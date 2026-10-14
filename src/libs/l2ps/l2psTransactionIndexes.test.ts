@@ -11,7 +11,9 @@ import { describe, expect, it } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { getMetadataArgsStorage } from "typeorm"
+import type { QueryRunner } from "typeorm"
 import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
+import { IndexL2PSEncryptedHash1791590400000 } from "@/migrations/1791590400000-IndexL2PSEncryptedHash"
 
 const indices = () =>
     getMetadataArgsStorage().indices.filter(i => i.target === L2PSTransaction)
@@ -49,19 +51,60 @@ describe("l2ps_transactions indexes", () => {
 })
 
 describe("the encrypted_hash migration", () => {
-    const source = readFileSync(
-        path.resolve(__dirname, "../../migrations/1791590400000-IndexL2PSEncryptedHash.ts"),
-        "utf8",
-    )
+    const recorder = (failOn?: RegExp) => {
+        const queries: string[] = []
+        let aborted = false
+        const runner = {
+            query: async (sql: string) => {
+                // A failed statement aborts the transaction: until it ends,
+                // Postgres refuses everything else, whatever it is.
+                if (aborted) throw new Error("current transaction is aborted, commands ignored until end of transaction block")
+                queries.push(sql)
+                if (failOn?.test(sql)) {
+                    aborted = true
+                    throw new Error("canceling statement due to lock timeout")
+                }
+            },
+        }
+        return { runner: runner as unknown as QueryRunner, queries }
+    }
 
-    it("puts back the timeouts it lifts, because they outlive it on a pooled connection", () => {
-        expect(source).toMatch(/SET statement_timeout = 0/)
-        expect(source).toMatch(/RESET statement_timeout/)
-        expect(source).toMatch(/RESET lock_timeout/)
+    const entityIndex = () => indices().find(i => columnsOf(i).join(",") === "encrypted_hash")!
+
+    it("up creates the index the entity declares, on the column the entity names", async () => {
+        const { runner, queries } = recorder()
+        await new IndexL2PSEncryptedHash1791590400000().up(runner)
+
+        const create = queries.find(q => /CREATE INDEX/.test(q))!
+        expect(create).toContain(`"${entityIndex().name}"`)
+        expect(create).toMatch(/ON "l2ps_transactions" \("encrypted_hash"\)/)
+        expect(create).not.toMatch(/CONCURRENTLY/)
     })
 
-    it("can be run twice and rolled back", () => {
-        expect(source).toContain("CREATE INDEX IF NOT EXISTS")
-        expect(source).toContain("DROP INDEX IF EXISTS")
+    it("up lifts the timeouts for the transaction only", async () => {
+        const { runner, queries } = recorder()
+        await new IndexL2PSEncryptedHash1791590400000().up(runner)
+
+        expect(queries.slice(0, 2)).toEqual(["SET LOCAL statement_timeout = 0", "SET LOCAL lock_timeout = 0"])
+        expect(queries.some(q => /^RESET/.test(q))).toBe(false)
+        expect(queries.some(q => /^SET (?!LOCAL)/.test(q))).toBe(false)
+    })
+
+    it("up reports the error that aborted the transaction, not a follow-on one", async () => {
+        const { runner } = recorder(/CREATE INDEX/)
+
+        await expect(new IndexL2PSEncryptedHash1791590400000().up(runner)).rejects.toThrow("lock timeout")
+    })
+
+    it("down drops the same index", async () => {
+        const { runner, queries } = recorder()
+        await new IndexL2PSEncryptedHash1791590400000().down(runner)
+
+        expect(queries).toEqual([`DROP INDEX IF EXISTS "${entityIndex().name}"`])
+    })
+
+    it("the entity carries the index under that name on that column", () => {
+        expect(entityIndex()).toBeDefined()
+        expect(entityIndex().name).toBe("IDX_L2PS_TX_ENCRYPTED_HASH")
     })
 })

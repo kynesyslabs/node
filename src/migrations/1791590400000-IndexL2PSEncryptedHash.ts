@@ -24,19 +24,17 @@ export class IndexL2PSEncryptedHash1791590400000 implements MigrationInterface {
     name = "IndexL2PSEncryptedHash1791590400000"
 
     public async up(queryRunner: QueryRunner): Promise<void> {
-        // An index build on a large table outlives the default timeouts. The
-        // settings belong to the connection, which goes back to the pool, so
-        // they are put back whatever happens.
-        await queryRunner.query("SET statement_timeout = 0")
-        await queryRunner.query("SET lock_timeout = 0")
-        try {
-            await queryRunner.query(
-                `CREATE INDEX IF NOT EXISTS "IDX_L2PS_TX_ENCRYPTED_HASH" ON "l2ps_transactions" ("encrypted_hash")`,
-            )
-        } finally {
-            await queryRunner.query("RESET statement_timeout")
-            await queryRunner.query("RESET lock_timeout")
-        }
+        // An index build on a large table outlives the default timeouts.
+        // Migrations run in one transaction, so SET LOCAL ends with it and
+        // leaves nothing on the pooled connection to put back; a RESET in a
+        // finally would instead fail inside the aborted transaction and hide
+        // the error that aborted it. The build is not CONCURRENTLY for the
+        // same reason: that cannot run in a transaction.
+        await queryRunner.query("SET LOCAL statement_timeout = 0")
+        await queryRunner.query("SET LOCAL lock_timeout = 0")
+        await queryRunner.query(
+            `CREATE INDEX IF NOT EXISTS "IDX_L2PS_TX_ENCRYPTED_HASH" ON "l2ps_transactions" ("encrypted_hash")`,
+        )
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
