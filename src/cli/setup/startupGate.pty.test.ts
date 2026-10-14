@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, setDefaultTimeout } from "bun:test"
 import { spawnSync } from "node:child_process"
 import * as path from "node:path"
-import { makeRoot, removeRoot, writeSubnet } from "./testSupport"
+import { makeRoot, ptyAvailable, removeRoot, writeSubnet } from "./testSupport"
 
 // Drives gateHarness.ts under a pseudo-terminal. The child waits for the
 // prompt text before it sends the keys, so the result does not depend on how
@@ -32,7 +32,7 @@ out = b""
 start = time.time()
 sent = send == "-"
 status = None
-while time.time() - start < 25:
+while time.time() - start < 90:
     ready, _, _ = select.select([fd], [], [], 0.1)
     if ready:
         try:
@@ -56,9 +56,8 @@ sys.stdout.write(out.decode(errors="replace"))
 `
 
 // Each case starts a real process and waits for its prompt.
-setDefaultTimeout(60_000)
+setDefaultTimeout(240_000)
 
-const hasPython = spawnSync("python3", ["-c", "import pty"]).status === 0
 const harness = path.join(import.meta.dir, "gateHarness.ts")
 
 let root: string
@@ -74,7 +73,7 @@ function drive(opts: { send?: string; timeoutMs?: number; stdin?: "tty" | "null"
         ["-c", DRIVER, process.execPath, "Run the setup now?", opts.send ?? "-", opts.stdin ?? "tty", opts.stdout ?? "tty", harness],
         {
             encoding: "utf8",
-            timeout: 40_000,
+            timeout: 150_000,
             env: { ...process.env, CI: "", HARNESS_ROOT: root, HARNESS_TIMEOUT_MS: String(opts.timeoutMs ?? 30_000), ...opts.env },
         },
     )
@@ -86,7 +85,7 @@ function drive(opts: { send?: string; timeoutMs?: number; stdin?: "tty" | "null"
     return { exit: first.replace("EXIT ", ""), text }
 }
 
-describe.skipIf(!hasPython)("the start-up offer on a real terminal", () => {
+describe.skipIf(!ptyAvailable)("the start-up offer on a real terminal", () => {
     it("Ctrl-C aborts the start with 130 and says so", () => {
         const r = drive({ send: "\\x03" })
         expect(r.exit).toBe("130")

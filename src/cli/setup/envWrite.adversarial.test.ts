@@ -4,7 +4,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { runCli } from "./cli"
 import { applyEnvChanges, parseEnv } from "./envFile"
-import { fakeRunner, makeRoot, recorder, removeRoot, writeZkBatch } from "./testSupport"
+import { AS_USER, fakeRunner, isRoot, makeRoot, recorder, removeRoot, writeZkBatch } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -188,7 +188,7 @@ describe("the wizard's .env write", () => {
         expect(fs.readFileSync(target, "utf8")).toContain("L2PS_MESSAGING_PORT=3100")
     })
 
-    it("refuses to rewrite a read-only .env and hands the lines over", async () => {
+    it.skipIf(isRoot)(`refuses to rewrite a read-only .env and hands the lines over ${AS_USER}`, async () => {
         fs.writeFileSync(envPath(), "A=1\n", { mode: 0o444 })
         const { code, out } = await setup(WIZARD)
         expect(fs.readFileSync(envPath(), "utf8")).toBe("A=1\n")
@@ -206,7 +206,7 @@ describe("the wizard's .env write", () => {
         expect(fs.statSync(envPath()).isDirectory()).toBe(true)
     })
 
-    it("exits non-zero when the env file cannot be created in an unwritable directory", async () => {
+    it.skipIf(isRoot)(`exits non-zero when the env file cannot be created in an unwritable directory ${AS_USER}`, async () => {
         const sub = path.join(root, "ro")
         fs.mkdirSync(sub)
         fs.chmodSync(sub, 0o555)

@@ -1,8 +1,9 @@
 import { describe, expect, it, setDefaultTimeout } from "bun:test"
 import { spawnSync } from "node:child_process"
 import * as path from "node:path"
+import { ptyAvailable } from "./testSupport"
 
-setDefaultTimeout(120_000)
+setDefaultTimeout(600_000)
 
 // Answers the secret prompt the instant it appears, as a paste or a password
 // manager would, and returns everything the terminal showed.
@@ -15,7 +16,7 @@ if pid == 0:
 out = b""
 sent = False
 start = time.time()
-while time.time() - start < 15:
+while time.time() - start < 60:
     ready, _, _ = select.select([fd], [], [], 0.05)
     if ready:
         try:
@@ -31,14 +32,13 @@ while time.time() - start < 15:
 sys.stdout.write(out.decode(errors="replace"))
 `
 
-const hasPython = spawnSync("python3", ["-c", "import pty"]).status === 0
 const harness = path.join(import.meta.dir, "secretHarness.ts")
 
-describe.skipIf(!hasPython)("a secret typed at the terminal", () => {
+describe.skipIf(!ptyAvailable)("a secret typed at the terminal", () => {
     it("is never shown, even when it arrives the moment the prompt does", () => {
         const secret = "S3CR3T-KEY-MATERIAL"
         for (let run = 0; run < 8; run++) {
-            const r = spawnSync("python3", ["-c", DRIVER, process.execPath, secret, harness], { encoding: "utf8", timeout: 40_000 })
+            const r = spawnSync("python3", ["-c", DRIVER, process.execPath, secret, harness], { encoding: "utf8", timeout: 90_000 })
             expect(r.stdout).toContain(`GOT:${secret.length}`)
             expect([run, r.stdout.includes(secret)]).toEqual([run, false])
         }

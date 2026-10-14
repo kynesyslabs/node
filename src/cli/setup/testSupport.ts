@@ -1,8 +1,20 @@
+import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import type { Prompter } from "./prompt"
 import type { ZkRunner } from "./zk"
+
+/**
+ * Whether a pseudo-terminal can be opened here. Containers without /dev/ptmx
+ * (some CI sandboxes) cannot, and the terminal tests are skipped there.
+ */
+export const ptyAvailable =
+    spawnSync("python3", ["-c", "import os, pty\nm, s = pty.openpty()\nos.close(m)\nos.close(s)"]).status === 0
+
+/** root ignores file modes, so tests that rely on a refused write or read cannot run as root. */
+export const isRoot = process.getuid?.() === 0
+export const AS_USER = "(needs a non-root user: root ignores file modes)"
 
 export const HEX_KEY = "ab".repeat(32)
 export const HEX_IV = "cd".repeat(16)

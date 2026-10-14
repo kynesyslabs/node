@@ -234,8 +234,11 @@ describe("the wizard never switches proofs on after a failure", () => {
     })
 })
 
-describe("what git is told to ignore", () => {
-    const repo = path.resolve(import.meta.dir, "../../..")
+// A source tarball or a container image has no .git, so there is nothing to ask.
+const repo = path.resolve(import.meta.dir, "../../..")
+const hasGit = fs.existsSync(path.join(repo, ".git")) && spawnSync("git", ["--version"]).status === 0
+
+describe.skipIf(!hasGit)("what git is told to ignore", () => {
     const ignored = (file: string) => spawnSync("git", ["check-ignore", "-q", file], { cwd: repo }).status === 0
 
     it("covers every file the setup can leave behind", () => {

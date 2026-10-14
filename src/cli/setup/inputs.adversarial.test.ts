@@ -4,7 +4,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { HELP, SETUP_ENV_NAMES, parseSetupArgs } from "./args"
 import { runCli } from "./cli"
-import { HEX_IV, HEX_KEY, fakeRunner, makeRoot, recorder, removeRoot } from "./testSupport"
+import { HEX_IV, HEX_KEY, fakeRunner, isRoot, makeRoot, recorder, removeRoot } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -47,8 +47,9 @@ describe("key and IV files", () => {
 
     it("a missing file, a directory and an unreadable file are plain errors, never a half-written subnet", async () => {
         fs.mkdirSync(path.join(root, "adir"))
-        fs.writeFileSync(path.join(root, "locked"), HEX_KEY, { mode: 0o000 })
-        for (const f of ["nope", "adir", "locked"]) {
+        // root reads a mode-000 file, so that case only runs for other users.
+        if (!isRoot) fs.writeFileSync(path.join(root, "locked"), HEX_KEY, { mode: 0o000 })
+        for (const f of isRoot ? ["nope", "adir"] : ["nope", "adir", "locked"]) {
             const { code, out } = await cli(["--yes", "--l2ps-uid", "s", "--l2ps-key-file", f], { DEMOS_SETUP_L2PS_IV: HEX_IV })
             expect([f, code]).toEqual([f, 1])
             expect(out).toContain(f)

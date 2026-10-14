@@ -3,7 +3,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { runCli } from "./cli"
 import { parseEnv } from "./envFile"
-import { HEX_IV, HEX_KEY, fakeRunner, installZkTools, writeZkBatch, makeRoot, recorder, removeRoot, scriptedPrompter, writeSubnet } from "./testSupport"
+import { AS_USER, HEX_IV, HEX_KEY, fakeRunner, isRoot, installZkTools, writeZkBatch, makeRoot, recorder, removeRoot, scriptedPrompter, writeSubnet } from "./testSupport"
 import type { Prompter } from "./prompt"
 
 let root: string
@@ -411,7 +411,7 @@ describe("ZK step", () => {
 })
 
 describe("env file that cannot be written", () => {
-    it("prints the lines to add by hand and exits non-zero so a script notices", async () => {
+    it.skipIf(isRoot)(`prints the lines to add by hand and exits non-zero so a script notices ${AS_USER}`, async () => {
         const ro = path.join(root, "ro")
         fs.mkdirSync(ro)
         fs.chmodSync(ro, 0o555)

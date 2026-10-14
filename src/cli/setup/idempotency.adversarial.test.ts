@@ -3,7 +3,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { runCli } from "./cli"
-import { HEX_IV, HEX_KEY, fakeRunner, makeRoot, recorder, removeRoot, writeSubnet } from "./testSupport"
+import { AS_USER, HEX_IV, HEX_KEY, fakeRunner, isRoot, makeRoot, recorder, removeRoot, writeSubnet } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -246,7 +246,7 @@ describe("a write that fails halfway", () => {
         expect(out).not.toMatch(/\n\s+at /)
     })
 
-    it("reports an unwritable subnet directory as a problem and writes nothing", async () => {
+    it.skipIf(isRoot)(`reports an unwritable subnet directory as a problem and writes nothing ${AS_USER}`, async () => {
         const base = path.join(root, "data/l2ps")
         fs.mkdirSync(base, { recursive: true })
         fs.chmodSync(base, 0o555)

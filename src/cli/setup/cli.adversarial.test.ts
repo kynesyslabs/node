@@ -3,7 +3,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { HELP, parseSetupArgs, UsageError } from "./args"
 import { runCli } from "./cli"
-import { HEX_IV, HEX_KEY, fakeRunner, makeRoot, recorder, removeRoot, writeSubnet } from "./testSupport"
+import { AS_USER, HEX_IV, HEX_KEY, fakeRunner, isRoot, makeRoot, recorder, removeRoot, writeSubnet } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -335,7 +335,7 @@ describe("an env file that cannot be read", () => {
         expect(text.code).toBe(2)
     })
 
-    it.skipIf(process.getuid?.() === 0)("also when it exists but is not readable", async () => {
+    it.skipIf(isRoot)(`also when it exists but is not readable ${AS_USER}`, async () => {
         fs.writeFileSync(path.join(root, "locked.env"), "A=1\n", { mode: 0o000 })
         const { code } = await cli(["--check", "--json", "--env-file", "locked.env"])
         expect(code).toBe(2)
