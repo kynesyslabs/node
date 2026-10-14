@@ -109,3 +109,11 @@ export function fakeRunner(opts: { vkeyJson?: string; failOn?: string } = {}): Z
         },
     }
 }
+
+export function installZkTools(root: string): void {
+    for (const rel of ["node_modules/.bin/circom2", "node_modules/.bin/snarkjs"]) {
+        fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true })
+        fs.writeFileSync(path.join(root, rel), "")
+    }
+    fs.mkdirSync(path.join(root, "node_modules/circomlib/circuits"), { recursive: true })
+}
