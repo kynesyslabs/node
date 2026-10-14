@@ -18,6 +18,33 @@ export interface WriteOptions {
      * key file must never be written through a link to outside the checkout.
      */
     followSymlink?: boolean
+    /**
+     * With followSymlink: refuse (before creating any directory) when the file
+     * a link leads to is outside this directory.
+     */
+    confineTo?: string
+}
+
+/** realpath for a path that may not exist yet: the existing part is resolved, the rest appended. */
+function realpathLoose(p: string): string {
+    const rest: string[] = []
+    let current = path.resolve(p)
+    for (;;) {
+        try {
+            return path.join(fs.realpathSync(current), ...rest.reverse())
+        } catch {
+            const parent = path.dirname(current)
+            if (parent === current) return path.resolve(p)
+            rest.push(path.basename(current))
+            current = parent
+        }
+    }
+}
+
+/** True when `file` is `dir` or below it once every symlink on the way is resolved. */
+export function isInsideDir(file: string, dir: string): boolean {
+    const rel = path.relative(realpathLoose(dir), realpathLoose(file))
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))
 }
 
 /** The file a chain of symlinks ends at; a dangling link yields where it would create it. */
@@ -48,7 +75,12 @@ export function writeFileGuarded(
     now: () => number = Date.now,
     rename: (from: string, to: string) => void = fs.renameSync,
 ): WriteOutcome {
-    if (opts.followSymlink) file = resolveSymlink(file)
+    if (opts.followSymlink) {
+        file = resolveSymlink(file)
+        if (opts.confineTo !== undefined && !isInsideDir(file, opts.confineTo)) {
+            throw new Error(`${file} is outside ${opts.confineTo}`)
+        }
+    }
     fs.mkdirSync(path.dirname(file), { recursive: true })
     const exists = fs.existsSync(file)
     // Modes only ever tighten: an operator's 600 config stays 600, a 644 key

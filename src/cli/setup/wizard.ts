@@ -22,7 +22,7 @@ import {
     readEnvFile,
     type EnvChange,
 } from "./envFile"
-import { readTextIfExists, resolveSymlink, writeFileGuarded, type WriteOutcome } from "./files"
+import { isInsideDir, readTextIfExists, resolveSymlink, writeFileGuarded, type WriteOutcome } from "./files"
 import {
     buildSubnetFiles,
     generateKeyMaterial,
@@ -818,11 +818,19 @@ async function applyEnv(
         // Replacing the file by rename ignores its mode, so a file the owner
         // made read-only on purpose has to be checked by hand.
         const target = resolveSymlink(ctx.envFilePath)
+        // A link inside the checkout that leads elsewhere is the operator's own
+        // arrangement for that file, but the setup does not write outside the
+        // checkout on the strength of a link; naming the file with --env-file
+        // is how to say that is intended.
+        const inCheckout = isInsideDir(path.dirname(ctx.envFilePath), ctx.root)
+        if (inCheckout && !isInsideDir(target, ctx.root)) {
+            throw new Error(`${envName} is a link to ${target}, outside the node directory; edit that file yourself or pass it with --env-file`)
+        }
         if (fs.existsSync(target)) fs.accessSync(target, fs.constants.W_OK)
         writeFileGuarded(
             ctx.envFilePath,
             applyEnvChanges(text, toApply),
-            { mode, overwrite: true, followSymlink: true },
+            { mode, overwrite: true, followSymlink: true, confineTo: inCheckout ? ctx.root : undefined },
             deps.now,
         )
         for (const c of applied) say(`  set ${c.key}=${c.to} in ${envName}`)

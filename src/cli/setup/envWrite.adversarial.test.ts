@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import dotenv from "dotenv"
 import * as fs from "node:fs"
+import * as os from "node:os"
 import * as path from "node:path"
 import { runCli } from "./cli"
 import { applyEnvChanges, parseEnv } from "./envFile"
@@ -186,6 +187,68 @@ describe("the wizard's .env write", () => {
         expect(code).toBe(0)
         expect(fs.lstatSync(envPath()).isSymbolicLink()).toBe(true)
         expect(fs.readFileSync(target, "utf8")).toContain("L2PS_MESSAGING_PORT=3100")
+    })
+
+    describe("a .env link that leads outside the checkout", () => {
+        let outside: string
+        beforeEach(() => {
+            outside = fs.mkdtempSync(path.join(os.tmpdir(), "demos-env-outside-"))
+        })
+        afterEach(() => fs.rmSync(outside, { recursive: true, force: true }))
+
+        it("is not written through: the outside file is untouched and the lines are handed over", async () => {
+            const target = path.join(outside, "shared.env")
+            fs.writeFileSync(target, "A=1\n")
+            fs.symlinkSync(target, envPath())
+            const { code, out } = await setup(WIZARD)
+            expect(code).toBe(1)
+            expect(fs.readFileSync(target, "utf8")).toBe("A=1\n")
+            expect(fs.lstatSync(envPath()).isSymbolicLink()).toBe(true)
+            expect(out).toContain("outside the node directory")
+            expect(out).toContain("L2PS_MESSAGING_PORT=3100")
+            expect(fs.readdirSync(outside)).toEqual(["shared.env"])
+        })
+
+        it("creates no directory for a dangling link into a path that does not exist", async () => {
+            fs.symlinkSync(path.join(outside, "new", "deeper", "x.env"), envPath())
+            const { code } = await setup(WIZARD)
+            expect(code).toBe(1)
+            expect(fs.readdirSync(outside)).toEqual([])
+        })
+
+        it("is written when the operator names that file with --env-file", async () => {
+            const target = path.join(outside, "shared.env")
+            fs.writeFileSync(target, "A=1\n")
+            const { code } = await setup([...WIZARD, "--env-file", target])
+            expect(code).toBe(0)
+            expect(fs.readFileSync(target, "utf8")).toContain("L2PS_MESSAGING_PORT=3100")
+        })
+    })
+
+    it("a checkout reached through a symlinked directory is still the checkout", async () => {
+        const via = `${root}-via`
+        fs.symlinkSync(root, via)
+        try {
+            fs.mkdirSync(path.join(root, "conf"))
+            fs.writeFileSync(path.join(root, "conf", "node.env"), "A=1\n")
+            fs.symlinkSync("conf/node.env", envPath())
+            const r = recorder()
+            const code = await runCli(WIZARD, { cwd: via, env: {}, isTTY: false, say: r.say, runner: fakeRunner(), inDocker: false })
+            expect(code).toBe(0)
+            expect(fs.readFileSync(path.join(root, "conf", "node.env"), "utf8")).toContain("L2PS_MESSAGING_PORT=3100")
+        } finally {
+            fs.rmSync(via, { force: true })
+        }
+    })
+
+    it("still writes through a link that stays inside the checkout", async () => {
+        fs.mkdirSync(path.join(root, "conf"))
+        fs.writeFileSync(path.join(root, "conf", "node.env"), "A=1\n")
+        fs.symlinkSync("conf/node.env", envPath())
+        const { code } = await setup(WIZARD)
+        expect(code).toBe(0)
+        expect(fs.readFileSync(path.join(root, "conf", "node.env"), "utf8")).toContain("L2PS_MESSAGING_PORT=3100")
+        expect(fs.lstatSync(envPath()).isSymbolicLink()).toBe(true)
     })
 
     it.skipIf(isRoot)(`refuses to rewrite a read-only .env and hands the lines over ${AS_USER}`, async () => {
