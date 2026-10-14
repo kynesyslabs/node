@@ -113,3 +113,29 @@ describe("the documentation matches the parser", () => {
         expect([...named].filter(n => !allowed.has(n) && !n.endsWith("_"))).toEqual([])
     })
 })
+
+describe("every DEMOS_SETUP_* variable with hostile values", () => {
+    const values = ["", " ", "\t\n ", "x".repeat(200_000), "\u{1F4A5}", "-1", "0x10", "null", "true", "false", "1e9", "9".repeat(40), "a b", "--force", "=", "\u0000", "http://", "../../etc/passwd"]
+
+    it("is accepted or refused as a usage error, never a crash", () => {
+        for (const name of SETUP_ENV_NAMES) {
+            for (const value of values) {
+                try {
+                    parseSetupArgs([], { [name]: value })
+                } catch (e) {
+                    expect([name, value.slice(0, 20), (e as Error).constructor.name]).toEqual([name, value.slice(0, 20), "UsageError"])
+                }
+            }
+        }
+    })
+
+    it("always ends in a documented exit code, with no exception escaping", async () => {
+        for (const name of SETUP_ENV_NAMES) {
+            for (const value of ["x".repeat(2000), "\t\n ", "9".repeat(40)]) {
+                const { code } = await cli(["--yes"], { [name]: value })
+                // 0: nothing to do or accepted, 1: a required answer is missing, 2: refused.
+                expect([name, [0, 1, 2].includes(code)]).toEqual([name, true])
+            }
+        }
+    })
+})
