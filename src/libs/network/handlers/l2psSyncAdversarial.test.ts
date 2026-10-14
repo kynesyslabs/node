@@ -111,3 +111,16 @@ describe("getL2PSTransactions, hostile paging values", () => {
         expect(JSON.stringify(response)).not.toContain("10.0.3.7")
     })
 })
+
+describe("the other subnet queries refuse a subnet that is not a string", () => {
+    it.each([[{}], [["a"]], [5], [true]])("%j", async uid => {
+        for (const name of ["getL2PSMempoolInfo", "getL2PSParticipationById"] as const) {
+            getByUID.mockClear()
+            const response: any = {}
+            await l2psHandlers[name]({ l2psUid: uid } as any, response)
+
+            expect(response.result).toBe(400)
+            expect(getByUID).not.toHaveBeenCalled()
+        }
+    })
+})

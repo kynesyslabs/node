@@ -20,10 +20,42 @@ function nonNegativeWhole(raw: unknown): number {
     return Math.min(Math.max(0, Math.floor(value)), Number.MAX_SAFE_INTEGER)
 }
 
+/**
+ * What an authenticated account history read answers with on success.
+ *
+ * `decryption` says whether this node holds a key for the subnet. When it is
+ * "unavailable" every row's `content` and `execution_message` is null because
+ * the node cannot read them, not because the rows failed to decrypt; the
+ * ciphertext in `encrypted_payload` is still returned for the member to read.
+ */
+export interface L2PSAccountHistoryResponse {
+    l2psUid: string
+    address: string
+    authenticated: true
+    decryption: "available" | "unavailable"
+    transactions: Array<{
+        hash: string
+        encrypted_hash: string | null
+        l1_batch_hash: string | null
+        type: string
+        from: string
+        to: string
+        amount: string
+        status: string
+        timestamp: string
+        l1_block_number: number | null
+        execution_message: string | null
+        content: Record<string, any> | null
+        encrypted_payload: Record<string, any> | null
+    }>
+    count: number
+    hasMore: boolean
+}
+
 export const l2psHandlers: Record<string, NodeCallHandler> = {
     getL2PSParticipationById: async (data, response) => {
         log.debug("[L2PS] Received L2PS participation query")
-        if (!data.l2psUid) {
+        if (!data.l2psUid || typeof data.l2psUid !== "string") {
             response.result = 400
             response.response = "No L2PS UID specified"
             return response
@@ -50,7 +82,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
 
     getL2PSMempoolInfo: async (data, response) => {
         log.debug("[L2PS] Received L2PS mempool info request")
-        if (!data.l2psUid) {
+        if (!data.l2psUid || typeof data.l2psUid !== "string") {
             response.result = 400
             response.response = "No L2PS UID specified"
             return response
@@ -348,10 +380,11 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             )
 
             response.result = 200
-            response.response = {
+            const body: L2PSAccountHistoryResponse = {
                 l2psUid: data.l2psUid,
                 address: data.address,
                 authenticated: true,
+                decryption: decrypt?.unavailable === true ? "unavailable" : "available",
                 transactions: transactions.map((tx, index) => ({
                     hash: tx.hash,
                     encrypted_hash: tx.encrypted_hash,
@@ -374,6 +407,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 count: transactions.length,
                 hasMore,
             }
+            response.response = body
         } catch (error) {
             log.error("[L2PS] Failed to get account transactions:", error)
             response.result = 500

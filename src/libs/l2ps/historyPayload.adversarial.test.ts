@@ -6,7 +6,10 @@
  * the others, and what went wrong with it must stay in the log.
  */
 
-import { describe, expect, it, jest } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 
 jest.mock("@/utilities/logger", () => ({
     __esModule: true,
@@ -209,5 +212,84 @@ describe("subnetDecryptor", () => {
             const decrypt = await subnetDecryptor(uid)
             expect(await decrypt(envelope)).toBeNull()
         }
+    })
+})
+
+describe("subnetDecryptor with a subnet this node is configured for", () => {
+    // The loader resolves its directory from the working directory, so each
+    // case gets one of its own holding exactly the files it needs.
+    let root: string
+    let previous: string
+    beforeEach(() => {
+        previous = process.cwd()
+        root = mkdtempSync(path.join(tmpdir(), "l2ps-adv-"))
+        process.chdir(root)
+    })
+    afterEach(() => {
+        process.chdir(previous)
+        rmSync(root, { recursive: true, force: true })
+    })
+
+    const configure = (uid: string, config: unknown, raw = false) => {
+        const dir = path.join(root, "data", "l2ps", uid)
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(path.join(dir, "config.json"), raw ? String(config) : JSON.stringify(config))
+        return dir
+    }
+
+    it.each([
+        ["an unparsable config", "adv_corrupt", () => configure("adv_corrupt", "{not json", true)],
+        ["a disabled subnet", "adv_disabled", () => configure("adv_disabled", { uid: "adv_disabled", enabled: false })],
+        [
+            "a config with no key paths",
+            "adv_nokeys",
+            () => configure("adv_nokeys", { uid: "adv_nokeys", enabled: true, keys: {} }),
+        ],
+        [
+            "key files that are missing",
+            "adv_nofiles",
+            () =>
+                configure("adv_nofiles", {
+                    uid: "adv_nofiles",
+                    enabled: true,
+                    keys: { private_key_path: "missing/key", iv_path: "missing/iv" },
+                }),
+        ],
+        [
+            "a key path outside the project",
+            "adv_escape",
+            () =>
+                configure("adv_escape", {
+                    uid: "adv_escape",
+                    enabled: true,
+                    keys: { private_key_path: "../../../../etc/passwd", iv_path: "../../../../etc/hostname" },
+                }),
+        ],
+        [
+            "a key file that is not hex",
+            "adv_badhex",
+            () => {
+                const dir = configure("adv_badhex", {
+                    uid: "adv_badhex",
+                    enabled: true,
+                    keys: { private_key_path: "data/l2ps/adv_badhex/key", iv_path: "data/l2ps/adv_badhex/iv" },
+                })
+                writeFileSync(path.join(dir, "key"), "zz-not-hex")
+                writeFileSync(path.join(dir, "iv"), "zz-not-hex")
+            },
+        ],
+    ])("%s fails the read instead of answering metadata", async (_n, uid, arrange) => {
+        arrange()
+        const { subnetDecryptor } = await import("./historyPayload")
+
+        await expect(subnetDecryptor(uid)).rejects.toThrow()
+    })
+
+    it("a subnet with no directory at all still degrades, and says so", async () => {
+        const { subnetDecryptor } = await import("./historyPayload")
+        const decrypt = await subnetDecryptor("adv_absent")
+
+        expect(await decrypt(envelope)).toBeNull()
+        expect(decrypt.unavailable).toBe(true)
     })
 })

@@ -23,9 +23,10 @@ jest.mock("../../l2ps/L2PSTransactionExecutor", () => ({
     default: { getAccountTransactions },
 }))
 
+const subnetDecryptor = jest.fn(async (_uid: string): Promise<any> => undefined)
 jest.mock("@/libs/l2ps/historyPayload", () => ({
     resolveHistoryEntry: jest.fn(async () => ({ message: null, content: null })),
-    subnetDecryptor: jest.fn(async () => undefined),
+    subnetDecryptor,
 }))
 
 const NODE_KEY = "0x" + "ab".repeat(32)
@@ -90,6 +91,8 @@ const NOW = 1_800_000_000_000
 beforeEach(() => {
     getAccountTransactions.mockReset()
     getAccountTransactions.mockResolvedValue([])
+    subnetDecryptor.mockReset()
+    subnetDecryptor.mockResolvedValue(undefined)
     sharedState.publicKeyHex = NODE_KEY
     sharedState.exposedUrl = "https://node-a.example.org"
     l2psConfig.historyRequireV2 = false
@@ -446,4 +449,31 @@ describe("an advertised URL that only spells loopback differently is not an iden
             expect(getAccountTransactions).not.toHaveBeenCalled()
         },
     )
+})
+
+describe("a read this node cannot decrypt says so", () => {
+    const ts = String(NOW)
+
+    it("marks the response when the node holds no key for the subnet", async () => {
+        subnetDecryptor.mockResolvedValue(Object.assign(async () => null, { unavailable: true }))
+        const response = await call(signedV2(ts))
+
+        expect(response.result).toBe(200)
+        expect(response.response.decryption).toBe("unavailable")
+    })
+
+    it("does not mark a read the node can decrypt", async () => {
+        subnetDecryptor.mockResolvedValue(async () => null)
+        const response = await call(signedV2(ts))
+
+        expect(response.response.decryption).toBe("available")
+    })
+
+    it("fails the read when the subnet is configured but cannot be loaded", async () => {
+        subnetDecryptor.mockRejectedValue(new Error("Failed to parse L2PS config for subnet-1"))
+        const response = await call(signedV2(ts))
+
+        expect(response.result).toBe(500)
+        expect(JSON.stringify(response)).not.toContain("Failed to parse")
+    })
 })
