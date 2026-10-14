@@ -56,18 +56,27 @@ export const ZK_IDENTITY_VKEY = path.join(
  * background process group; its first read stops it (SIGTTIN) and the node
  * never boots. /proc/self/stat has the terminal's foreground group (tpgid) next
  * to our own (pgrp); -1 means there is no controlling terminal, so no job
- * control applies. Where /proc does not exist there is nothing to check.
+ * control applies.
+ *
+ * It fails safe: when that file cannot be read or understood (macOS has no
+ * /proc, or the layout is not what is expected) the answer is "not known to be
+ * foreground", so the offer is skipped and the node boots. A skipped offer
+ * costs nothing; a stopped validator costs a missed start.
  */
-export function isForegroundOnTerminal(stat?: string): boolean {
+export function isForegroundOnTerminal(
+    stat: string | (() => string) = () => fs.readFileSync("/proc/self/stat", "utf8"),
+): boolean {
     try {
-        const text = stat ?? fs.readFileSync("/proc/self/stat", "utf8")
+        const text = typeof stat === "string" ? stat : stat()
         // The command name sits in parentheses and may contain spaces.
-        const fields = text.slice(text.lastIndexOf(")") + 2).split(" ")
+        const close = text.lastIndexOf(")")
+        if (close === -1) return false
+        const fields = text.slice(close + 2).split(" ")
         const pgrp = Number(fields[2])
         const tpgid = Number(fields[5])
-        if (!Number.isInteger(pgrp) || !Number.isInteger(tpgid)) return true
+        if (!Number.isInteger(pgrp) || !Number.isInteger(tpgid)) return false
         return tpgid === -1 || tpgid === pgrp
     } catch {
-        return true
+        return false
     }
 }

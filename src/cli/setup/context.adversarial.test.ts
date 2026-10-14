@@ -26,8 +26,17 @@ describe("isForegroundOnTerminal", () => {
         expect(isForegroundOnTerminal(stat(500, 500, "my (odd) name"))).toBe(true)
     })
 
-    it("does not block anything when the file is unreadable or unexpected", () => {
-        expect(isForegroundOnTerminal("garbage")).toBe(true)
-        expect(isForegroundOnTerminal("")).toBe(true)
+    it("fails safe: a missing, unreadable or garbled file means the offer is skipped", () => {
+        const missing = () => {
+            throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+        }
+        expect(isForegroundOnTerminal(missing)).toBe(false)
+        for (const garbage of ["garbage", "", "1 (x) S", "1 (x) S 1 two 3 4 five", ") ) )", "\u0000\u0001", "4242 (bun) S 1 500 500 34816 abc 0"]) {
+            expect([garbage, isForegroundOnTerminal(garbage)]).toEqual([garbage, false])
+        }
+    })
+
+    it("reads the real /proc/self/stat on Linux and returns a boolean", () => {
+        expect(typeof isForegroundOnTerminal()).toBe("boolean")
     })
 })
