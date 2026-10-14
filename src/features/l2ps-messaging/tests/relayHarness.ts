@@ -15,29 +15,33 @@ export const rows = new Map<string, Row>()
 export const faults: {
     save: Error | null
     update: ((patch: Row) => Error | null) | null
-} = { save: null, update: null }
+    /** The write commits and the error still reaches the caller, as when the connection drops before the reply. */
+    lostReply: boolean
+} = { save: null, update: null, lostReply: false }
 const tupleOf = (r: Row) => JSON.stringify([r.l2psUid, r.fromKey, r.toKey, r.messageHash])
 
 const repo = {
     findOneBy: async (where: Row) =>
         [...rows.values()].find(r => Object.entries(where).every(([k, v]) => r[k] === v)) ?? null,
     save: async (row: Row) => {
-        if (faults.save) throw faults.save
+        if (faults.save && !faults.lostReply) throw faults.save
         for (const r of rows.values()) {
             if (r.id !== row.id && tupleOf(r) === tupleOf(row)) {
                 throw Object.assign(new Error("duplicate key"), { code: "23505" })
             }
         }
         rows.set(row.id, { ...row })
+        if (faults.save) throw faults.save
         return row
     },
     update: async (criteria: string | string[] | Row, patch: Row) => {
         const fault = faults.update?.(patch)
-        if (fault) throw fault
+        if (fault && !faults.lostReply) throw fault
         const matches = typeof criteria === "string" || Array.isArray(criteria)
             ? [criteria].flat().map(id => rows.get(id)).filter(Boolean) as Row[]
             : [...rows.values()].filter(r => Object.entries(criteria).every(([k, v]) => r[k] === v))
         for (const r of matches) Object.assign(r, patch)
+        if (fault) throw fault
         return { affected: matches.length }
     },
     delete: async (id: string) => {
@@ -134,6 +138,7 @@ export function resetRelay(): void {
     conditions.length = 0
     faults.save = null
     faults.update = null
+    faults.lostReply = false
     relay.submitResult = OK
     submitToL2PS.mockReset()
     submitToL2PS.mockImplementation(async () => relay.submitResult)

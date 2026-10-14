@@ -163,6 +163,58 @@ describe("the offline quota follows the queued row", () => {
         expect(quotaOf("quota-f")).toBe(1)
     })
 
+    it("a write that commits but loses its reply frees the slot once, however the row is delivered", async () => {
+        faults.save = new Error("connection terminated")
+        faults.lostReply = true
+        await expect(send("quota-h", "lost-1")).rejects.toThrow()
+        faults.save = null
+        faults.lostReply = false
+
+        // The row is there although the caller was told the write failed.
+        const lost = [...rows.values()].find(r => r.messageHash === "lost-1")!
+        expect(lost.status).toBe("queued")
+        expect(quotaOf("quota-h")).toBe(0)
+
+        expect((await send("quota-h", "kept")).success).toBe(true)
+        expect(quotaOf("quota-h")).toBe(1)
+
+        await service.markDelivered([lost.id])
+        expect(quotaOf("quota-h")).toBe(1)
+        await service.markDelivered([lost.id])
+        expect(quotaOf("quota-h")).toBe(1)
+    })
+
+    it("a retry write that commits but loses its reply frees the slot once", async () => {
+        relay.submitResult = { success: false, error: "mempool unavailable" }
+        await send("quota-i", "lost-2")
+        relay.submitResult = { success: true, txHash: "0xtx" }
+        expect((await send("quota-i", "kept-2")).success).toBe(true)
+        expect(quotaOf("quota-i")).toBe(1)
+
+        faults.update = patch => (patch.status === "queued" ? new Error("connection terminated") : null)
+        faults.lostReply = true
+        await expect(send("quota-i", "lost-2")).rejects.toThrow()
+        faults.update = null
+        faults.lostReply = false
+
+        const row = [...rows.values()].find(r => r.messageHash === "lost-2")!
+        expect(row.status).toBe("queued")
+        expect(quotaOf("quota-i")).toBe(1)
+
+        await service.markDelivered([row.id])
+        expect(quotaOf("quota-i")).toBe(1)
+    })
+
+    it("a repeated requeue of one row holds one slot", async () => {
+        const sent = await service.processMessage("quota-j", "bb", "subnet_a", crypto.randomUUID(), "rq", encrypted, true)
+        await service.requeue(sent.messageId, "quota-j")
+        await service.requeue(sent.messageId, "quota-j")
+
+        expect(quotaOf("quota-j")).toBe(1)
+        await service.markDelivered([sent.messageId])
+        expect(quotaOf("quota-j")).toBe(0)
+    })
+
     it("a retry of the failed row takes a slot again and releases it with the row", async () => {
         relay.submitResult = { success: false, error: "mempool unavailable" }
         await send("quota-g", "h7")
