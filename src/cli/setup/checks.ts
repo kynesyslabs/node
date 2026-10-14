@@ -1,14 +1,14 @@
 import { EnvKey } from "../../config/envKeys"
+import {
+    parseBoolFlag,
+    parseIntSetting,
+    parseMessagingEnabled,
+    parseMessagingPort,
+} from "../../config/envFlags"
 import type { SetupContext } from "./context"
 import { inspectSubnets, type SubnetStatus } from "./l2ps"
 import { inspectBatchArtifacts, inspectIdentityKey } from "./zk"
-import {
-    messagingFlag,
-    nodeFlag,
-    nodeMessagingPort,
-    validateNonNegativeInt,
-    validatePort,
-} from "./validate"
+import { validatePort } from "./validate"
 
 export type CheckStatus = "ok" | "missing" | "invalid" | "warn" | "off"
 
@@ -126,27 +126,50 @@ function subnetItems(subnets: SubnetStatus[]): CheckItem[] {
     return items
 }
 
+/**
+ * An existing retention value, judged the way the node reads it (parseInt).
+ * It is only called out when the node's reading differs from plain digits.
+ */
+function retentionItem(raw: string): CheckItem {
+    const node = parseIntSetting(raw)
+    const plainDigits = /^\d+$/.test(raw) && Number(raw) === node
+    const base = { area: "L2PS", item: "History retention", blocking: false }
+    if (node === undefined) {
+        return {
+            ...base,
+            status: "invalid",
+            detail: `${EnvKey.L2PS_HISTORY_RETENTION_DAYS}=${raw}: not a number; the node ignores it and keeps history forever`,
+            fix: L2PS_FIX,
+        }
+    }
+    if (node < 0) {
+        return {
+            ...base,
+            status: "invalid",
+            detail: `${EnvKey.L2PS_HISTORY_RETENTION_DAYS}=${raw}: negative; the node would read ${node}`,
+            fix: L2PS_FIX,
+        }
+    }
+    if (plainDigits) {
+        return { ...base, status: "ok", detail: node === 0 ? "keeps history forever" : `${node} days` }
+    }
+    return {
+        ...base,
+        status: "warn",
+        detail: `${EnvKey.L2PS_HISTORY_RETENTION_DAYS}=${raw}: the node will read this as ${node}; write plain digits`,
+        fix: L2PS_FIX,
+    }
+}
+
 function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
     const out: CheckItem[] = []
     const env = ctx.env
 
     const retention = env[EnvKey.L2PS_HISTORY_RETENTION_DAYS]
     if (retention !== undefined && retention !== "") {
-        const r = validateNonNegativeInt(retention)
-        out.push({
-            area: "L2PS",
-            item: "History retention",
-            status: r.ok ? "ok" : "invalid",
-            detail: r.ok
-                ? r.value === 0
-                    ? "keeps history forever"
-                    : `${r.value} days`
-                : `${EnvKey.L2PS_HISTORY_RETENTION_DAYS}=${retention}: ${r.error}`,
-            blocking: false,
-            fix: r.ok ? undefined : L2PS_FIX,
-        })
+        out.push(retentionItem(retention))
     }
-    if (nodeFlag(env[EnvKey.L2PS_HISTORY_STORE_PLAINTEXT]) === true) {
+    if (parseBoolFlag(env[EnvKey.L2PS_HISTORY_STORE_PLAINTEXT]) === true) {
         out.push({
             area: "L2PS",
             item: "Plaintext history",
@@ -156,12 +179,12 @@ function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
         })
     }
 
-    if (messagingFlag(env[EnvKey.L2PS_MESSAGING_ENABLED])) {
+    if (parseMessagingEnabled(env[EnvKey.L2PS_MESSAGING_ENABLED])) {
         const rawPort = env[EnvKey.L2PS_MESSAGING_PORT]
-        const hasPort = rawPort !== undefined && rawPort !== ""
-        const port = hasPort ? validatePort(rawPort) : undefined
-        // The node takes the leading digits of "3100abc"; compose does not.
-        const nodePort = hasPort ? nodeMessagingPort(rawPort) : undefined
+        const node = parseMessagingPort(rawPort)
+        // The setup writes plain digits; a value the node reads differently
+        // (or compose rejects) is worth saying so.
+        const strict = rawPort === undefined ? undefined : validatePort(rawPort)
         out.push({
             area: "L2PS messaging",
             item: "Subnet for messaging",
@@ -172,19 +195,26 @@ function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
             blocking: !hasSubnet,
             fix: hasSubnet ? undefined : L2PS_FIX,
         })
+        const exact = strict?.ok === true && strict.value === node.port
         out.push({
             area: "L2PS messaging",
             item: "Port",
-            status: !hasPort || port.ok ? "ok" : nodePort !== undefined ? "warn" : "invalid",
-            detail: !hasPort
-                ? "default 3006"
-                : port.ok
-                  ? String(port.value)
-                  : nodePort !== undefined
-                    ? `${EnvKey.L2PS_MESSAGING_PORT}=${rawPort}: the node reads it as ${nodePort}, but docker compose rejects it; write plain digits`
-                    : `${EnvKey.L2PS_MESSAGING_PORT}=${rawPort}: ${port.error}; the node falls back to 3006`,
+            status:
+                node.source === "default" || exact
+                    ? "ok"
+                    : node.source === "env"
+                      ? "warn"
+                      : "invalid",
+            detail:
+                node.source === "default"
+                    ? `default ${node.port}`
+                    : exact
+                      ? String(node.port)
+                      : node.source === "env"
+                        ? `${EnvKey.L2PS_MESSAGING_PORT}=${rawPort}: the node reads it as ${node.port}, but docker compose rejects it; write plain digits`
+                        : `${EnvKey.L2PS_MESSAGING_PORT}=${rawPort}: not a port from 1 to 65535; the node falls back to ${node.port}`,
             blocking: false,
-            fix: !hasPort || port.ok ? undefined : L2PS_FIX,
+            fix: node.source === "default" || exact ? undefined : L2PS_FIX,
         })
     } else {
         out.push({
@@ -212,7 +242,7 @@ function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
         fix: identity.state === "ok" ? undefined : IDENTITY_KEY_FIX,
     })
 
-    const flag = nodeFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED])
+    const flag = parseBoolFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED])
     // The code default is on, which only means "use the keys if they exist";
     // an explicit true is the operator asking for proofs.
     const requested = flag === true && hasSubnet

@@ -145,26 +145,3 @@ export function parseBool(value: string | undefined): boolean | undefined {
     if (["false", "0", "no", "n", "off"].includes(v)) return false
     return undefined
 }
-
-/**
- * A flag as config/loader.ts envBool reads it: exactly "true" or "1", nothing
- * else counts as on, and an unset or empty value means "use the default".
- * parseBool is for what an operator types into the setup; this is for what is
- * already in the environment, where being more generous than the node would
- * report problems with a feature the node never switches on.
- */
-export function nodeFlag(raw: string | undefined): boolean | undefined {
-    if (raw === undefined || raw === "") return undefined
-    return raw === "true" || raw === "1"
-}
-
-/** L2PS_MESSAGING_ENABLED as index.ts reads it: the word true in any case. */
-export function messagingFlag(raw: string | undefined): boolean {
-    return raw?.toLowerCase() === "true"
-}
-
-/** L2PS_MESSAGING_PORT as index.ts reads it: parseInt, then a 1..65535 check. */
-export function nodeMessagingPort(raw: string): number | undefined {
-    const n = Number.parseInt(raw, 10)
-    return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : undefined
-}

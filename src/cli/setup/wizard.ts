@@ -1,6 +1,12 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { EnvKey } from "../../config/envKeys"
+import {
+    parseBoolFlag,
+    parseIntSetting,
+    parseMessagingEnabled,
+    parseMessagingPort,
+} from "../../config/envFlags"
 import type { SetupOptions } from "./args"
 import {
     collectChecks,
@@ -34,8 +40,6 @@ import {
     validatePort,
     validateRpcList,
     validateUid,
-    messagingFlag,
-    nodeFlag,
     type Result,
 } from "./validate"
 import {
@@ -515,7 +519,7 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
     const { opts, prompter, ctx, say } = deps
     const env = ctx.env
     const num = (r: Result<number>) => (r.ok ? r.value : undefined)
-    const flag = (key: string) => String(nodeFlag(env[key]) ?? false)
+    const flag = (key: string) => String(parseBoolFlag(env[key]) ?? false)
     // An explicit flag is always written. A prompted answer is written only
     // when it differs from what is in effect now, so the env file does not
     // fill up with the built-in defaults the operator accepted.
@@ -524,7 +528,7 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
     }
 
     let retention = opts.retentionDays
-    const retentionCurrent = env[EnvKey.L2PS_HISTORY_RETENTION_DAYS] ?? "0"
+    const retentionCurrent = String(parseIntSetting(env[EnvKey.L2PS_HISTORY_RETENTION_DAYS]) ?? 0)
     const retentionPrompted = retention === undefined && prompter !== undefined
     if (retentionPrompted) {
         const v = await ask(prompter, "Days to keep subnet history (0 keeps it forever)", {
@@ -538,7 +542,7 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
         retention = num(validateNonNegativeInt(v))
     }
     if (retention !== undefined) {
-        put(EnvKey.L2PS_HISTORY_RETENTION_DAYS, String(retention), String(Number(retentionCurrent)), retentionPrompted)
+        put(EnvKey.L2PS_HISTORY_RETENTION_DAYS, String(retention), retentionCurrent, retentionPrompted)
     }
 
     let plaintext = opts.storePlaintext
@@ -547,7 +551,7 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
         plaintext = await confirm(
             prompter,
             "Also store decrypted message bodies in the database? (not recommended)",
-            nodeFlag(env[EnvKey.L2PS_HISTORY_STORE_PLAINTEXT]) ?? false,
+            parseBoolFlag(env[EnvKey.L2PS_HISTORY_STORE_PLAINTEXT]) ?? false,
             say,
         )
         if (plaintext && !(await confirm(prompter, "Message bodies will be readable by anyone with database access. Keep this on?", false, say))) {
@@ -564,7 +568,7 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
         requireV2 = await confirm(
             prompter,
             "Refuse the old history signature? (turn on only once clients sign the new form)",
-            nodeFlag(env[EnvKey.L2PS_HISTORY_REQUIRE_V2]) ?? false,
+            parseBoolFlag(env[EnvKey.L2PS_HISTORY_REQUIRE_V2]) ?? false,
             say,
         )
     }
@@ -578,7 +582,7 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
         messaging = await confirm(
             prompter,
             "Enable the instant-messaging server on top of L2PS?",
-            messagingFlag(env[EnvKey.L2PS_MESSAGING_ENABLED]),
+            parseMessagingEnabled(env[EnvKey.L2PS_MESSAGING_ENABLED]),
             say,
         )
     }
@@ -587,7 +591,7 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
     }
     if (messaging) {
         let port = opts.messagingPort
-        const portCurrent = env[EnvKey.L2PS_MESSAGING_PORT] ?? "3006"
+        const portCurrent = String(parseMessagingPort(env[EnvKey.L2PS_MESSAGING_PORT]).port)
         const portPrompted = port === undefined && prompter !== undefined
         if (portPrompted) {
             const v = await ask(prompter, "Messaging port", {
@@ -636,7 +640,7 @@ async function zkSection(
             : "  L2PS batch proofs: keys not built yet.",
     )
 
-    const currentlyOn = nodeFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED]) === true
+    const currentlyOn = parseBoolFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED]) === true
     let want = opts.zk
     if (want === undefined && prompter) {
         if (state.activeSubnets.size === 0) {

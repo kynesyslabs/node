@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import * as fs from "node:fs"
+import * as path from "node:path"
+import { loadConfig } from "../../config/loader"
+import { parseMessagingEnabled, parseMessagingPort } from "../../config/envFlags"
 import { collectChecks, isProblem } from "./checks"
 import { createContext } from "./context"
 import { makeRoot, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
@@ -14,44 +17,100 @@ const problems = (env: Record<string, string>) =>
     collectChecks(createContext(root, ".env", env, false)).items.filter(isProblem)
 const items = (env: Record<string, string>) => collectChecks(createContext(root, ".env", env, false)).items
 
-// The node reads these flags with its own rules (loader.ts envBool and the
-// messaging check in index.ts). A checker that is more generous than the node
-// would demand setup for a feature the node never turns on, and in strict
-// mode would refuse to start over it.
-describe("flags are read the way the node reads them", () => {
-    it("L2PS_MESSAGING_ENABLED is on only for the word true, in any case", () => {
-        for (const off of ["1", "yes", "on", "y", "", "false"]) {
-            expect(problems({ L2PS_MESSAGING_ENABLED: off })).toEqual([])
-        }
-        for (const on of ["true", "TRUE", "True"]) {
-            expect(problems({ L2PS_MESSAGING_ENABLED: on }).map(p => p.item)).toContain("Subnet for messaging")
-        }
-    })
+// The node and the checker must read every setting the same way. The node side
+// is the real loader (loadConfig) and the shared helpers index.ts imports; the
+// checker side is collectChecks. Both get the same raw strings, including the
+// ones nobody would write on purpose.
+const RAW = ["true", "TRUE", "True", "1", "0", "false", "FALSE", "yes", "no", "on", "off", "y", "2", " true", "true ", "-1", "30", "030", "30days", "3.7", "1e3", "0x10", "abc", " ", "9999999999999999999999"]
 
-    it("L2PS_ZK_ENABLED is on only for exactly true or 1", () => {
+function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T): T {
+    const saved = Object.fromEntries(Object.keys(vars).map(k => [k, process.env[k]]))
+    for (const [k, v] of Object.entries(vars)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+    }
+    try {
+        return fn()
+    } finally {
+        for (const [k, v] of Object.entries(saved)) {
+            if (v === undefined) delete process.env[k]
+            else process.env[k] = v
+        }
+    }
+}
+
+describe("the checker reads settings exactly as the node does", () => {
+    it("L2PS_ZK_ENABLED: proofs are required by the checker iff the loader turns them on", () => {
         writeSubnet(root, "s1")
-        for (const off of ["TRUE", "True", "yes", "on", "y", "false", "0"]) {
-            expect(problems({ L2PS_ZK_ENABLED: off })).toEqual([])
-        }
-        for (const on of ["true", "1"]) {
-            expect(problems({ L2PS_ZK_ENABLED: on }).length).toBeGreaterThan(0)
+        for (const raw of RAW.filter(r => r !== " ")) {
+            const node = withEnv({ L2PS_ZK_ENABLED: raw }, () => loadConfig().l2ps.zkEnabled)
+            expect([raw, problems({ L2PS_ZK_ENABLED: raw }).length > 0]).toEqual([raw, node])
         }
     })
 
-    it("an explicit true with a complete key set is healthy, a half-built set is not", () => {
-        writeSubnet(root, "s1")
-        writeZkBatch(root, 5)
-        writeZkBatch(root, 10)
-        expect(problems({ L2PS_ZK_ENABLED: "true" })).toEqual([])
+    it("L2PS_HISTORY_STORE_PLAINTEXT: the plaintext warning appears iff the loader stores plaintext", () => {
+        for (const raw of RAW) {
+            const node = withEnv({ L2PS_HISTORY_STORE_PLAINTEXT: raw }, () => loadConfig().l2ps.historyStorePlaintext)
+            const warned = items({ L2PS_HISTORY_STORE_PLAINTEXT: raw }).some(i => i.item === "Plaintext history")
+            expect([raw, warned]).toEqual([raw, node])
+        }
     })
 
-    it("plaintext history is flagged only when the node would store it", () => {
-        for (const off of ["TRUE", "yes", "on", "false", ""]) {
-            expect(items({ L2PS_HISTORY_STORE_PLAINTEXT: off }).some(i => i.item === "Plaintext history")).toBe(false)
+    it("L2PS_MESSAGING_ENABLED: a missing subnet is reported iff the node would start messaging", () => {
+        for (const raw of RAW) {
+            const node = parseMessagingEnabled(raw)
+            const reported = problems({ L2PS_MESSAGING_ENABLED: raw }).some(p => p.item === "Subnet for messaging")
+            expect([raw, reported]).toEqual([raw, node])
         }
-        for (const on of ["true", "1"]) {
-            expect(items({ L2PS_HISTORY_STORE_PLAINTEXT: on }).some(i => i.item === "Plaintext history")).toBe(true)
+    })
+
+    it("L2PS_MESSAGING_PORT: the checker names the port the node will bind", () => {
+        for (const raw of RAW) {
+            const node = parseMessagingPort(raw)
+            const item = items({ L2PS_MESSAGING_ENABLED: "true", L2PS_MESSAGING_PORT: raw }).find(i => i.item === "Port")
+            expect(item).toBeDefined()
+            if (node.source === "invalid") {
+                expect([raw, item?.status]).toEqual([raw, "invalid"])
+                expect(item?.detail).toContain(String(node.port))
+            } else if (node.source === "env") {
+                expect(item?.detail).toContain(String(node.port))
+            }
         }
+    })
+
+    it("L2PS_HISTORY_RETENTION_DAYS: the number in the report is the one the loader uses", () => {
+        for (const raw of RAW) {
+            const node = withEnv({ L2PS_HISTORY_RETENTION_DAYS: raw }, () => loadConfig().l2ps.historyRetentionDays)
+            const item = items({ L2PS_HISTORY_RETENTION_DAYS: raw }).find(i => i.item === "History retention")
+            expect(item).toBeDefined()
+            const detail = item?.detail ?? ""
+            if (item?.status === "ok") {
+                expect([raw, detail]).toEqual([raw, node === 0 ? "keeps history forever" : `${node} days`])
+            } else if (detail.includes("not a number")) {
+                // The loader falls back to its default, which keeps history.
+                expect([raw, node]).toEqual([raw, 0])
+            } else {
+                expect([raw, detail]).toEqual([raw, expect.stringContaining(String(node))])
+            }
+        }
+    })
+
+    it("only calls a retention value out when the node reads it differently from plain digits", () => {
+        const status = (raw: string) => items({ L2PS_HISTORY_RETENTION_DAYS: raw }).find(i => i.item === "History retention")?.status
+        expect(["0", "30", "030", "36500", "1000000"].map(status)).toEqual(["ok", "ok", "ok", "ok", "ok"])
+        expect(["30days", "3.7", "1e3", "0x10"].map(status)).toEqual(["warn", "warn", "warn", "warn"])
+        expect(["abc", "-1", "-30"].map(status)).toEqual(["invalid", "invalid", "invalid"])
+    })
+
+    it("the node's entry points all use the shared helpers, not their own copies", () => {
+        const read = (rel: string) => fs.readFileSync(path.resolve(import.meta.dir, "../../..", rel), "utf8")
+        expect(read("src/index.ts")).toContain("config/envFlags")
+        expect(read("src/index.ts")).not.toMatch(/L2PS_MESSAGING_ENABLED\??\.toLowerCase/)
+        expect(read("src/features/l2ps-messaging/index.ts")).toContain("config/envFlags")
+        expect(read("src/features/l2ps-messaging/index.ts")).not.toContain("toLowerCase() === \"true\"")
+        const loader = read("src/config/loader.ts")
+        expect(loader).toContain("./envFlags")
+        expect(loader).not.toContain("raw === \"true\" || raw === \"1\"")
     })
 })
 

@@ -45,6 +45,7 @@ beforeAll(() => {
     for (const rel of [
         "package.json",
         "src/config/envKeys.ts",
+        "src/config/envFlags.ts",
         "src/features/zk/keys/verification_key_merkle.json",
         "src/libs/l2ps/zk/keys/batch_5/verification_key.json",
         "src/libs/l2ps/zk/keys/batch_10/verification_key.json",
