@@ -23,7 +23,7 @@ const keyOf = (uid: string) => fs.readFileSync(path.join(root, "data/l2ps", uid,
 
 describe("key and IV files", () => {
     it("are normalised whatever an editor or a copy-paste put around the hex", async () => {
-        const messy = `﻿0X${HEX_KEY.toUpperCase().slice(0, 32)}\r\n  ${HEX_KEY.toUpperCase().slice(32)}\r\n\r\n`
+        const messy = `\uFEFF0X${HEX_KEY.toUpperCase().slice(0, 32)}\r\n  ${HEX_KEY.toUpperCase().slice(32)}\r\n\r\n`
         fs.writeFileSync(path.join(root, "k"), messy)
         fs.writeFileSync(path.join(root, "i"), `\t${HEX_IV}`)
         const { code } = await cli(["--yes", "--l2ps-uid", "s", "--l2ps-key-file", "k", "--l2ps-iv-file", "i"])
