@@ -18,7 +18,7 @@ import PeerManager from "../PeerManager"
 import { sleep } from "@kynesyslabs/demosdk/utils"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
-import { hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
+import { hashGenesisCore, hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
 import { resolveGenesisMismatch } from "./genesisMismatch"
 import {
     diffSchedules,
@@ -27,6 +27,7 @@ import {
 } from "./forkScheduleAgreement"
 
 let ourGenesisDataHash = ""
+let ourGenesisCoreHash = ""
 const genesisFile = "data/genesis.json"
 const peerman = PeerManager.getInstance()
 const discoveredGenesisDataHashes = new Set<string>()
@@ -66,6 +67,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
 
         const verdict = await resolveGenesisMismatch(
             ourGenesisDataHash,
+            ourGenesisCoreHash,
             peerGenesisDataHash,
             {
                 fetchPeerGenesis: async () => {
@@ -85,14 +87,12 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                     )
                     return served.status === 200 ? served.data : null
                 },
+                readLocalGenesis: () =>
+                    JSON.parse(fs.readFileSync(genesisFile, "utf8")),
                 writeGenesis: data =>
                     fs.writeFileSync(genesisFile, JSON.stringify(data, null, 2)),
-                // Re-hash through the canonical normalizer so connection_url
-                // differences between this node and the source peer do not
-                // produce a spurious mismatch (see normalizeGenesisForHash.ts).
-                hashLocalFile: () =>
-                    hashGenesisData(JSON.parse(fs.readFileSync(genesisFile, "utf8"))),
-                hash: hashGenesisData,
+                hashFull: hashGenesisData,
+                hashCore: hashGenesisCore,
             },
         )
 
@@ -104,20 +104,23 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                     "keeping our data/genesis.json as it is",
             )
         } else if (verdict.outcome === "replaced") {
+            log.warn(
+                "[BOOTSTRAP] Replaced data/genesis.json with the data served by " +
+                    verifiedPeer.connection.string +
+                    (verdict.carriedOver.length > 0
+                        ? ", keeping our " + verdict.carriedOver.join(" and ")
+                        : ""),
+            )
             // INFO: Update discovered genesis hashes and current genesis hash
-            discoveredGenesisDataHashes.add(verdict.servedHash)
-            ourGenesisDataHash = verdict.servedHash
+            discoveredGenesisDataHashes.add(verdict.servedCoreHash)
+            ourGenesisDataHash = verdict.writtenFullHash
+            ourGenesisCoreHash = verdict.servedCoreHash
 
             // INFO: Ensure all peers have the same genesis data
             if (discoveredGenesisDataHashes.size > 1) {
                 log.error("[BOOTSTRAP] Conflicting genesis data hashes found")
                 throw new Error("Conflicting genesis data hashes found across peers")
             }
-
-            log.debug(
-                "[BOOTSTRAP] Downloaded genesis data with hash: " +
-                    verdict.servedHash,
-            )
         }
     } else {
         log.error(
@@ -261,6 +264,7 @@ export default async function peerBootstrap(
         throw new Error(`${label} at data/genesis.json: ${msg}`)
     }
     ourGenesisDataHash = hashGenesisData(genesisData)
+    ourGenesisCoreHash = hashGenesisCore(genesisData)
 
     // Validity check
     for (const peer of localList) {
@@ -268,6 +272,7 @@ export default async function peerBootstrap(
     }
 
     ourGenesisDataHash = null
+    ourGenesisCoreHash = null
     discoveredGenesisDataHashes.clear()
 
     log.info("[BOOTSTRAP] Valid peers found: " + peerman.getPeers().length)

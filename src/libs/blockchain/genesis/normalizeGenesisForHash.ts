@@ -29,16 +29,20 @@
  *   4. The original `genesisData` object is left untouched (deep
  *      cloning happens internally).
  *
- * The same reasoning removes the fork schedule (`forks`) and the chain id
- * (`properties.id`). A peer's hash is computed from the genesis block stored
- * in its database when the chain was created, and that block is never
- * refreshed. An operator who schedules a fork on a running chain edits the
- * genesis FILE, so with those fields in the hash every node's file differs
- * from every peer's stored block, each node "corrects" its file from a peer,
- * and the schedule is silently dropped on the next restart. Neither field is
- * peering metadata that all nodes must have had since block 0: they are read
- * from the file at every boot, and agreement on them is checked separately by
- * `forkScheduleAgreement.ts`.
+ * Two hashes
+ * -----------
+ * `hashGenesisData` is what a node ADVERTISES to peers and compares with the
+ * data its peers serve. It covers everything in the genesis block as stored,
+ * and must stay byte-identical across builds: a node on an older build
+ * compares its own full hash with the one a newer anchor advertises.
+ *
+ * `hashGenesisCore` leaves out the fork schedule (`forks`) and the chain id
+ * (`properties.id`). An operator who schedules a fork on a running chain edits
+ * the genesis FILE, while every peer still serves the block stored when the
+ * chain was created; the full hashes then differ although nothing a node must
+ * share since block 0 does. A node uses the core hash only to tell that kind of
+ * difference from a real one; agreement on the schedule is checked separately
+ * (see forkScheduleAgreement.ts).
  *
  * Callers
  * -------
@@ -63,6 +67,7 @@ import Hashing from "src/libs/crypto/hashing"
  */
 export function canonicalGenesisForHashing(
     genesisData: unknown,
+    options: { omitScheduleFields?: boolean } = {},
 ): Record<string, unknown> {
     if (
         genesisData === null ||
@@ -80,10 +85,16 @@ export function canonicalGenesisForHashing(
     const out: Record<string, unknown> = {}
 
     for (const key of Object.keys(src)) {
-        if (key === "validators" || key === "forks") continue
-        if (key === "properties") {
-            const props = src.properties
-            if (props !== null && typeof props === "object" && !Array.isArray(props)) {
+        if (key === "validators") continue
+        if (options.omitScheduleFields) {
+            if (key === "forks") continue
+            const props = src[key]
+            if (
+                key === "properties" &&
+                props !== null &&
+                typeof props === "object" &&
+                !Array.isArray(props)
+            ) {
                 const { id: _chainId, ...rest } = props as Record<string, unknown>
                 out.properties = rest
                 continue
@@ -169,5 +180,16 @@ export function stableStringify(value: unknown): string {
  */
 export function hashGenesisData(genesisData: unknown): string {
     const canonical = canonicalGenesisForHashing(genesisData)
+    return Hashing.sha256(stableStringify(canonical))
+}
+
+/**
+ * Hash of the genesis data without the fork schedule and the chain id.
+ * Never advertised to peers; see the "Two hashes" note above.
+ */
+export function hashGenesisCore(genesisData: unknown): string {
+    const canonical = canonicalGenesisForHashing(genesisData, {
+        omitScheduleFields: true,
+    })
     return Hashing.sha256(stableStringify(canonical))
 }

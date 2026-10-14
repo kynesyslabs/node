@@ -17,6 +17,7 @@ import {
     canonicalGenesisForHashing,
     stableStringify,
     hashGenesisData,
+    hashGenesisCore,
 } from "src/libs/blockchain/genesis/normalizeGenesisForHash"
 
 const VALIDATORS_A = [
@@ -143,71 +144,12 @@ describe("canonicalGenesisForHashing", () => {
             ...GENESIS_BASE,
             validators: VALIDATORS_A,
         })
-        expect(canonical.properties).toEqual({
-            name: "DEMOS",
-            currency: "DEM",
-        })
+        expect(canonical.properties).toEqual(GENESIS_BASE.properties)
         expect(canonical.mutables).toEqual(GENESIS_BASE.mutables)
+        expect(canonical.forks).toEqual(GENESIS_BASE.forks)
         expect(canonical.balances).toEqual(GENESIS_BASE.balances)
         expect(canonical.timestamp).toEqual(GENESIS_BASE.timestamp)
         expect(canonical.status).toEqual(GENESIS_BASE.status)
-    })
-})
-
-describe("fields an operator adds on a running chain", () => {
-    it("leaves the fork schedule and the chain id out of the canonical form", () => {
-        const canonical = canonicalGenesisForHashing({
-            ...GENESIS_BASE,
-            validators: VALIDATORS_A,
-        })
-        expect("forks" in canonical).toBe(false)
-        expect("id" in (canonical.properties as object)).toBe(false)
-    })
-
-    it("hashes a genesis file with a newly scheduled fork like the stored one without it", () => {
-        const stored = hashGenesisData({
-            ...GENESIS_BASE,
-            validators: VALIDATORS_A,
-        })
-        const edited = hashGenesisData({
-            ...GENESIS_BASE,
-            properties: { ...GENESIS_BASE.properties, id: 31337 },
-            forks: {
-                ...GENESIS_BASE.forks,
-                signatureDomain: { activationHeight: 40 },
-                web2ProofBinding: { activationHeight: 40 },
-            },
-            validators: VALIDATORS_A,
-        })
-        expect(edited).toBe(stored)
-    })
-
-    it("hashes a file with no chain id like one that has it", () => {
-        const { id: _id, ...withoutId } = GENESIS_BASE.properties
-        expect(
-            hashGenesisData({ ...GENESIS_BASE, properties: withoutId }),
-        ).toBe(hashGenesisData(GENESIS_BASE))
-    })
-
-    it("still tells apart genesis data that differs in anything else in properties", () => {
-        expect(
-            hashGenesisData({
-                ...GENESIS_BASE,
-                properties: { ...GENESIS_BASE.properties, name: "OTHER" },
-            }),
-        ).not.toBe(hashGenesisData(GENESIS_BASE))
-    })
-
-    it("still tells apart genesis data that differs in balances", () => {
-        expect(
-            hashGenesisData({ ...GENESIS_BASE, balances: [["0xab", "1"]] }),
-        ).not.toBe(hashGenesisData(GENESIS_BASE))
-    })
-
-    it("tolerates properties that are not an object", () => {
-        expect(() =>
-            hashGenesisData({ ...GENESIS_BASE, properties: "oops" }),
-        ).not.toThrow()
     })
 })
 
@@ -298,5 +240,69 @@ describe("hashGenesisData", () => {
             validators: VALIDATORS_A,
         })
         expect(h).toMatch(/^[0-9a-f]{64}$/)
+    })
+})
+
+describe("hashGenesisCore", () => {
+    it("ignores the fork schedule and the chain id", () => {
+        const edited = {
+            ...GENESIS_BASE,
+            properties: { ...GENESIS_BASE.properties, id: 31337 },
+            forks: {
+                ...GENESIS_BASE.forks,
+                signatureDomain: { activationHeight: 40 },
+            },
+            validators: VALIDATORS_A,
+        }
+        expect(hashGenesisCore(edited)).toBe(
+            hashGenesisCore({ ...GENESIS_BASE, validators: VALIDATORS_A }),
+        )
+    })
+
+    it("ignores a missing chain id", () => {
+        const { id: _id, ...withoutId } = GENESIS_BASE.properties
+        expect(
+            hashGenesisCore({ ...GENESIS_BASE, properties: withoutId }),
+        ).toBe(hashGenesisCore(GENESIS_BASE))
+    })
+
+    it("still tells apart anything else in properties, balances and validators", () => {
+        const base = hashGenesisCore(GENESIS_BASE)
+        expect(
+            hashGenesisCore({
+                ...GENESIS_BASE,
+                properties: { ...GENESIS_BASE.properties, name: "OTHER" },
+            }),
+        ).not.toBe(base)
+        expect(
+            hashGenesisCore({ ...GENESIS_BASE, balances: [["0xab", "1"]] }),
+        ).not.toBe(base)
+        expect(
+            hashGenesisCore({ ...GENESIS_BASE, validators: VALIDATORS_A }),
+        ).not.toBe(base)
+    })
+
+    it("tolerates properties that are not an object", () => {
+        expect(() =>
+            hashGenesisCore({ ...GENESIS_BASE, properties: "oops" }),
+        ).not.toThrow()
+    })
+})
+
+describe("hashGenesisData stays the full hash peers advertise", () => {
+    it("changes when the fork schedule or the chain id changes", () => {
+        const base = hashGenesisData(GENESIS_BASE)
+        expect(
+            hashGenesisData({
+                ...GENESIS_BASE,
+                forks: { ...GENESIS_BASE.forks, signatureDomain: { activationHeight: 40 } },
+            }),
+        ).not.toBe(base)
+        expect(
+            hashGenesisData({
+                ...GENESIS_BASE,
+                properties: { ...GENESIS_BASE.properties, id: 2 },
+            }),
+        ).not.toBe(base)
     })
 })
