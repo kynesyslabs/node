@@ -83,7 +83,7 @@ export class ProofVerifier {
         } catch (error) {
             handleError(error, "CORE", { source: "ProofVerifier.loadVerificationKey" })
             throw new Error(
-                "Verification key not found. Run 'bun run zk:setup-all' to generate keys.",
+                "Verification key not found or unreadable. Run 'bun run setup --check' to see what is wrong; restore the committed file rather than regenerating it.",
             )
         }
     }

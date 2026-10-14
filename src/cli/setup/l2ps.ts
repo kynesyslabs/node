@@ -145,13 +145,24 @@ export function buildSubnetFiles(args: {
     rpcs: string[]
     keyHex: string
     ivHex: string
+    /** An existing config.json, so fields the setup does not manage survive a repair. */
+    existingConfig?: any
 }): SubnetFile[] {
     const dir = `data/l2ps/${args.uid}`
+    const base =
+        args.existingConfig !== null && typeof args.existingConfig === "object"
+            ? args.existingConfig
+            : {}
     // Same shape as scripts/l2ps-create-subnet.sh and the devnet fixture.
     const config = {
+        ...base,
         uid: args.uid,
         enabled: true,
-        config: { created_at_block: 0, known_rpcs: args.rpcs },
+        config: {
+            ...base.config,
+            created_at_block: base.config?.created_at_block ?? 0,
+            known_rpcs: args.rpcs,
+        },
         keys: {
             private_key_path: `${dir}/private_key.txt`,
             iv_path: `${dir}/iv.txt`,
@@ -177,4 +188,28 @@ export function buildSubnetFiles(args: {
             secret: true,
         },
     ]
+}
+
+function canonical(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(canonical)
+    if (value !== null && typeof value === "object") {
+        return Object.fromEntries(
+            Object.entries(value as Record<string, unknown>)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([k, v]) => [k, canonical(v)]),
+        )
+    }
+    return value
+}
+
+/** True when two JSON texts hold the same data, ignoring layout and key order. */
+export function sameJson(a: string, b: string): boolean {
+    try {
+        return (
+            JSON.stringify(canonical(JSON.parse(a))) ===
+            JSON.stringify(canonical(JSON.parse(b)))
+        )
+    } catch {
+        return false
+    }
 }

@@ -381,3 +381,29 @@ describe("--check", () => {
         expect(fs.existsSync(path.join(root, "data"))).toBe(false)
     })
 })
+
+describe("repairing an existing subnet", () => {
+    it("fills in the missing key without touching the rest of config.json", async () => {
+        const dir = writeSubnet(root, "keepcfg", {
+            key: null,
+            config: {
+                uid: "keepcfg", enabled: true, name: "My subnet",
+                config: { created_at_block: 12, known_rpcs: ["http://peer:1"], network_params: { max_tx_per_block: 5 } },
+                keys: { private_key_path: "data/l2ps/keepcfg/private_key.txt", iv_path: "data/l2ps/keepcfg/iv.txt" },
+            },
+        })
+        const before = fs.readFileSync(path.join(dir, "config.json"), "utf8")
+        const { code, out } = await cli(["--yes", "--l2ps-uid", "keepcfg"])
+        expect(code).toBe(0)
+        expect(out).toContain("unchanged data/l2ps/keepcfg/config.json")
+        expect(fs.readFileSync(path.join(dir, "config.json"), "utf8")).toBe(before)
+        expect(fs.existsSync(path.join(dir, "private_key.txt"))).toBe(true)
+    })
+
+    it("asks before changing the RPC list of an existing subnet", async () => {
+        writeSubnet(root, "keepcfg")
+        const { out } = await cli(["--yes", "--l2ps-uid", "keepcfg", "--l2ps-rpc", "http://new:9"])
+        expect(out).toContain("kept data/l2ps/keepcfg/config.json")
+        expect(JSON.parse(fs.readFileSync(subnetFile("keepcfg", "config.json"), "utf8")).config.known_rpcs).toEqual(["http://127.0.0.1:53550"])
+    })
+})

@@ -51,6 +51,7 @@ import { DTRManager } from "./libs/network/dtr/dtrmanager"
 import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
 import ParallelNetworks from "./libs/l2ps/parallelNetworks"
+import { enforceGuidedSetup } from "./cli/setup/startupGate"
 
 dotenv.config()
 
@@ -566,6 +567,10 @@ async function main() {
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
     }
+
+    // Before the TUI takes over the terminal: offers the setup when a
+    // terminal is attached, otherwise stops with one actionable message.
+    await enforceGuidedSetup()
 
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
     try {

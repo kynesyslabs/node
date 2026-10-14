@@ -100,7 +100,7 @@ export class L2PSBatchProver {
         if (available.length === 0) {
             throw new Error(
                 `No zkey files found in ${this.keysDir}. ` +
-                "Run setup_all_batches.sh to generate keys.",
+                "Run 'bun run setup --only zk --zk' to generate keys.",
             )
         }
 
@@ -322,7 +322,7 @@ export class L2PSBatchProver {
         const maxSize = Math.max(...available)
         throw new Error(
             `Transaction count ${txCount} exceeds available batch size ${maxSize}. ` +
-            "Run setup_all_batches.sh to generate more keys.",
+            "Run 'bun run setup --only zk --zk' to generate more keys.",
         )
     }
 

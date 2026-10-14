@@ -21,6 +21,7 @@ import {
     generateKeyMaterial,
     inspectSubnet,
     inspectSubnets,
+    sameJson,
 } from "./l2ps"
 import { ask, confirm, select, type Prompter } from "./prompt"
 import {
@@ -136,12 +137,10 @@ function ownRpcUrl(env: SetupContext["env"]): string {
     )
 }
 
-function readKnownRpcs(root: string, uid: string): string[] | undefined {
+function readExistingConfig(root: string, uid: string): any {
     const text = readTextIfExists(path.join(root, "data", "l2ps", uid, "config.json"))
-    if (text === undefined) return undefined
     try {
-        const rpcs = JSON.parse(text)?.config?.known_rpcs
-        return Array.isArray(rpcs) && rpcs.length > 0 ? rpcs : undefined
+        return text === undefined ? undefined : JSON.parse(text)
     } catch {
         return undefined
     }
@@ -243,7 +242,12 @@ async function l2psSection(
             "Subnet IV (hex, input is hidden)", "--l2ps-iv-file", "DEMOS_SETUP_L2PS_IV")
     }
 
-    const knownRpcs = readKnownRpcs(ctx.root, uid)
+    const existingConfig = readExistingConfig(ctx.root, uid)
+    const knownRpcs: string[] | undefined =
+        Array.isArray(existingConfig?.config?.known_rpcs) &&
+        existingConfig.config.known_rpcs.length > 0
+            ? existingConfig.config.known_rpcs
+            : undefined
     let rpcs = opts.rpcs
     if (rpcs === undefined) {
         const fallback = knownRpcs ?? [ownRpcUrl(ctx.env)]
@@ -281,12 +285,15 @@ async function l2psSection(
         rpcs,
         keyHex: importedKey ?? reuseKey ?? generated.keyHex,
         ivHex: importedIv ?? reuseIv ?? generated.ivHex,
+        existingConfig,
     })
 
     for (const f of files) {
         const abs = path.join(ctx.root, f.rel)
         const current = readTextIfExists(abs)
-        const differs = current !== undefined && current !== f.content
+        const differs =
+            current !== undefined &&
+            (f.rel.endsWith(".json") ? !sameJson(current, f.content) : current !== f.content)
         let overwrite = false
         if (differs) {
             if (opts.force) overwrite = true
@@ -304,6 +311,12 @@ async function l2psSection(
                 current === undefined ? "would-create" : !differs ? "would-keep" : overwrite ? "would-replace" : "would-keep"
             result.files.push({ rel: f.rel, outcome })
             say(`  ${outcome.replace("-", " ")}: ${f.rel}${f.secret ? " (mode 600, contents never shown)" : ""}`)
+            continue
+        }
+        if (current !== undefined && !differs && current !== f.content) {
+            // Same data, different layout: leave the operator's file as written.
+            result.files.push({ rel: f.rel, outcome: "unchanged" })
+            say(`  unchanged ${f.rel}`)
             continue
         }
         const outcome = writeFileGuarded(abs, f.content, { mode: f.mode, overwrite }, deps.now)
