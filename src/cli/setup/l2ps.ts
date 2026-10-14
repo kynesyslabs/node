@@ -55,107 +55,101 @@ export function inspectSubnet(root: string, uid: string): SubnetStatus {
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
-function inspectSubnetUnsafe(root: string, uid: string): SubnetStatus {
-    const dir = path.join(root, L2PS_DIR, uid)
-    const status: SubnetStatus = {
-        uid,
-        dir,
-        state: "ok",
-        problems: [],
-        warnings: [],
-    }
-    const configPath = path.join(dir, "config.json")
-    if (!fs.existsSync(configPath)) {
-        status.state = "placeholder"
-        return status
-    }
+/** What config.json says, or the finished status when there is nothing more to inspect. */
+function readConfig(status: SubnetStatus): { cfg?: any; done?: SubnetStatus } {
+    const configPath = path.join(status.dir, "config.json")
+    if (!fs.existsSync(configPath)) return { done: { ...status, state: "placeholder" } }
     const parsed = readJson(configPath)
     if (parsed.error !== undefined) {
-        status.state = "invalid"
-        status.problems.push(`config.json is not valid JSON (${parsed.error})`)
-        return status
+        return { done: invalid(status, `config.json is not valid JSON (${parsed.error})`) }
     }
     const cfg = parsed.value
     if (cfg === null || typeof cfg !== "object") {
-        status.state = "invalid"
-        status.problems.push("config.json must be a JSON object")
-        return status
+        return { done: invalid(status, "config.json must be a JSON object") }
     }
-    if (!cfg.enabled) {
-        status.state = "disabled"
-        return status
-    }
+    if (!cfg.enabled) return { done: { ...status, state: "disabled" } }
+    return { cfg }
+}
+
+const invalid = (status: SubnetStatus, problem: string): SubnetStatus => ({
+    ...status,
+    state: "invalid",
+    problems: [...status.problems, problem],
+})
+
+function checkIdentity(cfg: any, uid: string, status: SubnetStatus): void {
     if (!SUBNET_UID_PATTERN.test(uid)) {
         status.problems.push("directory name is not a valid subnet id")
     }
     if (!cfg.uid) {
         status.problems.push("config.json has no \"uid\"")
     } else if (cfg.uid !== uid) {
-        status.warnings.push(
-            `config.json uid "${cfg.uid}" differs from the directory name`,
-        )
+        status.warnings.push(`config.json uid "${cfg.uid}" differs from the directory name`)
     }
+}
 
+/** One key or IV file: problems and warnings go on the status, a missing file is returned. */
+function checkKeyFile(root: string, label: "key" | "IV", rel: string, status: SubnetStatus): string | undefined {
+    const projectRoot = path.resolve(root)
+    const abs = path.resolve(root, rel)
+    // Same test as the loader: a plain prefix check against the root.
+    if (!abs.startsWith(projectRoot)) {
+        status.problems.push(`${label} path ${rel} is outside the node directory`)
+        return undefined
+    }
+    // `bun install` or a clean checkout wipes node_modules, and the key goes with it.
+    if (path.relative(projectRoot, abs).split(path.sep).includes("node_modules")) {
+        status.warnings.push(`${label} file ${rel} is inside node_modules and is lost when dependencies are reinstalled`)
+    }
+    if (!fs.existsSync(abs)) return `${label} file ${rel} is missing`
+    let text: string
+    try {
+        text = fs.readFileSync(abs, "utf8")
+    } catch (e) {
+        status.problems.push(`${label} file ${rel} cannot be read (${errorText(e)})`)
+        return undefined
+    }
+    const name = label === "key" ? "Key" : "IV"
+    const r = parseHex(text, name)
+    if (!r.ok) {
+        status.problems.push(`${label} file ${rel}: ${r.error}`)
+        return undefined
+    }
+    const lengthWarning = hexLengthWarning(r.value, name, label === "key" ? KEY_BYTES : IV_BYTES)
+    if (lengthWarning) status.warnings.push(`${rel}: ${lengthWarning}`)
+    if (label === "key" && (fs.statSync(abs).mode & 0o077) !== 0) {
+        status.warnings.push(`key file ${rel} is readable by other users (chmod 600 it)`)
+    }
+    return undefined
+}
+
+function checkKeyFiles(root: string, cfg: any, status: SubnetStatus): void {
     const keyRel = cfg.keys?.private_key_path
     const ivRel = cfg.keys?.iv_path
     if (!keyRel || !ivRel) {
-        status.problems.push(
-            "config.json needs keys.private_key_path and keys.iv_path",
-        )
-    } else {
-        const missing: string[] = []
-        const projectRoot = path.resolve(root)
-        const files: Array<[string, string]> = [
-            ["key", keyRel],
-            ["IV", ivRel],
-        ]
-        for (const [label, rel] of files) {
-            const abs = path.resolve(root, rel)
-            // Same test as the loader: a plain prefix check against the root.
-            if (!abs.startsWith(projectRoot)) {
-                status.problems.push(`${label} path ${rel} is outside the node directory`)
-                continue
-            }
-            // `bun install` or a clean checkout wipes node_modules, and the
-            // key goes with it.
-            if (path.relative(projectRoot, abs).split(path.sep).includes("node_modules")) {
-                status.warnings.push(`${label} file ${rel} is inside node_modules and is lost when dependencies are reinstalled`)
-            }
-            if (!fs.existsSync(abs)) {
-                missing.push(`${label} file ${rel} is missing`)
-                continue
-            }
-            let text: string
-            try {
-                text = fs.readFileSync(abs, "utf8")
-            } catch (e) {
-                status.problems.push(`${label} file ${rel} cannot be read (${errorText(e)})`)
-                continue
-            }
-            const r = parseHex(text, label === "key" ? "Key" : "IV")
-            if (!r.ok) {
-                status.problems.push(`${label} file ${rel}: ${r.error}`)
-                continue
-            }
-            const lengthWarning =
-                label === "key"
-                    ? hexLengthWarning(r.value, "Key", KEY_BYTES)
-                    : hexLengthWarning(r.value, "IV", IV_BYTES)
-            if (lengthWarning) status.warnings.push(`${rel}: ${lengthWarning}`)
-            if (label === "key" && (fs.statSync(abs).mode & 0o077) !== 0) {
-                status.warnings.push(
-                    `key file ${rel} is readable by other users (chmod 600 it)`,
-                )
-            }
-        }
-        if (missing.length > 0 && status.problems.length === 0) {
-            status.state = "missing-files"
-        }
-        status.problems.push(...missing)
+        status.problems.push("config.json needs keys.private_key_path and keys.iv_path")
+        return
     }
-    if (status.problems.length > 0 && status.state === "ok") {
-        status.state = "invalid"
+    const missing = [checkKeyFile(root, "key", keyRel, status), checkKeyFile(root, "IV", ivRel, status)].filter(
+        (m): m is string => m !== undefined,
+    )
+    if (missing.length > 0 && status.problems.length === 0) status.state = "missing-files"
+    status.problems.push(...missing)
+}
+
+function inspectSubnetUnsafe(root: string, uid: string): SubnetStatus {
+    const status: SubnetStatus = {
+        uid,
+        dir: path.join(root, L2PS_DIR, uid),
+        state: "ok",
+        problems: [],
+        warnings: [],
     }
+    const { cfg, done } = readConfig(status)
+    if (done) return done
+    checkIdentity(cfg, uid, status)
+    checkKeyFiles(root, cfg, status)
+    if (status.problems.length > 0 && status.state === "ok") status.state = "invalid"
     return status
 }
 
