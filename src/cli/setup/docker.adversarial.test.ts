@@ -29,11 +29,11 @@ beforeAll(() => {
 })
 afterAll(() => fs.rmSync(work, { recursive: true, force: true }))
 
-function compose(files: string[], env: Record<string, string> = {}, dotenv?: string) {
+function compose(files: string[], env: Record<string, string> = {}, dotenv?: string, profiles: string[] = []) {
     const envFile = path.join(work, ".env")
     fs.rmSync(envFile, { force: true })
     if (dotenv !== undefined) fs.writeFileSync(envFile, dotenv)
-    const r = spawnSync(DOCKER as string, ["compose", ...files.flatMap(f => ["-f", f]), "config", "--format", "json"], {
+    const r = spawnSync(DOCKER as string, ["compose", ...files.flatMap(f => ["-f", f]), ...profiles.flatMap(p => ["--profile", p]), "config", "--format", "json"], {
         cwd: work,
         encoding: "utf8",
         env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
@@ -117,6 +117,49 @@ describe.skipIf(!hasCompose)("compose files", () => {
     it("passes the other setup variables through as given", () => {
         const c = compose(BASE, { DEMOS_SETUP_STRICT: "true", DEMOS_SETUP_L2PS_UID: "my_subnet" }).json
         expect(c?.services.node.environment).toMatchObject({ DEMOS_SETUP_STRICT: "true", DEMOS_SETUP_L2PS_UID: "my_subnet" })
+    })
+})
+
+describe.skipIf(!hasCompose)("the reverse proxy follows the node's ports", () => {
+    const FILES = [["docker-compose.yml"], ["docker-compose.yml", "docker-compose.devnet.yml"]]
+
+    it("passes the same signaling and messaging ports to Caddy as to the node, default and custom", () => {
+        for (const files of FILES) {
+            for (const env of [{}, { L2PS_MESSAGING_PORT: "3100", RPC_SIGNALING_PORT: "3205" }]) {
+                const c = compose(files, { PROXY_DOMAIN: "node.example.org", ...env }, undefined, ["proxy"])
+                expect([files.length, c.status, c.stderr.slice(0, 200)]).toEqual([files.length, 0, ""])
+                const node = c.json?.services.node.environment
+                const caddy = c.json?.services.caddy.environment
+                expect(caddy?.L2PS_MESSAGING_PORT).toBe(node?.L2PS_MESSAGING_PORT)
+                expect(caddy?.RPC_SIGNALING_PORT).toBe(node?.RPC_SIGNALING_PORT)
+                expect(caddy?.L2PS_MESSAGING_PORT).toBe(env.L2PS_MESSAGING_PORT ?? "3006")
+                expect(caddy?.RPC_SIGNALING_PORT).toBe(env.RPC_SIGNALING_PORT ?? "3005")
+            }
+        }
+    })
+
+    it("a value written to .env by the setup reaches Caddy as well", () => {
+        const c = compose(["docker-compose.yml"], { PROXY_DOMAIN: "node.example.org" }, "L2PS_MESSAGING_PORT=3100\n", ["proxy"])
+        expect(c.json?.services.caddy.environment?.L2PS_MESSAGING_PORT).toBe("3100")
+    })
+})
+
+describe("the Caddyfile", () => {
+    const caddyfile = fs.readFileSync(path.join(repo, "monitoring/caddy/Caddyfile"), "utf8")
+
+    it("proxies /messaging/ and /signaling/ to the node's own ports through placeholders, not fixed numbers", () => {
+        expect(caddyfile).toMatch(/handle_path \/messaging\/\*\s*\{\s*reverse_proxy node:\{\$L2PS_MESSAGING_PORT:3006\}/)
+        expect(caddyfile).toMatch(/handle_path \/signaling\/\*\s*\{\s*reverse_proxy node:\{\$RPC_SIGNALING_PORT:3005\}/)
+        expect(caddyfile).not.toMatch(/reverse_proxy node:300[56]\b/)
+    })
+
+    it("uses only variables the compose file gives the caddy service", () => {
+        const compose = fs.readFileSync(path.join(repo, "docker-compose.yml"), "utf8")
+        const caddyBlock = compose.slice(compose.indexOf("\n  caddy:"))
+        for (const name of ["L2PS_MESSAGING_PORT", "RPC_SIGNALING_PORT"]) {
+            expect(caddyfile).toContain(`{$${name}:`)
+            expect(caddyBlock).toContain(`${name}: \${${name}:-`)
+        }
     })
 })
 

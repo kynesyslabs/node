@@ -525,6 +525,10 @@ services:
       # which Caddy reads from its OWN env — so it must be set here, or the
       # notary leg falls back to 7047 and 502s on port-remapped stacks (devnet).
       TLSNOTARY_PORT: ${TLSNOTARY_PORT:-7047}
+      # The /signaling/ and /messaging/ routes proxy to the ports the node
+      # listens on. Same variables, same defaults as the node's own environment.
+      RPC_SIGNALING_PORT: ${RPC_SIGNALING_PORT:-3005}
+      L2PS_MESSAGING_PORT: ${L2PS_MESSAGING_PORT:-3006}
     volumes:
       - ./monitoring/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./monitoring/caddy/tlsnotary-modes:/etc/caddy/tlsnotary-modes:ro
