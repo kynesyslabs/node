@@ -563,7 +563,7 @@ Examples:
 ```bash
 # Create a subnet, enable messaging and ZK proofs, no questions asked
 bun run setup --yes --l2ps-uid my_subnet --l2ps-rpc http://node2.example.com:53550 \
-    --messaging --zk
+    --messaging --zk --zk-generate
 
 # Join an existing subnet: put the key and IV you received in files (chmod 600,
 # delete them afterwards) so they never appear on a command line
