@@ -163,7 +163,7 @@ For dashboard internals and customization, see [monitoring/README.md](monitoring
 - **Runtime**: Bun (required due to performances and advanced native features)
 - **Language**: TypeScript with modern ES modules
 - **Database**: PostgreSQL with TypeORM
-- **Web Framework**: Fastify with RESTful APIs
+- **Web Framework**: Bun HTTP server with JSON-RPC and REST endpoints
 - **Networking**: Custom P2P protocol implementation
 - **Cryptography**: Advanced encryption libraries and post-quantum algorithms
 
