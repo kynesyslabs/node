@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto"
 import * as fs from "node:fs"
 import * as path from "node:path"
 
@@ -65,12 +66,23 @@ export function writeFileGuarded(
 
     let backup = ""
     if (exists) {
-        backup = `${file}.bak-${now()}`
-        fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL)
+        // Never overwrite an earlier backup: it may be the only copy of a key.
+        const stamp = now()
+        for (let n = 0; ; n++) {
+            backup = `${file}.bak-${stamp}${n === 0 ? "" : `-${n}`}`
+            try {
+                fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL)
+                break
+            } catch (e) {
+                if ((e as NodeJS.ErrnoException).code !== "EEXIST" || n >= 100) throw e
+            }
+        }
         fs.chmodSync(backup, 0o600)
     }
 
-    const tmp = `${file}.tmp-${process.pid}`
+    // A pid alone repeats across container restarts, so a temp file left by a
+    // killed run would block every later write.
+    const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString("hex")}`
     try {
         fs.writeFileSync(tmp, content, { mode, flag: "wx" })
         fs.chmodSync(tmp, mode)
