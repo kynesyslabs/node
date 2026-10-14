@@ -21,9 +21,9 @@ import { getSharedState } from "@/utilities/sharedState"
 import { hashGenesisCore, hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
 import { resolveGenesisMismatch } from "./genesisMismatch"
 import {
-    diffSchedules,
+    checkPeerSchedule,
     localScheduleView,
-    peerScheduleView,
+    type ForkConfigLike,
 } from "./forkScheduleAgreement"
 
 let ourGenesisDataHash = ""
@@ -135,45 +135,54 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
 }
 
 /**
- * The fork schedule is not in the genesis data hash, so pairing does not
- * catch a node that missed the genesis edit. Compare it here and say so
- * loudly; never refuse to boot over it, because during a rolling genesis edit
- * peers legitimately disagree for a while.
+ * The fork schedule is not part of what peers compare when they pair, so
+ * pairing does not catch a node that missed the genesis edit. Compare it here
+ * and say so loudly; never refuse to boot over it, because during a rolling
+ * genesis edit peers legitimately disagree for a while. A peer that has not
+ * loaded its own genesis yet answers "not ready"; that is retried and then left
+ * to the periodic comparison (forkScheduleWatch.ts), not reported as a mismatch.
  */
 async function warnOnForkScheduleMismatch(peer: Peer) {
-    try {
-        const answer = await peer.call({
-            method: "nodeCall",
-            params: [{ message: "getNetworkInfo" }],
-        } as RPCRequest)
-        if (answer?.result !== 200) return
-        const theirs = peerScheduleView(answer.response)
-        if (!theirs) return
-        const ours = localScheduleView(
-            getSharedState.forkConfig as unknown as Record<
-                string,
-                { activationHeight: number | null } | undefined
-            >,
-            getSharedState.chainId,
-        )
-        const differences = diffSchedules(ours, theirs)
-        if (differences.length > 0) {
+    const ours = localScheduleView(
+        getSharedState.forkConfig as unknown as ForkConfigLike,
+        getSharedState.chainId,
+    )
+    const result = await checkPeerSchedule(peer, ours)
+    switch (result.status) {
+        case "mismatch":
             log.error(
                 "[BOOTSTRAP] FORK SCHEDULE MISMATCH with " +
                     peer.connection.string +
                     ": " +
-                    differences.join("; ") +
+                    result.lines.join("; ") +
                     ". This node will split from its peers at the first activation height that differs. " +
                     "Fix the forks entries and properties.id in data/genesis.json and restart.",
             )
-        }
-    } catch (error) {
-        log.warn(
-            "[BOOTSTRAP] Could not compare fork schedules with " +
-                peer.connection.string +
-                ": " +
-                (error instanceof Error ? error.message : String(error)),
-        )
+            break
+        case "skipped":
+            log.debug(
+                "[BOOTSTRAP] Peer " +
+                    peer.connection.string +
+                    " does not publish a fork schedule digest; not compared",
+            )
+            break
+        case "not-ready":
+            log.warn(
+                "[BOOTSTRAP] Peer " +
+                    peer.connection.string +
+                    " has not loaded its fork schedule yet; it will be compared later",
+            )
+            break
+        case "unreachable":
+            log.warn(
+                "[BOOTSTRAP] Could not compare fork schedules with " +
+                    peer.connection.string +
+                    ": " +
+                    result.reason,
+            )
+            break
+        default:
+            break
     }
 }
 

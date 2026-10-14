@@ -14,6 +14,7 @@ import log from "@/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
 import { Config } from "src/config"
+import { getSharedState } from "@/utilities/sharedState"
 import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks"
 
 function getLatestGCRRecoveryData() {
@@ -82,6 +83,12 @@ export default async function findGenesisBlock() {
             )
             throw e
         }
+    }
+
+    // With no genesis file there is nothing to load: the defaults are this node's
+    // schedule, and it can report them.
+    if (!fs.existsSync("data/genesis.json")) {
+        getSharedState.forkConfigLoaded = true
     }
 
     log.info("[GENESIS] Looking for the genesis block...")

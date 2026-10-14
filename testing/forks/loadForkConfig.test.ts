@@ -526,3 +526,32 @@ describe("loadForkConfigFromGenesis", () => {
         expect(fd.specialOps.rpcPct).toBe(50)
     })
 })
+
+describe("forkConfigLoaded", () => {
+    it("is false until a genesis has been loaded, then true, with or without a forks field", async () => {
+        const { getSharedState } = await import("@/utilities/sharedState")
+        const { loadForkConfigFromGenesis } = await import("@/forks/loadForkConfig")
+        const before = getSharedState.forkConfigLoaded
+        const forks = getSharedState.forkConfig
+        const chainId = getSharedState.chainId
+        try {
+            getSharedState.forkConfigLoaded = false
+            loadForkConfigFromGenesis({ properties: { id: 1 } })
+            expect(getSharedState.forkConfigLoaded).toBe(true)
+
+            getSharedState.forkConfigLoaded = false
+            loadForkConfigFromGenesis({ properties: { id: 1 }, forks: { signatureDomain: { activationHeight: 9 } } })
+            expect(getSharedState.forkConfigLoaded).toBe(true)
+
+            getSharedState.forkConfigLoaded = false
+            expect(() =>
+                loadForkConfigFromGenesis({ properties: { id: 1 }, forks: { signatureDomain: { activationHeight: -1 } } }),
+            ).toThrow()
+            expect(getSharedState.forkConfigLoaded).toBe(false)
+        } finally {
+            getSharedState.forkConfigLoaded = before
+            getSharedState.forkConfig = forks
+            getSharedState.chainId = chainId
+        }
+    })
+})
