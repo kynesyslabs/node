@@ -557,7 +557,13 @@ async function zkSection(
         return
     }
     try {
-        const outcome = await runL2psZkSetup(ctx.root, deps.runner, l => say(`  ${l}`))
+        const outcome = await runL2psZkSetup(
+            ctx.root,
+            deps.runner,
+            l => say(`  ${l}`),
+            undefined,
+            opts.ptauUrl ? [opts.ptauUrl] : undefined,
+        )
         for (const m of outcome.messages) say(`  ${m}`)
         if (!outcome.ok) result.problems.push(...outcome.messages)
     } catch (e) {

@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- terminal tool: console is its output */
 import * as fs from "node:fs"
 import {
     collectChecks,

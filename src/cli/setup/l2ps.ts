@@ -65,7 +65,7 @@ export function inspectSubnet(root: string, uid: string): SubnetStatus {
         status.problems.push("directory name is not a valid subnet id")
     }
     if (!cfg.uid) {
-        status.problems.push('config.json has no "uid"')
+        status.problems.push("config.json has no \"uid\"")
     } else if (cfg.uid !== uid) {
         status.problems.push(
             `config.json uid "${cfg.uid}" differs from the directory name`,
@@ -76,7 +76,7 @@ export function inspectSubnet(root: string, uid: string): SubnetStatus {
     const ivRel = cfg.keys?.iv_path
     if (!keyRel || !ivRel) {
         status.problems.push(
-            'config.json needs keys.private_key_path and keys.iv_path',
+            "config.json needs keys.private_key_path and keys.iv_path",
         )
     } else {
         const missing: string[] = []

@@ -5,7 +5,7 @@ import { enforceGuidedSetup, describeProblems, type GateDeps } from "./startupGa
 import { createContext } from "./context"
 import { startupProblems } from "./startupGate"
 import { makeRoot, recorder, removeRoot, scriptedPrompter, writeSubnet } from "./testSupport"
-import type { Prompter } from "./prompt"
+import { SetupAborted, type Prompter } from "./prompt"
 
 class Exit extends Error {
     constructor(public code: number) {
@@ -116,7 +116,6 @@ describe("startup gate with a terminal", () => {
 
     it("treats Ctrl+C as a decline, not a crash", async () => {
         writeSubnet(root, "broken", { key: null })
-        const { SetupAborted } = await import("./prompt")
         const g = gate({ interactive: true, prompter: { readLine: async () => { throw new SetupAborted() } } })
         await g.run()
         expect(g.out()).toContain("Setup cancelled")

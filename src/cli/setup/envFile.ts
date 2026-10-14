@@ -7,7 +7,7 @@ export function parseEnv(text: string): Record<string, string> {
         if (!m) continue
         let value = m[2].trim()
         const quote = value[0]
-        if ((quote === '"' || quote === "'") && value.endsWith(quote) && value.length >= 2) {
+        if ((quote === "\"" || quote === "'") && value.endsWith(quote) && value.length >= 2) {
             value = value.slice(1, -1)
         } else {
             value = value.replace(/\s+#.*$/, "")

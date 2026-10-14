@@ -287,7 +287,7 @@ describe("ZK step", () => {
         writeSubnet(root, "good")
         const { code, out } = await cli(["--yes", "--zk"])
         expect(code).toBe(1)
-        expect(out).toContain('Run "bun install" first')
+        expect(out).toContain("Run \"bun install\" first")
     })
 
     it("turns proofs on, builds the keys and passes the final check", async () => {

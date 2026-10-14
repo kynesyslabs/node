@@ -81,6 +81,12 @@ describe("parseSetupArgs", () => {
         expect(parseSetupArgs(["--l2ps-uid", "flag_wins"], env).uid).toBe("flag_wins")
     })
 
+    it("takes a ptau mirror from a flag or the environment and validates it", () => {
+        expect(parseSetupArgs(["--ptau-url", "https://mirror.example/ptau/"], {}).ptauUrl).toBe("https://mirror.example/ptau")
+        expect(parseSetupArgs([], { DEMOS_SETUP_PTAU_URL: "https://m.example" }).ptauUrl).toBe("https://m.example")
+        expect(() => parseSetupArgs(["--ptau-url", "mirror"], {})).toThrow(UsageError)
+    })
+
     it("rejects bad values with a usage error", () => {
         expect(() => parseSetupArgs(["--l2ps-uid", "bad uid"], {})).toThrow(UsageError)
         expect(() => parseSetupArgs(["--messaging-port", "99999"], {})).toThrow(UsageError)

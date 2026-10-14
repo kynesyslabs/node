@@ -188,6 +188,12 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PROD: ${PROD:-false}
       L2PS_ZK_ENABLED: ${L2PS_ZK_ENABLED:-false}
+      # Written by `bun run setup`; the defaults equal the node's built-in ones.
+      L2PS_HISTORY_RETENTION_DAYS: ${L2PS_HISTORY_RETENTION_DAYS:-0}
+      L2PS_HISTORY_STORE_PLAINTEXT: ${L2PS_HISTORY_STORE_PLAINTEXT:-false}
+      L2PS_HISTORY_REQUIRE_V2: ${L2PS_HISTORY_REQUIRE_V2:-false}
+      L2PS_MESSAGING_ENABLED: ${L2PS_MESSAGING_ENABLED:-false}
+      L2PS_MESSAGING_PORT: ${L2PS_MESSAGING_PORT:-3006}
       # Optional external API keys (passed through if set in .env)
       SOLANA_RPC: ${SOLANA_RPC:-}
       ETHERSCAN_API_KEY: ${ETHERSCAN_API_KEY:-}

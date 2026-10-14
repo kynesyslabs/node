@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- terminal tool: console is its output */
 import { runCli } from "./cli"
 
 runCli(process.argv.slice(2), {

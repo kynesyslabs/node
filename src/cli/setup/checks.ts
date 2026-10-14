@@ -68,7 +68,7 @@ export function collectChecks(ctx: SetupContext): CheckReport {
                 area: "L2PS",
                 item,
                 status: "off",
-                detail: 'disabled ("enabled": false)',
+                detail: "disabled (\"enabled\": false)",
                 blocking: false,
             })
         } else {

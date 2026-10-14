@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- terminal tool: console is its output */
 import { Writable } from "node:stream"
 import * as readline from "node:readline/promises"
 

@@ -59,6 +59,43 @@ describe("runL2psZkSetup", () => {
         expect(runner.calls.filter(c => c.startsWith("download"))).toHaveLength(1)
     })
 
+    it("falls back to the next host and explains how to recover when none works", async () => {
+        seedCommittedVkeys({ protocol: "plonk" })
+        const tried: string[] = []
+        const runner = fakeRunner()
+        runner.download = async url => {
+            tried.push(url)
+            throw new Error("HTTP 403")
+        }
+        const out = await runL2psZkSetup(root, runner, recorder().say, [5])
+        expect(out.ok).toBe(false)
+        expect(tried).toHaveLength(2)
+        expect(out.messages[0]).toContain("--ptau-url")
+        expect(out.messages[0]).toContain("HTTP 403")
+
+        const second = fakeRunner()
+        let n = 0
+        const real = second.download
+        second.download = async (url, dest, min) => {
+            if (n++ === 0) throw new Error("HTTP 403")
+            return real(url, dest, min)
+        }
+        expect((await runL2psZkSetup(root, second, recorder().say, [5])).ok).toBe(true)
+    })
+
+    it("uses a mirror given by the operator", async () => {
+        seedCommittedVkeys({ protocol: "plonk" })
+        const urls: string[] = []
+        const runner = fakeRunner()
+        const real = runner.download
+        runner.download = async (url, dest, min) => {
+            urls.push(url)
+            return real(url, dest, min)
+        }
+        await runL2psZkSetup(root, runner, recorder().say, [5], ["https://mirror.example/ptau/"])
+        expect(urls).toEqual(["https://mirror.example/ptau/powersOfTau28_hez_final_16.ptau"])
+    })
+
     it("skips a ptau file that is already downloaded", async () => {
         seedCommittedVkeys({ protocol: "plonk" })
         const ptauDir = path.join(root, "src/libs/l2ps/zk/ptau")

@@ -9,6 +9,15 @@ export type BatchSize = (typeof BATCH_SIZES)[number]
 const PTAU_POWER: Record<BatchSize, number> = { 5: 16, 10: 17 }
 const PTAU_MIN_BYTES = 1_000_000
 
+// The ceremony file is public and the same everywhere; the committed
+// verification keys only match files from the Hermez ceremony. Hosts come and
+// go (the first one answers 403 at the time of writing), so the base URL can
+// be replaced with --ptau-url.
+export const PTAU_BASE_URLS = [
+    "https://storage.googleapis.com/zkevm/ptau",
+    "https://hermez.s3-eu-west-1.amazonaws.com",
+]
+
 export interface BatchArtifacts {
     size: BatchSize
     zkey: boolean
@@ -111,6 +120,7 @@ export async function runL2psZkSetup(
     runner: ZkRunner,
     say: (line: string) => void,
     sizes: readonly BatchSize[] = BATCH_SIZES,
+    ptauBaseUrls: readonly string[] = PTAU_BASE_URLS,
 ): Promise<ZkSetupResult> {
     const messages: string[] = []
     const zkDir = path.join(root, L2PS_ZK_DIR)
@@ -129,11 +139,27 @@ export async function runL2psZkSetup(
             fs.statSync(ptau).size < PTAU_MIN_BYTES
         ) {
             say(`Downloading ${ptauName} (public Powers of Tau file)...`)
-            await runner.download(
-                `https://storage.googleapis.com/zkevm/ptau/${ptauName}`,
-                ptau,
-                PTAU_MIN_BYTES,
-            )
+            const errors: string[] = []
+            let got = false
+            for (const base of ptauBaseUrls) {
+                try {
+                    await runner.download(
+                        `${base.replace(/\/+$/, "")}/${ptauName}`,
+                        ptau,
+                        PTAU_MIN_BYTES,
+                    )
+                    got = true
+                    break
+                } catch (e) {
+                    errors.push(e instanceof Error ? e.message : String(e))
+                }
+            }
+            if (!got) {
+                messages.push(
+                    `Could not download ${ptauName} (${errors.join("; ")}). Get it from another mirror of the Hermez Powers of Tau ceremony and save it as ${ptau}, or pass --ptau-url <base url>; then run the setup again.`,
+                )
+                return { ok: false, messages }
+            }
         } else {
             say(`${ptauName} already downloaded`)
         }

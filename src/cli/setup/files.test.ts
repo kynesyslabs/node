@@ -86,7 +86,7 @@ describe("subnet file generation", () => {
 
 describe("env file editing", () => {
     it("parses keys, quotes and trailing comments", () => {
-        expect(parseEnv('A=1\n# B=2\nexport C="x y"\nD=z # note\n')).toEqual({ A: "1", C: "x y", D: "z" })
+        expect(parseEnv("A=1\n# B=2\nexport C=\"x y\"\nD=z # note\n")).toEqual({ A: "1", C: "x y", D: "z" })
     })
 
     it("edits in place, switches on commented examples and appends the rest", () => {

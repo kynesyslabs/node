@@ -3,6 +3,7 @@ import {
     validateNonNegativeInt,
     validatePort,
     validateRpcList,
+    validateRpcUrl,
     validateUid,
 } from "./validate"
 
@@ -37,6 +38,7 @@ export interface SetupOptions {
     // ZK answers
     zk?: boolean
     zkGenerate?: boolean
+    ptauUrl?: string
 }
 
 type Kind = "bool" | "string" | "list"
@@ -71,6 +73,7 @@ const SPECS: Spec[] = [
     { flag: "messaging-port", key: "messagingPort", kind: "string", env: "DEMOS_SETUP_MESSAGING_PORT" },
     { flag: "zk", key: "zk", kind: "bool", env: "DEMOS_SETUP_ZK" },
     { flag: "zk-generate", key: "zkGenerate", kind: "bool", env: "DEMOS_SETUP_ZK_GENERATE" },
+    { flag: "ptau-url", key: "ptauUrl", kind: "string", env: "DEMOS_SETUP_PTAU_URL" },
 ]
 
 export const HELP = `Usage: bun run setup [options]
@@ -104,6 +107,7 @@ L2PS
 ZK
   --zk / --no-zk          Use ZK proofs for L2PS batches.
   --zk-generate           Build the missing proving keys (about 200 MB download, several minutes).
+  --ptau-url <base>       Mirror of the Hermez Powers of Tau files, if the default hosts are down.
 
 Other
   --env-file <path>       Env file to edit (default .env).
@@ -214,6 +218,11 @@ export function parseSetupArgs(
         const r = validateRpcList(raw.rpcs as string[])
         if (!r.ok) throw new UsageError(`--l2ps-rpc: ${r.error}`)
         o.rpcs = r.value
+    }
+    if (raw.ptauUrl !== undefined) {
+        const r = validateRpcUrl(raw.ptauUrl as string)
+        if (!r.ok) throw new UsageError(`--ptau-url: ${r.error}`)
+        o.ptauUrl = r.value
     }
     if (raw.keyFile !== undefined) o.keyFile = raw.keyFile as string
     if (raw.ivFile !== undefined) o.ivFile = raw.ivFile as string

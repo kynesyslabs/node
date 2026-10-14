@@ -542,6 +542,42 @@ bun install
 
 ---
 
+## L2PS and ZK setup (optional)
+
+L2PS subnets and ZK proofs need a few files and `.env` entries. Three commands handle them:
+
+```bash
+bun run setup            # asks what to enable and writes the files and .env entries
+bun run setup --check    # report only: what is configured, missing or invalid
+bun run setup --yes ...  # no questions; answers come from flags and DEMOS_SETUP_* variables
+```
+
+What the setup does:
+
+- **L2PS:** creates `data/l2ps/<id>/` (config, subnet key, IV) with a fresh key, or imports the key and IV you received from the subnet owner when you join an existing subnet. Key files get mode 600 and are never printed. It also sets the history retention, plaintext history, messaging and port options in `.env`.
+- **ZK batch proofs:** turns `L2PS_ZK_ENABLED` on and builds the proving keys (about 200 MB download, several minutes). The identity verification key is committed to the repository and is only checked, never regenerated.
+- Nothing that already exists is replaced unless you say yes or pass `--force`. A replaced file is kept next to the original as `<name>.bak-<time>`. Add `--dry-run` to see what would be written.
+
+Examples:
+
+```bash
+# Create a subnet, enable messaging and ZK proofs, no questions asked
+bun run setup --yes --l2ps-uid my_subnet --l2ps-rpc http://node2.example.com:53550 \
+    --messaging --zk
+
+# Join an existing subnet (key and IV from the owner, kept out of the process list)
+DEMOS_SETUP_L2PS_KEY=<hex> DEMOS_SETUP_L2PS_IV=<hex> \
+    bun run setup --yes --l2ps-uid shared_subnet --l2ps-role join
+
+bun run setup --help     # every flag and its DEMOS_SETUP_* variable
+```
+
+When the node starts in a terminal and L2PS or ZK is configured but incomplete, it offers to run the setup first. Without a terminal (Docker, systemd, CI) it stops with one message listing what is missing. Set `DEMOS_SKIP_SETUP_CHECK=true` to start anyway; the affected features then stay unavailable.
+
+**Docker:** run the same commands inside the container, for example `docker compose exec node bun run setup --check`. Subnet files go into the `demos_node_data` volume. The container cannot write your host `.env`, so the setup prints the lines to add there; recreate the container afterwards. The image has no writable ZK key directory, so build the ZK keys on a checkout and not in the image.
+
+---
+
 ## Security Notes
 
 1. **Backup your identity files:**
