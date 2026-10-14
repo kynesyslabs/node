@@ -102,6 +102,14 @@ export async function runWizard(deps: WizardDeps): Promise<WizardResult> {
 
     if (opts.only !== "zk") {
         await l2psSection(deps, result, wantedEnv, state)
+        // Messaging with no subnet to serve would put a warning banner at every
+        // start (and stop a strict one), so the setup never produces that state.
+        if (wantedEnv[EnvKey.L2PS_MESSAGING_ENABLED] === "true" && state.activeSubnets.size === 0) {
+            delete wantedEnv[EnvKey.L2PS_MESSAGING_ENABLED]
+            const msg = "Messaging was not enabled: it needs a usable L2PS subnet. Add one with --l2ps-uid <id>, then enable messaging."
+            say(`  ${msg}`)
+            result.problems.push(msg)
+        }
     }
     if (opts.only !== "l2ps") {
         await zkSection(deps, result, wantedEnv, state)

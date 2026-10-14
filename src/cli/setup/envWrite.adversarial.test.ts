@@ -26,7 +26,7 @@ async function setup(argv: string[], env: Record<string, string> = {}) {
 }
 
 const envPath = () => path.join(root, ".env")
-const WIZARD = ["--yes", "--no-l2ps", "--messaging", "--messaging-port", "3100"]
+const WIZARD = ["--yes", "--only", "l2ps", "--l2ps-uid", "env_check", "--messaging", "--messaging-port", "3100"]
 
 describe("applyEnvChanges keeps everything it does not own", () => {
     const BODY = [
