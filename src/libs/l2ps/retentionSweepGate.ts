@@ -17,7 +17,12 @@ export class RetentionSweepGate {
     /** True when a sweep is due; the grant is recorded before returning. */
     due(): boolean {
         const t = this.now()
-        if (this.last !== null && t - this.last < this.intervalMs) return false
+        // A reading that is not a time is no evidence an interval has passed,
+        // and recording it would make every later comparison false.
+        if (!Number.isFinite(t)) return false
+        // A clock stepped back past the last grant would otherwise hold the
+        // gate shut for as long as the step; the sweep is due on schedule.
+        if (this.last !== null && t >= this.last && t - this.last < this.intervalMs) return false
         this.last = t
         return true
     }
