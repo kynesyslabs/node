@@ -94,7 +94,7 @@ Modes
 
 L2PS
   --l2ps / --no-l2ps      Set up L2PS on this node (implied by --l2ps-uid).
-  --l2ps-uid <id>         Subnet id: letters, digits, _ and -, up to 64.
+  --l2ps-uid <id>         Subnet id: letters, digits, _ and -, up to 255.
   --l2ps-role create|join create makes a new key; join imports the owner's key and IV.
   --l2ps-rpc <url>        RPC of a subnet member; repeat or comma-separate.
   --l2ps-key-file <path>  File holding the subnet key (hex) for join/import.
@@ -116,6 +116,13 @@ ZK
 Other
   --env-file <path>       Env file to edit (default .env).
 
+Exit codes
+  0    done (or nothing to do), or --check found nothing wrong
+  1    something is missing or could not be done: --check found a problem,
+       a required answer is missing, a file or .env could not be written
+  2    the command line or a DEMOS_SETUP_* value is invalid
+  130  cancelled with Ctrl-C or end of input
+
 Every value flag also reads DEMOS_SETUP_<FLAG NAME IN CAPS>, for example
 DEMOS_SETUP_L2PS_UID. Flags win over variables.`
 
@@ -130,6 +137,11 @@ export function parseSetupArgs(
     env: Record<string, string | undefined> = process.env,
 ): SetupOptions {
     const raw: Partial<Record<keyof SetupOptions, string | string[] | boolean>> = {}
+    // Which answers came from the command line and which from the environment,
+    // so a contradiction is only reported within one source (flags win over
+    // variables, so a lingering variable never blocks a flag).
+    const fromCli = new Set<keyof SetupOptions>()
+    const fromEnv = new Set<keyof SetupOptions>()
     const bySpec = new Map<string, Spec>()
     for (const s of SPECS) bySpec.set(s.flag, s)
 
@@ -137,6 +149,7 @@ export function parseSetupArgs(
         const arg = argv[i]
         if (arg === "-y") {
             raw.yes = true
+            fromCli.add("yes")
             continue
         }
         if (arg === "-h") {
@@ -156,6 +169,7 @@ export function parseSetupArgs(
             if (spec?.kind !== "bool") spec = undefined
         }
         if (!spec) throw new UsageError(`Unknown option: --${name}`)
+        fromCli.add(spec.key)
 
         if (spec.kind === "bool") {
             if (inline === undefined && argv[i + 1] !== undefined && /^(true|false)$/i.test(argv[i + 1])) {
@@ -184,6 +198,7 @@ export function parseSetupArgs(
         if (raw[s.key] !== undefined || !s.env) continue
         const v = env[s.env]
         if (v === undefined || v === "") continue
+        fromEnv.add(s.key)
         if (s.kind === "bool") raw[s.key] = coerceBool(s.env, v)
         else if (s.kind === "list") raw[s.key] = [v]
         else raw[s.key] = v
@@ -242,6 +257,15 @@ export function parseSetupArgs(
         const r = validatePort(raw.messagingPort as string)
         if (!r.ok) throw new UsageError(`--messaging-port: ${r.error}`)
         o.messagingPort = r.value
+    }
+    for (const source of [fromCli, fromEnv]) {
+        const given = (...keys: Array<keyof SetupOptions>) => keys.some(k => source.has(k))
+        if (source.has("l2ps") && o.l2ps === false && given("uid", "role", "rpcs", "keyFile", "ivFile")) {
+            throw new UsageError("--no-l2ps cannot be combined with subnet answers such as --l2ps-uid")
+        }
+        if (o.role === "create" && source.has("role") && (given("keyFile", "ivFile") || (source === fromEnv && (o.keyHex || o.ivHex)))) {
+            throw new UsageError("--l2ps-role create makes a new key; it cannot be combined with an imported key or IV (use --l2ps-role join)")
+        }
     }
     if (o.only === "zk" && (o.l2ps !== undefined || o.uid !== undefined)) {
         throw new UsageError("--only zk cannot be combined with L2PS subnet options")

@@ -42,8 +42,14 @@ export function runCheck(deps: CliDeps, envFile: string, json: boolean): number 
     return problems.length === 0 ? 0 : 1
 }
 
+/** A script reading --check --json gets a document on every path, errors included. */
+function jsonFailure(deps: CliDeps, message: string): void {
+    deps.say(JSON.stringify({ ok: false, error: message, items: [] }, null, 2))
+}
+
 /** Returns the process exit code. */
 export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
+    const wantsJson = argv.includes("--check") && argv.includes("--json")
     try {
         const opts = parseSetupArgs(argv, deps.env)
         if (opts.help) {
@@ -70,8 +76,13 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         return result.exitCode
     } catch (e) {
         if (e instanceof UsageError) {
-            deps.say(`${e.message}\nSee: ${SETUP_COMMAND} --help`)
+            if (wantsJson) jsonFailure(deps, e.message)
+            else deps.say(`${e.message}\nSee: ${SETUP_COMMAND} --help`)
             return 2
+        }
+        if (wantsJson) {
+            jsonFailure(deps, e instanceof Error ? e.message : String(e))
+            return 1
         }
         if (e instanceof SetupError) {
             deps.say(e.message)

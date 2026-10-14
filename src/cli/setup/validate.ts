@@ -13,10 +13,17 @@ const fail = <T>(error: string): Result<T> => ({ ok: false, error })
 // refuses would silently never join, so the setup must not accept it either.
 export const SUBNET_UID_PATTERN = /^[A-Za-z0-9_-]+$/
 
+// The loader takes any length, but the id becomes a directory name, and past
+// the filesystem's 255-byte limit the run would die on a raw mkdir error.
+export const SUBNET_UID_MAX = 255
+
 export function validateUid(value: string): Result<string> {
     const uid = value.trim()
     if (!SUBNET_UID_PATTERN.test(uid)) {
         return fail("Use letters, digits, underscore or dash")
+    }
+    if (uid.length > SUBNET_UID_MAX) {
+        return fail(`At most ${SUBNET_UID_MAX} characters`)
     }
     return ok(uid)
 }
@@ -88,6 +95,10 @@ export function validateRpcUrl(value: string): Result<string> {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
         return fail(`"${raw}" must start with http:// or https://`)
     }
+    // The URL lands in config.json, which is readable by every local user.
+    if (url.username !== "" || url.password !== "") {
+        return fail("An RPC URL must not contain a user name or password")
+    }
     return ok(raw.replace(/\/+$/, ""))
 }
 
@@ -113,11 +124,18 @@ export function validatePort(value: string): Result<number> {
     return ok(port)
 }
 
+// 100 years. Beyond 2^53 a number prints as 1e+21, which the node reads as 1.
+export const MAX_RETENTION_DAYS = 36_500
+
 export function validateNonNegativeInt(value: string): Result<number> {
     if (!/^\d+$/.test(value.trim())) {
         return fail("Enter a whole number, 0 or more")
     }
-    return ok(Number(value))
+    const n = Number(value)
+    if (n > MAX_RETENTION_DAYS) {
+        return fail(`Enter at most ${MAX_RETENTION_DAYS} days (0 keeps history forever)`)
+    }
+    return ok(n)
 }
 
 export function parseBool(value: string | undefined): boolean | undefined {

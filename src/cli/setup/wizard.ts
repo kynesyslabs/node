@@ -441,7 +441,7 @@ async function secretInput(
     flag: string,
     envName: string,
 ): Promise<string> {
-    const raw = hex ?? (file !== undefined ? readSecretFile(file, label) : undefined)
+    const raw = hex ?? (file !== undefined ? readSecretFile(path.resolve(deps.ctx.root, file), label) : undefined)
     if (raw !== undefined) return orThrow(validator(raw), `Subnet ${label}`)
     if (!deps.prompter) {
         return missing(flag, envName)
