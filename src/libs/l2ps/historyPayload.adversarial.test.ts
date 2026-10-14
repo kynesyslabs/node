@@ -194,3 +194,20 @@ describe("which source wins", () => {
         expect(decrypt).not.toHaveBeenCalled()
     })
 })
+
+describe("subnetDecryptor", () => {
+    it("degrades to a decryptor that yields null for a subnet this node has no key for", async () => {
+        const { subnetDecryptor } = await import("./historyPayload")
+        const decrypt = await subnetDecryptor("no_such_subnet_for_adversarial_test")
+
+        expect(await decrypt(envelope)).toBeNull()
+    })
+
+    it("does not let a subnet name that fails the name rule throw either", async () => {
+        const { subnetDecryptor } = await import("./historyPayload")
+        for (const uid of ["../../etc", "a b", "", "a/b", "x\u0000y"]) {
+            const decrypt = await subnetDecryptor(uid)
+            expect(await decrypt(envelope)).toBeNull()
+        }
+    })
+})

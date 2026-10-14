@@ -120,8 +120,18 @@ export async function subnetDecryptor(
         "@/libs/l2ps/parallelNetworks"
     )
     const networks = ParallelNetworks.getInstance()
-    const instance =
-        (await networks.getL2PS(l2psUid)) ?? (await networks.loadL2PS(l2psUid))
+    // loadL2PS throws for a subnet this node has no configuration for, and
+    // the caller names the subnet, so an unknown or malformed name must end up
+    // on the same no-key path as a missing key rather than fail the read.
+    let instance: Awaited<ReturnType<typeof networks.loadL2PS>> | undefined
+    try {
+        instance =
+            (await networks.getL2PS(l2psUid)) ?? (await networks.loadL2PS(l2psUid))
+    } catch (error) {
+        log.debug(
+            `[L2PS History] Subnet ${JSON.stringify(l2psUid)} not available: ${error instanceof Error ? error.message : "unknown error"}`,
+        )
+    }
 
     if (!instance) {
         log.debug(`[L2PS History] No key for subnet ${l2psUid}`)
