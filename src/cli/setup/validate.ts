@@ -86,20 +86,27 @@ export const validateIvHex = (v: string) => validateHex(v, "IV", IV_BYTES)
 
 export function validateRpcUrl(value: string): Result<string> {
     const raw = value.trim()
+    // `new URL` also takes "http:host", which would be stored verbatim and read
+    // back differently by other tools, so the slashes are required here.
+    if (!/^https?:\/\//i.test(raw)) {
+        return fail(`"${raw}" must start with http:// or https://`)
+    }
     let url: URL
     try {
         url = new URL(raw)
     } catch {
         return fail(`"${raw}" is not a valid URL`)
     }
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-        return fail(`"${raw}" must start with http:// or https://`)
-    }
-    // The URL lands in config.json, which is readable by every local user.
+    // The URL lands in config.json, which every local user can read, so a
+    // password there would be a leak.
     if (url.username !== "" || url.password !== "") {
-        return fail("An RPC URL must not contain a user name or password")
+        return fail(
+            "An RPC URL must not contain a user name or password: config.json is readable by every local user. Put authentication on a reverse proxy in front of the RPC instead.",
+        )
     }
-    return ok(raw.replace(/\/+$/, ""))
+    // The scheme is case-insensitive; stored in one form so the same address
+    // is never listed twice under two spellings.
+    return ok(raw.replace(/^https?/i, m => m.toLowerCase()).replace(/\/+$/, ""))
 }
 
 /** Comma or whitespace separated list of RPC URLs; at least one. */

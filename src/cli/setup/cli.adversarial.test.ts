@@ -158,9 +158,18 @@ describe("values are validated, not coerced", () => {
 
     it("RPC urls: http(s) only, no credentials in a world-readable config", () => {
         expect(parseSetupArgs(["--l2ps-rpc", "http://a:1/, https://b:2"], {}).rpcs).toEqual(["http://a:1", "https://b:2"])
-        for (const bad of ["file:///etc/passwd", "ftp://a", "javascript:alert(1)", "http://", "not a url", "http://user:secret@host:53550", "http://user@host"]) {
+        for (const bad of ["file:///etc/passwd", "ftp://a", "javascript:alert(1)", "http://", "not a url", "http://user:secret@host:53550", "http://user@host", "http:host", "http:/host", "https:host:1", "HTTP:host", "http:\\\\host"]) {
             rejects(["--l2ps-rpc", bad])
         }
+    })
+
+    it("a credential is refused with the reason and the alternative", () => {
+        expect(() => parseSetupArgs(["--l2ps-rpc", "http://user:secret@host:53550"], {})).toThrow(/readable by every local user.*reverse proxy/)
+        expect(() => parseSetupArgs(["--l2ps-rpc", "http://user:secret@host:53550"], {})).not.toThrow(/secret/)
+    })
+
+    it("stores the scheme in lower case so one address is never listed twice", () => {
+        expect(parseSetupArgs(["--l2ps-rpc", "HTTP://H:1, http://H:1/, Https://x:2"], {}).rpcs).toEqual(["http://H:1", "https://x:2"])
     })
 
     it("booleans accept the documented spellings and nothing else", () => {
