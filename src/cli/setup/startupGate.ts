@@ -110,6 +110,24 @@ export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Pro
         ...overrides,
     }
     const skip = parseBool(deps.env[SKIP_ENV]) === true
+    // A mistyped safety switch must not read as "off" without a word: an
+    // operator who wrote DEMOS_SETUP_STRICT=ture believes strict mode is on.
+    for (const name of [STRICT_ENV, SKIP_ENV]) {
+        const raw = deps.env[name]
+        if (raw !== undefined && raw.trim() !== "" && parseBool(raw) === undefined) {
+            deps.say(`${name}="${raw}" is not true or false; treating it as false.`)
+        }
+    }
+
+    // Logging is a courtesy: a logger that fails must not decide whether the
+    // node starts, so the banner on stderr stays the record.
+    const record = async (message: string): Promise<void> => {
+        try {
+            await deps.logError(message)
+        } catch {
+            /* the banner on stderr already carries it */
+        }
+    }
 
     const inspect = (): CheckItem[] => {
         try {
@@ -132,7 +150,7 @@ export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Pro
     if (fatal.length > 0) {
         const text = describeFatal(fatal)
         deps.say(text)
-        await deps.logError(text)
+        await record(text)
         deps.exit(1)
     }
 
@@ -143,7 +161,7 @@ export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Pro
 
     const banner = describeProblems(problems, deps.inDocker)
     deps.say(banner)
-    await deps.logError(banner)
+    await record(banner)
     if (deps.strict) {
         deps.say(`${STRICT_ENV} is on: not starting.`)
         deps.exit(1)
