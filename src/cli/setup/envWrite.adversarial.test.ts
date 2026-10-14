@@ -4,7 +4,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { runCli } from "./cli"
 import { applyEnvChanges, parseEnv } from "./envFile"
-import { fakeRunner, makeRoot, recorder, removeRoot } from "./testSupport"
+import { fakeRunner, makeRoot, recorder, removeRoot, writeZkBatch } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -255,5 +255,35 @@ describe("the wizard's .env write", () => {
         expect(after.startsWith("\uFEFFFIRST=1\r\n# note\r\n")).toBe(true)
         expect(after.replaceAll("\r\n", "")).not.toContain("\n")
         expect(dotenv.parse(after)).toMatchObject({ FIRST: "1", L2PS_MESSAGING_PORT: "3100" })
+    })
+})
+
+describe("the repository's own .env.example", () => {
+    it("is edited in place on the keys the setup owns and nowhere else", async () => {
+        const original = fs.readFileSync(path.resolve(import.meta.dir, "../../../.env.example"), "utf8")
+        fs.writeFileSync(envPath(), original)
+        writeZkBatch(root, 5)
+        writeZkBatch(root, 10)
+        const { code } = await setup(
+            ["--yes", "--l2ps-uid", "ex", "--history-retention-days", "30", "--history-store-plaintext", "--history-require-v2", "--messaging", "--messaging-port", "3100", "--zk", "--force"],
+        )
+        expect(code).toBe(0)
+        const before = original.split("\n")
+        const after = fs.readFileSync(envPath(), "utf8").split("\n")
+        const owned = /^(L2PS_ZK_ENABLED|L2PS_HISTORY_RETENTION_DAYS|L2PS_HISTORY_STORE_PLAINTEXT|L2PS_HISTORY_REQUIRE_V2|L2PS_MESSAGING_ENABLED|L2PS_MESSAGING_PORT)=/
+        // Same number of lines, every owned line changed in place, every other line identical.
+        expect(after).toHaveLength(before.length)
+        before.forEach((line, i) => {
+            if (owned.test(line)) expect(after[i]).not.toBe(line)
+            else expect([i, after[i]]).toEqual([i, line])
+        })
+        expect(dotenv.parse(after.join("\n"))).toMatchObject({
+            L2PS_ZK_ENABLED: "true",
+            L2PS_HISTORY_RETENTION_DAYS: "30",
+            L2PS_HISTORY_STORE_PLAINTEXT: "true",
+            L2PS_HISTORY_REQUIRE_V2: "true",
+            L2PS_MESSAGING_ENABLED: "true",
+            L2PS_MESSAGING_PORT: "3100",
+        })
     })
 })
