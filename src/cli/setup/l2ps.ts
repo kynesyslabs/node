@@ -116,6 +116,11 @@ function inspectSubnetUnsafe(root: string, uid: string): SubnetStatus {
                 status.problems.push(`${label} path ${rel} is outside the node directory`)
                 continue
             }
+            // `bun install` or a clean checkout wipes node_modules, and the
+            // key goes with it.
+            if (path.relative(projectRoot, abs).split(path.sep).includes("node_modules")) {
+                status.warnings.push(`${label} file ${rel} is inside node_modules and is lost when dependencies are reinstalled`)
+            }
             if (!fs.existsSync(abs)) {
                 missing.push(`${label} file ${rel} is missing`)
                 continue

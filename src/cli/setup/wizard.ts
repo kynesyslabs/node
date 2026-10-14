@@ -311,11 +311,23 @@ async function l2psSection(
     const generated = opts.dryRun
         ? { keyHex: "<new random key>", ivHex: "<new random iv>" }
         : generateKeyMaterial(deps.randomBytes)
+    const haveKey = importedKey ?? reuse(keyRel)
+    const haveIv = importedIv ?? reuse(ivRel)
+    // Key and IV belong together. One of them being new next to an old other
+    // half is a subnet this node can no longer share with its members.
+    for (const [have, other, label, rel] of [
+        [haveIv, haveKey, "IV", ivRel],
+        [haveKey, haveIv, "key", keyRel],
+    ] as const) {
+        if (have === undefined && other !== undefined) {
+            say(`  Warning: ${rel} was missing or unusable, so a new random ${label} is generated. If other nodes share this subnet, get the original ${label} from its owner and import it; this node cannot read their traffic with a different one.`)
+        }
+    }
     const files = buildSubnetFiles({
         uid,
         rpcs,
-        keyHex: importedKey ?? reuse(keyRel) ?? generated.keyHex,
-        ivHex: importedIv ?? reuse(ivRel) ?? generated.ivHex,
+        keyHex: haveKey ?? generated.keyHex,
+        ivHex: haveIv ?? generated.ivHex,
         existingConfig,
         keyRel,
         ivRel,
@@ -370,30 +382,42 @@ async function l2psSection(
         return
     }
 
-    for (const d of decisions) {
-        const f = d.file
-        if (opts.dryRun) {
-            const outcome =
-                d.current === undefined ? "would-create" : d.differs && d.overwrite ? "would-replace" : "would-keep"
-            result.files.push({ rel: f.rel, outcome })
-            say(`  ${outcome.replace("-", " ")}: ${f.rel}${f.secret ? " (mode 600, contents never shown)" : ""}`)
-            continue
+    // Secrets first, config last: a half-finished run then leaves key files
+    // nobody points at instead of a config that names keys which do not exist.
+    const ordered = [...decisions].sort((a, b) => Number(!a.file.secret) - Number(!b.file.secret))
+    let current = ""
+    try {
+        for (const d of ordered) {
+            const f = d.file
+            current = f.rel
+            if (opts.dryRun) {
+                const outcome =
+                    d.current === undefined ? "would-create" : d.differs && d.overwrite ? "would-replace" : "would-keep"
+                result.files.push({ rel: f.rel, outcome })
+                say(`  ${outcome.replace("-", " ")}: ${f.rel}${f.secret ? " (mode 600, contents never shown)" : ""}`)
+                continue
+            }
+            if (d.sameData) {
+                // Same data, possibly a different layout: keep the operator's text
+                // and only tighten the file mode if it was too open.
+                const outcome = writeFileGuarded(d.abs, d.current as string, { mode: f.mode, overwrite: false })
+                result.files.push({ rel: f.rel, outcome: outcome.status })
+                say(`  unchanged ${f.rel}`)
+                continue
+            }
+            const outcome = writeFileGuarded(d.abs, f.content, { mode: f.mode, overwrite: d.overwrite }, deps.now)
+            result.files.push({
+                rel: f.rel,
+                outcome: outcome.status,
+                backup: outcome.status === "replaced" ? outcome.backup : undefined,
+            })
+            say(describe(f.rel, outcome, f.secret, d.differs && !d.overwrite))
         }
-        if (d.sameData) {
-            // Same data, possibly a different layout: keep the operator's text
-            // and only tighten the file mode if it was too open.
-            const outcome = writeFileGuarded(d.abs, d.current as string, { mode: f.mode, overwrite: false })
-            result.files.push({ rel: f.rel, outcome: outcome.status })
-            say(`  unchanged ${f.rel}`)
-            continue
-        }
-        const outcome = writeFileGuarded(d.abs, f.content, { mode: f.mode, overwrite: d.overwrite }, deps.now)
-        result.files.push({
-            rel: f.rel,
-            outcome: outcome.status,
-            backup: outcome.status === "replaced" ? outcome.backup : undefined,
-        })
-        say(describe(f.rel, outcome, f.secret, d.differs && !d.overwrite))
+    } catch (e) {
+        const msg = `Subnet ${uid}: could not write ${current} (${e instanceof Error ? e.message : String(e)}). Fix that and run the setup again.`
+        say(`  ${msg}`)
+        result.problems.push(msg)
+        return
     }
 
     if (opts.dryRun) {

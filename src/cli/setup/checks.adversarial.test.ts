@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import * as fs from "node:fs"
 import { collectChecks, isProblem } from "./checks"
 import { createContext } from "./context"
 import { makeRoot, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
@@ -69,5 +70,22 @@ describe("the port message matches what the node really does", () => {
             expect(port?.status).toBe("invalid")
             expect(port?.detail).toContain("3006")
         }
+    })
+})
+
+describe("key files that would not survive", () => {
+    it("warns about a key inside node_modules, which a reinstall wipes", () => {
+        writeSubnet(root, "nm", {
+            config: { uid: "nm", enabled: true, config: { known_rpcs: [] }, keys: { private_key_path: "node_modules/x/k.txt", iv_path: "node_modules/x/iv.txt" } },
+            key: null,
+            iv: null,
+        })
+        const dir = `${root}/node_modules/x`
+        fs.mkdirSync(dir, { recursive: true })
+        fs.writeFileSync(`${dir}/k.txt`, "ab".repeat(32))
+        fs.writeFileSync(`${dir}/iv.txt`, "cd".repeat(16))
+        const subnet = items({}).find(i => i.item === "Subnet nm")
+        expect(subnet?.status).toBe("warn")
+        expect(subnet?.detail).toContain("reinstalled")
     })
 })
