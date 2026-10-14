@@ -165,11 +165,30 @@ function orThrow<T>(r: Result<T>, label: string): T {
     return r.value
 }
 
+// A key is a few dozen hex characters. Reading a bounded prefix keeps a path
+// like /dev/zero or a huge file from hanging or exhausting memory, and still
+// lets /dev/stdin and a named pipe work.
+const SECRET_FILE_MAX_BYTES = 64 * 1024
+
 function readSecretFile(file: string, label: string): string {
+    let fd: number | undefined
     try {
-        return fs.readFileSync(file, "utf8")
+        fd = fs.openSync(file, "r")
+        const buf = Buffer.alloc(SECRET_FILE_MAX_BYTES + 1)
+        let filled = 0
+        while (filled < buf.length) {
+            const n = fs.readSync(fd, buf, filled, buf.length - filled, null)
+            if (n === 0) break
+            filled += n
+        }
+        if (filled > SECRET_FILE_MAX_BYTES) {
+            throw new Error(`more than ${SECRET_FILE_MAX_BYTES} bytes, which no key is`)
+        }
+        return buf.subarray(0, filled).toString("utf8")
     } catch (e) {
         throw new SetupError(`Cannot read ${label} file ${file}: ${e instanceof Error ? e.message : e}`)
+    } finally {
+        if (fd !== undefined) fs.closeSync(fd)
     }
 }
 

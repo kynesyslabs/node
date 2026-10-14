@@ -78,6 +78,9 @@ const SPECS: Spec[] = [
     { flag: "ptau-url", key: "ptauUrl", kind: "string", env: "DEMOS_SETUP_PTAU_URL" },
 ]
 
+/** Every DEMOS_SETUP_* variable the parser reads. */
+export const SETUP_ENV_NAMES = SPECS.flatMap(s => (s.env ? [s.env] : []))
+
 export const HELP = `Usage: bun run setup [options]
 
 Sets up L2PS (private subnets) and ZK (proofs) for this node. Without flags it
