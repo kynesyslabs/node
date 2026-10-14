@@ -1,6 +1,7 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { L2PS_ZK_DIR, ZK_IDENTITY_VKEY } from "./context"
+import { sameJson } from "./l2ps"
 
 export const BATCH_SIZES = [5, 10] as const
 export type BatchSize = (typeof BATCH_SIZES)[number]
@@ -33,12 +34,21 @@ export interface IdentityKeyState {
 const batchDir = (root: string, size: BatchSize) =>
     path.join(root, L2PS_ZK_DIR, "keys", `batch_${size}`)
 
+/** A file that exists and holds something: an empty one is a copy that was cut short. */
+const nonEmptyFile = (file: string): boolean => {
+    try {
+        return fs.statSync(file).size > 0
+    } catch {
+        return false
+    }
+}
+
 /** Same files the prover needs at proof time: zkey + wasm, and the vkey to verify. */
 export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
     return BATCH_SIZES.map(size => {
         const dir = batchDir(root, size)
-        const zkey = fs.existsSync(path.join(dir, `l2ps_batch_${size}.zkey`))
-        const wasm = fs.existsSync(
+        const zkey = nonEmptyFile(path.join(dir, `l2ps_batch_${size}.zkey`))
+        const wasm = nonEmptyFile(
             path.join(dir, `l2ps_batch_${size}_js`, `l2ps_batch_${size}.wasm`),
         )
         const vkey = fs.existsSync(path.join(dir, "verification_key.json"))
@@ -131,6 +141,11 @@ export async function runL2psZkSetup(
     ptauBaseUrls: readonly string[] = PTAU_BASE_URLS,
 ): Promise<ZkSetupResult> {
     const messages: string[] = []
+    const unknown = sizes.filter(size => PTAU_POWER[size] === undefined)
+    if (unknown.length > 0) {
+        messages.push(`No circuit is configured for a batch of ${unknown.join(", ")}; the setup knows ${BATCH_SIZES.join(" and ")}.`)
+        return { ok: false, messages }
+    }
     const zkDir = path.join(root, L2PS_ZK_DIR)
     const ptauDir = path.join(zkDir, "ptau")
     const circomlib = path.join(root, "node_modules", "circomlib", "circuits")
@@ -196,69 +211,76 @@ export async function runL2psZkSetup(
         const wasmDirName = `${name}_js`
         const committedVkey = path.join(out, "verification_key.json")
         const abandon = () => fs.rmSync(staging, { recursive: true, force: true })
-
-        const steps: Array<[string, string, string[]]> = [
-            [
-                `Compiling ${name}`,
-                circom2,
+        try {
+            const steps: Array<[string, string, string[]]> = [
                 [
-                    path.join(zkDir, "circuits", `${name}.circom`),
-                    "--r1cs",
-                    "--wasm",
-                    "--sym",
-                    "-o",
-                    staging,
-                    "-l",
-                    circomlib,
+                    `Compiling ${name}`,
+                    circom2,
+                    [
+                        path.join(zkDir, "circuits", `${name}.circom`),
+                        "--r1cs",
+                        "--wasm",
+                        "--sym",
+                        "-o",
+                        staging,
+                        "-l",
+                        circomlib,
+                    ],
                 ],
-            ],
-            [
-                `Generating the proving key for ${name}`,
-                snarkjs,
-                ["plonk", "setup", r1cs, ptau, zkeyNew],
-            ],
-            [
-                `Exporting the verification key for ${name}`,
-                snarkjs,
-                ["zkey", "export", "verificationkey", zkeyNew, generatedVkey],
-            ],
-        ]
-        for (const [label, cmd, args] of steps) {
-            say(`${label}...`)
-            const code = await runner.exec(cmd, args, root)
-            if (code !== 0) {
-                abandon()
-                messages.push(`${label} failed (exit code ${code})`)
+                [
+                    `Generating the proving key for ${name}`,
+                    snarkjs,
+                    ["plonk", "setup", r1cs, ptau, zkeyNew],
+                ],
+                [
+                    `Exporting the verification key for ${name}`,
+                    snarkjs,
+                    ["zkey", "export", "verificationkey", zkeyNew, generatedVkey],
+                ],
+            ]
+            for (const [label, cmd, args] of steps) {
+                say(`${label}...`)
+                const code = await runner.exec(cmd, args, root)
+                if (code !== 0) {
+                    messages.push(`${label} failed (exit code ${code})`)
+                    return { ok: false, messages }
+                }
+            }
+
+            if (!vkeyParses(root, size)) {
+                // The verification key is committed and shared by every peer, so a
+                // missing or corrupt copy is a broken checkout, not something to
+                // replace with a locally generated key that nobody else holds.
+                messages.push(
+                    `batch_${size}: the committed verification key is missing or unreadable; restore ${path.relative(root, committedVkey)} from the repository and run the setup again`,
+                )
                 return { ok: false, messages }
             }
-        }
-
-        if (!vkeyParses(root, size)) {
-            // The verification key is committed and shared by every peer, so a
-            // missing or corrupt copy is a broken checkout, not something to
-            // replace with a locally generated key that nobody else holds.
-            abandon()
-            messages.push(
-                `batch_${size}: the committed verification key is missing or unreadable; restore ${path.relative(root, committedVkey)} from the repository and run the setup again`,
+            // Compared as data: the same key printed with another key order or
+            // layout is still the same key.
+            const same = sameJson(
+                fs.readFileSync(committedVkey, "utf8"),
+                fs.readFileSync(generatedVkey, "utf8"),
             )
-            return { ok: false, messages }
-        }
-        const same =
-            JSON.stringify(JSON.parse(fs.readFileSync(committedVkey, "utf8"))) ===
-            JSON.stringify(JSON.parse(fs.readFileSync(generatedVkey, "utf8")))
-        if (!same) {
-            // Proofs from this key would be rejected by peers; whatever was
-            // there before stays untouched.
+            if (!same) {
+                // Proofs from this key would be rejected by peers; whatever was
+                // there before stays untouched.
+                messages.push(
+                    `batch_${size}: the verification key built here differs from the committed one, so proofs from it would be rejected by peers. The new proving key was discarded. Update the repository (git pull) and run the setup again.`,
+                )
+                return { ok: false, messages }
+            }
+            // The old proving key goes first: a process killed halfway then leaves
+            // a batch that reads as unfinished, never a new circuit beside an old
+            // key, which would look complete and prove nothing.
+            fs.rmSync(zkey, { force: true })
+            fs.rmSync(path.join(out, wasmDirName), { recursive: true, force: true })
+            fs.renameSync(path.join(staging, wasmDirName), path.join(out, wasmDirName))
+            fs.renameSync(zkeyNew, zkey)
+        } finally {
+            // Whatever ended the batch, a staging directory must not outlive it.
             abandon()
-            messages.push(
-                `batch_${size}: the verification key built here differs from the committed one, so proofs from it would be rejected by peers. The new proving key was discarded. Update the repository (git pull) and run the setup again.`,
-            )
-            return { ok: false, messages }
         }
-        fs.rmSync(path.join(out, wasmDirName), { recursive: true, force: true })
-        fs.renameSync(path.join(staging, wasmDirName), path.join(out, wasmDirName))
-        fs.renameSync(zkeyNew, zkey)
-        abandon()
         messages.push(`batch_${size}: ready`)
     }
     return { ok: true, messages }
