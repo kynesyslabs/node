@@ -84,8 +84,8 @@ describe("applyEnvChanges keeps everything it does not own", () => {
     })
 
     it("keeps a byte order mark and the first entry readable", () => {
-        const out = applyEnvChanges("﻿FIRST=1\nL2PS_ZK_ENABLED=false\n", { L2PS_ZK_ENABLED: "true" })
-        expect(out.startsWith("﻿FIRST=1\n")).toBe(true)
+        const out = applyEnvChanges("\uFEFFFIRST=1\nL2PS_ZK_ENABLED=false\n", { L2PS_ZK_ENABLED: "true" })
+        expect(out.startsWith("\uFEFFFIRST=1\n")).toBe(true)
         expect(dotenv.parse(out)).toMatchObject({ FIRST: "1", L2PS_ZK_ENABLED: "true" })
     })
 
@@ -113,6 +113,12 @@ describe("applyEnvChanges keeps everything it does not own", () => {
     it("keeps `export` so a shell that sources the file still exports the key", () => {
         const out = applyEnvChanges("export L2PS_MESSAGING_ENABLED=false\nB=2\n", { L2PS_MESSAGING_ENABLED: "true" })
         expect(out).toBe("export L2PS_MESSAGING_ENABLED=true\nB=2\n")
+    })
+
+    it("keeps the indentation of an edited line", () => {
+        expect(applyEnvChanges("  L2PS_ZK_ENABLED=false\n\tL2PS_MESSAGING_PORT=1 # c\n  export L2PS_HISTORY_REQUIRE_V2=false\n", { L2PS_ZK_ENABLED: "true", L2PS_MESSAGING_PORT: "3100", L2PS_HISTORY_REQUIRE_V2: "true" })).toBe(
+            "  L2PS_ZK_ENABLED=true\n\tL2PS_MESSAGING_PORT=3100 # c\n  export L2PS_HISTORY_REQUIRE_V2=true\n",
+        )
     })
 
     it("keeps the comment at the end of an edited line", () => {

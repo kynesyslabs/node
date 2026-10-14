@@ -63,7 +63,7 @@ const CASES: Array<[string, string, string]> = [
     ["upper-case hex", KEY.toUpperCase(), IV.toUpperCase()],
     ["leading and trailing whitespace", `  \t${KEY}  \n\n`, `\n${IV}\n`],
     ["hex wrapped over several lines", `${KEY.slice(0, 32)}\n${KEY.slice(32)}\n`, IV],
-    ["byte order mark in front", "﻿" + KEY, "﻿" + IV],
+    ["byte order mark in front", "\uFEFF" + KEY, "\uFEFF" + IV],
     ["0x after whitespace", `  0x${KEY}`, IV],
     ["odd-length key", KEY + "a", IV],
     ["odd-length IV", KEY, IV.slice(1)],

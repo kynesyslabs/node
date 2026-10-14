@@ -60,7 +60,7 @@ describe("key and IV files", () => {
 describe("an existing .env that is large or odd", () => {
     it("keeps a megabyte line, thousands of lines and non-ASCII text exactly", async () => {
         const lines = [
-            "# комментарий with ünïcode and 日本語",
+            "# \u03c3\u03c7\u03cc\u03bb\u03b9\u03bf with ünïcode and 日本語",
             `HUGE=${"x".repeat(1_000_000)}`,
             ...Array.from({ length: 5000 }, (_, i) => `KEY_${i}=value_${i} # note ${i}`),
             "\tTAB_INDENTED=1",

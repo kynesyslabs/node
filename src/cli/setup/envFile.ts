@@ -57,18 +57,20 @@ export function diffEnv(
 const SECTION_TITLE = "# --- L2PS / ZK (written by `bun run setup`) ---"
 
 /**
- * What an edited line keeps from the original: a leading `export`, which a
- * shell that sources the file needs, and a comment after the value.
+ * What an edited line keeps from the original: its indentation, a leading
+ * `export` (which a shell that sources the file needs), and a comment after
+ * the value.
  */
 function rewriteActiveLine(line: string, key: string, value: string): string {
     const m = new RegExp(`^(\\s*(?:export\\s+)?)${key}\\s*=(.*)$`).exec(line)
     if (!m) return `${key}=${value}`
-    const exported = /export\s+$/.test(m[1]) ? "export " : ""
+    // Indentation and `export` are kept exactly as written.
+    const prefix = m[1]
     const rest = m[2].trimStart()
     const quote = /^(["'`])(.*?)\1(.*)$/.exec(rest)
     const afterValue = quote ? quote[3] : (/(\s*#.*)$/.exec(rest)?.[1] ?? "")
     const tail = afterValue.trimStart().startsWith("#") ? afterValue : ""
-    return `${exported}${key}=${value}${tail}`
+    return `${prefix}${key}=${value}${tail}`
 }
 
 /**
