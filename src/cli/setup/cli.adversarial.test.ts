@@ -251,3 +251,22 @@ describe("an over-long subnet id", () => {
         expect(fs.existsSync(path.join(root, "data"))).toBe(false)
     })
 })
+
+describe("the RPC address used when none is given", () => {
+    const own = (env: Record<string, string>) => cli(["--yes", "--only", "l2ps", "--l2ps-uid", "s"], env)
+
+    it("comes from EXPOSED_URL or RPC_PORT and is checked like one typed in", async () => {
+        const ok = await own({ EXPOSED_URL: "http://203.0.113.9:53550/" })
+        expect(ok.code).toBe(0)
+        expect(JSON.parse(fs.readFileSync(path.join(root, "data/l2ps/s/config.json"), "utf8")).config.known_rpcs).toEqual(["http://203.0.113.9:53550"])
+    })
+
+    it("a garbage or credential-carrying value is refused, not written into a world-readable config", async () => {
+        for (const env of [{ EXPOSED_URL: "not a url" }, { EXPOSED_URL: "ws://x:1" }, { EXPOSED_URL: "http://u:p@h:1" }, { RPC_PORT: "abc" }]) {
+            const { code, out } = await own(env)
+            expect([JSON.stringify(env), code]).toEqual([JSON.stringify(env), 1])
+            expect(out).toContain("--l2ps-rpc")
+            expect(fs.existsSync(path.join(root, "data/l2ps/s/config.json"))).toBe(false)
+        }
+    })
+})

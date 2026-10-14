@@ -295,7 +295,10 @@ async function l2psSection(
                   ),
                   "RPC list",
               )
-            : fallback
+            : knownRpcs ?? orThrow(
+                  validateRpcList(fallback),
+                  "EXPOSED_URL or RPC_PORT does not give a usable RPC URL for this subnet (pass --l2ps-rpc)",
+              )
     }
 
     await collectL2psEnv(deps, wantedEnv)
