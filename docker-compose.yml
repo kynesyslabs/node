@@ -239,6 +239,12 @@ services:
       - "${RPC_PORT:-53550}:${RPC_PORT:-53550}"
       - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
       - "${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
+      # L2PS messaging WebSocket. The SDK client opens its own connection to
+      # this port (it does not go through RPC), so enabling messaging in the
+      # container is useless unless the port is published. Nothing listens
+      # while L2PS_MESSAGING_ENABLED is false. Same variable on both sides, as
+      # for RPC_PORT. In proxy mode Caddy serves it at /messaging/.
+      - "${L2PS_MESSAGING_PORT:-3006}:${L2PS_MESSAGING_PORT:-3006}"
       # wstcp TLSNotary proxy range, bound to 127.0.0.1 so ONLY the host's
       # reverse proxy can reach it (not the public internet). The node
       # allocates dynamic proxy ports here and nginx forwards

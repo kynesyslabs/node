@@ -40,6 +40,11 @@
 		reverse_proxy node-1:3005
 	}
 
+	# L2PS messaging (L2PS_MESSAGING_ENABLED=true); 502 while it is off.
+	handle_path /messaging/* {
+		reverse_proxy node-1:3006
+	}
+
 	# MCP — gated behind basic-auth (defaults reject all).
 	handle_path /mcp/* {
 		basic_auth {
