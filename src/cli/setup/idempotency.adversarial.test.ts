@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -155,6 +155,74 @@ describe("partial state", () => {
         expect(code).toBe(0)
         expect(read(path.join(root, ".env"))).toBe("# mine\nL2PS_MESSAGING_ENABLED=true\nL2PS_MESSAGING_PORT=3100\n")
         expect(fs.existsSync(sub("s1", "private_key.txt"))).toBe(true)
+    })
+})
+
+describe("the order files are written in", () => {
+    it("puts both key files down before config.json when a subnet is created", async () => {
+        const real = fs.renameSync
+        const landed: string[] = []
+        const spy = spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+            landed.push(path.basename(String(to)))
+            return real(from, to)
+        }) as typeof fs.renameSync)
+        try {
+            expect((await cli(["--yes", "--only", "l2ps", "--l2ps-uid", "ordered"])).code).toBe(0)
+        } finally {
+            spy.mockRestore()
+        }
+        const files = landed.filter(f => ["private_key.txt", "iv.txt", "config.json"].includes(f))
+        expect(files).toHaveLength(3)
+        expect(files[files.length - 1]).toBe("config.json")
+        expect(new Set(files.slice(0, 2))).toEqual(new Set(["private_key.txt", "iv.txt"]))
+    })
+
+    it("also when an existing subnet is repaired: the replaced key lands before the config that names it", async () => {
+        writeSubnet(root, "fix", { key: "zz-corrupt" })
+        const real = fs.renameSync
+        const landed: string[] = []
+        const spy = spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+            landed.push(path.basename(String(to)))
+            return real(from, to)
+        }) as typeof fs.renameSync)
+        try {
+            await cli(["--yes", "--only", "l2ps", "--l2ps-uid", "fix", "--l2ps-rpc", "http://other:1", "--force"])
+        } finally {
+            spy.mockRestore()
+        }
+        expect(landed.indexOf("private_key.txt")).toBeGreaterThanOrEqual(0)
+        expect(landed.indexOf("private_key.txt")).toBeLessThan(landed.indexOf("config.json"))
+    })
+})
+
+describe("the warning about a regenerated key or IV", () => {
+    it("is shown for each missing half and names the file", async () => {
+        writeSubnet(root, "no_iv", { iv: null })
+        writeSubnet(root, "no_key", { key: null })
+        const a = await cli(["--yes", "--only", "l2ps", "--l2ps-uid", "no_iv"])
+        expect(a.out).toMatch(/Warning: data\/l2ps\/no_iv\/iv\.txt was missing or unusable, so a new random IV/)
+        const b = await cli(["--yes", "--only", "l2ps", "--l2ps-uid", "no_key"])
+        expect(b.out).toMatch(/Warning: data\/l2ps\/no_key\/private_key\.txt was missing or unusable, so a new random key/)
+        expect(b.out).toContain("original key from its owner")
+    })
+
+    it("is also part of a dry run, which writes nothing", async () => {
+        writeSubnet(root, "no_iv", { iv: null })
+        const before = snapshot()
+        const { out } = await cli(["--yes", "--dry-run", "--only", "l2ps", "--l2ps-uid", "no_iv"])
+        expect(out).toContain("new random IV")
+        expect(snapshot()).toEqual(before)
+    })
+
+    it("is not shown for a brand new subnet, for a healthy one, or when the missing half is imported", async () => {
+        const fresh = await cli(["--yes", "--only", "l2ps", "--l2ps-uid", "fresh"])
+        expect(fresh.out).not.toContain("Warning")
+        const again = await cli(["--yes", "--only", "l2ps", "--l2ps-uid", "fresh"])
+        expect(again.out).not.toContain("new random")
+        writeSubnet(root, "imp", { iv: null })
+        const imported = await cli(["--yes", "--only", "l2ps", "--l2ps-uid", "imp", "--l2ps-role", "join"], { DEMOS_SETUP_L2PS_KEY: HEX_KEY, DEMOS_SETUP_L2PS_IV: HEX_IV })
+        expect(imported.out).not.toContain("new random")
+        expect(read(sub("imp", "iv.txt")).trim()).toBe(HEX_IV)
     })
 })
 
