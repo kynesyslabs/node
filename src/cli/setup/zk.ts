@@ -173,7 +173,7 @@ export function swapIntoPlace(
             if (!hadOld.has(p.final)) undo.push(() => fs.rmSync(p.final, { recursive: true, force: true }))
         }
     } catch (e) {
-        for (const step of undo.reverse()) {
+        for (const step of [...undo].reverse()) {
             try {
                 step()
             } catch {

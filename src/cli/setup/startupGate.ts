@@ -85,17 +85,9 @@ async function defaultLogError(message: string): Promise<void> {
     }
 }
 
-/**
- * Runs before the node boots anything. A feature problem (L2PS, messaging,
- * ZK batch proofs) is announced loudly and the node keeps booting, because a
- * validator must not go down over an optional feature; DEMOS_SETUP_STRICT=true
- * turns that into a failed start for CI. A missing identity verification key
- * always stops the node, whatever the skip switch says. It never waits for input without a terminal, and it
- * never throws on an unreadable file.
- */
-export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Promise<void> {
+function buildDeps(overrides: Partial<GateDeps>): GateDeps {
     const env = overrides.env ?? process.env
-    const deps: GateDeps = {
+    return {
         cwd: process.cwd(),
         env,
         interactive:
@@ -110,68 +102,61 @@ export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Pro
         exit: code => process.exit(code),
         ...overrides,
     }
-    const skip = parseBool(deps.env[SKIP_ENV]) === true
-    // A mistyped safety switch must not read as "off" without a word: an
-    // operator who wrote DEMOS_SETUP_STRICT=ture believes strict mode is on.
+}
+
+/**
+ * A mistyped safety switch must not read as "off" without a word: an operator
+ * who wrote DEMOS_SETUP_STRICT=ture believes strict mode is on.
+ */
+function warnAboutMistypedSwitches(deps: GateDeps): void {
     for (const name of [STRICT_ENV, SKIP_ENV]) {
         const raw = deps.env[name]
         if (raw !== undefined && raw.trim() !== "" && parseBool(raw) === undefined) {
             deps.say(`${name}="${raw}" is not true or false; treating it as false.`)
         }
     }
+}
 
-    // Logging is a courtesy: a logger that fails must not decide whether the
-    // node starts, so the banner on stderr stays the record.
-    const record = async (message: string): Promise<void> => {
+/**
+ * Logging is a courtesy: a logger that fails must not decide whether the node
+ * starts, so the banner on stderr stays the record.
+ */
+function safeRecorder(deps: GateDeps): (message: string) => Promise<void> {
+    return async message => {
         try {
             await deps.logError(message)
         } catch {
             /* the banner on stderr already carries it */
         }
     }
+}
 
-    const inspect = (): CheckItem[] => {
-        try {
-            return collectChecks(createContext(deps.cwd, ".env", deps.env, deps.inDocker)).items
-        } catch (e) {
-            return [
-                {
-                    area: "Setup",
-                    item: "Inspection",
-                    status: "invalid",
-                    detail: `could not be checked (${e instanceof Error ? e.message : String(e)})`,
-                    blocking: true,
-                },
-            ]
-        }
+function inspectSetup(deps: GateDeps): CheckItem[] {
+    try {
+        return collectChecks(createContext(deps.cwd, ".env", deps.env, deps.inDocker)).items
+    } catch (e) {
+        return [
+            {
+                area: "Setup",
+                item: "Inspection",
+                status: "invalid",
+                detail: `could not be checked (${e instanceof Error ? e.message : String(e)})`,
+                blocking: true,
+            },
+        ]
     }
-    const items = inspect()
+}
 
-    const fatal = items.filter(isFatal)
-    if (fatal.length > 0) {
-        const text = describeFatal(fatal)
-        deps.say(text)
-        await record(text)
-        deps.exit(1)
-    }
+const featureProblems = (items: CheckItem[]): CheckItem[] => items.filter(i => isProblem(i) && !i.fatal)
 
-    // The skip switch silences the optional-feature report only.
-    if (skip) return
-    const problems = items.filter(i => isProblem(i) && !i.fatal)
-    if (problems.length === 0) return
+interface OfferOutcome {
+    restartNeeded: boolean
+    aborted: boolean
+}
 
-    const banner = describeProblems(problems, deps.inDocker)
-    deps.say(banner)
-    await record(banner)
-    if (deps.strict) {
-        deps.say(`${STRICT_ENV} is on: not starting.`)
-        deps.exit(1)
-    }
-    if (!deps.interactive) return
-
+/** Asks whether to run the setup now and, on yes, runs it. Never throws: every way it can end is an outcome. */
+async function offerSetup(deps: GateDeps): Promise<OfferOutcome> {
     const prompter = deps.prompter ?? createReadlinePrompter()
-    let restartNeeded = false
-    let aborted = false
     try {
         deps.say("")
         const seconds = Math.round(deps.offerTimeoutMs / 1000)
@@ -184,32 +169,69 @@ export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Pro
         )
         if (!yes) {
             deps.say("Continuing without the setup.")
-        } else {
-            const ctx = createContext(deps.cwd, ".env", deps.env, deps.inDocker)
-            const result = await runWizard({
-                ctx,
-                opts: parseSetupArgs([], {}),
-                prompter,
-                say: line => console.log(line),
-                runner: createDefaultRunner(),
-            })
-            restartNeeded = result.restartNeeded
-            const left = inspect().filter(i => isProblem(i) && !i.fatal)
-            if (left.length > 0 && !restartNeeded) {
-                deps.say("Still incomplete; booting anyway:")
-                for (const p of left) deps.say(`  - ${p.area} / ${p.item}: ${p.detail}`)
-            }
+            return { restartNeeded: false, aborted: false }
         }
+        const result = await runWizard({
+            ctx: createContext(deps.cwd, ".env", deps.env, deps.inDocker),
+            opts: parseSetupArgs([], {}),
+            prompter,
+            say: line => console.log(line),
+            runner: createDefaultRunner(),
+        })
+        const left = featureProblems(inspectSetup(deps))
+        if (left.length > 0 && !result.restartNeeded) {
+            deps.say("Still incomplete; booting anyway:")
+            for (const p of left) deps.say(`  - ${p.area} / ${p.item}: ${p.detail}`)
+        }
+        return { restartNeeded: result.restartNeeded, aborted: false }
     } catch (e) {
+        if (e instanceof SetupAborted) return { restartNeeded: false, aborted: true }
         if (e instanceof SetupTimedOut) {
             deps.say("\nNo answer in time; continuing without the setup.")
-        } else if (e instanceof SetupAborted) {
-            aborted = true
         } else {
             // A failed setup is not a reason to stop a node.
             deps.say(`Setup failed (${e instanceof Error ? e.message : String(e)}); booting anyway.`)
         }
+        return { restartNeeded: false, aborted: false }
     }
+}
+
+/**
+ * Runs before the node boots anything. A feature problem (L2PS, messaging,
+ * ZK batch proofs) is announced loudly and the node keeps booting, because a
+ * validator must not go down over an optional feature; DEMOS_SETUP_STRICT=true
+ * turns that into a failed start for CI. A missing identity verification key
+ * always stops the node, whatever the skip switch says. It never waits for
+ * input without a terminal, and it never throws on an unreadable file.
+ */
+export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Promise<void> {
+    const deps = buildDeps(overrides)
+    warnAboutMistypedSwitches(deps)
+    const record = safeRecorder(deps)
+    const items = inspectSetup(deps)
+
+    const fatal = items.filter(isFatal)
+    if (fatal.length > 0) {
+        const text = describeFatal(fatal)
+        deps.say(text)
+        await record(text)
+        deps.exit(1)
+    }
+
+    // The skip switch silences the optional-feature report only.
+    const problems = featureProblems(items)
+    if (parseBool(deps.env[SKIP_ENV]) === true || problems.length === 0) return
+
+    const banner = describeProblems(problems, deps.inDocker)
+    deps.say(banner)
+    await record(banner)
+    if (deps.strict) {
+        deps.say(`${STRICT_ENV} is on: not starting.`)
+        deps.exit(1)
+    }
+    if (!deps.interactive) return
+
+    const { restartNeeded, aborted } = await offerSetup(deps)
     if (aborted) {
         deps.say("\nAborted by the operator; the node was not started.")
         deps.exit(130)

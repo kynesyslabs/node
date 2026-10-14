@@ -31,7 +31,8 @@ function realpathLoose(p: string): string {
     let current = path.resolve(p)
     for (;;) {
         try {
-            return path.join(fs.realpathSync(current), ...rest.reverse())
+            const resolved = fs.realpathSync(current)
+            return path.join(resolved, ...[...rest].reverse())
         } catch {
             const parent = path.dirname(current)
             if (parent === current) return path.resolve(p)
@@ -63,55 +64,40 @@ export function resolveSymlink(file: string): string {
     throw new Error(`${file}: too many levels of symbolic links`)
 }
 
-/**
- * The only place the setup writes files. An existing file is never replaced
- * unless `overwrite` is set, and a replaced file is first copied to a
- * `.bak-<time>` sibling so a mistaken key rotation can be undone.
- */
-export function writeFileGuarded(
+/** The file to write: the one a symlink leads to when asked, refused if that is outside the confinement. */
+function destination(file: string, opts: WriteOptions): string {
+    if (!opts.followSymlink) return file
+    const target = resolveSymlink(file)
+    if (opts.confineTo !== undefined && !isInsideDir(target, opts.confineTo)) {
+        throw new Error(`${target} is outside ${opts.confineTo}`)
+    }
+    return target
+}
+
+/** Copies the file to a fresh `.bak-<time>` sibling and returns its path. */
+function backUp(file: string, now: () => number): string {
+    // Never overwrite an earlier backup: it may be the only copy of a key.
+    const stamp = now()
+    for (let n = 0; ; n++) {
+        const suffix = n === 0 ? "" : `-${n}`
+        const backup = `${file}.bak-${stamp}${suffix}`
+        try {
+            fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL)
+            fs.chmodSync(backup, 0o600)
+            return backup
+        } catch (e) {
+            if ((e as NodeJS.ErrnoException).code !== "EEXIST" || n >= 100) throw e
+        }
+    }
+}
+
+/** Writes through a temp file in the same directory and renames it into place. */
+function replaceAtomically(
     file: string,
     content: string,
-    opts: WriteOptions,
-    now: () => number = Date.now,
-    rename: (from: string, to: string) => void = fs.renameSync,
-): WriteOutcome {
-    if (opts.followSymlink) {
-        file = resolveSymlink(file)
-        if (opts.confineTo !== undefined && !isInsideDir(file, opts.confineTo)) {
-            throw new Error(`${file} is outside ${opts.confineTo}`)
-        }
-    }
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    const exists = fs.existsSync(file)
-    // Modes only ever tighten: an operator's 600 config stays 600, a 644 key
-    // is brought down to 600, nothing is made more readable.
-    let mode = opts.mode
-    if (exists) {
-        const current = fs.statSync(file).mode & 0o777
-        mode = current & opts.mode
-        if (fs.readFileSync(file, "utf8") === content) {
-            if (mode !== current) fs.chmodSync(file, mode)
-            return { status: "unchanged" }
-        }
-        if (!opts.overwrite) return { status: "kept" }
-    }
-
-    let backup = ""
-    if (exists) {
-        // Never overwrite an earlier backup: it may be the only copy of a key.
-        const stamp = now()
-        for (let n = 0; ; n++) {
-            backup = `${file}.bak-${stamp}${n === 0 ? "" : `-${n}`}`
-            try {
-                fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL)
-                break
-            } catch (e) {
-                if ((e as NodeJS.ErrnoException).code !== "EEXIST" || n >= 100) throw e
-            }
-        }
-        fs.chmodSync(backup, 0o600)
-    }
-
+    mode: number,
+    rename: (from: string, to: string) => void,
+): void {
     // A pid alone repeats across container restarts, so a temp file left by a
     // killed run would block every later write.
     const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString("hex")}`
@@ -123,7 +109,38 @@ export function writeFileGuarded(
         fs.rmSync(tmp, { force: true })
         throw e
     }
-    return exists ? { status: "replaced", backup } : { status: "created" }
+}
+
+/**
+ * The only place the setup writes files. An existing file is never replaced
+ * unless `overwrite` is set, and a replaced file is first copied to a
+ * `.bak-<time>` sibling so a mistaken key rotation can be undone.
+ */
+export function writeFileGuarded(
+    requested: string,
+    content: string,
+    opts: WriteOptions,
+    now: () => number = Date.now,
+    rename: (from: string, to: string) => void = fs.renameSync,
+): WriteOutcome {
+    const file = destination(requested, opts)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    if (!fs.existsSync(file)) {
+        replaceAtomically(file, content, opts.mode, rename)
+        return { status: "created" }
+    }
+    // Modes only ever tighten: an operator's 600 config stays 600, a 644 key
+    // is brought down to 600, nothing is made more readable.
+    const current = fs.statSync(file).mode & 0o777
+    const mode = current & opts.mode
+    if (fs.readFileSync(file, "utf8") === content) {
+        if (mode !== current) fs.chmodSync(file, mode)
+        return { status: "unchanged" }
+    }
+    if (!opts.overwrite) return { status: "kept" }
+    const backup = backUp(file, now)
+    replaceAtomically(file, content, mode, rename)
+    return { status: "replaced", backup }
 }
 
 export function readTextIfExists(file: string): string | undefined {
