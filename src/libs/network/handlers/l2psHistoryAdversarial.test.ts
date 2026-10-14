@@ -417,3 +417,18 @@ describe("unversioned request, page values the node applies", () => {
         expect(getAccountTransactions.mock.calls[0][3]).toBe(1)
     })
 })
+
+describe("what a failed read tells the caller", () => {
+    const ts = String(NOW)
+
+    it("does not echo a table error", async () => {
+        getAccountTransactions.mockRejectedValue(
+            new Error('password authentication failed for user "node" at postgres://node:s3cret@db:5432/demos'),
+        )
+        const response = await call(signedV2(ts))
+
+        expect(response.result).toBe(500)
+        expect(JSON.stringify(response)).not.toContain("s3cret")
+        expect(JSON.stringify(response)).not.toContain("postgres://")
+    })
+})

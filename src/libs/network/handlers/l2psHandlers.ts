@@ -13,6 +13,13 @@ const historyAuthHint = (data: any) => ({
     example: `getL2PSHistory:${data.l2psUid}:${data.address}:${Date.now()}`,
 })
 
+/** A number or numeric string as a whole number in [0, MAX_SAFE_INTEGER]; anything else is 0. */
+function nonNegativeWhole(raw: unknown): number {
+    const value = readPageValue(raw)
+    if (value === undefined) return 0
+    return Math.min(Math.max(0, Math.floor(value)), Number.MAX_SAFE_INTEGER)
+}
+
 export const l2psHandlers: Record<string, NodeCallHandler> = {
     getL2PSParticipationById: async (data, response) => {
         log.debug("[L2PS] Received L2PS participation query")
@@ -61,17 +68,18 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             }
         } catch (error) {
             log.error("[L2PS] Failed to get mempool info:", error)
-            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS mempool info"
-            response.extra = errorMsg || "Internal error"
+            // The cause is in the log; the caller is not told what the
+            // database or the filesystem said.
+            response.extra = "Internal error"
         }
         return response
     },
 
     getL2PSTransactions: async (data, response) => {
         log.debug("[L2PS] Received L2PS transactions sync request")
-        if (!data.l2psUid) {
+        if (!data.l2psUid || typeof data.l2psUid !== "string") {
             response.result = 400
             response.response = "No L2PS UID specified"
             return response
@@ -82,9 +90,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             // `since_timestamp` is still accepted from peers that predate the
             // cursor, but it is their clock, so it can only be honoured as a
             // starting point, never as a running high-water mark.
-            const afterId = Math.max(0, Math.floor(Number(data.cursor)) || 0)
-            const sinceMs = Math.max(0, Number(data.since_timestamp) || 0)
-            const limit = Math.min(Math.max(1, data.limit || 500), 1000)
+            // This is open to any caller, so a value the table cannot take
+            // (NaN, an object, a number past the integer range) must reach it
+            // as a number it can, not as an error that comes back to the caller.
+            const afterId = nonNegativeWhole(data.cursor)
+            const sinceMs = nonNegativeWhole(data.since_timestamp)
+            const limit = Math.min(Math.max(1, Math.floor(readPageValue(data.limit) || 500)), 1000)
 
             // Served from the durable history table, not the aggregation
             // queue: the queue is swept minutes after confirmation, so a peer
@@ -143,10 +154,11 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             }
         } catch (error) {
             log.error("[L2PS] Failed to get transactions:", error)
-            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS transactions"
-            response.extra = errorMsg || "Internal error"
+            // The cause is in the log; the caller is not told what the
+            // database or the filesystem said.
+            response.extra = "Internal error"
         }
         return response
     },
@@ -364,10 +376,11 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             }
         } catch (error) {
             log.error("[L2PS] Failed to get account transactions:", error)
-            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS account transactions"
-            response.extra = errorMsg || "Internal error"
+            // The cause is in the log; the caller is not told what the
+            // database or the filesystem said.
+            response.extra = "Internal error"
         }
         return response
     },
