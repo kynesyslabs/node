@@ -23,19 +23,32 @@ describe("RetentionSweepGate under a hostile clock and many callers", () => {
         expect(results.filter(Boolean)).toHaveLength(1)
     })
 
-    it("sweeps again within an interval of a clock that was stepped back", () => {
-        // An NTP step or a manual correction must not silence retention for as
-        // long as the step was large: the promise is to delete on schedule.
+    it("a clock stepped back far is not due at once, and sweeps an interval after the new reading", () => {
+        // Silence for the size of the step would break the promise to delete
+        // on schedule; a grant on the step would be an extra sweep.
         let t = 1_700_000_000_000
         const gate = new RetentionSweepGate(HOUR, () => t)
         expect(gate.due()).toBe(true)
 
         t -= 10 * 24 * HOUR
-        expect(gate.due()).toBe(true)
+        expect(gate.due()).toBe(false)
         t += 10_000
         expect(gate.due()).toBe(false)
         t += HOUR
         expect(gate.due()).toBe(true)
+    })
+
+    it("a clock that wobbles back and forth does not earn extra sweeps", () => {
+        let t = 1_700_000_000_000
+        const gate = new RetentionSweepGate(HOUR, () => t)
+        expect(gate.due()).toBe(true)
+
+        let grants = 0
+        for (let i = 0; i < 100; i++) {
+            t += 1000 * (i % 2 === 0 ? -5 : 7)
+            if (gate.due()) grants++
+        }
+        expect(grants).toBe(0)
     })
 
     it("a clock that stops is never due twice", () => {

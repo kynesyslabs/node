@@ -20,9 +20,16 @@ export class RetentionSweepGate {
         // A reading that is not a time is no evidence an interval has passed,
         // and recording it would make every later comparison false.
         if (!Number.isFinite(t)) return false
-        // A clock stepped back past the last grant would otherwise hold the
-        // gate shut for as long as the step; the sweep is due on schedule.
-        if (this.last !== null && t >= this.last && t - this.last < this.intervalMs) return false
+        // A reading before the last grant means the clock was stepped back.
+        // Granting on it would give one extra sweep for every wobble; staying
+        // shut until the old baseline is reached would silence retention for
+        // the size of the step. So the baseline moves to the new reading and
+        // the next sweep is an interval after it.
+        if (this.last !== null && t < this.last) {
+            this.last = t
+            return false
+        }
+        if (this.last !== null && t - this.last < this.intervalMs) return false
         this.last = t
         return true
     }
