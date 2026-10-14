@@ -30,12 +30,15 @@ export function createReadlinePrompter(
         async readLine(question, opts) {
             // A secret is read through a muted stream so it is never echoed.
             const silent = new Writable({ write: (_c, _e, cb) => cb() })
-            if (opts?.secret) output.write(question)
             const rl = readline.createInterface({
                 input,
                 output: opts?.secret ? silent : output,
                 terminal: Boolean((input as NodeJS.ReadStream).isTTY),
             })
+            // Shown only now: the terminal stops echoing when the interface is
+            // created, so an answer pasted the moment the prompt appears (or
+            // typed ahead) cannot appear on screen.
+            if (opts?.secret) output.write(question)
             // Ctrl-C and end of input both end the question; the caller decides
             // what an abort means.
             const closed = new Promise<never>((_, reject) => {
