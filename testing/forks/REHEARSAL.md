@@ -55,41 +55,95 @@ Cause, from the code: a node computes its own genesis data hash from
 `data/genesis.json`, but a peer answers `getGenesisDataHash` and `/genesis` from
 the genesis block stored in its database when the chain was created, which is
 never refreshed. The fork entries and `properties.id` were part of that hash,
-so an edited file never matched anybody's stored block, and the mismatch
-handler overwrites the file from the peer. The running process keeps what it
+so an edited file never matched anybody's stored block, and the original
+mismatch handler overwrote the file from the peer. The running process keeps what it
 read at boot, so the first boot after the edit works and the next one
 silently does not. `forking/RUNBOOK_FORK_ACTIVATION.md` used to claim the
 opposite ("Only the `forks` block additions are hash-invariant"); it is
 corrected.
 
-### The fix (commit `7b0abf5d`)
+### The fix
 
-`forks` and `properties.id` are excluded from the genesis data hash. On a
-mismatch the node fetches the peer's data and replaces its file only when the
-hash of that DATA differs from its own, so an edited file survives even
-against a peer on a build that still hashes the schedule. Agreement on the
-schedule is checked separately: at bootstrap each peer's `getNetworkInfo`
-(which now also reports `web2ProofBinding`) is compared with the local fork
-configuration and chain id, and a difference is logged as
-`FORK SCHEDULE MISMATCH` without refusing to boot.
+The hash that peers advertise and the data `/genesis` serves are left exactly
+as they were: the full hash of the genesis block stored at chain creation, with
+the original normalisation. A node on a build without this change therefore
+keeps comparing the same hash against the same anchors, and the two builds can
+run side by side. Only what the REQUESTING node does with a mismatch changed
+(`genesisMismatch.ts`, wired in `peerBootstrap.ts`):
 
-Why this and not refreshing the stored genesis block from the file: the hash is
-a peering check and is not part of any block, so nothing consensus-relevant
-changes. Rewriting block 0's stored content on every node would change what
-`/genesis` serves to joining nodes.
+1. Its own two hashes are computed from the file: the full one, and a core one
+   that leaves out `forks` and `properties.id`.
+2. A peer's advertised hash equal to the full one: match, nothing to do.
+3. Otherwise `/genesis` is downloaded and must hash, in full, to what the peer
+   advertised. If it does not, the node throws: the peer's two answers disagree.
+4. If the core hash of the served data equals the node's own core hash, the
+   difference is only the schedule or the chain id: the file is kept and a
+   warning says so.
+5. Otherwise the file is replaced with the served data, with the local `forks`
+   and `properties.id` carried over, and the replacement is logged naming what
+   was carried over.
 
-**Trade-off to settle.** The pairing handshake no longer enforces the schedule.
-A node that missed the genesis edit used to fail to pair (and then, with the
-bug above, silently lose the schedule anyway); now it pairs and splits at the
-height, with only the log line as a warning. A hard stop at bootstrap would
-make a rolling genesis edit impossible, because peers legitimately disagree
-while it rolls out, so it was not added. Whether a mismatch that persists past
-some number of blocks before the height should stop the node is a decision for
-the team. The warning does show up transiently during a rolling restart, as it
-should (see the recorded run).
+`forks` and `properties.id` are the two things an operator adds to the file of a
+running chain, and neither is covered by any block after block 0, which is why
+they are the only exclusions. The unit tests (`testing/genesis/genesisMismatch.test.ts`)
+run the real old and the real new hash functions against both the production
+and the devnet genesis for the four pairings of builds: new against old, old
+against new, new against new with the same schedule, and new against new with
+different schedules.
 
-**The fix has to be on every node before the genesis edit.** A node without it
+**Why not refresh the stored genesis block from the file:** rewriting block 0's
+stored content on every node changes what `/genesis` serves to joining nodes.
+
+**Schedule agreement is a separate check.** `getNetworkInfo` reports every
+registered fork (seven at present) with its activation height, the chain id, and
+`forkScheduleDigest`: the sha256 of the whole `forks` object (activation heights
+and payloads, descriptions left out) and the chain id, with sorted keys. At
+bootstrap each peer's digest is compared with the local one. A difference logs
+one `FORK SCHEDULE MISMATCH` line carrying both digests, followed by the
+per-fork detail for the forks both sides report. A peer that does not publish a
+digest (an older build) is skipped with a debug line, not a warning. The extra
+keys are additive: the SDK reads only the fork entries it knows.
+
+**A peer that is still booting is not a mismatch.** The RPC server starts before
+the fork configuration is read from genesis, so a booting peer used to answer
+`getNetworkInfo` with the code's defaults (every fork unscheduled). It now
+answers 503 `STATE_NOT_READY` until the fork configuration and the chain id are
+loaded; bootstrap retries a few times and then compares later instead of
+warning.
+
+**The comparison keeps running.** After block insertion the node repeats it
+against its peers every 100 blocks, every 10 blocks once the tip is within 50
+blocks of the nearest scheduled height, and at error level inside that window.
+It only reports.
+
+**Decision for the owner: should a persistent mismatch stop the node?** No hard
+stop was added. The two risks pull in opposite directions:
+
+- *Without a stop*, a node that missed the genesis edit pairs and splits at the
+  height, with log lines as the only warning. A minority node splits silently.
+- *With a stop at bootstrap or in the periodic check*, a rolling genesis edit
+  becomes impossible or risky, because peers legitimately disagree while the
+  edit rolls out, and a stop that fires on a busy network can remove validators
+  and cost liveness at the worst moment.
+
+A stop limited to the last blocks before a scheduled height, or to a digest that
+has disagreed with a majority of peers for a number of consecutive checks, would
+sit between the two; that is for the owner to choose, and nothing here decides it.
+
+**The build has to be on every node before the genesis edit.** A node without it
 still overwrites an edited file and still drops the schedule.
+
+### A new node on a chain whose file was edited
+
+Block 0 embeds the raw genesis JSON (`chainGenesis.ts`, `extra.genesisData`) and
+its hash feeds the common validator seed. A node with an EMPTY database that
+creates its chain from the edited file therefore gets a block 0 different from
+the network's, and fast sync refuses the peers (`Sync.ts`,
+`verifyLastBlockIntegrity`). The procedure for such a node (also a node whose
+database was wiped): boot it on the UNEDITED genesis first, let block 0 be
+stored, and only then add the `forks` entries and `properties.id` and restart.
+The upgrade-path mode does not cover this, since every node there has a database
+from before the edit.
 
 ## Running it
 
@@ -154,8 +208,11 @@ Every line is a check; the scenario is `rehearsal.ts`.
   written into every node's genesis file, and all four nodes are restarted,
   twice. After each restart: peer bootstrap completes, every node logs both
   forks loaded at the height, every genesis file still carries the id and both
-  heights after bootstrap, no node reports a genesis data hash mismatch, and
-  `getNetworkInfo` reports the height and the chain id. Both restarts finish
+  heights after bootstrap, every node logs that the peers' genesis differs from
+  its own only in the schedule and chain id and keeps its file, none replaces
+  its file, every node still advertises the hash of the genesis it was created
+  with (the old-style hash, which a node without the change compares against),
+  and `getNetworkInfo` reports the height and the chain id. Both restarts finish
   before the height, and blocks keep carrying four signatures.
 
 **Both modes**
@@ -163,7 +220,8 @@ Every line is a check; the scenario is `rehearsal.ts`.
 1. *Configuration.* All 4 nodes report `signatureDomain` and `web2ProofBinding`
    at the height and the chain id, and log both forks as loaded. The node's own
    loader, fed the same genesis, reports both forks inactive at H-1 and active
-   at H. `tlsnProofEnforcement` stays unscheduled when genesis does not name it.
+   at H. All four nodes report all seven forks and one and the same schedule
+   digest. `tlsnProofEnforcement` stays unscheduled when genesis does not name it.
 2. *Before the height.* A legacy-signed native transfer is accepted and lands
    in one block on every node, below H. The same transaction signed with the
    domain preimage is refused at `confirm`.
@@ -182,16 +240,18 @@ Every line is a check; the scenario is `rehearsal.ts`.
 **Fresh mode only**
 
 6. *A validator without the schedule.* Node 4's genesis loses both fork entries
-   and the node restarts. Its bootstrap pairs normally (no hash mismatch, its
-   file is left alone) and logs `FORK SCHEDULE MISMATCH` against its peers. It
+   and the node restarts. Its bootstrap pairs normally (the peers' genesis differs only in the
+   schedule, so its file is kept) and logs `FORK SCHEDULE MISMATCH` against its
+   peers, with its digest and theirs; its `getNetworkInfo` digest differs from the
+   quorum's. It
    refuses the domain-signed transfer the others accept and accepts the
    legacy-signed one the others refuse. Peers refuse its candidate blocks, the
    blocks it was drawn into carry 3 signatures and none is its own, and its
    stall watchdog ends the process after three of them.
 7. *Recovery.* Left alone, nothing heals it: the engine restarts it from the
    same file and it warns again. The operator corrects the file and restarts the
-   node; it then loads the schedule, catches up, block hashes and balances
-   agree again on all 4 nodes, and its signature is back in the latest blocks.
+   node; it then loads the schedule, reports the quorum's digest, catches up,
+   block hashes and balances agree again on all 4 nodes, and its signature is back in the latest blocks.
 8. *Nothing else moved.* No container was restarted by the engine or killed for
    memory beyond what the scenario issued.
 
@@ -201,22 +261,26 @@ Every line is a check; the scenario is `rehearsal.ts`.
   schedules nothing, which is what a node from before the forks sees for the
   signature rule. Running a build from before the forks would also bring every
   other consensus change merged since (fee derivation, shard selection, stall
-  detection), so a split could not be pinned on the forks. The honest version
+  detection), so a split could not be pinned on the forks. The stronger version
   is "previous release tag against the current one" on a testnet, with the
   schedule on both.
 - **The `web2ProofBinding` gate.** It was loaded only: the field name is right,
   every node loads it at H, `getNetworkInfo` reports it, and the loader's gate
-  flips at H. The rule itself was not exercised, because the proof is fetched
-  from the web (a gist, a post), which a hermetic devnet cannot serve. The gate
-  used to read the node-local tip (`isForkActive("web2ProofBinding",
-  lastBlockNumber)` in `verifyWeb2Proof`), while `signatureDomain` gates at tip
-  + 1 (`signatureDomainGate.ts`, `forkHandlers.ts`), so the first block that
-  rejected the legacy shape was H+1. Commit `8b45c671` moves it to tip + 1 with
-  a unit test; this is a behaviour change at the activation boundary only
-  (nothing changes while the fork is unscheduled). I found no reason for it to
-  stay tip-based: the proof is verified at admission, where tip + 1 is the
-  block it lands in, and for Telegram proofs at apply time, which runs while the
-  tip is still the previous block.
+  flips at H. The rule itself was not exercised end to end, because the proof is
+  fetched from the web (a gist, a post), which a hermetic devnet cannot serve.
+  A unit test drives `verifyWeb2Proof` itself across the boundary with the
+  parser and the signature pool replaced. The gate used to read the node-local
+  tip, while `signatureDomain` gates at tip + 1, so the first block that
+  rejected the legacy shape was H+1; commit `8b45c671` moves it to tip + 1,
+  which changes behaviour at the activation boundary only (nothing changes
+  while the fork is unscheduled). **The gate is admission-only.** It is consulted
+  when a web2 proof is verified for the mempool. The Telegram path returns
+  before it, so Telegram proofs are not judged by the gate at all, and nothing
+  judges a proof at an explicit block height at validation or apply time, unlike
+  `signatureDomain` (`txSignatureContext(block.number)`). A legacy-shaped proof
+  admitted by a node whose tip lags, or included by a hostile proposer, can still
+  land after H. A validation-time check is the recommended follow-up; it was not
+  implemented here.
 - **tlsnProofEnforcement beyond its default.** Unscheduled means a TLSNotary
   identity claim is accepted on its structure alone, as before. Scheduling it
   is a separate decision.
@@ -229,10 +293,16 @@ Every line is a check; the scenario is `rehearsal.ts`.
   sync does not matter here (node 4 stored a block holding a transaction its own
   rules call invalid and kept following the chain), but that is an inference
   from behaviour; the sync code was not read for it.
-- **A mixed fleet during the rollout of the fix itself** (some nodes with it,
-  some without). The code handles a peer that still hashes the schedule by
-  comparing the data it serves, and a unit test covers that decision, but no run
-  mixed the two builds.
+- **A mixed fleet during the rollout of the build itself** (some nodes with it,
+  some without). The advertised hash and `/genesis` did not change, so the two
+  builds compare against the same anchors; the four pairings are unit-tested
+  with the real old and new hash functions, but no run mixed two builds.
+- **The periodic schedule check near a height.** Unit-tested (when it is due,
+  when it escalates, that it never throws); the rehearsal chain is too short to
+  reach the 100-block cadence, and the 50-block window is not entered at the
+  default heights.
+- **The 503 while a node boots.** Unit-tested at the handler and in the bootstrap
+  retry; the rehearsal does not poll fast enough to catch the window.
 
 ## Operator runbook for a testnet activation
 
@@ -260,8 +330,9 @@ In `data/genesis.json`, identical on every validator and RPC node:
   admission and `getNetworkInfo` answer for the next block, so they flip when
   the tip is H-1. Both forks default to `null`, so a genesis that does not name
   them changes nothing.
-- With the fix, `forks` and `properties.id` are not part of the genesis data
-  hash; everything else still is.
+- The genesis data hash peers advertise still covers everything in the stored
+  genesis block. A node on a build with the two-hash handling tolerates a file
+  that differs from the stored one only in `forks` and `properties.id`.
 
 ### Choosing the height
 
@@ -291,9 +362,10 @@ clients should migrate without a flag day.
    just as it refuses the legacy one after. This could not be verified from this
    repository. Test the build against a devnet with the forks scheduled, for
    example this rehearsal with `KEEP=1`, before announcing a height.
-3. **Node build with the genesis-hash fix, on every validator and RPC node.**
-   Nothing about the schedule changes yet. Without it the next step does not
-   stick.
+3. **Node build with the two-hash genesis handling, on every validator and RPC
+   node.** Nothing about the schedule changes yet. Without it the next step does
+   not stick. A node that is new or has an empty database follows the procedure
+   in "A new node on a chain whose file was edited" above.
 4. **Genesis edit.** Add the `forks` entries (and `properties.id` if the file
    has none) to `data/genesis.json` on every node and restart all of them, all
    before block H. An RPC node on the old schedule refuses domain-signed
@@ -311,11 +383,12 @@ The first two can ship long before the rest: a client that follows
 - `getNetworkInfo` returns `forks.signatureDomain.activationHeight` and
   `forks.web2ProofBinding.activationHeight` equal to H, and the expected
   `chainId`.
+- `getNetworkInfo` returns the same `forkScheduleDigest` on every node.
 - The log has no `FORK SCHEDULE MISMATCH` line from boots after the last node
   was restarted. Lines from earlier boots are expected: while the nodes are
   restarted one after another the first ones up still see peers that have not
   been edited yet, and a peer whose RPC is up before it has loaded its own genesis
-  answers with no schedule (the recorded runs show both).
+  answers 503 and is retried, not reported.
 - `data/genesis.json` still carries the entries after the node has booted.
 
 ### At the height
@@ -336,7 +409,9 @@ The first two can ship long before the rest: a client that follows
 | --- | --- | --- |
 | Domain signature before H, or legacy after H | refused at `confirm` with the signature error above; nothing is stored | the client signs from `getNetworkInfo`, never from a constant |
 | Domain signature bound to another chain id | same signature error | the id in the client comes from `getNetworkInfo`, and must equal `properties.id` |
-| Genesis edit on a build without the hash fix | `Genesis data hash does not match` on every node, the file overwritten with the stored version, the schedule gone at the next restart | the fix on every node first (step 3) |
+| Genesis edit on a build without the two-hash handling | `Genesis data hash does not match` on every node, the file overwritten with the stored version, the schedule gone at the next restart | the newer build on every node first (step 3) |
+| Empty-database node booted on the edited file | a block 0 different from the network's; fast sync refuses its peers | boot it on the unedited genesis first, then add the schedule |
+| `web2ProofBinding` legacy proof after H | can still land: the gate is admission-only | a validation-time check (follow-up); until then the height is a client deadline |
 | A validator whose genesis lacks the schedule | pairs, logs `FORK SCHEDULE MISMATCH`, admits legacy, refuses domain, its candidate blocks are refused by the others, 3 signatures per block. A 3-of-4 quorum survives one such node; two would stall it (not run) | correct its file and restart it |
 | The stall watchdog ends the process | exit code 0 after three drawn shards without its signature | see below |
 | The wrong validator admitted a legacy transaction | that transaction sat in its own mempool and kept spoiling its candidate blocks | it was gone after the restart (the mempool table was empty), nothing to clean by hand |
@@ -362,15 +437,17 @@ chain state while being unable to vote on it.
 ### Postponing or reverting
 
 Before block H: set the new height (or `null`) in `data/genesis.json` on every
-node and restart them all before the old H. With the fix the hash does not
-change, so nodes with different values still pair; `FORK SCHEDULE MISMATCH`
-is the only sign. After block H is final there is nothing to undo short of a
+node and restart them all before the old H. Peers
+still pair whatever the schedule says, because the advertised hash does not
+change; `FORK SCHEDULE MISMATCH` (and the periodic `[FORK SCHEDULE]` lines near
+the height) are the only sign. After block H is final there is nothing to undo short of a
 chain-level decision.
 
 ## Results of the recorded runs
 
-Both runs on the final tree: branch `test/fork-rehearsal` at `cb7ba2ce`
-(`origin/stabilisation` `52e2e569` plus the commits listed at the end), SDK
+Both runs on a clean tree: branch `test/fork-rehearsal` through `9d9c4cb5`
+(`origin/stabilisation` `52e2e569` plus the commits listed at the end; the runs
+used the same sources one commit-message rewording earlier), SDK
 4.0.17, `oven/bun:latest` (bun 1.4.0), 4 validators, chain id 31337, 10 seconds
 per block, 2026-10-14. About 10 minutes each. The network was too slow here for
 the apt and `bun install` steps of `testing/devnet/Dockerfile`, so that path was
@@ -378,8 +455,8 @@ not run; the image was built through `NODE_MODULES_FROM`.
 
 | Mode | Command | Summary | Exit |
 | --- | --- | --- | --- |
-| fresh | `./testing/forks/rehearsal.sh` | `54 checks passed, 0 failed, 54 expected` | 0 |
-| upgrade path | `UPGRADE_PATH=1 ./testing/forks/rehearsal.sh` | `43 checks passed, 0 failed, 43 expected` | 0 |
+| fresh | `./testing/forks/rehearsal.sh` | `58 checks passed, 0 failed, 58 expected` | 0 |
+| upgrade path | `UPGRADE_PATH=1 ./testing/forks/rehearsal.sh` | `48 checks passed, 0 failed, 48 expected` | 0 |
 
 Teardown: `after teardown: 0 containers, 0 volumes, 0 networks of project
 forkrehearsal` in both runs (`logs/teardown.log`).
@@ -390,56 +467,63 @@ numbers differ between runs; the shapes do not.
 ### Upgrade path (forks added to the running chain, height 40)
 
 - Tip 10: `properties.id=31337` and both heights 40 written into all four genesis
-  files; all four nodes restarted. Before the edit every node reported
+  files; all four nodes restarted, twice. Before the edit every node reported
   `signatureDomain` `activationHeight: null` and `chainId: null`.
-- First and second restart, every node: `Loaded fork "signatureDomain" with
-  activationHeight=40`, the same for `web2ProofBinding`, no genesis hash
-  mismatch, the genesis file still carrying the id and both heights after
-  bootstrap, `getNetworkInfo` reporting 40 and chain id 31337. Blocks 13 and 14
-  carry 4 signatures. Both restarts were done by tip 12.
-- During the rolling restart the nodes that came up first logged
-  `FORK SCHEDULE MISMATCH with http://node-2:53553: signatureDomain: ours 40,
-  theirs null; web2ProofBinding: ours 40, theirs null; chainId: ours 31337,
-  theirs null`, because the peer had not loaded its genesis yet. Expected, not a
-  failure.
-- Steps after that behave as in the fresh run below: legacy accepted in block 15,
-  tip 39 reports `{"activationHeight":40,"activated":true,"currentHeight":39}`,
+- After each restart, on every node: `Loaded fork "signatureDomain" with
+  activationHeight=40`, the same for `web2ProofBinding`; for each peer
+  `Peer http://node-1:53551 serves genesis data that differs from ours only in
+  the fork schedule or chain id; keeping our data/genesis.json as it is`; no
+  replacement of the file; the genesis file still carrying the id and both
+  heights; `getNetworkInfo` reporting 40 and chain id 31337.
+- The advertised hash is the old-style one. Before the edit the scenario
+  computed the full hash of the unscheduled genesis the chain was created from
+  (`5c1d1e05bfdc1f3f895eb87ff267c2071982a4e25ac23c521938ea0c498b209d`); after the
+  first and after the second restart `getGenesisDataHash` on each of the four
+  nodes returned exactly that value, although every node's file now holds the
+  schedule. A node on a build without this change therefore still compares equal
+  against all four.
+- No `FORK SCHEDULE MISMATCH` line on any node in this run, including during the
+  rolling restart. In the earlier run of the same scenario with the first
+  design, nodes that came up first reported one because a peer that had not yet
+  loaded its genesis answered with the code's defaults; the not-ready answer
+  and the retry removed that. The 503 itself was not observed in the logs: the
+  window is short and only covered by unit tests.
+- Both restarts were done by tip 12 (height 40), blocks 14 and 15 carry 4
+  signatures. All four nodes report all 7 forks and one schedule digest.
+- Steps after that behave as in the fresh run below: legacy accepted in block
+  16, tip 39 reports `{"activationHeight":40,"activated":true,"currentHeight":39}`,
   the legacy-signed copy is refused at `confirm` with the signature error, the
   domain-signed copy is accepted with `"confirmationBlock":40` and lands in
   block 40 on all four nodes, a later domain-signed transfer lands in block 42,
-  blocks 37 to 43 have the same hash on every node and
-  `getLastBlock` is `43:45901a8b1dac8c73575f9e00b7fefa9c61a92022b0338faed1af4618abb99944`
-  on each.
-- Same scenario on the tree before the fix (`b82d08fd`): every node logged
+  blocks 37 to 43 have the same hash on every node and `getLastBlock` is
+  `43:3877036af901e57795c563d3ed8c6dd1f6242152857e27f638f9fbe02def8c80` on each.
+- Same scenario on the tree before any fix (`b82d08fd`): every node logged
   `Genesis data hash does not match` on the first restart, all four files lost
   the schedule, the second restart loaded no fork, and the chain crossed height 40
   on the legacy rules (log lines above).
 
 ### Fresh (forks in block 0, height 30)
 
-**1. Configuration.** `getNetworkInfo` on node 1 at tip 2:
+**1. Configuration.** `getNetworkInfo` on node 1 at tip 2 reports seven forks:
+`osDenomination`, `gasFeeSeparation` and `nonceEnforcement` at 0 and active,
+`signatureDomain` and `web2ProofBinding` at 30 and not yet active,
+`tlsnProofEnforcement` and `atomicWork` unscheduled (`"activationHeight":null`),
+`"chainId":31337` and `"forkScheduleDigest":"33287362f579ab7f7024f428889c3678ea85c4bdcb98da63d5a61b0c70b46ff8"`,
+the same digest on all four nodes. The loader, fed the same genesis: both forks
+`[inactive at 29, active at 30]`. `tlsnProofEnforcement`: `activationHeight` is
+`null` in the defaults, inactive at every height, so a TLSNotary identity claim
+is accepted on its structure alone.
 
-```json
-{"forks":{"osDenomination":{"activationHeight":0,"activated":true,"currentHeight":2},
- "signatureDomain":{"activationHeight":30,"activated":false,"currentHeight":2},
- "web2ProofBinding":{"activationHeight":30,"activated":false,"currentHeight":2}},
- "chainId":31337,"nodeVersion":{"name":"demos-node-software","version":"0.9.8","commit":null,"commitShort":null,"commitMessage":null,"branch":null,"dirty":false,"builtAt":null}}
-```
-
-The loader, fed the same genesis: both forks `[inactive at 29, active at 30]`.
-`tlsnProofEnforcement`: `activationHeight` is `null` in the defaults, inactive at
-every height, so a TLSNotary identity claim is accepted on its structure alone.
-
-**2. Before the height (tip 2).** Domain-signed transfer, at `confirm`:
+**2. Before the height (tip 3).** Domain-signed transfer, at `confirm`:
 `Error: [Confirm] Transaction is not valid: [Tx Validation] [SIGNATURE ERROR]
 Transaction signature verification failed`. The same transaction signed
 legacy: `{"result":200,"response":{"message":"Transaction applied, waiting for
-confirmation"},"require_reply":false,"extra":{"confirmationBlock":3,"hash":"ac1caaba0b8ebe1b1d51712f39367d4b962462fc6444ee081e3c9d93d9b7a80f","disposition":"mempool"}}`,
-block 3 on all four nodes.
+confirmation"},"require_reply":false,"extra":{"confirmationBlock":4,...,"disposition":"mempool"}}`,
+block 4 on all four nodes.
 
 **3. The activation block (tip 29).** `getNetworkInfo` signatureDomain:
 `{"activationHeight":30,"activated":true,"currentHeight":29}`. Legacy copy:
-the same signature error. Domain-signed copy: `{"result":200,...,"extra":{"confirmationBlock":30,"hash":"a32fb3f5fa9cffcfc6ad3c9f2e301277b74dd7cff40f1f6568e25f8d31a339a6","disposition":"mempool"}}`,
+the same signature error. Domain-signed copy: accepted, `"confirmationBlock":30`,
 block 30 on all four nodes.
 
 **4. After the height.** Legacy: the same signature error. Domain signature
@@ -449,7 +533,7 @@ signature equals the one built from the node's `txSignaturePreimage`.
 
 **5. Agreement.** Blocks 27 to 33: the same hash on all four nodes for every
 block, each with 4 signatures; `getLastBlock` on each node is
-`33:94ba8b1607cd9e11126855da98d959ba06337bc884274f78a1908f0ff4f48c84`. Balances
+`33:addf40c45446467f4437ae6440113b35dc09be7d95dfef5bc60da871f424fe41`. Balances
 and nonces identical (read while the four tips agreed and held still); alice's
 `999999999999999988000000000:3` on every node (three transfers, nothing
 refused landed); bob holds exactly 3000000000.
@@ -457,18 +541,19 @@ refused landed); bob holds exactly 3000000000.
 **6. A validator without the schedule.** Node 4's genesis lost both fork entries
 and the node restarted at tip 35.
 
-- Its bootstrap logged, for each peer: `FORK SCHEDULE MISMATCH with
-  http://node-1:53551: signatureDomain: ours null, theirs 30;
-  web2ProofBinding: ours null, theirs 30. This node will split from its peers
-  at the first activation height that differs. Fix the forks entries and
-  properties.id in data/genesis.json and restart.` No `Genesis data hash does
-  not match`; its file was left alone; its `getNetworkInfo` says
-  `{"activationHeight":null,"activated":false,"currentHeight":35}`.
+- For each peer it logged `Peer http://node-1:53551 serves genesis data that
+  differs from ours only in the fork schedule or chain id; keeping our
+  data/genesis.json as it is`, then `FORK SCHEDULE MISMATCH with
+  http://node-1:53551: schedule digest: ours 4cf16bec..., theirs 33287362...;
+  signatureDomain: ours null, theirs 30; web2ProofBinding: ours null, theirs 30.
+  This node will split from its peers at the first activation height that
+  differs. ...`. Its file was left alone, and its `getNetworkInfo` says
+  `{"activationHeight":null,"activated":false,"currentHeight":35}` with a digest
+  different from the quorum's.
 - The same domain-signed transfer: node 4 refused it with the signature error,
   node 1 accepted it (`"confirmationBlock":36`, block 36 on all four nodes).
 - The same legacy-signed transfer from another account: node 1 refused it,
-  node 4 accepted it (`"confirmationBlock":36,"hash":"632ef2c4d46574e485821bda454200f0822618149b58181df6ef0e7721d12515"`).
-  It landed in no block on any node.
+  node 4 accepted it. It landed in no block on any node.
 - 9 candidate-block refusals by peers (`Hash does not correspond to our
   candidate block`) and `[STALL DETECTION] Drawn into the shard for block N but
   our signature is missing` for blocks 37, 38 and 39. Those blocks carry 3
@@ -477,13 +562,13 @@ and the node restarted at tip 35.
 - Block 36 was stored on node 4 anyway.
 
 **7. Recovery.** The devnet compose restarted node 4 from the same file; it warned
-again (`FORK SCHEDULE MISMATCH`, ours null) and was still on the wrong
-schedule. The scenario then corrected its genesis file and restarted it: it
-loaded `signatureDomain` at 30, logged no mismatch, caught up, blocks 34 to 45
-have the same hash on all four nodes, balances match, blocks 44 and 45 carry 4
-signatures with node 4's. The legacy-signed transfer node 4 had admitted was gone
-from its mempool table. On testnet the node would not have been restarted at all
-(see the failure-mode notes).
+again (`FORK SCHEDULE MISMATCH`) and was still on the wrong schedule. The
+scenario then corrected its genesis file and restarted it: it loaded
+`signatureDomain` at 30, logged no mismatch, reported the quorum's digest,
+caught up, blocks 34 to 45 have the same hash on all four nodes, balances match,
+blocks 44 and 45 carry 4 signatures with node 4's. The legacy-signed transfer
+node 4 had admitted was gone from its mempool table. On testnet the node would
+not have been restarted at all (see the failure-mode notes).
 
 **8. Container health.** Nodes 1-3 not restarted by the engine; node 4 not
 restarted by the engine after the operator's restart; no container killed for
@@ -497,10 +582,15 @@ the start of the scenario.
 | --- | --- |
 | `91fc13d5` | the rehearsal (fresh mode), runbook, first results |
 | `b82d08fd` | upgrade-path mode and harness hardening (fails on the unfixed tree, on purpose) |
-| `7b0abf5d` | the genesis-hash fix with unit tests |
-| `8b45c671` | `web2ProofBinding` judged at tip + 1, with a unit test |
-| `cb7ba2ce` | rehearsal follows the fixed bootstrap, pinned check counts |
-| (this one) | this document, the corrected runbook paragraph |
+| `7b0abf5d` | first genesis-hash fix, excluding the schedule from the hash (superseded by `dc9a68d0`: it changed what peers advertise) |
+| `12e7b121` | `web2ProofBinding` judged at tip + 1, admission-only scope stated |
+| `12153e29` | rehearsal follows the fixed bootstrap, pinned check counts |
+| `d0cf6a3d` | runbook for the real upgrade path and the testnet restart policy |
+| `dc9a68d0` | advertised hash and `/genesis` as before; the mismatch decision uses a local core hash |
+| `2f05420e` | fork schedule digest, all forks reported, not-ready answer, periodic comparison |
+| `6fcb0851` | wiring test for the web2 gate, corrected gate scope, comment cleanup |
+| `9d9c4cb5` | rehearsal checks for the two-hash design and the digest, re-pinned counts |
+| (this one) | this document and the runbook (fresh-node procedure, admission-only web2 policy) |
 
 ### What the runs left behind
 
