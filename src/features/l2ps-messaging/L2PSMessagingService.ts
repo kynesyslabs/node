@@ -32,6 +32,34 @@ export interface ProcessMessageResult {
     status?: MessageStatus
 }
 
+/**
+ * The paging fields of a history request, checked. An absent field (undefined
+ * or null) keeps its default; a present one that is not usable is an error,
+ * because falling back would hand a client that mis-built its cursor the
+ * newest page again, forever.
+ */
+export function parseHistoryPage(
+    before: unknown,
+    limit: unknown,
+): { before?: number; limit?: number } | { error: string } {
+    let cursor: number | undefined
+    if (before !== undefined && before !== null) {
+        const ok =
+            (typeof before === "number" || typeof before === "string") &&
+            /^\d{1,15}$/.test(String(before))
+        if (!ok) return { error: "before must be a whole millisecond timestamp" }
+        cursor = Number(before)
+    }
+    let size: number | undefined
+    if (limit !== undefined && limit !== null) {
+        if (typeof limit !== "number" || !Number.isFinite(limit)) {
+            return { error: "limit must be a number" }
+        }
+        size = limit
+    }
+    return { before: cursor, limit: size }
+}
+
 type MessageRepo = ReturnType<typeof dataSource.getRepository<L2PSMessage>>
 
 export class L2PSMessagingService {
@@ -109,21 +137,19 @@ export class L2PSMessagingService {
         const quotaError = this.reserveOfflineQuota(fromKey, recipientOnline)
         if (quotaError) return { success: false, error: quotaError }
 
-        // The slot is given back once, however the attempt ends: a thrown
-        // database error must not leave it held for a message that was never
-        // stored, or enough transient errors lock the sender out.
+        // A slot is held for as long as the row sits in "queued": it is what
+        // `markDelivered` gives back when the row leaves that state. So it is
+        // returned here only when no queued row results (nothing was stored,
+        // or the row was moved to "failed"), and once. If a later write fails
+        // while the row is still queued, the slot stays with it; freeing it
+        // would let `markDelivered` free it a second time.
         let held = !recipientOnline
         const release = () => {
             if (!held) return
             held = false
             this.releaseOfflineQuota(fromKey, recipientOnline)
         }
-        try {
-            return await this.persistAndSubmit(repo, existing, identity, messageId, encrypted, recipientOnline, release)
-        } catch (error) {
-            release()
-            throw error
-        }
+        return this.persistAndSubmit(repo, existing, identity, messageId, encrypted, recipientOnline, release)
     }
 
     private async persistAndSubmit(
@@ -138,12 +164,19 @@ export class L2PSMessagingService {
         const { l2psUid, fromKey, toKey, messageHash } = identity
         const now = Date.now()
         const status = recipientOnline ? "delivered" : "queued"
-        const writeError = existing
-            ? await this.claimFailed(repo, existing.id, { encrypted, now, status })
-            : await this.persistMessage(
-                repo,
-                { messageId, fromKey, toKey, l2psUid, messageHash, encrypted, now, recipientOnline },
-            )
+        let writeError: string | null
+        try {
+            writeError = existing
+                ? await this.claimFailed(repo, existing.id, { encrypted, now, status })
+                : await this.persistMessage(
+                    repo,
+                    { messageId, fromKey, toKey, l2psUid, messageHash, encrypted, now, recipientOnline },
+                )
+        } catch (error) {
+            // The write did not land, so there is no queued row to hold a slot.
+            release()
+            throw error
+        }
         const id = existing?.id ?? messageId
         if (writeError) {
             release()
@@ -158,6 +191,8 @@ export class L2PSMessagingService {
         const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, id, messageHash, encrypted, now)
 
         if (!l2psResult.success) {
+            // Released only once the row has left "queued"; if this write
+            // throws the row is still queued and keeps its slot.
             await repo.update(id, { status: "failed" as const })
             release()
             return { success: false, error: l2psResult.error }
@@ -227,8 +262,9 @@ export class L2PSMessagingService {
 
     /**
      * Reserve a per-sender offline-quota slot. Returns an error string
-     * when the cap has been reached; null otherwise. The increment
-     * here is rolled back when the attempt fails and decremented by `markDelivered` on queued-delivery.
+     * when the cap has been reached; null otherwise. The slot belongs to the
+     * message while its row is "queued": it is returned if the message is
+     * never stored or is marked failed, and otherwise by `markDelivered`.
      */
     private reserveOfflineQuota(
         fromKey: string,
@@ -468,25 +504,19 @@ export class L2PSMessagingService {
         peerA: string,
         peerB: string,
         l2psUid: string,
-        before?: unknown,
-        limit?: unknown,
+        before?: number,
+        limit?: number,
     ): Promise<{ messages: StoredMessage[]; hasMore: boolean }> {
         const repo = dataSource.getRepository(L2PSMessage)
         // Rows are stored canonically, so both sides of the pair must be
         // canonicalised for the lookup to match.
         const a = canonicalizeKey(peerA)
         const b = canonicalizeKey(peerB)
-        // The caller's values arrive as JSON, so they are whatever it sent. A
-        // page is bounded because the conversation is the caller's to fill, and
-        // a read that loads all of it is a way to exhaust the node's memory.
-        const pageSize =
-            typeof limit === "number" && Number.isFinite(limit)
-                ? Math.min(Math.max(1, Math.floor(limit)), MAX_HISTORY_PAGE)
-                : DEFAULT_HISTORY_PAGE
-        const cursor =
-            (typeof before === "number" || typeof before === "string") && /^\d{1,15}$/.test(String(before))
-                ? Number(before)
-                : 0
+        // A page is bounded because the conversation is the caller's to
+        // fill, and a read that loads all of it is a way to exhaust the
+        // node's memory. The values were checked by `parseHistoryPage`.
+        const pageSize = Math.min(Math.max(1, Math.floor(limit ?? DEFAULT_HISTORY_PAGE)), MAX_HISTORY_PAGE)
+        const cursor = before ?? 0
         const qb = repo.createQueryBuilder("m")
             .where("m.l2ps_uid = :l2psUid", { l2psUid })
             .andWhere(

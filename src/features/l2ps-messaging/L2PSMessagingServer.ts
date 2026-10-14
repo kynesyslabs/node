@@ -10,7 +10,7 @@ import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
-import { L2PSMessagingService } from "./L2PSMessagingService"
+import { L2PSMessagingService, parseHistoryPage } from "./L2PSMessagingService"
 import { canonicalizeKey } from "./keys"
 import type {
     ConnectedPeer,
@@ -25,8 +25,13 @@ import type {
 const MAX_MESSAGE_SIZE = 256 * 1024
 /** Max encrypted ciphertext size (128 KB base64) */
 const MAX_CIPHERTEXT_SIZE = 128 * 1024
-/** A hash is a digest or a signature in hex; this leaves room for either. */
-const MAX_MESSAGE_HASH_LENGTH = 1024
+/**
+ * The SDK sets messageHash to the hex signature of the envelope, and a
+ * post-quantum signature scheme is meant to replace ed25519 there; ML-DSA
+ * hex runs to about 6.6 KB. The cap is for a hostile field, not a format
+ * rule, so it sits well above that.
+ */
+const MAX_MESSAGE_HASH_LENGTH = 16384
 /** Min valid hex public key length (ed25519 = 64 hex chars) */
 const MIN_PUBLIC_KEY_LENGTH = 64
 /**
@@ -454,10 +459,16 @@ export class L2PSMessagingServer {
             return
         }
 
+        const page = parseHistoryPage(before, limit)
+        if ("error" in page) {
+            this.sendError(ws, "INVALID_MESSAGE", page.error, msg.requestId)
+            return
+        }
+
         // getHistory canonicalises both keys for the lookup; peerKey stays raw
         // here because the proof above was signed over the client's own form.
         const l2psUid = ws.data.l2psUid!
-        const result = await this.service.getHistory(myKey, peerKey, l2psUid, before, limit)
+        const result = await this.service.getHistory(myKey, peerKey, l2psUid, page.before, page.limit)
 
         this.send(ws, {
             type: "history_response",

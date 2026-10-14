@@ -13,7 +13,10 @@ import { generateKeyPairSync, sign, type KeyObject } from "node:crypto"
 
 type Row = Record<string, any>
 const rows = new Map<string, Row>()
-const faults: { save: Error | null; update: Error | null } = { save: null, update: null }
+const faults: {
+    save: Error | null
+    update: ((patch: Row) => Error | null) | null
+} = { save: null, update: null }
 const tupleOf = (r: Row) => JSON.stringify([r.l2psUid, r.fromKey, r.toKey, r.messageHash])
 
 const repo = {
@@ -30,7 +33,8 @@ const repo = {
         return row
     },
     update: async (criteria: string | string[] | Row, patch: Row) => {
-        if (faults.update) throw faults.update
+        const fault = faults.update?.(patch)
+        if (fault) throw fault
         const matches = typeof criteria === "string" || Array.isArray(criteria)
             ? [criteria].flat().map(id => rows.get(id)).filter(Boolean) as Row[]
             : [...rows.values()].filter(r => Object.entries(criteria).every(([k, v]) => r[k] === v))
@@ -40,7 +44,10 @@ const repo = {
     delete: async (id: string) => {
         rows.delete(id)
     },
-    find: async () => [],
+    find: async (query?: { where?: unknown }) =>
+        Array.isArray(query?.where)
+            ? (query.where as Row[]).map(w => rows.get(w.id)).filter(Boolean).map(r => ({ ...r }))
+            : [],
     createQueryBuilder: () => {
         const qb: any = {
             where: () => qb,
@@ -107,8 +114,9 @@ let server: InstanceType<typeof L2PSMessagingServer>
 let port: number
 
 beforeAll(() => {
-    port = 21000 + Math.floor(Math.random() * 2000)
-    server = new L2PSMessagingServer(port)
+    // Port 0 lets the system pick a free one, so a busy port cannot fail the run.
+    server = new L2PSMessagingServer(0)
+    port = (server as unknown as { server: { port: number } }).server.port
 })
 
 afterAll(() => {
@@ -253,35 +261,85 @@ describe("two different messages never share an identity", () => {
 
 // ─── What a failure leaves behind ────────────────────────────────
 
-describe("a send that fails does not cost the sender quota", () => {
-    it("when the row cannot be written", async () => {
+describe("the offline quota follows the queued row", () => {
+    const queuedFor = (sender: string) =>
+        [...rows.values()].filter(r => r.fromKey === sender && r.status === "queued").length
+    const send = (sender: string, hash: string) =>
+        service.processMessage(sender, "bb", "subnet_a", crypto.randomUUID(), hash, encrypted, false)
+
+    it("a row that cannot be written holds no slot", async () => {
         faults.save = new Error("connection terminated")
-        await expect(
-            service.processMessage("quota-a", "bb", "subnet_a", crypto.randomUUID(), "h1", encrypted, false),
-        ).rejects.toThrow()
+        await expect(send("quota-a", "h1")).rejects.toThrow()
 
         expect(quotaOf("quota-a")).toBe(0)
+        expect(rows.size).toBe(0)
     })
 
-    it("when the status of a failed submission cannot be written", async () => {
-        submitResult = { success: false, error: "mempool unavailable" }
-        faults.update = new Error("connection terminated")
-        await expect(
-            service.processMessage("quota-b", "bb", "subnet_a", crypto.randomUUID(), "h2", encrypted, false),
-        ).rejects.toThrow()
-
-        expect(quotaOf("quota-b")).toBe(0)
-    })
-
-    it("two hundred transient failures do not lock the sender out", async () => {
+    it("two hundred transient write failures do not lock the sender out", async () => {
         faults.save = new Error("connection terminated")
-        for (let i = 0; i < 205; i++) {
-            await service.processMessage("quota-c", "bb", "subnet_a", crypto.randomUUID(), `h${i}`, encrypted, false).catch(() => {})
-        }
+        for (let i = 0; i < 205; i++) await send("quota-c", `h${i}`).catch(() => {})
         faults.save = null
 
-        const ok = await service.processMessage("quota-c", "bb", "subnet_a", crypto.randomUUID(), "fresh", encrypted, false)
-        expect(ok.success).toBe(true)
+        expect((await send("quota-c", "fresh")).success).toBe(true)
+    })
+
+    it("a failed submission releases the slot and leaves the row failed", async () => {
+        submitResult = { success: false, error: "mempool unavailable" }
+        const result = await send("quota-d", "h3")
+
+        expect(result.success).toBe(false)
+        expect(quotaOf("quota-d")).toBe(0)
+        expect([...rows.values()].map(r => r.status)).toEqual(["failed"])
+    })
+
+    it("when the update to failed throws, the row is still queued and keeps its slot", async () => {
+        submitResult = { success: false, error: "mempool unavailable" }
+        faults.update = patch => (patch.status === "failed" ? new Error("connection terminated") : null)
+        await expect(send("quota-b", "h2")).rejects.toThrow()
+
+        expect([...rows.values()].map(r => r.status)).toEqual(["queued"])
+        expect(quotaOf("quota-b")).toBe(queuedFor("quota-b"))
+        expect(quotaOf("quota-b")).toBe(1)
+    })
+
+    it("when the update after a successful submit throws, the queued row keeps its slot", async () => {
+        faults.update = patch => (patch.l2psTxHash ? new Error("connection terminated") : null)
+        await expect(send("quota-e", "h4")).rejects.toThrow()
+
+        expect(submitToL2PS).toHaveBeenCalledTimes(1)
+        expect([...rows.values()].map(r => r.status)).toEqual(["queued"])
+        expect(quotaOf("quota-e")).toBe(1)
+    })
+
+    it("delivering that row frees its slot exactly once and spares the sender's other messages", async () => {
+        faults.update = patch => (patch.l2psTxHash ? new Error("connection terminated") : null)
+        await expect(send("quota-f", "h5")).rejects.toThrow()
+        faults.update = null
+        expect((await send("quota-f", "h6")).success).toBe(true)
+        expect(quotaOf("quota-f")).toBe(2)
+
+        const broken = [...rows.values()].find(r => r.messageHash === "h5")!
+        await service.markDelivered([broken.id])
+        expect(quotaOf("quota-f")).toBe(1)
+        expect(queuedFor("quota-f")).toBe(1)
+
+        await service.markDelivered([broken.id])
+        expect(quotaOf("quota-f")).toBe(1)
+    })
+
+    it("a retry of the failed row takes a slot again and releases it with the row", async () => {
+        submitResult = { success: false, error: "mempool unavailable" }
+        await send("quota-g", "h7")
+        expect(quotaOf("quota-g")).toBe(0)
+
+        submitResult = { success: true, txHash: "0xtx" }
+        const retried = await send("quota-g", "h7")
+        expect(retried.success).toBe(true)
+        expect(quotaOf("quota-g")).toBe(1)
+        expect(queuedFor("quota-g")).toBe(1)
+
+        await service.markDelivered([retried.messageId])
+        expect(quotaOf("quota-g")).toBe(0)
     })
 })
 
@@ -361,52 +419,98 @@ describe("a history read is bounded and does not depend on the caller's types", 
         }
     }
 
-    it.each([
-        [{ limit: 1e9 }, 201],
-        [{ limit: Number.MAX_SAFE_INTEGER }, 201],
-        [{ limit: -5 }, 2],
-        [{ limit: 0 }, 2],
-        [{ limit: "5" }, 51],
-        [{ limit: "abc" }, 51],
-        [{ limit: 2.5 }, 3],
-        [{ limit: null }, 51],
-        [{ limit: {} }, 51],
-    ])("limit %j reaches the query as take %p", async (extra, take) => {
+    const readHistory = async (extra: Record<string, unknown>) => {
         const me = identity()
         const peer = identity()
         const m = await register(me)
         const { payload, ts } = historyFrame(me, peer.publicKey, extra)
         m.client.frame("history", payload, ts)
         const reply = await m.client.next("history_response")
+        m.client.close()
+        return reply
+    }
+
+    it.each([
+        [{ limit: 1e9 }, 201],
+        [{ limit: Number.MAX_SAFE_INTEGER }, 201],
+        [{ limit: -5 }, 2],
+        [{ limit: 0 }, 2],
+        [{ limit: 2.5 }, 3],
+        [{ limit: null }, 51],
+        [{}, 51],
+    ])("limit %j reaches the query as take %p", async (extra, take) => {
+        const reply = await readHistory(extra)
 
         expect(reply.type).toBe("history_response")
         expect(queryTake).toEqual([take])
-        m.client.close()
     })
 
-    it.each([[{ before: "abc" }], [{ before: {} }], [{ before: [1] }], [{ before: "1; DROP TABLE" }], [{ before: -1 }], [{ before: 1e308 }]])(
-        "before %j does not fail the read",
+    it.each([[{ limit: "5" }], [{ limit: "abc" }], [{ limit: "" }], [{ limit: {} }], [{ limit: [5] }], [{ limit: true }]])(
+        "a non-numeric limit %j is an error, not a silent default",
         async extra => {
-            const me = identity()
-            const peer = identity()
-            const m = await register(me)
-            const { payload, ts } = historyFrame(me, peer.publicKey, extra)
-            m.client.frame("history", payload, ts)
-            const reply = await m.client.next("history_response")
+            const reply = await readHistory(extra)
 
-            expect(reply.type).toBe("history_response")
-            for (const condition of conditions as Array<{ before?: string }>) {
-                if ("before" in condition) expect(condition.before).toMatch(/^[0-9]{1,15}$/)
-            }
-            m.client.close()
+            expect(reply.type).toBe("error")
+            expect(reply.payload.code).toBe("INVALID_MESSAGE")
+            expect(queryTake).toEqual([])
         },
     )
 
-    it("a oversized hash is refused", async () => {
+    it.each([
+        [{ before: 1700000000000 }, "1700000000000"],
+        [{ before: "1700000000000" }, "1700000000000"],
+        [{ before: 999999999999999 }, "999999999999999"],
+    ])("a cursor %j reaches the query as %p", async (extra, bound) => {
+        const reply = await readHistory(extra)
+
+        expect(reply.type).toBe("history_response")
+        expect(conditions).toContainEqual({ before: bound })
+    })
+
+    it.each([[{ before: 0 }], [{ before: null }], [{}]])("%j reads the newest page", async extra => {
+        const reply = await readHistory(extra)
+
+        expect(reply.type).toBe("history_response")
+        expect(conditions.some(c => "before" in (c as object))).toBe(false)
+    })
+
+    it.each([
+        [{ before: "abc" }],
+        [{ before: {} }],
+        [{ before: [1] }],
+        [{ before: "1; DROP TABLE" }],
+        [{ before: -1 }],
+        [{ before: 1e308 }],
+        [{ before: 1.5 }],
+        [{ before: "1.5" }],
+        [{ before: 1e15 }],
+        [{ before: true }],
+        [{ before: "" }],
+    ])("a malformed cursor %j is an error, not the newest page again", async extra => {
+        const reply = await readHistory(extra)
+
+        expect(reply.type).toBe("error")
+        expect(reply.payload.code).toBe("INVALID_MESSAGE")
+        expect(queryTake).toEqual([])
+        expect(conditions).toEqual([])
+    })
+
+    it("a post-quantum sized signature is accepted as a hash", async () => {
         const sender = identity()
         const recipient = identity()
         const s = await register(sender)
-        s.client.frame("send", { to: recipient.publicKey, encrypted, messageHash: "h".repeat(2000) })
+        s.client.frame("send", { to: recipient.publicKey, encrypted, messageHash: "ab".repeat(3300) })
+        const reply = await s.client.next(["message_sent", "message_queued"])
+
+        expect(reply.type).toBe("message_queued")
+        s.client.close()
+    })
+
+    it("an oversized hash is refused", async () => {
+        const sender = identity()
+        const recipient = identity()
+        const s = await register(sender)
+        s.client.frame("send", { to: recipient.publicKey, encrypted, messageHash: "h".repeat(20_000) })
         const reply = await s.client.next(["message_sent", "message_queued"])
 
         expect(reply.payload.code).toBe("INVALID_MESSAGE")
