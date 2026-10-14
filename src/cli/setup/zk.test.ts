@@ -135,9 +135,37 @@ describe("runL2psZkSetup", () => {
             return realExec(cmd, args, cwd)
         }
         await runL2psZkSetup(root, runner, recorder().say, [5])
-        expect(seen).toEqual([path.join(keysDir(5), "l2ps_batch_5.zkey.building")])
+        expect(seen).toEqual([path.join(keysDir(5), ".building", "l2ps_batch_5.zkey")])
         expect(fs.readFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "utf8")).toBe("zkey")
         expect(fs.readdirSync(keysDir(5)).filter(f => f.endsWith(".building"))).toEqual([])
+    })
+
+    it("a failed build leaves no compiled files behind, so an old zkey cannot look finished", async () => {
+        seedCommittedVkeys({ protocol: "plonk" })
+        fs.writeFileSync(path.join(keysDir(10), "l2ps_batch_10.zkey"), "old")
+        const out = await runL2psZkSetup(root, fakeRunner({ failOn: "plonk setup" }), recorder().say, [10])
+        expect(out.ok).toBe(false)
+        expect(fs.existsSync(path.join(keysDir(10), "l2ps_batch_10_js"))).toBe(false)
+        expect(inspectBatchArtifacts(root).find(b => b.size === 10)?.complete).toBe(false)
+        expect(fs.readFileSync(path.join(keysDir(10), "l2ps_batch_10.zkey"), "utf8")).toBe("old")
+        expect(fs.existsSync(path.join(keysDir(10), ".building"))).toBe(false)
+    })
+
+    it("a key mismatch also leaves no wasm behind", async () => {
+        seedCommittedVkeys({ protocol: "plonk", power: 14 })
+        fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "old")
+        await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ protocol: "plonk", power: 15 }) }), recorder().say, [5])
+        expect(fs.existsSync(path.join(keysDir(5), "l2ps_batch_5_js"))).toBe(false)
+        expect(inspectBatchArtifacts(root).find(b => b.size === 5)?.complete).toBe(false)
+    })
+
+    it("replaces an older wasm only after the whole batch succeeded", async () => {
+        seedCommittedVkeys({ protocol: "plonk" })
+        fs.mkdirSync(path.join(keysDir(5), "l2ps_batch_5_js"), { recursive: true })
+        fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5_js", "stale.txt"), "x")
+        await runL2psZkSetup(root, fakeRunner(), recorder().say, [5])
+        expect(fs.existsSync(path.join(keysDir(5), "l2ps_batch_5_js", "stale.txt"))).toBe(false)
+        expect(fs.existsSync(path.join(keysDir(5), "l2ps_batch_5_js", "l2ps_batch_5.wasm"))).toBe(true)
     })
 
     it("skips a ptau file that is already downloaded", async () => {

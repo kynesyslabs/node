@@ -182,13 +182,20 @@ export async function runL2psZkSetup(
         const name = `l2ps_batch_${size}`
         const out = batchDir(root, size)
         fs.mkdirSync(out, { recursive: true })
-        const r1cs = path.join(out, `${name}.r1cs`)
+        // Everything is built in a staging directory and moved into place only
+        // after the whole batch succeeded and its verification key matched. A
+        // failure halfway can then never leave behind a wasm that makes an old
+        // zkey look like a finished build.
+        const staging = path.join(out, ".building")
+        fs.rmSync(staging, { recursive: true, force: true })
+        fs.mkdirSync(staging, { recursive: true })
+        const r1cs = path.join(staging, `${name}.r1cs`)
+        const zkeyNew = path.join(staging, `${name}.zkey`)
+        const generatedVkey = path.join(staging, "verification_key.json")
         const zkey = path.join(out, `${name}.zkey`)
-        // Built under a temporary name: a good zkey is only ever replaced by a
-        // new one that has been checked against the committed key.
-        const zkeyTmp = `${zkey}.building`
-        const generatedVkey = path.join(out, "verification_key.generated.json")
+        const wasmDirName = `${name}_js`
         const committedVkey = path.join(out, "verification_key.json")
+        const abandon = () => fs.rmSync(staging, { recursive: true, force: true })
 
         const steps: Array<[string, string, string[]]> = [
             [
@@ -200,7 +207,7 @@ export async function runL2psZkSetup(
                     "--wasm",
                     "--sym",
                     "-o",
-                    out,
+                    staging,
                     "-l",
                     circomlib,
                 ],
@@ -208,20 +215,19 @@ export async function runL2psZkSetup(
             [
                 `Generating the proving key for ${name}`,
                 snarkjs,
-                ["plonk", "setup", r1cs, ptau, zkeyTmp],
+                ["plonk", "setup", r1cs, ptau, zkeyNew],
             ],
             [
                 `Exporting the verification key for ${name}`,
                 snarkjs,
-                ["zkey", "export", "verificationkey", zkeyTmp, generatedVkey],
+                ["zkey", "export", "verificationkey", zkeyNew, generatedVkey],
             ],
         ]
         for (const [label, cmd, args] of steps) {
             say(`${label}...`)
             const code = await runner.exec(cmd, args, root)
             if (code !== 0) {
-                fs.rmSync(zkeyTmp, { force: true })
-                fs.rmSync(generatedVkey, { force: true })
+                abandon()
                 messages.push(`${label} failed (exit code ${code})`)
                 return { ok: false, messages }
             }
@@ -231,28 +237,28 @@ export async function runL2psZkSetup(
             // The verification key is committed and shared by every peer, so a
             // missing or corrupt copy is a broken checkout, not something to
             // replace with a locally generated key that nobody else holds.
-            fs.rmSync(zkeyTmp, { force: true })
-            fs.rmSync(generatedVkey, { force: true })
+            abandon()
             messages.push(
                 `batch_${size}: the committed verification key is missing or unreadable; restore ${path.relative(root, committedVkey)} from the repository and run the setup again`,
             )
             return { ok: false, messages }
-        } else {
-            const same =
-                JSON.stringify(JSON.parse(fs.readFileSync(committedVkey, "utf8"))) ===
-                JSON.stringify(JSON.parse(fs.readFileSync(generatedVkey, "utf8")))
-            fs.rmSync(generatedVkey, { force: true })
-            if (!same) {
-                // Proofs from this key would be rejected by peers; any earlier
-                // zkey stays untouched.
-                fs.rmSync(zkeyTmp, { force: true })
-                messages.push(
-                    `batch_${size}: the verification key built here differs from the committed one, so proofs from it would be rejected by peers. The new proving key was discarded. Update the repository (git pull) and run the setup again.`,
-                )
-                return { ok: false, messages }
-            }
         }
-        fs.renameSync(zkeyTmp, zkey)
+        const same =
+            JSON.stringify(JSON.parse(fs.readFileSync(committedVkey, "utf8"))) ===
+            JSON.stringify(JSON.parse(fs.readFileSync(generatedVkey, "utf8")))
+        if (!same) {
+            // Proofs from this key would be rejected by peers; whatever was
+            // there before stays untouched.
+            abandon()
+            messages.push(
+                `batch_${size}: the verification key built here differs from the committed one, so proofs from it would be rejected by peers. The new proving key was discarded. Update the repository (git pull) and run the setup again.`,
+            )
+            return { ok: false, messages }
+        }
+        fs.rmSync(path.join(out, wasmDirName), { recursive: true, force: true })
+        fs.renameSync(path.join(staging, wasmDirName), path.join(out, wasmDirName))
+        fs.renameSync(zkeyNew, zkey)
+        abandon()
         messages.push(`batch_${size}: ready`)
     }
     return { ok: true, messages }

@@ -658,6 +658,7 @@ async function zkSection(
         result.problems.push(msg)
         return
     }
+    let built = false
     try {
         const outcome = await runL2psZkSetup(
             ctx.root,
@@ -668,12 +669,14 @@ async function zkSection(
         )
         for (const m of outcome.messages) say(`  ${m}`)
         if (!outcome.ok) result.problems.push(...outcome.messages)
+        built = outcome.ok
     } catch (e) {
         const msg = `Building the ZK keys failed: ${e instanceof Error ? e.message : e}`
         say(`  ${msg}`)
         result.problems.push(msg)
     }
-    if (inspectBatchArtifacts(ctx.root).every(b => b.complete)) {
+    // A failed run never enables proofs, whatever files happen to be on disk.
+    if (built && inspectBatchArtifacts(ctx.root).every(b => b.complete)) {
         wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
     } else {
         say(untouched)

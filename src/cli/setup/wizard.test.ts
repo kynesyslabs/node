@@ -343,6 +343,18 @@ describe("ZK step", () => {
         expect(envOf().L2PS_ZK_ENABLED).toBe("false")
     })
 
+    it("does not enable proofs when a later size fails, even though an earlier one has an old key set without wasm", async () => {
+        writeSubnet(root, "good")
+        installZkTools(root)
+        writeZkBatch(root, 5)
+        writeZkBatch(root, 10, { zkey: true, wasm: false, vkey: true })
+        const { code, out } = await cli(["--yes", "--zk", "--zk-generate"], { runner: fakeRunner({ failOn: "plonk setup" }) })
+        expect(code).toBe(1)
+        expect(out).toContain("L2PS_ZK_ENABLED was left unchanged")
+        expect(fs.existsSync(path.join(root, ".env"))).toBe(false)
+        expect(fs.existsSync(path.join(root, "src/libs/l2ps/zk/keys/batch_10/l2ps_batch_10_js/l2ps_batch_10.wasm"))).toBe(false)
+    })
+
     it("leaves it untouched when the user declines to build", async () => {
         writeSubnet(root, "good")
         installZkTools(root)
