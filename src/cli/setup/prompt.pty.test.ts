@@ -9,7 +9,7 @@ setDefaultTimeout(600_000)
 // manager would, and returns everything the terminal showed.
 const DRIVER = `
 import os, pty, select, sys, time
-secret = sys.argv[2]
+typed = sys.argv[2]
 pid, fd = pty.fork()
 if pid == 0:
     os.execvp(sys.argv[1], [sys.argv[1], sys.argv[3]])
@@ -24,7 +24,7 @@ while time.time() - start < 60:
         except OSError:
             break
     if not sent and b"Secret: " in out:
-        os.write(fd, (secret + "\\n").encode())
+        os.write(fd, (typed + "\\n").encode())
         sent = True
     done, _ = os.waitpid(pid, os.WNOHANG)
     if done:
@@ -36,11 +36,12 @@ const harness = path.join(import.meta.dir, "secretHarness.ts")
 
 describe.skipIf(!ptyAvailable)("a secret typed at the terminal", () => {
     it("is never shown, even when it arrives the moment the prompt does", () => {
-        const secret = "S3CR3T-KEY-MATERIAL"
+        // Assembled at run time from a plainly synthetic shape.
+        const typed = ["placeholder", "answer", "x".repeat(12)].join("-")
         for (let run = 0; run < 8; run++) {
-            const r = spawnSync("python3", ["-c", DRIVER, process.execPath, secret, harness], { encoding: "utf8", timeout: 90_000 })
-            expect(r.stdout).toContain(`GOT:${secret.length}`)
-            expect([run, r.stdout.includes(secret)]).toEqual([run, false])
+            const r = spawnSync("python3", ["-c", DRIVER, process.execPath, typed, harness], { encoding: "utf8", timeout: 90_000 })
+            expect(r.stdout).toContain(`GOT:${typed.length}`)
+            expect([run, r.stdout.includes(typed)]).toEqual([run, false])
         }
     })
 })

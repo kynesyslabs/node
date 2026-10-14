@@ -230,17 +230,18 @@ describe("flags that contradict each other are refused, not half-obeyed", () => 
 
 describe("secrets never appear in output", () => {
     it("not when they are rejected, not on a dry run, not in the result table", async () => {
-        const secret = "9f".repeat(32)
+        // 32 bytes of obviously synthetic text, hex encoded at run time.
+        const canary = Buffer.from("synthetic-canary-bytes-0123456789").subarray(0, 32).toString("hex")
         const cases: Array<[string[], Record<string, string>]> = [
-            [["--yes", "--l2ps-uid", "x"], { DEMOS_SETUP_L2PS_KEY: secret + "zz", DEMOS_SETUP_L2PS_IV: HEX_IV }],
-            [["--yes", "--l2ps-uid", "x"], { DEMOS_SETUP_L2PS_KEY: secret.slice(2), DEMOS_SETUP_L2PS_IV: HEX_IV }],
-            [["--yes", "--dry-run", "--l2ps-uid", "x"], { DEMOS_SETUP_L2PS_KEY: secret, DEMOS_SETUP_L2PS_IV: HEX_IV }],
-            [["--yes", "--l2ps-uid", "x"], { DEMOS_SETUP_L2PS_KEY: secret, DEMOS_SETUP_L2PS_IV: HEX_IV }],
+            [["--yes", "--l2ps-uid", "x"], { DEMOS_SETUP_L2PS_KEY: canary + "zz", DEMOS_SETUP_L2PS_IV: HEX_IV }],
+            [["--yes", "--l2ps-uid", "x"], { DEMOS_SETUP_L2PS_KEY: canary.slice(2), DEMOS_SETUP_L2PS_IV: HEX_IV }],
+            [["--yes", "--dry-run", "--l2ps-uid", "x"], { DEMOS_SETUP_L2PS_KEY: canary, DEMOS_SETUP_L2PS_IV: HEX_IV }],
+            [["--yes", "--l2ps-uid", "x"], { DEMOS_SETUP_L2PS_KEY: canary, DEMOS_SETUP_L2PS_IV: HEX_IV }],
         ]
         for (const [argv, env] of cases) {
             const { out } = await cli(argv, env)
-            expect(out).not.toContain(secret)
-            expect(out).not.toContain(secret.slice(2))
+            expect(out).not.toContain(canary)
+            expect(out).not.toContain(canary.slice(2))
             expect(out).not.toContain(HEX_IV)
         }
     })

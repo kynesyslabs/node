@@ -106,9 +106,9 @@ describe.skipIf(!hasCompose)("compose files", () => {
     })
 
     it("never carries the subnet key or IV variables into the container environment", () => {
-        const secret = "deadbeef".repeat(8)
-        const c = compose(BASE, { DEMOS_SETUP_L2PS_KEY: secret, DEMOS_SETUP_L2PS_IV: secret })
-        expect(c.stdout).not.toContain(secret)
+        const canary = "canary-".repeat(10)
+        const c = compose(BASE, { DEMOS_SETUP_L2PS_KEY: canary, DEMOS_SETUP_L2PS_IV: canary })
+        expect(c.stdout).not.toContain(canary)
         const names = Object.keys(c.json?.services.node.environment ?? {})
         expect(names).not.toContain("DEMOS_SETUP_L2PS_KEY")
         expect(names).not.toContain("DEMOS_SETUP_L2PS_IV")

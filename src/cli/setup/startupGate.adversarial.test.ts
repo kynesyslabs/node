@@ -177,12 +177,12 @@ describe("the safety switches fail loudly, not silently", () => {
 
 describe("the report and its log", () => {
     it("never prints key material, an env value or the contents of a bad file", async () => {
-        const secret = "9f".repeat(31) + "-not-hex-secret"
-        writeSubnet(root, "broken", { key: secret })
+        const canary = `${"canary-".repeat(8)}not-hex`
+        writeSubnet(root, "broken", { key: canary })
         const o = await gate({ env: { L2PS_MESSAGING_ENABLED: "true", L2PS_MESSAGING_PORT: "3100" } })
         expect(o.out).toContain("broken")
-        expect(o.out + o.logged.join("\n")).not.toContain("9f9f9f")
-        expect(o.out + o.logged.join("\n")).not.toContain("not-hex-secret")
+        expect(o.out + o.logged.join("\n")).not.toContain("canary-canary")
+        expect(o.out + o.logged.join("\n")).not.toContain("not-hex")
     })
 
     it("a logger that fails changes neither the decision nor the exit code", async () => {
