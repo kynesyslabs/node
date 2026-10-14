@@ -687,25 +687,100 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
 // ZK
 // ---------------------------------------------------------------------------
 
+type Subnets = { activeSubnets: Set<string> }
+
+const ZK_UNTOUCHED = "  L2PS_ZK_ENABLED was left unchanged."
+const NO_SUBNET_FOR_ZK = "  No L2PS subnet is configured, so there are no batches to prove. Skipping."
+
+function reportIdentityKey(deps: WizardDeps, result: WizardResult): void {
+    const { ctx, say } = deps
+    const identity = inspectIdentityKey(ctx.root)
+    if (identity.state === "ok") {
+        say("  Identity proofs: ready (only the committed verification key is needed on a node).")
+        return
+    }
+    say(`  Identity proofs: ${identity.state.toUpperCase()} - ${identity.detail}`)
+    say("  This key is shared by every validator and is never regenerated here.")
+    say(`  ${IDENTITY_KEY_FIX}`)
+    result.problems.push(`ZK identity verification key is ${identity.state}`)
+}
+
+/** Whether the operator wants ZK proofs: the flag, else a question, else undefined (leave it). */
+async function wantsZk(deps: WizardDeps, state: Subnets, keepOn: boolean): Promise<boolean | "skip" | undefined> {
+    const { opts, prompter, say } = deps
+    if (opts.zk !== undefined || !prompter) return opts.zk
+    if (state.activeSubnets.size === 0) {
+        say(NO_SUBNET_FOR_ZK)
+        return "skip"
+    }
+    return confirm(prompter, "Use ZK proofs for L2PS batches?", keepOn, say)
+}
+
+async function wantsGeneration(deps: WizardDeps): Promise<boolean> {
+    const { opts, prompter, say } = deps
+    if (opts.zkGenerate !== undefined) return opts.zkGenerate
+    if (!prompter) return false
+    return confirm(
+        prompter,
+        "Build the batch proving keys now? (about 200 MB download, several minutes, around 2 GB of memory)",
+        true,
+        say,
+    )
+}
+
+function missingToolsMessage(root: string): string | undefined {
+    const tools = missingZkTools(root)
+    return tools.length > 0 ? `Missing ${tools.join(", ")}. Run "bun install" first.` : undefined
+}
+
+function notWritableMessage(root: string): string | undefined {
+    try {
+        fs.accessSync(path.join(root, L2PS_ZK_DIR), fs.constants.W_OK)
+        return undefined
+    } catch {
+        return `${L2PS_ZK_DIR} is not writable here (read-only image?). Build the keys on a machine with a writable checkout.`
+    }
+}
+
+/** Reports a reason the keys cannot be built and records it as a problem. */
+function refuseBuild(deps: WizardDeps, result: WizardResult, reason: string): void {
+    deps.say(`  ${reason}`)
+    deps.say(ZK_UNTOUCHED)
+    result.problems.push(reason)
+}
+
+/** Builds the missing keys; true only when the build succeeded. */
+async function buildBatchKeys(deps: WizardDeps, result: WizardResult): Promise<boolean> {
+    const { ctx, opts, say } = deps
+    try {
+        const outcome = await runL2psZkSetup(
+            ctx.root,
+            deps.runner,
+            l => say(`  ${l}`),
+            undefined,
+            opts.ptauUrl ? [opts.ptauUrl] : undefined,
+        )
+        for (const m of outcome.messages) say(`  ${m}`)
+        if (!outcome.ok) result.problems.push(...outcome.messages)
+        return outcome.ok
+    } catch (e) {
+        const msg = `Building the ZK keys failed: ${e instanceof Error ? e.message : e}`
+        say(`  ${msg}`)
+        result.problems.push(msg)
+        return false
+    }
+}
+
 async function zkSection(
     deps: WizardDeps,
     result: WizardResult,
     wantedEnv: Record<string, string>,
-    state: { activeSubnets: Set<string> },
+    state: Subnets,
 ): Promise<void> {
-    const { ctx, opts, prompter, say } = deps
+    const { ctx, opts, say } = deps
     say("")
     say("ZK")
-
-    const identity = inspectIdentityKey(ctx.root)
-    if (identity.state === "ok") {
-        say("  Identity proofs: ready (only the committed verification key is needed on a node).")
-    } else {
-        say(`  Identity proofs: ${identity.state.toUpperCase()} - ${identity.detail}`)
-        say("  This key is shared by every validator and is never regenerated here.")
-        say(`  ${IDENTITY_KEY_FIX}`)
-        result.problems.push(`ZK identity verification key is ${identity.state}`)
-    }
+    reportIdentityKey(deps, result)
 
     const batches = inspectBatchArtifacts(ctx.root)
     const ready = batches.filter(b => b.complete).map(b => b.size)
@@ -716,14 +791,8 @@ async function zkSection(
     )
 
     const currentlyOn = parseBoolFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED]) === true
-    let want = opts.zk
-    if (want === undefined && prompter) {
-        if (state.activeSubnets.size === 0) {
-            say("  No L2PS subnet is configured, so there are no batches to prove. Skipping.")
-            return
-        }
-        want = await confirm(prompter, "Use ZK proofs for L2PS batches?", currentlyOn || ready.length > 0, say)
-    }
+    const want = await wantsZk(deps, state, currentlyOn || ready.length > 0)
+    if (want === "skip") return
     if (want === undefined) {
         say("  No ZK choice given (use --zk or --no-zk). Left as it is.")
         return
@@ -738,42 +807,23 @@ async function zkSection(
         return
     }
     if (state.activeSubnets.size === 0) {
-        say("  No L2PS subnet is configured, so there are no batches to prove. Skipping.")
+        say(NO_SUBNET_FOR_ZK)
         return
     }
 
     // Requiring proofs before the keys exist would only make the node complain
     // at every start, so the switch is flipped last.
-    const untouched = "  L2PS_ZK_ENABLED was left unchanged."
     if (batches.every(b => b.complete)) {
         say("  All batch keys are in place.")
         wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
         return
     }
-
-    const tools = missingZkTools(ctx.root)
-    if (tools.length > 0) {
-        const msg = `Missing ${tools.join(", ")}. Run "bun install" first.`
-        say(`  ${msg}`)
-        say(untouched)
-        result.problems.push(msg)
-        return
-    }
-
-    const generate =
-        opts.zkGenerate ??
-        (prompter
-            ? await confirm(
-                  prompter,
-                  "Build the batch proving keys now? (about 200 MB download, several minutes, around 2 GB of memory)",
-                  true,
-                  say,
-              )
-            : false)
-    if (!generate) {
+    const noTools = missingToolsMessage(ctx.root)
+    if (noTools !== undefined) return refuseBuild(deps, result, noTools)
+    if (!(await wantsGeneration(deps))) {
         say("  The batch keys are not built, and building them downloads about 200 MB.")
         say("  Build them with: bun run setup --only zk --zk --zk-generate")
-        say(untouched)
+        say(ZK_UNTOUCHED)
         return
     }
     if (opts.dryRun) {
@@ -781,39 +831,14 @@ async function zkSection(
         say("  would then set L2PS_ZK_ENABLED=true")
         return
     }
-
-    const zkDir = path.join(ctx.root, L2PS_ZK_DIR)
-    try {
-        fs.accessSync(zkDir, fs.constants.W_OK)
-    } catch {
-        const msg = `${L2PS_ZK_DIR} is not writable here (read-only image?). Build the keys on a machine with a writable checkout.`
-        say(`  ${msg}`)
-        say(untouched)
-        result.problems.push(msg)
-        return
-    }
-    let built = false
-    try {
-        const outcome = await runL2psZkSetup(
-            ctx.root,
-            deps.runner,
-            l => say(`  ${l}`),
-            undefined,
-            opts.ptauUrl ? [opts.ptauUrl] : undefined,
-        )
-        for (const m of outcome.messages) say(`  ${m}`)
-        if (!outcome.ok) result.problems.push(...outcome.messages)
-        built = outcome.ok
-    } catch (e) {
-        const msg = `Building the ZK keys failed: ${e instanceof Error ? e.message : e}`
-        say(`  ${msg}`)
-        result.problems.push(msg)
-    }
+    const readOnly = notWritableMessage(ctx.root)
+    if (readOnly !== undefined) return refuseBuild(deps, result, readOnly)
     // A failed run never enables proofs, whatever files happen to be on disk.
+    const built = await buildBatchKeys(deps, result)
     if (built && inspectBatchArtifacts(ctx.root).every(b => b.complete)) {
         wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
     } else {
-        say(untouched)
+        say(ZK_UNTOUCHED)
     }
 }
 
