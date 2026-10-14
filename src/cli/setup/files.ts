@@ -11,6 +11,28 @@ export interface WriteOptions {
     mode: number
     /** Replace a file that exists with different content. Off unless the operator agreed. */
     overwrite: boolean
+    /**
+     * Write to the file a symlink points at instead of replacing the link.
+     * Only for a file the operator may deliberately keep elsewhere (.env); a
+     * key file must never be written through a link to outside the checkout.
+     */
+    followSymlink?: boolean
+}
+
+/** The file a chain of symlinks ends at; a dangling link yields where it would create it. */
+export function resolveSymlink(file: string): string {
+    let current = file
+    for (let hops = 0; hops < 40; hops++) {
+        let target: string
+        try {
+            if (!fs.lstatSync(current).isSymbolicLink()) return current
+            target = fs.readlinkSync(current)
+        } catch {
+            return current
+        }
+        current = path.resolve(path.dirname(current), target)
+    }
+    throw new Error(`${file}: too many levels of symbolic links`)
 }
 
 /**
@@ -25,6 +47,7 @@ export function writeFileGuarded(
     now: () => number = Date.now,
     rename: (from: string, to: string) => void = fs.renameSync,
 ): WriteOutcome {
+    if (opts.followSymlink) file = resolveSymlink(file)
     fs.mkdirSync(path.dirname(file), { recursive: true })
     const exists = fs.existsSync(file)
     // Modes only ever tighten: an operator's 600 config stays 600, a 644 key

@@ -411,13 +411,13 @@ describe("ZK step", () => {
 })
 
 describe("env file that cannot be written", () => {
-    it("prints the lines to add by hand instead of failing", async () => {
+    it("prints the lines to add by hand and exits non-zero so a script notices", async () => {
         const ro = path.join(root, "ro")
         fs.mkdirSync(ro)
         fs.chmodSync(ro, 0o555)
         try {
             const { code, out } = await cli(["--yes", "--l2ps-uid", "demo_1", "--messaging", "--env-file", "ro/.env"])
-            expect(code).toBe(0)
+            expect(code).toBe(1)
             expect(out).toContain("Add these lines to your .env by hand")
             expect(out).toContain("L2PS_MESSAGING_ENABLED=true")
         } finally {

@@ -16,7 +16,7 @@ import {
     readEnvFile,
     type EnvChange,
 } from "./envFile"
-import { readTextIfExists, writeFileGuarded, type WriteOutcome } from "./files"
+import { readTextIfExists, resolveSymlink, writeFileGuarded, type WriteOutcome } from "./files"
 import {
     buildSubnetFiles,
     generateKeyMaterial,
@@ -756,13 +756,24 @@ async function applyEnv(
         /* new file */
     }
     try {
-        writeFileGuarded(ctx.envFilePath, applyEnvChanges(text, toApply), { mode, overwrite: true }, deps.now)
+        // Replacing the file by rename ignores its mode, so a file the owner
+        // made read-only on purpose has to be checked by hand.
+        const target = resolveSymlink(ctx.envFilePath)
+        if (fs.existsSync(target)) fs.accessSync(target, fs.constants.W_OK)
+        writeFileGuarded(
+            ctx.envFilePath,
+            applyEnvChanges(text, toApply),
+            { mode, overwrite: true, followSymlink: true },
+            deps.now,
+        )
         for (const c of applied) say(`  set ${c.key}=${c.to} in ${envName}`)
         result.envApplied.push(...applied)
         result.restartNeeded = true
     } catch (e) {
         // A container's /app is read-only; the operator copies the lines to the host .env.
-        say(`  Could not write ${envName} (${e instanceof Error ? e.message : e}). Add these lines to your .env by hand:`)
+        const why = e instanceof Error ? e.message : String(e)
+        say(`  Could not write ${envName} (${why}). Add these lines to your .env by hand:`)
+        result.problems.push(`${envName} could not be written (${why})`)
         for (const c of applied) {
             say(`    ${c.key}=${c.to}`)
             result.manualEnv[c.key] = c.to

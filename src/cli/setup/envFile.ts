@@ -6,10 +6,12 @@ export function parseEnv(text: string): Record<string, string> {
         const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line)
         if (!m) continue
         let value = m[2].trim()
-        // A quoted value ends at its closing quote; anything after is a comment.
-        const quoted = /^(["'])(.*?)\1/.exec(value)
+        // A quoted value ends at its closing quote; anything after is a
+        // comment. An unquoted one ends at the first `#`, with or without a
+        // space before it, which is what dotenv and Bun both do.
+        const quoted = /^(["'`])(.*?)\1/.exec(value)
         if (quoted) value = quoted[2]
-        else value = value.replace(/\s+#.*$/, "")
+        else value = value.replace(/#.*$/, "").trimEnd()
         out[m[1]] = value
     }
     return out
@@ -55,6 +57,21 @@ export function diffEnv(
 const SECTION_TITLE = "# --- L2PS / ZK (written by `bun run setup`) ---"
 
 /**
+ * What an edited line keeps from the original: a leading `export`, which a
+ * shell that sources the file needs, and a comment after the value.
+ */
+function rewriteActiveLine(line: string, key: string, value: string): string {
+    const m = new RegExp(`^(\\s*(?:export\\s+)?)${key}\\s*=(.*)$`).exec(line)
+    if (!m) return `${key}=${value}`
+    const exported = /export\s+$/.test(m[1]) ? "export " : ""
+    const rest = m[2].trimStart()
+    const quote = /^(["'`])(.*?)\1(.*)$/.exec(rest)
+    const afterValue = quote ? quote[3] : (/(\s*#.*)$/.exec(rest)?.[1] ?? "")
+    const tail = afterValue.trimStart().startsWith("#") ? afterValue : ""
+    return `${exported}${key}=${value}${tail}`
+}
+
+/**
  * Sets the given keys in an env file's text, touching nothing else. An active
  * `KEY=` line is edited in place (the last one, because dotenv lets the last
  * duplicate win), a commented `#KEY=` example is switched on, anything new goes
@@ -77,8 +94,11 @@ export function applyEnvChanges(
         const commented = new RegExp(`^\\s*#\\s*${key}\\s*=`)
         let idx = lastIndex(active)
         if (idx === -1) idx = lastIndex(commented)
-        if (idx !== -1) lines[idx] = `${key}=${value}${cr}`
-        else appended.push(`${key}=${value}${cr}`)
+        if (idx !== -1) {
+            const wasActive = active.test(lines[idx])
+            const body = lines[idx].endsWith("\r") ? lines[idx].slice(0, -1) : lines[idx]
+            lines[idx] = `${wasActive ? rewriteActiveLine(body, key, value) : `${key}=${value}`}${cr}`
+        } else appended.push(`${key}=${value}${cr}`)
     }
     if (appended.length > 0) {
         // Drop the empty piece a trailing newline leaves, then restore it last.
