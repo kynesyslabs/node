@@ -1,7 +1,7 @@
 import { describe, expect, it, setDefaultTimeout } from "bun:test"
 import { spawnSync } from "node:child_process"
 import * as path from "node:path"
-import { ptyAvailable } from "./testSupport"
+import { PYTHON, ptyAvailable } from "./testSupport"
 
 setDefaultTimeout(600_000)
 
@@ -39,7 +39,7 @@ describe.skipIf(!ptyAvailable)("a secret typed at the terminal", () => {
         // Assembled at run time from a plainly synthetic shape.
         const typed = ["placeholder", "answer", "x".repeat(12)].join("-")
         for (let run = 0; run < 8; run++) {
-            const r = spawnSync("python3", ["-c", DRIVER, process.execPath, typed, harness], { encoding: "utf8", timeout: 90_000 })
+            const r = spawnSync(PYTHON as string, ["-c", DRIVER, process.execPath, typed, harness], { encoding: "utf8", timeout: 90_000 })
             expect(r.stdout).toContain(`GOT:${typed.length}`)
             expect([run, r.stdout.includes(typed)]).toEqual([run, false])
         }

@@ -4,6 +4,8 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { HELP, SETUP_ENV_NAMES, parseSetupArgs } from "./args"
 import { runCli } from "./cli"
+import { applyEnvChanges, parseEnv } from "./envFile"
+import { parseBool, validateKeyHex, validateNonNegativeInt, validatePort, validateRpcList, validateRpcUrl, validateUid } from "./validate"
 import { HEX_IV, HEX_KEY, fakeRunner, isRoot, makeRoot, recorder, removeRoot } from "./testSupport"
 
 let root: string
@@ -136,6 +138,87 @@ describe("every DEMOS_SETUP_* variable with hostile values", () => {
                 const { code } = await cli(["--yes"], { [name]: value })
                 // 0: nothing to do or accepted, 1: a required answer is missing, 2: refused.
                 expect([name, [0, 1, 2].includes(code)]).toEqual([name, true])
+            }
+        }
+    })
+})
+
+describe("hostile input stays linear", () => {
+    const BIG = 100_000
+    const timed = (fn: () => void): number => {
+        const start = performance.now()
+        fn()
+        return performance.now() - start
+    }
+
+    it("a 100 KB .env line parses in well under 50 ms, whatever its shape", () => {
+        const shapes = [
+            `A=${" ".repeat(BIG)}x`,
+            `${" ".repeat(BIG)}A=1`,
+            `A${" ".repeat(BIG)}`,
+            `export${" ".repeat(BIG)}`,
+            `A="${"x ".repeat(BIG / 2)}`,
+            `A='${"#".repeat(BIG)}`,
+            `A=${"#".repeat(BIG)}`,
+            `A=${"\\".repeat(BIG)}`,
+            `${"A".repeat(BIG)}=`,
+            `#${" ".repeat(BIG)}L2PS_ZK_ENABLED`,
+            `L2PS_ZK_ENABLED${" ".repeat(BIG)}x`,
+            "A=".repeat(BIG / 2),
+        ]
+        for (const shape of shapes) {
+            const took = Math.min(timed(() => parseEnv(shape)), timed(() => parseEnv(shape)))
+            expect([shape.slice(0, 12), took < 50]).toEqual([shape.slice(0, 12), true])
+        }
+    })
+
+    it("rewriting a 100 KB hostile line is just as fast and still correct", () => {
+        const keys = { L2PS_ZK_ENABLED: "true", L2PS_MESSAGING_PORT: "3100" }
+        const shapes = [
+            `L2PS_ZK_ENABLED=${" ".repeat(BIG)}# c`,
+            `L2PS_ZK_ENABLED=${" ".repeat(BIG)}x`,
+            `L2PS_ZK_ENABLED=a${" \t".repeat(BIG / 2)}x`,
+            `  ${" ".repeat(BIG)}L2PS_ZK_ENABLED = "${"x".repeat(BIG)}`,
+            `#${" ".repeat(BIG)}L2PS_MESSAGING_PORT${" ".repeat(BIG)}=1`,
+            `export${" ".repeat(BIG)}L2PS_ZK_ENABLED=1 ${"#".repeat(BIG)}`,
+        ]
+        for (const shape of shapes) {
+            let out = ""
+            const took = timed(() => {
+                out = applyEnvChanges(`${shape}\n`, keys)
+            })
+            expect([shape.slice(0, 12), took < 50]).toEqual([shape.slice(0, 12), true])
+            expect(parseEnv(out)).toMatchObject({ L2PS_ZK_ENABLED: "true", L2PS_MESSAGING_PORT: "3100" })
+        }
+    })
+
+    it("a 100 KB value or list validates in well under 50 ms", () => {
+        const values = [
+            "/".repeat(BIG),
+            `http://h${"/".repeat(BIG)}`,
+            `http://h${"/".repeat(BIG)}x`,
+            `${"/".repeat(BIG)}x`,
+            `http://${"a".repeat(BIG)}`,
+            `${"a".repeat(BIG)}/`,
+            " ".repeat(BIG),
+            "0".repeat(BIG),
+            `${"0x".repeat(BIG / 2)}`,
+            `${"a,".repeat(BIG / 2)}`,
+            `${"a b ".repeat(BIG / 4)}`,
+        ]
+        const checks: Array<[string, (v: string) => unknown]> = [
+            ["rpc url", validateRpcUrl],
+            ["rpc list", validateRpcList],
+            ["uid", validateUid],
+            ["port", validatePort],
+            ["integer", validateNonNegativeInt],
+            ["hex", (v: string) => validateKeyHex(v)],
+            ["bool", (v: string) => parseBool(v)],
+        ]
+        for (const [name, fn] of checks) {
+            for (const value of values) {
+                const took = Math.min(timed(() => fn(value)), timed(() => fn(value)))
+                expect([name, value.slice(0, 10), took < 50]).toEqual([name, value.slice(0, 10), true])
             }
         }
     })

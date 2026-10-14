@@ -4,14 +4,14 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { runCli } from "./cli"
-import { fakeRunner } from "./testSupport"
+import { BASH, DOCKER, fakeRunner } from "./testSupport"
 
 // `docker compose config` only reads and interpolates the files; nothing is
 // started, built or pulled.
 setDefaultTimeout(60_000)
 
 const repo = path.resolve(import.meta.dir, "../../..")
-const hasCompose = spawnSync("docker", ["compose", "version"], { encoding: "utf8" }).status === 0
+const hasCompose = DOCKER !== undefined && spawnSync(DOCKER, ["compose", "version"], { encoding: "utf8" }).status === 0
 
 interface Port {
     target: number
@@ -33,7 +33,7 @@ function compose(files: string[], env: Record<string, string> = {}, dotenv?: str
     const envFile = path.join(work, ".env")
     fs.rmSync(envFile, { force: true })
     if (dotenv !== undefined) fs.writeFileSync(envFile, dotenv)
-    const r = spawnSync("docker", ["compose", ...files.flatMap(f => ["-f", f]), "config", "--format", "json"], {
+    const r = spawnSync(DOCKER as string, ["compose", ...files.flatMap(f => ["-f", f]), "config", "--format", "json"], {
         cwd: work,
         encoding: "utf8",
         env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
@@ -91,7 +91,7 @@ describe.skipIf(!hasCompose)("compose files", () => {
             inDocker: false,
         })
         expect(code).toBe(0)
-        const c = spawnSync("docker", ["compose", "-f", "docker-compose.yml", "config", "--format", "json"], {
+        const c = spawnSync(DOCKER as string, ["compose", "-f", "docker-compose.yml", "config", "--format", "json"], {
             cwd: work,
             encoding: "utf8",
             env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" },
@@ -120,7 +120,7 @@ describe.skipIf(!hasCompose)("compose files", () => {
     })
 })
 
-describe("scripts/docker-run", () => {
+describe.skipIf(BASH === undefined)("scripts/docker-run", () => {
     const script = path.join(repo, "scripts", "docker-run")
     let stubDir: string
     beforeAll(() => {
@@ -136,7 +136,7 @@ describe("scripts/docker-run", () => {
     afterAll(() => fs.rmSync(stubDir, { recursive: true, force: true }))
 
     function run(args: string[]) {
-        const r = spawnSync("bash", [script, ...args], {
+        const r = spawnSync(BASH as string, [script, ...args], {
             cwd: repo,
             encoding: "utf8",
             env: { PATH: `${stubDir}:${process.env.PATH}`, HOME: process.env.HOME ?? "" },
@@ -147,7 +147,7 @@ describe("scripts/docker-run", () => {
     }
 
     it("is valid bash", () => {
-        expect(spawnSync("bash", ["-n", script]).status).toBe(0)
+        expect(spawnSync(BASH as string, ["-n", script]).status).toBe(0)
     })
 
     it("the default instance keeps 3006, and --port 53550 is the same instance", () => {

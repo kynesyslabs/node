@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, setDefaultTimeout } from "bun:test"
 import { spawnSync } from "node:child_process"
 import * as path from "node:path"
-import { makeRoot, ptyAvailable, removeRoot, writeSubnet } from "./testSupport"
+import { PYTHON, makeRoot, ptyAvailable, removeRoot, writeSubnet } from "./testSupport"
 
 // Drives gateHarness.ts under a pseudo-terminal. The child waits for the
 // prompt text before it sends the keys, so the result does not depend on how
@@ -69,7 +69,7 @@ afterEach(() => removeRoot(root))
 
 function drive(opts: { send?: string; timeoutMs?: number; stdin?: "tty" | "null" | "background"; stdout?: "tty" | "pipe"; env?: Record<string, string> }) {
     const r = spawnSync(
-        "python3",
+        PYTHON as string,
         ["-c", DRIVER, process.execPath, "Run the setup now?", opts.send ?? "-", opts.stdin ?? "tty", opts.stdout ?? "tty", harness],
         {
             encoding: "utf8",

@@ -5,12 +5,36 @@ import * as path from "node:path"
 import type { Prompter } from "./prompt"
 import type { ZkRunner } from "./zk"
 
+// Tools are found in a fixed list of system directories, never by a bare name
+// through PATH, so a writable directory early in PATH cannot substitute them.
+const TOOL_DIRS = ["/usr/bin", "/bin", "/usr/local/bin"]
+
+/** Absolute path of a system tool, or undefined so the test that needs it can skip. */
+export function findExecutable(name: string): string | undefined {
+    for (const dir of TOOL_DIRS) {
+        const candidate = path.join(dir, name)
+        try {
+            fs.accessSync(candidate, fs.constants.X_OK)
+            return candidate
+        } catch {
+            /* try the next directory */
+        }
+    }
+    return undefined
+}
+
+export const PYTHON = findExecutable("python3")
+export const GIT = findExecutable("git")
+export const DOCKER = findExecutable("docker")
+export const BASH = findExecutable("bash")
+
 /**
  * Whether a pseudo-terminal can be opened here. Containers without /dev/ptmx
  * (some CI sandboxes) cannot, and the terminal tests are skipped there.
  */
 export const ptyAvailable =
-    spawnSync("python3", ["-c", "import os, pty\nm, s = pty.openpty()\nos.close(m)\nos.close(s)"]).status === 0
+    PYTHON !== undefined &&
+    spawnSync(PYTHON, ["-c", "import os, pty\nm, s = pty.openpty()\nos.close(m)\nos.close(s)"]).status === 0
 
 /** root ignores file modes, so tests that rely on a refused write or read cannot run as root. */
 export const isRoot = process.getuid?.() === 0

@@ -2,6 +2,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { L2PS_ZK_DIR, ZK_IDENTITY_VKEY } from "./context"
 import { sameJson } from "./l2ps"
+import { trimTrailingSlashes } from "./validate"
 
 export const BATCH_SIZES = [5, 10] as const
 export type BatchSize = (typeof BATCH_SIZES)[number]
@@ -231,7 +232,7 @@ export async function runL2psZkSetup(
             for (const base of ptauBaseUrls) {
                 try {
                     await runner.download(
-                        `${base.replace(/\/+$/, "")}/${ptauName}`,
+                        `${trimTrailingSlashes(base)}/${ptauName}`,
                         ptau,
                         PTAU_MIN_BYTES,
                     )

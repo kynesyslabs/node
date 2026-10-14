@@ -67,7 +67,7 @@ afterAll(() => {
 })
 
 function setup(args: string[], env: Record<string, string> = {}) {
-    const r = spawnSync("bun", ["run", "setup", ...args], {
+    const r = spawnSync(process.execPath, ["run", "setup", ...args], {
         cwd: copy,
         encoding: "utf8",
         env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", DEMOS_IN_DOCKER: "false", ...env },

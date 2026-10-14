@@ -4,7 +4,7 @@ import * as path from "node:path"
 import { spawnSync } from "node:child_process"
 import { runCli } from "./cli"
 import { inspectBatchArtifacts, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
-import { fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
+import { GIT, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -236,10 +236,10 @@ describe("the wizard never switches proofs on after a failure", () => {
 
 // A source tarball or a container image has no .git, so there is nothing to ask.
 const repo = path.resolve(import.meta.dir, "../../..")
-const hasGit = fs.existsSync(path.join(repo, ".git")) && spawnSync("git", ["--version"]).status === 0
+const hasGit = fs.existsSync(path.join(repo, ".git")) && GIT !== undefined
 
 describe.skipIf(!hasGit)("what git is told to ignore", () => {
-    const ignored = (file: string) => spawnSync("git", ["check-ignore", "-q", file], { cwd: repo }).status === 0
+    const ignored = (file: string) => spawnSync(GIT as string, ["check-ignore", "-q", file], { cwd: repo }).status === 0
 
     it("covers every file the setup can leave behind", () => {
         for (const f of [

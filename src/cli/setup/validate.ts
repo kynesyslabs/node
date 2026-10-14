@@ -84,6 +84,13 @@ export const IV_BYTES = [12, 16]
 export const validateKeyHex = (v: string) => validateHex(v, "Key", KEY_BYTES)
 export const validateIvHex = (v: string) => validateHex(v, "IV", IV_BYTES)
 
+/** A scan from the end: `/\/+$/` retries from every slash of a long run and is quadratic. */
+export function trimTrailingSlashes(text: string): string {
+    let end = text.length
+    while (end > 0 && text[end - 1] === "/") end--
+    return text.slice(0, end)
+}
+
 export function validateRpcUrl(value: string): Result<string> {
     const raw = value.trim()
     // `new URL` also takes "http:host", which would be stored verbatim and read
@@ -106,7 +113,7 @@ export function validateRpcUrl(value: string): Result<string> {
     }
     // The scheme is case-insensitive; stored in one form so the same address
     // is never listed twice under two spellings.
-    return ok(raw.replace(/^https?/i, m => m.toLowerCase()).replace(/\/+$/, ""))
+    return ok(trimTrailingSlashes(raw.replace(/^https?/i, m => m.toLowerCase())))
 }
 
 /** Comma or whitespace separated list of RPC URLs; at least one. */
