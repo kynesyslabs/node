@@ -7,7 +7,7 @@ import {
 } from "../../config/envFlags"
 import type { SetupContext } from "./context"
 import { inspectSubnets, type SubnetStatus } from "./l2ps"
-import { inspectBatchArtifacts, inspectIdentityKey } from "./zk"
+import { inspectBatchArtifacts, inspectIdentityKey, type BatchArtifacts } from "./zk"
 import { validatePort } from "./validate"
 
 export type CheckStatus = "ok" | "missing" | "invalid" | "warn" | "off"
@@ -161,6 +161,49 @@ function retentionItem(raw: string): CheckItem {
     }
 }
 
+function portItem(rawPort: string | undefined): CheckItem {
+    const node = parseMessagingPort(rawPort)
+    // The setup writes plain digits; a value the node reads differently (or
+    // compose rejects) is worth saying so.
+    const strict = rawPort === undefined ? undefined : validatePort(rawPort)
+    const exact = strict?.ok === true && strict.value === node.port
+    const base = { area: "L2PS messaging", item: "Port", blocking: false }
+    const key = EnvKey.L2PS_MESSAGING_PORT
+    if (node.source === "default") {
+        return { ...base, status: "ok", detail: `default ${node.port}` }
+    }
+    if (exact) return { ...base, status: "ok", detail: String(node.port) }
+    if (node.source === "env") {
+        return {
+            ...base,
+            status: "warn",
+            detail: `${key}=${rawPort}: the node reads it as ${node.port}, but docker compose rejects it; write plain digits`,
+            fix: L2PS_FIX,
+        }
+    }
+    return {
+        ...base,
+        status: "invalid",
+        detail: `${key}=${rawPort}: not a port from 1 to 65535; the node falls back to ${node.port}`,
+        fix: L2PS_FIX,
+    }
+}
+
+function messagingItems(env: SetupContext["env"], hasSubnet: boolean): CheckItem[] {
+    if (!parseMessagingEnabled(env[EnvKey.L2PS_MESSAGING_ENABLED])) {
+        return [{ area: "L2PS messaging", item: "Messaging", status: "off", detail: "not enabled", blocking: false }]
+    }
+    const subnet: CheckItem = {
+        area: "L2PS messaging",
+        item: "Subnet for messaging",
+        status: hasSubnet ? "ok" : "missing",
+        detail: hasSubnet ? "at least one subnet is loaded" : "messaging is on but no usable subnet exists",
+        blocking: !hasSubnet,
+        fix: hasSubnet ? undefined : L2PS_FIX,
+    }
+    return [subnet, portItem(env[EnvKey.L2PS_MESSAGING_PORT])]
+}
+
 function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
     const out: CheckItem[] = []
     const env = ctx.env
@@ -178,61 +221,13 @@ function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
             blocking: false,
         })
     }
-
-    if (parseMessagingEnabled(env[EnvKey.L2PS_MESSAGING_ENABLED])) {
-        const rawPort = env[EnvKey.L2PS_MESSAGING_PORT]
-        const node = parseMessagingPort(rawPort)
-        // The setup writes plain digits; a value the node reads differently
-        // (or compose rejects) is worth saying so.
-        const strict = rawPort === undefined ? undefined : validatePort(rawPort)
-        out.push({
-            area: "L2PS messaging",
-            item: "Subnet for messaging",
-            status: hasSubnet ? "ok" : "missing",
-            detail: hasSubnet
-                ? "at least one subnet is loaded"
-                : "messaging is on but no usable subnet exists",
-            blocking: !hasSubnet,
-            fix: hasSubnet ? undefined : L2PS_FIX,
-        })
-        const exact = strict?.ok === true && strict.value === node.port
-        out.push({
-            area: "L2PS messaging",
-            item: "Port",
-            status:
-                node.source === "default" || exact
-                    ? "ok"
-                    : node.source === "env"
-                      ? "warn"
-                      : "invalid",
-            detail:
-                node.source === "default"
-                    ? `default ${node.port}`
-                    : exact
-                      ? String(node.port)
-                      : node.source === "env"
-                        ? `${EnvKey.L2PS_MESSAGING_PORT}=${rawPort}: the node reads it as ${node.port}, but docker compose rejects it; write plain digits`
-                        : `${EnvKey.L2PS_MESSAGING_PORT}=${rawPort}: not a port from 1 to 65535; the node falls back to ${node.port}`,
-            blocking: false,
-            fix: node.source === "default" || exact ? undefined : L2PS_FIX,
-        })
-    } else {
-        out.push({
-            area: "L2PS messaging",
-            item: "Messaging",
-            status: "off",
-            detail: "not enabled",
-            blocking: false,
-        })
-    }
+    out.push(...messagingItems(env, hasSubnet))
     return out
 }
 
-function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
-    const out: CheckItem[] = []
-
-    const identity = inspectIdentityKey(ctx.root)
-    out.push({
+function identityItem(root: string): CheckItem {
+    const identity = inspectIdentityKey(root)
+    return {
         area: "ZK identity",
         item: "Verification key",
         status: identity.state,
@@ -240,54 +235,58 @@ function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
         blocking: identity.state !== "ok",
         fatal: true,
         fix: identity.state === "ok" ? undefined : IDENTITY_KEY_FIX,
-    })
+    }
+}
 
+/** Why batch proofs are not being required, in the operator's terms. */
+function notRequestedDetail(flag: boolean | undefined, anyComplete: boolean): string {
+    if (flag === true) return "L2PS_ZK_ENABLED=true but no subnet is configured, nothing to prove"
+    if (flag === false) return "off (L2PS_ZK_ENABLED=false)"
+    if (anyComplete) return "keys are present; proofs are used when a subnet is joined"
+    return "not requested (set L2PS_ZK_ENABLED=true to require them)"
+}
+
+function batchItem(b: BatchArtifacts, batches: BatchArtifacts[], anyComplete: boolean): CheckItem {
+    const base = { area: "L2PS ZK", item: `Batch of up to ${b.size}` }
+    if (b.complete) {
+        return { ...base, status: "ok", detail: "proving key, circuit and verification key are in place", blocking: false }
+    }
+    const missing = [!b.zkey && "proving key", !b.wasm && "circuit wasm", !b.vkey && "verification key"]
+        .filter(Boolean)
+        .join(", ")
+    if (!anyComplete) {
+        return { ...base, status: "missing", detail: `${missing} missing`, blocking: true, fix: ZK_FIX }
+    }
+    const largest = Math.max(...batches.filter(x => x.complete).map(x => x.size))
+    return {
+        ...base,
+        status: "warn",
+        detail: `${missing} missing; batches above ${largest} transactions cannot be proven`,
+        blocking: false,
+        fix: ZK_FIX,
+    }
+}
+
+function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
+    const out: CheckItem[] = [identityItem(ctx.root)]
     const flag = parseBoolFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED])
-    // The code default is on, which only means "use the keys if they exist";
-    // an explicit true is the operator asking for proofs.
-    const requested = flag === true && hasSubnet
     const batches = inspectBatchArtifacts(ctx.root)
     const anyComplete = batches.some(b => b.complete)
 
-    if (!requested) {
+    // The code default is on, which only means "use the keys if they exist";
+    // an explicit true is the operator asking for proofs.
+    if (!(flag === true && hasSubnet)) {
         out.push({
             area: "L2PS ZK",
             item: "Batch proofs",
             status: anyComplete ? "ok" : "off",
-            detail:
-                flag === true
-                    ? "L2PS_ZK_ENABLED=true but no subnet is configured, nothing to prove"
-                    : flag === false
-                      ? "off (L2PS_ZK_ENABLED=false)"
-                      : anyComplete
-                        ? "keys are present; proofs are used when a subnet is joined"
-                        : "not requested (set L2PS_ZK_ENABLED=true to require them)",
+            detail: notRequestedDetail(flag, anyComplete),
             blocking: false,
             fix: anyComplete ? undefined : ZK_FIX,
         })
         return out
     }
-
-    for (const b of batches) {
-        const missing = [
-            !b.zkey && "proving key",
-            !b.wasm && "circuit wasm",
-            !b.vkey && "verification key",
-        ].filter(Boolean)
-        const blocking = !anyComplete
-        out.push({
-            area: "L2PS ZK",
-            item: `Batch of up to ${b.size}`,
-            status: b.complete ? "ok" : blocking ? "missing" : "warn",
-            detail: b.complete
-                ? "proving key, circuit and verification key are in place"
-                : anyComplete
-                  ? `${missing.join(", ")} missing; batches above ${Math.max(...batches.filter(x => x.complete).map(x => x.size))} transactions cannot be proven`
-                  : `${missing.join(", ")} missing`,
-            blocking,
-            fix: b.complete ? undefined : ZK_FIX,
-        })
-    }
+    out.push(...batches.map(b => batchItem(b, batches, anyComplete)))
     return out
 }
 
