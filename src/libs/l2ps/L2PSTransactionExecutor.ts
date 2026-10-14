@@ -649,6 +649,10 @@ export default class L2PSTransactionExecutor {
         // check reads this table, and a prune must not make an executed
         // transfer look new.
         const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+        // A retention longer than the table's existence matches nothing, and
+        // a cutoff before the epoch or not a number is outside what the
+        // database converts: it would fail the sweep instead of finding no row.
+        if (!Number.isFinite(cutoffMs) || cutoffMs <= 0) return 0
         const [{ pruned }] = await ds.query(
             `WITH deleted AS (
                 DELETE FROM "l2ps_transactions"
