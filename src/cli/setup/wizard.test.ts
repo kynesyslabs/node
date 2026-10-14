@@ -607,3 +607,34 @@ describe("absolute key paths in config.json", () => {
         expect(out).toContain("is ready")
     })
 })
+
+describe("node-wide L2PS options without a subnet request", () => {
+    it("applies --messaging and the history flags next to a healthy existing subnet", async () => {
+        writeSubnet(root, "good")
+        const { code, out } = await cli(["--yes", "--messaging", "--messaging-port", "3100", "--history-retention-days", "14", "--history-require-v2"])
+        expect(code).toBe(0)
+        expect(envOf()).toMatchObject({
+            L2PS_MESSAGING_ENABLED: "true",
+            L2PS_MESSAGING_PORT: "3100",
+            L2PS_HISTORY_RETENTION_DAYS: "14",
+            L2PS_HISTORY_REQUIRE_V2: "true",
+        })
+        expect(out).toContain("only the options you gave are applied")
+        // The subnet itself is left alone.
+        expect(out).not.toContain("created data")
+    })
+
+    it("applies them when the interactive answer to the subnet question is no, without asking more", async () => {
+        writeSubnet(root, "good")
+        const p = scriptedPrompter(["n", "n"]) // subnet question, then the ZK question
+        await cli(["--messaging"], { isTTY: true, prompter: p })
+        expect(envOf().L2PS_MESSAGING_ENABLED).toBe("true")
+        expect(p.asked.filter(q => /messaging|retention|plaintext|signature/i.test(q))).toEqual([])
+    })
+
+    it("still does nothing when no flag is given", async () => {
+        writeSubnet(root, "good")
+        await cli(["--yes"])
+        expect(fs.existsSync(path.join(root, ".env"))).toBe(false)
+    })
+})

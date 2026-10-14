@@ -183,10 +183,26 @@ async function l2psSection(
     }
     const broken = subnets.filter(s => s.state === "invalid" || s.state === "missing-files")
 
+    // History and messaging flags are node-wide: they apply to a healthy
+    // existing subnet too, so they must not depend on adding or repairing one.
+    const envFlagGiven =
+        opts.retentionDays !== undefined ||
+        opts.storePlaintext !== undefined ||
+        opts.requireV2 !== undefined ||
+        opts.messaging !== undefined ||
+        opts.messagingPort !== undefined
+    const applyFlagsOnly = () =>
+        envFlagGiven ? collectL2psEnv({ ...deps, prompter: undefined }, wantedEnv) : Promise.resolve()
+
     let enable = opts.l2ps ?? (opts.uid !== undefined ? true : undefined)
     if (enable === undefined) {
         if (!prompter) {
-            say("  Nothing requested (use --l2ps-uid <id> to set up a subnet). Left as it is.")
+            await applyFlagsOnly()
+            say(
+                envFlagGiven
+                    ? "  No subnet requested (use --l2ps-uid <id> to set one up); only the options you gave are applied."
+                    : "  Nothing requested (use --l2ps-uid <id> to set up a subnet). Left as it is.",
+            )
             return
         }
         const question =
@@ -198,7 +214,8 @@ async function l2psSection(
         enable = await confirm(prompter, question, broken.length > 0, say)
     }
     if (!enable) {
-        say("  L2PS left as it is.")
+        await applyFlagsOnly()
+        say("  L2PS subnets left as they are.")
         return
     }
 
