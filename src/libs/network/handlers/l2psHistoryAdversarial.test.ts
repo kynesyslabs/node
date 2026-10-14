@@ -9,47 +9,21 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test"
 import forge from "node-forge"
+import { mockHandlerModules } from "./handlerMocks"
 
 const getAccountTransactions = jest.fn(async (..._args: unknown[]) => [] as any[])
 
-jest.mock("../../blockchain/l2ps_mempool", () => ({
-    __esModule: true,
-    default: { getByUID: jest.fn() },
-    L2PS_STATUS: {},
-}))
-
-jest.mock("../../l2ps/L2PSTransactionExecutor", () => ({
-    __esModule: true,
-    default: { getAccountTransactions },
-}))
-
 const subnetDecryptor = jest.fn(async (_uid: string): Promise<any> => undefined)
-jest.mock("@/libs/l2ps/historyPayload", () => ({
-    resolveHistoryEntry: jest.fn(async () => ({ message: null, content: null })),
-    subnetDecryptor,
-}))
-
 const NODE_KEY = "0x" + "ab".repeat(32)
-
 const sharedState: Record<string, unknown> = {}
-jest.mock("src/utilities/sharedState", () => ({ getSharedState: sharedState }))
-
 const l2psConfig = { historyRequireV2: false }
-jest.mock("src/config", () => ({
-    Config: { getInstance: () => ({ l2ps: l2psConfig }) },
-}))
 
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockHandlerModules({
+    executor: { getAccountTransactions },
+    payload: { resolveHistoryEntry: jest.fn(async () => ({ message: null, content: null })), subnetDecryptor },
+    sharedState,
+    config: l2psConfig,
+})
 
 const { l2psHandlers } = await import("./l2psHandlers")
 const { historyAuthMessageV2 } = await import("@/libs/l2ps/historyAuth")

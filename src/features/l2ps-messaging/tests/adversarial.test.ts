@@ -6,194 +6,30 @@
  * different messages look like one, cannot leave a sender worse off after a
  * failure, and cannot turn a malformed field into a crash or an unbounded read.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "bun:test"
-import { generateKeyPairSync, sign, type KeyObject } from "node:crypto"
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+import {
+    Client,
+    conditions,
+    encrypted,
+    faults,
+    identity,
+    queryTake,
+    register,
+    relay,
+    resetRelay,
+    rows,
+    sendAndWait,
+    service,
+    startRelayServer,
+    stopRelayServer,
+    submitToL2PS,
+    type Identity,
+} from "./relayHarness"
+import { sign } from "node:crypto"
 
-// ─── In-memory l2ps_messages ─────────────────────────────────────
-
-type Row = Record<string, any>
-const rows = new Map<string, Row>()
-const faults: {
-    save: Error | null
-    update: ((patch: Row) => Error | null) | null
-} = { save: null, update: null }
-const tupleOf = (r: Row) => JSON.stringify([r.l2psUid, r.fromKey, r.toKey, r.messageHash])
-
-const repo = {
-    findOneBy: async (where: Row) =>
-        [...rows.values()].find(r => Object.entries(where).every(([k, v]) => r[k] === v)) ?? null,
-    save: async (row: Row) => {
-        if (faults.save) throw faults.save
-        for (const r of rows.values()) {
-            if (r.id !== row.id && tupleOf(r) === tupleOf(row)) {
-                throw Object.assign(new Error("duplicate key"), { code: "23505" })
-            }
-        }
-        rows.set(row.id, { ...row })
-        return row
-    },
-    update: async (criteria: string | string[] | Row, patch: Row) => {
-        const fault = faults.update?.(patch)
-        if (fault) throw fault
-        const matches = typeof criteria === "string" || Array.isArray(criteria)
-            ? [criteria].flat().map(id => rows.get(id)).filter(Boolean) as Row[]
-            : [...rows.values()].filter(r => Object.entries(criteria).every(([k, v]) => r[k] === v))
-        for (const r of matches) Object.assign(r, patch)
-        return { affected: matches.length }
-    },
-    delete: async (id: string) => {
-        rows.delete(id)
-    },
-    find: async (query?: { where?: unknown }) =>
-        Array.isArray(query?.where)
-            ? (query.where as Row[]).map(w => rows.get(w.id)).filter(Boolean).map(r => ({ ...r }))
-            : [],
-    createQueryBuilder: () => {
-        const qb: any = {
-            where: () => qb,
-            andWhere: (_clause: string, params: unknown) => {
-                conditions.push(params)
-                return qb
-            },
-            orderBy: () => qb,
-            take: (n: unknown) => {
-                queryTake.push(n)
-                return qb
-            },
-            getMany: async () => [],
-        }
-        return qb
-    },
-}
-const queryTake: unknown[] = []
-const conditions: unknown[] = []
-
-const SUBNETS = new Set(["subnet_a", "subnet_b"])
-
-jest.mock("@/model/datasource", () => ({
-    __esModule: true,
-    dataSource: { getRepository: () => repo },
-    default: { getInstance: async () => ({ getDataSource: () => ({ getRepository: () => repo }) }) },
-}))
-jest.mock("@/libs/l2ps/parallelNetworks", () => ({
-    __esModule: true,
-    default: { getInstance: () => ({ getL2PS: async (uid: string) => (SUBNETS.has(uid) ? {} : null) }) },
-}))
-jest.mock("@/libs/blockchain/transaction", () => ({ __esModule: true, default: class {} }))
-jest.mock("@/libs/blockchain/l2ps_mempool", () => ({ __esModule: true, default: {} }))
-jest.mock("@/libs/l2ps/L2PSTransactionExecutor", () => ({ __esModule: true, default: {} }))
-jest.mock("@/utilities/sharedState", () => ({ getSharedState: { signingAlgorithm: "ed25519" } }))
-
-const { L2PSMessagingService } = await import("../L2PSMessagingService")
-const { L2PSMessagingServer } = await import("../L2PSMessagingServer")
-
-const service = L2PSMessagingService.getInstance() as any
-let submitResult: { success: boolean; txHash?: string; error?: string } = { success: true, txHash: "0xtx" }
-// The service is a process-wide singleton shared with other test files.
-const submitToL2PS = jest.spyOn(service, "submitToL2PS").mockImplementation(async () => submitResult)
-
-// ─── Keys and sockets ────────────────────────────────────────────
-
-interface Identity {
-    publicKey: string
-    privateKey: KeyObject
-}
-
-function identity(): Identity {
-    const { publicKey, privateKey } = generateKeyPairSync("ed25519")
-    const raw = Buffer.from(publicKey.export({ format: "jwk" }).x as string, "base64url")
-    return { publicKey: raw.toString("hex"), privateKey }
-}
-
-function proofFor(id: Identity, timestamp: number, l2psUid?: string): string {
-    const message = l2psUid ? `register:${l2psUid}:${id.publicKey}:${timestamp}` : `register:${id.publicKey}:${timestamp}`
-    return sign(null, Buffer.from(message), id.privateKey).toString("hex")
-}
-
-let server: InstanceType<typeof L2PSMessagingServer>
-let port: number
-
-beforeAll(() => {
-    // Port 0 lets the system pick a free one, so a busy port cannot fail the run.
-    server = new L2PSMessagingServer(0)
-    port = (server as unknown as { server: { port: number } }).server.port
-})
-
-afterAll(() => {
-    server.stop()
-    submitToL2PS.mockRestore()
-})
-
-beforeEach(() => {
-    rows.clear()
-    queryTake.length = 0
-    conditions.length = 0
-    submitToL2PS.mockImplementation(async () => submitResult)
-    faults.save = null
-    faults.update = null
-    submitToL2PS.mockClear()
-    submitResult = { success: true, txHash: "0xtx" }
-})
-
-class Client {
-    private inbox: any[] = []
-    private waiters: Array<() => void> = []
-    constructor(readonly ws: WebSocket) {
-        ws.addEventListener("message", e => {
-            this.inbox.push(JSON.parse(e.data as string))
-            this.waiters.splice(0).forEach(w => w())
-        })
-    }
-
-    static async open(): Promise<Client> {
-        const ws = new WebSocket(`ws://localhost:${port}`)
-        await new Promise((resolve, reject) => {
-            ws.addEventListener("open", resolve)
-            ws.addEventListener("error", reject)
-        })
-        return new Client(ws)
-    }
-
-    frame(type: string, payload: Record<string, unknown>, timestamp = Date.now()): void {
-        this.ws.send(JSON.stringify({ type, payload, timestamp }))
-    }
-
-    async next(type: string | string[], timeout = 2000): Promise<any> {
-        const types = Array.isArray(type) ? type : [type]
-        const deadline = Date.now() + timeout
-        for (;;) {
-            const i = this.inbox.findIndex(f => types.includes(f.type) || f.type === "error")
-            if (i >= 0) return this.inbox.splice(i, 1)[0]
-            if (Date.now() > deadline) throw new Error(`timeout waiting for ${type}`)
-            await new Promise<void>(r => {
-                this.waiters.push(r)
-                setTimeout(r, 50)
-            })
-        }
-    }
-
-    has(type: string): boolean {
-        return this.inbox.some(f => f.type === type)
-    }
-
-    close(): void {
-        this.ws.close()
-    }
-}
-
-async function register(id: Identity, l2psUid = "subnet_a", timestamp = Date.now(), proof?: string) {
-    const client = await Client.open()
-    client.frame("register", { publicKey: id.publicKey, l2psUid, proof: proof ?? proofFor(id, timestamp) }, timestamp)
-    return { client, reply: await client.next("registered") }
-}
-
-const encrypted = { ciphertext: Buffer.from("quote").toString("base64"), nonce: Buffer.from("n").toString("base64") }
-
-async function sendAndWait(from: Client, to: Identity, messageHash: string) {
-    from.frame("send", { to: to.publicKey, encrypted, messageHash })
-    return from.next(["message_sent", "message_queued"])
-}
-
+beforeAll(startRelayServer)
+afterAll(stopRelayServer)
+beforeEach(resetRelay)
 
 const quotaOf = (key: string): number => service.offlineMessageCounts.get(key) ?? 0
 
@@ -284,7 +120,7 @@ describe("the offline quota follows the queued row", () => {
     })
 
     it("a failed submission releases the slot and leaves the row failed", async () => {
-        submitResult = { success: false, error: "mempool unavailable" }
+        relay.submitResult = { success: false, error: "mempool unavailable" }
         const result = await send("quota-d", "h3")
 
         expect(result.success).toBe(false)
@@ -293,7 +129,7 @@ describe("the offline quota follows the queued row", () => {
     })
 
     it("when the update to failed throws, the row is still queued and keeps its slot", async () => {
-        submitResult = { success: false, error: "mempool unavailable" }
+        relay.submitResult = { success: false, error: "mempool unavailable" }
         faults.update = patch => (patch.status === "failed" ? new Error("connection terminated") : null)
         await expect(send("quota-b", "h2")).rejects.toThrow()
 
@@ -328,11 +164,11 @@ describe("the offline quota follows the queued row", () => {
     })
 
     it("a retry of the failed row takes a slot again and releases it with the row", async () => {
-        submitResult = { success: false, error: "mempool unavailable" }
+        relay.submitResult = { success: false, error: "mempool unavailable" }
         await send("quota-g", "h7")
         expect(quotaOf("quota-g")).toBe(0)
 
-        submitResult = { success: true, txHash: "0xtx" }
+        relay.submitResult = { success: true, txHash: "0xtx" }
         const retried = await send("quota-g", "h7")
         expect(retried.success).toBe(true)
         expect(quotaOf("quota-g")).toBe(1)

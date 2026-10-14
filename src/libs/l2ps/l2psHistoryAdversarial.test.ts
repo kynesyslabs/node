@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it, jest } from "bun:test"
 
 const save = jest.fn(async (row: any) => ({ ...row, id: 1 }))
 const create = jest.fn((row: any) => row)
-const execute = jest.fn(async () => ({ affected: 3 }))
 const getMany = jest.fn(async () => [])
 const rawQuery = jest.fn(async (_sql: string, _params: unknown[]) => [{ pruned: 3 }])
 
@@ -20,79 +19,39 @@ const taken: unknown[] = []
 const skipped: unknown[] = []
 const orderings: string[] = []
 
-const queryBuilder = {
-    where(clause: string, params: any) {
-        whereClauses.push({ clause, params })
-        return this
-    },
-    andWhere(clause: string, params: any) {
-        whereClauses.push({ clause, params })
-        return this
-    },
-    delete() {
-        return this
-    },
-    from() {
-        return this
-    },
-    orderBy(column: string, direction: string) {
-        orderings.push(`${column} ${direction}`)
-        return this
-    },
-    addOrderBy(column: string, direction: string) {
-        orderings.push(`${column} ${direction}`)
-        return this
-    },
-    take(n: unknown) {
-        taken.push(n)
-        return this
-    },
-    skip(n: unknown) {
-        skipped.push(n)
-        return this
-    },
-    execute,
-    getMany,
+// Every builder method is recorded by name and chains; only the two that end
+// a query answer. What a test reads back is what the code asked the database.
+const recordWhere = ([clause, params]: unknown[]) => whereClauses.push({ clause: String(clause), params })
+const recordOrder = ([column, direction]: unknown[]) => orderings.push(`${column} ${direction}`)
+const recorders: Record<string, (args: unknown[]) => unknown> = {
+    where: recordWhere,
+    andWhere: recordWhere,
+    orderBy: recordOrder,
+    addOrderBy: recordOrder,
+    take: ([n]) => taken.push(n),
+    skip: ([n]) => skipped.push(n),
 }
+const queryBuilder: any = new Proxy({}, {
+    get: (_target, method: string) =>
+        method === "getMany"
+            ? getMany
+            : (...args: unknown[]) => {
+                recorders[method]?.(args)
+                return queryBuilder
+            },
+})
 
 const storePlaintext = { value: false }
 
 jest.mock("src/config", () => ({
-    Config: {
-        getInstance: () => ({
-            l2ps: {
-                get historyStorePlaintext() {
-                    return storePlaintext.value
-                },
-            },
-        }),
-    },
+    Config: { getInstance: () => ({ l2ps: { get historyStorePlaintext() { return storePlaintext.value } } }) },
 }))
-
-jest.mock("@/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
-
+jest.mock("@/utilities/logger", () => ({ __esModule: true, default: new Proxy({}, { get: () => jest.fn() }) }))
 jest.mock("@/model/datasource", () => ({
     __esModule: true,
     default: {
         getInstance: async () => ({
-            getDataSource: () => ({
-                query: rawQuery,
-                getRepository: () => ({
-                    create,
-                    save,
-                    createQueryBuilder: () => queryBuilder,
-                }),
-            }),
+            getDataSource: () => ({ query: rawQuery, getRepository: () => ({ create, save, createQueryBuilder: () => queryBuilder }) }),
         }),
     },
 }))

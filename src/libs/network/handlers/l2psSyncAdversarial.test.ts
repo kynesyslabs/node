@@ -7,39 +7,12 @@
  */
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { mockHandlerModules } from "./handlerMocks"
 
 const getByUID = jest.fn(async (..._args: unknown[]) => [] as any[])
 const getSubnetTransactions = jest.fn()
 
-jest.mock("../../blockchain/l2ps_mempool", () => ({
-    __esModule: true,
-    default: { getByUID },
-    L2PS_STATUS: { EXECUTED: "executed", BATCHED: "batched", CONFIRMED: "confirmed" },
-}))
-
-jest.mock("../../l2ps/L2PSTransactionExecutor", () => ({
-    __esModule: true,
-    default: { getSubnetTransactions },
-}))
-
-jest.mock("@/libs/l2ps/historyPayload", () => ({
-    resolveHistoryEntry: jest.fn(),
-    subnetDecryptor: jest.fn(),
-}))
-
-jest.mock("src/utilities/sharedState", () => ({ getSharedState: {} }))
-
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockHandlerModules({ executor: { getSubnetTransactions }, mempool: { getByUID } })
 
 const { l2psHandlers } = await import("./l2psHandlers")
 
