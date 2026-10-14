@@ -3,7 +3,8 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { runCli } from "./cli"
 import { parseEnv } from "./envFile"
-import { fakeRunner, makeRoot, recorder, removeRoot, writeSubnet } from "./testSupport"
+import { parseMessagingEnabled } from "../../config/envFlags"
+import { fakeRunner, makeRoot, recorder, removeRoot, scriptedPrompter, writeSubnet } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -60,5 +61,48 @@ describe("messaging needs a subnet", () => {
         const { out } = await cli(["--yes", "--dry-run", "--only", "l2ps", "--messaging"])
         expect(out).toContain("--l2ps-uid")
         expect(fs.existsSync(path.join(root, ".env"))).toBe(false)
+    })
+})
+
+describe("answering no to messaging when the file already turns it on", () => {
+    // Flags settle every other question, so the only prompts are the messaging
+    // question and, when the value in the file differs, the confirmation.
+    async function interactive(existing: string, answers: string[]) {
+        fs.writeFileSync(path.join(root, ".env"), `L2PS_MESSAGING_ENABLED=${existing}\n`)
+        const p = scriptedPrompter(answers)
+        const r = recorder()
+        const code = await runCli(
+            ["--only", "l2ps", "--l2ps-uid", "s1", "--l2ps-role", "create", "--l2ps-rpc", "http://a:1", "--history-retention-days", "0", "--no-history-store-plaintext", "--no-history-require-v2"],
+            { cwd: root, env: {}, isTTY: true, say: r.say, prompter: p, runner: fakeRunner(), inDocker: false },
+        )
+        return { code, asked: p.asked, out: r.text() }
+    }
+
+    it("turns it off whenever the node reads the current value as on", async () => {
+        for (const on of ["true", "TRUE", "True", "tRuE", "1"].filter(v => parseMessagingEnabled(v))) {
+            const { code, asked } = await interactive(on, ["n", "y"])
+            expect([on, code]).toEqual([on, 0])
+            expect(asked.some(q => q.includes("instant-messaging") && q.includes("[Y/n]"))).toBe(true)
+            expect([on, envOf().L2PS_MESSAGING_ENABLED]).toEqual([on, "false"])
+        }
+    })
+
+    it("which includes TRUE and True, which the other flags read as off", async () => {
+        expect(parseMessagingEnabled("TRUE")).toBe(true)
+        expect(parseMessagingEnabled("True")).toBe(true)
+    })
+
+    it("leaves the file alone when the node already reads it as off and the answer is no", async () => {
+        for (const off of ["yes", "on", "0", "false", "FALSE"]) {
+            const { code } = await interactive(off, ["n"])
+            expect([off, code]).toEqual([off, 0])
+            expect([off, envOf().L2PS_MESSAGING_ENABLED]).toEqual([off, off])
+        }
+    })
+
+    it("writes true when the node reads the current value as off and the answer is yes", async () => {
+        const { code } = await interactive("yes", ["y", "", "y"])
+        expect(code).toBe(0)
+        expect(envOf().L2PS_MESSAGING_ENABLED).toBe("true")
     })
 })

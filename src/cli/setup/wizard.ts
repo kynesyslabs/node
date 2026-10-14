@@ -515,97 +515,113 @@ async function secretInput(
     return orThrow(validator(v), `Subnet ${label}`)
 }
 
-async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>): Promise<void> {
-    const { opts, prompter, ctx, say } = deps
-    const env = ctx.env
-    const num = (r: Result<number>) => (r.ok ? r.value : undefined)
-    const flag = (key: string) => String(parseBoolFlag(env[key]) ?? false)
-    // An explicit flag is always written. A prompted answer is written only
-    // when it differs from what is in effect now, so the env file does not
-    // fill up with the built-in defaults the operator accepted.
-    const put = (key: string, value: string, current: string, prompted: boolean) => {
-        if (!prompted || value !== current) wanted[key] = value
-    }
+/**
+ * An explicit flag is always written. A prompted answer is written only when
+ * its meaning differs from what is in effect now, so the env file does not fill
+ * up with the built-in defaults the operator accepted. The comparison is on the
+ * parsed meaning, not on the text: `TRUE` means on for messaging and off for the
+ * other flags, and answering "no" must be written whenever the node reads the
+ * current value as on.
+ */
+function putSetting(
+    wanted: Record<string, string>,
+    key: string,
+    value: boolean | number,
+    current: boolean | number,
+    prompted: boolean,
+): void {
+    if (!prompted || value !== current) wanted[key] = String(value)
+}
 
-    let retention = opts.retentionDays
-    const retentionCurrent = String(parseIntSetting(env[EnvKey.L2PS_HISTORY_RETENTION_DAYS]) ?? 0)
-    const retentionPrompted = retention === undefined && prompter !== undefined
-    if (retentionPrompted) {
-        const v = await ask(prompter, "Days to keep subnet history (0 keeps it forever)", {
-            default: retentionCurrent,
+interface FlagQuestion {
+    key: string
+    given: boolean | undefined
+    /** What the node reads the current environment as, by the node's own rule. */
+    current: boolean
+    question: string
+    /** A second question asked after a yes; a no there turns the answer back to no. */
+    confirmYes?: string
+}
+
+/** Asks about one on/off setting when it was not given, records the answer, and returns it. */
+async function collectFlag(deps: WizardDeps, wanted: Record<string, string>, q: FlagQuestion): Promise<boolean | undefined> {
+    const { prompter, say } = deps
+    let value = q.given
+    const prompted = value === undefined && prompter !== undefined
+    if (prompted) {
+        value = await confirm(prompter, q.question, q.current, say)
+        if (value && q.confirmYes !== undefined && !(await confirm(prompter, q.confirmYes, false, say))) {
+            value = false
+        }
+    }
+    if (value !== undefined) putSetting(wanted, q.key, value, q.current, prompted)
+    return value
+}
+
+async function collectRetention(deps: WizardDeps, wanted: Record<string, string>): Promise<void> {
+    const { opts, prompter, ctx, say } = deps
+    const current = parseIntSetting(ctx.env[EnvKey.L2PS_HISTORY_RETENTION_DAYS]) ?? 0
+    let days = opts.retentionDays
+    const prompted = days === undefined && prompter !== undefined
+    if (prompted) {
+        const answer = await ask(prompter, "Days to keep subnet history (0 keeps it forever)", {
+            default: String(current),
             validate: x => {
                 const r = validateNonNegativeInt(x)
                 return r.ok ? null : r.error
             },
             say,
         })
-        retention = num(validateNonNegativeInt(v))
+        const parsed = validateNonNegativeInt(answer)
+        days = parsed.ok ? parsed.value : undefined
     }
-    if (retention !== undefined) {
-        put(EnvKey.L2PS_HISTORY_RETENTION_DAYS, String(retention), retentionCurrent, retentionPrompted)
-    }
+    if (days !== undefined) putSetting(wanted, EnvKey.L2PS_HISTORY_RETENTION_DAYS, days, current, prompted)
+}
 
-    let plaintext = opts.storePlaintext
-    const plaintextPrompted = plaintext === undefined && prompter !== undefined
-    if (plaintextPrompted) {
-        plaintext = await confirm(
-            prompter,
-            "Also store decrypted message bodies in the database? (not recommended)",
-            parseBoolFlag(env[EnvKey.L2PS_HISTORY_STORE_PLAINTEXT]) ?? false,
+async function collectPort(deps: WizardDeps, wanted: Record<string, string>): Promise<void> {
+    const { opts, prompter, ctx, say } = deps
+    const current = parseMessagingPort(ctx.env[EnvKey.L2PS_MESSAGING_PORT]).port
+    let port = opts.messagingPort
+    const prompted = port === undefined && prompter !== undefined
+    if (prompted) {
+        const answer = await ask(prompter, "Messaging port", {
+            default: String(current),
+            validate: x => {
+                const r = validatePort(x)
+                return r.ok ? null : r.error
+            },
             say,
-        )
-        if (plaintext && !(await confirm(prompter, "Message bodies will be readable by anyone with database access. Keep this on?", false, say))) {
-            plaintext = false
-        }
+        })
+        const parsed = validatePort(answer)
+        port = parsed.ok ? parsed.value : undefined
     }
-    if (plaintext !== undefined) {
-        put(EnvKey.L2PS_HISTORY_STORE_PLAINTEXT, String(plaintext), flag(EnvKey.L2PS_HISTORY_STORE_PLAINTEXT), plaintextPrompted)
-    }
+    if (port !== undefined) putSetting(wanted, EnvKey.L2PS_MESSAGING_PORT, port, current, prompted)
+}
 
-    let requireV2 = opts.requireV2
-    const v2Prompted = requireV2 === undefined && prompter !== undefined
-    if (v2Prompted) {
-        requireV2 = await confirm(
-            prompter,
-            "Refuse the old history signature? (turn on only once clients sign the new form)",
-            parseBoolFlag(env[EnvKey.L2PS_HISTORY_REQUIRE_V2]) ?? false,
-            say,
-        )
-    }
-    if (requireV2 !== undefined) {
-        put(EnvKey.L2PS_HISTORY_REQUIRE_V2, String(requireV2), flag(EnvKey.L2PS_HISTORY_REQUIRE_V2), v2Prompted)
-    }
-
-    let messaging = opts.messaging
-    const messagingPrompted = messaging === undefined && prompter !== undefined
-    if (messagingPrompted) {
-        messaging = await confirm(
-            prompter,
-            "Enable the instant-messaging server on top of L2PS?",
-            parseMessagingEnabled(env[EnvKey.L2PS_MESSAGING_ENABLED]),
-            say,
-        )
-    }
-    if (messaging !== undefined) {
-        put(EnvKey.L2PS_MESSAGING_ENABLED, String(messaging), flag(EnvKey.L2PS_MESSAGING_ENABLED), messagingPrompted)
-    }
-    if (messaging) {
-        let port = opts.messagingPort
-        const portCurrent = String(parseMessagingPort(env[EnvKey.L2PS_MESSAGING_PORT]).port)
-        const portPrompted = port === undefined && prompter !== undefined
-        if (portPrompted) {
-            const v = await ask(prompter, "Messaging port", {
-                default: portCurrent,
-                validate: x => {
-                    const r = validatePort(x)
-                    return r.ok ? null : r.error
-                },
-                say,
-            })
-            port = num(validatePort(v))
-        }
-        if (port !== undefined) put(EnvKey.L2PS_MESSAGING_PORT, String(port), portCurrent, portPrompted)
-    }
+async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>): Promise<void> {
+    const { opts, ctx } = deps
+    const env = ctx.env
+    await collectRetention(deps, wanted)
+    await collectFlag(deps, wanted, {
+        key: EnvKey.L2PS_HISTORY_STORE_PLAINTEXT,
+        given: opts.storePlaintext,
+        current: parseBoolFlag(env[EnvKey.L2PS_HISTORY_STORE_PLAINTEXT]) ?? false,
+        question: "Also store decrypted message bodies in the database? (not recommended)",
+        confirmYes: "Message bodies will be readable by anyone with database access. Keep this on?",
+    })
+    await collectFlag(deps, wanted, {
+        key: EnvKey.L2PS_HISTORY_REQUIRE_V2,
+        given: opts.requireV2,
+        current: parseBoolFlag(env[EnvKey.L2PS_HISTORY_REQUIRE_V2]) ?? false,
+        question: "Refuse the old history signature? (turn on only once clients sign the new form)",
+    })
+    const messaging = await collectFlag(deps, wanted, {
+        key: EnvKey.L2PS_MESSAGING_ENABLED,
+        given: opts.messaging,
+        current: parseMessagingEnabled(env[EnvKey.L2PS_MESSAGING_ENABLED]),
+        question: "Enable the instant-messaging server on top of L2PS?",
+    })
+    if (messaging) await collectPort(deps, wanted)
 }
 
 // ---------------------------------------------------------------------------
