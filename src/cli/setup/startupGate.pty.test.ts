@@ -18,6 +18,15 @@ if pid == 0:
         os.dup2(os.open("/dev/null", os.O_RDONLY), 0)
     if stdout_mode == "pipe":
         os.dup2(os.open("/dev/null", os.O_WRONLY), 1)
+    if stdin_mode == "background":
+        # Like \`node &\` in an interactive shell: a process group that is not
+        # the terminal's foreground one, so reading the terminal stops it.
+        grand = os.fork()
+        if grand == 0:
+            os.setpgid(0, 0)
+            os.execvpe(cmd, [cmd, sys.argv[6]], env)
+        _, st = os.waitpid(grand, 0)
+        os._exit(os.waitstatus_to_exitcode(st) & 255)
     os.execvpe(cmd, [cmd, sys.argv[6]], env)
 out = b""
 start = time.time()
@@ -59,7 +68,7 @@ beforeEach(() => {
 })
 afterEach(() => removeRoot(root))
 
-function drive(opts: { send?: string; timeoutMs?: number; stdin?: "tty" | "null"; stdout?: "tty" | "pipe"; env?: Record<string, string> }) {
+function drive(opts: { send?: string; timeoutMs?: number; stdin?: "tty" | "null" | "background"; stdout?: "tty" | "pipe"; env?: Record<string, string> }) {
     const r = spawnSync(
         "python3",
         ["-c", DRIVER, process.execPath, "Run the setup now?", opts.send ?? "-", opts.stdin ?? "tty", opts.stdout ?? "tty", harness],
@@ -109,6 +118,14 @@ describe.skipIf(!hasPython)("the start-up offer on a real terminal", () => {
 
     it("never asks when stdin is not a terminal (service manager, </dev/null)", () => {
         const r = drive({ stdin: "null" })
+        expect(r.exit).toBe("0")
+        expect(r.text).toContain("DEMOS NODE SETUP WARNING")
+        expect(r.text).not.toContain("Run the setup now?")
+        expect(r.text).toContain("BOOTED")
+    })
+
+    it("never asks when started in the background of a terminal, where reading would stop it", () => {
+        const r = drive({ stdin: "background", timeoutMs: 30_000 })
         expect(r.exit).toBe("0")
         expect(r.text).toContain("DEMOS NODE SETUP WARNING")
         expect(r.text).not.toContain("Run the setup now?")

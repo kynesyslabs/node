@@ -49,3 +49,25 @@ export const ZK_IDENTITY_VKEY = path.join(
     "keys",
     "verification_key_merkle.json",
 )
+
+/**
+ * Whether this process may read the terminal without being stopped. A node
+ * started with `&` from an interactive shell has a tty on stdin but sits in a
+ * background process group; its first read stops it (SIGTTIN) and the node
+ * never boots. /proc/self/stat has the terminal's foreground group (tpgid) next
+ * to our own (pgrp); -1 means there is no controlling terminal, so no job
+ * control applies. Where /proc does not exist there is nothing to check.
+ */
+export function isForegroundOnTerminal(stat?: string): boolean {
+    try {
+        const text = stat ?? fs.readFileSync("/proc/self/stat", "utf8")
+        // The command name sits in parentheses and may contain spaces.
+        const fields = text.slice(text.lastIndexOf(")") + 2).split(" ")
+        const pgrp = Number(fields[2])
+        const tpgid = Number(fields[5])
+        if (!Number.isInteger(pgrp) || !Number.isInteger(tpgid)) return true
+        return tpgid === -1 || tpgid === pgrp
+    } catch {
+        return true
+    }
+}

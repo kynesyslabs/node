@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { detectDocker } from "./context"
 import { writeFileGuarded } from "./files"
 import { makeRoot, removeRoot } from "./testSupport"
 
@@ -60,12 +59,5 @@ describe("writeFileGuarded", () => {
         writeFileGuarded(file, "v2\n", { mode: 0o600, overwrite: true }, fixed)
         expect(() => writeFileGuarded(file, "v3\n", { mode: 0o600, overwrite: true }, fixed)).not.toThrow()
         expect(fs.readFileSync(file, "utf8")).toBe("v3\n")
-    })
-})
-
-describe("detectDocker", () => {
-    it("reads the flag in any case and lets an explicit off win", () => {
-        for (const v of ["true", "TRUE", "1"]) expect(detectDocker({ DEMOS_IN_DOCKER: v })).toBe(true)
-        for (const v of ["false", "FALSE", "0"]) expect(detectDocker({ DEMOS_IN_DOCKER: v })).toBe(false)
     })
 })

@@ -7,7 +7,7 @@ import {
     SETUP_COMMAND,
     type CheckItem,
 } from "./checks"
-import { createContext, detectDocker, type SetupContext } from "./context"
+import { createContext, detectDocker, isForegroundOnTerminal, type SetupContext } from "./context"
 import {
     confirm,
     createReadlinePrompter,
@@ -100,7 +100,8 @@ export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Pro
         env,
         interactive:
             Boolean(process.stdin.isTTY && process.stdout.isTTY) &&
-            parseBool(env.CI) !== true,
+            parseBool(env.CI) !== true &&
+            isForegroundOnTerminal(),
         say: line => console.error(line),
         logError: defaultLogError,
         inDocker: detectDocker(env),
