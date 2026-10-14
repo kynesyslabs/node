@@ -25,6 +25,8 @@ import type {
 const MAX_MESSAGE_SIZE = 256 * 1024
 /** Max encrypted ciphertext size (128 KB base64) */
 const MAX_CIPHERTEXT_SIZE = 128 * 1024
+/** A hash is a digest or a signature in hex; this leaves room for either. */
+const MAX_MESSAGE_HASH_LENGTH = 1024
 /** Min valid hex public key length (ed25519 = 64 hex chars) */
 const MIN_PUBLIC_KEY_LENGTH = 64
 /**
@@ -149,6 +151,10 @@ export class L2PSMessagingServer {
 
         if (!publicKey || !l2psUid || !proof) {
             this.sendError(ws, "INVALID_MESSAGE", "Missing publicKey, l2psUid, or proof", msg.requestId)
+            return
+        }
+        if (typeof publicKey !== "string" || typeof l2psUid !== "string" || typeof proof !== "string") {
+            this.sendError(ws, "INVALID_MESSAGE", "publicKey, l2psUid and proof must be strings", msg.requestId)
             return
         }
 
@@ -307,6 +313,20 @@ export class L2PSMessagingServer {
             this.sendError(ws, "INVALID_MESSAGE", "Missing to, encrypted, or messageHash", msg.requestId)
             return
         }
+        // The frame is JSON from an unauthenticated-in-shape client: each
+        // field is used as a string below, so anything else is refused here
+        // rather than surfacing as a handler error or reaching the database.
+        if (
+            typeof to !== "string" ||
+            typeof messageHash !== "string" ||
+            messageHash.length > MAX_MESSAGE_HASH_LENGTH ||
+            typeof encrypted !== "object" ||
+            typeof encrypted.ciphertext !== "string" ||
+            typeof encrypted.nonce !== "string"
+        ) {
+            this.sendError(ws, "INVALID_MESSAGE", "to, messageHash, ciphertext and nonce must be strings", msg.requestId)
+            return
+        }
         const toKey = canonicalizeKey(to) // canonical recipient identity for routing
 
         if (!encrypted.ciphertext || !encrypted.nonce) {
@@ -405,6 +425,10 @@ export class L2PSMessagingServer {
             this.sendError(ws, "INVALID_MESSAGE", "Missing peerKey or proof", msg.requestId)
             return
         }
+        if (typeof peerKey !== "string" || typeof proof !== "string") {
+            this.sendError(ws, "INVALID_MESSAGE", "peerKey and proof must be strings", msg.requestId)
+            return
+        }
 
         // Verify proof: sign("history:{peerKey}:{timestamp}")
         const proofMessage = `history:${peerKey}:${msg.timestamp}`
@@ -433,7 +457,7 @@ export class L2PSMessagingServer {
         // getHistory canonicalises both keys for the lookup; peerKey stays raw
         // here because the proof above was signed over the client's own form.
         const l2psUid = ws.data.l2psUid!
-        const result = await this.service.getHistory(myKey, peerKey, l2psUid, before, limit ?? 50)
+        const result = await this.service.getHistory(myKey, peerKey, l2psUid, before, limit)
 
         this.send(ws, {
             type: "history_response",

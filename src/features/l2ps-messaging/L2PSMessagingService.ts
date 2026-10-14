@@ -17,6 +17,8 @@ import { canonicalizeKey } from "./keys"
 import type { MessageStatus, SerializedEncryptedMessage, StoredMessage } from "./types"
 
 const MAX_OFFLINE_MESSAGES_PER_SENDER = 200
+const DEFAULT_HISTORY_PAGE = 50
+const MAX_HISTORY_PAGE = 200
 
 export interface ProcessMessageResult {
     success: boolean
@@ -67,7 +69,10 @@ export class L2PSMessagingService {
         recipientOnline: boolean,
     ): Promise<ProcessMessageResult> {
         const identity = { l2psUid, fromKey, toKey, messageHash }
-        const key = [l2psUid, canonicalizeKey(fromKey), canonicalizeKey(toKey), messageHash].join("|")
+        // Encoded, not joined: the recipient and the hash are the caller's
+        // strings, and a delimiter inside one would let two different messages
+        // share a key and have the second answered as a resend of the first.
+        const key = JSON.stringify([l2psUid, canonicalizeKey(fromKey), canonicalizeKey(toKey), messageHash])
 
         // A resend that arrives while the first attempt is still being
         // submitted gets that attempt's outcome, whatever it turns out to be,
@@ -93,7 +98,7 @@ export class L2PSMessagingService {
         encrypted: SerializedEncryptedMessage,
         recipientOnline: boolean,
     ): Promise<ProcessMessageResult> {
-        const { l2psUid, fromKey, toKey, messageHash } = identity
+        const { fromKey } = identity
         const repo = dataSource.getRepository(L2PSMessage)
 
         const existing = await this.findExisting(repo, identity)
@@ -104,6 +109,33 @@ export class L2PSMessagingService {
         const quotaError = this.reserveOfflineQuota(fromKey, recipientOnline)
         if (quotaError) return { success: false, error: quotaError }
 
+        // The slot is given back once, however the attempt ends: a thrown
+        // database error must not leave it held for a message that was never
+        // stored, or enough transient errors lock the sender out.
+        let held = !recipientOnline
+        const release = () => {
+            if (!held) return
+            held = false
+            this.releaseOfflineQuota(fromKey, recipientOnline)
+        }
+        try {
+            return await this.persistAndSubmit(repo, existing, identity, messageId, encrypted, recipientOnline, release)
+        } catch (error) {
+            release()
+            throw error
+        }
+    }
+
+    private async persistAndSubmit(
+        repo: MessageRepo,
+        existing: L2PSMessage | null,
+        identity: { l2psUid: string; fromKey: string; toKey: string; messageHash: string },
+        messageId: string,
+        encrypted: SerializedEncryptedMessage,
+        recipientOnline: boolean,
+        release: () => void,
+    ): Promise<ProcessMessageResult> {
+        const { l2psUid, fromKey, toKey, messageHash } = identity
         const now = Date.now()
         const status = recipientOnline ? "delivered" : "queued"
         const writeError = existing
@@ -114,7 +146,7 @@ export class L2PSMessagingService {
             )
         const id = existing?.id ?? messageId
         if (writeError) {
-            this.releaseOfflineQuota(fromKey, recipientOnline)
+            release()
             // A concurrent send of the same message got there first.
             const winner = await this.findExisting(repo, identity)
             if (winner && winner.status !== "failed") {
@@ -126,7 +158,8 @@ export class L2PSMessagingService {
         const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, id, messageHash, encrypted, now)
 
         if (!l2psResult.success) {
-            await this.handleSubmissionFailure(repo, id, fromKey, recipientOnline)
+            await repo.update(id, { status: "failed" as const })
+            release()
             return { success: false, error: l2psResult.error }
         }
 
@@ -195,8 +228,7 @@ export class L2PSMessagingService {
     /**
      * Reserve a per-sender offline-quota slot. Returns an error string
      * when the cap has been reached; null otherwise. The increment
-     * here is rolled back by `handleSubmissionFailure` on L2PS submit
-     * failure and decremented by `markDelivered` on queued-delivery.
+     * here is rolled back when the attempt fails and decremented by `markDelivered` on queued-delivery.
      */
     private reserveOfflineQuota(
         fromKey: string,
@@ -251,16 +283,6 @@ export class L2PSMessagingService {
             }
             throw saveError
         }
-    }
-
-    private async handleSubmissionFailure(
-        repo: MessageRepo,
-        messageId: string,
-        fromKey: string,
-        recipientOnline: boolean,
-    ): Promise<void> {
-        await repo.update(messageId, { status: "failed" as const })
-        this.releaseOfflineQuota(fromKey, recipientOnline)
     }
 
     /**
@@ -446,14 +468,25 @@ export class L2PSMessagingService {
         peerA: string,
         peerB: string,
         l2psUid: string,
-        before?: number,
-        limit = 50,
+        before?: unknown,
+        limit?: unknown,
     ): Promise<{ messages: StoredMessage[]; hasMore: boolean }> {
         const repo = dataSource.getRepository(L2PSMessage)
         // Rows are stored canonically, so both sides of the pair must be
         // canonicalised for the lookup to match.
         const a = canonicalizeKey(peerA)
         const b = canonicalizeKey(peerB)
+        // The caller's values arrive as JSON, so they are whatever it sent. A
+        // page is bounded because the conversation is the caller's to fill, and
+        // a read that loads all of it is a way to exhaust the node's memory.
+        const pageSize =
+            typeof limit === "number" && Number.isFinite(limit)
+                ? Math.min(Math.max(1, Math.floor(limit)), MAX_HISTORY_PAGE)
+                : DEFAULT_HISTORY_PAGE
+        const cursor =
+            (typeof before === "number" || typeof before === "string") && /^\d{1,15}$/.test(String(before))
+                ? Number(before)
+                : 0
         const qb = repo.createQueryBuilder("m")
             .where("m.l2ps_uid = :l2psUid", { l2psUid })
             .andWhere(
@@ -461,15 +494,15 @@ export class L2PSMessagingService {
                 { a, b },
             )
             .orderBy("m.timestamp", "DESC")
-            .take(limit + 1)
+            .take(pageSize + 1)
 
-        if (before) {
-            qb.andWhere("m.timestamp < :before", { before: String(before) })
+        if (cursor > 0) {
+            qb.andWhere("m.timestamp < :before", { before: String(cursor) })
         }
 
         const results = await qb.getMany()
-        const hasMore = results.length > limit
-        const messages = results.slice(0, limit).map(m => ({
+        const hasMore = results.length > pageSize
+        const messages = results.slice(0, pageSize).map(m => ({
             id: m.id,
             from: m.fromKey,
             to: m.toKey,
