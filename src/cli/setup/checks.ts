@@ -3,7 +3,9 @@ import type { SetupContext } from "./context"
 import { inspectSubnets, type SubnetStatus } from "./l2ps"
 import { inspectBatchArtifacts, inspectIdentityKey } from "./zk"
 import {
-    parseBool,
+    messagingFlag,
+    nodeFlag,
+    nodeMessagingPort,
     validateNonNegativeInt,
     validatePort,
 } from "./validate"
@@ -144,7 +146,7 @@ function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
             fix: r.ok ? undefined : L2PS_FIX,
         })
     }
-    if (parseBool(env[EnvKey.L2PS_HISTORY_STORE_PLAINTEXT]) === true) {
+    if (nodeFlag(env[EnvKey.L2PS_HISTORY_STORE_PLAINTEXT]) === true) {
         out.push({
             area: "L2PS",
             item: "Plaintext history",
@@ -154,10 +156,12 @@ function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
         })
     }
 
-    const messaging = parseBool(env[EnvKey.L2PS_MESSAGING_ENABLED])
-    if (messaging === true) {
+    if (messagingFlag(env[EnvKey.L2PS_MESSAGING_ENABLED])) {
         const rawPort = env[EnvKey.L2PS_MESSAGING_PORT]
-        const port = rawPort === undefined ? undefined : validatePort(rawPort)
+        const hasPort = rawPort !== undefined && rawPort !== ""
+        const port = hasPort ? validatePort(rawPort) : undefined
+        // The node takes the leading digits of "3100abc"; compose does not.
+        const nodePort = hasPort ? nodeMessagingPort(rawPort) : undefined
         out.push({
             area: "L2PS messaging",
             item: "Subnet for messaging",
@@ -171,15 +175,16 @@ function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
         out.push({
             area: "L2PS messaging",
             item: "Port",
-            status: port === undefined || port.ok ? "ok" : "invalid",
-            detail:
-                port === undefined
-                    ? "default 3006"
-                    : port.ok
-                      ? String(port.value)
-                      : `${EnvKey.L2PS_MESSAGING_PORT}=${rawPort}: ${port.error}; the node falls back to 3006`,
+            status: !hasPort || port.ok ? "ok" : nodePort !== undefined ? "warn" : "invalid",
+            detail: !hasPort
+                ? "default 3006"
+                : port.ok
+                  ? String(port.value)
+                  : nodePort !== undefined
+                    ? `${EnvKey.L2PS_MESSAGING_PORT}=${rawPort}: the node reads it as ${nodePort}, but docker compose rejects it; write plain digits`
+                    : `${EnvKey.L2PS_MESSAGING_PORT}=${rawPort}: ${port.error}; the node falls back to 3006`,
             blocking: false,
-            fix: port === undefined || port.ok ? undefined : L2PS_FIX,
+            fix: !hasPort || port.ok ? undefined : L2PS_FIX,
         })
     } else {
         out.push({
@@ -207,7 +212,7 @@ function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
         fix: identity.state === "ok" ? undefined : IDENTITY_KEY_FIX,
     })
 
-    const flag = parseBool(ctx.env[EnvKey.L2PS_ZK_ENABLED])
+    const flag = nodeFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED])
     // The code default is on, which only means "use the keys if they exist";
     // an explicit true is the operator asking for proofs.
     const requested = flag === true && hasSubnet
