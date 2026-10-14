@@ -8,9 +8,18 @@ export class SetupAborted extends Error {
     }
 }
 
+export class SetupTimedOut extends Error {
+    constructor() {
+        super("No answer in time")
+    }
+}
+
 /** The one primitive a terminal has to provide; everything else is built on it. */
 export interface Prompter {
-    readLine(question: string, opts?: { secret?: boolean }): Promise<string>
+    readLine(
+        question: string,
+        opts?: { secret?: boolean; timeoutMs?: number },
+    ): Promise<string>
 }
 
 export function createReadlinePrompter(
@@ -27,17 +36,29 @@ export function createReadlinePrompter(
                 output: opts?.secret ? silent : output,
                 terminal: Boolean((input as NodeJS.ReadStream).isTTY),
             })
-            const closed = new Promise<never>((_, reject) =>
-                rl.once("close", () => reject(new SetupAborted())),
-            )
+            // Ctrl-C and end of input both end the question; the caller decides
+            // what an abort means.
+            const closed = new Promise<never>((_, reject) => {
+                rl.once("close", () => reject(new SetupAborted()))
+                rl.once("SIGINT", () => rl.close())
+            })
+            const ac = new AbortController()
+            const timer =
+                opts?.timeoutMs !== undefined
+                    ? setTimeout(() => ac.abort(), opts.timeoutMs)
+                    : undefined
             try {
                 const answer = await Promise.race([
-                    rl.question(opts?.secret ? "" : question),
+                    rl.question(opts?.secret ? "" : question, { signal: ac.signal }),
                     closed,
                 ])
                 if (opts?.secret) output.write("\n")
                 return answer
+            } catch (e) {
+                if (ac.signal.aborted) throw new SetupTimedOut()
+                throw e
             } finally {
+                if (timer) clearTimeout(timer)
                 rl.close()
             }
         },
@@ -73,10 +94,11 @@ export async function confirm(
     question: string,
     def: boolean,
     say: (line: string) => void = l => console.log(l),
+    timeoutMs?: number,
 ): Promise<boolean> {
     for (;;) {
         const raw = (
-            await p.readLine(`${question} [${def ? "Y/n" : "y/N"}]: `)
+            await p.readLine(`${question} [${def ? "Y/n" : "y/N"}]: `, { timeoutMs })
         )
             .trim()
             .toLowerCase()
