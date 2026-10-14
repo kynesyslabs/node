@@ -33,7 +33,7 @@ describe("applyEnvChanges keeps everything it does not own", () => {
         "# node settings",
         "",
         "PG_PASSWORD=pa=ss#word",
-        'QUOTED="a # b"',
+        "QUOTED=\"a # b\"",
         "export KEEP_EXPORT=1",
         "L2PS_ZK_ENABLED_EXTRA=nope",
         "XL2PS_ZK_ENABLED=nope",
@@ -122,7 +122,7 @@ describe("applyEnvChanges keeps everything it does not own", () => {
     })
 
     it("does not treat a # inside a quoted old value as a comment", () => {
-        const out = applyEnvChanges('KEY="a # b"\n', { KEY: "c" })
+        const out = applyEnvChanges("KEY=\"a # b\"\n", { KEY: "c" })
         expect(dotenv.parse(out).KEY).toBe("c")
     })
 })
@@ -134,15 +134,15 @@ describe("parseEnv reads values the way dotenv (and Bun) do", () => {
         "export K=v",
         "K=v # c",
         "K=v#c",
-        'K="v # x"',
+        "K=\"v # x\"",
         "K='v'",
         "K=`v`",
-        'K="a"#c',
+        "K=\"a\"#c",
         "K=",
         "K=a=b",
         "K=a b",
         "K='a' # c",
-        '  K="x"  ',
+        "  K=\"x\"  ",
         "K=true #on",
     ]
     for (const line of lines) {

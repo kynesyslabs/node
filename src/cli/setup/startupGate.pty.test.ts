@@ -72,6 +72,7 @@ function drive(opts: { send?: string; timeoutMs?: number; stdin?: "tty" | "null"
     if (!r.stdout) console.error("driver failed:", r.status, r.signal, r.stderr)
     const [first, ...rest] = r.stdout.split("\n")
     // Strip terminal control sequences so assertions read plain text.
+    // eslint-disable-next-line no-control-regex -- the escape character is what is being stripped
     const text = rest.join("\n").replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "")
     return { exit: first.replace("EXIT ", ""), text }
 }

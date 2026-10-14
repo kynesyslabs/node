@@ -140,7 +140,7 @@ describe("checker and loader agree on config.json shapes", () => {
         ["JSON null", () => "null"],
         ["JSON array", () => "[]"],
         ["JSON number", () => "7"],
-        ["truncated JSON", () => '{"uid": "x", "enabled": tr'],
+        ["truncated JSON", () => "{\"uid\": \"x\", \"enabled\": tr"],
         ["empty file", () => ""],
     ]
     for (const [name, make] of shapes) {

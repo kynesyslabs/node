@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- test harness: console is its output */
 // Run by startupGate.pty.test.ts inside a real pseudo-terminal: the gate's
 // terminal detection, Ctrl-C and end-of-input handling only exist there.
 import { enforceGuidedSetup } from "./startupGate"
