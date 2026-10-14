@@ -286,7 +286,7 @@ async function l2psSection(
 
     // Reuse what is already on disk before generating anything new.
     const reuse = (rel: string): string | undefined => {
-        const text = readTextIfExists(path.join(ctx.root, rel))
+        const text = readTextIfExists(path.resolve(ctx.root, rel))
         const parsed = text === undefined ? undefined : parseHex(text, "value")
         return parsed?.ok ? parsed.value : undefined
     }
@@ -316,7 +316,7 @@ async function l2psSection(
     const decisions: Decision[] = []
     const blocked: string[] = []
     for (const f of files) {
-        const abs = path.join(ctx.root, f.rel)
+        const abs = path.resolve(ctx.root, f.rel)
         const current = readTextIfExists(abs)
         // Key material is compared as normalised hex, so a missing trailing
         // newline is not a difference; config as data, so layout is not either.

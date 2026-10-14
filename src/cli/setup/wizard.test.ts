@@ -586,3 +586,24 @@ describe("matching the loader", () => {
         expect(fs.readFileSync(subnetFile("shared_1", "private_key.txt"), "utf8").trim()).toBe(HEX_KEY)
     })
 })
+
+describe("absolute key paths in config.json", () => {
+    it("reads and writes them where the loader looks, not under the root twice", async () => {
+        const dir = path.join(root, "data/l2ps/abs")
+        fs.mkdirSync(dir, { recursive: true })
+        const keyAbs = path.join(dir, "key.txt")
+        const ivAbs = path.join(dir, "iv.txt")
+        fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({
+            uid: "abs", enabled: true,
+            config: { created_at_block: 0, known_rpcs: ["http://127.0.0.1:53550"] },
+            keys: { private_key_path: keyAbs, iv_path: ivAbs },
+        }))
+        fs.writeFileSync(keyAbs, HEX_KEY + "\n", { mode: 0o600 })
+        const { code, out } = await cli(["--yes", "--l2ps-uid", "abs"])
+        expect(code).toBe(0)
+        expect(fs.readFileSync(keyAbs, "utf8").trim()).toBe(HEX_KEY) // reused, not regenerated
+        expect(fs.existsSync(ivAbs)).toBe(true) // created at the real location
+        expect(fs.existsSync(path.join(root, root))).toBe(false) // no <root><root>/... copy
+        expect(out).toContain("is ready")
+    })
+})
