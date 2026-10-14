@@ -432,3 +432,18 @@ describe("what a failed read tells the caller", () => {
         expect(JSON.stringify(response)).not.toContain("postgres://")
     })
 })
+
+describe("an advertised URL that only spells loopback differently is not an identity", () => {
+    it.each([["localhost."], ["foo.localhost"], ["[::]"], ["[0:0:0:0:0:0:0:1]"], ["127.1"]])(
+        "%s",
+        async spelling => {
+            sharedState.exposedUrl = `http://${spelling}:53550`
+            const host = new URL(sharedState.exposedUrl as string).host
+            const ts = String(NOW)
+            const response = await call(signedV2(ts, { host }, v2(host, ts)))
+
+            expect(response.result).toBe(403)
+            expect(getAccountTransactions).not.toHaveBeenCalled()
+        },
+    )
+})

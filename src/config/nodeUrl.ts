@@ -2,13 +2,43 @@ export const LOOPBACK_HOSTS = new Set([
     "localhost",
     "127.0.0.1",
     "0.0.0.0",
+    "::",
     "::1",
     "[::1]",
     "host.docker.internal",
 ])
 
+/**
+ * The compressed form of an IPv6 address, so 0:0:0:0:0:0:0:1 is compared as
+ * ::1. A numeric IPv4 spelling (127.1, 0177.0.0.1, 2130706433) needs no
+ * handling here: the URL parser has folded it before a hostname gets this far.
+ */
+function canonicalIpv6(host: string): string {
+    if (!host.includes(":")) return host
+    try {
+        return new URL(`http://[${host}]`).hostname.replace(/^\[|\]$/g, "")
+    } catch (_e) {
+        return host
+    }
+}
+
 export function isLoopbackHost(hostname: string): boolean {
-    const host = hostname.toLowerCase().replace(/^\[|\]$/g, "")
+    if (typeof hostname !== "string") return false
+
+    // A trailing dot is the absolute form of the same name, and a zone id
+    // (::1%lo) scopes an address without changing which one it is.
+    const trimmed = hostname
+        .trim()
+        .toLowerCase()
+        .replace(/^\[|\]$/g, "")
+        .replace(/%.*$/, "")
+        .replace(/\.+$/, "")
+    if (trimmed === "") return false
+
+    // Resolvers send every name under .localhost to the loopback interface.
+    if (trimmed.endsWith(".localhost")) return true
+
+    const host = canonicalIpv6(trimmed)
     if (LOOPBACK_HOSTS.has(host)) return true
     // The whole 127/8 block loops back, not only .0.0.1, and so does its
     // IPv4-mapped IPv6 form, which the URL parser rewrites to hex
