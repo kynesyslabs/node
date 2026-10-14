@@ -228,8 +228,15 @@ export async function runL2psZkSetup(
         }
 
         if (!vkeyParses(root, size)) {
-            fs.renameSync(generatedVkey, committedVkey)
-            messages.push(`batch_${size}: no usable verification key on disk, wrote the generated one`)
+            // The verification key is committed and shared by every peer, so a
+            // missing or corrupt copy is a broken checkout, not something to
+            // replace with a locally generated key that nobody else holds.
+            fs.rmSync(zkeyTmp, { force: true })
+            fs.rmSync(generatedVkey, { force: true })
+            messages.push(
+                `batch_${size}: the committed verification key is missing or unreadable; restore ${path.relative(root, committedVkey)} from the repository and run the setup again`,
+            )
+            return { ok: false, messages }
         } else {
             const same =
                 JSON.stringify(JSON.parse(fs.readFileSync(committedVkey, "utf8"))) ===
