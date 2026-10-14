@@ -16,7 +16,7 @@
  *   5  every validator agrees on block hashes across the activation height
  * and only without UPGRADE_PATH:
  *   6  one validator that boots without the fork schedule cannot vote with the rest
- *   7  its stall watchdog ends it, and it rejoins once its genesis is corrected
+ *   7  its stall watchdog ends it; it rejoins only once the operator corrects its genesis file
  *   8  nothing else restarted or ran out of memory
  */
 import { execFile, execFileSync } from "node:child_process"
@@ -223,7 +223,7 @@ const alice = await client(PORTS[0], "alice")
 let aliceNonce = Number((await alice.getAddressInfo(ALICE))?.nonce ?? 0)
 say(`rehearsal: forks at ${H}, chain id ${CHAIN_ID}, ~${BLOCK_SECS}s per block, alice nonce ${aliceNonce}`)
 
-// ---- U ---------------------------------------------------------------------
+// ---- upgrade path only: add the schedule to a running chain ----------------
 let restartsBaseline = startupRestarts
 if (UPGRADE) {
     step("U1 a chain that starts without a fork schedule")
@@ -297,7 +297,7 @@ if (UPGRADE) {
     restartsBaseline = restartCounts()
 }
 
-// ---- 1 ---------------------------------------------------------------------
+// ---- fork configuration ----------------------------------------------------
 step("fork configuration")
 const infos = await Promise.all(PORTS.map(p => nodeCall(p, "getNetworkInfo")))
 record("getNetworkInfo-node1", infos[0].response)
@@ -310,8 +310,8 @@ check(
     "osDenomination is active from genesis (the fork this one is layered on)",
 )
 check(
-    infos.every(i => !("web2ProofBinding" in i.response.forks)),
-    "getNetworkInfo does not report web2ProofBinding (operators must read it from the node log)",
+    infos.every(i => i.response.forks.web2ProofBinding?.activationHeight === H),
+    `all 4 nodes report web2ProofBinding at ${H} through getNetworkInfo`,
 )
 const loaded = (n: number) =>
     execFileSync(DOCKER, ["logs", `${PROJECT}-node-${n}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
@@ -341,7 +341,7 @@ check(
     )
 }
 
-// ---- 2 ---------------------------------------------------------------------
+// ---- before the activation height ------------------------------------------
 step("before the activation height")
 const tipBefore = await tipOf(PORTS[0])
 say(`   tip is ${tipBefore}; activation at ${H}`)
@@ -369,7 +369,7 @@ check(
 await nextNonceReady(alice, aliceNonce)
 aliceNonce++
 
-// ---- 3 ---------------------------------------------------------------------
+// ---- the activation block and after it -------------------------------------
 step("the activation block")
 // Built ahead of time so the window at tip H-1 is spent submitting, not signing.
 const edgeBase = await alice.pay(BOB, AMOUNT)
@@ -432,7 +432,7 @@ check(
 await nextNonceReady(fresh, aliceNonce)
 aliceNonce++
 
-// ---- 4 ---------------------------------------------------------------------
+// ---- agreement across the activation height --------------------------------
 step("agreement across the activation height")
 const common = await (async () => {
     await until(async () => (await Promise.all(PORTS.map(tipOf))).every(t => t >= H + 3), 120)
@@ -459,7 +459,7 @@ check(
 const bobTotal = everyDb(`select balance from gcr_main where pubkey='${BOB}'`)
 check(bobTotal.every(b => BigInt(b) === AMOUNT * 3n), `bob received exactly ${AMOUNT * 3n} (three transfers)`)
 
-// ---- 6 and 7 --------------------------------------------------------------
+// ---- fresh path only: a validator on the wrong schedule, then recovery -----
 let restartsAfterManual = restartsBaseline
 if (!UPGRADE) {
 step("a validator that boots without the fork schedule")
@@ -480,20 +480,29 @@ const restartedEpoch = Math.floor(Date.now() / 1000)
 restartsAfterManual = restartCounts()
 const back = await until(async () => (await tipOf(PORTS[3])) >= common - 1, 150, 3000)
 check(back, "node 4 restarted and is serving again")
-// The hash comparison happens during peer bootstrap, some seconds after the RPC is up.
-const mismatchSeen = await until(() => /Genesis data hash does not match/.test(nodeLog(4, restartedAt)), 90, 2000)
+// Peer bootstrap runs some seconds after the RPC is up.
+const warned = await until(() => /FORK SCHEDULE MISMATCH/.test(nodeLog(4, restartedAt)), 90, 2000)
+check(warned, "node 4's bootstrap logged FORK SCHEDULE MISMATCH against its peers")
+const bootLog4 = nodeLog(4, restartedAt)
+record("node4-schedule-warning", bootLog4.split("\n").filter(l => /FORK SCHEDULE MISMATCH/.test(l)).slice(0, 2).map(l => l.slice(0, 400)))
 check(
-    mismatchSeen,
-    "node 4's bootstrap found its genesis hash different from its peers': the fork schedule is part of the genesis hash",
+    /signatureDomain: ours null, theirs \d+/.test(bootLog4) && /web2ProofBinding: ours null, theirs \d+/.test(bootLog4),
+    "the warning names both forks with this node's null against the peers' height",
 )
-const healedFile = () => JSON.parse(readFileSync(`${RUN_DIR}/data/genesis.node4.json`, "utf8"))
-const healed = await until(() => healedFile().forks.signatureDomain?.activationHeight === H, 30, 1000)
-check(healed, "node 4 overwrote its own genesis file with the peer's, fork entries included")
+check(
+    !/Genesis data hash does not match/.test(bootLog4),
+    "no genesis data hash mismatch: the fork schedule is not part of the hash, so pairing succeeds",
+)
+const staleFile = JSON.parse(readFileSync(`${RUN_DIR}/data/genesis.node4.json`, "utf8"))
+check(
+    staleFile.forks.signatureDomain === undefined && staleFile.forks.web2ProofBinding === undefined,
+    "node 4's genesis file was left as the operator wrote it, not overwritten from a peer",
+)
 const info4 = (await nodeCall(PORTS[3], "getNetworkInfo")).response
 record("getNetworkInfo-node4", info4.forks.signatureDomain)
 check(
     info4.forks.signatureDomain.activationHeight === null,
-    "yet the running node 4 still reports signatureDomain unscheduled: the schedule was read before the file was replaced",
+    "node 4 reports signatureDomain unscheduled, as its file says",
 )
 
 const tipsBefore = await Promise.all(PORTS.map(tipOf))
@@ -541,7 +550,7 @@ check(
 )
 check(
     incl[3] === majorityBlock,
-    "node 4 still stored that block: block sync trusts the quorum's signatures and does not re-check transaction signatures",
+    "node 4 still stored that block, which holds a transaction its own rules refuse: sync accepted it without that check (inferred, the sync code was not read)",
 )
 const stallSigners = stallBlocks.map(n => ({ n, signers: signersOf(n).length, node4: signersOf(n).includes(NODE4_KEY) }))
 record("signers-per-stall-block", stallSigners)
@@ -556,13 +565,13 @@ record(
     "node4-log-evidence",
     log4s
         .split("\n")
-        .filter(l => /Hash does not correspond|STALL DETECTION|Genesis data hash does not match|Block is invalid/.test(l))
+        .filter(l => /Hash does not correspond|STALL DETECTION|FORK SCHEDULE MISMATCH|Block is invalid/.test(l))
         .slice(-8)
         .map(l => l.slice(0, 220)),
 )
 
-// ---- 7 ---------------------------------------------------------------------
-step("recovery: the engine restarts the validator and it reads the corrected genesis")
+// ---- recovery ---------------------------------------------------------------
+step("recovery: the operator corrects the genesis file and restarts the validator")
 const exits = () =>
     readFileSync(`${RUN_DIR}/logs/docker-events.log`, "utf8")
         .split("\n")
@@ -571,12 +580,24 @@ check(
     await until(() => exits().length === 1, 30, 1000),
     "the engine saw exactly one exit with code 0 from node 4 since its manual restart: the watchdog's process.exit(0)",
 )
-const reloaded = await until(
-    () => new RegExp(`Loaded fork "signatureDomain" with activationHeight=${H}`).test(nodeLog(4, restartedAt)),
+// This devnet's compose restarts the node (restart: unless-stopped). The root compose
+// file runs it with restart "no", where the node would stay down here instead.
+const secondBoot = await until(
+    () => /FORK SCHEDULE MISMATCH/.test(nodeLog(4, restartedAt).split("exiting for log investigation").pop() ?? ""),
     120,
     3000,
 )
-check(reloaded, `the restarted node 4 loaded signatureDomain at ${H} from the genesis it had downloaded`)
+check(secondBoot, "restarted by the engine from the same file, node 4 warns again and is still on the wrong schedule: nothing heals it")
+writeFileSync(`${RUN_DIR}/data/genesis.node4.json`, readFileSync(`${RUN_DIR}/data/genesis.node1.json`, "utf8"))
+const fixedAt = (execFileSync(DOCKER, ["restart", `${PROJECT}-node-4`]), new Date().toISOString())
+restartsAfterManual = restartCounts()
+const reloaded = await until(
+    () => new RegExp(`Loaded fork "signatureDomain" with activationHeight=${H}`).test(nodeLog(4, fixedAt)),
+    120,
+    3000,
+)
+check(reloaded, `after the file was corrected and node 4 restarted, it loaded signatureDomain at ${H}`)
+check(!/FORK SCHEDULE MISMATCH/.test(nodeLog(4, fixedAt)), "and logged no schedule mismatch")
 const info4b = await until(
     async () => {
         try {
@@ -593,7 +614,7 @@ const tipTarget = async () => Math.min(...(await Promise.all(PORTS.slice(0, 3).m
 check(await until(async () => (await tipOf(PORTS[3])) >= (await tipTarget()) - 1, 180, 3000), "node 4 catches up with the quorum")
 const stateAfter = await settledStates()
 check(stateAfter !== null && new Set(stateAfter).size === 1, "balances and nonces identical on all 4 nodes again")
-const refusalsAtCatchUp = (nodeLog(4, restartedAt).match(/Hash does not correspond to our candidate block/g) ?? []).length
+const refusalsAtCatchUp = (nodeLog(4, fixedAt).match(/Hash does not correspond to our candidate block/g) ?? []).length
 const tipAtCatchUp = Math.min(...(await Promise.all(PORTS.map(tipOf))))
 await until(async () => Math.min(...(await Promise.all(PORTS.map(tipOf)))) >= tipAtCatchUp + 4, 120, 3000)
 const common2 = Math.min(...(await Promise.all(PORTS.map(tipOf))))
@@ -604,11 +625,11 @@ check(
     grid2.every(g => g.hashes.every(h => h !== null && h === g.hashes[0])),
     `block hashes identical on all 4 nodes for blocks ${heights2[0]}..${common2}, from before the split to after the recovery`,
 )
-const stillRefused = (nodeLog(4, restartedAt).match(/Hash does not correspond to our candidate block/g) ?? []).length
+const stillRefused = (nodeLog(4, fixedAt).match(/Hash does not correspond to our candidate block/g) ?? []).length
 const mempool4 = sql("node4_db", `select count(*) from mempooltx where hash='${carolBase.hash}'`)
 record("recovery-observation", { refusalsAtCatchUp, stillRefused, legacyTxInMempool: mempool4 })
 say(`   candidate-block refusals in node 4's log: ${refusalsAtCatchUp} up to the catch-up, ${stillRefused} four blocks later; legacy-signed transfer in node 4's mempool table: ${mempool4}`)
-check(mempool4 === "0", "the legacy-signed transfer only node 4 had admitted is gone from its mempool after the restart")
+check(mempool4 === "0", "the legacy-signed transfer only node 4 had admitted is gone from its mempool after the restarts")
 const tail7 = Array.from({ length: 2 }, (_, i) => common2 - 1 + i).map(n => ({ n, signers: signersOf(n).length, node4: signersOf(n).includes(NODE4_KEY) }))
 record("signers-per-block-after-recovery", tail7)
 check(tail7.every(b => b.signers === 4 && b.node4), `blocks ${tail7[0].n} and ${tail7[1].n}, four blocks after the catch-up, carry all four signatures, node 4's again`)
@@ -639,8 +660,8 @@ if (UPGRADE) {
         "nodes 1-3 were never restarted and no container was killed for memory while the scenario ran",
     )
     check(
-        endRestarts[3] === `${Number(restartsAfterManual[3].split(" ")[0]) + 1} false`,
-        "node 4 was restarted by the engine exactly once after the manual restart: the stall exit",
+        endRestarts[3] === restartsAfterManual[3],
+        "node 4 was not restarted by the engine again after the operator's restart",
     )
 }
 

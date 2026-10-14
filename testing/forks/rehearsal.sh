@@ -48,8 +48,8 @@ RUN_DIR="${RUN_DIR:-$ROOT/testing/runs/fork-rehearsal-$(date +%Y%m%dT%H%M%S)}"
 DATA="$RUN_DIR/data"
 LOGS="$RUN_DIR/logs"
 # Checks the scenario has in each mode; fewer means it stopped early.
-EXPECTED_CHECKS_FRESH=0
-EXPECTED_CHECKS_UPGRADE=0
+EXPECTED_CHECKS_FRESH=54
+EXPECTED_CHECKS_UPGRADE=43
 mkdir -p "$DATA/identities" "$LOGS" "$RUN_DIR/steps"
 MAIN_LOG="$LOGS/rehearsal.log"
 
