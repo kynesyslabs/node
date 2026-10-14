@@ -43,13 +43,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * Compare hashes and, only when the genesis data really differs, replace the
  * local file.
  *
- * The advertised hash is the full hash of the genesis block a peer stored when
- * its chain was created, and that block is never refreshed. An operator who
- * schedules a fork on a running chain edits the file, so the file's full hash
- * differs from every peer's although nothing a node must share since block 0
- * does. Overwriting the file in that case would drop the schedule at the next
- * restart, so the core hash decides, and when a real difference does force a
- * replacement the local schedule and chain id are kept.
+ * The advertised hash covers the whole stored genesis block, including the
+ * fork schedule and chain id, while an operator can add those to the local file
+ * on a running chain. The file's full hash then differs from every peer's
+ * though nothing shared since block 0 does, and overwriting the file would
+ * drop the schedule at the next restart. The core hash therefore decides, and
+ * when a real difference forces a replacement the local schedule and chain id
+ * are kept.
  *
  * What the peer serves must hash, in full, to what it advertised: that is the
  * consistency check between the two answers.
