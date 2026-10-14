@@ -148,7 +148,7 @@ export async function subnetDecryptor(
 
     if (!instance) {
         log.debug(`[L2PS History] No key for subnet ${l2psUid}`)
-        return Object.assign(async () => null, { unavailable: true })
+        return Object.assign(() => Promise.resolve(null), { unavailable: true })
     }
 
     return async envelope =>
