@@ -1,0 +1,2 @@
+# Synthetic prompt fixture in the guided-setup pty test: the literal "S3CR3T-KEY-MATERIAL" only checks that the terminal stops echoing; later commits replaced it with a runtime canary.
+2bac9b744f7634b819f8aefea230ebdbd6378cd0:src/cli/setup/prompt.pty.test.ts:generic-api-key:39
