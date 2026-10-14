@@ -441,7 +441,7 @@ Multi-cycle gradients are safer governance hygiene than one large shift, even wh
 
 ## 9. Don't-do list
 
-- **Don't change `data/genesis.json` `balances` mid-run.** Balances are inside `BlockContent` and will invalidate every existing `chain.db`. Only the `forks` block additions are hash-invariant.
+- **Don't change `data/genesis.json` `balances` mid-run.** Balances are inside `BlockContent` and will invalidate every existing `chain.db`. The `forks` entries and `properties.id` are the exception, and only on a build that excludes them from the genesis data hash (`normalizeGenesisForHash.ts`): on an older build, adding them to the file of a running chain makes every node's file differ from its peers' stored genesis block, and each node overwrites the file with the stored version at boot, dropping the schedule on the next restart. Put the build with that exclusion on every node before editing the genesis file. See `testing/forks/REHEARSAL.md` for the rehearsal of that upgrade.
 - **Don't enable `DEMOS_DISABLE_FORK_MACHINERY` on testnet/production.** Rehearsal-only flag. With it set, neither migration fires and the validator silently desyncs at `N`. Production has a hard guard but verify anyway.
 - **Don't skip the genesis update on any validator.** A validator without the two `activationHeight` values never crosses the fork; it hard-fails on every post-fork block from peers.
 - **Don't activate at a height too close to current head.** Minimum 600 blocks lead time.
