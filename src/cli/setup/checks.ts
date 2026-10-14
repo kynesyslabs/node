@@ -15,8 +15,10 @@ export interface CheckItem {
     item: string
     status: CheckStatus
     detail: string
-    /** A missing/invalid blocking item stops a non-interactive start. */
+    /** A missing/invalid blocking item is reported loudly at start. */
     blocking: boolean
+    /** Consensus-critical: a missing/invalid fatal item stops the node. */
+    fatal?: boolean
     fix?: string
 }
 
@@ -35,10 +37,46 @@ const ZK_FIX = `${SETUP_COMMAND} --only zk`
 export const isProblem = (i: CheckItem) =>
     i.blocking && (i.status === "missing" || i.status === "invalid")
 
+export const isFatal = (i: CheckItem) => i.fatal === true && isProblem(i)
+
+export const IDENTITY_KEY_FIX =
+    "restore the committed src/features/zk/keys/verification_key_merkle.json from the repository (in Docker: rebuild or re-pull the image)"
+
+/** Inspection must never take the caller down; a failure becomes a problem. */
+function guarded(area: string, fn: () => CheckItem[]): CheckItem[] {
+    try {
+        return fn()
+    } catch (e) {
+        return [
+            {
+                area,
+                item: "Inspection",
+                status: "invalid",
+                detail: `could not be checked (${e instanceof Error ? e.message : String(e)})`,
+                blocking: true,
+                fix: SETUP_COMMAND + " --check",
+            },
+        ]
+    }
+}
+
 export function collectChecks(ctx: SetupContext): CheckReport {
     const items: CheckItem[] = []
-    const subnets = inspectSubnets(ctx.root).filter(s => s.state !== "placeholder")
+    let subnets: SubnetStatus[] = []
+    items.push(
+        ...guarded("L2PS", () => {
+            subnets = inspectSubnets(ctx.root).filter(s => s.state !== "placeholder")
+            return subnetItems(subnets)
+        }),
+    )
     const activeSubnets = subnets.filter(s => s.state === "ok").map(s => s.uid)
+    items.push(...guarded("L2PS", () => envChecks(ctx, activeSubnets.length > 0)))
+    items.push(...guarded("ZK", () => zkChecks(ctx, activeSubnets.length > 0)))
+    return { items, subnets, activeSubnets }
+}
+
+function subnetItems(subnets: SubnetStatus[]): CheckItem[] {
+    const items: CheckItem[] = []
 
     if (subnets.length === 0) {
         items.push({
@@ -83,9 +121,7 @@ export function collectChecks(ctx: SetupContext): CheckReport {
         }
     }
 
-    items.push(...envChecks(ctx, activeSubnets.length > 0))
-    items.push(...zkChecks(ctx, activeSubnets.length > 0))
-    return { items, subnets, activeSubnets }
+    return items
 }
 
 function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
@@ -167,10 +203,8 @@ function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
         status: identity.state,
         detail: identity.detail,
         blocking: identity.state !== "ok",
-        fix:
-            identity.state === "ok"
-                ? undefined
-                : "restore the committed file: git checkout -- src/features/zk/keys/verification_key_merkle.json",
+        fatal: true,
+        fix: identity.state === "ok" ? undefined : IDENTITY_KEY_FIX,
     })
 
     const flag = parseBool(ctx.env[EnvKey.L2PS_ZK_ENABLED])

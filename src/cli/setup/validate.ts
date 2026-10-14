@@ -9,42 +9,65 @@ export interface Result<T> {
 const ok = <T>(value: T): Result<T> => ({ ok: true, value })
 const fail = <T>(error: string): Result<T> => ({ ok: false, error })
 
-// The node loader accepts [A-Za-z0-9_-]+ only; a dot would be rejected at boot.
-export const SUBNET_UID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+// Identical to the check in ParallelNetworks.loadL2PS: a uid the loader
+// refuses would silently never join, so the setup must not accept it either.
+export const SUBNET_UID_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export function validateUid(value: string): Result<string> {
     const uid = value.trim()
     if (!SUBNET_UID_PATTERN.test(uid)) {
-        return fail(
-            "Use 1-64 characters: letters, digits, underscore or dash",
-        )
+        return fail("Use letters, digits, underscore or dash")
     }
     return ok(uid)
 }
 
-/** Accepts optional 0x prefix and surrounding whitespace; returns lowercase hex. */
+/**
+ * Same normalisation as the loader's hexFileToBytes: trim, drop a 0x prefix,
+ * drop every whitespace character. Returns lowercase hex.
+ */
+export function normalizeHex(value: string): string {
+    return value
+        .trim()
+        .replace(/^0x/i, "")
+        .replaceAll(/\s+/g, "")
+        .toLowerCase()
+}
+
+/** Format only: what makes the loader throw. Length is checked separately. */
+export function parseHex(value: string, label: string): Result<string> {
+    const cleaned = normalizeHex(value)
+    if (cleaned.length === 0) return fail(`${label} is empty`)
+    if (!/^[0-9a-f]+$/.test(cleaned)) {
+        return fail(`${label} contains non-hex characters`)
+    }
+    if (cleaned.length % 2 !== 0) {
+        return fail(`${label} hex length must be even`)
+    }
+    return ok(cleaned)
+}
+
+/** A warning text when the byte length is not one the cipher takes, else null. */
+export function hexLengthWarning(
+    hex: string,
+    label: string,
+    allowedBytes: number[],
+): string | null {
+    const bytes = hex.length / 2
+    return allowedBytes.includes(bytes)
+        ? null
+        : `${label} is ${bytes} bytes; expected ${allowedBytes.join(" or ")}`
+}
+
+/** Strict form used for new input: format and length must both be right. */
 export function validateHex(
     value: string,
     label: string,
     allowedBytes: number[],
 ): Result<string> {
-    const cleaned = value.trim().replace(/^0x/i, "")
-    if (cleaned.length === 0) return fail(`${label} is empty`)
-    if (!/^[0-9a-fA-F]+$/.test(cleaned)) {
-        return fail(`${label} must be hexadecimal`)
-    }
-    if (cleaned.length % 2 !== 0) {
-        return fail(`${label} must have an even number of hex digits`)
-    }
-    const bytes = cleaned.length / 2
-    if (!allowedBytes.includes(bytes)) {
-        return fail(
-            `${label} must be ${allowedBytes.join(" or ")} bytes (${allowedBytes
-                .map(b => b * 2)
-                .join(" or ")} hex digits), got ${bytes}`,
-        )
-    }
-    return ok(cleaned.toLowerCase())
+    const parsed = parseHex(value, label)
+    if (!parsed.ok) return parsed
+    const warning = hexLengthWarning(parsed.value, label, allowedBytes)
+    return warning === null ? parsed : fail(warning)
 }
 
 // AES key sizes the cipher accepts; new keys are always 32 bytes.

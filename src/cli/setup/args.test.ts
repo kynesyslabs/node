@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { parseSetupArgs, UsageError } from "./args"
 import {
+    normalizeHex,
     parseBool,
     validateHex,
     validateIvHex,
@@ -16,13 +17,17 @@ describe("validators", () => {
         expect(validateUid("has.dot").ok).toBe(false)
         expect(validateUid("../escape").ok).toBe(false)
         expect(validateUid("").ok).toBe(false)
-        expect(validateUid("a".repeat(65)).ok).toBe(false)
+        // The loader has no length limit, so neither does the setup.
+        expect(validateUid("a".repeat(100)).ok).toBe(true)
     })
 
     it("normalises hex and enforces byte lengths", () => {
         expect(validateKeyHex(" 0x" + "AB".repeat(32) + "\n").value).toBe("ab".repeat(32))
         expect(validateKeyHex("ab".repeat(31)).ok).toBe(false)
-        expect(validateKeyHex("zz".repeat(32)).error).toContain("hexadecimal")
+        expect(validateKeyHex("zz".repeat(32)).error).toContain("non-hex")
+        // Same normalisation as the loader: a 0x/0X prefix and any inner whitespace go.
+        expect(validateKeyHex("0X" + "ab".repeat(16) + " \n\t" + "ab".repeat(16)).value).toBe("ab".repeat(32))
+        expect(normalizeHex("0xAB cd\n")).toBe("abcd")
         expect(validateHex("abc", "X", [2]).error).toContain("even")
         expect(validateIvHex("cd".repeat(12)).ok).toBe(true)
         expect(validateIvHex("cd".repeat(16)).ok).toBe(true)
