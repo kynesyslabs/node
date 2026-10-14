@@ -16,10 +16,42 @@ export const LOOPBACK_HOSTS = new Set([
 function canonicalIpv6(host: string): string {
     if (!host.includes(":")) return host
     try {
-        return new URL(`http://[${host}]`).hostname.replace(/^\[|\]$/g, "")
+        return stripBrackets(new URL(`http://[${host}]`).hostname)
     } catch (_e) {
         return host
     }
+}
+
+// Plain scans, not regular expressions: these run on hostnames a peer
+// advertises, and an unanchored or repeated pattern over a long hostile
+// string is quadratic where a scan is linear.
+function stripBrackets(host: string): string {
+    const from = host.startsWith("[") ? 1 : 0
+    const to = host.endsWith("]") ? host.length - 1 : host.length
+    return host.slice(from, Math.max(from, to))
+}
+
+function stripZoneId(host: string): string {
+    const at = host.indexOf("%")
+    return at < 0 ? host : host.slice(0, at)
+}
+
+function stripTrailingDots(host: string): string {
+    let end = host.length
+    while (end > 0 && host.charCodeAt(end - 1) === 46) end--
+    return host.slice(0, end)
+}
+
+function isDecimalOctet(part: string): boolean {
+    if (part.length === 0 || part.length > 3) return false
+    for (const ch of part) if (ch < "0" || ch > "9") return false
+    return true
+}
+
+/** Four dotted decimal groups inside 127/8, whatever the later groups hold. */
+function isLoopbackBlock(host: string): boolean {
+    const parts = host.split(".")
+    return parts.length === 4 && parts[0] === "127" && parts.slice(1).every(isDecimalOctet)
 }
 
 export function isLoopbackHost(hostname: string): boolean {
@@ -27,12 +59,7 @@ export function isLoopbackHost(hostname: string): boolean {
 
     // A trailing dot is the absolute form of the same name, and a zone id
     // (::1%lo) scopes an address without changing which one it is.
-    const trimmed = hostname
-        .trim()
-        .toLowerCase()
-        .replace(/^\[|\]$/g, "")
-        .replace(/%.*$/, "")
-        .replace(/\.+$/, "")
+    const trimmed = stripTrailingDots(stripZoneId(stripBrackets(hostname.trim().toLowerCase())))
     if (trimmed === "") return false
 
     // Resolvers send every name under .localhost to the loopback interface.
@@ -44,10 +71,8 @@ export function isLoopbackHost(hostname: string): boolean {
     // IPv4-mapped IPv6 form, which the URL parser rewrites to hex
     // (::ffff:127.0.0.1 becomes ::ffff:7f00:1); a name from that block is
     // every machine's own.
-    return (
-        /^(::ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
-        /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host)
-    )
+    const mapped = host.startsWith("::ffff:") ? host.slice("::ffff:".length) : host
+    return isLoopbackBlock(mapped) || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host)
 }
 
 /**

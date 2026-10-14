@@ -117,3 +117,38 @@ describe("validateExposedUrl under PROD", () => {
         },
     )
 })
+
+describe("isLoopbackHost on hostile length", () => {
+    // The quadratic cases for the patterns this replaced: a long run of the
+    // character a pattern repeats, ending in one that makes it fail.
+    const hostile = [
+        "." .repeat(100_000) + "x",
+        "x" + ".".repeat(100_000) + "x",
+        "%".repeat(100_000) + "x",
+        "[".repeat(100_000),
+        "]".repeat(100_000),
+        "127." + "1.".repeat(50_000),
+        "::ffff:" + "7f".repeat(50_000),
+        "a".repeat(100_000) + ".localhost.",
+        ":".repeat(100_000),
+        " ".repeat(100_000) + "127.0.0.1",
+    ]
+
+    it.each(hostile.map((h, i) => [i, h]))("input %p returns quickly", (_i, input) => {
+        const start = performance.now()
+        isLoopbackHost(input as string)
+        expect(performance.now() - start).toBeLessThan(50)
+    })
+
+    it("still answers correctly around the scans", () => {
+        expect(isLoopbackHost("[127.1.2.3]")).toBe(true)
+        expect(isLoopbackHost("[[::1]]")).toBe(true)
+        expect(isLoopbackHost("]")).toBe(false)
+        expect(isLoopbackHost("[")).toBe(false)
+        expect(isLoopbackHost("....")).toBe(false)
+        expect(isLoopbackHost("127.0.0.1....")).toBe(true)
+        expect(isLoopbackHost("127.0.0.256x")).toBe(false)
+        expect(isLoopbackHost("127.0.0")).toBe(false)
+        expect(isLoopbackHost("::ffff:127.0.0.1")).toBe(true)
+    })
+})
