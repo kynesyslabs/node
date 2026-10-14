@@ -367,3 +367,33 @@ describe("page values, version 2", () => {
         expect(response.result).toBe(400)
     })
 })
+
+describe("no 5xx from a malformed request", () => {
+    const ts = String(NOW)
+
+    it.each([
+        ["a numeric signature", { signature: 12345 }],
+        ["an object signature", { signature: { startsWith: () => true } }],
+        ["an array signature", { signature: ["0x00"] }],
+        ["a numeric address", { address: 12345 }],
+        ["an object address", { address: {} }],
+        ["a numeric host", { host: 5 }],
+        ["an object host", { host: { toLowerCase: () => NODE_KEY } }],
+        ["an odd-length hex signature", { signature: "0xabc" }],
+        ["a non-hex signature", { signature: "0x" + "zz".repeat(64) }],
+        ["an empty signature after the prefix", { signature: "0x" }],
+        ["a doubled prefix", { signature: "0x0x" + "00".repeat(64) }],
+        ["an oversized signature", { signature: "00".repeat(100_000) }],
+        ["an address that is not a key", { address: "0xnothex" }],
+        ["a 33-byte address", { address: "0x" + "ab".repeat(33) }],
+    ])("%s is answered with a client error, not an internal one", async (_n, change) => {
+        for (const version of [undefined, 2]) {
+            const data: Record<string, unknown> = signedV2(ts, change)
+            if (version === undefined) delete data.signatureVersion
+            const response = await call(data)
+            expect(response.result).toBeGreaterThanOrEqual(400)
+            expect(response.result).toBeLessThan(500)
+            expect(JSON.stringify(response)).not.toContain("is not a function")
+        }
+    })
+})

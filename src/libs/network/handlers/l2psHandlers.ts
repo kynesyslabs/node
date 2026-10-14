@@ -166,6 +166,19 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             return response
         }
 
+        // The values are used as strings below (prefix stripping, the signed
+        // message), so a number or object here would otherwise surface as a
+        // TypeError from the handler instead of a refusal.
+        if (
+            typeof data.l2psUid !== "string" ||
+            typeof data.address !== "string" ||
+            typeof data.signature !== "string"
+        ) {
+            response.result = 400
+            response.response = "Subnet, address and signature must be strings."
+            return response
+        }
+
         const requestTime =
             typeof data.timestamp === "string" || typeof data.timestamp === "number"
                 ? Number.parseInt(String(data.timestamp), 10)
