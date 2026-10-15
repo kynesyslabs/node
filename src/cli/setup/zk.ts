@@ -68,13 +68,18 @@ export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
  */
 export const IDENTITY_CIRCUIT_DIGEST = "246abe5d7da79c64925375dd3e7360e82fa38e93a657132351e93461b407d622"
 
+/** Code-point order: the digest must not depend on the machine's locale. */
+const byCodePoint = (a: string, b: string): number => {
+    if (a === b) return 0
+    return a < b ? -1 : 1
+}
+
 const sortedDeep = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(sortedDeep)
     if (value === null || typeof value !== "object") return value
-    // Plain code-point order, not localeCompare: the digest must not depend on the machine's locale.
     return Object.fromEntries(
         Object.keys(value as object)
-            .sort()
+            .sort(byCodePoint)
             .map(k => [k, sortedDeep((value as Record<string, unknown>)[k])]),
     )
 }
