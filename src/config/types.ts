@@ -143,6 +143,8 @@ export interface L2PSConfig {
      * aggregator has drained some. 0 turns the limit off.
      */
     mempoolMaxExecutedPerSubnet: number
+    /** Batches the aggregator builds per subnet in one cycle. */
+    aggregatorMaxBatchesPerCycle: number
     /**
      * How long an executed transaction stays in the durable history table,
      * in days. 0 keeps history forever, which is the default: `cleanupAgeMs`

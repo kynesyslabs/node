@@ -294,6 +294,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET,
                 d.l2ps.mempoolMaxExecutedPerSubnet,
             ),
+            aggregatorMaxBatchesPerCycle: envInt(
+                EnvKey.L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE,
+                d.l2ps.aggregatorMaxBatchesPerCycle,
+            ),
             historyRetentionDays: envInt(
                 EnvKey.L2PS_HISTORY_RETENTION_DAYS,
                 d.l2ps.historyRetentionDays,
