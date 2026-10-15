@@ -20,6 +20,16 @@ export interface ScheduleView {
     digest?: string
 }
 
+/**
+ * UTF-16 code unit order, the same order `stableStringify` gives object keys.
+ * `localeCompare` is deliberately not used for the digest: it varies with the
+ * host's locale and ICU data, and two nodes must derive the same bytes.
+ */
+function byCodeUnit(a: string, b: string): number {
+    if (a < b) return -1
+    return a > b ? 1 : 0
+}
+
 export type ForkEntry = { activationHeight: number | null } & Record<string, unknown>
 export type ForkConfigLike = Record<string, ForkEntry | undefined>
 
@@ -34,7 +44,7 @@ export function forkScheduleDigest(
     chainId: number | null,
 ): string {
     const forks: Record<string, unknown> = {}
-    for (const name of Object.keys(forkConfig).sort()) {
+    for (const name of Object.keys(forkConfig).sort(byCodeUnit)) {
         const entry = forkConfig[name]
         if (!entry) continue
         const { description: _description, ...consensus } = entry
@@ -92,7 +102,7 @@ export function compareSchedules(
     if (theirs.digest === undefined) return { status: "skipped" }
     if (ours.digest === theirs.digest) return { status: "agree" }
     const lines = [`schedule digest: ours ${ours.digest}, theirs ${theirs.digest}`]
-    for (const name of Object.keys(ours.forks).sort()) {
+    for (const name of Object.keys(ours.forks).sort(byCodeUnit)) {
         if (!(name in theirs.forks)) continue
         if (ours.forks[name] !== theirs.forks[name]) {
             lines.push(

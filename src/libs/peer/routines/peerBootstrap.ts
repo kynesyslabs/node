@@ -32,7 +32,8 @@ const genesisFile = "data/genesis.json"
 const peerman = PeerManager.getInstance()
 const discoveredGenesisDataHashes = new Set<string>()
 
-async function ensureGenesisDataMatch(verifiedPeer: Peer) {
+/** Ask a peer for its advertised genesis data hash, retrying while it is not ready. */
+async function fetchPeerGenesisHash(verifiedPeer: Peer) {
     const request: RPCRequest = {
         method: "nodeCall",
         params: [
@@ -58,9 +59,68 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                     `(attempt ${attempt}/${maxAttempts}, result=${res?.result})`,
             )
             await sleep(1000)
-            continue
         }
     }
+    return res as NonNullable<typeof res>
+}
+
+async function downloadPeerGenesis(
+    verifiedPeer: Peer,
+    peerGenesisDataHash: string,
+): Promise<unknown | null> {
+    log.warn(
+        "[BOOTSTRAP] Genesis data hash differs from the one " +
+            verifiedPeer.connection.string +
+            " advertises (ours " +
+            ourGenesisDataHash +
+            ", theirs " +
+            peerGenesisDataHash +
+            "); comparing the data it serves",
+    )
+    log.debug(
+        "[BOOTSTRAP] Fetching new genesis data from peer: " +
+            verifiedPeer.connection.string,
+    )
+    const served = await axios.get(verifiedPeer.connection.string + "/genesis")
+    return served.status === 200 ? served.data : null
+}
+
+function logGenesisVerdict(
+    verdict: Awaited<ReturnType<typeof resolveGenesisMismatch>>,
+    verifiedPeer: Peer,
+) {
+    if (verdict.outcome === "unhashed-fields-only") {
+        log.warn(
+            "[BOOTSTRAP] Peer " +
+                verifiedPeer.connection.string +
+                " serves genesis data that differs from ours only in the fork schedule or chain id; " +
+                "keeping our data/genesis.json as it is",
+        )
+        return
+    }
+    if (verdict.outcome !== "replaced") return
+
+    log.warn(
+        "[BOOTSTRAP] Replaced data/genesis.json with the data served by " +
+            verifiedPeer.connection.string +
+            (verdict.carriedOver.length > 0
+                ? ", keeping our " + verdict.carriedOver.join(" and ")
+                : ""),
+    )
+    // INFO: Update discovered genesis hashes and current genesis hash
+    discoveredGenesisDataHashes.add(verdict.servedCoreHash)
+    ourGenesisDataHash = verdict.writtenFullHash
+    ourGenesisCoreHash = verdict.servedCoreHash
+
+    // INFO: Ensure all peers have the same genesis data
+    if (discoveredGenesisDataHashes.size > 1) {
+        log.error("[BOOTSTRAP] Conflicting genesis data hashes found")
+        throw new Error("Conflicting genesis data hashes found across peers")
+    }
+}
+
+async function ensureGenesisDataMatch(verifiedPeer: Peer) {
+    const res = await fetchPeerGenesisHash(verifiedPeer)
 
     if (res.result === 200) {
         const peerGenesisDataHash = res.response
@@ -70,25 +130,8 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
             ourGenesisCoreHash,
             peerGenesisDataHash,
             {
-                fetchPeerGenesis: async () => {
-                    log.warn(
-                        "[BOOTSTRAP] Genesis data hash differs from the one " +
-                            verifiedPeer.connection.string +
-                            " advertises (ours " +
-                            ourGenesisDataHash +
-                            ", theirs " +
-                            peerGenesisDataHash +
-                            "); comparing the data it serves",
-                    )
-                    log.debug(
-                        "[BOOTSTRAP] Fetching new genesis data from peer: " +
-                            verifiedPeer.connection.string,
-                    )
-                    const served = await axios.get(
-                        verifiedPeer.connection.string + "/genesis",
-                    )
-                    return served.status === 200 ? served.data : null
-                },
+                fetchPeerGenesis: () =>
+                    downloadPeerGenesis(verifiedPeer, peerGenesisDataHash),
                 readLocalGenesis: () =>
                     JSON.parse(fs.readFileSync(genesisFile, "utf8")),
                 writeGenesis: data =>
@@ -97,33 +140,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                 hashCore: hashGenesisCore,
             },
         )
-
-        if (verdict.outcome === "unhashed-fields-only") {
-            log.warn(
-                "[BOOTSTRAP] Peer " +
-                    verifiedPeer.connection.string +
-                    " serves genesis data that differs from ours only in the fork schedule or chain id; " +
-                    "keeping our data/genesis.json as it is",
-            )
-        } else if (verdict.outcome === "replaced") {
-            log.warn(
-                "[BOOTSTRAP] Replaced data/genesis.json with the data served by " +
-                    verifiedPeer.connection.string +
-                    (verdict.carriedOver.length > 0
-                        ? ", keeping our " + verdict.carriedOver.join(" and ")
-                        : ""),
-            )
-            // INFO: Update discovered genesis hashes and current genesis hash
-            discoveredGenesisDataHashes.add(verdict.servedCoreHash)
-            ourGenesisDataHash = verdict.writtenFullHash
-            ourGenesisCoreHash = verdict.servedCoreHash
-
-            // INFO: Ensure all peers have the same genesis data
-            if (discoveredGenesisDataHashes.size > 1) {
-                log.error("[BOOTSTRAP] Conflicting genesis data hashes found")
-                throw new Error("Conflicting genesis data hashes found across peers")
-            }
-        }
+        logGenesisVerdict(verdict, verifiedPeer)
     } else {
         log.error(
             "[BOOTSTRAP] Failed to get genesis data hash from peer: " +

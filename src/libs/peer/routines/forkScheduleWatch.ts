@@ -41,29 +41,66 @@ export function planScheduleCheck(
     return { due, inWindow, nearest }
 }
 
-let running = false
+/** Peers asked at the same time, and how long one may take before it is given up on. */
+export const PEER_CONCURRENCY = 4
+export const PEER_TIMEOUT_MS = 3000
 
-/** Called after a block is inserted; never throws and never blocks the caller. */
-export async function onBlockInserted(tip: number): Promise<void> {
-    if (running) return
-    running = true
-    try {
-        const { getSharedState } = await import("@/utilities/sharedState")
-        const forkConfig = getSharedState.forkConfig as unknown as ForkConfigLike
-        const plan = planScheduleCheck(tip, forkConfig)
-        if (!plan.due) return
-        const [{ default: PeerManager }, { default: log }, agreement] = await Promise.all([
-            import("../PeerManager"),
-            import("@/utilities/logger"),
-            import("./forkScheduleAgreement"),
-        ])
-        const ours = agreement.localScheduleView(forkConfig, getSharedState.chainId)
-        for (const peer of PeerManager.getInstance().getPeers()) {
-            if (peer.identity === getSharedState.publicKeyHex) continue
-            const result = await agreement.checkPeerSchedule(peer, ours, {
-                attempts: 1,
-            })
-            if (result.status !== "mismatch") continue
+/**
+ * Run `fn` over `items` with at most `limit` in flight. `fn` must not throw.
+ * Exported for the test.
+ */
+export async function mapWithLimit<T>(
+    items: readonly T[],
+    limit: number,
+    fn: (item: T) => Promise<void>,
+): Promise<void> {
+    let next = 0
+    const worker = async () => {
+        while (next < items.length) {
+            const item = items[next++]
+            await fn(item)
+        }
+    }
+    await Promise.all(
+        Array.from({ length: Math.min(limit, items.length) }, worker),
+    )
+}
+
+/** Gives `promise` at most `ms`; the late answer is dropped, not awaited. */
+function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: T): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<T>(resolve => {
+        timer = setTimeout(() => resolve(onTimeout), ms)
+    })
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
+let running = false
+// A round that was due while another was still running. Only the latest one is
+// kept, so a slow round delays the next check but never drops it, and a backlog
+// cannot build up.
+let pendingTip: number | null = null
+
+async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
+    const { getSharedState } = await import("@/utilities/sharedState")
+    const forkConfig = getSharedState.forkConfig as unknown as ForkConfigLike
+    const [{ default: PeerManager }, { default: log }, agreement] = await Promise.all([
+        import("../PeerManager"),
+        import("@/utilities/logger"),
+        import("./forkScheduleAgreement"),
+    ])
+    const ours = agreement.localScheduleView(forkConfig, getSharedState.chainId)
+    const peers = PeerManager.getInstance()
+        .getPeers()
+        .filter(peer => peer.identity !== getSharedState.publicKeyHex)
+    await mapWithLimit(peers, PEER_CONCURRENCY, async peer => {
+        try {
+            const result = await withTimeout<Awaited<ReturnType<typeof agreement.checkPeerSchedule>>>(
+                agreement.checkPeerSchedule(peer, ours, { attempts: 1 }),
+                PEER_TIMEOUT_MS,
+                { status: "unreachable", reason: "timed out" },
+            )
+            if (result.status !== "mismatch") return
             const text =
                 "[FORK SCHEDULE] MISMATCH with " +
                 peer.connection.string +
@@ -76,10 +113,43 @@ export async function onBlockInserted(tip: number): Promise<void> {
                 result.lines.join("; ")
             if (plan.inWindow) log.error(text)
             else log.warn(text)
+        } catch {
+            // One peer failing must not stop the others from being compared.
         }
-    } catch {
-        // A failed comparison must not affect block processing.
+    })
+}
+
+async function runRounds(first: number): Promise<void> {
+    running = true
+    try {
+        const { getSharedState } = await import("@/utilities/sharedState")
+        let current: number | null = first
+        while (current !== null) {
+            const forkConfig = getSharedState.forkConfig as unknown as ForkConfigLike
+            await compareWithPeers(current, planScheduleCheck(current, forkConfig))
+            current = pendingTip
+            pendingTip = null
+        }
     } finally {
         running = false
+    }
+}
+
+/** Called after a block is inserted; never throws and never blocks the caller. */
+export async function onBlockInserted(tip: number): Promise<void> {
+    try {
+        const { getSharedState } = await import("@/utilities/sharedState")
+        const plan = planScheduleCheck(
+            tip,
+            getSharedState.forkConfig as unknown as ForkConfigLike,
+        )
+        if (!plan.due) return
+        if (running) {
+            pendingTip = tip
+            return
+        }
+        await runRounds(tip)
+    } catch {
+        // A failed comparison must not affect block processing.
     }
 }
