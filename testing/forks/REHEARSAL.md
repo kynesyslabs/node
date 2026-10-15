@@ -195,6 +195,17 @@ Per run directory:
 The identities, the peer list and one genesis file per node are generated per
 run, so a run never reuses or touches `testing/devnet`'s own files.
 
+Only one rehearsal runs at a time: the script takes an exclusive lock
+(`testing/runs/.fork-rehearsal.lock`) before anything else and holds it until
+the teardown is done, and a second launch exits with status 2 and says so. All
+published ports (the nodes' RPC, omni and signaling ports, and Postgres) are
+bound to 127.0.0.1 only, and the scenario talks to 127.0.0.1. The `http://node-N:port`
+URLs in the generated genesis and peer list are the nodes' addresses on the
+project's private docker network, between containers, so they cannot be loopback
+addresses and plain http is what a hermetic local devnet uses. The image tag
+folds in the content of untracked files under `src` and `testing/devnet`, so
+editing one of them is never served from an older image.
+
 ## What it proves
 
 Every line is a check; the scenario is `rehearsal.ts`.

@@ -92,7 +92,7 @@ async function until(fn: () => boolean | Promise<boolean>, secs: number, everyMs
 // ---- node access -----------------------------------------------------------
 
 async function nodeCall(port: number, message: string, data: unknown = {}) {
-    const res = await fetch(`http://localhost:${port}`, {
+    const res = await fetch(`http://127.0.0.1:${port}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ method: "nodeCall", params: [{ message, data, muid: "rehearsal" }] }),
@@ -149,11 +149,18 @@ const nodeLog = (n: number, since?: string) =>
         maxBuffer: 256 * 1024 * 1024,
     }).replace(/\u001b\[[0-9;]*m/g, "")
 
+// Plain substring tests: the log text is untrusted input and a built regex adds nothing here.
+const forkLoadedLine = (fork: string, height: number) => `Loaded fork "${fork}" with activationHeight=${height}`
+const stallExit = (log: string) => {
+    const at = log.indexOf("Missed 3 consecutive shard selections")
+    return at >= 0 && log.indexOf("exiting for log investigation", at) >= 0
+}
+
 // ---- transactions ----------------------------------------------------------
 
 async function client(port: number, who: string) {
     const demos = new Demos()
-    await demos.connect(`http://localhost:${port}`)
+    await demos.connect(`http://127.0.0.1:${port}`)
     await demos.connectWallet(identity(who, "identity"))
     return demos
 }
@@ -275,8 +282,8 @@ if (UPGRADE) {
         check(booted, `${round} restart: all four nodes finished peer bootstrap`)
         const logged = [1, 2, 3, 4].map(n => ({
             n,
-            sig: new RegExp(`Loaded fork "signatureDomain" with activationHeight=${H}`).test(nodeLog(n, at)),
-            web2: new RegExp(`Loaded fork "web2ProofBinding" with activationHeight=${H}`).test(nodeLog(n, at)),
+            sig: nodeLog(n, at).includes(forkLoadedLine("signatureDomain", H)),
+            web2: nodeLog(n, at).includes(forkLoadedLine("web2ProofBinding", H)),
             kept: /differs from ours only in the fork schedule or chain id/.test(nodeLog(n, at)),
             replaced: /Replaced data\/genesis\.json|Genesis data hash mismatch after download/.test(nodeLog(n, at)),
         }))
@@ -331,7 +338,7 @@ check(
 const loaded = (n: number) =>
     execFileSync(DOCKER, ["logs", `${PROJECT}-node-${n}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
 const logHas = (n: number, fork: string) =>
-    new RegExp(`Loaded fork "${fork}" with activationHeight=${H}`).test(loaded(n))
+    loaded(n).includes(forkLoadedLine(fork, H))
 check(
     [1, 2, 3, 4].every(n => logHas(n, "signatureDomain") && logHas(n, "web2ProofBinding")),
     `every node logged both forks loaded at activationHeight=${H}`,
@@ -554,7 +561,7 @@ check(r4Legacy.accepted, "node 4 accepts the very same legacy-signed transfer: t
 
 // Node 4 keeps being drawn into shards with a candidate block nobody else agrees
 // with; after three such draws its stall watchdog ends the process.
-const stalled = await until(() => /Missed 3 consecutive shard selections.*exiting for log investigation/.test(nodeLog(4, restartedAt)), 180, 3000)
+const stalled = await until(() => stallExit(nodeLog(4, restartedAt)), 180, 3000)
 check(stalled, "node 4 logged the stall watchdog's exit after three shard draws without its signature")
 const log4s = nodeLog(4, restartedAt)
 const stallBlocks = [...log4s.matchAll(/Drawn into the shard for block (\d+) but our signature is missing/g)].map(m => Number(m[1]))
@@ -615,7 +622,7 @@ writeFileSync(`${RUN_DIR}/data/genesis.node4.json`, readFileSync(`${RUN_DIR}/dat
 const fixedAt = (execFileSync(DOCKER, ["restart", `${PROJECT}-node-4`]), new Date().toISOString())
 restartsAfterManual = restartCounts()
 const reloaded = await until(
-    () => new RegExp(`Loaded fork "signatureDomain" with activationHeight=${H}`).test(nodeLog(4, fixedAt)),
+    () => nodeLog(4, fixedAt).includes(forkLoadedLine("signatureDomain", H)),
     120,
     3000,
 )
