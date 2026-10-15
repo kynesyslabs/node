@@ -11,6 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, jest, mock } fro
 import { DataSource } from "typeorm"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
+import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
 
 const PG_URL = process.env.L2PS_TEST_PG_URL
 const SCHEMA = `l2ps_mempool_test_${process.pid}_${Date.now()}`
@@ -67,6 +68,21 @@ async function insert(hash: string, status: string, ageMs: number, edits: unknow
     })
 }
 
+/** The history row for a queue row's original hash; payload null stands for a row from before ciphertext was kept. */
+async function insertHistory(hash: string, payload: Record<string, unknown> | null) {
+    await ds.getRepository(L2PSTransaction).insert({
+        l2ps_uid: "subnet_a",
+        hash: `orig-${hash}`,
+        type: "instantMessaging",
+        from_address: "a",
+        to_address: "b",
+        amount: 0n,
+        nonce: 0n,
+        timestamp: 1n,
+        encrypted_payload: payload,
+    } as never)
+}
+
 describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
     beforeAll(async () => {
         assertDisposable(PG_URL as string)
@@ -75,7 +91,7 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
             url: PG_URL,
             schema: SCHEMA,
             extra: { options: `-c search_path=${SCHEMA}` },
-            entities: [L2PSMempoolTx],
+            entities: [L2PSMempoolTx, L2PSTransaction],
         })
         await ds.initialize()
         await ds.query(`CREATE SCHEMA "${SCHEMA}"`)
@@ -91,21 +107,37 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
     })
 
     beforeEach(async () => {
-        await ds.query(`TRUNCATE "l2ps_mempool"`)
+        await ds.query(`TRUNCATE "l2ps_mempool", "l2ps_transactions" RESTART IDENTITY`)
     })
 
-    it("deletes old batched rows that have no edits and keeps everything else", async () => {
+    it("deletes old batched rows that have no edits and a stored ciphertext, and keeps everything else", async () => {
         await insert("old-null", "batched", 10 * MINUTE, null)
         await insert("old-empty", "batched", 10 * MINUTE, [])
         await insert("old-edits", "batched", 10 * MINUTE, [{ type: "balance" }])
         await insert("recent-null", "batched", 1 * MINUTE, null)
         await insert("old-executed", "executed", 10 * MINUTE, null)
         await insert("old-failed", "failed", 10 * MINUTE, null)
+        for (const hash of ["old-null", "old-empty", "old-edits", "recent-null", "old-executed", "old-failed"]) {
+            await insertHistory(hash, { hash })
+        }
 
         expect(await L2PSMempool.cleanupBatchedWithoutEdits(5 * MINUTE)).toBe(2)
 
         const left = (await ds.getRepository(L2PSMempoolTx).find()).map(r => r.hash).sort()
         expect(left).toEqual(["old-edits", "old-executed", "old-failed", "recent-null"])
+    })
+
+    it("keeps a legacy row whose history entry holds no ciphertext, or has no entry at all", async () => {
+        await insert("legacy-null-payload", "batched", 10 * MINUTE, null)
+        await insert("legacy-no-history", "batched", 10 * MINUTE, null)
+        await insert("modern", "batched", 10 * MINUTE, null)
+        await insertHistory("legacy-null-payload", null)
+        await insertHistory("modern", { hash: "modern" })
+
+        expect(await L2PSMempool.cleanupBatchedWithoutEdits(5 * MINUTE)).toBe(1)
+
+        const left = (await ds.getRepository(L2PSMempoolTx).find()).map(r => r.hash).sort()
+        expect(left).toEqual(["legacy-no-history", "legacy-null-payload"])
     })
 
     it("summarises a status without loading rows", async () => {

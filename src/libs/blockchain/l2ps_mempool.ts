@@ -792,12 +792,17 @@ export default class L2PSMempool {
     }
 
     /**
-     * Delete batched rows that carry no GCR edits once they are old enough.
+     * Delete batched rows that carry no GCR edits once they are old enough, and
+     * whose ciphertext the history table already holds.
      *
-     * A batched row leaves the queue when the proof built from its edits is
+     * A batched row leaves the queue when the proof built from its GCR edits is
      * applied at consensus. A transaction with no edits, such as a message,
-     * never gets a proof, so nothing would ever remove it and the queue would
-     * gain a row per message for good. The envelope stays in the history table.
+     * never gets a proof, so nothing would otherwise remove it and the queue
+     * would gain a row per message for good.
+     *
+     * Rows written before the history table kept the ciphertext have no
+     * payload there, and the history endpoint recovers theirs from this row. A
+     * row without a stored payload is therefore kept, and counted in the log.
      *
      * @param olderThanMs - Remove rows whose timestamp is older than this many milliseconds
      * @returns Promise resolving to number of deleted records
@@ -807,6 +812,8 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             const cutoffTimestamp = (Date.now() - olderThanMs).toString()
+            const historyHasPayload =
+                "EXISTS (SELECT 1 FROM l2ps_transactions h WHERE h.hash = l2ps_mempool.original_hash AND h.encrypted_payload IS NOT NULL)"
 
             const result = await this.repo
                 .createQueryBuilder()
@@ -815,11 +822,23 @@ export default class L2PSMempool {
                 .where("status = :status", { status: L2PS_STATUS.BATCHED })
                 .andWhere("CAST(timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
                 .andWhere("(gcr_edits IS NULL OR gcr_edits = '[]'::jsonb)")
+                .andWhere(historyHasPayload)
                 .execute()
 
             const deletedCount = result.affected || 0
             if (deletedCount > 0) {
                 log.info(`[L2PS Mempool] Cleaned up ${deletedCount} old batched transactions without edits`)
+            }
+
+            const kept = await this.repo
+                .createQueryBuilder("tx")
+                .where("tx.status = :status", { status: L2PS_STATUS.BATCHED })
+                .andWhere("CAST(tx.timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
+                .andWhere("(tx.gcr_edits IS NULL OR tx.gcr_edits = '[]'::jsonb)")
+                .andWhere(`NOT ${historyHasPayload.replace("l2ps_mempool.original_hash", "tx.original_hash")}`)
+                .getCount()
+            if (kept > 0) {
+                log.info(`[L2PS Mempool] ${kept} legacy rows kept: their ciphertext is not in the history table`)
             }
             return deletedCount
 
