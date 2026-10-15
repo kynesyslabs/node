@@ -85,6 +85,18 @@ describe("getSummaryByUIDAndStatus", () => {
     })
 })
 
+describe("getSummaryByUIDAndStatus failure", () => {
+    it("reaches the caller instead of reading as an empty queue", async () => {
+        ;(L2PSMempool as any).repo = {
+            createQueryBuilder: () => {
+                throw new Error("connection lost")
+            },
+        }
+
+        await expect(L2PSMempool.getSummaryByUIDAndStatus("subnet_a", "executed")).rejects.toThrow("connection lost")
+    })
+})
+
 describe("cleanupBatchedWithoutEdits", () => {
     it("deletes only rows whose ciphertext the history table holds, and counts the ones it keeps", async () => {
         const del = recordingBuilder({})

@@ -20,6 +20,8 @@ export interface Admission {
 
 interface SubnetState {
     count: number
+    /** False until a count has been read once; a failed read before that has nothing to fall back on. */
+    known: boolean
     fetchedAt: number
     halfWarned: boolean
     lastCapLog: number
@@ -72,7 +74,7 @@ export class ExecutedBacklogGuard {
     private async current(l2psUid: string): Promise<SubnetState> {
         let state = this.subnets.get(l2psUid)
         if (!state) {
-            state = { count: 0, fetchedAt: Number.NEGATIVE_INFINITY, halfWarned: false, lastCapLog: Number.NEGATIVE_INFINITY, refresh: null }
+            state = { count: 0, known: false, fetchedAt: Number.NEGATIVE_INFINITY, halfWarned: false, lastCapLog: Number.NEGATIVE_INFINITY, refresh: null }
             this.subnets.set(l2psUid, state)
         }
         if (this.now() - state.fetchedAt >= this.ttlMs) {
@@ -87,10 +89,13 @@ export class ExecutedBacklogGuard {
     private async reload(l2psUid: string, state: SubnetState): Promise<void> {
         try {
             state.count = await this.opts.countExecuted(l2psUid)
+            state.known = true
         } catch (error) {
-            // A failed count must not stop a subnet from working; the next
-            // interval asks again.
-            log.warning(`[L2PS Backlog] Could not count executed rows for ${l2psUid}: ${error}`)
+            // A failed count keeps the last one read, so a database hiccup does
+            // not reopen a subnet that was at its cap. With no count yet there
+            // is nothing to hold on to and messages pass; the next interval
+            // asks again either way.
+            log.warning(`[L2PS Backlog] Could not count executed rows for ${l2psUid}${state.known ? ", keeping the last count" : ""}: ${error}`)
         }
         state.fetchedAt = this.now()
     }

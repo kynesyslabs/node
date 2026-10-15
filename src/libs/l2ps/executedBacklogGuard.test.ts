@@ -130,4 +130,30 @@ describe("executed backlog cap", () => {
         await g.admit("a")
         expect(error).toHaveBeenCalledTimes(2)
     })
+
+    it("keeps refusing a subnet at its cap when a later count fails", async () => {
+        backlog.a = 100
+        let failing = false
+        const g = new ExecutedBacklogGuard({
+            cap: 100,
+            retryAfterMs: 1,
+            now: () => clock,
+            countExecuted: async uid => {
+                if (failing) throw new Error("db down")
+                return backlog[uid] ?? 0
+            },
+        })
+        expect((await g.admit("a")).admitted).toBe(false)
+
+        failing = true
+        for (let window = 0; window < 3; window++) {
+            clock += 3001
+            expect((await g.admit("a")).admitted).toBe(false)
+        }
+
+        failing = false
+        backlog.a = 5
+        clock += 3001
+        expect((await g.admit("a")).admitted).toBe(true)
+    })
 })

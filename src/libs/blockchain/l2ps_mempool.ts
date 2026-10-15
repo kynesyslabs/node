@@ -515,31 +515,29 @@ export default class L2PSMempool {
      * @param status - Status to summarise
      * @returns Row count and the oldest and newest row timestamps, as the
      *          database's bigint strings (null when there are no rows)
+     * @throws When the database cannot be queried
      */
     public static async getSummaryByUIDAndStatus(
         l2psUid: string,
         status: L2PSStatus,
     ): Promise<{ count: number; oldestTimestamp: string | null; newestTimestamp: string | null }> {
-        try {
-            await this.ensureInitialized()
+        // A failure is the caller's to handle: reporting zero would read as an
+        // empty queue to a caller deciding whether to accept more work.
+        await this.ensureInitialized()
 
-            const row = await this.repo
-                .createQueryBuilder("tx")
-                .select("COUNT(*)", "count")
-                .addSelect("MIN(CAST(tx.timestamp AS BIGINT))", "oldest")
-                .addSelect("MAX(CAST(tx.timestamp AS BIGINT))", "newest")
-                .where("tx.l2ps_uid = :l2psUid", { l2psUid })
-                .andWhere("tx.status = :status", { status })
-                .getRawOne()
+        const row = await this.repo
+            .createQueryBuilder("tx")
+            .select("COUNT(*)", "count")
+            .addSelect("MIN(CAST(tx.timestamp AS BIGINT))", "oldest")
+            .addSelect("MAX(CAST(tx.timestamp AS BIGINT))", "newest")
+            .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+            .andWhere("tx.status = :status", { status })
+            .getRawOne()
 
-            return {
-                count: Number.parseInt(row?.count ?? "0", 10),
-                oldestTimestamp: row?.oldest ?? null,
-                newestTimestamp: row?.newest ?? null,
-            }
-        } catch (error) {
-            log.error(`[L2PS Mempool] Error summarising ${status} transactions for UID ${l2psUid}:`, error)
-            return { count: 0, oldestTimestamp: null, newestTimestamp: null }
+        return {
+            count: Number.parseInt(row?.count ?? "0", 10),
+            oldestTimestamp: row?.oldest ?? null,
+            newestTimestamp: row?.newest ?? null,
         }
     }
 
