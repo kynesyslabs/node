@@ -732,6 +732,44 @@ export default class L2PSMempool {
     }
 
     /**
+     * Delete batched rows that carry no GCR edits once they are old enough.
+     *
+     * A batched row leaves the queue when the proof built from its edits is
+     * applied at consensus. A transaction with no edits, such as a message,
+     * never gets a proof, so nothing would ever remove it and the queue would
+     * gain a row per message for good. The envelope stays in the history table.
+     *
+     * @param olderThanMs - Remove rows whose timestamp is older than this many milliseconds
+     * @returns Promise resolving to number of deleted records
+     */
+    public static async cleanupBatchedWithoutEdits(olderThanMs: number): Promise<number> {
+        try {
+            await this.ensureInitialized()
+
+            const cutoffTimestamp = (Date.now() - olderThanMs).toString()
+
+            const result = await this.repo
+                .createQueryBuilder()
+                .delete()
+                .from(L2PSMempoolTx)
+                .where("status = :status", { status: L2PS_STATUS.BATCHED })
+                .andWhere("CAST(timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
+                .andWhere("(gcr_edits IS NULL OR gcr_edits = '[]'::jsonb)")
+                .execute()
+
+            const deletedCount = result.affected || 0
+            if (deletedCount > 0) {
+                log.info(`[L2PS Mempool] Cleaned up ${deletedCount} old batched transactions without edits`)
+            }
+            return deletedCount
+
+        } catch (error) {
+            log.error("[L2PS Mempool] Error during cleanup of batched transactions without edits:", error)
+            return 0
+        }
+    }
+
+    /**
      * Check if a transaction with the given original hash already exists
      * Used for duplicate detection during transaction processing
      * 

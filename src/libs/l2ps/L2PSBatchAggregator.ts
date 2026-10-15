@@ -808,6 +808,16 @@ export class L2PSBatchAggregator {
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${deleted} old confirmed transactions`)
             }
 
+            // Batched rows without edits never get a proof, and a proof is the
+            // only thing that removes a batched row.
+            const batchedWithoutEdits = await L2PSMempool.cleanupBatchedWithoutEdits(
+                this.CLEANUP_AGE_MS,
+            )
+            if (batchedWithoutEdits > 0) {
+                this.stats.cleanedUpTransactions += batchedWithoutEdits
+                log.info(`[L2PS Batch Aggregator] Cleaned up ${batchedWithoutEdits} batched transactions without edits`)
+            }
+
             // Rows synced from peers are stored as "processed" and nothing
             // moves them on — this node never executes them, and history is
             // served from `l2ps_transactions`. A local submission leaves this
