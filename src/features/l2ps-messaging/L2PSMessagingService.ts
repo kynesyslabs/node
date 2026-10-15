@@ -188,8 +188,20 @@ export class L2PSMessagingService {
 
     private releaseOfflineQuota(fromKey: string, recipientOnline: boolean): void {
         if (recipientOnline) return
+        this.decrementOfflineCount(fromKey)
+    }
+
+    /**
+     * Keys are free to mint, so a sender that has nothing queued must not keep
+     * an entry: a zero would stay for the life of the process.
+     */
+    private decrementOfflineCount(fromKey: string): void {
         const count = this.offlineMessageCounts.get(fromKey) ?? 0
-        if (count > 0) this.offlineMessageCounts.set(fromKey, count - 1)
+        if (count > 1) {
+            this.offlineMessageCounts.set(fromKey, count - 1)
+        } else {
+            this.offlineMessageCounts.delete(fromKey)
+        }
     }
 
     /**
@@ -432,10 +444,7 @@ export class L2PSMessagingService {
 
         for (const row of rows) {
             if (row.status !== "queued") continue
-            const count = this.offlineMessageCounts.get(row.fromKey) ?? 0
-            if (count > 0) {
-                this.offlineMessageCounts.set(row.fromKey, count - 1)
-            }
+            this.decrementOfflineCount(row.fromKey)
         }
     }
 
