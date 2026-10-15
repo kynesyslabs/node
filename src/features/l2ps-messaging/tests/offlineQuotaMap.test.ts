@@ -5,7 +5,7 @@
  * at zero is memory the node holds for as long as it runs.
  */
 
-import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
 
 const rows = new Map<string, Record<string, any>>()
 const repo = {
@@ -23,15 +23,15 @@ const repo = {
         query.where.map(w => rows.get(w.id)).filter(Boolean).map(r => ({ ...r })),
 }
 
-jest.mock("@/model/datasource", () => ({
+mock.module("@/model/datasource", () => ({
     __esModule: true,
     dataSource: { getRepository: () => repo },
 }))
-jest.mock("@/libs/l2ps/parallelNetworks", () => ({ __esModule: true, default: {} }))
-jest.mock("@/libs/blockchain/transaction", () => ({ __esModule: true, default: class {} }))
-jest.mock("@/libs/blockchain/l2ps_mempool", () => ({ __esModule: true, default: {} }))
-jest.mock("@/libs/l2ps/L2PSTransactionExecutor", () => ({ __esModule: true, default: {} }))
-jest.mock("@/utilities/logger", () => ({
+mock.module("@/libs/l2ps/parallelNetworks", () => ({ __esModule: true, default: {} }))
+mock.module("@/libs/blockchain/transaction", () => ({ __esModule: true, default: class {} }))
+mock.module("@/libs/blockchain/l2ps_mempool", () => ({ __esModule: true, default: {} }))
+mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({ __esModule: true, default: {} }))
+mock.module("@/utilities/logger", () => ({
     __esModule: true,
     default: {
         debug: jest.fn(),

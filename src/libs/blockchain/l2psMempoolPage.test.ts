@@ -2,18 +2,18 @@
  * The paged queue listing and the backlog summary issue bounded queries.
  */
 
-import { describe, expect, it, jest } from "bun:test"
+import { describe, expect, it, jest, mock } from "bun:test"
 
-jest.mock("@/model/datasource", () => ({
+mock.module("@/model/datasource", () => ({
     __esModule: true,
     default: { getInstance: async () => ({ getDataSource: () => ({}) }) },
 }))
-jest.mock("@/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
-jest.mock("@/libs/consensus/v2/types/secretaryManager", () => ({
+mock.module("@/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
+mock.module("@/libs/consensus/v2/types/secretaryManager", () => ({
     __esModule: true,
     default: { getInstance: () => ({}) },
 }))
-jest.mock("@/utilities/logger", () => ({
+mock.module("@/utilities/logger", () => ({
     __esModule: true,
     default: {
         debug: jest.fn(),

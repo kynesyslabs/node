@@ -6,21 +6,21 @@
  * those rows or the queue grows by one row per message, for good.
  */
 
-import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
 
 const cleanupByStatus = jest.fn(async (..._args: unknown[]) => 0)
 const cleanupBatchedWithoutEdits = jest.fn(async (..._args: unknown[]) => 0)
 
-jest.mock("@/libs/blockchain/l2ps_mempool", () => ({
+mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
     default: { cleanupByStatus, cleanupBatchedWithoutEdits },
     L2PS_STATUS: { EXECUTED: "executed", BATCHED: "batched", CONFIRMED: "confirmed", PROCESSED: "processed" },
 }))
-jest.mock("@/libs/l2ps/zk/L2PSBatchProver", () => ({ L2PSBatchProver: class {} }))
-jest.mock("@/libs/blockchain/validation/txValidatorPool", () => ({ __esModule: true, default: {} }))
-jest.mock("@/libs/blockchain/mempool", () => ({ __esModule: true, default: {} }))
-jest.mock("@/libs/l2ps/L2PSProofManager", () => ({ __esModule: true, default: {} }))
-jest.mock("@/utilities/logger", () => ({
+mock.module("@/libs/l2ps/zk/L2PSBatchProver", () => ({ L2PSBatchProver: class {} }))
+mock.module("@/libs/blockchain/validation/txValidatorPool", () => ({ __esModule: true, default: {} }))
+mock.module("@/libs/blockchain/mempool", () => ({ __esModule: true, default: {} }))
+mock.module("@/libs/l2ps/L2PSProofManager", () => ({ __esModule: true, default: {} }))
+mock.module("@/utilities/logger", () => ({
     __esModule: true,
     default: {
         debug: jest.fn(),

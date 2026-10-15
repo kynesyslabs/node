@@ -5,7 +5,7 @@
  * the whole queue, whatever the peer sends or leaves out.
  */
 
-import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
 
 const getByUID = jest.fn(async (..._args: unknown[]) => [] as unknown[])
 const getPageByUID = jest.fn(async (..._args: unknown[]) => [] as unknown[])
@@ -15,11 +15,11 @@ const getSummaryByUIDAndStatus = jest.fn(async (..._args: unknown[]) => ({
     newestTimestamp: null,
 }))
 
-jest.mock("@/libs/blockchain/l2ps_mempool", () => ({
+mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
     default: { getByUID, getPageByUID, getSummaryByUIDAndStatus },
 }))
-jest.mock("src/utilities/logger", () => ({
+mock.module("src/utilities/logger", () => ({
     __esModule: true,
     default: {
         debug: jest.fn(),

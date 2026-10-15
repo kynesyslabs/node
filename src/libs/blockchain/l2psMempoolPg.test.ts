@@ -7,7 +7,7 @@
  * after it, so nothing already in the database is touched.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "bun:test"
+import { afterAll, beforeAll, beforeEach, describe, expect, it, jest, mock } from "bun:test"
 import { DataSource } from "typeorm"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 
@@ -27,16 +27,16 @@ function assertDisposable(url: string): void {
 
 let ds: DataSource
 
-jest.mock("@/model/datasource", () => ({
+mock.module("@/model/datasource", () => ({
     __esModule: true,
     default: { getInstance: async () => ({ getDataSource: () => ds }) },
 }))
-jest.mock("@/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
-jest.mock("@/libs/consensus/v2/types/secretaryManager", () => ({
+mock.module("@/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
+mock.module("@/libs/consensus/v2/types/secretaryManager", () => ({
     __esModule: true,
     default: { getInstance: () => ({}) },
 }))
-jest.mock("@/utilities/logger", () => ({
+mock.module("@/utilities/logger", () => ({
     __esModule: true,
     default: {
         debug: jest.fn(),
