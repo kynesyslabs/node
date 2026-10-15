@@ -1,4 +1,4 @@
-import L2PSMempool, { L2PS_STATUS } from "@/libs/blockchain/l2ps_mempool"
+import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import SharedState, { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
@@ -250,8 +250,11 @@ export class L2PSHashService {
      */
     private async processL2PSNetwork(l2psUid: string): Promise<void> {
         try {
-            // Generate consolidated hash for this L2PS UID
-            const consolidatedHash = await L2PSMempool.getHashForL2PS(l2psUid)
+            // The hash and the count come from one snapshot. A read that fails
+            // throws, and this cycle publishes nothing for the subnet: the
+            // next one tries again.
+            const { hash: consolidatedHash, count: transactionCount } =
+                await L2PSMempool.getDigestWithCount(l2psUid)
 
             // Validate hash generation succeeded
             if (!consolidatedHash || consolidatedHash.length === 0) {
@@ -259,13 +262,7 @@ export class L2PSHashService {
                 return
             }
 
-            // Get transaction count for this UID (only executed transactions awaiting batching)
-            const { count: transactionCount } = await L2PSMempool.getSummaryByUIDAndStatus(
-                l2psUid,
-                L2PS_STATUS.EXECUTED,
-            )
-
-            // Only generate hash update if there are transactions
+            // Only generate hash update if there are executed transactions awaiting batching
             if (transactionCount === 0) {
                 log.debug(`[L2PS Hash Service] No transactions for L2PS ${l2psUid}, skipping`)
                 return

@@ -7,12 +7,8 @@
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
 
-const getHashForL2PS = jest.fn(async (..._args: unknown[]) => "0xconsolidated")
-const getSummaryByUIDAndStatus = jest.fn(async (..._args: unknown[]) => ({
-    count: 12345,
-    oldestTimestamp: "1",
-    newestTimestamp: "2",
-}))
+const getDigestWithCount = jest.fn(async (..._args: unknown[]) => ({ hash: "0xconsolidated", count: 12345 }))
+const getSummaryByUIDAndStatus = jest.fn()
 const getByUID = jest.fn(async (..._args: unknown[]) => [] as unknown[])
 const createL2PSHashUpdate = jest.fn(async (..._args: unknown[]) => ({
     content: { from: "0xself", nonce: 7 },
@@ -25,7 +21,7 @@ mock.module("@/utilities/sharedState", () => ({
 }))
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
-    default: { getHashForL2PS, getSummaryByUIDAndStatus, getByUID },
+    default: { getDigestWithCount, getSummaryByUIDAndStatus, getByUID },
     L2PS_STATUS: { EXECUTED: "executed" },
 }))
 mock.module("@kynesyslabs/demosdk/websdk", () => ({
@@ -66,6 +62,7 @@ beforeEach(() => {
     getByUID.mockClear()
     getSummaryByUIDAndStatus.mockClear()
     createL2PSHashUpdate.mockClear()
+    getDigestWithCount.mockClear()
 })
 
 describe("hash cycle over the executed queue", () => {
@@ -78,7 +75,29 @@ describe("hash cycle over the executed queue", () => {
         }
 
         expect(getByUID).not.toHaveBeenCalled()
+        expect(getSummaryByUIDAndStatus).not.toHaveBeenCalled()
         expect(createL2PSHashUpdate).toHaveBeenCalledTimes(20)
-        expect(createL2PSHashUpdate.mock.calls[0][2]).toBe(12345)
+        // The count and the hash come from the same call, so they describe one snapshot.
+        expect(createL2PSHashUpdate.mock.calls[0].slice(1, 3)).toEqual(["0xconsolidated", 12345])
+    })
+
+    it("publishes nothing for a subnet whose digest could not be read", async () => {
+        getDigestWithCount.mockRejectedValueOnce(new Error("connection lost"))
+        const service = L2PSHashService.getInstance() as any
+        service.demos = {}
+
+        await service.processL2PSNetwork("subnet_a")
+
+        expect(createL2PSHashUpdate).not.toHaveBeenCalled()
+    })
+
+    it("publishes nothing for an empty queue", async () => {
+        getDigestWithCount.mockResolvedValueOnce({ hash: "0xempty", count: 0 })
+        const service = L2PSHashService.getInstance() as any
+        service.demos = {}
+
+        await service.processL2PSNetwork("subnet_a")
+
+        expect(createL2PSHashUpdate).not.toHaveBeenCalled()
     })
 })

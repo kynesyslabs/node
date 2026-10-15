@@ -110,4 +110,28 @@ describe("consolidated hash over an executed backlog", () => {
 
         expect(await L2PSMempool.getHashForL2PS("subnet_a")).toBe(expected)
     })
+
+    it("returns the count from the same snapshot as the digest", async () => {
+        const repo = fakeRepo()
+        ;(L2PSMempool as any).repo = repo
+
+        const { hash, count } = await L2PSMempool.getDigestWithCount("subnet_a")
+
+        expect(count).toBe(ROWS)
+        expect(hash).toBe(await L2PSMempool.getHashForL2PS("subnet_a"))
+        expect(transactions).toBe(2)
+    })
+
+    it("throws when the database cannot be read, and never returns a stand-in hash", async () => {
+        ;(L2PSMempool as any).repo = {
+            manager: {
+                transaction: async () => {
+                    throw new Error("connection lost")
+                },
+            },
+        }
+
+        await expect(L2PSMempool.getHashForL2PS("subnet_a")).rejects.toThrow("connection lost")
+        await expect(L2PSMempool.getDigestWithCount("subnet_a")).rejects.toThrow("connection lost")
+    })
 })

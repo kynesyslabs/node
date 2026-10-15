@@ -370,6 +370,21 @@ export default class L2PSMempool {
      * ```
      */
     public static async getHashForL2PS(l2psUid: string, blockNumber?: number): Promise<string> {
+        return (await this.getDigestWithCount(l2psUid, blockNumber)).hash
+    }
+
+    /**
+     * The consolidated hash together with the number of rows it covers, both
+     * from one snapshot so they cannot disagree.
+     *
+     * @throws When the database cannot be read. A failure is never answered
+     *         with a stand-in hash: a caller that relays the hash as a
+     *         commitment would be publishing something that commits to nothing.
+     */
+    public static async getDigestWithCount(
+        l2psUid: string,
+        blockNumber?: number,
+    ): Promise<{ hash: string; count: number }> {
         try {
             await this.ensureInitialized()
 
@@ -423,21 +438,17 @@ export default class L2PSMempool {
             })
 
             if (result === null) {
-                // Return deterministic empty hash
+                // Deterministic empty hash
                 const suffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
-                return Hashing.sha256(`L2PS_EMPTY_${l2psUid}${suffix}`)
+                return { hash: Hashing.sha256(`L2PS_EMPTY_${l2psUid}${suffix}`), count: 0 }
             }
 
-            const consolidatedHash = result.digest
-
-            log.debug(`[L2PS Mempool] Generated hash for ${l2psUid}${blockSuffix}: ${consolidatedHash} (${result.count} txs)`)
-            return consolidatedHash
+            log.debug(`[L2PS Mempool] Generated hash for ${l2psUid}${blockSuffix}: ${result.digest} (${result.count} txs)`)
+            return { hash: result.digest, count: result.count }
 
         } catch (error) {
             log.error(`[L2PS Mempool] Error generating hash for UID ${l2psUid}, block ${blockNumber}:`, error)
-            // Return deterministic error hash
-            const blockSuffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
-            return Hashing.sha256(`L2PS_ERROR_${l2psUid}${blockSuffix}`)
+            throw error
         }
     }
 
