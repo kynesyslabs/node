@@ -35,11 +35,12 @@ mock.module("@/utilities/logger", () => ({
 
 const { default: handleL2PS } = await import("./handleL2PS")
 
-const tx = { content: { data: ["l2psEncryptedTx", { l2ps_uid: "subnet_a", original_hash: "0xo" }] } } as any
+const tx = { hash: "a".repeat(64), content: { data: ["l2psEncryptedTx", { l2ps_uid: "subnet_a", original_hash: "0xo" }] } } as any
 
 beforeEach(() => {
     admit.mockReset()
     addTransaction.mockClear()
+    getL2PS.mockClear()
 })
 
 describe("handleL2PS with a full subnet queue", () => {
@@ -60,5 +61,17 @@ describe("handleL2PS with a full subnet queue", () => {
         const response = await handleL2PS(tx)
 
         expect(response.result).not.toBe(429)
+    })
+
+    it("refuses a malformed outer hash before the backlog or the network is consulted", async () => {
+        for (const hash of ["enc-1", "\u{1F600}".repeat(32), "A".repeat(64), undefined]) {
+            const response = await handleL2PS({ ...tx, hash })
+
+            expect(response.result).toBe(400)
+            expect(String(response.extra)).toContain("hash")
+        }
+        expect(admit).not.toHaveBeenCalled()
+        expect(getL2PS).not.toHaveBeenCalled()
+        expect(addTransaction).not.toHaveBeenCalled()
     })
 })

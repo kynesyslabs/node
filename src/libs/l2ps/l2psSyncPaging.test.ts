@@ -55,9 +55,10 @@ function peerServing(pageFor: (cursor: number) => Page) {
     return { peer: peer as never, cursors }
 }
 
+const hex = (n: number) => n.toString(16).padStart(64, "0")
 const tx = (n: number) => ({
     original_hash: `orig-${n}`,
-    encrypted_tx: { hash: `enc-${n}`, content: { data: [] } },
+    encrypted_tx: { hash: hex(n), content: { data: [] } },
 })
 
 beforeEach(() => {
@@ -248,5 +249,28 @@ describe("syncL2PSWithPeer", () => {
         }
         expect(addTransaction).toHaveBeenCalledTimes(total)
         expect(new Set(cursors).size).toBe(cursors.length)
+    })
+})
+
+describe("synced rows with a malformed hash", () => {
+    it("are dropped, and the valid ones in the same page are still stored", async () => {
+        const bad = (hash: string) => ({
+            original_hash: "orig-bad",
+            encrypted_tx: { hash, content: { data: [] } },
+        })
+        const { peer } = peerServing(cursor =>
+            cursor === 0
+                ? {
+                    transactions: [bad("enc-1"), bad("\u{1F600}".repeat(32)), bad(hex(10).toUpperCase()), tx(2)],
+                    nextCursor: 1,
+                    hasMore: false,
+                }
+                : { transactions: [], nextCursor: 1, hasMore: false },
+        )
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+
+        expect(addTransaction).toHaveBeenCalledTimes(1)
+        expect((addTransaction.mock.calls[0] as any[])[1].hash).toBe(hex(2))
     })
 })

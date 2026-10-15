@@ -9,6 +9,7 @@ import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import log from "@/utilities/logger"
+import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
 import { getExecutedBacklogGuard, L2PS_BACKLOG_FULL } from "@/libs/l2ps/executedBacklogGuard"
 
 /**
@@ -126,6 +127,11 @@ export default async function handleL2PS(
     const structureError = validateL2PSStructure(l2psTx)
     if (structureError) {
         return createErrorResponse(response, 400, structureError)
+    }
+
+    // The outer hash becomes the queue's key and is not recomputed anywhere.
+    if (!isValidL2PSTxHash(l2psTx.hash)) {
+        return createErrorResponse(response, 400, "Invalid L2PS transaction hash: expected 64 lower-case hex characters")
     }
 
     const payloadData = l2psTx.content.data[1]

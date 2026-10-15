@@ -4,6 +4,7 @@ import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import forge from "node-forge"
+import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
 import Chain from "./chain"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import log from "@/utilities/logger"
@@ -116,6 +117,12 @@ export default class L2PSMempool {
         originalHash: string,
         status = "processed",
     ): Promise<{ success: boolean; error?: string }> {
+        // The one place every insert passes through, so a key the digest could
+        // not order the way it was defined never reaches the table.
+        if (!isValidL2PSTxHash(encryptedTx?.hash)) {
+            return { success: false, error: "Invalid transaction hash: expected 64 lower-case hex characters" }
+        }
+
         try {
             await this.ensureInitialized()
 
@@ -390,8 +397,10 @@ export default class L2PSMempool {
 
                 // Hashed a page at a time off one sorted cursor: the backlog is
                 // read on every cycle and can be large, and only the running
-                // digest has to stay in memory. Byte order is what .sort() gave
-                // on these ASCII keys, whatever collation the database uses.
+                // digest has to stay in memory. Byte order is what .sort() gave,
+                // whatever collation the database uses, because every stored key
+                // is 64 hex characters: addTransaction refuses any other form.
+                // Rows from before that rule are not covered by it.
                 const digest = forge.sha256.create()
                 digest.update(`L2PS_${l2psUid}${blockSuffix}:${count}:`)
                 await manager.query(
