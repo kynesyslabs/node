@@ -102,14 +102,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             // the queue still answers for them while it holds them — in any
             // status that follows execution, since batching moves them on
             // long before the sweep deletes them.
-            const missingPayload = rows.some(tx => !tx.encrypted_payload)
-            const queued = missingPayload
-                ? await L2PSMempool.getByUID(data.l2psUid, [
-                    L2PS_STATUS.EXECUTED,
-                    L2PS_STATUS.BATCHED,
-                    L2PS_STATUS.CONFIRMED,
-                ])
-                : []
+            const missingPayload = rows.filter(tx => !tx.encrypted_payload)
+            const queued = await L2PSMempool.getByOriginalHashes(
+                data.l2psUid,
+                missingPayload.map(tx => tx.hash),
+                [L2PS_STATUS.EXECUTED, L2PS_STATUS.BATCHED, L2PS_STATUS.CONFIRMED],
+            )
             const queuedByOriginalHash = new Map(queued.map(tx => [tx.original_hash, tx]))
 
             const transactions = rows

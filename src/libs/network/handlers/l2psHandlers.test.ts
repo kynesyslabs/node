@@ -10,6 +10,7 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 
 const getByUID = jest.fn(async (..._args: unknown[]) => [] as any[])
+const getByOriginalHashes = jest.fn(async (..._args: unknown[]) => [] as any[])
 const getSummaryByUIDAndStatus = jest.fn(async (..._args: unknown[]) => ({
     count: 0,
     oldestTimestamp: null as string | null,
@@ -19,7 +20,7 @@ const getSubnetTransactions = jest.fn()
 
 jest.mock("../../blockchain/l2ps_mempool", () => ({
     __esModule: true,
-    default: { getByUID, getSummaryByUIDAndStatus },
+    default: { getByUID, getByOriginalHashes, getSummaryByUIDAndStatus },
     L2PS_STATUS: {
         PENDING: "pending",
         PROCESSED: "processed",
@@ -70,6 +71,8 @@ const legacyRow = (id: number) => ({
 
 beforeEach(() => {
     getByUID.mockReset()
+    getByOriginalHashes.mockReset()
+    getByOriginalHashes.mockResolvedValue([])
     getSummaryByUIDAndStatus.mockReset()
     getSummaryByUIDAndStatus.mockResolvedValue({ count: 0, oldestTimestamp: null, newestTimestamp: null })
     getSubnetTransactions.mockReset()
@@ -119,10 +122,12 @@ describe("getL2PSTransactions", () => {
             { original_hash: "orig-1", status: "batched", encrypted_tx: { hash: "enc-1" } },
             { original_hash: "orig-2", status: "confirmed", encrypted_tx: { hash: "enc-2" } },
         ]
-        getByUID.mockImplementation(async (_uid: unknown, status: unknown) => {
-            const wanted = Array.isArray(status) ? status : [status]
-            return queue.filter(tx => wanted.includes(tx.status))
-        })
+        getByOriginalHashes.mockImplementation(
+            async (_uid: unknown, hashes: unknown, statuses: unknown) =>
+                queue.filter(
+                    tx => (hashes as string[]).includes(tx.original_hash) && (statuses as string[]).includes(tx.status),
+                ),
+        )
 
         const response: any = {}
         await l2psHandlers.getL2PSTransactions({ l2psUid: "subnet-1" } as any, response)
@@ -133,6 +138,26 @@ describe("getL2PSTransactions", () => {
             "enc-2",
         ])
         expect(response.response.unrecoverable).toBe(0)
+        expect(getByUID).not.toHaveBeenCalled()
+    })
+
+    it("looks up only the legacy rows of the page, never the subnet's whole queue", async () => {
+        getSubnetTransactions.mockResolvedValue({
+            rows: [
+                { ...legacyRow(1), encrypted_payload: { hash: "enc-1" } },
+                legacyRow(2),
+                { ...legacyRow(3), encrypted_payload: { hash: "enc-3" } },
+            ],
+            nextCursor: 3,
+            hasMore: false,
+        })
+
+        const response: any = {}
+        await l2psHandlers.getL2PSTransactions({ l2psUid: "subnet-1" } as any, response)
+
+        expect(getByUID).not.toHaveBeenCalled()
+        expect(getByOriginalHashes).toHaveBeenCalledTimes(1)
+        expect(getByOriginalHashes.mock.calls[0][1]).toEqual(["orig-2"])
     })
 
     it("does not touch the queue when every row carries its ciphertext", async () => {

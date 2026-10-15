@@ -132,6 +132,22 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
         expect(next.map(r => r.hash)).toEqual(["row-5", "row-6", "row-7", "row-8", "row-9"])
     })
 
+    it("looks rows up by original hash within the wanted statuses", async () => {
+        await insert("a", "batched", MINUTE, null)
+        await insert("b", "executed", MINUTE, null)
+        await insert("c", "failed", MINUTE, null)
+        await insert("d", "batched", MINUTE, null, "subnet_b")
+
+        const found = await L2PSMempool.getByOriginalHashes(
+            "subnet_a",
+            ["orig-a", "orig-c", "orig-d", "orig-missing"],
+            ["executed", "batched", "confirmed"],
+        )
+
+        expect(found.map(r => r.hash)).toEqual(["a"])
+        expect(await L2PSMempool.getByOriginalHashes("subnet_a", [], ["batched"])).toEqual([])
+    })
+
     it("hashes the executed rows in hash order", async () => {
         await insert("0xbb", "executed", 2000, null)
         await insert("0xaa", "executed", 1000, null)

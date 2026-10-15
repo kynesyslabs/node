@@ -413,6 +413,37 @@ export default class L2PSMempool {
     }
 
     /**
+     * Queue rows for a known set of original hashes, in the given statuses.
+     * For a caller that holds a page of hashes and wants the matching rows,
+     * which reading the subnet's whole queue and filtering would not bound.
+     *
+     * @param l2psUid - L2PS network identifier
+     * @param originalHashes - Original transaction hashes to look up
+     * @param statuses - Statuses a matching row may be in
+     */
+    public static async getByOriginalHashes(
+        l2psUid: string,
+        originalHashes: string[],
+        statuses: L2PSStatus[],
+    ): Promise<L2PSMempoolTx[]> {
+        if (originalHashes.length === 0) return []
+        try {
+            await this.ensureInitialized()
+
+            return await this.repo.find({
+                where: {
+                    l2ps_uid: l2psUid,
+                    original_hash: In(originalHashes),
+                    status: In(statuses),
+                },
+            })
+        } catch (error) {
+            log.error(`[L2PS Mempool] Error getting transactions by original hash for UID ${l2psUid}:`, error)
+            return []
+        }
+    }
+
+    /**
      * One page of a subnet's queue, oldest first, with the identifying columns
      * only. Used to list queue entries to a peer, which never needs a payload,
      * and bounded so one request cannot read the whole table.
