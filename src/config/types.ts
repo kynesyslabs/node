@@ -138,6 +138,12 @@ export interface L2PSConfig {
     maxBatchSize: number
     cleanupAgeMs: number
     /**
+     * Most executed transactions a subnet may have waiting for a batch. At the
+     * cap the node refuses new transactions for that subnet until the
+     * aggregator has drained some. 0 turns the limit off.
+     */
+    mempoolMaxExecutedPerSubnet: number
+    /**
      * How long an executed transaction stays in the durable history table,
      * in days. 0 keeps history forever, which is the default: `cleanupAgeMs`
      * above governs the aggregation *queue* only, and a subnet that wants its

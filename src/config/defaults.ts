@@ -121,6 +121,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         minBatchSize: 1,
         maxBatchSize: 10,
         cleanupAgeMs: 300000,
+        mempoolMaxExecutedPerSubnet: 50_000,
         historyRetentionDays: 0,
         historyStorePlaintext: false,
         historyRequireV2: false,

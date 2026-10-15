@@ -9,6 +9,7 @@ import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import log from "@/utilities/logger"
+import { getExecutedBacklogGuard, L2PS_BACKLOG_FULL } from "@/libs/l2ps/executedBacklogGuard"
 
 /**
  * Create an error response with the given status code and message
@@ -134,6 +135,16 @@ export default async function handleL2PS(
     const l2psInstance = await getL2PSInstance(l2psUid)
     if (!l2psInstance) {
         return createErrorResponse(response, 400, "L2PS network not found and not joined (missing config)")
+    }
+
+    // Refuse before any decrypt or write once the subnet's queue is at its cap.
+    const admission = await getExecutedBacklogGuard().admit(l2psUid)
+    if (!admission.admitted) {
+        return createErrorResponse(
+            response,
+            429,
+            `${L2PS_BACKLOG_FULL}: the subnet's queue holds ${admission.count} transactions, retry in ${Math.ceil(admission.retryAfterMs / 1000)}s`,
+        )
     }
 
     // Decrypt and validate transaction

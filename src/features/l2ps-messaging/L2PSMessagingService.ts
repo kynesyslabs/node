@@ -12,6 +12,7 @@ import Transaction from "@/libs/blockchain/transaction"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
+import { getExecutedBacklogGuard, L2PS_BACKLOG_FULL } from "@/libs/l2ps/executedBacklogGuard"
 import { L2PSMessage } from "./entities/L2PSMessage"
 import { canonicalizeKey } from "./keys"
 import type { MessageStatus, SerializedEncryptedMessage, StoredMessage } from "./types"
@@ -28,6 +29,9 @@ export interface ProcessMessageResult {
     duplicate?: boolean
     /** Status the message is stored with: delivered, queued or, for a duplicate, sent. */
     status?: MessageStatus
+    /** Set when the subnet's queue is full and the sender should try again later. */
+    code?: typeof L2PS_BACKLOG_FULL
+    retryAfterMs?: number
 }
 
 type MessageRepo = ReturnType<typeof dataSource.getRepository<L2PSMessage>>
@@ -99,6 +103,17 @@ export class L2PSMessagingService {
         const existing = await this.findExisting(repo, identity)
         if (existing && existing.status !== "failed") {
             return this.duplicateResult(existing)
+        }
+
+        // Before anything is written: a refused message leaves no row behind.
+        const admission = await getExecutedBacklogGuard().admit(l2psUid)
+        if (!admission.admitted) {
+            return {
+                success: false,
+                error: "L2PS queue is full, retry later",
+                code: L2PS_BACKLOG_FULL,
+                retryAfterMs: admission.retryAfterMs,
+            }
         }
 
         const quotaError = this.reserveOfflineQuota(fromKey, recipientOnline)
