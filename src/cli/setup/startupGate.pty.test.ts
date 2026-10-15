@@ -85,6 +85,9 @@ function drive(opts: { send?: string; timeoutMs?: number; stdin?: "tty" | "null"
     return { exit: first.replace("EXIT ", ""), text }
 }
 
+const BANNER = "DEMOS NODE SETUP WARNING"
+const occurrences = (text: string): number => text.split(BANNER).length - 1
+
 describe.skipIf(!ptyAvailable)("the start-up offer on a real terminal", () => {
     it("Ctrl-C aborts the start with 130 and says so", () => {
         const r = drive({ send: "\\x03" })
@@ -97,6 +100,15 @@ describe.skipIf(!ptyAvailable)("the start-up offer on a real terminal", () => {
         const r = drive({ send: "\\x04" })
         expect(r.exit).toBe("130")
         expect(r.text).not.toContain("BOOTED")
+    })
+
+    it("shows the warning banner once on the terminal, with the offer after it, and once headless", () => {
+        const offered = drive({ send: "n\\n" })
+        expect(occurrences(offered.text)).toBe(1)
+        expect(offered.text.indexOf(BANNER)).toBeLessThan(offered.text.indexOf("Run the setup now?"))
+        expect(occurrences(drive({ stdin: "null" }).text)).toBe(1)
+        expect(occurrences(drive({ stdin: "background" }).text)).toBe(1)
+        expect(occurrences(drive({ env: { CI: "true" } }).text)).toBe(1)
     })
 
     it("Enter and n continue booting", () => {

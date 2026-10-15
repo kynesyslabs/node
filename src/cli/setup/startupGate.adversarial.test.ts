@@ -176,6 +176,39 @@ describe("the safety switches fail loudly, not silently", () => {
     })
 })
 
+describe("a report is shown once", () => {
+    const banners = (o: Outcome) => o.out.split("DEMOS NODE SETUP WARNING").length - 1
+
+    it("only the logger shows it when the logger also writes to the terminal", async () => {
+        writeSubnet(root, "broken", { key: null })
+        const o = await gate({ logError: m => (void m, true) })
+        expect(banners(o)).toBe(0)
+        const logged: string[] = []
+        const again = await gate({ logError: m => (logged.push(m), true) })
+        expect(again.out).toBe("")
+        expect(logged).toHaveLength(1)
+        expect(logged[0]).toContain("DEMOS NODE SETUP WARNING")
+    })
+
+    it("a logger that records quietly, returns nothing, or fails leaves the plain print as the one copy", async () => {
+        writeSubnet(root, "broken", { key: null })
+        for (const logError of [() => false, () => undefined, async () => {
+            throw new Error("disk full")
+        }]) {
+            expect(banners(await gate({ logError }))).toBe(1)
+        }
+    })
+
+    it("the same holds for the identity key stop", async () => {
+        breakIdentity()
+        const quiet = await gate({ logError: () => true })
+        expect(quiet).toMatchObject({ result: "exit", code: 1 })
+        expect(quiet.out).not.toContain("CANNOT START")
+        const plain = await gate({ logError: () => false })
+        expect(plain.out.split("CANNOT START").length - 1).toBe(1)
+    })
+})
+
 describe("the report and its log", () => {
     it("never prints key material, an env value or the contents of a bad file", async () => {
         const canary = `${"canary-".repeat(8)}not-hex`

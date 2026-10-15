@@ -33,8 +33,11 @@ export interface GateDeps {
     env: Record<string, string | undefined>
     interactive: boolean
     say: (line: string) => void
-    /** Also records the problems in the node log. */
-    logError: (message: string) => void | Promise<void>
+    /**
+     * Records the problems in the node log. Returns true when the logger also
+     * wrote the text to the terminal, so it is not printed a second time.
+     */
+    logError: (message: string) => boolean | void | Promise<boolean | void>
     prompter?: Prompter
     inDocker: boolean
     /** Stop the node on any problem, not only on the consensus-critical one. */
@@ -79,12 +82,15 @@ export function describeFatal(fatal: CheckItem[]): string {
     ].join("\n")
 }
 
-async function defaultLogError(message: string): Promise<void> {
+async function defaultLogError(message: string): Promise<boolean> {
     try {
         const { default: log } = await import("@/utilities/logger")
         log.error(`[SETUP] ${message}`)
+        // The gate runs before the TUI takes the terminal, when the logger writes
+        // every line to stdout as well as to the log file, like the rest of the boot.
+        return true
     } catch {
-        /* the banner on stderr already carries it */
+        return false
     }
 }
 
@@ -122,16 +128,20 @@ function warnAboutMistypedSwitches(deps: GateDeps): void {
 }
 
 /**
- * Logging is a courtesy: a logger that fails must not decide whether the node
- * starts, so the banner on stderr stays the record.
+ * Shows a report once. The logger line is the record (it reaches the log file
+ * and the terminal like every other boot message); the plain print only
+ * stands in when the logger did not show it. A logger that fails must not
+ * decide whether the node starts, so a failure also falls back to the print.
  */
-function safeRecorder(deps: GateDeps): (message: string) => Promise<void> {
+function safeReporter(deps: GateDeps): (message: string) => Promise<void> {
     return async message => {
+        let shown = false
         try {
-            await deps.logError(message)
+            shown = (await deps.logError(message)) === true
         } catch {
-            /* the banner on stderr already carries it */
+            /* fall back to the plain print */
         }
+        if (!shown) deps.say(message)
     }
 }
 
@@ -211,14 +221,12 @@ async function offerSetup(deps: GateDeps): Promise<OfferOutcome> {
 export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Promise<void> {
     const deps = buildDeps(overrides)
     warnAboutMistypedSwitches(deps)
-    const record = safeRecorder(deps)
+    const report = safeReporter(deps)
     const items = inspectSetup(deps)
 
     const fatal = items.filter(isFatal)
     if (fatal.length > 0) {
-        const text = describeFatal(fatal)
-        deps.say(text)
-        await record(text)
+        await report(describeFatal(fatal))
         deps.exit(1)
     }
 
@@ -226,9 +234,7 @@ export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Pro
     const problems = featureProblems(items)
     if (parseBool(deps.env[SKIP_ENV]) === true || problems.length === 0) return
 
-    const banner = describeProblems(problems, deps.inDocker)
-    deps.say(banner)
-    await record(banner)
+    await report(describeProblems(problems, deps.inDocker))
     if (deps.strict) {
         deps.say(`${STRICT_ENV} is on: not starting.`)
         deps.exit(1)
