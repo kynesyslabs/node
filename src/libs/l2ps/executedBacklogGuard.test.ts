@@ -156,4 +156,20 @@ describe("executed backlog cap", () => {
         clock += 3001
         expect((await g.admit("a")).admitted).toBe(true)
     })
+
+    it("check takes no slot, claim takes one and refuses at the cap", async () => {
+        backlog.a = 98
+        const g = guard()
+
+        for (let i = 0; i < 50; i++) expect((await g.check("a")).admitted).toBe(true)
+
+        expect(g.claim("a")).toBe(true)
+        expect(g.claim("a")).toBe(true)
+        expect(g.claim("a")).toBe(false)
+        expect((await g.check("a")).admitted).toBe(false)
+    })
+
+    it("claims nothing for a subnet it has never checked", () => {
+        expect(guard().claim("never-seen")).toBe(true)
+    })
 })

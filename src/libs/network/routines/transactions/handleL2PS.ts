@@ -10,7 +10,7 @@ import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import log from "@/utilities/logger"
 import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
-import { getExecutedBacklogGuard, L2PS_BACKLOG_FULL } from "@/libs/l2ps/executedBacklogGuard"
+import { backlogFullMessage, getExecutedBacklogGuard } from "@/libs/l2ps/executedBacklogGuard"
 
 /**
  * Create an error response with the given status code and message
@@ -143,14 +143,12 @@ export default async function handleL2PS(
         return createErrorResponse(response, 400, "L2PS network not found and not joined (missing config)")
     }
 
-    // Refuse before any decrypt or write once the subnet's queue is at its cap.
-    const admission = await getExecutedBacklogGuard().admit(l2psUid)
-    if (!admission.admitted) {
-        return createErrorResponse(
-            response,
-            429,
-            `${L2PS_BACKLOG_FULL}: the subnet's queue holds ${admission.count} transactions, retry in ${Math.ceil(admission.retryAfterMs / 1000)}s`,
-        )
+    // Cheap refusal before any decrypt while the subnet's queue is at its cap.
+    // The slot itself is only taken once the transaction is known to be new.
+    const backlog = getExecutedBacklogGuard()
+    const room = await backlog.check(l2psUid)
+    if (!room.admitted) {
+        return createErrorResponse(response, 429, backlogFullMessage(room.retryAfterMs))
     }
 
     // Decrypt and validate transaction
@@ -234,6 +232,13 @@ async function processValidL2PSTransaction(
         response.response = "Transaction already processed"
         response.extra = "Duplicate L2PS transaction detected"
         return response
+    }
+
+    // Only a transaction that decrypted, verified and is not a duplicate takes a
+    // slot, so malformed or repeated requests cannot use up the subnet's room.
+    const backlog = getExecutedBacklogGuard()
+    if (!backlog.claim(l2psUid)) {
+        return createErrorResponse(response, 429, backlogFullMessage(backlog.retryAfterMs))
     }
 
     // Store in mempool

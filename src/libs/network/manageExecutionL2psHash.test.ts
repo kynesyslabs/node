@@ -24,6 +24,7 @@ mock.module("@/libs/l2ps/balanceCheck", () => ({ checkInnerTxBalance: async () =
 mock.module("@/libs/l2ps/executedBacklogGuard", () => ({
     __esModule: true,
     L2PS_BACKLOG_FULL: "L2PS_BACKLOG_FULL",
+    backlogFullMessage: (ms: number) => `L2PS_BACKLOG_FULL: retryAfterMs=${ms}`,
     getExecutedBacklogGuard: () => ({ check: async () => ({ admitted: true }), admit: async () => ({ admitted: true }) }),
 }))
 mock.module("./endpointHandlers", async () => ({

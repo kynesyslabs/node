@@ -56,7 +56,11 @@ export class ExecutedBacklogGuard {
         this.ttlMs = opts.ttlMs ?? COUNT_TTL_MS
     }
 
-    async admit(l2psUid: string): Promise<Admission> {
+    /**
+     * Whether the subnet has room, without taking any. For a cheap refusal
+     * before work that may still fail; `claim` takes the slot once it will not.
+     */
+    async check(l2psUid: string): Promise<Admission> {
         const { cap } = this.opts
         if (cap <= 0) return { admitted: true, count: 0, cap, retryAfterMs: this.opts.retryAfterMs }
 
@@ -67,8 +71,33 @@ export class ExecutedBacklogGuard {
             this.reportFull(l2psUid, state)
             return { admitted: false, count: state.count, cap, retryAfterMs: this.opts.retryAfterMs }
         }
-        state.count++
         return { admitted: true, count: state.count, cap, retryAfterMs: this.opts.retryAfterMs }
+    }
+
+    /**
+     * Take a slot for a transaction that is about to be queued. Synchronous, so
+     * a burst cannot pass the cap between the check and the claim. False when
+     * the subnet filled up in the meantime.
+     */
+    claim(l2psUid: string): boolean {
+        if (this.opts.cap <= 0) return true
+        const state = this.subnets.get(l2psUid)
+        if (!state) return true
+        if (state.count >= this.opts.cap) return false
+        state.count++
+        return true
+    }
+
+    /** Check and claim in one step, for a caller with nothing left that could fail. */
+    async admit(l2psUid: string): Promise<Admission> {
+        const outcome = await this.check(l2psUid)
+        if (!outcome.admitted) return outcome
+        if (!this.claim(l2psUid)) return { ...outcome, admitted: false }
+        return { ...outcome, count: outcome.count + 1 }
+    }
+
+    get retryAfterMs(): number {
+        return this.opts.retryAfterMs
     }
 
     private async current(l2psUid: string): Promise<SubnetState> {
@@ -116,6 +145,11 @@ export class ExecutedBacklogGuard {
         state.lastCapLog = now
         log.error(`[L2PS Backlog] ${l2psUid} is at the cap of ${this.opts.cap} executed transactions; refusing new ones until the aggregator catches up`)
     }
+}
+
+/** What an unauthenticated caller is told: the code and when to retry, not how full the queue is. */
+export function backlogFullMessage(retryAfterMs: number): string {
+    return `${L2PS_BACKLOG_FULL}: retryAfterMs=${retryAfterMs}`
 }
 
 let shared: ExecutedBacklogGuard | null = null
