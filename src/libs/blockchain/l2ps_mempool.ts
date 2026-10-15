@@ -413,6 +413,40 @@ export default class L2PSMempool {
     }
 
     /**
+     * One page of a subnet's queue, oldest first, with the identifying columns
+     * only. Used to list queue entries to a peer, which never needs a payload,
+     * and bounded so one request cannot read the whole table.
+     *
+     * @param l2psUid - L2PS network identifier
+     * @param afterTimestamp - Only rows strictly newer than this are returned
+     * @param limit - Maximum rows returned
+     */
+    public static async getPageByUID(
+        l2psUid: string,
+        afterTimestamp: number,
+        limit: number,
+    ): Promise<Pick<L2PSMempoolTx, "hash" | "l2ps_uid" | "original_hash" | "status" | "timestamp">[]> {
+        try {
+            await this.ensureInitialized()
+
+            return await this.repo
+                .createQueryBuilder("tx")
+                .select(["tx.hash", "tx.l2ps_uid", "tx.original_hash", "tx.status", "tx.timestamp"])
+                .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+                .andWhere("CAST(tx.timestamp AS BIGINT) > CAST(:after AS BIGINT)", {
+                    after: String(Math.max(0, Math.trunc(afterTimestamp))),
+                })
+                .orderBy("tx.timestamp", "ASC")
+                .addOrderBy("tx.hash", "ASC")
+                .limit(limit)
+                .getMany()
+        } catch (error) {
+            log.error(`[L2PS Mempool] Error paging transactions for UID ${l2psUid}:`, error)
+            return []
+        }
+    }
+
+    /**
      * Size and age span of the rows a subnet holds in one status, computed by
      * the database. Callers that only report a backlog use this instead of
      * loading the rows to count them.

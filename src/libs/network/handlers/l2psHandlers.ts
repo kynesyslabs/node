@@ -50,14 +50,14 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         }
 
         try {
-            const transactions = await L2PSMempool.getByUID(data.l2psUid, L2PS_STATUS.EXECUTED)
+            const summary = await L2PSMempool.getSummaryByUIDAndStatus(data.l2psUid, L2PS_STATUS.EXECUTED)
 
             response.result = 200
             response.response = {
                 l2psUid: data.l2psUid,
-                transactionCount: transactions.length,
-                lastTimestamp: transactions.at(-1)?.timestamp ?? 0,
-                oldestTimestamp: transactions.at(0)?.timestamp ?? 0,
+                transactionCount: summary.count,
+                lastTimestamp: summary.newestTimestamp ?? 0,
+                oldestTimestamp: summary.oldestTimestamp ?? 0,
             }
         } catch (error) {
             log.error("[L2PS] Failed to get mempool info:", error)

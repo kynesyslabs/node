@@ -10,11 +10,16 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 
 const getByUID = jest.fn(async (..._args: unknown[]) => [] as any[])
+const getSummaryByUIDAndStatus = jest.fn(async (..._args: unknown[]) => ({
+    count: 0,
+    oldestTimestamp: null as string | null,
+    newestTimestamp: null as string | null,
+}))
 const getSubnetTransactions = jest.fn()
 
 jest.mock("../../blockchain/l2ps_mempool", () => ({
     __esModule: true,
-    default: { getByUID },
+    default: { getByUID, getSummaryByUIDAndStatus },
     L2PS_STATUS: {
         PENDING: "pending",
         PROCESSED: "processed",
@@ -65,7 +70,42 @@ const legacyRow = (id: number) => ({
 
 beforeEach(() => {
     getByUID.mockReset()
+    getSummaryByUIDAndStatus.mockReset()
+    getSummaryByUIDAndStatus.mockResolvedValue({ count: 0, oldestTimestamp: null, newestTimestamp: null })
     getSubnetTransactions.mockReset()
+})
+
+describe("getL2PSMempoolInfo", () => {
+    it("reports the backlog from a summary, never by loading the queue", async () => {
+        getSummaryByUIDAndStatus.mockResolvedValue({
+            count: 250_000,
+            oldestTimestamp: "1700000000000",
+            newestTimestamp: "1700000900000",
+        })
+
+        // The endpoint is reachable by any peer, so repeated calls must stay cheap.
+        for (let call = 0; call < 50; call++) {
+            const response: any = {}
+            await l2psHandlers.getL2PSMempoolInfo({ l2psUid: "subnet-1" } as any, response)
+            expect(response.result).toBe(200)
+            expect(response.response).toEqual({
+                l2psUid: "subnet-1",
+                transactionCount: 250_000,
+                lastTimestamp: "1700000900000",
+                oldestTimestamp: "1700000000000",
+            })
+        }
+        expect(getByUID).not.toHaveBeenCalled()
+    })
+
+    it("reports an empty queue as zero timestamps", async () => {
+        const response: any = {}
+        await l2psHandlers.getL2PSMempoolInfo({ l2psUid: "subnet-1" } as any, response)
+
+        expect(response.response.transactionCount).toBe(0)
+        expect(response.response.lastTimestamp).toBe(0)
+        expect(response.response.oldestTimestamp).toBe(0)
+    })
 })
 
 describe("getL2PSTransactions", () => {
