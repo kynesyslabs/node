@@ -260,8 +260,10 @@ export class L2PSHashService {
             }
 
             // Get transaction count for this UID (only executed transactions awaiting batching)
-            const transactions = await L2PSMempool.getByUID(l2psUid, L2PS_STATUS.EXECUTED)
-            const transactionCount = transactions.length
+            const { count: transactionCount } = await L2PSMempool.getSummaryByUIDAndStatus(
+                l2psUid,
+                L2PS_STATUS.EXECUTED,
+            )
 
             // Only generate hash update if there are transactions
             if (transactionCount === 0) {

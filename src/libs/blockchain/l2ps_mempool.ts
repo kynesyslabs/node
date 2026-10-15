@@ -378,6 +378,10 @@ export default class L2PSMempool {
                 options.where = { ...options.where, block_number: blockNumber }
             }
 
+            // Only the hash feeds the digest. A backlog is read whole on every
+            // cycle, and each row also carries its encrypted payload and edits,
+            // so the full entity costs several times the row's size per row.
+            options.select = { hash: true }
             const transactions = await this.repo.find(options)
 
             if (transactions.length === 0) {
@@ -405,6 +409,43 @@ export default class L2PSMempool {
             // Return deterministic error hash
             const blockSuffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
             return Hashing.sha256(`L2PS_ERROR_${l2psUid}${blockSuffix}`)
+        }
+    }
+
+    /**
+     * Size and age span of the rows a subnet holds in one status, computed by
+     * the database. Callers that only report a backlog use this instead of
+     * loading the rows to count them.
+     *
+     * @param l2psUid - L2PS network identifier
+     * @param status - Status to summarise
+     * @returns Row count and the oldest and newest row timestamps, as the
+     *          database's bigint strings (null when there are no rows)
+     */
+    public static async getSummaryByUIDAndStatus(
+        l2psUid: string,
+        status: L2PSStatus,
+    ): Promise<{ count: number; oldestTimestamp: string | null; newestTimestamp: string | null }> {
+        try {
+            await this.ensureInitialized()
+
+            const row = await this.repo
+                .createQueryBuilder("tx")
+                .select("COUNT(*)", "count")
+                .addSelect("MIN(CAST(tx.timestamp AS BIGINT))", "oldest")
+                .addSelect("MAX(CAST(tx.timestamp AS BIGINT))", "newest")
+                .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+                .andWhere("tx.status = :status", { status })
+                .getRawOne()
+
+            return {
+                count: Number.parseInt(row?.count ?? "0", 10),
+                oldestTimestamp: row?.oldest ?? null,
+                newestTimestamp: row?.newest ?? null,
+            }
+        } catch (error) {
+            log.error(`[L2PS Mempool] Error summarising ${status} transactions for UID ${l2psUid}:`, error)
+            return { count: 0, oldestTimestamp: null, newestTimestamp: null }
         }
     }
 
