@@ -83,7 +83,7 @@ When the stack is healthy:
 | `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | `demosuser` / `demospassword` / `demos` | Postgres credentials. Change `PG_PASSWORD` if you're paranoid; it never leaves the compose network. |
 | `METRICS_ENABLED` / `METRICS_PORT` | `true` / `9090` | Prometheus scrape endpoint on the node. |
 | `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password. Change this. |
-| `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` | `50000` | Most executed L2PS transactions one subnet may have waiting for a batch. At the cap new ones are refused with `L2PS_BACKLOG_FULL` (HTTP 429, or a retry-later error on the messaging socket) until the aggregator catches up. `0` turns the limit off. |
+| `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` | `50000` | Most executed L2PS transactions one subnet may have waiting for a batch. At the cap new ones are refused with `L2PS_BACKLOG_FULL` (HTTP 429, or a retry-later error on the messaging socket) until the aggregator catches up. `0` turns the limit off; the hash cycle then sorts the whole queue every few seconds, with no bound and without the primary-key index, so only do that on a node with a small subnet. |
 | `L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE` | `5` | Batches (up to ten transactions each) the L2PS aggregator builds per subnet per cycle. Raise it if a busy subnet's queue keeps growing; each batch costs one ZK proof when proofs are on. |
 | `COMPOSE_PROFILES` | `monitoring,tlsnotary` | Which compose profiles are active. See below. |
 

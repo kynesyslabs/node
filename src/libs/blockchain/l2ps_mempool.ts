@@ -32,6 +32,9 @@ export const L2PS_STATUS = {
 
 export type L2PSStatus = typeof L2PS_STATUS[keyof typeof L2PS_STATUS]
 
+/** Hashes read per query when the consolidated digest is computed. */
+const HASH_PAGE_SIZE = 5000
+
 /**
  * L2PS Mempool Manager
  * 
@@ -47,9 +50,6 @@ export type L2PSStatus = typeof L2PS_STATUS[keyof typeof L2PS_STATUS]
  * - Prevents duplicate transaction processing
  * - Follows main mempool patterns for consistency
  */
-/** Hashes read per query when the consolidated digest is computed. */
-const HASH_PAGE_SIZE = 5000
-
 export default class L2PSMempool {
     /** TypeORM repository for L2PS mempool transactions */
     public static repo: Repository<L2PSMempoolTx> | null = null

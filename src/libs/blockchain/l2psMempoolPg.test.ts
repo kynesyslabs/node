@@ -223,15 +223,15 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
         return Hashing.sha256(`L2PS_${uid}${suffix}:${sorted.length}:${sorted.join(",")}`)
     }
 
-    async function seed(count: number): Promise<void> {
+    async function seed(count: number, allExecuted = false): Promise<void> {
         // Upper and lower case, an underscore and a digit-first form, so that a
         // locale-aware ordering would differ from the code-unit order of .sort().
         await ds.query(
             `INSERT INTO l2ps_mempool (hash, l2ps_uid, sequence_number, original_hash, encrypted_tx, status, timestamp, block_number, gcr_edits, affected_accounts_count)
              SELECT CASE g % 4 WHEN 0 THEN '0x' || md5(g::text) WHEN 1 THEN '0x' || upper(md5(g::text)) WHEN 2 THEN 'A_' || md5(g::text) ELSE 'a-' || md5(g::text) END,
-                    'subnet_a', g, 'o' || g, '{}'::jsonb, CASE WHEN g % 10 = 0 THEN 'batched' ELSE 'executed' END, 1700000000000 + g, 1 + g % 3, null, 0
+                    'subnet_a', g, 'o' || g, '{}'::jsonb, CASE WHEN g % 10 = 0 AND NOT $2::boolean THEN 'batched' ELSE 'executed' END, 1700000000000 + g, 1 + g % 3, null, 0
              FROM generate_series(1, $1::int) g`,
-            [count],
+            [count, allExecuted],
         )
     }
 
@@ -241,19 +241,19 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
         expect(await L2PSMempool.getHashForL2PS("subnet_a")).toBe(await referenceDigest("subnet_a"))
     })
 
-    it("computes the same digest for a block filter, an exact page multiple and an empty subnet", async () => {
+    it("computes the same digest for a block filter and for an empty subnet", async () => {
         await seed(12_345)
         expect(await L2PSMempool.getHashForL2PS("subnet_a", 2)).toBe(await referenceDigest("subnet_a", 2))
-
-        await ds.query(`TRUNCATE "l2ps_mempool"`)
-        await seed(5000 * 2 + 1000)
-        // 10_000 executed rows would be an exact multiple; drop the batched share to land on it
-        await ds.query(`DELETE FROM l2ps_mempool WHERE status = 'batched'`)
-        const exec = Number((await ds.query(`SELECT count(*) FROM l2ps_mempool`))[0].count)
-        expect(await L2PSMempool.getHashForL2PS("subnet_a")).toBe(await referenceDigest("subnet_a"))
-        expect(exec).toBeGreaterThan(0)
-
         expect(await L2PSMempool.getHashForL2PS("subnet_missing")).toBe(await referenceDigest("subnet_missing"))
+    })
+
+    it("computes the same digest when the backlog is exactly two pages", async () => {
+        await seed(10_000, true)
+        const executed = Number((await ds.query(`SELECT count(*) FROM l2ps_mempool WHERE status = 'executed'`))[0].count)
+        expect(executed).toBe(10_000)
+
+        expect(await L2PSMempool.getHashForL2PS("subnet_a")).toBe(await referenceDigest("subnet_a"))
+        expect((await L2PSMempool.getDigestWithCount("subnet_a")).count).toBe(10_000)
     })
 
     it("hashes exactly one page when the backlog is a whole number of pages", async () => {
