@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { L2PS_ZK_DIR, ZK_IDENTITY_VKEY } from "./context"
@@ -58,6 +59,31 @@ export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
 }
 
 /**
+ * SHA-256 of the identity verification key committed in this release, over its
+ * canonical JSON (keys sorted, layout ignored). The file cannot be compared with
+ * itself, so the release carries this digest: a well-formed but different key
+ * (an edit, a key from another build) would otherwise pass the shape check and
+ * make this validator reject proofs its peers accept. Changing the key means
+ * changing this digest in the same commit; a test fails when they disagree.
+ */
+export const IDENTITY_CIRCUIT_DIGEST = "246abe5d7da79c64925375dd3e7360e82fa38e93a657132351e93461b407d622"
+
+const sortedDeep = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sortedDeep)
+    if (value === null || typeof value !== "object") return value
+    // Plain code-point order, not localeCompare: the digest must not depend on the machine's locale.
+    return Object.fromEntries(
+        Object.keys(value as object)
+            .sort()
+            .map(k => [k, sortedDeep((value as Record<string, unknown>)[k])]),
+    )
+}
+
+export function canonicalDigest(jsonText: string): string {
+    return crypto.createHash("sha256").update(JSON.stringify(sortedDeep(JSON.parse(jsonText)))).digest("hex")
+}
+
+/**
  * The identity circuit needs only its committed verification key on a node;
  * the proving key lives with the client. It is consensus-critical, so it is
  * checked here but never regenerated.
@@ -68,11 +94,18 @@ export function inspectIdentityKey(root: string): IdentityKeyState {
         return { state: "missing", detail: `${ZK_IDENTITY_VKEY} not found` }
     }
     try {
-        const vk = JSON.parse(fs.readFileSync(file, "utf8"))
+        const text = fs.readFileSync(file, "utf8")
+        const vk = JSON.parse(text)
         if (vk.protocol !== "groth16" || !vk.vk_alpha_1 || !vk.IC) {
             return {
                 state: "invalid",
                 detail: "file is not a groth16 verification key",
+            }
+        }
+        if (canonicalDigest(text) !== IDENTITY_CIRCUIT_DIGEST) {
+            return {
+                state: "invalid",
+                detail: "does not match the verification key committed in this release (modified, or from another build)",
             }
         }
         return { state: "ok", detail: "verification key present" }

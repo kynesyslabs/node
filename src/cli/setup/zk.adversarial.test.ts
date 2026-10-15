@@ -3,7 +3,8 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { spawnSync } from "node:child_process"
 import { runCli } from "./cli"
-import { inspectBatchArtifacts, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
+import { CODE_ROOT } from "./context"
+import { IDENTITY_CIRCUIT_DIGEST, canonicalDigest, inspectBatchArtifacts, inspectIdentityKey, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
 import { GIT, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
 
 let root: string
@@ -327,5 +328,46 @@ describe("swapIntoPlace keeps the previous keys when any step fails", () => {
         expect(fs.readFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "utf8")).toBe("OLD-ZKEY")
         expect(stagingLeft()).toEqual([])
         expect(fs.readdirSync(keysDir(5)).filter(f => /\.(next|old)$/.test(f))).toEqual([])
+    })
+})
+
+describe("the identity verification key is pinned to the one committed in this release", () => {
+    const vkey = () => path.join(root, "src/features/zk/keys/verification_key_merkle.json")
+
+    it("the digest in the code is the digest of the committed file, so a key change cannot be forgotten", () => {
+        const committed = fs.readFileSync(path.join(CODE_ROOT, "src/features/zk/keys/verification_key_merkle.json"), "utf8")
+        expect(canonicalDigest(committed)).toBe(IDENTITY_CIRCUIT_DIGEST)
+    })
+
+    it("accepts the committed key, whatever its layout or key order", () => {
+        expect(inspectIdentityKey(root).state).toBe("ok")
+        const parsed = JSON.parse(fs.readFileSync(vkey(), "utf8")) as Record<string, unknown>
+        const reordered = Object.fromEntries(Object.entries(parsed).reverse())
+        fs.writeFileSync(vkey(), JSON.stringify(reordered))
+        expect(inspectIdentityKey(root).state).toBe("ok")
+        fs.writeFileSync(vkey(), JSON.stringify(reordered, null, "\t"))
+        expect(inspectIdentityKey(root).state).toBe("ok")
+    })
+
+    it("refuses a well-formed groth16 key that is not the committed one, with a clear message", () => {
+        const parsed = JSON.parse(fs.readFileSync(vkey(), "utf8")) as { IC: string[][] }
+        for (const different of [
+            { protocol: "groth16", vk_alpha_1: ["1"], IC: [["1"]] },
+            { ...parsed, IC: [...parsed.IC, ["1", "2", "1"]] },
+            { ...parsed, nPublic: 99 },
+        ]) {
+            fs.writeFileSync(vkey(), JSON.stringify(different))
+            const state = inspectIdentityKey(root)
+            expect(state.state).toBe("invalid")
+            expect(state.detail).toContain("does not match the verification key committed in this release")
+        }
+    })
+
+    it("stops the gate through the fatal path", async () => {
+        fs.writeFileSync(vkey(), JSON.stringify({ protocol: "groth16", vk_alpha_1: ["1"], IC: [["1"]] }))
+        const lines: string[] = []
+        const code = await runCli(["--check", "--json"], { cwd: root, env: {}, isTTY: false, say: l => lines.push(l), inDocker: false })
+        expect(code).toBe(1)
+        expect(lines.join("\n")).toContain("committed in this release")
     })
 })
