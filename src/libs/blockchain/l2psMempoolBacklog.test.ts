@@ -32,45 +32,61 @@ mock.module("@/utilities/logger", () => ({
 
 const { default: L2PSMempool } = await import("./l2ps_mempool")
 
-const ROWS = 2000
+const ROWS = 12_345
 const PAYLOAD_BYTES = 8 * 1024
 
+let largestFetch = 0
+let transactions = 0
 let materialisedBytes = 0
-let findCalls = 0
 
-/** A table of executed rows that returns only the columns a query selects. */
+/**
+ * A table of executed rows behind the few statements the digest issues: a
+ * count, a cursor sorted by byte order, and fetches from it.
+ */
 function fakeRepo() {
     const table = Array.from({ length: ROWS }, (_, i) => ({
-        hash: `0x${(ROWS - i).toString(16).padStart(8, "0")}`,
-        l2ps_uid: "subnet_a",
-        status: "executed",
-        timestamp: String(1_700_000_000_000 + i),
+        hash: i % 2 ? `0x${(ROWS - i).toString(16).padStart(8, "0")}` : `0X${(ROWS - i).toString(16).toUpperCase().padStart(8, "0")}`,
         encrypted_tx: { content: { data: ["l2psEncryptedTx", { encrypted_data: "x".repeat(PAYLOAD_BYTES) }] } },
-        gcr_edits: null,
     }))
+    let cursor: string[] = []
+    const manager = {
+        getRepository: () => ({ metadata: { tablePath: "l2ps_mempool" } }),
+        query: async (sql: string) => {
+            if (sql.startsWith("SELECT COUNT")) return [{ count: String(table.length) }]
+            if (sql.startsWith("DECLARE")) {
+                // Code-unit order, which is what the in-memory sort produced.
+                cursor = table.map(row => row.hash).sort()
+                return []
+            }
+            if (sql.startsWith("FETCH")) {
+                const n = Number(sql.split(" ")[1])
+                const rows = cursor.splice(0, n).map(hash => ({ hash }))
+                largestFetch = Math.max(largestFetch, rows.length)
+                materialisedBytes += JSON.stringify(rows).length
+                return rows
+            }
+            return []
+        },
+    }
     return {
         table,
-        find: async (options: { select?: Record<string, boolean> }) => {
-            findCalls++
-            const selected = options.select
-            const rows = table.map(row =>
-                selected
-                    ? Object.fromEntries(Object.keys(selected).map(key => [key, (row as any)[key]]))
-                    : { ...row },
-            )
-            materialisedBytes += JSON.stringify(rows).length
-            return rows
+        manager: {
+            transaction: async (_level: string, work: (m: typeof manager) => Promise<unknown>) => {
+                transactions++
+                return work(manager)
+            },
         },
     }
 }
 
 beforeEach(() => {
+    largestFetch = 0
+    transactions = 0
     materialisedBytes = 0
-    findCalls = 0
 })
 
 describe("consolidated hash over an executed backlog", () => {
-    it("materialises hashes only, however large the stored payloads are", async () => {
+    it("reads the backlog in bounded pages, however large the stored payloads are", async () => {
         const repo = fakeRepo()
         ;(L2PSMempool as any).repo = repo
 
@@ -80,7 +96,8 @@ describe("consolidated hash over an executed backlog", () => {
         }
 
         const storedPayloadBytes = ROWS * PAYLOAD_BYTES
-        expect(findCalls).toBe(5)
+        expect(transactions).toBe(5)
+        expect(largestFetch).toBeLessThanOrEqual(5000)
         expect(materialisedBytes / 5).toBeLessThan(storedPayloadBytes / 20)
     })
 

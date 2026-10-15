@@ -9,6 +9,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest, mock } from "bun:test"
 import { DataSource } from "typeorm"
+import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 
 const PG_URL = process.env.L2PS_TEST_PG_URL
@@ -148,13 +149,58 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
         expect(await L2PSMempool.getByOriginalHashes("subnet_a", [], ["batched"])).toEqual([])
     })
 
-    it("hashes the executed rows in hash order", async () => {
-        await insert("0xbb", "executed", 2000, null)
-        await insert("0xaa", "executed", 1000, null)
-        await insert("0xcc", "batched", 3000, null)
+    // The digest as it was defined when every row was loaded and sorted in memory.
+    const referenceDigest = async (uid: string, blockNumber?: number) => {
+        const rows = await ds.getRepository(L2PSMempoolTx).find({
+            where: { l2ps_uid: uid, status: "executed", ...(blockNumber === undefined ? {} : { block_number: blockNumber }) },
+        })
+        const sorted = rows.map(r => r.hash).sort()
+        if (sorted.length === 0) return Hashing.sha256(`L2PS_EMPTY_${uid}${blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`}`)
+        const suffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
+        return Hashing.sha256(`L2PS_${uid}${suffix}:${sorted.length}:${sorted.join(",")}`)
+    }
 
-        const hash = await L2PSMempool.getHashForL2PS("subnet_a")
-        expect(hash).toBe(await L2PSMempool.getHashForL2PS("subnet_a"))
-        expect(hash).not.toBe(await L2PSMempool.getHashForL2PS("subnet_b"))
+    async function seed(count: number): Promise<void> {
+        // Upper and lower case, an underscore and a digit-first form, so that a
+        // locale-aware ordering would differ from the code-unit order of .sort().
+        await ds.query(
+            `INSERT INTO l2ps_mempool (hash, l2ps_uid, sequence_number, original_hash, encrypted_tx, status, timestamp, block_number, gcr_edits, affected_accounts_count)
+             SELECT CASE g % 4 WHEN 0 THEN '0x' || md5(g::text) WHEN 1 THEN '0x' || upper(md5(g::text)) WHEN 2 THEN 'A_' || md5(g::text) ELSE 'a-' || md5(g::text) END,
+                    'subnet_a', g, 'o' || g, '{}'::jsonb, CASE WHEN g % 10 = 0 THEN 'batched' ELSE 'executed' END, 1700000000000 + g, 1 + g % 3, null, 0
+             FROM generate_series(1, $1::int) g`,
+            [count],
+        )
+    }
+
+    it("computes the same digest as loading and sorting every row, across several pages", async () => {
+        await seed(12_345)
+
+        expect(await L2PSMempool.getHashForL2PS("subnet_a")).toBe(await referenceDigest("subnet_a"))
+    })
+
+    it("computes the same digest for a block filter, an exact page multiple and an empty subnet", async () => {
+        await seed(12_345)
+        expect(await L2PSMempool.getHashForL2PS("subnet_a", 2)).toBe(await referenceDigest("subnet_a", 2))
+
+        await ds.query(`TRUNCATE "l2ps_mempool"`)
+        await seed(5000 * 2 + 1000)
+        // 10_000 executed rows would be an exact multiple; drop the batched share to land on it
+        await ds.query(`DELETE FROM l2ps_mempool WHERE status = 'batched'`)
+        const exec = Number((await ds.query(`SELECT count(*) FROM l2ps_mempool`))[0].count)
+        expect(await L2PSMempool.getHashForL2PS("subnet_a")).toBe(await referenceDigest("subnet_a"))
+        expect(exec).toBeGreaterThan(0)
+
+        expect(await L2PSMempool.getHashForL2PS("subnet_missing")).toBe(await referenceDigest("subnet_missing"))
+    })
+
+    it("hashes exactly one page when the backlog is a whole number of pages", async () => {
+        await seed(100)
+        await ds.query(`DELETE FROM l2ps_mempool WHERE status = 'batched'`)
+        await ds.query(
+            `INSERT INTO l2ps_mempool (hash, l2ps_uid, sequence_number, original_hash, encrypted_tx, status, timestamp, block_number, gcr_edits, affected_accounts_count)
+             SELECT 'x' || g, 'subnet_b', g, 'ox' || g, '{}'::jsonb, 'executed', 1, 1, null, 0 FROM generate_series(1, 5000) g`,
+        )
+
+        expect(await L2PSMempool.getHashForL2PS("subnet_b")).toBe(await referenceDigest("subnet_b"))
     })
 })

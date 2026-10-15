@@ -3,6 +3,7 @@ import Datasource from "@/model/datasource"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
+import forge from "node-forge"
 import Chain from "./chain"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import log from "@/utilities/logger"
@@ -45,6 +46,9 @@ export type L2PSStatus = typeof L2PS_STATUS[keyof typeof L2PS_STATUS]
  * - Prevents duplicate transaction processing
  * - Follows main mempool patterns for consistency
  */
+/** Hashes read per query when the consolidated digest is computed. */
+const HASH_PAGE_SIZE = 5000
+
 export default class L2PSMempool {
     /** TypeORM repository for L2PS mempool transactions */
     public static repo: Repository<L2PSMempoolTx> | null = null
@@ -362,46 +366,62 @@ export default class L2PSMempool {
         try {
             await this.ensureInitialized()
 
-            const options: FindManyOptions<L2PSMempoolTx> = {
-                where: {
-                    l2ps_uid: l2psUid,
-                    status: L2PS_STATUS.EXECUTED,  // Only include successfully executed transactions awaiting batching
-                },
-                order: {
-                    timestamp: "ASC",
-                    hash: "ASC",
-                },
-            }
+            const blockSuffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
 
-            // Add block filter if specified
-            if (blockNumber !== undefined) {
-                options.where = { ...options.where, block_number: blockNumber }
-            }
+            // The digest covers the count before the hashes, so the count and the
+            // pages must come from one snapshot, or rows arriving between the two
+            // reads would make them disagree.
+            const result = await this.repo.manager.transaction("REPEATABLE READ", async manager => {
+                const table = manager.getRepository(L2PSMempoolTx).metadata.tablePath
+                // Only successfully executed transactions awaiting batching
+                const params: unknown[] = [l2psUid, L2PS_STATUS.EXECUTED]
+                let where = "l2ps_uid = $1 AND status = $2"
+                if (blockNumber !== undefined) {
+                    params.push(blockNumber)
+                    where += " AND block_number = $3"
+                }
 
-            // Only the hash feeds the digest. A backlog is read whole on every
-            // cycle, and each row also carries its encrypted payload and edits,
-            // so the full entity costs several times the row's size per row.
-            options.select = { hash: true }
-            const transactions = await this.repo.find(options)
+                const [{ count: total }] = await manager.query(
+                    `SELECT COUNT(*)::text AS count FROM ${table} WHERE ${where}`,
+                    params,
+                )
+                const count = Number.parseInt(total, 10)
+                if (count === 0) return null
 
-            if (transactions.length === 0) {
+                // Hashed a page at a time off one sorted cursor: the backlog is
+                // read on every cycle and can be large, and only the running
+                // digest has to stay in memory. Byte order is what .sort() gave
+                // on these ASCII keys, whatever collation the database uses.
+                const digest = forge.sha256.create()
+                digest.update(`L2PS_${l2psUid}${blockSuffix}:${count}:`)
+                await manager.query(
+                    `DECLARE l2ps_hash_cursor NO SCROLL CURSOR FOR SELECT hash FROM ${table} WHERE ${where} ORDER BY hash COLLATE "C"`,
+                    params,
+                )
+                let first = true
+                for (;;) {
+                    const hashes: { hash: string }[] = await manager.query(
+                        `FETCH ${HASH_PAGE_SIZE} FROM l2ps_hash_cursor`,
+                    )
+                    if (hashes.length === 0) break
+
+                    digest.update((first ? "" : ",") + hashes.map(row => row.hash).join(","))
+                    first = false
+                    if (hashes.length < HASH_PAGE_SIZE) break
+                }
+                await manager.query("CLOSE l2ps_hash_cursor")
+                return { count, digest: digest.digest().toHex() }
+            })
+
+            if (result === null) {
                 // Return deterministic empty hash
                 const suffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
                 return Hashing.sha256(`L2PS_EMPTY_${l2psUid}${suffix}`)
             }
 
-            // Sort hashes for deterministic output
-            const sortedHashes = transactions
-                .map(tx => tx.hash)
-                .sort()
+            const consolidatedHash = result.digest
 
-            // Create consolidated hash: UID + block info + count + all hashes
-            const blockSuffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
-            const hashInput = `L2PS_${l2psUid}${blockSuffix}:${sortedHashes.length}:${sortedHashes.join(",")}`
-
-            const consolidatedHash = Hashing.sha256(hashInput)
-
-            log.debug(`[L2PS Mempool] Generated hash for ${l2psUid}${blockSuffix}: ${consolidatedHash} (${sortedHashes.length} txs)`)
+            log.debug(`[L2PS Mempool] Generated hash for ${l2psUid}${blockSuffix}: ${consolidatedHash} (${result.count} txs)`)
             return consolidatedHash
 
         } catch (error) {
