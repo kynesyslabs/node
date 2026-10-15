@@ -67,7 +67,7 @@ async function fetchPeerGenesisHash(verifiedPeer: Peer) {
 async function downloadPeerGenesis(
     verifiedPeer: Peer,
     peerGenesisDataHash: string,
-): Promise<unknown | null> {
+): Promise<unknown> {
     log.warn(
         "[BOOTSTRAP] Genesis data hash differs from the one " +
             verifiedPeer.connection.string +

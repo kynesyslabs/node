@@ -152,8 +152,9 @@ const nodeLog = (n: number, since?: string) =>
 // Plain substring tests: the log text is untrusted input and a built regex adds nothing here.
 const forkLoadedLine = (fork: string, height: number) => `Loaded fork "${fork}" with activationHeight=${height}`
 const stallExit = (log: string) => {
-    const at = log.indexOf("Missed 3 consecutive shard selections")
-    return at >= 0 && log.indexOf("exiting for log investigation", at) >= 0
+    const marker = "Missed 3 consecutive shard selections"
+    if (!log.includes(marker)) return false
+    return log.slice(log.indexOf(marker)).includes("exiting for log investigation")
 }
 
 // ---- transactions ----------------------------------------------------------

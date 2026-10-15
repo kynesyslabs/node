@@ -78,7 +78,7 @@ export function peerScheduleView(info: unknown): ScheduleView | null {
     const out: Record<string, number | null> = {}
     for (const name of Object.keys(forks)) {
         const entry = forks[name]
-        if (entry && entry.activationHeight !== undefined) {
+        if (entry?.activationHeight !== undefined) {
             out[name] = entry.activationHeight
         }
     }

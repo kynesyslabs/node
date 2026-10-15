@@ -54,9 +54,11 @@ describe("comparing against many peers", () => {
     })
 
     it("does nothing for no items", async () => {
+        let ran = 0
         await mapWithLimit([], 4, async () => {
-            throw new Error("must not run")
+            ran++
         })
+        expect(ran).toBe(0)
     })
 })
 

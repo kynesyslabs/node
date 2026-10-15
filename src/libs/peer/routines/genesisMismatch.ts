@@ -26,7 +26,7 @@ export type GenesisMismatchOutcome =
 
 export interface GenesisMismatchDeps {
     /** The peer's genesis data as it serves it, or null when it could not be fetched. */
-    fetchPeerGenesis: () => Promise<unknown | null>
+    fetchPeerGenesis: () => Promise<unknown>
     readLocalGenesis: () => unknown
     writeGenesis: (data: unknown) => void
     /** The hash peers advertise and compare: covers everything in the stored block. */
