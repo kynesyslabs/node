@@ -567,8 +567,10 @@ async function main() {
         indexState.TUI_ENABLED = false
     }
 
-    // Before the TUI takes over the terminal: offers the setup when a
-    // terminal is attached, otherwise stops with one actionable message.
+    // Before the TUI takes over the terminal, so its banner and the optional
+    // offer to run the setup stay readable. It returns and the node boots when
+    // only an optional L2PS or ZK feature is incomplete; it stops the process
+    // only for the missing or altered identity verification key, or in strict mode.
     await enforceGuidedSetup()
 
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
