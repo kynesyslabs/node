@@ -7,22 +7,26 @@
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
 
-const executed = Array.from({ length: 50 }, (_, i) => ({
-    hash: `0x${i.toString().padStart(4, "0")}`,
-    l2ps_uid: "subnet_a",
-    original_hash: `orig-${i}`,
-    encrypted_tx: {},
-    status: "executed",
-    timestamp: String(1_700_000_000_000 + i),
-    gcr_edits: null,
-}))
+const rowsFor = (uid: string, count: number, from = 0) =>
+    Array.from({ length: count }, (_, i) => ({
+        hash: `${uid}-${(i + from).toString().padStart(4, "0")}`,
+        l2ps_uid: uid,
+        original_hash: `orig-${uid}-${i + from}`,
+        encrypted_tx: {},
+        status: "executed",
+        timestamp: String(1_700_000_000_000 + i + from),
+        gcr_edits: null,
+    }))
 
-const getByStatus = jest.fn(async (_status: unknown, limit?: number) => executed.slice(0, limit))
+let queue: Record<string, ReturnType<typeof rowsFor>> = {}
+
+const getExecutedSubnets = jest.fn(async () => Object.keys(queue).filter(uid => queue[uid].length > 0))
+const getByUIDAndStatus = jest.fn(async (uid: string, _status: unknown, limit?: number) => queue[uid].slice(0, limit))
 const updateStatusBatch = jest.fn(async (hashes: string[]) => hashes.length)
 
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
-    default: { getByStatus, updateStatusBatch, cleanupByStatus: async () => 0 },
+    default: { getExecutedSubnets, getByUIDAndStatus, updateStatusBatch, cleanupByStatus: async () => 0 },
     L2PS_STATUS: { EXECUTED: "executed", BATCHED: "batched", CONFIRMED: "confirmed", PROCESSED: "processed" },
 }))
 mock.module("@/libs/l2ps/zk/L2PSBatchProver", () => ({ L2PSBatchProver: class {} }))
@@ -46,7 +50,9 @@ const createBatchPayload = jest.spyOn(aggregator, "createBatchPayload")
 const submitBatchToMempool = jest.spyOn(aggregator, "submitBatchToMempool")
 
 beforeEach(() => {
-    getByStatus.mockClear()
+    queue = { subnet_a: rowsFor("subnet_a", 50) }
+    getExecutedSubnets.mockClear()
+    getByUIDAndStatus.mockClear()
     updateStatusBatch.mockClear()
     createBatchPayload.mockReset()
     submitBatchToMempool.mockReset()
@@ -82,5 +88,21 @@ describe("aggregation cycle drain", () => {
 
         expect(submitBatchToMempool).toHaveBeenCalledTimes(1)
         expect(updateStatusBatch).not.toHaveBeenCalled()
+    })
+
+    it("serves every subnet in a cycle, however deep another subnet's backlog is", async () => {
+        // The busy subnet's rows are older and far more numerous than any shared window.
+        queue = { subnet_a: rowsFor("subnet_a", 2000), subnet_b: rowsFor("subnet_b", 5, 10_000), subnet_c: rowsFor("subnet_c", 12, 20_000) }
+
+        await aggregator.aggregateAndSubmitBatches()
+
+        const batchedBySubnet: Record<string, number> = {}
+        for (const [hashes] of updateStatusBatch.mock.calls) {
+            const uid = hashes[0].split("-")[0]
+            batchedBySubnet[uid] = (batchedBySubnet[uid] ?? 0) + hashes.length
+        }
+        expect(batchedBySubnet).toEqual({ subnet_a: 50, subnet_b: 5, subnet_c: 12 })
+        // A subnet's fetch is sized to its own cycle, not to the whole queue.
+        expect(getByUIDAndStatus.mock.calls.every(args => args[2] === 50)).toBe(true)
     })
 })

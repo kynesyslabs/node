@@ -267,32 +267,33 @@ export class L2PSBatchAggregator {
     /**
      * Main aggregation logic - collect, batch, and submit transactions
      * 
-     * 1. Fetches all executed transactions from L2PS mempool
-     * 2. Groups transactions by L2PS UID
-     * 3. Creates encrypted batch for each group
+     * 1. Lists the subnets with executed transactions waiting
+     * 2. Fetches each subnet's oldest executed transactions separately
+     * 3. Creates encrypted batches for each subnet
      * 4. Submits batches to main mempool
      * 5. Updates transaction statuses to 'batched'
      */
     private async aggregateAndSubmitBatches(): Promise<void> {
         try {
-            // Get all executed transactions ready for batching
-            const executedTransactions = await L2PSMempool.getByStatus(
-                L2PS_STATUS.EXECUTED,
-                this.MAX_BATCH_SIZE * this.MAX_BATCHES_PER_CYCLE * 10, // Allow for multiple L2PS networks
-            )
+            // Each subnet's rows are fetched on their own, so a subnet with a
+            // deep backlog cannot fill a shared window and starve the others.
+            const subnets = await L2PSMempool.getExecutedSubnets()
 
-            if (executedTransactions.length === 0) {
+            if (subnets.length === 0) {
                 log.debug("[L2PS Batch Aggregator] No executed transactions to batch")
                 return
             }
 
-            log.info(`[L2PS Batch Aggregator] Found ${executedTransactions.length} transactions to batch`)
+            for (const l2psUid of subnets) {
+                const transactions = await L2PSMempool.getByUIDAndStatus(
+                    l2psUid,
+                    L2PS_STATUS.EXECUTED,
+                    this.MAX_BATCH_SIZE * this.MAX_BATCHES_PER_CYCLE,
+                )
+                if (transactions.length === 0) continue
 
-            // Group transactions by L2PS UID
-            const groupedByUID = this.groupTransactionsByUID(executedTransactions)
+                log.info(`[L2PS Batch Aggregator] Found ${transactions.length} transactions to batch for ${l2psUid}`)
 
-            // Process each L2PS network's transactions
-            for (const [l2psUid, transactions] of Object.entries(groupedByUID)) {
                 for (let batch = 0; batch < this.MAX_BATCHES_PER_CYCLE; batch++) {
                     const chunk = transactions.slice(
                         batch * this.MAX_BATCH_SIZE,
@@ -310,25 +311,6 @@ export class L2PSBatchAggregator {
             log.error(`[L2PS Batch Aggregator] Error in aggregation: ${message}`)
             throw error
         }
-    }
-
-    /**
-     * Group transactions by their L2PS UID
-     * 
-     * @param transactions - Array of L2PS mempool transactions
-     * @returns Record mapping L2PS UID to array of transactions
-     */
-    private groupTransactionsByUID(transactions: L2PSMempoolTx[]): Record<string, L2PSMempoolTx[]> {
-        const grouped: Record<string, L2PSMempoolTx[]> = {}
-
-        for (const tx of transactions) {
-            if (!grouped[tx.l2ps_uid]) {
-                grouped[tx.l2ps_uid] = []
-            }
-            grouped[tx.l2ps_uid].push(tx)
-        }
-
-        return grouped
     }
 
     /**

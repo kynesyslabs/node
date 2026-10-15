@@ -187,6 +187,15 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
         expect(seen).toEqual(["a", "b", "c", "d", "e"])
     })
 
+    it("lists each subnet with executed rows once", async () => {
+        await insert("a1", "executed", MINUTE, null, "subnet_b")
+        await insert("a2", "executed", MINUTE, null, "subnet_b")
+        await insert("a3", "executed", MINUTE, null, "subnet_a")
+        await insert("a4", "batched", MINUTE, null, "subnet_c")
+
+        expect(await L2PSMempool.getExecutedSubnets()).toEqual(["subnet_a", "subnet_b"])
+    })
+
     it("looks rows up by original hash within the wanted statuses", async () => {
         await insert("a", "batched", MINUTE, null)
         await insert("b", "executed", MINUTE, null)

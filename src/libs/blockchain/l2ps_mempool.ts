@@ -453,6 +453,24 @@ export default class L2PSMempool {
     }
 
     /**
+     * Subnets that have at least one executed row waiting for a batch.
+     * One row per subnet comes back, so the answer is as small as the number of
+     * subnets however deep a backlog is.
+     */
+    public static async getExecutedSubnets(): Promise<string[]> {
+        await this.ensureInitialized()
+
+        const rows = await this.repo
+            .createQueryBuilder("tx")
+            .select("tx.l2ps_uid", "l2ps_uid")
+            .distinct(true)
+            .where("tx.status = :status", { status: L2PS_STATUS.EXECUTED })
+            .orderBy("tx.l2ps_uid", "ASC")
+            .getRawMany()
+        return rows.map(row => row.l2ps_uid)
+    }
+
+    /**
      * Queue rows for a known set of original hashes, in the given statuses.
      * For a caller that holds a page of hashes and wants the matching rows,
      * which reading the subnet's whole queue and filtering would not bound.
