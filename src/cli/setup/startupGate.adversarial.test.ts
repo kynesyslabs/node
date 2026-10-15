@@ -40,6 +40,7 @@ async function gate(over: Partial<GateDeps>, answers: string[] = []): Promise<Ou
     }
     const deps: Partial<GateDeps> = {
         cwd: root,
+        codeRoot: root,
         env: {},
         interactive: false,
         inDocker: false,
@@ -196,16 +197,44 @@ describe("the report and its log", () => {
         expect(await gate({ logError: failing })).toMatchObject({ result: "exit", code: 1 })
     })
 
-    it("runs the inspection from the node directory it was given, not from wherever the shell is", async () => {
+    it("reads the operator's state from the node directory and the keys from the checkout, each from where the node reads it", async () => {
         writeSubnet(root, "broken", { key: null })
-        const elsewhere = makeRoot({ identityKey: false })
+        const stateDir = makeRoot({ identityKey: false })
         try {
-            const here = await gate({ cwd: root })
-            const there = await gate({ cwd: elsewhere })
+            // The subnet problem lives in the node directory, the identity key in the checkout.
+            const here = await gate({ cwd: root, codeRoot: root })
             expect(here.out).toContain("broken")
-            expect(there).toMatchObject({ result: "exit", code: 1 })
+            const split = await gate({ cwd: stateDir, codeRoot: root })
+            expect(split.result).toBe("returned")
+            expect(split.out).toBe("")
+            // A checkout without the key stops the node however clean the node directory is.
+            const noKey = await gate({ cwd: root, codeRoot: stateDir })
+            expect(noKey).toMatchObject({ result: "exit", code: 1 })
         } finally {
+            removeRoot(stateDir)
+        }
+    })
+
+    it("with no overrides, a node started from any directory finds the committed keys of its own checkout", async () => {
+        const elsewhere = makeRoot({ identityKey: false })
+        const start = process.cwd()
+        const out: string[] = []
+        try {
+            process.chdir(elsewhere)
+            await enforceGuidedSetup({
+                env: {},
+                interactive: false,
+                inDocker: false,
+                say: l => out.push(l),
+                logError: () => undefined,
+                exit: ((code: number) => {
+                    throw new Exit(code)
+                }) as GateDeps["exit"],
+            })
+        } finally {
+            process.chdir(start)
             removeRoot(elsewhere)
         }
+        expect(out).toEqual([])
     })
 })

@@ -23,6 +23,7 @@ function gate(over: Partial<GateDeps>) {
     const logged: string[] = []
     const deps: Partial<GateDeps> = {
         cwd: root,
+        codeRoot: root,
         env: {},
         interactive: false,
         inDocker: false,

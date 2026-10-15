@@ -694,7 +694,7 @@ const NO_SUBNET_FOR_ZK = "  No L2PS subnet is configured, so there are no batche
 
 function reportIdentityKey(deps: WizardDeps, result: WizardResult): void {
     const { ctx, say } = deps
-    const identity = inspectIdentityKey(ctx.root)
+    const identity = inspectIdentityKey(ctx.codeRoot)
     if (identity.state === "ok") {
         say("  Identity proofs: ready (only the committed verification key is needed on a node).")
         return
@@ -754,7 +754,7 @@ async function buildBatchKeys(deps: WizardDeps, result: WizardResult): Promise<b
     const { ctx, opts, say } = deps
     try {
         const outcome = await runL2psZkSetup(
-            ctx.root,
+            ctx.codeRoot,
             deps.runner,
             l => say(`  ${l}`),
             undefined,
@@ -782,7 +782,7 @@ async function zkSection(
     say("ZK")
     reportIdentityKey(deps, result)
 
-    const batches = inspectBatchArtifacts(ctx.root)
+    const batches = inspectBatchArtifacts(ctx.codeRoot)
     const ready = batches.filter(b => b.complete).map(b => b.size)
     say(
         ready.length > 0
@@ -818,7 +818,7 @@ async function zkSection(
         wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
         return
     }
-    const noTools = missingToolsMessage(ctx.root)
+    const noTools = missingToolsMessage(ctx.codeRoot)
     if (noTools !== undefined) return refuseBuild(deps, result, noTools)
     if (!(await wantsGeneration(deps))) {
         say("  The batch keys are not built, and building them downloads about 200 MB.")
@@ -831,11 +831,11 @@ async function zkSection(
         say("  would then set L2PS_ZK_ENABLED=true")
         return
     }
-    const readOnly = notWritableMessage(ctx.root)
+    const readOnly = notWritableMessage(ctx.codeRoot)
     if (readOnly !== undefined) return refuseBuild(deps, result, readOnly)
     // A failed run never enables proofs, whatever files happen to be on disk.
     const built = await buildBatchKeys(deps, result)
-    if (built && inspectBatchArtifacts(ctx.root).every(b => b.complete)) {
+    if (built && inspectBatchArtifacts(ctx.codeRoot).every(b => b.complete)) {
         wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
     } else {
         say(ZK_UNTOUCHED)

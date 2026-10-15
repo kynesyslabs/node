@@ -5,6 +5,7 @@ import { enforceGuidedSetup } from "./startupGate"
 
 await enforceGuidedSetup({
     cwd: process.env.HARNESS_ROOT,
+    codeRoot: process.env.HARNESS_ROOT,
     env: { ...process.env },
     offerTimeoutMs: Number(process.env.HARNESS_TIMEOUT_MS ?? 30_000),
 })

@@ -174,6 +174,7 @@ describe("bun run setup --yes in a throwaway checkout", () => {
         const lines: string[] = []
         const deps: Partial<GateDeps> = {
             cwd: copy,
+            codeRoot: copy,
             env: { ...dotenv.parse(fs.readFileSync(path.join(copy, ".env"), "utf8")), DEMOS_SETUP_STRICT: "true" },
             interactive: false,
             inDocker: false,

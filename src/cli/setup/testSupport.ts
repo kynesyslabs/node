@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import { CODE_ROOT, ZK_IDENTITY_VKEY } from "./context"
 import type { Prompter } from "./prompt"
 import type { ZkRunner } from "./zk"
 
@@ -48,10 +49,8 @@ export function makeRoot(opts: { identityKey?: boolean } = {}): string {
     if (opts.identityKey !== false) {
         const dir = path.join(root, "src", "features", "zk", "keys")
         fs.mkdirSync(dir, { recursive: true })
-        fs.writeFileSync(
-            path.join(dir, "verification_key_merkle.json"),
-            JSON.stringify({ protocol: "groth16", vk_alpha_1: ["1"], IC: [["1"]] }),
-        )
+        // The real committed key: the gate pins it by digest, so a stand-in would be refused.
+        fs.copyFileSync(path.join(CODE_ROOT, ZK_IDENTITY_VKEY), path.join(dir, "verification_key_merkle.json"))
     }
     return root
 }

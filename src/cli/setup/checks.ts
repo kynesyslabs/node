@@ -268,9 +268,9 @@ function batchItem(b: BatchArtifacts, batches: BatchArtifacts[], anyComplete: bo
 }
 
 function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
-    const out: CheckItem[] = [identityItem(ctx.root)]
+    const out: CheckItem[] = [identityItem(ctx.codeRoot)]
     const flag = parseBoolFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED])
-    const batches = inspectBatchArtifacts(ctx.root)
+    const batches = inspectBatchArtifacts(ctx.codeRoot)
     const anyComplete = batches.some(b => b.complete)
 
     // The code default is on, which only means "use the keys if they exist";

@@ -7,7 +7,7 @@ import {
     SETUP_COMMAND,
     type CheckItem,
 } from "./checks"
-import { createContext, detectDocker, isForegroundOnTerminal, type SetupContext } from "./context"
+import { CODE_ROOT, createContext, detectDocker, isForegroundOnTerminal, type SetupContext } from "./context"
 import {
     confirm,
     createReadlinePrompter,
@@ -26,7 +26,10 @@ const OFFER_TIMEOUT_MS = 30_000
 const RULE = "=".repeat(72)
 
 export interface GateDeps {
+    /** The operator's node directory: .env and data/ are read from here, as the node does. */
     cwd: string
+    /** The checkout this code lives in: where the committed and built ZK keys are. */
+    codeRoot: string
     env: Record<string, string | undefined>
     interactive: boolean
     say: (line: string) => void
@@ -89,6 +92,7 @@ function buildDeps(overrides: Partial<GateDeps>): GateDeps {
     const env = overrides.env ?? process.env
     return {
         cwd: process.cwd(),
+        codeRoot: CODE_ROOT,
         env,
         interactive:
             Boolean(process.stdin.isTTY && process.stdout.isTTY) &&
@@ -133,7 +137,7 @@ function safeRecorder(deps: GateDeps): (message: string) => Promise<void> {
 
 function inspectSetup(deps: GateDeps): CheckItem[] {
     try {
-        return collectChecks(createContext(deps.cwd, ".env", deps.env, deps.inDocker)).items
+        return collectChecks(createContext(deps.cwd, ".env", deps.env, deps.inDocker, deps.codeRoot)).items
     } catch (e) {
         return [
             {
@@ -172,7 +176,7 @@ async function offerSetup(deps: GateDeps): Promise<OfferOutcome> {
             return { restartNeeded: false, aborted: false }
         }
         const result = await runWizard({
-            ctx: createContext(deps.cwd, ".env", deps.env, deps.inDocker),
+            ctx: createContext(deps.cwd, ".env", deps.env, deps.inDocker, deps.codeRoot),
             opts: parseSetupArgs([], {}),
             prompter,
             say: line => console.log(line),

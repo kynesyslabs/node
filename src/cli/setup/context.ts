@@ -1,10 +1,26 @@
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { fileURLToPath } from "node:url"
 import { readEnvFile } from "./envFile"
 
+/**
+ * The checkout this code lives in, found from this file and not from the shell's
+ * current directory. The committed keys and the built ZK keys are read by the
+ * node from here (the batch prover resolves its key directory from its own
+ * location), so they are inspected here whatever directory the node is started
+ * from.
+ */
+export const CODE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..")
+
 export interface SetupContext {
-    /** Directory the node runs from; the loader resolves `data/l2ps` against it. */
+    /**
+     * Directory the node runs from. The node reads `.env`, `data/l2ps` and
+     * `data/genesis.json` relative to it, so the operator's own state is
+     * inspected and written there.
+     */
     root: string
+    /** Where the committed and built ZK keys live; see CODE_ROOT. */
+    codeRoot: string
     envFilePath: string
     /** Effective environment: the env file overlaid by the real process env, as dotenv does. */
     env: Record<string, string | undefined>
@@ -29,10 +45,12 @@ export function createContext(
     envFileName = ".env",
     processEnv: Record<string, string | undefined> = process.env,
     inDocker: boolean = detectDocker(processEnv),
+    codeRoot: string = root,
 ): SetupContext {
     const envFilePath = path.resolve(root, envFileName)
     return {
         root,
+        codeRoot,
         envFilePath,
         env: { ...readEnvFile(envFilePath), ...processEnv },
         processEnv,

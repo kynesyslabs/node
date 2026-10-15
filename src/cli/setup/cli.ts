@@ -22,12 +22,14 @@ export interface CliDeps {
     /** Replaces the terminal prompter; tests inject scripted answers here. */
     prompter?: Prompter
     runner?: ZkRunner
+    /** Where the committed and built ZK keys are; defaults to cwd, main.ts passes the real checkout. */
+    codeRoot?: string
     /** Override container detection; tests set it so they behave the same anywhere. */
     inDocker?: boolean
 }
 
 export function runCheck(deps: CliDeps, envFile: string, json: boolean): number {
-    const ctx = createContext(deps.cwd, envFile, deps.env, deps.inDocker)
+    const ctx = createContext(deps.cwd, envFile, deps.env, deps.inDocker, deps.codeRoot)
     try {
         readEnvFileStrict(ctx.envFilePath)
     } catch (e) {
@@ -74,7 +76,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
             deps.say("No terminal detected: using flags and DEMOS_SETUP_* variables only, no questions will be asked.")
         }
         const result = await runWizard({
-            ctx: createContext(deps.cwd, opts.envFile, deps.env, deps.inDocker),
+            ctx: createContext(deps.cwd, opts.envFile, deps.env, deps.inDocker, deps.codeRoot),
             opts,
             prompter,
             say: deps.say,
