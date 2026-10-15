@@ -157,12 +157,34 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
     it("pages the queue oldest first after a cursor, capped by the limit", async () => {
         for (let i = 0; i < 12; i++) await insert(`row-${i}`, "executed", (20 - i) * 1000, null)
 
-        const first = await L2PSMempool.getPageByUID("subnet_a", 0, 5)
+        const first = await L2PSMempool.getPageByUID("subnet_a", { timestamp: 0 }, 5)
         expect(first.map(r => r.hash)).toEqual(["row-0", "row-1", "row-2", "row-3", "row-4"])
         expect((first[0] as any).encrypted_tx).toBeUndefined()
 
-        const next = await L2PSMempool.getPageByUID("subnet_a", Number(first[4].timestamp), 5)
+        const next = await L2PSMempool.getPageByUID("subnet_a", { timestamp: Number(first[4].timestamp) }, 5)
         expect(next.map(r => r.hash)).toEqual(["row-5", "row-6", "row-7", "row-8", "row-9"])
+    })
+
+    it("pages through rows that share a millisecond with the (timestamp, hash) cursor", async () => {
+        const at = String(Date.now() - 60_000)
+        for (const hash of ["e", "b", "d", "a", "c"]) {
+            await ds.getRepository(L2PSMempoolTx).insert({
+                hash, l2ps_uid: "subnet_a", sequence_number: String(++sequence), original_hash: `o-${hash}`,
+                encrypted_tx: {} as never, status: "executed", timestamp: at, block_number: 1, gcr_edits: null as never,
+                affected_accounts_count: 0,
+            })
+        }
+
+        const seen: string[] = []
+        let cursor: { timestamp: number; hash?: string } = { timestamp: 0 }
+        for (let page = 0; page < 10; page++) {
+            const rows = await L2PSMempool.getPageByUID("subnet_a", cursor, 2)
+            if (rows.length === 0) break
+            seen.push(...rows.map(r => r.hash))
+            cursor = { timestamp: Number(rows.at(-1)!.timestamp), hash: rows.at(-1)!.hash }
+        }
+
+        expect(seen).toEqual(["a", "b", "c", "d", "e"])
     })
 
     it("looks rows up by original hash within the wanted statuses", async () => {

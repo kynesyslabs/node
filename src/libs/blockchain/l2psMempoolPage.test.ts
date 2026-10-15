@@ -52,7 +52,7 @@ describe("getPageByUID", () => {
         const { qb, calls } = recordingBuilder({ many: [] })
         ;(L2PSMempool as any).repo = { createQueryBuilder: () => qb }
 
-        await L2PSMempool.getPageByUID("subnet_a", 42, 1000)
+        await L2PSMempool.getPageByUID("subnet_a", { timestamp: 42 }, 1000)
 
         const columns = (calls.select[0] as string[][])[0]
         expect(columns).not.toContain("tx.encrypted_tx")
@@ -61,12 +61,23 @@ describe("getPageByUID", () => {
         expect(calls.andWhere[0][1]).toEqual({ after: "42" })
     })
 
+    it("with a hash in the cursor also matches rows sharing its timestamp that sort after it", async () => {
+        const { qb, calls } = recordingBuilder({ many: [] })
+        ;(L2PSMempool as any).repo = { createQueryBuilder: () => qb }
+
+        await L2PSMempool.getPageByUID("subnet_a", { timestamp: 42, hash: "abc" }, 10)
+
+        expect(String(calls.andWhere[0][0])).toContain("= CAST(:after AS BIGINT) AND tx.hash > :afterHash")
+        expect(calls.andWhere[0][1]).toEqual({ after: "42", afterHash: "abc" })
+        expect(calls.addOrderBy).toEqual([["tx.hash", "ASC"]])
+    })
+
     it("treats a negative or fractional cursor as a safe integer", async () => {
         const { qb, calls } = recordingBuilder({ many: [] })
         ;(L2PSMempool as any).repo = { createQueryBuilder: () => qb }
 
-        await L2PSMempool.getPageByUID("subnet_a", -5, 10)
-        await L2PSMempool.getPageByUID("subnet_a", 7.9, 10)
+        await L2PSMempool.getPageByUID("subnet_a", { timestamp: -5 }, 10)
+        await L2PSMempool.getPageByUID("subnet_a", { timestamp: 7.9 }, 10)
 
         expect(calls.andWhere.map(args => (args[1] as any).after)).toEqual(["0", "7"])
     })

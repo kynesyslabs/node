@@ -251,15 +251,20 @@ export const handleL2PSSyncMempool: OmniHandler<Buffer> = async ({ message, cont
         const L2PSMempool = (await import("../../../blockchain/l2ps_mempool")).default
 
         // A peer that sends no limit, or a huge one, still gets one bounded
-        // page; it continues from the last timestamp it received.
+        // page; it continues from the (timestamp, hash) of the last entry.
         const limit = Number.isSafeInteger(request.limit) && request.limit! > 0
             ? Math.min(request.limit!, MAX_SYNC_MEMPOOL_ENTRIES)
             : MAX_SYNC_MEMPOOL_ENTRIES
-        const limitedEntries = await L2PSMempool.getPageByUID(
+        const fetched = await L2PSMempool.getPageByUID(
             request.l2psUid,
-            Number(request.fromTimestamp) || 0,
-            limit,
+            {
+                timestamp: Number(request.fromTimestamp) || 0,
+                hash: typeof request.afterHash === "string" ? request.afterHash : undefined,
+            },
+            limit + 1,
         )
+        const hasMore = fetched.length > limit
+        const limitedEntries = fetched.slice(0, limit)
 
         return encodeResponse(
             successResponse({
@@ -271,6 +276,7 @@ export const handleL2PSSyncMempool: OmniHandler<Buffer> = async ({ message, cont
                     timestamp: Number(e.timestamp),
                 })),
                 count: limitedEntries.length,
+                hasMore,
             }),
         )
     } catch (error) {

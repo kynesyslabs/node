@@ -477,25 +477,36 @@ export default class L2PSMempool {
      * only. Used to list queue entries to a peer, which never needs a payload,
      * and bounded so one request cannot read the whole table.
      *
+     * Rows are ordered by (timestamp, hash) and the cursor is that pair, so rows
+     * that share a millisecond are neither skipped nor repeated across pages.
+     * Without a hash the cursor is the timestamp alone and only newer rows match.
+     *
      * @param l2psUid - L2PS network identifier
-     * @param afterTimestamp - Only rows strictly newer than this are returned
+     * @param after - Cursor: rows after this timestamp, or after this (timestamp, hash)
      * @param limit - Maximum rows returned
      */
     public static async getPageByUID(
         l2psUid: string,
-        afterTimestamp: number,
+        after: { timestamp: number; hash?: string },
         limit: number,
     ): Promise<Pick<L2PSMempoolTx, "hash" | "l2ps_uid" | "original_hash" | "status" | "timestamp">[]> {
         try {
             await this.ensureInitialized()
 
-            return await this.repo
+            const timestamp = String(Math.max(0, Math.trunc(after.timestamp)))
+            const qb = this.repo
                 .createQueryBuilder("tx")
                 .select(["tx.hash", "tx.l2ps_uid", "tx.original_hash", "tx.status", "tx.timestamp"])
                 .where("tx.l2ps_uid = :l2psUid", { l2psUid })
-                .andWhere("CAST(tx.timestamp AS BIGINT) > CAST(:after AS BIGINT)", {
-                    after: String(Math.max(0, Math.trunc(afterTimestamp))),
-                })
+            if (typeof after.hash === "string") {
+                qb.andWhere(
+                    "(CAST(tx.timestamp AS BIGINT) > CAST(:after AS BIGINT) OR (CAST(tx.timestamp AS BIGINT) = CAST(:after AS BIGINT) AND tx.hash > :afterHash))",
+                    { after: timestamp, afterHash: after.hash },
+                )
+            } else {
+                qb.andWhere("CAST(tx.timestamp AS BIGINT) > CAST(:after AS BIGINT)", { after: timestamp })
+            }
+            return await qb
                 .orderBy("tx.timestamp", "ASC")
                 .addOrderBy("tx.hash", "ASC")
                 .limit(limit)
