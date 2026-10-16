@@ -47,10 +47,19 @@ const repo = {
     delete: async (id: string) => {
         rows.delete(id)
     },
-    find: async (query?: { where?: unknown }) =>
-        Array.isArray(query?.where)
-            ? (query.where as Row[]).map(w => rows.get(w.id)).filter(Boolean).map(r => ({ ...r }))
-            : [],
+    find: async (query?: { where?: unknown }) => {
+        if (Array.isArray(query?.where)) {
+            return (query.where as Row[]).map(w => rows.get(w.id)).filter(Boolean).map(r => ({ ...r }))
+        }
+        if (query?.where && typeof query.where === "object") {
+            const where = query.where as Row
+            return [...rows.values()]
+                .filter(r => Object.entries(where).every(([k, v]) => r[k] === v))
+                .sort((a, b) => Number(a.timestamp) - Number(b.timestamp))
+                .map(r => ({ ...r }))
+        }
+        return []
+    },
     createQueryBuilder: () => {
         const qb: any = {
             where: () => qb,

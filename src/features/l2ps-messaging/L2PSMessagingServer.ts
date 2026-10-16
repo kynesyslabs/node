@@ -27,14 +27,25 @@ const MAX_MESSAGE_SIZE = 256 * 1024
 /** Max encrypted ciphertext size (128 KB base64) */
 const MAX_CIPHERTEXT_SIZE = 128 * 1024
 /**
- * The SDK sets messageHash to the hex signature of the envelope, and a
- * post-quantum signature scheme is meant to replace ed25519 there; ML-DSA
- * hex runs to about 6.6 KB. The cap is for a hostile field, not a format
- * rule, so it sits well above that.
+ * The SDK sets messageHash to the hex ed25519 signature of the envelope
+ * (128 chars). The field is part of a unique btree index together with the
+ * subnet and both keys, and Postgres refuses index rows above about 2.7 KB
+ * with an error that is not a duplicate, so a larger value would turn into
+ * an internal error after the write instead of a refusal before it. A
+ * post-quantum signature there needs the index on a digest of the field.
  */
-const MAX_MESSAGE_HASH_LENGTH = 16384
+const MAX_MESSAGE_HASH_LENGTH = 2048
 /** Min valid hex public key length (ed25519 = 64 hex chars) */
 const MIN_PUBLIC_KEY_LENGTH = 64
+/** Room for a post-quantum key encoding without admitting an unbounded field. */
+const MAX_PUBLIC_KEY_LENGTH = 256
+/**
+ * Registration needs no subnet membership, so any key holder can mint one
+ * fresh proof per millisecond inside the clock window and each lives until
+ * the window closes. The map is bounded so that flood costs registrations,
+ * not memory; nothing is evicted early because an evicted proof would replay.
+ */
+const MAX_USED_REGISTER_PROOFS = 50_000
 /**
  * How far a register frame's timestamp may sit from the node clock. The proof
  * signs only the key, that timestamp and (in the bound form) the subnet, so
@@ -84,10 +95,18 @@ function checkRegisterFrame(payload: RegisterMessage["payload"]): RegisterFrame 
         return refusal("INVALID_MESSAGE", "publicKey, l2psUid and proof must be strings")
     }
     const canonicalKey = canonicalizeKey(publicKey)
-    if (canonicalKey.length < MIN_PUBLIC_KEY_LENGTH || !/^[0-9a-f]+$/.test(canonicalKey)) {
+    if (!isHexKey(canonicalKey)) {
         return refusal("INVALID_MESSAGE", "Invalid publicKey format (expected hex)")
     }
     return { publicKey, l2psUid, proof, canonicalKey }
+}
+
+function isHexKey(canonicalKey: string): boolean {
+    return (
+        canonicalKey.length >= MIN_PUBLIC_KEY_LENGTH &&
+        canonicalKey.length <= MAX_PUBLIC_KEY_LENGTH &&
+        /^[0-9a-f]+$/.test(canonicalKey)
+    )
 }
 
 function registerTimestampRefusal(timestamp: unknown, now: number): Refusal | null {
@@ -137,6 +156,9 @@ function checkSendFrame(payload: SendMessage["payload"], senderKey: string): Sen
         return refusal("INVALID_MESSAGE", `Ciphertext too large (max ${MAX_CIPHERTEXT_SIZE} bytes)`)
     }
     const toKey = canonicalizeKey(to) // canonical recipient identity for routing
+    if (!isHexKey(toKey)) {
+        return refusal("INVALID_MESSAGE", "Invalid recipient key format (expected hex)")
+    }
     if (toKey === senderKey) {
         return refusal("INVALID_MESSAGE", "Cannot send message to yourself")
     }
@@ -202,6 +224,11 @@ export class L2PSMessagingServer {
             return
         }
 
+        // JSON.parse accepts "null", numbers and arrays, none of which carry a frame.
+        if (!frame || typeof frame !== "object" || Array.isArray(frame)) {
+            this.sendError(ws, "INVALID_MESSAGE", "Frame must be a JSON object")
+            return
+        }
         if (!frame.type || typeof frame.type !== "string" || !frame.payload || typeof frame.payload !== "object") {
             this.sendError(ws, "INVALID_MESSAGE", "Missing or invalid type/payload", frame.requestId)
             return
@@ -277,6 +304,9 @@ export class L2PSMessagingServer {
         this.pruneRegisterProofs(now)
         if (this.usedRegisterProofs.has(proofKey)) {
             return refusal("INVALID_PROOF", "Register proof already used")
+        }
+        if (this.usedRegisterProofs.size >= MAX_USED_REGISTER_PROOFS) {
+            return refusal("RATE_LIMITED", "Too many recent registrations, retry later")
         }
         this.usedRegisterProofs.set(proofKey, msg.timestamp + REGISTER_PROOF_MAX_SKEW_MS)
         return null
@@ -625,7 +655,6 @@ export class L2PSMessagingServer {
         if (queued.length === 0) return
 
         const deliveredIds: string[] = []
-        const senderKeys = new Set<string>()
 
         for (const msg of queued) {
             const sent = this.send(ws, {
@@ -640,15 +669,12 @@ export class L2PSMessagingServer {
             })
             if (!sent) break // Maintain order — stop on first failure
             deliveredIds.push(msg.id)
-            senderKeys.add(msg.from)
         }
 
         if (deliveredIds.length > 0) {
+            // Frees exactly the delivered rows' slots; the sender's messages
+            // still queued for other recipients keep theirs.
             await this.service.markDelivered(deliveredIds)
-            // Reset offline quota only after DB commit succeeds
-            for (const key of senderKeys) {
-                this.service.resetOfflineCount(key)
-            }
             log.info(`[L2PS-IM] Delivered ${deliveredIds.length} queued messages to ${toKey.slice(0, 12)}...`)
         }
     }

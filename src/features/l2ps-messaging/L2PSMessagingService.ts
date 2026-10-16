@@ -558,13 +558,4 @@ export class L2PSMessagingService {
         return { messages, hasMore }
     }
 
-    /**
-     * Reset offline message count for a sender after delivery.
-     */
-    resetOfflineCount(senderKey: string): void {
-        this.offlineMessageCounts.delete(senderKey)
-        for (const [id, key] of this.heldSlots) {
-            if (key === senderKey) this.heldSlots.delete(id)
-        }
-    }
 }

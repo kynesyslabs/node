@@ -13,6 +13,7 @@ import {
     encrypted,
     faults,
     identity,
+    proofFor,
     queryTake,
     register,
     relay,
@@ -383,11 +384,11 @@ describe("a history read is bounded and does not depend on the caller's types", 
         expect(conditions).toEqual([])
     })
 
-    it("a post-quantum sized signature is accepted as a hash", async () => {
+    it("a hash at the index row limit is accepted", async () => {
         const sender = identity()
         const recipient = identity()
         const s = await register(sender)
-        s.client.frame("send", { to: recipient.publicKey, encrypted, messageHash: "ab".repeat(3300) })
+        s.client.frame("send", { to: recipient.publicKey, encrypted, messageHash: "ab".repeat(1024) })
         const reply = await s.client.next(["message_sent", "message_queued"])
 
         expect(reply.type).toBe("message_queued")
@@ -442,5 +443,104 @@ describe("a history read is bounded and does not depend on the caller's types", 
 
         expect(reply.payload.code).toBe("REGISTRATION_REQUIRED")
         client.close()
+    })
+})
+
+// ─── Frames that are valid JSON but not frames ───────────────────
+
+describe("a JSON value that is not an object is refused, and the socket stays usable", () => {
+    it.each([
+        ["null", "null"],
+        ["a number", "5"],
+        ["an array", "[]"],
+        ["a string", '"register"'],
+    ])("%s", async (_n, raw) => {
+        const client = await Client.open()
+        client.ws.send(raw)
+        const reply = await client.next("registered")
+
+        expect(reply.type).toBe("error")
+        expect(reply.payload.code).toBe("INVALID_MESSAGE")
+
+        const id = identity()
+        client.frame("register", { publicKey: id.publicKey, l2psUid: "subnet_a", proof: proofFor(id, Date.now()) })
+        expect((await client.next("registered")).type).toBe("registered")
+        client.close()
+    })
+})
+
+// ─── Field bounds that the storage layer would otherwise enforce ─
+
+describe("a send with an oversized or malformed identity field is refused before storage", () => {
+    it.each([
+        ["a messageHash above the index row limit", (to: string) => ({ to, encrypted, messageHash: "a".repeat(2049) })],
+        ["a recipient that is not hex", () => ({ to: "zz".repeat(32), encrypted, messageHash: "h" })],
+        ["a recipient shorter than a key", () => ({ to: "ab".repeat(16), encrypted, messageHash: "h" })],
+        ["a recipient longer than any key encoding", () => ({ to: "ab".repeat(200), encrypted, messageHash: "h" })],
+    ])("%s", async (_name, build) => {
+        const sender = identity()
+        const recipient = identity()
+        const s = await register(sender)
+
+        s.client.frame("send", build(recipient.publicKey))
+        const reply = await s.client.next(["message_sent", "message_queued"])
+
+        expect(reply.type).toBe("error")
+        expect(reply.payload.code).toBe("INVALID_MESSAGE")
+        expect(rows.size).toBe(0)
+
+        const ok = await sendAndWait(s.client, recipient, "a".repeat(2048))
+        expect(ok.type).toBe("message_queued")
+        s.client.close()
+    })
+})
+
+// ─── Slot accounting across recipients ───────────────────────────
+
+describe("delivery to one recipient frees only that recipient's slots", () => {
+    it("the sender's message queued for another offline peer keeps its slot", async () => {
+        const sender = identity()
+        const first = identity()
+        const second = identity()
+        const s = await register(sender)
+
+        expect((await sendAndWait(s.client, first, "to-first")).type).toBe("message_queued")
+        expect((await sendAndWait(s.client, second, "to-second")).type).toBe("message_queued")
+        expect(quotaOf(sender.publicKey)).toBe(2)
+
+        const r = await register(second)
+        const delivered = await r.client.next("message")
+        expect(delivered.payload.messageHash).toBe("to-second")
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+        expect(quotaOf(sender.publicKey)).toBe(1)
+        const left = [...rows.values()].filter(row => row.status === "queued")
+        expect(left.map(row => row.messageHash)).toEqual(["to-first"])
+
+        r.client.close()
+        s.client.close()
+    })
+})
+
+// ─── Register proof memory ───────────────────────────────────────
+
+describe("the register proof memory is bounded", () => {
+    const proofs = () => (relay.server as any).usedRegisterProofs as Map<string, number>
+
+    it("a full memory refuses new registrations instead of growing or forgetting", async () => {
+        const far = Date.now() + 60 * 60 * 1000
+        for (let i = 0; i < 50_000; i++) proofs().set(`subnet_a|${i}`, far)
+        try {
+            const blocked = await register(identity())
+            expect(blocked.reply.type).toBe("error")
+            expect(blocked.reply.payload.code).toBe("RATE_LIMITED")
+            blocked.client.close()
+        } finally {
+            proofs().clear()
+        }
+
+        const ok = await register(identity())
+        expect(ok.reply.type).toBe("registered")
+        ok.client.close()
     })
 })
