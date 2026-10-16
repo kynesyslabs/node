@@ -187,10 +187,11 @@ validators='[]'
 balances='[]'
 peerlist='{}'
 for i in 1 2 3 4; do
-    validators=$(jq --arg a "$(pub node$i)" --arg u "http://node-$i:${ports[$((i - 1))]}" \
+    node_url="http://node-$i:${ports[$((i - 1))]}" # NOSONAR
+    validators=$(jq --arg a "$(pub node$i)" --arg u "$node_url" \
         '. + [{address: $a, status: "2", connection_url: $u, staked_amount: "1000000000000000000", first_seen: 0, valid_at: 0}]' <<<"$validators")
     balances=$(jq --arg a "$(pub node$i)" '. + [[$a, "1000000000000000000"]]' <<<"$balances")
-    peerlist=$(jq --arg a "$(pub node$i)" --arg u "http://node-$i:${ports[$((i - 1))]}" '. + {($a): $u}' <<<"$peerlist")
+    peerlist=$(jq --arg a "$(pub node$i)" --arg u "$node_url" '. + {($a): $u}' <<<"$peerlist")
 done
 for who in alice carol; do
     balances=$(jq --arg a "$(pub $who)" '. + [[$a, "1000000000000000000"]]' <<<"$balances")

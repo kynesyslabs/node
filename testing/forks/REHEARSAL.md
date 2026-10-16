@@ -48,8 +48,8 @@ the second restart loaded no fork at all, `getNetworkInfo` reported
 40 with the legacy rules. Checks that failed on the unfixed tree: the file still
 carries the schedule after bootstrap, no hash mismatch, second restart loads
 both forks, `getNetworkInfo` after the second restart, and every
-activation-height check after that. (Commit `b82d08fd` is that scenario; it
-fails on the tree it was written against, on purpose.)
+activation-height check after that. (The upgrade-path scenario fails on a tree
+without the fix, on purpose.)
 
 Cause, from the code: a node computes its own genesis data hash from
 `data/genesis.json`, but a peer answers `getGenesisDataHash` and `/genesis` from
@@ -96,13 +96,15 @@ stored content on every node changes what `/genesis` serves to joining nodes.
 
 **Schedule agreement is a separate check.** `getNetworkInfo` reports every
 registered fork (seven at present) with its activation height, the chain id, and
-`forkScheduleDigest`: the sha256 of the whole `forks` object (activation heights
-and payloads, descriptions left out) and the chain id, with sorted keys. At
-bootstrap each peer's digest is compared with the local one. A difference logs
-one `FORK SCHEDULE MISMATCH` line carrying both digests, followed by the
-per-fork detail for the forks both sides report. A peer that does not publish a
-digest (an older build) is skipped with a debug line, not a warning. The extra
-keys are additive: the SDK reads only the fork entries it knows.
+`forkScheduleDigest`: the sha256 of the scheduled forks (activation heights and
+payloads, descriptions left out) and the chain id, with sorted keys. At
+bootstrap each peer's digest is compared with the local one. When the digests
+differ, the activation heights of the forks both sides report and the chain id
+decide: only a real difference logs a `FORK SCHEDULE MISMATCH` line, carrying
+both digests and the per-fork detail. A peer on an older build, which publishes
+no digest, is compared by those heights alone, and is skipped with a debug line
+only when it reports no fork data at all. The extra keys are additive: the SDK
+reads only the fork entries it knows.
 
 **A peer that is still booting is not a mismatch.** The RPC server starts before
 the fork configuration is read from genesis, so a booting peer used to answer
@@ -142,7 +144,9 @@ the network's, and fast sync refuses the peers (`Sync.ts`,
 `verifyLastBlockIntegrity`). The procedure for such a node (also a node whose
 database was wiped): boot it on the UNEDITED genesis first, let block 0 be
 stored, and only then add the `forks` entries and `properties.id` and restart.
-The upgrade-path mode does not cover this, since every node there has a database
+A node that has done this anyway refuses to continue at bootstrap with an
+error naming the cause, because its stored block 0 hashes differently from what
+its peers advertise. The upgrade-path mode does not cover this, since every node there has a database
 from before the edit.
 
 ## Running it
@@ -282,7 +286,7 @@ Every line is a check; the scenario is `rehearsal.ts`.
   A unit test drives `verifyWeb2Proof` itself across the boundary with the
   parser and the signature pool replaced. The gate used to read the node-local
   tip, while `signatureDomain` gates at tip + 1, so the first block that
-  rejected the legacy shape was H+1; commit `8b45c671` moves it to tip + 1,
+  rejected the legacy shape was H+1; the gate now judges at tip + 1,
   which changes behaviour at the activation boundary only (nothing changes
   while the fork is unscheduled). **The gate is admission-only.** It is consulted
   when a web2 proof is verified for the mempool. The Telegram path returns
@@ -456,10 +460,7 @@ chain-level decision.
 
 ## Results of the recorded runs
 
-Both runs on a clean tree: branch `test/fork-rehearsal` through `9d9c4cb5`
-(`origin/stabilisation` `52e2e569` plus the commits listed at the end; the runs
-used the same sources one commit-message rewording earlier), SDK
-4.0.17, `oven/bun:latest` (bun 1.4.0), 4 validators, chain id 31337, 10 seconds
+Both runs on a clean tree, SDK 4.0.17, `oven/bun:latest` (bun 1.4.0), 4 validators, chain id 31337, 10 seconds
 per block, 2026-10-14. About 10 minutes each. The network was too slow here for
 the apt and `bun install` steps of `testing/devnet/Dockerfile`, so that path was
 not run; the image was built through `NODE_MODULES_FROM`.
@@ -508,7 +509,7 @@ numbers differ between runs; the shapes do not.
   block 40 on all four nodes, a later domain-signed transfer lands in block 42,
   blocks 37 to 43 have the same hash on every node and `getLastBlock` is
   `43:3877036af901e57795c563d3ed8c6dd1f6242152857e27f638f9fbe02def8c80` on each.
-- Same scenario on the tree before any fix (`b82d08fd`): every node logged
+- Same scenario on a tree without the fix: every node logged
   `Genesis data hash does not match` on the first restart, all four files lost
   the schedule, the second restart loaded no fork, and the chain crossed height 40
   on the legacy rules (log lines above).
@@ -586,22 +587,6 @@ restarted by the engine after the operator's restart; no container killed for
 memory. Peers occasionally make a node exit during the first minute (the devnet
 start-up race; the script starts node 1 first), so the counts are compared from
 the start of the scenario.
-
-### Commits on the branch
-
-| Commit | What |
-| --- | --- |
-| `91fc13d5` | the rehearsal (fresh mode), runbook, first results |
-| `b82d08fd` | upgrade-path mode and harness hardening (fails on the unfixed tree, on purpose) |
-| `7b0abf5d` | first genesis-hash fix, excluding the schedule from the hash (superseded by `dc9a68d0`: it changed what peers advertise) |
-| `12e7b121` | `web2ProofBinding` judged at tip + 1, admission-only scope stated |
-| `12153e29` | rehearsal follows the fixed bootstrap, pinned check counts |
-| `d0cf6a3d` | runbook for the real upgrade path and the testnet restart policy |
-| `dc9a68d0` | advertised hash and `/genesis` as before; the mismatch decision uses a local core hash |
-| `2f05420e` | fork schedule digest, all forks reported, not-ready answer, periodic comparison |
-| `6fcb0851` | wiring test for the web2 gate, corrected gate scope, comment cleanup |
-| `9d9c4cb5` | rehearsal checks for the two-hash design and the digest, re-pinned counts |
-| (this one) | this document and the runbook (fresh-node procedure, admission-only web2 policy) |
 
 ### What the runs left behind
 

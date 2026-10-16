@@ -5,6 +5,7 @@ import {
     forkScheduleDigest,
     localScheduleView,
     peerScheduleView,
+    type ScheduleView,
 } from "src/libs/peer/routines/forkScheduleAgreement"
 import { cloneDefaultForkConfig } from "src/forks/forkConfig"
 
@@ -36,14 +37,22 @@ describe("fork schedule digest", () => {
         }
     })
 
-    it("covers payloads and the chain id", () => {
-        const c = config()
-        const other = config()
+    it("covers the payload of a scheduled fork and the chain id", () => {
+        const c = config({ gasFeeSeparation: 50 })
+        const other = config({ gasFeeSeparation: 50 })
         other.gasFeeSeparation.treasuryAddress = "0x" + "11".repeat(32)
         expect(forkScheduleDigest(other, 1)).not.toBe(forkScheduleDigest(c, 1))
         expect(forkScheduleDigest(c, 2)).not.toBe(forkScheduleDigest(c, 1))
         expect(forkScheduleDigest(c, null)).not.toBe(forkScheduleDigest(c, 1))
     })
+})
+
+it("leaves out forks that are not scheduled, whatever their payload", () => {
+    const c = config()
+    const other = config()
+    other.atomicWork.somePayloadField = "code default of another build"
+    other.extraFork = { activationHeight: null, anything: 1 }
+    expect(forkScheduleDigest(other, 1)).toBe(forkScheduleDigest(c, 1))
 })
 
 describe("comparing schedules", () => {
@@ -70,8 +79,54 @@ describe("comparing schedules", () => {
         expect(result.lines).toContain("chainId: ours 31337, theirs 1")
     })
 
-    it("skips a peer that publishes no digest", () => {
-        expect(compareSchedules(ours, view(config({ atomicWork: 900 }), 1, false))).toEqual({ status: "skipped" })
+    it("compares heights with a peer that publishes no digest: equal heights agree", () => {
+        expect(compareSchedules(ours, view(config(), 31337, false))).toEqual({ status: "agree" })
+    })
+
+    it("compares heights with a peer that publishes no digest: a differing height is a mismatch naming the fork", () => {
+        const result = compareSchedules(ours, view(config({ atomicWork: 900 }), 31337, false))
+        if (result.status !== "mismatch") throw new Error("expected a mismatch")
+        expect(result.lines).toEqual(["atomicWork: ours null, theirs 900"])
+    })
+
+    it("skips a peer that reports no fork data at all", () => {
+        expect(compareSchedules(ours, peerScheduleView({ forks: {}, chainId: 31337 })!)).toEqual({ status: "skipped" })
+    })
+
+    it("agrees when the digests differ but every per-fork height and the chain id are equal", () => {
+        const theirConfig = config()
+        theirConfig.signatureDomain.someNewPayloadField = "only in the other build"
+        const theirs = view(theirConfig, 31337)
+        expect(theirs.digest).not.toBe(ours.digest)
+        expect(compareSchedules(ours, theirs)).toEqual({ status: "agree" })
+    })
+
+    it("does not use or print a peer digest that is not a sha256 hex string", () => {
+        const hostile = peerScheduleView({
+            ...answer(config({ atomicWork: 900 }), 31337),
+            forkScheduleDigest: "x".repeat(10_000),
+        })!
+        expect(hostile.digest).toBeUndefined()
+        const result = compareSchedules(ours, hostile)
+        if (result.status !== "mismatch") throw new Error("expected a mismatch")
+        expect(result.lines.join("\n")).not.toContain("xxxx")
+    })
+
+    it("caps what a peer supplied when it is logged", () => {
+        const long = "7".repeat(500)
+        const theirs: ScheduleView = { chainId: long as unknown as number, forks: { atomicWork: long as unknown as number } }
+        const result = compareSchedules(ours, theirs)
+        if (result.status !== "mismatch") throw new Error("expected a mismatch")
+        for (const line of result.lines) expect(line.length).toBeLessThan(120)
+    })
+
+    it("drops peer values of the wrong type when reading the answer", () => {
+        const view = peerScheduleView({
+            forks: { atomicWork: { activationHeight: "9" }, signatureDomain: { activationHeight: 40 } },
+            chainId: { nested: true },
+        })!
+        expect(view.forks).toEqual({ signatureDomain: 40 })
+        expect(view.chainId).toBeUndefined()
     })
 
     it("has no view of an answer without a fork table", () => {

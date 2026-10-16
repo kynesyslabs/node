@@ -13,7 +13,11 @@
 
 import { describe, it, expect } from "bun:test"
 import { readFileSync } from "node:fs"
-import { resolveGenesisMismatch, type GenesisMismatchDeps } from "src/libs/peer/routines/genesisMismatch"
+import {
+    editedGenesisOnFreshChainProblem,
+    resolveGenesisMismatch,
+    type GenesisMismatchDeps,
+} from "src/libs/peer/routines/genesisMismatch"
 import {
     hashGenesisCore,
     hashGenesisData,
@@ -170,5 +174,28 @@ describe("what an anchor serves must hash to what it advertised", () => {
         const { deps } = newDeps(chains.devnet, chains.devnet)
         deps.fetchPeerGenesis = async () => null
         await expect(resolveGenesisMismatch("a", "b", "c", deps)).rejects.toThrow("Failed to download")
+    })
+})
+
+describe("a wiped node on an edited genesis file", () => {
+    for (const [name, genesis] of Object.entries(chains)) {
+        it(`is told apart from a node that stores the network's block 0 (${name})`, () => {
+            const networkHash = hashGenesisData(genesis)
+            const edited = withSchedule(genesis)
+
+            // A running node: its stored block 0 is the network's, the edited file is fine.
+            expect(editedGenesisOnFreshChainProblem(networkHash, networkHash)).toBeNull()
+
+            // A wiped node: block 0 was regenerated from the edited file.
+            const problem = editedGenesisOnFreshChainProblem(hashGenesisData(edited), networkHash)
+            expect(problem).not.toBeNull()
+            expect(problem).toContain(hashGenesisData(edited))
+            expect(problem).toContain(networkHash)
+            expect(problem).toMatch(/Restore the genesis file/)
+        })
+    }
+
+    it("has nothing to judge without a stored block 0", () => {
+        expect(editedGenesisOnFreshChainProblem(null, "ab".repeat(32))).toBeNull()
     })
 })

@@ -48,9 +48,9 @@ function readGenesisFile() {
 }
 
 /**
- * Fail closed on ANY failure to read the fork config (GH#3214986124, Greptile
- * P1, and follow-up): a malformed activationHeight, a JSON parse error or an IO
- * read error are all operator misconfigurations of consensus-relevant state.
+ * Fail closed on ANY failure to read the fork config: a malformed
+ * activationHeight, a JSON parse error or an IO read error are all operator
+ * misconfigurations of consensus-relevant state.
  * The caller only gets here when the file exists, so everything inside is a
  * real read or validation failure. A silent fallback would let a typo or a
  * truncated file disable the fork on this validator while peers cross the

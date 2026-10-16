@@ -306,3 +306,36 @@ describe("hashGenesisData stays the full hash peers advertise", () => {
         ).not.toBe(base)
     })
 })
+
+describe("hashGenesisData golden vector", () => {
+    // Every node already on the network advertises and compares this exact
+    // value for the same data, so the normalisation must never change what it
+    // produces: a different hash here would split a new build from the old ones.
+    const FIXTURE = {
+        timestamp: "1700000000",
+        balances: [
+            ["0xa0000000000000000000000000000000000000000000000000000000000000aa", "1000"],
+            ["0xb0000000000000000000000000000000000000000000000000000000000000bb", "2000"],
+        ],
+        properties: { name: "golden", mutables: { rate: 5 } },
+        validators: [
+            {
+                address: "0xb0000000000000000000000000000000000000000000000000000000000000bb",
+                status: "2",
+                connection_url: "http://localhost:53551",
+                staked_amount: "1",
+            },
+            {
+                address: "0xa0000000000000000000000000000000000000000000000000000000000000aa",
+                status: "2",
+                connection_url: "http://node-1:53551",
+                staked_amount: "1",
+            },
+        ],
+        forks: { signatureDomain: { activationHeight: 40 } },
+    }
+
+    it("is pinned", () => {
+        expect(hashGenesisData(FIXTURE)).toBe("b24e72530d5fee6076cbb1017d5405f8844666fa67c0b601e1c8d9788de7bef6")
+    })
+})

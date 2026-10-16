@@ -19,7 +19,11 @@ import { sleep } from "@kynesyslabs/demosdk/utils"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { hashGenesisCore, hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
-import { resolveGenesisMismatch } from "./genesisMismatch"
+import Chain from "@/libs/blockchain/chain"
+import {
+    editedGenesisOnFreshChainProblem,
+    resolveGenesisMismatch,
+} from "./genesisMismatch"
 import {
     checkPeerSchedule,
     localScheduleView,
@@ -119,6 +123,16 @@ function logGenesisVerdict(
     }
 }
 
+/** Hash of the genesis data in this node's stored block 0, or null when it has none. */
+async function storedGenesisHash(): Promise<string | null> {
+    const block = await Chain.getGenesisBlock()
+    const content = block?.content as { extra?: { genesisData?: unknown } } | undefined
+    let data = content?.extra?.genesisData
+    if (!data) return null
+    if (typeof data === "string") data = JSON.parse(data)
+    return hashGenesisData(data)
+}
+
 async function ensureGenesisDataMatch(verifiedPeer: Peer) {
     const res = await fetchPeerGenesisHash(verifiedPeer)
 
@@ -141,6 +155,16 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
             },
         )
         logGenesisVerdict(verdict, verifiedPeer)
+        if (verdict.outcome === "unhashed-fields-only") {
+            const problem = editedGenesisOnFreshChainProblem(
+                await storedGenesisHash(),
+                peerGenesisDataHash,
+            )
+            if (problem) {
+                log.error("[BOOTSTRAP] Refusing to continue: " + problem)
+                throw new Error(problem)
+            }
+        }
     } else {
         log.error(
             "[BOOTSTRAP] Failed to get genesis data hash from peer: " +
@@ -182,7 +206,7 @@ async function warnOnForkScheduleMismatch(peer: Peer) {
             log.debug(
                 "[BOOTSTRAP] Peer " +
                     peer.connection.string +
-                    " does not publish a fork schedule digest; not compared",
+                    " reports no fork schedule; not compared",
             )
             break
         case "not-ready":

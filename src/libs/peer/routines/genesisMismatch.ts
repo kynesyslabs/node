@@ -109,3 +109,32 @@ export async function resolveGenesisMismatch(
         carriedOver,
     }
 }
+
+/**
+ * After a verdict of "unhashed-fields-only" the local file is kept as it is,
+ * which is right for a node that already stores the network's block 0. A node
+ * whose database was wiped has just created its block 0 from that edited file,
+ * and what it stores hashes differently from what its peers advertise, so it
+ * could never sync. The stored block's hash tells the two apart.
+ *
+ * Returns the explanation to log and throw, or null when the stored block 0
+ * is the network's (or there is no stored block to judge).
+ */
+export function editedGenesisOnFreshChainProblem(
+    storedGenesisHash: string | null,
+    peerAdvertisedHash: string,
+): string | null {
+    if (storedGenesisHash === null || storedGenesisHash === peerAdvertisedHash) {
+        return null
+    }
+    return (
+        "The genesis block stored by this node (hash " +
+        storedGenesisHash +
+        ") differs from the network's (hash " +
+        peerAdvertisedHash +
+        ") only in the fork schedule or chain id, so this node created its block 0 from an " +
+        "edited data/genesis.json and can never sync with its peers. Restore the genesis file " +
+        "as it was when the chain was created, wipe the database, let block 0 be stored, and " +
+        "only then add the forks entries and properties.id again and restart."
+    )
+}

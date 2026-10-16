@@ -5,8 +5,9 @@
  * compare when they pair (see normalizeGenesisForHash.ts), so a node that
  * missed a genesis edit would pair with everyone and then split from them at
  * the activation height. Each node publishes a digest of its whole schedule
- * through `getNetworkInfo`; this compares digests and, only when they differ,
- * names what differs.
+ * through `getNetworkInfo`; equal digests settle it, and when they differ (or
+ * the peer predates the digest) the per-fork activation heights, which every
+ * build publishes, decide whether the schedules really differ.
  */
 
 import { stableStringify } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
@@ -33,9 +34,20 @@ function byCodeUnit(a: string, b: string): number {
 export type ForkEntry = { activationHeight: number | null } & Record<string, unknown>
 export type ForkConfigLike = Record<string, ForkEntry | undefined>
 
+const DIGEST_FORMAT = /^[0-9a-f]{64}$/
+
+/** Longest piece of peer-supplied text that is put into a log line. */
+const MAX_LOGGED_LENGTH = 64
+
+function show(value: unknown): string {
+    return String(value).slice(0, MAX_LOGGED_LENGTH)
+}
+
 /**
- * Digest of everything about the schedule that consensus depends on: every
- * fork's activation height and payload, and the chain id. A fork's free-text
+ * Digest of everything about the schedule that consensus depends on: the
+ * activation height and payload of every SCHEDULED fork, and the chain id. A
+ * fork that is not scheduled does nothing, so two builds whose registries
+ * differ only in forks neither schedules still agree. A fork's free-text
  * `description` is left out because it is a code constant that differs between
  * builds without meaning anything.
  */
@@ -46,7 +58,7 @@ export function forkScheduleDigest(
     const forks: Record<string, unknown> = {}
     for (const name of Object.keys(forkConfig).sort(byCodeUnit)) {
         const entry = forkConfig[name]
-        if (!entry) continue
+        if (!entry || entry.activationHeight === null) continue
         const { description: _description, ...consensus } = entry
         forks[name] = consensus
     }
@@ -77,41 +89,55 @@ export function peerScheduleView(info: unknown): ScheduleView | null {
     if (!forks || typeof forks !== "object") return null
     const out: Record<string, number | null> = {}
     for (const name of Object.keys(forks)) {
-        const entry = forks[name]
-        if (entry?.activationHeight !== undefined) {
-            out[name] = entry.activationHeight
-        }
+        const height = forks[name]?.activationHeight
+        if (height === null || typeof height === "number") out[name] = height
     }
-    return { chainId, forks: out, digest }
+    return {
+        chainId: chainId === null || typeof chainId === "number" ? chainId : undefined,
+        forks: out,
+        // Anything but a sha256 hex string is not a digest this node can use or print.
+        digest: typeof digest === "string" && DIGEST_FORMAT.test(digest) ? digest : undefined,
+    }
 }
 
 export type ScheduleComparison =
     | { status: "agree" }
-    /** The peer predates the digest: nothing to compare. */
+    /** The peer reports no fork data at all: nothing to compare. */
     | { status: "skipped" }
     | { status: "mismatch"; lines: string[] }
 
 /**
- * Compare two views by digest. Detail lines are only for the forks both sides
- * report: a peer on an older build says nothing about a fork it does not know.
+ * Compare two views. Equal digests agree. Otherwise, and for a peer on an
+ * older build that publishes no digest, the activation heights of the forks
+ * both sides report and the chain id decide: a peer says nothing about a fork
+ * it does not know, and a digest can differ on registry details that do not
+ * change when any fork activates.
  */
 export function compareSchedules(
     ours: ScheduleView,
     theirs: ScheduleView,
 ): ScheduleComparison {
-    if (theirs.digest === undefined) return { status: "skipped" }
-    if (ours.digest === theirs.digest) return { status: "agree" }
-    const lines = [`schedule digest: ours ${ours.digest}, theirs ${theirs.digest}`]
+    if (theirs.digest !== undefined && ours.digest === theirs.digest) {
+        return { status: "agree" }
+    }
+    if (theirs.digest === undefined && Object.keys(theirs.forks).length === 0) {
+        return { status: "skipped" }
+    }
+    const lines: string[] = []
     for (const name of Object.keys(ours.forks).sort(byCodeUnit)) {
         if (!(name in theirs.forks)) continue
         if (ours.forks[name] !== theirs.forks[name]) {
             lines.push(
-                `${name}: ours ${String(ours.forks[name])}, theirs ${String(theirs.forks[name])}`,
+                `${name}: ours ${show(ours.forks[name])}, theirs ${show(theirs.forks[name])}`,
             )
         }
     }
     if (theirs.chainId !== undefined && ours.chainId !== theirs.chainId) {
-        lines.push(`chainId: ours ${String(ours.chainId)}, theirs ${String(theirs.chainId)}`)
+        lines.push(`chainId: ours ${show(ours.chainId)}, theirs ${show(theirs.chainId)}`)
+    }
+    if (lines.length === 0) return { status: "agree" }
+    if (theirs.digest !== undefined) {
+        lines.unshift(`schedule digest: ours ${ours.digest}, theirs ${theirs.digest}`)
     }
     return { status: "mismatch", lines }
 }

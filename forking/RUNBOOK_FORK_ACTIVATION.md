@@ -241,6 +241,8 @@ If you see:
 
 stop the node, unset the flag, restart. This flag is rehearsal-only.
 
+**Accepted risk: a schedule mismatch is log-only.** Peers compare their fork schedules at bootstrap and periodically, and a difference is logged as `FORK SCHEDULE MISMATCH` (error level near a scheduled height), but it never stops the node. A node that missed the genesis edit therefore keeps running and splits from its peers at the first height that differs, so the log lines are the only warning. A hard stop is deliberately not offered: during a rolling genesis edit peers disagree legitimately for a while, and a stop that fires then can remove validators at the worst moment. Check the `getNetworkInfo` schedule digest on every validator rather than relying on the node to refuse.
+
 ### 4.4 Block `N-3` → `N+5` observation
 
 From `T-0` minus a few minutes, watch the activation sequence on every validator.

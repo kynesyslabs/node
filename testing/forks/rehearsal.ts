@@ -57,7 +57,8 @@ if (!DOCKER) throw new Error("docker not found at /usr/bin or /usr/local/bin")
 let stepNo = 0
 let stepFile = `${RUN_DIR}/steps/00-setup.log`
 mkdirSync(`${RUN_DIR}/steps`, { recursive: true })
-// The SDK prints debug output while it builds transactions; the report goes through say().
+// The SDK prints debug output while it builds transactions, which would bury the
+// check lines; the report goes through say(), which writes to stdout directly.
 console.log = () => {}
 function say(line: string) {
     process.stdout.write(line + "\n")

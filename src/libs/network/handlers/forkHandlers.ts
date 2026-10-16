@@ -60,7 +60,7 @@ export interface NetworkInfo {
         web2ProofBinding: ForkStatus
     } & Record<string, ForkStatus>
     /**
-     * Digest of the whole fork schedule and the chain id (see
+     * Digest of the scheduled forks and the chain id (see
      * `forkScheduleAgreement.ts`). Peers compare it to notice a node that
      * missed a genesis edit. Absent on nodes older than this field.
      */
