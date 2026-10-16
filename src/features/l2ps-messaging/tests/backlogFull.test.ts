@@ -43,7 +43,11 @@ const { L2PSMessagingService } = await import("../L2PSMessagingService")
 const { L2PSMessagingServer } = await import("../L2PSMessagingServer")
 
 const service = L2PSMessagingService.getInstance() as any
-const submitToL2PS = jest.spyOn(service, "submitToL2PS").mockImplementation(async () => ({ success: true, txHash: "0xtx", executed: true }))
+const submitToL2PS = jest.spyOn(service, "submitToL2PS").mockImplementation(async (...args: unknown[]) => {
+    const onExecuted = args[7] as () => void
+    onExecuted()
+    return { success: true, txHash: "0xtx" }
+})
 
 interface Identity {
     publicKey: string
@@ -146,7 +150,7 @@ describe("messaging relay with a full subnet queue", () => {
 
     it("gives the slot back when the row was stored but never executed", async () => {
         guard.check.mockResolvedValue({ admitted: true })
-        submitToL2PS.mockResolvedValueOnce({ success: true, txHash: "0xtx", executed: false })
+        submitToL2PS.mockResolvedValueOnce({ success: true, txHash: "0xtx" })
 
         const result = await service.processMessage("alice", "bob", "subnet_a", "m0", "h0", encrypted, true)
 

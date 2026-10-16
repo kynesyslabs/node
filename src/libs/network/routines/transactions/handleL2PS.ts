@@ -251,13 +251,14 @@ async function processValidL2PSTransaction(
     // Execute transaction. An executed row keeps its slot counted until the
     // next database refresh sees it; a failed attempt gives the slot back.
     let executed = false
+    const onExecuted = () => {
+        executed = true
+        backlog.settle(l2psUid)
+    }
     try {
-        const outcome = await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
-        executed = outcome.result === 200
-        return outcome
+        return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash, onExecuted)
     } finally {
-        if (executed) backlog.settle(l2psUid)
-        else backlog.release(l2psUid)
+        if (!executed) backlog.release(l2psUid)
     }
 }
 
@@ -270,6 +271,7 @@ async function executeAndRecordL2PSTransaction(
     l2psTx: L2PSTransaction,
     decryptedTx: Transaction,
     originalHash: string,
+    onExecuted: () => void,
 ): Promise<RPCResponse> {
     let executionResult
     try {
@@ -294,8 +296,12 @@ async function executeAndRecordL2PSTransaction(
         )
     }
 
-    // Update status and return success
+    // Update status and return success. The slot moves into the executed
+    // count right here, before any further database work, so a refresh
+    // landing in between cannot count the row twice for longer than it
+    // takes the next refresh to replace the cached value.
     await L2PSMempool.updateStatus(l2psTx.hash, "executed")
+    onExecuted()
 
     // Record transaction in l2ps_transactions table for persistent history
     try {
