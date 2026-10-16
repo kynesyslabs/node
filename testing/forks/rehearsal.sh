@@ -30,6 +30,9 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEVNET="$ROOT/testing/devnet"
 PROJECT="forkrehearsal"
+# The node URLs name compose services on the project's private docker network, so
+# there is no TLS between containers; TLS terminates at the reverse proxy in front of a real node.
+DEVNET_RPC_SCHEME="${DEVNET_RPC_SCHEME:-http}"
 UPGRADE_PATH="${UPGRADE_PATH:-0}"
 UPGRADE_LEAD="${UPGRADE_LEAD:-30}"
 # The tag names the tree the image holds, so a stale image is never reused.
@@ -187,7 +190,7 @@ validators='[]'
 balances='[]'
 peerlist='{}'
 for i in 1 2 3 4; do
-    node_url="http://node-$i:${ports[$((i - 1))]}" # NOSONAR
+    node_url="$DEVNET_RPC_SCHEME://node-$i:${ports[$((i - 1))]}"
     validators=$(jq --arg a "$(pub node$i)" --arg u "$node_url" \
         '. + [{address: $a, status: "2", connection_url: $u, staked_amount: "1000000000000000000", first_seen: 0, valid_at: 0}]' <<<"$validators")
     balances=$(jq --arg a "$(pub node$i)" '. + [[$a, "1000000000000000000"]]' <<<"$balances")

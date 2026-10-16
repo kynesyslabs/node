@@ -5,9 +5,9 @@
  * compare when they pair (see normalizeGenesisForHash.ts), so a node that
  * missed a genesis edit would pair with everyone and then split from them at
  * the activation height. Each node publishes a digest of its whole schedule
- * through `getNetworkInfo`; equal digests settle it, and when they differ (or
- * the peer predates the digest) the per-fork activation heights, which every
- * build publishes, decide whether the schedules really differ.
+ * through `getNetworkInfo`; equal digests settle it, and when they differ the
+ * per-fork activation heights, which every build publishes, name what differs.
+ * A peer that predates the digest is compared by those heights alone.
  */
 
 import { stableStringify } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
@@ -107,11 +107,11 @@ export type ScheduleComparison =
     | { status: "mismatch"; lines: string[] }
 
 /**
- * Compare two views. Equal digests agree. Otherwise, and for a peer on an
- * older build that publishes no digest, the activation heights of the forks
- * both sides report and the chain id decide: a peer says nothing about a fork
- * it does not know, and a digest can differ on registry details that do not
- * change when any fork activates.
+ * Compare two views. Equal digests agree. Differing digests are a mismatch, and
+ * the forks whose heights differ, if any, are named. A peer on an older build
+ * that publishes no digest is compared by the activation heights of the forks
+ * both sides report and the chain id alone: a peer says nothing about a fork it
+ * does not know.
  */
 export function compareSchedules(
     ours: ScheduleView,
@@ -135,9 +135,17 @@ export function compareSchedules(
     if (theirs.chainId !== undefined && ours.chainId !== theirs.chainId) {
         lines.push(`chainId: ours ${show(ours.chainId)}, theirs ${show(theirs.chainId)}`)
     }
-    if (lines.length === 0) return { status: "agree" }
     if (theirs.digest !== undefined) {
+        // Digests cover only scheduled forks, so with equal heights and chain id a
+        // difference can only be a scheduled fork's payload or the set of scheduled forks.
+        if (lines.length === 0) {
+            lines.push(
+                `scheduled fork payload or set differs (digest ${ours.digest} vs ${theirs.digest})`,
+            )
+        }
         lines.unshift(`schedule digest: ours ${ours.digest}, theirs ${theirs.digest}`)
+    } else if (lines.length === 0) {
+        return { status: "agree" }
     }
     return { status: "mismatch", lines }
 }

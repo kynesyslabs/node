@@ -98,12 +98,12 @@ stored content on every node changes what `/genesis` serves to joining nodes.
 registered fork (seven at present) with its activation height, the chain id, and
 `forkScheduleDigest`: the sha256 of the scheduled forks (activation heights and
 payloads, descriptions left out) and the chain id, with sorted keys. At
-bootstrap each peer's digest is compared with the local one. When the digests
-differ, the activation heights of the forks both sides report and the chain id
-decide: only a real difference logs a `FORK SCHEDULE MISMATCH` line, carrying
-both digests and the per-fork detail. A peer on an older build, which publishes
-no digest, is compared by those heights alone, and is skipped with a debug line
-only when it reports no fork data at all. The extra keys are additive: the SDK
+bootstrap each peer's digest is compared with the local one. A difference logs
+one `FORK SCHEDULE MISMATCH` line carrying both digests and naming the forks
+whose heights differ; when only a scheduled fork's payload or the set of
+scheduled forks differs, the line says so instead. A peer on an older build,
+which publishes no digest, is compared by activation heights and chain id alone,
+and is skipped with a debug line only when it reports no fork data at all. The extra keys are additive: the SDK
 reads only the fork entries it knows.
 
 **A peer that is still booting is not a mismatch.** The RPC server starts before

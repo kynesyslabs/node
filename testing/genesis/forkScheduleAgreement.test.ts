@@ -93,12 +93,26 @@ describe("comparing schedules", () => {
         expect(compareSchedules(ours, peerScheduleView({ forks: {}, chainId: 31337 })!)).toEqual({ status: "skipped" })
     })
 
-    it("agrees when the digests differ but every per-fork height and the chain id are equal", () => {
+    it("reports a mismatch when the digests differ but every per-fork height and the chain id are equal", () => {
         const theirConfig = config()
         theirConfig.signatureDomain.someNewPayloadField = "only in the other build"
         const theirs = view(theirConfig, 31337)
-        expect(theirs.digest).not.toBe(ours.digest)
-        expect(compareSchedules(ours, theirs)).toEqual({ status: "agree" })
+        const result = compareSchedules(ours, theirs)
+        if (result.status !== "mismatch") throw new Error("expected a mismatch")
+        expect(result.lines).toHaveLength(2)
+        expect(result.lines[1]).toBe(
+            `scheduled fork payload or set differs (digest ${ours.digest} vs ${theirs.digest})`,
+        )
+    })
+
+    it("reports a mismatch for the same scheduled fork at the same height with a different treasury address", () => {
+        const mine = localScheduleView(config({ gasFeeSeparation: 50 }), 31337)
+        const theirConfig = config({ gasFeeSeparation: 50 })
+        theirConfig.gasFeeSeparation.treasuryAddress = "0x" + "11".repeat(32)
+        const result = compareSchedules(mine, view(theirConfig, 31337))
+        if (result.status !== "mismatch") throw new Error("expected a mismatch")
+        expect(result.lines[0]).toMatch(/^schedule digest: ours [0-9a-f]{64}, theirs [0-9a-f]{64}$/)
+        expect(result.lines[1]).toMatch(/^scheduled fork payload or set differs/)
     })
 
     it("does not use or print a peer digest that is not a sha256 hex string", () => {
