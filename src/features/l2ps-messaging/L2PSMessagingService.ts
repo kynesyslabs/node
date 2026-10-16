@@ -17,6 +17,8 @@ import { canonicalizeKey } from "./keys"
 import type { MessageStatus, SerializedEncryptedMessage, StoredMessage } from "./types"
 
 const MAX_OFFLINE_MESSAGES_PER_SENDER = 200
+const DEFAULT_HISTORY_PAGE = 50
+const MAX_HISTORY_PAGE = 200
 
 export interface ProcessMessageResult {
     success: boolean
@@ -30,11 +32,46 @@ export interface ProcessMessageResult {
     status?: MessageStatus
 }
 
+/**
+ * The paging fields of a history request, checked. An absent field (undefined
+ * or null) keeps its default; a present one that is not usable is an error,
+ * because falling back would hand a client that mis-built its cursor the
+ * newest page again, forever.
+ */
+export function parseHistoryPage(
+    before: unknown,
+    limit: unknown,
+): { before?: number; limit?: number } | { error: string } {
+    let cursor: number | undefined
+    if (before !== undefined && before !== null) {
+        const ok =
+            (typeof before === "number" || typeof before === "string") &&
+            /^\d{1,15}$/.test(String(before))
+        if (!ok) return { error: "before must be a whole millisecond timestamp" }
+        cursor = Number(before)
+    }
+    let size: number | undefined
+    if (limit !== undefined && limit !== null) {
+        if (typeof limit !== "number" || !Number.isFinite(limit)) {
+            return { error: "limit must be a number" }
+        }
+        size = limit
+    }
+    return { before: cursor, limit: size }
+}
+
 type MessageRepo = ReturnType<typeof dataSource.getRepository<L2PSMessage>>
 
 export class L2PSMessagingService {
     private static instance: L2PSMessagingService
     private offlineMessageCounts = new Map<string, number>()
+    /**
+     * Which message holds each offline slot, and under which sender key. A slot
+     * is freed by deleting its entry, so it is freed at most once whichever
+     * path notices first: a lost database reply can make the failure path and
+     * `markDelivered` both see a message whose row did commit.
+     */
+    private heldSlots = new Map<string, string>()
     /** Attempts still waiting for their L2PS outcome, by message identity. */
     private inFlight = new Map<string, Promise<ProcessMessageResult>>()
 
@@ -67,7 +104,10 @@ export class L2PSMessagingService {
         recipientOnline: boolean,
     ): Promise<ProcessMessageResult> {
         const identity = { l2psUid, fromKey, toKey, messageHash }
-        const key = [l2psUid, canonicalizeKey(fromKey), canonicalizeKey(toKey), messageHash].join("|")
+        // Encoded, not joined: the recipient and the hash are the caller's
+        // strings, and a delimiter inside one would let two different messages
+        // share a key and have the second answered as a resend of the first.
+        const key = JSON.stringify([l2psUid, canonicalizeKey(fromKey), canonicalizeKey(toKey), messageHash])
 
         // A resend that arrives while the first attempt is still being
         // submitted gets that attempt's outcome, whatever it turns out to be,
@@ -93,7 +133,7 @@ export class L2PSMessagingService {
         encrypted: SerializedEncryptedMessage,
         recipientOnline: boolean,
     ): Promise<ProcessMessageResult> {
-        const { l2psUid, fromKey, toKey, messageHash } = identity
+        const { fromKey } = identity
         const repo = dataSource.getRepository(L2PSMessage)
 
         const existing = await this.findExisting(repo, identity)
@@ -101,20 +141,50 @@ export class L2PSMessagingService {
             return this.duplicateResult(existing)
         }
 
-        const quotaError = this.reserveOfflineQuota(fromKey, recipientOnline)
+        const slotId = existing?.id ?? messageId
+        const quotaError = this.reserveOfflineQuota(slotId, fromKey, recipientOnline)
         if (quotaError) return { success: false, error: quotaError }
 
+        // A slot is held for as long as the row sits in "queued": it is what
+        // `markDelivered` gives back when the row leaves that state. So it is
+        // returned here only when no queued row results (nothing was stored,
+        // or the row was moved to "failed"), and once. If a later write fails
+        // while the row is still queued, the slot stays with it. A write that
+        // commits and then throws (the reply is lost) frees the slot here, and
+        // `markDelivered` finds none to free for that row, so it is never
+        // freed twice.
+        const release = () => this.releaseSlot(slotId)
+        return this.persistAndSubmit(repo, existing, identity, messageId, encrypted, recipientOnline, release)
+    }
+
+    private async persistAndSubmit(
+        repo: MessageRepo,
+        existing: L2PSMessage | null,
+        identity: { l2psUid: string; fromKey: string; toKey: string; messageHash: string },
+        messageId: string,
+        encrypted: SerializedEncryptedMessage,
+        recipientOnline: boolean,
+        release: () => void,
+    ): Promise<ProcessMessageResult> {
+        const { l2psUid, fromKey, toKey, messageHash } = identity
         const now = Date.now()
         const status = recipientOnline ? "delivered" : "queued"
-        const writeError = existing
-            ? await this.claimFailed(repo, existing.id, { encrypted, now, status })
-            : await this.persistMessage(
-                repo,
-                { messageId, fromKey, toKey, l2psUid, messageHash, encrypted, now, recipientOnline },
-            )
+        let writeError: string | null
+        try {
+            writeError = existing
+                ? await this.claimFailed(repo, existing.id, { encrypted, now, status })
+                : await this.persistMessage(
+                    repo,
+                    { messageId, fromKey, toKey, l2psUid, messageHash, encrypted, now, recipientOnline },
+                )
+        } catch (error) {
+            // The write did not land, so there is no queued row to hold a slot.
+            release()
+            throw error
+        }
         const id = existing?.id ?? messageId
         if (writeError) {
-            this.releaseOfflineQuota(fromKey, recipientOnline)
+            release()
             // A concurrent send of the same message got there first.
             const winner = await this.findExisting(repo, identity)
             if (winner && winner.status !== "failed") {
@@ -126,7 +196,10 @@ export class L2PSMessagingService {
         const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, id, messageHash, encrypted, now)
 
         if (!l2psResult.success) {
-            await this.handleSubmissionFailure(repo, id, fromKey, recipientOnline)
+            // Released only once the row has left "queued"; if this write
+            // throws the row is still queued and keeps its slot.
+            await repo.update(id, { status: "failed" as const })
+            release()
             return { success: false, error: l2psResult.error }
         }
 
@@ -161,7 +234,12 @@ export class L2PSMessagingService {
     async requeue(messageId: string, fromKey: string): Promise<void> {
         const repo = dataSource.getRepository(L2PSMessage)
         await repo.update({ id: messageId, status: "delivered" }, { status: "queued" })
-        this.offlineMessageCounts.set(fromKey, (this.offlineMessageCounts.get(fromKey) ?? 0) + 1)
+        // Only a message that holds no slot already takes one: a repeated
+        // requeue must not count the same row twice.
+        if (!this.heldSlots.has(messageId)) {
+            this.heldSlots.set(messageId, fromKey)
+            this.offlineMessageCounts.set(fromKey, (this.offlineMessageCounts.get(fromKey) ?? 0) + 1)
+        }
     }
 
     private findExisting(
@@ -186,19 +264,23 @@ export class L2PSMessagingService {
         }
     }
 
-    private releaseOfflineQuota(fromKey: string, recipientOnline: boolean): void {
-        if (recipientOnline) return
+    /** Gives back a message's slot if it still holds one; a second call, from any path, does nothing. */
+    private releaseSlot(messageId: string): void {
+        const fromKey = this.heldSlots.get(messageId)
+        if (fromKey === undefined) return
+        this.heldSlots.delete(messageId)
         const count = this.offlineMessageCounts.get(fromKey) ?? 0
         if (count > 0) this.offlineMessageCounts.set(fromKey, count - 1)
     }
 
     /**
      * Reserve a per-sender offline-quota slot. Returns an error string
-     * when the cap has been reached; null otherwise. The increment
-     * here is rolled back by `handleSubmissionFailure` on L2PS submit
-     * failure and decremented by `markDelivered` on queued-delivery.
+     * when the cap has been reached; null otherwise. The slot belongs to the
+     * message while its row is "queued": it is returned if the message is
+     * never stored or is marked failed, and otherwise by `markDelivered`.
      */
     private reserveOfflineQuota(
+        messageId: string,
         fromKey: string,
         recipientOnline: boolean,
     ): string | null {
@@ -208,6 +290,7 @@ export class L2PSMessagingService {
             return "Offline message limit reached"
         }
         this.offlineMessageCounts.set(fromKey, count + 1)
+        this.heldSlots.set(messageId, fromKey)
         return null
     }
 
@@ -251,16 +334,6 @@ export class L2PSMessagingService {
             }
             throw saveError
         }
-    }
-
-    private async handleSubmissionFailure(
-        repo: MessageRepo,
-        messageId: string,
-        fromKey: string,
-        recipientOnline: boolean,
-    ): Promise<void> {
-        await repo.update(messageId, { status: "failed" as const })
-        this.releaseOfflineQuota(fromKey, recipientOnline)
     }
 
     /**
@@ -431,11 +504,7 @@ export class L2PSMessagingService {
         await repo.update(messageIds, { status: "sent" })
 
         for (const row of rows) {
-            if (row.status !== "queued") continue
-            const count = this.offlineMessageCounts.get(row.fromKey) ?? 0
-            if (count > 0) {
-                this.offlineMessageCounts.set(row.fromKey, count - 1)
-            }
+            if (row.status === "queued") this.releaseSlot(row.id)
         }
     }
 
@@ -447,13 +516,18 @@ export class L2PSMessagingService {
         peerB: string,
         l2psUid: string,
         before?: number,
-        limit = 50,
+        limit?: number,
     ): Promise<{ messages: StoredMessage[]; hasMore: boolean }> {
         const repo = dataSource.getRepository(L2PSMessage)
         // Rows are stored canonically, so both sides of the pair must be
         // canonicalised for the lookup to match.
         const a = canonicalizeKey(peerA)
         const b = canonicalizeKey(peerB)
+        // A page is bounded because the conversation is the caller's to
+        // fill, and a read that loads all of it is a way to exhaust the
+        // node's memory. The values were checked by `parseHistoryPage`.
+        const pageSize = Math.min(Math.max(1, Math.floor(limit ?? DEFAULT_HISTORY_PAGE)), MAX_HISTORY_PAGE)
+        const cursor = before ?? 0
         const qb = repo.createQueryBuilder("m")
             .where("m.l2ps_uid = :l2psUid", { l2psUid })
             .andWhere(
@@ -461,15 +535,15 @@ export class L2PSMessagingService {
                 { a, b },
             )
             .orderBy("m.timestamp", "DESC")
-            .take(limit + 1)
+            .take(pageSize + 1)
 
-        if (before) {
-            qb.andWhere("m.timestamp < :before", { before: String(before) })
+        if (cursor > 0) {
+            qb.andWhere("m.timestamp < :before", { before: String(cursor) })
         }
 
         const results = await qb.getMany()
-        const hasMore = results.length > limit
-        const messages = results.slice(0, limit).map(m => ({
+        const hasMore = results.length > pageSize
+        const messages = results.slice(0, pageSize).map(m => ({
             id: m.id,
             from: m.fromKey,
             to: m.toKey,
@@ -484,10 +558,4 @@ export class L2PSMessagingService {
         return { messages, hasMore }
     }
 
-    /**
-     * Reset offline message count for a sender after delivery.
-     */
-    resetOfflineCount(senderKey: string): void {
-        this.offlineMessageCounts.delete(senderKey)
-    }
 }
