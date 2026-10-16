@@ -331,16 +331,27 @@ async function chooseRpcs(deps: WizardDeps, existingConfig: any): Promise<string
     return orThrow(validateRpcList(answer), "RPC list")
 }
 
-/** Where the key and IV live: what an existing config.json names if that stays inside the node directory, else the standard layout. */
+/**
+ * Where the key and IV live: what an existing config.json names if that is under
+ * data/ in the node directory, else the standard layout. Key material is only
+ * ever written under data/, whatever a config.json says, so a path such as
+ * `.env` or `src/...` cannot make the setup overwrite code or settings.
+ */
 function keyLocations(root: string, uid: string, existingConfig: any): { keyRel: string; ivRel: string } {
-    const configured = (rel: unknown): string | undefined => {
+    const dataDir = path.join(path.resolve(root), "data")
+    const configured = (label: string, rel: unknown): string | undefined => {
         if (typeof rel !== "string" || rel === "") return undefined
+        // The directory is resolved through symlinks, so a linked directory under data/ that
+        // leads elsewhere is refused. A symlinked file itself is replaced, never written through.
         const abs = path.resolve(root, rel)
-        return abs.startsWith(path.resolve(root) + path.sep) ? rel : undefined
+        if (abs !== dataDir && isInsideDir(path.dirname(abs), dataDir)) return rel
+        throw new SetupError(
+            `Subnet ${uid}: ${label} "${rel}" is outside data/ in the node directory, and key material is only written there. Move the file under data/l2ps/${uid}/ and update config.json, or remove its keys section to use the standard location.`,
+        )
     }
     return {
-        keyRel: configured(existingConfig?.keys?.private_key_path) ?? `data/l2ps/${uid}/private_key.txt`,
-        ivRel: configured(existingConfig?.keys?.iv_path) ?? `data/l2ps/${uid}/iv.txt`,
+        keyRel: configured("keys.private_key_path", existingConfig?.keys?.private_key_path) ?? `data/l2ps/${uid}/private_key.txt`,
+        ivRel: configured("keys.iv_path", existingConfig?.keys?.iv_path) ?? `data/l2ps/${uid}/iv.txt`,
     }
 }
 
@@ -694,7 +705,7 @@ const NO_SUBNET_FOR_ZK = "  No L2PS subnet is configured, so there are no batche
 
 function reportIdentityKey(deps: WizardDeps, result: WizardResult): void {
     const { ctx, say } = deps
-    const identity = inspectIdentityKey(ctx.codeRoot)
+    const identity = inspectIdentityKey(ctx.codeRoot, ctx.env)
     if (identity.state === "ok") {
         say("  Identity proofs: ready (only the committed verification key is needed on a node).")
         return

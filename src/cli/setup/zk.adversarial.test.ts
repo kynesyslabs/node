@@ -3,8 +3,8 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { spawnSync } from "node:child_process"
 import { runCli } from "./cli"
-import { CODE_ROOT } from "./context"
-import { IDENTITY_CIRCUIT_DIGEST, canonicalDigest, inspectBatchArtifacts, inspectIdentityKey, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
+import { CODE_ROOT, ZK_IDENTITY_VKEY } from "./context"
+import { IDENTITY_CIRCUIT_DIGEST, IDENTITY_DIGEST_ENV, canonicalDigest, downloadWithFetch, inspectBatchArtifacts, inspectIdentityKey, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
 import { GIT, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
 
 let root: string
@@ -363,11 +363,112 @@ describe("the identity verification key is pinned to the one committed in this r
         }
     })
 
+    describe("an operator override after a deliberate key rotation", () => {
+        const rotated = () => {
+            const parsed = JSON.parse(fs.readFileSync(vkey(), "utf8")) as Record<string, unknown>
+            const next = { ...parsed, nPublic: 99 }
+            fs.writeFileSync(vkey(), JSON.stringify(next))
+            return canonicalDigest(JSON.stringify(next))
+        }
+
+        it("accepts a rotated key whose digest is given, in any letter case", () => {
+            const digest = rotated()
+            expect(inspectIdentityKey(root).state).toBe("invalid")
+            for (const value of [digest, digest.toUpperCase(), ` ${digest}\n`]) {
+                const state = inspectIdentityKey(root, { [IDENTITY_DIGEST_ENV]: value })
+                expect(state.state).toBe("ok")
+                expect(state.detail).toContain(IDENTITY_DIGEST_ENV)
+            }
+        })
+
+        it("replaces the release digest, so the committed key itself no longer passes and any other key still fails", () => {
+            const digest = rotated()
+            const state = inspectIdentityKey(root, { [IDENTITY_DIGEST_ENV]: "ab".repeat(32) })
+            expect(state.state).toBe("invalid")
+            expect(state.detail).toContain(`does not match the digest in ${IDENTITY_DIGEST_ENV}`)
+            fs.copyFileSync(path.join(CODE_ROOT, ZK_IDENTITY_VKEY), vkey())
+            expect(inspectIdentityKey(root, { [IDENTITY_DIGEST_ENV]: digest }).state).toBe("invalid")
+        })
+
+        it("treats an empty value as not set", () => {
+            expect(inspectIdentityKey(root, { [IDENTITY_DIGEST_ENV]: "" }).state).toBe("ok")
+        })
+
+        it("rejects a malformed digest with a clear message, even for the committed key", () => {
+            for (const bad of ["abc", "zz".repeat(32), "ab".repeat(31), "ab".repeat(33), `0x${"ab".repeat(32)}`]) {
+                const state = inspectIdentityKey(root, { [IDENTITY_DIGEST_ENV]: bad })
+                expect(state.state).toBe("invalid")
+                expect(state.detail).toContain(`${IDENTITY_DIGEST_ENV} must be a 64-character hex SHA-256 digest`)
+            }
+        })
+
+        it("still stops the node when the key is missing or unreadable, override or not", () => {
+            const digest = rotated()
+            fs.writeFileSync(vkey(), "not json")
+            expect(inspectIdentityKey(root, { [IDENTITY_DIGEST_ENV]: digest }).state).toBe("invalid")
+            fs.rmSync(vkey())
+            expect(inspectIdentityKey(root, { [IDENTITY_DIGEST_ENV]: digest }).state).toBe("missing")
+        })
+
+        it("is read from the gate's environment", async () => {
+            const digest = rotated()
+            const run = async (env: Record<string, string>) => {
+                const lines: string[] = []
+                const code = await runCli(["--check", "--json"], { cwd: root, env, isTTY: false, say: l => lines.push(l), inDocker: false })
+                return { code, text: lines.join("\n") }
+            }
+            expect((await run({})).code).toBe(1)
+            expect((await run({ [IDENTITY_DIGEST_ENV]: digest })).code).toBe(0)
+            const malformed = await run({ [IDENTITY_DIGEST_ENV]: "nope" })
+            expect(malformed.code).toBe(1)
+            expect(malformed.text).toContain("64-character hex")
+        })
+    })
+
     it("stops the gate through the fatal path", async () => {
         fs.writeFileSync(vkey(), JSON.stringify({ protocol: "groth16", vk_alpha_1: ["1"], IC: [["1"]] }))
         const lines: string[] = []
         const code = await runCli(["--check", "--json"], { cwd: root, env: {}, isTTY: false, say: l => lines.push(l), inDocker: false })
         expect(code).toBe(1)
         expect(lines.join("\n")).toContain("committed in this release")
+    })
+})
+
+
+describe("the start-up check reads the key file the verifier reads", () => {
+    it("resolves to the same absolute path as ProofVerifier", async () => {
+        // The node loads this first; the verifier's entity imports need it.
+        await import("reflect-metadata")
+        const { ProofVerifier } = await import("@/features/zk/proof/ProofVerifier")
+        expect(path.resolve(CODE_ROOT, ZK_IDENTITY_VKEY)).toBe(path.resolve(ProofVerifier.verificationKeyPath))
+    })
+})
+
+describe("downloadWithFetch", () => {
+    it("leaves no .part file behind when the final move fails", async () => {
+        const bytes = new Uint8Array(2048).fill(7)
+        const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response(bytes) })
+        const dir = fs.mkdtempSync(path.join(root, "dl-"))
+        try {
+            // A directory at the destination makes the rename fail after the data was written.
+            const dest = path.join(dir, "file.ptau")
+            fs.mkdirSync(path.join(dest, "inner"), { recursive: true })
+            await expect(downloadWithFetch(`http://127.0.0.1:${server.port}/x`, dest, 1024)).rejects.toThrow()
+            expect(fs.readdirSync(dir)).toEqual(["file.ptau"])
+        } finally {
+            server.stop(true)
+        }
+    })
+
+    it("writes the file when the download succeeds", async () => {
+        const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response(new Uint8Array(2048)) })
+        const dir = fs.mkdtempSync(path.join(root, "dl-"))
+        try {
+            const dest = path.join(dir, "ok.ptau")
+            await downloadWithFetch(`http://127.0.0.1:${server.port}/x`, dest, 1024)
+            expect(fs.readdirSync(dir)).toEqual(["ok.ptau"])
+        } finally {
+            server.stop(true)
+        }
     })
 })

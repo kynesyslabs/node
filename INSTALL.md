@@ -583,9 +583,18 @@ bun run setup --help     # every flag and its DEMOS_SETUP_* variable
 
 At start the node checks this setup. If L2PS, messaging or explicitly enabled ZK batch proofs are incomplete, it prints a loud banner (and logs it) listing what is missing and the fix command, then keeps booting: the affected features stay unavailable, the rest of the node is not affected. In a terminal it also offers to run the setup (default no after 30 seconds; Ctrl-C aborts the start). Set `DEMOS_SETUP_STRICT=true` to stop the node instead (CI, fail-fast operators), or `DEMOS_SKIP_SETUP_CHECK=true` to silence the banner. A missing, corrupt or altered ZK identity verification key always stops the node (the skip switch does not apply), because every validator must verify with the same key committed in the release; restore the committed file from the repository (in Docker, rebuild or re-pull the image).
 
+**Identity key rotation:** the node pins the identity verification key by the digest committed in the release, and `bun run zk:setup` or `bun run zk:ceremony` rewrite that file, so a node that ran them refuses to boot. After every validator has agreed on the new key, compute its digest and set it on each node, in `.env` or the process environment:
+
+```bash
+bun -e 'import {canonicalDigest} from "./src/cli/setup/zk"; import {readFileSync} from "fs"; console.log(canonicalDigest(readFileSync("src/features/zk/keys/verification_key_merkle.json","utf8")))'
+# then: DEMOS_ZK_IDENTITY_KEY_DIGEST=<the 64 hex characters>
+```
+
+The variable replaces the pinned digest (it does not turn the check off), so a node still refuses any other key; a malformed value stops the node with a clear message. Drop it again once the release you run carries the new key's digest.
+
 **Working directory:** start the node (and run `bun run setup`) from the checkout directory. The node reads `.env`, `data/genesis.json` and `data/l2ps/` relative to the current directory, and the setup inspects the same places; only the committed and built ZK keys are found from the checkout itself, so they do not depend on where you start from.
 
-**Docker:** run the same commands inside the container, for example `docker compose exec node bun run setup --check`. Subnet files go into the `demos_node_data` volume. Inside the image the setup does not write `/app/.env`; it prints the lines to put in your host `.env` (or the compose environment), and you recreate the container afterwards. The messaging WebSocket port (`L2PS_MESSAGING_PORT`, default 3006) is published by the compose file, and with the `proxy` profile Caddy serves it at `/messaging/` and forwards to the same `L2PS_MESSAGING_PORT` (a custom port works there too; `/signaling/` follows `RPC_SIGNALING_PORT` the same way). The image has no writable ZK key directory, so build the ZK keys on a checkout and not in the image.
+**Docker:** run the same commands inside the container, for example `docker compose exec node bun run setup --check`. Subnet files go into the `demos_node_data` volume. Inside the image the setup does not write `/app/.env`; it prints the lines to put in your host `.env` (or the compose environment), and you recreate the container afterwards. The messaging WebSocket port (`L2PS_MESSAGING_PORT`, default 3006) is published by the compose file on loopback only (`L2PS_MESSAGING_BIND`, default `127.0.0.1`; set `0.0.0.0` so SDK clients can reach the port directly; operators behind a reverse proxy keep the default), and with the `proxy` profile Caddy serves it at `/messaging/` and forwards to the same `L2PS_MESSAGING_PORT` (a custom port works there too; `/signaling/` follows `RPC_SIGNALING_PORT` the same way). The image has no writable ZK key directory, so build the ZK keys on a checkout and not in the image.
 
 ---
 

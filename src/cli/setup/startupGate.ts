@@ -84,11 +84,13 @@ export function describeFatal(fatal: CheckItem[]): string {
 
 async function defaultLogError(message: string): Promise<boolean> {
     try {
-        const { default: log } = await import("@/utilities/logger")
-        log.error(`[SETUP] ${message}`)
-        // The gate runs before the TUI takes the terminal, when the logger writes
-        // every line to stdout as well as to the log file, like the rest of the boot.
-        return true
+        const { default: log, CategorizedLogger } = await import("@/utilities/logger")
+        const entry = log.error(`[SETUP] ${message}`)
+        // The logger drops a line its level or category filter excludes (LOG_LEVEL=critical),
+        // and writes to the terminal only outside the TUI. In either case the text
+        // has not reached the operator, so the caller must print it.
+        const logger = CategorizedLogger.getInstance()
+        return entry !== null && logger.getConfig().terminalOutput && !logger.isTuiMode()
     } catch {
         return false
     }

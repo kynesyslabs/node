@@ -63,6 +63,11 @@ export class ProofVerifier {
         "keys",
         "verification_key_merkle.json",
     )
+    /** The key file the verifier reads, so the start-up check can be tested against the same path. */
+    static get verificationKeyPath(): string {
+        return this.vKeyPath
+    }
+
     private dataSource: DataSource
     private nullifierRepo: Repository<UsedNullifier>
     private merkleStateRepo: Repository<MerkleTreeState>

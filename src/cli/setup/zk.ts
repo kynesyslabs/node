@@ -68,6 +68,29 @@ export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
  */
 export const IDENTITY_CIRCUIT_DIGEST = "246abe5d7da79c64925375dd3e7360e82fa38e93a657132351e93461b407d622"
 
+/**
+ * A key rotation done on purpose (`zk:setup`, `zk:ceremony`) rewrites the
+ * committed file, and every validator of the network must then run the same
+ * new key. This variable replaces the release's digest so such a node can
+ * start; it never relaxes the check to "any key".
+ */
+export const IDENTITY_DIGEST_ENV = "DEMOS_ZK_IDENTITY_KEY_DIGEST"
+
+const SHA256_HEX = /^[0-9a-f]{64}$/
+
+/** The digest the key must have, and whether the operator replaced the release's. Throws on a malformed override. */
+export function expectedIdentityDigest(
+    env: Record<string, string | undefined>,
+): { digest: string; overridden: boolean } {
+    const raw = env[IDENTITY_DIGEST_ENV]?.trim()
+    if (raw === undefined || raw === "") return { digest: IDENTITY_CIRCUIT_DIGEST, overridden: false }
+    const digest = raw.toLowerCase()
+    if (!SHA256_HEX.test(digest)) {
+        throw new Error(`${IDENTITY_DIGEST_ENV} must be a 64-character hex SHA-256 digest (got ${raw.length} characters)`)
+    }
+    return { digest, overridden: true }
+}
+
 /** Code-point order: the digest must not depend on the machine's locale. */
 const byCodePoint = (a: string, b: string): number => {
     if (a === b) return 0
@@ -93,7 +116,16 @@ export function canonicalDigest(jsonText: string): string {
  * the proving key lives with the client. It is consensus-critical, so it is
  * checked here but never regenerated.
  */
-export function inspectIdentityKey(root: string): IdentityKeyState {
+export function inspectIdentityKey(
+    root: string,
+    env: Record<string, string | undefined> = {},
+): IdentityKeyState {
+    let expected: ReturnType<typeof expectedIdentityDigest>
+    try {
+        expected = expectedIdentityDigest(env)
+    } catch (e) {
+        return { state: "invalid", detail: e instanceof Error ? e.message : String(e) }
+    }
     const file = path.join(root, ZK_IDENTITY_VKEY)
     if (!fs.existsSync(file)) {
         return { state: "missing", detail: `${ZK_IDENTITY_VKEY} not found` }
@@ -107,13 +139,20 @@ export function inspectIdentityKey(root: string): IdentityKeyState {
                 detail: "file is not a groth16 verification key",
             }
         }
-        if (canonicalDigest(text) !== IDENTITY_CIRCUIT_DIGEST) {
+        if (canonicalDigest(text) !== expected.digest) {
             return {
                 state: "invalid",
-                detail: "does not match the verification key committed in this release (modified, or from another build)",
+                detail: expected.overridden
+                    ? `does not match the digest in ${IDENTITY_DIGEST_ENV}`
+                    : `does not match the verification key committed in this release (modified, or from another build; after a deliberate key rotation set ${IDENTITY_DIGEST_ENV} to the new key's digest)`,
             }
         }
-        return { state: "ok", detail: "verification key present" }
+        return {
+            state: "ok",
+            detail: expected.overridden
+                ? `verification key present (pinned by ${IDENTITY_DIGEST_ENV})`
+                : "verification key present",
+        }
     } catch (e) {
         return {
             state: "invalid",
@@ -144,8 +183,14 @@ export async function downloadWithFetch(
         throw new Error(`download of ${url} is too small (${buf.length} bytes)`)
     }
     const tmp = `${dest}.part`
-    fs.writeFileSync(tmp, buf)
-    fs.renameSync(tmp, dest)
+    try {
+        fs.writeFileSync(tmp, buf)
+        fs.renameSync(tmp, dest)
+    } catch (e) {
+        // A cut-off write must not leave a partial file next to the real one.
+        fs.rmSync(tmp, { force: true })
+        throw e
+    }
 }
 
 function vkeyParses(root: string, size: BatchSize): boolean {

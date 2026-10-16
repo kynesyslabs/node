@@ -167,7 +167,8 @@ function readFlags(argv: string[], lenient: boolean): { raw: RawAnswers; fromCli
             continue
         }
         if (!arg.startsWith("--")) {
-            bad(`Unexpected argument: ${arg}`)
+            // Position only: a secret passed here by mistake must not be printed back.
+            bad(`Unexpected argument at position ${i + 1} (options start with --)`)
             continue
         }
         const eq = arg.indexOf("=")

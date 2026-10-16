@@ -7,7 +7,7 @@ import {
 } from "../../config/envFlags"
 import type { SetupContext } from "./context"
 import { inspectSubnets, type SubnetStatus } from "./l2ps"
-import { inspectBatchArtifacts, inspectIdentityKey, type BatchArtifacts } from "./zk"
+import { IDENTITY_DIGEST_ENV, inspectBatchArtifacts, inspectIdentityKey, type BatchArtifacts } from "./zk"
 import { validatePort } from "./validate"
 
 export type CheckStatus = "ok" | "missing" | "invalid" | "warn" | "off"
@@ -42,7 +42,7 @@ export const isProblem = (i: CheckItem) =>
 export const isFatal = (i: CheckItem) => i.fatal === true && isProblem(i)
 
 export const IDENTITY_KEY_FIX =
-    "restore the committed src/features/zk/keys/verification_key_merkle.json from the repository (in Docker: rebuild or re-pull the image)"
+    `restore the committed src/features/zk/keys/verification_key_merkle.json from the repository (in Docker: rebuild or re-pull the image); after a deliberate key rotation set ${IDENTITY_DIGEST_ENV} to the new key's sha256 instead`
 
 /** Inspection must never take the caller down; a failure becomes a problem. */
 function guarded(area: string, fn: () => CheckItem[]): CheckItem[] {
@@ -225,8 +225,8 @@ function envChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
     return out
 }
 
-function identityItem(root: string): CheckItem {
-    const identity = inspectIdentityKey(root)
+function identityItem(root: string, env: Record<string, string | undefined>): CheckItem {
+    const identity = inspectIdentityKey(root, env)
     return {
         area: "ZK identity",
         item: "Verification key",
@@ -268,7 +268,7 @@ function batchItem(b: BatchArtifacts, batches: BatchArtifacts[], anyComplete: bo
 }
 
 function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
-    const out: CheckItem[] = [identityItem(ctx.codeRoot)]
+    const out: CheckItem[] = [identityItem(ctx.codeRoot, ctx.env)]
     const flag = parseBoolFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED])
     const batches = inspectBatchArtifacts(ctx.codeRoot)
     const anyComplete = batches.some(b => b.complete)

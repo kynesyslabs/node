@@ -92,6 +92,18 @@ describe("parseSetupArgs", () => {
         expect(() => parseSetupArgs(["--ptau-url", "mirror"], {})).toThrow(UsageError)
     })
 
+    it("does not print a stray argument back, since it may be a secret", () => {
+        const stray = "typed-by-mistake-value"
+        let message = ""
+        try {
+            parseSetupArgs(["--yes", stray], {})
+        } catch (e) {
+            message = e instanceof UsageError ? e.message : String(e)
+        }
+        expect(message).toContain("Unexpected argument at position 2")
+        expect(message).not.toContain(stray)
+    })
+
     it("rejects bad values with a usage error", () => {
         expect(() => parseSetupArgs(["--l2ps-uid", "bad uid"], {})).toThrow(UsageError)
         expect(() => parseSetupArgs(["--messaging-port", "99999"], {})).toThrow(UsageError)

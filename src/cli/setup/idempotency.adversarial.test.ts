@@ -327,16 +327,55 @@ describe("where files are written", () => {
         expect(fs.statSync(sub("s1", "iv.txt")).mode & 0o777).toBe(0o400)
     })
 
-    it("honours a custom key location inside the node directory and keeps using it", async () => {
+    it("honours a custom key location under data/ and keeps using it", async () => {
         writeSubnet(root, "s1", {
             key: null,
             iv: null,
-            config: { uid: "s1", enabled: true, config: { known_rpcs: ["http://a:1"] }, keys: { private_key_path: "secrets/s1.key", iv_path: "secrets/s1.iv" } },
+            config: { uid: "s1", enabled: true, config: { known_rpcs: ["http://a:1"] }, keys: { private_key_path: "data/keys/s1.key", iv_path: "data/keys/s1.iv" } },
         })
         await cli(["--yes", "--l2ps-uid", "s1"])
-        const firstKey = read(path.join(root, "secrets/s1.key"))
+        const firstKey = read(path.join(root, "data/keys/s1.key"))
         expect(fs.existsSync(sub("s1", "private_key.txt"))).toBe(false)
         await cli(["--yes", "--l2ps-uid", "s1"])
-        expect(read(path.join(root, "secrets/s1.key"))).toBe(firstKey)
+        expect(read(path.join(root, "data/keys/s1.key"))).toBe(firstKey)
+    })
+
+    it("refuses a key location that is inside the checkout but not under data/, and writes nothing there", async () => {
+        fs.mkdirSync(path.join(root, "src"), { recursive: true })
+        fs.writeFileSync(path.join(root, ".env"), "KEEP=1\n")
+        for (const [uid, keyPath, ivPath] of [
+            ["env", ".env", "data/l2ps/env/iv.txt"],
+            ["src", "src/k.txt", "data/l2ps/src/iv.txt"],
+            ["iv", "data/l2ps/iv/private_key.txt", "secrets/iv.txt"],
+            ["bare", "data", "data/l2ps/bare/iv.txt"],
+        ]) {
+            writeSubnet(root, uid, {
+                key: null,
+                iv: null,
+                config: { uid, enabled: true, config: { known_rpcs: ["http://a:1"] }, keys: { private_key_path: keyPath, iv_path: ivPath } },
+            })
+            for (const force of [false, true]) {
+                const { code, out } = await cli(["--yes", "--l2ps-uid", uid, ...(force ? ["--force"] : [])])
+                expect(code).toBe(1)
+                expect(out).toContain("outside data/")
+            }
+        }
+        expect(read(path.join(root, ".env"))).toBe("KEEP=1\n")
+        expect(fs.existsSync(path.join(root, "src", "k.txt"))).toBe(false)
+        expect(fs.existsSync(path.join(root, "secrets"))).toBe(false)
+    })
+
+    it("refuses a key location reached through a symlinked directory under data/ that leads elsewhere", async () => {
+        fs.mkdirSync(path.join(root, "data"), { recursive: true })
+        fs.symlinkSync(outside, path.join(root, "data", "link"))
+        writeSubnet(root, "lnk", {
+            key: null,
+            iv: null,
+            config: { uid: "lnk", enabled: true, config: { known_rpcs: ["http://a:1"] }, keys: { private_key_path: "data/link/k.txt", iv_path: "data/link/iv.txt" } },
+        })
+        const { code, out } = await cli(["--yes", "--l2ps-uid", "lnk"])
+        expect(code).toBe(1)
+        expect(out).toContain("outside data/")
+        expect(fs.readdirSync(outside)).toEqual([])
     })
 })

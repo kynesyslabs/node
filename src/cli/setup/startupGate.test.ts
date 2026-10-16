@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { describeProblems, enforceGuidedSetup, startupProblems, type GateDeps } from "./startupGate"
-import { createContext } from "./context"
+import { CODE_ROOT, createContext } from "./context"
 import { SetupAborted, SetupTimedOut, type Prompter } from "./prompt"
 import { makeRoot, recorder, removeRoot, scriptedPrompter, writeSubnet } from "./testSupport"
 
@@ -249,5 +250,39 @@ describe("with a terminal", () => {
         writeSubnet(root, "broken", { key: null })
         const g = gate({ interactive: true, strict: true, prompter: neverPrompt })
         await expect(g.run()).rejects.toMatchObject({ code: 1 })
+    })
+})
+
+describe("the report reaches the operator when the real logger filters it out", () => {
+    const harness = path.join(import.meta.dir, "gateHarness.ts")
+
+    function boot(logLevel: string) {
+        const bare = makeRoot({ identityKey: false })
+        try {
+            const r = spawnSync(process.execPath, [harness], {
+                // The checkout is the working directory, as for the node: the logger's decorators
+                // need its tsconfig. HARNESS_ROOT points the gate at the bare directory.
+                cwd: CODE_ROOT,
+                encoding: "utf8",
+                timeout: 60_000,
+                env: { ...process.env, CI: "", LOG_LEVEL: logLevel, HARNESS_REAL_LOGGER: "1", HARNESS_ROOT: bare, DEMOS_SKIP_SETUP_CHECK: "" },
+            })
+            return { status: r.status, text: `${r.stdout}${r.stderr}` }
+        } finally {
+            removeRoot(bare)
+        }
+    }
+    const count = (text: string) => text.split("DEMOS NODE CANNOT START").length - 1
+
+    it("prints the refusal itself under LOG_LEVEL=critical, where the logger drops error lines", () => {
+        const r = boot("critical")
+        expect(r.status).toBe(1)
+        expect(count(r.text)).toBe(1)
+    })
+
+    it("shows the refusal once, through the logger, under the default level", () => {
+        const r = boot("info")
+        expect(r.status).toBe(1)
+        expect(count(r.text)).toBe(1)
     })
 })

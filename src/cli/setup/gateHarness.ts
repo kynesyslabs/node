@@ -3,6 +3,10 @@
 // terminal detection, Ctrl-C and end-of-input handling only exist there.
 import { enforceGuidedSetup } from "./startupGate"
 
+// The node loads this before anything else; without it the real logger cannot be
+// imported and the gate falls back to its plain print.
+if (process.env.HARNESS_REAL_LOGGER) await import("reflect-metadata")
+
 await enforceGuidedSetup({
     cwd: process.env.HARNESS_ROOT,
     codeRoot: process.env.HARNESS_ROOT,

@@ -199,6 +199,7 @@ services:
       # show up in `docker inspect`. Use DEMOS_SETUP_L2PS_KEY_FILE / _IV_FILE.
       DEMOS_SETUP_STRICT: ${DEMOS_SETUP_STRICT:-}
       DEMOS_SKIP_SETUP_CHECK: ${DEMOS_SKIP_SETUP_CHECK:-}
+      DEMOS_ZK_IDENTITY_KEY_DIGEST: ${DEMOS_ZK_IDENTITY_KEY_DIGEST:-}
       DEMOS_SETUP_YES: ${DEMOS_SETUP_YES:-}
       DEMOS_SETUP_DRY_RUN: ${DEMOS_SETUP_DRY_RUN:-}
       DEMOS_SETUP_FORCE: ${DEMOS_SETUP_FORCE:-}
@@ -243,8 +244,11 @@ services:
       # this port (it does not go through RPC), so enabling messaging in the
       # container is useless unless the port is published. Nothing listens
       # while L2PS_MESSAGING_ENABLED is false. Same variable on both sides, as
-      # for RPC_PORT. In proxy mode Caddy serves it at /messaging/.
-      - "${L2PS_MESSAGING_PORT:-3006}:${L2PS_MESSAGING_PORT:-3006}"
+      # for RPC_PORT. In proxy mode Caddy serves it at /messaging/, over the
+      # compose network, so it needs no host mapping. Bound to loopback unless
+      # L2PS_MESSAGING_BIND says otherwise: operators who never enable messaging
+      # must not expose the port, or lose `up` to a host-side port clash.
+      - "${L2PS_MESSAGING_BIND:-127.0.0.1}:${L2PS_MESSAGING_PORT:-3006}:${L2PS_MESSAGING_PORT:-3006}"
       # wstcp TLSNotary proxy range, bound to 127.0.0.1 so ONLY the host's
       # reverse proxy can reach it (not the public internet). The node
       # allocates dynamic proxy ports here and nginx forwards
