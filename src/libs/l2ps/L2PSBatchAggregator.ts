@@ -167,7 +167,7 @@ export class L2PSBatchAggregator {
             const errorMessage = getErrorMessage(error)
             log.warning(`[L2PS Batch Aggregator] ZK Prover not available: ${errorMessage}`)
             log.warning("[L2PS Batch Aggregator] Batches will be submitted without ZK proofs")
-            log.warning("[L2PS Batch Aggregator] Run 'src/libs/l2ps/zk/scripts/setup_all_batches.sh' to enable ZK proofs")
+            log.warning("[L2PS Batch Aggregator] Run 'bun run setup --only zk --zk' to enable ZK proofs")
         }
     }
 

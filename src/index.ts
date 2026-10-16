@@ -51,6 +51,8 @@ import { DTRManager } from "./libs/network/dtr/dtrmanager"
 import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
 import ParallelNetworks from "./libs/l2ps/parallelNetworks"
+import { enforceGuidedSetup } from "./cli/setup/startupGate"
+import { parseMessagingEnabled, parseMessagingPort } from "./config/envFlags"
 
 dotenv.config()
 
@@ -198,8 +200,9 @@ const indexState: {
     // a negative/over-range value (which would fail at server-bind time
     // with an opaque error instead of telling the operator the env was
     // malformed).
-    L2PS_MESSAGING_ENABLED:
-        process.env.L2PS_MESSAGING_ENABLED?.toLowerCase() === "true",
+    L2PS_MESSAGING_ENABLED: parseMessagingEnabled(
+        process.env.L2PS_MESSAGING_ENABLED,
+    ),
     L2PS_MESSAGING_PORT: parseL2PSMessagingPort(
         process.env.L2PS_MESSAGING_PORT,
     ),
@@ -207,18 +210,15 @@ const indexState: {
 }
 
 function parseL2PSMessagingPort(raw: string | undefined): number {
-    const fallback = 3006
-    if (raw === undefined || raw === "") return fallback
-    const n = Number.parseInt(raw, 10)
-    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    const { port, source } = parseMessagingPort(raw)
+    if (source === "invalid") {
         // Use console here because the logger may not be initialised yet
         // at module-init time (this runs before the boot tracker).
         console.warn(
-            `[L2PS-IM] L2PS_MESSAGING_PORT="${raw}" is not a valid port (expected 1..65535); falling back to ${fallback}`,
+            `[L2PS-IM] L2PS_MESSAGING_PORT="${raw}" is not a valid port (expected 1..65535); falling back to ${port}`,
         )
-        return fallback
     }
-    return n
+    return port
 }
 
 // SECTION Preparation methods
@@ -566,6 +566,12 @@ async function main() {
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
     }
+
+    // Before the TUI takes over the terminal, so its banner and the optional
+    // offer to run the setup stay readable. It returns and the node boots when
+    // only an optional L2PS or ZK feature is incomplete; it stops the process
+    // only for the missing or altered identity verification key, or in strict mode.
+    await enforceGuidedSetup()
 
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
     try {

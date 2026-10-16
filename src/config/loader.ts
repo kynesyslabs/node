@@ -7,6 +7,7 @@
 
 import * as dotenv from "dotenv"
 import { EnvKey } from "./envKeys"
+import { parseBoolFlag, parseIntSetting } from "./envFlags"
 import { DEFAULT_CONFIG } from "./defaults"
 import type { AppConfig } from "./types"
 import { validateBuildProvenance, validateExposedUrl } from "./nodeUrl"
@@ -27,10 +28,7 @@ function envStr(key: string, fallback: string): string {
 }
 
 function envInt(key: string, fallback: number): number {
-    const raw = process.env[key]
-    if (raw === undefined || raw === "") return fallback
-    const parsed = Number.parseInt(raw, 10)
-    return Number.isNaN(parsed) ? fallback : parsed
+    return parseIntSetting(process.env[key]) ?? fallback
 }
 
 function envFloat(key: string, fallback: number): number {
@@ -41,9 +39,7 @@ function envFloat(key: string, fallback: number): number {
 }
 
 function envBool(key: string, fallback: boolean): boolean {
-    const raw = process.env[key]
-    if (raw === undefined || raw === "") return fallback
-    return raw === "true" || raw === "1"
+    return parseBoolFlag(process.env[key]) ?? fallback
 }
 
 function envList(key: string, fallback: string[] = []): string[] {
