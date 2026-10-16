@@ -120,10 +120,14 @@ export class L2PSMessagingService {
             this.releaseOfflineQuota(fromKey, recipientOnline)
             return this.backlogFullResult(room.retryAfterMs)
         }
+        let executed = false
         try {
-            return await this.storeAndSubmit(repo, identity, existing, messageId, encrypted, recipientOnline)
+            return await this.storeAndSubmit(repo, identity, existing, messageId, encrypted, recipientOnline, () => {
+                executed = true
+            })
         } finally {
-            backlog.release(l2psUid)
+            if (executed) backlog.settle(l2psUid)
+            else backlog.release(l2psUid)
         }
     }
 
@@ -143,6 +147,7 @@ export class L2PSMessagingService {
         messageId: string,
         encrypted: SerializedEncryptedMessage,
         recipientOnline: boolean,
+        onExecuted: () => void,
     ): Promise<ProcessMessageResult> {
         const { l2psUid, fromKey, toKey, messageHash } = identity
         const now = Date.now()
@@ -165,6 +170,7 @@ export class L2PSMessagingService {
         }
 
         const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, id, messageHash, encrypted, now)
+        if (l2psResult.executed) onExecuted()
 
         if (!l2psResult.success) {
             await this.handleSubmissionFailure(repo, id, fromKey, recipientOnline)
@@ -327,7 +333,7 @@ export class L2PSMessagingService {
         messageHash: string,
         encrypted: SerializedEncryptedMessage,
         timestamp: number,
-    ): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    ): Promise<{ success: boolean; txHash?: string; error?: string; executed?: boolean }> {
         try {
             const parallelNetworks = ParallelNetworks.getInstance()
             const l2psInstance = await parallelNetworks.getL2PS(l2psUid)
@@ -399,12 +405,14 @@ export class L2PSMessagingService {
             }
 
             // Execute (IM messages have no state changes, so execution is lightweight)
+            let executed = false
             try {
                 const execResult = await L2PSTransactionExecutor.execute(
                     l2psUid, tx, encryptedTxHash, false,
                 )
                 if (execResult.success) {
                     await L2PSMempool.updateStatus(encryptedTxHash, "executed")
+                    executed = true
                 } else {
                     await L2PSMempool.updateStatus(encryptedTxHash, "failed")
                     log.warning(`[L2PS-IM] Execution failed: ${execResult.message}`)
@@ -427,7 +435,7 @@ export class L2PSMessagingService {
             }
 
             log.info(`[L2PS-IM] Message ${messageId.slice(0, 8)}... submitted to L2PS`)
-            return { success: true, txHash: encryptedTxHash }
+            return { success: true, txHash: encryptedTxHash, executed }
         } catch (error) {
             const msg = error instanceof Error ? error.message : "Unknown error"
             log.error(`[L2PS-IM] Submit error: ${msg}`)

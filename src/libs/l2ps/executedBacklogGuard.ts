@@ -96,13 +96,25 @@ export class ExecutedBacklogGuard {
     }
 
     /**
-     * Give back a slot taken by `claim`. Called once the row is executed, when
-     * the database count includes it, or when the attempt failed and the row
-     * will never be executed.
+     * Give back a slot taken by `claim` for an attempt that failed: the row
+     * will never be executed, so nothing holds the room.
      */
     release(l2psUid: string): void {
         const state = this.subnets.get(l2psUid)
         if (state && state.pending > 0) state.pending--
+    }
+
+    /**
+     * Move a slot taken by `claim` into the executed count. The row is
+     * executed now, but the cached database count predates it by up to one
+     * refresh interval; counting it here until the next refresh keeps a burst
+     * from passing the cap through the gap.
+     */
+    settle(l2psUid: string): void {
+        const state = this.subnets.get(l2psUid)
+        if (!state) return
+        if (state.pending > 0) state.pending--
+        state.dbCount++
     }
 
     /** Check and claim in one step, for a caller with nothing left that could fail. */

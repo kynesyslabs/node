@@ -235,6 +235,23 @@ describe("executed backlog cap", () => {
         expect(g.claim("a")).toBe(true)
     })
 
+    it("settle keeps an executed row counted until the database refresh includes it", async () => {
+        backlog.a = 99
+        const g = guard()
+        await g.check("a")
+        expect(g.claim("a")).toBe(true)
+        g.settle("a")
+        // The database still says 99, the executed row makes it 100: full.
+        expect(g.claim("a")).toBe(false)
+        expect((await g.check("a")).admitted).toBe(false)
+
+        backlog.a = 100
+        clock += 3_001
+        expect((await g.check("a")).count).toBe(100)
+        g.release("a")
+        expect(g.claim("a")).toBe(false)
+    })
+
     it("claims nothing for a subnet it has never checked", () => {
         expect(guard().claim("never-seen")).toBe(true)
     })

@@ -12,7 +12,8 @@ import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
 const check = jest.fn()
 const claim = jest.fn()
 const release = jest.fn()
-const guard = { check, claim, release, retryAfterMs: 10_000 }
+const settle = jest.fn()
+const guard = { check, claim, release, settle, retryAfterMs: 10_000 }
 const execute = jest.fn(async (..._args: unknown[]): Promise<any> => ({ success: true, gcr_edits: [] }))
 const addTransaction = jest.fn(async (..._args: unknown[]): Promise<{ success: boolean; error?: string }> => ({ success: true }))
 const existsByOriginalHash = jest.fn(async (..._args: unknown[]) => false)
@@ -70,6 +71,7 @@ beforeEach(() => {
     check.mockReset()
     claim.mockReset()
     release.mockReset()
+    settle.mockReset()
     execute.mockReset()
     execute.mockResolvedValue({ success: true, gcr_edits: [] })
     check.mockResolvedValue({ admitted: true, count: 1, cap: 50_000, retryAfterMs: 10_000 })
@@ -116,11 +118,12 @@ describe("handleL2PS with a full subnet queue", () => {
         expect(addTransaction).toHaveBeenCalledTimes(1)
     })
 
-    it("gives the slot back once the row is executed", async () => {
+    it("keeps an executed row counted until the next refresh instead of freeing its slot", async () => {
         expect((await handleL2PS(tx)).result).toBe(200)
 
-        expect(release).toHaveBeenCalledTimes(1)
-        expect(release).toHaveBeenCalledWith("subnet_a")
+        expect(settle).toHaveBeenCalledTimes(1)
+        expect(settle).toHaveBeenCalledWith("subnet_a")
+        expect(release).not.toHaveBeenCalled()
     })
 
     it("gives the slot back when the mempool refuses the row", async () => {
@@ -128,6 +131,7 @@ describe("handleL2PS with a full subnet queue", () => {
 
         expect((await handleL2PS(tx)).result).toBe(500)
         expect(release).toHaveBeenCalledTimes(1)
+        expect(settle).not.toHaveBeenCalled()
     })
 
     it("gives the slot back when execution throws", async () => {

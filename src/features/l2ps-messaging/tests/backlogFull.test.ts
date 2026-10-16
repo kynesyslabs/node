@@ -18,7 +18,7 @@ const repo = {
     update: async () => ({ affected: 1 }),
     find: async () => [],
 }
-const guard = { check: jest.fn(), claim: jest.fn(), release: jest.fn() }
+const guard = { check: jest.fn(), claim: jest.fn(), release: jest.fn(), settle: jest.fn() }
 
 mock.module("@/model/datasource", () => ({
     __esModule: true,
@@ -43,7 +43,7 @@ const { L2PSMessagingService } = await import("../L2PSMessagingService")
 const { L2PSMessagingServer } = await import("../L2PSMessagingServer")
 
 const service = L2PSMessagingService.getInstance() as any
-const submitToL2PS = jest.spyOn(service, "submitToL2PS").mockImplementation(async () => ({ success: true, txHash: "0xtx" }))
+const submitToL2PS = jest.spyOn(service, "submitToL2PS").mockImplementation(async () => ({ success: true, txHash: "0xtx", executed: true }))
 
 interface Identity {
     publicKey: string
@@ -96,6 +96,7 @@ beforeEach(() => {
     guard.claim.mockReset()
     guard.claim.mockReturnValue(true)
     guard.release.mockReset()
+    guard.settle.mockReset()
     service.offlineMessageCounts.clear()
     submitToL2PS.mockClear()
 })
@@ -139,7 +140,19 @@ describe("messaging relay with a full subnet queue", () => {
         expect(reply.type).toBe("message_sent")
         expect(rows.size).toBe(1)
         expect(guard.claim).toHaveBeenCalledTimes(1)
+        expect(guard.settle).toHaveBeenCalledTimes(1)
+        expect(guard.release).not.toHaveBeenCalled()
+    })
+
+    it("gives the slot back when the row was stored but never executed", async () => {
+        guard.check.mockResolvedValue({ admitted: true })
+        submitToL2PS.mockResolvedValueOnce({ success: true, txHash: "0xtx", executed: false })
+
+        const result = await service.processMessage("alice", "bob", "subnet_a", "m0", "h0", encrypted, true)
+
+        expect(result.success).toBe(true)
         expect(guard.release).toHaveBeenCalledTimes(1)
+        expect(guard.settle).not.toHaveBeenCalled()
     })
 
     it("answers retry-later when the subnet fills between the check and the claim, and keeps the sender's quota", async () => {
