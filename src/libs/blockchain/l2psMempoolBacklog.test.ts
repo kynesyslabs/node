@@ -6,29 +6,11 @@
  * encrypted payload, or a backlog turns every cycle into an allocation spike.
  */
 
-import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { beforeEach, describe, expect, it } from "bun:test"
+import { mockMempoolDeps } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 
-mock.module("@/model/datasource", () => ({
-    __esModule: true,
-    default: { getInstance: async () => ({ getDataSource: () => ({}) }) },
-}))
-mock.module("@/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
-mock.module("@/libs/consensus/v2/types/secretaryManager", () => ({
-    __esModule: true,
-    default: { getInstance: () => ({}) },
-}))
-mock.module("@/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockMempoolDeps()
 
 const { default: L2PSMempool } = await import("./l2ps_mempool")
 

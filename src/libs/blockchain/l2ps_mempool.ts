@@ -582,6 +582,20 @@ export default class L2PSMempool {
     }
 
     /**
+     * Number of rows a subnet holds in one status. A plain count over the
+     * (l2ps_uid, status) index, for callers that poll the size often and need
+     * neither the age span nor the rows.
+     *
+     * @throws When the database cannot be queried
+     */
+    public static async countByUIDAndStatus(l2psUid: string, status: L2PSStatus): Promise<number> {
+        // A failure is the caller's to handle: reporting zero would read as an
+        // empty queue to a caller deciding whether to accept more work.
+        await this.ensureInitialized()
+        return this.repo.count({ where: { l2ps_uid: l2psUid, status } })
+    }
+
+    /**
      * Legacy method for backward compatibility
      * @deprecated Use getHashForL2PS() instead
      */

@@ -8,6 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { mockLogger } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 
 const getByUID = jest.fn(async (..._args: unknown[]) => [] as any[])
 const getByOriginalHashes = jest.fn(async (..._args: unknown[]) => [] as any[])
@@ -43,17 +44,7 @@ jest.mock("@/libs/l2ps/historyPayload", () => ({
 
 jest.mock("src/utilities/sharedState", () => ({ getSharedState: {} }))
 
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockLogger("src/utilities/logger")
 
 // Imported once the mocks are registered: a static import is evaluated first,
 // loads the real mempool, and cycles back through the handler index.

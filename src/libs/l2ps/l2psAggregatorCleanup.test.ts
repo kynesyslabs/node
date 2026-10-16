@@ -7,6 +7,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { mockLogger } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 
 const cleanupByStatus = jest.fn(async (..._args: unknown[]) => 0)
 const cleanupBatchedWithoutEdits = jest.fn(async (..._args: unknown[]) => 0)
@@ -20,17 +21,7 @@ mock.module("@/libs/l2ps/zk/L2PSBatchProver", () => ({ L2PSBatchProver: class {}
 mock.module("@/libs/blockchain/validation/txValidatorPool", () => ({ __esModule: true, default: {} }))
 mock.module("@/libs/blockchain/mempool", () => ({ __esModule: true, default: {} }))
 mock.module("@/libs/l2ps/L2PSProofManager", () => ({ __esModule: true, default: {} }))
-mock.module("@/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockLogger()
 
 const { L2PSBatchAggregator } = await import("./L2PSBatchAggregator")
 

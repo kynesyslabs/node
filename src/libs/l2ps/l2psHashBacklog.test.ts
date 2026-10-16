@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { mockLogger } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 
 const getDigestWithCount = jest.fn(async (..._args: unknown[]) => ({ hash: "0xconsolidated", count: 12345 }))
 const getSummaryByUIDAndStatus = jest.fn()
@@ -44,17 +45,7 @@ mock.module("@/libs/consensus/v2/routines/getCommonValidatorSeed", () => ({
     __esModule: true,
     default: async () => ({ commonValidatorSeed: "seed", lastBlockNumber: 1 }),
 }))
-mock.module("@/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockLogger()
 
 const { L2PSHashService } = await import("./L2PSHashService")
 

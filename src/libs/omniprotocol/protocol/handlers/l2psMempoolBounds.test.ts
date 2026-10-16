@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { mockLogger } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 
 const getByUID = jest.fn(async (..._args: unknown[]) => [] as unknown[])
 const getPageByUID = jest.fn(async (..._args: unknown[]) => [] as unknown[])
@@ -19,17 +20,7 @@ mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
     default: { getByUID, getPageByUID, getSummaryByUIDAndStatus },
 }))
-mock.module("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockLogger("src/utilities/logger")
 
 const { handleL2PSSyncMempool, handleL2PSGetBatchStatus, MAX_SYNC_MEMPOOL_ENTRIES } = await import("./l2ps")
 const { encodeJsonRequest, decodeRpcResponse } = await import("../../serialization/jsonEnvelope")

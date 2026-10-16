@@ -169,6 +169,72 @@ describe("executed backlog cap", () => {
         expect((await g.check("a")).admitted).toBe(false)
     })
 
+    it("keeps claims across a refresh, so a slot in flight is not forgotten", async () => {
+        backlog.a = 95
+        const g = guard()
+        await g.check("a")
+        for (let i = 0; i < 5; i++) expect(g.claim("a")).toBe(true)
+
+        // The five rows are not executed yet, so the database still says 95.
+        clock += 3001
+        expect((await g.check("a")).admitted).toBe(false)
+        expect(g.claim("a")).toBe(false)
+        expect(counts).toBe(2)
+    })
+
+    it("keeps claims made while a refresh is still pending", async () => {
+        backlog.a = 0
+        let release!: (n: number) => void
+        let calls = 0
+        const g = new ExecutedBacklogGuard({
+            cap: 3,
+            retryAfterMs: 1,
+            now: () => clock,
+            countExecuted: () => (calls++ === 0 ? Promise.resolve(0) : new Promise<number>(resolve => (release = resolve))),
+        })
+        await g.check("a")
+        clock += 3001
+        const refresh = g.check("a")
+        expect(g.claim("a")).toBe(true)
+        expect(g.claim("a")).toBe(true)
+        release(0)
+        await refresh
+
+        expect(g.claim("a")).toBe(true)
+        expect(g.claim("a")).toBe(false)
+    })
+
+    it("release returns the slot, and never goes below zero", async () => {
+        backlog.a = 98
+        const g = guard()
+        await g.check("a")
+        expect(g.claim("a")).toBe(true)
+        expect(g.claim("a")).toBe(true)
+        expect(g.claim("a")).toBe(false)
+
+        g.release("a")
+        expect(g.claim("a")).toBe(true)
+
+        for (let i = 0; i < 10; i++) g.release("a")
+        g.release("never-seen")
+        // Down to the database count of 98, not below it.
+        expect(g.claim("a")).toBe(true)
+        expect(g.claim("a")).toBe(true)
+        expect(g.claim("a")).toBe(false)
+    })
+
+    it("a failed attempt that releases its claim does not consume a slot", async () => {
+        backlog.a = 99
+        const g = guard()
+        await g.check("a")
+        for (let i = 0; i < 50; i++) {
+            expect(g.claim("a")).toBe(true)
+            g.release("a")
+        }
+        expect((await g.check("a")).admitted).toBe(true)
+        expect(g.claim("a")).toBe(true)
+    })
+
     it("claims nothing for a subnet it has never checked", () => {
         expect(guard().claim("never-seen")).toBe(true)
     })

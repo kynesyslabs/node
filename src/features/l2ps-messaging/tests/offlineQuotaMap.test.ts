@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { mockLogger } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 
 const rows = new Map<string, Record<string, any>>()
 const repo = {
@@ -31,17 +32,7 @@ mock.module("@/libs/l2ps/parallelNetworks", () => ({ __esModule: true, default: 
 mock.module("@/libs/blockchain/transaction", () => ({ __esModule: true, default: class {} }))
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({ __esModule: true, default: {} }))
 mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({ __esModule: true, default: {} }))
-mock.module("@/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockLogger()
 
 const { L2PSMessagingService } = await import("../L2PSMessagingService")
 const service = L2PSMessagingService.getInstance() as any

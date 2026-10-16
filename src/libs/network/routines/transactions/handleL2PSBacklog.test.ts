@@ -11,8 +11,10 @@ import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
 
 const check = jest.fn()
 const claim = jest.fn()
-const guard = { check, claim, retryAfterMs: 10_000 }
-const addTransaction = jest.fn(async (..._args: unknown[]) => ({ success: true }))
+const release = jest.fn()
+const guard = { check, claim, release, retryAfterMs: 10_000 }
+const execute = jest.fn(async (..._args: unknown[]): Promise<any> => ({ success: true, gcr_edits: [] }))
+const addTransaction = jest.fn(async (..._args: unknown[]): Promise<{ success: boolean; error?: string }> => ({ success: true }))
 const existsByOriginalHash = jest.fn(async (..._args: unknown[]) => false)
 const decryptTx = jest.fn()
 const getL2PS = jest.fn(async (..._args: unknown[]) => ({ decryptTx }))
@@ -41,7 +43,7 @@ mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
     L2PS_TX_FEE: 1,
     default: {
         hasExecuted: async () => false,
-        execute: async () => ({ success: true, gcr_edits: [] }),
+        execute,
         recordTransaction: async () => undefined,
     },
 }))
@@ -67,9 +69,13 @@ const tx = {
 beforeEach(() => {
     check.mockReset()
     claim.mockReset()
+    release.mockReset()
+    execute.mockReset()
+    execute.mockResolvedValue({ success: true, gcr_edits: [] })
     check.mockResolvedValue({ admitted: true, count: 1, cap: 50_000, retryAfterMs: 10_000 })
     claim.mockReturnValue(true)
-    addTransaction.mockClear()
+    addTransaction.mockReset()
+    addTransaction.mockResolvedValue({ success: true })
     existsByOriginalHash.mockReset()
     existsByOriginalHash.mockResolvedValue(false)
     getL2PS.mockClear()
@@ -108,6 +114,41 @@ describe("handleL2PS with a full subnet queue", () => {
         expect(claim).toHaveBeenCalledTimes(1)
         expect(claim).toHaveBeenCalledWith("subnet_a")
         expect(addTransaction).toHaveBeenCalledTimes(1)
+    })
+
+    it("gives the slot back once the row is executed", async () => {
+        expect((await handleL2PS(tx)).result).toBe(200)
+
+        expect(release).toHaveBeenCalledTimes(1)
+        expect(release).toHaveBeenCalledWith("subnet_a")
+    })
+
+    it("gives the slot back when the mempool refuses the row", async () => {
+        addTransaction.mockResolvedValue({ success: false, error: "db down" })
+
+        expect((await handleL2PS(tx)).result).toBe(500)
+        expect(release).toHaveBeenCalledTimes(1)
+    })
+
+    it("gives the slot back when execution throws", async () => {
+        execute.mockRejectedValue(new Error("boom"))
+
+        expect((await handleL2PS(tx)).result).toBe(500)
+        expect(release).toHaveBeenCalledTimes(1)
+    })
+
+    it("gives the slot back when execution reports failure", async () => {
+        execute.mockResolvedValue({ success: false, message: "insufficient balance" })
+
+        expect((await handleL2PS(tx)).result).toBe(400)
+        expect(release).toHaveBeenCalledTimes(1)
+    })
+
+    it("releases nothing when no slot was taken", async () => {
+        claim.mockReturnValue(false)
+
+        expect((await handleL2PS(tx)).result).toBe(429)
+        expect(release).not.toHaveBeenCalled()
     })
 
     it("takes no slot for requests that fail to decrypt, fail verification or repeat a transaction", async () => {

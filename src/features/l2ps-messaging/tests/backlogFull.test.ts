@@ -18,7 +18,7 @@ const repo = {
     update: async () => ({ affected: 1 }),
     find: async () => [],
 }
-const guard = { admit: jest.fn() }
+const guard = { check: jest.fn(), claim: jest.fn(), release: jest.fn() }
 
 mock.module("@/model/datasource", () => ({
     __esModule: true,
@@ -92,13 +92,17 @@ beforeAll(() => {
 afterAll(() => server.stop())
 beforeEach(() => {
     rows.clear()
-    guard.admit.mockReset()
+    guard.check.mockReset()
+    guard.claim.mockReset()
+    guard.claim.mockReturnValue(true)
+    guard.release.mockReset()
+    service.offlineMessageCounts.clear()
     submitToL2PS.mockClear()
 })
 
 describe("messaging relay with a full subnet queue", () => {
     it("answers a retry-later error and stores nothing", async () => {
-        guard.admit.mockResolvedValue({ admitted: false, count: 50_000, cap: 50_000, retryAfterMs: 10_000 })
+        guard.check.mockResolvedValue({ admitted: false, count: 50_000, cap: 50_000, retryAfterMs: 10_000 })
         const alice = identity()
         const bob = identity()
         const a = await connect(alice)
@@ -118,10 +122,12 @@ describe("messaging relay with a full subnet queue", () => {
         expect(reply.requestId).toBe("r1")
         expect(rows.size).toBe(0)
         expect(submitToL2PS).not.toHaveBeenCalled()
+        expect(guard.claim).not.toHaveBeenCalled()
+        expect(guard.release).not.toHaveBeenCalled()
     })
 
     it("delivers as before while the queue has room", async () => {
-        guard.admit.mockResolvedValue({ admitted: true })
+        guard.check.mockResolvedValue({ admitted: true })
         const alice = identity()
         const bob = identity()
         const a = await connect(alice)
@@ -132,5 +138,54 @@ describe("messaging relay with a full subnet queue", () => {
 
         expect(reply.type).toBe("message_sent")
         expect(rows.size).toBe(1)
+        expect(guard.claim).toHaveBeenCalledTimes(1)
+        expect(guard.release).toHaveBeenCalledTimes(1)
+    })
+
+    it("answers retry-later when the subnet fills between the check and the claim, and keeps the sender's quota", async () => {
+        guard.check.mockResolvedValue({ admitted: true })
+        guard.claim.mockReturnValue(false)
+
+        const result = await service.processMessage("alice", "bob", "subnet_a", "m1", "h3", encrypted, false)
+
+        expect(result.code).toBe("L2PS_BACKLOG_FULL")
+        expect(rows.size).toBe(0)
+        expect(service.offlineMessageCounts.size).toBe(0)
+        expect(guard.release).not.toHaveBeenCalled()
+    })
+
+    it("lets a sender at its offline quota take no subnet slot", async () => {
+        guard.check.mockResolvedValue({ admitted: true })
+        service.offlineMessageCounts.set("alice", 200)
+
+        const result = await service.processMessage("alice", "bob", "subnet_a", "m2", "h4", encrypted, false)
+
+        expect(result).toEqual({ success: false, error: "Offline message limit reached" })
+        expect(guard.claim).not.toHaveBeenCalled()
+        expect(guard.release).not.toHaveBeenCalled()
+        expect(rows.size).toBe(0)
+    })
+
+    it("gives the slot back when the submission fails", async () => {
+        guard.check.mockResolvedValue({ admitted: true })
+        submitToL2PS.mockResolvedValueOnce({ success: false, error: "L2PS network not loaded" })
+
+        const result = await service.processMessage("alice", "bob", "subnet_a", "m3", "h5", encrypted, true)
+
+        expect(result.success).toBe(false)
+        expect(guard.claim).toHaveBeenCalledTimes(1)
+        expect(guard.release).toHaveBeenCalledTimes(1)
+    })
+
+    it("gives the slot back when the row cannot be written", async () => {
+        guard.check.mockResolvedValue({ admitted: true })
+        const save = jest.spyOn(repo, "save").mockRejectedValueOnce({ code: "23505" })
+
+        const result = await service.processMessage("alice", "bob", "subnet_a", "m4", "h6", encrypted, true)
+        save.mockRestore()
+
+        expect(result.success).toBe(false)
+        expect(submitToL2PS).not.toHaveBeenCalled()
+        expect(guard.release).toHaveBeenCalledTimes(1)
     })
 })

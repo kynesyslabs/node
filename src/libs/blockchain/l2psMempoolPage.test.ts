@@ -2,28 +2,10 @@
  * The paged queue listing and the backlog summary issue bounded queries.
  */
 
-import { describe, expect, it, jest, mock } from "bun:test"
+import { describe, expect, it, jest } from "bun:test"
+import { mockMempoolDeps } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 
-mock.module("@/model/datasource", () => ({
-    __esModule: true,
-    default: { getInstance: async () => ({ getDataSource: () => ({}) }) },
-}))
-mock.module("@/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
-mock.module("@/libs/consensus/v2/types/secretaryManager", () => ({
-    __esModule: true,
-    default: { getInstance: () => ({}) },
-}))
-mock.module("@/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockMempoolDeps()
 
 const { default: L2PSMempool } = await import("./l2ps_mempool")
 
@@ -93,6 +75,26 @@ describe("getSummaryByUIDAndStatus", () => {
             oldestTimestamp: "5",
             newestTimestamp: "9",
         })
+    })
+})
+
+describe("countByUIDAndStatus", () => {
+    it("asks the database for a plain count of the subnet's rows in that status", async () => {
+        const count = jest.fn(async (..._args: unknown[]) => 7)
+        ;(L2PSMempool as any).repo = { count }
+
+        expect(await L2PSMempool.countByUIDAndStatus("subnet_a", "executed")).toBe(7)
+        expect(count).toHaveBeenCalledWith({ where: { l2ps_uid: "subnet_a", status: "executed" } })
+    })
+
+    it("reaches the caller when the database cannot be queried", async () => {
+        ;(L2PSMempool as any).repo = {
+            count: async () => {
+                throw new Error("connection lost")
+            },
+        }
+
+        await expect(L2PSMempool.countByUIDAndStatus("subnet_a", "executed")).rejects.toThrow("connection lost")
     })
 })
 

@@ -106,19 +106,45 @@ export class L2PSMessagingService {
         }
 
         // Before anything is written: a refused message leaves no row behind.
-        const admission = await getExecutedBacklogGuard().admit(l2psUid)
-        if (!admission.admitted) {
-            return {
-                success: false,
-                error: "L2PS queue is full, retry later",
-                code: L2PS_BACKLOG_FULL,
-                retryAfterMs: admission.retryAfterMs,
-            }
-        }
+        const backlog = getExecutedBacklogGuard()
+        const room = await backlog.check(l2psUid)
+        if (!room.admitted) return this.backlogFullResult(room.retryAfterMs)
 
         const quotaError = this.reserveOfflineQuota(fromKey, recipientOnline)
         if (quotaError) return { success: false, error: quotaError }
 
+        // The slot comes after the quota, so a sender at its own limit never
+        // takes room from the subnet, and it is held only while this attempt
+        // is running: an executed row is counted by the database from then on.
+        if (!backlog.claim(l2psUid)) {
+            this.releaseOfflineQuota(fromKey, recipientOnline)
+            return this.backlogFullResult(room.retryAfterMs)
+        }
+        try {
+            return await this.storeAndSubmit(repo, identity, existing, messageId, encrypted, recipientOnline)
+        } finally {
+            backlog.release(l2psUid)
+        }
+    }
+
+    private backlogFullResult(retryAfterMs: number): ProcessMessageResult {
+        return {
+            success: false,
+            error: "L2PS queue is full, retry later",
+            code: L2PS_BACKLOG_FULL,
+            retryAfterMs,
+        }
+    }
+
+    private async storeAndSubmit(
+        repo: MessageRepo,
+        identity: { l2psUid: string; fromKey: string; toKey: string; messageHash: string },
+        existing: L2PSMessage | null,
+        messageId: string,
+        encrypted: SerializedEncryptedMessage,
+        recipientOnline: boolean,
+    ): Promise<ProcessMessageResult> {
+        const { l2psUid, fromKey, toKey, messageHash } = identity
         const now = Date.now()
         const status = recipientOnline ? "delivered" : "queued"
         const writeError = existing

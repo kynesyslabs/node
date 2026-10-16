@@ -244,11 +244,18 @@ async function processValidL2PSTransaction(
     // Store in mempool
     const mempoolResult = await L2PSMempool.addTransaction(l2psUid, l2psTx, originalHash, "processed")
     if (!mempoolResult.success) {
+        backlog.release(l2psUid)
         return createErrorResponse(response, 500, `Failed to store in L2PS mempool: ${mempoolResult.error}`)
     }
 
-    // Execute transaction
-    return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
+    // Execute transaction. The slot is held until the row is executed, which
+    // the database then counts, or until the attempt fails and the row never
+    // will be.
+    try {
+        return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
+    } finally {
+        backlog.release(l2psUid)
+    }
 }
 
 /**

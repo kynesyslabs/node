@@ -7,7 +7,8 @@
  * after it, so nothing already in the database is touched.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+import { mockMempoolDeps } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 import { DataSource } from "typeorm"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
@@ -29,26 +30,7 @@ function assertDisposable(url: string): void {
 
 let ds: DataSource
 
-mock.module("@/model/datasource", () => ({
-    __esModule: true,
-    default: { getInstance: async () => ({ getDataSource: () => ds }) },
-}))
-mock.module("@/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
-mock.module("@/libs/consensus/v2/types/secretaryManager", () => ({
-    __esModule: true,
-    default: { getInstance: () => ({}) },
-}))
-mock.module("@/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+mockMempoolDeps(() => ds)
 
 const { default: L2PSMempool } = await import("./l2ps_mempool")
 
@@ -152,6 +134,8 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
 
         const none = await L2PSMempool.getSummaryByUIDAndStatus("subnet_a", "failed")
         expect(none).toEqual({ count: 0, oldestTimestamp: null, newestTimestamp: null })
+        expect(await L2PSMempool.countByUIDAndStatus("subnet_a", "failed")).toBe(0)
+        expect(await L2PSMempool.countByUIDAndStatus("subnet_a", "executed")).toBe(summary.count)
     })
 
     it("pages the queue oldest first after a cursor, capped by the limit", async () => {

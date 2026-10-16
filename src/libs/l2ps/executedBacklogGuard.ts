@@ -19,7 +19,10 @@ export interface Admission {
 }
 
 interface SubnetState {
-    count: number
+    /** Rows with status executed, as last read from the database. */
+    dbCount: number
+    /** Slots claimed here whose row is not yet counted by the database: still running, or finished some other way. */
+    pending: number
     /** False until a count has been read once; a failed read before that has nothing to fall back on. */
     known: boolean
     fetchedAt: number
@@ -41,10 +44,13 @@ export interface BacklogGuardOptions {
  * few batches per cycle, so ingest above that rate would otherwise queue
  * without end, and the backlog is read in full by each hash cycle.
  *
- * The count is cached for a few seconds and bumped locally on each admission,
- * so the check costs one query per subnet per interval rather than one per
- * message, and a burst cannot overshoot the cap by more than what the cache
- * has not yet seen from other writers.
+ * The database count is cached for a few seconds and the claims taken here
+ * are kept beside it, so the check costs one query per subnet per interval
+ * rather than one per message, a refresh does not forget a claim still in
+ * flight, and a burst cannot overshoot the cap by more than what the cache
+ * has not yet seen from other writers. A claim is given back with `release`
+ * once its row is executed (the database counts it from then on) or the
+ * attempt failed.
  */
 export class ExecutedBacklogGuard {
     private readonly subnets = new Map<string, SubnetState>()
@@ -67,11 +73,12 @@ export class ExecutedBacklogGuard {
         const state = await this.current(l2psUid)
         this.warnAtHalf(l2psUid, state)
 
-        if (state.count >= cap) {
+        const count = this.total(state)
+        if (count >= cap) {
             this.reportFull(l2psUid, state)
-            return { admitted: false, count: state.count, cap, retryAfterMs: this.opts.retryAfterMs }
+            return { admitted: false, count, cap, retryAfterMs: this.opts.retryAfterMs }
         }
-        return { admitted: true, count: state.count, cap, retryAfterMs: this.opts.retryAfterMs }
+        return { admitted: true, count, cap, retryAfterMs: this.opts.retryAfterMs }
     }
 
     /**
@@ -83,9 +90,19 @@ export class ExecutedBacklogGuard {
         if (this.opts.cap <= 0) return true
         const state = this.subnets.get(l2psUid)
         if (!state) return true
-        if (state.count >= this.opts.cap) return false
-        state.count++
+        if (this.total(state) >= this.opts.cap) return false
+        state.pending++
         return true
+    }
+
+    /**
+     * Give back a slot taken by `claim`. Called once the row is executed, when
+     * the database count includes it, or when the attempt failed and the row
+     * will never be executed.
+     */
+    release(l2psUid: string): void {
+        const state = this.subnets.get(l2psUid)
+        if (state && state.pending > 0) state.pending--
     }
 
     /** Check and claim in one step, for a caller with nothing left that could fail. */
@@ -103,7 +120,7 @@ export class ExecutedBacklogGuard {
     private async current(l2psUid: string): Promise<SubnetState> {
         let state = this.subnets.get(l2psUid)
         if (!state) {
-            state = { count: 0, known: false, fetchedAt: Number.NEGATIVE_INFINITY, halfWarned: false, lastCapLog: Number.NEGATIVE_INFINITY, refresh: null }
+            state = { dbCount: 0, pending: 0, known: false, fetchedAt: Number.NEGATIVE_INFINITY, halfWarned: false, lastCapLog: Number.NEGATIVE_INFINITY, refresh: null }
             this.subnets.set(l2psUid, state)
         }
         if (this.now() - state.fetchedAt >= this.ttlMs) {
@@ -117,7 +134,7 @@ export class ExecutedBacklogGuard {
 
     private async reload(l2psUid: string, state: SubnetState): Promise<void> {
         try {
-            state.count = await this.opts.countExecuted(l2psUid)
+            state.dbCount = await this.opts.countExecuted(l2psUid)
             state.known = true
         } catch (error) {
             // A failed count keeps the last one read, so a database hiccup does
@@ -129,13 +146,18 @@ export class ExecutedBacklogGuard {
         state.fetchedAt = this.now()
     }
 
+    private total(state: SubnetState): number {
+        return state.dbCount + state.pending
+    }
+
     private warnAtHalf(l2psUid: string, state: SubnetState): void {
         const half = this.opts.cap / 2
-        if (state.count < half) {
+        const count = this.total(state)
+        if (count < half) {
             state.halfWarned = false
         } else if (!state.halfWarned) {
             state.halfWarned = true
-            log.warning(`[L2PS Backlog] ${l2psUid} has ${state.count} executed transactions waiting, half of the ${this.opts.cap} cap`)
+            log.warning(`[L2PS Backlog] ${l2psUid} has ${count} executed transactions waiting, half of the ${this.opts.cap} cap`)
         }
     }
 
@@ -159,8 +181,7 @@ export function getExecutedBacklogGuard(): ExecutedBacklogGuard {
     shared ??= new ExecutedBacklogGuard({
         cap: Config.getInstance().l2ps.mempoolMaxExecutedPerSubnet,
         retryAfterMs: Config.getInstance().l2ps.aggregationIntervalMs,
-        countExecuted: async uid =>
-            (await L2PSMempool.getSummaryByUIDAndStatus(uid, "executed")).count,
+        countExecuted: uid => L2PSMempool.countByUIDAndStatus(uid, "executed"),
     })
     return shared
 }
