@@ -18,14 +18,26 @@ import PeerManager from "../PeerManager"
 import { sleep } from "@kynesyslabs/demosdk/utils"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
-import { hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
+import { hashGenesisCore, hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
+import Chain from "@/libs/blockchain/chain"
+import {
+    editedGenesisOnFreshChainProblem,
+    resolveGenesisMismatch,
+} from "./genesisMismatch"
+import {
+    checkPeerSchedule,
+    localScheduleView,
+    type ForkConfigLike,
+} from "./forkScheduleAgreement"
 
 let ourGenesisDataHash = ""
+let ourGenesisCoreHash = ""
 const genesisFile = "data/genesis.json"
 const peerman = PeerManager.getInstance()
 const discoveredGenesisDataHashes = new Set<string>()
 
-async function ensureGenesisDataMatch(verifiedPeer: Peer) {
+/** Ask a peer for its advertised genesis data hash, retrying while it is not ready. */
+async function fetchPeerGenesisHash(verifiedPeer: Peer) {
     const request: RPCRequest = {
         method: "nodeCall",
         params: [
@@ -51,75 +63,107 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                     `(attempt ${attempt}/${maxAttempts}, result=${res?.result})`,
             )
             await sleep(1000)
-            continue
         }
     }
+    return res as NonNullable<typeof res>
+}
+
+async function downloadPeerGenesis(
+    verifiedPeer: Peer,
+    peerGenesisDataHash: string,
+): Promise<unknown> {
+    log.warn(
+        "[BOOTSTRAP] Genesis data hash differs from the one " +
+            verifiedPeer.connection.string +
+            " advertises (ours " +
+            ourGenesisDataHash +
+            ", theirs " +
+            peerGenesisDataHash +
+            "); comparing the data it serves",
+    )
+    log.debug(
+        "[BOOTSTRAP] Fetching new genesis data from peer: " +
+            verifiedPeer.connection.string,
+    )
+    const served = await axios.get(verifiedPeer.connection.string + "/genesis")
+    return served.status === 200 ? served.data : null
+}
+
+function logGenesisVerdict(
+    verdict: Awaited<ReturnType<typeof resolveGenesisMismatch>>,
+    verifiedPeer: Peer,
+) {
+    if (verdict.outcome === "unhashed-fields-only") {
+        log.warn(
+            "[BOOTSTRAP] Peer " +
+                verifiedPeer.connection.string +
+                " serves genesis data that differs from ours only in the fork schedule or chain id; " +
+                "keeping our data/genesis.json as it is",
+        )
+        return
+    }
+    if (verdict.outcome !== "replaced") return
+
+    log.warn(
+        "[BOOTSTRAP] Replaced data/genesis.json with the data served by " +
+            verifiedPeer.connection.string +
+            (verdict.carriedOver.length > 0
+                ? ", keeping our " + verdict.carriedOver.join(" and ")
+                : ""),
+    )
+    // INFO: Update discovered genesis hashes and current genesis hash
+    discoveredGenesisDataHashes.add(verdict.servedCoreHash)
+    ourGenesisDataHash = verdict.writtenFullHash
+    ourGenesisCoreHash = verdict.servedCoreHash
+
+    // INFO: Ensure all peers have the same genesis data
+    if (discoveredGenesisDataHashes.size > 1) {
+        log.error("[BOOTSTRAP] Conflicting genesis data hashes found")
+        throw new Error("Conflicting genesis data hashes found across peers")
+    }
+}
+
+/** Hash of the genesis data in this node's stored block 0, or null when it has none. */
+async function storedGenesisHash(): Promise<string | null> {
+    const block = await Chain.getGenesisBlock()
+    const content = block?.content as { extra?: { genesisData?: unknown } } | undefined
+    let data = content?.extra?.genesisData
+    if (!data) return null
+    if (typeof data === "string") data = JSON.parse(data)
+    return hashGenesisData(data)
+}
+
+async function ensureGenesisDataMatch(verifiedPeer: Peer) {
+    const res = await fetchPeerGenesisHash(verifiedPeer)
 
     if (res.result === 200) {
         const peerGenesisDataHash = res.response
 
-        if (peerGenesisDataHash !== ourGenesisDataHash) {
-            log.error("[BOOTSTRAP] Genesis data hash does not match")
-            log.warn(
-                "[BOOTSTRAP] Expected: " +
-                    ourGenesisDataHash +
-                    " Got: " +
-                    peerGenesisDataHash,
-            )
-            log.debug(
-                "[BOOTSTRAP] Fetching new genesis data from peer: " +
-                    verifiedPeer.connection.string,
-            )
-
-            const res = await axios.get(
-                verifiedPeer.connection.string + "/genesis",
-            )
-
-            if (res.status === 200) {
-                // INFO: Save the new genesis data to the file
-                fs.writeFileSync(genesisFile, JSON.stringify(res.data, null, 2))
-                // Re-hash through the canonical normalizer so connection_url
-                // differences between this node and the source peer do not
-                // produce a spurious mismatch (see normalizeGenesisForHash.ts).
-                const ourNewGenesisDataHash = hashGenesisData(
+        const verdict = await resolveGenesisMismatch(
+            ourGenesisDataHash,
+            ourGenesisCoreHash,
+            peerGenesisDataHash,
+            {
+                fetchPeerGenesis: () =>
+                    downloadPeerGenesis(verifiedPeer, peerGenesisDataHash),
+                readLocalGenesis: () =>
                     JSON.parse(fs.readFileSync(genesisFile, "utf8")),
-                )
-
-                // INFO: Update discovered genesis hashes and current genesis hash
-                discoveredGenesisDataHashes.add(ourNewGenesisDataHash)
-                ourGenesisDataHash = ourNewGenesisDataHash
-
-                // INFO: Ensure all peers have the same genesis data
-                if (discoveredGenesisDataHashes.size > 1) {
-                    log.error(
-                        "[BOOTSTRAP] Conflicting genesis data hashes found",
-                    )
-                    throw new Error("Conflicting genesis data hashes found across peers")
-                }
-
-                log.debug(
-                    "[BOOTSTRAP] Downloaded genesis data with hash: " +
-                        ourNewGenesisDataHash,
-                )
-
-                if (ourNewGenesisDataHash !== peerGenesisDataHash) {
-                    log.error(
-                        "[BOOTSTRAP] New genesis data hash still does not match: " +
-                            ourNewGenesisDataHash +
-                            " != " +
-                            peerGenesisDataHash,
-                    )
-                    throw new Error(`Genesis data hash mismatch after download: ${ourNewGenesisDataHash} != ${peerGenesisDataHash}`)
-                }
-
-                return
-            }
-
-            log.error(
-                "[BOOTSTRAP] Failed to download genesis data from peer: " +
-                    verifiedPeer.connection.string,
+                writeGenesis: data =>
+                    fs.writeFileSync(genesisFile, JSON.stringify(data, null, 2)),
+                hashFull: hashGenesisData,
+                hashCore: hashGenesisCore,
+            },
+        )
+        logGenesisVerdict(verdict, verifiedPeer)
+        if (verdict.outcome === "unhashed-fields-only") {
+            const problem = editedGenesisOnFreshChainProblem(
+                await storedGenesisHash(),
+                peerGenesisDataHash,
             )
-            throw new Error(`Failed to download genesis data from peer: ${verifiedPeer.connection.string}`)
+            if (problem) {
+                log.error("[BOOTSTRAP] Refusing to continue: " + problem)
+                throw new Error(problem)
+            }
         }
     } else {
         log.error(
@@ -128,6 +172,60 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                 " response=" +
                 JSON.stringify(res),
         )
+    }
+
+    await warnOnForkScheduleMismatch(verifiedPeer)
+}
+
+/**
+ * The fork schedule is not part of what peers compare when they pair, so
+ * pairing does not catch a node that missed the genesis edit. Compare it here
+ * and say so loudly; never refuse to boot over it, because during a rolling
+ * genesis edit peers legitimately disagree for a while. A peer that has not
+ * loaded its own genesis yet answers "not ready"; that is retried and then left
+ * to the periodic comparison (forkScheduleWatch.ts), not reported as a mismatch.
+ */
+async function warnOnForkScheduleMismatch(peer: Peer) {
+    const ours = localScheduleView(
+        getSharedState.forkConfig as unknown as ForkConfigLike,
+        getSharedState.chainId,
+    )
+    const result = await checkPeerSchedule(peer, ours)
+    switch (result.status) {
+        case "mismatch":
+            log.error(
+                "[BOOTSTRAP] FORK SCHEDULE MISMATCH with " +
+                    peer.connection.string +
+                    ": " +
+                    result.lines.join("; ") +
+                    ". This node will split from its peers at the first activation height that differs. " +
+                    "Fix the forks entries and properties.id in data/genesis.json and restart.",
+            )
+            break
+        case "skipped":
+            log.debug(
+                "[BOOTSTRAP] Peer " +
+                    peer.connection.string +
+                    " reports no fork schedule; not compared",
+            )
+            break
+        case "not-ready":
+            log.warn(
+                "[BOOTSTRAP] Peer " +
+                    peer.connection.string +
+                    " has not loaded its fork schedule yet; it will be compared later",
+            )
+            break
+        case "unreachable":
+            log.warn(
+                "[BOOTSTRAP] Could not compare fork schedules with " +
+                    peer.connection.string +
+                    ": " +
+                    result.reason,
+            )
+            break
+        default:
+            break
     }
 }
 
@@ -218,6 +316,7 @@ export default async function peerBootstrap(
         throw new Error(`${label} at data/genesis.json: ${msg}`)
     }
     ourGenesisDataHash = hashGenesisData(genesisData)
+    ourGenesisCoreHash = hashGenesisCore(genesisData)
 
     // Validity check
     for (const peer of localList) {
@@ -225,6 +324,7 @@ export default async function peerBootstrap(
     }
 
     ourGenesisDataHash = null
+    ourGenesisCoreHash = null
     discoveredGenesisDataHashes.clear()
 
     log.info("[BOOTSTRAP] Valid peers found: " + peerman.getPeers().length)

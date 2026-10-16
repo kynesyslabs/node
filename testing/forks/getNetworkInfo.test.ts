@@ -62,8 +62,11 @@ interface NetworkInfoResponse {
 describe("getNetworkInfo RPC handler", () => {
     let forkSnapshot: ForkConfigByName
     let blockNumberSnapshot: number
+    let loadedSnapshot: boolean
 
     beforeEach(() => {
+        loadedSnapshot = getSharedState.forkConfigLoaded
+        getSharedState.forkConfigLoaded = true
         // Capture and reset to a clean default before each case. Other
         // suites that mutate forkConfig (e.g. forkGates.test.ts) are
         // already snapshotting in their own beforeEach/afterEach, but we
@@ -74,6 +77,7 @@ describe("getNetworkInfo RPC handler", () => {
     })
 
     afterEach(() => {
+        getSharedState.forkConfigLoaded = loadedSnapshot
         getSharedState.forkConfig = forkSnapshot
         getSharedState.lastBlockNumber = blockNumberSnapshot
     })
@@ -214,5 +218,69 @@ describe("getNetworkInfo RPC handler", () => {
         expect(response.result).toBe(0)
         expect(response.require_reply).toBe(false)
         expect(response.extra).toBeNull()
+    })
+
+    it("reports web2ProofBinding with the same next-block convention as signatureDomain", async () => {
+        getSharedState.forkConfig.web2ProofBinding.activationHeight = 1000
+        getSharedState.lastBlockNumber = 999
+
+        const response = await getNetworkInfo({}, makeResponse())
+        const body = response.response as {
+            forks: { web2ProofBinding: ForkStatusResponse }
+        }
+
+        expect(body.forks.web2ProofBinding.activationHeight).toBe(1000)
+        expect(body.forks.web2ProofBinding.activated).toBe(true)
+    })
+
+    it("reports an unscheduled web2ProofBinding as null and inactive", async () => {
+        getSharedState.lastBlockNumber = 5_000_000
+
+        const response = await getNetworkInfo({}, makeResponse())
+        const body = response.response as {
+            forks: { web2ProofBinding: ForkStatusResponse }
+        }
+
+        expect(body.forks.web2ProofBinding.activationHeight).toBeNull()
+        expect(body.forks.web2ProofBinding.activated).toBe(false)
+    })
+
+    it("answers not-ready until the fork configuration has been loaded", async () => {
+        getSharedState.forkConfigLoaded = false
+
+        const response = await getNetworkInfo({}, makeResponse())
+
+        expect(response.result).toBe(503)
+        expect((response.response as { error: string }).error).toBe("STATE_NOT_READY")
+    })
+
+    it("reports every registered fork", async () => {
+        const response = await getNetworkInfo({}, makeResponse())
+        const body = response.response as { forks: Record<string, ForkStatusResponse> }
+
+        expect(Object.keys(body.forks).sort()).toEqual(Object.keys(getSharedState.forkConfig).sort())
+        expect(Object.keys(body.forks)).toContain("atomicWork")
+        expect(Object.keys(body.forks)).toContain("tlsnProofEnforcement")
+    })
+
+    it("publishes a schedule digest that follows the whole schedule and the chain id", async () => {
+        const digestOf = async () =>
+            ((await getNetworkInfo({}, makeResponse())).response as { forkScheduleDigest: string }).forkScheduleDigest
+        const chainSnapshot = getSharedState.chainId
+        try {
+            getSharedState.chainId = 1
+            const base = await digestOf()
+            expect(base).toMatch(/^[0-9a-f]{64}$/)
+            expect(await digestOf()).toBe(base)
+
+            getSharedState.forkConfig.atomicWork.activationHeight = 500
+            const withAtomic = await digestOf()
+            expect(withAtomic).not.toBe(base)
+
+            getSharedState.chainId = 2
+            expect(await digestOf()).not.toBe(withAtomic)
+        } finally {
+            getSharedState.chainId = chainSnapshot
+        }
     })
 })
