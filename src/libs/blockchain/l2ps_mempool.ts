@@ -3,6 +3,8 @@ import Datasource from "@/model/datasource"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
+import forge from "node-forge"
+import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
 import Chain from "./chain"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import log from "@/utilities/logger"
@@ -29,6 +31,9 @@ export const L2PS_STATUS = {
 } as const
 
 export type L2PSStatus = typeof L2PS_STATUS[keyof typeof L2PS_STATUS]
+
+/** Hashes read per query when the consolidated digest is computed. */
+const HASH_PAGE_SIZE = 5000
 
 /**
  * L2PS Mempool Manager
@@ -112,6 +117,12 @@ export default class L2PSMempool {
         originalHash: string,
         status = "processed",
     ): Promise<{ success: boolean; error?: string }> {
+        // The one place every insert passes through, so a key the digest could
+        // not order the way it was defined never reaches the table.
+        if (!isValidL2PSTxHash(encryptedTx?.hash)) {
+            return { success: false, error: "Invalid transaction hash: expected 64 lower-case hex characters" }
+        }
+
         try {
             await this.ensureInitialized()
 
@@ -359,53 +370,229 @@ export default class L2PSMempool {
      * ```
      */
     public static async getHashForL2PS(l2psUid: string, blockNumber?: number): Promise<string> {
+        return (await this.getDigestWithCount(l2psUid, blockNumber)).hash
+    }
+
+    /**
+     * The consolidated hash together with the number of rows it covers, both
+     * from one snapshot so they cannot disagree.
+     *
+     * @throws When the database cannot be read. A failure is never answered
+     *         with a stand-in hash: a caller that relays the hash as a
+     *         commitment would be publishing something that commits to nothing.
+     */
+    public static async getDigestWithCount(
+        l2psUid: string,
+        blockNumber?: number,
+    ): Promise<{ hash: string; count: number }> {
         try {
             await this.ensureInitialized()
 
-            const options: FindManyOptions<L2PSMempoolTx> = {
-                where: {
-                    l2ps_uid: l2psUid,
-                    status: L2PS_STATUS.EXECUTED,  // Only include successfully executed transactions awaiting batching
-                },
-                order: {
-                    timestamp: "ASC",
-                    hash: "ASC",
-                },
-            }
-
-            // Add block filter if specified
-            if (blockNumber !== undefined) {
-                options.where = { ...options.where, block_number: blockNumber }
-            }
-
-            const transactions = await this.repo.find(options)
-
-            if (transactions.length === 0) {
-                // Return deterministic empty hash
-                const suffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
-                return Hashing.sha256(`L2PS_EMPTY_${l2psUid}${suffix}`)
-            }
-
-            // Sort hashes for deterministic output
-            const sortedHashes = transactions
-                .map(tx => tx.hash)
-                .sort()
-
-            // Create consolidated hash: UID + block info + count + all hashes
             const blockSuffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
-            const hashInput = `L2PS_${l2psUid}${blockSuffix}:${sortedHashes.length}:${sortedHashes.join(",")}`
 
-            const consolidatedHash = Hashing.sha256(hashInput)
+            // The digest covers the count before the hashes, so the count and the
+            // pages must come from one snapshot, or rows arriving between the two
+            // reads would make them disagree.
+            const result = await this.repo.manager.transaction("REPEATABLE READ", async manager => {
+                const table = manager.getRepository(L2PSMempoolTx).metadata.tablePath
+                // Only successfully executed transactions awaiting batching
+                const params: unknown[] = [l2psUid, L2PS_STATUS.EXECUTED]
+                let where = "l2ps_uid = $1 AND status = $2"
+                if (blockNumber !== undefined) {
+                    params.push(blockNumber)
+                    where += " AND block_number = $3"
+                }
 
-            log.debug(`[L2PS Mempool] Generated hash for ${l2psUid}${blockSuffix}: ${consolidatedHash} (${sortedHashes.length} txs)`)
-            return consolidatedHash
+                const [{ count: total }] = await manager.query(
+                    `SELECT COUNT(*)::text AS count FROM ${table} WHERE ${where}`,
+                    params,
+                )
+                const count = Number.parseInt(total, 10)
+                if (count === 0) return null
+
+                // Hashed a page at a time off one sorted cursor: the backlog is
+                // read on every cycle and can be large, and only the running
+                // digest has to stay in memory. Byte order is what .sort() gave,
+                // whatever collation the database uses, because every stored key
+                // is 64 hex characters: addTransaction refuses any other form.
+                // Rows from before that rule are not covered by it.
+                const digest = forge.sha256.create()
+                digest.update(`L2PS_${l2psUid}${blockSuffix}:${count}:`)
+                await manager.query(
+                    `DECLARE l2ps_hash_cursor NO SCROLL CURSOR FOR SELECT hash FROM ${table} WHERE ${where} ORDER BY hash COLLATE "C"`,
+                    params,
+                )
+                let first = true
+                for (;;) {
+                    const hashes: { hash: string }[] = await manager.query(
+                        `FETCH ${HASH_PAGE_SIZE} FROM l2ps_hash_cursor`,
+                    )
+                    if (hashes.length === 0) break
+
+                    digest.update((first ? "" : ",") + hashes.map(row => row.hash).join(","))
+                    first = false
+                    if (hashes.length < HASH_PAGE_SIZE) break
+                }
+                await manager.query("CLOSE l2ps_hash_cursor")
+                return { count, digest: digest.digest().toHex() }
+            })
+
+            if (result === null) {
+                // Deterministic empty hash
+                const suffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
+                return { hash: Hashing.sha256(`L2PS_EMPTY_${l2psUid}${suffix}`), count: 0 }
+            }
+
+            log.debug(`[L2PS Mempool] Generated hash for ${l2psUid}${blockSuffix}: ${result.digest} (${result.count} txs)`)
+            return { hash: result.digest, count: result.count }
 
         } catch (error) {
             log.error(`[L2PS Mempool] Error generating hash for UID ${l2psUid}, block ${blockNumber}:`, error)
-            // Return deterministic error hash
-            const blockSuffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
-            return Hashing.sha256(`L2PS_ERROR_${l2psUid}${blockSuffix}`)
+            throw error
         }
+    }
+
+    /**
+     * Subnets that have at least one executed row waiting for a batch.
+     * One row per subnet comes back, so the answer is as small as the number of
+     * subnets however deep a backlog is.
+     */
+    public static async getExecutedSubnets(): Promise<string[]> {
+        await this.ensureInitialized()
+
+        const rows = await this.repo
+            .createQueryBuilder("tx")
+            .select("tx.l2ps_uid", "l2ps_uid")
+            .distinct(true)
+            .where("tx.status = :status", { status: L2PS_STATUS.EXECUTED })
+            .orderBy("tx.l2ps_uid", "ASC")
+            .getRawMany()
+        return rows.map(row => row.l2ps_uid)
+    }
+
+    /**
+     * Queue rows for a known set of original hashes, in the given statuses.
+     * For a caller that holds a page of hashes and wants the matching rows,
+     * which reading the subnet's whole queue and filtering would not bound.
+     *
+     * @param l2psUid - L2PS network identifier
+     * @param originalHashes - Original transaction hashes to look up
+     * @param statuses - Statuses a matching row may be in
+     */
+    public static async getByOriginalHashes(
+        l2psUid: string,
+        originalHashes: string[],
+        statuses: L2PSStatus[],
+    ): Promise<L2PSMempoolTx[]> {
+        if (originalHashes.length === 0) return []
+        try {
+            await this.ensureInitialized()
+
+            return await this.repo.find({
+                where: {
+                    l2ps_uid: l2psUid,
+                    original_hash: In(originalHashes),
+                    status: In(statuses),
+                },
+            })
+        } catch (error) {
+            log.error(`[L2PS Mempool] Error getting transactions by original hash for UID ${l2psUid}:`, error)
+            return []
+        }
+    }
+
+    /**
+     * One page of a subnet's queue, oldest first, with the identifying columns
+     * only. Used to list queue entries to a peer, which never needs a payload,
+     * and bounded so one request cannot read the whole table.
+     *
+     * Rows are ordered by (timestamp, hash) and the cursor is that pair, so rows
+     * that share a millisecond are neither skipped nor repeated across pages.
+     * Without a hash the cursor is the timestamp alone and only newer rows match.
+     *
+     * @param l2psUid - L2PS network identifier
+     * @param after - Cursor: rows after this timestamp, or after this (timestamp, hash)
+     * @param limit - Maximum rows returned
+     */
+    public static async getPageByUID(
+        l2psUid: string,
+        after: { timestamp: number; hash?: string },
+        limit: number,
+    ): Promise<Pick<L2PSMempoolTx, "hash" | "l2ps_uid" | "original_hash" | "status" | "timestamp">[]> {
+        try {
+            await this.ensureInitialized()
+
+            const timestamp = String(Math.max(0, Math.trunc(after.timestamp)))
+            const qb = this.repo
+                .createQueryBuilder("tx")
+                .select(["tx.hash", "tx.l2ps_uid", "tx.original_hash", "tx.status", "tx.timestamp"])
+                .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+            if (typeof after.hash === "string") {
+                qb.andWhere(
+                    "(CAST(tx.timestamp AS BIGINT) > CAST(:after AS BIGINT) OR (CAST(tx.timestamp AS BIGINT) = CAST(:after AS BIGINT) AND tx.hash > :afterHash))",
+                    { after: timestamp, afterHash: after.hash },
+                )
+            } else {
+                qb.andWhere("CAST(tx.timestamp AS BIGINT) > CAST(:after AS BIGINT)", { after: timestamp })
+            }
+            return await qb
+                .orderBy("tx.timestamp", "ASC")
+                .addOrderBy("tx.hash", "ASC")
+                .limit(limit)
+                .getMany()
+        } catch (error) {
+            log.error(`[L2PS Mempool] Error paging transactions for UID ${l2psUid}:`, error)
+            return []
+        }
+    }
+
+    /**
+     * Size and age span of the rows a subnet holds in one status, computed by
+     * the database. Callers that only report a backlog use this instead of
+     * loading the rows to count them.
+     *
+     * @param l2psUid - L2PS network identifier
+     * @param status - Status to summarise
+     * @returns Row count and the oldest and newest row timestamps, as the
+     *          database's bigint strings (null when there are no rows)
+     * @throws When the database cannot be queried
+     */
+    public static async getSummaryByUIDAndStatus(
+        l2psUid: string,
+        status: L2PSStatus,
+    ): Promise<{ count: number; oldestTimestamp: string | null; newestTimestamp: string | null }> {
+        // A failure is the caller's to handle: reporting zero would read as an
+        // empty queue to a caller deciding whether to accept more work.
+        await this.ensureInitialized()
+
+        const row = await this.repo
+            .createQueryBuilder("tx")
+            .select("COUNT(*)", "count")
+            .addSelect("MIN(CAST(tx.timestamp AS BIGINT))", "oldest")
+            .addSelect("MAX(CAST(tx.timestamp AS BIGINT))", "newest")
+            .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+            .andWhere("tx.status = :status", { status })
+            .getRawOne()
+
+        return {
+            count: Number.parseInt(row?.count ?? "0", 10),
+            oldestTimestamp: row?.oldest ?? null,
+            newestTimestamp: row?.newest ?? null,
+        }
+    }
+
+    /**
+     * Number of rows a subnet holds in one status. A plain count over the
+     * (l2ps_uid, status) index, for callers that poll the size often and need
+     * neither the age span nor the rows.
+     *
+     * @throws When the database cannot be queried
+     */
+    public static async countByUIDAndStatus(l2psUid: string, status: L2PSStatus): Promise<number> {
+        // A failure is the caller's to handle: reporting zero would read as an
+        // empty queue to a caller deciding whether to accept more work.
+        await this.ensureInitialized()
+        return this.repo.count({ where: { l2ps_uid: l2psUid, status } })
     }
 
     /**
@@ -652,6 +839,63 @@ export default class L2PSMempool {
 
         } catch (error) {
             log.error(`[L2PS Mempool] Error during cleanup by status ${status}:`, error)
+            return 0
+        }
+    }
+
+    /**
+     * Delete batched rows that carry no GCR edits once they are old enough, and
+     * whose ciphertext the history table already holds.
+     *
+     * A batched row leaves the queue when the proof built from its GCR edits is
+     * applied at consensus. A transaction with no edits, such as a message,
+     * never gets a proof, so nothing would otherwise remove it and the queue
+     * would gain a row per message for good.
+     *
+     * Rows written before the history table kept the ciphertext have no
+     * payload there, and the history endpoint recovers theirs from this row. A
+     * row without a stored payload is therefore kept, and counted in the log.
+     *
+     * @param olderThanMs - Remove rows whose timestamp is older than this many milliseconds
+     * @returns Promise resolving to number of deleted records
+     */
+    public static async cleanupBatchedWithoutEdits(olderThanMs: number): Promise<number> {
+        try {
+            await this.ensureInitialized()
+
+            const cutoffTimestamp = (Date.now() - olderThanMs).toString()
+            const historyHasPayload =
+                "EXISTS (SELECT 1 FROM l2ps_transactions h WHERE h.hash = l2ps_mempool.original_hash AND h.encrypted_payload IS NOT NULL)"
+
+            const result = await this.repo
+                .createQueryBuilder()
+                .delete()
+                .from(L2PSMempoolTx)
+                .where("status = :status", { status: L2PS_STATUS.BATCHED })
+                .andWhere("CAST(timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
+                .andWhere("(gcr_edits IS NULL OR gcr_edits = '[]'::jsonb)")
+                .andWhere(historyHasPayload)
+                .execute()
+
+            const deletedCount = result.affected || 0
+            if (deletedCount > 0) {
+                log.info(`[L2PS Mempool] Cleaned up ${deletedCount} old batched transactions without edits`)
+            }
+
+            const kept = await this.repo
+                .createQueryBuilder("tx")
+                .where("tx.status = :status", { status: L2PS_STATUS.BATCHED })
+                .andWhere("CAST(tx.timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
+                .andWhere("(tx.gcr_edits IS NULL OR tx.gcr_edits = '[]'::jsonb)")
+                .andWhere(`NOT ${historyHasPayload.replace("l2ps_mempool.original_hash", "tx.original_hash")}`)
+                .getCount()
+            if (kept > 0) {
+                log.info(`[L2PS Mempool] ${kept} legacy rows kept: their ciphertext is not in the history table`)
+            }
+            return deletedCount
+
+        } catch (error) {
+            log.error("[L2PS Mempool] Error during cleanup of batched transactions without edits:", error)
             return 0
         }
     }

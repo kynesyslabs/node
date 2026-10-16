@@ -12,6 +12,7 @@ import Transaction from "@/libs/blockchain/transaction"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
+import { getExecutedBacklogGuard, L2PS_BACKLOG_FULL } from "@/libs/l2ps/executedBacklogGuard"
 import { L2PSMessage } from "./entities/L2PSMessage"
 import { canonicalizeKey } from "./keys"
 import type { MessageStatus, SerializedEncryptedMessage, StoredMessage } from "./types"
@@ -28,6 +29,9 @@ export interface ProcessMessageResult {
     duplicate?: boolean
     /** Status the message is stored with: delivered, queued or, for a duplicate, sent. */
     status?: MessageStatus
+    /** Set when the subnet's queue is full and the sender should try again later. */
+    code?: typeof L2PS_BACKLOG_FULL
+    retryAfterMs?: number
 }
 
 type MessageRepo = ReturnType<typeof dataSource.getRepository<L2PSMessage>>
@@ -101,9 +105,52 @@ export class L2PSMessagingService {
             return this.duplicateResult(existing)
         }
 
+        // Before anything is written: a refused message leaves no row behind.
+        const backlog = getExecutedBacklogGuard()
+        const room = await backlog.check(l2psUid)
+        if (!room.admitted) return this.backlogFullResult(room.retryAfterMs)
+
         const quotaError = this.reserveOfflineQuota(fromKey, recipientOnline)
         if (quotaError) return { success: false, error: quotaError }
 
+        // The slot comes after the quota, so a sender at its own limit never
+        // takes room from the subnet, and it is held only while this attempt
+        // is running: an executed row is counted by the database from then on.
+        if (!backlog.claim(l2psUid)) {
+            this.releaseOfflineQuota(fromKey, recipientOnline)
+            return this.backlogFullResult(room.retryAfterMs)
+        }
+        let executed = false
+        const onExecuted = () => {
+            executed = true
+            backlog.settle(l2psUid)
+        }
+        try {
+            return await this.storeAndSubmit(repo, identity, existing, messageId, encrypted, recipientOnline, onExecuted)
+        } finally {
+            if (!executed) backlog.release(l2psUid)
+        }
+    }
+
+    private backlogFullResult(retryAfterMs: number): ProcessMessageResult {
+        return {
+            success: false,
+            error: "L2PS queue is full, retry later",
+            code: L2PS_BACKLOG_FULL,
+            retryAfterMs,
+        }
+    }
+
+    private async storeAndSubmit(
+        repo: MessageRepo,
+        identity: { l2psUid: string; fromKey: string; toKey: string; messageHash: string },
+        existing: L2PSMessage | null,
+        messageId: string,
+        encrypted: SerializedEncryptedMessage,
+        recipientOnline: boolean,
+        onExecuted: () => void,
+    ): Promise<ProcessMessageResult> {
+        const { l2psUid, fromKey, toKey, messageHash } = identity
         const now = Date.now()
         const status = recipientOnline ? "delivered" : "queued"
         const writeError = existing
@@ -123,7 +170,7 @@ export class L2PSMessagingService {
             return { success: false, error: writeError }
         }
 
-        const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, id, messageHash, encrypted, now)
+        const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, id, messageHash, encrypted, now, onExecuted)
 
         if (!l2psResult.success) {
             await this.handleSubmissionFailure(repo, id, fromKey, recipientOnline)
@@ -188,8 +235,20 @@ export class L2PSMessagingService {
 
     private releaseOfflineQuota(fromKey: string, recipientOnline: boolean): void {
         if (recipientOnline) return
+        this.decrementOfflineCount(fromKey)
+    }
+
+    /**
+     * Keys are free to mint, so a sender that has nothing queued must not keep
+     * an entry: a zero would stay for the life of the process.
+     */
+    private decrementOfflineCount(fromKey: string): void {
         const count = this.offlineMessageCounts.get(fromKey) ?? 0
-        if (count > 0) this.offlineMessageCounts.set(fromKey, count - 1)
+        if (count > 1) {
+            this.offlineMessageCounts.set(fromKey, count - 1)
+        } else {
+            this.offlineMessageCounts.delete(fromKey)
+        }
     }
 
     /**
@@ -274,6 +333,7 @@ export class L2PSMessagingService {
         messageHash: string,
         encrypted: SerializedEncryptedMessage,
         timestamp: number,
+        onExecuted: () => void = () => {},
     ): Promise<{ success: boolean; txHash?: string; error?: string }> {
         try {
             const parallelNetworks = ParallelNetworks.getInstance()
@@ -352,6 +412,7 @@ export class L2PSMessagingService {
                 )
                 if (execResult.success) {
                     await L2PSMempool.updateStatus(encryptedTxHash, "executed")
+                    onExecuted()
                 } else {
                     await L2PSMempool.updateStatus(encryptedTxHash, "failed")
                     log.warning(`[L2PS-IM] Execution failed: ${execResult.message}`)
@@ -432,10 +493,7 @@ export class L2PSMessagingService {
 
         for (const row of rows) {
             if (row.status !== "queued") continue
-            const count = this.offlineMessageCounts.get(row.fromKey) ?? 0
-            if (count > 0) {
-                this.offlineMessageCounts.set(row.fromKey, count - 1)
-            }
+            this.decrementOfflineCount(row.fromKey)
         }
     }
 

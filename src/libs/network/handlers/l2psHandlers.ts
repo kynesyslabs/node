@@ -50,14 +50,14 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         }
 
         try {
-            const transactions = await L2PSMempool.getByUID(data.l2psUid, L2PS_STATUS.EXECUTED)
+            const summary = await L2PSMempool.getSummaryByUIDAndStatus(data.l2psUid, L2PS_STATUS.EXECUTED)
 
             response.result = 200
             response.response = {
                 l2psUid: data.l2psUid,
-                transactionCount: transactions.length,
-                lastTimestamp: transactions.at(-1)?.timestamp ?? 0,
-                oldestTimestamp: transactions.at(0)?.timestamp ?? 0,
+                transactionCount: summary.count,
+                lastTimestamp: summary.newestTimestamp ?? 0,
+                oldestTimestamp: summary.oldestTimestamp ?? 0,
             }
         } catch (error) {
             log.error("[L2PS] Failed to get mempool info:", error)
@@ -102,14 +102,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             // the queue still answers for them while it holds them — in any
             // status that follows execution, since batching moves them on
             // long before the sweep deletes them.
-            const missingPayload = rows.some(tx => !tx.encrypted_payload)
-            const queued = missingPayload
-                ? await L2PSMempool.getByUID(data.l2psUid, [
-                    L2PS_STATUS.EXECUTED,
-                    L2PS_STATUS.BATCHED,
-                    L2PS_STATUS.CONFIRMED,
-                ])
-                : []
+            const missingPayload = rows.filter(tx => !tx.encrypted_payload)
+            const queued = await L2PSMempool.getByOriginalHashes(
+                data.l2psUid,
+                missingPayload.map(tx => tx.hash),
+                [L2PS_STATUS.EXECUTED, L2PS_STATUS.BATCHED, L2PS_STATUS.CONFIRMED],
+            )
             const queuedByOriginalHash = new Map(queued.map(tx => [tx.original_hash, tx]))
 
             const transactions = rows

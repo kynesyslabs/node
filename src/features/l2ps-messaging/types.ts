@@ -199,6 +199,8 @@ export interface ErrorResponse extends ProtocolFrame<"error"> {
         code: ErrorCode
         message: string
         details?: string
+        /** Set with L2PS_BACKLOG_FULL: when it is worth sending the message again. */
+        retryAfterMs?: number
     }
 }
 
@@ -247,6 +249,7 @@ export type ErrorCode =
     | "PEER_NOT_FOUND"
     | "L2PS_NOT_FOUND"
     | "L2PS_SUBMIT_FAILED"
+    | "L2PS_BACKLOG_FULL"
     | "RATE_LIMITED"
     | "INTERNAL_ERROR"
 

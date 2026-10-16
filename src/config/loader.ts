@@ -290,6 +290,14 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.L2PS_CLEANUP_AGE_MS,
                 d.l2ps.cleanupAgeMs,
             ),
+            mempoolMaxExecutedPerSubnet: envInt(
+                EnvKey.L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET,
+                d.l2ps.mempoolMaxExecutedPerSubnet,
+            ),
+            aggregatorMaxBatchesPerCycle: envInt(
+                EnvKey.L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE,
+                d.l2ps.aggregatorMaxBatchesPerCycle,
+            ),
             historyRetentionDays: envInt(
                 EnvKey.L2PS_HISTORY_RETENTION_DAYS,
                 d.l2ps.historyRetentionDays,
@@ -458,6 +466,7 @@ export function loadConfig(): Readonly<AppConfig> {
     }
 
     assertConsensusTimingSane(config)
+    assertL2psBacklogCapUsable(config)
 
     return deepFreeze(config)
 }
@@ -508,6 +517,22 @@ function assertConsensusTimingSane(config: AppConfig): void {
     if (problems.length > 0) {
         throw new Error(
             `[config] invalid consensus timing configuration:\n  - ${problems.join("\n  - ")}`,
+        )
+    }
+}
+
+/**
+ * A subnet's executed backlog is only batched once it holds the minimum batch
+ * size. A cap below that refuses new transactions before the aggregator will
+ * touch the ones already accepted, so the subnet would stop for good.
+ */
+function assertL2psBacklogCapUsable(config: AppConfig): void {
+    const { mempoolMaxExecutedPerSubnet: cap, minBatchSize } = config.l2ps
+    if (cap > 0 && cap < minBatchSize) {
+        throw new Error(
+            `[config] L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET (${cap}) is below L2PS_MIN_BATCH_SIZE (${minBatchSize}): ` +
+                "a subnet would fill up before its first batch could form. " +
+                "Raise the cap to at least the minimum batch size, or set it to 0 to disable the limit.",
         )
     }
 }

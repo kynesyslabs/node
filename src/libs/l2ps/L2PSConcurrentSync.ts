@@ -4,6 +4,7 @@ import log from "@/utilities/logger"
 // FIX: Default import for the service class and use relative path or alias correctly
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
 
 /**
  * L2PS Concurrent Sync Utilities
@@ -276,6 +277,11 @@ async function processReceivedTransactions(l2psUid: string, txs: any[], peerIden
 
             if (!l2psTx || !originalHash || !l2psTx.hash || !l2psTx.content) {
                 log.debug(`[L2PS-SYNC] Invalid transaction structure received from ${peerIdentity}`)
+                continue
+            }
+
+            if (!isValidL2PSTxHash(l2psTx.hash)) {
+                log.warning(`[L2PS-SYNC] Dropping synced transaction with a malformed hash from ${peerIdentity}`)
                 continue
             }
 

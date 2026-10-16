@@ -335,7 +335,11 @@ export class L2PSMessagingServer {
         )
 
         if (!result.success) {
-            this.sendError(ws, "L2PS_SUBMIT_FAILED", result.error, msg.requestId)
+            if (result.code === "L2PS_BACKLOG_FULL") {
+                this.sendError(ws, "L2PS_BACKLOG_FULL", result.error, msg.requestId, result.retryAfterMs)
+            } else {
+                this.sendError(ws, "L2PS_SUBMIT_FAILED", result.error, msg.requestId)
+            }
             return
         }
 
@@ -588,10 +592,11 @@ export class L2PSMessagingServer {
         code: ErrorCode,
         message: string,
         requestId?: string,
+        retryAfterMs?: number,
     ): void {
         this.send(ws, {
             type: "error",
-            payload: { code, message },
+            payload: retryAfterMs === undefined ? { code, message } : { code, message, retryAfterMs },
             timestamp: Date.now(),
             requestId,
         })
