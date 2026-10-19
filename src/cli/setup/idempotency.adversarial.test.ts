@@ -318,6 +318,26 @@ describe("where files are written", () => {
         expect(read(sub("s1", "private_key.txt")).trim()).toBe(fresh)
     })
 
+    it("reports a symlinked key with identical contents as needing replacement, and --force repairs it without touching the target", async () => {
+        writeSubnet(root, "s2", { key: null })
+        const target = path.join(outside, "same.key")
+        fs.writeFileSync(target, HEX_KEY + "\n", { mode: 0o644 })
+        fs.chmodSync(target, 0o644)
+        fs.symlinkSync(target, sub("s2", "private_key.txt"))
+        const refused = await cli(["--yes", "--l2ps-uid", "s2"])
+        expect(refused.code).toBe(1)
+        expect(refused.out).toContain("key is a symbolic link")
+        expect(fs.lstatSync(sub("s2", "private_key.txt")).isSymbolicLink()).toBe(true)
+        expect(fs.statSync(target).mode & 0o777).toBe(0o644)
+        const forced = await cli(["--yes", "--force", "--l2ps-uid", "s2"])
+        expect(forced.code).toBe(0)
+        expect(fs.lstatSync(sub("s2", "private_key.txt")).isSymbolicLink()).toBe(false)
+        expect(fs.statSync(sub("s2", "private_key.txt")).mode & 0o777).toBe(0o600)
+        expect(read(sub("s2", "private_key.txt")).trim()).toBe(HEX_KEY)
+        expect(fs.statSync(target).mode & 0o777).toBe(0o644)
+        expect(read(target)).toBe(HEX_KEY + "\n")
+    })
+
     it("fixes the mode of a key file that is world readable, never the other way", async () => {
         writeSubnet(root, "s1")
         fs.chmodSync(sub("s1", "private_key.txt"), 0o644)

@@ -36,6 +36,49 @@ describe("writeFileGuarded", () => {
         expect(writeFileGuarded(file, "same\n", { mode: 0o600, overwrite: false }).status).toBe("unchanged")
     })
 
+    describe("a symbolic link at the path", () => {
+        // The target sits outside the directory being written, with a loose mode
+        // that a write through the link would have tightened.
+        function linked() {
+            const outside = fs.mkdtempSync(path.join(root, "outside-"))
+            const target = path.join(outside, "real.key")
+            fs.writeFileSync(target, "same\n", { mode: 0o644 })
+            fs.chmodSync(target, 0o644)
+            const file = path.join(root, "k.txt")
+            fs.symlinkSync(target, file)
+            return { target, file }
+        }
+
+        it("is never called unchanged, even when the target holds the same content, and is left alone without overwrite", () => {
+            const { target, file } = linked()
+            expect(writeFileGuarded(file, "same\n", { mode: 0o600, overwrite: false }).status).toBe("link")
+            expect(fs.lstatSync(file).isSymbolicLink()).toBe(true)
+            expect(fs.statSync(target).mode & 0o777).toBe(0o644)
+        })
+
+        it("is replaced by a private regular file with overwrite; the target is untouched and the backup is the link", () => {
+            const { target, file } = linked()
+            const out = writeFileGuarded(file, "same\n", { mode: 0o600, overwrite: true })
+            expect(out.status).toBe("replaced")
+            expect(fs.lstatSync(file).isSymbolicLink()).toBe(false)
+            expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+            expect(fs.readFileSync(file, "utf8")).toBe("same\n")
+            expect(fs.readFileSync(target, "utf8")).toBe("same\n")
+            expect(fs.statSync(target).mode & 0o777).toBe(0o644)
+            const backup = (out as { backup: string }).backup
+            expect(fs.lstatSync(backup).isSymbolicLink()).toBe(true)
+            expect(fs.readlinkSync(backup)).toBe(target)
+        })
+
+        it("a dangling link is replaced by a regular file with overwrite and refused without", () => {
+            const file = path.join(root, "d.txt")
+            fs.symlinkSync(path.join(root, "nowhere"), file)
+            expect(writeFileGuarded(file, "v\n", { mode: 0o600, overwrite: false }).status).toBe("link")
+            expect(writeFileGuarded(file, "v\n", { mode: 0o600, overwrite: true }).status).toBe("replaced")
+            expect(fs.lstatSync(file).isSymbolicLink()).toBe(false)
+        })
+    })
+
     it("replaces only when told to and keeps a private backup", () => {
         const file = path.join(root, "k.txt")
         fs.writeFileSync(file, "original\n")

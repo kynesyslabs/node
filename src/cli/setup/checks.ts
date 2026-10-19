@@ -269,10 +269,16 @@ function batchItem(b: BatchArtifacts, batches: BatchArtifacts[], anyComplete: bo
         return { ...base, status: "missing", detail: missing, blocking: true, fix: ZK_FIX }
     }
     const largest = Math.max(...batches.filter(x => x.complete).map(x => x.size))
+    // The prover lists only complete sizes, so an incomplete one is never picked: not blocking.
+    const larger = batches.filter(x => x.complete && x.size > b.size).map(x => x.size)
+    const effect =
+        larger.length > 0
+            ? `this size is skipped, batches of up to ${b.size} transactions use batch ${Math.min(...larger)}`
+            : `batches above ${largest} transactions cannot be proven`
     return {
         ...base,
         status: "warn",
-        detail: `${missing}; batches above ${largest} transactions cannot be proven`,
+        detail: `${missing}; ${effect}`,
         blocking: false,
         fix: ZK_FIX,
     }

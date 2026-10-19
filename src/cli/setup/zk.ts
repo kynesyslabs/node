@@ -2,6 +2,7 @@ import * as crypto from "node:crypto"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { L2PS_ZK_DIR, ZK_IDENTITY_VKEY } from "./context"
+import { rawBatchVkeyProblem, nonEmptyFile } from "../../libs/l2ps/zk/batchArtifacts"
 import { sameJson } from "./l2ps"
 import { displaySafe, trimTrailingSlashes } from "./validate"
 
@@ -41,44 +42,10 @@ export interface IdentityKeyState {
 const batchDir = (root: string, size: BatchSize) =>
     path.join(root, L2PS_ZK_DIR, "keys", `batch_${size}`)
 
-/** A file that exists and holds something: an empty one is a copy that was cut short. */
-const nonEmptyFile = (file: string): boolean => {
-    try {
-        return fs.statSync(file).size > 0
-    } catch {
-        return false
-    }
-}
-
-const isText = (v: unknown): boolean => typeof v === "string" && v !== ""
-const isPoint = (v: unknown, coordinates: number): boolean =>
-    Array.isArray(v) && v.length >= coordinates && v.every(c => (Array.isArray(c) ? c.length > 0 && c.every(isText) : isText(c)))
-
-const G1_FIELDS = ["Qm", "Ql", "Qr", "Qo", "Qc", "S1", "S2", "S3"] as const
-
-/**
- * Why a batch verification key cannot verify a proof, or undefined when it can.
- * The prover hands the parsed file straight to snarkjs's PLONK verifier, which
- * reads exactly these fields; a key missing one only fails later, on the first
- * proof, so it must not pass as a finished build.
- */
+/** Why a batch verification key cannot verify a proof, cleaned for the terminal, or undefined when it can. */
 export function batchVkeyProblem(file: string): string | undefined {
-    let key: any
-    try {
-        key = JSON.parse(fs.readFileSync(file, "utf8"))
-    } catch (e) {
-        return `is not valid JSON (${displaySafe(e instanceof Error ? e.message : e)})`
-    }
-    if (key === null || typeof key !== "object" || Array.isArray(key)) return "is not a JSON object"
-    if (key.protocol !== "plonk") return "is not a PLONK verification key"
-    if (key.curve !== "bn128") return "is not for the bn128 curve"
-    if (!Number.isInteger(key.nPublic) || !Number.isInteger(key.power)) return "has no nPublic or power"
-    const missing = [
-        ...["k1", "k2", "w"].filter(f => !isText(key[f])),
-        ...G1_FIELDS.filter(f => !isPoint(key[f], 2)),
-        ...(isPoint(key.X_2, 2) ? [] : ["X_2"]),
-    ]
-    return missing.length > 0 ? `lacks ${missing.join(", ")}` : undefined
+    const problem = rawBatchVkeyProblem(file)
+    return problem === undefined ? undefined : displaySafe(problem)
 }
 
 /** Same files the prover needs at proof time: zkey + wasm, and the vkey to verify. */

@@ -29,6 +29,7 @@ import * as fs from "node:fs"
 import { fileURLToPath } from "node:url"
 import { spawn, ChildProcess } from "node:child_process"
 import { plonkVerifyBun } from "./BunPlonkWrapper.js"
+import { isBatchBuilt } from "./batchArtifacts.js"
 import log from "@/utilities/logger"
 import { Config } from "src/config"
 
@@ -284,13 +285,12 @@ export class L2PSBatchProver {
     }
 
     /**
-     * Get available batch sizes (those with compiled zkeys)
+     * Get available batch sizes: only those with the whole artifact set. A size
+     * with a proving key but no circuit (or a key that cannot verify) would be
+     * picked for small batches and then fail, where the next size up works.
      */
     getAvailableBatchSizes(): BatchSize[] {
-        return BATCH_SIZES.filter(size => {
-            const zkeyPath = path.join(this.keysDir, `batch_${size}`, `l2ps_batch_${size}.zkey`)
-            return fs.existsSync(zkeyPath)
-        })
+        return BATCH_SIZES.filter(size => isBatchBuilt(this.keysDir, size))
     }
 
     /**

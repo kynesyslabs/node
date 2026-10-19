@@ -271,3 +271,41 @@ describe("a batch verification key counts only when the verifier can use it", ()
         expect(b).toMatchObject({ vkey: false, vkeyProblem: undefined })
     })
 })
+
+describe("the prover only offers batch sizes that are fully built", () => {
+    const keys = () => path.join(root, "src/libs/l2ps/zk/keys")
+    async function prover() {
+        // The node loads this before anything else; the prover's imports need it.
+        await import("reflect-metadata")
+        const { L2PSBatchProver } = await import("@/libs/l2ps/zk/L2PSBatchProver")
+        return new L2PSBatchProver(keys()) as any
+    }
+
+    it("lists a size only with proving key, circuit and a usable verification key", async () => {
+        writeZkBatch(root, 5, { zkey: true, wasm: false, vkey: true })
+        writeZkBatch(root, 10)
+        expect((await prover()).getAvailableBatchSizes()).toEqual([10])
+        writeZkBatch(root, 5)
+        expect((await prover()).getAvailableBatchSizes()).toEqual([5, 10])
+        fs.writeFileSync(path.join(keys(), "batch_5", "verification_key.json"), JSON.stringify({ protocol: "plonk" }))
+        expect((await prover()).getAvailableBatchSizes()).toEqual([10])
+    })
+
+    it("a batch of 3 uses batch 10 while batch 5 is incomplete, and batch 5 once it is built", async () => {
+        writeZkBatch(root, 5, { zkey: true, wasm: false, vkey: true })
+        writeZkBatch(root, 10)
+        expect((await prover()).selectBatchSize(3)).toBe(10)
+        writeZkBatch(root, 5)
+        expect((await prover()).selectBatchSize(3)).toBe(5)
+    })
+
+    it("the setup check says an incomplete size is skipped, and does not block", () => {
+        writeSubnet(root, "good")
+        writeZkBatch(root, 5, { zkey: true, wasm: false, vkey: true })
+        writeZkBatch(root, 10)
+        const item = collectChecks(createContext(root, ".env", { L2PS_ZK_ENABLED: "true" })).items.find(i => i.item === "Batch of up to 5")
+        expect(item).toMatchObject({ status: "warn", blocking: false })
+        expect(item?.detail).toContain("this size is skipped")
+        expect(item?.detail).toContain("use batch 10")
+    })
+})

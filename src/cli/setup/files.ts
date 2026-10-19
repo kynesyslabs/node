@@ -7,6 +7,8 @@ export type WriteOutcome =
     | { status: "unchanged" }
     | { status: "replaced"; backup: string }
     | { status: "kept" }
+    /** The path is a symbolic link and replacing it was not allowed. */
+    | { status: "link" }
 
 export interface WriteOptions {
     mode: number
@@ -74,7 +76,15 @@ function destination(file: string, opts: WriteOptions): string {
     return target
 }
 
-/** Copies the file to a fresh `.bak-<time>` sibling and returns its path. */
+export function isSymlink(file: string): boolean {
+    try {
+        return fs.lstatSync(file).isSymbolicLink()
+    } catch {
+        return false
+    }
+}
+
+/** Copies the file (or, for a link, the link itself) to a fresh `.bak-<time>` sibling and returns its path. */
 function backUp(file: string, now: () => number): string {
     // Never overwrite an earlier backup: it may be the only copy of a key.
     const stamp = now()
@@ -82,6 +92,11 @@ function backUp(file: string, now: () => number): string {
         const suffix = n === 0 ? "" : `-${n}`
         const backup = `${file}.bak-${stamp}${suffix}`
         try {
+            if (isSymlink(file)) {
+                // Copying a link would copy what it points at, which may be outside the checkout.
+                fs.symlinkSync(fs.readlinkSync(file), backup)
+                return backup
+            }
             fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL)
             fs.chmodSync(backup, 0o600)
             return backup
@@ -125,6 +140,16 @@ export function writeFileGuarded(
 ): WriteOutcome {
     const file = destination(requested, opts)
     fs.mkdirSync(path.dirname(file), { recursive: true })
+    // A link is judged by what it is, never by what it points at: reading through
+    // it would call an outside file "unchanged", and tightening its mode would
+    // chmod that file. The node's checker rejects a linked key, so only a
+    // replacement by a regular file repairs it.
+    if (!opts.followSymlink && isSymlink(file)) {
+        if (!opts.overwrite) return { status: "link" }
+        const backup = backUp(file, now)
+        replaceAtomically(file, content, opts.mode, rename)
+        return { status: "replaced", backup }
+    }
     if (!fs.existsSync(file)) {
         replaceAtomically(file, content, opts.mode, rename)
         return { status: "created" }

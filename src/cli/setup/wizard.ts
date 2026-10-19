@@ -22,7 +22,7 @@ import {
     readEnvFile,
     type EnvChange,
 } from "./envFile"
-import { isInsideDir, readTextIfExists, realpathLoose, resolveSymlink, writeFileGuarded, type WriteOutcome } from "./files"
+import { isInsideDir, isSymlink, readTextIfExists, realpathLoose, resolveSymlink, writeFileGuarded, type WriteOutcome } from "./files"
 import {
     buildSubnetFiles,
     type SubnetFile,
@@ -434,12 +434,15 @@ async function decideFiles(
     const blocked: string[] = []
     for (const f of files) {
         const abs = path.resolve(deps.ctx.root, f.rel)
-        const current = readTextIfExists(abs)
-        const sameData = current !== undefined && sameContent(f, current)
-        const differs = current !== undefined && !sameData
+        // A link never counts as "same data": the checker rejects it whatever it points at,
+        // so it needs replacing even when the target holds exactly the wanted key.
+        const link = isSymlink(abs)
+        const current = link ? "" : readTextIfExists(abs)
+        const sameData = !link && current !== undefined && sameContent(f, current)
+        const differs = link || (current !== undefined && !sameData)
         const overwrite = differs && (await mayReplace(deps, f.rel))
         if (differs && !overwrite && f.secret) {
-            blocked.push(`${f.rel === keyRel ? "key" : "IV"} differs`)
+            blocked.push(`${f.rel === keyRel ? "key" : "IV"} ${link ? "is a symbolic link" : "differs"}`)
         }
         decisions.push({ file: f, abs, current, differs, overwrite, sameData })
     }
@@ -560,6 +563,8 @@ function describe(rel: string, o: WriteOutcome, secret: boolean, keptDiffering: 
             return `  unchanged ${rel}`
         case "replaced":
             return `  replaced ${rel} (old version saved as ${path.basename(o.backup)})`
+        case "link":
+            return `  kept ${rel} (a symbolic link; pass --force to replace it with a regular file)`
         case "kept":
             return `  kept ${rel}${keptDiffering ? " (differs from the answers; pass --force to replace it)" : ""}`
     }
