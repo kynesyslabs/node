@@ -24,3 +24,19 @@ export const TXS_PUBLISHER_BYTES_PER_SEC = 5 * 1024 * 1024
 export const TXS_PUBLISHER_BYTES_BURST = 50 * 1024 * 1024
 export const TXS_GLOBAL_RATE_PER_SEC = 1000
 export const TXS_GLOBAL_BURST = 2000
+
+/**
+ * Budget for signature checks on tx messages, charged to the transport
+ * origin (the libp2p peer that signed the gossipsub message) before the
+ * publisher's own signature is verified. Bounds the verification work a
+ * peer can force with forged envelopes; the claimed publisher is charged
+ * only once its signature passes. An honest origin is one publisher, so it
+ * gets the publisher budget. The pool-wide cap is twice the admitted
+ * global rate, so forgeries have to fill it before honest traffic waits.
+ */
+export const TXS_ORIGIN_RATE_PER_SEC = TXS_PUBLISHER_RATE_PER_SEC
+export const TXS_ORIGIN_BURST = TXS_PUBLISHER_BURST
+export const TXS_ORIGIN_BYTES_PER_SEC = TXS_PUBLISHER_BYTES_PER_SEC
+export const TXS_ORIGIN_BYTES_BURST = TXS_PUBLISHER_BYTES_BURST
+export const TXS_UNVERIFIED_RATE_PER_SEC = 2 * TXS_GLOBAL_RATE_PER_SEC
+export const TXS_UNVERIFIED_BURST = 2 * TXS_GLOBAL_BURST

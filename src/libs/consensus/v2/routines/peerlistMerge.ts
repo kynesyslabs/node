@@ -307,9 +307,9 @@ async function collectParentVotes(
  * unique, and staked at the round's parent height when a validator set
  * exists. With `shardMembers`, it is also held to our own contributions:
  * every entry must have been observed at the parent block by some member,
- * and every identity that reaches quorum in our view must be present. The
- * secretary can then neither invent a validator nor drop one the shard
- * agreed on. Returns the list or null when it fails.
+ * and every staked identity that reaches quorum in our view must be
+ * present. The secretary can then neither invent a validator nor drop one
+ * the shard agreed on. Returns the list or null when it fails.
  */
 export async function validateMergedPeerlist(
     blockRef: number,
@@ -336,6 +336,19 @@ export async function validateMergedPeerlist(
 
     const list = peerlist as string[]
 
+    // Same validator set the secretary filtered with, so an unstaked peer
+    // the shard observed is neither required nor allowed.
+    const activeValidators = (await GCR.getGCRValidatorsAtBlock(
+        blockRef - 1,
+    )) as Validators[]
+    const validatorAddresses = new Set<string>(
+        activeValidators
+            .map(v => v.address)
+            .filter((a): a is string => a !== null),
+    )
+    const isStaked = (id: string) =>
+        activeValidators.length === 0 || validatorAddresses.has(id)
+
     if (shardMembers) {
         const { votes, quorum } = await collectParentVotes(blockRef, shardMembers)
         const listed = new Set(list)
@@ -347,26 +360,18 @@ export async function validateMergedPeerlist(
             return null
         }
         const dropped = [...votes]
-            .filter(([id, seenBy]) => seenBy.size >= quorum && !listed.has(id))
+            .filter(
+                ([id, seenBy]) =>
+                    seenBy.size >= quorum && isStaked(id) && !listed.has(id),
+            )
             .map(([id]) => id)
         if (dropped.length > 0) {
             log.error(
-                `[peerlistMerge] dictated peerlist for block ${blockRef} omits ${dropped.length} identit(ies) at quorum in our view: ${dropped.join(", ")}`,
+                `[peerlistMerge] dictated peerlist for block ${blockRef} omits ${dropped.length} staked identit(ies) at quorum in our view: ${dropped.join(", ")}`,
             )
             return null
         }
     }
 
-    const activeValidators = (await GCR.getGCRValidatorsAtBlock(
-        blockRef - 1,
-    )) as Validators[]
-    if (activeValidators.length === 0) {
-        return list
-    }
-    const validatorAddresses = new Set<string>(
-        activeValidators
-            .map(v => v.address)
-            .filter((a): a is string => a !== null),
-    )
-    return list.every(id => validatorAddresses.has(id)) ? list : null
+    return list.every(isStaked) ? list : null
 }

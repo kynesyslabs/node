@@ -810,6 +810,7 @@ export class GossipManager {
         } else if (topic === TXS_TOPIC) {
             const { result, validityData } = await validateTxMessage(
                 new Uint8Array(data),
+                from,
             )
             if (result !== "accept" || !validityData) return
             await this.applyTx(validityData)

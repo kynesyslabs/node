@@ -22,10 +22,16 @@ import {
     TXS_GLOBAL_BURST,
     TXS_GLOBAL_RATE_PER_SEC,
     TXS_MAX_BYTES,
+    TXS_ORIGIN_BURST,
+    TXS_ORIGIN_BYTES_BURST,
+    TXS_ORIGIN_BYTES_PER_SEC,
+    TXS_ORIGIN_RATE_PER_SEC,
     TXS_PUBLISHER_BURST,
     TXS_PUBLISHER_BYTES_BURST,
     TXS_PUBLISHER_BYTES_PER_SEC,
     TXS_PUBLISHER_RATE_PER_SEC,
+    TXS_UNVERIFIED_BURST,
+    TXS_UNVERIFIED_RATE_PER_SEC,
 } from "./topics"
 import { countTxRateLimited, recordVerdict } from "./metrics"
 import { TxRateLimiter } from "./rateLimit"
@@ -239,6 +245,23 @@ const txRateLimiter = new TxRateLimiter({
     },
 })
 
+// Charged to the transport origin before the signature check, so a peer
+// cannot force unbounded verification work with forged envelopes.
+const originRateLimiter = new TxRateLimiter({
+    publisherMessages: {
+        ratePerSec: TXS_ORIGIN_RATE_PER_SEC,
+        burst: TXS_ORIGIN_BURST,
+    },
+    publisherBytes: {
+        ratePerSec: TXS_ORIGIN_BYTES_PER_SEC,
+        burst: TXS_ORIGIN_BYTES_BURST,
+    },
+    globalMessages: {
+        ratePerSec: TXS_UNVERIFIED_RATE_PER_SEC,
+        burst: TXS_UNVERIFIED_BURST,
+    },
+})
+
 export function isValidityDataShape(x: unknown): x is ValidityData {
     if (x === null || typeof x !== "object") return false
     const vd = x as Record<string, unknown>
@@ -269,15 +292,21 @@ export interface TxValidation {
 
 /**
  * Gate for gossiped transactions: size, shape, signing algorithm, a staked
- * publisher, its rate budget, and the publisher's signature over the
- * envelope. Everything about the transaction itself is checked by the
- * mempool ingest step that follows an accept.
+ * publisher, the origin's verification budget, the publisher's signature
+ * over the envelope, then the publisher's rate budget. Everything about
+ * the transaction itself is checked by the mempool ingest step that
+ * follows an accept.
+ *
+ * `origin` is the libp2p peer that signed the gossipsub message, which
+ * libp2p has already authenticated; it pays for the signature check so a
+ * forged envelope costs the claimed publisher nothing.
  *
  * Over-budget messages are `ignore`, not `reject`, so gossipsub does not
  * penalise an honest but busy publisher.
  */
 export async function validateTxMessage(
     data: Uint8Array,
+    origin = "",
 ): Promise<TxValidation> {
     if (data.length > TXS_MAX_BYTES) {
         log.debug(`[GOSSIP] tx reject: oversized (${data.length} bytes)`)
@@ -314,14 +343,21 @@ export async function validateTxMessage(
         recordVerdict("txs", "reject")
         return { result: "reject" }
     }
-    // Check the budget before paying for the signature check, but charge
-    // it only once the signature proves the message is the publisher's.
-    // A forged envelope under a validator's key then costs that validator
-    // nothing.
+    // Check the publisher's budget before paying for the signature check,
+    // but charge it only once the signature proves the message is theirs.
     const budget = txRateLimiter.peek(publisher, data.length)
     if (budget !== "ok") {
         log.debug(`[GOSSIP] tx ignore: ${budget} for publisher ${publisher}`)
         countTxRateLimited(budget)
+        recordVerdict("txs", "ignore")
+        return { result: "ignore" }
+    }
+    const originBudget = originRateLimiter.admit(origin || "unknown", data.length)
+    if (originBudget !== "ok") {
+        log.debug(
+            `[GOSSIP] tx ignore: origin_${originBudget} for origin ${origin || "unknown"} claiming ${publisher}`,
+        )
+        countTxRateLimited(`origin_${originBudget}`)
         recordVerdict("txs", "ignore")
         return { result: "ignore" }
     }

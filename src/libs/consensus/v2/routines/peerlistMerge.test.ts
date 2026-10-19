@@ -164,6 +164,16 @@ describe("validateMergedPeerlist", () => {
             expect(await validateMergedPeerlist(101, [], shard)).toBeNull()
         })
 
+        it("does not require an unstaked identity the shard observed at quorum", async () => {
+            validatorAddresses = [OUR_KEY, SYNCED_PEER]
+            contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+            contributePeerlist(101, "c2", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+            contributePeerlist(101, "c3", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+            const list = [OUR_KEY, SYNCED_PEER].sort()
+            expect(await computeMergedPeerlist(101, shard)).toEqual(list)
+            expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
+        })
+
         it("rejects an identity nobody observed at the parent block", async () => {
             const list = [OUR_KEY, SYNCED_PEER, STALE_PEER].sort()
             expect(await validateMergedPeerlist(101, list, shard)).toBeNull()
