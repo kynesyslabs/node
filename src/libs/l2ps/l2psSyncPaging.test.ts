@@ -31,6 +31,7 @@ jest.mock("@/utilities/logger", () => ({
     },
 }))
 
+import log from "@/utilities/logger"
 import {
     clearL2PSSyncCursors,
     MAX_SYNC_CONTINUATIONS,
@@ -268,9 +269,16 @@ describe("synced rows with a malformed hash", () => {
                 : { transactions: [], nextCursor: 1, hasMore: false },
         )
 
+        const warning = log.warning as unknown as ReturnType<typeof jest.fn>
+        warning.mockClear()
+
         await syncL2PSWithPeer(peer, "subnet-1")
 
         expect(addTransaction).toHaveBeenCalledTimes(1)
         expect((addTransaction.mock.calls[0] as any[])[1].hash).toBe(hex(2))
+        // One line for the page, with the count, however many hashes were bad.
+        const dropped = warning.mock.calls.filter(call => String(call[0]).includes("malformed hash"))
+        expect(dropped).toHaveLength(1)
+        expect(String(dropped[0][0])).toContain("Dropped 3 ")
     })
 })

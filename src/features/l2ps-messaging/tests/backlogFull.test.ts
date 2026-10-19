@@ -41,6 +41,7 @@ mock.module("@/libs/l2ps/executedBacklogGuard", () => ({
 
 const { L2PSMessagingService } = await import("../L2PSMessagingService")
 const { L2PSMessagingServer } = await import("../L2PSMessagingServer")
+const { SendRateLimiter } = await import("../sendRateLimiter")
 
 const service = L2PSMessagingService.getInstance() as any
 const submitToL2PS = jest.spyOn(service, "submitToL2PS").mockImplementation(async (...args: unknown[]) => {
@@ -157,6 +158,36 @@ describe("messaging relay with a full subnet queue", () => {
         expect(result.success).toBe(true)
         expect(guard.release).toHaveBeenCalledTimes(1)
         expect(guard.settle).not.toHaveBeenCalled()
+    })
+
+    it("answers RATE_LIMITED to a sender over its rate, before any storage, and keeps the socket usable", async () => {
+        guard.check.mockResolvedValue({ admitted: true })
+        let clock = 1_000_000
+        ;(server as any).sendLimiter = new SendRateLimiter({ ratePerSec: 1, burst: 2, now: () => clock })
+        const alice = identity()
+        const bob = identity()
+        const a = await connect(alice)
+        await connect(bob)
+        const send = (hash: string) =>
+            a.ws.send(JSON.stringify({ type: "send", payload: { to: bob.publicKey, encrypted, messageHash: hash }, timestamp: Date.now(), requestId: hash }))
+
+        send("r1")
+        expect((await a.next()).type).toBe("message_sent")
+        send("r2")
+        expect((await a.next()).type).toBe("message_sent")
+        send("r3")
+        const refused = await a.next()
+
+        expect(refused.type).toBe("error")
+        expect(refused.payload.code).toBe("RATE_LIMITED")
+        expect(refused.payload.retryAfterMs).toBe(1000)
+        expect(refused.requestId).toBe("r3")
+        expect(rows.size).toBe(2)
+        expect(guard.check).toHaveBeenCalledTimes(2)
+
+        clock += 1000
+        send("r4")
+        expect((await a.next()).type).toBe("message_sent")
     })
 
     it("answers retry-later when the subnet fills between the check and the claim, and keeps the sender's quota", async () => {

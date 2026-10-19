@@ -18,6 +18,8 @@ import { canonicalizeKey } from "./keys"
 import type { MessageStatus, SerializedEncryptedMessage, StoredMessage } from "./types"
 
 const MAX_OFFLINE_MESSAGES_PER_SENDER = 200
+/** Messaging slots are held to a share of the subnet's backlog cap. */
+const MESSAGING_CLAIM = { origin: "messaging" } as const
 
 export interface ProcessMessageResult {
     success: boolean
@@ -107,7 +109,7 @@ export class L2PSMessagingService {
 
         // Before anything is written: a refused message leaves no row behind.
         const backlog = getExecutedBacklogGuard()
-        const room = await backlog.check(l2psUid)
+        const room = await backlog.check(l2psUid, MESSAGING_CLAIM)
         if (!room.admitted) return this.backlogFullResult(room.retryAfterMs)
 
         const quotaError = this.reserveOfflineQuota(fromKey, recipientOnline)
@@ -116,19 +118,19 @@ export class L2PSMessagingService {
         // The slot comes after the quota, so a sender at its own limit never
         // takes room from the subnet, and it is held only while this attempt
         // is running: an executed row is counted by the database from then on.
-        if (!backlog.claim(l2psUid)) {
+        if (!backlog.claim(l2psUid, MESSAGING_CLAIM)) {
             this.releaseOfflineQuota(fromKey, recipientOnline)
             return this.backlogFullResult(room.retryAfterMs)
         }
         let executed = false
         const onExecuted = () => {
             executed = true
-            backlog.settle(l2psUid)
+            backlog.settle(l2psUid, MESSAGING_CLAIM)
         }
         try {
             return await this.storeAndSubmit(repo, identity, existing, messageId, encrypted, recipientOnline, onExecuted)
         } finally {
-            if (!executed) backlog.release(l2psUid)
+            if (!executed) backlog.release(l2psUid, MESSAGING_CLAIM)
         }
     }
 
@@ -411,8 +413,13 @@ export class L2PSMessagingService {
                     l2psUid, tx, encryptedTxHash, false,
                 )
                 if (execResult.success) {
-                    await L2PSMempool.updateStatus(encryptedTxHash, "executed")
-                    onExecuted()
+                    // A row that is still not executed is not counted by the
+                    // database either, so its slot goes back instead of settling.
+                    if (await L2PSMempool.updateStatus(encryptedTxHash, "executed")) {
+                        onExecuted()
+                    } else {
+                        log.warning(`[L2PS-IM] Could not mark ${encryptedTxHash} executed`)
+                    }
                 } else {
                     await L2PSMempool.updateStatus(encryptedTxHash, "failed")
                     log.warning(`[L2PS-IM] Execution failed: ${execResult.message}`)

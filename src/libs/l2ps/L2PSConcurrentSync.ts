@@ -269,6 +269,9 @@ export async function exchangeL2PSParticipation(peers: Peer[]): Promise<void> {
  * Helper to process a batch of received L2PS transactions
  */
 async function processReceivedTransactions(l2psUid: string, txs: any[], peerIdentity: string): Promise<void> {
+    // One line per batch: a peer chooses how many bad hashes it sends, so a
+    // line each would let it fill the log.
+    let malformedHashes = 0
     for (const txData of txs) {
         try {
             // Extract and validate L2PS transaction object
@@ -281,7 +284,7 @@ async function processReceivedTransactions(l2psUid: string, txs: any[], peerIden
             }
 
             if (!isValidL2PSTxHash(l2psTx.hash)) {
-                log.warning(`[L2PS-SYNC] Dropping synced transaction with a malformed hash from ${peerIdentity}`)
+                malformedHashes++
                 continue
             }
 
@@ -297,5 +300,8 @@ async function processReceivedTransactions(l2psUid: string, txs: any[], peerIden
         } catch (err) {
             log.warning(`[L2PS-SYNC] Exception processing synced tx: ${err instanceof Error ? err.message : String(err)}`)
         }
+    }
+    if (malformedHashes > 0) {
+        log.warning(`[L2PS-SYNC] Dropped ${malformedHashes} synced transaction(s) with a malformed hash from ${peerIdentity}`)
     }
 }

@@ -7,11 +7,13 @@
 
 import type { Server, ServerWebSocket } from "bun"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { Config } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { L2PSMessagingService } from "./L2PSMessagingService"
 import { canonicalizeKey } from "./keys"
+import { SendRateLimiter } from "./sendRateLimiter"
 import type {
     ConnectedPeer,
     ProtocolFrame,
@@ -57,6 +59,8 @@ export class L2PSMessagingServer {
     /** Register proofs already accepted per subnet, until their timestamp leaves the window. */
     private usedRegisterProofs = new Map<string, number>()
     private lastProofPrune = 0
+    /** Per sender key, so a throwaway key cannot flood a subnet's queue. */
+    private sendLimiter: SendRateLimiter
     // Bun.Server / Bun.serve dropped the WSData generic; the cast on
     // `ws.data` accesses at call sites still narrows correctly because
     // we set ws.data in `upgrade()`.
@@ -65,6 +69,8 @@ export class L2PSMessagingServer {
 
     constructor(port: number) {
         this.service = L2PSMessagingService.getInstance()
+        const { messagingSendRate, messagingSendBurst } = Config.getInstance().l2ps
+        this.sendLimiter = new SendRateLimiter({ ratePerSec: messagingSendRate, burst: messagingSendBurst })
 
         this.server = Bun.serve({
             port,
@@ -321,6 +327,14 @@ export class L2PSMessagingServer {
 
         if (toKey === senderKey) {
             this.sendError(ws, "INVALID_MESSAGE", "Cannot send message to yourself", msg.requestId)
+            return
+        }
+
+        // Before any database work: a sender over its rate costs the node
+        // nothing beyond this check, and the socket stays usable.
+        const allowance = this.sendLimiter.take(senderKey)
+        if (!allowance.allowed) {
+            this.sendError(ws, "RATE_LIMITED", "Sending too fast, retry later", msg.requestId, allowance.retryAfterMs)
             return
         }
 

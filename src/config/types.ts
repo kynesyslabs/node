@@ -146,6 +146,19 @@ export interface L2PSConfig {
     /** Batches the aggregator builds per subnet in one cycle. */
     aggregatorMaxBatchesPerCycle: number
     /**
+     * Messages per second one sender key may submit through the messaging
+     * relay, after its burst is spent. Anyone can register a key, so without
+     * this a few throwaway keys fill a subnet's backlog. 0 turns the limit off.
+     */
+    messagingSendRate: number
+    /** Messages a sender key may send at once before the rate applies. */
+    messagingSendBurst: number
+    /**
+     * Largest fraction of the backlog cap that messaging may hold, so
+     * transactions submitted over RPC keep the rest. 1 gives messaging all of it.
+     */
+    messagingBacklogShare: number
+    /**
      * How long an executed transaction stays in the durable history table,
      * in days. 0 keeps history forever, which is the default: `cleanupAgeMs`
      * above governs the aggregation *queue* only, and a subnet that wants its

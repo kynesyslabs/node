@@ -300,8 +300,13 @@ async function executeAndRecordL2PSTransaction(
     // count right here, before any further database work, so a refresh
     // landing in between cannot count the row twice for longer than it
     // takes the next refresh to replace the cached value.
-    await L2PSMempool.updateStatus(l2psTx.hash, "executed")
-    onExecuted()
+    // A failed update leaves the row unexecuted, so the database will not
+    // count it and the slot goes back instead of settling.
+    if (await L2PSMempool.updateStatus(l2psTx.hash, "executed")) {
+        onExecuted()
+    } else {
+        log.warning(`[handleL2PS] Could not mark ${l2psTx.hash} executed`)
+    }
 
     // Record transaction in l2ps_transactions table for persistent history
     try {

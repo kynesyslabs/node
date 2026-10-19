@@ -252,6 +252,72 @@ describe("executed backlog cap", () => {
         expect(g.claim("a")).toBe(false)
     })
 
+    describe("messaging share of the cap", () => {
+        const messaging = { origin: "messaging" } as const
+
+        function shared(cap = 100, messagingShare = 0.5) {
+            return new ExecutedBacklogGuard({
+                cap,
+                retryAfterMs: 10_000,
+                now: () => clock,
+                countExecuted: async uid => backlog[uid] ?? 0,
+                messagingShare,
+            })
+        }
+
+        it("refuses messaging past its share while RPC still claims", async () => {
+            const g = shared()
+            await g.check("a", messaging)
+            for (let i = 0; i < 50; i++) expect(g.claim("a", messaging)).toBe(true)
+
+            expect(g.claim("a", messaging)).toBe(false)
+            expect((await g.check("a", messaging)).admitted).toBe(false)
+            expect((await g.check("a")).admitted).toBe(true)
+            for (let i = 0; i < 50; i++) expect(g.claim("a")).toBe(true)
+            expect(g.claim("a")).toBe(false)
+        })
+
+        it("keeps counting settled messaging rows against the share, and gives released ones back", async () => {
+            const g = shared()
+            await g.check("a", messaging)
+            for (let i = 0; i < 50; i++) {
+                expect(g.claim("a", messaging)).toBe(true)
+                g.settle("a", messaging)
+            }
+            expect(g.claim("a", messaging)).toBe(false)
+
+            const h = shared()
+            await h.check("a", messaging)
+            for (let i = 0; i < 50; i++) {
+                expect(h.claim("a", messaging)).toBe(true)
+                h.release("a", messaging)
+            }
+            expect(h.claim("a", messaging)).toBe(true)
+        })
+
+        it("lets messaging back in as a refresh shows the queue drained", async () => {
+            const g = shared()
+            await g.check("a", messaging)
+            for (let i = 0; i < 50; i++) {
+                g.claim("a", messaging)
+                g.settle("a", messaging)
+            }
+            expect(g.claim("a", messaging)).toBe(false)
+
+            backlog.a = 10
+            clock += 3001
+            await g.check("a", messaging)
+            expect(g.claim("a", messaging)).toBe(true)
+        })
+
+        it("is not limited when the share is 1", async () => {
+            const g = shared(100, 1)
+            await g.check("a", messaging)
+            for (let i = 0; i < 100; i++) expect(g.claim("a", messaging)).toBe(true)
+            expect(g.claim("a", messaging)).toBe(false)
+        })
+    })
+
     it("claims nothing for a subnet it has never checked", () => {
         expect(guard().claim("never-seen")).toBe(true)
     })

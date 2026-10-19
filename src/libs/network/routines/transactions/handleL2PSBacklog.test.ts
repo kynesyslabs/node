@@ -14,6 +14,7 @@ const claim = jest.fn()
 const release = jest.fn()
 const settle = jest.fn()
 const guard = { check, claim, release, settle, retryAfterMs: 10_000 }
+const updateStatus = jest.fn(async (..._args: unknown[]) => true)
 const execute = jest.fn(async (..._args: unknown[]): Promise<any> => ({ success: true, gcr_edits: [] }))
 const addTransaction = jest.fn(async (..._args: unknown[]): Promise<{ success: boolean; error?: string }> => ({ success: true }))
 const existsByOriginalHash = jest.fn(async (..._args: unknown[]) => false)
@@ -35,7 +36,7 @@ mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     default: {
         addTransaction,
         existsByOriginalHash,
-        updateStatus: async () => true,
+        updateStatus,
         updateGCREdits: async () => true,
     },
 }))
@@ -73,6 +74,8 @@ beforeEach(() => {
     release.mockReset()
     settle.mockReset()
     execute.mockReset()
+    updateStatus.mockReset()
+    updateStatus.mockResolvedValue(true)
     execute.mockResolvedValue({ success: true, gcr_edits: [] })
     check.mockResolvedValue({ admitted: true, count: 1, cap: 50_000, retryAfterMs: 10_000 })
     claim.mockReturnValue(true)
@@ -124,6 +127,15 @@ describe("handleL2PS with a full subnet queue", () => {
         expect(settle).toHaveBeenCalledTimes(1)
         expect(settle).toHaveBeenCalledWith("subnet_a")
         expect(release).not.toHaveBeenCalled()
+    })
+
+    it("gives the slot back, without settling, when the row could not be marked executed", async () => {
+        updateStatus.mockResolvedValue(false)
+
+        await handleL2PS(tx)
+
+        expect(settle).not.toHaveBeenCalled()
+        expect(release).toHaveBeenCalledTimes(1)
     })
 
     it("gives the slot back when the mempool refuses the row", async () => {
