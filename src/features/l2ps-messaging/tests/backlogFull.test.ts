@@ -203,6 +203,33 @@ describe("messaging relay with a full subnet queue", () => {
         expect(guard.release).not.toHaveBeenCalled()
     })
 
+    it("retries a delivery while the backlog is full, since it adds nothing to the queue", async () => {
+        guard.check.mockResolvedValue({ admitted: false, count: 50_000, cap: 50_000, retryAfterMs: 10_000 })
+        const failed = { id: "old", status: "failed", l2psTxHash: "0xold", encrypted, fromKey: "alice", toKey: "bob" }
+        const find = jest.spyOn(repo, "findOneBy").mockResolvedValueOnce(failed as never)
+
+        const result = await service.processMessage("alice", "bob", "subnet_a", "m5", "h7", encrypted, true)
+        find.mockRestore()
+
+        expect(result.success).toBe(true)
+        expect(result.messageId).toBe("old")
+        expect(guard.check).not.toHaveBeenCalled()
+        expect(guard.claim).not.toHaveBeenCalled()
+        expect(submitToL2PS).not.toHaveBeenCalled()
+    })
+
+    it("leaves no quota entry behind when a new offline message is refused for a full backlog", async () => {
+        guard.check.mockResolvedValue({ admitted: false, count: 50_000, cap: 50_000, retryAfterMs: 10_000 })
+
+        const result = await service.processMessage("alice", "bob", "subnet_a", "m6", "h8", encrypted, false)
+
+        expect(result.code).toBe("L2PS_BACKLOG_FULL")
+        expect(service.offlineMessageCounts.size).toBe(0)
+        expect(service.heldSlots.size).toBe(0)
+        expect(rows.size).toBe(0)
+        expect(guard.claim).not.toHaveBeenCalled()
+    })
+
     it("lets a sender at its offline quota take no subnet slot", async () => {
         guard.check.mockResolvedValue({ admitted: true })
         service.offlineMessageCounts.set("alice", 200)

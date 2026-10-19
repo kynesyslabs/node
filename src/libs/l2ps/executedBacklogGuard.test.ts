@@ -17,6 +17,7 @@ const { ExecutedBacklogGuard } = await import("./executedBacklogGuard")
 
 let clock = 1_000_000
 let backlog: Record<string, number>
+let messagingBacklog: Record<string, number>
 let counts: number
 
 function guard(cap = 100) {
@@ -34,6 +35,7 @@ function guard(cap = 100) {
 beforeEach(() => {
     clock = 1_000_000
     backlog = {}
+    messagingBacklog = {}
     counts = 0
     warning.mockClear()
     error.mockClear()
@@ -261,6 +263,7 @@ describe("executed backlog cap", () => {
                 retryAfterMs: 10_000,
                 now: () => clock,
                 countExecuted: async uid => backlog[uid] ?? 0,
+                countMessaging: async uid => messagingBacklog[uid] ?? 0,
                 messagingShare,
             })
         }
@@ -304,10 +307,56 @@ describe("executed backlog cap", () => {
             }
             expect(g.claim("a", messaging)).toBe(false)
 
+            // The aggregator drained the queue, messaging rows included.
             backlog.a = 10
+            messagingBacklog.a = 10
             clock += 3001
             await g.check("a", messaging)
             expect(g.claim("a", messaging)).toBe(true)
+        })
+
+        it("counts the messaging rows the database holds, so a restart does not forget them", async () => {
+            backlog.a = 50
+            messagingBacklog.a = 50
+            const g = shared()
+
+            expect((await g.check("a", messaging)).admitted).toBe(false)
+            expect(g.claim("a", messaging)).toBe(false)
+            expect((await g.check("a")).admitted).toBe(true)
+            for (let i = 0; i < 50; i++) expect(g.claim("a")).toBe(true)
+            expect(g.claim("a")).toBe(false)
+        })
+
+        it("does not lose a messaging settle that lands while the refresh is reading", async () => {
+            const gate: { open: () => void } = { open: () => undefined }
+            let first = true
+            const g = new ExecutedBacklogGuard({
+                cap: 100,
+                retryAfterMs: 1,
+                now: () => clock,
+                messagingShare: 0.5,
+                countExecuted: async () => 0,
+                countMessaging: async () => {
+                    if (first) {
+                        first = false
+                        return 0
+                    }
+                    await new Promise<void>(resolve => (gate.open = resolve))
+                    return 49
+                },
+            })
+            await g.check("a", messaging)
+            expect(g.claim("a", messaging)).toBe(true)
+
+            clock += 3001
+            const refresh = g.check("a", messaging)
+            await Promise.resolve()
+            g.settle("a", messaging)
+            gate.open()
+            await refresh
+
+            // 49 read by the query, plus the one that settled while it ran.
+            expect(g.claim("a", messaging)).toBe(false)
         })
 
         it("lets messaging reach one batch when the share is smaller than the batch minimum", async () => {
@@ -342,6 +391,39 @@ describe("executed backlog cap", () => {
             for (let i = 0; i < 100; i++) expect(g.claim("a", messaging)).toBe(true)
             expect(g.claim("a", messaging)).toBe(false)
         })
+    })
+
+    it("does not lose a settle that lands while the refresh is reading", async () => {
+        let gate: () => void = () => undefined
+        let first = true
+        const g = new ExecutedBacklogGuard({
+            cap: 100,
+            retryAfterMs: 1,
+            now: () => clock,
+            countExecuted: async () => {
+                if (first) {
+                    first = false
+                    return 99
+                }
+                // The count is taken before the settle below lands.
+                const read = 99
+                await new Promise<void>(resolve => (gate = resolve))
+                return read
+            },
+        })
+        await g.check("a")
+        expect(g.claim("a")).toBe(true)
+
+        clock += 3001
+        const refresh = g.check("a")
+        await Promise.resolve()
+        g.settle("a")
+        gate()
+        await refresh
+
+        // 99 read plus the one that settled while reading: the subnet is full.
+        expect(g.claim("a")).toBe(false)
+        expect((await g.check("a")).count).toBe(100)
     })
 
     it("claims nothing for a subnet it has never checked", () => {

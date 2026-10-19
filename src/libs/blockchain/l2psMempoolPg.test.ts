@@ -13,6 +13,7 @@ import { DataSource } from "typeorm"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
+import { L2PSMessage } from "@/features/l2ps-messaging/entities/L2PSMessage"
 
 const PG_URL = process.env.L2PS_TEST_PG_URL
 const SCHEMA = `l2ps_mempool_test_${process.pid}_${Date.now()}`
@@ -73,7 +74,7 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
             url: PG_URL,
             schema: SCHEMA,
             extra: { options: `-c search_path=${SCHEMA}` },
-            entities: [L2PSMempoolTx, L2PSTransaction],
+            entities: [L2PSMempoolTx, L2PSTransaction, L2PSMessage],
         })
         await ds.initialize()
         await ds.query(`CREATE SCHEMA "${SCHEMA}"`)
@@ -89,7 +90,7 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
     })
 
     beforeEach(async () => {
-        await ds.query(`TRUNCATE "l2ps_mempool", "l2ps_transactions" RESTART IDENTITY`)
+        await ds.query(`TRUNCATE "l2ps_mempool", "l2ps_transactions", "l2ps_messages" RESTART IDENTITY`)
     })
 
     it("deletes old batched rows that have no edits and a stored ciphertext, and keeps everything else", async () => {
@@ -136,6 +137,29 @@ describe.skipIf(!PG_URL)("L2PS queue queries on Postgres", () => {
         expect(none).toEqual({ count: 0, oldestTimestamp: null, newestTimestamp: null })
         expect(await L2PSMempool.countByUIDAndStatus("subnet_a", "failed")).toBe(0)
         expect(await L2PSMempool.countByUIDAndStatus("subnet_a", "executed")).toBe(summary.count)
+    })
+
+    it("counts the executed rows a stored message points at, and only those", async () => {
+        await insert("m1", "executed", MINUTE, null)
+        await insert("m2", "executed", MINUTE, null)
+        await insert("m3", "batched", MINUTE, null)
+        await insert("m4", "executed", MINUTE, null, "subnet_b")
+        await insert("rpc", "executed", MINUTE, null)
+        let n = 0
+        for (const hash of ["m1", "m2", "m3", "m4"]) {
+            await ds.getRepository(L2PSMessage).insert({
+                id: `id-${++n}`, fromKey: "a", toKey: "b", l2psUid: "subnet_a", messageHash: `h-${n}`,
+                encrypted: {} as never, l2psTxHash: hash, timestamp: "1", status: "delivered",
+            })
+        }
+        await ds.getRepository(L2PSMessage).insert({
+            id: "id-none", fromKey: "a", toKey: "b", l2psUid: "subnet_a", messageHash: "h-none",
+            encrypted: {} as never, l2psTxHash: null, timestamp: "1", status: "queued",
+        })
+
+        expect(await L2PSMempool.countExecutedFromMessaging("subnet_a")).toBe(2)
+        expect(await L2PSMempool.countExecutedFromMessaging("subnet_b")).toBe(1)
+        expect(await L2PSMempool.countExecutedFromMessaging("subnet_c")).toBe(0)
     })
 
     it("pages the queue oldest first after a cursor, capped by the limit", async () => {

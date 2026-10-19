@@ -596,6 +596,25 @@ export default class L2PSMempool {
     }
 
     /**
+     * Executed rows of a subnet that a messaging relay message produced: the
+     * row's hash is the `l2ps_tx_hash` of a stored message. Lets the backlog
+     * guard hold messaging to its share from what the database holds, which
+     * survives a restart and follows the aggregator draining the queue.
+     *
+     * @throws When the database cannot be queried
+     */
+    public static async countExecutedFromMessaging(l2psUid: string): Promise<number> {
+        await this.ensureInitialized()
+        const rows: Array<{ count: string }> = await this.repo.query(
+            `SELECT COUNT(*) AS count FROM l2ps_mempool tx
+             WHERE tx.l2ps_uid = $1 AND tx.status = $2
+               AND EXISTS (SELECT 1 FROM l2ps_messages m WHERE m.l2ps_tx_hash = tx.hash)`,
+            [l2psUid, L2PS_STATUS.EXECUTED],
+        )
+        return Number.parseInt(rows[0]?.count ?? "0", 10)
+    }
+
+    /**
      * Legacy method for backward compatibility
      * @deprecated Use getHashForL2PS() instead
      */

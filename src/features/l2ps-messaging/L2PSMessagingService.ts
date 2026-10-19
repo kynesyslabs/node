@@ -161,11 +161,6 @@ export class L2PSMessagingService {
             return this.duplicateResult(existing)
         }
 
-        // Before anything is written: a refused message leaves no row behind.
-        const backlog = getExecutedBacklogGuard()
-        const room = await backlog.check(l2psUid, MESSAGING_CLAIM)
-        if (!room.admitted) return this.backlogFullResult(room.retryAfterMs)
-
         if (!recipientOnline && (await this.recipientQueueFull(repo, identity.toKey, identity.l2psUid))) {
             return { success: false, code: "QUEUE_FULL", error: "Recipient has too many queued messages" }
         }
@@ -184,9 +179,19 @@ export class L2PSMessagingService {
         // freed twice.
         const release = () => this.releaseSlot(slotId)
         // A hash on a failed row means the L2PS transaction exists and only
-        // delivery failed; submitting again would record the message twice,
-        // and no new executed row results, so the backlog is not claimed.
+        // delivery failed; submitting again would record the message twice.
+        // No new executed row results, so this path never meets the backlog
+        // cap: a full subnet must not refuse a retry that adds nothing to it.
         if (existing?.l2psTxHash) return this.retryDelivery(repo, existing, identity, recipientOnline, release)
+
+        // Before anything is written: a refused message leaves no row behind
+        // and gives its quota slot back.
+        const backlog = getExecutedBacklogGuard()
+        const room = await backlog.check(l2psUid, MESSAGING_CLAIM)
+        if (!room.admitted) {
+            release()
+            return this.backlogFullResult(room.retryAfterMs)
+        }
 
         // The backlog slot comes after the quota, so a sender at its own limit
         // never takes room from the subnet, and it is held only while this

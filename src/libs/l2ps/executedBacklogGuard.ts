@@ -36,12 +36,15 @@ interface SubnetState {
     pending: number
     /** Of `pending`, the slots claimed by messaging. */
     messagingPending: number
+    /** Of `dbCount`, the executed rows that came from messaging. */
+    messagingDbCount: number
     /**
-     * Estimate of the executed rows messaging put in the queue. The database
-     * cannot tell them apart, so it is kept locally and shrunk in proportion
-     * when a refresh shows the queue drained.
+     * Completions applied by `settle`, ever. A refresh whose query was in
+     * flight while a row settled reads a count that predates it, so the
+     * refresh adds back what settled in the meantime instead of losing it.
      */
-    messagingExecuted: number
+    settledTotal: number
+    messagingSettledTotal: number
     /** False until a count has been read once; a failed read before that has nothing to fall back on. */
     known: boolean
     fetchedAt: number
@@ -54,6 +57,8 @@ export interface BacklogGuardOptions {
     cap: number
     retryAfterMs: number
     countExecuted: (l2psUid: string) => Promise<number>
+    /** Of the executed rows, how many came from messaging; without it messaging's share counts only claims made here. */
+    countMessaging?: (l2psUid: string) => Promise<number>
     now?: () => number
     ttlMs?: number
     /** Largest fraction of the cap messaging may hold; 1 or more leaves it unrestricted. */
@@ -148,9 +153,11 @@ export class ExecutedBacklogGuard {
         if (!state) return
         if (state.pending > 0) state.pending--
         state.dbCount++
+        state.settledTotal++
         if (opts.origin === "messaging") {
             if (state.messagingPending > 0) state.messagingPending--
-            state.messagingExecuted++
+            state.messagingDbCount++
+            state.messagingSettledTotal++
         }
     }
 
@@ -169,7 +176,7 @@ export class ExecutedBacklogGuard {
     private async current(l2psUid: string): Promise<SubnetState> {
         let state = this.subnets.get(l2psUid)
         if (!state) {
-            state = { dbCount: 0, pending: 0, messagingPending: 0, messagingExecuted: 0, known: false, fetchedAt: Number.NEGATIVE_INFINITY, halfWarned: false, lastCapLog: Number.NEGATIVE_INFINITY, refresh: null }
+            state = { dbCount: 0, pending: 0, messagingPending: 0, messagingDbCount: 0, settledTotal: 0, messagingSettledTotal: 0, known: false, fetchedAt: Number.NEGATIVE_INFINITY, halfWarned: false, lastCapLog: Number.NEGATIVE_INFINITY, refresh: null }
             this.subnets.set(l2psUid, state)
         }
         if (this.now() - state.fetchedAt >= this.ttlMs) {
@@ -183,9 +190,14 @@ export class ExecutedBacklogGuard {
 
     private async reload(l2psUid: string, state: SubnetState): Promise<void> {
         try {
-            const counted = await this.opts.countExecuted(l2psUid)
-            this.shrinkMessaging(state, counted)
-            state.dbCount = counted
+            const settledBefore = state.settledTotal
+            const messagingSettledBefore = state.messagingSettledTotal
+            const [counted, messaging] = await Promise.all([
+                this.opts.countExecuted(l2psUid),
+                this.opts.countMessaging?.(l2psUid) ?? Promise.resolve(state.messagingDbCount),
+            ])
+            state.dbCount = counted + (state.settledTotal - settledBefore)
+            state.messagingDbCount = messaging + (state.messagingSettledTotal - messagingSettledBefore)
             state.known = true
         } catch (error) {
             // A failed count keeps the last one read, so a database hiccup does
@@ -205,18 +217,7 @@ export class ExecutedBacklogGuard {
     private hasRoom(state: SubnetState, origin?: ClaimOrigin): boolean {
         if (this.total(state) >= this.opts.cap) return false
         if (origin !== "messaging") return true
-        return state.messagingPending + state.messagingExecuted < this.messagingCap
-    }
-
-    /** A queue that shrank took its messaging rows out in the same proportion. */
-    private shrinkMessaging(state: SubnetState, counted: number): void {
-        if (counted >= state.dbCount) {
-            state.messagingExecuted = Math.min(state.messagingExecuted, counted)
-            return
-        }
-        state.messagingExecuted = state.dbCount > 0
-            ? Math.floor((state.messagingExecuted * counted) / state.dbCount)
-            : 0
+        return state.messagingPending + state.messagingDbCount < this.messagingCap
     }
 
     private warnAtHalf(l2psUid: string, state: SubnetState): void {
@@ -251,6 +252,7 @@ export function getExecutedBacklogGuard(): ExecutedBacklogGuard {
         cap: Config.getInstance().l2ps.mempoolMaxExecutedPerSubnet,
         retryAfterMs: Config.getInstance().l2ps.aggregationIntervalMs,
         countExecuted: uid => L2PSMempool.countByUIDAndStatus(uid, "executed"),
+        countMessaging: uid => L2PSMempool.countExecutedFromMessaging(uid),
         messagingShare: Config.getInstance().l2ps.messagingBacklogShare,
         minBatchSize: Config.getInstance().l2ps.minBatchSize,
     })
