@@ -1,4 +1,4 @@
-import { isForkActive } from "@/forks/forkGates"
+import { web2ProofBindingActiveForPendingBlock } from "@/forks/web2ProofBindingGate"
 import { web2BoundProofMessage } from "./web2/boundMessage"
 import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
@@ -327,10 +327,7 @@ export async function verifyWeb2Proof(
             if (
                 !verified &&
                 payload.context !== "domain" &&
-                !isForkActive(
-                    "web2ProofBinding",
-                    getSharedState.lastBlockNumber ?? 0,
-                )
+                !web2ProofBindingActiveForPendingBlock()
             ) {
                 verified = await verifyAgainst(message)
             }

@@ -181,6 +181,10 @@ export function loadConfig(): Readonly<AppConfig> {
             xffMode: envStr(EnvKey.XFF_MODE, d.core.xffMode),
             mcpEnabled: envBool(EnvKey.MCP_ENABLED, d.core.mcpEnabled),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
+            expectedGenesisHash: envStr(
+                EnvKey.EXPECTED_GENESIS_HASH,
+                d.core.expectedGenesisHash,
+            ).toLowerCase(),
             blockWatchdogEnabled: envBool(
                 EnvKey.BLOCK_WATCHDOG_ENABLED,
                 d.core.blockWatchdogEnabled,

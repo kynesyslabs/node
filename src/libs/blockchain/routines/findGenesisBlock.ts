@@ -14,6 +14,7 @@ import log from "@/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
 import { Config } from "src/config"
+import { getSharedState } from "@/utilities/sharedState"
 import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks"
 
 function getLatestGCRRecoveryData() {
@@ -38,6 +39,63 @@ function getLatestGCRRecoveryData() {
     }
 }
 
+function readGenesisFile() {
+    let genesisData = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
+    if (typeof genesisData === "string") {
+        genesisData = JSON.parse(genesisData)
+    }
+    return genesisData
+}
+
+/**
+ * Fail closed on ANY failure to read the fork config: a malformed
+ * activationHeight, a JSON parse error or an IO read error are all operator
+ * misconfigurations of consensus-relevant state.
+ * The caller only gets here when the file exists, so everything inside is a
+ * real read or validation failure. A silent fallback would let a typo or a
+ * truncated file disable the fork on this validator while peers cross the
+ * activation height, the same consensus split the validation throw prevents.
+ */
+function loadForkConfigFromGenesisFile() {
+    try {
+        loadForkConfigFromGenesis(readGenesisFile())
+    } catch (e) {
+        if (e instanceof ForkConfigValidationError) {
+            log.error(
+                `[FORKS] Refusing to boot — invalid fork config in data/genesis.json: ${e.message}`,
+            )
+            throw e
+        }
+        log.error(
+            `[FORKS] Refusing to boot — failed to read fork config from data/genesis.json: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        throw e
+    }
+}
+
+/** Overlay a recovery export's users and genesis balances onto the genesis data. */
+function applyRecoveryData(genesisData, recoveryGenesis) {
+    const finalBalances = {}
+
+    for (const entry of genesisData["balances"]) {
+        const [address, balance] = entry
+        finalBalances[address] = balance
+    }
+
+    genesisData["users"] = recoveryGenesis["users"]
+
+    // add recoveryGenesis["genesis_balances"] to genesisData["balances"]
+    // (replacing the ones that are already in genesisData["balances"])
+    for (const entry of recoveryGenesis["genesis_balances"]) {
+        const [address, balance] = entry
+        finalBalances[address] = balance
+    }
+
+    genesisData["balances"] = Object.entries(finalBalances)
+}
+
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
     // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
@@ -48,40 +106,13 @@ export default async function findGenesisBlock() {
     // heights at every boot. Absent `forks` field leaves
     // SharedState.forkConfig at its inactive default, matching pre-P2
     // behavior bit-for-bit.
-    if (fs.existsSync("data/genesis.json")) {
-        try {
-            let cfgGenesisData = JSON.parse(
-                fs.readFileSync("data/genesis.json", "utf8"),
-            )
-            if (typeof cfgGenesisData === "string") {
-                cfgGenesisData = JSON.parse(cfgGenesisData)
-            }
-            loadForkConfigFromGenesis(cfgGenesisData)
-        } catch (e) {
-            // GH#3214986124 (Greptile P1) and follow-up: fail-closed on
-            // ANY failure to read the fork config. A malformed
-            // activationHeight, a JSON parse error, or an IO read error
-            // are all operator misconfigurations of consensus-relevant
-            // state. The original fs.existsSync above already
-            // short-circuits the legitimate "no genesis configured"
-            // path; everything inside this try block is a real read or
-            // validation failure. Silent fallback would let a typo or
-            // truncated file silently disable the fork on this validator
-            // while peers cross the activation height — same consensus
-            // split the validation throw was meant to prevent.
-            if (e instanceof ForkConfigValidationError) {
-                log.error(
-                    `[FORKS] Refusing to boot — invalid fork config in data/genesis.json: ${e.message}`,
-                )
-                throw e
-            }
-            log.error(
-                `[FORKS] Refusing to boot — failed to read fork config from data/genesis.json: ${
-                    e instanceof Error ? e.message : String(e)
-                }`,
-            )
-            throw e
-        }
+    const hasGenesisFile = fs.existsSync("data/genesis.json")
+    if (hasGenesisFile) {
+        loadForkConfigFromGenesisFile()
+    } else {
+        // With no genesis file there is nothing to load: the defaults are this
+        // node's schedule, and it can report them.
+        getSharedState.forkConfigLoaded = true
     }
 
     log.info("[GENESIS] Looking for the genesis block...")
@@ -91,7 +122,7 @@ export default async function findGenesisBlock() {
         return
     }
 
-    if (!fs.existsSync("data/genesis.json")) {
+    if (!hasGenesisFile) {
         log.error("[GENESIS] No genesis block found, aborting boot")
         // Audit-sweep batch E: was `process.exit(1)`. Throw so
         // `main().catch → gracefulShutdown` handles uniformly.
@@ -101,34 +132,15 @@ export default async function findGenesisBlock() {
     }
 
     // Loading the genesis block
-    let genesisData = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
-
-    if (typeof genesisData === "string") {
-        genesisData = JSON.parse(genesisData)
-    }
+    const genesisData = readGenesisFile()
 
     const recoveryGenesis = getLatestGCRRecoveryData()
-
     if (recoveryGenesis) {
-        const finalBalances = {}
-
-        for (const entry of genesisData["balances"]) {
-            const [address, balance] = entry
-            finalBalances[address] = balance
-        }
-
-        genesisData["users"] = recoveryGenesis["users"]
-
-        // add recoveryGenesis["genesis_balances"] to genesisData["balances"]
-        // (replacing the ones that are already in genesisData["balances"])
-        for (const entry of recoveryGenesis["genesis_balances"]) {
-            const [address, balance] = entry
-            finalBalances[address] = balance
-        }
-
-        genesisData["balances"] = Object.entries(finalBalances)
+        applyRecoveryData(genesisData, recoveryGenesis)
     }
 
     // Adding the genesis block to the chain
-    return await Chain.generateGenesisBlock(genesisData)
+    const created = await Chain.generateGenesisBlock(genesisData)
+    getSharedState.genesisCreatedThisBoot = true
+    return created
 }

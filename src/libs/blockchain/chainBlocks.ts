@@ -490,6 +490,10 @@ export async function insertBlock(
             getSharedState.lastBlockHash = block.hash
             getSharedState.lastBlockInsertedAt = Date.now()
 
+            void import("@/libs/peer/routines/forkScheduleWatch")
+                .then(m => m.onBlockInserted(block.number))
+                .catch(() => undefined)
+
             void import("@/libs/network/dtr/dtrmanager")
                 .then(dtr => dtr.DTRManager.releaseDTRWaiter(block))
                 .catch(e =>

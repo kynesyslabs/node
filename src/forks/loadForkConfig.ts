@@ -168,6 +168,11 @@ export function isForkMachineryDisabled(): boolean {
  * @param genesisData Parsed genesis JSON object.
  */
 export function loadForkConfigFromGenesis(genesisData: any): void {
+    loadForkConfigFromGenesisInner(genesisData)
+    getSharedState.forkConfigLoaded = true
+}
+
+function loadForkConfigFromGenesisInner(genesisData: any): void {
     if (isForkMachineryDisabled()) {
         log.warning(
             "[FORKS] DEMOS_DISABLE_FORK_MACHINERY set — ignoring genesis " +
