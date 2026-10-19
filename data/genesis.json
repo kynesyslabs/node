@@ -3,7 +3,7 @@
       "id": 1,
       "name": "DEMOS",
       "currency": "DEM",
-      "shardSize": 4
+      "shardSize": 10
   },
   "mutables": {
       "minBlocksForValidationOnlineStatus": 4
