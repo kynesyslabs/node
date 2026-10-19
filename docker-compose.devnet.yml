@@ -73,7 +73,7 @@ services:
       - "53650:${RPC_PORT:-53550}"
       - "53651:${OMNI_PORT:-53551}"
       - "3105:${RPC_SIGNALING_PORT:-3005}"
-      - "3106:${L2PS_MESSAGING_PORT:-3006}"
+      - "${L2PS_MESSAGING_BIND:-127.0.0.1}:3106:${L2PS_MESSAGING_PORT:-3006}"
       - "9190:9090"
       # wstcp TLSNotary proxy range (devnet window), localhost-bound so only
       # the host reverse proxy reaches it. MUST match TLSNOTARY_PROXY_PORT_MIN/

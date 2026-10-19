@@ -41,6 +41,26 @@ export const ptyAvailable =
 export const isRoot = process.getuid?.() === 0
 export const AS_USER = "(needs a non-root user: root ignores file modes)"
 
+/** A batch verification key with every field the PLONK verifier reads; the numbers are stand-ins. */
+export const BATCH_VKEY = {
+    protocol: "plonk",
+    curve: "bn128",
+    nPublic: 3,
+    power: 14,
+    k1: "2",
+    k2: "3",
+    Qm: ["1", "2", "1"],
+    Ql: ["1", "2", "1"],
+    Qr: ["1", "2", "1"],
+    Qo: ["1", "2", "1"],
+    Qc: ["1", "2", "1"],
+    S1: ["1", "2", "1"],
+    S2: ["1", "2", "1"],
+    S3: ["1", "2", "1"],
+    X_2: [["1", "2"], ["3", "4"], ["1", "0"]],
+    w: "5",
+}
+
 export const HEX_KEY = "ab".repeat(32)
 export const HEX_IV = "cd".repeat(16)
 
@@ -95,7 +115,7 @@ export function writeZkBatch(root: string, size: number, parts = { zkey: true, w
     fs.mkdirSync(path.join(dir, `l2ps_batch_${size}_js`), { recursive: true })
     if (parts.zkey) fs.writeFileSync(path.join(dir, `l2ps_batch_${size}.zkey`), "z")
     if (parts.wasm) fs.writeFileSync(path.join(dir, `l2ps_batch_${size}_js`, `l2ps_batch_${size}.wasm`), "w")
-    if (parts.vkey) fs.writeFileSync(path.join(dir, "verification_key.json"), JSON.stringify({ protocol: "plonk" }))
+    if (parts.vkey) fs.writeFileSync(path.join(dir, "verification_key.json"), JSON.stringify(BATCH_VKEY))
 }
 
 /** Answers questions in order; an exhausted script fails the test instead of hanging. */
@@ -132,7 +152,7 @@ export function fakeRunner(opts: { vkeyJson?: string; failOn?: string } = {}): Z
             if (opts.failOn && name.includes(opts.failOn)) return 1
             const last = args[args.length - 1]
             if (args[0] === "plonk") fs.writeFileSync(last, "zkey")
-            if (args[0] === "zkey") fs.writeFileSync(last, opts.vkeyJson ?? JSON.stringify({ protocol: "plonk" }))
+            if (args[0] === "zkey") fs.writeFileSync(last, opts.vkeyJson ?? JSON.stringify(BATCH_VKEY))
             if (name.endsWith("compile")) {
                 const out = args[args.indexOf("-o") + 1]
                 const base = path.basename(args[0], ".circom")

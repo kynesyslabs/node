@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { collectChecks } from "./checks"
 import { childEnv, createDefaultRunner } from "./runner"
-import { inspectBatchArtifacts, missingZkTools, runL2psZkSetup } from "./zk"
-import { fakeRunner, makeRoot, recorder, removeRoot, writeZkBatch } from "./testSupport"
+import { CODE_ROOT, createContext } from "./context"
+import { batchVkeyProblem, inspectBatchArtifacts, missingZkTools, runL2psZkSetup } from "./zk"
+import { BATCH_VKEY, fakeRunner, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -22,7 +24,7 @@ function seedCommittedVkeys(content: object) {
 
 describe("runL2psZkSetup", () => {
     it("downloads the ptau files, builds both sizes and keeps the committed verification key", async () => {
-        seedCommittedVkeys({ protocol: "plonk" })
+        seedCommittedVkeys(BATCH_VKEY)
         const runner = fakeRunner()
         const r = recorder()
         const out = await runL2psZkSetup(root, runner, r.say)
@@ -42,8 +44,8 @@ describe("runL2psZkSetup", () => {
     })
 
     it("refuses to ship a key whose verification key differs from the committed one", async () => {
-        seedCommittedVkeys({ protocol: "plonk", power: 14 })
-        const out = await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ protocol: "plonk", power: 15 }) }), recorder().say)
+        seedCommittedVkeys(BATCH_VKEY)
+        const out = await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ ...BATCH_VKEY, power: 15 }) }), recorder().say)
         expect(out.ok).toBe(false)
         expect(out.messages.join()).toContain("differs from the committed one")
         // The committed file is untouched and the unusable proving key is gone.
@@ -52,7 +54,7 @@ describe("runL2psZkSetup", () => {
     })
 
     it("stops at the first failing step and says which", async () => {
-        seedCommittedVkeys({ protocol: "plonk" })
+        seedCommittedVkeys(BATCH_VKEY)
         const runner = fakeRunner({ failOn: "plonk setup" })
         const out = await runL2psZkSetup(root, runner, recorder().say)
         expect(out.ok).toBe(false)
@@ -61,7 +63,7 @@ describe("runL2psZkSetup", () => {
     })
 
     it("falls back to the next host and explains how to recover when none works", async () => {
-        seedCommittedVkeys({ protocol: "plonk" })
+        seedCommittedVkeys(BATCH_VKEY)
         const tried: string[] = []
         const runner = fakeRunner()
         runner.download = async url => {
@@ -85,7 +87,7 @@ describe("runL2psZkSetup", () => {
     })
 
     it("uses a mirror given by the operator", async () => {
-        seedCommittedVkeys({ protocol: "plonk" })
+        seedCommittedVkeys(BATCH_VKEY)
         const urls: string[] = []
         const runner = fakeRunner()
         const real = runner.download
@@ -116,17 +118,17 @@ describe("runL2psZkSetup", () => {
     })
 
     it("never deletes a good proving key when a new build does not match", async () => {
-        seedCommittedVkeys({ protocol: "plonk", power: 14 })
+        seedCommittedVkeys(BATCH_VKEY)
         // zkey present but wasm missing: the size counts as incomplete and is rebuilt.
         fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "previous-good")
-        const out = await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ protocol: "plonk", power: 15 }) }), recorder().say, [5])
+        const out = await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ ...BATCH_VKEY, power: 15 }) }), recorder().say, [5])
         expect(out.ok).toBe(false)
         expect(fs.readFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "utf8")).toBe("previous-good")
         expect(fs.readdirSync(keysDir(5)).filter(f => f.endsWith(".building"))).toEqual([])
     })
 
     it("builds under a temporary name and swaps it in only after the key matches", async () => {
-        seedCommittedVkeys({ protocol: "plonk" })
+        seedCommittedVkeys(BATCH_VKEY)
         fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "old")
         const runner = fakeRunner()
         const seen: string[] = []
@@ -142,7 +144,7 @@ describe("runL2psZkSetup", () => {
     })
 
     it("a failed build leaves no compiled files behind, so an old zkey cannot look finished", async () => {
-        seedCommittedVkeys({ protocol: "plonk" })
+        seedCommittedVkeys(BATCH_VKEY)
         fs.writeFileSync(path.join(keysDir(10), "l2ps_batch_10.zkey"), "old")
         const out = await runL2psZkSetup(root, fakeRunner({ failOn: "plonk setup" }), recorder().say, [10])
         expect(out.ok).toBe(false)
@@ -153,15 +155,15 @@ describe("runL2psZkSetup", () => {
     })
 
     it("a key mismatch also leaves no wasm behind", async () => {
-        seedCommittedVkeys({ protocol: "plonk", power: 14 })
+        seedCommittedVkeys(BATCH_VKEY)
         fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "old")
-        await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ protocol: "plonk", power: 15 }) }), recorder().say, [5])
+        await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ ...BATCH_VKEY, power: 15 }) }), recorder().say, [5])
         expect(fs.existsSync(path.join(keysDir(5), "l2ps_batch_5_js"))).toBe(false)
         expect(inspectBatchArtifacts(root).find(b => b.size === 5)?.complete).toBe(false)
     })
 
     it("replaces an older wasm only after the whole batch succeeded", async () => {
-        seedCommittedVkeys({ protocol: "plonk" })
+        seedCommittedVkeys(BATCH_VKEY)
         fs.mkdirSync(path.join(keysDir(5), "l2ps_batch_5_js"), { recursive: true })
         fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5_js", "stale.txt"), "x")
         await runL2psZkSetup(root, fakeRunner(), recorder().say, [5])
@@ -170,7 +172,7 @@ describe("runL2psZkSetup", () => {
     })
 
     it("skips a ptau file that is already downloaded", async () => {
-        seedCommittedVkeys({ protocol: "plonk" })
+        seedCommittedVkeys(BATCH_VKEY)
         const ptauDir = path.join(root, "src/libs/l2ps/zk/ptau")
         fs.mkdirSync(ptauDir, { recursive: true })
         fs.writeFileSync(path.join(ptauDir, "powersOfTau28_hez_final_16.ptau"), Buffer.alloc(1_500_000))
@@ -207,5 +209,65 @@ describe("the toolchain child process gets a minimal environment", () => {
                 else process.env[k] = saved[k]
             }
         }
+    })
+})
+
+describe("a batch verification key counts only when the verifier can use it", () => {
+    const vkeyFile = () => path.join(keysDir(5), "verification_key.json")
+    const checkZk = () =>
+        collectChecks(createContext(root, ".env", { L2PS_ZK_ENABLED: "true" })).items.find(i => i.item === "Batch of up to 5")
+
+    it("accepts the keys committed in the repository", () => {
+        for (const size of [5, 10]) {
+            expect(batchVkeyProblem(path.join(CODE_ROOT, "src/libs/l2ps/zk/keys", `batch_${size}`, "verification_key.json"))).toBeUndefined()
+        }
+    })
+
+    it("accepts a complete key", () => {
+        writeZkBatch(root, 5)
+        expect(inspectBatchArtifacts(root)[0]).toMatchObject({ vkey: true, complete: true })
+    })
+
+    it("refuses malformed JSON and says how to fix it", () => {
+        writeZkBatch(root, 5)
+        fs.writeFileSync(vkeyFile(), "{not json")
+        const b = inspectBatchArtifacts(root)[0]
+        expect(b).toMatchObject({ vkey: false, complete: false })
+        expect(b.vkeyProblem).toContain("not valid JSON")
+        writeSubnet(root, "good")
+        const item = checkZk()
+        expect(item).toMatchObject({ status: "missing", blocking: true })
+        expect(item?.detail).toContain("restore src/libs/l2ps/zk/keys/batch_5/verification_key.json")
+        expect(item?.fix).toContain("setup --only zk")
+    })
+
+    it("refuses valid JSON that lacks fields the verifier reads", () => {
+        writeZkBatch(root, 5)
+        for (const [mutate, named] of [
+            [(k: any) => delete k.X_2, "X_2"],
+            [(k: any) => delete k.Qm, "Qm"],
+            [(k: any) => (k.S3 = ["only-one"]), "S3"],
+            [(k: any) => (k.k1 = ""), "k1"],
+            [(k: any) => delete k.nPublic, "nPublic"],
+            [(k: any) => (k.protocol = "groth16"), "PLONK"],
+            [(k: any) => (k.curve = "bls12381"), "bn128"],
+        ] as Array<[(k: any) => unknown, string]>) {
+            const key = JSON.parse(JSON.stringify(BATCH_VKEY))
+            mutate(key)
+            fs.writeFileSync(vkeyFile(), JSON.stringify(key))
+            const b = inspectBatchArtifacts(root)[0]
+            expect(b.complete).toBe(false)
+            expect(b.vkeyProblem).toContain(named)
+        }
+        for (const bad of ["[]", "null", "42"]) {
+            fs.writeFileSync(vkeyFile(), bad)
+            expect(inspectBatchArtifacts(root)[0].complete).toBe(false)
+        }
+    })
+
+    it("does not report a broken key as merely absent, and a missing one still reads as missing", () => {
+        writeZkBatch(root, 5, { zkey: true, wasm: true, vkey: false })
+        const b = inspectBatchArtifacts(root)[0]
+        expect(b).toMatchObject({ vkey: false, vkeyProblem: undefined })
     })
 })

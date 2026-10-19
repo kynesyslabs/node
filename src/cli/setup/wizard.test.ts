@@ -3,7 +3,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { runCli } from "./cli"
 import { parseEnv } from "./envFile"
-import { AS_USER, HEX_IV, HEX_KEY, fakeRunner, isRoot, installZkTools, writeZkBatch, makeRoot, recorder, removeRoot, scriptedPrompter, writeSubnet } from "./testSupport"
+import { AS_USER, BATCH_VKEY, HEX_IV, HEX_KEY, fakeRunner, isRoot, installZkTools, writeZkBatch, makeRoot, recorder, removeRoot, scriptedPrompter, writeSubnet } from "./testSupport"
 import type { Prompter } from "./prompt"
 
 let root: string
@@ -306,7 +306,7 @@ describe("ZK step", () => {
         for (const size of [5, 10]) {
             const dir = path.join(root, "src/libs/l2ps/zk/keys", `batch_${size}`)
             fs.mkdirSync(dir, { recursive: true })
-            fs.writeFileSync(path.join(dir, "verification_key.json"), JSON.stringify({ protocol: "plonk" }))
+            fs.writeFileSync(path.join(dir, "verification_key.json"), JSON.stringify(BATCH_VKEY))
         }
     }
 

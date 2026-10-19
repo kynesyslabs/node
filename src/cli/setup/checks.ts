@@ -256,17 +256,23 @@ function batchItem(b: BatchArtifacts, batches: BatchArtifacts[], anyComplete: bo
     if (b.complete) {
         return { ...base, status: "ok", detail: "proving key, circuit and verification key are in place", blocking: false }
     }
-    const missing = [!b.zkey && "proving key", !b.wasm && "circuit wasm", !b.vkey && "verification key"]
+    const missingParts = [!b.zkey && "proving key", !b.wasm && "circuit wasm", !b.vkey && b.vkeyProblem === undefined && "verification key"]
         .filter(Boolean)
         .join(", ")
+    // A key that exists but cannot verify is committed and shared by every peer: it is restored, not rebuilt locally.
+    const brokenKey =
+        b.vkeyProblem === undefined
+            ? ""
+            : `verification key ${b.vkeyProblem} (restore src/libs/l2ps/zk/keys/batch_${b.size}/verification_key.json from the repository)`
+    const missing = [missingParts && `${missingParts} missing`, brokenKey].filter(Boolean).join("; ")
     if (!anyComplete) {
-        return { ...base, status: "missing", detail: `${missing} missing`, blocking: true, fix: ZK_FIX }
+        return { ...base, status: "missing", detail: missing, blocking: true, fix: ZK_FIX }
     }
     const largest = Math.max(...batches.filter(x => x.complete).map(x => x.size))
     return {
         ...base,
         status: "warn",
-        detail: `${missing} missing; batches above ${largest} transactions cannot be proven`,
+        detail: `${missing}; batches above ${largest} transactions cannot be proven`,
         blocking: false,
         fix: ZK_FIX,
     }

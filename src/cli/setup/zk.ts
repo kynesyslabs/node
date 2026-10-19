@@ -3,7 +3,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { L2PS_ZK_DIR, ZK_IDENTITY_VKEY } from "./context"
 import { sameJson } from "./l2ps"
-import { trimTrailingSlashes } from "./validate"
+import { displaySafe, trimTrailingSlashes } from "./validate"
 
 export const BATCH_SIZES = [5, 10] as const
 export type BatchSize = (typeof BATCH_SIZES)[number]
@@ -24,7 +24,10 @@ export interface BatchArtifacts {
     size: BatchSize
     zkey: boolean
     wasm: boolean
+    /** The verification key exists and has what the verifier reads. */
     vkey: boolean
+    /** Why the verification key is unusable, when it exists but is not. */
+    vkeyProblem?: string
     complete: boolean
 }
 
@@ -47,6 +50,37 @@ const nonEmptyFile = (file: string): boolean => {
     }
 }
 
+const isText = (v: unknown): boolean => typeof v === "string" && v !== ""
+const isPoint = (v: unknown, coordinates: number): boolean =>
+    Array.isArray(v) && v.length >= coordinates && v.every(c => (Array.isArray(c) ? c.length > 0 && c.every(isText) : isText(c)))
+
+const G1_FIELDS = ["Qm", "Ql", "Qr", "Qo", "Qc", "S1", "S2", "S3"] as const
+
+/**
+ * Why a batch verification key cannot verify a proof, or undefined when it can.
+ * The prover hands the parsed file straight to snarkjs's PLONK verifier, which
+ * reads exactly these fields; a key missing one only fails later, on the first
+ * proof, so it must not pass as a finished build.
+ */
+export function batchVkeyProblem(file: string): string | undefined {
+    let key: any
+    try {
+        key = JSON.parse(fs.readFileSync(file, "utf8"))
+    } catch (e) {
+        return `is not valid JSON (${displaySafe(e instanceof Error ? e.message : e)})`
+    }
+    if (key === null || typeof key !== "object" || Array.isArray(key)) return "is not a JSON object"
+    if (key.protocol !== "plonk") return "is not a PLONK verification key"
+    if (key.curve !== "bn128") return "is not for the bn128 curve"
+    if (!Number.isInteger(key.nPublic) || !Number.isInteger(key.power)) return "has no nPublic or power"
+    const missing = [
+        ...["k1", "k2", "w"].filter(f => !isText(key[f])),
+        ...G1_FIELDS.filter(f => !isPoint(key[f], 2)),
+        ...(isPoint(key.X_2, 2) ? [] : ["X_2"]),
+    ]
+    return missing.length > 0 ? `lacks ${missing.join(", ")}` : undefined
+}
+
 /** Same files the prover needs at proof time: zkey + wasm, and the vkey to verify. */
 export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
     return BATCH_SIZES.map(size => {
@@ -55,8 +89,10 @@ export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
         const wasm = nonEmptyFile(
             path.join(dir, `l2ps_batch_${size}_js`, `l2ps_batch_${size}.wasm`),
         )
-        const vkey = fs.existsSync(path.join(dir, "verification_key.json"))
-        return { size, zkey, wasm, vkey, complete: zkey && wasm && vkey }
+        const vkeyFile = path.join(dir, "verification_key.json")
+        const vkeyProblem = fs.existsSync(vkeyFile) ? batchVkeyProblem(vkeyFile) : undefined
+        const vkey = fs.existsSync(vkeyFile) && vkeyProblem === undefined
+        return { size, zkey, wasm, vkey, vkeyProblem, complete: zkey && wasm && vkey }
     })
 }
 
@@ -232,12 +268,8 @@ export async function downloadWithFetch(
 }
 
 function vkeyParses(root: string, size: BatchSize): boolean {
-    try {
-        JSON.parse(fs.readFileSync(path.join(batchDir(root, size), "verification_key.json"), "utf8"))
-        return true
-    } catch {
-        return false
-    }
+    const file = path.join(batchDir(root, size), "verification_key.json")
+    return fs.existsSync(file) && batchVkeyProblem(file) === undefined
 }
 
 export function missingZkTools(root: string): string[] {

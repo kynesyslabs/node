@@ -6,7 +6,7 @@ import { collectChecks, isFatal } from "./checks"
 import { runCli } from "./cli"
 import { CODE_ROOT, ZK_IDENTITY_VKEY, createContext } from "./context"
 import { IDENTITY_CIRCUIT_DIGEST, IDENTITY_DIGEST_ENV, byCodePoint, canonicalDigest, downloadWithFetch, inspectBatchArtifacts, inspectIdentityKey, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
-import { GIT, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
+import { BATCH_VKEY, GIT, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -15,7 +15,7 @@ beforeEach(() => {
 afterEach(() => removeRoot(root))
 
 const keysDir = (size: number) => path.join(root, "src/libs/l2ps/zk/keys", `batch_${size}`)
-const COMMITTED = { protocol: "plonk", power: 14 }
+const COMMITTED = BATCH_VKEY
 
 /** A fake toolchain whose verification key equals the committed one. */
 const toolchain = (opts: { vkeyJson?: string; failOn?: string } = {}) =>
@@ -93,7 +93,7 @@ describe("a build that fails", () => {
         seedCommitted()
         fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "OLD-ZKEY")
         const before = fs.readFileSync(path.join(keysDir(5), "verification_key.json"), "utf8")
-        const out = await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ protocol: "plonk", power: 99 }) }), recorder().say)
+        const out = await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ ...BATCH_VKEY, power: 99 }) }), recorder().say)
         expect(out.ok).toBe(false)
         expect(fs.readFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "utf8")).toBe("OLD-ZKEY")
         expect(fs.readFileSync(path.join(keysDir(5), "verification_key.json"), "utf8")).toBe(before)
@@ -117,8 +117,8 @@ describe("a build that fails", () => {
     })
 
     it("a verification key with the same data in another key order is the same key", async () => {
-        seedCommitted({ protocol: "plonk", power: 14, curve: "bn128" })
-        const reordered = JSON.stringify({ curve: "bn128", power: 14, protocol: "plonk" })
+        seedCommitted(BATCH_VKEY)
+        const reordered = JSON.stringify(Object.fromEntries(Object.entries(BATCH_VKEY).reverse()))
         const out = await runL2psZkSetup(root, toolchain({ vkeyJson: reordered }), recorder().say)
         expect(out.ok).toBe(true)
     })
@@ -195,7 +195,7 @@ describe("the wizard never switches proofs on after a failure", () => {
         seedCommitted()
         for (const runner of [
             toolchain({ failOn: "plonk setup" }),
-            toolchain({ vkeyJson: JSON.stringify({ protocol: "plonk", power: 1 }) }),
+            toolchain({ vkeyJson: JSON.stringify({ ...BATCH_VKEY, power: 1 }) }),
             { download: async () => { throw new Error("offline") }, exec: async () => 0 } as ZkRunner,
         ]) {
             const { code, out } = await run(runner)
