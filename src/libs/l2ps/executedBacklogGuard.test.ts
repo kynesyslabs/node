@@ -310,6 +310,32 @@ describe("executed backlog cap", () => {
             expect(g.claim("a", messaging)).toBe(true)
         })
 
+        it("lets messaging reach one batch when the share is smaller than the batch minimum", async () => {
+            const g = new ExecutedBacklogGuard({
+                cap: 10,
+                retryAfterMs: 1,
+                now: () => clock,
+                countExecuted: async () => 0,
+                messagingShare: 0.5,
+                minBatchSize: 10,
+            })
+            await g.check("a", messaging)
+            for (let i = 0; i < 10; i++) expect(g.claim("a", messaging)).toBe(true)
+            expect(g.claim("a", messaging)).toBe(false)
+
+            const small = new ExecutedBacklogGuard({
+                cap: 100,
+                retryAfterMs: 1,
+                now: () => clock,
+                countExecuted: async () => 0,
+                messagingShare: 0.05,
+                minBatchSize: 10,
+            })
+            await small.check("a", messaging)
+            for (let i = 0; i < 10; i++) expect(small.claim("a", messaging)).toBe(true)
+            expect(small.claim("a", messaging)).toBe(false)
+        })
+
         it("is not limited when the share is 1", async () => {
             const g = shared(100, 1)
             await g.check("a", messaging)

@@ -58,6 +58,8 @@ export interface BacklogGuardOptions {
     ttlMs?: number
     /** Largest fraction of the cap messaging may hold; 1 or more leaves it unrestricted. */
     messagingShare?: number
+    /** Rows the aggregator needs before it batches; messaging's share never drops below it. */
+    minBatchSize?: number
 }
 
 /**
@@ -83,8 +85,11 @@ export class ExecutedBacklogGuard {
         this.now = opts.now ?? Date.now
         this.ttlMs = opts.ttlMs ?? COUNT_TTL_MS
         const share = opts.messagingShare ?? 1
-        // At least one slot, so a tiny cap or share does not shut messaging out.
-        this.messagingCap = share >= 1 ? opts.cap : Math.max(1, Math.floor(opts.cap * share))
+        // Never below one batch: a subnet that only carries messages must be
+        // able to reach the aggregator's minimum, or its backlog would sit
+        // below it, never drain, and refuse every later message.
+        const floor = Math.max(1, opts.minBatchSize ?? 1)
+        this.messagingCap = share >= 1 ? opts.cap : Math.min(opts.cap, Math.max(floor, Math.floor(opts.cap * share)))
     }
 
     /**
@@ -247,6 +252,7 @@ export function getExecutedBacklogGuard(): ExecutedBacklogGuard {
         retryAfterMs: Config.getInstance().l2ps.aggregationIntervalMs,
         countExecuted: uid => L2PSMempool.countByUIDAndStatus(uid, "executed"),
         messagingShare: Config.getInstance().l2ps.messagingBacklogShare,
+        minBatchSize: Config.getInstance().l2ps.minBatchSize,
     })
     return shared
 }

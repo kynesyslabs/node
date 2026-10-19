@@ -579,6 +579,15 @@ function assertL2psLimitsSane(config: AppConfig): void {
         problems.push(`L2PS_MESSAGING_BACKLOG_SHARE must be above 0 and at most 1 (got ${share})`)
     }
 
+    // Not an error: the guard raises the messaging share to one batch so a
+    // message-only subnet can still drain, but the operator asked for less.
+    if (cap > 0 && cap >= minBatchSize && Math.floor(cap * share) < minBatchSize) {
+        console.warn(
+            `[config] L2PS_MESSAGING_BACKLOG_SHARE (${share}) of L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET (${cap}) is below ` +
+                `L2PS_MIN_BATCH_SIZE (${minBatchSize}); the messaging share was raised to the batch minimum.`,
+        )
+    }
+
     if (problems.length > 0) {
         throw new Error(`[config] invalid L2PS configuration:\n  - ${problems.join("\n  - ")}`)
     }

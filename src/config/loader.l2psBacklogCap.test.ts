@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it, spyOn } from "bun:test"
 import { loadConfig } from "./loader"
 
 const KEYS = [
@@ -68,5 +68,22 @@ describe("other L2PS limits", () => {
 
         process.env.L2PS_MESSAGING_SEND_RATE = "-1"
         expect(() => loadConfig()).toThrow(/L2PS_MESSAGING_SEND_RATE/)
+    })
+
+    it("warns, without failing, when the messaging share is below the batch minimum", () => {
+        const warn = spyOn(console, "warn").mockImplementation(() => undefined)
+        try {
+            withEnv("10", "10")
+            process.env.L2PS_MESSAGING_BACKLOG_SHARE = "0.5"
+            expect(loadConfig().l2ps.mempoolMaxExecutedPerSubnet).toBe(10)
+            expect(warn.mock.calls.some(call => String(call[0]).includes("raised to the batch minimum"))).toBe(true)
+
+            warn.mockClear()
+            withEnv("100", "10")
+            loadConfig()
+            expect(warn.mock.calls.some(call => String(call[0]).includes("raised to the batch minimum"))).toBe(false)
+        } finally {
+            warn.mockRestore()
+        }
     })
 })
