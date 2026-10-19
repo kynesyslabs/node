@@ -10,6 +10,7 @@ import { generateKeyPairSync, sign, type KeyObject } from "node:crypto"
 
 const rows = new Map<string, Record<string, any>>()
 const repo = {
+    count: async () => 0,
     findOneBy: async () => null,
     save: async (row: Record<string, any>) => {
         rows.set(row.id, { ...row })

@@ -102,7 +102,7 @@ describe("getL2PSAccountTransactions, version 2 signature", () => {
         const response = await call(v2Request(v2Message(NODE_KEY, ts), ts))
 
         expect(response.result).toBe(200)
-        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 101, 0, 0)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, [address, address.slice(2)], 101, 0, 0)
     })
 
     it("accepts the node address regardless of case and 0x prefix", async () => {
@@ -129,7 +129,7 @@ describe("getL2PSAccountTransactions, version 2 signature", () => {
         )
 
         expect(response.result).toBe(200)
-        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 26, 50, since)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, [address, address.slice(2)], 26, 50, since)
     })
 
     it("signs the clamped limit when the caller asks for more than the maximum", async () => {
@@ -181,7 +181,7 @@ describe("getL2PSAccountTransactions, version 2 signature", () => {
         const response = await call(v2Request(v2Message(NODE_KEY, ts, 1), ts, { limit }))
 
         expect(response.result).toBe(200)
-        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 2, 0, 0)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, [address, address.slice(2)], 2, 0, 0)
     })
 
     it("falls back to the default limit only when none is supplied", async () => {
@@ -361,7 +361,7 @@ describe("getL2PSAccountTransactions, unversioned signature", () => {
         const response = await call(legacyRequest(ts))
 
         expect(response.result).toBe(200)
-        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 101, 0, 0)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, [address, address.slice(2)], 101, 0, 0)
     })
 
     it("keeps applying the unsigned page values", async () => {
@@ -369,7 +369,7 @@ describe("getL2PSAccountTransactions, unversioned signature", () => {
         const response = await call(legacyRequest(ts, { limit: 7, offset: 3, since: 9 }))
 
         expect(response.result).toBe(200)
-        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 8, 3, 9)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, [address, address.slice(2)], 8, 3, 9)
     })
 
     it("clamps a zero limit to one row instead of the default page", async () => {
@@ -377,7 +377,7 @@ describe("getL2PSAccountTransactions, unversioned signature", () => {
         const response = await call(legacyRequest(ts, { limit: "0" }))
 
         expect(response.result).toBe(200)
-        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 2, 0, 0)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, [address, address.slice(2)], 2, 0, 0)
     })
 
     it("does not need a host", async () => {
@@ -403,7 +403,7 @@ describe("getL2PSAccountTransactions, unversioned signature", () => {
         const response = await call(legacyRequest(ts, { limit: hostile, offset: hostile, since: hostile }))
 
         expect(response.result).toBe(200)
-        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 101, 0, 0)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, [address, address.slice(2)], 101, 0, 0)
     })
 
     it("gives a bad signature with an object page value the usual 403", async () => {
@@ -441,5 +441,24 @@ describe("getL2PSAccountTransactions, unversioned signature", () => {
         const response = await call({ timestamp: ts, signature: sign("something else") })
 
         expect(response.result).toBe(403)
+    })
+})
+
+describe("getL2PSAccountTransactions, address spelling", () => {
+    const hex = address.slice(2)
+
+    it("reads rows stored under the canonical key when the caller signs a mixed-case 0x address", async () => {
+        const ts = String(Date.now())
+        const spelled = "0x" + hex.toUpperCase()
+        const response = await call({
+            address: spelled,
+            timestamp: ts,
+            signature: sign(`getL2PSHistory:${UID}:${spelled}:${ts}`),
+        })
+
+        expect(response.result).toBe(200)
+        const [, forms] = getAccountTransactions.mock.calls[0] as [string, string[]]
+        expect(forms).toEqual(expect.arrayContaining([spelled, hex, address]))
+        expect(new Set(forms).size).toBe(forms.length)
     })
 })

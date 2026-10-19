@@ -364,6 +364,16 @@ export default class SharedState {
     // `forkConfig.gasFeeSeparation.treasuryAddress` is statically typed.
     forkConfig: ForkConfigByName = cloneDefaultForkConfig()
 
+    // False until the fork configuration and chain id have been read from
+    // genesis at boot. The RPC server starts before that, and what it would
+    // report in the meantime is the code's defaults, not this node's schedule.
+    forkConfigLoaded = false
+
+    // True when this boot created block 0 from data/genesis.json because the
+    // database had none. Such a block 0 has no authority older than the file
+    // that made it, unlike one stored by an earlier boot.
+    genesisCreatedThisBoot = false
+
     // Network identity from genesis `properties.id`. Bound into the
     // transaction signature preimage once the `signatureDomain` fork is
     // active, so a signature made here cannot be replayed on another chain.

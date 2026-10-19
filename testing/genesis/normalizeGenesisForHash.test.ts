@@ -17,6 +17,7 @@ import {
     canonicalGenesisForHashing,
     stableStringify,
     hashGenesisData,
+    hashGenesisCore,
 } from "src/libs/blockchain/genesis/normalizeGenesisForHash"
 
 const VALIDATORS_A = [
@@ -239,5 +240,102 @@ describe("hashGenesisData", () => {
             validators: VALIDATORS_A,
         })
         expect(h).toMatch(/^[0-9a-f]{64}$/)
+    })
+})
+
+describe("hashGenesisCore", () => {
+    it("ignores the fork schedule and the chain id", () => {
+        const edited = {
+            ...GENESIS_BASE,
+            properties: { ...GENESIS_BASE.properties, id: 31337 },
+            forks: {
+                ...GENESIS_BASE.forks,
+                signatureDomain: { activationHeight: 40 },
+            },
+            validators: VALIDATORS_A,
+        }
+        expect(hashGenesisCore(edited)).toBe(
+            hashGenesisCore({ ...GENESIS_BASE, validators: VALIDATORS_A }),
+        )
+    })
+
+    it("ignores a missing chain id", () => {
+        const { id: _id, ...withoutId } = GENESIS_BASE.properties
+        expect(
+            hashGenesisCore({ ...GENESIS_BASE, properties: withoutId }),
+        ).toBe(hashGenesisCore(GENESIS_BASE))
+    })
+
+    it("still tells apart anything else in properties, balances and validators", () => {
+        const base = hashGenesisCore(GENESIS_BASE)
+        expect(
+            hashGenesisCore({
+                ...GENESIS_BASE,
+                properties: { ...GENESIS_BASE.properties, name: "OTHER" },
+            }),
+        ).not.toBe(base)
+        expect(
+            hashGenesisCore({ ...GENESIS_BASE, balances: [["0xab", "1"]] }),
+        ).not.toBe(base)
+        expect(
+            hashGenesisCore({ ...GENESIS_BASE, validators: VALIDATORS_A }),
+        ).not.toBe(base)
+    })
+
+    it("tolerates properties that are not an object", () => {
+        expect(() =>
+            hashGenesisCore({ ...GENESIS_BASE, properties: "oops" }),
+        ).not.toThrow()
+    })
+})
+
+describe("hashGenesisData stays the full hash peers advertise", () => {
+    it("changes when the fork schedule or the chain id changes", () => {
+        const base = hashGenesisData(GENESIS_BASE)
+        expect(
+            hashGenesisData({
+                ...GENESIS_BASE,
+                forks: { ...GENESIS_BASE.forks, signatureDomain: { activationHeight: 40 } },
+            }),
+        ).not.toBe(base)
+        expect(
+            hashGenesisData({
+                ...GENESIS_BASE,
+                properties: { ...GENESIS_BASE.properties, id: 2 },
+            }),
+        ).not.toBe(base)
+    })
+})
+
+describe("hashGenesisData golden vector", () => {
+    // Every node already on the network advertises and compares this exact
+    // value for the same data, so the normalisation must never change what it
+    // produces: a different hash here would split a new build from the old ones.
+    const FIXTURE = {
+        timestamp: "1700000000",
+        balances: [
+            ["0xa0000000000000000000000000000000000000000000000000000000000000aa", "1000"],
+            ["0xb0000000000000000000000000000000000000000000000000000000000000bb", "2000"],
+        ],
+        properties: { name: "golden", mutables: { rate: 5 } },
+        validators: [
+            {
+                address: "0xb0000000000000000000000000000000000000000000000000000000000000bb",
+                status: "2",
+                connection_url: "http://localhost:53551",
+                staked_amount: "1",
+            },
+            {
+                address: "0xa0000000000000000000000000000000000000000000000000000000000000aa",
+                status: "2",
+                connection_url: "http://node-1:53551",
+                staked_amount: "1",
+            },
+        ],
+        forks: { signatureDomain: { activationHeight: 40 } },
+    }
+
+    it("is pinned", () => {
+        expect(hashGenesisData(FIXTURE)).toBe("b24e72530d5fee6076cbb1017d5405f8844666fa67c0b601e1c8d9788de7bef6")
     })
 })

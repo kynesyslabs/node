@@ -537,7 +537,7 @@ export default class L2PSTransactionExecutor {
      */
     static async getAccountTransactions(
         l2psUid: string,
-        pubkey: string,
+        pubkey: string | string[],
         limit = 100,
         offset = 0,
         since = 0,
@@ -551,7 +551,17 @@ export default class L2PSTransactionExecutor {
         // This prevents duplicates when from_address === to_address (self-transfer)
         const query = txRepo.createQueryBuilder("tx")
             .where("tx.l2ps_uid = :l2psUid", { l2psUid })
-            .andWhere("(tx.from_address = :pubkey OR tx.to_address = :pubkey)", { pubkey })
+
+        // One spelling keeps the plain equality; several (the caller's and the
+        // canonical forms of one address) match any of them, still as exact values.
+        if (Array.isArray(pubkey)) {
+            query.andWhere(
+                "(tx.from_address IN (:...pubkeys) OR tx.to_address IN (:...pubkeys))",
+                { pubkeys: pubkey },
+            )
+        } else {
+            query.andWhere("(tx.from_address = :pubkey OR tx.to_address = :pubkey)", { pubkey })
+        }
 
         if (since > 0) {
             query.andWhere("tx.timestamp > :since", { since: String(since) })
@@ -649,6 +659,10 @@ export default class L2PSTransactionExecutor {
         // check reads this table, and a prune must not make an executed
         // transfer look new.
         const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+        // A retention longer than the table's existence matches nothing, and
+        // a cutoff before the epoch or not a number is outside what the
+        // database converts: it would fail the sweep instead of finding no row.
+        if (!Number.isFinite(cutoffMs) || cutoffMs <= 0) return 0
         const [{ pruned }] = await ds.query(
             `WITH deleted AS (
                 DELETE FROM "l2ps_transactions"

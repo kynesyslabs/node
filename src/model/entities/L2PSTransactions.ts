@@ -36,6 +36,7 @@ import { bigintNumericTransformer } from "./transformers"
 @Entity("l2ps_transactions")
 @Index("IDX_L2PS_TX_UID", ["l2ps_uid"])
 @Index("IDX_L2PS_TX_HASH", ["hash"])
+@Index("IDX_L2PS_TX_ENCRYPTED_HASH", ["encrypted_hash"])
 @Index("IDX_L2PS_TX_FROM", ["from_address"])
 @Index("IDX_L2PS_TX_TO", ["to_address"])
 @Index("IDX_L2PS_TX_L1_BATCH", ["l1_batch_hash"])
