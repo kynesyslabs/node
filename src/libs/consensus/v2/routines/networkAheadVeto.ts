@@ -7,26 +7,29 @@ let vetoActive = false
 
 export const DISCREDIT_MS = 60_000
 
-// Advertised heights a peer could not back with blocks when sync asked.
-// Until the entry expires, that peer's gossip claim up to this height no
-// longer counts as the network being ahead; its corroborated sync state
-// still does.
-const discredited = new Map<string, { height: number; until: number }>()
+// Peers whose advertised height sync could not download. Until the entry
+// expires or the peer serves us blocks, its gossip claim does not count
+// as the network being ahead at any height; its corroborated sync state
+// still does. The whole claim is ignored, not just the failed height, so
+// re-advertising one block higher buys nothing.
+const discredited = new Map<string, number>()
 
 /**
  * Records that `peer` failed to serve blocks it advertised. A peer that
- * is really ahead serves them on the next attempt and the entry lapses.
+ * is really ahead serves them on a later attempt and is credited again.
  */
 export function discreditAdvertisedHeight(peer: Peer): void {
     const height = peer.gossip?.height ?? 0
     if (height <= getSharedState.lastBlockNumber) return
-    discredited.set(peer.identity.toLowerCase(), {
-        height,
-        until: Date.now() + DISCREDIT_MS,
-    })
+    discredited.set(peer.identity.toLowerCase(), Date.now() + DISCREDIT_MS)
     log.warning(
-        `[networkAheadVeto] ${peer.identity} advertised height ${height} but could not serve it; ignoring the claim for ${DISCREDIT_MS / 1000}s`,
+        `[networkAheadVeto] ${peer.identity} advertised height ${height} but could not serve it; ignoring its claims for ${DISCREDIT_MS / 1000}s`,
     )
+}
+
+/** `peer` served blocks, so its advertised height counts again. */
+export function creditAdvertisedHeight(peer: Peer): void {
+    discredited.delete(peer.identity.toLowerCase())
 }
 
 export function clearDiscreditedHeights(): void {
@@ -36,16 +39,13 @@ export function clearDiscreditedHeights(): void {
 /** The height this peer is believed to be at, discredited claims excluded. */
 export function credibleHeight(peer: Peer, now = Date.now()): number {
     const corroborated = peer.sync.block ?? 0
-    const claimed = peer.gossip?.height ?? 0
-    const entry = discredited.get(peer.identity.toLowerCase())
-    if (entry) {
-        if (entry.until <= now) {
-            discredited.delete(peer.identity.toLowerCase())
-        } else if (claimed <= entry.height) {
-            return corroborated
-        }
+    const key = peer.identity.toLowerCase()
+    const until = discredited.get(key)
+    if (until !== undefined) {
+        if (until > now) return corroborated
+        discredited.delete(key)
     }
-    return Math.max(corroborated, claimed)
+    return Math.max(corroborated, peer.gossip?.height ?? 0)
 }
 
 export async function getAheadValidatorPeers(): Promise<Peer[]> {

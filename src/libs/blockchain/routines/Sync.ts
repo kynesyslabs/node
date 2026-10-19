@@ -54,7 +54,11 @@ import {
     readNonceTrace,
     readNonces,
 } from "@/libs/debug/nonceTrace"
-import { discreditAdvertisedHeight } from "src/libs/consensus/v2/routines/networkAheadVeto"
+import {
+    creditAdvertisedHeight,
+    credibleHeight,
+    discreditAdvertisedHeight,
+} from "src/libs/consensus/v2/routines/networkAheadVeto"
 
 /**
  * Used to prevent block insert operations from happening concurrently.
@@ -114,9 +118,8 @@ async function sleep(time: number) {
 // gossip heights records. The gossip claim exists precisely because
 // handleUpdatePeerSyncData refuses heights ahead of our own chain — without
 // it a lagging node can never learn the network head once push sync is
-// gossip-only.
-const peerHeight = (peer: Peer) =>
-    Math.max(peer.sync.block ?? 0, peer.gossip?.height ?? 0)
+// gossip-only. A claim the peer could not back with blocks is left out.
+const peerHeight = (peer: Peer) => credibleHeight(peer)
 
 const latestBlock = () =>
     peerManager
@@ -1392,6 +1395,7 @@ async function requestBlocks(): Promise<boolean> {
                 peer = next
                 continue
             }
+            creditAdvertisedHeight(peer)
             // Trigger L2PS sync
             triggerL2PSSync(peer)
 
