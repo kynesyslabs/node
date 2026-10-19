@@ -5,159 +5,27 @@
  * accepted once per recipient and answered idempotently.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "bun:test"
-import { generateKeyPairSync, sign, type KeyObject } from "node:crypto"
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+import {
+    Client,
+    encrypted,
+    identity,
+    proofFor,
+    register,
+    relay,
+    resetRelay,
+    rows,
+    sendAndWait,
+    service,
+    startRelayServer,
+    stopRelayServer,
+    submitToL2PS,
+    type Identity,
+} from "./relayHarness"
 
-// ─── In-memory l2ps_messages ─────────────────────────────────────
-
-type Row = Record<string, any>
-const rows = new Map<string, Row>()
-const tupleOf = (r: Row) => [r.l2psUid, r.fromKey, r.toKey, r.messageHash].join("|")
-
-const repo = {
-    findOneBy: async (where: Row) =>
-        [...rows.values()].find(r => Object.entries(where).every(([k, v]) => r[k] === v)) ?? null,
-    save: async (row: Row) => {
-        for (const r of rows.values()) {
-            if (r.id !== row.id && tupleOf(r) === tupleOf(row)) {
-                throw Object.assign(new Error("duplicate key"), { code: "23505" })
-            }
-        }
-        rows.set(row.id, { ...row })
-        return row
-    },
-    update: async (criteria: string | string[] | Row, patch: Row) => {
-        const matches = typeof criteria === "string" || Array.isArray(criteria)
-            ? [criteria].flat().map(id => rows.get(id)).filter(Boolean) as Row[]
-            : [...rows.values()].filter(r => Object.entries(criteria).every(([k, v]) => r[k] === v))
-        for (const r of matches) Object.assign(r, patch)
-        return { affected: matches.length }
-    },
-    delete: async (id: string) => {
-        rows.delete(id)
-    },
-    find: async () => [],
-}
-
-const SUBNETS = new Set(["subnet_a", "subnet_b"])
-
-jest.mock("@/model/datasource", () => ({
-    __esModule: true,
-    dataSource: { getRepository: () => repo },
-    default: { getInstance: async () => ({ getDataSource: () => ({ getRepository: () => repo }) }) },
-}))
-jest.mock("@/libs/l2ps/parallelNetworks", () => ({
-    __esModule: true,
-    default: { getInstance: () => ({ getL2PS: async (uid: string) => (SUBNETS.has(uid) ? {} : null) }) },
-}))
-jest.mock("@/libs/blockchain/transaction", () => ({ __esModule: true, default: class {} }))
-jest.mock("@/libs/blockchain/l2ps_mempool", () => ({ __esModule: true, default: {} }))
-jest.mock("@/libs/l2ps/L2PSTransactionExecutor", () => ({ __esModule: true, default: {} }))
-jest.mock("@/utilities/sharedState", () => ({ getSharedState: { signingAlgorithm: "ed25519" } }))
-
-const { L2PSMessagingService } = await import("../L2PSMessagingService")
-const { L2PSMessagingServer } = await import("../L2PSMessagingServer")
-
-const service = L2PSMessagingService.getInstance() as any
-let submitResult: { success: boolean; txHash?: string; error?: string } = { success: true, txHash: "0xtx" }
-// The service is a process-wide singleton shared with other test files.
-const submitToL2PS = jest.spyOn(service, "submitToL2PS").mockImplementation(async () => submitResult)
-
-// ─── Keys and sockets ────────────────────────────────────────────
-
-interface Identity {
-    publicKey: string
-    privateKey: KeyObject
-}
-
-function identity(): Identity {
-    const { publicKey, privateKey } = generateKeyPairSync("ed25519")
-    const raw = Buffer.from(publicKey.export({ format: "jwk" }).x as string, "base64url")
-    return { publicKey: raw.toString("hex"), privateKey }
-}
-
-function proofFor(id: Identity, timestamp: number, l2psUid?: string): string {
-    const message = l2psUid ? `register:${l2psUid}:${id.publicKey}:${timestamp}` : `register:${id.publicKey}:${timestamp}`
-    return sign(null, Buffer.from(message), id.privateKey).toString("hex")
-}
-
-let server: InstanceType<typeof L2PSMessagingServer>
-let port: number
-
-beforeAll(() => {
-    port = 21000 + Math.floor(Math.random() * 2000)
-    server = new L2PSMessagingServer(port)
-})
-
-afterAll(() => {
-    server.stop()
-    submitToL2PS.mockRestore()
-})
-
-beforeEach(() => {
-    rows.clear()
-    submitToL2PS.mockClear()
-    submitResult = { success: true, txHash: "0xtx" }
-})
-
-class Client {
-    private inbox: any[] = []
-    private waiters: Array<() => void> = []
-    constructor(readonly ws: WebSocket) {
-        ws.addEventListener("message", e => {
-            this.inbox.push(JSON.parse(e.data as string))
-            this.waiters.splice(0).forEach(w => w())
-        })
-    }
-
-    static async open(): Promise<Client> {
-        const ws = new WebSocket(`ws://localhost:${port}`)
-        await new Promise((resolve, reject) => {
-            ws.addEventListener("open", resolve)
-            ws.addEventListener("error", reject)
-        })
-        return new Client(ws)
-    }
-
-    frame(type: string, payload: Record<string, unknown>, timestamp = Date.now()): void {
-        this.ws.send(JSON.stringify({ type, payload, timestamp }))
-    }
-
-    async next(type: string | string[], timeout = 2000): Promise<any> {
-        const types = Array.isArray(type) ? type : [type]
-        const deadline = Date.now() + timeout
-        for (;;) {
-            const i = this.inbox.findIndex(f => types.includes(f.type) || f.type === "error")
-            if (i >= 0) return this.inbox.splice(i, 1)[0]
-            if (Date.now() > deadline) throw new Error(`timeout waiting for ${type}`)
-            await new Promise<void>(r => {
-                this.waiters.push(r)
-                setTimeout(r, 50)
-            })
-        }
-    }
-
-    has(type: string): boolean {
-        return this.inbox.some(f => f.type === type)
-    }
-
-    close(): void {
-        this.ws.close()
-    }
-}
-
-async function register(id: Identity, l2psUid = "subnet_a", timestamp = Date.now(), proof?: string) {
-    const client = await Client.open()
-    client.frame("register", { publicKey: id.publicKey, l2psUid, proof: proof ?? proofFor(id, timestamp) }, timestamp)
-    return { client, reply: await client.next("registered") }
-}
-
-const encrypted = { ciphertext: Buffer.from("quote").toString("base64"), nonce: Buffer.from("n").toString("base64") }
-
-async function sendAndWait(from: Client, to: Identity, messageHash: string) {
-    from.frame("send", { to: to.publicKey, encrypted, messageHash })
-    return from.next(["message_sent", "message_queued"])
-}
+beforeAll(startRelayServer)
+afterAll(stopRelayServer)
+beforeEach(resetRelay)
 
 // ─── Registration ────────────────────────────────────────────────
 
@@ -350,12 +218,12 @@ describe("messageHash scope", () => {
         const b = await register(buyer)
         const s = await register(seller)
 
-        submitResult = { success: false, error: "mempool unavailable" }
+        relay.submitResult = { success: false, error: "mempool unavailable" }
         const err = await sendAndWait(b.client, seller, "h-retry")
         expect(err.type).toBe("error")
         expect(err.payload.code).toBe("L2PS_SUBMIT_FAILED")
 
-        submitResult = { success: true, txHash: "0xtx2" }
+        relay.submitResult = { success: true, txHash: "0xtx2" }
         const retried = await sendAndWait(b.client, seller, "h-retry")
         expect(retried.type).toBe("message_sent")
         expect(retried.payload.duplicate).toBeUndefined()
@@ -372,7 +240,7 @@ describe("messageHash scope", () => {
         const b = await register(buyer)
         const s = await register(seller)
 
-        const srv = server as any
+        const srv = relay.server as any
         const realSend = srv.send.bind(srv)
         srv.send = (ws: any, frame: any) => (frame.type === "message" ? false : realSend(ws, frame))
         try {
@@ -388,12 +256,12 @@ describe("messageHash scope", () => {
     })
 
     it("resubmits a failed message once when two retries race", async () => {
-        submitResult = { success: false, error: "mempool unavailable" }
+        relay.submitResult = { success: false, error: "mempool unavailable" }
         const first = await service.processMessage("aa", "bb", "subnet_a", crypto.randomUUID(), "h-race", encrypted, true)
         expect(first.success).toBe(false)
         submitToL2PS.mockClear()
 
-        submitResult = { success: true, txHash: "0xtx3" }
+        relay.submitResult = { success: true, txHash: "0xtx3" }
         const results = await Promise.all([1, 2].map(() =>
             service.processMessage("aa", "bb", "subnet_a", crypto.randomUUID(), "h-race", encrypted, true)))
 
@@ -419,7 +287,7 @@ describe("messageHash scope", () => {
         expect(r2.duplicate).toBeUndefined()
         expect(submitToL2PS).toHaveBeenCalledTimes(1)
 
-        submitResult = { success: true, txHash: "0xtx4" }
+        relay.submitResult = { success: true, txHash: "0xtx4" }
         const retry = await service.processMessage("aa", "bb", "subnet_a", crypto.randomUUID(), "h-inflight", encrypted, true)
         expect(retry.success).toBe(true)
         expect(retry.duplicate).toBeUndefined()

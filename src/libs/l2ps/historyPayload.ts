@@ -12,6 +12,8 @@
  */
 
 import log from "@/utilities/logger"
+import { sanitizeForLog } from "@/utilities/logSafe"
+import { isNotConfigured } from "./l2psErrors"
 
 export interface HistoryRow {
     encrypted_payload?: Record<string, any> | null
@@ -19,10 +21,16 @@ export interface HistoryRow {
     execution_message?: string | null
 }
 
-/** Decrypts one stored envelope, or returns null if it cannot. */
-export type EnvelopeDecryptor = (
+/**
+ * Decrypts one stored envelope, or returns null if it cannot.
+ *
+ * `unavailable` is set on the decryptor a read gets when this node holds no
+ * key for the subnet at all, so the caller can say that, rather than leave a
+ * client to read a page of nulls as rows that failed to decrypt.
+ */
+export type EnvelopeDecryptor = ((
     envelope: Record<string, any>,
-) => Promise<Record<string, any> | null>
+) => Promise<Record<string, any> | null>) & { unavailable?: boolean }
 
 /** The message carried by a transaction payload, if it has one. */
 export function messageFromContent(
@@ -120,12 +128,28 @@ export async function subnetDecryptor(
         "@/libs/l2ps/parallelNetworks"
     )
     const networks = ParallelNetworks.getInstance()
-    const instance =
-        (await networks.getL2PS(l2psUid)) ?? (await networks.loadL2PS(l2psUid))
+    // Only "this node has no configuration for that name" is a node outside
+    // the subnet. The caller names the subnet, so that case is expected and
+    // answers metadata. A subnet the node does belong to whose key, IV or
+    // config cannot be loaded is a fault of this node: serving metadata for it
+    // would hide the fault behind a response that looks like a normal one.
+    let instance: Awaited<ReturnType<typeof networks.loadL2PS>> | undefined
+    try {
+        instance =
+            (await networks.getL2PS(l2psUid)) ?? (await networks.loadL2PS(l2psUid))
+    } catch (error) {
+        if (!isNotConfigured(error)) {
+            log.error(
+                `[L2PS History] Subnet ${sanitizeForLog(JSON.stringify(l2psUid), 100)} is configured but could not be loaded: ${error instanceof Error ? error.message : "unknown error"}`,
+            )
+            throw error
+        }
+        log.debug(`[L2PS History] No configuration for subnet ${sanitizeForLog(JSON.stringify(l2psUid), 100)}`)
+    }
 
     if (!instance) {
-        log.debug(`[L2PS History] No key for subnet ${l2psUid}`)
-        return async () => null
+        log.debug(`[L2PS History] No key for subnet ${sanitizeForLog(l2psUid, 100)}`)
+        return Object.assign(() => Promise.resolve(null), { unavailable: true })
     }
 
     return async envelope =>

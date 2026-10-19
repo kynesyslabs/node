@@ -1,10 +1,13 @@
 import { getSharedState } from "src/utilities/sharedState"
 import L2PSMempool, { L2PS_STATUS } from "../../blockchain/l2ps_mempool"
 import log from "src/utilities/logger"
+import { sanitizeForLog } from "src/utilities/logSafe"
+import { canonicalizeKey } from "@/features/l2ps-messaging/keys"
 import type { NodeCallHandler } from "./types"
+import type { L2PSTransaction } from "@/model/entities/L2PSTransactions"
 import { resolveHistoryEntry, subnetDecryptor } from "@/libs/l2ps/historyPayload"
-import { historyAuthMessageV2, isOwnHistoryHost, readPageValue } from "@/libs/l2ps/historyAuth"
-import { Config } from "src/config"
+import { historyAuthMessageV2, readPageValue, type HistoryPageParams } from "@/libs/l2ps/historyAuth"
+import { isRefusal, parseHistoryRequest } from "@/libs/l2ps/historyRequest"
 
 const historyAuthHint = (data: any) => ({
     messageV2:
@@ -13,10 +16,121 @@ const historyAuthHint = (data: any) => ({
     example: `getL2PSHistory:${data.l2psUid}:${data.address}:${Date.now()}`,
 })
 
+/** `l2ps_transactions.id` is a 32-bit serial: a cursor above this is not a row id the table can compare. */
+export const MAX_ROW_CURSOR = 2_147_483_647
+/** The latest instant a JS Date, and so a millisecond timestamp the node issues, can name. */
+export const MAX_EPOCH_MS = 8.64e15
+
+/**
+ * A number or numeric string as a whole number in [0, max]. Something that is
+ * not a number at all reads as 0, like an omitted field; a number outside the
+ * bound is null, because clamping it would hide that the peer's cursor is not
+ * one this node issued.
+ */
+function boundedWhole(raw: unknown, max: number): number | null {
+    const value = readPageValue(raw)
+    if (value === undefined) return 0
+    const whole = Math.floor(value)
+    return whole < 0 || whole > max ? null : whole
+}
+
+/**
+ * What an authenticated account history read answers with on success.
+ *
+ * `decryption` says whether this node holds a key for the subnet. When it is
+ * "unavailable" every row's `content` and `execution_message` is null because
+ * the node cannot read them, not because the rows failed to decrypt; the
+ * ciphertext in `encrypted_payload` is still returned for the member to read.
+ */
+export interface L2PSAccountHistoryResponse {
+    l2psUid: string
+    address: string
+    authenticated: true
+    decryption: "available" | "unavailable"
+    transactions: Array<{
+        hash: string
+        encrypted_hash: string | null
+        l1_batch_hash: string | null
+        type: string
+        from: string
+        to: string
+        amount: string
+        status: string
+        timestamp: string
+        l1_block_number: number | null
+        execution_message: string | null
+        content: Record<string, any> | null
+        encrypted_payload: Record<string, any> | null
+    }>
+    count: number
+    hasMore: boolean
+}
+
+/** Verifies an ed25519 signature given as hex, with or without a 0x prefix; any failure to decode is a failed check. */
+async function signatureVerifies(message: string, signature: string, address: string): Promise<boolean> {
+    const strip = (hex: string) => (hex.startsWith("0x") ? hex.slice(2) : hex)
+    const Cryptography = (await import("../../crypto/cryptography")).default
+    try {
+        return Cryptography.verify(message, strip(signature), strip(address))
+    } catch (verifyError: any) {
+        log.warning(`[L2PS] Signature verification error: ${verifyError.message}`)
+        return false
+    }
+}
+
+/**
+ * The string the caller signed. The subnet is part of it: without that one
+ * signature would authorize a read of any subnet this node serves, and
+ * anything able to relay the request could repoint it and still present a
+ * signature that verifies. The legacy form leaves the host and the page
+ * parameters unsigned and is kept only so existing clients keep working.
+ */
+function signedHistoryMessage(data: Record<string, any>, isV2: boolean, page: HistoryPageParams): string {
+    return isV2
+        ? historyAuthMessageV2(data.l2psUid, data.address, String(data.timestamp), data.host, page)
+        : `getL2PSHistory:${data.l2psUid}:${data.address}:${data.timestamp}`
+}
+
+/**
+ * Rows are stored under the sender's own spelling of an address, and instant
+ * messages under the canonical one, so a lookup by the spelling the caller
+ * happened to sign with misses the rest. The signature was already checked
+ * over the raw form.
+ */
+function accountKeyForms(address: string): string[] {
+    const canonical = canonicalizeKey(address)
+    return [...new Set([address, canonical, `0x${canonical}`])]
+}
+
+function historyRow(
+    tx: L2PSTransaction,
+    entry: { message: string | null; content: Record<string, any> | null },
+): L2PSAccountHistoryResponse["transactions"][number] {
+    return {
+        hash: tx.hash,
+        encrypted_hash: tx.encrypted_hash,
+        l1_batch_hash: tx.l1_batch_hash,
+        type: tx.type,
+        from: tx.from_address,
+        to: tx.to_address,
+        amount: tx.amount?.toString() || "0",
+        status: tx.status,
+        timestamp: tx.timestamp?.toString() || "0",
+        l1_block_number: tx.l1_block_number,
+        execution_message: entry.message,
+        content: entry.content,
+        // The stored ciphertext, as the unauthenticated subnet listing already
+        // serves it. A member holding the subnet key decrypts it locally and
+        // verifies the hash, instead of trusting a plaintext this node would
+        // hand back.
+        encrypted_payload: tx.encrypted_payload ?? null,
+    }
+}
+
 export const l2psHandlers: Record<string, NodeCallHandler> = {
     getL2PSParticipationById: async (data, response) => {
         log.debug("[L2PS] Received L2PS participation query")
-        if (!data.l2psUid) {
+        if (!data.l2psUid || typeof data.l2psUid !== "string") {
             response.result = 400
             response.response = "No L2PS UID specified"
             return response
@@ -43,7 +157,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
 
     getL2PSMempoolInfo: async (data, response) => {
         log.debug("[L2PS] Received L2PS mempool info request")
-        if (!data.l2psUid) {
+        if (!data.l2psUid || typeof data.l2psUid !== "string") {
             response.result = 400
             response.response = "No L2PS UID specified"
             return response
@@ -61,17 +175,18 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             }
         } catch (error) {
             log.error("[L2PS] Failed to get mempool info:", error)
-            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS mempool info"
-            response.extra = errorMsg || "Internal error"
+            // The cause is in the log; the caller is not told what the
+            // database or the filesystem said.
+            response.extra = "Internal error"
         }
         return response
     },
 
     getL2PSTransactions: async (data, response) => {
         log.debug("[L2PS] Received L2PS transactions sync request")
-        if (!data.l2psUid) {
+        if (!data.l2psUid || typeof data.l2psUid !== "string") {
             response.result = 400
             response.response = "No L2PS UID specified"
             return response
@@ -82,9 +197,18 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             // `since_timestamp` is still accepted from peers that predate the
             // cursor, but it is their clock, so it can only be honoured as a
             // starting point, never as a running high-water mark.
-            const afterId = Math.max(0, Math.floor(Number(data.cursor)) || 0)
-            const sinceMs = Math.max(0, Number(data.since_timestamp) || 0)
-            const limit = Math.min(Math.max(1, data.limit || 500), 1000)
+            // This is open to any caller, so a value the table cannot take
+            // must not reach it: an error from the comparison would come back
+            // as a 500. Each cursor has the bound of the column it is compared
+            // with.
+            const afterId = boundedWhole(data.cursor, MAX_ROW_CURSOR)
+            const sinceMs = boundedWhole(data.since_timestamp, MAX_EPOCH_MS)
+            if (afterId === null || sinceMs === null) {
+                response.result = 400
+                response.response = "cursor or since_timestamp is out of range"
+                return response
+            }
+            const limit = Math.min(Math.max(1, Math.floor(readPageValue(data.limit) || 500)), 1000)
 
             // Served from the durable history table, not the aggregation
             // queue: the queue is swept minutes after confirmation, so a peer
@@ -143,148 +267,29 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             }
         } catch (error) {
             log.error("[L2PS] Failed to get transactions:", error)
-            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS transactions"
-            response.extra = errorMsg || "Internal error"
+            // The cause is in the log; the caller is not told what the
+            // database or the filesystem said.
+            response.extra = "Internal error"
         }
         return response
     },
 
     getL2PSAccountTransactions: async (data, response) => {
         log.debug("[L2PS] Received account transactions request")
-        if (!data.l2psUid || !data.address) {
-            response.result = 400
-            response.response = "L2PS UID and address are required"
+        const parsed = parseHistoryRequest(data, Date.now(), () => historyAuthHint(data))
+        if (isRefusal(parsed)) {
+            response.result = parsed.result
+            response.response = parsed.response
+            if (parsed.extra !== undefined) response.extra = parsed.extra
             return response
         }
-
-        if (!data.signature || !data.timestamp) {
-            response.result = 401
-            response.response = "Authentication required. Provide signature and timestamp."
-            response.extra = historyAuthHint(data)
-            return response
-        }
-
-        const requestTime =
-            typeof data.timestamp === "string" || typeof data.timestamp === "number"
-                ? Number.parseInt(String(data.timestamp), 10)
-                : Number.NaN
-        const now = Date.now()
-        if (Number.isNaN(requestTime) || now - requestTime > 5 * 60 * 1000 || requestTime > now + 60 * 1000) {
-            response.result = 401
-            response.response = "Request expired or invalid timestamp."
-            return response
-        }
-
-        // This runs before the signature is verified, so a hostile value must
-        // not be able to throw here: page values are read without coercion
-        // and the version is compared strictly.
-        // An explicit null is a malformed version, not an omitted one, so it is
-        // refused rather than quietly served with the weaker legacy form.
-        const hasVersion = data.signatureVersion !== undefined
-        if (hasVersion && data.signatureVersion !== 2 && data.signatureVersion !== "2") {
-            response.result = 400
-            response.response = "Unsupported signatureVersion."
-            return response
-        }
-        // Version 2 is chosen by the request, never inferred from the
-        // signature: the two strings differ in their first segment, so a
-        // signature made for one version cannot verify as the other, and a
-        // relay that strips the marker only turns the request into a refusal.
-        const isV2 = hasVersion
-
-        if (!isV2 && Config.getInstance().l2ps.historyRequireV2) {
-            response.result = 401
-            response.response = "This node requires a version 2 history signature."
-            response.extra = historyAuthHint(data)
-            return response
-        }
-
-        const rawLimit = readPageValue(data.limit)
-        const rawOffset = readPageValue(data.offset)
-        const rawSince = readPageValue(data.since)
-
-        const maxLimit = 1000
-        // Only a missing value takes the default: a supplied zero is clamped to
-        // the documented minimum, so the signed value and the applied value agree.
-        const limit = Math.min(Math.max(1, rawLimit ?? 100), maxLimit)
-        const offset = Math.max(0, rawOffset ?? 0)
-        const since = Math.max(0, rawSince ?? 0)
-
-        if (isV2) {
-            // The message is joined with ":", so a segment that can carry one
-            // would let two different requests produce the same string.
-            const timestamp = String(data.timestamp)
-            if (
-                !/^\d+$/.test(timestamp) ||
-                typeof data.l2psUid !== "string" ||
-                data.l2psUid.includes(":") ||
-                typeof data.address !== "string" ||
-                data.address.includes(":")
-            ) {
-                response.result = 400
-                response.response = "Malformed timestamp, subnet or address."
-                return response
-            }
-            // A supplied page value that is not a number would otherwise fall
-            // back to a default the caller never signed.
-            const supplied = [data.limit, data.offset, data.since]
-            const parsed = [rawLimit, rawOffset, rawSince]
-            const unreadable = supplied.some(
-                (value, index) =>
-                    value !== undefined && value !== null && parsed[index] === undefined,
-            )
-            if (!data.host) {
-                response.result = 401
-                response.response = "A version 2 signature requires the host it is bound to."
-                return response
-            }
-            // Bound to the node so a signature collected by or relayed through
-            // one node cannot be presented to another serving the same subnet.
-            if (!isOwnHistoryHost(data.host)) {
-                response.result = 403
-                response.response = "Signature is bound to another host."
-                return response
-            }
-            if (unreadable || ![limit, offset, since].every(Number.isSafeInteger)) {
-                response.result = 400
-                response.response = "limit, offset and since must be integers."
-                return response
-            }
-        }
+        const { isV2, page: { limit, offset, since } } = parsed
 
         try {
-            // The subnet is part of what is signed. Without it one signature
-            // would authorize a read of any subnet this node serves, so
-            // anything able to relay the request could repoint it and still
-            // present a signature that verifies.
-            //
-            // The legacy form leaves the host and the page parameters unsigned
-            // and is kept only so existing clients keep working.
-            const expectedMessage = isV2
-                ? historyAuthMessageV2(data.l2psUid, data.address, String(data.timestamp), data.host, {
-                    limit,
-                    offset,
-                    since,
-                })
-                : `getL2PSHistory:${data.l2psUid}:${data.address}:${data.timestamp}`
-
-            const Cryptography = (await import("../../crypto/cryptography")).default
-
-            let signature = data.signature
-            let publicKey = data.address
-
-            if (signature.startsWith("0x")) signature = signature.slice(2)
-            if (publicKey.startsWith("0x")) publicKey = publicKey.slice(2)
-
-            let isValid = false
-            try {
-                isValid = Cryptography.verify(expectedMessage, signature, publicKey)
-            } catch (verifyError: any) {
-                log.warning(`[L2PS] Signature verification error: ${verifyError.message}`)
-                isValid = false
-            }
+            const expectedMessage = signedHistoryMessage(data, isV2, { limit, offset, since })
+            const isValid = await signatureVerifies(expectedMessage, data.signature, data.address)
 
             if (!isValid) {
                 response.result = 403
@@ -292,14 +297,14 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 return response
             }
 
-            log.info(`[L2PS] Authenticated request for ${data.address.slice(0, 16)}...`)
+            log.info(`[L2PS] Authenticated request for ${sanitizeForLog(data.address, 16)}`)
 
             const { default: L2PSTransactionExecutor } = await import("../../l2ps/L2PSTransactionExecutor")
             // One past the page, so a full last page can say there is nothing
             // after it instead of inviting a request for an empty one.
             const fetched = await L2PSTransactionExecutor.getAccountTransactions(
                 data.l2psUid,
-                data.address,
+                accountKeyForms(data.address),
                 limit + 1,
                 offset,
                 since,
@@ -317,38 +322,23 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             )
 
             response.result = 200
-            response.response = {
+            const body: L2PSAccountHistoryResponse = {
                 l2psUid: data.l2psUid,
                 address: data.address,
                 authenticated: true,
-                transactions: transactions.map((tx, index) => ({
-                    hash: tx.hash,
-                    encrypted_hash: tx.encrypted_hash,
-                    l1_batch_hash: tx.l1_batch_hash,
-                    type: tx.type,
-                    from: tx.from_address,
-                    to: tx.to_address,
-                    amount: tx.amount?.toString() || "0",
-                    status: tx.status,
-                    timestamp: tx.timestamp?.toString() || "0",
-                    l1_block_number: tx.l1_block_number,
-                    execution_message: entries[index].message,
-                    content: entries[index].content,
-                    // The stored ciphertext, as the unauthenticated subnet
-                    // listing already serves it. A member holding the subnet
-                    // key decrypts it locally and verifies the hash, instead
-                    // of trusting a plaintext this node would hand back.
-                    encrypted_payload: tx.encrypted_payload ?? null,
-                })),
+                decryption: decrypt?.unavailable === true ? "unavailable" : "available",
+                transactions: transactions.map((tx, index) => historyRow(tx, entries[index])),
                 count: transactions.length,
                 hasMore,
             }
+            response.response = body
         } catch (error) {
             log.error("[L2PS] Failed to get account transactions:", error)
-            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS account transactions"
-            response.extra = errorMsg || "Internal error"
+            // The cause is in the log; the caller is not told what the
+            // database or the filesystem said.
+            response.extra = "Internal error"
         }
         return response
     },
