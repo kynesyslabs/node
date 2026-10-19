@@ -12,11 +12,14 @@ import Transaction from "@/libs/blockchain/transaction"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
+import { getExecutedBacklogGuard, L2PS_BACKLOG_FULL } from "@/libs/l2ps/executedBacklogGuard"
 import { L2PSMessage } from "./entities/L2PSMessage"
 import { canonicalizeKey } from "./keys"
 import type { ErrorCode, MessageStatus, SerializedEncryptedMessage, StoredMessage } from "./types"
 
 const MAX_OFFLINE_MESSAGES_PER_SENDER = 200
+/** Messaging slots are held to a share of the subnet's backlog cap. */
+const MESSAGING_CLAIM = { origin: "messaging" } as const
 /**
  * Queued rows one recipient key may hold. The per-sender limit bounds each
  * sender, but registration needs no membership, so any number of keys can
@@ -45,6 +48,8 @@ export interface ProcessMessageResult {
     duplicate?: boolean
     /** Status the message is stored with: delivered, queued or, for a duplicate, sent. */
     status?: MessageStatus
+    /** Set with L2PS_BACKLOG_FULL: when it is worth sending the message again. */
+    retryAfterMs?: number
 }
 
 /**
@@ -148,7 +153,7 @@ export class L2PSMessagingService {
         encrypted: SerializedEncryptedMessage,
         recipientOnline: boolean,
     ): Promise<ProcessMessageResult> {
-        const { fromKey } = identity
+        const { l2psUid, fromKey } = identity
         const repo = dataSource.getRepository(L2PSMessage)
 
         const existing = await this.findExisting(repo, identity)
@@ -175,8 +180,46 @@ export class L2PSMessagingService {
         const release = () => this.releaseSlot(slotId)
         // A hash on a failed row means the L2PS transaction exists and only
         // delivery failed; submitting again would record the message twice.
+        // No new executed row results, so this path never meets the backlog
+        // cap: a full subnet must not refuse a retry that adds nothing to it.
         if (existing?.l2psTxHash) return this.retryDelivery(repo, existing, identity, recipientOnline, release)
-        return this.persistAndSubmit(repo, existing, identity, messageId, encrypted, recipientOnline, release)
+
+        // Before anything is written: a refused message leaves no row behind
+        // and gives its quota slot back.
+        const backlog = getExecutedBacklogGuard()
+        const room = await backlog.check(l2psUid, MESSAGING_CLAIM)
+        if (!room.admitted) {
+            release()
+            return this.backlogFullResult(room.retryAfterMs)
+        }
+
+        // The backlog slot comes after the quota, so a sender at its own limit
+        // never takes room from the subnet, and it is held only while this
+        // attempt is running: an executed row is counted by the database from
+        // then on.
+        if (!backlog.claim(l2psUid, MESSAGING_CLAIM)) {
+            release()
+            return this.backlogFullResult(room.retryAfterMs)
+        }
+        let executed = false
+        const onExecuted = () => {
+            executed = true
+            backlog.settle(l2psUid, MESSAGING_CLAIM)
+        }
+        try {
+            return await this.persistAndSubmit(repo, existing, identity, messageId, encrypted, recipientOnline, release, onExecuted)
+        } finally {
+            if (!executed) backlog.release(l2psUid, MESSAGING_CLAIM)
+        }
+    }
+
+    private backlogFullResult(retryAfterMs: number): ProcessMessageResult {
+        return {
+            success: false,
+            error: "L2PS queue is full, retry later",
+            code: L2PS_BACKLOG_FULL,
+            retryAfterMs,
+        }
     }
 
     private async persistAndSubmit(
@@ -187,6 +230,7 @@ export class L2PSMessagingService {
         encrypted: SerializedEncryptedMessage,
         recipientOnline: boolean,
         release: () => void,
+        onExecuted: () => void,
     ): Promise<ProcessMessageResult> {
         const { l2psUid, fromKey, toKey, messageHash } = identity
         const now = Date.now()
@@ -215,7 +259,7 @@ export class L2PSMessagingService {
             return { success: false, error: writeError }
         }
 
-        const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, id, messageHash, encrypted, now)
+        const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, id, messageHash, encrypted, now, onExecuted)
 
         if (!l2psResult.success) {
             // Released only once the row has left "queued"; if this write
@@ -345,7 +389,11 @@ export class L2PSMessagingService {
         if (fromKey === undefined) return
         this.heldSlots.delete(messageId)
         const count = this.offlineMessageCounts.get(fromKey) ?? 0
-        if (count > 0) this.offlineMessageCounts.set(fromKey, count - 1)
+        if (count > 1) {
+            this.offlineMessageCounts.set(fromKey, count - 1)
+        } else {
+            this.offlineMessageCounts.delete(fromKey)
+        }
     }
 
     /**
@@ -422,6 +470,7 @@ export class L2PSMessagingService {
         messageHash: string,
         encrypted: SerializedEncryptedMessage,
         timestamp: number,
+        onExecuted: () => void = () => {},
     ): Promise<{ success: boolean; txHash?: string; error?: string }> {
         try {
             const parallelNetworks = ParallelNetworks.getInstance()
@@ -499,7 +548,13 @@ export class L2PSMessagingService {
                     l2psUid, tx, encryptedTxHash, false,
                 )
                 if (execResult.success) {
-                    await L2PSMempool.updateStatus(encryptedTxHash, "executed")
+                    // A row that is still not executed is not counted by the
+                    // database either, so its slot goes back instead of settling.
+                    if (await L2PSMempool.updateStatus(encryptedTxHash, "executed")) {
+                        onExecuted()
+                    } else {
+                        log.warning(`[L2PS-IM] Could not mark ${encryptedTxHash} executed`)
+                    }
                 } else {
                     await L2PSMempool.updateStatus(encryptedTxHash, "failed")
                     log.warning(`[L2PS-IM] Execution failed: ${execResult.message}`)

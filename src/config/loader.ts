@@ -294,6 +294,26 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.L2PS_CLEANUP_AGE_MS,
                 d.l2ps.cleanupAgeMs,
             ),
+            mempoolMaxExecutedPerSubnet: envInt(
+                EnvKey.L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET,
+                d.l2ps.mempoolMaxExecutedPerSubnet,
+            ),
+            aggregatorMaxBatchesPerCycle: envInt(
+                EnvKey.L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE,
+                d.l2ps.aggregatorMaxBatchesPerCycle,
+            ),
+            messagingSendRate: envFloat(
+                EnvKey.L2PS_MESSAGING_SEND_RATE,
+                d.l2ps.messagingSendRate,
+            ),
+            messagingSendBurst: envInt(
+                EnvKey.L2PS_MESSAGING_SEND_BURST,
+                d.l2ps.messagingSendBurst,
+            ),
+            messagingBacklogShare: envFloat(
+                EnvKey.L2PS_MESSAGING_BACKLOG_SHARE,
+                d.l2ps.messagingBacklogShare,
+            ),
             historyRetentionDays: envInt(
                 EnvKey.L2PS_HISTORY_RETENTION_DAYS,
                 d.l2ps.historyRetentionDays,
@@ -462,6 +482,7 @@ export function loadConfig(): Readonly<AppConfig> {
     }
 
     assertConsensusTimingSane(config)
+    assertL2psLimitsSane(config)
 
     return deepFreeze(config)
 }
@@ -513,5 +534,65 @@ function assertConsensusTimingSane(config: AppConfig): void {
         throw new Error(
             `[config] invalid consensus timing configuration:\n  - ${problems.join("\n  - ")}`,
         )
+    }
+}
+
+/**
+ * Most batches one aggregation cycle may build for a subnet. Each cycle reads
+ * that many batches' worth of rows at once, so an unbounded value brings back
+ * the whole-backlog read the backlog cap exists to prevent.
+ */
+const MAX_BATCHES_PER_CYCLE_LIMIT = 100
+
+/**
+ * Reject L2PS backlog and relay limits that would wedge a subnet or silently
+ * switch a protection off.
+ */
+function assertL2psLimitsSane(config: AppConfig): void {
+    const { mempoolMaxExecutedPerSubnet: cap, minBatchSize, aggregatorMaxBatchesPerCycle: batches } = config.l2ps
+    const { messagingSendRate: rate, messagingSendBurst: burst, messagingBacklogShare: share } = config.l2ps
+    const problems: string[] = []
+
+    // A negative cap reads as "off" to the guard, which is only meant to be
+    // asked for with 0.
+    if (cap < 0) {
+        problems.push(`L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET must be 0 (no limit) or positive (got ${cap})`)
+    }
+    // A subnet's backlog is only batched once it holds the minimum batch size.
+    // A cap below that refuses new transactions before the aggregator will
+    // touch the ones already accepted, so the subnet would stop for good.
+    if (cap > 0 && cap < minBatchSize) {
+        problems.push(
+            `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET (${cap}) is below L2PS_MIN_BATCH_SIZE (${minBatchSize}): ` +
+                "a subnet would fill up before its first batch could form. " +
+                "Raise the cap to at least the minimum batch size, or set it to 0 to disable the limit.",
+        )
+    }
+    if (batches > MAX_BATCHES_PER_CYCLE_LIMIT) {
+        problems.push(
+            `L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE must be at most ${MAX_BATCHES_PER_CYCLE_LIMIT} (got ${batches})`,
+        )
+    }
+    if (rate < 0) {
+        problems.push(`L2PS_MESSAGING_SEND_RATE must be 0 (no limit) or positive (got ${rate})`)
+    }
+    if (rate > 0 && burst < 1) {
+        problems.push(`L2PS_MESSAGING_SEND_BURST must be at least 1 while a send rate is set (got ${burst})`)
+    }
+    if (!(share > 0 && share <= 1)) {
+        problems.push(`L2PS_MESSAGING_BACKLOG_SHARE must be above 0 and at most 1 (got ${share})`)
+    }
+
+    // Not an error: the guard raises the messaging share to one batch so a
+    // message-only subnet can still drain, but the operator asked for less.
+    if (cap > 0 && cap >= minBatchSize && Math.floor(cap * share) < minBatchSize) {
+        console.warn(
+            `[config] L2PS_MESSAGING_BACKLOG_SHARE (${share}) of L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET (${cap}) is below ` +
+                `L2PS_MIN_BATCH_SIZE (${minBatchSize}); the messaging share was raised to the batch minimum.`,
+        )
+    }
+
+    if (problems.length > 0) {
+        throw new Error(`[config] invalid L2PS configuration:\n  - ${problems.join("\n  - ")}`)
     }
 }

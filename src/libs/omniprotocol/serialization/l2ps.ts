@@ -23,7 +23,9 @@ export interface L2PSVerifyBatchRequest {
 
 export interface L2PSSyncMempoolRequest {
     l2psUid: string
+    /** Cursor: entries after this timestamp, or after (fromTimestamp, afterHash) when afterHash is set. */
     fromTimestamp?: number
+    afterHash?: string
     limit?: number
 }
 

@@ -27,6 +27,9 @@ import type {
 } from "../../serialization/l2ps"
 import { decodeL2PSHashUpdate } from "../../serialization/l2ps"
 
+/** Most queue entries one sync request returns, whatever limit the peer asks for. */
+export const MAX_SYNC_MEMPOOL_ENTRIES = 1000
+
 /**
  * Handler for 0x70 L2PS_GENERIC opcode
  *
@@ -247,17 +250,21 @@ export const handleL2PSSyncMempool: OmniHandler<Buffer> = async ({ message, cont
 
         const L2PSMempool = (await import("../../../blockchain/l2ps_mempool")).default
 
-        const entries = await L2PSMempool.getByUID(request.l2psUid)
-
-        // Filter by timestamp if provided
-        const filteredEntries = request.fromTimestamp
-            ? entries.filter((e) => Number(e.timestamp) > request.fromTimestamp!)
-            : entries
-
-        // Apply limit
-        const limitedEntries = request.limit
-            ? filteredEntries.slice(0, request.limit)
-            : filteredEntries
+        // A peer that sends no limit, or a huge one, still gets one bounded
+        // page; it continues from the (timestamp, hash) of the last entry.
+        const limit = Number.isSafeInteger(request.limit) && request.limit! > 0
+            ? Math.min(request.limit!, MAX_SYNC_MEMPOOL_ENTRIES)
+            : MAX_SYNC_MEMPOOL_ENTRIES
+        const fetched = await L2PSMempool.getPageByUID(
+            request.l2psUid,
+            {
+                timestamp: Number(request.fromTimestamp) || 0,
+                hash: typeof request.afterHash === "string" ? request.afterHash : undefined,
+            },
+            limit + 1,
+        )
+        const hasMore = fetched.length > limit
+        const limitedEntries = fetched.slice(0, limit)
 
         return encodeResponse(
             successResponse({
@@ -269,6 +276,7 @@ export const handleL2PSSyncMempool: OmniHandler<Buffer> = async ({ message, cont
                     timestamp: Number(e.timestamp),
                 })),
                 count: limitedEntries.length,
+                hasMore,
             }),
         )
     } catch (error) {
@@ -300,12 +308,12 @@ export const handleL2PSGetBatchStatus: OmniHandler<Buffer> = async ({ message, c
         // Get pending transactions from L2PS mempool
         const L2PSMempool = (await import("../../../blockchain/l2ps_mempool")).default
 
-        const pendingTxs = await L2PSMempool.getByUID(request.l2psUid, "executed")
+        const pending = await L2PSMempool.getSummaryByUIDAndStatus(request.l2psUid, "executed")
 
         return encodeResponse(
             successResponse({
                 found: true,
-                pendingTransactions: pendingTxs.length,
+                pendingTransactions: pending.count,
                 l2psUid: request.l2psUid,
             }),
         )
