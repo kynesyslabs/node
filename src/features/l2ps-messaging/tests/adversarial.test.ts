@@ -466,7 +466,8 @@ describe("a JSON value that is not an object is refused, and the socket stays us
         expect(reply.payload.code).toBe("INVALID_MESSAGE")
 
         const id = identity()
-        client.frame("register", { publicKey: id.publicKey, l2psUid: "subnet_a", proof: proofFor(id, Date.now()) })
+        const ts = Date.now()
+        client.frame("register", { publicKey: id.publicKey, l2psUid: "subnet_a", proof: proofFor(id, ts) }, ts)
         expect((await client.next("registered")).type).toBe("registered")
         client.close()
     })
