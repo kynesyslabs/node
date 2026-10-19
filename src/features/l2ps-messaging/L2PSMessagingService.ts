@@ -33,6 +33,8 @@ const MAX_HISTORY_PAGE = 200
 
 export interface ProcessMessageResult {
     success: boolean
+    /** The envelope as stored, when a retry delivers a message that was already submitted. */
+    encrypted?: SerializedEncryptedMessage
     /** Row id of the accepted message (a retry reuses the failed row's id). */
     messageId?: string
     l2psTxHash?: string
@@ -258,11 +260,14 @@ export class L2PSMessagingService {
                 ? this.duplicateResult(winner)
                 : { success: false, error: "Duplicate message" }
         }
+        // History holds the envelope that was submitted; a retry delivers that
+        // one, not whatever the resend frame carries under the same hash.
         return {
             success: true,
             messageId: existing.id,
             l2psTxHash: existing.l2psTxHash ?? undefined,
             status,
+            encrypted: existing.encrypted,
         }
     }
 

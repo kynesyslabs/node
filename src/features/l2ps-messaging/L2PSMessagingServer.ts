@@ -591,7 +591,13 @@ export class L2PSMessagingServer {
             return
         }
 
-        await this.routeAndReply(ws, msg.requestId, { senderKey, recipientPeer, encrypted, messageHash, result })
+        await this.routeAndReply(ws, msg.requestId, {
+            senderKey,
+            recipientPeer,
+            encrypted: result.encrypted ?? encrypted,
+            messageHash,
+            result,
+        })
     }
 
     private replyToResend(

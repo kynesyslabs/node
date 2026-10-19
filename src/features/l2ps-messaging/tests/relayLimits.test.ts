@@ -263,6 +263,20 @@ describe("a submitted message is never submitted twice", () => {
         expect(rows.size).toBe(1)
     })
 
+    it("a retry with a changed envelope delivers the one that was submitted", async () => {
+        const victim = identity()
+        const from = "ff".repeat(32)
+        await service.processMessage(from, victim.publicKey, "subnet_a", "msg-1", "h-1", encrypted, true)
+        rows.get("msg-1")!.status = "failed"
+        const changed = { ciphertext: Buffer.from("other").toString("base64"), nonce: encrypted.nonce }
+
+        const again = await service.processMessage(from, victim.publicKey, "subnet_a", "msg-2", "h-1", changed, true)
+
+        expect(again.success).toBe(true)
+        expect(again.encrypted).toEqual(encrypted)
+        expect(rows.get("msg-1")!.encrypted).toEqual(encrypted)
+    })
+
     it("a failed row that was never submitted is still submitted on retry", async () => {
         const victim = identity()
         const from = "ff".repeat(32)
