@@ -32,10 +32,16 @@ import {
 } from "./forkScheduleAgreement"
 import { Config } from "src/config"
 import { replaceFileAtomically } from "./replaceFileAtomically"
+import {
+    clearRefusalMarker,
+    pendingRefusal,
+    writeRefusalMarker,
+} from "./genesisRefusalMarker"
 
 let ourGenesisDataHash = ""
 let ourGenesisCoreHash = ""
 const genesisFile = "data/genesis.json"
+const refusalMarkerFile = "data/genesis.bootstrap-refused.json"
 /** A genesis file is a few KB; this only bounds what a peer can make this node buffer. */
 const MAX_GENESIS_BYTES = 2 * 1024 * 1024
 const GENESIS_DOWNLOAD_TIMEOUT_MS = 10_000
@@ -155,13 +161,18 @@ async function storedGenesisHash(): Promise<string | null> {
 }
 
 function writeGenesisAtomically(data: unknown, expectedCoreHash: string) {
-    replaceFileAtomically(genesisFile, JSON.stringify(data, null, 2), written => {
-        if (hashGenesisCore(JSON.parse(written)) !== expectedCoreHash) {
-            throw new Error(
-                "Genesis data written from peer does not hash like what the peer served",
-            )
-        }
-    })
+    const method = replaceFileAtomically(
+        genesisFile,
+        JSON.stringify(data, null, 2),
+        written => {
+            if (hashGenesisCore(JSON.parse(written)) !== expectedCoreHash) {
+                throw new Error(
+                    "Genesis data written from peer does not hash like what the peer served",
+                )
+            }
+        },
+    )
+    log.debug(`[BOOTSTRAP] Replaced ${genesisFile} (${method})`)
 }
 
 async function ensureGenesisDataMatch(verifiedPeer: Peer) {
@@ -203,7 +214,25 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
             )
             if (problem) {
                 log.error("[BOOTSTRAP] Refusing to continue: " + problem)
+                try {
+                    writeRefusalMarker(refusalMarkerFile, {
+                        message: problem,
+                        storedHash: (await storedGenesisHash()) ?? "",
+                        peerHash: peerGenesisDataHash,
+                    })
+                } catch (error) {
+                    log.error(
+                        `[BOOTSTRAP] Could not write ${refusalMarkerFile}: ` +
+                            (error instanceof Error ? error.message : String(error)),
+                    )
+                }
                 throw new Error(problem)
+            }
+        }
+        if (storedHash !== null && peerGenesisDataHash === storedHash) {
+            // A peer and this node's own stored block 0 agree: whatever an earlier refusal was about is gone.
+            if (clearRefusalMarker(refusalMarkerFile)) {
+                log.info(`[BOOTSTRAP] Removed ${refusalMarkerFile}: the stored block 0 agrees with the network`)
             }
         }
     } else {
@@ -355,6 +384,13 @@ export default async function peerBootstrap(
                 ? "Missing genesis file"
                 : "Corrupt genesis file"
         throw new Error(`${label} at data/genesis.json: ${msg}`)
+    }
+    // Before anything is judged against the stored block 0: a refusal from an
+    // earlier boot means that block is the one that was refused.
+    const refusal = pendingRefusal(refusalMarkerFile, await storedGenesisHash())
+    if (refusal) {
+        log.error("[BOOTSTRAP] Refusing to continue: " + refusal)
+        throw new Error(refusal)
     }
     ourGenesisDataHash = hashGenesisData(genesisData)
     ourGenesisCoreHash = hashGenesisCore(genesisData)

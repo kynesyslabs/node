@@ -94,17 +94,29 @@ export async function resolveGenesisMismatch(
                 showPeerValue(peerAdvertisedHash),
         )
     }
-    if (peerAdvertisedHash === ourFullHash) return { outcome: "match" }
 
+    // The authority is consulted before the peer's agreement counts for anything:
+    // a file and a peer that agree with each other are still the wrong chain
+    // when the authority says otherwise.
     const trusted = authority.storedHash || authority.expectedHash || null
-    if (trusted !== null) {
+    if (trusted === null) {
+        if (peerAdvertisedHash === ourFullHash) return { outcome: "match" }
+    } else {
+        const source = authority.storedHash ? "this node's stored block 0" : "EXPECTED_GENESIS_HASH"
         if (ourFullHash === trusted) {
+            if (peerAdvertisedHash === ourFullHash) return { outcome: "match" }
             return { outcome: "peer-disagrees", peerAdvertisedHash }
+        }
+        if (peerAdvertisedHash === ourFullHash) {
+            throw new Error(
+                `The local genesis file hashes to ${ourFullHash} but the trusted genesis hash is ${trusted} ` +
+                    `(${source}); the peer agreeing with the file does not make it right`,
+            )
         }
         if (peerAdvertisedHash !== trusted) {
             throw new Error(
                 `Peer advertises genesis hash ${peerAdvertisedHash} but the trusted genesis hash is ${trusted} ` +
-                    `(${authority.storedHash ? "this node's stored block 0" : "EXPECTED_GENESIS_HASH"}); ` +
+                    `(${source}); ` +
                     "refusing to take genesis data from it",
             )
         }

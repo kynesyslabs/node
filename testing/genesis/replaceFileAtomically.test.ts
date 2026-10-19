@@ -1,4 +1,5 @@
-import { describe, it, expect } from "bun:test"
+import { describe, it, expect, afterEach } from "bun:test"
+import fs from "node:fs"
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, chmodSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -38,5 +39,60 @@ describe("replacing a file atomically", () => {
         expect(readFileSync(path, "utf8")).toBe("old")
         expect(readdirSync(dir)).toEqual(["genesis.json"])
         rmSync(dir, { recursive: true })
+    })
+
+    describe("when the file cannot be renamed over (a single-file bind mount)", () => {
+        const realRename = fs.renameSync
+        afterEach(() => {
+            fs.renameSync = realRename
+        })
+        const failRename = (code: string) => {
+            fs.renameSync = (() => {
+                throw Object.assign(new Error(code), { code })
+            }) as typeof fs.renameSync
+        }
+
+        for (const code of ["EBUSY", "EXDEV"]) {
+            it(`writes the verified bytes in place on ${code} and removes the temporary file`, () => {
+                const { dir, path } = setup()
+                failRename(code)
+                const method = replaceFileAtomically(path, "new content", () => undefined)
+                expect(method).toBe("in-place")
+                expect(readFileSync(path, "utf8")).toBe("new content")
+                expect(statSync(path).mode & 0o777).toBe(0o640)
+                expect(readdirSync(dir)).toEqual(["genesis.json"])
+                rmSync(dir, { recursive: true })
+            })
+        }
+
+        it("does not fall back for other errors, and leaves the old file", () => {
+            const { dir, path } = setup()
+            failRename("EACCES")
+            expect(() => replaceFileAtomically(path, "new", () => undefined)).toThrow("EACCES")
+            expect(readFileSync(path, "utf8")).toBe("old")
+            expect(readdirSync(dir)).toEqual(["genesis.json"])
+            rmSync(dir, { recursive: true })
+        })
+
+        it("shortens the content in place without leaving old bytes behind", () => {
+            const { dir, path } = setup()
+            writeFileSync(path, "a much longer previous content")
+            failRename("EBUSY")
+            replaceFileAtomically(path, "short", () => undefined)
+            expect(readFileSync(path, "utf8")).toBe("short")
+            rmSync(dir, { recursive: true })
+        })
+
+        it("still verifies before touching the file", () => {
+            const { dir, path } = setup()
+            failRename("EBUSY")
+            expect(() =>
+                replaceFileAtomically(path, "bad", () => {
+                    throw new Error("rejected")
+                }),
+            ).toThrow("rejected")
+            expect(readFileSync(path, "utf8")).toBe("old")
+            rmSync(dir, { recursive: true })
+        })
     })
 })

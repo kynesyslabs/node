@@ -274,6 +274,25 @@ describe("the stored block 0 or a pinned hash decides which peer is right", () =
         expect(ignored.verdict.outcome).toBe("peer-disagrees")
     })
 
+    it("a pinned hash is checked even when the file and the peer agree with each other", async () => {
+        const pinned = hashGenesisData(forged)
+        const error = await run(truth, truth, { expectedHash: pinned }).catch(e => e)
+        expect(error).toBeInstanceOf(Error)
+        expect(error.message).toContain(hashGenesisData(truth))
+        expect(error.message).toContain(pinned)
+    })
+
+    it("a stored block 0 is checked even when the file and the peer agree with each other", async () => {
+        const stored = hashGenesisData(forged)
+        await expect(run(truth, truth, { storedHash: stored })).rejects.toThrow(stored)
+    })
+
+    it("a file, a peer and an authority that all agree match", async () => {
+        const h = hashGenesisData(truth)
+        expect((await run(truth, truth, { storedHash: h })).verdict).toEqual({ outcome: "match" })
+        expect((await run(truth, truth, { expectedHash: h })).verdict).toEqual({ outcome: "match" })
+    })
+
     it("without any authority the first peer decides, as before", async () => {
         const { verdict } = await run(withSchedule(truth), forged, {})
         expect(verdict.outcome).toBe("replaced")
