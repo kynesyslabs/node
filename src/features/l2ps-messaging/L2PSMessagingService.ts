@@ -171,6 +171,9 @@ export class L2PSMessagingService {
         // `markDelivered` finds none to free for that row, so it is never
         // freed twice.
         const release = () => this.releaseSlot(slotId)
+        // A hash on a failed row means the L2PS transaction exists and only
+        // delivery failed; submitting again would record the message twice.
+        if (existing?.l2psTxHash) return this.retryDelivery(repo, existing, identity, recipientOnline, release)
         return this.persistAndSubmit(repo, existing, identity, messageId, encrypted, recipientOnline, release)
     }
 
@@ -228,6 +231,42 @@ export class L2PSMessagingService {
     }
 
     /**
+     * Take a failed row whose message is already submitted back for delivery
+     * only. Conditional on it still being failed, like `claimFailed`, and the
+     * stored envelope, timestamp and transaction hash stay as submitted.
+     */
+    private async retryDelivery(
+        repo: MessageRepo,
+        existing: L2PSMessage,
+        identity: { l2psUid: string; fromKey: string; toKey: string; messageHash: string },
+        recipientOnline: boolean,
+        release: () => void,
+    ): Promise<ProcessMessageResult> {
+        const status = recipientOnline ? "delivered" : "queued"
+        let claimed: { affected?: number }
+        try {
+            claimed = await repo.update({ id: existing.id, status: "failed" }, { status })
+        } catch (error) {
+            release()
+            throw error
+        }
+        if (!claimed.affected) {
+            release()
+            // A concurrent resend took the row first.
+            const winner = await this.findExisting(repo, identity)
+            return winner && winner.status !== "failed"
+                ? this.duplicateResult(winner)
+                : { success: false, error: "Duplicate message" }
+        }
+        return {
+            success: true,
+            messageId: existing.id,
+            l2psTxHash: existing.l2psTxHash ?? undefined,
+            status,
+        }
+    }
+
+    /**
      * Take a failed row back for a retry. Conditional on it still being
      * failed, so two concurrent retries cannot both resubmit it.
      */
@@ -252,7 +291,8 @@ export class L2PSMessagingService {
         const repo = dataSource.getRepository(L2PSMessage)
         const row = await repo.findOneBy({ id: messageId })
         if (row && row.status === "delivered" && (await this.recipientQueueFull(repo, row.toKey, row.l2psUid))) {
-            // Not queued, so not kept: failed lets the sender's resend try again.
+            // Not queued, so not kept. The row keeps its transaction hash, so the
+            // sender's resend retries delivery without submitting the message again.
             await repo.update({ id: messageId, status: "delivered" }, { status: "failed" })
             return false
         }
@@ -570,7 +610,9 @@ export class L2PSMessagingService {
                 "((m.from_key = :a AND m.to_key = :b) OR (m.from_key = :b AND m.to_key = :a))",
                 { a, b },
             )
+            // The id makes the order total, so a cursor that carries it can be added later.
             .orderBy("m.timestamp", "DESC")
+            .addOrderBy("m.id", "DESC")
             .take(pageSize + 1)
 
         if (cursor > 0) {
@@ -580,13 +622,20 @@ export class L2PSMessagingService {
         const results = await qb.getMany()
         // Rows can each be 128 KB, so a count limit alone allows a reply of
         // tens of megabytes. The first row always goes out so a page cannot be empty.
-        const page: L2PSMessage[] = []
+        const candidates = results.slice(0, pageSize)
+        let end = 0
         let bytes = 0
-        for (const m of results.slice(0, pageSize)) {
-            bytes += m.encrypted?.ciphertext?.length ?? 0
-            if (page.length > 0 && bytes > MAX_HISTORY_PAGE_BYTES) break
-            page.push(m)
+        while (end < candidates.length) {
+            bytes += candidates[end].encrypted?.ciphertext?.length ?? 0
+            if (end > 0 && bytes > MAX_HISTORY_PAGE_BYTES) break
+            end++
         }
+        // The client continues with `before` = the last timestamp, a strict
+        // comparison, so rows sharing that timestamp but left out of the page
+        // would never be served. The page therefore runs to the end of a
+        // timestamp group and may exceed the byte budget by that group.
+        while (end < candidates.length && candidates[end].timestamp === candidates[end - 1].timestamp) end++
+        const page = candidates.slice(0, end)
         const hasMore = results.length > page.length
         const messages = page.map(m => ({
             id: m.id,

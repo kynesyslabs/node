@@ -70,7 +70,14 @@ const repo = {
                 conditions.push(params)
                 return qb
             },
-            orderBy: () => qb,
+            orderBy: (column: string, dir: string) => {
+                orderings.push(`${column} ${dir}`)
+                return qb
+            },
+            addOrderBy: (column: string, dir: string) => {
+                orderings.push(`${column} ${dir}`)
+                return qb
+            },
             take: (n: unknown) => {
                 queryTake.push(n)
                 return qb
@@ -82,6 +89,7 @@ const repo = {
 }
 /** What the history query builder answers with; tests fill it. */
 export const historyRows: Row[] = []
+export const orderings: string[] = []
 export const queryTake: unknown[] = []
 export const conditions: unknown[] = []
 
@@ -152,6 +160,7 @@ export function resetRelay(): void {
     rows.clear()
     queryTake.length = 0
     historyRows.length = 0
+    orderings.length = 0
     conditions.length = 0
     faults.save = null
     faults.update = null

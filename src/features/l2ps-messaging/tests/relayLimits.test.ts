@@ -10,6 +10,7 @@ import {
     encrypted,
     historyRows,
     identity,
+    orderings,
     proofFor,
     register,
     relay,
@@ -19,6 +20,7 @@ import {
     service,
     startRelayServer,
     stopRelayServer,
+    submitToL2PS,
 } from "./relayHarness"
 
 // After the harness: importing the server first would load the real datasource.
@@ -211,6 +213,70 @@ describe("a recipient's queue is bounded", () => {
     })
 })
 
+describe("a submitted message is never submitted twice", () => {
+    it("a resend after a requeue hit the recipient cap retries delivery only, with the original tx hash", async () => {
+        const victim = identity()
+        const from = "ff".repeat(32)
+        const sent = await service.processMessage(from, victim.publicKey, "subnet_a", "msg-1", "h-1", encrypted, true)
+        expect(sent.success).toBe(true)
+        expect(sent.l2psTxHash).toBe("0xtx")
+
+        for (let i = 0; i < 1_000; i++) rows.set(`row-${i}`, queuedRow(i, victim.publicKey))
+        expect(await service.requeue("msg-1", from)).toBe(false)
+        expect(rows.get("msg-1")!.status).toBe("failed")
+        expect(rows.get("msg-1")!.l2psTxHash).toBe("0xtx")
+
+        // Still full: refused, row untouched.
+        const full = await service.processMessage(from, victim.publicKey, "subnet_a", "msg-2", "h-1", encrypted, false)
+        expect(full.success).toBe(false)
+        expect(full.code).toBe("QUEUE_FULL")
+        expect(rows.get("msg-1")!.status).toBe("failed")
+
+        for (let i = 0; i < 1_000; i++) rows.delete(`row-${i}`)
+        const again = await service.processMessage(from, victim.publicKey, "subnet_a", "msg-3", "h-1", encrypted, false)
+
+        expect(again.success).toBe(true)
+        expect(again.duplicate).toBeUndefined()
+        expect(again.messageId).toBe("msg-1")
+        expect(again.l2psTxHash).toBe("0xtx")
+        expect(again.status).toBe("queued")
+        expect(rows.size).toBe(1)
+        expect(rows.get("msg-1")!.status).toBe("queued")
+        expect(rows.get("msg-1")!.l2psTxHash).toBe("0xtx")
+        expect(submitToL2PS).toHaveBeenCalledTimes(1)
+        expect(service.heldSlots.get("msg-1")).toBe(from)
+        service.releaseSlot("msg-1")
+    })
+
+    it("a resend to a recipient who is online again is delivered, still without a second submission", async () => {
+        const victim = identity()
+        const from = "ff".repeat(32)
+        await service.processMessage(from, victim.publicKey, "subnet_a", "msg-1", "h-1", encrypted, true)
+        rows.get("msg-1")!.status = "failed"
+
+        const again = await service.processMessage(from, victim.publicKey, "subnet_a", "msg-2", "h-1", encrypted, true)
+
+        expect(again.success).toBe(true)
+        expect(again.status).toBe("delivered")
+        expect(again.l2psTxHash).toBe("0xtx")
+        expect(submitToL2PS).toHaveBeenCalledTimes(1)
+        expect(rows.size).toBe(1)
+    })
+
+    it("a failed row that was never submitted is still submitted on retry", async () => {
+        const victim = identity()
+        const from = "ff".repeat(32)
+        relay.submitResult = { success: false, error: "mempool unavailable" }
+        await service.processMessage(from, victim.publicKey, "subnet_a", "msg-1", "h-1", encrypted, true)
+        relay.submitResult = { success: true, txHash: "0xtx2" }
+
+        const again = await service.processMessage(from, victim.publicKey, "subnet_a", "msg-2", "h-1", encrypted, true)
+
+        expect(again.l2psTxHash).toBe("0xtx2")
+        expect(submitToL2PS).toHaveBeenCalledTimes(2)
+    })
+})
+
 describe("queued delivery is paged", () => {
     it("250 queued rows are delivered in pages of 100, marked per page, in order", async () => {
         const victim = identity()
@@ -337,6 +403,35 @@ describe("a history read needs a fresh proof and has a bounded reply", () => {
         expect(reply.type).toBe("history_response")
         expect(reply.payload.messages).toHaveLength(8)
         expect(reply.payload.hasMore).toBe(true)
+    })
+
+    it("never cuts inside a group of rows that share a timestamp, so the next page cannot skip any", async () => {
+        const big = { ciphertext: "A".repeat(128 * 1024), nonce: "n" }
+        for (let i = 0; i < 9; i++) {
+            historyRows.push(queuedRow(i, "aa".repeat(32), { timestamp: "5000", encrypted: big }))
+        }
+        const result = await service.getHistory("aa", "bb", "subnet_a")
+
+        expect(result.messages.map((m: any) => m.id)).toEqual(Array.from({ length: 9 }, (_, i) => `row-${i}`))
+        expect(result.hasMore).toBe(false)
+    })
+
+    it("runs a page past the budget only to the end of the group the cutoff landed in", async () => {
+        const big = { ciphertext: "A".repeat(128 * 1024), nonce: "n" }
+        for (let i = 0; i < 7; i++) historyRows.push(queuedRow(i, "aa".repeat(32), { timestamp: String(9000 - i), encrypted: big }))
+        for (let i = 7; i < 10; i++) historyRows.push(queuedRow(i, "aa".repeat(32), { timestamp: "100", encrypted: big }))
+        historyRows.push(queuedRow(10, "aa".repeat(32), { timestamp: "50", encrypted: big }))
+
+        const result = await service.getHistory("aa", "bb", "subnet_a")
+
+        expect(result.messages).toHaveLength(10)
+        expect(result.messages.at(-1)!.timestamp).toBe(100)
+        expect(result.hasMore).toBe(true)
+    })
+
+    it("orders history by timestamp and then id, both newest first", async () => {
+        await service.getHistory("aa", "bb", "subnet_a")
+        expect(orderings).toEqual(["m.timestamp DESC", "m.id DESC"])
     })
 
     it("always returns the first row, whatever its size, so a page is never empty", async () => {
