@@ -97,7 +97,7 @@ export default async function executeNativeTransaction(
             message = "Insufficient funds"
             return [success, message]
         }
-        // Emit operation params in the magnitude downstream subOperations
+        // Emit operation params in the magnitude downstream consumers
         // expects. Post-fork that's the OS string (matching the wire
         // shape the SDK 3.1.0+ produces). Pre-fork the legacy number is
         // preserved bit-identically.

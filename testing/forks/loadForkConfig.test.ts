@@ -39,6 +39,55 @@ describe("loadForkConfigFromGenesis", () => {
         getSharedState.feeDistribution = feeDistSnapshot
     })
 
+    it("refuses a scheduled signatureDomain when genesis has no chain id", () => {
+        const chainIdSnapshot = getSharedState.chainId
+        try {
+            getSharedState.chainId = null
+            expect(() =>
+                loadForkConfigFromGenesis({
+                    properties: { name: "DEMOS", currency: "DEM" },
+                    balances: [],
+                    forks: { signatureDomain: { activationHeight: 100 } },
+                }),
+            ).toThrow(ForkConfigValidationError)
+
+            getSharedState.chainId = null
+            getSharedState.forkConfig = cloneDefaultForkConfig()
+            loadForkConfigFromGenesis({
+                properties: { id: 7, name: "DEMOS", currency: "DEM" },
+                balances: [],
+                forks: { signatureDomain: { activationHeight: 100 } },
+            })
+            expect(getSharedState.chainId).toBe(7)
+            expect(getSharedState.forkConfig.signatureDomain.activationHeight).toBe(100)
+
+            // An id left from an earlier load does not stand in for a
+            // missing one.
+            getSharedState.forkConfig = cloneDefaultForkConfig()
+            expect(getSharedState.chainId).toBe(7)
+            expect(() =>
+                loadForkConfigFromGenesis({
+                    properties: { name: "DEMOS", currency: "DEM" },
+                    balances: [],
+                    forks: { signatureDomain: { activationHeight: 100 } },
+                }),
+            ).toThrow(ForkConfigValidationError)
+
+            // Dormant, it needs no chain id.
+            getSharedState.chainId = null
+            getSharedState.forkConfig = cloneDefaultForkConfig()
+            expect(() =>
+                loadForkConfigFromGenesis({
+                    properties: { name: "DEMOS", currency: "DEM" },
+                    balances: [],
+                    forks: { signatureDomain: { activationHeight: null } },
+                }),
+            ).not.toThrow()
+        } finally {
+            getSharedState.chainId = chainIdSnapshot
+        }
+    })
+
     it("is a no-op for genesis with no `forks` field", () => {
         // Pin to a known sentinel so we can prove no-op: any value
         // other than the library default would be overwritten if the
@@ -54,6 +103,20 @@ describe("loadForkConfigFromGenesis", () => {
         expect(
             getSharedState.forkConfig.osDenomination.activationHeight,
         ).toBeNull()
+    })
+
+    it("leaves rules that change existing behaviour switched off by default", () => {
+        // A chain already running has a genesis written before these entries
+        // existed, and a missing entry hydrates from the defaults. So any
+        // default that is not null is a rule change that lands the moment the
+        // binary is upgraded, with no height agreed by anyone. Both of these
+        // reject traffic that a live chain currently accepts, so both wait to
+        // be scheduled in genesis.
+        const defaults = cloneDefaultForkConfig()
+
+        expect(defaults.tlsnProofEnforcement.activationHeight).toBeNull()
+        expect(defaults.signatureDomain.activationHeight).toBeNull()
+        expect(defaults.web2ProofBinding.activationHeight).toBeNull()
     })
 
     it("hydrates osDenomination activation height when present", () => {
@@ -295,10 +358,14 @@ describe("loadForkConfigFromGenesis", () => {
         const fd = getSharedState.feeDistribution
         expect(fd).not.toBeNull()
         expect(fd!.burnAddress).toBe(GAS_FEE_SEPARATION_BURN_ADDRESS)
-        // Placeholder treasury comes from the default fork config; the
-        // loader does not reject the placeholder until activationHeight
-        // is non-null.
-        expect(fd!.treasuryAddress).toBe(PLACEHOLDER_TREASURY_ADDRESS)
+        // With no forks block the treasury hydrates from the default fork
+        // config.
+        expect(fd!.treasuryAddress).toBe(
+            cloneDefaultForkConfig().gasFeeSeparation.treasuryAddress,
+        )
+        // The fork is live from genesis, so a placeholder default would send
+        // treasury fees to the burn address.
+        expect(fd!.treasuryAddress).not.toBe(PLACEHOLDER_TREASURY_ADDRESS)
     })
 
     it("throws when gasFeeSeparation.treasuryAddress is missing", () => {
@@ -457,5 +524,34 @@ describe("loadForkConfigFromGenesis", () => {
         expect(fd.networkFee.burnPct).toBe(50)
         expect(fd.additionalFee.treasuryPct).toBe(75)
         expect(fd.specialOps.rpcPct).toBe(50)
+    })
+})
+
+describe("forkConfigLoaded", () => {
+    it("is false until a genesis has been loaded, then true, with or without a forks field", async () => {
+        const { getSharedState } = await import("@/utilities/sharedState")
+        const { loadForkConfigFromGenesis } = await import("@/forks/loadForkConfig")
+        const before = getSharedState.forkConfigLoaded
+        const forks = getSharedState.forkConfig
+        const chainId = getSharedState.chainId
+        try {
+            getSharedState.forkConfigLoaded = false
+            loadForkConfigFromGenesis({ properties: { id: 1 } })
+            expect(getSharedState.forkConfigLoaded).toBe(true)
+
+            getSharedState.forkConfigLoaded = false
+            loadForkConfigFromGenesis({ properties: { id: 1 }, forks: { signatureDomain: { activationHeight: 9 } } })
+            expect(getSharedState.forkConfigLoaded).toBe(true)
+
+            getSharedState.forkConfigLoaded = false
+            expect(() =>
+                loadForkConfigFromGenesis({ properties: { id: 1 }, forks: { signatureDomain: { activationHeight: -1 } } }),
+            ).toThrow()
+            expect(getSharedState.forkConfigLoaded).toBe(false)
+        } finally {
+            getSharedState.forkConfigLoaded = before
+            getSharedState.forkConfig = forks
+            getSharedState.chainId = chainId
+        }
     })
 })

@@ -73,7 +73,7 @@ Before sending messages, register with your ed25519 key and target L2PS network:
   "payload": {
     "publicKey": "<your_ed25519_public_key_hex>",
     "l2psUid": "testnet_l2ps_001",
-    "proof": "<signature_of_'register:{publicKey}:{timestamp}'>"
+    "proof": "<signature_of_'register:{l2psUid}:{publicKey}:{timestamp}'>"
   },
   "timestamp": 1709312400000
 }
@@ -91,7 +91,9 @@ Before sending messages, register with your ed25519 key and target L2PS network:
   },
   "timestamp": 1709312400001
 }
-```text
+```
+
+The frame `timestamp` is the one signed in the proof. It must be within 5 minutes of the node clock, and each proof is accepted once per subnet, so sign a fresh one per connection. The proof should name the subnet as above, which makes it valid for that subnet only; the older form without it, `register:{publicKey}:{timestamp}`, is still accepted. A key can be registered on several subnets of the same node, one connection per subnet; registering again on the same subnet replaces the previous connection.
 
 ### 3.2 Send Message
 
@@ -134,6 +136,8 @@ Before sending messages, register with your ed25519 key and target L2PS network:
   "timestamp": 1709312400001
 }
 ```
+
+A message is identified by subnet, sender, recipient and `messageHash`, so the same hash may be sent to several recipients. Sending it again to the same recipient after it was accepted returns the original `message_sent` or `message_queued` with `"duplicate": true` and is not delivered twice, which makes resending after a lost acknowledgement safe. A send that failed can be retried under the same hash.
 
 ### 3.3 Receive Message
 

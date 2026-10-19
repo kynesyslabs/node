@@ -180,6 +180,10 @@ export function loadConfig(): Readonly<AppConfig> {
             xffMode: envStr(EnvKey.XFF_MODE, d.core.xffMode),
             mcpEnabled: envBool(EnvKey.MCP_ENABLED, d.core.mcpEnabled),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
+            expectedGenesisHash: envStr(
+                EnvKey.EXPECTED_GENESIS_HASH,
+                d.core.expectedGenesisHash,
+            ).toLowerCase(),
             blockWatchdogEnabled: envBool(
                 EnvKey.BLOCK_WATCHDOG_ENABLED,
                 d.core.blockWatchdogEnabled,
@@ -197,11 +201,6 @@ export function loadConfig(): Readonly<AppConfig> {
         tlsnotary: {
             enabled: envBool(EnvKey.TLSNOTARY_ENABLED, d.tlsnotary.enabled),
             host: envStr(EnvKey.TLSNOTARY_HOST, d.tlsnotary.host),
-            exposedUrl: envStr(
-                EnvKey.TLSNOTARY_EXPOSED_URL,
-                d.tlsnotary.exposedUrl,
-            ),
-            proxyUrl: envStr(EnvKey.TLSNOTARY_PROXY_URL, d.tlsnotary.proxyUrl),
             port: envInt(EnvKey.TLSNOTARY_PORT, d.tlsnotary.port),
             signingKey: envStr(
                 EnvKey.TLSNOTARY_SIGNING_KEY,
@@ -293,6 +292,18 @@ export function loadConfig(): Readonly<AppConfig> {
             cleanupAgeMs: envInt(
                 EnvKey.L2PS_CLEANUP_AGE_MS,
                 d.l2ps.cleanupAgeMs,
+            ),
+            historyRetentionDays: envInt(
+                EnvKey.L2PS_HISTORY_RETENTION_DAYS,
+                d.l2ps.historyRetentionDays,
+            ),
+            historyStorePlaintext: envBool(
+                EnvKey.L2PS_HISTORY_STORE_PLAINTEXT,
+                d.l2ps.historyStorePlaintext,
+            ),
+            historyRequireV2: envBool(
+                EnvKey.L2PS_HISTORY_REQUIRE_V2,
+                d.l2ps.historyRequireV2,
             ),
         },
 

@@ -31,7 +31,10 @@ import log from "src/utilities/logger"
 import prefetchIdentities from "./validation/prefetchIdentities"
 import { validateTxSignature } from "./validation/txValidator"
 import TxValidatorPool from "./validation/txValidatorPool"
-import { serializeTransactionContent } from "@/forks"
+import {
+    serializeTransactionContent,
+    pendingTxSignatureContext,
+} from "@/forks"
 import { Transactions } from "@/model/entities/Transactions"
 import type { TransactionStatus } from "@/utilities/constants"
 
@@ -50,7 +53,9 @@ export default class Transaction implements ITransaction {
     hash: string | null = null
     status: string | TransactionStatus | null = null
     blockNumber: number | null = null
-    attrs: Record<string, any> | null = null
+    // The node also records why a transaction failed, alongside the SDK's
+    // fields.
+    attrs: (ITransaction["attrs"] & { message?: string }) | null = null
 
     constructor(data?: Partial<ITransaction>) {
         // Initialize with defaults or provided data
@@ -214,7 +219,11 @@ export default class Transaction implements ITransaction {
         // truth for the crypto rules. The DB lookup that the PQC-no-co-signature
         // branch needs is pre-resolved here as a single-tx prefetch.
         const hints = await prefetchIdentities([tx])
-        const result = await validateTxSignature(tx, hints[tx.hash] ?? null)
+        const result = await validateTxSignature(
+            tx,
+            hints[tx.hash] ?? null,
+            pendingTxSignatureContext(),
+        )
 
         return {
             success: result.valid,

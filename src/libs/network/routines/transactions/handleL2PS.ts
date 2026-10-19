@@ -200,10 +200,14 @@ async function processValidL2PSTransaction(
     decryptedTx: Transaction,
     originalHash: string,
 ): Promise<RPCResponse> {
-    // Check for duplicates
+    // Check for duplicates. The mempool only remembers recent traffic — its
+    // rows are cleaned by age — so ask the permanent execution history too,
+    // or a payload replayed after the cleanup window pays out twice.
     let alreadyProcessed
     try {
-        alreadyProcessed = await L2PSMempool.existsByOriginalHash(originalHash)
+        alreadyProcessed =
+            (await L2PSMempool.existsByOriginalHash(originalHash)) ||
+            (await L2PSTransactionExecutor.hasExecuted(originalHash))
     } catch (error) {
         return createErrorResponse(response, 500, `Mempool check failed: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
@@ -270,6 +274,7 @@ async function executeAndRecordL2PSTransaction(
             l2psTx.hash, // encrypted_hash
             0, // batch_index
             "pending", // Initial status - executed locally, waiting for aggregation
+            l2psTx as unknown as Record<string, any>, // ciphertext, so history outlives the queue
         )
         log.info(`[handleL2PS] Recorded transaction ${decryptedTx.hash.slice(0, 16)}... to history as 'pending'`)
     } catch (recordError) {

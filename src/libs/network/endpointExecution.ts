@@ -29,6 +29,28 @@ import handleL2PS from "./routines/transactions/handleL2PS"
 
 import { isReferenceBlockAllowed } from "@/libs/blockchain/referenceBlockWindow"
 
+/**
+ * How an accepted transaction left this node. "mempool" is the only path
+ * now: a staked node admits the tx itself and publishes it on the tx topic.
+ */
+export type BroadcastDisposition = "mempool"
+
+/**
+ * Names the accepted transaction and the path that took it, in `extra`
+ * next to `confirmationBlock`, so a client can check the node took the
+ * bytes it signed without matching message text. `response` is left
+ * alone: per-type handlers put their own result there.
+ */
+export function withDisposition<T extends { extra?: unknown }>(
+    reply: T,
+    hash: string,
+    disposition: BroadcastDisposition,
+): T {
+    const extra =
+        reply.extra && typeof reply.extra === "object" ? reply.extra : {}
+    return { ...reply, extra: { ...extra, hash, disposition } }
+}
+
 export async function handleExecuteTransaction(
     validatedData: ValidityData,
     sender: string,
@@ -127,6 +149,16 @@ export async function handleExecuteTransaction(
     log.only(`[SERVER] Cloned tx in ${cloneTxEnd - cloneTxStart}ms`)
     let payload: DemoScript | any
 
+    // Newer than some SDK builds' type union, so matched ahead of the switch.
+    // The simulated apply below decides: while the atomicWork fork is
+    // dormant it refuses every Work, so nothing reaches the mempool.
+    if ((tx.content.type as string) === "atomicWork") {
+        result.response = {
+            message: "Transaction applied, waiting for confirmation",
+        }
+        result.success = true
+    }
+
     switch (tx.content.type) {
         case "crosschainOperation": {
             payload = tx.content.data
@@ -189,7 +221,9 @@ export async function handleExecuteTransaction(
             result.response = l2psResult
             if (l2psResult.result === 200) {
                 result.success = true
-                return result
+                // Accepted into this node's L2PS mempool; named like every
+                // other acceptance so clients read one shape.
+                return withDisposition(result, tx.hash, "mempool")
             } else {
                 result.success = false
             }
@@ -348,6 +382,9 @@ export async function handleExecuteTransaction(
                 confirmationBlock: submission.confirmationBlock ?? null,
                 lastBlockNumber: getSharedState.lastBlockNumber,
                 ...(submission.error ? { error: submission.error } : {}),
+            }
+            if (submission.ok) {
+                return withDisposition(result, queriedTx.hash, "mempool")
             }
         } catch (e) {
             result.success = false

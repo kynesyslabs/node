@@ -2,6 +2,11 @@ import { getSharedState } from "@/utilities/sharedState"
 import { isForkActive } from "@/forks/forkGates"
 import log from "@/utilities/logger"
 import { NODE_VERSION, type NodeVersionInfo } from "@/utilities/nodeVersion"
+import type { ForkName } from "@/forks/forkConfig"
+import {
+    forkScheduleDigest,
+    type ForkConfigLike,
+} from "@/libs/peer/routines/forkScheduleAgreement"
 import type { NodeCallHandler } from "./types"
 
 // REVIEW: P3c — fork-status RPC. Adds `getNetworkInfo` so SDK v3 (P4) can
@@ -44,9 +49,30 @@ export interface ForkStatus {
  * older SDKs that destructure `forks` keep working.
  */
 export interface NetworkInfo {
+    /**
+     * Every registered fork, so an operator can read the whole schedule from
+     * the node. The three named below are the ones clients act on; the rest
+     * are reported for the same reason as `forkScheduleDigest`.
+     */
     forks: {
         osDenomination: ForkStatus
-    }
+        signatureDomain: ForkStatus
+        web2ProofBinding: ForkStatus
+    } & Record<string, ForkStatus>
+    /**
+     * Digest of the scheduled forks and the chain id (see
+     * `forkScheduleAgreement.ts`). Peers compare it to notice a node that
+     * missed a genesis edit. Absent on nodes older than this field.
+     */
+    forkScheduleDigest: string
+    /**
+     * Network identity from genesis `properties.id`. A signer needs it to
+     * build the transaction signature preimage once `signatureDomain` is
+     * active, and it is what stops a signature from being replayed on
+     * another chain. Null on a node whose genesis declared none — such a
+     * node cannot activate the fork.
+     */
+    chainId: number | null
     nodeVersion: NodeVersionInfo
 }
 
@@ -73,20 +99,42 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
     getNetworkInfo: async (_data, response) => {
         log.debug("[SERVER] Received getNetworkInfo")
 
+        // The RPC server is up before the fork configuration is read at boot.
+        // Until then the defaults would be reported as this node's schedule.
+        if (!getSharedState.forkConfigLoaded) {
+            response.result = 503
+            response.response = {
+                error: "STATE_NOT_READY",
+                message: "Fork configuration not loaded yet",
+            }
+            return response
+        }
+
         const currentHeight = readCurrentHeight()
-        const osDenominationConfig =
-            getSharedState.forkConfig?.osDenomination
-        const activationHeight =
-            osDenominationConfig?.activationHeight ?? null
+        const forkConfig = getSharedState.forkConfig
+
+        // signatureDomain and web2ProofBinding are judged at admission for the
+        // block a transaction or proof would land in, so they answer for the
+        // next block; a wallet asking at tip H-1 is about to sign for block H
+        // and must already be told to use the new rules. The others keep the
+        // tip, as osDenomination always did.
+        const forks: Record<string, ForkStatus> = {}
+        for (const name of Object.keys(forkConfig) as ForkName[]) {
+            const nextBlock = name === "signatureDomain" || name === "web2ProofBinding"
+            forks[name] = {
+                activationHeight: forkConfig[name]?.activationHeight ?? null,
+                activated: isForkActive(name, currentHeight + (nextBlock ? 1 : 0)),
+                currentHeight,
+            }
+        }
 
         const networkInfo: NetworkInfo = {
-            forks: {
-                osDenomination: {
-                    activationHeight,
-                    activated: isForkActive("osDenomination", currentHeight),
-                    currentHeight,
-                },
-            },
+            forks: forks as NetworkInfo["forks"],
+            forkScheduleDigest: forkScheduleDigest(
+                forkConfig as unknown as ForkConfigLike,
+                getSharedState.chainId,
+            ),
+            chainId: getSharedState.chainId,
             nodeVersion: NODE_VERSION,
         }
 

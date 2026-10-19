@@ -24,6 +24,8 @@ import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
 import { GCRAssignedTx } from "./entities/GCRv2/GCRAssignedTx.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
+import { GCRAtomicWork } from "./entities/GCRv2/GCR_AtomicWork.js"
+import { GCRResourceSlot } from "./entities/GCRv2/GCR_ResourceSlot.js"
 import { GCRStorageProgram } from "./entities/GCRv2/GCR_StorageProgram.js"
 // ZK Identity entities
 import { IdentityCommitment } from "./entities/GCRv2/IdentityCommitment.js"
@@ -34,6 +36,7 @@ import { OfflineMessage } from "./entities/OfflineMessages"
 import { L2PSHash } from "./entities/L2PSHashes.js"
 import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
 import { L2PSTransaction } from "./entities/L2PSTransactions.js"
+import { L2PSExecutedHash } from "./entities/L2PSExecutedHashes.js"
 import { L2PSProof } from "./entities/L2PSProofs.js"
 // Stackable-genesis governance entities
 import { NetworkUpgrade } from "./entities/NetworkUpgrade.js"
@@ -75,6 +78,8 @@ export const dataSource = new DataSource({
         GCRAssignedTx,
         GCRTLSNotary,
         GCRStorageProgram,
+        GCRAtomicWork,
+        GCRResourceSlot,
         Validators,
         // ZK Identity entities
         IdentityCommitment,
@@ -85,6 +90,7 @@ export const dataSource = new DataSource({
         L2PSHash,
         L2PSMempoolTx,
         L2PSTransaction,
+        L2PSExecutedHash,
         L2PSProof,
         // Stackable-genesis governance entities
         NetworkUpgrade,

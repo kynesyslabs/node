@@ -20,6 +20,7 @@ import { Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
+import { L2PSExecutedHash } from "@/model/entities/L2PSExecutedHashes"
 import type { Transaction, GCREdit, INativePayload } from "@kynesyslabs/demosdk/types"
 import { denomination } from "@kynesyslabs/demosdk"
 import L2PSProofManager from "./L2PSProofManager"
@@ -33,6 +34,7 @@ import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
+import { Config } from "src/config"
 
 /**
  * L2PS Transaction Fee (in DEM)
@@ -407,6 +409,11 @@ export default class L2PSTransactionExecutor {
 
     /**
      * Record transaction in l2ps_transactions table
+     *
+     * @param encryptedPayload - The envelope the subnet submitted. Stored so
+     * the history survives the aggregation queue's five-minute sweep and can
+     * be read back without keeping the plaintext on disk; passing nothing
+     * leaves a row that only the routing metadata can be read from.
      */
     static async recordTransaction(
         l2psUid: string,
@@ -415,6 +422,7 @@ export default class L2PSTransactionExecutor {
         encryptedHash?: string,
         batchIndex = 0,
         initialStatus: "pending" | "batched" | "confirmed" | "failed" = "pending",
+        encryptedPayload?: Record<string, any> | null,
     ): Promise<number> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -434,13 +442,55 @@ export default class L2PSTransactionExecutor {
             nonce: BigInt(tx.content.nonce || 0),
             timestamp: BigInt(tx.content.timestamp || Date.now()),
             status: initialStatus,
-            content: tx.content as Record<string, any>,
+            encrypted_payload: encryptedPayload ?? null,
+            content: Config.getInstance().l2ps.historyStorePlaintext
+                ? (tx.content as Record<string, any>)
+                : null,
             execution_message: null,
         })
 
         const saved = await txRepo.save(l2psTx)
         log.info(`[L2PS Executor] Recorded tx ${tx.hash.slice(0, 16)}... in L2PS ${l2psUid} (id: ${saved.id}, status: ${initialStatus})`)
         return saved.id
+    }
+
+    /**
+     * Has this transaction already been executed in this subnet?
+     *
+     * The admission check in `handleL2PS` asks the L2PS *mempool*, whose rows
+     * are deleted by `cleanupByStatus` once they age past
+     * `l2ps.cleanupAgeMs` (five minutes by default). After that the same
+     * encrypted payload is new again — and nothing else stops it: the inner
+     * nonce is not enforced ("nonce edits are always valid"), the ciphertext
+     * is readable from the subnet's public history, and the execute RPC
+     * carries no outer signature or fee. So a confirmed transfer could be
+     * resubmitted and paid out a second time.
+     *
+     * `l2ps_transactions` is the permanent record of what actually executed
+     * (its `hash` column is unique), so it answers the question after the
+     * mempool row is gone. It was already consulted implicitly — by failing
+     * the insert AFTER the balance edits had been generated.
+     *
+     * History retention deletes from that table, so the hashes of pruned
+     * rows are kept in `l2ps_executed_hashes` and consulted here as well.
+     */
+    static async hasExecuted(originalHash: string): Promise<boolean> {
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+        const txRepo = ds.getRepository(L2PSTransaction)
+
+        const existing = await txRepo.findOne({
+            where: { hash: originalHash },
+            select: { id: true },
+        })
+        if (existing !== null) return true
+
+        const pruned = await ds.getRepository(L2PSExecutedHash).findOne({
+            where: { hash: originalHash },
+            select: { hash: true },
+        })
+        return pruned !== null
     }
 
     /**
@@ -480,12 +530,17 @@ export default class L2PSTransactionExecutor {
 
     /**
      * Get transactions for an account (from l2ps_transactions table)
+     *
+     * @param since - Only transactions stamped after this millisecond
+     * timestamp. Lets a client that already holds history ask for the tail
+     * instead of paging back through all of it.
      */
     static async getAccountTransactions(
         l2psUid: string,
-        pubkey: string,
+        pubkey: string | string[],
         limit = 100,
         offset = 0,
+        since = 0,
     ): Promise<L2PSTransaction[]> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -494,15 +549,175 @@ export default class L2PSTransactionExecutor {
 
         // Use query builder to get unique transactions where user is sender or receiver
         // This prevents duplicates when from_address === to_address (self-transfer)
-        const transactions = await txRepo.createQueryBuilder("tx")
+        const query = txRepo.createQueryBuilder("tx")
             .where("tx.l2ps_uid = :l2psUid", { l2psUid })
-            .andWhere("(tx.from_address = :pubkey OR tx.to_address = :pubkey)", { pubkey })
+
+        // One spelling keeps the plain equality; several (the caller's and the
+        // canonical forms of one address) match any of them, still as exact values.
+        if (Array.isArray(pubkey)) {
+            query.andWhere(
+                "(tx.from_address IN (:...pubkeys) OR tx.to_address IN (:...pubkeys))",
+                { pubkeys: pubkey },
+            )
+        } else {
+            query.andWhere("(tx.from_address = :pubkey OR tx.to_address = :pubkey)", { pubkey })
+        }
+
+        if (since > 0) {
+            query.andWhere("tx.timestamp > :since", { since: String(since) })
+        }
+
+        // Several rows can share a timestamp (a batch lands in one tick), so
+        // the id breaks the tie. Without it two pages can disagree on where a
+        // tied run ends and a row is served twice or never.
+        return query
             .orderBy("tx.timestamp", "DESC")
+            .addOrderBy("tx.id", "DESC")
             .take(limit)
             .skip(offset)
             .getMany()
+    }
 
-        return transactions
+    /**
+     * Every transaction in a subnet, oldest first — the durable answer to the
+     * sync request that used to be served from the aggregation queue.
+     *
+     * A node that was offline longer than `l2ps.cleanupAgeMs` could not catch
+     * up from the queue, because the rows it needed had already been swept;
+     * this reads the table that keeps them.
+     *
+     * Pages are keyed on the row id, which is unique and grows with every
+     * insert. A time cursor loses rows: several can share a timestamp, and
+     * a page that ends inside such a tie leaves the rest behind a strict
+     * `>` for good. It would also be the peer comparing this node's clock.
+     *
+     * @param from.afterId - A cursor this node issued, echoed back by the peer.
+     * @param from.sinceMs - A record time, for peers that predate the cursor.
+     */
+    static async getSubnetTransactions(
+        l2psUid: string,
+        limit = 100,
+        from: { afterId?: number; sinceMs?: number } = {},
+    ): Promise<{ rows: L2PSTransaction[]; nextCursor: number; hasMore: boolean }> {
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+        const txRepo = ds.getRepository(L2PSTransaction)
+
+        const afterId = from.afterId && from.afterId > 0 ? from.afterId : 0
+        const query = txRepo.createQueryBuilder("tx")
+            .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+
+        if (afterId > 0) {
+            query.andWhere("tx.id > :afterId", { afterId })
+        } else if (from.sinceMs && from.sinceMs > 0) {
+            // `created_at` has no zone and is written by the database's
+            // `now()`. A JS Date parameter is serialised in the node process's
+            // local zone and the offset dropped on the cast, so the instant is
+            // converted in SQL, the same way `now()` is.
+            query.andWhere(
+                "tx.created_at > to_timestamp(CAST(:since AS double precision) / 1000)::timestamp",
+                { since: from.sinceMs },
+            )
+        }
+
+        // One row past the page says whether another page exists, so the
+        // last full page does not claim more.
+        const fetched = await query.orderBy("tx.id", "ASC").take(limit + 1).getMany()
+        const rows = fetched.slice(0, limit)
+        const last = rows.at(-1)
+        return {
+            rows,
+            nextCursor: last ? last.id : afterId,
+            hasMore: fetched.length > limit,
+        }
+    }
+
+    /**
+     * Drop history older than the configured retention.
+     *
+     * Retention is opt-in: `l2ps.historyRetentionDays` defaults to 0, which
+     * keeps everything. Without this the only thing pruning L2PS data was the
+     * queue sweep, which is a mempool cleanup that happened to be the sole
+     * reason history vanished — an expiry policy nobody chose.
+     */
+    static async pruneHistory(retentionDays: number): Promise<number> {
+        if (!retentionDays || retentionDays <= 0) return 0
+
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+
+        // Age is measured from when this node recorded the transaction, not
+        // from the sender's timestamp, so a backdated payload cannot ask to be
+        // deleted on arrival.
+        //
+        // The cutoff goes in as epoch milliseconds and is converted in SQL,
+        // for the zone reason given in `getSubnetTransactions`.
+        //
+        // Each deleted row's hash is kept in the same statement: the replay
+        // check reads this table, and a prune must not make an executed
+        // transfer look new.
+        const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+        // A retention longer than the table's existence matches nothing, and
+        // a cutoff before the epoch or not a number is outside what the
+        // database converts: it would fail the sweep instead of finding no row.
+        if (!Number.isFinite(cutoffMs) || cutoffMs <= 0) return 0
+        const [{ pruned }] = await ds.query(
+            `WITH deleted AS (
+                DELETE FROM "l2ps_transactions"
+                 WHERE "created_at" < to_timestamp(CAST($1 AS double precision) / 1000)::timestamp
+             RETURNING "hash", "l2ps_uid"
+            ), kept AS (
+                INSERT INTO "l2ps_executed_hashes" ("hash", "l2ps_uid")
+                SELECT "hash", "l2ps_uid" FROM deleted
+                ON CONFLICT ("hash") DO NOTHING
+            )
+            SELECT COUNT(*)::int AS "pruned" FROM deleted`,
+            [cutoffMs],
+        )
+
+        return Number(pruned) || 0
+    }
+
+    /**
+     * Blank the plaintext on rows that also hold their ciphertext.
+     *
+     * Rows written before payloads were kept encrypted carry the decrypted
+     * content next to the ciphertext that was later backfilled. A row is only
+     * blanked when the envelope is there to read instead; a row whose
+     * ciphertext was already swept keeps its plaintext, because that is its
+     * only copy.
+     *
+     * Does nothing when the node is configured to store plaintext.
+     */
+    static async scrubStoredPlaintext(batchSize = 1000): Promise<number> {
+        if (Config.getInstance().l2ps.historyStorePlaintext) return 0
+
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+
+        // Batched by id so a large table is neither locked nor rewritten in one
+        // go, and so each batch resumes after the last one instead of
+        // rescanning the rows it already blanked.
+        let total = 0
+        let lastId = 0
+        for (;;) {
+            const [rows] = (await ds.query(
+                `UPDATE "l2ps_transactions" SET "content" = NULL
+                  WHERE "id" IN (
+                    SELECT "id" FROM "l2ps_transactions"
+                     WHERE "id" > $2 AND "content" IS NOT NULL AND "encrypted_payload" IS NOT NULL
+                     ORDER BY "id" LIMIT $1)
+                  RETURNING "id"`,
+                [batchSize, lastId],
+            )) as [Array<{ id: number | string }>, number]
+            const count = rows.length
+            total += count
+            if (count < batchSize) return total
+            lastId = rows.reduce((max, r) => Math.max(max, Number(r.id)), lastId)
+        }
     }
 
     /**

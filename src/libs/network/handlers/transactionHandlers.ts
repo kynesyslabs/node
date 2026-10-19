@@ -22,17 +22,32 @@ export const transactionHandlers: Record<string, NodeCallHandler> = {
             return response
         }
         log.debug(`[SERVER] getTxByHash: ${data.hash}`)
+        // A client recovering a lost broadcast reply reads by hash and must
+        // tell "not in this chain as of height H" (keep waiting, or give up
+        // once H is well past) apart from "could not look" (ask elsewhere).
+        // The height is read first, so anything at or below it was searched.
+        let checkedThroughBlock: number
+        let tx: Awaited<ReturnType<typeof Chain.getTxByHash>>
         try {
-            response.response = await Chain.getTxByHash(data.hash)
+            checkedThroughBlock = await Chain.getLastBlockNumber()
+            tx = await Chain.getTxByHash(data.hash)
         } catch (e) {
+            log.warning(`[SERVER] getTxByHash lookup failed: ${e}`)
+            response.result = 500
             response.response = null
-            response.result = 400
-            response.extra = e
+            response.extra = {
+                reason: "lookup_failed",
+                error: e instanceof Error ? e.message : String(e),
+            }
+            return response
         }
-        if (!response.response) {
-            response.result = 400
-            response.response = "error"
+        if (!tx) {
+            response.result = 404
+            response.response = null
+            response.extra = { reason: "not_found", checkedThroughBlock }
+            return response
         }
+        response.response = tx
         return response
     },
 

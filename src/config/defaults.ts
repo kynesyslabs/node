@@ -70,6 +70,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mcpEnabled: false,
         restore: false,
+        expectedGenesisHash: "",
         blockWatchdogEnabled: false,
         blockWatchdogTimeoutSeconds: 600,
         stallDetectionBlocks: 3,
@@ -120,6 +121,9 @@ export const DEFAULT_CONFIG: AppConfig = {
         minBatchSize: 1,
         maxBatchSize: 10,
         cleanupAgeMs: 300000,
+        historyRetentionDays: 0,
+        historyStorePlaintext: false,
+        historyRequireV2: false,
     },
 
     metrics: {

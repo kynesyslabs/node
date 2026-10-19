@@ -1,5 +1,5 @@
 import { denomination } from "@kynesyslabs/demosdk"
-import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
+import { generateGcrEdits } from "@/libs/blockchain/validation/generateGcrEdits"
 import type { Transaction } from "@kynesyslabs/demosdk/types"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { ValidityData, GCREdit } from "@kynesyslabs/demosdk/types"
@@ -31,7 +31,7 @@ export async function handleValidateTransaction(
         )
 
         const handleGcrEditsStart = Date.now()
-        const gcrEdits = await GCRGeneration.generate(tx)
+        const gcrEdits = await generateGcrEdits(tx)
         gcrEdits.forEach((edit: GCREdit) => {
             edit.txhash = ""
         })

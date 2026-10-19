@@ -70,6 +70,12 @@ export interface CoreConfig {
     xffMode: string
     mcpEnabled: boolean
     restore: boolean
+    /**
+     * Full genesis data hash (sha256 hex) the operator expects the network to
+     * have. A node with no stored genesis block takes the genesis it adopts from
+     * a peer only when it hashes to this. Empty means no pin.
+     */
+    expectedGenesisHash: string
     blockWatchdogEnabled: boolean
     blockWatchdogTimeoutSeconds: number
     /** Consecutive missed shard selections before the node exits for
@@ -89,8 +95,6 @@ export interface CoreConfig {
 
 export interface TLSNotaryConfig {
     enabled: boolean
-    exposedUrl: string
-    proxyUrl: string
     host: string
     port: number
     signingKey: string
@@ -138,6 +142,24 @@ export interface L2PSConfig {
     minBatchSize: number
     maxBatchSize: number
     cleanupAgeMs: number
+    /**
+     * How long an executed transaction stays in the durable history table,
+     * in days. 0 keeps history forever, which is the default: `cleanupAgeMs`
+     * above governs the aggregation *queue* only, and a subnet that wants its
+     * history to expire has to say so.
+     */
+    historyRetentionDays: number
+    /**
+     * Also keep the decrypted payload of every transaction in the history
+     * table. Off by default: the ciphertext is stored instead and decrypted
+     * only to answer an authenticated read from the account it belongs to.
+     */
+    historyStorePlaintext: boolean
+    /**
+     * Refuse the unversioned history signature, which names neither the node
+     * nor the page. Off while existing clients still send it.
+     */
+    historyRequireV2: boolean
 }
 
 // --- Metrics & Monitoring ---

@@ -8,7 +8,10 @@ import { Operation } from "@kynesyslabs/demosdk/types"
 import Transaction from "../../blockchain/transaction"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
-import { serializeTransactionContent } from "@/forks"
+import {
+    serializeTransactionContent,
+    txSignaturePreimageForPendingBlock,
+} from "@/forks"
 
 export interface DerivableNative {
     from: string
@@ -236,7 +239,7 @@ export async function createTransaction(
     )
     const signature = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
-        new TextEncoder().encode(transaction.hash),
+        txSignaturePreimageForPendingBlock(transaction.hash),
     )
     transaction.signature = signature as any // REVIEW Should be correct but it was transaction.signature = signature before
     // TODO See how to be general purpose but specific (a shared format?)

@@ -21,7 +21,7 @@ import {
     ForgingEndedError,
     NotInShardError,
 } from "@/errors"
-import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
+import HandleGCR, { type BlockClock } from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
@@ -336,6 +336,8 @@ export async function consensusRoutine(): Promise<void> {
             markStep("consensus", "applyGCREdits")
             const applyRes = await applyGCREditsFromMergedMempool(
                 refRes.validTxs,
+                // The forged block's own time: what syncing nodes will read.
+                { height: block.number, timestampSec: block.content.timestamp },
             )
 
             if (traceEnabled) {
@@ -793,6 +795,7 @@ async function rollbackGCREditsFromTxs(txs: Transaction[]) {
  */
 async function applyGCREditsFromMergedMempool(
     mempool: MempoolTransaction[],
+    clock: BlockClock,
 ): Promise<{
     successfulTxs: string[]
     appliedTxs: string[]
@@ -826,7 +829,7 @@ async function applyGCREditsFromMergedMempool(
         return { successfulTxs: [], appliedTxs: [], failedTxs }
     }
 
-    const res = await HandleGCR.applyTransactions(pendingTxs, false)
+    const res = await HandleGCR.applyTransactions(pendingTxs, false, clock)
     failedTxs = failedTxs.concat(
         res.failedTxs.map(txhash => ({
             txhash: txhash,

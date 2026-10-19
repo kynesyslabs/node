@@ -53,8 +53,10 @@ jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
     },
 }))
 
+const valueEditsOk = { ok: true, unexplained: [] as string[] }
 jest.mock("src/libs/blockchain/validation/verifyGcrEdits", () => ({
     verifyGcrEditsMatch: jest.fn(async () => ({ match: true })),
+    verifyNoUnexplainedValueEdits: jest.fn(async () => valueEditsOk),
 }))
 
 let insertedRows: Array<Record<string, unknown>> = []
@@ -151,5 +153,26 @@ describe("Mempool.receive admission", () => {
         const res = await Mempool.receive([tx("0xheld", 100)])
         expect(res.success).toBe(true)
         expect(insertedRows).toHaveLength(0)
+    })
+
+    it("rejects a non-native tx whose value edits the node would not generate", async () => {
+        // This ingress is unauthenticated and applies gcr_edits for any tx
+        // type, so an unbound funds/points edit here is an unauthenticated
+        // mint. The whole-set binding only covers native txs; the value-edit
+        // guard covers the rest.
+        valueEditsOk.ok = false
+        valueEditsOk.unexplained = ["balance|0xattacker|add|1000"]
+
+        await Mempool.receive([tx("0xforged", 100)])
+
+        expect(insertedRows).toHaveLength(0)
+        expect(
+            logError.mock.calls.filter(c =>
+                String(c[0]).includes("value edits with no counterpart"),
+            ),
+        ).toHaveLength(1)
+
+        valueEditsOk.ok = true
+        valueEditsOk.unexplained = []
     })
 })

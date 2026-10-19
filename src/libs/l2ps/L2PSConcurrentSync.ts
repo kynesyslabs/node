@@ -104,38 +104,156 @@ export function clearL2PSCache(): void {
  * Synchronize L2PS mempool with a specific peer for a specific network.
  * Uses delta sync based on last received timestamp.
  */
+/**
+ * Where this node has read up to in each peer's history, by peer and subnet.
+ *
+ * The value is a cursor the peer issued, in the peer's own clock, and is only
+ * ever echoed back to that peer. Taking a high-water mark from local state
+ * instead — as this did — compares two machines' clocks: after inserting a
+ * page under local timestamps, the mark jumps past everything still missing,
+ * and a peer more than one page behind can never finish catching up.
+ *
+ * In memory on purpose. A restart resyncs from the beginning, which costs a
+ * few duplicate inserts that the mempool already rejects.
+ */
+const syncCursors = new Map<string, number>()
+
+export function clearL2PSSyncCursors(): void {
+    syncCursors.clear()
+    continuations.clear()
+}
+
+/**
+ * Pages one sync run may pull from a peer. The peer decides whether there is
+ * more, so the bound is this node's: a backlog larger than this drains over
+ * the next runs instead of in one unbounded burst.
+ */
+export const MAX_SYNC_PAGES_PER_RUN = 20
+
+/**
+ * Pause before the next run when a run stopped at the page cap with the peer
+ * still reporting more. Nothing else would start that run: block sync does
+ * not, and discovery skips peers it already knows.
+ */
+let continueDelayMs = 1_000
+export function setL2PSSyncContinueDelay(ms: number): void {
+    continueDelayMs = ms
+}
+
+/**
+ * Rows asked of a peer per page. Sent so the page size is this node's choice,
+ * and enforced on the answer, since the peer is free to ignore it.
+ */
+export const SYNC_PAGE_LIMIT = 100
+
+/**
+ * Consecutive self-scheduled runs allowed for one peer and subnet before the
+ * node stops scheduling its own and waits for the regular triggers (block sync,
+ * discovery). A peer that answers "more" for ever with a rising cursor would
+ * otherwise keep this node pulling and storing its pages without end. Each
+ * regular trigger starts a fresh budget, so a long backlog still drains in one
+ * trigger's chain at a time, while the peer alone can never extend it.
+ */
+export const MAX_SYNC_CONTINUATIONS = 5
+
+/** Runs in progress, by peer and subnet, so a scheduled one never overlaps another. */
+const running = new Set<string>()
+
+/** Self-scheduled runs since the last regular trigger for this peer and subnet. */
+const continuations = new Map<string, number>()
+
 export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<void> {
+    return runSync(peer, l2psUid, false)
+}
+
+async function runSync(peer: Peer, l2psUid: string, selfScheduled: boolean): Promise<void> {
+    const cursorKey = `${peer.identity}\u0000${l2psUid}`
+    if (running.has(cursorKey)) return
+    running.add(cursorKey)
+    if (!selfScheduled) continuations.delete(cursorKey)
+    let more = false
     try {
-        // 1. Get local high-water mark (latest timestamp)
-        const latestTx = await L2PSMempool.getLastTransaction(l2psUid)
-        const sinceTimestamp = latestTx ? Number(latestTx.timestamp) : 0
+        for (let page = 0; page < MAX_SYNC_PAGES_PER_RUN; page++) {
+            more = false
+            const cursor = syncCursors.get(cursorKey) ?? 0
 
-        // 2. Request transactions from peer
-        const response = await peer.call({
-            method: "nodeCall",
-            params: [{
-                message: "getL2PSTransactions",
-                data: {
-                    l2psUid: l2psUid,
-                    since_timestamp: sinceTimestamp,
-                },
-                muid: `l2ps_sync_${Date.now()}`,
-            }],
-        })
+            const response = await peer.call({
+                method: "nodeCall",
+                params: [{
+                    message: "getL2PSTransactions",
+                    data: {
+                        l2psUid: l2psUid,
+                        cursor,
+                        limit: SYNC_PAGE_LIMIT,
+                    },
+                    muid: `l2ps_sync_${Date.now()}`,
+                }],
+            })
 
-        if (response?.result === 200 && response.response?.transactions) {
-            const txs = response.response.transactions as any[] // Using any to avoid strict type mismatch with raw response
-            if (txs.length === 0) return
+            if (response?.result !== 200 || !response.response?.transactions) return
 
-            log.info(`[L2PS-SYNC] Received ${txs.length} transactions from ${peer.identity} for ${l2psUid}`)
+            const body = response.response as {
+                transactions: any[]
+                nextCursor?: number
+                hasMore?: boolean
+            }
+            const all = Array.isArray(body.transactions) ? body.transactions : []
+            const txs = all.slice(0, SYNC_PAGE_LIMIT)
+            // A page over the limit cannot be partly accepted: its cursor
+            // covers every row sent, and the rows carry no cursor of their own,
+            // so taking it would skip the dropped rows for good. Keep what fits,
+            // leave the cursor where it was, and end the run.
+            const truncated = all.length > txs.length
 
-            // 3. Process transactions (verify & store)
-            await processReceivedTransactions(l2psUid, txs, peer.identity)
+            // Advance even on an empty page: the peer may have skipped rows it
+            // can no longer serve, and refusing to move would ask for them for
+            // ever.
+            const advanced = !truncated &&
+                typeof body.nextCursor === "number" && body.nextCursor > cursor
+            if (advanced) {
+                syncCursors.set(cursorKey, body.nextCursor as number)
+            }
+
+            if (truncated) {
+                log.warning(`[L2PS-SYNC] ${peer.identity} sent ${all.length} rows for ${l2psUid} against a limit of ${SYNC_PAGE_LIMIT}; not advancing its cursor`)
+            }
+
+            if (txs.length > 0) {
+                log.info(`[L2PS-SYNC] Received ${txs.length} transactions from ${peer.identity} for ${l2psUid}`)
+                await processReceivedTransactions(l2psUid, txs, peer.identity)
+            }
+
+            // Keep pulling while the peer says there is more, so a backlog
+            // drains instead of being re-read one page at a time — but only
+            // while its cursor moves. "More" with a cursor that stands still
+            // is the same page again.
+            if (!body.hasMore || !advanced) return
+            more = true
         }
-
     } catch (e) {
+        more = false
         log.warning(`[L2PS-SYNC] Failed to sync with ${peer.identity}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+        running.delete(cursorKey)
     }
+
+    if (!more) {
+        continuations.delete(cursorKey)
+        return
+    }
+
+    // Stopped at the cap with more to come: carry on shortly, from the
+    // stored cursor, rather than leave the rest missing until the next
+    // trigger — but only a bounded number of times in a row.
+    const scheduled = continuations.get(cursorKey) ?? 0
+    if (scheduled >= MAX_SYNC_CONTINUATIONS) {
+        log.info(`[L2PS-SYNC] ${peer.identity} still reports more for ${l2psUid} after ${scheduled} continuations; resuming on the next sync trigger`)
+        return
+    }
+    continuations.set(cursorKey, scheduled + 1)
+    setTimeout(() => {
+        runSync(peer, l2psUid, true).catch(() => undefined)
+    }, continueDelayMs)
 }
 
 /**

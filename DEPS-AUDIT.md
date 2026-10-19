@@ -29,6 +29,9 @@
 - **fast-xml-parser** >=5.3.4 (critical+high entity expansion/injection)
 - **validator** >=13.15.20 (high URL validation bypass)
 
+### Removed dependencies
+- **fastify**, **@fastify/cors**, **@fastify/swagger**, **@fastify/swagger-ui**: removed, unused at runtime (2026-10-14). The only importers were two modules that nothing loaded; the node serves HTTP through Bun. This also drops the fastify advisories that were previously tracked as false positives.
+
 ---
 
 ## Remaining Vulnerabilities (85)
@@ -40,7 +43,6 @@ installed version, but the actual vulnerability doesn't affect the installed maj
 
 | Package | Installed | Vuln Range | Why False Positive |
 |---------|-----------|------------|-------------------|
-| **fastify** | 4.29.1 | <=5.7.2 | All 3 CVEs are 5.x-only (sendWebStream, Content-Type tab, X-Forwarded). Dismissed on GitHub. |
 | **path-to-regexp** | 0.1.12 | >=8.0.0 <8.4.0 | Vuln is in 8.x branch; express 4.x uses 0.x |
 | **body-parser** | 1.20.3 | >=2.2.0 <2.2.1 | Vuln is in 2.x; express 4.x uses 1.x |
 | **@solana/web3.js** | 1.98.4 | >=1.89.0 <1.89.2 | Installed version is well past the patched 1.89.2 |

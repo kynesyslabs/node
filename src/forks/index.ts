@@ -2,6 +2,12 @@
 
 export { isForkActive } from "./forkGates"
 export {
+    txSignatureContext,
+    pendingTxSignatureContext,
+    txSignaturePreimageForPendingBlock,
+} from "./signatureDomainGate"
+export type { TxSignatureContext } from "./signatureDomainGate"
+export {
     serializeTransactionContent,
     serializeBlockContent,
 } from "./serializerGate"
@@ -22,6 +28,7 @@ export type {
     BaseForkConfig,
     OsDenominationConfig,
     GasFeeSeparationConfig,
+    SignatureDomainConfig,
 } from "./forkConfig"
 export {
     runOsDenominationMigration,

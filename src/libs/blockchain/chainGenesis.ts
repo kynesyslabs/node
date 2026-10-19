@@ -55,7 +55,9 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
     genesisTx.hash = Hashing.sha256(
         serializeTransactionContent(genesisTx.content, GENESIS_BLOCK_HEIGHT),
     )
-    genesisTx.attrs = {}
+    // The genesis transaction has no reference block; it keeps the empty
+    // attrs it has always been stored with.
+    genesisTx.attrs = {} as typeof genesisTx.attrs
 
     genesisBlock.content.timestamp = genesisTx.content.timestamp
     genesisBlock.content.ordered_transactions.push(genesisTx.hash)

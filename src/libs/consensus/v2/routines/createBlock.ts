@@ -59,7 +59,7 @@ export async function createBlock(
         peerlist as unknown as typeof block.content.peerlist
     block.proposer = commonValidatorSeed // This is the shard identifier
     block.number = blockNumber
-    block.content.native_tables_hashes = await hashNativeTables()
+    block.content.native_tables_hashes = await hashNativeTables(blockNumber)
     block.content.timestamp = await resolveBlockTimestamp(
         blockTimestamp,
         blockNumber,
@@ -98,9 +98,11 @@ export async function createBlock(
 }
 
 // NOTE Proxy for hashGCRTables
-export async function hashNativeTables(): Promise<NativeTablesHashes> {
+export async function hashNativeTables(
+    blockNumber?: number,
+): Promise<NativeTablesHashes> {
     // TODO
-    const hashes: NativeTablesHashes = await hashGCRTables()
+    const hashes: NativeTablesHashes = await hashGCRTables(blockNumber)
     // TODO
     return hashes
 }

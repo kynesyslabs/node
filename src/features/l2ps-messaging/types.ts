@@ -147,6 +147,8 @@ export interface MessageSentResponse extends ProtocolFrame<"message_sent"> {
         messageHash: string
         /** L2PS mempool status */
         l2psStatus: "submitted" | "failed"
+        /** Set when this answers a resend of a message the node already accepted */
+        duplicate?: boolean
     }
 }
 
@@ -155,6 +157,8 @@ export interface MessageQueuedResponse extends ProtocolFrame<"message_queued"> {
         messageHash: string
         /** Recipient was offline, message queued */
         status: "queued"
+        /** Set when this answers a resend of a message the node already accepted */
+        duplicate?: boolean
     }
 }
 
@@ -195,6 +199,8 @@ export interface ErrorResponse extends ProtocolFrame<"error"> {
         code: ErrorCode
         message: string
         details?: string
+        /** Set with RATE_LIMITED: how long to wait before the same request can succeed. */
+        retryAfterMs?: number
     }
 }
 
@@ -244,6 +250,7 @@ export type ErrorCode =
     | "L2PS_NOT_FOUND"
     | "L2PS_SUBMIT_FAILED"
     | "RATE_LIMITED"
+    | "QUEUE_FULL"
     | "INTERNAL_ERROR"
 
 // ─── Connected Peer ──────────────────────────────────────────────

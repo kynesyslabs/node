@@ -87,7 +87,7 @@ export const HARDCODED_FALLBACK_NETWORK_PARAMETERS: NetworkParameters = {
     // Placeholder only: the SDK type requires the field. The real value
     // is pinned from block 0 and written over this by loadNetworkParameters.
     shardSize: 0,
-    minValidatorStake: DEFAULT_MIN_VALIDATOR_STAKE,
+    minValidatorStake: DEFAULT_MIN_VALIDATOR_STAKE.toString(),
     networkFee: 1,
     rpcFee: 1,
     additionalFee: 0,

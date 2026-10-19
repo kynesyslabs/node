@@ -9,8 +9,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import type { Transaction } from "@/types/blockchain/Transaction"
-import type { INativePayload } from "@kynesyslabs/demosdk/types"
+import type { INativePayload, Transaction } from "@kynesyslabs/demosdk/types"
 import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
 import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"

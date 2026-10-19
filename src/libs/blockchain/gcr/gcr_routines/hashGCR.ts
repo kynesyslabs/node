@@ -6,6 +6,12 @@ import { GCRTLSNotary } from "../../../../model/entities/GCRv2/GCR_TLSNotary"
 import { GCRHashes } from "../../../../model/entities/GCRv2/GCRHashes"
 import Chain from "src/libs/blockchain/chain"
 import { type NativeTablesHashes } from "@kynesyslabs/demosdk/types"
+import { isForkActive } from "@/forks"
+import { jcsCanonicalize } from "@/libs/crypto/jcs"
+import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
+import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
+import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
+import { getSharedState } from "@/utilities/sharedState"
 
 /**
  * Generates a SHA-256 hash for tables that use 'publicKey' as their identifier.
@@ -98,16 +104,62 @@ export async function hashTLSNotaryTable(): Promise<string> {
  *
  * @returns Promise<string> - Combined SHA-256 hash of all GCR tables
  */
-export default async function hashGCRTables(): Promise<NativeTablesHashes> {
+export default async function hashGCRTables(
+    blockHeight: number = getSharedState.lastBlockNumber ?? 0,
+): Promise<NativeTablesHashes> {
     // Get all individual hashes
     // REVIEW: The below was GCRTracker without "", which was causing an error as is not an entity
     const subnetsTxsHash = await hashSubnetsTxsTable()
     // REVIEW: TLSNotary proofs included in GCR integrity hash
     const tlsnotaryHash = await hashTLSNotaryTable()
-    return {
+    const hashes = {
         native_subnets_txs: subnetsTxsHash,
         native_tlsnotary: tlsnotaryHash,
+    } as NativeTablesHashes & { native_atomic_work?: string }
+    // Only from the fork on: an extra key changes the hash of every block
+    // that carries it, and blocks before the fork must keep theirs.
+    if (isForkActive("atomicWork", blockHeight)) {
+        hashes.native_atomic_work = await hashAtomicWorkTables()
     }
+    return hashes
+}
+
+/**
+ * Hash of the state Works commit: winners and receipts, resource slots, and
+ * the storage entries Works wrote. Folded into the block hash so validators
+ * whose Work state diverged cannot agree on a block.
+ */
+export async function hashAtomicWorkTables(): Promise<string> {
+    const db = (await Datasource.getInstance()).getDataSource()
+
+    const works = await db
+        .getRepository(GCRAtomicWork)
+        .find({ order: { workId: "ASC" } })
+    const slots = await db
+        .getRepository(GCRResourceSlot)
+        .find({ order: { resourceKey: "ASC" } })
+    const writes = await db
+        .getRepository(GCRStorageProgram)
+        .createQueryBuilder("sp")
+        .where("sp.metadata -> 'atomicWork' IS NOT NULL")
+        .orderBy("sp.storageAddress", "ASC")
+        .getMany()
+
+    // JCS, because slot records and stored values come back from jsonb with
+    // their keys in the database's order, not the order they were written.
+    return Hashing.sha256(
+        jcsCanonicalize({
+            works: works.map(w => ({ ...w })),
+            slots: slots.map(s => s.record),
+            writes: writes.map(w => ({
+                storageAddress: w.storageAddress,
+                owner: w.owner,
+                data: w.data ?? null,
+                lastModifiedByTx: w.lastModifiedByTx,
+                isDeleted: w.isDeleted,
+            })),
+        }),
+    )
 }
 
 /**

@@ -490,6 +490,10 @@ export async function insertBlock(
             getSharedState.lastBlockNumber = block.number
             getSharedState.lastBlockHash = block.hash
             getSharedState.lastBlockInsertedAt = Date.now()
+
+            void import("@/libs/peer/routines/forkScheduleWatch")
+                .then(m => m.onBlockInserted(block.number))
+                .catch(() => undefined)
         }
 
         // Post-commit refresh: rolled-back tx → no-op; committed tx →

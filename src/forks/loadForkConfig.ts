@@ -6,7 +6,11 @@ import type {
     ForkName,
     GasFeeSeparationConfig,
     NonceEnforcementConfig,
+    AtomicWorkConfig,
     OsDenominationConfig,
+    SignatureDomainConfig,
+    TlsnProofEnforcementConfig,
+    Web2ProofBindingConfig,
 } from "./forkConfig"
 
 // REVIEW: P2 + DEM-665 — genesis loader for fork heights + per-fork payloads.
@@ -164,6 +168,11 @@ export function isForkMachineryDisabled(): boolean {
  * @param genesisData Parsed genesis JSON object.
  */
 export function loadForkConfigFromGenesis(genesisData: any): void {
+    loadForkConfigFromGenesisInner(genesisData)
+    getSharedState.forkConfigLoaded = true
+}
+
+function loadForkConfigFromGenesisInner(genesisData: any): void {
     if (isForkMachineryDisabled()) {
         log.warning(
             "[FORKS] DEMOS_DISABLE_FORK_MACHINERY set — ignoring genesis " +
@@ -175,6 +184,21 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
         primeFeeDistributionFromForkConfig()
         return
     }
+    // Network identity travels with the fork config: both are genesis facts
+    // the signature preimage depends on once `signatureDomain` activates.
+    // Always taken from this genesis, never left over from a previous load:
+    // a stale id would pass the signatureDomain check below and bind
+    // signatures to another chain.
+    const declaredChainId = genesisData.properties?.id
+    getSharedState.chainId = null
+    if (typeof declaredChainId === "number" && Number.isInteger(declaredChainId)) {
+        getSharedState.chainId = declaredChainId
+    } else if (declaredChainId !== undefined) {
+        throw new ForkConfigValidationError(
+            `[FORKS] genesis properties.id must be an integer, got ${String(declaredChainId)}`,
+        )
+    }
+
     const forks = genesisData.forks
     if (!forks || typeof forks !== "object") {
         primeFeeDistributionFromForkConfig()
@@ -206,6 +230,19 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
         )
     }
 
+    // A scheduled signatureDomain binds every signature to the chain id from
+    // `properties.id`. Without one, the node boots fine and then cannot sign
+    // or admit a single transaction once the fork activates: refuse now.
+    if (
+        getSharedState.forkConfig.signatureDomain.activationHeight !== null &&
+        typeof getSharedState.chainId !== "number"
+    ) {
+        throw new ForkConfigValidationError(
+            "[FORKS] signatureDomain is scheduled but genesis properties.id is missing; " +
+                "the signature preimage needs the chain id",
+        )
+    }
+
     primeFeeDistributionFromForkConfig()
 }
 
@@ -227,6 +264,21 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "nonceEnforcement":
             getSharedState.forkConfig.nonceEnforcement =
                 config as NonceEnforcementConfig
+            return
+        case "signatureDomain":
+            getSharedState.forkConfig.signatureDomain =
+                config as SignatureDomainConfig
+            return
+        case "web2ProofBinding":
+            getSharedState.forkConfig.web2ProofBinding =
+                config as Web2ProofBindingConfig
+            return
+        case "tlsnProofEnforcement":
+            getSharedState.forkConfig.tlsnProofEnforcement =
+                config as TlsnProofEnforcementConfig
+            return
+        case "atomicWork":
+            getSharedState.forkConfig.atomicWork = config as AtomicWorkConfig
             return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
@@ -336,6 +388,18 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             // No payload beyond the base. Genesis may only set
             // activationHeight + description.
             return base as NonceEnforcementConfig
+        case "signatureDomain":
+            // No payload: the chain id the preimage binds to comes from
+            // genesis `properties.id`, not from the fork entry.
+            return base as SignatureDomainConfig
+        case "web2ProofBinding":
+            // No payload beyond the base.
+            return base as Web2ProofBindingConfig
+        case "tlsnProofEnforcement":
+            // No payload beyond the base.
+            return base as TlsnProofEnforcementConfig
+        case "atomicWork":
+            return base as AtomicWorkConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

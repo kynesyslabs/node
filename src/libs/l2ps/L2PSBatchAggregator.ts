@@ -12,7 +12,8 @@ import L2PSProofManager from "./L2PSProofManager"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
 import type { L2PSBatchPayload } from "./types"
-import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN } from "./constants"
+import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN, HISTORY_RETENTION_SWEEP_INTERVAL_MS } from "./constants"
+import { RetentionSweepGate } from "./retentionSweepGate"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 // Re-export for backward compatibility
@@ -71,6 +72,13 @@ export class L2PSBatchAggregator {
 
     /** Cleanup age - remove batched transactions older than this (ms) */
     private readonly CLEANUP_AGE_MS = Config.getInstance().l2ps.cleanupAgeMs
+
+    /** History retention in days; 0 keeps history forever. */
+    private readonly HISTORY_RETENTION_DAYS =
+        Config.getInstance().l2ps.historyRetentionDays
+
+    /** Lets the retention sweep run at most once an hour. */
+    private readonly retentionSweep = new RetentionSweepGate(HISTORY_RETENTION_SWEEP_INTERVAL_MS)
 
     /** Domain separator for batch transaction signatures */
     private readonly SIGNATURE_DOMAIN = BATCH_SIGNATURE_DOMAIN
@@ -132,6 +140,8 @@ export class L2PSBatchAggregator {
 
         // Reset statistics using helper method
         this.stats = this.createInitialStats()
+
+        void this.scrubLegacyPlaintext()
 
         // Start the interval timer
         this.intervalId = setInterval(async () => {
@@ -236,6 +246,10 @@ export class L2PSBatchAggregator {
             log.error(`[L2PS Batch Aggregator] Aggregation cycle failed: ${message}`)
 
         } finally {
+            // Retention runs whether or not this cycle aggregated anything.
+            // A subnet whose submission is failing is precisely the one that
+            // would otherwise hold data past the day it agreed to delete it.
+            await this.pruneHistoryRetention()
             this.isAggregating = false
         }
     }
@@ -794,9 +808,63 @@ export class L2PSBatchAggregator {
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${deleted} old confirmed transactions`)
             }
 
+            // Rows synced from peers are stored as "processed" and nothing
+            // moves them on — this node never executes them, and history is
+            // served from `l2ps_transactions`. A local submission leaves this
+            // status within the same request, so anything this old is a synced
+            // copy that would otherwise stay for ever.
+            const staleProcessed = await L2PSMempool.cleanupByStatus(
+                L2PS_STATUS.PROCESSED,
+                this.CLEANUP_AGE_MS,
+            )
+            if (staleProcessed > 0) {
+                this.stats.cleanedUpTransactions += staleProcessed
+                log.info(`[L2PS Batch Aggregator] Cleaned up ${staleProcessed} synced transactions`)
+            }
+
         } catch (error: unknown) {
             const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Error during cleanup: ${message}`)
+        }
+    }
+
+    /**
+     * Sweep history past its retention.
+     *
+     * Deliberately not chained to a successful aggregation: retention is a
+     * data-handling promise, and a subnet whose batch submission is failing is
+     * exactly the one that would otherwise keep ciphertext and metadata past
+     * the day it agreed to delete them.
+     */
+    private async pruneHistoryRetention(): Promise<void> {
+        if (!this.HISTORY_RETENTION_DAYS || this.HISTORY_RETENTION_DAYS <= 0) return
+        if (!this.retentionSweep.due()) return
+        try {
+            const { default: L2PSTransactionExecutor } = await import("./L2PSTransactionExecutor")
+            const pruned = await L2PSTransactionExecutor.pruneHistory(
+                this.HISTORY_RETENTION_DAYS,
+            )
+            if (pruned > 0) {
+                log.info(`[L2PS Batch Aggregator] Pruned ${pruned} transactions past the ${this.HISTORY_RETENTION_DAYS}-day history retention`)
+            }
+        } catch (error: unknown) {
+            log.error(`[L2PS Batch Aggregator] History retention sweep failed: ${getErrorMessage(error)}`)
+        }
+    }
+
+    /**
+     * Retire plaintext that older rows still hold next to their ciphertext.
+     * Runs once at start; a failure only means it is tried again next start.
+     */
+    private async scrubLegacyPlaintext(): Promise<void> {
+        try {
+            const { default: L2PSTransactionExecutor } = await import("./L2PSTransactionExecutor")
+            const scrubbed = await L2PSTransactionExecutor.scrubStoredPlaintext()
+            if (scrubbed > 0) {
+                log.info(`[L2PS Batch Aggregator] Removed stored plaintext from ${scrubbed} history rows that keep their ciphertext`)
+            }
+        } catch (error: unknown) {
+            log.error(`[L2PS Batch Aggregator] Plaintext scrub failed: ${getErrorMessage(error)}`)
         }
     }
 

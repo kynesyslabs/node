@@ -15,11 +15,12 @@ export const ZK_CIRCUIT_MAX_BATCH_SIZE = 10
 export const BATCH_SIGNATURE_DOMAIN = "L2PS_BATCH_TX_V1"
 
 // ---------------------------------------------------------------------------
-// Hash Service – OmniProtocol connection pool defaults
+// History retention
 // ---------------------------------------------------------------------------
 
-
-
-
-
-
+/**
+ * Minimum gap between history retention sweeps (ms) – 1 hour.
+ * Retention is measured in days, so sweeping on every aggregation cycle only
+ * repeats the same delete scan.
+ */
+export const HISTORY_RETENTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000
