@@ -54,6 +54,7 @@ import {
     readNonceTrace,
     readNonces,
 } from "@/libs/debug/nonceTrace"
+import { discreditAdvertisedHeight } from "src/libs/consensus/v2/routines/networkAheadVeto"
 
 /**
  * Used to prevent block insert operations from happening concurrently.
@@ -1032,10 +1033,19 @@ async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
         return false
     }
 
-    await HandleGCR.applyTransactions(
-        orderDeterministically(txs as unknown as Transaction[]),
+    // Undo in reverse apply order so a credit is never undone before the
+    // spend that depended on it, and keep the assignments unless every
+    // rollback succeeded: a partial undo must not look like a clean slate.
+    const rollback = await HandleGCR.applyTransactions(
+        orderDeterministically(txs as unknown as Transaction[]).reverse(),
         true,
     )
+    if (rollback.failedTxs.length > 0) {
+        log.error(
+            `[applySyncedBlock] cannot roll back orphaned GCR state: ${rollback.failedTxs.length}/${txs.length} rollback(s) failed: ${rollback.failedTxs.join(", ")}`,
+        )
+        return false
+    }
     for (const block of blocks) {
         await HandleGCR.deleteAssignedTxsForBlock(block)
     }
@@ -1103,10 +1113,15 @@ async function insertBlockOrHalt(
             const confirmed = blockTxs.filter(
                 tx => tx.status === TRANSACTION_STATUS.CONFIRMED,
             )
-            await HandleGCR.applyTransactions(
-                orderDeterministically(confirmed),
+            const rollback = await HandleGCR.applyTransactions(
+                orderDeterministically(confirmed).reverse(),
                 true,
             )
+            if (rollback.failedTxs.length > 0) {
+                throw new Error(
+                    `${rollback.failedTxs.length}/${confirmed.length} rollback(s) failed: ${rollback.failedTxs.join(", ")}`,
+                )
+            }
             await HandleGCR.deleteAssignedTxsForBlock(block.number)
         } catch (rollbackError) {
             unreconciledGcrBlock = block.number
@@ -1367,6 +1382,7 @@ async function requestBlocks(): Promise<boolean> {
             // Download batch of blocks
             const ok = await batchDownloadBlocks(peer, startBlock, endBlock)
             if (!ok) {
+                discreditAdvertisedHeight(peer)
                 seenPeers.add(peer.identity)
                 const next = findNextAvailablePeer(seenPeers)
                 if (!next) {
@@ -1389,12 +1405,14 @@ async function requestBlocks(): Promise<boolean> {
                 log.info(
                     "[requestBlocks] Reached end of available blocks on peer",
                 )
+                discreditAdvertisedHeight(peer)
                 break
             }
 
             // Handle a forked peer: continue from the recovery source,
             // or abort the round safely when no valid variant exists
             if (error instanceof ForkedPeerError) {
+                discreditAdvertisedHeight(peer)
                 seenPeers.add(peer.identity)
                 cooldownPeer(peer.identity, error.message)
 
@@ -1417,6 +1435,7 @@ async function requestBlocks(): Promise<boolean> {
                 log.debug(
                     `[requestBlocks] Peer ${peer.identity} is unreachable. Switching to next peer.`,
                 )
+                discreditAdvertisedHeight(peer)
                 seenPeers.add(peer.identity)
                 cooldownPeer(peer.identity, "unreachable during batch sync")
 

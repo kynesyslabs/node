@@ -19,6 +19,7 @@ const sharedState = {
 
 const submitValidatedTx = jest.fn(async (..._args: unknown[]) => ({
     ok: true,
+    published: true,
     confirmationBlock: 102,
     error: undefined as string | undefined,
 }))
@@ -68,7 +69,7 @@ function validityData(): any {
 beforeEach(() => {
     sharedState.PROD = true
     submitValidatedTx.mockClear()
-    submitValidatedTx.mockImplementation(async () => ({ ok: true, confirmationBlock: 102, error: undefined }))
+    submitValidatedTx.mockImplementation(async () => ({ ok: true, published: true, confirmationBlock: 102, error: undefined }))
     isSelfStaked.mockClear()
     isSelfStaked.mockImplementation(async () => true)
     handleL2PS.mockClear()
@@ -79,8 +80,17 @@ describe("broadcastTx disposition", () => {
         const reply = await handleExecuteTransaction(validityData(), "sender")
 
         expect(reply.success).toBe(true)
-        expect(reply.extra).toMatchObject({ hash: HASH, disposition: "mempool", confirmationBlock: 102 })
+        expect(reply.extra).toMatchObject({ hash: HASH, disposition: "mempool", confirmationBlock: 102, published: true })
         expect(submitValidatedTx).toHaveBeenCalledTimes(1)
+    })
+
+    it("mempool: says so when the mesh has not taken it yet", async () => {
+        submitValidatedTx.mockImplementationOnce(async () => ({ ok: true, published: false, confirmationBlock: 102, error: undefined }))
+
+        const reply = await handleExecuteTransaction(validityData(), "sender")
+
+        expect(reply.success).toBe(true)
+        expect(reply.extra).toMatchObject({ hash: HASH, disposition: "mempool", published: false })
     })
 
     it("refuses on an unstaked node without naming a disposition", async () => {
@@ -107,7 +117,7 @@ describe("broadcastTx disposition", () => {
 
     it("names no disposition when the mempool refuses it", async () => {
         sharedState.PROD = false
-        submitValidatedTx.mockImplementationOnce(async () => ({ ok: false, confirmationBlock: undefined, error: "nonce too low" }))
+        submitValidatedTx.mockImplementationOnce(async () => ({ ok: false, published: false, confirmationBlock: undefined, error: "nonce too low" }))
 
         const reply = await handleExecuteTransaction(validityData(), "sender")
 

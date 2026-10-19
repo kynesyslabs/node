@@ -139,6 +139,40 @@ describe("validateMergedPeerlist", () => {
             NON_VALIDATOR,
         ])
     })
+
+    describe("held to our contributions when the shard is given", () => {
+        const shard = [OUR_KEY, "c1", "c2", "c3"] // quorum 3
+        beforeEach(() => {
+            // us + c1 + c2 see OUR_KEY and SYNCED_PEER (quorum); only c1 + c2
+            // see REPORTED_PEER (vouched, below quorum); nobody sees STALE_PEER.
+            contributePeerlist(101, "c1", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+            contributePeerlist(101, "c2", [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+        })
+
+        it("accepts the list we would compute ourselves", async () => {
+            const list = [OUR_KEY, SYNCED_PEER].sort()
+            expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
+        })
+
+        it("accepts extra identities some member observed at the parent", async () => {
+            const list = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
+            expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
+        })
+
+        it("rejects a list that drops an identity at quorum in our view", async () => {
+            expect(await validateMergedPeerlist(101, [OUR_KEY], shard)).toBeNull()
+            expect(await validateMergedPeerlist(101, [], shard)).toBeNull()
+        })
+
+        it("rejects an identity nobody observed at the parent block", async () => {
+            const list = [OUR_KEY, SYNCED_PEER, STALE_PEER].sort()
+            expect(await validateMergedPeerlist(101, list, shard)).toBeNull()
+        })
+
+        it("does not apply without the shard", async () => {
+            expect(await validateMergedPeerlist(101, [OUR_KEY])).toEqual([OUR_KEY])
+        })
+    })
 })
 
 const SHARD = [OUR_KEY, "c1", "c2", "c3"] // quorum = floor(4*2/3)+1 = 3

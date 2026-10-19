@@ -161,6 +161,7 @@ export class GossipManager {
                         }`,
                     ),
                 )
+                this.retryHeldTxs()
                 this.refreshGauges()
             }, cfg.heightsIntervalMs)
 
@@ -655,6 +656,24 @@ export class GossipManager {
             return false
         }
         return true
+    }
+
+    private retryingHeldTxs = false
+
+    /** Re-offer txs whose publish was skipped; one pass in flight at a time. */
+    private retryHeldTxs(): void {
+        if (this.retryingHeldTxs || !this.sidecarUp()) return
+        this.retryingHeldTxs = true
+        void import("src/libs/network/txSubmission")
+            .then(m => m.retryUnpublishedTxs())
+            .catch(e =>
+                log.warning(
+                    `[GOSSIP] held tx retry failed: ${e instanceof Error ? e.message : String(e)}`,
+                ),
+            )
+            .finally(() => {
+                this.retryingHeldTxs = false
+            })
     }
 
     private lastSkipLog = new Map<string, number>()

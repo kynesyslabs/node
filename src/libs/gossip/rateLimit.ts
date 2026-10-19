@@ -19,15 +19,23 @@ class TokenBucket {
         this.updatedAt = now
     }
     take(amount: number, now: number): boolean {
+        this.refill(now)
+        if (this.tokens < amount) return false
+        this.tokens -= amount
+        return true
+    }
+    /** Whether `take(amount, now)` would succeed, without charging. */
+    has(amount: number, now: number): boolean {
+        this.refill(now)
+        return this.tokens >= amount
+    }
+    private refill(now: number): void {
         const elapsed = Math.max(0, now - this.updatedAt) / 1000
         this.tokens = Math.min(
             this.spec.burst,
             this.tokens + elapsed * this.spec.ratePerSec,
         )
         this.updatedAt = now
-        if (this.tokens < amount) return false
-        this.tokens -= amount
-        return true
     }
 }
 
@@ -67,6 +75,35 @@ export class TxRateLimiter {
      */
     admit(publisher: string, bytes: number): RateLimitVerdict {
         const now = this.clock()
+        const entry = this.entryFor(publisher, now)
+        if (!entry.messages.take(1, now)) return "publisher_rate"
+        if (!entry.bytes.take(bytes, now)) {
+            entry.messages.take(-1, now)
+            return "publisher_bytes"
+        }
+        if (!this.global.take(1, now)) {
+            entry.messages.take(-1, now)
+            entry.bytes.take(-bytes, now)
+            return "global_rate"
+        }
+        return "ok"
+    }
+
+    /**
+     * The verdict `admit` would give right now, charging nothing. Lets the
+     * caller refuse an over-budget message before doing expensive work on
+     * it, and charge only once the message proves to be the publisher's.
+     */
+    peek(publisher: string, bytes: number): RateLimitVerdict {
+        const now = this.clock()
+        const entry = this.entryFor(publisher, now)
+        if (!entry.messages.has(1, now)) return "publisher_rate"
+        if (!entry.bytes.has(bytes, now)) return "publisher_bytes"
+        if (!this.global.has(1, now)) return "global_rate"
+        return "ok"
+    }
+
+    private entryFor(publisher: string, now: number) {
         const key = publisher.toLowerCase()
         let entry = this.publishers.get(key)
         if (!entry) {
@@ -79,17 +116,7 @@ export class TxRateLimiter {
             this.publishers.set(key, entry)
         }
         entry.lastSeen = now
-        if (!entry.messages.take(1, now)) return "publisher_rate"
-        if (!entry.bytes.take(bytes, now)) {
-            entry.messages.take(-1, now)
-            return "publisher_bytes"
-        }
-        if (!this.global.take(1, now)) {
-            entry.messages.take(-1, now)
-            entry.bytes.take(-bytes, now)
-            return "global_rate"
-        }
-        return "ok"
+        return entry
     }
 
     private evict(now: number): void {

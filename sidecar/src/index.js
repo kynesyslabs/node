@@ -93,32 +93,20 @@ function componentLogger() {
     return { forComponent: makeLogger }
 }
 
-// Content-derived message IDs — MUST stay in sync with the rules in
-// src/libs/gossip/topics.ts (block hash for blocks, pubkey+seq for heights).
+// Message IDs are the hash of the full payload. A claimed transaction or
+// block hash must not stand in for the message: the parent validates the
+// content only after gossipsub has deduplicated by ID, so an invalid
+// payload carrying a real hash would make the real message a duplicate.
+// Identical re-broadcasts still collapse; the parent dedups the rest by
+// transaction and block hash itself.
 function gossipMsgId(msg) {
-    const enc = new TextEncoder()
-    try {
-        const payload = JSON.parse(new TextDecoder().decode(msg.data))
-        if (msg.topic === BLOCKS_TOPIC && typeof payload?.hash === "string") {
-            return enc.encode(`block:${payload.hash}`)
-        }
-        if (
-            msg.topic === TXS_TOPIC &&
-            typeof payload?.data?.transaction?.hash === "string"
-        ) {
-            return enc.encode(`tx:${payload.data.transaction.hash}`)
-        }
-        if (
-            msg.topic === HEIGHTS_TOPIC &&
-            typeof payload?.pubkey === "string" &&
-            typeof payload?.seq === "number"
-        ) {
-            return enc.encode(`heights:${payload.pubkey}:${payload.seq}`)
-        }
-    } catch {
-        // malformed payload: fall through, content hash still dedups
-    }
-    return new Uint8Array(createHash("sha256").update(msg.data).digest())
+    return new Uint8Array(
+        createHash("sha256")
+            .update(msg.topic ?? "")
+            .update("\0")
+            .update(msg.data)
+            .digest(),
+    )
 }
 
 // The key file holds a 24-word BIP39 mnemonic; its 32-byte entropy is the

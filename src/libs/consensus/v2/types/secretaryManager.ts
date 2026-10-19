@@ -101,7 +101,11 @@ export default class SecretaryManager {
 
     /** Member only: adopts the secretary's merged peerlist after checking it. */
     public async receiveMergedPeerlist(peerlist: unknown): Promise<void> {
-        const valid = await validateMergedPeerlist(this.shard.blockRef, peerlist)
+        const valid = await validateMergedPeerlist(
+            this.shard.blockRef,
+            peerlist,
+            this.shard.members.map(m => m.identity),
+        )
         if (!valid) {
             log.error(
                 `[SECRETARY ROUTINE] Rejected the merged peerlist from ${this.secretary?.identity} for block ${this.shard.blockRef}: ${JSON.stringify(peerlist)}`,

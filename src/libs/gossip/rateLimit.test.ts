@@ -13,6 +13,17 @@ const make = (now: { t: number }, overrides = {}) =>
     )
 
 describe("TxRateLimiter", () => {
+    it("peek reports the verdict without charging", () => {
+        const now = { t: 0 }
+        const rl = make(now)
+        for (let i = 0; i < 100; i++) expect(rl.peek("A", 10)).toBe("ok")
+        for (let i = 0; i < 20; i++) expect(rl.admit("A", 10)).toBe("ok")
+        expect(rl.peek("A", 10)).toBe("publisher_rate")
+        expect(rl.peek("A", 10)).toBe("publisher_rate")
+        expect(rl.peek("B", 6000)).toBe("publisher_bytes")
+        expect(rl.admit("B", 10)).toBe("ok")
+    })
+
     it("admits up to the burst then refuses", () => {
         const now = { t: 0 }
         const rl = make(now)

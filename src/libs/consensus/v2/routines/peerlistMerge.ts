@@ -203,45 +203,7 @@ export async function computeMergedPeerlist(
     blockRef: number,
     shardMembers: string[],
 ): Promise<string[]> {
-    const parentNumber = blockRef - 1
-    const parentBlock = await Chain.getBlockByNumber(parentNumber)
-    const parentHash = parentBlock?.hash ?? null
-
-    const isAtParent = (observation: SyncObservation) =>
-        parentHash !== null &&
-        observation.block === parentNumber &&
-        observation.block_hash === parentHash
-
-    const voters = new Set(shardMembers.map(m => m.toLowerCase()))
-    const quorum = Math.floor((voters.size * 2) / 3) + 1
-    const votes = new Map<string, Set<string>>()
-    const vote = (voter: string, observation: SyncObservation) => {
-        if (!isAtParent(observation)) return
-        const identity = observation.identity.toLowerCase()
-        let seenBy = votes.get(identity)
-        if (!seenBy) {
-            seenBy = new Set()
-            votes.set(identity, seenBy)
-        }
-        seenBy.add(voter)
-    }
-
-    const ourKey = getSharedState.publicKeyHex.toLowerCase()
-    if (voters.has(ourKey)) {
-        for (const observation of getLocalSyncObservations()) {
-            vote(ourKey, observation)
-        }
-    }
-
-    if (contributionsBlockRef === blockRef) {
-        for (const [contributor, entries] of contributions) {
-            const voter = contributor.toLowerCase()
-            if (!voters.has(voter)) continue
-            for (const observation of entries) {
-                vote(voter, observation)
-            }
-        }
-    }
+    const { votes, quorum } = await collectParentVotes(blockRef, shardMembers)
 
     const merged = new Set<string>()
     for (const [identity, seenBy] of votes) {
@@ -288,13 +250,71 @@ export async function computeMergedPeerlist(
 }
 
 /**
+ * Who observed which identity at the round's parent block, one vote per
+ * shard member: our own table is our vote, and a contribution counts only
+ * when its contributor is a member. Absent members still count towards
+ * the quorum denominator.
+ */
+async function collectParentVotes(
+    blockRef: number,
+    shardMembers: string[],
+): Promise<{ votes: Map<string, Set<string>>; quorum: number }> {
+    const parentNumber = blockRef - 1
+    const parentBlock = await Chain.getBlockByNumber(parentNumber)
+    const parentHash = parentBlock?.hash ?? null
+
+    const isAtParent = (observation: SyncObservation) =>
+        parentHash !== null &&
+        observation.block === parentNumber &&
+        observation.block_hash === parentHash
+
+    const voters = new Set(shardMembers.map(m => m.toLowerCase()))
+    const quorum = Math.floor((voters.size * 2) / 3) + 1
+    const votes = new Map<string, Set<string>>()
+    const vote = (voter: string, observation: SyncObservation) => {
+        if (!isAtParent(observation)) return
+        const identity = observation.identity.toLowerCase()
+        let seenBy = votes.get(identity)
+        if (!seenBy) {
+            seenBy = new Set()
+            votes.set(identity, seenBy)
+        }
+        seenBy.add(voter)
+    }
+
+    const ourKey = getSharedState.publicKeyHex.toLowerCase()
+    if (voters.has(ourKey)) {
+        for (const observation of getLocalSyncObservations(blockRef)) {
+            vote(ourKey, observation)
+        }
+    }
+
+    if (contributionsBlockRef === blockRef) {
+        for (const [contributor, entries] of contributions) {
+            const voter = contributor.toLowerCase()
+            if (!voters.has(voter)) continue
+            for (const observation of entries) {
+                vote(voter, observation)
+            }
+        }
+    }
+
+    return { votes, quorum }
+}
+
+/**
  * Checks a merged peerlist dictated by the secretary: well-formed, sorted,
  * unique, and staked at the round's parent height when a validator set
- * exists. Returns the list or null when it fails.
+ * exists. With `shardMembers`, it is also held to our own contributions:
+ * every entry must have been observed at the parent block by some member,
+ * and every identity that reaches quorum in our view must be present. The
+ * secretary can then neither invent a validator nor drop one the shard
+ * agreed on. Returns the list or null when it fails.
  */
 export async function validateMergedPeerlist(
     blockRef: number,
     peerlist: unknown,
+    shardMembers?: string[],
 ): Promise<string[] | null> {
     if (!Array.isArray(peerlist)) return null
     if (peerlist.length > MERGE_PEERLIST_MAX_ENTRIES_PER_PEER) return null
@@ -314,18 +334,39 @@ export async function validateMergedPeerlist(
         }
     }
 
+    const list = peerlist as string[]
+
+    if (shardMembers) {
+        const { votes, quorum } = await collectParentVotes(blockRef, shardMembers)
+        const listed = new Set(list)
+        const invented = list.filter(id => !votes.has(id))
+        if (invented.length > 0) {
+            log.error(
+                `[peerlistMerge] dictated peerlist for block ${blockRef} names ${invented.length} identit(ies) nobody observed at the parent block: ${invented.join(", ")}`,
+            )
+            return null
+        }
+        const dropped = [...votes]
+            .filter(([id, seenBy]) => seenBy.size >= quorum && !listed.has(id))
+            .map(([id]) => id)
+        if (dropped.length > 0) {
+            log.error(
+                `[peerlistMerge] dictated peerlist for block ${blockRef} omits ${dropped.length} identit(ies) at quorum in our view: ${dropped.join(", ")}`,
+            )
+            return null
+        }
+    }
+
     const activeValidators = (await GCR.getGCRValidatorsAtBlock(
         blockRef - 1,
     )) as Validators[]
     if (activeValidators.length === 0) {
-        return peerlist as string[]
+        return list
     }
     const validatorAddresses = new Set<string>(
         activeValidators
             .map(v => v.address)
             .filter((a): a is string => a !== null),
     )
-    return (peerlist as string[]).every(id => validatorAddresses.has(id))
-        ? (peerlist as string[])
-        : null
+    return list.every(id => validatorAddresses.has(id)) ? list : null
 }

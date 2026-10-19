@@ -5,16 +5,58 @@ import log from "src/utilities/logger"
 
 let vetoActive = false
 
+export const DISCREDIT_MS = 60_000
+
+// Advertised heights a peer could not back with blocks when sync asked.
+// Until the entry expires, that peer's gossip claim up to this height no
+// longer counts as the network being ahead; its corroborated sync state
+// still does.
+const discredited = new Map<string, { height: number; until: number }>()
+
+/**
+ * Records that `peer` failed to serve blocks it advertised. A peer that
+ * is really ahead serves them on the next attempt and the entry lapses.
+ */
+export function discreditAdvertisedHeight(peer: Peer): void {
+    const height = peer.gossip?.height ?? 0
+    if (height <= getSharedState.lastBlockNumber) return
+    discredited.set(peer.identity.toLowerCase(), {
+        height,
+        until: Date.now() + DISCREDIT_MS,
+    })
+    log.warning(
+        `[networkAheadVeto] ${peer.identity} advertised height ${height} but could not serve it; ignoring the claim for ${DISCREDIT_MS / 1000}s`,
+    )
+}
+
+export function clearDiscreditedHeights(): void {
+    discredited.clear()
+}
+
+/** The height this peer is believed to be at, discredited claims excluded. */
+export function credibleHeight(peer: Peer, now = Date.now()): number {
+    const corroborated = peer.sync.block ?? 0
+    const claimed = peer.gossip?.height ?? 0
+    const entry = discredited.get(peer.identity.toLowerCase())
+    if (entry) {
+        if (entry.until <= now) {
+            discredited.delete(peer.identity.toLowerCase())
+        } else if (claimed <= entry.height) {
+            return corroborated
+        }
+    }
+    return Math.max(corroborated, claimed)
+}
+
 export async function getAheadValidatorPeers(): Promise<Peer[]> {
     const ourBlock = getSharedState.lastBlockNumber
     const onlinePeers = await PeerManager.getInstance().getOnlinePeers()
     // peer.sync is corroborated and can never exceed our own head; the
     // signed self-attested head from gossip heights records is what lets
     // a lagging node see the network is ahead at all.
+    const now = Date.now()
     const aheadPeers = onlinePeers.filter(
-        peer =>
-            Math.max(peer.sync.block ?? 0, peer.gossip?.height ?? 0) >
-            ourBlock,
+        peer => credibleHeight(peer, now) > ourBlock,
     )
 
     if (aheadPeers.length === 0) {
@@ -65,6 +107,7 @@ export async function isNetworkAhead(context: string): Promise<boolean> {
                 aheadPeers.map(peer => ({
                     peer: peer.connection.string,
                     block: peer.sync.block,
+                    advertised: peer.gossip?.height ?? null,
                 })),
             ),
     )

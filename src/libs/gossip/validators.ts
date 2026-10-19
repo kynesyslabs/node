@@ -44,12 +44,16 @@ const lastSeq = new Map<string, number>()
 
 function seqIsFresh(pubkey: string, seq: number): boolean {
     const prev = lastSeq.get(pubkey)
-    if (prev !== undefined && seq <= prev) return false
+    return prev === undefined || seq > prev
+}
+
+// Only a record whose signature verified moves the watermark, so a forged
+// record under a validator's key cannot park its real sequences behind it.
+function rememberSeq(pubkey: string, seq: number): void {
     lastSeq.set(pubkey, seq)
     if (lastSeq.size > SEQ_LRU_MAX) {
         lastSeq.delete(lastSeq.keys().next().value)
     }
-    return true
 }
 
 export interface HeightsValidation {
@@ -103,6 +107,7 @@ export async function validateHeightsMessage(
         recordVerdict("heights", "reject")
         return { result: "reject" }
     }
+    rememberSeq(record.pubkey, record.seq)
 
     log.debug(
         `[GOSSIP] heights accept: ${record.pubkey} at height ${record.height} (seq ${record.seq})`,
@@ -309,7 +314,11 @@ export async function validateTxMessage(
         recordVerdict("txs", "reject")
         return { result: "reject" }
     }
-    const budget = txRateLimiter.admit(publisher, data.length)
+    // Check the budget before paying for the signature check, but charge
+    // it only once the signature proves the message is the publisher's.
+    // A forged envelope under a validator's key then costs that validator
+    // nothing.
+    const budget = txRateLimiter.peek(publisher, data.length)
     if (budget !== "ok") {
         log.debug(`[GOSSIP] tx ignore: ${budget} for publisher ${publisher}`)
         countTxRateLimited(budget)
@@ -320,6 +329,13 @@ export async function validateTxMessage(
         log.debug(`[GOSSIP] tx reject: bad envelope signature from ${publisher}`)
         recordVerdict("txs", "reject")
         return { result: "reject" }
+    }
+    const charged = txRateLimiter.admit(publisher, data.length)
+    if (charged !== "ok") {
+        log.debug(`[GOSSIP] tx ignore: ${charged} for publisher ${publisher}`)
+        countTxRateLimited(charged)
+        recordVerdict("txs", "ignore")
+        return { result: "ignore" }
     }
     recordVerdict("txs", "accept")
     return { result: "accept", validityData }
