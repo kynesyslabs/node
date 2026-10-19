@@ -47,13 +47,24 @@ export function replaceFileAtomically(
         }
     }
 
+    // A full disk can cut the write short; the verified temporary copy stays
+    // until the file on disk is proven to hold every byte.
+    const bytes = Buffer.from(content, "utf8")
     const fd = fs.openSync(path, "r+")
     try {
         fs.ftruncateSync(fd, 0)
-        fs.writeSync(fd, content)
+        let written = 0
+        while (written < bytes.length) {
+            const n = fs.writeSync(fd, bytes, written, bytes.length - written, written)
+            if (n <= 0) throw new Error(`short write to ${path}: ${written} of ${bytes.length} bytes`)
+            written += n
+        }
         fs.fsyncSync(fd)
     } finally {
         fs.closeSync(fd)
+    }
+    if (fs.readFileSync(path, "utf8") !== content) {
+        throw new Error(`${path} does not hold the verified content after an in-place write; the copy is at ${tmp}`)
     }
     fs.rmSync(tmp, { force: true })
     return "in-place"

@@ -65,6 +65,40 @@ describe("replacing a file atomically", () => {
             })
         }
 
+        it("writes every byte in place when the filesystem accepts only a few at a time", () => {
+            const { dir, path } = setup()
+            failRename("EBUSY")
+            const realWrite = fs.writeSync
+            fs.writeSync = ((fd: number, data: Buffer | string, ...rest: unknown[]) => {
+                if (typeof data === "string") return realWrite(fd, data)
+                const [offset, length, position] = rest as [number, number, number]
+                return realWrite(fd, data, offset, Math.min(length, 3), position)
+            }) as typeof fs.writeSync
+            try {
+                expect(replaceFileAtomically(path, "new content, written in pieces", () => undefined)).toBe("in-place")
+            } finally {
+                fs.writeSync = realWrite
+            }
+            expect(readFileSync(path, "utf8")).toBe("new content, written in pieces")
+            expect(readdirSync(dir)).toEqual(["genesis.json"])
+            rmSync(dir, { recursive: true })
+        })
+
+        it("keeps the verified copy when the in-place write stops short", () => {
+            const { dir, path } = setup()
+            failRename("EBUSY")
+            const realWrite = fs.writeSync
+            fs.writeSync = ((fd: number, data: Buffer | string, ...rest: unknown[]) =>
+                typeof data === "string" ? realWrite(fd, data) : 0) as typeof fs.writeSync
+            try {
+                expect(() => replaceFileAtomically(path, "new content", () => undefined)).toThrow(/short write/)
+            } finally {
+                fs.writeSync = realWrite
+            }
+            expect(readdirSync(dir).some(name => name.endsWith(".tmp"))).toBe(true)
+            rmSync(dir, { recursive: true })
+        })
+
         it("does not fall back for other errors, and leaves the old file", () => {
             const { dir, path } = setup()
             failRename("EACCES")
