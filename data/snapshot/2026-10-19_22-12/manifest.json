@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 2,
+  "source": {
+    "host": "vmi2200529.contaboserver.net",
+    "chain_block_height": 568109,
+    "chain_block_hash": "a3ba7b6b6adda5c6cdf2a632195f4e7887cb58922fc1c9a3bf8c587b30612fc7",
+    "node_version": "0.9.8",
+    "pg_version": "16.14",
+    "dumped_at": "2026-10-19T20:12:53.583Z"
+  },
+  "files": {
+    "gcr_main.jsonl": {
+      "sha256": "db51386251780278c99bf69fb0748249840c6f5d9558b7686653c4410ecbf1db",
+      "rows": 14216,
+      "balance_sum": "15024999999998792044000000000"
+    },
+    "gcr_storageprogram.jsonl": {
+      "sha256": "e9c2597f966f42bc8805a7c125c6d8f3e2b719062f2cb23d723621f7da5567ab",
+      "rows": 5251,
+      "size_bytes_sum": 8781553
+    },
+    "identity_commitments.jsonl": {
+      "sha256": "636ad55ccc03cefba62ef57289914321ed8ffccf726335306e17f867081287a3",
+      "rows": 6
+    },
+    "validators.jsonl": {
+      "sha256": "252b3d70e865e7bebcd0bf0bdd303f205d03145b1ec19149afa8940ff19f1533",
+      "rows": 35
+    }
+  },
+  "fork_state": [
+    {
+      "fork_name": "gasFeeSeparation",
+      "applied": true,
+      "applied_at_block": "0",
+      "applied_at": "2026-06-10T16:17:44.98",
+      "pre_sum_dem": null,
+      "post_sum_os": null,
+      "gcr_v2_row_count": null,
+      "legacy_row_count": null,
+      "validators_row_count": null,
+      "capped_count": null,
+      "total_value_lost_os": null,
+      "malformed_validators_count": null
+    },
+    {
+      "fork_name": "osDenomination",
+      "applied": true,
+      "applied_at_block": "0",
+      "applied_at": "2026-06-10T16:17:44.907",
+      "pre_sum_dem": "19024999999998868586",
+      "post_sum_os": "19024999999998868586000000000",
+      "gcr_v2_row_count": 13880,
+      "legacy_row_count": 0,
+      "validators_row_count": 4,
+      "capped_count": 0,
+      "total_value_lost_os": "0",
+      "malformed_validators_count": 0
+    }
+  ],
+  "transforms_applied": {
+    "nonces_reset_to_zero": true,
+    "assigned_txs_emptied": true,
+    "test_identity_commitments_dropped": 0
+  }
+}
