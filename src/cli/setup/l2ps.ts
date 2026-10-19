@@ -2,7 +2,9 @@ import * as crypto from "node:crypto"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { L2PS_DIR } from "./context"
+import { isInsideDir } from "./files"
 import {
+    displaySafe,
     hexLengthWarning,
     IV_BYTES,
     KEY_BYTES,
@@ -53,7 +55,8 @@ export function inspectSubnet(root: string, uid: string): SubnetStatus {
     }
 }
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+// Error text carries file names and parsed fragments, so it is cleaned like any other file-derived text.
+const errorText = (e: unknown) => displaySafe(e instanceof Error ? e.message : String(e))
 
 /** What config.json says, or the finished status when there is nothing more to inspect. */
 function readConfig(status: SubnetStatus): { cfg?: any; done?: SubnetStatus } {
@@ -61,7 +64,7 @@ function readConfig(status: SubnetStatus): { cfg?: any; done?: SubnetStatus } {
     if (!fs.existsSync(configPath)) return { done: { ...status, state: "placeholder" } }
     const parsed = readJson(configPath)
     if (parsed.error !== undefined) {
-        return { done: invalid(status, `config.json is not valid JSON (${parsed.error})`) }
+        return { done: invalid(status, `config.json is not valid JSON (${displaySafe(parsed.error)})`) }
     }
     const cfg = parsed.value
     if (cfg === null || typeof cfg !== "object") {
@@ -84,7 +87,36 @@ function checkIdentity(cfg: any, uid: string, status: SubnetStatus): void {
     if (!cfg.uid) {
         status.problems.push("config.json has no \"uid\"")
     } else if (cfg.uid !== uid) {
-        status.warnings.push(`config.json uid "${cfg.uid}" differs from the directory name`)
+        status.warnings.push(`config.json uid "${displaySafe(cfg.uid)}" differs from the directory name`)
+    }
+}
+
+// The same ceiling the wizard puts on a key file it reads: no key is larger.
+const KEY_FILE_MAX_BYTES = 64 * 1024
+
+/** The file's text, or why it cannot be trusted as a key file. Never follows a link, never waits on a pipe. */
+function readKeyFile(abs: string): { text?: string; problem?: string } {
+    let fd: number | undefined
+    try {
+        const info = fs.lstatSync(abs)
+        if (!info.isFile()) {
+            return { problem: info.isSymbolicLink() ? "is a symbolic link, not a regular file" : "is not a regular file" }
+        }
+        // O_NOFOLLOW closes the gap between the check and the open.
+        fd = fs.openSync(abs, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
+        const buf = Buffer.alloc(KEY_FILE_MAX_BYTES + 1)
+        let filled = 0
+        while (filled < buf.length) {
+            const n = fs.readSync(fd, buf, filled, buf.length - filled, null)
+            if (n === 0) break
+            filled += n
+        }
+        if (filled > KEY_FILE_MAX_BYTES) return { problem: `is larger than ${KEY_FILE_MAX_BYTES} bytes, which no key is` }
+        return { text: buf.subarray(0, filled).toString("utf8") }
+    } catch (e) {
+        return { problem: `cannot be read (${errorText(e)})` }
+    } finally {
+        if (fd !== undefined) fs.closeSync(fd)
     }
 }
 
@@ -92,35 +124,44 @@ function checkIdentity(cfg: any, uid: string, status: SubnetStatus): void {
 function checkKeyFile(root: string, label: "key" | "IV", rel: string, status: SubnetStatus): string | undefined {
     const projectRoot = path.resolve(root)
     const abs = path.resolve(root, rel)
-    // Same test as the loader: a plain prefix check against the root.
-    if (!abs.startsWith(projectRoot)) {
-        status.problems.push(`${label} path ${rel} is outside the node directory`)
+    const shown = displaySafe(rel)
+    // The loader only compares a prefix, which also admits a sibling such as
+    // `<root>-evil`; symlinks are resolved so a link cannot lead out either.
+    if (!isInsideDir(abs, projectRoot)) {
+        status.problems.push(`${label} path ${shown} is outside the node directory`)
         return undefined
     }
     // `bun install` or a clean checkout wipes node_modules, and the key goes with it.
     if (path.relative(projectRoot, abs).split(path.sep).includes("node_modules")) {
-        status.warnings.push(`${label} file ${rel} is inside node_modules and is lost when dependencies are reinstalled`)
+        status.warnings.push(`${label} file ${shown} is inside node_modules and is lost when dependencies are reinstalled`)
     }
-    if (!fs.existsSync(abs)) return `${label} file ${rel} is missing`
-    let text: string
-    try {
-        text = fs.readFileSync(abs, "utf8")
-    } catch (e) {
-        status.problems.push(`${label} file ${rel} cannot be read (${errorText(e)})`)
+    if (!fs.existsSync(abs) && !isLink(abs)) return `${label} file ${shown} is missing`
+    const read = readKeyFile(abs)
+    if (read.text === undefined) {
+        status.problems.push(`${label} file ${shown} ${read.problem}`)
         return undefined
     }
     const name = label === "key" ? "Key" : "IV"
-    const r = parseHex(text, name)
+    const r = parseHex(read.text, name)
     if (!r.ok) {
-        status.problems.push(`${label} file ${rel}: ${r.error}`)
+        status.problems.push(`${label} file ${shown}: ${r.error}`)
         return undefined
     }
     const lengthWarning = hexLengthWarning(r.value, name, label === "key" ? KEY_BYTES : IV_BYTES)
-    if (lengthWarning) status.warnings.push(`${rel}: ${lengthWarning}`)
+    if (lengthWarning) status.warnings.push(`${shown}: ${lengthWarning}`)
     if (label === "key" && (fs.statSync(abs).mode & 0o077) !== 0) {
-        status.warnings.push(`key file ${rel} is readable by other users (chmod 600 it)`)
+        status.warnings.push(`key file ${shown} is readable by other users (chmod 600 it)`)
     }
     return undefined
+}
+
+/** A dangling link is not "missing": it is a link, and is reported as one. */
+function isLink(file: string): boolean {
+    try {
+        return fs.lstatSync(file).isSymbolicLink()
+    } catch {
+        return false
+    }
 }
 
 function checkKeyFiles(root: string, cfg: any, status: SubnetStatus): void {

@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { spawnSync } from "node:child_process"
+import { collectChecks, isFatal } from "./checks"
 import { runCli } from "./cli"
-import { CODE_ROOT, ZK_IDENTITY_VKEY } from "./context"
+import { CODE_ROOT, ZK_IDENTITY_VKEY, createContext } from "./context"
 import { IDENTITY_CIRCUIT_DIGEST, IDENTITY_DIGEST_ENV, canonicalDigest, downloadWithFetch, inspectBatchArtifacts, inspectIdentityKey, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
 import { GIT, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
 
@@ -425,6 +426,42 @@ describe("the identity verification key is pinned to the one committed in this r
         })
     })
 
+    it("keeps the identity item fatal when another ZK check throws", () => {
+        fs.rmSync(vkey())
+        const ctx = createContext(root, ".env", {})
+        // Reading this flag is the first thing the batch-proof checks do.
+        ctx.env = new Proxy(ctx.env, {
+            get(target, key) {
+                if (key === "L2PS_ZK_ENABLED") throw new Error("boom")
+                return target[key as string]
+            },
+        })
+        const items = collectChecks(ctx).items
+        expect(items.some(i => i.area === "ZK" && i.item === "Inspection")).toBe(true)
+        const identity = items.find(i => i.area === "ZK identity")
+        expect(identity).toMatchObject({ status: "missing", fatal: true })
+        expect(items.filter(isFatal).length).toBe(1)
+    })
+
+    it("falls back to a fatal item when the identity check itself throws", () => {
+        const ctx = createContext(root, ".env", {})
+        ctx.codeRoot = null as unknown as string
+        const fatal = collectChecks(ctx).items.filter(isFatal)
+        expect(fatal.length).toBe(1)
+        expect(fatal[0].detail).toContain("could not be checked")
+    })
+
+    it("shows an active override as a warning item, never as a plain pass", () => {
+        const parsed = JSON.parse(fs.readFileSync(vkey(), "utf8")) as Record<string, unknown>
+        const next = { ...parsed, nPublic: 99 }
+        fs.writeFileSync(vkey(), JSON.stringify(next))
+        const digest = canonicalDigest(JSON.stringify(next))
+        const item = collectChecks(createContext(root, ".env", { [IDENTITY_DIGEST_ENV]: digest })).items.find(i => i.area === "ZK identity")
+        expect(item).toMatchObject({ status: "warn", blocking: false, fatal: true })
+        expect(item?.detail).toContain(IDENTITY_DIGEST_ENV)
+        expect(item?.detail).not.toContain(digest)
+    })
+
     it("stops the gate through the fatal path", async () => {
         fs.writeFileSync(vkey(), JSON.stringify({ protocol: "groth16", vk_alpha_1: ["1"], IC: [["1"]] }))
         const lines: string[] = []
@@ -457,6 +494,54 @@ describe("downloadWithFetch", () => {
             expect(fs.readdirSync(dir)).toEqual(["file.ptau"])
         } finally {
             server.stop(true)
+        }
+    })
+
+    const serve = (make: () => Response) => Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: make })
+    const slot = () => fs.mkdtempSync(path.join(root, "dl-"))
+
+    it("refuses a body larger than the cap, declared or streamed, and leaves nothing behind", async () => {
+        const declared = serve(() => new Response(new Uint8Array(4096)))
+        const streamed = serve(
+            () =>
+                new Response(
+                    new ReadableStream({
+                        pull(c) {
+                            c.enqueue(new Uint8Array(1024))
+                        },
+                    }),
+                ),
+        )
+        const dir = slot()
+        try {
+            await expect(downloadWithFetch(`http://127.0.0.1:${declared.port}/x`, path.join(dir, "a"), 10, 1024)).rejects.toThrow(/too large/)
+            await expect(downloadWithFetch(`http://127.0.0.1:${streamed.port}/x`, path.join(dir, "b"), 10, 8192)).rejects.toThrow(/too large/)
+            expect(fs.readdirSync(dir)).toEqual([])
+        } finally {
+            declared.stop(true)
+            streamed.stop(true)
+        }
+    })
+
+    it("gives up after the time limit", async () => {
+        const stalled = serve(() => new Response(new ReadableStream({ start() {} })))
+        const dir = slot()
+        try {
+            await expect(downloadWithFetch(`http://127.0.0.1:${stalled.port}/x`, path.join(dir, "a"), 10, 1024, 300)).rejects.toThrow(/timed out/)
+            expect(fs.readdirSync(dir)).toEqual([])
+        } finally {
+            stalled.stop(true)
+        }
+    })
+
+    it("refuses a body below the minimum without keeping it", async () => {
+        const small = serve(() => new Response(new Uint8Array(10)))
+        const dir = slot()
+        try {
+            await expect(downloadWithFetch(`http://127.0.0.1:${small.port}/x`, path.join(dir, "a"), 1024)).rejects.toThrow(/too small/)
+            expect(fs.readdirSync(dir)).toEqual([])
+        } finally {
+            small.stop(true)
         }
     })
 

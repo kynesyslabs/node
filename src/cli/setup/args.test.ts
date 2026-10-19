@@ -92,6 +92,15 @@ describe("parseSetupArgs", () => {
         expect(() => parseSetupArgs(["--ptau-url", "mirror"], {})).toThrow(UsageError)
     })
 
+    it("requires https for a ptau mirror unless a local mirror is explicitly allowed", () => {
+        expect(() => parseSetupArgs(["--ptau-url", "http://mirror.example"], {})).toThrow(/https/)
+        expect(() => parseSetupArgs([], { DEMOS_SETUP_PTAU_URL: "http://mirror.example" })).toThrow(UsageError)
+        expect(parseSetupArgs(["--ptau-url", "HTTPS://mirror.example/"], {}).ptauUrl).toBe("https://mirror.example")
+        const allowed = { DEMOS_SETUP_ALLOW_INSECURE_PTAU: "true" }
+        expect(parseSetupArgs(["--ptau-url", "http://10.0.0.5:8080/ptau"], allowed).ptauUrl).toBe("http://10.0.0.5:8080/ptau")
+        expect(() => parseSetupArgs(["--ptau-url", "http://mirror.example"], { DEMOS_SETUP_ALLOW_INSECURE_PTAU: "false" })).toThrow(UsageError)
+    })
+
     it("does not print a stray argument back, since it may be a secret", () => {
         const stray = "typed-by-mistake-value"
         let message = ""

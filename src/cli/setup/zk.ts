@@ -31,6 +31,8 @@ export interface BatchArtifacts {
 export interface IdentityKeyState {
     state: "ok" | "missing" | "invalid"
     detail: string
+    /** The key matched the operator's digest, not the release's. */
+    pinnedByOperator?: boolean
 }
 
 const batchDir = (root: string, size: BatchSize) =>
@@ -152,6 +154,7 @@ export function inspectIdentityKey(
             detail: expected.overridden
                 ? `verification key present (pinned by ${IDENTITY_DIGEST_ENV})`
                 : "verification key present",
+            pinnedByOperator: expected.overridden,
         }
     } catch (e) {
         return {
@@ -171,25 +174,60 @@ export interface ZkSetupResult {
     messages: string[]
 }
 
+// The largest file used here is power 17 (about 150 MB); the cap leaves room
+// for a re-published copy without letting a mirror fill the disk.
+export const PTAU_MAX_BYTES = 256 * 1024 * 1024
+export const PTAU_TIMEOUT_MS = 10 * 60 * 1000
+
+/**
+ * Integrity gate: the Hermez files have no pinned hash here, so a corrupted or
+ * swapped file is caught later, when the verification key built from it must
+ * equal the one committed in the release (a different ceremony file yields a
+ * different key and the run fails). The size bounds and the time limit only
+ * keep a bad mirror from exhausting the disk or hanging the setup.
+ */
 export async function downloadWithFetch(
     url: string,
     dest: string,
     minBytes: number,
+    maxBytes: number = PTAU_MAX_BYTES,
+    timeoutMs: number = PTAU_TIMEOUT_MS,
 ): Promise<void> {
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`)
-    const buf = Buffer.from(await res.arrayBuffer())
-    if (buf.length < minBytes) {
-        throw new Error(`download of ${url} is too small (${buf.length} bytes)`)
-    }
     const tmp = `${dest}.part`
+    const abort = new AbortController()
+    const timer = setTimeout(() => abort.abort(), timeoutMs)
+    let fd: number | undefined
     try {
-        fs.writeFileSync(tmp, buf)
+        const res = await fetch(url, { signal: abort.signal })
+        if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`)
+        const declared = Number(res.headers.get("content-length"))
+        if (Number.isFinite(declared) && declared > maxBytes) {
+            throw new Error(`download of ${url} is too large (${declared} bytes, at most ${maxBytes})`)
+        }
+        if (res.body === null) throw new Error(`download of ${url} has no body`)
+        fd = fs.openSync(tmp, "w")
+        let written = 0
+        // Streamed to disk: the whole file is never held in memory, and the
+        // size cap holds even when the server does not declare a length.
+        for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+            written += chunk.byteLength
+            if (written > maxBytes) throw new Error(`download of ${url} is too large (more than ${maxBytes} bytes)`)
+            fs.writeSync(fd, chunk)
+        }
+        fs.closeSync(fd)
+        fd = undefined
+        if (written < minBytes) {
+            throw new Error(`download of ${url} is too small (${written} bytes)`)
+        }
         fs.renameSync(tmp, dest)
     } catch (e) {
-        // A cut-off write must not leave a partial file next to the real one.
-        fs.rmSync(tmp, { force: true })
+        if (abort.signal.aborted) throw new Error(`download of ${url} timed out after ${Math.round(timeoutMs / 1000)}s`)
         throw e
+    } finally {
+        clearTimeout(timer)
+        if (fd !== undefined) fs.closeSync(fd)
+        // A cut-off or rejected download must not leave a partial file next to the real one.
+        fs.rmSync(tmp, { force: true })
     }
 }
 

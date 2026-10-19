@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { childEnv, createDefaultRunner } from "./runner"
 import { inspectBatchArtifacts, missingZkTools, runL2psZkSetup } from "./zk"
 import { fakeRunner, makeRoot, recorder, removeRoot, writeZkBatch } from "./testSupport"
 
@@ -182,5 +183,29 @@ describe("runL2psZkSetup", () => {
 describe("missingZkTools", () => {
     it("lists the build tools that are not installed", () => {
         expect(missingZkTools(root)).toHaveLength(3)
+    })
+})
+
+describe("the toolchain child process gets a minimal environment", () => {
+    const SECRETS = { DEMOS_SETUP_L2PS_KEY: "ab".repeat(32), DEMOS_SETUP_L2PS_IV: "cd".repeat(16), GITHUB_TOKEN: "t" }
+
+    it("passes only the search path, home, runtime options and temp directory", () => {
+        const env = childEnv({ PATH: "/usr/bin", HOME: "/h", NODE_OPTIONS: "--x", TMPDIR: "/t", LANG: "C", ...SECRETS })
+        expect(env).toEqual({ PATH: "/usr/bin", HOME: "/h", NODE_OPTIONS: "--x", TMPDIR: "/t" })
+    })
+
+    it("a spawned command does not see the key variables, but still finds its tools", async () => {
+        const saved = { ...process.env }
+        Object.assign(process.env, SECRETS)
+        try {
+            const sh = "/bin/sh"
+            const code = await createDefaultRunner().exec(sh, ["-c", 'test -z "$DEMOS_SETUP_L2PS_KEY" && test -z "$DEMOS_SETUP_L2PS_IV" && test -z "$GITHUB_TOKEN" && test -n "$PATH"'], root)
+            expect(code).toBe(0)
+        } finally {
+            for (const k of Object.keys(SECRETS)) {
+                if (saved[k] === undefined) delete process.env[k]
+                else process.env[k] = saved[k]
+            }
+        }
     })
 })

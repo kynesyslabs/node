@@ -8,7 +8,7 @@ import {
 import type { SetupContext } from "./context"
 import { inspectSubnets, type SubnetStatus } from "./l2ps"
 import { IDENTITY_DIGEST_ENV, inspectBatchArtifacts, inspectIdentityKey, type BatchArtifacts } from "./zk"
-import { validatePort } from "./validate"
+import { displaySafe, validatePort } from "./validate"
 
 export type CheckStatus = "ok" | "missing" | "invalid" | "warn" | "off"
 
@@ -45,7 +45,7 @@ export const IDENTITY_KEY_FIX =
     `restore the committed src/features/zk/keys/verification_key_merkle.json from the repository (in Docker: rebuild or re-pull the image); after a deliberate key rotation set ${IDENTITY_DIGEST_ENV} to the new key's sha256 instead`
 
 /** Inspection must never take the caller down; a failure becomes a problem. */
-function guarded(area: string, fn: () => CheckItem[]): CheckItem[] {
+function guarded(area: string, fn: () => CheckItem[], fatal = false): CheckItem[] {
     try {
         return fn()
     } catch (e) {
@@ -56,6 +56,7 @@ function guarded(area: string, fn: () => CheckItem[]): CheckItem[] {
                 status: "invalid",
                 detail: `could not be checked (${e instanceof Error ? e.message : String(e)})`,
                 blocking: true,
+                fatal: fatal || undefined,
                 fix: SETUP_COMMAND + " --check",
             },
         ]
@@ -73,6 +74,9 @@ export function collectChecks(ctx: SetupContext): CheckReport {
     )
     const activeSubnets = subnets.filter(s => s.state === "ok").map(s => s.uid)
     items.push(...guarded("L2PS", () => envChecks(ctx, activeSubnets.length > 0)))
+    // Its own guard, and a fatal fallback: a failure in any other ZK check must
+    // never take the consensus-critical key check down with it.
+    items.push(...guarded("ZK identity", () => [identityItem(ctx.codeRoot, ctx.env)], true))
     items.push(...guarded("ZK", () => zkChecks(ctx, activeSubnets.length > 0)))
     return { items, subnets, activeSubnets }
 }
@@ -91,7 +95,7 @@ function subnetItems(subnets: SubnetStatus[]): CheckItem[] {
         })
     }
     for (const s of subnets) {
-        const item = `Subnet ${s.uid}`
+        const item = `Subnet ${displaySafe(s.uid)}`
         if (s.state === "ok") {
             items.push({
                 area: "L2PS",
@@ -230,7 +234,8 @@ function identityItem(root: string, env: Record<string, string | undefined>): Ch
     return {
         area: "ZK identity",
         item: "Verification key",
-        status: identity.state,
+        // The override is a deliberate step, but it replaces a consensus safeguard, so it stays visible.
+        status: identity.pinnedByOperator ? "warn" : identity.state,
         detail: identity.detail,
         blocking: identity.state !== "ok",
         fatal: true,
@@ -268,7 +273,7 @@ function batchItem(b: BatchArtifacts, batches: BatchArtifacts[], anyComplete: bo
 }
 
 function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
-    const out: CheckItem[] = [identityItem(ctx.codeRoot, ctx.env)]
+    const out: CheckItem[] = []
     const flag = parseBoolFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED])
     const batches = inspectBatchArtifacts(ctx.codeRoot)
     const anyComplete = batches.some(b => b.complete)

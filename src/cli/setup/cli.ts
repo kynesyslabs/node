@@ -61,6 +61,12 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     const wantsJson = modes.check && modes.json
     try {
         const opts = parseSetupArgs(argv, deps.env)
+        // Read once, now held only in opts: the environment is copied into child
+        // processes and shown by the process tools, so the key must not stay in it.
+        for (const env of [deps.env, process.env]) {
+            delete env.DEMOS_SETUP_L2PS_KEY
+            delete env.DEMOS_SETUP_L2PS_IV
+        }
         if (opts.help) {
             deps.say(HELP)
             return 0

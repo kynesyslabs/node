@@ -198,13 +198,22 @@ describe("the do-not-overwrite guard", () => {
         // Flags answer the questions; only the replace confirmations remain.
         const args = [...joinArgs.filter(a => a !== "--yes"), "--l2ps-rpc", "http://127.0.0.1:53550",
             "--history-retention-days", "0", "--no-history-store-plaintext", "--no-history-require-v2", "--no-messaging", "--no-zk"]
-        const env = { DEMOS_SETUP_L2PS_KEY: otherKey, DEMOS_SETUP_L2PS_IV: HEX_IV }
-        await cli(args, { env, isTTY: true, prompter: decline })
+        // A fresh environment per run, as for two separate processes: the key is taken out of it once read.
+        const env = () => ({ DEMOS_SETUP_L2PS_KEY: otherKey, DEMOS_SETUP_L2PS_IV: HEX_IV })
+        await cli(args, { env: env(), isTTY: true, prompter: decline })
         expect(decline.asked.some(q => q.includes("already exists with different content"))).toBe(true)
         expect(fs.readFileSync(subnetFile("keep_me", "private_key.txt"), "utf8").trim()).toBe(HEX_KEY)
 
         const accept = scriptedPrompter(["y", "y", "y"])
-        await cli(args, { env, isTTY: true, prompter: accept })
+        await cli(args, { env: env(), isTTY: true, prompter: accept })
+        expect(fs.readFileSync(subnetFile("keep_me", "private_key.txt"), "utf8").trim()).toBe(otherKey)
+    })
+
+    it("takes the key variables out of the environment once they are read", async () => {
+        const env: Record<string, string> = { DEMOS_SETUP_L2PS_KEY: otherKey, DEMOS_SETUP_L2PS_IV: HEX_IV, KEEP: "1" }
+        const { code } = await cli(joinArgs, { env })
+        expect(code).toBe(0)
+        expect(env).toEqual({ KEEP: "1" })
         expect(fs.readFileSync(subnetFile("keep_me", "private_key.txt"), "utf8").trim()).toBe(otherKey)
     })
 

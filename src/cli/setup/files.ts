@@ -26,7 +26,7 @@ export interface WriteOptions {
 }
 
 /** realpath for a path that may not exist yet: the existing part is resolved, the rest appended. */
-function realpathLoose(p: string): string {
+export function realpathLoose(p: string): string {
     const rest: string[] = []
     let current = path.resolve(p)
     for (;;) {

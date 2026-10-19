@@ -327,20 +327,20 @@ describe("where files are written", () => {
         expect(fs.statSync(sub("s1", "iv.txt")).mode & 0o777).toBe(0o400)
     })
 
-    it("honours a custom key location under data/ and keeps using it", async () => {
+    it("honours a custom key location under the subnet's own directory and keeps using it", async () => {
         writeSubnet(root, "s1", {
             key: null,
             iv: null,
-            config: { uid: "s1", enabled: true, config: { known_rpcs: ["http://a:1"] }, keys: { private_key_path: "data/keys/s1.key", iv_path: "data/keys/s1.iv" } },
+            config: { uid: "s1", enabled: true, config: { known_rpcs: ["http://a:1"] }, keys: { private_key_path: "data/l2ps/s1/keys/s1.key", iv_path: "data/l2ps/s1/keys/s1.iv" } },
         })
         await cli(["--yes", "--l2ps-uid", "s1"])
-        const firstKey = read(path.join(root, "data/keys/s1.key"))
+        const firstKey = read(path.join(root, "data/l2ps/s1/keys/s1.key"))
         expect(fs.existsSync(sub("s1", "private_key.txt"))).toBe(false)
         await cli(["--yes", "--l2ps-uid", "s1"])
-        expect(read(path.join(root, "data/keys/s1.key"))).toBe(firstKey)
+        expect(read(path.join(root, "data/l2ps/s1/keys/s1.key"))).toBe(firstKey)
     })
 
-    it("refuses a key location that is inside the checkout but not under data/, and writes nothing there", async () => {
+    it("refuses a key location that is not under the subnet's own data/l2ps/<uid>/, and writes nothing there", async () => {
         fs.mkdirSync(path.join(root, "src"), { recursive: true })
         fs.writeFileSync(path.join(root, ".env"), "KEEP=1\n")
         for (const [uid, keyPath, ivPath] of [
@@ -348,6 +348,8 @@ describe("where files are written", () => {
             ["src", "src/k.txt", "data/l2ps/src/iv.txt"],
             ["iv", "data/l2ps/iv/private_key.txt", "secrets/iv.txt"],
             ["bare", "data", "data/l2ps/bare/iv.txt"],
+            ["wide", "data/keys/wide.key", "data/l2ps/wide/iv.txt"],
+            ["peer", "data/l2ps/victim/private_key.txt", "data/l2ps/peer/iv.txt"],
         ]) {
             writeSubnet(root, uid, {
                 key: null,
@@ -363,6 +365,17 @@ describe("where files are written", () => {
         expect(read(path.join(root, ".env"))).toBe("KEEP=1\n")
         expect(fs.existsSync(path.join(root, "src", "k.txt"))).toBe(false)
         expect(fs.existsSync(path.join(root, "secrets"))).toBe(false)
+        expect(fs.existsSync(path.join(root, "data/keys"))).toBe(false)
+        expect(fs.existsSync(path.join(root, "data/l2ps/victim"))).toBe(false)
+    })
+
+    it("refuses a subnet directory that is a symlink leading out of data/l2ps, for the standard location too", async () => {
+        fs.mkdirSync(path.join(root, "data/l2ps"), { recursive: true })
+        fs.symlinkSync(outside, path.join(root, "data/l2ps/linked"))
+        const { code, out } = await cli(["--yes", "--l2ps-uid", "linked"])
+        expect(code).toBe(1)
+        expect(out).toContain("resolves outside data/l2ps")
+        expect(fs.readdirSync(outside)).toEqual([])
     })
 
     it("refuses a key location reached through a symlinked directory under data/ that leads elsewhere", async () => {

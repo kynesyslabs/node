@@ -28,6 +28,25 @@ export function validateUid(value: string): Result<string> {
     return ok(uid)
 }
 
+export const DISPLAY_MAX = 200
+
+// Terminal escape sequences (CSI, OSC, and a lone ESC with its next character),
+// then every remaining control character, C1 included.
+const ESCAPE_SEQUENCES = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|\u001b[\s\S]?/g
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g
+
+/**
+ * Text taken from a file, a file name or an error is shown on the operator's
+ * terminal and written to the node log. A partner-supplied config.json or
+ * directory name could carry escape sequences that repaint the terminal, or
+ * newlines that forge extra log lines, so everything of that kind goes through
+ * here before it is printed. The length cap keeps one value from burying the rest.
+ */
+export function displaySafe(value: unknown, max: number = DISPLAY_MAX): string {
+    const text = String(value).replace(ESCAPE_SEQUENCES, "").replace(CONTROL_CHARACTERS, " ")
+    return text.length > max ? `${text.slice(0, max)}...` : text
+}
+
 /**
  * Same normalisation as the loader's hexFileToBytes: trim, drop a 0x prefix,
  * drop every whitespace character. Returns lowercase hex.

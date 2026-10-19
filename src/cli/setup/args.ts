@@ -117,6 +117,7 @@ ZK
                           With --yes nothing is downloaded unless this is given; L2PS_ZK_ENABLED
                           is only switched on once the keys exist.
   --ptau-url <base>       Mirror of the Hermez Powers of Tau files, if the default hosts are down.
+                          Must be https://; DEMOS_SETUP_ALLOW_INSECURE_PTAU=true allows http for a local mirror.
 
 Other
   --env-file <path>       Env file to edit (default .env).
@@ -273,7 +274,15 @@ function buildOptions(raw: RawAnswers, env: Record<string, string | undefined>):
     if (raw.uid !== undefined) o.uid = accepted("l2ps-uid", validateUid(raw.uid as string))
     if (raw.role !== undefined) o.role = oneOf("l2ps-role", raw.role as string, ["create", "join"] as const)
     if (raw.rpcs !== undefined) o.rpcs = accepted("l2ps-rpc", validateRpcList(raw.rpcs as string[]))
-    if (raw.ptauUrl !== undefined) o.ptauUrl = accepted("ptau-url", validateRpcUrl(raw.ptauUrl as string))
+    if (raw.ptauUrl !== undefined) {
+        o.ptauUrl = accepted("ptau-url", validateRpcUrl(raw.ptauUrl as string))
+        // The file feeds the proving key, so it travels over TLS; plain http is only for a local mirror.
+        if (!/^https:/i.test(o.ptauUrl) && parseBool(env.DEMOS_SETUP_ALLOW_INSECURE_PTAU) !== true) {
+            throw new UsageError(
+                "--ptau-url must use https://. For a mirror on a trusted local network set DEMOS_SETUP_ALLOW_INSECURE_PTAU=true.",
+            )
+        }
+    }
     if (raw.keyFile !== undefined) o.keyFile = raw.keyFile as string
     if (raw.ivFile !== undefined) o.ivFile = raw.ivFile as string
     // The key material only ever comes from the environment, never from argv.

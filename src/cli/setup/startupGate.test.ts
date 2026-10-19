@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { canonicalDigest, IDENTITY_DIGEST_ENV } from "./zk"
 import { describeProblems, enforceGuidedSetup, startupProblems, type GateDeps } from "./startupGate"
 import { CODE_ROOT, createContext } from "./context"
 import { SetupAborted, SetupTimedOut, type Prompter } from "./prompt"
@@ -177,7 +178,7 @@ describe("inspection never crashes the start", () => {
         fs.mkdirSync(path.join(dir, "iv.txt"))
         const g = gate({})
         await g.run()
-        expect(g.out()).toContain("cannot be read")
+        expect(g.out()).toContain("not a regular file")
     })
 })
 
@@ -284,5 +285,38 @@ describe("the report reaches the operator when the real logger filters it out", 
         const r = boot("info")
         expect(r.status).toBe(1)
         expect(count(r.text)).toBe(1)
+    })
+})
+
+describe("an identity key digest override is announced on every start", () => {
+    function rotatedDigest(): string {
+        const file = path.join(root, "src", "features", "zk", "keys", "verification_key_merkle.json")
+        const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>
+        const next = { ...parsed, nPublic: 99 }
+        fs.writeFileSync(file, JSON.stringify(next))
+        return canonicalDigest(JSON.stringify(next))
+    }
+
+    it("logs one warning naming the variable, not the digest, each time the node starts", async () => {
+        const digest = rotatedDigest()
+        for (let start = 0; start < 2; start++) {
+            const g = gate({ env: { [IDENTITY_DIGEST_ENV]: digest } })
+            await g.run()
+            expect(g.logged.length).toBe(1)
+            expect(g.logged[0]).toContain(IDENTITY_DIGEST_ENV)
+            expect(g.logged[0]).not.toContain(digest)
+            expect(g.logged[0].split("\n").length).toBe(1)
+        }
+    })
+
+    it("also warns when the skip switch is on, and stays quiet without an override", async () => {
+        const digest = rotatedDigest()
+        const skipped = gate({ env: { [IDENTITY_DIGEST_ENV]: digest, DEMOS_SKIP_SETUP_CHECK: "true" } })
+        await skipped.run()
+        expect(skipped.logged.length).toBe(1)
+        fs.copyFileSync(path.join(CODE_ROOT, "src", "features", "zk", "keys", "verification_key_merkle.json"), path.join(root, "src", "features", "zk", "keys", "verification_key_merkle.json"))
+        const quiet = gate({})
+        await quiet.run()
+        expect(quiet.logged).toEqual([])
     })
 })

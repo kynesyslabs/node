@@ -16,8 +16,9 @@ import {
     type Prompter,
 } from "./prompt"
 import { createDefaultRunner } from "./runner"
-import { parseBool } from "./validate"
+import { displaySafe, parseBool } from "./validate"
 import { runWizard } from "./wizard"
+import { IDENTITY_DIGEST_ENV } from "./zk"
 import { parseSetupArgs } from "./args"
 
 export const SKIP_ENV = "DEMOS_SKIP_SETUP_CHECK"
@@ -57,7 +58,8 @@ export function describeProblems(problems: CheckItem[], inDocker: boolean): stri
         RULE,
         " DEMOS NODE SETUP WARNING",
         " L2PS or ZK is configured on this node, but its setup is incomplete:",
-        ...problems.map(p => `   - ${p.area} / ${p.item}: ${p.detail}`),
+        // Item names and details can carry file names and config text; nothing raw reaches the banner or the log.
+        ...problems.map(p => `   - ${displaySafe(p.area)} / ${displaySafe(p.item)}: ${displaySafe(p.detail, 600)}`),
         "",
         " The node keeps booting; the affected features stay unavailable.",
         ` Fix it:   ${runIn}${fixes.length > 0 ? fixes.join("  |  ") : SETUP_COMMAND}`,
@@ -73,7 +75,7 @@ export function describeFatal(fatal: CheckItem[]): string {
     return [
         RULE,
         " DEMOS NODE CANNOT START: ZK identity verification key",
-        ...fatal.map(p => `   - ${p.detail}`),
+        ...fatal.map(p => `   - ${displaySafe(p.detail, 600)}`),
         "",
         " Every validator must verify identity proofs with the same committed key,",
         " so the node does not start without it.",
@@ -197,7 +199,7 @@ async function offerSetup(deps: GateDeps): Promise<OfferOutcome> {
         const left = featureProblems(inspectSetup(deps))
         if (left.length > 0 && !result.restartNeeded) {
             deps.say("Still incomplete; booting anyway:")
-            for (const p of left) deps.say(`  - ${p.area} / ${p.item}: ${p.detail}`)
+            for (const p of left) deps.say(`  - ${displaySafe(p.area)} / ${displaySafe(p.item)}: ${displaySafe(p.detail, 600)}`)
         }
         return { restartNeeded: result.restartNeeded, aborted: false }
     } catch (e) {
@@ -230,6 +232,12 @@ export async function enforceGuidedSetup(overrides: Partial<GateDeps> = {}): Pro
     if (fatal.length > 0) {
         await report(describeFatal(fatal))
         deps.exit(1)
+    }
+
+    // An override of the pinned key digest changes a consensus safeguard; every
+    // start says so, and the skip switch does not silence it.
+    if (items.some(i => i.fatal === true && i.status === "warn")) {
+        await report(`[WARNING] ${IDENTITY_DIGEST_ENV} is set: the identity verification key is checked against the operator's digest, not the release's. Unset it once the release carries the key.`)
     }
 
     // The skip switch silences the optional-feature report only.

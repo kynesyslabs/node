@@ -112,7 +112,7 @@ describe("the documentation matches the parser", () => {
     it("every variable named in .env.example or the compose file is one the parser reads", () => {
         const text = fs.readFileSync(path.join(repo, "docker-compose.yml"), "utf8") + fs.readFileSync(path.join(repo, ".env.example"), "utf8")
         const named = new Set([...text.matchAll(/DEMOS_SETUP_[A-Z0-9_]+/g)].map(m => m[0]))
-        const allowed = new Set([...SETUP_ENV_NAMES, "DEMOS_SETUP_STRICT", "DEMOS_SETUP_L2PS_KEY", "DEMOS_SETUP_L2PS_IV", "DEMOS_SETUP_"])
+        const allowed = new Set([...SETUP_ENV_NAMES, "DEMOS_SETUP_STRICT", "DEMOS_SETUP_ALLOW_INSECURE_PTAU", "DEMOS_SETUP_L2PS_KEY", "DEMOS_SETUP_L2PS_IV", "DEMOS_SETUP_"])
         expect([...named].filter(n => !allowed.has(n) && !n.endsWith("_"))).toEqual([])
     })
 })

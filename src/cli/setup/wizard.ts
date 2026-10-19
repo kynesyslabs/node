@@ -22,7 +22,7 @@ import {
     readEnvFile,
     type EnvChange,
 } from "./envFile"
-import { isInsideDir, readTextIfExists, resolveSymlink, writeFileGuarded, type WriteOutcome } from "./files"
+import { isInsideDir, readTextIfExists, realpathLoose, resolveSymlink, writeFileGuarded, type WriteOutcome } from "./files"
 import {
     buildSubnetFiles,
     type SubnetFile,
@@ -34,6 +34,7 @@ import {
 } from "./l2ps"
 import { ask, confirm, select, type Prompter } from "./prompt"
 import {
+    displaySafe,
     normalizeHex,
     parseHex,
     validateIvHex,
@@ -51,7 +52,7 @@ import {
     runL2psZkSetup,
     type ZkRunner,
 } from "./zk"
-import { L2PS_ZK_DIR } from "./context"
+import { L2PS_DIR, L2PS_ZK_DIR } from "./context"
 
 /** A required answer was not given and there is nobody to ask. */
 export class SetupError extends Error {}
@@ -209,7 +210,7 @@ function reportExistingSubnets(deps: WizardDeps): SubnetStatus[] {
     const { ctx, say } = deps
     const subnets = inspectSubnets(ctx.root).filter(s => s.state !== "placeholder")
     for (const s of subnets) {
-        say(`  Found subnet ${s.uid}: ${subnetLabel(s.state)}`)
+        say(`  Found subnet ${displaySafe(s.uid)}: ${subnetLabel(s.state)}`)
         for (const p of s.problems) say(`    - ${p}`)
     }
     return subnets.filter(s => s.state === "invalid" || s.state === "missing-files")
@@ -333,20 +334,31 @@ async function chooseRpcs(deps: WizardDeps, existingConfig: any): Promise<string
 
 /**
  * Where the key and IV live: what an existing config.json names if that is under
- * data/ in the node directory, else the standard layout. Key material is only
- * ever written under data/, whatever a config.json says, so a path such as
- * `.env` or `src/...` cannot make the setup overwrite code or settings.
+ * data/l2ps/<uid>/ in the node directory, else the standard layout. Key material
+ * is only ever written there, whatever a config.json says, so a path such as
+ * `.env`, `src/...` or another subnet's directory cannot make the setup
+ * overwrite code, settings or someone else's key.
  */
 function keyLocations(root: string, uid: string, existingConfig: any): { keyRel: string; ivRel: string } {
-    const dataDir = path.join(path.resolve(root), "data")
+    const subnetDir = path.join(path.resolve(root), L2PS_DIR, uid)
+    // The subnet directory itself may not be a link that leads elsewhere, or
+    // every path under it would silently land outside data/l2ps.
+    if (realpathLoose(subnetDir) !== path.join(realpathLoose(path.join(root, L2PS_DIR)), uid)) {
+        throw new SetupError(
+            `Subnet ${displaySafe(uid)}: data/l2ps/${displaySafe(uid)} resolves outside data/l2ps (a symbolic link?), and key material is only written there. Replace the link with a real directory.`,
+        )
+    }
     const configured = (label: string, rel: unknown): string | undefined => {
         if (typeof rel !== "string" || rel === "") return undefined
-        // The directory is resolved through symlinks, so a linked directory under data/ that
-        // leads elsewhere is refused. A symlinked file itself is replaced, never written through.
         const abs = path.resolve(root, rel)
-        if (abs !== dataDir && isInsideDir(path.dirname(abs), dataDir)) return rel
+        const within = path.relative(subnetDir, abs)
+        // The directory is resolved through symlinks, so a linked directory under the
+        // subnet's that leads elsewhere is refused. A symlinked file itself is replaced, never written through.
+        if (within !== "" && !within.startsWith("..") && !path.isAbsolute(within) && isInsideDir(path.dirname(abs), subnetDir)) {
+            return rel
+        }
         throw new SetupError(
-            `Subnet ${uid}: ${label} "${rel}" is outside data/ in the node directory, and key material is only written there. Move the file under data/l2ps/${uid}/ and update config.json, or remove its keys section to use the standard location.`,
+            `Subnet ${displaySafe(uid)}: ${label} "${displaySafe(rel)}" is outside data/l2ps/${displaySafe(uid)}/, and key material is only written there. Move the file there and update config.json, or remove its keys section to use the standard location.`,
         )
     }
     return {
