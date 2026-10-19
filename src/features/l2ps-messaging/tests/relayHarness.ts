@@ -47,7 +47,7 @@ const repo = {
     delete: async (id: string) => {
         rows.delete(id)
     },
-    find: async (query?: { where?: unknown }) => {
+    find: async (query?: { where?: unknown; take?: number }) => {
         if (Array.isArray(query?.where)) {
             return (query.where as Row[]).map(w => rows.get(w.id)).filter(Boolean).map(r => ({ ...r }))
         }
@@ -56,10 +56,13 @@ const repo = {
             return [...rows.values()]
                 .filter(r => Object.entries(where).every(([k, v]) => r[k] === v))
                 .sort((a, b) => Number(a.timestamp) - Number(b.timestamp))
+                .slice(0, typeof query?.take === "number" ? query.take : undefined)
                 .map(r => ({ ...r }))
         }
         return []
     },
+    count: async (query?: { where?: Row }) =>
+        [...rows.values()].filter(r => Object.entries(query?.where ?? {}).every(([k, v]) => r[k] === v)).length,
     createQueryBuilder: () => {
         const qb: any = {
             where: () => qb,
@@ -72,11 +75,13 @@ const repo = {
                 queryTake.push(n)
                 return qb
             },
-            getMany: async () => [],
+            getMany: async () => historyRows.map(r => ({ ...r })),
         }
         return qb
     },
 }
+/** What the history query builder answers with; tests fill it. */
+export const historyRows: Row[] = []
 export const queryTake: unknown[] = []
 export const conditions: unknown[] = []
 
@@ -142,8 +147,11 @@ export function stopRelayServer(): void {
 
 /** Back to an empty store, no injected faults and a submission that succeeds. */
 export function resetRelay(): void {
+    // Every test registers from the same loopback address.
+    relay.server?.registerByAddress.clear()
     rows.clear()
     queryTake.length = 0
+    historyRows.length = 0
     conditions.length = 0
     faults.save = null
     faults.update = null

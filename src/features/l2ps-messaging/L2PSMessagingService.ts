@@ -14,9 +14,20 @@ import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
 import { L2PSMessage } from "./entities/L2PSMessage"
 import { canonicalizeKey } from "./keys"
-import type { MessageStatus, SerializedEncryptedMessage, StoredMessage } from "./types"
+import type { ErrorCode, MessageStatus, SerializedEncryptedMessage, StoredMessage } from "./types"
 
 const MAX_OFFLINE_MESSAGES_PER_SENDER = 200
+/**
+ * Queued rows one recipient key may hold. The per-sender limit bounds each
+ * sender, but registration needs no membership, so any number of keys can
+ * queue to one victim; without this the victim's queue, and the memory its
+ * delivery needs, grows with the attacker's key count.
+ */
+const MAX_QUEUED_PER_RECIPIENT = 1_000
+/** Rows loaded and sent per step of an offline delivery. */
+export const QUEUED_DELIVERY_PAGE = 100
+/** Ciphertext bytes one history page may carry; 200 full-size rows would be about 25 MB. */
+const MAX_HISTORY_PAGE_BYTES = 1024 * 1024
 const DEFAULT_HISTORY_PAGE = 50
 const MAX_HISTORY_PAGE = 200
 
@@ -26,6 +37,8 @@ export interface ProcessMessageResult {
     messageId?: string
     l2psTxHash?: string
     error?: string
+    /** Set when the refusal has its own protocol code instead of the generic submit failure. */
+    code?: ErrorCode
     /** The sender already sent this message to this recipient; nothing was redone. */
     duplicate?: boolean
     /** Status the message is stored with: delivered, queued or, for a duplicate, sent. */
@@ -141,6 +154,10 @@ export class L2PSMessagingService {
             return this.duplicateResult(existing)
         }
 
+        if (!recipientOnline && (await this.recipientQueueFull(repo, identity.toKey, identity.l2psUid))) {
+            return { success: false, code: "QUEUE_FULL", error: "Recipient has too many queued messages" }
+        }
+
         const slotId = existing?.id ?? messageId
         const quotaError = this.reserveOfflineQuota(slotId, fromKey, recipientOnline)
         if (quotaError) return { success: false, error: quotaError }
@@ -231,8 +248,14 @@ export class L2PSMessagingService {
      * delivery and count it against the sender's offline quota, which
      * `markDelivered` releases.
      */
-    async requeue(messageId: string, fromKey: string): Promise<void> {
+    async requeue(messageId: string, fromKey: string): Promise<boolean> {
         const repo = dataSource.getRepository(L2PSMessage)
+        const row = await repo.findOneBy({ id: messageId })
+        if (row && row.status === "delivered" && (await this.recipientQueueFull(repo, row.toKey, row.l2psUid))) {
+            // Not queued, so not kept: failed lets the sender's resend try again.
+            await repo.update({ id: messageId, status: "delivered" }, { status: "failed" })
+            return false
+        }
         await repo.update({ id: messageId, status: "delivered" }, { status: "queued" })
         // Only a message that holds no slot already takes one: a repeated
         // requeue must not count the same row twice.
@@ -240,6 +263,13 @@ export class L2PSMessagingService {
             this.heldSlots.set(messageId, fromKey)
             this.offlineMessageCounts.set(fromKey, (this.offlineMessageCounts.get(fromKey) ?? 0) + 1)
         }
+        return true
+    }
+
+    /** Soft limit: concurrent sends can pass the count together and overshoot by their number. */
+    private async recipientQueueFull(repo: MessageRepo, toKey: string, l2psUid: string): Promise<boolean> {
+        const queued = await repo.count({ where: { toKey: canonicalizeKey(toKey), l2psUid, status: "queued" } })
+        return queued >= MAX_QUEUED_PER_RECIPIENT
     }
 
     private findExisting(
@@ -456,15 +486,21 @@ export class L2PSMessagingService {
     }
 
     /**
-     * Get queued messages for a peer (offline delivery).
+     * Get the oldest queued messages for a peer (offline delivery), one page
+     * at a time; the caller marks them delivered and asks again.
      */
-    async getQueuedMessages(toKey: string, l2psUid: string): Promise<StoredMessage[]> {
+    async getQueuedMessages(
+        toKey: string,
+        l2psUid: string,
+        limit = QUEUED_DELIVERY_PAGE,
+    ): Promise<StoredMessage[]> {
         const repo = dataSource.getRepository(L2PSMessage)
         // Rows are stored canonically (persist boundary + one-shot migration),
         // so a single canonical lookup covers every key variant.
         const messages = await repo.find({
             where: { toKey: canonicalizeKey(toKey), l2psUid, status: "queued" },
             order: { timestamp: "ASC" },
+            take: limit,
         })
         return messages.map(m => ({
             id: m.id,
@@ -542,8 +578,17 @@ export class L2PSMessagingService {
         }
 
         const results = await qb.getMany()
-        const hasMore = results.length > pageSize
-        const messages = results.slice(0, pageSize).map(m => ({
+        // Rows can each be 128 KB, so a count limit alone allows a reply of
+        // tens of megabytes. The first row always goes out so a page cannot be empty.
+        const page: L2PSMessage[] = []
+        let bytes = 0
+        for (const m of results.slice(0, pageSize)) {
+            bytes += m.encrypted?.ciphertext?.length ?? 0
+            if (page.length > 0 && bytes > MAX_HISTORY_PAGE_BYTES) break
+            page.push(m)
+        }
+        const hasMore = results.length > page.length
+        const messages = page.map(m => ({
             id: m.id,
             from: m.fromKey,
             to: m.toKey,

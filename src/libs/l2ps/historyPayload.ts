@@ -12,6 +12,7 @@
  */
 
 import log from "@/utilities/logger"
+import { sanitizeForLog } from "@/utilities/logSafe"
 import { isNotConfigured } from "./l2psErrors"
 
 export interface HistoryRow {
@@ -139,15 +140,15 @@ export async function subnetDecryptor(
     } catch (error) {
         if (!isNotConfigured(error)) {
             log.error(
-                `[L2PS History] Subnet ${JSON.stringify(l2psUid)} is configured but could not be loaded: ${error instanceof Error ? error.message : "unknown error"}`,
+                `[L2PS History] Subnet ${sanitizeForLog(JSON.stringify(l2psUid), 100)} is configured but could not be loaded: ${error instanceof Error ? error.message : "unknown error"}`,
             )
             throw error
         }
-        log.debug(`[L2PS History] No configuration for subnet ${JSON.stringify(l2psUid)}`)
+        log.debug(`[L2PS History] No configuration for subnet ${sanitizeForLog(JSON.stringify(l2psUid), 100)}`)
     }
 
     if (!instance) {
-        log.debug(`[L2PS History] No key for subnet ${l2psUid}`)
+        log.debug(`[L2PS History] No key for subnet ${sanitizeForLog(l2psUid, 100)}`)
         return Object.assign(() => Promise.resolve(null), { unavailable: true })
     }
 

@@ -149,6 +149,14 @@ describe("getAccountTransactions with a hostile address and subnet", () => {
         expect(whereClauses[0].clause).toBe("tx.l2ps_uid = :l2psUid")
     })
 
+    it("matches any of several spellings of one address by exact value, still one row for a self-transfer", async () => {
+        await L2PSTransactionExecutor.getAccountTransactions("s", ["0xABC", "abc", "0xabc"], 10, 0, 0)
+
+        const party = whereClauses.find(w => w.clause.includes("from_address"))!
+        expect(party.clause).toBe("(tx.from_address IN (:...pubkeys) OR tx.to_address IN (:...pubkeys))")
+        expect(party.params).toEqual({ pubkeys: ["0xABC", "abc", "0xabc"] })
+    })
+
     it("scopes every read to the subnet", async () => {
         await L2PSTransactionExecutor.getAccountTransactions("subnet-x", "0xabc", 10, 0, 5)
         expect(whereClauses[0]).toEqual({ clause: "tx.l2ps_uid = :l2psUid", params: { l2psUid: "subnet-x" } })

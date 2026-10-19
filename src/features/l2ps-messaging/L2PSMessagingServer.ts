@@ -9,8 +9,14 @@ import type { Server, ServerWebSocket } from "bun"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
+import { sanitizeForLog } from "@/utilities/logSafe"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
-import { L2PSMessagingService, parseHistoryPage, type ProcessMessageResult } from "./L2PSMessagingService"
+import {
+    L2PSMessagingService,
+    parseHistoryPage,
+    QUEUED_DELIVERY_PAGE,
+    type ProcessMessageResult,
+} from "./L2PSMessagingService"
 import { canonicalizeKey } from "./keys"
 import type {
     ConnectedPeer,
@@ -31,8 +37,10 @@ const MAX_CIPHERTEXT_SIZE = 128 * 1024
  * (128 chars). The field is part of a unique btree index together with the
  * subnet and both keys, and Postgres refuses index rows above about 2.7 KB
  * with an error that is not a duplicate, so a larger value would turn into
- * an internal error after the write instead of a refusal before it. A
- * post-quantum signature there needs the index on a digest of the field.
+ * an internal error after the write instead of a refusal before it. The limit
+ * is in bytes because the index row is measured in bytes: a multi-byte string
+ * of the same character count is several times larger. A post-quantum
+ * signature there needs the index on a digest of the field.
  */
 const MAX_MESSAGE_HASH_LENGTH = 2048
 /** Min valid hex public key length (ed25519 = 64 hex chars) */
@@ -42,10 +50,27 @@ const MAX_PUBLIC_KEY_LENGTH = 256
 /**
  * Registration needs no subnet membership, so any key holder can mint one
  * fresh proof per millisecond inside the clock window and each lives until
- * the window closes. The map is bounded so that flood costs registrations,
+ * the window closes. The memory is bounded so that flood costs registrations,
  * not memory; nothing is evicted early because an evicted proof would replay.
+ * The bound is per subnet: a single global bound let one socket fill it and
+ * lock every other subnet's registrations out.
  */
-const MAX_USED_REGISTER_PROOFS = 50_000
+export const MAX_USED_REGISTER_PROOFS_PER_SUBNET = 20_000
+/** Register frames one socket may send per window, counted before the proof is looked at. */
+const REGISTER_FRAMES_PER_SOCKET = 5
+const REGISTER_SOCKET_WINDOW_MS = 10_000
+/**
+ * Register frames one remote address may send per window. Each costs up to
+ * two ed25519 verifications, and a new socket is free, so the per-socket
+ * limit alone does not bound the CPU an address can burn. Failed proofs count
+ * the same as accepted ones.
+ */
+const REGISTER_FRAMES_PER_ADDRESS = 30
+const REGISTER_ADDRESS_WINDOW_MS = 60_000
+/** Addresses tracked at once; the oldest entry goes first, which loosens a limit and never blocks anyone. */
+export const MAX_TRACKED_ADDRESSES = 10_000
+/** Seconds a socket may stay silent; a registered peer that sends nothing is not worth a slot. */
+const IDLE_TIMEOUT_SECONDS = 120
 /**
  * How far a register frame's timestamp may sit from the node clock. The proof
  * signs only the key, that timestamp and (in the bound form) the subnet, so
@@ -57,6 +82,72 @@ export const REGISTER_PROOF_MAX_SKEW_MS = 5 * 60_000
 interface WSData {
     publicKey: string | null
     l2psUid: string | null
+    /** Last hop named by x-forwarded-for; only read when the relay is told it sits behind a trusted proxy. */
+    forwardedFor: string | null
+    registerWindow: { count: number; resetAt: number }
+}
+
+/**
+ * Fixed-window counters per key, bounded in size. Evicting the oldest key when
+ * full forgets a count, which lets that address through a little more, but it
+ * never refuses an address that has not earned it.
+ */
+class FrameLimiter {
+    private windows = new Map<string, { count: number; resetAt: number }>()
+
+    constructor(
+        private readonly limit: number,
+        private readonly windowMs: number,
+        private readonly maxKeys: number,
+    ) {}
+
+    get size(): number {
+        return this.windows.size
+    }
+
+    clear(): void {
+        this.windows.clear()
+    }
+
+    /** 0 when the frame is allowed (and counted), otherwise the ms until the window reopens. */
+    take(key: string, now: number): number {
+        const current = this.windows.get(key)
+        if (!current || current.resetAt <= now) {
+            this.windows.delete(key)
+            this.makeRoom(now)
+            this.windows.set(key, { count: 1, resetAt: now + this.windowMs })
+            return 0
+        }
+        if (current.count >= this.limit) return current.resetAt - now
+        current.count++
+        return 0
+    }
+
+    private makeRoom(now: number): void {
+        if (this.windows.size < this.maxKeys) return
+        for (const [key, window] of this.windows) {
+            if (window.resetAt <= now) this.windows.delete(key)
+        }
+        // Still full: every window is live, so drop the oldest insertions.
+        for (const key of this.windows.keys()) {
+            if (this.windows.size < this.maxKeys) break
+            this.windows.delete(key)
+        }
+    }
+}
+
+/** True only when the operator has said a reverse proxy in front of the relay sets x-forwarded-for. */
+function trustsProxy(): boolean {
+    return process.env.L2PS_MESSAGING_TRUST_PROXY?.toLowerCase() === "true"
+}
+
+/**
+ * The last entry is the one the trusted proxy appended; earlier ones are
+ * whatever the client claimed.
+ */
+function lastForwardedHop(header: string | null): string | null {
+    const hop = header?.split(",").pop()?.trim()
+    return hop ? hop.slice(0, 64) : null
 }
 
 // Re-exported from ./keys so external callers (and tests) keep importing it
@@ -74,9 +165,14 @@ function peerId(l2psUid: string, publicKey: string): string {
 interface Refusal {
     code: ErrorCode
     message: string
+    retryAfterMs?: number
 }
 
-const refusal = (code: ErrorCode, message: string): Refusal => ({ code, message })
+const refusal = (code: ErrorCode, message: string, retryAfterMs?: number): Refusal => ({
+    code,
+    message,
+    ...(retryAfterMs !== undefined && { retryAfterMs }),
+})
 
 interface RegisterFrame {
     publicKey: string
@@ -109,7 +205,7 @@ function isHexKey(canonicalKey: string): boolean {
     )
 }
 
-function registerTimestampRefusal(timestamp: unknown, now: number): Refusal | null {
+function proofTimestampRefusal(timestamp: unknown, now: number, what: string): Refusal | null {
     if (
         typeof timestamp !== "number" ||
         !Number.isFinite(timestamp) ||
@@ -117,7 +213,7 @@ function registerTimestampRefusal(timestamp: unknown, now: number): Refusal | nu
     ) {
         return refusal(
             "INVALID_PROOF",
-            `Register timestamp must be within ${REGISTER_PROOF_MAX_SKEW_MS / 1000}s of the node clock`,
+            `${what} timestamp must be within ${REGISTER_PROOF_MAX_SKEW_MS / 1000}s of the node clock`,
         )
     }
     return null
@@ -142,7 +238,7 @@ function checkSendFrame(payload: SendMessage["payload"], senderKey: string): Sen
     if (
         typeof to !== "string" ||
         typeof messageHash !== "string" ||
-        messageHash.length > MAX_MESSAGE_HASH_LENGTH ||
+        Buffer.byteLength(messageHash) > MAX_MESSAGE_HASH_LENGTH ||
         typeof encrypted !== "object" ||
         typeof encrypted.ciphertext !== "string" ||
         typeof encrypted.nonce !== "string"
@@ -167,9 +263,14 @@ function checkSendFrame(payload: SendMessage["payload"], senderKey: string): Sen
 
 export class L2PSMessagingServer {
     private peers = new Map<string, ConnectedPeer>()
-    /** Register proofs already accepted per subnet, until their timestamp leaves the window. */
-    private usedRegisterProofs = new Map<string, number>()
+    /** Register proofs already accepted, by subnet and then proof bytes, until their timestamp leaves the window. */
+    private usedRegisterProofs = new Map<string, Map<string, number>>()
     private lastProofPrune = 0
+    private registerByAddress = new FrameLimiter(
+        REGISTER_FRAMES_PER_ADDRESS,
+        REGISTER_ADDRESS_WINDOW_MS,
+        MAX_TRACKED_ADDRESSES,
+    )
     // Bun.Server / Bun.serve dropped the WSData generic; the cast on
     // `ws.data` accesses at call sites still narrows correctly because
     // we set ws.data in `upgrade()`.
@@ -182,12 +283,23 @@ export class L2PSMessagingServer {
         this.server = Bun.serve({
             port,
             fetch: (req, server) => {
-                if (server.upgrade(req, { data: { publicKey: null, l2psUid: null } })) {
+                const data: WSData = {
+                    publicKey: null,
+                    l2psUid: null,
+                    forwardedFor: trustsProxy() ? lastForwardedHop(req.headers.get("x-forwarded-for")) : null,
+                    registerWindow: { count: 0, resetAt: 0 },
+                }
+                if (server.upgrade(req, { data })) {
                     return undefined
                 }
                 return new Response("WebSocket upgrade required", { status: 426 })
             },
             websocket: {
+                // Bun reads the whole frame before the handler sees it, so the
+                // size check in handleMessage alone would still let a 16 MB
+                // frame be received first. Over the limit Bun closes the socket.
+                maxPayloadLength: MAX_MESSAGE_SIZE,
+                idleTimeout: IDLE_TIMEOUT_SECONDS,
                 // Bun.serve no longer carries a WSData generic on the
                 // outer Server type; ws.data is `unknown` at the dispatch
                 // boundary even though we set it in upgrade(). The cast
@@ -211,7 +323,8 @@ export class L2PSMessagingServer {
     // ─── Message Router ──────────────────────────────────────────
 
     private async handleMessage(ws: ServerWebSocket<WSData>, raw: string): Promise<void> {
-        if (raw.length > MAX_MESSAGE_SIZE) {
+        // Bytes, not characters: the limit exists for the memory the frame takes.
+        if (Buffer.byteLength(raw) > MAX_MESSAGE_SIZE) {
             this.sendError(ws, "INVALID_MESSAGE", `Message too large (max ${MAX_MESSAGE_SIZE} bytes)`)
             return
         }
@@ -263,6 +376,11 @@ export class L2PSMessagingServer {
     // ─── Register ────────────────────────────────────────────────
 
     private async handleRegister(ws: ServerWebSocket<WSData>, msg: RegisterMessage): Promise<void> {
+        // Before anything that costs CPU: a signature check is the expensive
+        // part and a flood of bad frames must not get to it for free.
+        const limited = this.registerRateRefusal(ws, Date.now())
+        if (limited) return this.refuse(ws, limited, msg.requestId)
+
         const frame = checkRegisterFrame(msg.payload)
         if ("code" in frame) return this.refuse(ws, frame, msg.requestId)
 
@@ -280,7 +398,26 @@ export class L2PSMessagingServer {
     }
 
     private refuse(ws: ServerWebSocket<WSData>, refusal: Refusal, requestId?: string): void {
-        this.sendError(ws, refusal.code, refusal.message, requestId)
+        this.sendError(ws, refusal.code, refusal.message, requestId, refusal.retryAfterMs)
+    }
+
+    /** Counts a register frame against its socket and its remote address; a refusal says when to retry. */
+    private registerRateRefusal(ws: ServerWebSocket<WSData>, now: number): Refusal | null {
+        const window = ws.data.registerWindow
+        if (window.resetAt <= now) {
+            window.count = 0
+            window.resetAt = now + REGISTER_SOCKET_WINDOW_MS
+        }
+        if (window.count >= REGISTER_FRAMES_PER_SOCKET) {
+            return refusal("RATE_LIMITED", "Too many register attempts on this connection", window.resetAt - now)
+        }
+        window.count++
+
+        const retryAfterMs = this.registerByAddress.take(ws.data.forwardedFor ?? ws.remoteAddress ?? "unknown", now)
+        if (retryAfterMs > 0) {
+            return refusal("RATE_LIMITED", "Too many register attempts from this address", retryAfterMs)
+        }
+        return null
     }
 
     /** Everything about a register frame that is checked before its proof: the subnet, the clock, the signature, the replay cache. */
@@ -289,8 +426,18 @@ export class L2PSMessagingServer {
         if (!l2ps) return refusal("L2PS_NOT_FOUND", `L2PS network ${frame.l2psUid} not found`)
 
         const now = Date.now()
-        const skewed = registerTimestampRefusal(msg.timestamp, now)
+        const skewed = proofTimestampRefusal(msg.timestamp, now, "Register")
         if (skewed) return skewed
+
+        // Tracked per subnet: a legacy proof does not name one, a client may
+        // register one key on two subnets with the same timestamp, and one
+        // subnet filling its memory must not refuse the others.
+        this.pruneRegisterProofs(now)
+        const used = this.proofsOf(frame.l2psUid)
+        // Checked before the signature, so a full memory also stops the CPU cost.
+        if (used.size >= MAX_USED_REGISTER_PROOFS_PER_SUBNET) {
+            return refusal("RATE_LIMITED", "Too many recent registrations, retry later", REGISTER_PROOF_MAX_SKEW_MS)
+        }
 
         const proofBytes = await this.verifyRegisterSignature(frame, msg.timestamp)
         if (!(proofBytes instanceof Uint8Array)) return proofBytes
@@ -298,18 +445,25 @@ export class L2PSMessagingServer {
         // ed25519 signatures are deterministic, so a replayed proof is
         // byte-identical to the one already accepted. Keyed on the bytes that
         // verified, so no re-encoding of an accepted proof counts as a new one.
-        // Tracked per subnet: a legacy proof does not name one, and a client
-        // may register one key on two subnets with the same timestamp.
-        const proofKey = `${frame.l2psUid}|${Buffer.from(proofBytes).toString("hex")}`
-        this.pruneRegisterProofs(now)
-        if (this.usedRegisterProofs.has(proofKey)) {
+        const proofKey = Buffer.from(proofBytes).toString("hex")
+        if (used.has(proofKey)) {
             return refusal("INVALID_PROOF", "Register proof already used")
         }
-        if (this.usedRegisterProofs.size >= MAX_USED_REGISTER_PROOFS) {
-            return refusal("RATE_LIMITED", "Too many recent registrations, retry later")
+        // Concurrent registrations passed the check above together.
+        if (used.size >= MAX_USED_REGISTER_PROOFS_PER_SUBNET) {
+            return refusal("RATE_LIMITED", "Too many recent registrations, retry later", REGISTER_PROOF_MAX_SKEW_MS)
         }
-        this.usedRegisterProofs.set(proofKey, msg.timestamp + REGISTER_PROOF_MAX_SKEW_MS)
+        used.set(proofKey, msg.timestamp + REGISTER_PROOF_MAX_SKEW_MS)
         return null
+    }
+
+    private proofsOf(l2psUid: string): Map<string, number> {
+        let used = this.usedRegisterProofs.get(l2psUid)
+        if (!used) {
+            used = new Map()
+            this.usedRegisterProofs.set(l2psUid, used)
+        }
+        return used
     }
 
     /**
@@ -338,7 +492,9 @@ export class L2PSMessagingServer {
             }
             return refusal("INVALID_PROOF", "Signature verification failed")
         } catch (error) {
-            return refusal("INVALID_PROOF", `Proof verification error: ${error}`)
+            // The library's text is for the log; the client only learns the proof was unusable.
+            log.debug(`[L2PS-IM] Register proof verification error: ${sanitizeForLog(error, 200)}`)
+            return refusal("INVALID_PROOF", "Proof verification error")
         }
     }
 
@@ -424,7 +580,7 @@ export class L2PSMessagingServer {
         )
 
         if (!result.success) {
-            this.sendError(ws, "L2PS_SUBMIT_FAILED", result.error, msg.requestId)
+            this.sendError(ws, result.code ?? "L2PS_SUBMIT_FAILED", result.error, msg.requestId)
             return
         }
 
@@ -483,7 +639,11 @@ export class L2PSMessagingServer {
             timestamp: Date.now(),
         })
         if (recipientPeer && !routed) {
-            await this.service.requeue(result.messageId!, senderKey)
+            const kept = await this.service.requeue(result.messageId!, senderKey)
+            if (!kept) {
+                this.sendError(ws, "QUEUE_FULL", "Recipient has too many queued messages", requestId)
+                return
+            }
         }
 
         this.send(ws, routed
@@ -517,6 +677,14 @@ export class L2PSMessagingServer {
         }
         if (typeof peerKey !== "string" || typeof proof !== "string") {
             this.sendError(ws, "INVALID_MESSAGE", "peerKey and proof must be strings", msg.requestId)
+            return
+        }
+
+        // A proof with no freshness would let one captured frame read the
+        // conversation for as long as the key lives.
+        const stale = proofTimestampRefusal(msg.timestamp, Date.now(), "History")
+        if (stale) {
+            this.refuse(ws, stale, msg.requestId)
             return
         }
 
@@ -651,31 +819,45 @@ export class L2PSMessagingServer {
         toKey: string,
         l2psUid: string,
     ): Promise<void> {
-        const queued = await this.service.getQueuedMessages(toKey, l2psUid)
-        if (queued.length === 0) return
+        let delivered = 0
+        let previousFirstId: string | undefined
 
-        const deliveredIds: string[] = []
+        // A page at a time: the queue is filled by other keys, so loading it
+        // whole puts its size in the hands of whoever wrote to this recipient.
+        // Delivered rows leave "queued", so each query starts at the front again.
+        for (;;) {
+            const page = await this.service.getQueuedMessages(toKey, l2psUid, QUEUED_DELIVERY_PAGE)
+            // The same head twice means the rows were not marked; looping would resend them forever.
+            if (page.length === 0 || page[0].id === previousFirstId) break
+            previousFirstId = page[0].id
 
-        for (const msg of queued) {
-            const sent = this.send(ws, {
-                type: "message",
-                payload: {
-                    from: msg.from,
-                    encrypted: msg.encrypted,
-                    messageHash: msg.messageHash,
-                    offline: true,
-                },
-                timestamp: Date.now(),
-            })
-            if (!sent) break // Maintain order — stop on first failure
-            deliveredIds.push(msg.id)
+            const deliveredIds: string[] = []
+            for (const msg of page) {
+                const sent = this.send(ws, {
+                    type: "message",
+                    payload: {
+                        from: msg.from,
+                        encrypted: msg.encrypted,
+                        messageHash: msg.messageHash,
+                        offline: true,
+                    },
+                    timestamp: Date.now(),
+                })
+                if (!sent) break // Maintain order — stop on first failure
+                deliveredIds.push(msg.id)
+            }
+
+            if (deliveredIds.length > 0) {
+                // Frees exactly the delivered rows' slots; the sender's messages
+                // still queued for other recipients keep theirs.
+                await this.service.markDelivered(deliveredIds)
+                delivered += deliveredIds.length
+            }
+            if (deliveredIds.length < page.length || page.length < QUEUED_DELIVERY_PAGE) break
         }
 
-        if (deliveredIds.length > 0) {
-            // Frees exactly the delivered rows' slots; the sender's messages
-            // still queued for other recipients keep theirs.
-            await this.service.markDelivered(deliveredIds)
-            log.info(`[L2PS-IM] Delivered ${deliveredIds.length} queued messages to ${toKey.slice(0, 12)}...`)
+        if (delivered > 0) {
+            log.info(`[L2PS-IM] Delivered ${delivered} queued messages to ${toKey.slice(0, 12)}...`)
         }
     }
 
@@ -684,8 +866,11 @@ export class L2PSMessagingServer {
     private pruneRegisterProofs(now: number): void {
         if (now - this.lastProofPrune < 1000) return
         this.lastProofPrune = now
-        for (const [proof, expiresAt] of this.usedRegisterProofs) {
-            if (expiresAt < now) this.usedRegisterProofs.delete(proof)
+        for (const [l2psUid, used] of this.usedRegisterProofs) {
+            for (const [proof, expiresAt] of used) {
+                if (expiresAt < now) used.delete(proof)
+            }
+            if (used.size === 0) this.usedRegisterProofs.delete(l2psUid)
         }
     }
 
@@ -704,10 +889,11 @@ export class L2PSMessagingServer {
         code: ErrorCode,
         message: string,
         requestId?: string,
+        retryAfterMs?: number,
     ): void {
         this.send(ws, {
             type: "error",
-            payload: { code, message },
+            payload: { code, message, ...(retryAfterMs !== undefined && { retryAfterMs: Math.ceil(retryAfterMs) }) },
             timestamp: Date.now(),
             requestId,
         })

@@ -1,6 +1,8 @@
 import { getSharedState } from "src/utilities/sharedState"
 import L2PSMempool, { L2PS_STATUS } from "../../blockchain/l2ps_mempool"
 import log from "src/utilities/logger"
+import { sanitizeForLog } from "src/utilities/logSafe"
+import { canonicalizeKey } from "@/features/l2ps-messaging/keys"
 import type { NodeCallHandler } from "./types"
 import type { L2PSTransaction } from "@/model/entities/L2PSTransactions"
 import { resolveHistoryEntry, subnetDecryptor } from "@/libs/l2ps/historyPayload"
@@ -87,6 +89,17 @@ function signedHistoryMessage(data: Record<string, any>, isV2: boolean, page: Hi
     return isV2
         ? historyAuthMessageV2(data.l2psUid, data.address, String(data.timestamp), data.host, page)
         : `getL2PSHistory:${data.l2psUid}:${data.address}:${data.timestamp}`
+}
+
+/**
+ * Rows are stored under the sender's own spelling of an address, and instant
+ * messages under the canonical one, so a lookup by the spelling the caller
+ * happened to sign with misses the rest. The signature was already checked
+ * over the raw form.
+ */
+function accountKeyForms(address: string): string[] {
+    const canonical = canonicalizeKey(address)
+    return [...new Set([address, canonical, `0x${canonical}`])]
 }
 
 function historyRow(
@@ -284,14 +297,14 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 return response
             }
 
-            log.info(`[L2PS] Authenticated request for ${data.address.slice(0, 16)}...`)
+            log.info(`[L2PS] Authenticated request for ${sanitizeForLog(data.address, 16)}`)
 
             const { default: L2PSTransactionExecutor } = await import("../../l2ps/L2PSTransactionExecutor")
             // One past the page, so a full last page can say there is nothing
             // after it instead of inviting a request for an empty one.
             const fetched = await L2PSTransactionExecutor.getAccountTransactions(
                 data.l2psUid,
-                data.address,
+                accountKeyForms(data.address),
                 limit + 1,
                 offset,
                 since,

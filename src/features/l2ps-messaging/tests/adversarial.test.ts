@@ -28,6 +28,9 @@ import {
 } from "./relayHarness"
 import { sign } from "node:crypto"
 
+// After the harness: importing the server first would load the real datasource.
+const { MAX_USED_REGISTER_PROOFS_PER_SUBNET } = await import("../L2PSMessagingServer")
+
 beforeAll(startRelayServer)
 afterAll(stopRelayServer)
 beforeEach(resetRelay)
@@ -525,15 +528,22 @@ describe("delivery to one recipient frees only that recipient's slots", () => {
 // ─── Register proof memory ───────────────────────────────────────
 
 describe("the register proof memory is bounded", () => {
-    const proofs = () => (relay.server as any).usedRegisterProofs as Map<string, number>
+    const proofs = () => (relay.server as any).usedRegisterProofs as Map<string, Map<string, number>>
+    const fill = (uid: string) => {
+        const far = Date.now() + 60 * 60 * 1000
+        const used = new Map<string, number>()
+        for (let i = 0; i < MAX_USED_REGISTER_PROOFS_PER_SUBNET; i++) used.set(String(i), far)
+        proofs().set(uid, used)
+    }
 
     it("a full memory refuses new registrations instead of growing or forgetting", async () => {
-        const far = Date.now() + 60 * 60 * 1000
-        for (let i = 0; i < 50_000; i++) proofs().set(`subnet_a|${i}`, far)
+        fill("subnet_a")
         try {
             const blocked = await register(identity())
             expect(blocked.reply.type).toBe("error")
             expect(blocked.reply.payload.code).toBe("RATE_LIMITED")
+            expect(blocked.reply.payload.retryAfterMs).toBeGreaterThan(0)
+            expect(proofs().get("subnet_a")!.size).toBe(MAX_USED_REGISTER_PROOFS_PER_SUBNET)
             blocked.client.close()
         } finally {
             proofs().clear()
@@ -542,5 +552,28 @@ describe("the register proof memory is bounded", () => {
         const ok = await register(identity())
         expect(ok.reply.type).toBe("registered")
         ok.client.close()
+    })
+
+    it("a full memory on one subnet does not refuse registrations on another", async () => {
+        fill("subnet_a")
+        try {
+            const other = await register(identity(), "subnet_b")
+            expect(other.reply.type).toBe("registered")
+            other.client.close()
+        } finally {
+            proofs().clear()
+        }
+    })
+
+    it("a full memory is refused before any signature is checked", async () => {
+        fill("subnet_a")
+        try {
+            const id = identity()
+            const bad = await register(id, "subnet_a", Date.now(), "ab".repeat(64))
+            expect(bad.reply.payload.code).toBe("RATE_LIMITED")
+            bad.client.close()
+        } finally {
+            proofs().clear()
+        }
     })
 })
