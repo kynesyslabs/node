@@ -29,6 +29,21 @@
  *   4. The original `genesisData` object is left untouched (deep
  *      cloning happens internally).
  *
+ * Two hashes
+ * -----------
+ * `hashGenesisData` is what a node ADVERTISES to peers and compares with the
+ * data its peers serve. It covers everything in the genesis block as stored,
+ * and must stay byte-identical across builds: a node on an older build
+ * compares its own full hash with the one a newer anchor advertises.
+ *
+ * `hashGenesisCore` leaves out the fork schedule (`forks`) and the chain id
+ * (`properties.id`). An operator who schedules a fork on a running chain edits
+ * the genesis FILE, while every peer still serves the block stored when the
+ * chain was created; the full hashes then differ although nothing a node must
+ * share since block 0 does. A node uses the core hash only to tell that kind of
+ * difference from a real one; agreement on the schedule is checked separately
+ * (see forkScheduleAgreement.ts).
+ *
  * Callers
  * -------
  * Every site that computes a genesis-data hash for inter-peer
@@ -52,6 +67,7 @@ import Hashing from "src/libs/crypto/hashing"
  */
 export function canonicalGenesisForHashing(
     genesisData: unknown,
+    options: { omitScheduleFields?: boolean } = {},
 ): Record<string, unknown> {
     if (
         genesisData === null ||
@@ -70,6 +86,20 @@ export function canonicalGenesisForHashing(
 
     for (const key of Object.keys(src)) {
         if (key === "validators") continue
+        if (options.omitScheduleFields) {
+            if (key === "forks") continue
+            const props = src[key]
+            if (
+                key === "properties" &&
+                props !== null &&
+                typeof props === "object" &&
+                !Array.isArray(props)
+            ) {
+                const { id: _chainId, ...rest } = props as Record<string, unknown>
+                out.properties = rest
+                continue
+            }
+        }
         // Shallow copy; nested objects/arrays inside genesis are
         // already content-addressed (balances, forks, properties,
         // mutables) — their authoring order is fixed by the genesis
@@ -150,5 +180,16 @@ export function stableStringify(value: unknown): string {
  */
 export function hashGenesisData(genesisData: unknown): string {
     const canonical = canonicalGenesisForHashing(genesisData)
+    return Hashing.sha256(stableStringify(canonical))
+}
+
+/**
+ * Hash of the genesis data without the fork schedule and the chain id.
+ * Never advertised to peers; see the "Two hashes" note above.
+ */
+export function hashGenesisCore(genesisData: unknown): string {
+    const canonical = canonicalGenesisForHashing(genesisData, {
+        omitScheduleFields: true,
+    })
     return Hashing.sha256(stableStringify(canonical))
 }

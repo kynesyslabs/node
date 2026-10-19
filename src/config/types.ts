@@ -71,6 +71,12 @@ export interface CoreConfig {
     xffMode: string
     mcpEnabled: boolean
     restore: boolean
+    /**
+     * Full genesis data hash (sha256 hex) the operator expects the network to
+     * have. A node with no stored genesis block takes the genesis it adopts from
+     * a peer only when it hashes to this. Empty means no pin.
+     */
+    expectedGenesisHash: string
     blockWatchdogEnabled: boolean
     blockWatchdogTimeoutSeconds: number
     /** Consecutive missed shard selections before the node exits for

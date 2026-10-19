@@ -13,6 +13,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import { L2PSNotConfiguredError } from "./l2psErrors"
 
 /**
  * Configuration interface for an L2PS node.
@@ -110,7 +111,7 @@ export default class ParallelNetworks {
     async loadL2PS(uid: string): Promise<L2PS> {
         // Validate uid to prevent path traversal attacks
         if (!uid || !/^[A-Za-z0-9_-]+$/.test(uid)) {
-            throw new Error(`Invalid L2PS uid: ${uid}`)
+            throw new L2PSNotConfiguredError(`Invalid L2PS uid: ${uid}`)
         }
 
         if (this.l2pses.has(uid)) {
@@ -149,7 +150,7 @@ export default class ParallelNetworks {
             throw new Error(`Path traversal detected in uid: ${uid}`)
         }
         if (!fs.existsSync(configPath)) {
-            throw new Error(`L2PS config file not found: ${configPath}`)
+            throw new L2PSNotConfiguredError(`L2PS config file not found: ${configPath}`)
         }
 
         let nodeConfig: L2PSNodeConfig
