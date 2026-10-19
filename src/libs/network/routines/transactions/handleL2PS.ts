@@ -9,6 +9,8 @@ import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import log from "@/utilities/logger"
+import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
+import { backlogFullMessage, getExecutedBacklogGuard } from "@/libs/l2ps/executedBacklogGuard"
 
 /**
  * Create an error response with the given status code and message
@@ -127,6 +129,11 @@ export default async function handleL2PS(
         return createErrorResponse(response, 400, structureError)
     }
 
+    // The outer hash becomes the queue's key and is not recomputed anywhere.
+    if (!isValidL2PSTxHash(l2psTx.hash)) {
+        return createErrorResponse(response, 400, "Invalid L2PS transaction hash: expected 64 lower-case hex characters")
+    }
+
     const payloadData = l2psTx.content.data[1]
     const l2psUid = payloadData.l2ps_uid
 
@@ -134,6 +141,14 @@ export default async function handleL2PS(
     const l2psInstance = await getL2PSInstance(l2psUid)
     if (!l2psInstance) {
         return createErrorResponse(response, 400, "L2PS network not found and not joined (missing config)")
+    }
+
+    // Cheap refusal before any decrypt while the subnet's queue is at its cap.
+    // The slot itself is only taken once the transaction is known to be new.
+    const backlog = getExecutedBacklogGuard()
+    const room = await backlog.check(l2psUid)
+    if (!room.admitted) {
+        return createErrorResponse(response, 429, backlogFullMessage(room.retryAfterMs))
     }
 
     // Decrypt and validate transaction
@@ -219,14 +234,32 @@ async function processValidL2PSTransaction(
         return response
     }
 
+    // Only a transaction that decrypted, verified and is not a duplicate takes a
+    // slot, so malformed or repeated requests cannot use up the subnet's room.
+    const backlog = getExecutedBacklogGuard()
+    if (!backlog.claim(l2psUid)) {
+        return createErrorResponse(response, 429, backlogFullMessage(backlog.retryAfterMs))
+    }
+
     // Store in mempool
     const mempoolResult = await L2PSMempool.addTransaction(l2psUid, l2psTx, originalHash, "processed")
     if (!mempoolResult.success) {
+        backlog.release(l2psUid)
         return createErrorResponse(response, 500, `Failed to store in L2PS mempool: ${mempoolResult.error}`)
     }
 
-    // Execute transaction
-    return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
+    // Execute transaction. An executed row keeps its slot counted until the
+    // next database refresh sees it; a failed attempt gives the slot back.
+    let executed = false
+    const onExecuted = () => {
+        executed = true
+        backlog.settle(l2psUid)
+    }
+    try {
+        return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash, onExecuted)
+    } finally {
+        if (!executed) backlog.release(l2psUid)
+    }
 }
 
 /**
@@ -238,6 +271,7 @@ async function executeAndRecordL2PSTransaction(
     l2psTx: L2PSTransaction,
     decryptedTx: Transaction,
     originalHash: string,
+    onExecuted: () => void,
 ): Promise<RPCResponse> {
     let executionResult
     try {
@@ -262,8 +296,17 @@ async function executeAndRecordL2PSTransaction(
         )
     }
 
-    // Update status and return success
-    await L2PSMempool.updateStatus(l2psTx.hash, "executed")
+    // Update status and return success. The slot moves into the executed
+    // count right here, before any further database work, so a refresh
+    // landing in between cannot count the row twice for longer than it
+    // takes the next refresh to replace the cached value.
+    // A failed update leaves the row unexecuted, so the database will not
+    // count it and the slot goes back instead of settling.
+    if (await L2PSMempool.updateStatus(l2psTx.hash, "executed")) {
+        onExecuted()
+    } else {
+        log.warning(`[handleL2PS] Could not mark ${l2psTx.hash} executed`)
+    }
 
     // Record transaction in l2ps_transactions table for persistent history
     try {

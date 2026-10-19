@@ -70,6 +70,16 @@ export class L2PSBatchAggregator {
         ZK_CIRCUIT_MAX_BATCH_SIZE,
     )
 
+    /**
+     * Batches built per subnet in one cycle. One batch per cycle capped the
+     * drain at a handful of transactions every interval, far below what a
+     * messaging subnet receives.
+     */
+    private readonly MAX_BATCHES_PER_CYCLE = Math.max(
+        1,
+        Config.getInstance().l2ps.aggregatorMaxBatchesPerCycle,
+    )
+
     /** Cleanup age - remove batched transactions older than this (ms) */
     private readonly CLEANUP_AGE_MS = Config.getInstance().l2ps.cleanupAgeMs
 
@@ -167,7 +177,7 @@ export class L2PSBatchAggregator {
             const errorMessage = getErrorMessage(error)
             log.warning(`[L2PS Batch Aggregator] ZK Prover not available: ${errorMessage}`)
             log.warning("[L2PS Batch Aggregator] Batches will be submitted without ZK proofs")
-            log.warning("[L2PS Batch Aggregator] Run 'src/libs/l2ps/zk/scripts/setup_all_batches.sh' to enable ZK proofs")
+            log.warning("[L2PS Batch Aggregator] Run 'bun run setup --only zk --zk' to enable ZK proofs")
         }
     }
 
@@ -257,33 +267,43 @@ export class L2PSBatchAggregator {
     /**
      * Main aggregation logic - collect, batch, and submit transactions
      * 
-     * 1. Fetches all executed transactions from L2PS mempool
-     * 2. Groups transactions by L2PS UID
-     * 3. Creates encrypted batch for each group
+     * 1. Lists the subnets with executed transactions waiting
+     * 2. Fetches each subnet's oldest executed transactions separately
+     * 3. Creates encrypted batches for each subnet
      * 4. Submits batches to main mempool
      * 5. Updates transaction statuses to 'batched'
      */
     private async aggregateAndSubmitBatches(): Promise<void> {
         try {
-            // Get all executed transactions ready for batching
-            const executedTransactions = await L2PSMempool.getByStatus(
-                L2PS_STATUS.EXECUTED,
-                this.MAX_BATCH_SIZE * 10, // Allow for multiple L2PS networks
-            )
+            // Each subnet's rows are fetched on their own, so a subnet with a
+            // deep backlog cannot fill a shared window and starve the others.
+            const subnets = await L2PSMempool.getExecutedSubnets()
 
-            if (executedTransactions.length === 0) {
+            if (subnets.length === 0) {
                 log.debug("[L2PS Batch Aggregator] No executed transactions to batch")
                 return
             }
 
-            log.info(`[L2PS Batch Aggregator] Found ${executedTransactions.length} transactions to batch`)
+            for (const l2psUid of subnets) {
+                const transactions = await L2PSMempool.getByUIDAndStatus(
+                    l2psUid,
+                    L2PS_STATUS.EXECUTED,
+                    this.MAX_BATCH_SIZE * this.MAX_BATCHES_PER_CYCLE,
+                )
+                if (transactions.length === 0) continue
 
-            // Group transactions by L2PS UID
-            const groupedByUID = this.groupTransactionsByUID(executedTransactions)
+                log.info(`[L2PS Batch Aggregator] Found ${transactions.length} transactions to batch for ${l2psUid}`)
 
-            // Process each L2PS network's transactions
-            for (const [l2psUid, transactions] of Object.entries(groupedByUID)) {
-                await this.processBatchForUID(l2psUid, transactions)
+                for (let batch = 0; batch < this.MAX_BATCHES_PER_CYCLE; batch++) {
+                    const chunk = transactions.slice(
+                        batch * this.MAX_BATCH_SIZE,
+                        (batch + 1) * this.MAX_BATCH_SIZE,
+                    )
+                    if (chunk.length === 0) break
+                    // A failed submission leaves its rows executed, so the next
+                    // chunk would only fail the same way.
+                    if (!(await this.processBatchForUID(l2psUid, chunk))) break
+                }
             }
 
         } catch (error) {
@@ -294,38 +314,20 @@ export class L2PSBatchAggregator {
     }
 
     /**
-     * Group transactions by their L2PS UID
-     * 
-     * @param transactions - Array of L2PS mempool transactions
-     * @returns Record mapping L2PS UID to array of transactions
-     */
-    private groupTransactionsByUID(transactions: L2PSMempoolTx[]): Record<string, L2PSMempoolTx[]> {
-        const grouped: Record<string, L2PSMempoolTx[]> = {}
-
-        for (const tx of transactions) {
-            if (!grouped[tx.l2ps_uid]) {
-                grouped[tx.l2ps_uid] = []
-            }
-            grouped[tx.l2ps_uid].push(tx)
-        }
-
-        return grouped
-    }
-
-    /**
      * Process a batch of transactions for a specific L2PS UID
      *
      * @param l2psUid - L2PS network identifier
      * @param transactions - Array of transactions to batch
+     * @returns true when a batch was submitted
      */
-    private async processBatchForUID(l2psUid: string, transactions: L2PSMempoolTx[]): Promise<void> {
+    private async processBatchForUID(l2psUid: string, transactions: L2PSMempoolTx[]): Promise<boolean> {
         try {
             // Enforce maximum batch size
             const batchTransactions = transactions.slice(0, this.MAX_BATCH_SIZE)
 
             if (batchTransactions.length < this.MIN_BATCH_SIZE) {
                 log.debug(`[L2PS Batch Aggregator] Not enough transactions for ${l2psUid} (${batchTransactions.length}/${this.MIN_BATCH_SIZE})`)
-                return
+                return false
             }
 
             log.info(`[L2PS Batch Aggregator] Creating batch for ${l2psUid} with ${batchTransactions.length} transactions`)
@@ -384,15 +386,18 @@ export class L2PSBatchAggregator {
                 this.stats.successfulSubmissions++
 
                 log.info(`[L2PS Batch Aggregator] Successfully batched ${updated} transactions for ${l2psUid}`)
-            } else {
-                this.stats.failedSubmissions++
-                log.error(`[L2PS Batch Aggregator] Failed to submit batch for ${l2psUid}`)
+                return true
             }
+
+            this.stats.failedSubmissions++
+            log.error(`[L2PS Batch Aggregator] Failed to submit batch for ${l2psUid}`)
+            return false
 
         } catch (error) {
             const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Error processing batch for ${l2psUid}: ${message}`)
             this.stats.failedSubmissions++
+            return false
         }
     }
 
@@ -806,6 +811,16 @@ export class L2PSBatchAggregator {
             if (deleted > 0) {
                 this.stats.cleanedUpTransactions += deleted
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${deleted} old confirmed transactions`)
+            }
+
+            // Batched rows without edits never get a proof, and a proof is the
+            // only thing that removes a batched row.
+            const batchedWithoutEdits = await L2PSMempool.cleanupBatchedWithoutEdits(
+                this.CLEANUP_AGE_MS,
+            )
+            if (batchedWithoutEdits > 0) {
+                this.stats.cleanedUpTransactions += batchedWithoutEdits
+                log.info(`[L2PS Batch Aggregator] Cleaned up ${batchedWithoutEdits} batched transactions without edits`)
             }
 
             // Rows synced from peers are stored as "processed" and nothing

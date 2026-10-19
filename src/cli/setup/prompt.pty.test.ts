@@ -1,0 +1,47 @@
+import { describe, expect, it, setDefaultTimeout } from "bun:test"
+import { spawnSync } from "node:child_process"
+import * as path from "node:path"
+import { PYTHON, ptyAvailable } from "./testSupport"
+
+setDefaultTimeout(600_000)
+
+// Answers the secret prompt the instant it appears, as a paste or a password
+// manager would, and returns everything the terminal showed.
+const DRIVER = `
+import os, pty, select, sys, time
+typed = sys.argv[2]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[1], [sys.argv[1], sys.argv[3]])
+out = b""
+sent = False
+start = time.time()
+while time.time() - start < 60:
+    ready, _, _ = select.select([fd], [], [], 0.05)
+    if ready:
+        try:
+            out += os.read(fd, 4096)
+        except OSError:
+            break
+    if not sent and b"Secret: " in out:
+        os.write(fd, (typed + "\\n").encode())
+        sent = True
+    done, _ = os.waitpid(pid, os.WNOHANG)
+    if done:
+        break
+sys.stdout.write(out.decode(errors="replace"))
+`
+
+const harness = path.join(import.meta.dir, "secretHarness.ts")
+
+describe.skipIf(!ptyAvailable)("a secret typed at the terminal", () => {
+    it("is never shown, even when it arrives the moment the prompt does", () => {
+        // Assembled at run time from a plainly synthetic shape.
+        const typed = ["placeholder", "answer", "x".repeat(12)].join("-")
+        for (let run = 0; run < 8; run++) {
+            const r = spawnSync(PYTHON as string, ["-c", DRIVER, process.execPath, typed, harness], { encoding: "utf8", timeout: 90_000 })
+            expect(r.stdout).toContain(`GOT:${typed.length}`)
+            expect([run, r.stdout.includes(typed)]).toEqual([run, false])
+        }
+    })
+})

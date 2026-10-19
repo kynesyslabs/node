@@ -83,6 +83,11 @@ When the stack is healthy:
 | `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | `demosuser` / `demospassword` / `demos` | Postgres credentials. Change `PG_PASSWORD` if you're paranoid; it never leaves the compose network. |
 | `METRICS_ENABLED` / `METRICS_PORT` | `true` / `9090` | Prometheus scrape endpoint on the node. |
 | `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password. Change this. |
+| `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` | `50000` | Most executed L2PS transactions one subnet may have waiting for a batch. At the cap new ones are refused with `L2PS_BACKLOG_FULL` (HTTP 429, or a retry-later error on the messaging socket) until the aggregator catches up. `0` turns the limit off; the hash cycle then sorts the whole queue every few seconds, with no bound and without the primary-key index, so only do that on a node with a small subnet. A positive value must be at least `L2PS_MIN_BATCH_SIZE`, and a negative one is refused, or the node does not start. |
+| `L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE` | `5` | Batches (each up to `L2PS_MAX_BATCH_SIZE` transactions, capped by the ZK circuit size) the L2PS aggregator builds per subnet per cycle. Raise it if a busy subnet's queue keeps growing; each batch costs one ZK proof when proofs are on. At most 100. |
+| `L2PS_MESSAGING_SEND_RATE` | `5` | Messages per second one sender key may send through the messaging relay once its burst is spent. Over it the sender gets `RATE_LIMITED` with a retry time and keeps its socket. `0` turns the limit off. |
+| `L2PS_MESSAGING_SEND_BURST` | `30` | Messages a sender key may send at once before the rate applies. |
+| `L2PS_MESSAGING_BACKLOG_SHARE` | `0.5` | Largest fraction of `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` that messaging may hold, so RPC transactions keep the rest. `1` gives messaging all of it. |
 | `COMPOSE_PROFILES` | `monitoring,tlsnotary` | Which compose profiles are active. See below. |
 
 Leave `PG_HOST=postgres` and `TLSNOTARY_HOST=tlsnotary` exactly as shipped — those are the in-network service names. They are only `localhost` for the bare-metal path (Track 2).
@@ -539,6 +544,62 @@ cd postgres_5332
 rm -rf node_modules bun.lockb
 bun install
 ```
+
+---
+
+## L2PS and ZK setup (optional)
+
+L2PS subnets and ZK proofs need a few files and `.env` entries. Three commands handle them:
+
+```bash
+bun run setup            # asks what to enable and writes the files and .env entries
+bun run setup --check    # report only: what is configured, missing or invalid
+bun run setup --yes ...  # no questions; answers come from flags and DEMOS_SETUP_* variables
+```
+
+What the setup does:
+
+- **L2PS:** creates `data/l2ps/<id>/` (config, subnet key, IV) with a fresh key, or imports the key and IV you received from the subnet owner when you join an existing subnet. Key files get mode 600 and are never printed. It also sets the history retention, plaintext history, messaging and port options in `.env`.
+- **ZK batch proofs:** builds the proving keys (about 200 MB download, several minutes; with `--yes` only when you pass `--zk-generate`) and turns `L2PS_ZK_ENABLED` on once they exist. The identity verification key is committed to the repository and is only checked, never regenerated.
+- Messaging is only switched on together with a usable subnet, never on its own.
+- Exit codes: 0 done (or `--check` found nothing wrong), 1 something is missing or could not be written, 2 invalid command line or `DEMOS_SETUP_*` value, 130 cancelled. With `--check --json` the output is a single JSON document on every path, errors included.
+- Nothing that already exists is replaced unless you say yes or pass `--force`. A replaced file is kept next to the original as `<name>.bak-<time>`. Add `--dry-run` to see what would be written.
+
+Examples:
+
+```bash
+# Create a subnet, enable messaging and ZK proofs, no questions asked
+bun run setup --yes --l2ps-uid my_subnet --l2ps-rpc http://node2.example.com:53550 \
+    --messaging --zk --zk-generate
+
+# Join an existing subnet: put the key and IV you received in files (chmod 600,
+# delete them afterwards) so they never appear on a command line
+bun run setup --yes --l2ps-uid shared_subnet --l2ps-role join \
+    --l2ps-key-file ./subnet.key --l2ps-iv-file ./subnet.iv
+
+# Or read them silently into the shell's environment (not shown in `ps`)
+read -rs -p "Subnet key: " DEMOS_SETUP_L2PS_KEY; echo
+read -rs -p "Subnet IV: " DEMOS_SETUP_L2PS_IV; echo
+export DEMOS_SETUP_L2PS_KEY DEMOS_SETUP_L2PS_IV
+bun run setup --yes --l2ps-uid shared_subnet --l2ps-role join
+
+bun run setup --help     # every flag and its DEMOS_SETUP_* variable
+```
+
+At start the node checks this setup. If L2PS, messaging or explicitly enabled ZK batch proofs are incomplete, it prints a loud banner (and logs it) listing what is missing and the fix command, then keeps booting: the affected features stay unavailable, the rest of the node is not affected. In a terminal it also offers to run the setup (default no after 30 seconds; Ctrl-C aborts the start). Set `DEMOS_SETUP_STRICT=true` to stop the node instead (CI, fail-fast operators), or `DEMOS_SKIP_SETUP_CHECK=true` to silence the banner. A missing, corrupt or altered ZK identity verification key always stops the node (the skip switch does not apply), because every validator must verify with the same key committed in the release; restore the committed file from the repository (in Docker, rebuild or re-pull the image).
+
+**Identity key rotation:** the node pins the identity verification key by the digest committed in the release, and `bun run zk:setup` or `bun run zk:ceremony` rewrite that file, so a node that ran them refuses to boot. After every validator has agreed on the new key, compute its digest and set it on each node, in `.env` or the process environment:
+
+```bash
+bun -e 'import {canonicalDigest} from "./src/cli/setup/zk"; import {readFileSync} from "fs"; console.log(canonicalDigest(readFileSync("src/features/zk/keys/verification_key_merkle.json","utf8")))'
+# then: DEMOS_ZK_IDENTITY_KEY_DIGEST=<the 64 hex characters>
+```
+
+The variable replaces the pinned digest (it does not turn the check off), so a node still refuses any other key; a malformed value stops the node with a clear message. Drop it again once the release you run carries the new key's digest.
+
+**Working directory:** start the node (and run `bun run setup`) from the checkout directory. The node reads `.env`, `data/genesis.json` and `data/l2ps/` relative to the current directory, and the setup inspects the same places; only the committed and built ZK keys are found from the checkout itself, so they do not depend on where you start from.
+
+**Docker:** run the same commands inside the container, for example `docker compose exec node bun run setup --check`. Subnet files go into the `demos_node_data` volume. Inside the image the setup does not write `/app/.env`; it prints the lines to put in your host `.env` (or the compose environment), and you recreate the container afterwards. The messaging WebSocket port (`L2PS_MESSAGING_PORT`, default 3006) is published by the compose file on loopback only (`L2PS_MESSAGING_BIND`, default `127.0.0.1`; set `0.0.0.0` so SDK clients can reach the port directly; operators behind a reverse proxy keep the default), and with the `proxy` profile Caddy serves it at `/messaging/` and forwards to the same `L2PS_MESSAGING_PORT` (a custom port works there too; `/signaling/` follows `RPC_SIGNALING_PORT` the same way). The image has no writable ZK key directory, so build the ZK keys on a checkout and not in the image.
 
 ---
 

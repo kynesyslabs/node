@@ -174,6 +174,8 @@ After installation, configure your node by editing:
 - `.env`: Core node settings including network endpoints
 - `demos_peerlist.json`: Known peer connections for network participation
 
+L2PS subnets and ZK proofs have a guided setup: `bun run setup` (see [INSTALL.md](INSTALL.md#l2ps-and-zk-setup-optional)).
+
 ## Network Ports
 
 For the docker-compose path see [INSTALL.md → Network Exposure](INSTALL.md#network-exposure) — that section has the canonical inbound/outbound rules and a `ufw` example for VPS deployments.

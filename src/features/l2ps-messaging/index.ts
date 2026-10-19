@@ -12,6 +12,7 @@ export { L2PSMessage } from "./entities/L2PSMessage"
 export { computeMessageHash, encryptMessage, decryptMessage, generateSymmetricKey } from "./crypto"
 export type * from "./types"
 
+import { parseMessagingEnabled } from "../../config/envFlags"
 import { L2PSMessagingServer } from "./L2PSMessagingServer"
 
 let server: L2PSMessagingServer | null = null
@@ -30,5 +31,5 @@ export function stopL2PSMessaging(): void {
 }
 
 export function isL2PSMessagingEnabled(): boolean {
-    return process.env.L2PS_MESSAGING_ENABLED?.toLowerCase() === "true"
+    return parseMessagingEnabled(process.env.L2PS_MESSAGING_ENABLED)
 }

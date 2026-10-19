@@ -16,6 +16,12 @@
  *   bun run zk:ceremony init
  *   bun run zk:ceremony contribute
  *   bun run zk:ceremony finalize
+ *
+ * Key rotation: finalize overwrites src/features/zk/keys/verification_key_merkle.json,
+ * and a node pins that file by digest at start-up, so it refuses to boot with
+ * the new key. Once every validator has agreed on the new key, give each node
+ * its sha256 in DEMOS_ZK_IDENTITY_KEY_DIGEST (see INSTALL.md, "Identity key
+ * rotation").
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "fs"

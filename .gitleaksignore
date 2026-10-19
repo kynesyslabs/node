@@ -1,2 +1,4 @@
 # Synthetic prompt fixture in the guided-setup pty test: the literal "S3CR3T-KEY-MATERIAL" only checks that the terminal stops echoing; later commits replaced it with a runtime canary.
 2bac9b744f7634b819f8aefea230ebdbd6378cd0:src/cli/setup/prompt.pty.test.ts:generic-api-key:39
+# Guided-setup test: a Proxy get handler whose second argument was named like an API-key assignment and compared with an env-variable name; the argument was renamed in a later commit, the scanner still sees the original commit in the PR range.
+934c6640e44d88cae2a2db8152dfcc1c7af3e6d2:src/cli/setup/zk.adversarial.test.ts:generic-api-key:435

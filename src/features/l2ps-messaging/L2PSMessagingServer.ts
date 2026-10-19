@@ -7,6 +7,7 @@
 
 import type { Server, ServerWebSocket } from "bun"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { Config } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { sanitizeForLog } from "@/utilities/logSafe"
@@ -18,6 +19,7 @@ import {
     type ProcessMessageResult,
 } from "./L2PSMessagingService"
 import { canonicalizeKey } from "./keys"
+import { SendRateLimiter } from "./sendRateLimiter"
 import type {
     ConnectedPeer,
     ProtocolFrame,
@@ -266,6 +268,8 @@ export class L2PSMessagingServer {
     /** Register proofs already accepted, by subnet and then proof bytes, until their timestamp leaves the window. */
     private usedRegisterProofs = new Map<string, Map<string, number>>()
     private lastProofPrune = 0
+    /** Per sender key, so a throwaway key cannot flood a subnet's queue. */
+    private sendLimiter: SendRateLimiter
     private registerByAddress = new FrameLimiter(
         REGISTER_FRAMES_PER_ADDRESS,
         REGISTER_ADDRESS_WINDOW_MS,
@@ -279,6 +283,8 @@ export class L2PSMessagingServer {
 
     constructor(port: number) {
         this.service = L2PSMessagingService.getInstance()
+        const { messagingSendRate, messagingSendBurst } = Config.getInstance().l2ps
+        this.sendLimiter = new SendRateLimiter({ ratePerSec: messagingSendRate, burst: messagingSendBurst })
 
         this.server = Bun.serve({
             port,
@@ -571,6 +577,14 @@ export class L2PSMessagingServer {
         if ("code" in frame) return this.refuse(ws, frame, msg.requestId)
         const { toKey, encrypted, messageHash } = frame
 
+        // Before any database work: a sender over its rate costs the node
+        // nothing beyond this check, and the socket stays usable.
+        const allowance = this.sendLimiter.take(senderKey)
+        if (!allowance.allowed) {
+            this.sendError(ws, "RATE_LIMITED", "Sending too fast, retry later", msg.requestId, allowance.retryAfterMs)
+            return
+        }
+
         const l2psUid = ws.data.l2psUid!
         const recipientPeer = this.peers.get(peerId(l2psUid, toKey))
 
@@ -580,7 +594,7 @@ export class L2PSMessagingServer {
         )
 
         if (!result.success) {
-            this.sendError(ws, result.code ?? "L2PS_SUBMIT_FAILED", result.error, msg.requestId)
+            this.sendError(ws, result.code ?? "L2PS_SUBMIT_FAILED", result.error, msg.requestId, result.retryAfterMs)
             return
         }
 

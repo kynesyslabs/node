@@ -33,6 +33,8 @@ blocked_ips.json
 .env
 .env.local
 .env.*.local
+.env.bak-*
+.env.tmp-*
 mnemonic.txt
 certs/
 *.pem
@@ -138,6 +140,7 @@ src/features/zk/circuits/*_js/
 
 # L2PS ZK
 src/libs/l2ps/zk/keys/**/*.zkey
+src/libs/l2ps/zk/keys/**/.building/
 src/libs/l2ps/zk/keys/**/*.r1cs
 src/libs/l2ps/zk/keys/**/*.sym
 src/libs/l2ps/zk/keys/**/*.wasm

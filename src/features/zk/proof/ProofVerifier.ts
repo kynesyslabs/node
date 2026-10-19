@@ -23,7 +23,8 @@ import {
     parseIdentityPublicSignals,
 } from "./publicSignals"
 import { readFile } from "fs/promises"
-import { join } from "path"
+import { dirname, join } from "path"
+import { fileURLToPath } from "url"
 import { DataSource, Repository, EntityManager } from "typeorm"
 import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier.js"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState.js"
@@ -54,7 +55,19 @@ export interface ProofVerificationResult {
 
 export class ProofVerifier {
     private static vKey: any
-    private static vKeyPath = "src/features/zk/keys/verification_key_merkle.json"
+    // Resolved from this file, not the working directory: the key is part of the
+    // release, and the start-up check inspects exactly this path.
+    private static vKeyPath = join(
+        dirname(fileURLToPath(import.meta.url)),
+        "..",
+        "keys",
+        "verification_key_merkle.json",
+    )
+    /** The key file the verifier reads, so the start-up check can be tested against the same path. */
+    static get verificationKeyPath(): string {
+        return this.vKeyPath
+    }
+
     private dataSource: DataSource
     private nullifierRepo: Repository<UsedNullifier>
     private merkleStateRepo: Repository<MerkleTreeState>
@@ -76,14 +89,13 @@ export class ProofVerifier {
         }
 
         try {
-            const vKeyPath = join(process.cwd(), this.vKeyPath)
-            const vKeyJson = await readFile(vKeyPath, "utf-8")
+            const vKeyJson = await readFile(this.vKeyPath, "utf-8")
             this.vKey = JSON.parse(vKeyJson)
             log.info("[CORE] ZK verification key loaded successfully")
         } catch (error) {
             handleError(error, "CORE", { source: "ProofVerifier.loadVerificationKey" })
             throw new Error(
-                "Verification key not found. Run 'bun run zk:setup-all' to generate keys.",
+                "Verification key not found or unreadable. Run 'bun run setup --check' to see what is wrong; restore the committed file rather than regenerating it.",
             )
         }
     }

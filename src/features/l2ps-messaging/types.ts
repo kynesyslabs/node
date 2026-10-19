@@ -199,7 +199,7 @@ export interface ErrorResponse extends ProtocolFrame<"error"> {
         code: ErrorCode
         message: string
         details?: string
-        /** Set with RATE_LIMITED: how long to wait before the same request can succeed. */
+        /** Set with L2PS_BACKLOG_FULL or RATE_LIMITED: how long to wait before the same request can succeed. */
         retryAfterMs?: number
     }
 }
@@ -249,6 +249,7 @@ export type ErrorCode =
     | "PEER_NOT_FOUND"
     | "L2PS_NOT_FOUND"
     | "L2PS_SUBMIT_FAILED"
+    | "L2PS_BACKLOG_FULL"
     | "RATE_LIMITED"
     | "QUEUE_FULL"
     | "INTERNAL_ERROR"

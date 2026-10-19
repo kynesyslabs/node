@@ -9,6 +9,8 @@ import type { SerializedEncryptedMessage } from "../types"
 //   - getHistory:        WHERE l2ps_uid=$1 AND (from_key=$2 OR to_key=$2) ORDER BY timestamp DESC
 @Index("IDX_l2ps_messages_queued_for_recipient", ["toKey", "l2psUid", "status", "timestamp"])
 @Index("IDX_l2ps_messages_pair_history", ["l2psUid", "timestamp"])
+// The backlog guard counts queue rows that came from messaging by joining on this hash.
+@Index("IDX_l2ps_messages_tx_hash", ["l2psTxHash"], { where: "l2ps_tx_hash IS NOT NULL" })
 // One message per subnet, sender, recipient and hash: clients reuse the hash
 // across recipients and on resend (migration ScopeL2PSMessageHashUnique1791504000000).
 @Index("UQ_l2ps_messages_sender_recipient_hash", ["l2psUid", "fromKey", "toKey", "messageHash"], { unique: true })

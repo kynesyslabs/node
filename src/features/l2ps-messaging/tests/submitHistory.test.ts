@@ -11,6 +11,7 @@ import { describe, expect, it, jest } from "bun:test"
 const ENVELOPE = { hash: "enc-hash", content: { data: ["l2psEncryptedTx", { ciphertext: "…" }] } }
 
 const recordTransaction = jest.fn(async (..._args: unknown[]) => 1)
+const updateStatus = jest.fn(async (..._args: unknown[]) => true)
 
 jest.mock("@/model/datasource", () => ({ dataSource: {} }))
 
@@ -58,7 +59,7 @@ jest.mock("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
     default: {
         addTransaction: async () => ({ success: true }),
-        updateStatus: async () => true,
+        updateStatus,
     },
 }))
 
@@ -91,5 +92,30 @@ describe("submitToL2PS", () => {
         const args = recordTransaction.mock.calls[0]
         expect(args[3]).toBe("enc-hash")
         expect(args[6]).toBe(ENVELOPE)
+    })
+
+    const submit = (onExecuted: () => void) =>
+        (L2PSMessagingService.getInstance() as any).submitToL2PS(
+            "subnet-1", "from-key", "to-key", "message-id", "message-hash",
+            { ciphertext: "x", nonce: "y" }, 1_700_000_000_000, onExecuted,
+        )
+
+    it("reports the row executed once the status update has landed", async () => {
+        updateStatus.mockResolvedValueOnce(true)
+        const onExecuted = jest.fn()
+
+        await submit(onExecuted)
+
+        expect(onExecuted).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not report the row executed when the status update fails", async () => {
+        updateStatus.mockResolvedValueOnce(false)
+        const onExecuted = jest.fn()
+
+        const result = await submit(onExecuted)
+
+        expect(onExecuted).not.toHaveBeenCalled()
+        expect(result.success).toBe(true)
     })
 })
