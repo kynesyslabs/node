@@ -39,9 +39,11 @@ const DIGEST_FORMAT = /^[0-9a-f]{64}$/
 /** Longest piece of peer-supplied text that is put into a log line. */
 const MAX_LOGGED_LENGTH = 64
 
-function show(value: unknown): string {
+/** A peer-supplied value as it may appear in a log line or an error message. */
+export function showPeerValue(value: unknown): string {
     return String(value).slice(0, MAX_LOGGED_LENGTH)
 }
+const show = showPeerValue
 
 /**
  * Digest of everything about the schedule that consensus depends on: the
@@ -185,7 +187,7 @@ export async function checkPeerSchedule(
         } catch (error) {
             return {
                 status: "unreachable",
-                reason: error instanceof Error ? error.message : String(error),
+                reason: showPeerValue(error instanceof Error ? error.message : error),
             }
         }
         if (answer?.result === 503) {
@@ -193,7 +195,7 @@ export async function checkPeerSchedule(
             continue
         }
         if (answer?.result !== 200) {
-            return { status: "unreachable", reason: `result ${String(answer?.result)}` }
+            return { status: "unreachable", reason: `result ${showPeerValue(answer?.result)}` }
         }
         const theirs = peerScheduleView(answer.response)
         if (!theirs) return { status: "skipped" }

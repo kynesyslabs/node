@@ -369,6 +369,11 @@ export default class SharedState {
     // report in the meantime is the code's defaults, not this node's schedule.
     forkConfigLoaded = false
 
+    // True when this boot created block 0 from data/genesis.json because the
+    // database had none. Such a block 0 has no authority older than the file
+    // that made it, unlike one stored by an earlier boot.
+    genesisCreatedThisBoot = false
+
     // Network identity from genesis `properties.id`. Bound into the
     // transaction signature preimage once the `signatureDomain` fork is
     // active, so a signature made here cannot be replayed on another chain.

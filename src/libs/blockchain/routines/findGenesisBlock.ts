@@ -140,5 +140,7 @@ export default async function findGenesisBlock() {
     }
 
     // Adding the genesis block to the chain
-    return await Chain.generateGenesisBlock(genesisData)
+    const created = await Chain.generateGenesisBlock(genesisData)
+    getSharedState.genesisCreatedThisBoot = true
+    return created
 }

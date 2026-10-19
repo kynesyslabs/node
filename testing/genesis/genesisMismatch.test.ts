@@ -70,7 +70,8 @@ function newDeps(own: any, served: any) {
     const deps: GenesisMismatchDeps = {
         fetchPeerGenesis: async () => structuredClone(served),
         readLocalGenesis: () => structuredClone(state.file),
-        writeGenesis: d => {
+        writeGenesis: (d, expectedCoreHash) => {
+            if (hashGenesisCore(d) !== expectedCoreHash) throw new Error("written data does not hash as served")
             state.file = structuredClone(d)
             state.writes++
         },
@@ -173,7 +174,7 @@ describe("what an anchor serves must hash to what it advertised", () => {
     it("fails when the data cannot be fetched", async () => {
         const { deps } = newDeps(chains.devnet, chains.devnet)
         deps.fetchPeerGenesis = async () => null
-        await expect(resolveGenesisMismatch("a", "b", "c", deps)).rejects.toThrow("Failed to download")
+        await expect(resolveGenesisMismatch("a".repeat(64), "b".repeat(64), "c".repeat(64), deps)).rejects.toThrow("Failed to download")
     })
 })
 
@@ -197,5 +198,98 @@ describe("a wiped node on an edited genesis file", () => {
 
     it("has nothing to judge without a stored block 0", () => {
         expect(editedGenesisOnFreshChainProblem(null, "ab".repeat(32))).toBeNull()
+    })
+})
+
+describe("the stored block 0 or a pinned hash decides which peer is right", () => {
+    const truth = chains.devnet
+    const forged = (() => {
+        const f = structuredClone(truth)
+        f.balances = [...(f.balances ?? []), ["0x" + "ee".repeat(32), "1000000"]]
+        return f
+    })()
+    const run = (file: any, served: any, authority: any) => {
+        const { state, deps } = newDeps(file, served)
+        let fetched = 0
+        const fetchPeerGenesis = deps.fetchPeerGenesis
+        deps.fetchPeerGenesis = async () => {
+            fetched++
+            return fetchPeerGenesis()
+        }
+        return resolveGenesisMismatch(
+            hashGenesisData(file),
+            hashGenesisCore(file),
+            hashGenesisData(served),
+            deps,
+            authority,
+        ).then(verdict => ({ verdict, state, fetched }))
+    }
+
+    it("stored block 0 matches the local file and an anchor lies: the peer is ignored, nothing is downloaded or replaced", async () => {
+        const { verdict, state, fetched } = await run(truth, forged, { storedHash: hashGenesisData(truth) })
+        expect(verdict).toEqual({ outcome: "peer-disagrees", peerAdvertisedHash: hashGenesisData(forged) })
+        expect(fetched).toBe(0)
+        expect(state.writes).toBe(0)
+        expect(state.file).toEqual(truth)
+    })
+
+    it("stored block 0, an edited local file and an anchor serving the true genesis: the file is kept", async () => {
+        const edited = withSchedule(truth)
+        const { verdict, state } = await run(edited, truth, { storedHash: hashGenesisData(truth) })
+        expect(verdict.outcome).toBe("unhashed-fields-only")
+        expect(state.file).toEqual(edited)
+    })
+
+    it("stored block 0, a local file that differs from it and an anchor serving the true genesis: the file is replaced", async () => {
+        const drifted = structuredClone(truth)
+        drifted.balances = [...(drifted.balances ?? []), ["0x" + "dd".repeat(32), "5"]]
+        const { verdict, state } = await run(withSchedule(drifted), truth, { storedHash: hashGenesisData(truth) })
+        expect(verdict.outcome).toBe("replaced")
+        expect(state.file.balances).toEqual(truth.balances)
+        expect(state.file.forks.signatureDomain).toEqual({ activationHeight: 40 })
+    })
+
+    it("stored block 0, a local file that differs from it and an anchor serving a forged genesis: refused naming both hashes", async () => {
+        const edited = withSchedule(truth)
+        const { deps, state } = newDeps(edited, forged)
+        const promise = resolveGenesisMismatch(
+            hashGenesisData(edited),
+            hashGenesisCore(edited),
+            hashGenesisData(forged),
+            deps,
+            { storedHash: hashGenesisData(truth) },
+        )
+        await expect(promise).rejects.toThrow(hashGenesisData(forged))
+        await expect(promise).rejects.toThrow(hashGenesisData(truth))
+        expect(state.writes).toBe(0)
+    })
+
+    it("a pinned hash applies to a node with no stored block 0: a served genesis that is not the pinned one is refused", async () => {
+        const pinned = hashGenesisData(truth)
+        const edited = withSchedule(truth)
+        await expect(run(edited, forged, { expectedHash: pinned })).rejects.toThrow(pinned)
+        const ok = await run(edited, truth, { expectedHash: pinned })
+        expect(ok.verdict.outcome).toBe("unhashed-fields-only")
+        const ignored = await run(truth, forged, { expectedHash: pinned })
+        expect(ignored.verdict.outcome).toBe("peer-disagrees")
+    })
+
+    it("without any authority the first peer decides, as before", async () => {
+        const { verdict } = await run(withSchedule(truth), forged, {})
+        expect(verdict.outcome).toBe("replaced")
+    })
+
+    it("refuses an advertised hash that is not a sha256 hex string before fetching anything", async () => {
+        const { deps } = newDeps(truth, truth)
+        let fetched = 0
+        deps.fetchPeerGenesis = async () => {
+            fetched++
+            return truth
+        }
+        const hostile = "z".repeat(5000)
+        const error = await resolveGenesisMismatch("a".repeat(64), "b".repeat(64), hostile, deps).catch(e => e)
+        expect(error).toBeInstanceOf(Error)
+        expect(error.message.length).toBeLessThan(200)
+        expect(fetched).toBe(0)
     })
 })

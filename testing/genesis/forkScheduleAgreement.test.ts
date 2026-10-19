@@ -182,6 +182,13 @@ describe("asking a peer", () => {
         expect((await checkPeerSchedule(p, ours, fast)).status).toBe("mismatch")
     })
 
+    it("caps what a peer put into the reason of an unreachable answer", async () => {
+        const p = peer([{ result: "9".repeat(500) as unknown as number }])
+        const check = await checkPeerSchedule(p, ours, fast)
+        if (check.status !== "unreachable") throw new Error("expected unreachable")
+        expect(check.reason.length).toBeLessThan(100)
+    })
+
     it("reports an unreachable peer without throwing", async () => {
         const p = peer([new Error("boom")])
         expect(await checkPeerSchedule(p, ours, fast)).toEqual({ status: "unreachable", reason: "boom" })

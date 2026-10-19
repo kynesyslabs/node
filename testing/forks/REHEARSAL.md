@@ -91,6 +91,17 @@ and the devnet genesis for the four pairings of builds: new against old, old
 against new, new against new with the same schedule, and new against new with
 different schedules.
 
+**What decides which peer is right.** A node with a stored block 0 from an earlier
+boot treats that block's hash as the authority: if its file already hashes to
+it, a peer advertising another hash is ignored with a warning and nothing is
+downloaded; if its file differs, only genesis data hashing to the stored block's
+hash is accepted, anything else is refused with both hashes in the error. A
+node with no such block (empty database) has no authority, so the first peer's
+genesis is taken as before unless `EXPECTED_GENESIS_HASH` pins the full hash,
+in which case anything else is refused. The advertised hash must be a sha256 hex
+string, the download is capped at 10 seconds and 2 MB, and the file is replaced
+through a temporary file that is verified before the rename.
+
 **Why not refresh the stored genesis block from the file:** rewriting block 0's
 stored content on every node changes what `/genesis` serves to joining nodes.
 

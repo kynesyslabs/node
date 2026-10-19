@@ -27,12 +27,18 @@ import {
 import {
     checkPeerSchedule,
     localScheduleView,
+    showPeerValue,
     type ForkConfigLike,
 } from "./forkScheduleAgreement"
+import { Config } from "src/config"
+import { replaceFileAtomically } from "./replaceFileAtomically"
 
 let ourGenesisDataHash = ""
 let ourGenesisCoreHash = ""
 const genesisFile = "data/genesis.json"
+/** A genesis file is a few KB; this only bounds what a peer can make this node buffer. */
+const MAX_GENESIS_BYTES = 2 * 1024 * 1024
+const GENESIS_DOWNLOAD_TIMEOUT_MS = 10_000
 const peerman = PeerManager.getInstance()
 const discoveredGenesisDataHashes = new Set<string>()
 
@@ -51,7 +57,7 @@ async function fetchPeerGenesisHash(verifiedPeer: Peer) {
     const maxAttempts = 10
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         res = await verifiedPeer.call(request)
-        log.debug("[BOOTSTRAP] Genesis data hash: " + JSON.stringify(res))
+        log.debug("[BOOTSTRAP] Genesis data hash: " + showPeerValue(JSON.stringify(res)))
 
         if (res?.result === 200) {
             break
@@ -60,7 +66,7 @@ async function fetchPeerGenesisHash(verifiedPeer: Peer) {
         if (attempt < maxAttempts) {
             log.warn(
                 `[BOOTSTRAP] Peer ${verifiedPeer.connection.string} is not ready to serve genesis data hash yet ` +
-                    `(attempt ${attempt}/${maxAttempts}, result=${res?.result})`,
+                    `(attempt ${attempt}/${maxAttempts}, result=${showPeerValue(res?.result)})`,
             )
             await sleep(1000)
         }
@@ -78,14 +84,18 @@ async function downloadPeerGenesis(
             " advertises (ours " +
             ourGenesisDataHash +
             ", theirs " +
-            peerGenesisDataHash +
+            showPeerValue(peerGenesisDataHash) +
             "); comparing the data it serves",
     )
     log.debug(
         "[BOOTSTRAP] Fetching new genesis data from peer: " +
             verifiedPeer.connection.string,
     )
-    const served = await axios.get(verifiedPeer.connection.string + "/genesis")
+    const served = await axios.get(verifiedPeer.connection.string + "/genesis", {
+        timeout: GENESIS_DOWNLOAD_TIMEOUT_MS,
+        maxContentLength: MAX_GENESIS_BYTES,
+        maxBodyLength: MAX_GENESIS_BYTES,
+    })
     return served.status === 200 ? served.data : null
 }
 
@@ -99,6 +109,17 @@ function logGenesisVerdict(
                 verifiedPeer.connection.string +
                 " serves genesis data that differs from ours only in the fork schedule or chain id; " +
                 "keeping our data/genesis.json as it is",
+        )
+        return
+    }
+    if (verdict.outcome === "peer-disagrees") {
+        log.warn(
+            "[BOOTSTRAP] Peer " +
+                verifiedPeer.connection.string +
+                " advertises genesis hash " +
+                verdict.peerAdvertisedHash +
+                ", which is not the one this node's genesis is anchored to; ignoring it and keeping " +
+                "our data/genesis.json",
         )
         return
     }
@@ -133,11 +154,25 @@ async function storedGenesisHash(): Promise<string | null> {
     return hashGenesisData(data)
 }
 
+function writeGenesisAtomically(data: unknown, expectedCoreHash: string) {
+    replaceFileAtomically(genesisFile, JSON.stringify(data, null, 2), written => {
+        if (hashGenesisCore(JSON.parse(written)) !== expectedCoreHash) {
+            throw new Error(
+                "Genesis data written from peer does not hash like what the peer served",
+            )
+        }
+    })
+}
+
 async function ensureGenesisDataMatch(verifiedPeer: Peer) {
     const res = await fetchPeerGenesisHash(verifiedPeer)
 
     if (res.result === 200) {
         const peerGenesisDataHash = res.response
+        // A block 0 created at this boot came from the local file, so it cannot vouch for it.
+        const storedHash = getSharedState.genesisCreatedThisBoot
+            ? null
+            : await storedGenesisHash()
 
         const verdict = await resolveGenesisMismatch(
             ourGenesisDataHash,
@@ -148,14 +183,20 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                     downloadPeerGenesis(verifiedPeer, peerGenesisDataHash),
                 readLocalGenesis: () =>
                     JSON.parse(fs.readFileSync(genesisFile, "utf8")),
-                writeGenesis: data =>
-                    fs.writeFileSync(genesisFile, JSON.stringify(data, null, 2)),
+                writeGenesis: writeGenesisAtomically,
                 hashFull: hashGenesisData,
                 hashCore: hashGenesisCore,
             },
+            {
+                storedHash,
+                expectedHash: Config.getInstance().core.expectedGenesisHash,
+            },
         )
         logGenesisVerdict(verdict, verifiedPeer)
-        if (verdict.outcome === "unhashed-fields-only") {
+        if (
+            verdict.outcome === "unhashed-fields-only" &&
+            getSharedState.genesisCreatedThisBoot
+        ) {
             const problem = editedGenesisOnFreshChainProblem(
                 await storedGenesisHash(),
                 peerGenesisDataHash,
@@ -170,7 +211,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
             "[BOOTSTRAP] Failed to get genesis data hash from peer: " +
                 verifiedPeer.connection.string +
                 " response=" +
-                JSON.stringify(res),
+                showPeerValue(JSON.stringify(res)),
         )
     }
 
