@@ -431,9 +431,9 @@ describe("the identity verification key is pinned to the one committed in this r
         const ctx = createContext(root, ".env", {})
         // Reading this flag is the first thing the batch-proof checks do.
         ctx.env = new Proxy(ctx.env, {
-            get(target, key) {
-                if (key === "L2PS_ZK_ENABLED") throw new Error("boom")
-                return target[key as string]
+            get(target, name) {
+                if (name === "L2PS_ZK_ENABLED") throw new Error("boom")
+                return target[name as string]
             },
         })
         const items = collectChecks(ctx).items
