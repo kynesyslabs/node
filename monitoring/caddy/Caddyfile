@@ -7,7 +7,8 @@
 #
 # Routes (all single domain, ${PROXY_DOMAIN}):
 #   /                  -> RPC (node:53550)              — HTTP JSON-RPC
-#   /signaling/*       -> Signaling (node:3005)         — WSS (Bun WS)
+#   /signaling/*       -> Signaling (node:$RPC_SIGNALING_PORT, 3005) — WSS (Bun WS)
+#   /messaging/*       -> L2PS messaging (node:$L2PS_MESSAGING_PORT, 3006) — WSS (when enabled)
 #   /mcp/*             -> MCP (node:3001)               — SSE/HTTP, AUTH
 #   /metrics           -> Node metrics (node:9090)      — Prometheus, AUTH
 #   /grafana/*         -> Grafana (grafana:3000)        — UI sub-path
@@ -62,8 +63,16 @@
 
 	# --- WebSocket routes (must come before catch-all /) ---------------------
 
+	# The upstream ports are the ones the node itself listens on. Caddy reads
+	# them from its own environment (docker-compose.yml sets both), so a custom
+	# RPC_SIGNALING_PORT or L2PS_MESSAGING_PORT does not turn the route into a 502.
 	handle_path /signaling/* {
-		reverse_proxy node:3005
+		reverse_proxy node:{$RPC_SIGNALING_PORT:3005}
+	}
+
+	# L2PS messaging (L2PS_MESSAGING_ENABLED=true); 502 while it is off.
+	handle_path /messaging/* {
+		reverse_proxy node:{$L2PS_MESSAGING_PORT:3006}
 	}
 
 	# TLSNotary route — selected by TLSNOTARY_PROXY_MODE env. Defaults

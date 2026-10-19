@@ -27,7 +27,7 @@
 #                a fully isolated extra instance: compose project demos-<p>,
 #                container names demos-*_<p>, network demos-network_<p>,
 #                volumes demos_*_<p>. Every other published host port shifts
-#                by the same offset (<p> - 53550): Omni, signaling, metrics,
+#                by the same offset (<p> - 53550): Omni, signaling, messaging, metrics,
 #                tlsnotary, prometheus, grafana, node-exporter, neo4j. Pick
 #                instance ports 100 apart (53650, 53750, ...) so the derived
 #                ports of different instances never overlap. Stopping or
@@ -182,6 +182,7 @@ done
 DEFAULT_RPC_PORT=53550
 DEFAULT_OMNI_PORT=53551
 DEFAULT_SIGNALING_PORT=3005
+DEFAULT_MESSAGING_PORT=3006
 DEFAULT_METRICS_HOST_PORT=9090
 DEFAULT_TLSNOTARY_PORT=7047
 DEFAULT_PROMETHEUS_PORT=9091
@@ -212,6 +213,9 @@ if [[ -n "$NODE_PORT" ]]; then
     export RPC_PORT="$NODE_PORT"
     export OMNI_PORT=$(( DEFAULT_OMNI_PORT + PORT_OFFSET ))
     export RPC_SIGNALING_PORT=$(( DEFAULT_SIGNALING_PORT + PORT_OFFSET ))
+    # The messaging port is published even while messaging is off, so every
+    # extra instance needs its own host port or `up` fails on a bind clash.
+    export L2PS_MESSAGING_PORT=$(( DEFAULT_MESSAGING_PORT + PORT_OFFSET ))
     export METRICS_HOST_PORT=$(( DEFAULT_METRICS_HOST_PORT + PORT_OFFSET ))
     export TLSNOTARY_PORT=$(( DEFAULT_TLSNOTARY_PORT + PORT_OFFSET ))
     export PROMETHEUS_PORT=$(( DEFAULT_PROMETHEUS_PORT + PORT_OFFSET ))
@@ -220,7 +224,7 @@ if [[ -n "$NODE_PORT" ]]; then
     export NEO4J_HTTP_PORT=$(( DEFAULT_NEO4J_HTTP_PORT + PORT_OFFSET ))
     export NEO4J_BOLT_PORT=$(( DEFAULT_NEO4J_BOLT_PORT + PORT_OFFSET ))
 
-    for derived_port in "$OMNI_PORT" "$RPC_SIGNALING_PORT" "$METRICS_HOST_PORT" \
+    for derived_port in "$OMNI_PORT" "$RPC_SIGNALING_PORT" "$L2PS_MESSAGING_PORT" "$METRICS_HOST_PORT" \
         "$TLSNOTARY_PORT" "$PROMETHEUS_PORT" "$GRAFANA_PORT" \
         "$NODE_EXPORTER_PORT" "$NEO4J_HTTP_PORT" "$NEO4J_BOLT_PORT"; do
         if (( derived_port < MIN_PORT || derived_port > MAX_PORT )); then

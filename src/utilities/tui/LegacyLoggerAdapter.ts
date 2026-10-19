@@ -10,7 +10,7 @@
  * 3. Once migration is complete, remove this adapter
  */
 
-import { CategorizedLogger } from "./CategorizedLogger"
+import { CategorizedLogger, type LogEntry } from "./CategorizedLogger"
 import { TAG_TO_CATEGORY, type LogCategory } from "./tagCategories"
 import { getSharedState } from "@/utilities/sharedState"
 import fs from "fs"
@@ -135,15 +135,16 @@ export default class LegacyLoggerAdapter {
      * Error level log (legacy API)
      * Accepts any type and stringifies automatically (matches console.log behavior)
      * Second parameter can be boolean (legacy logToTerminal) or additional data to log
+     * Returns the recorded entry, or null when the level or category filter dropped the line.
      */
-    static error(message: unknown, extra?: unknown): void {
+    static error(message: unknown, extra?: unknown): LogEntry | null {
         let stringified = stringify(message)
         // If extra is not a boolean, append it to the message (console.log style)
         if (extra !== undefined && typeof extra !== "boolean") {
             stringified += " " + stringify(extra)
         }
         const { category, cleanMessage } = parseMessage(stringified)
-        this.logger.error(category, cleanMessage)
+        return this.logger.error(category, cleanMessage)
     }
 
     /**

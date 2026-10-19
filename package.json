@@ -15,6 +15,7 @@
         "type-check-ts": "tsc --noEmit",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "format": "prettier --plugin-search-dir . --write .",
+        "setup": "bun src/cli/setup/main.ts",
         "start": "tsx -r tsconfig-paths/register src/index.ts",
         "start:up": "bun install && tsx -r tsconfig-paths/register src/index.ts",
         "start:bun": "bun -r tsconfig-paths/register src/index.ts",
