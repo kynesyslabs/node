@@ -29,7 +29,22 @@ export default async function checkOfflinePeers(): Promise<void> {
         await PeerManager.sayHelloToPeer(offlinePeer)
     })
 
-    await Promise.all(checkPromises)
+    // Online peers that went silent get one ping; a failure moves them to
+    // the offline table so the hello above recovers them later.
+    const quietPeers = peerman.getQuietPeers()
+    const probePromises = quietPeers.map(async quietPeer => {
+        const alive = await quietPeer.connect()
+        if (!alive) {
+            log.warning(
+                `[PEER RECHECK] ${quietPeer.identity} @ ${quietPeer.connection.string} silent for ${Math.round((now - (quietPeer.status.timestamp ?? 0)) / 1000)}s and not answering: marking offline`,
+            )
+            PeerManager.markPeerOffline(quietPeer)
+        }
+    })
+
+    await Promise.all([...checkPromises, ...probePromises])
     getSharedState.inPeerRecheckLoop = false
-    log.info("[PEER RECHECK] Finished checking offline peers")
+    log.info(
+        `[PEER RECHECK] Finished checking ${Object.keys(offlinePeers).length} offline and ${quietPeers.length} quiet peers`,
+    )
 }

@@ -18,6 +18,13 @@ import { Peer } from "./libs/peer"
 import { PeerManager } from "./libs/peer"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
+import GossipManager from "./libs/gossip/GossipManager"
+import {
+    getStakedSet,
+    invalidateStakedSet,
+    onSelfStakeChange,
+} from "./libs/consensus/stakedSet"
+import { syncL2PSServices } from "./libs/l2ps/roleServices"
 import { Waiter } from "./utilities/waiter"
 import { TimeoutError, AbortError } from "@/errors"
 import {
@@ -40,6 +47,11 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
+import { acquireIdentityLock } from "./libs/identity/identityLock"
+import {
+    assertIdentityNotLive,
+    IdentityLiveError,
+} from "./libs/peer/identityLiveness"
 import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
@@ -47,7 +59,6 @@ import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentit
 // DTR and L2PS imports
 import Mempool from "./libs/blockchain/mempool"
 import TxValidatorPool from "./libs/blockchain/validation/txValidatorPool"
-import { DTRManager } from "./libs/network/dtr/dtrmanager"
 import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
 import ParallelNetworks from "./libs/l2ps/parallelNetworks"
@@ -474,6 +485,17 @@ async function preMainLoop() {
         log.warning("[NETWORK] {OFFLINE?} Failed to get public IP")
     }
 
+    // ANCHOR Gossip layer (libp2p gossipsub) — must be up before the hello
+    // phase so hello responses can carry our multiaddr. Failure inside
+    // start() is fatal by design.
+    if (GossipManager.isEnabled()) {
+        getSharedState.bootTracker.start("gossip")
+        await GossipManager.getInstance().start()
+        getSharedState.bootTracker.ready("gossip")
+    } else {
+        getSharedState.bootTracker.skip("gossip", "disabled")
+    }
+
     // ANCHOR Looking for the genesis block
     log.info("[BOOTSTRAP] Looking for the genesis block")
     await findGenesisBlock()
@@ -521,7 +543,27 @@ async function preMainLoop() {
     getSharedState.lastBlockNumber = lastBlock.number
     getSharedState.lastBlockHash = lastBlock.hash
 
+    // Role-gated services follow the node's own stake status; register
+    // before the first refresh so an already-staked node starts them now.
+    onSelfStakeChange(staked => {
+        void syncL2PSServices(staked)
+    })
+    // Prime the node's own role before anything role-gated starts.
+    invalidateStakedSet()
+    await getStakedSet()
+
     await peerBootstrap(indexState.PeerList)
+
+    try {
+        await assertIdentityNotLive()
+    } catch (error) {
+        if (error instanceof IdentityLiveError) {
+            log.error(`[IDENTITY] ${error.message}; refusing to run twice`)
+            await gracefulShutdown("identity_in_use", 1)
+            return
+        }
+        throw error
+    }
 
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(
@@ -558,7 +600,7 @@ async function preMainLoop() {
  * Side effects:
  * - May call process.exit(1) if the signaling server fails to start.
  * - Sets shared-state flags such as `isSignalingServerStarted` and `isMCPServerStarted`.
- * - Starts background services (MCP server and DTRManager) when configured.
+ * - Starts background services (MCP server) when configured.
  */
 async function main() {
     getSharedState.isInitialized = false
@@ -574,6 +616,14 @@ async function main() {
     await enforceGuidedSetup()
 
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
+    try {
+        acquireIdentityLock(getSharedState.identityFile)
+    } catch (error) {
+        log.error(
+            `[IDENTITY] ${error instanceof Error ? error.message : String(error)}`,
+        )
+        process.exit(1)
+    }
     try {
         await TxValidatorPool.getInstance().start()
     } catch (error) {

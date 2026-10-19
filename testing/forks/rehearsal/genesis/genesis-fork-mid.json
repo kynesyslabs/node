@@ -2,7 +2,8 @@
     "properties": {
         "id": 1,
         "name": "DEMOS",
-        "currency": "DEM"
+        "currency": "DEM",
+        "shardSize": 10
     },
     "mutables": {
         "minBlocksForValidationOnlineStatus": 4

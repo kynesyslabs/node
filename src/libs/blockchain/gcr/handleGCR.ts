@@ -1165,6 +1165,18 @@ export default class HandleGCR {
      *
      * @returns The successful and failed transactions (in original order)
      */
+    /** Delete gcr_assigned_txs rows stamped with `blockNumber`. */
+    static async deleteAssignedTxsForBlock(
+        blockNumber: number,
+    ): Promise<number> {
+        const db = await Datasource.getInstance()
+        const res = await db
+            .getDataSource()
+            .getRepository(GCRAssignedTx)
+            .delete({ blockNumber })
+        return res.affected ?? 0
+    }
+
     static async applyTransactions(
         txs: Transaction[],
         isRollback: boolean,

@@ -108,3 +108,5 @@ Dockerfile.*
 postgres/
 tlsnotary/
 monitoring/
+sidecar/node_modules
+sidecar/dist

@@ -1,38 +1,69 @@
 import { Peer, PeerManager } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
-import GCR from "src/libs/blockchain/gcr/gcr"
+import { getStakedSet } from "src/libs/consensus/stakedSet"
 import log from "src/utilities/logger"
-import type { Validators } from "src/model/entities/Validators"
 
-let cachedBlock: number | null = null
-let cachedAddresses: Set<string> | null = null
 let vetoActive = false
 
-async function getValidatorAddresses(lastBlock: number): Promise<Set<string>> {
-    if (cachedBlock === lastBlock && cachedAddresses !== null) {
-        return cachedAddresses
-    }
+export const DISCREDIT_MS = 60_000
 
-    const validators = (await GCR.getGCRValidatorsAtBlock(
-        lastBlock,
-    )) as Validators[]
-    cachedAddresses = new Set(
-        validators.map(v => v.address).filter((a): a is string => a !== null),
+// Peers whose advertised height sync could not download. Until the entry
+// expires or the peer serves us blocks, its gossip claim does not count
+// as the network being ahead at any height; its corroborated sync state
+// still does. The whole claim is ignored, not just the failed height, so
+// re-advertising one block higher buys nothing.
+const discredited = new Map<string, number>()
+
+/**
+ * Records that `peer` failed to serve blocks it advertised. A peer that
+ * is really ahead serves them on a later attempt and is credited again.
+ */
+export function discreditAdvertisedHeight(peer: Peer): void {
+    const height = peer.gossip?.height ?? 0
+    if (height <= getSharedState.lastBlockNumber) return
+    discredited.set(peer.identity.toLowerCase(), Date.now() + DISCREDIT_MS)
+    log.warning(
+        `[networkAheadVeto] ${peer.identity} advertised height ${height} but could not serve it; ignoring its claims for ${DISCREDIT_MS / 1000}s`,
     )
-    cachedBlock = lastBlock
-    return cachedAddresses
+}
+
+/** `peer` served blocks, so its advertised height counts again. */
+export function creditAdvertisedHeight(peer: Peer): void {
+    discredited.delete(peer.identity.toLowerCase())
+}
+
+export function clearDiscreditedHeights(): void {
+    discredited.clear()
+}
+
+/** The height this peer is believed to be at, discredited claims excluded. */
+export function credibleHeight(peer: Peer, now = Date.now()): number {
+    const corroborated = peer.sync.block ?? 0
+    const key = peer.identity.toLowerCase()
+    const until = discredited.get(key)
+    if (until !== undefined) {
+        if (until > now) return corroborated
+        discredited.delete(key)
+    }
+    return Math.max(corroborated, peer.gossip?.height ?? 0)
 }
 
 export async function getAheadValidatorPeers(): Promise<Peer[]> {
     const ourBlock = getSharedState.lastBlockNumber
     const onlinePeers = await PeerManager.getInstance().getOnlinePeers()
-    const aheadPeers = onlinePeers.filter(peer => peer.sync.block > ourBlock)
+    // peer.sync is corroborated and can never exceed our own head; the
+    // signed self-attested head from gossip heights records is what lets
+    // a lagging node see the network is ahead at all.
+    const now = Date.now()
+    const aheadPeers = onlinePeers.filter(
+        peer => credibleHeight(peer, now) > ourBlock,
+    )
 
     if (aheadPeers.length === 0) {
         return []
     }
 
-    const validatorAddresses = await getValidatorAddresses(ourBlock)
+    const validatorAddresses = await getStakedSet()
     if (validatorAddresses.size === 0) {
         // Same bootstrap edge case guarded in peerlistMerge/getShard: with no
         // validator set to filter against, ANY peer claiming a higher block
@@ -50,7 +81,9 @@ export async function getAheadValidatorPeers(): Promise<Peer[]> {
         return aheadPeers
     }
 
-    return aheadPeers.filter(peer => validatorAddresses.has(peer.identity))
+    return aheadPeers.filter(peer =>
+        validatorAddresses.has(peer.identity.toLowerCase()),
+    )
 }
 
 export async function isNetworkAhead(context: string): Promise<boolean> {
@@ -74,6 +107,7 @@ export async function isNetworkAhead(context: string): Promise<boolean> {
                 aheadPeers.map(peer => ({
                     peer: peer.connection.string,
                     block: peer.sync.block,
+                    advertised: peer.gossip?.height ?? null,
                 })),
             ),
     )

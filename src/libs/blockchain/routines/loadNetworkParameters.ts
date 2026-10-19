@@ -49,6 +49,9 @@ export async function loadNetworkParameters(
     for (const upgrade of active) {
         if (!upgrade.proposedParameters) continue
         for (const [key, value] of Object.entries(upgrade.proposedParameters)) {
+            // shardSize is a static genesis constant, never governable;
+            // a stray key on an old row must not reach consensus.
+            if (key === "shardSize") continue
             if (key === "featureFlags" && value && typeof value === "object") {
                 Object.assign(
                     params.featureFlags,
@@ -60,13 +63,18 @@ export async function loadNetworkParameters(
         }
     }
 
+    // shardSize flows the other way: block 0 → sharedState → the
+    // published parameter view. The SDK type still carries the field,
+    // so report the real chain value when genesis has been loaded.
+    if (getSharedState.hasShardSize) {
+        params.shardSize = getSharedState.shardSize
+    }
+
     getSharedState.networkParameters = params
-    // Mirror onto flat fields read by calculateCurrentGas / getShard.
+    // Mirror onto flat fields read by calculateCurrentGas.
     ;(getSharedState as unknown as { rpcFee: number }).rpcFee = params.rpcFee
     ;(getSharedState as unknown as { networkFee: number }).networkFee =
         params.networkFee
-    ;(getSharedState as unknown as { shardSize: number }).shardSize =
-        params.shardSize
     // DEM-665: additional_fee is governance-mutable and read by the
     // post-fork fee-distribution path. Mirror onto the flat field so
     // calculateFeeBreakdown picks up governance changes without a

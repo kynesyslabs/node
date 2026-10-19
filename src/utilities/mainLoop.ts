@@ -41,12 +41,12 @@ export default async function mainLoop() {
             intervalMs: interval,
             budgetMs: 30_000,
         }),
-        startLoopTask({
-            name: "sync_guard",
-            fn: syncGuardTask,
-            intervalMs: interval,
-            budgetMs: 30_000,
-        }),
+        // startLoopTask({
+        //     name: "sync_guard",
+        //     fn: syncGuardTask,
+        //     intervalMs: interval,
+        //     budgetMs: 30_000,
+        // }),
         startLoopTask({
             name: "consensus_trigger",
             fn: consensusTriggerTask,
@@ -130,19 +130,26 @@ async function consensusTriggerTask() {
         return
     }
 
-    const checkedAt = getSharedState.networkAheadCheckedAt
-    const maxVerdictAge = Math.max(3 * getSharedState.mainLoopSleepTime, 30_000)
-    if (checkedAt === null || Date.now() - checkedAt > maxVerdictAge) {
-        log.warning(
-            "[MAIN LOOP] Network-ahead verdict is missing or stale, skipping consensus this tick",
-            true,
+    if (await isNetworkAhead("mainLoop")) {
+        fastSync([], "networkAheadVeto").catch(e =>
+            handleError(e, "SYNC", { source: "networkAheadVeto" }),
         )
         return
     }
 
-    if (getSharedState.networkAhead) {
-        return
-    }
+    // const checkedAt = getSharedState.networkAheadCheckedAt
+    // const maxVerdictAge = Math.max(3 * getSharedState.mainLoopSleepTime, 30_000)
+    // if (checkedAt === null || Date.now() - checkedAt > maxVerdictAge) {
+    //     log.warning(
+    //         "[MAIN LOOP] Network-ahead verdict is missing or stale, skipping consensus this tick",
+    //         true,
+    //     )
+    //     return
+    // }
+
+    // if (getSharedState.networkAhead) {
+    //     return
+    // }
 
     // ANCHOR Check if we have to forge the block now
     const isConsensusTimeReached = await consensusTime.checkConsensusTime()

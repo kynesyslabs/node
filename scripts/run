@@ -2,6 +2,8 @@
 
 PG_PORT=5332
 PEER_LIST_FILE="demos_peerlist.json"
+GOSSIP_PORT="${GOSSIP_PORT:-}"
+GOSSIP_KEY_FILE="${GOSSIP_KEY_FILE:-}"
 VERBOSE=false
 NO_TUI=false
 EXTERNAL_DB=false
@@ -82,6 +84,8 @@ OPTIONS:
     -n <true/false>                Skip git pull (useful for custom branches)
     -u <url>                       Override EXPOSED_URL
     -l <path>                      Peer list file (default: demos_peerlist.json)
+    -g <port>                      Gossip (libp2p) TCP port (default: 9095)
+    -k <path>                      Gossip transport key file (default: .demos_gossip_key)
     -r <runtime>                   Force runtime (bun only - node deprecated)
     -b <true/false>                Restore from backup
     -t                             Disable TUI (use legacy scrolling logs)
@@ -324,13 +328,13 @@ check_system_requirements() {
 				# Try to stop the docker container that might be using the port
 				PG_FOLDER="postgres_${PG_PORT}"
 				if [[ -d "${PG_FOLDER}" ]]; then
-					(cd "${PG_FOLDER}" && docker compose down 2>/dev/null) || true
+					(cd "${PG_FOLDER}" && docker compose -f docker-compose.yml down 2>/dev/null) || true
 					sleep 2 # Give Docker time to release the port
 				fi
 
 				# Also try the base postgres folder in case it's using the port
 				if [[ -d "postgres" ]]; then
-					(cd "postgres" && docker compose down 2>/dev/null) || true
+					(cd "postgres" && docker compose -f docker-compose.yml down 2>/dev/null) || true
 					sleep 1
 				fi
 
@@ -381,7 +385,7 @@ function ctrl_c() {
 	HAS_BEEN_INTERRUPTED=true
 	if [[ "${EXTERNAL_DB}" = false ]]; then
 		cd "postgres_${PG_PORT}"
-		docker compose down
+		docker compose -f docker-compose.yml down
 		cd ..
 	fi
 	# Stop TLSNotary container if running (enabled by default)
@@ -482,13 +486,15 @@ for arg in "$@"; do
 done
 
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:r:b:tvehm" opt; do
+while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehm" opt; do
 	case $opt in
 	p) PORT=$OPTARG ;;
 	d) PG_PORT=$OPTARG ;;
 	c) CLEAN=$OPTARG ;;
 	i) IDENTITY_FILE=$OPTARG ;;
 	l) PEER_LIST_FILE=$OPTARG ;;
+	g) GOSSIP_PORT=$OPTARG ;;
+	k) GOSSIP_KEY_FILE=$OPTARG ;;
 	n) GIT_PULL=false ;;
 	u) EXPOSED_URL=$OPTARG ;;
 	r) RUNTIME=$OPTARG ;;
@@ -592,6 +598,12 @@ if [[ ! -z "${EXPOSED_URL}" ]]; then
 	echo "   📡 Exposed URL: $EXPOSED_URL"
 fi
 echo "   👥 Peer List: $PEER_LIST_FILE"
+if [[ ! -z "${GOSSIP_PORT}" ]]; then
+	echo "   📣 Gossip Port: $GOSSIP_PORT"
+fi
+if [[ ! -z "${GOSSIP_KEY_FILE}" ]]; then
+	echo "   🔐 Gossip Key File: $GOSSIP_KEY_FILE"
+fi
 if [[ "${EXTERNAL_DB}" = true ]]; then
 	echo "   🔗 Mode: External database (DATABASE_URL)"
 elif [[ "${RESTORE}" = "true" ]]; then
@@ -659,6 +671,30 @@ export IDENTITY_FILE=$IDENTITY_FILE
 export EXPOSED_URL=$EXPOSED_URL
 export PEER_LIST_FILE=$PEER_LIST_FILE
 export RESTORE=${RESTORE}
+if [[ ! -z "${GOSSIP_PORT}" ]]; then
+	export GOSSIP_PORT=$GOSSIP_PORT
+fi
+if [[ ! -z "${GOSSIP_KEY_FILE}" ]]; then
+	export GOSSIP_KEY_FILE=$GOSSIP_KEY_FILE
+fi
+
+# The gossip sidecar runs under Node (libp2p does not work under Bun for
+# frames >1KB); make sure the runtime and the bundle are present.
+if [[ "${GOSSIP_ENABLED:-true}" != "false" ]]; then
+	if ! command -v node >/dev/null 2>&1; then
+		echo "❌ Gossip is enabled but Node.js is not on PATH (the gossip sidecar requires Node >= 20)."
+		echo "   Install Node, or start with GOSSIP_ENABLED=false."
+		exit 1
+	fi
+	SIDECAR_BUNDLE="sidecar/dist/gossip-sidecar.mjs"
+	if [[ ! -f "$SIDECAR_BUNDLE" || "sidecar/src/index.js" -nt "$SIDECAR_BUNDLE" ]]; then
+		echo "🔧 Building gossip sidecar..."
+		(cd sidecar && bun install --silent && node build.mjs) || {
+			echo "❌ Gossip sidecar build failed"
+			exit 1
+		}
+	fi
+fi
 
 # Only manage PostgreSQL if not using external database
 if [[ "${EXTERNAL_DB}" = false ]]; then
@@ -669,9 +705,19 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 	# If the folder doesn't exist yet, create it by copying the base postgres folder
 	# This allows multiple instances to run simultaneously with different ports
 	if [ ! -d "$PG_FOLDER" ]; then
-		cp -r postgres $PG_FOLDER
+		cp -r postgres "$PG_FOLDER"
 	fi
-	cd $PG_FOLDER || exit
+	# The folder may exist but lack the template (manual mkdir, partial cleanup,
+	# root-owned leftovers). Without docker-compose.yml here, Compose walks up to
+	# the repo root and tries to build the full node stack instead.
+	if [ ! -f "$PG_FOLDER/docker-compose.yml" ]; then
+		echo "⚠️  ${PG_FOLDER}/docker-compose.yml missing; restoring from postgres/ template"
+		cp postgres/docker-compose.yml postgres/*.sh "$PG_FOLDER/" || {
+			echo "❌ Could not restore ${PG_FOLDER}/docker-compose.yml (check ownership: ls -la ${PG_FOLDER})"
+			exit 1
+		}
+	fi
+	cd "$PG_FOLDER" || exit
 
 	# If we are cleaning, we need to remove the database
 	if [[ "${CLEAN}" == "true" ]]; then
@@ -684,7 +730,7 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 	fi
 
 	# Suppressing errors if the database is not running
-	docker compose down >/dev/null 2>&1
+	docker compose -f docker-compose.yml down >/dev/null 2>&1
 	if [[ "${CLEAN}" == "true" ]]; then
 		rm -rf data_"${PG_PORT}" || rm -rf data_"${PG_PORT}"
 		mkdir data_"${PG_PORT}"
@@ -693,7 +739,7 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 	# Finally starting the database
 	echo "🗄️  Starting PostgreSQL database..."
 	log_verbose "Running docker compose up -d in ${PG_FOLDER}"
-	if ! docker compose up -d; then
+	if ! docker compose -f docker-compose.yml up -d; then
 		echo "❌ Failed to start PostgreSQL database"
 		echo "💡 Check Docker Desktop is running and try again"
 		exit 1
@@ -778,7 +824,7 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 		# Stop the database
 		echo "Stopping the database"
 		cd postgres_${PG_PORT} || exit
-		docker compose down
+		docker compose -f docker-compose.yml down
 
 		# Remove the database folder
 		echo "Removing the database folder"
@@ -787,7 +833,7 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 
 		# Start the database
 		echo "Starting the database"
-		docker compose up -d
+		docker compose -f docker-compose.yml up -d
 		cd ..
 
 		# Wait for the database to be available
@@ -946,7 +992,7 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 	# Once exiting, stopping the database
 	echo "🛑 Stopping PostgreSQL database..."
 	cd postgres_${PG_PORT}
-	if docker compose down; then
+	if docker compose -f docker-compose.yml down; then
 		echo "✅ PostgreSQL stopped successfully"
 	else
 		echo "⚠️  Warning: Failed to stop PostgreSQL gracefully"

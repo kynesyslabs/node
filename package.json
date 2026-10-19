@@ -79,7 +79,8 @@
         "testenv:gcr:local": "bun testing/scripts/run-suite.ts gcr-focus --local",
         "testenv:gcr:routine:local": "bun testing/scripts/run-suite.ts gcr-routine --local",
         "testenv:gcr-health:local": "bun testing/scripts/run-suite.ts gcr-focus --local",
-        "preflight:fork": "bun run testing/forks/preflight.ts"
+        "preflight:fork": "bun run testing/forks/preflight.ts",
+        "sidecar:build": "cd sidecar && bun install && node build.mjs"
     },
     "devDependencies": {
         "@jest/globals": "^30.2.0",

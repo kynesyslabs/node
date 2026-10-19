@@ -194,6 +194,10 @@ services:
       L2PS_HISTORY_REQUIRE_V2: ${L2PS_HISTORY_REQUIRE_V2:-false}
       L2PS_MESSAGING_ENABLED: ${L2PS_MESSAGING_ENABLED:-false}
       L2PS_MESSAGING_PORT: ${L2PS_MESSAGING_PORT:-3006}
+      # Gossip sidecar (libp2p). The node advertises EXPOSED_URL's host with
+      # this port, so it must be published 1:1 below.
+      GOSSIP_ENABLED: ${GOSSIP_ENABLED:-true}
+      GOSSIP_PORT: ${GOSSIP_PORT:-9095}
       # Setup check at start and the `bun run setup` answers (empty = unset).
       # The subnet key and IV variables are not listed on purpose: values here
       # show up in `docker inspect`. Use DEMOS_SETUP_L2PS_KEY_FILE / _IV_FILE.
@@ -241,6 +245,9 @@ services:
       - "${RPC_PORT:-53550}:${RPC_PORT:-53550}"
       - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
       - "${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
+      # Gossip sidecar (libp2p TCP). Peers dial EXPOSED_URL's host on this
+      # port, so it is published 1:1 like RPC_PORT.
+      - "${GOSSIP_PORT:-9095}:${GOSSIP_PORT:-9095}"
       # L2PS messaging WebSocket. The SDK client opens its own connection to
       # this port (it does not go through RPC), so enabling messaging in the
       # container is useless unless the port is published. Nothing listens

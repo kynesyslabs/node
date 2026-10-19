@@ -119,7 +119,6 @@ export function loadConfig(): Readonly<AppConfig> {
 
         core: {
             prod,
-            shardSize: envInt(EnvKey.SHARD_SIZE, d.core.shardSize),
             mainLoopSleepTime: envInt(
                 EnvKey.MAIN_LOOP_SLEEP_TIME,
                 d.core.mainLoopSleepTime,
@@ -474,6 +473,16 @@ export function loadConfig(): Readonly<AppConfig> {
         ipfs: {
             swarmPort: envInt(EnvKey.IPFS_SWARM_PORT, d.ipfs.swarmPort),
             apiPort: envInt(EnvKey.IPFS_API_PORT, d.ipfs.apiPort),
+        },
+
+        gossip: {
+            enabled: envBool(EnvKey.GOSSIP_ENABLED, d.gossip.enabled),
+            port: envInt(EnvKey.GOSSIP_PORT, d.gossip.port),
+            heightsIntervalMs: envInt(
+                EnvKey.GOSSIP_HEIGHTS_INTERVAL,
+                d.gossip.heightsIntervalMs,
+            ),
+            keyFile: envStr(EnvKey.GOSSIP_KEY_FILE, d.gossip.keyFile),
         },
     }
 

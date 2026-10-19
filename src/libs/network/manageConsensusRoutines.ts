@@ -3,7 +3,7 @@ import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorS
 import { emptyResponse } from "./server_rpc"
 import _ from "lodash"
 import { getSharedState } from "src/utilities/sharedState"
-import getShard from "../consensus/v2/routines/getShard"
+import getRoundCommittee from "../consensus/v2/routines/roundCommittee"
 import manageProposeBlockHash from "../consensus/v2/routines/manageProposeBlockHash"
 import { ValidationData } from "../consensus/v2/interfaces"
 import { checkConsensusTime } from "../consensus/routines/consensusTime"
@@ -50,10 +50,11 @@ async function handleGreenlight(
     try {
         // TODO: Check if the sender is the secretary (without verifying the signature
         // as we have already done that) in validateHeaders
-        const [blockRef, timestamp, validatorPhase] = params as [
+        const [blockRef, timestamp, validatorPhase, peerlist] = params as [
             number, // blockRef
             number, // timestamp
             number, // validatorPhase
+            unknown?, // merged peerlist, phase 3 only
         ]
 
         const manager = SecretaryManager.getInstance(blockRef)
@@ -66,8 +67,8 @@ async function handleGreenlight(
         if (sender !== manager.secretary.identity) {
             log.debug("returning a 401")
             response.result = 401
-            response.response = "Greenlight not accepted"
-            response.extra = "Secretary identity mismatch"
+            response.response = "Greenlight not accepted: secretary identity mismatch"
+            response.extra = manager.committeeView("committeeMismatch")
             response.require_reply = false
             return response
         }
@@ -85,6 +86,7 @@ async function handleGreenlight(
         const greenLightReceived = await manager.receiveGreenLight(
             timestamp,
             validatorPhase,
+            peerlist,
         )
         response.result = greenLightReceived ? 200 : 400
         response.response = greenLightReceived
@@ -185,8 +187,11 @@ export default async function manageConsensusRoutines(
     }
 
     // Also refuses the routine if we are not in the shard
-    const { commonValidatorSeed } = await getCommonValidatorSeed()
-    const shard = await getShard(commonValidatorSeed)
+    const {
+        members: shard,
+        seed: commonValidatorSeed,
+        frozen,
+    } = await getRoundCommittee()
     const ourId = getSharedState.publicKeyHex
     let isInShard = false
 
@@ -197,7 +202,7 @@ export default async function manageConsensusRoutines(
         }
     }
 
-    log.debug(`isInShard: ${isInShard}`)
+    log.debug(`isInShard: ${isInShard} (${frozen ? "frozen" : "drawn"} committee)`)
 
     inShardCheck: if (!isInShard) {
         // INFO: If is a greenlight request, return 200
@@ -355,7 +360,7 @@ export default async function manageConsensusRoutines(
                     return {
                         result: 200,
                         response: "Invalid seed detected",
-                        extra: 450,
+                        extra: manager.committeeView("seedMismatch"),
                         require_reply: false,
                     }
                 }
@@ -412,7 +417,7 @@ export default async function manageConsensusRoutines(
                 if (!manager.shard.members.some(m => m.identity === sender)) {
                     response.result = 401
                     response.response = "Sender not in the consensus"
-                    response.extra = "Sender not in the consensus"
+                    response.extra = manager.committeeView("committeeMismatch")
                     return response
                 }
 
@@ -437,6 +442,9 @@ export default async function manageConsensusRoutines(
                 // NOTE: We also attach the block timestamp to the response
                 data["timestamp"] = manager.blockTimestamp
                 data["blockRef"] = manager.shard.blockRef
+                if (manager.mergedPeerlist) {
+                    data["peerlist"] = manager.mergedPeerlist
+                }
                 response.extra = data
             } catch (error) {
                 // INFO: Node is secretary, but hasn't started the secretary routine yet!

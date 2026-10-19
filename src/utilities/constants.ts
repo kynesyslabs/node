@@ -17,6 +17,8 @@ export const DEFAULT_BLOCK_TIME = 10
 // --- Peer management ---
 /** How often to recheck peers (ms) */
 export const PEER_RECHECK_INTERVAL_MS = 10_000
+/** A peer not heard from for this long no longer counts as online. */
+export const PEER_LIVENESS_WINDOW_MS = 30_000
 
 /**
  * Max transactions accepted from a single peer in one mergeMempools round.
@@ -29,17 +31,20 @@ export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
 
 /**
  * Validator identities guaranteed a committee slot whenever they are
- * eligible and online (see getShard).
+ * eligible and online, placed at the front of the shard in this order so
+ * the first online pin acts as secretary (see getShard).
  */
 export const PINNED_SHARD_IDENTITIES: readonly string[] = [
     "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156",
     "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82",
+    "0xdad5ae081825bcf93353bb76157ae8368c33fee6fc0f692b85155bb37e4ae0ab",
 ]
 
 // --- Batch sync ---
 export const BATCH_SYNC_BLOCK_SIZE = 100
-export const BATCH_SYNC_TX_SIZE = 100
-export const BATCH_SYNC_TX_LIMIT = 100
+/** Hashes per getTxsByHashes request (client chunk) and per response (server cap). */
+export const BATCH_SYNC_TX_SIZE = 1000
+export const BATCH_SYNC_TX_LIMIT = 1000
 export const BATCH_SYNC_BLOCK_LIMIT = 100
 
 // --- Rate limiting defaults ---

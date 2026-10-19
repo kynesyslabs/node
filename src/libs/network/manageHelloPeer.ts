@@ -13,6 +13,11 @@ import {
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { helloResponseMessage } from "../peer/helloAuth"
+import GossipManager from "../gossip/GossipManager"
+import { parseNodeUrl } from "src/config"
+import { reportTwin } from "../peer/identityLiveness"
+
+const HELLO_PEERLIST_SAMPLE_SIZE = 32
 
 export interface HelloPeerRequest {
     url: string
@@ -56,16 +61,6 @@ export async function manageHelloPeer(
 
     const peerObject = new Peer()
     peerObject.identity = content.publicKey
-
-    if (peerObject.identity === getSharedState.publicKeyHex) {
-        response.result = 200
-        response.response = true
-        response.extra = {
-            msg: "Peer is us: skipping",
-        }
-        return response
-    }
-
     peerObject.connection.string = content.url
 
     if (sender.toLowerCase() !== content.publicKey.toLowerCase()) {
@@ -103,6 +98,22 @@ export async function manageHelloPeer(
         return response
     }
 
+    if (
+        peerObject.identity.toLowerCase() ===
+        getSharedState.publicKeyHex.toLowerCase()
+    ) {
+        const theirs = parseNodeUrl(content.url)?.origin
+        const ours = parseNodeUrl(getSharedState.exposedUrl)?.origin
+        if (theirs && theirs !== ours) reportTwin("hello", theirs)
+        response.result = 200
+        response.response = true
+        response.extra = {
+            msg: "Peer is us: skipping",
+            ...(content.nonce ? await signHelloResponse(content.nonce) : {}),
+        }
+        return response
+    }
+
     // Add the peer as authenticated
     peerObject.verification.status = true
 
@@ -116,7 +127,19 @@ export async function manageHelloPeer(
 
     const peerManager = PeerManager.getInstance()
 
-    if (peerManager.getPeer(peerObject.identity)) {
+    // Where we last saw the caller online, if that is somewhere else.
+    const known = peerManager.getPeer(peerObject.identity)
+    const knownOrigin = known
+        ? parseNodeUrl(known.connection.string)?.origin
+        : null
+    const callerKnownAt =
+        known?.status.online &&
+        knownOrigin &&
+        knownOrigin !== parseNodeUrl(content.url)?.origin
+            ? known.connection.string
+            : undefined
+
+    if (known) {
         // Known peer: the signed hello may update its URL and sync data
         const [isAddedToPeerlist, message] = peerManager.addPeer(
             peerObject,
@@ -159,11 +182,24 @@ export async function manageHelloPeer(
 
     // INFO: Return a list of all our connected peers
 
+    const gossipAddr = GossipManager.isEnabled()
+        ? GossipManager.getInstance().getListenAddr()
+        : null
+
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
+        ...(callerKnownAt ? { callerKnownAt } : {}),
         ...(content.nonce ? await signHelloResponse(content.nonce) : {}),
+        ...(gossipAddr
+            ? {
+                  gossip: {
+                      peerId: GossipManager.getInstance().getPeerId(),
+                      multiaddr: gossipAddr,
+                  },
+              }
+            : {}),
         syncData: peerManager.ourSyncData,
         peerlist: peerManager
             .getPeers()
@@ -172,6 +208,8 @@ export async function manageHelloPeer(
                     peer.identity !== getSharedState.publicKeyHex &&
                     peer.identity !== content.publicKey,
             )
+            .sort(() => Math.random() - 0.5)
+            .slice(0, HELLO_PEERLIST_SAMPLE_SIZE)
             .map(peer => ({
                 url: peer.connection.string,
                 publicKey: peer.identity,

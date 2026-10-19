@@ -155,31 +155,22 @@ export async function getEligiblePool(
 }
 
 /**
- * Ensure every pinned identity that is an online-eligible candidate holds
- * a committee slot, mutating `shard` in place.
+ * Move every pinned identity that is an online-eligible candidate to the
+ * front of the committee, in `PINNED_SHARD_IDENTITIES` order, mutating
+ * `shard` in place.
  *
- * A pin missing from the draw replaces the last non-pinned member, walking
- * backwards. Slot 0 is never displaced: the secretary is
- * `shard.members[0]`, so rotation stays with the seeded draw. A pin that
- * is offline, outside the eligible pool, or left without a replaceable
- * slot is skipped — pinning is best-effort and never blocks a round.
- * Deterministic given (seed, pool, online view): the same inputs the draw
- * itself uses.
+ * Deterministic given (seed, pool, online view)
  *
  * @returns A per-pin outcome summary for the debug log.
  */
 export function pinShardIdentities(shard: Peer[], candidates: Peer[]): string {
-    const pinnedSet = new Set(PINNED_SHARD_IDENTITIES)
-    const shardIds = new Set(shard.map(p => p.identity.toLowerCase()))
+    const size = shard.length
+    const drawnIds = new Set(shard.map(p => p.identity.toLowerCase()))
     const outcomes: string[] = []
 
-    let replaceIndex = shard.length - 1
+    const front: Peer[] = []
     for (const pinned of PINNED_SHARD_IDENTITIES) {
         const label = pinned.slice(0, 10)
-        if (shardIds.has(pinned)) {
-            outcomes.push(`${label}=drawn`)
-            continue
-        }
         const candidate = candidates.find(
             p => p.identity.toLowerCase() === pinned,
         )
@@ -187,32 +178,49 @@ export function pinShardIdentities(shard: Peer[], candidates: Peer[]): string {
             outcomes.push(`${label}=absent`)
             continue
         }
-        while (
-            replaceIndex > 0 &&
-            pinnedSet.has(shard[replaceIndex].identity.toLowerCase())
-        ) {
-            replaceIndex--
-        }
-        if (replaceIndex <= 0) {
+        if (front.length >= size) {
             outcomes.push(`${label}=no-slot`)
             continue
         }
-        shard[replaceIndex] = candidate
-        shardIds.add(pinned)
-        outcomes.push(`${label}=swapped`)
-        replaceIndex--
+        front.push(candidate)
+        outcomes.push(`${label}=${drawnIds.has(pinned) ? "drawn" : "swapped"}`)
     }
+
+    if (front.length === 0) {
+        return outcomes.join(",")
+    }
+
+    const frontIds = new Set(front.map(p => p.identity.toLowerCase()))
+    const rest = shard.filter(p => !frontIds.has(p.identity.toLowerCase()))
+    shard.splice(0, shard.length, ...front, ...rest.slice(0, size - front.length))
 
     return outcomes.join(",")
 }
 
 /**
+ * Deterministic permutation of the pool under `seed`. Ranking the full
+ * pool before the live filter keeps a one-peer view difference to a
+ * one-slot difference in the committee.
+ */
+export function rankPool(seed: string, pool: string[]): string[] {
+    const deterministicRandomness = Alea(seed)
+    const available = [...pool]
+    const ranked: string[] = []
+    while (available.length > 0) {
+        const index = Math.floor(deterministicRandomness() * available.length)
+        ranked.push(available[index])
+        available.splice(index, 1)
+    }
+    return ranked
+}
+
+/**
  * Committee for the next block: the deterministic eligible pool at
- * `lastBlockNumber`, filtered to peers currently indexed in the
- * PeerManager online list (ourselves always included), drawn with
- * Alea(seed). Liveness-filtered and therefore view-dependent —
- * verifyBlock must validate signers against getEligiblePool, never
- * against this selection.
+ * `lastBlockNumber` ranked with Alea(seed), then filtered to peers
+ * currently indexed in the PeerManager online list (ourselves always
+ * included), taking the first shardSize survivors. Liveness-filtered and
+ * therefore view-dependent — verifyBlock must validate signers against
+ * getEligiblePool, never against this selection.
  */
 export default async function getShard(
     seed: string,
@@ -231,38 +239,42 @@ export default async function getShard(
     }
 
     const selfId = getSharedState.publicKeyHex
-    const candidates: Peer[] = []
+    const liveByIdentity = new Map<string, Peer>()
+    let behind = 0
     for (const identity of pool) {
         if (identity === selfId) {
-            candidates.push(peerman.getPeer(identity) ?? new Peer("", identity))
+            liveByIdentity.set(
+                identity,
+                peerman.getPeer(identity) ?? new Peer("", identity),
+            )
             continue
         }
         const online = onlineByIdentity.get(identity)
-        if (online) {
-            candidates.push(online)
+        if (!online) continue
+        // A peer more than one block behind the tip cannot validate the
+        // next block. One block behind is usually a status report in flight.
+        const knownHeight = Math.max(
+            online.sync?.block ?? 0,
+            online.gossip?.height ?? 0,
+        )
+        if (knownHeight < lastBlockNumber - 1) {
+            behind++
+            continue
         }
+        liveByIdentity.set(identity, online)
     }
+    const candidates = [...liveByIdentity.values()]
 
-    let committeeSize = getSharedState.shardSize
-    if (candidates.length < committeeSize) {
-        committeeSize = candidates.length
-    }
-
-    const deterministicRandomness = Alea(seed)
-    const available = [...candidates]
-    const shard: Peer[] = []
-
-    for (let i = 0; i < committeeSize && available.length > 0; i++) {
-        const index = Math.floor(deterministicRandomness() * available.length)
-        shard.push(available[index])
-        available.splice(index, 1)
-    }
+    const shard = rankPool(seed, pool)
+        .filter(identity => liveByIdentity.has(identity))
+        .slice(0, getSharedState.shardSize)
+        .map(identity => liveByIdentity.get(identity))
 
     const pinOutcome = pinShardIdentities(shard, candidates)
 
     log.debug(
         `[getShard] pool at block ${lastBlockNumber}: ${pool.length}; ` +
-            `online candidates: ${candidates.length}; shard: ${shard.length}; ` +
+            `online candidates: ${candidates.length} (${behind} behind the tip); shard: ${shard.length}; ` +
             `pins: ${pinOutcome}`,
     )
 

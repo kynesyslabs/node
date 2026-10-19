@@ -16,6 +16,10 @@ import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
 import { Config } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks"
+import {
+    loadShardSizeFromGenesisBlock,
+    readGenesisShardSize,
+} from "@/libs/consensus/genesisShardSize"
 
 function getLatestGCRRecoveryData() {
     if (!Config.getInstance().core.restore) {
@@ -119,6 +123,7 @@ export default async function findGenesisBlock() {
     const genesisBlockHash = await Chain.getGenesisBlockHash()
     if (genesisBlockHash) {
         log.info(`[GENESIS] Genesis block found. Hash: ${genesisBlockHash}`)
+        await loadShardSizeFromGenesisBlock()
         return
     }
 
@@ -139,8 +144,13 @@ export default async function findGenesisBlock() {
         applyRecoveryData(genesisData, recoveryGenesis)
     }
 
+    // Fail before block 0 is generated: a genesis without a valid shard
+    // size would be committed, hashed, and impossible to fix in place.
+    readGenesisShardSize(genesisData)
+
     // Adding the genesis block to the chain
-    const created = await Chain.generateGenesisBlock(genesisData)
+    const genesisBlock = await Chain.generateGenesisBlock(genesisData)
     getSharedState.genesisCreatedThisBoot = true
-    return created
+    await loadShardSizeFromGenesisBlock()
+    return genesisBlock
 }

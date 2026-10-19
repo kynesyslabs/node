@@ -51,6 +51,17 @@ export default class Peer {
         timestamp: number // timestamp of the last online status check
         ready: boolean // is the peer ready to be used (aka 1. synced, 2. verified, 3. online, 4. not in an error state)  // TODO Implement
     }
+    // gossip transport binding + self-attested head, learned from signed
+    // heights records. Unlike peer.sync this is NOT corroborated against
+    // our chain — sync uses it to discover the network head; consensus
+    // admission never reads it.
+    public gossip?: {
+        peerId: string
+        addrs: string[]
+        seq: number
+        height?: number
+        headHash?: string
+    }
 
     get isLocalNode(): boolean {
         return (
@@ -179,7 +190,7 @@ export default class Peer {
                 "] Max retries reached for method: " +
                 methodString +
                 " - " +
-                response,
+                JSON.stringify(response),
         )
         return {
             result: 400,
@@ -333,6 +344,11 @@ export default class Peer {
                 log.info(
                     `[RPC Call] [${method}] [${timestampReadable}] Response OK: ${response.data.result}`,
                 )
+            }
+
+            // Any answer proves the peer is alive.
+            if (!this.isLocalNode) {
+                PeerManager.getInstance().updatePeerLastSeen(this.identity)
             }
 
             return response.data

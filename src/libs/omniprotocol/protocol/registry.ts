@@ -62,7 +62,6 @@ import {
     handleL2PSSyncMempool,
     handleL2PSGetBatchStatus,
     handleL2PSGetParticipation,
-    handleL2PSHashUpdate,
 } from "./handlers/l2ps"
 
 export interface HandlerDescriptor {
@@ -437,7 +436,6 @@ const DESCRIPTORS: HandlerDescriptor[] = [
     { opcode: OmniOpcode.L2PS_SYNC_MEMPOOL, name: "l2ps_syncMempool", authRequired: true, handler: handleL2PSSyncMempool },
     { opcode: OmniOpcode.L2PS_GET_BATCH_STATUS, name: "l2ps_getBatchStatus", authRequired: false, handler: handleL2PSGetBatchStatus },
     { opcode: OmniOpcode.L2PS_GET_PARTICIPATION, name: "l2ps_getParticipation", authRequired: false, handler: handleL2PSGetParticipation },
-    { opcode: OmniOpcode.L2PS_HASH_UPDATE, name: "l2ps_hashUpdate", authRequired: true, handler: handleL2PSHashUpdate },
 
     // 0xFX Meta
     {

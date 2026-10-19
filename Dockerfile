@@ -53,7 +53,12 @@ COPY scripts/     ./scripts/
 COPY data/        ./data/
 COPY sdk/         ./sdk/
 COPY libs/        ./libs/
+COPY sidecar/     ./sidecar/
 COPY tsconfig.json bunfig.toml ormconfig.json ./
+
+# Build the gossip sidecar into a single self-contained bundle; its
+# node_modules never ship (only dist/ is used at runtime).
+RUN cd sidecar && bun install --frozen-lockfile && bun build.mjs && rm -rf node_modules
 
 # Patch falcon-sign so uncaught WASM exceptions are logged before rethrow.
 # Mirrors scripts/run::patch_falcon_sign. Idempotent and tolerant of a
@@ -164,9 +169,14 @@ LABEL org.opencontainers.image.source="https://github.com/kynesyslabs/node" \
       org.opencontainers.image.vendor="Kynesys Labs"
 
 # Runtime essentials only: curl for HEALTHCHECK, ca-certificates for TLS.
+# Node.js is required by the gossip sidecar (libp2p cannot run under Bun
+# for frames >1KB; see specs/gossip-sidecar.md).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
+        gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user. The base image already ships a `bun` user/group at uid/gid

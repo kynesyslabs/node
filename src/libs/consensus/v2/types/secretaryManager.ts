@@ -1,7 +1,9 @@
 import { ValidationPhase, emptyValidationPhase } from "./validationStatusTypes"
 import { Shard } from "./shardTypes"
+import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
 import getShard from "../routines/getShard"
+import Chain from "src/libs/blockchain/chain"
 import _ from "lodash"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import { Waiter } from "src/utilities/waiter"
@@ -12,12 +14,39 @@ import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getCommitteeFloor } from "../routines/getShard"
+import { debugAssertionsEnabled } from "@/libs/debug/nonceTrace"
+import {
+    computeMergedPeerlist,
+    freezeLocalSyncObservations,
+    validateMergedPeerlist,
+} from "../routines/peerlistMerge"
+
+/** The phase whose greenlight carries the secretary's merged peerlist. */
+export const PEERLIST_PHASE = 3
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
         super(message)
         this.name = "AbortConsensusError"
     }
+}
+
+/** A node's view of the round, attached to rejections of a peer that drew a different one. */
+export interface CommitteeView {
+    reason: "committeeMismatch" | "seedMismatch"
+    blockRef: number
+    seed: string
+    secretary: string
+    shard: string[]
+}
+
+function isCommitteeView(value: unknown): value is CommitteeView {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        Array.isArray((value as CommitteeView).shard) &&
+        typeof (value as CommitteeView).reason === "string"
+    )
 }
 
 // ANCHOR SecretaryManager
@@ -51,8 +80,108 @@ export default class SecretaryManager {
     public blockTimestamp: number = null
     public unresponsiveMembers = new Set<string>()
     public ended = false
+    /** The peerlist committed in this round's block, dictated by the secretary. */
+    public mergedPeerlist: string[] | null = null
 
     constructor() {}
+
+    /** Secretary only: merges the round's contributions once. */
+    public async ensureMergedPeerlist(): Promise<string[]> {
+        if (!this.mergedPeerlist) {
+            this.mergedPeerlist = await computeMergedPeerlist(
+                this.shard.blockRef,
+                this.shard.members.map(m => m.identity),
+            )
+            log.only(
+                `[SECRETARY ROUTINE] Merged peerlist for block ${this.shard.blockRef}: ${this.mergedPeerlist.length} validators`,
+            )
+        }
+        return this.mergedPeerlist
+    }
+
+    /** Member only: adopts the secretary's merged peerlist after checking it. */
+    public async receiveMergedPeerlist(peerlist: unknown): Promise<void> {
+        const valid = await validateMergedPeerlist(
+            this.shard.blockRef,
+            peerlist,
+            this.shard.members.map(m => m.identity),
+        )
+        if (!valid) {
+            log.error(
+                `[SECRETARY ROUTINE] Rejected the merged peerlist from ${this.secretary?.identity} for block ${this.shard.blockRef}: ${JSON.stringify(peerlist)}`,
+            )
+            return
+        }
+        this.mergedPeerlist = valid
+    }
+
+    /** The round's peerlist: computed if we are the secretary, else as received. */
+    public async resolveMergedPeerlist(): Promise<string[]> {
+        if (this.checkIfWeAreSecretary()) {
+            return await this.ensureMergedPeerlist()
+        }
+        if (!this.mergedPeerlist) {
+            throw new AbortConsensusError(
+                `Merged peerlist for block ${this.shard.blockRef} not received from the secretary`,
+            )
+        }
+        return this.mergedPeerlist
+    }
+
+    /** Our view of the round, for the peer we are rejecting. */
+    public committeeView(reason: CommitteeView["reason"]): CommitteeView {
+        return {
+            reason,
+            blockRef: this.shard?.blockRef ?? null,
+            seed: this.shard?.CVSA ?? "",
+            secretary: this.shard?.secretaryKey ?? "",
+            shard: (this.shard?.members ?? []).map(m => m.identity),
+        }
+    }
+
+    /**
+     * Logs both views of the round side by side. Exits under debug
+     * assertions, since one of the two nodes drew the wrong committee.
+     */
+    public reportCommitteeMismatch(
+        peerId: string,
+        theirs: unknown,
+        context: string,
+    ): void {
+        const ours = this.committeeView("committeeMismatch")
+        log.error(
+            `[COMMITTEE MISMATCH] ${context}: ${peerId} rejected us for block ${ours.blockRef}`,
+        )
+        log.error(`Our view: ${JSON.stringify(ours, null, 2)}`)
+        log.error(
+            `Their view: ${JSON.stringify(
+                isCommitteeView(theirs) ? theirs : { raw: theirs },
+                null,
+                2,
+            )}`,
+        )
+        if (debugAssertionsEnabled()) {
+            process.exit(1)
+        }
+    }
+
+    /** Throws when the network clock is still inside the parent block's interval. */
+    private async assertParentIntervalElapsed(
+        lastBlockNumber: number,
+    ): Promise<void> {
+        const parent = await Chain.getBlockByNumber(lastBlockNumber)
+        const parentTimestamp = parent?.content?.timestamp
+        if (typeof parentTimestamp !== "number") return
+
+        const interval = getSharedState.getConsensusTime()
+        const floor = parentTimestamp + interval
+        const now = getNetworkTimestamp()
+        if (now < floor) {
+            throw new AbortConsensusError(
+                `Too early to forge block ${this.shard.blockRef}: now ${now} is below the floor of ${floor} (parent ${parentTimestamp} + ${interval}s)`,
+            )
+        }
+    }
 
     /**
      * Initializes the shard, including the members and the validation phases.
@@ -71,7 +200,9 @@ export default class SecretaryManager {
         }
         this.unresponsiveMembers = new Set<string>()
         this.blockTimestamp = null
+        this.mergedPeerlist = null
         this.registerUnderShardBlockRef()
+        freezeLocalSyncObservations(this.shard.blockRef)
 
         // Reusing the method to create the members
         this.shard.members = await getShard(cVSA)
@@ -109,7 +240,8 @@ export default class SecretaryManager {
             )
         }
 
-        // The secretary is the first member of the deterministic draw
+        // The secretary is the first member: the first online pinned
+        // identity, or the head of the deterministic draw when no pin is online
         this.shard.secretaryKey = this.shard.members[0].identity
 
         log.only("\n\n\n")
@@ -122,6 +254,10 @@ export default class SecretaryManager {
             )}`,
         )
         log.only(`SECRETARY: ${this.secretary.identity}`)
+
+        if (this.checkIfWeAreSecretary() && !this.blockTimestamp) {
+            await this.assertParentIntervalElapsed(lastBlockNumber)
+        }
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
@@ -553,6 +689,10 @@ export default class SecretaryManager {
 
         // INFO: Check if that peer was the one holding the green light
         if (shouldRelease) {
+            if (this.ourValidatorPhase.currentPhase === PEERLIST_PHASE) {
+                await this.ensureMergedPeerlist()
+            }
+
             // INFO: If we are in the last phase, stop the secretary routine
             if (this.ourValidatorPhase.currentPhase === 6) {
                 this.runSecretaryRoutine = false
@@ -615,6 +755,10 @@ export default class SecretaryManager {
             phase = this.ourValidatorPhase.currentPhase
         }
 
+        // The merged peerlist travels with the phase 3 greenlight.
+        const peerlist =
+            phase === PEERLIST_PHASE ? await this.ensureMergedPeerlist() : undefined
+
         // INFO: Release the waiting members
         // When members are provided, skip check
         if (waitingMembers.length === 0) {
@@ -634,6 +778,7 @@ export default class SecretaryManager {
                             this.shard.blockRef,
                             this.blockTimestamp,
                             phase,
+                            peerlist,
                         ],
                     },
                 ],
@@ -656,7 +801,7 @@ export default class SecretaryManager {
                 member.longCall(request, true, {
                     sleepTime: 250,
                     retries: 4,
-                    allowedCodes: [400],
+                    allowedCodes: [400, 401],
                 }),
             )
         }
@@ -677,6 +822,12 @@ export default class SecretaryManager {
             }
 
             if (result.result === 200) {
+                continue
+            }
+
+            if (result.result === 401) {
+                // The member follows another secretary: one of us drew the wrong committee.
+                this.reportCommitteeMismatch(pubKey, result.extra, "greenlight")
                 continue
             }
 
@@ -709,6 +860,7 @@ export default class SecretaryManager {
     public async receiveGreenLight(
         secretaryBlockTimestamp?: number,
         validatorPhase?: number,
+        peerlist?: unknown,
     ) {
         if (!this.ourValidatorPhase) {
             log.debug("Our phase is undefined, doing nothing")
@@ -737,6 +889,10 @@ export default class SecretaryManager {
             secretaryBlockTimestamp > this.blockTimestamp
         ) {
             this.blockTimestamp = secretaryBlockTimestamp
+        }
+
+        if (validatorPhase === PEERLIST_PHASE && Array.isArray(peerlist)) {
+            await this.receiveMergedPeerlist(peerlist)
         }
 
         const waiterKey =
@@ -868,7 +1024,7 @@ export default class SecretaryManager {
             return await this.secretary.longCall(request, true, {
                 retries,
                 sleepTime: 250,
-                allowedCodes: [400],
+                allowedCodes: [400, 401],
             })
         }
 
@@ -884,6 +1040,23 @@ export default class SecretaryManager {
                 log.debug(
                     "[SEND OUR VALIDATOR PHASE] Key has already been resolved, doing nothing",
                 )
+                return null
+            }
+
+            if (res.result === 401) {
+                if (isCommitteeView(res.extra)) {
+                    // The secretary we drew does not have us in its committee.
+                    this.reportCommitteeMismatch(
+                        this.secretary?.identity ?? "unknown",
+                        res.extra,
+                        "setValidatorPhase",
+                    )
+                } else {
+                    log.error(
+                        `[SEND OUR VALIDATOR PHASE] Secretary refused us: ${JSON.stringify(res)}`,
+                    )
+                }
+                Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
                 return null
             }
 
@@ -931,13 +1104,17 @@ export default class SecretaryManager {
                 `[SEND OUR VALIDATOR PHASE] SendStatus callback got response: ${JSON.stringify(res)}`,
             )
 
-            if (res.extra === 450) {
-                log.debug("[SEND OUR VALIDATOR PHASE] Invalid seed detected")
-                // process.exit(0)
+            if (isCommitteeView(res.extra) && res.extra.reason === "seedMismatch") {
                 // INFO: Logs parts used to create the current CVSA
                 await getCommonValidatorSeed(null, (message: string) => {
-                    log.debug(message)
+                    log.error(message)
                 })
+                this.reportCommitteeMismatch(
+                    this.secretary?.identity ?? "unknown",
+                    res.extra,
+                    "setValidatorPhase seed",
+                )
+                Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
                 return null
             }
 
@@ -951,6 +1128,10 @@ export default class SecretaryManager {
                     "[SEND OUR VALIDATOR PHASE] SendStatus callback received greenlight",
                 )
                 log.debug(`Response.extra: ${JSON.stringify(res.extra)}`)
+
+                if (Array.isArray(res.extra.peerlist)) {
+                    await this.receiveMergedPeerlist(res.extra.peerlist)
+                }
 
                 // INFO: Resolve the waiter with the timestamp
                 return Waiter.resolve<number>(waiterKey, timestamp)
@@ -1074,6 +1255,17 @@ export default class SecretaryManager {
         this.ourValidatorPhase.currentPhase = phase
         this.ourValidatorPhase.phases[phase][1] = status
         this.ourValidatorPhase.waitStatus = true
+    }
+
+    /** Shard of the running round for the next block, or null if no round is running. */
+    public static runningShard(): Peer[] | null {
+        const manager = SecretaryManager.instances.get(
+            getSharedState.lastBlockNumber + 1,
+        )
+        if (!manager || manager.ended || !manager.shard?.members?.length) {
+            return null
+        }
+        return manager.shard.members
     }
 
     // ANCHOR Singleton logic

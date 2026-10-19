@@ -77,7 +77,6 @@ export enum OmniOpcode {
     L2PS_SYNC_MEMPOOL = 0x74,
     L2PS_GET_BATCH_STATUS = 0x75,
     L2PS_GET_PARTICIPATION = 0x76,
-    L2PS_HASH_UPDATE = 0x77,
 
     // 0xFX Protocol Meta
     PROTO_VERSION_NEGOTIATE = 0xf0,

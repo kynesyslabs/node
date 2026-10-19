@@ -18,6 +18,7 @@ import { isLoopbackHost, parseNodeUrl } from "src/config"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import type { HelloPeerRequest } from "../network/manageHelloPeer"
 import { helloResponseMessage } from "./helloAuth"
+import { noteCallerKnownAt } from "./identityLiveness"
 import {
     hexToUint8Array,
     ucrypto,
@@ -25,23 +26,7 @@ import {
 } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { Config } from "src/config"
-
-const HELLO_TIMEOUT_MS = 5000
-
-function withTimeout<T>(
-    promise: Promise<T>,
-    ms: number,
-    label: string,
-): Promise<T> {
-    let timer: ReturnType<typeof setTimeout>
-    const timeout = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-            () => reject(new Error(`${label} timed out after ${ms}ms`)),
-            ms,
-        )
-    })
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
-}
+import { PEER_LIVENESS_WINDOW_MS } from "src/utilities/constants"
 
 export type HelloVerdict =
     | "verified"
@@ -55,8 +40,6 @@ export default class PeerManager {
     private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
     private offlinePeers: Record<string, Peer> // Storing all the offline peers to be retried later
     private seedPeers: Peer[] = [] // Bootstrap hints from the peer list file; join the table only via a verified hello
-    private lastHelloFanoutAt = 0
-    private helloFanoutInFlight: Promise<void> | null = null
 
     private constructor() {
         this.peerList = {}
@@ -264,46 +247,35 @@ export default class PeerManager {
         log.custom("peer_list", JSON.stringify(jsonPeerList), false, true)
     }
 
-    async getOnlinePeers(): Promise<Peer[]> {
-        const refreshIntervalMs = Config.getInstance().core.helloRefreshIntervalMs
-
-        if (this.helloFanoutInFlight) {
-            await this.helloFanoutInFlight
-        } else if (Date.now() - this.lastHelloFanoutAt >= refreshIntervalMs) {
-            this.lastHelloFanoutAt = Date.now()
-            this.helloFanoutInFlight = this.runHelloFanout(refreshIntervalMs)
-            try {
-                await this.helloFanoutInFlight
-            } finally {
-                this.helloFanoutInFlight = null
-            }
-        }
-
-        // Returning the list of online peers from the peerlist
-        return this.getPeers() // REVIEW is this working?
+    /** How long a peer stays online after its last contact. */
+    static livenessWindowMs(): number {
+        return Math.max(
+            PEER_LIVENESS_WINDOW_MS,
+            3 * getSharedState.getConsensusTime() * 1000,
+        )
     }
 
-    private async runHelloFanout(recentContactWindowMs: number): Promise<void> {
+    /** True when the peer is ourselves or was heard from inside the liveness window. */
+    isPeerFresh(peer: Peer, now = Date.now()): boolean {
+        if (peer.identity === getSharedState.publicKeyHex) {
+            return true
+        }
+        return now - (peer.status.timestamp ?? 0) <= PeerManager.livenessWindowMs()
+    }
+
+    /** Peers heard from inside the liveness window. */
+    async getOnlinePeers(): Promise<Peer[]> {
         const now = Date.now()
-        await Promise.allSettled(
-            Object.values(this.peerList).map(async peerInstance => {
-                if (peerInstance.identity == getSharedState.publicKeyHex) {
-                    return
-                }
+        return this.getPeers().filter(peer => this.isPeerFresh(peer, now))
+    }
 
-                if (
-                    peerInstance.status.online &&
-                    now - peerInstance.status.timestamp < recentContactWindowMs
-                ) {
-                    return
-                }
-
-                await withTimeout(
-                    PeerManager.sayHelloToPeer(peerInstance),
-                    HELLO_TIMEOUT_MS,
-                    `sayHelloToPeer(${peerInstance.identity})`,
-                )
-            }),
+    /** Peers still listed online that have gone silent past the liveness window. */
+    getQuietPeers(): Peer[] {
+        const now = Date.now()
+        return this.getPeers().filter(
+            peer =>
+                peer.identity !== getSharedState.publicKeyHex &&
+                !this.isPeerFresh(peer, now),
         )
     }
 
@@ -561,7 +533,7 @@ export default class PeerManager {
 
     // REVIEW This method should be tested and finalized with the new peer structure
     static urlPointsAtUs(url: URL): boolean {
-        if (isLoopbackHost(url.hostname)) {
+        if (getSharedState.prod && isLoopbackHost(url.hostname)) {
             return true
         }
 
@@ -595,19 +567,18 @@ export default class PeerManager {
         }
     }
 
-    private static async sayHelloToPeerUnguarded(
-        peer: Peer,
-        waitForDiscovery = false,
-    ): Promise<HelloVerdict> {
+    /** Our signed hello request with a fresh nonce. */
+    static async buildHelloRequest(): Promise<{
+        request: HelloPeerRequest
+        nonce: string
+    }> {
         const nonce = crypto.randomBytes(32).toString("hex")
-        const connectionString = getSharedState.exposedUrl // ? Are we sure about this
+        const connectionString = getSharedState.exposedUrl
         const signedConnectionString = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(connectionString),
         )
-
-        // Sending the transmission to the peer
-        const helloRequest: HelloPeerRequest = {
+        const request: HelloPeerRequest = {
             url: connectionString,
             publicKey: getSharedState.publicKeyHex,
             signature: {
@@ -621,8 +592,16 @@ export default class PeerManager {
             },
             nonce,
         }
+        return { request, nonce }
+    }
 
-        // Not awaiting the response to not block the main thread
+    private static async sayHelloToPeerUnguarded(
+        peer: Peer,
+        waitForDiscovery = false,
+    ): Promise<HelloVerdict> {
+        const { request: helloRequest, nonce } =
+            await PeerManager.buildHelloRequest()
+
         const response = await peer.longCall(
             {
                 method: "hello_peer",
@@ -670,6 +649,9 @@ export default class PeerManager {
     }> {
         const peerman = PeerManager.getInstance()
         if (response.result === 200) {
+            if (response.extra?.callerKnownAt !== undefined) {
+                noteCallerKnownAt(response.extra.callerKnownAt)
+            }
             if (
                 typeof response.extra?.msg === "string" &&
                 response.extra.msg.startsWith("Peer is us")
@@ -704,6 +686,18 @@ export default class PeerManager {
 
             if (response.extra.syncData) {
                 peer.sync = response.extra.syncData
+            }
+
+            if (typeof response.extra.gossip?.multiaddr === "string") {
+                void import("../gossip/GossipManager").then(
+                    ({ default: gossipManager }) => {
+                        if (gossipManager.isEnabled()) {
+                            gossipManager.getInstance().dial([
+                                response.extra.gossip.multiaddr,
+                            ])
+                        }
+                    },
+                )
             }
 
             peerman.addPeer(peer, verdict === "verified")

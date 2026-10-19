@@ -25,11 +25,10 @@ import {
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import * as dotenv from "dotenv"
-import { Config } from "src/config"
 
 dotenv.config()
 
-const DEFAULT_IDENTITY_FILE = Config.getInstance().core.identityFile
+const DEFAULT_IDENTITY_FILE = process.env.IDENTITY_FILE || ".demos_identity"
 const DEFAULT_SIGNING_ALGORITHM: SigningAlgorithm = "ed25519"
 const SUPPORTED_ALGORITHMS: SigningAlgorithm[] = ["ed25519", "falcon", "ml-dsa"]
 

@@ -1,7 +1,6 @@
 import Chain from "src/libs/blockchain/chain"
-import Mempool from "src/libs/blockchain/mempool"
+import { verifyValidityDataSignature } from "@/libs/blockchain/validation/validityData"
 import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
-import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
 import {
@@ -9,8 +8,6 @@ import {
     ValidityData,
     XMScript,
     IWeb2Payload,
-    RPCResponse,
-    SigningAlgorithm,
 } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
@@ -21,31 +18,28 @@ import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyR
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import {
-    hexToUint8Array,
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
-import { DTRManager } from "./dtr/dtrmanager"
+import { submitValidatedTx } from "./txSubmission"
+import { isSelfStaked } from "src/libs/consensus/stakedSet"
 import handleL2PS from "./routines/transactions/handleL2PS"
-import TxValidatorPool from "../blockchain/validation/txValidatorPool"
-import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 
 import { isReferenceBlockAllowed } from "@/libs/blockchain/referenceBlockWindow"
 
 /**
- * How an accepted transaction left this node. "held" means no validator has
- * it yet: it is cached for a later relay and may land later or not at all.
+ * How an accepted transaction left this node. "mempool" is the only path
+ * now: a staked node admits the tx itself and publishes it on the tx topic.
  */
-export type BroadcastDisposition = "mempool" | "relayed" | "held"
+export type BroadcastDisposition = "mempool"
 
 /**
- * Names the accepted transaction and the path that took it, in `extra` next
- * to `confirmationBlock`, so a client can check the node took the bytes it
- * signed and tell a held transaction from one already with a validator
- * without matching message text. `response` is left alone: per-type
- * handlers put their own result there.
+ * Names the accepted transaction and the path that took it, in `extra`
+ * next to `confirmationBlock`, so a client can check the node took the
+ * bytes it signed without matching message text. `response` is left
+ * alone: per-type handlers put their own result there.
  */
 export function withDisposition<T extends { extra?: unknown }>(
     reply: T,
@@ -97,13 +91,7 @@ export async function handleExecuteTransaction(
     }
 
     const handleVerifyStart = Date.now()
-    const hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
-    const signatureValid = await TxValidatorPool.getInstance().verify({
-        algorithm: validatedData.signature.type as SigningAlgorithm,
-        message: new TextEncoder().encode(hashedData),
-        publicKey: hexToUint8Array(validatedData.rpc_public_key.data) as any,
-        signature: hexToUint8Array(validatedData.signature.data) as any,
-    })
+    const signatureValid = await verifyValidityDataSignature(validatedData)
 
     const handleVerifyEnd = Date.now()
     log.only(
@@ -363,95 +351,40 @@ export async function handleExecuteTransaction(
             return result
         }
 
-        if (getSharedState.PROD) {
-            if (getSharedState.inConsensusLoop) {
-                return withDisposition(
-                    await DTRManager.inConsensusHandler([validatedData]),
-                    queriedTx.hash,
-                    "held",
-                )
+        // Only staked validators change network state. An unstaked node
+        // rejects client txs outright; there is no relay path any more.
+        if (getSharedState.PROD && !(await isSelfStaked())) {
+            result.success = false
+            result.response = {
+                message:
+                    "This node is not a staked validator and does not accept transactions; submit to a validator RPC",
             }
-
-            const { isValidator, validators, lastBlockHash } =
-                await isValidatorForNextBlock()
-
-            if (!isValidator) {
-                const availableValidators = validators.sort(
-                    () => Math.random() - 0.5,
-                )
-
-                const results = await DTRManager.relayTransactions(
-                    availableValidators,
-                    [validatedData],
-                    lastBlockHash,
-                )
-
-                const accepted = (results.response as RPCResponse[]).filter(
-                    res => res.result === 200,
-                )
-
-                if (accepted.length === 0) {
-                    log.warning(
-                        "[handleExecuteTransaction] No validator accepted the relay, holding for retry: " +
-                            validatedData.data.transaction.hash,
-                    )
-                    DTRManager.cacheForRetry(validatedData)
-
-                    return withDisposition({
-                        success: true,
-                        response: {
-                            message:
-                                "Transaction held for relay to the next shard",
-                        },
-                        extra: {
-                            confirmationBlock:
-                                DTRManager.parkedConfirmationBlock,
-                        },
-                        require_reply: false,
-                    }, queriedTx.hash, "held")
-                }
-
-                const confirmationBlocks = accepted
-                    .map(res => DTRManager.readConfirmationBlock(res))
-                    .filter((block): block is number => block !== null)
-
-                return withDisposition({
-                    success: true,
-                    response: {
-                        message: "Transaction relayed to validators",
-                    },
-                    extra: {
-                        confirmationBlock:
-                            confirmationBlocks.length > 0
-                                ? Math.min(...confirmationBlocks)
-                                : getSharedState.lastBlockNumber + 1,
-                    },
-                    require_reply: false,
-                }, queriedTx.hash, "relayed")
-            }
+            result.extra = { error: "NOT_A_VALIDATOR" }
+            return result
         }
 
         try {
-            const { confirmationBlock, error } = await Mempool.addTransactionWithLock({
-                ...queriedTx,
-                reference_block: validatedData.data.reference_block,
-            })
+            const submission = await submitValidatedTx(validatedData, queriedTx)
 
-            log.debug("[handleExecuteTransaction] Transaction added to mempool")
-
-            if (error) {
+            if (!submission.ok) {
                 result.success = false
                 result.response = {
                     message: "Failed to add transaction to mempool",
                 }
+            } else {
+                log.debug(
+                    "[handleExecuteTransaction] Transaction added to mempool and published",
+                )
             }
 
             result.extra = {
                 ...(result.extra ? result.extra : {}),
-                confirmationBlock,
-                ...(error ? { error } : {}),
+                confirmationBlock: submission.confirmationBlock ?? null,
+                lastBlockNumber: getSharedState.lastBlockNumber,
+                ...(submission.ok ? { published: submission.published === true } : {}),
+                ...(submission.error ? { error: submission.error } : {}),
             }
-            if (!error) {
+            if (submission.ok) {
                 return withDisposition(result, queriedTx.hash, "mempool")
             }
         } catch (e) {

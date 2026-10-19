@@ -36,7 +36,6 @@ export interface DatabaseConfig {
 
 export interface CoreConfig {
     prod: boolean
-    shardSize: number
     mainLoopSleepTime: number
     helloRefreshIntervalMs: number
     rpcFeePercent: number
@@ -251,6 +250,15 @@ export interface IPFSConfig {
     apiPort: number
 }
 
+// --- Gossip (libp2p gossipsub) ---
+
+export interface GossipConfig {
+    enabled: boolean
+    port: number
+    heightsIntervalMs: number
+    keyFile: string
+}
+
 // --- Full Application Config ---
 
 export interface AppConfig {
@@ -266,4 +274,5 @@ export interface AppConfig {
     identity: IdentityConfig
     bridges: BridgesConfig
     ipfs: IPFSConfig
+    gossip: GossipConfig
 }

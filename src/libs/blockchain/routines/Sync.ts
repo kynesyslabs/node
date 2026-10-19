@@ -54,6 +54,11 @@ import {
     readNonceTrace,
     readNonces,
 } from "@/libs/debug/nonceTrace"
+import {
+    creditAdvertisedHeight,
+    credibleHeight,
+    discreditAdvertisedHeight,
+} from "src/libs/consensus/v2/routines/networkAheadVeto"
 
 /**
  * Used to prevent block insert operations from happening concurrently.
@@ -109,13 +114,62 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
+// Corroborated sync state, or the peer's signed self-attested head from
+// gossip heights records. The gossip claim exists precisely because
+// handleUpdatePeerSyncData refuses heights ahead of our own chain — without
+// it a lagging node can never learn the network head once push sync is
+// gossip-only. A claim the peer could not back with blocks is left out.
+const peerHeight = (peer: Peer) => credibleHeight(peer)
+
 const latestBlock = () =>
     peerManager
         .getAll()
-        .reduce((max, peer) => Math.max(max, peer.sync.block), 0)
+        .reduce((max, peer) => Math.max(max, peerHeight(peer)), 0)
 
 const highestBlockPeer = () =>
-    peerManager.getAll().find(peer => peer.sync.block === latestBlock())
+    peerManager.getAll().find(peer => peerHeight(peer) === latestBlock())
+
+const PEER_COOLDOWN_MS = 60_000
+const peerCooldowns = new Map<string, number>()
+
+function cooldownPeer(identity: string, why: string): void {
+    peerCooldowns.set(identity, Date.now() + PEER_COOLDOWN_MS)
+    log.warning(
+        `[sync] cooling down peer ${identity} for ${PEER_COOLDOWN_MS / 1000}s: ${why}`,
+    )
+}
+
+const isCoolingDown = (p: Peer) =>
+    (peerCooldowns.get(p.identity) ?? 0) > Date.now()
+
+// Prefers peers that can serve the whole batch; random within tier,
+// cooled-down peers only as a last resort.
+function selectSyncPeer(
+    startBlock: number,
+    batchSize: number,
+    exclude: ReadonlySet<string> = new Set(),
+): Peer | null {
+    const candidates = peerManager
+        .getAll()
+        .filter(
+            p =>
+                p.identity !== getSharedState.publicKeyHex &&
+                !exclude.has(p.identity) &&
+                peerHeight(p) >= startBlock,
+        )
+    if (candidates.length === 0) return null
+
+    const fullBatch = candidates.filter(
+        p => peerHeight(p) >= startBlock + batchSize - 1,
+    )
+    const preferWarm = (peers: Peer[]) => {
+        const warm = peers.filter(p => !isCoolingDown(p))
+        return warm.length > 0 ? warm : peers
+    }
+    const tier =
+        fullBatch.length > 0 ? preferWarm(fullBatch) : preferWarm(candidates)
+    return tier[Math.floor(Math.random() * tier.length)]
+}
 
 const FAST_SYNC_TIMEOUT_MS = 30_000
 
@@ -937,16 +991,71 @@ async function assertNoUnreconciledGcrState(): Promise<void> {
     }
 
     const orphanedBlock = await findOrphanedGcrBlock()
-    if (orphanedBlock !== null) {
-        unreconciledGcrBlock = orphanedBlock
-        getSharedState.syncStatus = false
-        throw new Error(
-            "[applySyncedBlock] refusing to apply further blocks: GCR state for block " +
-                `${orphanedBlock} exists but the block does not (chain tip is ` +
-                `${await Chain.getLastBlockNumber()}). Local state has drifted from the ` +
-                "chain — the node must be resynced from scratch.",
+    if (orphanedBlock === null) return
+
+    const tip = await Chain.getLastBlockNumber()
+    getSharedState.syncStatus = false
+    log.warning(
+        `[applySyncedBlock] GCR state for block ${orphanedBlock} exists but the block does not (chain tip is ${tip}); rolling it back`,
+    )
+    const recovered = await rollbackOrphanedGcrState(tip)
+    if (recovered) return
+
+    unreconciledGcrBlock = orphanedBlock
+    throw new Error(
+        "[applySyncedBlock] refusing to apply further blocks: GCR state for block " +
+            `${orphanedBlock} exists but the block does not (chain tip is ${tip}) ` +
+            "and its transactions are no longer in the mempool. Local state has drifted " +
+            "from the chain — the node must be resynced from scratch.",
+    )
+}
+
+/**
+ * Undo GCR edits stamped above `tip` using the tx bodies still in the
+ * mempool. False when any body is missing; nothing is changed in that case.
+ */
+async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
+    const db = await Datasource.getInstance()
+    const repo = db.getDataSource().getRepository(GCRAssignedTx)
+    const rows = await repo
+        .createQueryBuilder("a")
+        .select("DISTINCT a.tx_hash", "hash")
+        .addSelect("a.block_number", "block")
+        .where("a.block_number > :tip", { tip })
+        .getRawMany<{ hash: string; block: number | string }>()
+    const hashes = [...new Set(rows.map(r => r.hash))]
+    const blocks = [...new Set(rows.map(r => Number(r.block)))]
+
+    const txs = await Mempool.getTransactionsByHashes(hashes)
+    const found = new Set(txs.map(tx => tx.hash))
+    const missing = hashes.filter(h => !found.has(h))
+    if (missing.length > 0) {
+        log.error(
+            `[applySyncedBlock] cannot roll back orphaned GCR state: ${missing.length}/${hashes.length} tx bodies missing from the mempool`,
         )
+        return false
     }
+
+    // Undo in reverse apply order so a credit is never undone before the
+    // spend that depended on it, and keep the assignments unless every
+    // rollback succeeded: a partial undo must not look like a clean slate.
+    const rollback = await HandleGCR.applyTransactions(
+        orderDeterministically(txs as unknown as Transaction[]).reverse(),
+        true,
+    )
+    if (rollback.failedTxs.length > 0) {
+        log.error(
+            `[applySyncedBlock] cannot roll back orphaned GCR state: ${rollback.failedTxs.length}/${txs.length} rollback(s) failed: ${rollback.failedTxs.join(", ")}`,
+        )
+        return false
+    }
+    for (const block of blocks) {
+        await HandleGCR.deleteAssignedTxsForBlock(block)
+    }
+    log.info(
+        `[applySyncedBlock] rolled back ${txs.length} tx(s) stamped for block(s) ${blocks.join(", ")}; resuming sync at tip ${tip}`,
+    )
+    return true
 }
 
 /**
@@ -998,15 +1107,32 @@ async function insertBlockOrHalt(
     try {
         await Chain.insertBlock(block, blockTxs)
     } catch (e) {
-        unreconciledGcrBlock = block.number
         getSharedState.syncStatus = false
         log.error(
-            `[applySyncedBlock] FATAL: GCR state for block ${block.number} was applied ` +
-                "but the block failed to insert; local state has drifted from the chain. " +
-                "Marking the node unsynced and refusing further block application — " +
-                "it must be resynced from scratch: " +
+            `[applySyncedBlock] block ${block.number} failed to insert after its GCR edits were applied; rolling them back: ` +
                 `${e instanceof Error ? e.message : String(e)}`,
         )
+        try {
+            const confirmed = blockTxs.filter(
+                tx => tx.status === TRANSACTION_STATUS.CONFIRMED,
+            )
+            const rollback = await HandleGCR.applyTransactions(
+                orderDeterministically(confirmed).reverse(),
+                true,
+            )
+            if (rollback.failedTxs.length > 0) {
+                throw new Error(
+                    `${rollback.failedTxs.length}/${confirmed.length} rollback(s) failed: ${rollback.failedTxs.join(", ")}`,
+                )
+            }
+            await HandleGCR.deleteAssignedTxsForBlock(block.number)
+        } catch (rollbackError) {
+            unreconciledGcrBlock = block.number
+            log.error(
+                `[applySyncedBlock] FATAL: rollback of block ${block.number} failed; local state has drifted from the chain and the node must be resynced from scratch: ` +
+                    `${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+            )
+        }
         throw e
     }
 
@@ -1027,7 +1153,12 @@ async function batchDownloadBlocks(
     endBlock: number,
 ): Promise<boolean> {
     const batchSize = getSharedState.batchSyncBlockSize
-    const totalBlocks = endBlock - startBlock + 1
+    const knownPeerHeight = peerHeight(peer)
+    const cappedEnd =
+        knownPeerHeight >= startBlock
+            ? Math.min(endBlock, knownPeerHeight)
+            : endBlock
+    const totalBlocks = cappedEnd - startBlock + 1
     const limit = Math.min(totalBlocks, batchSize)
 
     log.debug(
@@ -1206,29 +1337,17 @@ function triggerL2PSSync(peer: Peer): void {
  * Find the next available peer with highest block, excluding seen peers
  */
 function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
-    const highestBlockPeers = peerManager
-        .getAll()
-        .filter(p => p.sync.block === latestBlock())
-        .filter(p => !seenPeers.has(p.identity))
-
-    log.info(
-        "[fastSync] Highest block peers: " +
-            JSON.stringify(
-                highestBlockPeers.map(p => p.connection.string),
-                null,
-                2,
-            ),
+    const next = selectSyncPeer(
+        getSharedState.lastBlockNumber + 1,
+        getSharedState.batchSyncBlockSize,
+        seenPeers,
     )
-
-    if (highestBlockPeers.length === 0) {
+    if (!next) {
         return null
     }
 
-    log.info(
-        "[fastSync] Switched to peer: " +
-            highestBlockPeers[0].connection.string,
-    )
-    return highestBlockPeers[0]
+    log.info("[fastSync] Switched to peer: " + next.connection.string)
+    return next
 }
 
 /**
@@ -1238,7 +1357,14 @@ function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
  */
 async function requestBlocks(): Promise<boolean> {
     const seenPeers = new Set<string>()
-    let peer = highestBlockPeer()
+    let peer = selectSyncPeer(
+        getSharedState.lastBlockNumber + 1,
+        getSharedState.batchSyncBlockSize,
+    )
+    if (!peer) {
+        log.error("[requestBlocks] No peer can serve the blocks we need")
+        return false
+    }
 
     while (getSharedState.lastBlockNumber < latestBlock()) {
         // if (latestBlock() === SecretaryManager.lastBlockRef) {
@@ -1259,6 +1385,7 @@ async function requestBlocks(): Promise<boolean> {
             // Download batch of blocks
             const ok = await batchDownloadBlocks(peer, startBlock, endBlock)
             if (!ok) {
+                discreditAdvertisedHeight(peer)
                 seenPeers.add(peer.identity)
                 const next = findNextAvailablePeer(seenPeers)
                 if (!next) {
@@ -1268,6 +1395,7 @@ async function requestBlocks(): Promise<boolean> {
                 peer = next
                 continue
             }
+            creditAdvertisedHeight(peer)
             // Trigger L2PS sync
             triggerL2PSSync(peer)
 
@@ -1281,13 +1409,16 @@ async function requestBlocks(): Promise<boolean> {
                 log.info(
                     "[requestBlocks] Reached end of available blocks on peer",
                 )
+                discreditAdvertisedHeight(peer)
                 break
             }
 
             // Handle a forked peer: continue from the recovery source,
             // or abort the round safely when no valid variant exists
             if (error instanceof ForkedPeerError) {
+                discreditAdvertisedHeight(peer)
                 seenPeers.add(peer.identity)
+                cooldownPeer(peer.identity, error.message)
 
                 if (error.validSource) {
                     peer = error.validSource
@@ -1308,24 +1439,17 @@ async function requestBlocks(): Promise<boolean> {
                 log.debug(
                     `[requestBlocks] Peer ${peer.identity} is unreachable. Switching to next peer.`,
                 )
+                discreditAdvertisedHeight(peer)
                 seenPeers.add(peer.identity)
+                cooldownPeer(peer.identity, "unreachable during batch sync")
 
-                // Find alternative peers with highest block
-                const highestBlockPeers = peerManager
-                    .getAll()
-                    .filter(p => p.sync.block === latestBlock())
-                    .filter(p => !seenPeers.has(p.identity))
-
-                log.info(
-                    `[requestBlocks] Available highest block peers: ${highestBlockPeers.length}`,
-                )
-
-                if (highestBlockPeers.length === 0) {
+                const next = findNextAvailablePeer(seenPeers)
+                if (!next) {
                     log.error("[requestBlocks] No more peers available to sync")
                     return false
                 }
 
-                peer = highestBlockPeers[0]
+                peer = next
                 log.info(
                     `[requestBlocks] Switched to peer: ${peer.connection.string}`,
                 )
@@ -1379,33 +1503,24 @@ export async function syncGCRTables(txs: Transaction[], block?: Block) {
 }
 
 // Helper function to ask for the transactions in a block
-export async function askTxsForBlock(
+/** Full block body fetch: the block endpoint, then the whole hash list. */
+async function fetchAllBlockTxs(
     block: Block,
     peer: Peer,
 ): Promise<Transaction[]> {
-    if (
-        Array.isArray(block.content.ordered_transactions) &&
-        block.content.ordered_transactions.length === 0
-    ) {
-        return []
-    }
-
-    let request: RPCRequest = {
-        method: "nodeCall",
-        params: [
-            {
-                message: "getBlockTransactions",
-                data: { blockHash: block.hash },
-            },
-        ],
-    }
-
-    let res = await peer.longCall(request, true, {
-        protocol: "http",
-        sleepTime: 1000,
-        retries: 3,
-    })
-
+    let res = await peer.longCall(
+        {
+            method: "nodeCall",
+            params: [
+                {
+                    message: "getBlockTransactions",
+                    data: { blockHash: block.hash },
+                },
+            ],
+        },
+        true,
+        { protocol: "http", sleepTime: 1000, retries: 3 },
+    )
     if (
         res.result === 200 &&
         Array.isArray(res.response) &&
@@ -1413,30 +1528,36 @@ export async function askTxsForBlock(
     ) {
         return res.response as Transaction[]
     }
+    res = await peer.longCall(
+        {
+            method: "nodeCall",
+            params: [
+                {
+                    message: "getTxsByHashes",
+                    data: { hashes: block.content.ordered_transactions },
+                },
+            ],
+        },
+        true,
+        { protocol: "http", sleepTime: 1000, retries: 3 },
+    )
+    return res.result === 200 ? (res.response as Transaction[]) : []
+}
 
-    // INFO: fetch all transactions by hashes
-    request = {
-        method: "nodeCall",
-        params: [
-            {
-                message: "getTxsByHashes",
-                data: { hashes: block.content.ordered_transactions },
-            },
-        ],
+/**
+ * Transactions for a block we are about to apply, always fetched from the
+ * peer: a tx's final status and failure attrs are decided in the round and
+ * only the forger's copy carries them.
+ */
+export async function askTxsForBlock(
+    block: Block,
+    peer: Peer,
+): Promise<Transaction[]> {
+    const ordered = block.content.ordered_transactions
+    if (!Array.isArray(ordered) || ordered.length === 0) {
+        return []
     }
-
-    res = await peer.longCall(request, true, {
-        protocol: "http",
-        sleepTime: 1000,
-        retries: 3,
-    })
-
-    if (res.result === 200) {
-        return res.response as Transaction[]
-    }
-
-    log.error("[askTxsForBlock] Failed to fetch transactions")
-    return []
+    return await fetchAllBlockTxs(block, peer)
 }
 
 // Helper function to merge the peerlist from the last block
@@ -1540,6 +1661,15 @@ export async function fastSync(
     peers: Peer[] = [],
     from: string,
 ): Promise<{ latestChainBlock: number; ourLatestBlock: number }> {
+    if (process.env.SYNC_PULL_DISABLED === "true" && from !== "index.ts") {
+        log.debug(`[fastSync] SYNC_PULL_DISABLED: skipping pull from ${from}`)
+
+        return {
+            latestChainBlock: getSharedState.lastBlockNumber,
+            ourLatestBlock: getSharedState.lastBlockNumber,
+        }
+    }
+
     if (getSharedState.inSyncLoop) {
         log.debug("[fastSync] Sync loop already running, skipping")
 

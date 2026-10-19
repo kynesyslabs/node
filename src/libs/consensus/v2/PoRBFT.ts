@@ -11,7 +11,10 @@ import { createBlock } from "./routines/createBlock"
 import { getEligiblePool } from "./routines/getShard"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
+import SecretaryManager, {
+    AbortConsensusError,
+    PEERLIST_PHASE,
+} from "./types/secretaryManager"
 import {
     BlockInvalidError,
     ErrorCode,
@@ -20,7 +23,6 @@ import {
 } from "@/errors"
 import HandleGCR, { type BlockClock } from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
-import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
     fastSync,
@@ -44,7 +46,6 @@ import {
     debugAssertionsEnabled,
     readNonces,
 } from "@/libs/debug/nonceTrace"
-import { computeMergedPeerlist } from "./routines/peerlistMerge"
 import { markStep } from "@/utilities/loopScheduler"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
@@ -126,6 +127,13 @@ export async function consensusRoutine(): Promise<void> {
         if (!peersReady) {
             log.warn(
                 "[consensusRoutine] Peers ahead of us, aborting this round",
+            )
+            return
+        }
+
+        if (getSharedState.lastBlockNumber + 1 !== blockRef) {
+            log.warn(
+                `[consensusRoutine] Head moved to ${getSharedState.lastBlockNumber} while preparing block ${blockRef}`,
             )
             return
         }
@@ -422,7 +430,6 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             BroadcastManager.broadcastNewBlock(block)
-            DTRManager.releaseDTRWaiter(block)
 
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
@@ -489,54 +496,57 @@ export async function consensusRoutine(): Promise<void> {
             )
         }
     } catch (error) {
-        if (
+        const aborted =
             error instanceof NotInShardError ||
             error instanceof ForgingEndedError
-        ) {
-            exitReason = "abortConsensus"
-            log.error(error)
-            log.error("[consensusRoutine] Exiting consensus routine")
-            return
-        }
-
-        if (
+        const invalid =
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
-        ) {
-            exitReason = "abortConsensus"
-            // INFO: If we're past merge mempools phase
 
-            if (manager && manager.ourValidatorPhase) {
+        if (aborted || invalid) {
+            exitReason = "abortConsensus"
+            if (aborted) {
+                log.error(error)
+                log.error("[consensusRoutine] Exiting consensus routine")
+            }
+            if (manager?.ourValidatorPhase) {
                 log.warn(
                     "[consensusRoutine] Aborted consensus routine at phase: " +
                         manager.ourValidatorPhase.currentPhase,
                 )
-                if (manager.ourValidatorPhase.currentPhase <= 3) {
-                    return
-                }
             }
-
-            log.warn(
-                "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
-            )
-
-            // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
-            // Getting the txs from the hashes
-            const txsToRollback: Transaction[] = []
-
+            // Nothing persisted yet: nothing to undo.
             if (successfulTxs.length > 0) {
+                log.warn(
+                    `[consensusRoutine] Round ended after GCR edits were applied for block ${blockRef}. Rolling back ${successfulTxs.length} tx(s)`,
+                )
+
+                // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
+                // Getting the txs from the hashes
+                const txsToRollback: Transaction[] = []
+
                 for (const txHash of successfulTxs) {
                     const tx = txMap.get(txHash)
                     if (tx) {
                         txsToRollback.push(tx)
                     }
                 }
-
                 await rollbackGCREditsFromTxs(txsToRollback)
+                await HandleGCR.deleteAssignedTxsForBlock(blockRef)
+
+                // Also rollback any L2PS proofs that were applied
+                await L2PSConsensus.rollbackProofsForBlock(blockRef)
             }
 
-            // Also rollback any L2PS proofs that were applied
-            await L2PSConsensus.rollbackProofsForBlock(blockRef)
+            if (
+                debugAssertionsEnabled() &&
+                error instanceof BlockInvalidError
+            ) {
+                log.error(
+                    `[consensusRoutine] Block ${blockRef} rejected by vote, exiting`,
+                )
+                process.exit(1)
+            }
             return
         }
 
@@ -547,11 +557,6 @@ export async function consensusRoutine(): Promise<void> {
     } finally {
         markStep("consensus", null)
         releaseSyncLock?.()
-
-        // INFO: If there was a relayed tx past finalize block step, release
-        if (DTRManager.poolSize > 0) {
-            DTRManager.releaseDTRWaiter()
-        }
 
         cleanupConsensusState()
         manager.endConsensusRoutine()
@@ -706,12 +711,15 @@ async function mergeAndOrderMempools(
 
     // Merge with peers
     await mergeMempools(outboundPool, shard, blockRef)
-    await updateValidatorPhase(3, blockRef)
+    await updateValidatorPhase(PEERLIST_PHASE, blockRef)
 
-    const mergedPeerlist = await computeMergedPeerlist(
-        blockRef,
-        shard.map(member => member.identity),
-    )
+    // The secretary merges the contributions; members adopt the list it
+    // sent with the phase 3 greenlight.
+    const manager = SecretaryManager.getInstance(blockRef)
+    if (!manager) {
+        throw new ForgingEndedError("Secretary manager not found")
+    }
+    const mergedPeerlist = await manager.resolveMergedPeerlist()
     log.only(
         `[mergeAndOrderMempools] Merged peerlist: ${mergedPeerlist.length} validators`,
     )
