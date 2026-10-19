@@ -6,6 +6,7 @@ import * as path from "node:path"
 import { runCli } from "./cli"
 import { applyEnvChanges, parseEnv } from "./envFile"
 import { AS_USER, fakeRunner, isRoot, makeRoot, recorder, removeRoot, writeZkBatch } from "./testSupport"
+import { byCodePoint } from "./zk"
 
 let root: string
 beforeEach(() => {
@@ -303,10 +304,10 @@ describe("the wizard's .env write", () => {
         fs.writeFileSync(envPath(), "A=1\n")
         await setup(WIZARD)
         const first = fs.readFileSync(envPath(), "utf8")
-        const files = fs.readdirSync(root).sort()
+        const files = fs.readdirSync(root).sort(byCodePoint)
         await setup(WIZARD)
         expect(fs.readFileSync(envPath(), "utf8")).toBe(first)
-        expect(fs.readdirSync(root).sort()).toEqual(files)
+        expect(fs.readdirSync(root).sort(byCodePoint)).toEqual(files)
     })
 
     it("never makes an existing .env more readable, and creates a new one at 600", async () => {

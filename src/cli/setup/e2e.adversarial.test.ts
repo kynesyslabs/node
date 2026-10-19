@@ -8,6 +8,7 @@ import { runCli } from "./cli"
 import { inspectSubnet } from "./l2ps"
 import { enforceGuidedSetup, type GateDeps } from "./startupGate"
 import { fakeRunner, makeRoot, recorder, removeRoot } from "./testSupport"
+import { byCodePoint } from "./zk"
 
 mock.module("@/utilities/sharedState", () => ({ getSharedState: {} }))
 mock.module("@/utilities/logger", () => ({
@@ -166,7 +167,7 @@ describe("bun run setup --yes in a throwaway checkout", () => {
         process.chdir(copy)
         const nets = parallelNetworks.getInstance()
         const loaded = await nets.loadAllL2PS()
-        expect(loaded.sort()).toEqual(["e2e_created", "e2e_joined"])
+        expect(loaded.sort(byCodePoint)).toEqual(["e2e_created", "e2e_joined"])
         for (const uid of loaded) expect(await nets.loadL2PS(uid)).toBeDefined()
     })
 

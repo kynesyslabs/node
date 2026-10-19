@@ -4,6 +4,7 @@ import * as path from "node:path"
 import { HELP, parseSetupArgs, UsageError } from "./args"
 import { runCli } from "./cli"
 import { AS_USER, HEX_IV, HEX_KEY, fakeRunner, isRoot, makeRoot, recorder, removeRoot, writeSubnet } from "./testSupport"
+import { byCodePoint } from "./zk"
 
 let root: string
 beforeEach(() => {
@@ -27,7 +28,7 @@ function tree(dir: string): string[] {
         }
     }
     walk(dir)
-    return out.sort()
+    return out.sort(byCodePoint)
 }
 
 describe("--check --json is valid JSON on every path", () => {

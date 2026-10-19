@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process"
 import { collectChecks, isFatal } from "./checks"
 import { runCli } from "./cli"
 import { CODE_ROOT, ZK_IDENTITY_VKEY, createContext } from "./context"
-import { IDENTITY_CIRCUIT_DIGEST, IDENTITY_DIGEST_ENV, canonicalDigest, downloadWithFetch, inspectBatchArtifacts, inspectIdentityKey, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
+import { IDENTITY_CIRCUIT_DIGEST, IDENTITY_DIGEST_ENV, byCodePoint, canonicalDigest, downloadWithFetch, inspectBatchArtifacts, inspectIdentityKey, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
 import { GIT, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
 
 let root: string
@@ -40,7 +40,7 @@ function keyFiles(): string[] {
         }
     }
     walk(path.join(root, "src/libs/l2ps/zk/keys"))
-    return out.sort()
+    return out.sort(byCodePoint)
 }
 
 const finalFiles = (size: number) => keyFiles().filter(f => f.includes(`batch_${size}/`) && !f.includes(".building"))

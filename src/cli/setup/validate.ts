@@ -31,9 +31,15 @@ export function validateUid(value: string): Result<string> {
 export const DISPLAY_MAX = 200
 
 // Terminal escape sequences (CSI, OSC, and a lone ESC with its next character),
-// then every remaining control character, C1 included.
-const ESCAPE_SEQUENCES = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|\u001b[\s\S]?/g
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g
+// then every remaining control character, C1 included. The two control
+// characters are built from their codes so no pattern holds a raw one.
+const ESC = String.fromCharCode(0x1b)
+const BEL = String.fromCharCode(0x07)
+const ESCAPE_SEQUENCES = new RegExp(
+    `${ESC}\\[[0-?]*[ -/]*[@-~]|${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)?|${ESC}[\\s\\S]?`,
+    "g",
+)
+const CONTROL_CHARACTERS = /\p{Cc}/gu
 
 /**
  * Text taken from a file, a file name or an error is shown on the operator's
