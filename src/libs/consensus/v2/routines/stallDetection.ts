@@ -4,6 +4,7 @@ import Chain from "src/libs/blockchain/chain"
 import Block from "src/libs/blockchain/block"
 import { Peer } from "src/libs/peer"
 import { Config } from "src/config"
+import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
@@ -54,9 +55,12 @@ export async function recordSyncedBlock(block: Block): Promise<void> {
         if (missed >= threshold) {
             log.error(
                 `[STALL DETECTION] Missed ${missed} consecutive shard selections, last at block ${block.number}: ` +
-                    "the node appears stalled — exiting for log investigation",
+                    "the node appears stalled",
             )
-            process.exit(0)
+            if (debugAssertionsEnabled()) {
+                log.error("[STALL DETECTION] exiting for log investigation")
+                process.exit(0)
+            }
         }
     } catch (error) {
         log.error(
