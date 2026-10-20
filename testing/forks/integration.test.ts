@@ -245,11 +245,13 @@ describe("forks integration (P3d)", () => {
     let dataSource: DataSource
     let forkSnapshot: ForkConfigByName
     let blockNumberSnapshot: number
+    let forkLoadedSnapshot: boolean
 
     beforeEach(async () => {
         dataSource = await createTestDataSource()
         forkSnapshot = cloneDefaultForkConfig()
         blockNumberSnapshot = getSharedState.lastBlockNumber
+        forkLoadedSnapshot = getSharedState.forkConfigLoaded
         getSharedState.forkConfig = cloneDefaultForkConfig()
         // getNetworkInfo answers 503 until boot has loaded the schedule; the
         // replay below stands in for that boot.
@@ -260,6 +262,7 @@ describe("forks integration (P3d)", () => {
         if (dataSource?.isInitialized) await dataSource.destroy()
         getSharedState.forkConfig = forkSnapshot
         getSharedState.lastBlockNumber = blockNumberSnapshot
+        getSharedState.forkConfigLoaded = forkLoadedSnapshot
     })
 
     // -------------------------------------------------------------------------
