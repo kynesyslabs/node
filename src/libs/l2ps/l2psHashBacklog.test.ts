@@ -25,7 +25,11 @@ mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     default: { getDigestWithCount, getSummaryByUIDAndStatus, getByUID },
     L2PS_STATUS: { EXECUTED: "executed" },
 }))
+// Only the two names the hash service uses are replaced; everything else
+// the loaded modules take from the SDK stays real.
+const websdk = await import("@kynesyslabs/demosdk/websdk")
 mock.module("@kynesyslabs/demosdk/websdk", () => ({
+    ...websdk,
     Demos: class {},
     DemosTransactions: { createL2PSHashUpdate },
 }))
@@ -40,6 +44,11 @@ mock.module("@/libs/network/dtr/dtrmanager", () => ({ DTRManager: {} }))
 mock.module("@/libs/consensus/v2/routines/getShard", () => ({
     __esModule: true,
     default: async () => [],
+    getCommitteeFloor: () => 0,
+    getEligiblePool: async () => [],
+    pinShardIdentities: () => "",
+    rankPool: (_seed: string, pool: string[]) => pool,
+    __resetValidatorCache: () => undefined,
 }))
 mock.module("@/libs/consensus/v2/routines/getCommonValidatorSeed", () => ({
     __esModule: true,

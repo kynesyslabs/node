@@ -20,7 +20,9 @@ export interface HandlerMockParts {
 export function mockHandlerModules(parts: HandlerMockParts): void {
     jest.mock("../../blockchain/l2ps_mempool", () => ({
         __esModule: true,
-        default: parts.mempool ?? {},
+        // The sync listing fills legacy rows from the queue, so a test that
+        // only cares about paging still needs that read to answer.
+        default: { getByOriginalHashes: async () => [], ...(parts.mempool ?? {}) },
         L2PS_STATUS: { EXECUTED: "executed", BATCHED: "batched", CONFIRMED: "confirmed" },
     }))
     jest.mock("../../l2ps/L2PSTransactionExecutor", () => ({ __esModule: true, default: parts.executor }))

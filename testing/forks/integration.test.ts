@@ -251,6 +251,9 @@ describe("forks integration (P3d)", () => {
         forkSnapshot = cloneDefaultForkConfig()
         blockNumberSnapshot = getSharedState.lastBlockNumber
         getSharedState.forkConfig = cloneDefaultForkConfig()
+        // getNetworkInfo answers 503 until boot has loaded the schedule; the
+        // replay below stands in for that boot.
+        getSharedState.forkConfigLoaded = true
     })
 
     afterEach(async () => {
