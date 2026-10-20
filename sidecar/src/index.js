@@ -353,12 +353,10 @@ server.listen(IPC_PATH, () => {
     slog(`IPC listening on ${IPC_PATH}`)
 })
 
-// The parent is the only reason this process exists. The IPC client-gone
-// timer covers a clean parent shutdown; this covers a parent that died
-// without closing the socket (SIGKILL mid-write, OOM kill).
+
 const PARENT_PID = process.ppid
 setInterval(() => {
-    if (process.ppid !== PARENT_PID || process.ppid === 1) {
+    if (process.ppid !== PARENT_PID) {
         slog(`parent ${PARENT_PID} is gone (ppid now ${process.ppid}); exiting`)
         process.exit(0)
     }
