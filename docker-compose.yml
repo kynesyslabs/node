@@ -290,7 +290,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 90s
+      # The RPC server listens only once block 0 and the snapshot are in
+      # the database, so a cold restore has to fit in here.
+      start_period: 300s
     logging: *default-logging
     networks:
       - demos-network

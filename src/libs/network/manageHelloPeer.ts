@@ -16,6 +16,7 @@ import { helloResponseMessage } from "../peer/helloAuth"
 import GossipManager from "../gossip/GossipManager"
 import { parseNodeUrl } from "src/config"
 import { reportTwin } from "../peer/identityLiveness"
+import { corroborateSyncData } from "../peer/syncClaims"
 
 const HELLO_PEERLIST_SAMPLE_SIZE = 32
 
@@ -28,6 +29,8 @@ export interface HelloPeerRequest {
     }
     syncData: SyncData
     nonce?: string
+    /** Hash of the caller's block 0. Absent from nodes that predate the check. */
+    genesisHash?: string
 }
 
 /**
@@ -114,6 +117,41 @@ export async function manageHelloPeer(
         return response
     }
 
+    const peerManager = PeerManager.getInstance()
+
+    // The caller must be on our network. Until our own block 0 is loaded
+    // there is nothing to compare against, so it is told to come back.
+    const ourGenesis = getSharedState.genesisBlockHash
+    if (!ourGenesis) {
+        response.result = 503
+        response.response = false
+        response.extra = { msg: "genesis not loaded yet, retry later" }
+        return response
+    }
+    if (typeof content.genesisHash !== "string") {
+        log.warning(
+            `[Hello Peer Listener] ${peerObject.identity} @ ${content.url} sent no genesis hash (old node?): not adding it until it upgrades`,
+        )
+        response.result = 426
+        response.response = false
+        response.extra = { msg: "hello carries no genesis hash: upgrade required" }
+        return response
+    }
+    if (content.genesisHash !== ourGenesis) {
+        log.warning(
+            `[Hello Peer Listener] ${peerObject.identity} @ ${content.url} is on another network (genesis ${content.genesisHash}, ours ${ourGenesis}): refusing`,
+        )
+        peerManager.removeOnlinePeer(peerObject.identity)
+        peerManager.removeOfflinePeer(peerObject.identity)
+        response.result = 409
+        response.response = false
+        response.extra = {
+            msg: "genesis mismatch",
+            genesisHash: ourGenesis,
+        }
+        return response
+    }
+
     // Add the peer as authenticated
     peerObject.verification.status = true
 
@@ -122,10 +160,7 @@ export async function manageHelloPeer(
     peerObject.status.online = true
     peerObject.status.timestamp = Date.now()
 
-    // INFO: Write the sync data for the peer
-    peerObject.sync = content.syncData
-
-    const peerManager = PeerManager.getInstance()
+    peerObject.sync = await corroborateSyncData(content.syncData)
 
     // Where we last saw the caller online, if that is somewhere else.
     const known = peerManager.getPeer(peerObject.identity)
@@ -201,6 +236,7 @@ export async function manageHelloPeer(
               }
             : {}),
         syncData: peerManager.ourSyncData,
+        genesisHash: ourGenesis,
         peerlist: peerManager
             .getPeers()
             .filter(

@@ -267,10 +267,11 @@ USER demos
 # Liveness check against the RPC /health endpoint. Returns 200 when the
 # node is accepting traffic, 503 when failing (chain DB down, mainLoop
 # dead). dormant/degraded states return 200 — operators read the body
-# for nuance. start-period extended to 90s to cover DB connect, peer
-# discovery, and chain bootstrap on cold start. Epic 13 T10 — was
-# previously hitting "/" which always 200s regardless of node state.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+# for nuance. The RPC server listens only once block 0 and the snapshot
+# are in the database, so the start period covers DB connect plus a cold
+# snapshot restore. Epic 13 T10 — was previously hitting "/" which always
+# 200s regardless of node state.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
     CMD curl -fsS "http://localhost:${RPC_PORT:-53550}/health" >/dev/null || exit 1
 
 # The entrypoint bridges runtime files into /app/state for persistence,

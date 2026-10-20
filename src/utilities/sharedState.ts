@@ -394,6 +394,11 @@ export default class SharedState {
     // that made it, unlike one stored by an earlier boot.
     genesisCreatedThisBoot = false
 
+    // Hash of this node's stored block 0: the identity of the network it is
+    // on. Null until genesis is loaded; hellos are refused until then, and a
+    // peer that reports a different one is on another network.
+    genesisBlockHash: string | null = null
+
     // Network identity from genesis `properties.id`. Bound into the
     // transaction signature preimage once the `signatureDomain` fork is
     // active, so a signature made here cannot be replayed on another chain.

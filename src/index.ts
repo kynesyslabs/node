@@ -427,16 +427,85 @@ async function warmup() {
     log.info("[MAIN] = End of Configuration =")
     // Configure the logs directory
     log.setLogsDir(indexState.SERVER_PORT)
-    // ? REVIEW Starting the server_rpc: should we keep this async?
-    // This should start the server_rpc without any other needed operation
-    log.info("[MAIN] Starting the RPC server")
-    //server_rpc()
-    indexState.rpcServer = await serverRpcBun()
     indexState.peerManager = PeerManager.getInstance()
     log.info("[MAIN] peerManager started")
 
     // Digest the arguments
     await digestArguments()
+}
+
+// Inbound servers come up only once genesis, network parameters and the
+// staked set are loaded, so every hello is answered with our genesis hash
+// and every handler reads this node's real state rather than defaults.
+async function startInboundServers() {
+    const bootTracker = getSharedState.bootTracker
+
+    log.info("[MAIN] Starting the RPC server")
+    indexState.rpcServer = await serverRpcBun()
+    markSubsystem(getSharedState.subsystems, "rpc", "ready", {
+        port: indexState.SERVER_PORT,
+    })
+
+    // Start OmniProtocol TCP server (optional)
+    if (indexState.OMNI_ENABLED) {
+        bootTracker.start("omni.server")
+        try {
+            getSharedState.omniConfig.port = indexState.OMNI_PORT
+            const omniServer = await startOmniProtocolServer(
+                getSharedState.omniConfig,
+            )
+            indexState.omniServer = omniServer
+            log.info(
+                `[CORE] OmniProtocol server started on port ${indexState.OMNI_PORT}`,
+            )
+
+            // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
+            // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
+            const omniMode =
+                (Config.getInstance().omni.mode as
+                    | "HTTP_ONLY"
+                    | "OMNI_PREFERRED"
+                    | "OMNI_ONLY") || "OMNI_ONLY"
+            getSharedState.initOmniProtocol(omniMode)
+            log.info(
+                `[CORE] OmniProtocol client adapter initialized with mode: ${omniMode}`,
+            )
+            bootTracker.ready("omni.server")
+            markSubsystem(getSharedState.subsystems, "omni", "ready", {
+                port: indexState.OMNI_PORT,
+                enabled: true,
+            })
+        } catch (error) {
+            handleError(error, "NETWORK", { source: ErrorSource.OMNI_STARTUP })
+            bootTracker.fail("omni.server", error)
+            subsystemError(getSharedState.subsystems, "omni", error)
+            // Continue without OmniProtocol (failsafe - falls back to HTTP)
+        }
+
+        if (!getSharedState.omniAdapter) {
+            log.error("[CORE] Failed to start OmniProtocol server")
+            process.exit(1)
+        }
+    } else {
+        log.info(
+            "[CORE] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)",
+        )
+        markSubsystem(getSharedState.subsystems, "omni", "skipped", {
+            reason: "OMNI_ENABLED=false",
+            enabled: false,
+        })
+        bootTracker.skip("omni.server", "disabled")
+    }
+    // Gossip layer (libp2p gossipsub), up before the hello phase so hello
+    // responses can carry our multiaddr. Failure inside start() is fatal
+    // by design.
+    if (GossipManager.isEnabled()) {
+        bootTracker.start("gossip")
+        await GossipManager.getInstance().start()
+        bootTracker.ready("gossip")
+    } else {
+        bootTracker.skip("gossip", "disabled")
+    }
 }
 
 // ANCHOR Preparing the main loop
@@ -485,17 +554,6 @@ async function preMainLoop() {
         log.warning("[NETWORK] {OFFLINE?} Failed to get public IP")
     }
 
-    // ANCHOR Gossip layer (libp2p gossipsub) — must be up before the hello
-    // phase so hello responses can carry our multiaddr. Failure inside
-    // start() is fatal by design.
-    if (GossipManager.isEnabled()) {
-        getSharedState.bootTracker.start("gossip")
-        await GossipManager.getInstance().start()
-        getSharedState.bootTracker.ready("gossip")
-    } else {
-        getSharedState.bootTracker.skip("gossip", "disabled")
-    }
-
     // ANCHOR Looking for the genesis block
     log.info("[BOOTSTRAP] Looking for the genesis block")
     await findGenesisBlock()
@@ -531,6 +589,10 @@ async function preMainLoop() {
         await ensureValidatorSeed(genesisData)
     }
     log.info("[CHAIN] 🖥️ Found the genesis block")
+    getSharedState.genesisBlockHash = await Chain.getGenesisBlockHash()
+    if (!getSharedState.genesisBlockHash) {
+        throw new Error("[BOOT] block 0 is not in the database after findGenesisBlock")
+    }
 
     // Governance state must be in sharedState BEFORE any inbound traffic
     // hits a handler that reads networkParameters / fees. Order matters:
@@ -551,6 +613,8 @@ async function preMainLoop() {
     // Prime the node's own role before anything role-gated starts.
     invalidateStakedSet()
     await getStakedSet()
+
+    await startInboundServers()
 
     await peerBootstrap(indexState.PeerList)
 
@@ -699,10 +763,6 @@ async function main() {
     try {
         await warmup()
         bootTracker.ready("warmup")
-        // RPC server is up at this point (warmup awaits serverRpcBun).
-        markSubsystem(getSharedState.subsystems, "rpc", "ready", {
-            port: indexState.SERVER_PORT,
-        })
     } catch (e) {
         bootTracker.fail("warmup", e)
         throw e
@@ -718,56 +778,6 @@ async function main() {
     // INFO Calibrating the time at the start of the node
     await calibrateTime()
 
-    // Start OmniProtocol TCP server (optional)
-    if (indexState.OMNI_ENABLED) {
-        bootTracker.start("omni.server")
-        try {
-            getSharedState.omniConfig.port = indexState.OMNI_PORT
-            const omniServer = await startOmniProtocolServer(
-                getSharedState.omniConfig,
-            )
-            indexState.omniServer = omniServer
-            log.info(
-                `[CORE] OmniProtocol server started on port ${indexState.OMNI_PORT}`,
-            )
-
-            // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
-            // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
-            const omniMode =
-                (Config.getInstance().omni.mode as
-                    | "HTTP_ONLY"
-                    | "OMNI_PREFERRED"
-                    | "OMNI_ONLY") || "OMNI_ONLY"
-            getSharedState.initOmniProtocol(omniMode)
-            log.info(
-                `[CORE] OmniProtocol client adapter initialized with mode: ${omniMode}`,
-            )
-            bootTracker.ready("omni.server")
-            markSubsystem(getSharedState.subsystems, "omni", "ready", {
-                port: indexState.OMNI_PORT,
-                enabled: true,
-            })
-        } catch (error) {
-            handleError(error, "NETWORK", { source: ErrorSource.OMNI_STARTUP })
-            bootTracker.fail("omni.server", error)
-            subsystemError(getSharedState.subsystems, "omni", error)
-            // Continue without OmniProtocol (failsafe - falls back to HTTP)
-        }
-
-        if (!getSharedState.omniAdapter) {
-            log.error("[CORE] Failed to start OmniProtocol server")
-            process.exit(1)
-        }
-    } else {
-        log.info(
-            "[CORE] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)",
-        )
-        markSubsystem(getSharedState.subsystems, "omni", "skipped", {
-            reason: "OMNI_ENABLED=false",
-            enabled: false,
-        })
-        bootTracker.skip("omni.server", "disabled")
-    }
     // INFO Preparing the main loop
     bootTracker.start("pre_main_loop")
     try {

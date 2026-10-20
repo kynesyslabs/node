@@ -19,6 +19,7 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import type { HelloPeerRequest } from "../network/manageHelloPeer"
 import { helloResponseMessage } from "./helloAuth"
 import { noteCallerKnownAt } from "./identityLiveness"
+import { corroborateSyncData } from "./syncClaims"
 import {
     hexToUint8Array,
     ucrypto,
@@ -591,6 +592,9 @@ export default class PeerManager {
                 status: getSharedState.syncStatus,
             },
             nonce,
+            ...(getSharedState.genesisBlockHash
+                ? { genesisHash: getSharedState.genesisBlockHash }
+                : {}),
         }
         return { request, nonce }
     }
@@ -684,9 +688,25 @@ export default class PeerManager {
                 return { peers: [], verdict }
             }
 
-            if (response.extra.syncData) {
-                peer.sync = response.extra.syncData
+            const theirGenesis = response.extra.genesisHash
+            const ourGenesis = getSharedState.genesisBlockHash
+            if (typeof theirGenesis !== "string") {
+                if (!peerman.getPeer(peer.identity)) {
+                    log.warning(
+                        `[PEERMANAGER] ${peer.connection.string} answered without a genesis hash (old node?): not adding ${peer.identity} until it upgrades`,
+                    )
+                    return { peers: [], verdict }
+                }
+            } else if (ourGenesis && theirGenesis !== ourGenesis) {
+                log.warning(
+                    `[PEERMANAGER] ${peer.connection.string} is on another network (genesis ${theirGenesis}, ours ${ourGenesis}): dropping ${peer.identity}`,
+                )
+                peerman.removeOnlinePeer(peer.identity)
+                peerman.removeOfflinePeer(peer.identity)
+                return { peers: [], verdict: "invalid" }
             }
+
+            peer.sync = await corroborateSyncData(response.extra.syncData)
 
             if (typeof response.extra.gossip?.multiaddr === "string") {
                 void import("../gossip/GossipManager").then(
@@ -704,6 +724,13 @@ export default class PeerManager {
             peerman.removeOfflinePeer(peer.identity)
 
             return { peers: response.extra.peerlist || [], verdict }
+        } else if (response.result === 409) {
+            log.warning(
+                `[PEERMANAGER] ${peer.connection.string} refused our hello: ${peer.identity} is on another network (genesis ${response.extra?.genesisHash ?? "unknown"}): dropping`,
+            )
+            peerman.removeOnlinePeer(peer.identity)
+            peerman.removeOfflinePeer(peer.identity)
+            return { peers: [], verdict: "invalid" }
         } else {
             PeerManager.markPeerOffline(peer)
         }

@@ -401,8 +401,12 @@ async function verifyLastBlockIntegrity(
 
         if (genesisBlock.hash !== ourGenesisHash) {
             log.error(
-                `[fastSync] Genesis hash mismatch with peer ${currentPeer.identity}: ours=${ourGenesisHash} peer=${genesisBlock.hash}, trying next peer`,
+                `[fastSync] Genesis hash mismatch with peer ${currentPeer.identity}: ours=${ourGenesisHash} peer=${genesisBlock.hash}, dropping it and trying next peer`,
             )
+            // Another network: its heights must stop defining ours.
+            peerManager.removeOnlinePeer(currentPeer.identity)
+            peerManager.removeOfflinePeer(currentPeer.identity)
+            cooldownPeer(currentPeer.identity, "genesis mismatch")
             currentPeer = findNextAvailablePeer(seenPeers)
             continue
         }
@@ -1623,10 +1627,23 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         )
 
         if (!verified) {
-            log.error("[fastSync] Last block is not coherent")
-            throw new Error(
-                "[fastSync] Last block integrity check failed — node refusing to sync against incoherent chain",
-            )
+            if (getSharedState.lastBlockNumber === 0) {
+                // Our block 0 is our own; a peer that disagrees is on another
+                // network, not evidence that our chain is broken.
+                log.error(
+                    "[fastSync] No reachable peer shares our genesis block; nothing to verify at height 0",
+                )
+            } else {
+                log.error("[fastSync] Last block is not coherent")
+                throw new Error(
+                    "[fastSync] Last block integrity check failed — node refusing to sync against incoherent chain",
+                )
+            }
+        }
+        // The check may have dropped the peers that looked ahead of us.
+        if (latestBlock() === getSharedState.lastBlockNumber) {
+            log.debug("[fastSync] Nothing left to sync after the integrity check")
+            return true
         }
     }
 
