@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import log from "src/utilities/logger"
 
@@ -126,16 +127,122 @@ function writeRecordAtomically(file: string, record: SigningRecord): void {
             `cannot persist signing record ${file}: ${(e as Error).message}`,
         )
     }
+    syncDirectory(path.dirname(file), file)
+}
+
+// Only errors that mean "this filesystem cannot sync a directory" are
+// tolerated; any other failure leaves the rename's durability unknown, so
+// the block must not be signed.
+const DIR_OPEN_UNSUPPORTED = new Set(["EINVAL", "ENOTSUP", "EPERM", "EISDIR"])
+const DIR_FSYNC_UNSUPPORTED = new Set(["EINVAL", "ENOTSUP", "EPERM", "EBADF"])
+
+function errorCode(e: unknown): string | undefined {
+    return (e as NodeJS.ErrnoException).code
+}
+
+function syncDirectory(dir: string, file: string): void {
+    let dirFd: number
     try {
-        const dirFd = fs.openSync(path.dirname(file), "r")
-        try {
-            fs.fsyncSync(dirFd)
-        } finally {
-            fs.closeSync(dirFd)
+        dirFd = fs.openSync(dir, "r")
+    } catch (e) {
+        if (DIR_OPEN_UNSUPPORTED.has(errorCode(e) ?? "")) return
+        throw new SigningRecordError(
+            `cannot sync directory of signing record ${file}: ${(e as Error).message}`,
+        )
+    }
+    try {
+        fs.fsyncSync(dirFd)
+    } catch (e) {
+        if (DIR_FSYNC_UNSUPPORTED.has(errorCode(e) ?? "")) return
+        throw new SigningRecordError(
+            `cannot sync directory of signing record ${file}: ${(e as Error).message}`,
+        )
+    } finally {
+        fs.closeSync(dirFd)
+    }
+}
+
+// Two nodes can share one state directory (separate identity locks), so the
+// check-and-write must be exclusive across processes. A record write takes
+// milliseconds: a lock older than the window belongs to a crashed writer.
+const RECORD_LOCK_STALE_MS = 30_000
+
+interface RecordLockHolder {
+    pid: number
+    hostname: string
+    at: number
+}
+
+function recordLockIsStale(lockPath: string): boolean {
+    let holder: RecordLockHolder | null = null
+    try {
+        const parsed = JSON.parse(fs.readFileSync(lockPath, "utf8"))
+        if (
+            typeof parsed?.pid === "number" &&
+            typeof parsed?.hostname === "string" &&
+            typeof parsed?.at === "number"
+        ) {
+            holder = parsed
         }
     } catch {
-        /* directory fsync is unsupported on some platforms */
+        /* unreadable or malformed: judged by file age below */
     }
+    if (!holder) {
+        try {
+            return (
+                Date.now() - fs.statSync(lockPath).mtimeMs >
+                RECORD_LOCK_STALE_MS
+            )
+        } catch {
+            return true
+        }
+    }
+    if (Date.now() - holder.at > RECORD_LOCK_STALE_MS) return true
+    if (holder.hostname !== os.hostname()) return false
+    // Our own pid is a leftover of an earlier attempt in this process (or of
+    // a restarted container that got the same pid again).
+    if (holder.pid === process.pid) return true
+    try {
+        process.kill(holder.pid, 0)
+        return false
+    } catch (e) {
+        return errorCode(e) !== "EPERM"
+    }
+}
+
+function acquireRecordLock(file: string): () => void {
+    const lockPath = `${file}.lock`
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const fd = fs.openSync(lockPath, "wx", 0o600)
+            try {
+                fs.writeSync(
+                    fd,
+                    JSON.stringify({
+                        pid: process.pid,
+                        hostname: os.hostname(),
+                        at: Date.now(),
+                    }),
+                )
+            } finally {
+                fs.closeSync(fd)
+            }
+            return () => fs.rmSync(lockPath, { force: true })
+        } catch (e) {
+            if (errorCode(e) !== "EEXIST") {
+                throw new SigningRecordError(
+                    `cannot lock signing record ${file}: ${(e as Error).message}`,
+                )
+            }
+            if (!recordLockIsStale(lockPath)) {
+                throw new SigningRecordError(
+                    `another process is writing the signing record ${file} (lock: ${lockPath})`,
+                )
+            }
+            fs.rmSync(lockPath, { force: true })
+        }
+    }
+    throw new SigningRecordError(`could not lock signing record ${file}`)
 }
 
 type Verdict =
@@ -202,27 +309,33 @@ export function checkBlockSignature(
 
 /**
  * Persist the round after the signature exists and before it can leave the
- * process. The check runs again here so two signatures produced concurrently
- * for conflicting blocks cannot both be released. A failure to persist is an
+ * process. The check runs again here, under a cross-process lock, so two
+ * signatures produced concurrently for conflicting blocks cannot both be
+ * released. A failure to persist is an
  * error: a signed block without a durable record must not be returned.
  */
 export function recordBlockSignature(
     identityFile: string,
     request: BlockSigningRequest,
 ): void {
-    const verdict = evaluate(identityFile, request)
-    if (verdict.action === "unchanged") return
-    const file = signingRecordPath(identityFile)
-    if (verdict.action === "rebind") {
-        log.warning(
-            `[SIGNING] signing record ${file} belongs to another chain (genesis ${verdict.last.genesisHash}, current ${request.genesisHash}); overwriting it`,
-        )
+    const file = resolveWriteTarget(signingRecordPath(identityFile))
+    const release = acquireRecordLock(file)
+    try {
+        const verdict = evaluate(identityFile, request)
+        if (verdict.action === "unchanged") return
+        if (verdict.action === "rebind") {
+            log.warning(
+                `[SIGNING] signing record ${signingRecordPath(identityFile)} belongs to another chain (genesis ${verdict.last.genesisHash}, current ${request.genesisHash}); overwriting it`,
+            )
+        }
+        writeRecordAtomically(file, {
+            genesisHash: request.genesisHash,
+            height: request.height,
+            timestamp: request.timestamp,
+            hash: request.hash,
+            signedAt: Date.now(),
+        })
+    } finally {
+        release()
     }
-    writeRecordAtomically(resolveWriteTarget(file), {
-        genesisHash: request.genesisHash,
-        height: request.height,
-        timestamp: request.timestamp,
-        hash: request.hash,
-        signedAt: Date.now(),
-    })
 }

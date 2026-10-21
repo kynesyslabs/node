@@ -7,11 +7,16 @@
 #
 # Files bridged:
 #   /app/.demos_identity             <- /app/state/.demos_identity
-#   /app/.demos_identity.signed.json <- /app/state/.demos_identity.signed.json
+#   /app/<IDENTITY_FILE>.signed.json <- /app/state/<IDENTITY_FILE>.signed.json
+#                                       (default: .demos_identity.signed.json)
 #   /app/demos_peerlist.json         <- /app/state/demos_peerlist.json
 #   /app/.tlsnotary-key              <- /app/state/.tlsnotary-key
 #   /app/output                      <- /app/state/output
 #   /app/publickey_*                 <- /app/state/publickey_* (after creation)
+#
+# An IDENTITY_FILE inside /app/state already persists its record next to it. An
+# absolute path elsewhere, or a nested path under /app, is not bridged: the
+# identity file and its .signed.json must then be on a persistent volume.
 #
 # Logs:
 #   /app/logs_*  -> /app/logs/  (the legacy logger writes one dir per port+id)
@@ -24,7 +29,8 @@ mkdir -p "$STATE_DIR" "$LOGS_DIR"
 
 # Files: create on volume if absent, then symlink from /app.
 # The node generates these on demand on first boot — we don't pre-create.
-for f in .demos_identity .demos_identity.signed.json demos_peerlist.json .tlsnotary-key; do
+bridge_file() {
+    f="$1"
     target="$STATE_DIR/$f"
     link="/app/$f"
     # If /app already has a real file (e.g. baked from image), move it once
@@ -37,7 +43,34 @@ for f in .demos_identity .demos_identity.signed.json demos_peerlist.json .tlsnot
     fi
     # Create symlink (idempotent — pointing into the volume)
     [ -L "$link" ] || ln -s "$target" "$link"
+}
+
+for f in .demos_identity demos_peerlist.json .tlsnotary-key; do
+    bridge_file "$f"
 done
+
+# The signing record sits next to the configured identity file as
+# <IDENTITY_FILE>.signed.json and must survive container recreation, since it
+# is what stops the key from signing a round twice.
+identity_path="${IDENTITY_FILE:-.demos_identity}"
+case "$identity_path" in
+    /*) record_path="$identity_path.signed.json" ;;
+    *) record_path="/app/$identity_path.signed.json" ;;
+esac
+case "$record_path" in
+    "$STATE_DIR"/*)
+        : # already on the persistent volume
+        ;;
+    /app/*/*)
+        echo "entrypoint: IDENTITY_FILE=$identity_path is outside /app root; its signing record ($record_path) must be on a persistent volume too" >&2
+        ;;
+    /app/*)
+        bridge_file "${record_path#/app/}"
+        ;;
+    *)
+        echo "entrypoint: IDENTITY_FILE=$identity_path is outside /app; its signing record ($record_path) must be on a persistent volume too" >&2
+        ;;
+esac
 
 # Directory: output/
 # rmdir would only work on an empty dir, and 'ln -sfn TARGET /app/output'

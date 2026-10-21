@@ -27,6 +27,16 @@ key running on an independent host: nothing in software can see that node.
 Keep the record together with the identity file. Deleting it is only safe
 after the chain itself was reset.
 
+Under docker compose the container entrypoint links the record for the
+configured `IDENTITY_FILE` into the `/app/state` volume. If `IDENTITY_FILE` is
+an absolute path or sits in a subdirectory, the entrypoint only warns: put the
+identity file and its `.signed.json` record on a persistent volume yourself.
+
+Writing the record takes a short-lived lock file (`<record>.lock`) so that two
+nodes sharing a state directory cannot both record a different block for one
+round. A lock held by a live process makes the round abort without signing; a
+lock from a dead process or older than 30 seconds is replaced.
+
 ## One host signs for each key
 
 Exactly one named host runs a validator for a given key at any time. Write the

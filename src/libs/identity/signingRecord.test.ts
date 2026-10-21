@@ -240,4 +240,113 @@ describe("signingRecord", () => {
             expect(loadSigningRecord(identity)?.hash).toBe("aa")
         },
     )
+
+    describe("cross-process record lock", () => {
+        const lockPath = () => `${signingRecordPath(identity)}.lock`
+        const holdLock = (holder: object) =>
+            fs.writeFileSync(lockPath(), JSON.stringify(holder))
+
+        it("refuses to write while another live process holds a fresh lock", () => {
+            holdLock({
+                pid: process.ppid,
+                hostname: os.hostname(),
+                at: Date.now(),
+            })
+            expect(() =>
+                recordBlockSignature(identity, round(10, 1000, "aa")),
+            ).toThrow(/another process is writing/)
+            expect(fs.existsSync(signingRecordPath(identity))).toBe(false)
+            expect(fs.existsSync(lockPath())).toBe(true)
+        })
+
+        it("refuses while a lock from another host is fresh", () => {
+            holdLock({ pid: 1, hostname: "elsewhere", at: Date.now() })
+            expect(() =>
+                recordBlockSignature(identity, round(10, 1000, "aa")),
+            ).toThrow(SigningRecordError)
+        })
+
+        it("replaces a lock whose pid is dead on this host", () => {
+            holdLock({
+                pid: 2 ** 22 - 1,
+                hostname: os.hostname(),
+                at: Date.now(),
+            })
+            recordBlockSignature(identity, round(10, 1000, "aa"))
+            expect(loadSigningRecord(identity)?.hash).toBe("aa")
+            expect(fs.existsSync(lockPath())).toBe(false)
+        })
+
+        it("replaces a lock left by our own pid", () => {
+            holdLock({
+                pid: process.pid,
+                hostname: os.hostname(),
+                at: Date.now(),
+            })
+            recordBlockSignature(identity, round(10, 1000, "aa"))
+            expect(loadSigningRecord(identity)?.hash).toBe("aa")
+        })
+
+        it("replaces a lock older than the stale window, even from a live pid or another host", () => {
+            holdLock({
+                pid: process.ppid,
+                hostname: os.hostname(),
+                at: Date.now() - 60_000,
+            })
+            recordBlockSignature(identity, round(10, 1000, "aa"))
+            holdLock({ pid: 1, hostname: "elsewhere", at: Date.now() - 60_000 })
+            recordBlockSignature(identity, round(11, 1001, "bb"))
+            expect(loadSigningRecord(identity)?.height).toBe(11)
+        })
+
+        it("replaces an unreadable lock once its file is old", () => {
+            fs.writeFileSync(lockPath(), "garbage")
+            const old = new Date(Date.now() - 60_000)
+            fs.utimesSync(lockPath(), old, old)
+            recordBlockSignature(identity, round(10, 1000, "aa"))
+            expect(loadSigningRecord(identity)?.hash).toBe("aa")
+        })
+
+        it("releases the lock when the check under it refuses", () => {
+            recordBlockSignature(identity, round(10, 1000, "aa"))
+            expect(() =>
+                recordBlockSignature(identity, round(10, 1000, "bb")),
+            ).toThrow(DoubleSignError)
+            expect(fs.existsSync(lockPath())).toBe(false)
+        })
+    })
+
+    describe("directory sync", () => {
+        afterEach(() => {
+            jest.restoreAllMocks()
+        })
+
+        const failDirectoryFsync = (code: string) => {
+            const real = fs.fsyncSync
+            return jest.spyOn(fs, "fsyncSync").mockImplementation(fd => {
+                if (fs.fstatSync(fd).isDirectory()) {
+                    throw Object.assign(new Error(`${code}: sync failed`), {
+                        code,
+                    })
+                }
+                real(fd)
+            })
+        }
+
+        it("fails when the directory cannot be synced for a real reason", () => {
+            failDirectoryFsync("EIO")
+            expect(() =>
+                recordBlockSignature(identity, round(10, 1000, "aa")),
+            ).toThrow(SigningRecordError)
+            expect(fs.existsSync(`${signingRecordPath(identity)}.lock`)).toBe(
+                false,
+            )
+        })
+
+        it("tolerates filesystems that cannot sync directories", () => {
+            failDirectoryFsync("EINVAL")
+            recordBlockSignature(identity, round(10, 1000, "aa"))
+            expect(loadSigningRecord(identity)?.hash).toBe("aa")
+        })
+    })
 })
