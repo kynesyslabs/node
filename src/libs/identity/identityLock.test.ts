@@ -40,12 +40,23 @@ describe("identityLock", () => {
         expect(fs.existsSync(`${identity}.lock`)).toBe(false)
     })
 
-    it("refuses when a live process on this host holds it", () => {
+    it("refuses when another live process on this host holds it", () => {
+        fs.writeFileSync(
+            `${identity}.lock`,
+            JSON.stringify({ pid: process.ppid, hostname: os.hostname() }),
+        )
+        expect(() => acquireIdentityLock(identity)).toThrow(IdentityLockError)
+    })
+
+    it("treats a lock carrying our own pid and host as stale", () => {
         fs.writeFileSync(
             `${identity}.lock`,
             JSON.stringify({ pid: process.pid, hostname: os.hostname() }),
         )
-        expect(() => acquireIdentityLock(identity)).toThrow(IdentityLockError)
+        acquireIdentityLock(identity)
+        expect(
+            JSON.parse(fs.readFileSync(`${identity}.lock`, "utf8")).pid,
+        ).toBe(process.pid)
     })
 
     it("replaces a lock left by a dead pid", () => {
@@ -58,15 +69,82 @@ describe("identityLock", () => {
         expect(holder.pid).toBe(process.pid)
     })
 
-    it("replaces a lock from another host or an unreadable one", () => {
-        fs.writeFileSync(
-            `${identity}.lock`,
-            JSON.stringify({ pid: process.pid, hostname: "elsewhere" }),
-        )
-        acquireIdentityLock(identity)
-        releaseIdentityLock()
+    it("replaces an unreadable lock", () => {
         fs.writeFileSync(`${identity}.lock`, "garbage")
         acquireIdentityLock(identity)
+        expect(
+            JSON.parse(fs.readFileSync(`${identity}.lock`, "utf8")).pid,
+        ).toBe(process.pid)
+    })
+
+    describe("lock held by another host", () => {
+        const foreign = () =>
+            fs.writeFileSync(
+                `${identity}.lock`,
+                JSON.stringify({ pid: 4242, hostname: "elsewhere" }),
+            )
+        const savedEnv = process.env.DEMOS_IDENTITY_TAKEOVER
+        afterEach(() => {
+            if (savedEnv === undefined) {
+                delete process.env.DEMOS_IDENTITY_TAKEOVER
+            } else {
+                process.env.DEMOS_IDENTITY_TAKEOVER = savedEnv
+            }
+        })
+
+        it("refuses and names the holder host and pid", () => {
+            delete process.env.DEMOS_IDENTITY_TAKEOVER
+            foreign()
+            let message = ""
+            try {
+                acquireIdentityLock(identity)
+            } catch (e) {
+                expect(e).toBeInstanceOf(IdentityLockError)
+                message = (e as Error).message
+            }
+            expect(message).toContain("elsewhere")
+            expect(message).toContain("4242")
+            expect(
+                JSON.parse(fs.readFileSync(`${identity}.lock`, "utf8"))
+                    .hostname,
+            ).toBe("elsewhere")
+        })
+
+        it("is replaced when DEMOS_IDENTITY_TAKEOVER=true", () => {
+            process.env.DEMOS_IDENTITY_TAKEOVER = "true"
+            foreign()
+            acquireIdentityLock(identity)
+            const holder = JSON.parse(
+                fs.readFileSync(`${identity}.lock`, "utf8"),
+            )
+            expect(holder.pid).toBe(process.pid)
+            expect(holder.hostname).toBe(os.hostname())
+        })
+
+        it("is not replaced by other values of the variable", () => {
+            process.env.DEMOS_IDENTITY_TAKEOVER = "false"
+            foreign()
+            expect(() => acquireIdentityLock(identity)).toThrow(
+                IdentityLockError,
+            )
+        })
+
+        it("honours the explicit takeover option", () => {
+            delete process.env.DEMOS_IDENTITY_TAKEOVER
+            foreign()
+            acquireIdentityLock(identity, { takeover: true })
+            expect(
+                JSON.parse(fs.readFileSync(`${identity}.lock`, "utf8")).pid,
+            ).toBe(process.pid)
+        })
+    })
+
+    it("treats a dead pid on this host as stale even without takeover", () => {
+        fs.writeFileSync(
+            `${identity}.lock`,
+            JSON.stringify({ pid: 2 ** 22 - 1, hostname: os.hostname() }),
+        )
+        acquireIdentityLock(identity, { takeover: false })
         expect(
             JSON.parse(fs.readFileSync(`${identity}.lock`, "utf8")).pid,
         ).toBe(process.pid)

@@ -6,11 +6,12 @@
 # Also routes the timestamped logs_<port>_<id>/ directory into /app/logs.
 #
 # Files bridged:
-#   /app/.demos_identity           <- /app/state/.demos_identity
-#   /app/demos_peerlist.json       <- /app/state/demos_peerlist.json
-#   /app/.tlsnotary-key            <- /app/state/.tlsnotary-key
-#   /app/output                    <- /app/state/output
-#   /app/publickey_*               <- /app/state/publickey_* (after creation)
+#   /app/.demos_identity             <- /app/state/.demos_identity
+#   /app/.demos_identity.signed.json <- /app/state/.demos_identity.signed.json
+#   /app/demos_peerlist.json         <- /app/state/demos_peerlist.json
+#   /app/.tlsnotary-key              <- /app/state/.tlsnotary-key
+#   /app/output                      <- /app/state/output
+#   /app/publickey_*                 <- /app/state/publickey_* (after creation)
 #
 # Logs:
 #   /app/logs_*  -> /app/logs/  (the legacy logger writes one dir per port+id)
@@ -23,7 +24,7 @@ mkdir -p "$STATE_DIR" "$LOGS_DIR"
 
 # Files: create on volume if absent, then symlink from /app.
 # The node generates these on demand on first boot — we don't pre-create.
-for f in .demos_identity demos_peerlist.json .tlsnotary-key; do
+for f in .demos_identity .demos_identity.signed.json demos_peerlist.json .tlsnotary-key; do
     target="$STATE_DIR/$f"
     link="/app/$f"
     # If /app already has a real file (e.g. baked from image), move it once
