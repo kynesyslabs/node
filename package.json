@@ -107,6 +107,11 @@
         "tsx": "^3.12.8",
         "typescript": "^5.9.3"
     },
+    "trustedDependencies": [
+        "bufferutil",
+        "sqlite3",
+        "utf-8-validate"
+    ],
     "dependencies": {
         "@aptos-labs/ts-sdk": "^5.2.0",
         "@coral-xyz/anchor": "^0.32.1",

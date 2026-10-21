@@ -34,9 +34,9 @@ WORKDIR /app
 # Copy manifests first to maximise layer cache reuse on dep installs.
 COPY package.json bun.lock ./
 
-# Resolve all dependencies exactly as locked. Lifecycle scripts stay
-# blocked (Bun's default): none of the blocked ones does anything the
-# node needs at runtime, and a blanket trust would run whatever a future
+# Resolve all dependencies exactly as locked. Lifecycle scripts run only
+# for the packages listed in package.json trustedDependencies (the native
+# modules the node needs); a blanket trust would run whatever a future
 # dependency ships. bufferutil and utf-8-validate come from the lockfile
 # with prebuilt binaries, so no `bun add` at build time.
 RUN bun install --frozen-lockfile
@@ -183,7 +183,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
          /var/log/alternatives.log /var/cache/ldconfig/aux-cache \
     && case "$(dpkg --print-architecture)" in amd64) ;; *) \
          echo >&2 "Node is pinned for amd64 only; add the sha256 for this architecture"; exit 1 ;; esac \
-    && curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
     && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
     && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
          --exclude='*/CHANGELOG.md' --exclude='*/README.md' --exclude='*/LICENSE' \
