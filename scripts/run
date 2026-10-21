@@ -8,7 +8,9 @@ VERBOSE=false
 NO_TUI=false
 EXTERNAL_DB=false
 
-GIT_PULL=true
+# The launcher starts the checked-out release as is. Pulling is opt-in
+# (-U) so a validator never picks up origin's head by accident.
+GIT_PULL=false
 TLSNOTARY_DISABLED=false
 MONITORING_DISABLED=false
 
@@ -81,7 +83,8 @@ OPTIONS:
     -d <port>                      PostgreSQL port (default: 5332)
     -i <path>                      Identity file path (default: .demos_identity)
     -c <true/false>                Clean database on startup
-    -n <true/false>                Skip git pull (useful for custom branches)
+    -U                             Update the checkout (git pull) before starting
+    -n <true/false>                Kept for compatibility: pull is already off by default
     -u <url>                       Override EXPOSED_URL
     -l <path>                      Peer list file (default: demos_peerlist.json)
     -g <port>                      Gossip (libp2p) TCP port (default: 9095)
@@ -102,7 +105,7 @@ EXAMPLES:
     ./run -p 53551 -d 5333         # Run on custom ports
     ./run -c                       # Clean start (fresh database)
     ./run -v                       # Verbose output for troubleshooting
-    ./run -n                       # Skip git update (for development)
+    ./run -U                       # Pull origin first (development only)
     ./run -t                       # Legacy mode (scrolling logs for developers)
     ./run --no-tui                 # Same as -t
     ./run -e                       # Use external database (DATABASE_URL from env)
@@ -163,7 +166,7 @@ check_git_origin() {
 
 		if [[ ${REPLY} =~ ^[Nn]$ ]]; then
 			echo "   Skipping git pull for this run (origin unchanged)."
-			echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
+			echo "   💡 Tip: without -U the launcher starts the checked-out commit and never pulls."
 			GIT_PULL=false
 			return 0
 		else
@@ -188,7 +191,7 @@ check_git_origin() {
 	else
 		echo "   Origin doesn't appear to be a GitHub repository."
 		echo "   Skipping git pull for this run."
-		echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
+		echo "   💡 Tip: without -U the launcher starts the checked-out commit and never pulls."
 		GIT_PULL=false
 		return 0
 	fi
@@ -409,15 +412,44 @@ function is_first_run() {
 	fi
 }
 
-# If we are on the first run, we need to install the dependencies
-if is_first_run; then
-	echo "Installing node dependencies"
-	if ! bun install; then
-		echo "Error: Dependencies failed to install"
-		exit 1
+# Every validator runs the Bun in .bun-version: another version reads
+# the lockfile differently or resolves it differently.
+check_bun_version() {
+	local wanted have
+	wanted=$(tr -d '[:space:]' <.bun-version 2>/dev/null || true)
+	[[ -z "${wanted}" ]] && return 0
+	have=$(bun --version 2>/dev/null || true)
+	[[ "${have}" == "${wanted}" ]] && return 0
+	if [[ "${DEMOS_SKIP_BUN_VERSION_CHECK:-}" == "true" ]]; then
+		echo "⚠️  Bun ${have} differs from the pinned ${wanted}; check skipped"
+		return 0
 	fi
-	echo "Ok, dependencies installed"
-	patch_falcon_sign
+	echo "❌ Bun ${have} is installed; this release needs ${wanted} (.bun-version)"
+	echo "💡 Install it: mise use -g bun@${wanted}"
+	echo "   For development only: DEMOS_SKIP_BUN_VERSION_CHECK=true ./run"
+	exit 1
+}
+
+if ! command -v bun &>/dev/null; then
+	echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
+	echo "Install bun following: https://bun.sh/docs/installation."
+	exit 1
+fi
+check_bun_version
+
+# Dependencies are installed from the lockfile on every start, not only
+# on the first run: a checkout moved to a new tag must not run new source
+# on the previous tag's node_modules. With nothing to do this takes a
+# moment.
+echo "📦 Installing dependencies from the lockfile..."
+if ! bun install --frozen-lockfile; then
+	echo "Error: Dependencies failed to install"
+	exit 1
+fi
+patch_falcon_sign
+
+# If we are on the first run, check the tooling the node needs
+if is_first_run; then
 	# We need docker and docker compose to be installed (unless using external DB)
 	if [[ "${EXTERNAL_DB}" = false ]]; then
 		echo "🔍 Checking Docker..."
@@ -447,16 +479,6 @@ if is_first_run; then
 
 		echo "✅ Docker and Docker Compose are ready"
 	fi
-	# Check if Bun is installed
-	if ! command -v bun &>/dev/null; then
-		echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
-		echo "Install bun following: https://bun.sh/docs/installation."
-		exit 1
-	else
-		echo "Ok, Bun is installed"
-	fi
-	# This file is used to check if we are on the first run
-
 	# This file is used to check if we are on the first run
 	touch .RUN
 fi
@@ -486,7 +508,7 @@ for arg in "$@"; do
 done
 
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehm" opt; do
+while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehmU" opt; do
 	case $opt in
 	p) PORT=$OPTARG ;;
 	d) PG_PORT=$OPTARG ;;
@@ -496,6 +518,7 @@ while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehm" opt; do
 	g) GOSSIP_PORT=$OPTARG ;;
 	k) GOSSIP_KEY_FILE=$OPTARG ;;
 	n) GIT_PULL=false ;;
+	U) GIT_PULL=true ;;
 	u) EXPOSED_URL=$OPTARG ;;
 	r) RUNTIME=$OPTARG ;;
 	b) RESTORE=${OPTARG} ;;
@@ -561,7 +584,7 @@ if [ "$GIT_PULL" = true ]; then
 				echo "   - Run 'git remote -v' to check your remotes"
 				echo ""
 				echo "   Quick fixes:"
-				echo "   1. Skip git pull: ./run -n true"
+				echo "   1. Start the checked-out commit without pulling: ./run (drop -U)"
 				echo "   2. Fix origin: git remote set-url origin https://github.com/kynesyslabs/node"
 				echo "   3. Or re-run ./run and choose 'Y' when prompted about the fork"
 			else
@@ -576,7 +599,7 @@ if [ "$GIT_PULL" = true ]; then
 	# Always run bun install after successful git pull
 	echo "📦 Installing dependencies..."
 	log_verbose "Running bun install after git pull"
-	if ! bun install; then
+	if ! bun install --frozen-lockfile; then
 		echo "❌ Failed to install dependencies"
 		exit 1
 	fi
@@ -689,7 +712,7 @@ if [[ "${GOSSIP_ENABLED:-true}" != "false" ]]; then
 	SIDECAR_BUNDLE="sidecar/dist/gossip-sidecar.mjs"
 	if [[ ! -f "$SIDECAR_BUNDLE" || "sidecar/src/index.js" -nt "$SIDECAR_BUNDLE" ]]; then
 		echo "🔧 Building gossip sidecar..."
-		(cd sidecar && bun install --silent && node build.mjs) || {
+		(cd sidecar && bun install --frozen-lockfile --silent && node build.mjs) || {
 			echo "❌ Gossip sidecar build failed"
 			exit 1
 		}
