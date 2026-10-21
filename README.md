@@ -72,36 +72,9 @@ See [INSTALL.md](INSTALL.md) for profiles, env vars, volumes, upgrades, and trou
 
 ## Publishing the Image
 
-The compose file uses `${IMAGE_NAME}:${IMAGE_TAG}` (default `demos-node:local`) for the node service, so the same compose can either build locally or pull from a registry by switching `.env`.
+Release images are built and published by CI from a signed tag, twice from clean checkouts, and pushed to `ghcr.io/kynesyslabs/node:<tag>` only when both builds produce the same digest. Validators pin that tag and digest in `.env`. The procedure, including how to verify the digest a node runs, is in [docs/runbooks/release.md](docs/runbooks/release.md).
 
-**Build and tag for a registry:**
-
-```bash
-# Pick your registry coordinates
-export IMAGE_NAME=ghcr.io/kynesyslabs/node     # or docker.io/<user>/demos-node, etc.
-export IMAGE_TAG=v0.9.8                         # or git sha, or 'latest'
-
-docker build -t "$IMAGE_NAME:$IMAGE_TAG" .
-docker push "$IMAGE_NAME:$IMAGE_TAG"
-```
-
-**Multi-arch (recommended for public registries):**
-
-```bash
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  -t "$IMAGE_NAME:$IMAGE_TAG" \
-  --push .
-```
-
-**Pull on a target host** — write `IMAGE_NAME` and `IMAGE_TAG` into that host's `.env`, then:
-
-```bash
-docker compose pull node
-docker compose up -d
-```
-
-For private registries, run `docker login <registry>` first.
+The compose file uses `${IMAGE_NAME}:${IMAGE_TAG}` (default `demos-node:local`) for the node service, so the same compose either builds locally for development or pulls the released image. For private registries, run `docker login <registry>` first.
 
 ## Advanced / Bare-Metal Run
 
