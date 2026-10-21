@@ -1,13 +1,11 @@
 # Demos Network Devnet Node
-FROM oven/bun:latest
+FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f
 
-# Install system dependencies (including build tools for native modules)
+# No compiler: lifecycle scripts are blocked and the native modules the
+# node uses ship prebuilt binaries.
 RUN apt-get update && apt-get install -y \
     curl \
     netcat-openbsd \
-    build-essential \
-    python3 \
-    python3-setuptools \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -17,11 +15,7 @@ WORKDIR /app
 COPY package.json bun.lock ./
 
 # Install dependencies at build time (cached if package.json unchanged)
-RUN bun install
-RUN bun pm trust --all || true
-
-# Install native websocket modules explicitly
-RUN bun add bufferutil utf-8-validate
+RUN bun install --frozen-lockfile
 
 # Now copy the rest of the repo
 COPY . .
