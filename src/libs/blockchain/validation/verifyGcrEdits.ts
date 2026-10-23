@@ -68,6 +68,32 @@ function blankVolatileEditFields(edit: GCREdit): GCREdit {
 }
 
 /**
+ * The canonical wire-shape transform the SDK applies to a transaction's edits
+ * (post-fork OS amount strings vs raw author shape). Any two edit sets that
+ * are compared must go through the same transform, or identical sets compare
+ * differently. The fork decision comes from the local chain tip, never from
+ * the transaction: tx.blockNumber is attacker controlled.
+ */
+async function osDenominationActive(): Promise<boolean> {
+    const blockHeight = await Chain.getLastBlockNumber()
+    return isForkActive("osDenomination", blockHeight)
+}
+
+function canonicalEdits(
+    tx: Transaction,
+    postFork: boolean,
+): (edits: GCREdit[]) => GCREdit[] {
+    return (edits: GCREdit[]): GCREdit[] => {
+        const serialised = denomination.serializeTransactionContent(
+            { ...tx.content, gcr_edits: edits } as any,
+            postFork,
+        )
+        const parsed = JSON.parse(serialised) as { gcr_edits?: GCREdit[] }
+        return parsed.gcr_edits ?? []
+    }
+}
+
+/**
  * Verify that `tx.content.gcr_edits` equals the edits regenerated from the
  * signed tx body. Pure: does not mutate `tx` and never throws on mismatch
  * (only on an unexpected internal failure, which the caller should treat as
@@ -177,26 +203,7 @@ export async function verifyGcrEditsMatch(
         gcredit.txhash = ""
     })
 
-    // Both sides must be normalised through the SAME canonical wire-shape
-    // transform the SDK applies (post-fork OS amount strings vs raw author
-    // shape), or identical edit sets hash differently. Block height comes from
-    // the local chain tip — never from the tx (tx.blockNumber is attacker
-    // controlled). osDenomination gate decides the amount encoding.
-    const blockHeight = await Chain.getLastBlockNumber()
-    const postFork = isForkActive("osDenomination", blockHeight)
-
-    const normalise = (edits: GCREdit[]): GCREdit[] => {
-        const envelope = {
-            ...tx.content,
-            gcr_edits: edits,
-        }
-        const serialised = denomination.serializeTransactionContent(
-            envelope as any,
-            postFork,
-        )
-        const parsed = JSON.parse(serialised) as { gcr_edits: GCREdit[] }
-        return parsed.gcr_edits ?? []
-    }
+    const normalise = canonicalEdits(tx, await osDenominationActive())
 
     const normalisedRegen = normalise(regen)
     const regenEditsHash = Hashing.sha256(JSON.stringify(normalisedRegen))
@@ -288,9 +295,20 @@ export async function verifyNoUnexplainedValueEdits(
         return { ok: true, unexplained: [] }
     }
 
+    // The shipped amounts are compared exactly as the balance routines will
+    // apply them, so a shipped amount is never reinterpreted here. Only the
+    // regenerated side is brought to the wire shape: once osDenomination is
+    // active the SDK ships amounts as OS strings while regeneration yields the
+    // author shape, and comparing those as text explains nothing a peer sends.
+    // Before the fork both sides are already in the author shape.
     let regenerated: string[]
     try {
-        regenerated = projectValueEdits(await generateGcrEdits(tx))
+        const regen = await generateGcrEdits(tx)
+        regenerated = projectValueEdits(
+            (await osDenominationActive())
+                ? canonicalEdits(tx, true)(regen)
+                : regen,
+        )
     } catch (e) {
         log.error(
             `[verifyNoUnexplainedValueEdits] regeneration failed for tx ${tx.hash}: ` +
