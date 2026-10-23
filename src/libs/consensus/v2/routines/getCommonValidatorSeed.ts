@@ -84,12 +84,6 @@ export default async function getCommonValidatorSeed(
         lastBlockHash &&
         getSharedState.lastBlockHash === lastBlockHash
     ) {
-        log.debug("[getCommonValidatorSeed] Returning cached result")
-        log.debug("Common validator seed: " + lastCVSAResult.commonValidatorSeed)
-        log.debug("Last block number: " + lastCVSAResult.lastBlockNumber)
-        log.debug("--------------------------------")
-        log.debug("Last block hash: " + lastBlockHash)
-        log.debug("--------------------------------")
         return lastCVSAResult
     }
 

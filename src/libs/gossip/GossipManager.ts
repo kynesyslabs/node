@@ -780,23 +780,22 @@ export class GossipManager {
         data: Buffer,
         from: string,
     ): Promise<void> {
-        let seq: number | undefined
-        try {
-            seq = JSON.parse(data.toString())?.seq
-        } catch {
-            /* validator rejects unparseable payloads below */
+        if (topic !== HEIGHTS_TOPIC) {
+            let seq: number | undefined
+            try {
+                seq = JSON.parse(data.toString())?.seq
+            } catch {
+                /* validator rejects unparseable payloads below */
+            }
+            log.debug(
+                `[GOSSIP] message received on '${topic}' (${data.length} bytes) from ${this.senderUrl(from)}${seq !== undefined ? `, seq: ${seq}` : ""}`,
+            )
         }
-        log.debug(
-            `[GOSSIP] message received on '${topic}' (${data.length} bytes) from ${this.senderUrl(from)}${seq !== undefined ? `, seq: ${seq}` : ""}`,
-        )
         if (topic === HEIGHTS_TOPIC) {
             const { result, record } = await validateHeightsMessage(
                 new Uint8Array(data),
             )
             if (result !== "accept" || !record) return
-            log.debug(
-                `[GOSSIP] heights record from ${record.pubkey}: height ${record.height}, seq ${record.seq}`,
-            )
             await this.applyHeightsRecord(record)
         } else if (topic === BLOCKS_TOPIC) {
             const { result, block } = await validateBlockMessage(
@@ -855,13 +854,11 @@ export class GossipManager {
             `${status}:${record.height}:${record.headHash}`,
         )
         countHeightsRecord(res?.result === 200 ? "applied" : "not_applied")
-        log.debug(
-            `[GOSSIP] heights record for ${record.pubkey} ${
-                res?.result === 200
-                    ? "applied to peer sync state"
-                    : `not applied: ${res?.message ?? "unknown"}`
-            }`,
-        )
+        if (res?.result !== 200) {
+            log.debug(
+                `[GOSSIP] heights record for ${record.pubkey} not applied: ${res?.message ?? "unknown"}`,
+            )
+        }
 
         const peer = peerman.getPeer(record.pubkey)
         if (peer) {
