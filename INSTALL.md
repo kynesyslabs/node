@@ -54,6 +54,28 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
+### Docker daemon baseline
+
+Docker Engine 29+ stores images and build cache through containerd, under `/var/lib/containerd`, and keeps up to ~60% of that disk as build cache before it collects anything. On a node that rebuilds the image regularly this fills the root filesystem within months. Set the baseline below in `/etc/docker/daemon.json` before the first build, then `sudo systemctl restart docker`:
+
+```json
+{
+  "live-restore": true,
+  "builder": { "gc": { "enabled": true, "defaultKeepStorage": "10GB" } }
+}
+```
+
+- `builder.gc` caps the BuildKit cache at 10 GB.
+- `live-restore` keeps running containers up across daemon restarts.
+
+Check which image store you are on:
+
+```bash
+docker info --format '{{.Driver}} {{json .DriverStatus}}'
+```
+
+`overlayfs` with `driver-type: io.containerd.snapshotter.v1` means the containerd store. In that mode `data-root` in `daemon.json` only relocates volumes, container metadata and networks. To put images and build cache on a separate disk as well, set `root = "/path/on/that/disk/containerd"` at the top level of `/etc/containerd/config.toml` (generate the file with `containerd config default` if it only lists `disabled_plugins`), then stop `docker`, `docker.socket` and `containerd` in that order, rsync `/var/lib/containerd/` to the new path, and start `containerd` then `docker`.
+
 ### Quickstart (3 steps)
 
 ```bash
@@ -252,7 +274,7 @@ git pull
 docker compose up -d --build
 ```
 
-The `--build` rebuilds the node image against the new source. Volumes (and therefore your identity, chain data, peerlist cache) are preserved.
+The `--build` rebuilds the node image against the new source. Volumes (and therefore your identity, chain data, peerlist cache) are preserved. Each update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
 
 ### Stop the node
 
@@ -284,7 +306,7 @@ This deletes your identity, chain data, Prometheus history, Grafana dashboards â
 > Postgres takes a few seconds to become healthy on first boot. The node has a `depends_on: condition: service_healthy` so this should be automatic â€” but if it persists, check `docker compose logs postgres` for crash loops or auth failures.
 
 **Out of disk**
-> Volumes grow over time. Inspect with `docker system df -v`. To reclaim space without losing identity, only prune images: `docker image prune -af`. To reclaim everything: `docker compose down -v` (destructive).
+> Start with `docker system df`. Build cache is the usual culprit after repeated rebuilds: `docker builder prune -af` reclaims it and touches no containers, images or volumes (the next build runs cold). Then prune unused images: `docker image prune -af`. If the cache keeps coming back, apply the [daemon baseline](#docker-daemon-baseline). To reclaim everything: `docker compose down -v` (destructive, wipes identity and chain data).
 
 **`docker compose: command not found`**
 > You have the legacy Python `docker-compose` instead of the v2 plugin. Install the plugin per [https://docs.docker.com/compose/install/](https://docs.docker.com/compose/install/).

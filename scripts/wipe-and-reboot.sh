@@ -16,7 +16,8 @@
 #   3. Removes the three named volumes (PG data, node data, node state)
 #      belonging to the targeted stack.
 #   4. Forces a `--no-cache` rebuild of the node image (so source
-#      changes since the last build are picked up).
+#      changes since the last build are picked up), then prunes build
+#      cache older than 24h.
 #   5. Boots the stack detached.
 #   6. Tails the GENESIS / FORK / BALANCES log lines so the operator
 #      can confirm the chain came up clean.
@@ -146,6 +147,7 @@ if [[ "$DO_REBUILD" -eq 1 ]]; then
         ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --rebuild build
     else
         docker compose build --no-cache node
+        docker builder prune -f --filter until=24h || true
     fi
 else
     echo "[4/6] skipping image rebuild (--no-rebuild)."

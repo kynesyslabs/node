@@ -44,10 +44,10 @@
 #                `up`. Equivalent to bare-metal `./run -b true`. Brings down
 #                the stack first, then `docker volume rm` the project-scoped
 #                volumes. Snapshot-restore re-runs from genesis on next boot.
-#   --rebuild    Rebuild the node image with --no-cache before `up`. Use
-#                after pulling new commits to force a fresh build that
-#                picks up Dockerfile / source / data/ changes. Implied by
-#                nothing — pass explicitly.
+#   --rebuild    Rebuild the node image with --no-cache before `up` (or
+#                `build`), then prune build cache older than 24h. A plain
+#                `up` already rebuilds on source changes; reserve this for
+#                a suspect cache. Implied by nothing — pass explicitly.
 #   --detach,-d  Detach after start (`docker compose up -d`).
 #   --help,-h    Print this help.
 #
@@ -399,13 +399,15 @@ if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
     done
 fi
 
-# --rebuild: force --no-cache rebuild of the node image before `up`.
-# Order matters: after --clean (volumes wiped) so the freshly-built image
-# is paired with an empty data dir. Only fires when SUBCOMMAND is `up`;
-# explicit `down`/`logs`/etc skip the rebuild.
-if [[ "$REBUILD_IMAGE" == "true" && "$SUBCOMMAND" == "up" ]]; then
+# --rebuild: force --no-cache rebuild of the node image before `up` or
+# `build`. Runs after --clean so the fresh image pairs with an empty data
+# dir. A no-cache build leaves the previous build's layers in the BuildKit
+# cache, so prune everything older than 24h once the build succeeds.
+if [[ "$REBUILD_IMAGE" == "true" && ( "$SUBCOMMAND" == "up" || "$SUBCOMMAND" == "build" ) ]]; then
     echo "+ --rebuild: docker compose build --no-cache node"
     docker compose "${COMPOSE_ARGS[@]}" build --no-cache node
+    echo "+ --rebuild: pruning build cache older than 24h"
+    docker builder prune -f --filter until=24h || true
 fi
 
 # Always-sync host `.demos_identity` -> `node_state` volume before `up`.

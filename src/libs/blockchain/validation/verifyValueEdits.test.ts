@@ -14,10 +14,19 @@ jest.mock("@kynesyslabs/demosdk/websdk", () => ({
     GCRGeneration: { generate: (tx: Transaction) => generate(tx) },
 }))
 
+// Mirrors the SDK serializer gate: post-fork, a DEM-number balance amount
+// goes on the wire as an OS string.
 jest.mock("@kynesyslabs/demosdk", () => ({
     denomination: {
-        serializeTransactionContent: (content: unknown) =>
-            JSON.stringify(content),
+        serializeTransactionContent: (content: any, postFork: boolean) => {
+            if (!postFork) return JSON.stringify(content)
+            const edits = (content.gcr_edits ?? []).map((e: any) =>
+                e.type === "balance" && typeof e.amount === "number"
+                    ? { ...e, amount: String(BigInt(e.amount) * 1_000_000_000n) }
+                    : e,
+            )
+            return JSON.stringify({ ...content, gcr_edits: edits })
+        },
     },
 }))
 
@@ -37,8 +46,10 @@ jest.mock("src/libs/blockchain/chain", () => ({
     default: { getLastBlockNumber: async () => 0 },
 }))
 
+const sharedState = { lastBlockNumber: 0, forkConfig: {} as Record<string, unknown> }
+
 jest.mock("@/utilities/sharedState", () => ({
-    getSharedState: { lastBlockNumber: 0, forkConfig: {} },
+    getSharedState: sharedState,
 }))
 
 import { verifyNoUnexplainedValueEdits } from "./verifyGcrEdits"
@@ -94,6 +105,7 @@ function identityAddEdit(): GCREdit {
 
 beforeEach(() => {
     generate.mockReset()
+    sharedState.forkConfig = {}
 })
 
 describe("verifyNoUnexplainedValueEdits", () => {
@@ -149,6 +161,38 @@ describe("verifyNoUnexplainedValueEdits", () => {
         expect(result.ok).toBe(true)
         // No value edits shipped — nothing to regenerate or compare.
         expect(generate).not.toHaveBeenCalled()
+    })
+
+    it("accepts a fee the generator emits in DEM once the wire carries OS", async () => {
+        sharedState.forkConfig = { osDenomination: { activationHeight: 0 } }
+        // The generator emits the fee as a DEM number; the wire carries OS.
+        generate.mockResolvedValue([
+            { ...balanceEdit(""), operation: "remove", amount: 1 } as unknown as GCREdit,
+        ])
+
+        const result = await verifyNoUnexplainedValueEdits(
+            identityTx([
+                { ...balanceEdit("1000000000"), operation: "remove" } as unknown as GCREdit,
+            ]),
+        )
+
+        expect(result.ok).toBe(true)
+    })
+
+    it("still rejects a post-fork amount the generator did not emit", async () => {
+        sharedState.forkConfig = { osDenomination: { activationHeight: 0 } }
+        generate.mockResolvedValue([
+            { ...balanceEdit(""), operation: "remove", amount: 1 } as unknown as GCREdit,
+        ])
+
+        const result = await verifyNoUnexplainedValueEdits(
+            identityTx([
+                { ...balanceEdit("2000000000"), operation: "remove" } as unknown as GCREdit,
+            ]),
+        )
+
+        expect(result.ok).toBe(false)
+        expect(result.unexplained[0]).toContain("2000000000")
     })
 
     it("fails closed when the edits cannot be regenerated", async () => {
