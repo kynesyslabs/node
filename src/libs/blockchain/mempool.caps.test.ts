@@ -322,6 +322,37 @@ describe("eviction", () => {
         expect(pool).toHaveLength(3)
     })
 
+    it("does not evict while a consensus round is in progress", async () => {
+        sharedState.inConsensusLoop = true
+        fund("0xpayer", 100)
+        const refused = await rpc(makeTx({ fee: 50, from: "0xpayer" }))
+        expect(refused.error).toMatch(/Mempool full/)
+        expect(pool.map(h => h.hash).sort()).toEqual(["0xhigh", "0xlow-new", "0xlow-old"])
+        expect(calls).not.toContain("delete")
+    })
+
+    it("does not delete when a round starts after the admission check", async () => {
+        fund("0xpayer", 100)
+        const m = Mempool as any
+        const candidates = m.listEvictionCandidates
+        m.listEvictionCandidates = async () => {
+            const rows = await candidates()
+            sharedState.inConsensusLoop = true
+            return rows
+        }
+        const refused = await rpc(makeTx({ fee: 50, from: "0xpayer" }))
+        expect(refused.error).toMatch(/Mempool full/)
+        expect(pool).toHaveLength(3)
+        expect(calls).not.toContain("delete")
+
+        nonceEnforced = true
+        sharedState.inConsensusLoop = false
+        const refusedWithNonce = await rpc(makeTx({ fee: 50, from: "0xpayer", nonce: 3 }))
+        expect(refusedWithNonce.error).toMatch(/Mempool full/)
+        expect(pool).toHaveLength(3)
+        expect(calls).not.toContain("delete")
+    })
+
     it("never evicts for a gossiped or internal tx, whatever it pays", async () => {
         fund("0xpayer", 100)
         expect((await gossip(makeTx({ fee: 50, from: "0xpayer" }))).error).toMatch(/Mempool full/)

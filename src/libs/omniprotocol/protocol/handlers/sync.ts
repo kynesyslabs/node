@@ -254,8 +254,8 @@ export const handleMempoolMerge: OmniHandler<Buffer> = async ({
 
     const request = decodeMempoolMergeRequest(message.payload)
 
-    // A merge batch is a peer's whole pool, which is capped, so a longer
-    // list is not a pool.
+    // Senders split their pool into requests of at most the pool cap, so a
+    // longer list is not from an honest node.
     const { getMempoolLimits } = await import(
         "src/libs/blockchain/mempoolLimits"
     )

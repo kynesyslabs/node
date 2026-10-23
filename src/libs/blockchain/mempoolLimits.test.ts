@@ -14,6 +14,7 @@ const {
     checkTxAge,
     chooseVictims,
     getMempoolLimits,
+    splitMergeBatches,
     txStoredBytes,
     txTotalFee,
 } = limitsModule
@@ -162,5 +163,40 @@ describe("chooseVictims", () => {
         expect(
             chooseVictims([cand("a", 1, 1)], { fee: 1n, bytes: 100 }, { count: 1, bytes: 100 }, limits),
         ).toEqual([])
+    })
+})
+
+describe("splitMergeBatches", () => {
+    const tx = (hash: string, pad = 0) =>
+        ({ hash, content: { pad: "x".repeat(pad) }, signature: {} }) as never
+
+    it("keeps a pool within the caps as one request", () => {
+        const pool = [tx("a"), tx("b"), tx("c")]
+        expect(splitMergeBatches(pool)).toEqual([pool])
+    })
+
+    it("still sends one empty request for an empty pool", () => {
+        expect(splitMergeBatches([])).toEqual([[]])
+    })
+
+    it("never lets a request exceed the count cap and keeps order", () => {
+        __setMempoolLimits({ maxTxs: 2 })
+        const pool = [tx("a"), tx("b"), tx("c"), tx("d"), tx("e")]
+        const batches = splitMergeBatches(pool)
+        expect(batches.map(b => b.length)).toEqual([2, 2, 1])
+        expect(batches.flat()).toEqual(pool)
+    })
+
+    it("accepts a pool one over the cap, as an own relay tx makes it", () => {
+        __setMempoolLimits({ maxTxs: 3 })
+        const batches = splitMergeBatches([tx("a"), tx("b"), tx("c"), tx("d")])
+        expect(batches.map(b => b.length)).toEqual([3, 1])
+    })
+
+    it("never lets a request exceed the byte cap, and ships an oversized tx alone", () => {
+        const one = txStoredBytes(tx("a", 100))
+        __setMempoolLimits({ maxBytes: one * 2 + 5 })
+        const batches = splitMergeBatches([tx("a", 100), tx("b", 100), tx("c", 100), tx("big", 5000)])
+        expect(batches.map(b => b.length)).toEqual([2, 1, 1])
     })
 })

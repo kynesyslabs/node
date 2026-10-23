@@ -344,7 +344,12 @@ export default class Mempool {
         }
 
         const full: MempoolRejectReason = countFull ? "pool_full" : "bytes_full"
-        if (origin !== "rpc" || sender === null) return refuse(full)
+        // Deleting a held tx while a round runs would change the pool the
+        // committee is exchanging: members that already received it keep it,
+        // and this node's final read would not.
+        if (origin !== "rpc" || sender === null || getSharedState.inConsensusLoop) {
+            return refuse(full)
+        }
 
         // One balance read, and only at a full pool.
         const fee = txTotalFee(tx.content?.transaction_fee)
@@ -643,6 +648,15 @@ export default class Mempool {
                         }
 
                         if (evict.length > 0) {
+                            // A round can start between the admission check
+                            // and this delete.
+                            if (getSharedState.inConsensusLoop) {
+                                countMempoolRejection("pool_full")
+                                return {
+                                    confirmationBlock: null,
+                                    error: rejectMessage("pool_full"),
+                                }
+                            }
                             await mempoolRepo.delete({ hash: In(evict) })
                         }
                         const saved = await mempoolRepo.save({
@@ -679,6 +693,14 @@ export default class Mempool {
                 timestamp: BigInt(transaction.content.timestamp),
                 nonce: transaction.content.nonce,
                 blockNumber: blockRef,
+            }
+            if (evict.length > 0 && getSharedState.inConsensusLoop) {
+                // A round can start between the admission check and the delete.
+                countMempoolRejection("pool_full")
+                return {
+                    confirmationBlock: null,
+                    error: rejectMessage("pool_full"),
+                }
             }
             const saved =
                 evict.length === 0

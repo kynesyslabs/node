@@ -149,8 +149,9 @@ export default class ServerHandlers {
                 : null
         const txs: Transaction[] = envelope ? envelope.txs : content
 
-        // A merge batch is a peer's whole pool, which is capped, so a longer
-        // list is not a pool and is not worth validating.
+        // Senders split their pool into requests of at most the pool cap, so
+        // a longer list is not from an honest node and is not worth
+        // validating.
         if (!Array.isArray(txs) || txs.length > getMempoolLimits().maxTxs) {
             return {
                 result: 400,

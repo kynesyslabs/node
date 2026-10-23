@@ -233,3 +233,36 @@ export function chooseVictims(
     }
     return over() ? null : victims
 }
+
+/**
+ * Splits a pool into the requests that carry it to a peer. A request is
+ * held to the pool caps, which the receiving side enforces on every merge
+ * request, but the pool itself may be larger than the caps: the node's own
+ * relay tx and the txs merged in from committee members are exempt from
+ * them. Always returns at least one batch, because an empty exchange still
+ * brings the peer's pool back.
+ */
+export function splitMergeBatches<T extends Parameters<typeof txStoredBytes>[0]>(
+    txs: readonly T[],
+    limits: MempoolLimits = active,
+): T[][] {
+    const batches: T[][] = []
+    let current: T[] = []
+    let currentBytes = 0
+    for (const tx of txs) {
+        const bytes = txStoredBytes(tx)
+        if (
+            current.length > 0 &&
+            (current.length + 1 > limits.maxTxs ||
+                currentBytes + bytes > limits.maxBytes)
+        ) {
+            batches.push(current)
+            current = []
+            currentBytes = 0
+        }
+        current.push(tx)
+        currentBytes += bytes
+    }
+    if (current.length > 0 || batches.length === 0) batches.push(current)
+    return batches
+}
