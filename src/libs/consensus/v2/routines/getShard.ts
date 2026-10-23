@@ -52,7 +52,7 @@ async function readCommittedPeerlist(
 }
 
 /** Addresses of the active (staked) validator set at a block. */
-async function readActiveValidatorAddresses(
+export async function readActiveValidatorAddresses(
     lastBlockNumber: number,
 ): Promise<Set<string>> {
     const activeValidators = (await GCR.getGCRValidatorsAtBlock(

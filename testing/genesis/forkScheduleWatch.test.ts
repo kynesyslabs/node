@@ -4,6 +4,7 @@ import {
     mapWithLimit,
     onBlockInserted,
 } from "src/libs/peer/routines/forkScheduleWatch"
+import GCR from "src/libs/blockchain/gcr/gcr"
 
 const cfg = (...heights: Array<number | null>) =>
     Object.fromEntries(heights.map((h, i) => [`f${i}`, { activationHeight: h }]))
@@ -90,6 +91,10 @@ describe("rounds that become due while one is still running", () => {
         const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
             getPeers: () => [peer],
         } as never)
+        // The watch compares staked validators only, so the peer must be in the set.
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+            { address: "peer" },
+        ] as never)
 
         try {
             const first = onBlockInserted(950)
@@ -105,6 +110,7 @@ describe("rounds that become due while one is still running", () => {
             expect(asked).toBe(2)
         } finally {
             getPeers.mockRestore()
+            validators.mockRestore()
             getSharedState.forkConfig = saved.forkConfig
             getSharedState.chainId = saved.chainId
         }

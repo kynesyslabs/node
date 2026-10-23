@@ -11,6 +11,7 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { SECRETARY_ROTATION_GRACE_SECONDS } from "../../routines/consensusTime"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import { getEligiblePool, pinShardIdentities } from "./getShard"
+import { countMissedSignature } from "@/features/metrics/consensusMetrics"
 
 const FRESHNESS_WINDOWS = 2
 
@@ -48,6 +49,7 @@ export async function recordSyncedBlock(block: Block): Promise<void> {
         }
 
         const missed = ++getSharedState.consecutiveMissedShardBlocks
+        countMissedSignature()
         log.error(
             `[STALL DETECTION] Drawn into the shard for block ${block.number} but our signature is missing (${missed}/${threshold})`,
         )

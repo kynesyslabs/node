@@ -219,3 +219,6 @@ graphify-out/
 .token-savior-cache.json
 HANDOFF.md
 .demos_gossip_key*
+# ---- Monitoring secrets (Slack webhook for Alertmanager) ----
+monitoring/secrets/*
+!monitoring/secrets/README.md

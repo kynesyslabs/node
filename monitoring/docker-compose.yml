@@ -24,6 +24,7 @@ services:
             - --web.enable-lifecycle
         volumes:
             - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+            - ./prometheus/alerts:/etc/prometheus/alerts:ro
             - prometheus_data:/prometheus
         ports:
             - "${PROMETHEUS_PORT:-9091}:9090"
@@ -31,6 +32,27 @@ services:
             - demos-monitoring
         extra_hosts:
             - host.docker.internal:host-gateway
+        depends_on:
+            - alertmanager
+
+    # Alert routing. Reads the Slack webhook from the compose secret below
+    # (monitoring/secrets/slack_webhook, gitignored); `up` fails until it exists.
+    alertmanager:
+        image: prom/alertmanager:v0.27.0
+        container_name: demos-alertmanager
+        restart: unless-stopped
+        command:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+        volumes:
+            - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+            - alertmanager_data:/alertmanager
+        secrets:
+            - slack_webhook
+        ports:
+            - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+        networks:
+            - demos-monitoring
 
     grafana:
         image: grafana/grafana:10.2.2
@@ -123,8 +145,14 @@ networks:
     demos-monitoring:
         driver: bridge
 
+secrets:
+    slack_webhook:
+        file: ./secrets/slack_webhook
+
 volumes:
     prometheus_data:
         name: demos-prometheus-data
+    alertmanager_data:
+        name: demos-alertmanager-data
     grafana_data:
         name: demos-grafana-data

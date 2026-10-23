@@ -289,6 +289,28 @@ export class MetricsService {
             ["source"],
         )
 
+        // Consensus health surface (alerts in monitoring/prometheus/alerts/consensus.yml).
+        this.createCounter(
+            "consensus_block_hash_mismatch_total",
+            "Peers whose candidate block hash for our height differed from ours, once per peer per round",
+            [],
+        )
+        this.createCounter(
+            "consensus_missed_signatures_total",
+            "Blocks where this node was drawn into the shard but its signature is missing",
+            [],
+        )
+        this.createGauge(
+            "fork_schedule_mismatch",
+            "1 while the last fork-schedule comparison found a peer with a different schedule, else 0",
+            [],
+        )
+        this.createGauge(
+            "consensus_abstaining",
+            "1 while the node skips consensus rounds because its fork schedule differs from its peers, else 0",
+            [],
+        )
+
         log.debug("[METRICS] Core metrics registered")
     }
 
