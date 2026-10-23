@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import {
     applyRoundOutcome,
+    ensureWindowChecked,
     onBlockInserted,
+    resetWindowCheck,
     RECHECK_INTERVAL_MS,
     type CheckPlan,
 } from "src/libs/peer/routines/forkScheduleWatch"
@@ -36,6 +38,7 @@ function usePolicy(policy: "abstain" | "warn") {
 }
 
 beforeEach(() => {
+    resetWindowCheck()
     getSharedState.forkScheduleAbstain = false
     getSharedState.forkScheduleAbstainReason = ""
     gauges = {}
@@ -436,6 +439,126 @@ describe("the watch end to end", () => {
             getSharedState.forkConfig = saved.forkConfig
             getSharedState.chainId = saved.chainId
         }
+    }, 30000)
+})
+
+describe("the check before the first round inside the window", () => {
+    async function withPeers(
+        digestOf: (ours: string) => string,
+        run: (calls: () => number) => Promise<void>,
+    ) {
+        const PeerManager = (await import("src/libs/peer/PeerManager")).default
+        const agreement = await import("src/libs/peer/routines/forkScheduleAgreement")
+        const saved = {
+            forkConfig: getSharedState.forkConfig,
+            chainId: getSharedState.chainId,
+        }
+        getSharedState.forkConfig = {
+            signatureDomain: { activationHeight: 1000 },
+        } as never
+        getSharedState.chainId = 1
+        const ours = agreement.localScheduleView(getSharedState.forkConfig as never, 1)
+        let called = 0
+        const peer = {
+            identity: "peer",
+            connection: { string: "http://peer:53550" },
+            call: async () => {
+                called++
+                return {
+                    result: 200,
+                    response: {
+                        chainId: 1,
+                        forks: { signatureDomain: { activationHeight: 1000 } },
+                        forkScheduleDigest: digestOf(ours.digest as string),
+                    },
+                }
+            },
+        }
+        const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
+            getPeers: () => [peer],
+        } as never)
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+            { address: "peer" },
+        ] as never)
+        try {
+            await run(() => called)
+        } finally {
+            getPeers.mockRestore()
+            validators.mockRestore()
+            getSharedState.forkConfig = saved.forkConfig
+            getSharedState.chainId = saved.chainId
+        }
+    }
+
+    it("raises the flag for a restarted node before any block is inserted", async () => {
+        await withPeers(() => "a".repeat(64), async () => {
+            expect(getSharedState.forkScheduleAbstain).toBe(false)
+            await ensureWindowChecked(999)
+            expect(getSharedState.forkScheduleAbstain).toBe(true)
+            expect(getSharedState.forkScheduleAbstainReason).toContain("http://peer:53550")
+        })
+    }, 30000)
+
+    it("leaves the flag down when the validators agree, and does not ask again for the same height", async () => {
+        await withPeers(ours => ours, async calls => {
+            await ensureWindowChecked(999)
+            expect(getSharedState.forkScheduleAbstain).toBe(false)
+            expect(calls()).toBe(1)
+            await ensureWindowChecked(999)
+            await ensureWindowChecked(1000 - 1)
+            expect(calls()).toBe(1)
+        })
+    }, 30000)
+
+    it("does nothing outside the window", async () => {
+        await withPeers(() => "a".repeat(64), async calls => {
+            await ensureWindowChecked(100)
+            expect(calls()).toBe(0)
+            expect(getSharedState.forkScheduleAbstain).toBe(false)
+        })
+    }, 30000)
+
+    it("does nothing under the warn policy", async () => {
+        usePolicy("warn")
+        await withPeers(() => "a".repeat(64), async calls => {
+            await ensureWindowChecked(999)
+            expect(calls()).toBe(0)
+            expect(getSharedState.forkScheduleAbstain).toBe(false)
+        })
+    }, 30000)
+
+    it("retries on the next call when no validator answered", async () => {
+        const PeerManager = (await import("src/libs/peer/PeerManager")).default
+        const saved = getSharedState.forkConfig
+        getSharedState.forkConfig = {
+            signatureDomain: { activationHeight: 1000 },
+        } as never
+        const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
+            getPeers: () => [],
+        } as never)
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+            { address: "peer" },
+        ] as never)
+        try {
+            await ensureWindowChecked(999)
+            expect(getSharedState.forkScheduleAbstain).toBe(false)
+            await ensureWindowChecked(999)
+            expect(getPeers).toHaveBeenCalledTimes(2)
+        } finally {
+            getPeers.mockRestore()
+            validators.mockRestore()
+            getSharedState.forkConfig = saved
+        }
+    }, 30000)
+
+    it("waits for a round that is already running instead of starting another", async () => {
+        await withPeers(() => "a".repeat(64), async calls => {
+            const inserted = onBlockInserted(950)
+            await ensureWindowChecked(999)
+            await inserted
+            expect(calls()).toBe(1)
+            expect(getSharedState.forkScheduleAbstain).toBe(true)
+        })
     }, 30000)
 })
 

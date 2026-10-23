@@ -23,6 +23,11 @@ not vote. It keeps syncing blocks from its peers, so it can rejoin.
   so extra connections cannot sway the count. On a bare dev network with no
   staked set, every peer counts.
 - The comparison runs every 100 blocks, and every 10 blocks inside the window.
+- A node that starts, or restarts, with the tip already inside the window
+  compares before its first consensus round and waits for the answer (at most a
+  few seconds), so it does not forge on an unchecked schedule. A comparison that
+  reaches no validator is retried on the next round and does not hold the node
+  back.
 - A minority of differing validators never makes the node abstain. It is logged
   and shown by `demos_fork_schedule_mismatch`, and the alert `ForkScheduleMismatch`
   fires, but the node keeps taking part: it is the one with the schedule most of

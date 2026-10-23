@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test"
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test"
 
 // The abort must come right after the sync step and before anything that
 // forges or votes, so the stubs record which of those steps were reached.
@@ -22,11 +22,13 @@ mock.module("@/libs/blockchain/routines/Sync", () => ({
 const { getSharedState } = await import("src/utilities/sharedState")
 const { consensusRoutine } = await import("src/libs/consensus/v2/PoRBFT")
 const { default: log } = await import("src/utilities/logger")
+const { resetWindowCheck } = await import("src/libs/peer/routines/forkScheduleWatch")
 const { resetForkScheduleAbstainLogThrottle } = await import(
     "src/libs/consensus/v2/routines/forkScheduleAbstain"
 )
 
 afterEach(() => {
+    resetWindowCheck()
     reached.length = 0
     resetForkScheduleAbstainLogThrottle()
     getSharedState.forkScheduleAbstain = false
@@ -79,5 +81,51 @@ describe("the consensus routine while the fork schedule flag is up", () => {
     it("goes on to the peer check once the flag is down", async () => {
         await consensusRoutine()
         expect(reached).toEqual(["fastSync", "waitForPeerStatus"])
+    }, 30000)
+
+    it("compares the schedule first when the node starts inside the window, and sits the round out on a mismatch", async () => {
+        const PeerManager = (await import("src/libs/peer/PeerManager")).default
+        const { default: GCR } = await import("src/libs/blockchain/gcr/gcr")
+        const saved = {
+            forkConfig: getSharedState.forkConfig,
+            chainId: getSharedState.chainId,
+        }
+        getSharedState.forkConfig = {
+            signatureDomain: { activationHeight: getSharedState.lastBlockNumber + 10 },
+        } as never
+        getSharedState.chainId = 1
+        const peer = {
+            identity: "peer",
+            connection: { string: "http://peer:53550" },
+            call: async () => ({
+                result: 200,
+                response: {
+                    chainId: 1,
+                    forks: {
+                        signatureDomain: {
+                            activationHeight: getSharedState.lastBlockNumber + 10,
+                        },
+                    },
+                    forkScheduleDigest: "a".repeat(64),
+                },
+            }),
+        }
+        const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
+            getPeers: () => [peer],
+        } as never)
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+            { address: "peer" },
+        ] as never)
+        try {
+            expect(getSharedState.forkScheduleAbstain).toBe(false)
+            await consensusRoutine()
+            expect(getSharedState.forkScheduleAbstain).toBe(true)
+            expect(reached).toEqual(["fastSync"])
+        } finally {
+            getPeers.mockRestore()
+            validators.mockRestore()
+            getSharedState.forkConfig = saved.forkConfig
+            getSharedState.chainId = saved.chainId
+        }
     }, 30000)
 })

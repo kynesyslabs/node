@@ -34,6 +34,7 @@ import {
     forkScheduleAbstainReason,
     shouldLogForkScheduleAbstain,
 } from "./routines/forkScheduleAbstain"
+import { ensureWindowChecked } from "@/libs/peer/routines/forkScheduleWatch"
 import {
     filterMempoolByNonce,
     filterMempoolByRefBlock,
@@ -126,6 +127,10 @@ export async function consensusRoutine(): Promise<void> {
             )
             return
         }
+
+        // A node that restarted inside the window has not compared its schedule
+        // yet, and the block-driven watch would only run it after the first round.
+        await ensureWindowChecked(getSharedState.lastBlockNumber)
 
         // Placed after fastSync so an abstaining node keeps pulling blocks and
         // can rejoin; before the shard is initialised so it neither forges nor votes.

@@ -17,10 +17,9 @@ const FRESHNESS_WINDOWS = 2
 
 export async function recordSyncedBlock(block: Block): Promise<void> {
     try {
+        // 0 turns the stall response off; the missed-signature metric stays on.
         const threshold = Config.getInstance().core.stallDetectionBlocks
-        if (!threshold || threshold <= 0) {
-            return
-        }
+        const stallResponseOn = !!threshold && threshold > 0
         if (getSharedState.fastSyncCount === 0 || block.number === 0) {
             return
         }
@@ -51,10 +50,11 @@ export async function recordSyncedBlock(block: Block): Promise<void> {
         const missed = ++getSharedState.consecutiveMissedShardBlocks
         countMissedSignature()
         log.error(
-            `[STALL DETECTION] Drawn into the shard for block ${block.number} but our signature is missing (${missed}/${threshold})`,
+            `[STALL DETECTION] Drawn into the shard for block ${block.number} but our signature is missing` +
+                (stallResponseOn ? ` (${missed}/${threshold})` : ` (${missed} in a row)`),
         )
 
-        if (missed >= threshold) {
+        if (stallResponseOn && missed >= threshold) {
             log.error(
                 `[STALL DETECTION] Missed ${missed} consecutive shard selections, last at block ${block.number}: ` +
                     "the node appears stalled",

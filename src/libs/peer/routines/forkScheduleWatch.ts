@@ -18,6 +18,13 @@
  * no majority differs, inside the window or after it. Outside the window, or
  * under `warn`, a mismatch is only reported: stopping a node during a rolling
  * genesis edit far from any fork would cost liveness for no gain.
+ *
+ * The watch is driven by inserted blocks, so a node that restarts inside the
+ * window would otherwise forge before its first comparison. The consensus
+ * routine therefore awaits ensureWindowChecked() first: one conclusive round
+ * per scheduled height before the node takes part. A round that reached no
+ * validator stays inconclusive and is retried on the next consensus round, so a
+ * node cut off from every peer is not held back by it.
  */
 
 import type { ForkConfigLike } from "./forkScheduleAgreement"
@@ -88,6 +95,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: T): Promise<
 }
 
 let running = false
+let currentRun: Promise<void> | null = null
+// The scheduled height for which a round inside the window reached a validator.
+let windowCheckedFor: number | null = null
 // A round that was due while another was still running. Only the latest one is
 // kept, so a slow round delays the next check but never drops it, and a backlog
 // cannot build up.
@@ -160,6 +170,7 @@ export async function applyRoundOutcome(
 
     const differing = outcome.mismatched.length
     if (differing + outcome.agreed === 0) return
+    if (plan.inWindow) windowCheckedFor = plan.nearest
     setForkScheduleMismatch(differing > 0)
 
     if (differing > outcome.agreed) {
@@ -262,7 +273,13 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
     await applyRoundOutcome(tip, plan, outcome)
 }
 
-async function runRounds(first: number): Promise<void> {
+function runRounds(first: number): Promise<void> {
+    const run = drainRounds(first)
+    currentRun = run
+    return run
+}
+
+async function drainRounds(first: number): Promise<void> {
     running = true
     try {
         const { getSharedState } = await import("@/utilities/sharedState")
@@ -275,6 +292,41 @@ async function runRounds(first: number): Promise<void> {
         }
     } finally {
         running = false
+    }
+}
+
+/** Forgets which scheduled height was checked. Exported for the test. */
+export function resetWindowCheck(): void {
+    windowCheckedFor = null
+    currentRun = null
+}
+
+/**
+ * Makes sure the schedule was compared against the validators at least once
+ * since the tip entered the window of the nearest scheduled fork, waiting for a
+ * round that is already running or starting one. Returns at once outside the
+ * window, under the warn policy, or when that height was already checked. Never
+ * throws: on failure the node proceeds, as the periodic watch still runs.
+ */
+export async function ensureWindowChecked(tip: number): Promise<void> {
+    try {
+        const [{ getSharedState }, { Config }] = await Promise.all([
+            import("@/utilities/sharedState"),
+            import("@/config"),
+        ])
+        if (Config.getInstance().core.forkScheduleMismatchPolicy !== "abstain") {
+            return
+        }
+        const plan = planScheduleCheck(
+            tip,
+            getSharedState.forkConfig as unknown as ForkConfigLike,
+        )
+        if (!plan.inWindow || windowCheckedFor === plan.nearest) return
+        if (running && currentRun) await currentRun.catch(() => undefined)
+        if (windowCheckedFor === plan.nearest || running) return
+        await runRounds(tip)
+    } catch {
+        // A failed comparison must not stop consensus; the periodic watch retries.
     }
 }
 
