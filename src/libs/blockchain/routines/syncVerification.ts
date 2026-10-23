@@ -4,13 +4,18 @@ import Chain from "../chain"
 import hashGCRTables from "../gcr/gcr_routines/hashGCR"
 import TxValidatorPool from "../validation/txValidatorPool"
 import { isSystemRelayTx, verifySystemRelayTx } from "../validation/systemRelayTx"
-import { isReferenceBlockAllowed, isWithinDeepWindow } from "../referenceBlockWindow"
+import {
+    EXPIRED_TX_DEEP_WINDOW_MULTIPLIER,
+    isReferenceBlockAllowed,
+    isWithinDeepWindow,
+} from "../referenceBlockWindow"
 import { filterMempoolByNonce } from "src/libs/consensus/v2/routines/mempoolFilters"
 import type { MempoolTransaction } from "src/libs/consensus/v2/routines/mempoolFilters"
 import { orderDeterministically } from "src/libs/consensus/v2/routines/deterministicOrder"
 import { isForkActive, txSignatureContext } from "@/forks"
 import { ErrorCode } from "@/errors"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import { getSharedState } from "@/utilities/sharedState"
 import log from "src/utilities/logger"
 
 type FinalStatus = typeof TRANSACTION_STATUS.CONFIRMED | typeof TRANSACTION_STATUS.FAILED
@@ -40,23 +45,45 @@ async function validateAtHeight(
     )
 }
 
+const SIGNATURE_RULE_FORKS = ["osDenomination", "signatureDomain"] as const
+
 /**
- * The forger admits a tx at the tip and never revalidates its mempool, so a
- * tx admitted just before a fork activates can sit in the activation block
- * itself. That block is the only height where the previous height's rules
- * also applied to what it carries.
+ * Heights whose rules a block's transactions may legitimately have been
+ * admitted under, besides the block's own: the height before each fork that
+ * activated no more than a deep window ago.
+ *
+ * The forger admits a tx under the rules of the tip it saw and never
+ * revalidates its mempool. A tx kept for a later round (a nonce ahead of its
+ * predecessor) can therefore reach a block after a fork activated, for as long
+ * as its reference block is still inside the deep window; past that the forger
+ * drops it. Every fork rule is judged separately because they activate at
+ * different heights.
  */
-function isActivationBlock(height: number): boolean {
-    return (["osDenomination", "signatureDomain"] as const).some(
-        fork => isForkActive(fork, height) && !isForkActive(fork, height - 1),
-    )
+function previousRuleHeights(height: number): number[] {
+    const window =
+        EXPIRED_TX_DEEP_WINDOW_MULTIPLIER * getSharedState.referenceBlockRoom
+    const heights = new Set<number>()
+    for (const fork of SIGNATURE_RULE_FORKS) {
+        const activation = getSharedState.forkConfig?.[fork]?.activationHeight
+        if (
+            activation !== null &&
+            activation !== undefined &&
+            activation > 0 &&
+            height >= activation &&
+            height < activation + window
+        ) {
+            heights.add(activation - 1)
+        }
+    }
+    return [...heights]
 }
 
 /**
  * The block hash covers transaction hashes only, so a peer is free to serve
  * any body for them. Each body must hash to the hash the block committed to
  * and carry a valid signature, judged by the rules of the block's own height
- * (and, in a fork's activation block, those of the height before it).
+ * (and, while a transaction admitted before a fork can still be in a block,
+ * those in force before it).
  */
 export async function verifyBlockTransactions(
     block: Block,
@@ -89,17 +116,13 @@ export async function verifyBlockTransactions(
                 verdicts.set(result.hash, result)
             }
 
-            if (isActivationBlock(block.number)) {
+            for (const height of previousRuleHeights(block.number)) {
                 const retry = userTxs.filter(
                     tx => verdicts.get(tx.hash)?.valid !== true,
                 )
-                if (retry.length > 0) {
-                    for (const result of await validateAtHeight(
-                        retry,
-                        block.number - 1,
-                    )) {
-                        if (result.valid) verdicts.set(result.hash, result)
-                    }
+                if (retry.length === 0) break
+                for (const result of await validateAtHeight(retry, height)) {
+                    if (result.valid) verdicts.set(result.hash, result)
                 }
             }
         }

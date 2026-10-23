@@ -5,6 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test"
 import { createHash, sign as edSign } from "node:crypto"
+import { EXPIRED_TX_DEEP_WINDOW_MULTIPLIER } from "../referenceBlockWindow"
 import {
     makeSignedTx,
     newAccount,
@@ -345,6 +346,7 @@ describe("local statuses", () => {
 
 describe("fork activation blocks", () => {
     const ACTIVATION = HEIGHT
+    const RETENTION_WINDOW = EXPIRED_TX_DEEP_WINDOW_MULTIPLIER * 1
 
     function activate(fork: "osDenomination" | "signatureDomain") {
         const config = getSharedState.forkConfig
@@ -354,7 +356,7 @@ describe("fork activation blocks", () => {
         getSharedState.chainId = 7
     }
 
-    it("accepts a transaction hashed under the pre-denomination rules in the activation block only", async () => {
+    it("accepts a transaction hashed under the pre-denomination rules only while one admitted before the fork can still be in a block", async () => {
         activate("osDenomination")
         const legacy = makeSignedTx(alice, bob, {
             height: ACTIVATION,
@@ -364,15 +366,20 @@ describe("fork activation blocks", () => {
 
         await verifyBlockTransactions(makeBlock([legacy], undefined, ACTIVATION), [legacy])
 
+        // A kept-back transaction reaches a block until its reference block
+        // leaves the deep window
+        const lastInWindow = ACTIVATION + RETENTION_WINDOW - 1
+        await verifyBlockTransactions(makeBlock([legacy], undefined, lastInWindow), [legacy])
+
         const later = await verifyBlockTransactions(
-            makeBlock([legacy], undefined, ACTIVATION + 1),
+            makeBlock([legacy], undefined, lastInWindow + 1),
             [legacy],
         ).catch(e => e)
         expect(later).toBeInstanceOf(SyncBlockRejectedError)
         expect(later.message).toContain("not coherent")
     })
 
-    it("accepts a bare-hash signature in the signature-domain activation block only", async () => {
+    it("accepts a bare-hash signature only while one admitted before the fork can still be in a block", async () => {
         activate("signatureDomain")
         const bare = makeSignedTx(alice, bob, {
             height: ACTIVATION,
@@ -390,12 +397,33 @@ describe("fork activation blocks", () => {
             bound,
         ])
 
+        const lastInWindow = ACTIVATION + RETENTION_WINDOW - 1
+        await verifyBlockTransactions(makeBlock([bare], undefined, lastInWindow), [bare])
+
         const later = await verifyBlockTransactions(
-            makeBlock([bare], undefined, ACTIVATION + 1),
+            makeBlock([bare], undefined, lastInWindow + 1),
             [bare],
         ).catch(e => e)
         expect(later).toBeInstanceOf(SyncBlockRejectedError)
         expect(later.message).toMatch(/signature/i)
+    })
+
+    it("judges each fork against the height before its own activation", async () => {
+        const config = getSharedState.forkConfig
+        config.osDenomination.activationHeight = ACTIVATION
+        config.signatureDomain.activationHeight = ACTIVATION + 2
+        getSharedState.chainId = 7
+        // Hashed under the old amounts, signed before either fork's domain
+        const bare = makeSignedTx(alice, bob, {
+            height: ACTIVATION,
+            hashHeight: ACTIVATION - 1,
+            legacyAmounts: true,
+        })
+
+        await verifyBlockTransactions(
+            makeBlock([bare], undefined, ACTIVATION + 3),
+            [bare],
+        )
     })
 
     it("still rejects a tampered body in the activation block", async () => {

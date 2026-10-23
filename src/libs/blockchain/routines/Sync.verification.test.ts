@@ -5,7 +5,7 @@
  * checked against the node's own view before and while applying it.
  */
 
-import { beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
 import {
     makeSignedTx,
     newAccount,
@@ -130,6 +130,14 @@ function applyResult(result: {
                   skippedTxs: result.skippedTxs ?? [],
               }) as any)
 }
+
+const forkConfigAtStart = structuredClone(getSharedState.forkConfig)
+const chainIdAtStart = getSharedState.chainId
+
+afterEach(() => {
+    getSharedState.forkConfig = structuredClone(forkConfigAtStart)
+    getSharedState.chainId = chainIdAtStart
+})
 
 beforeEach(() => {
     verifyBlock.mockReset()

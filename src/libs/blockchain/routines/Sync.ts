@@ -1126,9 +1126,9 @@ async function undoBlockApply(
 }
 
 /**
- * Undo what a failed apply left behind. The edits of one apply are saved in a
- * single database transaction and the per-account assignments are written
- * after it, so a throw leaves either nothing or edits that carry assignments.
+ * Undo what a failed apply left behind. The edits of one apply and the
+ * per-account assignments are saved in a single database transaction, so a
+ * throw leaves either nothing or edits that carry all their assignments.
  * The assignments name exactly the transactions that took effect; undoing
  * anything else would subtract what was never added.
  */
