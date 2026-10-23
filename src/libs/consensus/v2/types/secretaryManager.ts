@@ -1219,8 +1219,8 @@ export default class SecretaryManager {
 
         Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
 
-        if (manager && manager === this) {
-            SecretaryManager.instances.delete(this.shard.blockRef)
+        for (const [key, instance] of SecretaryManager.instances) {
+            if (instance === this) SecretaryManager.instances.delete(key)
         }
 
         // SecretaryManager.instance = null
@@ -1283,6 +1283,11 @@ export default class SecretaryManager {
 
         if (!existing || (existing.ended && initialize)) {
             if (initialize) {
+                for (const key of SecretaryManager.instances.keys()) {
+                    if (key <= getSharedState.lastBlockNumber) {
+                        SecretaryManager.instances.delete(key)
+                    }
+                }
                 SecretaryManager.instances.set(blockRef, new SecretaryManager())
             } else {
                 log.debug(
