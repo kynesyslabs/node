@@ -11,13 +11,9 @@ import {
     unifiedCrypto as ucrypto,
     hexToUint8Array,
 } from "../../../../node_modules/@kynesyslabs/demosdk/build/encryption/unifiedCrypto.js"
-// Import the serializer via the DIRECT build path (NOT the SDK barrel), same
-// reason as unifiedCrypto above: the barrel transitively loads zK/ffjavascript
-// which crashes inside a worker_thread. serializerGate.js only pulls
-// constants.js + conversion.js, both worker-safe (audit H1).
-import { serializeTransactionContent } from "../../../../node_modules/@kynesyslabs/demosdk/build/denomination/serializerGate.js"
 import Hashing from "../../crypto/hashing"
 import { txSignaturePreimage } from "../../crypto/txSignaturePreimage"
+import { serializeTxContent } from "../../crypto/txContentSerializer"
 import type { PqcIdentityHint, TxValidationResult } from "./types"
 
 /**
@@ -37,15 +33,15 @@ const LEGACY_DOMAIN: TxSignatureDomain = { active: false, chainId: 0 }
  * Coherence: SHA-256 of the CANONICAL serialization of tx.content === tx.hash.
  *
  * Must use the SAME canonicalization the signer/consensus use
- * (serializeTransactionContent), or a post-osDenomination tx whose hash was
- * committed over OS-string amounts diverges from a raw JSON.stringify and a
- * legit tx is wrongly rejected — or, worse, one node admits a tx whose hash
- * disagrees with what peers recompute at block time (consensus divergence).
- * Audit H1.
+ * (serializeTxContent, shared with the RPC check), or a post-osDenomination
+ * tx whose hash was committed over OS-string amounts diverges from a raw
+ * JSON.stringify and a legit tx is wrongly rejected — or, worse, one node
+ * admits a tx whose hash disagrees with what peers recompute at block time
+ * (consensus divergence). Audit H1.
  *
  * `isPostFork` is computed on the MAIN thread (where forkConfig + chain height
  * live) and threaded in, because the worker has neither. Pre-fork
- * (isPostFork=false) the SDK serializer returns JSON.stringify(content) —
+ * (isPostFork=false) the serializer returns JSON.stringify(content) —
  * byte-identical to the legacy behaviour, so re-sync stays safe. No I/O, no
  * logger (worker-safe).
  */
@@ -53,9 +49,18 @@ export function validateTxCoherence(
     tx: Transaction,
     isPostFork: boolean,
 ): TxValidationResult {
-    const derivedHash = Hashing.sha256(
-        serializeTransactionContent(tx.content, isPostFork),
-    )
+    let derivedHash: string
+    try {
+        derivedHash = Hashing.sha256(serializeTxContent(tx.content, isPostFork))
+    } catch (e) {
+        // Content the serializer cannot canonicalize (null fee field,
+        // malformed amount) is a rejected transaction, not a crashed worker.
+        return {
+            hash: tx.hash,
+            valid: false,
+            reason: `Transaction content cannot be serialized: ${e instanceof Error ? e.message : String(e)}`,
+        }
+    }
 
     if (derivedHash !== tx.hash) {
         return {

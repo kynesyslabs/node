@@ -69,12 +69,9 @@ export async function checkTxAdmissible(
         }
     }
 
-    if (!Transaction.isCoherent(txObj, options.head)) {
-        return {
-            ok: false,
-            code: "coherence",
-            reason: "Transaction hash mismatch",
-        }
+    const coherence = Transaction.checkCoherence(txObj, options.head)
+    if (!coherence.coherent) {
+        return { ok: false, code: "coherence", reason: coherence.reason }
     }
 
     const signature = await Transaction.validateSignature(

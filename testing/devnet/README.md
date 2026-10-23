@@ -92,6 +92,17 @@ docker compose down
 docker compose down -v
 ```
 
+### Chain id 1337 and old devnet volumes
+
+The devnet genesis carries `properties.id: 1337` and schedules `signatureDomain`
+at height 0, so every transaction is signed for this network only. A devnet
+whose volumes were created from the earlier genesis (id 1, no
+`signatureDomain`) has to be wiped with `docker compose down -v` before it is
+started again. Otherwise the nodes keep the genesis block already in their
+database and peers keep serving its hash, so the new id and schedule do not
+reliably take effect. A client must read the chain id from
+`getNetworkInfo`; one that signs the bare hash is rejected.
+
 ### Rebuild after code changes
 
 ```bash
