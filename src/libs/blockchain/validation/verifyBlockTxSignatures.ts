@@ -35,6 +35,16 @@ export interface BlockTxSignatureVerdict {
  * and are checked by that rule; every other type goes through the standard
  * coherence and preimage check.
  *
+ * Identity state is NOT judged at the block's height. A PQC transaction
+ * without an Ed25519 co-signature is checked against the signer's current
+ * identity record, because the node keeps no per-height identity history
+ * (removing a key deletes the record). The verdict is therefore exact only
+ * when the check runs before the block is applied, in height order, which is
+ * how a syncing node uses it: the stored identities are then the ones the
+ * block's own transactions were admitted against. Re-checking an old,
+ * already-applied block can reject a PQC transaction whose key was removed
+ * later; a caller that needs that must supply historical identity records.
+ *
  * @param block - The block the transactions were included in.
  * @param txs - The transactions received for that block.
  */
