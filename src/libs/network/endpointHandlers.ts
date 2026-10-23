@@ -41,6 +41,8 @@ import { handleValidateTransaction } from "./endpointValidation"
 import { handleExecuteTransaction } from "./endpointExecution"
 import { handleConsensusRequest } from "./endpointConsensus"
 import { handleL2PSHashUpdate } from "./endpointL2PSHash"
+import { isMergePeerEligible } from "src/libs/consensus/mergePeerEligibility"
+import { getMempoolLimits } from "src/libs/blockchain/mempoolLimits"
 
 /**
  * ServerHandlers facade — delegates to focused sub-modules:
@@ -123,6 +125,21 @@ export default class ServerHandlers {
     }
 
     static async handleMempool(content: any, sender = ""): Promise<any> {
+        // This is the consensus mempool merge between committee members. It
+        // admits txs on signature and coherence alone, with no nonce, balance
+        // or fee check, because the sending validator already admitted them;
+        // open to anyone it is a free way to fill the pool. Every transport
+        // that reaches it passes the sender it authenticated, so the gate
+        // lives here: only a node shard selection would admit may merge.
+        if (!(await isMergePeerEligible(sender))) {
+            return {
+                result: 401,
+                response: "Mempool exchange is limited to validators",
+                extra: "Mempool not merged",
+                requireReply: false,
+            }
+        }
+
         const envelope =
             Array.isArray(content) &&
             content.length === 1 &&
@@ -132,7 +149,18 @@ export default class ServerHandlers {
                 : null
         const txs: Transaction[] = envelope ? envelope.txs : content
 
-        let response = {
+        // A merge batch is a peer's whole pool, which is capped, so a longer
+        // list is not a pool and is not worth validating.
+        if (!Array.isArray(txs) || txs.length > getMempoolLimits().maxTxs) {
+            return {
+                result: 400,
+                response: "Invalid mempool payload",
+                extra: "Mempool not merged",
+                requireReply: false,
+            }
+        }
+
+        let response: { success: boolean; mempool: unknown[] } = {
             success: false,
             mempool: [],
         }

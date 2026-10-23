@@ -67,8 +67,11 @@
 	# TLSNotary route — selected by TLSNOTARY_PROXY_MODE.
 	import /etc/caddy/tlsnotary-modes/{$TLSNOTARY_PROXY_MODE:subpath}.caddy
 
-	# RPC — root + everything else
+	# RPC — root + everything else. Same body cap as the production Caddyfile.
 	handle {
+		request_body {
+			max_size {$RPC_MAX_BODY_BYTES:4194304}
+		}
 		reverse_proxy node-1:53551
 	}
 

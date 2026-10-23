@@ -11,16 +11,26 @@ export type Middleware = (
     server?: Server,
 ) => Promise<Response>
 
+export interface BunServerOptions {
+    /**
+     * Hard ceiling on a request body, enforced by Bun before the handler is
+     * called. Bun's own default applies when unset.
+     */
+    maxRequestBodySize?: number
+}
+
 export class BunServer {
     private routes: Map<string, Map<string, Handler>> = new Map()
     private middlewares: Middleware[] = []
     private port: number
     private hostname: string
+    private options: BunServerOptions
     public server: Server | null = null
 
-    constructor(port: number, hostname = "0.0.0.0") {
+    constructor(port: number, hostname = "0.0.0.0", options: BunServerOptions = {}) {
         this.port = port
         this.hostname = hostname
+        this.options = options
     }
 
     use(middleware: Middleware): BunServer {
@@ -139,6 +149,9 @@ export class BunServer {
         this.server = Bun.serve({
             port: this.port,
             hostname: this.hostname,
+            ...(this.options.maxRequestBodySize !== undefined && {
+                maxRequestBodySize: this.options.maxRequestBodySize,
+            }),
             fetch: async (req, server) => {
                 return await this.handleRequest(req, server)
             },

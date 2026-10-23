@@ -96,10 +96,14 @@ export async function submitValidatedTx(
     validityData: ValidityData,
     transaction: Transaction = validityData.data.transaction,
 ): Promise<TxSubmissionResult> {
-    const { error } = await Mempool.addTransactionWithLock({
-        ...transaction,
-        reference_block: validityData.data.reference_block,
-    })
+    const { error } = await Mempool.addTransactionWithLock(
+        {
+            ...transaction,
+            reference_block: validityData.data.reference_block,
+        },
+        undefined,
+        { origin: "rpc" },
+    )
     if (error) {
         return { ok: false, error }
     }

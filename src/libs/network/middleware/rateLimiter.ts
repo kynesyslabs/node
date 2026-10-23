@@ -13,6 +13,15 @@ import {
 } from "../verifySignature"
 import { PeerManager } from "@/libs/peer"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import {
+    RATE_LIMIT_DEFAULT_BLOCK_DURATION_MS,
+    RATE_LIMIT_MAX_TRACKED_COUNTERS,
+} from "@/utilities/constants"
+
+/** Separates the bucket name from the client IP in a counter key. */
+const BUCKET_SEPARATOR = "|"
+/** Bucket shared by every route that has no limit of its own. */
+const DEFAULT_BUCKET = "default"
 
 interface RateLimitData {
     count: number
@@ -24,6 +33,36 @@ interface RateLimitData {
      * The block expiry time in milliseconds
      */
     blockExpiry?: number
+}
+
+/**
+ * What a client is counted as. An IPv6 customer is routinely handed a whole
+ * /64, so counting each address separately would give one client as many
+ * quotas as it has addresses; every address in a /64 shares one.
+ */
+function rateLimitSubject(ip: string): string {
+    if (!ip.includes(":")) return ip
+    try {
+        const parsed = ipaddr.parse(ip)
+        if (parsed.kind() !== "ipv6") return ip
+        const v6 = parsed as ipaddr.IPv6
+        if (v6.isIPv4MappedAddress()) return v6.toIPv4Address().toString()
+        const network = ipaddr.IPv6.networkAddressFromCIDR(`${ip}/64`)
+        return `${network.toRFC5952String()}/64`
+    } catch {
+        return ip
+    }
+}
+
+/** Counter key: one per limit bucket per client subject. */
+function bucketKey(bucket: string, ip: string): string {
+    return `${bucket}${BUCKET_SEPARATOR}${rateLimitSubject(ip)}`
+}
+
+function splitBucketKey(key: string): { bucket: string; ip: string } | null {
+    const at = key.indexOf(BUCKET_SEPARATOR)
+    if (at <= 0) return null
+    return { bucket: key.slice(0, at), ip: key.slice(at + 1) }
 }
 
 interface MethodLimitConfig {
@@ -63,6 +102,8 @@ interface RateLimitConfig {
     whitelistedKeys: string[]
     methodLimits: Record<string, MethodLimitConfig>
     txPerBlock: number
+    /** Optional — most counters kept at once; the oldest are dropped past it. */
+    maxTrackedCounters?: number
     /**
      * Optional — when omitted (or empty string), resolved from env at
      * construct time. Accepts the literal modes plus arbitrary strings
@@ -330,34 +371,100 @@ export class RateLimiter {
         )
     }
 
+    /**
+     * How long an IP stays blocked. A missing or non-positive configured
+     * value falls back to the default: a block that expires the moment it
+     * is set, or never gets a valid expiry, would not block at all.
+     */
+    private blockDurationMs(): number {
+        const configured = this.config.blockDurationMs
+        return Number.isFinite(configured) && configured > 0
+            ? configured
+            : RATE_LIMIT_DEFAULT_BLOCK_DURATION_MS
+    }
+
+    /** Which counter a request method draws on. */
+    private bucketFor(method: string | null): string {
+        return method && this.config.methodLimits[method]
+            ? method
+            : DEFAULT_BUCKET
+    }
+
+    private getLimitForBucket(bucket: string): MethodLimitConfig {
+        return bucket === DEFAULT_BUCKET
+            ? this.config.defaultLimit
+            : this.config.methodLimits[bucket] || this.config.defaultLimit
+    }
+
+    /** The counter a method keeps for an IP, if it has one. */
+    public getEntry(method: string, ip: string): RateLimitData | undefined {
+        return this.ipRequests.get(bucketKey(this.bucketFor(method), ip))
+    }
+
+    public setEntry(method: string, ip: string, data: RateLimitData): void {
+        this.ipRequests.set(bucketKey(this.bucketFor(method), ip), data)
+    }
+
+    /**
+     * Keeps the number of counters bounded when requests keep arriving from
+     * new sources. Past the cap the counters with the oldest window start go,
+     * live blocks last so a flood cannot wash its own block away. A tenth of
+     * the cap is dropped at once so this does not run on every new source.
+     */
+    private makeRoomForCounter(now: number): void {
+        const max = this.config.maxTrackedCounters ?? RATE_LIMIT_MAX_TRACKED_COUNTERS
+        if (this.ipRequests.size < max) return
+
+        const ranked = [...this.ipRequests.entries()].sort(([, a], [, b]) => {
+            const aLive = a.blocked && a.blockExpiry > now ? 1 : 0
+            const bLive = b.blocked && b.blockExpiry > now ? 1 : 0
+            return aLive - bLive || a.firstRequest - b.firstRequest
+        })
+        const drop = Math.max(1, Math.floor(max / 10))
+        for (const [key] of ranked.slice(0, drop)) {
+            this.ipRequests.delete(key)
+        }
+        log.warning(
+            `[Rate Limiter] ${max} counters tracked; dropped the ${drop} oldest`,
+        )
+    }
+
+    /**
+     * Drop counters that no longer hold anything: those whose block (if any)
+     * has run out and whose OWN bucket's window has passed. A short-window
+     * counter's age says nothing about a long-window one, so each entry is
+     * judged against the window it was counted in.
+     */
     private cleanup(): void {
         const now = Date.now()
-        const expiredIPs: string[] = []
+        const expiredKeys: string[] = []
 
-        for (const [ip, data] of this.ipRequests.entries()) {
-            // Remove entries that are not blocked and haven't been accessed recently
-            if (
-                !data.blocked &&
-                now - data.firstRequest > this.config.defaultLimit.windowMs * 2
-            ) {
-                expiredIPs.push(ip)
+        for (const [key, data] of this.ipRequests.entries()) {
+            const parts = splitBucketKey(key)
+            if (!parts) {
+                // Legacy blocked_ips.json keys have no bucket and cannot be mapped.
+                expiredKeys.push(key)
+                continue
             }
 
-            // Remove entries where block has expired
-            else if (
-                data.blocked &&
-                data.blockExpiry &&
-                now >= data.blockExpiry
-            ) {
-                expiredIPs.push(ip)
+            // A live block is kept whatever the window says.
+            if (data.blocked && data.blockExpiry > now) {
+                continue
+            }
+
+            // Past its block the entry still carries the count of its
+            // window, which is what holds a long-window cap.
+            const { windowMs } = this.getLimitForBucket(parts.bucket)
+            if (now - data.firstRequest > windowMs) {
+                expiredKeys.push(key)
             }
         }
 
-        expiredIPs.forEach(ip => this.ipRequests.delete(ip))
+        expiredKeys.forEach(key => this.ipRequests.delete(key))
 
-        if (expiredIPs.length > 0) {
+        if (expiredKeys.length > 0) {
             log.info(
-                `[Rate Limiter] Cleaned up ${expiredIPs.length} expired IP entries`,
+                `[Rate Limiter] Cleaned up ${expiredKeys.length} expired counters`,
             )
         }
     }
@@ -385,8 +492,10 @@ export class RateLimiter {
             )
 
             // load each IP and its RateLimitData to this.ipRequests
-            for (const [ip, rateLimitData] of Object.entries(data)) {
-                this.ipRequests.set(ip, rateLimitData)
+            for (const [key, rateLimitData] of Object.entries(data)) {
+                // Legacy blocked_ips.json keys have no bucket and cannot be mapped.
+                if (!splitBucketKey(key)) continue
+                this.ipRequests.set(key, rateLimitData)
             }
 
             log.info(
@@ -551,7 +660,7 @@ export class RateLimiter {
             return this.config.defaultLimit
         }
 
-        return this.config.methodLimits[method] || this.config.defaultLimit
+        return this.getLimitForBucket(this.bucketFor(method))
     }
 
     public createMiddleware(): Middleware {
@@ -647,7 +756,11 @@ export class RateLimiter {
             const method = this.getMethodFromRequest(req)
             const limit = this.getLimitForMethod(method)
 
-            const ipData = this.ipRequests.get(clientIP) || {
+            const counterKey = bucketKey(this.bucketFor(method), clientIP)
+            if (!this.ipRequests.has(counterKey)) {
+                this.makeRoomForCounter(now)
+            }
+            const ipData = this.ipRequests.get(counterKey) || {
                 count: 0,
                 firstRequest: now,
                 blocked: false,
@@ -655,8 +768,15 @@ export class RateLimiter {
                 lastSeenWithinBlockCount: 0,
             }
 
-            const isBlocked =
-                ipData.blocked && ipData.blockExpiry && now < ipData.blockExpiry
+            // The block ending does not forgive the count: a long-window cap
+            // (the daily POST quota) must hold through the block, and the
+            // window reset below is what clears it once the window is over.
+            if (ipData.blocked && !(ipData.blockExpiry > now)) {
+                ipData.blocked = false
+                delete ipData.blockExpiry
+            }
+
+            const isBlocked = ipData.blocked
 
             // Check if IP is currently blocked
             if (isBlocked) {
@@ -694,37 +814,34 @@ export class RateLimiter {
 
             // Block if limit exceeded
             if (ipData.count > limit.maxRequests) {
+                const blockMs = this.blockDurationMs()
                 ipData.blocked = true
-                ipData.blockExpiry = now + this.config.blockDurationMs
+                ipData.blockExpiry = now + blockMs
 
                 log.warning(
-                    `[Rate Limiter] IP ${clientIP} exceeded limit (${ipData.count}/${limit.maxRequests}) and blocked for ${this.config.blockDurationMs}ms`,
+                    `[Rate Limiter] IP ${clientIP} exceeded limit (${ipData.count}/${limit.maxRequests}) and blocked for ${blockMs}ms`,
                 )
 
-                this.ipRequests.set(clientIP, ipData)
+                this.ipRequests.set(counterKey, ipData)
 
                 return new Response(
                     JSON.stringify({
                         error: "Rate limit exceeded",
                         // limit: limit.maxRequests,
                         // windowMs: limit.windowMs,
-                        retryAfter: Math.ceil(
-                            this.config.blockDurationMs / 1000,
-                        ),
+                        retryAfter: Math.ceil(blockMs / 1000),
                     }),
                     {
                         status: 429,
                         headers: {
                             "Content-Type": "application/json",
-                            "Retry-After": Math.ceil(
-                                this.config.blockDurationMs / 1000,
-                            ).toString(),
+                            "Retry-After": Math.ceil(blockMs / 1000).toString(),
                         },
                     },
                 )
             }
 
-            this.ipRequests.set(clientIP, ipData)
+            this.ipRequests.set(counterKey, ipData)
 
             // Log high usage (above 80% of limit)
             if (ipData.count > limit.maxRequests * 0.8) {
@@ -749,7 +866,7 @@ export class RateLimiter {
         remaining: number
         resetEpochSeconds: number
     } | null {
-        const ipData = this.ipRequests.get(ip)
+        const ipData = this.getEntry("POST", ip)
         if (!ipData) {
             return null
         }
@@ -772,40 +889,54 @@ export class RateLimiter {
         activeRequests: number
     } {
         const now = Date.now()
-        let blockedIPs = 0
+        const allIPs = new Set<string>()
+        const blocked = new Set<string>()
         let activeRequests = 0
 
-        for (const [, data] of this.ipRequests.entries()) {
+        for (const [key, data] of this.ipRequests.entries()) {
+            const parts = splitBucketKey(key)
+            if (!parts) continue
+            allIPs.add(parts.ip)
             if (data.blocked && data.blockExpiry && now < data.blockExpiry) {
-                blockedIPs++
+                blocked.add(parts.ip)
             }
-            if (now - data.firstRequest < this.config.defaultLimit.windowMs) {
+            const { windowMs } = this.getLimitForBucket(parts.bucket)
+            if (now - data.firstRequest < windowMs) {
                 activeRequests += data.count
             }
         }
 
         return {
-            totalIPs: this.ipRequests.size,
-            blockedIPs,
+            totalIPs: allIPs.size,
+            blockedIPs: blocked.size,
             activeRequests,
         }
     }
 
+    /** Lifts the block on every counter the IP has, across all buckets. */
     public unblockIP(ips: string[]): Record<string, boolean> {
-        const results = {}
+        const results: Record<string, boolean> = {}
+        const bySubject = new Map<string, string[]>()
+        for (const ip of ips) {
+            results[ip] = false
+            const subject = rateLimitSubject(ip)
+            bySubject.set(subject, [...(bySubject.get(subject) ?? []), ip])
+        }
+
+        for (const [key, ipData] of this.ipRequests.entries()) {
+            const parts = splitBucketKey(key)
+            const asked = parts ? bySubject.get(parts.ip) : undefined
+            if (!asked || !ipData.blocked) continue
+            ipData.blocked = false
+            delete ipData.blockExpiry
+            ipData.count = 0
+            ipData.firstRequest = Date.now()
+            for (const ip of asked) results[ip] = true
+        }
 
         for (const ip of ips) {
-            const ipData = this.ipRequests.get(ip)
-            if (ipData && ipData.blocked) {
-                ipData.blocked = false
-                delete ipData.blockExpiry
-                ipData.count = 0
-                ipData.firstRequest = Date.now()
-                this.ipRequests.set(ip, ipData)
+            if (results[ip]) {
                 log.info(`[Rate Limiter] Manually unblocked IP ${ip}`)
-                results[ip] = true
-            } else {
-                results[ip] = false
             }
         }
 

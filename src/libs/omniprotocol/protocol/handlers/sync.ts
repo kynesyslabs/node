@@ -235,12 +235,33 @@ export const handleGetTxByHash: OmniHandler<Buffer> = async ({ message }) => {
     })
 }
 
-export const handleMempoolMerge: OmniHandler<Buffer> = async ({ message }) => {
+export const handleMempoolMerge: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeMempoolResponse({ status: 400, transactions: [] })
     }
 
+    // Merging admits txs without the nonce, balance and fee checks of a
+    // submit, so it is for the validators shard selection would admit.
+    const { isMergePeerEligible } = await import(
+        "src/libs/consensus/mergePeerEligibility"
+    )
+    if (!(await isMergePeerEligible(context.peerIdentity ?? ""))) {
+        return encodeMempoolResponse({ status: 401, transactions: [] })
+    }
+
     const request = decodeMempoolMergeRequest(message.payload)
+
+    // A merge batch is a peer's whole pool, which is capped, so a longer
+    // list is not a pool.
+    const { getMempoolLimits } = await import(
+        "src/libs/blockchain/mempoolLimits"
+    )
+    if (request.transactions.length > getMempoolLimits().maxTxs) {
+        return encodeMempoolResponse({ status: 400, transactions: [] })
+    }
 
     const transactions = request.transactions.map(buffer => {
         const text = buffer.toString("utf8").trim()

@@ -146,6 +146,20 @@ services:
     environment:
       # Network & ports
       RPC_PORT: ${RPC_PORT:-53550}
+      # Empty means the node's own default (see .env.example). RPC_BIND stays
+      # 0.0.0.0 in a container: the published port, not the bind address, is
+      # what limits exposure here.
+      RPC_BIND: ${RPC_BIND:-}
+      RPC_MAX_BODY_BYTES: ${RPC_MAX_BODY_BYTES:-}
+      RPC_PEER_MAX_BODY_BYTES: ${RPC_PEER_MAX_BODY_BYTES:-}
+      RATE_LIMIT_BLOCK_DURATION_MS: ${RATE_LIMIT_BLOCK_DURATION_MS:-}
+      # Proxy headers are only honoured from these networks. The default is
+      # the docker bridge range, where the caddy service connects from; without
+      # it the node sees every public client as caddy's address and gives them
+      # all one rate-limit counter. Caddy strips client-sent forwarding
+      # headers, so the value the node reads is the one Caddy set.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12}
+      XFF_MODE: ${XFF_MODE:-}
       EXPOSED_URL: ${EXPOSED_URL:-http://localhost:53550}
       OMNI_ENABLED: ${OMNI_ENABLED:-true}
       OMNI_PORT: ${OMNI_PORT:-53551}
@@ -543,6 +557,9 @@ services:
       # listens on. Same variables, same defaults as the node's own environment.
       RPC_SIGNALING_PORT: ${RPC_SIGNALING_PORT:-3005}
       L2PS_MESSAGING_PORT: ${L2PS_MESSAGING_PORT:-3006}
+      # Upload cap on the public RPC route; keep equal to the node's own
+      # RPC_MAX_BODY_BYTES.
+      RPC_MAX_BODY_BYTES: ${RPC_MAX_BODY_BYTES:-4194304}
     volumes:
       - ./monitoring/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./monitoring/caddy/tlsnotary-modes:/etc/caddy/tlsnotary-modes:ro
