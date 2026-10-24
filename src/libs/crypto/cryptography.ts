@@ -51,9 +51,11 @@ export default class Cryptography {
         log.debug(keypair.privateKey)
         if (mode === "hex") {
             const hexPrivKey = Cryptography.saveToHex(keypair.privateKey)
-            await fs.writeFile(path, hexPrivKey)
+            await fs.writeFile(path, hexPrivKey, { mode: 0o600 })
         } else {
-            await fs.writeFile(path, JSON.stringify(keypair.privateKey))
+            await fs.writeFile(path, JSON.stringify(keypair.privateKey), {
+                mode: 0o600,
+            })
         }
     }
 

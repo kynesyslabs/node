@@ -10,6 +10,11 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import { serializeBlockContent } from "@/forks"
 import Chain from "src/libs/blockchain/chain"
+import {
+    checkBlockSignature,
+    recordBlockSignature,
+    SigningRecordError,
+} from "src/libs/identity/signingRecord"
 
 export async function resolveBlockTimestamp(
     secretaryTimestamp: number,
@@ -71,10 +76,28 @@ export async function createBlock(
     )
     // Signing the block and adding the signature to the block validation data
 
+    const genesisHash = getSharedState.genesisBlockHash
+    if (!genesisHash) {
+        throw new SigningRecordError(
+            "genesis block hash is not loaded; refusing to sign",
+        )
+    }
+    const round = {
+        genesisHash,
+        height: blockNumber,
+        timestamp: block.content.timestamp,
+        hash: block.hash,
+    }
+    checkBlockSignature(getSharedState.identityFile, round)
+
     const blockSignature = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
         new TextEncoder().encode(block.hash),
     )
+
+    // Persisted before the block is returned so the signature cannot leave
+    // the process without a record of it, and only once signing succeeded.
+    recordBlockSignature(getSharedState.identityFile, round)
 
     // ? Probably to remove once we have the mechanism working for v2
     if (!block.validation_data) {

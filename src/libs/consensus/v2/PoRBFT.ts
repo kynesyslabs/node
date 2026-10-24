@@ -47,6 +47,10 @@ import {
     readNonces,
 } from "@/libs/debug/nonceTrace"
 import { markStep } from "@/utilities/loopScheduler"
+import {
+    DoubleSignError,
+    SigningRecordError,
+} from "@/libs/identity/signingRecord"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
 
@@ -912,14 +916,28 @@ async function forgeBlock(
         await getCommonValidatorSeed()
 
     // REVIEW Add the GCR hash to the block should be done in createBlock
-    const block = await createBlock(
-        orderedTransactions,
-        commonValidatorSeed,
-        previousBlockHash,
-        lastBlockNumber + 1,
-        peerlist,
-        blockTimestamp,
-    )
+    let block: Block
+    try {
+        block = await createBlock(
+            orderedTransactions,
+            commonValidatorSeed,
+            previousBlockHash,
+            lastBlockNumber + 1,
+            peerlist,
+            blockTimestamp,
+        )
+    } catch (error) {
+        // A refused signature or an unusable signing record ends this round
+        // without signing; anything else keeps its existing handling.
+        if (
+            error instanceof DoubleSignError ||
+            error instanceof SigningRecordError
+        ) {
+            log.error(`[consensusRoutine] ${error.message}`)
+            throw new AbortConsensusError(error.message)
+        }
+        throw error
+    }
 
     // await updateValidatorStatus("forgedBlock", true, false, true)
     // Using the secretary to update the local statuses
