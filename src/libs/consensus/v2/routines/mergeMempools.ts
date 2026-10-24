@@ -7,6 +7,7 @@ import {
     Transaction,
 } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
+import { splitMergeBatches } from "@/libs/blockchain/mempoolLimits"
 import { MERGE_MEMPOOL_MAX_TXS_PER_PEER } from "@/utilities/constants"
 import { contributePeerlist, getLocalSyncObservations } from "./peerlistMerge"
 
@@ -58,39 +59,58 @@ export async function mergeMempools(
         return
     }
 
-    const request: RPCRequest = {
+    // A pool can be larger than one request is allowed to be (see
+    // splitMergeBatches), and the receiver refuses an oversized request
+    // before merging anything, so the pool goes out in bounded requests.
+    const batches = splitMergeBatches(mempool)
+    const buildRequest = (txs: Transaction[]): RPCRequest => ({
         method: "mempool",
         params: [
             {
-                txs: mempool,
+                txs,
                 peerlist: getLocalSyncObservations(blockRef),
                 blockRef,
             },
         ],
-    }
-
-    const promises = shard.map(peer => {
-        log.only(
-            `[mergeMempools] Merging mempool with ${peer.connection.string}`,
-        )
-        return withTimeout(
-            peer.longCall(request, true, {
-                sleepTime: 250,
-                retries: 2,
-            }),
-            PEER_CALL_TIMEOUT_MS,
-            peer,
-        )
     })
 
-    const settled = await Promise.allSettled(promises)
+    // One peer's requests go out in order and stop at the first failure;
+    // the peers are reached in parallel.
+    const exchange = async (
+        peer: Peer,
+    ): Promise<PromiseSettledResult<RPCResponse>[]> => {
+        log.only(
+            `[mergeMempools] Merging mempool with ${peer.connection.string} in ${batches.length} request(s)`,
+        )
+        const outcomes: PromiseSettledResult<RPCResponse>[] = []
+        for (const batch of batches) {
+            const [outcome] = await Promise.allSettled([
+                withTimeout(
+                    peer.longCall(buildRequest(batch), true, {
+                        sleepTime: 250,
+                        retries: 2,
+                    }),
+                    PEER_CALL_TIMEOUT_MS,
+                    peer,
+                ),
+            ])
+            outcomes.push(outcome)
+            if (outcome.status === "rejected" || outcome.value.result !== 200) {
+                break
+            }
+        }
+        return outcomes
+    }
+
+    const perPeer = await Promise.all(shard.map(exchange))
+    const settled = perPeer.flatMap((outcomes, i) =>
+        outcomes.map(outcome => ({ peer: shard[i], outcome })),
+    )
 
     // INFO: collect txs from successful responses, deduped by hash,
     // so we make a single Mempool.receive call instead of one per peer.
     const merged = new Map<string, Transaction>()
-    for (const [i, result] of settled.entries()) {
-        const peer = shard[i]
-
+    for (const { peer, outcome: result } of settled) {
         if (result.status === "rejected") {
             log.error(
                 `[mergeMempools] longCall rejected for ${peer.connection.string}: ${result.reason}`,

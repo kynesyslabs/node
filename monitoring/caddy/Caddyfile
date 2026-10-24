@@ -127,7 +127,14 @@
 	# Note: /health and /version on the node are intentionally fast and
 	# rate-limit-bypassed already (server_rpc.ts). LB / k8s probes can hit
 	# them directly through this vhost without auth.
+	# request_body caps what a public client may upload; keep it equal to the
+	# node's RPC_MAX_BODY_BYTES. Validators exchange mempools and blocks larger
+	# than this, so validator-to-validator traffic must reach the node directly
+	# (RPC_BIND on a private interface), not through this public vhost.
 	handle {
+		request_body {
+			max_size {$RPC_MAX_BODY_BYTES:4194304}
+		}
 		reverse_proxy node:53550
 	}
 

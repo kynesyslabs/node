@@ -513,7 +513,7 @@ export default class SharedState {
             maxRequests: RATE_LIMIT_DEFAULT_MAX_REQUESTS,
             windowMs: RATE_LIMIT_DEFAULT_WINDOW_MS,
         },
-        blockDurationMs: undefined,
+        blockDurationMs: Config.getInstance().core.rateLimitBlockDurationMs,
         whitelistedIPs: [
             ...LOCALHOST_IPS,
             ...Config.getInstance().core.whitelistedIPs,
