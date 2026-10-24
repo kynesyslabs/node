@@ -8,7 +8,7 @@ Human readable license: https://creativecommons.org/licenses/by-nc-nd/4.0/
 KyneSys Labs: https://www.kynesys.xyz/
 */
 
-import type { Block } from "@kynesyslabs/demosdk/types"
+import type { Block, Transaction } from "@kynesyslabs/demosdk/types"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 
 import Chain from "../chain"
@@ -16,6 +16,7 @@ import log from "src/utilities/logger"
 import Hashing from "src/libs/crypto/hashing"
 import { serializeBlockContent } from "@/forks"
 import TxValidatorPool from "./txValidatorPool"
+import { verifyBlockTxSignatures } from "./verifyBlockTxSignatures"
 import { getSharedState } from "@/utilities/sharedState"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getEligiblePool } from "src/libs/consensus/v2/routines/getShard"
@@ -50,8 +51,17 @@ export function checkTimestampAgainstParent(
 
 /**
  * Verify a synced block's hash + signature quorum.
+ *
+ * When the block's transactions are supplied (an empty array counts) they are re-judged at the
+ * block's own height (hash coherence and signature preimage, including the
+ * chain id once `signatureDomain` applies). Callers that already hold the
+ * transactions should pass them: the block header alone commits to hashes,
+ * so without them no transaction signature is checked here.
  */
-export async function verifyBlock(block: Block): Promise<BlockVerification> {
+export async function verifyBlock(
+    block: Block,
+    txs?: Transaction[],
+): Promise<BlockVerification> {
     // Genesis has no shard or signatures
     if (block.number === 0) {
         return { valid: true }
@@ -173,6 +183,12 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
             valid: false,
             reason: `insufficient verified pool signatures: ${verifiedSigners.size}/${denominator} (need ${threshold})`,
         }
+    }
+
+    // Last, because it is the expensive check: only a block that already has
+    // its quorum is worth verifying transaction by transaction.
+    if (txs !== undefined) {
+        return await verifyBlockTxSignatures(block, txs)
     }
 
     return { valid: true }
