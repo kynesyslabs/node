@@ -74,6 +74,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         blockWatchdogEnabled: false,
         blockWatchdogTimeoutSeconds: 600,
         stallDetectionBlocks: 3,
+        forkScheduleMismatchPolicy: "abstain",
     },
 
     tlsnotary: {

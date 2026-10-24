@@ -34,6 +34,8 @@ export interface DatabaseConfig {
 
 // --- Core Node ---
 
+export type ForkScheduleMismatchPolicy = "abstain" | "warn"
+
 export interface CoreConfig {
     prod: boolean
     mainLoopSleepTime: number
@@ -81,6 +83,13 @@ export interface CoreConfig {
     /** Consecutive missed shard selections before the node exits for
      *  investigation. 0 or lower disables the exit. */
     stallDetectionBlocks: number
+    /**
+     * What a node does when a peer reports a different fork schedule inside the
+     * window before the nearest scheduled fork.
+     *   abstain — skip consensus rounds (forging and voting) until the schedules agree
+     *   warn    — only log, as before
+     */
+    forkScheduleMismatchPolicy: ForkScheduleMismatchPolicy
     rpcFee: number
     networkFee: number
     /** Per-tx burn — sat/lamport-style integer for now.

@@ -184,6 +184,8 @@ services:
       # the allocation range and the published range can never drift.
       TLSNOTARY_PROXY_PORT_MIN: ${TLSNOTARY_PROXY_PORT_MIN:-55000}
       TLSNOTARY_PROXY_PORT_MAX: ${TLSNOTARY_PROXY_PORT_MAX:-55063}
+      # Consensus: sit out rounds while a peer's fork schedule differs
+      FORK_SCHEDULE_MISMATCH_POLICY: ${FORK_SCHEDULE_MISMATCH_POLICY:-abstain}
       # Logging & misc
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PROD: ${PROD:-false}
@@ -276,7 +278,11 @@ services:
       # METRICS_PORT — keep container port pinned to 9090 so the
       # prometheus.yml scrape target (node:9090) stays valid. The
       # host-side port is independently configurable via METRICS_HOST_PORT.
-      - "${METRICS_HOST_PORT:-9090}:9090"
+      # Published on loopback by default: the endpoint is unauthenticated and
+      # lists peers and heights. A monitoring host off this machine sets
+      # METRICS_BIND to a private interface address; the bundled Prometheus
+      # scrapes node:9090 over the compose network and is unaffected.
+      - "${METRICS_BIND:-127.0.0.1}:${METRICS_HOST_PORT:-9090}:9090"
       # TLSNotary wstcp proxy — publish only the single advertised proxy
       # port from .env (TLSNOTARY_PROXY_PORT) so the URL the node hands to
       # clients is reachable from the host.

@@ -1,0 +1,34 @@
+# Alertmanager for the Demos monitoring stack. One Slack receiver; the webhook
+# URL is read from a file so it never lands in this repo (see monitoring/secrets/README.md).
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: slack
+  # One notification per alert name and validator, so a network-wide stall
+  # arrives as one message per node but a flapping alert does not repeat.
+  group_by: [alertname, instance]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: slack
+      group_wait: 10s
+      repeat_interval: 1h
+    - matchers:
+        - severity="warning"
+      receiver: slack
+      repeat_interval: 4h
+
+receivers:
+  - name: slack
+    slack_configs:
+      - api_url_file: /run/secrets/slack_webhook
+        send_resolved: true
+        title: '[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})'
+        text: |-
+          {{ range .Alerts }}*{{ .Labels.instance }}*: {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
