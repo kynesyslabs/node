@@ -78,11 +78,6 @@ mock.module("src/libs/blockchain/validation/txValidatorPool", () => ({
         }),
     },
 }))
-mock.module("src/libs/blockchain/validation/verifyGcrEdits", () => ({
-    verifyGcrEditsMatch: jest.fn(async () => ({ match: true })),
-    verifyNoUnexplainedValueEdits: jest.fn(async () => ({ ok: true, unexplained: [] })),
-}))
-
 let insertedRows: Array<Record<string, unknown>> = []
 mock.module("src/libs/blockchain/chainDb", () => ({
     chunkedInsert: jest.fn(
@@ -97,6 +92,16 @@ mock.module("src/libs/consensus/v2/types/secretaryManager", () => ({
     default: class {
         static lastBlockRef = 100
     },
+}))
+
+// Spread the real module so exports other mempool dependencies import from it
+// keep resolving; only the two checks the caps policy bypasses are stubbed.
+// Loaded after the mocks above so its own imports see them.
+const realVerifyGcrEdits = await import("src/libs/blockchain/validation/verifyGcrEdits")
+mock.module("src/libs/blockchain/validation/verifyGcrEdits", () => ({
+    ...realVerifyGcrEdits,
+    verifyGcrEditsMatch: jest.fn(async () => ({ match: true })),
+    verifyNoUnexplainedValueEdits: jest.fn(async () => ({ ok: true, unexplained: [] })),
 }))
 
 const { default: Mempool } = await import("./mempool")
