@@ -13,6 +13,7 @@
         "lint:fix": "eslint . --ignore-pattern 'local_tests' --ignore-pattern 'aptos_tests' --fix --ext .ts",
         "type-check": "bun build src/index.ts --target=bun --no-emit",
         "test:release": "jest --maxWorkers=1 tests/release/reproducibleRelease.test.ts",
+        "test:consensus": "scripts/test-consensus.sh",
         "type-check-ts": "tsc --noEmit",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "format": "prettier --plugin-search-dir . --write .",

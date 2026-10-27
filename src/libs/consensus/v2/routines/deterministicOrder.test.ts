@@ -1,7 +1,6 @@
 import {
     compareTxDeterministic,
     orderDeterministically,
-    senderKey,
 } from "./deterministicOrder"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 
@@ -11,7 +10,10 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
  * per-sender nonce ordering, hash tie-break, and no-mutation.
  */
 function tx(from: string, nonce: number, hash: string): Transaction {
-    return { content: { from, nonce }, hash } as unknown as Transaction
+    return {
+        content: { from_ed25519_address: from, nonce },
+        hash,
+    } as unknown as Transaction
 }
 
 describe("deterministicOrder (P-ORDER)", () => {
@@ -38,8 +40,12 @@ describe("deterministicOrder (P-ORDER)", () => {
         expect(o2).toEqual(o3)
     })
 
-    test("sender key is lowercased", () => {
-        expect(senderKey(tx("0xABCDEF", 0, "h"))).toBe("0xabcdef")
+    test("senders compare case-insensitively", () => {
+        // Same sender in two cases: only the nonce may decide, so the
+        // higher-nonce uppercase spelling sorts after.
+        const upper = tx("0xABCDEF", 2, "h0")
+        const lower = tx("0xabcdef", 1, "h1")
+        expect(compareTxDeterministic(upper, lower)).toBeGreaterThan(0)
     })
 
     test("does not mutate input", () => {
