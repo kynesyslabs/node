@@ -1,78 +1,110 @@
 import type { Transaction } from "@kynesyslabs/demosdk/types"
-import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
-import Hashing from "src/libs/crypto/hashing"
+import {
+    unifiedCrypto as ucrypto,
+    hexToUint8Array,
+} from "../../../../node_modules/@kynesyslabs/demosdk/build/encryption/unifiedCrypto.js"
+
+import Hashing from "@/libs/crypto/hashing"
 import { BATCH_SIGNATURE_DOMAIN } from "@/libs/l2ps/constants"
-import TxValidatorPool from "./txValidatorPool"
+import type { TxValidationResult } from "./types"
 
 /**
- * Node-generated relay transactions that are not signed the way a user
- * transaction is. The L2PS batch aggregator hashes the plain
- * `JSON.stringify(content)` and signs `${BATCH_SIGNATURE_DOMAIN}:${content}`
- * with the node key, so the user-transaction check (a signature over the
- * hash preimage) can never accept one.
- *
- * Nothing on the mempool receive path verifies this form: the mempool only
- * exempts these types from the per-account nonce throttle, and a remote
- * validator's receive refuses them. They reach a block only from the
- * originating node's own mempool, which is why a syncing node has to verify
- * the form itself instead of trusting the type.
- *
- * The L2PS consensus summary transaction (`from: "l2ps:consensus"`, empty
- * signature) is written straight to the transactions table and never enters
- * a mempool or `ordered_transactions`, so it has no valid form here.
+ * Types of node-generated relay transactions that do not follow the standard
+ * transaction signing rules. Keep in step with the set mempool admission uses
+ * to skip the per-account nonce check.
  */
 const SYSTEM_RELAY_TX_TYPES = new Set<string>(["l2psBatch"])
 
-export interface SystemRelayVerdict {
-    valid: boolean
-    reason?: string
-}
+/** `from` of the unsigned local record the L2PS consensus step writes. */
+const L2PS_CONSENSUS_SENDER = "l2ps:consensus"
 
+/**
+ * Whether a transaction is a system relay type, judged by its content type
+ * only. Being one selects which verifier applies; it exempts nothing.
+ */
 export function isSystemRelayTx(tx: Transaction): boolean {
-    return SYSTEM_RELAY_TX_TYPES.has(tx?.content?.type as string)
+    const type = (tx?.content as { type?: unknown } | undefined)?.type
+    return typeof type === "string" && SYSTEM_RELAY_TX_TYPES.has(type)
 }
 
+/**
+ * Verify a system relay transaction by the rule its producer signs under.
+ *
+ * `l2psBatch` is built by the L2PS batch aggregator: the hash is the SHA-256
+ * of the raw `JSON.stringify(content)` (no denomination canonicalization), and
+ * the node key signs `${BATCH_SIGNATURE_DOMAIN}:${JSON.stringify(content)}`,
+ * not the transaction hash. Neither matches the standard coherence or
+ * preimage check, and the receiving mempool does not accept these through
+ * its standard validation, so a block that carries one has to be judged by
+ * the producer's own rule or not at all.
+ *
+ * The signer is not checked against the validator set here: any key that
+ * signs its own batch transaction passes. Admission to a block is the
+ * proposer's decision; this check proves only that the content was signed
+ * by the key it names.
+ *
+ * The L2PS consensus step also writes a transaction of this type with an
+ * empty signature and `from: "l2ps:consensus"`. It goes straight into the
+ * transactions table after the block's contents are fixed and is never in a
+ * block's `ordered_transactions`, so a block that does list one is rejected
+ * rather than exempted.
+ */
 export async function verifySystemRelayTx(
     tx: Transaction,
-): Promise<SystemRelayVerdict> {
-    const signature = tx.signature as
-        | { type?: string; data?: string; domain?: string }
-        | null
-        | undefined
-    if (!signature?.data || !signature.type) {
-        return { valid: false, reason: "system relay transaction is unsigned" }
+): Promise<TxValidationResult> {
+    const hash = tx?.hash
+    const invalid = (reason: string): TxValidationResult => ({
+        hash,
+        valid: false,
+        reason,
+    })
+
+    if (!isSystemRelayTx(tx)) {
+        return invalid("not a system relay transaction")
     }
-    if (signature.domain !== BATCH_SIGNATURE_DOMAIN) {
-        return {
-            valid: false,
-            reason: "system relay transaction carries the wrong signature domain",
-        }
+    const content = tx.content as Record<string, any>
+
+    if (
+        content.from === L2PS_CONSENSUS_SENDER ||
+        typeof tx.signature?.data !== "string" ||
+        tx.signature.data.length === 0
+    ) {
+        return invalid(
+            "unsigned system transaction cannot be part of a block's ordered transactions",
+        )
     }
 
-    const contentString = JSON.stringify(tx.content)
-    if (Hashing.sha256(contentString) !== tx.hash) {
-        return { valid: false, reason: "Transaction is not coherent" }
+    // The aggregator labels the domain it signed under. The label is not
+    // signed, so the check below proves nothing on its own; it rejects a
+    // relay transaction that claims a different signing rule.
+    if ((tx.signature as { domain?: unknown }).domain !== BATCH_SIGNATURE_DOMAIN) {
+        return invalid("system relay transaction carries the wrong signature domain")
+    }
+
+    if (!Array.isArray(content.data) || content.data[0] !== content.type) {
+        return invalid("system relay payload does not match its type")
+    }
+
+    const contentString = JSON.stringify(content)
+    if (Hashing.sha256(contentString) !== hash) {
+        return invalid("Transaction is not coherent")
     }
 
     try {
-        const ok = await TxValidatorPool.getInstance().verify({
-            algorithm: signature.type as never,
+        const ok = await ucrypto.verify({
+            algorithm: tx.signature.type,
             message: new TextEncoder().encode(
                 `${BATCH_SIGNATURE_DOMAIN}:${contentString}`,
             ),
-            signature: hexToUint8Array(signature.data),
-            publicKey: hexToUint8Array(tx.content.from as string),
+            signature: hexToUint8Array(tx.signature.data),
+            publicKey: hexToUint8Array(content.from),
         })
         return ok
-            ? { valid: true }
-            : {
-                  valid: false,
-                  reason: "system relay transaction signature verification failed",
-              }
+            ? { hash, valid: true }
+            : invalid("system relay signature verification failed")
     } catch (e) {
-        return {
-            valid: false,
-            reason: `system relay transaction signature could not be verified: ${e instanceof Error ? e.message : String(e)}`,
-        }
+        return invalid(
+            `system relay signature check threw: ${e instanceof Error ? e.message : String(e)}`,
+        )
     }
 }

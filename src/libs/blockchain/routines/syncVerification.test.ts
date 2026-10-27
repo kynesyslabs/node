@@ -498,8 +498,11 @@ describe("L2PS batch transactions", () => {
         altered.content.data[1].batch_hash = "forged"
         const foreign = batchTx({ signer: mallory })
         const wrongDomain = batchTx({ domain: "SOMETHING_ELSE" })
+        // Signed under the batch domain but labelled with another one.
+        const mislabelled = batchTx()
+        mislabelled.signature.domain = "SOMETHING_ELSE"
 
-        for (const tx of [altered, foreign, wrongDomain]) {
+        for (const tx of [altered, foreign, wrongDomain, mislabelled]) {
             const rejection = await verifyBlockTransactions(makeBlock([tx]), [tx]).catch(e => e)
             expect(rejection).toBeInstanceOf(SyncBlockRejectedError)
         }
