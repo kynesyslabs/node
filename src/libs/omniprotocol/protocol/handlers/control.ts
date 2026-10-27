@@ -60,6 +60,17 @@ export const handlePeerlistSync: OmniHandler<Buffer> = async () => {
     })
 }
 
+// Methods that act on the sender's identity or change consensus, mempool or
+// account state. They are reachable through the unauthenticated nodeCall
+// opcode, so each message must carry its own verified auth block. Read-only
+// queries stay open because peers on older builds sync blocks without auth.
+const SENDER_BOUND_METHODS: ReadonlySet<string> = new Set([
+    "mempool",
+    "hello_peer",
+    "consensus_routine",
+    "gcr_routine",
+])
+
 export const handleNodeCall: OmniHandler<Buffer> = async ({
     message,
     context,
@@ -78,6 +89,15 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
     }
 
     const request = decodeNodeCallRequest(message.payload as Buffer)
+
+    if (SENDER_BOUND_METHODS.has(request.method) && !context.isAuthenticated) {
+        return encodeNodeCallResponse({
+            status: 401,
+            value: `Authentication required for ${request.method}`,
+            requireReply: false,
+            extra: null,
+        })
+    }
 
     // REVIEW: Handle top-level RPC methods that are NOT nodeCall messages
     // These are routed to ServerHandlers directly, not manageNodeCall
