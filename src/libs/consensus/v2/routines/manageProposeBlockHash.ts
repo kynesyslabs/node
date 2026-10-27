@@ -28,6 +28,55 @@ function getIncomingSignatures(
     return signatures as Record<string, string>
 }
 
+async function mergeIncomingSignatures(
+    incomingSignatures: Record<string, string>,
+    poolIdentities: Set<string>,
+): Promise<void> {
+    const candidateBlock = getSharedState.candidateBlock
+    for (const [identity, signature] of Object.entries(incomingSignatures)) {
+        // verifyBlock ignores signers outside the pool, so keeping them
+        // would only bloat the block and cost a verification.
+        if (!poolIdentities.has(identity)) {
+            log.error(
+                `[manageProposeBlockHash] Dropping signature by ${identity}: not in the eligible pool`,
+            )
+            continue
+        }
+
+        let isValid = false
+        try {
+            isValid = await TxValidatorPool.getInstance().verify({
+                algorithm: getSharedState.signingAlgorithm,
+                message: new TextEncoder().encode(candidateBlock.hash),
+                signature: hexToUint8Array(signature),
+                publicKey: hexToUint8Array(identity),
+            })
+        } catch (e) {
+            log.error(
+                `[manageProposeBlockHash] Signature verification failed for ${identity}: ${errorMessage(e)}`,
+            )
+            continue
+        }
+
+        if (isValid) {
+            candidateBlock.validation_data.signatures[identity] = signature
+            log.debug(
+                `Signature ${signature} from ${identity} added to the candidate block`,
+            )
+            continue
+        }
+
+        log.error(`Found invalid incoming signature by: ${identity}`)
+        log.error(`Proposed signature: ${signature}`)
+        log.error("Candidate block hash: " + candidateBlock.hash)
+        log.error("Signature verification failed. Signature not added.")
+    }
+}
+
+function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : String(e)
+}
+
 export default async function manageProposeBlockHash(
     blockHash: string,
     validationData: ValidationData,
@@ -115,7 +164,7 @@ export default async function manageProposeBlockHash(
             pool = await getEligiblePool(candidate.number - 1)
         } catch (e) {
             log.error(
-                `[manageProposeBlockHash] Could not resolve the eligible pool: ${e instanceof Error ? e.message : String(e)}`,
+                `[manageProposeBlockHash] Could not resolve the eligible pool: ${errorMessage(e)}`,
             )
             response.result = 500
             response.response = getSharedState.publicKeyHex
@@ -123,69 +172,20 @@ export default async function manageProposeBlockHash(
             return response
         }
 
-        // One signature per signer is all a legitimate map can hold, and
-        // verifyBlock's quorum denominator is min(shardSize, pool).
-        const cap = Math.min(getSharedState.shardSize, pool.length)
-        if (Object.keys(incomingSignatures).length > cap) {
+        // Honest nodes draw different committees, so the map accumulated over
+        // several relays can hold more signers than shardSize. Every signer
+        // must be a distinct pool member, which makes the pool the ceiling.
+        if (Object.keys(incomingSignatures).length > pool.length) {
             log.error(
-                "[manageProposeBlockHash] Signature map larger than the signer cap: refusing the block hash",
+                "[manageProposeBlockHash] Signature map larger than the eligible pool: refusing the block hash",
             )
             response.result = 400
             response.response = getSharedState.publicKeyHex
-            response.extra = "Signature map is larger than the shard"
+            response.extra = "Signature map is larger than the eligible pool"
             return response
         }
 
-        // INFO: Copy the incoming signatures to our candidate block
-        const poolIdentities = new Set(pool)
-        for (const [identity, signature] of Object.entries(
-            incomingSignatures,
-        )) {
-            // verifyBlock ignores signers outside the pool, so keeping them
-            // would only bloat the block and cost a verification.
-            if (!poolIdentities.has(identity)) {
-                log.error(
-                    `[manageProposeBlockHash] Dropping signature by ${identity}: not in the eligible pool`,
-                )
-                continue
-            }
-
-            let isValid = false
-
-            try {
-                isValid = await TxValidatorPool.getInstance().verify({
-                    algorithm: getSharedState.signingAlgorithm,
-                    message: new TextEncoder().encode(
-                        getSharedState.candidateBlock.hash,
-                    ),
-                    signature: hexToUint8Array(signature),
-                    publicKey: hexToUint8Array(identity),
-                })
-            } catch (e) {
-                const errorMsg = e instanceof Error ? e.message : String(e)
-                log.error(
-                    `[manageProposeBlockHash] Signature verification failed for ${identity}: ${errorMsg}`,
-                )
-                continue
-            }
-
-            if (isValid) {
-                getSharedState.candidateBlock.validation_data.signatures[
-                    identity
-                ] = signature
-                log.debug(
-                    `Signature ${signature} from ${identity} added to the candidate block`,
-                )
-                continue
-            }
-
-            log.error(`Found invalid incoming signature by: ${identity}`)
-            log.error(`Proposed signature: ${signature}`)
-            log.error(
-                "Candidate block hash: " + getSharedState.candidateBlock.hash,
-            )
-            log.error("Signature verification failed. Signature not added.")
-        }
+        await mergeIncomingSignatures(incomingSignatures, new Set(pool))
 
         response.extra = getSharedState.candidateBlock.validation_data
         return response

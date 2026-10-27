@@ -274,7 +274,7 @@ for (const kind of connections) {
                 await new Promise(r => setTimeout(r, 5))
             }
 
-            expect(socket.written.length).toBe(before + 1)
+            expect(socket.written).toHaveLength(before + 1)
             expect(socket.written[before].toString("utf8")).toContain("Authentication required")
             expect(socket.ended).toBe(false)
             expect(kind.pending(conn)).toBe(true)

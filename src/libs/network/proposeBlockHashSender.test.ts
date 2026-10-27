@@ -2,7 +2,7 @@
  * proposeBlockHash acts for the authenticated sender: the peer id in the
  * params names nobody and the sender must be in the round committee. The
  * signature map it relays is judged like verifyBlock judges signatures:
- * limited to the eligible pool and bounded by min(shardSize, pool).
+ * limited to the eligible pool and bounded by the pool size.
  */
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
@@ -162,7 +162,7 @@ describe("proposeBlockHash sender", () => {
         expect(candidate.validation_data.signatures).toEqual({ [POOL_ONLY]: sig })
     })
 
-    it("accepts a map as large as min(shardSize, pool), even when our committee is smaller", async () => {
+    it("accepts a map as large as the pool, even when our committee is smaller", async () => {
         const res = await propose(MEMBER_A, MEMBER_A, {
             [OUR_KEY]: sig,
             [MEMBER_A]: sig,
@@ -174,7 +174,26 @@ describe("proposeBlockHash sender", () => {
         expect(Object.keys(candidate.validation_data.signatures)).toHaveLength(4)
     })
 
-    it("refuses a map larger than min(shardSize, pool)", async () => {
+    it("accepts more eligible signatures than shardSize when committees overlap", async () => {
+        // Two honest nodes drew different committees of 3 out of a pool of 5;
+        // the relayed map is the union of both, so it exceeds shardSize.
+        const extra = ["0x" + "d4".repeat(32), "0x" + "e5".repeat(32)]
+        pool = [OUR_KEY, MEMBER_A, MEMBER_B, POOL_ONLY, ...extra]
+        sharedState.shardSize = 3
+
+        const res = await propose(MEMBER_A, MEMBER_A, {
+            [OUR_KEY]: sig,
+            [MEMBER_A]: sig,
+            [MEMBER_B]: sig,
+            [POOL_ONLY]: sig,
+            [extra[0]]: sig,
+        })
+
+        expect(res.result).toBe(200)
+        expect(Object.keys(candidate.validation_data.signatures)).toHaveLength(5)
+    })
+
+    it("refuses a map larger than the pool before verifying anything", async () => {
         const padded: Record<string, string> = {}
         for (let i = 0; i < 5; i++) {
             padded["0x" + String(i).padStart(2, "0").repeat(32)] = sig
@@ -187,7 +206,7 @@ describe("proposeBlockHash sender", () => {
         expect(candidate.validation_data.signatures).toEqual({})
     })
 
-    it("caps by the pool when the pool is smaller than the shard size", async () => {
+    it("bounds the map by a pool smaller than the shard size", async () => {
         pool = [MEMBER_A, MEMBER_B]
         sharedState.shardSize = 10
 
