@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test"
 import axios from "axios"
 import { verifyWeb2Proof } from "@/libs/abstraction"
 import { GithubProofParser } from "./github"
+import { nonCanonicalClaim, sameId } from "./parsers"
 import { Twitter } from "@/libs/identity/tools/twitter"
 import { Discord } from "@/libs/identity/tools/discord"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
@@ -131,7 +132,7 @@ describe("web2 proofs are bound to the claimed account", () => {
 
         it("accepts a gist owned by the claimed account", async () => {
             gists.a1b2 = { owner: { login: "alice", id: 7 }, files: { a: { filename: "a", content: PROOF_TEXT } } }
-            const r = await verifyWeb2Proof(claim(gistUrl, "Alice"), SENDER)
+            const r = await verifyWeb2Proof(claim(gistUrl, "alice"), SENDER)
             expect(r.success).toBe(true)
         })
 
@@ -229,6 +230,99 @@ describe("web2 proofs are bound to the claimed account", () => {
             expect(r.success).toBe(false)
             expect(rawFetches).toEqual([])
             expect(githubRequests).toEqual([])
+        })
+    })
+
+    describe("claims in canonical form only", () => {
+        // Stored ids are compared as exact text, so another spelling of an
+        // account's id would count as an account never linked before.
+        const tweetUrl = "https://x.com/alice/status/1"
+        const twitterClaim = (username: string, userId: unknown) =>
+            ({ context: "twitter", username, userId, proof: tweetUrl }) as any
+        const discordProof =
+            "https://discord.com/channels/111111111111111111/222222222222222222/333333333333333333"
+        const discordClaim = (userId: unknown) =>
+            ({ context: "discord", username: "alice", userId, proof: discordProof }) as any
+        const gistClaim = (username: string, userId: unknown) =>
+            ({
+                context: "github",
+                username,
+                userId,
+                proof: "https://gist.github.com/alice/a1b2",
+            }) as any
+
+        beforeEach(() => {
+            tweets["1"] = { text: PROOF_TEXT, author: { screen_name: "Alice", rest_id: "42" } }
+            discordMessages["333333333333333333"] = {
+                content: PROOF_TEXT,
+                author: { id: "42", username: "alice" },
+            }
+            gists.a1b2 = {
+                owner: { login: "Alice", id: 42 },
+                files: { a: { filename: "a", content: PROOF_TEXT } },
+            }
+        })
+
+        it("refuses a padded user id on every provider", async () => {
+            for (const id of [" 42 ", "42 ", " 42", "4 2", "\t42"]) {
+                const results = [
+                    await verifyWeb2Proof(twitterClaim("alice", id), SENDER),
+                    await verifyWeb2Proof(discordClaim(id), SENDER),
+                    await verifyWeb2Proof(gistClaim("alice", id), SENDER),
+                ]
+                for (const r of results) {
+                    expect({ id, ok: r.success }).toEqual({ id, ok: false })
+                    expect(r.message).toContain("decimal string")
+                }
+            }
+            expect(githubRequests).toEqual([])
+        })
+
+        it("refuses a user id with leading zeros, a sign or a number type", async () => {
+            for (const id of ["042", "0", "+42", "-42", "4.2e1", 42, "", undefined]) {
+                const r = await verifyWeb2Proof(twitterClaim("alice", id), SENDER)
+                expect({ id, ok: r.success }).toEqual({ id, ok: false })
+            }
+        })
+
+        it("refuses a second link of the same account under another spelling of its id", async () => {
+            // The account behind the post is id 42; only that spelling links.
+            const first = await verifyWeb2Proof(twitterClaim("alice", "42"), SENDER)
+            expect(first.success).toBe(true)
+            for (const id of ["042", " 42", "42 ", "0042"]) {
+                const again = await verifyWeb2Proof(twitterClaim("alice", id), SENDER)
+                expect({ id, ok: again.success }).toEqual({ id, ok: false })
+                const gist = await verifyWeb2Proof(gistClaim("alice", id), SENDER)
+                expect({ id, ok: gist.success }).toEqual({ id, ok: false })
+                const discord = await verifyWeb2Proof(discordClaim(id), SENDER)
+                expect({ id, ok: discord.success }).toEqual({ id, ok: false })
+            }
+        })
+
+        it("refuses Twitter and GitHub handles that are not lower case", async () => {
+            for (const name of ["Alice", "ALICE", " alice", "alice "]) {
+                const t = await verifyWeb2Proof(twitterClaim(name, "42"), SENDER)
+                const g = await verifyWeb2Proof(gistClaim(name, "42"), SENDER)
+                expect({ name, t: t.success, g: g.success }).toEqual({ name, t: false, g: false })
+                expect(t.message).toContain("lower case")
+            }
+            // The provider may print the handle in any case; the lower-case
+            // claim of the same account is accepted.
+            expect((await verifyWeb2Proof(twitterClaim("alice", "42"), SENDER)).success).toBe(true)
+            expect((await verifyWeb2Proof(gistClaim("alice", "42"), SENDER)).success).toBe(true)
+        })
+
+        it("leaves telegram ids to the exact match against the bot attestation", () => {
+            expect(nonCanonicalClaim("telegram", { username: "Alice", userId: 42 })).toBeNull()
+            expect(nonCanonicalClaim("domain", { username: "Example.com" })).toBeNull()
+        })
+
+        it("compares a numeric provider id with the claimed decimal string", () => {
+            expect(sameId(42, "42")).toBe(true)
+            expect(sameId("42", "42")).toBe(true)
+            expect(sameId(42, " 42")).toBe(false)
+            expect(sameId("42", 42)).toBe(false)
+            expect(sameId(2 ** 60, String(2 ** 60))).toBe(false)
         })
     })
 

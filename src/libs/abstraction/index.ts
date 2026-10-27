@@ -4,7 +4,7 @@ import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { DiscordProofParser } from "./web2/discord"
 import { DomainProofParser, DOMAIN_PROOF_PATH } from "./web2/domain"
-import { type Web2ProofParser } from "./web2/parsers"
+import { type Web2ProofParser, nonCanonicalClaim } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { Twitter } from "../identity/tools/twitter"
@@ -259,6 +259,14 @@ export async function verifyWeb2Proof(
                 success: false,
                 message: `Unsupported proof context: ${payload.context}`,
             }
+    }
+
+    const nonCanonical = nonCanonicalClaim(payload.context, {
+        username: payload.username,
+        userId: payload.userId,
+    })
+    if (nonCanonical) {
+        return { success: false, message: nonCanonical }
     }
 
     // INFO: Check if Twitter account is a bot

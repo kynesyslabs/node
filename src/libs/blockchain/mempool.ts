@@ -17,6 +17,7 @@ import {
 } from "./validation/verifyGcrEdits"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { checkTxAdmissible } from "./validation/txAdmission"
+import { checkIdentityAdmission } from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
@@ -33,6 +34,16 @@ import { TRANSACTION_STATUS } from "@/utilities/constants"
  * of these types to bypass the per-account nonce throttle.
  */
 const SYSTEM_RELAY_TX_TYPES = new Set<string>(["l2psBatch"])
+
+/**
+ * Transactions whose shipped gcr_edits must equal the set regenerated from
+ * the signed body. Identity edits are generated from the payload alone, so
+ * binding them makes the proof checked at admission the one that is applied.
+ */
+function bindsWholeEditSet(tx: Transaction): boolean {
+    const type = tx.content?.type
+    return type === "native" || type === "identity" || carriesWorkEdits(tx)
+}
 
 export default class Mempool {
     public static lock = new Mutex()
@@ -176,7 +187,7 @@ export default class Mempool {
      * Single-transaction ingest for the gossip path. The envelope was
      * already verified by the topic validator (staked publisher, envelope
      * signature); this runs the per-tx admission checks shared with RPC
-     * intake, the forged-edit guard for native txs, and then the normal
+     * intake, the forged-edit guard, the identity proof checks, and then the normal
      * `addTransaction` nonce and persistence rules — under the mempool
      * lock, since gossip delivery is concurrent with consensus.
      *
@@ -201,11 +212,11 @@ export default class Mempool {
             return { accepted: false, reason: `${admission.code}: ${admission.reason}` }
         }
 
-        // Native txs and txs carrying Work edits are bound to the full
+        // Native, identity and Work-carrying txs are bound to the full
         // regenerated edit set. Every other type may ship only the value
         // edits (balance, stake, points) the node regenerates from its
         // signed body, since handleGCR applies gcr_edits for any type.
-        if (tx.content?.type === "native" || carriesWorkEdits(tx)) {
+        if (bindsWholeEditSet(tx)) {
             try {
                 const { match } = await verifyGcrEditsMatch(tx, {
                     expectFeeEdits: false,
@@ -230,6 +241,11 @@ export default class Mempool {
                     reason: `value edits with no counterpart in the regenerated set (${unexplained.join(", ")})`,
                 }
             }
+        }
+
+        const identity = await checkIdentityAdmission(tx)
+        if (identity.ok === false) {
+            return { accepted: false, reason: identity.reason }
         }
 
         const { confirmationBlock, error } = await this.addTransactionWithLock(tx)
@@ -598,8 +614,9 @@ export default class Mempool {
         // gate, entered the mempool + gossiped shard-wide. Re-derive the
         // expected edits here on the main thread and drop any tx whose shipped
         // edits don't match. Runs on the main thread (not the worker, which
-        // deliberately avoids the SDK encryption index). Native txs only —
-        // non-native bundles carry no gcr_edits to forge.
+        // deliberately avoids the SDK encryption index). The whole set is
+        // bound for the types in bindsWholeEditSet; the rest get the narrower
+        // value-edit guard.
         //
         // A gossiped native tx was confirmed upstream, so when
         // gasFeeSeparation is active it ALREADY carries the node-computed fee
@@ -620,10 +637,7 @@ export default class Mempool {
             for (const tx of validTransactions) {
                 // Work edits are state the sender signs for, so a tx that
                 // carries them is bound like a native one whatever its type.
-                if (
-                    tx.content?.type !== "native" &&
-                    !carriesWorkEdits(tx)
-                ) {
+                if (!bindsWholeEditSet(tx)) {
                     // Non-native transactions are not edit-bound as a whole
                     // (regeneration is not byte-deterministic across nodes for
                     // every type), but they must not move funds, stake or
@@ -663,6 +677,27 @@ export default class Mempool {
             }
             validTransactions.length = 0
             validTransactions.push(...editVerifiedTransactions)
+        }
+
+        // Proofs are checked concurrently so that provider latency is paid
+        // once per merge rather than once per identity transaction.
+        {
+            const verdicts = await Promise.all(
+                validTransactions.map(tx => checkIdentityAdmission(tx)),
+            )
+            const proofChecked: Transaction[] = []
+            verdicts.forEach((verdict, i) => {
+                const tx = validTransactions[i]
+                if (verdict.ok === false) {
+                    log.error(
+                        `[Mempool.receive] Rejecting tx ${tx.hash}: ${verdict.reason}`,
+                    )
+                    return
+                }
+                proofChecked.push(tx)
+            })
+            validTransactions.length = 0
+            validTransactions.push(...proofChecked)
         }
 
         log.only(

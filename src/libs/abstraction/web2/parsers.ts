@@ -24,18 +24,65 @@ export function sameHandle(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Ids are compared as text because the payload carries them as numbers or
- * strings depending on the client.
+ * The one spelling of a numeric account id: decimal digits with no sign,
+ * padding or leading zero. Stored ids are compared as exact text (the
+ * duplicate check in apply and the cross-account first-connection lookup),
+ * so " 42 " or "042" would count as an account that has never been linked.
  */
-export function sameId(a: unknown, b: unknown): boolean {
-    if (
-        (typeof a !== "string" && typeof a !== "number") ||
-        (typeof b !== "string" && typeof b !== "number")
-    ) {
-        return false
+export function isCanonicalNumericId(id: unknown): id is string {
+    return typeof id === "string" && /^[1-9][0-9]{0,31}$/.test(id)
+}
+
+/**
+ * The claimed id must be canonical and equal the provider's id. Providers
+ * return ids as strings, except GitHub, which returns a number.
+ */
+export function sameId(provided: unknown, claimed: unknown): boolean {
+    const providedText =
+        typeof provided === "number" && Number.isSafeInteger(provided)
+            ? String(provided)
+            : provided
+    return (
+        typeof providedText === "string" &&
+        isCanonicalNumericId(claimed) &&
+        providedText === claimed
+    )
+}
+
+/**
+ * Contexts whose claimed id is checked against a provider id here. Telegram
+ * is not among them: its id is compared exactly with the bot-signed
+ * attestation, and that check also runs when a block is applied, where a new
+ * rule would change how existing blocks replay.
+ */
+const NUMERIC_ID_CONTEXTS = new Set(["twitter", "github", "discord"])
+
+/**
+ * Handles these providers treat case-insensitively, in lower case. The edit
+ * is signed by the client, so the node refuses another spelling rather than
+ * rewriting it, and one account has exactly one stored handle.
+ */
+const CANONICAL_HANDLES: Record<string, RegExp> = {
+    twitter: /^[a-z0-9_]{1,15}$/,
+    github: /^[a-z0-9][a-z0-9-]{0,38}$/,
+}
+
+/**
+ * Returns why a web2 claim is not in canonical form, or null when it is.
+ * Checked before any provider call, so a malformed claim costs nothing.
+ */
+export function nonCanonicalClaim(
+    context: string,
+    claim: Web2Claim,
+): string | null {
+    if (NUMERIC_ID_CONTEXTS.has(context) && !isCanonicalNumericId(claim.userId)) {
+        return `${context} user id must be a decimal string with no spaces or leading zeros`
     }
-    const left = String(a).trim()
-    return left.length > 0 && left === String(b).trim()
+    const handle = CANONICAL_HANDLES[context]
+    if (handle && !(typeof claim.username === "string" && handle.test(claim.username))) {
+        return `${context} username must be sent in lower case, without spaces`
+    }
+    return null
 }
 
 export abstract class Web2ProofParser {
