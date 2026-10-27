@@ -47,7 +47,7 @@ import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
-import { In } from "typeorm"
+import { In, type EntityManager } from "typeorm"
 import { Mutex } from "async-mutex"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
@@ -309,6 +309,7 @@ export default class HandleGCR {
      */
     static async bulkUpdateAssignedTxs(
         updates: Map<string, AssignedTxRecord[]>,
+        manager?: EntityManager,
     ): Promise<void> {
         if (updates.size === 0) return
 
@@ -325,7 +326,7 @@ export default class HandleGCR {
         }
         if (rows.length === 0) return
 
-        const repo = dataSource.getRepository(GCRAssignedTx)
+        const repo = (manager ?? dataSource).getRepository(GCRAssignedTx)
         const chunkSize = maxRowsPerInsert(repo, GCRAssignedTx)
         for (let i = 0; i < rows.length; i += chunkSize) {
             const chunk = rows.slice(i, i + chunkSize)
@@ -1391,15 +1392,14 @@ export default class HandleGCR {
         }
 
         await HandleGCR.gcrWriteMutex.runExclusive(async () => {
-            await this.saveGCREditChanges(entities, mergedSideEffects)
-            if (assignedTxsUpdates.size > 0) {
-                log.debug(
-                    `[applyTransactions] Updating ${assignedTxsUpdates.size} assignedTxs`,
-                )
-
-                // TODO: Move this to after transactions have been saved to the database
-                await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
-            }
+            // The assignments are the record of which transactions took
+            // effect, so they share the edits' database transaction: a
+            // failure leaves neither, never edits without their record.
+            await this.saveGCREditChanges(
+                entities,
+                mergedSideEffects,
+                assignedTxsUpdates,
+            )
         })
 
         const end = Date.now()
@@ -1419,10 +1419,12 @@ export default class HandleGCR {
      *
      * @param entities All entity caches to flush
      * @param sideEffects The side-effects to apply
+     * @param assignedTxs Assignments to record in the same database transaction
      */
     static async saveGCREditChanges(
         entities: GCREntityCaches,
         sideEffects: (() => Promise<void>)[],
+        assignedTxs?: Map<string, AssignedTxRecord[]>,
     ) {
         const now = Date.now()
         // One database transaction for the whole set: a crash or a failed
@@ -1530,6 +1532,13 @@ export default class HandleGCR {
                 if (toDelete.length > 0) {
                     await repo.delete({ resourceKey: In(toDelete) })
                 }
+            }
+
+            if (assignedTxs && assignedTxs.size > 0) {
+                log.debug(
+                    `[saveGCREditChanges] Recording ${assignedTxs.size} assignedTxs`,
+                )
+                await HandleGCR.bulkUpdateAssignedTxs(assignedTxs, em)
             }
         })
 
