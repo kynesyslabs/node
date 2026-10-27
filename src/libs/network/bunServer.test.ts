@@ -37,3 +37,28 @@ describe("BunServer routing", () => {
         await expect(response.json()).resolves.toEqual({ error: "Not Found" })
     })
 })
+
+describe("BunServer listen options", () => {
+    test("binds the interface it is given", () => {
+        const server = new BunServer(0, "127.0.0.1")
+        try {
+            expect(server.start().hostname).toBe("127.0.0.1")
+        } finally {
+            server.stop()
+        }
+    })
+
+    test("applies the body ceiling Bun enforces before any handler runs", async () => {
+        const server = new BunServer(0, "127.0.0.1", { maxRequestBodySize: 64 })
+        server.post("/", () => jsonResponse({ ok: true }))
+        try {
+            const url = `http://127.0.0.1:${server.start().port}/`
+            const small = await fetch(url, { method: "POST", body: "x".repeat(10) })
+            const large = await fetch(url, { method: "POST", body: "x".repeat(65) })
+            expect(small.status).toBe(200)
+            expect(large.status).toBe(413)
+        } finally {
+            server.stop()
+        }
+    })
+})

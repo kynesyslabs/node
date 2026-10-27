@@ -76,6 +76,17 @@ jest.mock("./txValidatorPool", () => ({
     },
 }))
 
+// The per-transaction re-check has its own suite; here only its wiring into
+// verifyBlock matters, and the real module pulls the ESM-only SDK crypto.
+const verifyBlockTxSignatures = jest.fn(
+    async (): Promise<{ valid: boolean; reason?: string }> => ({ valid: true }),
+)
+jest.mock("./verifyBlockTxSignatures", () => ({
+    __esModule: true,
+    verifyBlockTxSignatures: (...args: unknown[]) =>
+        (verifyBlockTxSignatures as any)(...args),
+}))
+
 function makeBlock(overrides: Record<string, any> = {}) {
     return {
         number: 10,
@@ -97,6 +108,8 @@ function makeBlock(overrides: Record<string, any> = {}) {
 }
 
 beforeEach(() => {
+    verifyBlockTxSignatures.mockClear()
+    verifyBlockTxSignatures.mockImplementation(async () => ({ valid: true }))
     pool = [A, B, C, D]
     networkNow = 2000
     verifyingSigners = new Set([A, B, C, D])
@@ -192,5 +205,45 @@ describe("verifyBlock", () => {
     it("accepts genesis without signatures", async () => {
         const result = await verifyBlock(makeBlock({ number: 0 }))
         expect(result.valid).toBe(true)
+    })
+
+    it("does not re-check transactions when none are supplied", async () => {
+        const result = await verifyBlock(makeBlock())
+        expect(result.valid).toBe(true)
+        expect(verifyBlockTxSignatures).not.toHaveBeenCalled()
+    })
+
+    it("re-checks supplied transactions once the quorum holds", async () => {
+        const block = makeBlock()
+        const txs = [{ hash: "tx-1" }] as any
+        const result = await verifyBlock(block, txs)
+        expect(result.valid).toBe(true)
+        expect(verifyBlockTxSignatures).toHaveBeenCalledTimes(1)
+        expect(verifyBlockTxSignatures).toHaveBeenCalledWith(block, txs)
+    })
+
+    it("re-checks an empty transaction list", async () => {
+        const block = makeBlock()
+        await verifyBlock(block, [])
+        expect(verifyBlockTxSignatures).toHaveBeenCalledWith(block, [])
+    })
+
+    it("rejects the block when a transaction signature fails", async () => {
+        verifyBlockTxSignatures.mockImplementation(async () => ({
+            valid: false,
+            reason: "tx tx-1: bad signature",
+        }))
+        const result = await verifyBlock(makeBlock(), [{ hash: "tx-1" }] as any)
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain("bad signature")
+    })
+
+    it("skips the transaction re-check when the quorum fails", async () => {
+        const block = makeBlock({
+            validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
+        })
+        const result = await verifyBlock(block, [{ hash: "tx-1" }] as any)
+        expect(result.valid).toBe(false)
+        expect(verifyBlockTxSignatures).not.toHaveBeenCalled()
     })
 })

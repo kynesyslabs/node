@@ -13,6 +13,11 @@ export interface DispatchOptions<TPayload = unknown> {
     message: ParsedOmniMessage<TPayload>
     context: ReceiveContext
     fallbackToHttp: () => Promise<Buffer>
+    /**
+     * Runs once this message's auth block has verified, before the handler.
+     * The connection uses it to adopt an identity only after proof.
+     */
+    onAuthVerified?: (identity: string) => void
 }
 
 export async function dispatchOmniMessage<TPayload = unknown>(
@@ -24,6 +29,12 @@ export async function dispatchOmniMessage<TPayload = unknown>(
     if (!descriptor) {
         throw new UnknownOpcodeError(opcode)
     }
+
+    // Identity belongs to this message alone. What the connection remembers
+    // from earlier traffic proves nothing about this one, so handlers reached
+    // through opcodes that do not require auth never see it.
+    options.context.peerIdentity = ""
+    options.context.isAuthenticated = false
 
     // Check if handler requires authentication
     if (descriptor.authRequired && !options.message.auth) {
@@ -55,6 +66,7 @@ export async function dispatchOmniMessage<TPayload = unknown>(
         // Update context with verified identity
         options.context.peerIdentity = verificationResult.peerIdentity!
         options.context.isAuthenticated = true
+        options.onAuthVerified?.(verificationResult.peerIdentity!)
     }
 
     const handlerContext: HandlerContext<TPayload> = {

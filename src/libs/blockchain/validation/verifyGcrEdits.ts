@@ -85,15 +85,19 @@ function blankVolatileEditFields(edit: GCREdit): GCREdit {
 
 /**
  * Returns a function that rewrites an edit set into the wire shape the SDK
- * ships for the current chain tip: OS amount strings once osDenomination is
- * active, the raw author shape before. Both sides of an edit comparison go
- * through it.
+ * ships: OS amount strings once osDenomination is active, the raw author
+ * shape before. The fork decision comes from the local chain tip, never from
+ * the transaction: tx.blockNumber is attacker controlled.
  */
-async function wireShapeNormaliser(
-    tx: Transaction,
-): Promise<(edits: GCREdit[]) => GCREdit[]> {
+async function osDenominationActive(): Promise<boolean> {
     const blockHeight = await Chain.getLastBlockNumber()
-    const postFork = isForkActive("osDenomination", blockHeight)
+    return isForkActive("osDenomination", blockHeight)
+}
+
+function wireShapeNormaliser(
+    tx: Transaction,
+    postFork: boolean,
+): (edits: GCREdit[]) => GCREdit[] {
     return (edits: GCREdit[]): GCREdit[] => {
         const envelope = {
             ...tx.content,
@@ -103,7 +107,7 @@ async function wireShapeNormaliser(
             envelope as any,
             postFork,
         )
-        const parsed = JSON.parse(serialised) as { gcr_edits: GCREdit[] }
+        const parsed = JSON.parse(serialised) as { gcr_edits?: GCREdit[] }
         return parsed.gcr_edits ?? []
     }
 }
@@ -224,7 +228,7 @@ export async function verifyGcrEditsMatch(
         gcredit.txhash = ""
     })
 
-    const normalise = await wireShapeNormaliser(tx)
+    const normalise = wireShapeNormaliser(tx, await osDenominationActive())
 
     const normalisedRegen = normalise(regen)
     const regenEditsHash = digest(normalisedRegen)
@@ -309,19 +313,27 @@ export interface ValueEditsVerification {
 export async function verifyNoUnexplainedValueEdits(
     tx: Transaction,
 ): Promise<ValueEditsVerification> {
-    const shippedRaw = (tx.content?.gcr_edits ?? []) as GCREdit[]
-    if (projectValueEdits(shippedRaw).length === 0) {
+    const shipped = projectValueEdits(
+        (tx.content?.gcr_edits ?? []) as GCREdit[],
+    )
+    if (shipped.length === 0) {
         return { ok: true, unexplained: [] }
     }
 
-    // Shipped edits carry the signed wire shape and regenerated edits carry
-    // the generator's raw shape, so both are normalised before projection.
-    const normalise = await wireShapeNormaliser(tx)
-    const shipped = projectValueEdits(normalise(shippedRaw))
-
+    // The shipped amounts are compared exactly as the balance routines will
+    // apply them, so a shipped amount is never reinterpreted here. Only the
+    // regenerated side is brought to the wire shape: once osDenomination is
+    // active the SDK ships amounts as OS strings while regeneration yields the
+    // author shape, and comparing those as text explains nothing a peer sends.
+    // Before the fork both sides are already in the author shape.
     let regenerated: string[]
     try {
-        regenerated = projectValueEdits(normalise(await generateGcrEdits(tx)))
+        const regen = await generateGcrEdits(tx)
+        regenerated = projectValueEdits(
+            (await osDenominationActive())
+                ? wireShapeNormaliser(tx, true)(regen)
+                : regen,
+        )
     } catch (e) {
         log.error(
             `[verifyNoUnexplainedValueEdits] regeneration failed for tx ${tx.hash}: ` +

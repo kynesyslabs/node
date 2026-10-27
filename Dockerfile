@@ -18,14 +18,14 @@
 # Installs build toolchain, resolves dependencies, compiles native modules,
 # and patches falcon-sign to log uncaught exceptions before rethrowing.
 # =============================================================================
-FROM oven/bun:1.3-debian AS builder
+# Base images are pinned by digest: a tag like 1.3-debian moves, so two
+# builds of the same commit could otherwise start from different images.
+# Bump the tag and digest together with .bun-version.
+FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS builder
 
-# Build-time deps for native modules (bufferutil, utf-8-validate, etc.).
-# python3-setuptools is required for node-gyp on newer Pythons.
+# No compiler: lifecycle scripts are blocked, and the native modules the
+# node uses (bufferutil, utf-8-validate) ship prebuilt binaries.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        python3 \
-        python3-setuptools \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -34,16 +34,12 @@ WORKDIR /app
 # Copy manifests first to maximise layer cache reuse on dep installs.
 COPY package.json bun.lock ./
 
-# Resolve all dependencies. Split into two RUN steps so `|| true` only
-# tolerates `bun pm trust` failures (some packages have no postinstall
-# script to trust), not `bun install` failures — a failed install must
-# fail the build, otherwise we'd build a silently broken image.
+# Resolve all dependencies exactly as locked. Lifecycle scripts run only
+# for the packages listed in package.json trustedDependencies (the native
+# modules the node needs); a blanket trust would run whatever a future
+# dependency ships. bufferutil and utf-8-validate come from the lockfile
+# with prebuilt binaries, so no `bun add` at build time.
 RUN bun install --frozen-lockfile
-RUN bun pm trust --all || true
-
-# Native websocket accelerators - explicit install so they are not skipped
-# when the lockfile considers them optional peers.
-RUN bun add bufferutil utf-8-validate
 
 # Bring in the runtime payload. Explicit allow-list (rather than `COPY . .`)
 # so host-only files (run wrapper, captraf.sh, jest config, etc.) and any
@@ -152,7 +148,7 @@ RUN if [ "$PRUNE_MODULES" = "true" ]; then \
 # fallback in ensureWstcp() cannot run — bake the binary in instead.
 # Without it the proxy never binds its port and every verification fails
 # with an nginx 502 / CloseEvent 1006 on the prover.
-FROM rust:1-slim AS wstcp
+FROM rust:1.99.1-slim@sha256:e6cd1d294a300601eaaa4a294b337e5f0826f427fb2d481e9f76e69e7981e244 AS wstcp
 # Pin the version so an upstream wstcp release can't silently change
 # behaviour or break the build. `--locked` is intentionally omitted: the
 # crate's bundled Cargo.lock pins dependency versions that no longer
@@ -160,7 +156,7 @@ FROM rust:1-slim AS wstcp
 # deps for this exact wstcp version.
 RUN cargo install wstcp --version 0.2.1 --root /wstcp
 
-FROM oven/bun:1.3-debian AS runtime
+FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS runtime
 
 # OCI image metadata.
 LABEL org.opencontainers.image.source="https://github.com/kynesyslabs/node" \
@@ -168,16 +164,31 @@ LABEL org.opencontainers.image.source="https://github.com/kynesyslabs/node" \
       org.opencontainers.image.licenses="CC-BY-NC-SA-4.0" \
       org.opencontainers.image.vendor="Kynesys Labs"
 
-# Runtime essentials only: curl for HEALTHCHECK, ca-certificates for TLS.
-# Node.js is required by the gossip sidecar (libp2p cannot run under Bun
-# for frames >1KB; see specs/gossip-sidecar.md).
+# Runtime essentials only: curl for HEALTHCHECK, ca-certificates for TLS,
+# xz to unpack Node. Node.js is required by the gossip sidecar (libp2p
+# cannot run under Bun for frames >1KB; see specs/gossip-sidecar.md).
+# The apt and dpkg logs are dropped in the same step because they carry
+# the time of the run, which would make two builds of one commit differ.
+# Node comes from one pinned release, checked against its published
+# sha256, so the image does not depend on what a package repository
+# serves on build day. Bump NODE_VERSION and NODE_SHA256 together
+# (sha256 from https://nodejs.org/dist/v<version>/SHASUMS256.txt).
+ARG NODE_VERSION=22.23.4
+ARG NODE_SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
-        gnupg \
-    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
+        xz-utils \
+    && rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log \
+         /var/log/alternatives.log /var/cache/ldconfig/aux-cache \
+    && case "$(dpkg --print-architecture)" in amd64) ;; *) \
+         echo >&2 "Node is pinned for amd64 only; add the sha256 for this architecture"; exit 1 ;; esac \
+    && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+         --exclude='*/CHANGELOG.md' --exclude='*/README.md' --exclude='*/LICENSE' \
+    && rm /tmp/node.tar.xz \
+    && node --version
 
 # Non-root user. The base image already ships a `bun` user/group at uid/gid
 # 1000; rename them to `demos` in-place so the uid stays predictable for

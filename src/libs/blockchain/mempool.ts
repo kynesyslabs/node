@@ -16,6 +16,49 @@ import { checkTxAdmissible } from "./validation/txAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import {
+    EvictionCandidate,
+    MempoolRejectReason,
+    PoolUsage,
+    checkTxAge,
+    chooseVictims,
+    countMempoolRejection,
+    getMempoolLimits,
+    rejectMessage,
+    txStoredBytes,
+    txTotalFee,
+} from "./mempoolLimits"
+
+// Size of a stored row, measured exactly as `txStoredBytes` measures an
+// incoming tx.
+const STORED_BYTES_SQL =
+    "octet_length(\"content\"::text) + octet_length(\"signature\"::text) + " +
+    "COALESCE(octet_length(\"extra\"::text), 0) + " +
+    "COALESCE(octet_length(\"ed25519_signature\"), 0) + octet_length(\"hash\")"
+
+// The signed timestamp as a number, or NULL unless it is a JSON number that is
+// a positive whole number of at most 15 digits: the same definition as
+// `signedTimestampMs`, so the sweep and the admission check cannot disagree.
+// Read from the signed content, not the row's own timestamp column, which a
+// relaying peer fills in.
+const SIGNED_TS_SQL =
+    "(CASE WHEN json_typeof(\"content\"->'timestamp') = 'number' " +
+    "AND \"content\"->>'timestamp' ~ '^[1-9][0-9]{0,14}$' " +
+    "THEN (\"content\"->>'timestamp')::bigint END)"
+
+type PoolTx = Transaction & { reference_block: number }
+
+/**
+ * Where a tx entered from. Only an RPC submit may displace other txs at a
+ * full pool; see `checkAdmission`.
+ */
+export type AdmissionOrigin = "rpc" | "gossip" | "internal"
+
+export interface AddTransactionOptions {
+    origin?: AdmissionOrigin
+}
+
+const AGE_SWEEP_MIN_INTERVAL_MS = 2_000
 
 /**
  * System relay transaction types: node-generated txs that carry no
@@ -29,6 +72,23 @@ import { TRANSACTION_STATUS } from "@/utilities/constants"
  * of these types to bypass the per-account nonce throttle.
  */
 const SYSTEM_RELAY_TX_TYPES = new Set<string>(["l2psBatch"])
+
+// The node's own relay txs are neither aged out nor evicted: their timestamp
+// is a network clock in seconds, not the signer's milliseconds, and the
+// aggregator cannot re-create one the pool dropped before a block took it.
+// Matched on the sender as well as the type, since anyone can label a tx with
+// a relay type, and that label must not make it immortal.
+function notOwnRelaySql(): string {
+    const own = getSharedState.publicKeyHex?.toLowerCase()
+    if (!own || !/^(0x)?[0-9a-f]+$/.test(own)) return "TRUE"
+    const types = [...SYSTEM_RELAY_TX_TYPES]
+        .map(t => `'${t.replace(/'/g, "''")}'`)
+        .join(", ")
+    return (
+        `COALESCE(NOT (("content"->>'type') IN (${types}) ` +
+        `AND LOWER("content"->>'from') = '${own}'), TRUE)`
+    )
+}
 
 export default class Mempool {
     public static lock = new Mutex()
@@ -144,6 +204,172 @@ export default class Mempool {
             .getCount()
     }
 
+    /** Row count and stored bytes of the whole pool, for the admission caps. */
+    public static async getUsage(): Promise<PoolUsage> {
+        const rows = await this.repo.query(
+            `SELECT COUNT(*)::int AS count, COALESCE(SUM(${STORED_BYTES_SQL}), 0)::bigint AS bytes FROM "mempooltx"`,
+        )
+        return { count: Number(rows[0].count), bytes: Number(rows[0].bytes) }
+    }
+
+    /**
+     * Pending txs per sender, whatever their reference block: a cap that
+     * only counted in-window rows would let a sender hold one full quota
+     * per block still inside the deep window.
+     */
+    public static async countPendingBySenders(
+        addresses: string[],
+    ): Promise<Map<string, number>> {
+        const counts = new Map<string, number>()
+        if (addresses.length === 0) return counts
+        const rows = await this.repo.query(
+            `SELECT LOWER("content"->>'from') AS sender, COUNT(*)::int AS count FROM "mempooltx" WHERE LOWER("content"->>'from') = ANY($1) GROUP BY 1`,
+            [addresses.map(a => a.toLowerCase())],
+        )
+        for (const row of rows) {
+            counts.set(row.sender, Number(row.count))
+        }
+        return counts
+    }
+
+    /** Every row's eviction ranking inputs. Only read when the pool is full. */
+    public static async listEvictionCandidates(): Promise<EvictionCandidate[]> {
+        const rows = await this.repo.query(
+            `SELECT "hash", ${SIGNED_TS_SQL} AS ts, "content"->'transaction_fee' AS fee, (${STORED_BYTES_SQL}) AS bytes FROM "mempooltx" WHERE ${notOwnRelaySql()}`,
+        )
+        return rows.map(
+            (row: { hash: string; ts: string | null; fee: unknown; bytes: string }) => ({
+                hash: row.hash,
+                timestamp: row.ts === null ? 0 : Number(row.ts),
+                fee: txTotalFee(row.fee as Parameters<typeof txTotalFee>[0]),
+                bytes: Number(row.bytes),
+            }),
+        )
+    }
+
+    private static lastAgeSweep = 0
+
+    /**
+     * Drops txs whose signed timestamp is past the pool lifetime, or is not
+     * a usable timestamp at all. The
+     * reference-block window already ages txs out, but only as blocks are
+     * produced; a stalled chain would otherwise keep a flood forever.
+     * Throttled, since every admission asks for it.
+     */
+    public static async pruneExpiredByAge(
+        now = Date.now(),
+        force = false,
+    ): Promise<number> {
+        if (!force && now - this.lastAgeSweep < AGE_SWEEP_MIN_INTERVAL_MS) {
+            return 0
+        }
+        this.lastAgeSweep = now
+        const cutoff = now - getMempoolLimits().ttlMs
+        const res = await this.repo
+            .createQueryBuilder()
+            .delete()
+            .from(MempoolTx)
+            .where(`${notOwnRelaySql()} AND COALESCE(${SIGNED_TS_SQL} < :cutoff, TRUE)`, { cutoff })
+            .execute()
+        const removed = res.affected ?? 0
+        for (let i = 0; i < removed; i++) countMempoolRejection("expired")
+        return removed
+    }
+
+    /**
+     * Admission gate for the paths that take a tx from outside the validator
+     * set: RPC submit and gossip ingest. Checks lifetime, the per-sender cap
+     * and the pool-wide count and byte caps, and decides, without changing
+     * anything, which held txs would have to go to make room.
+     *
+     * Only an RPC submit may displace held txs, and only when the sender can
+     * pay the fee it offers: a tx that pays nothing it can lose must not be
+     * able to push out others. Gossip and internal txs are turned away at a
+     * full pool instead. The caller deletes the returned victims in the same
+     * database transaction as the insert, after its own nonce and duplicate
+     * checks, so a tx that then fails never costs anyone their place.
+     *
+     * The peer merge does not come through here: every committee member
+     * must end it with the same pool, so it is not subject to caps or
+     * lifetime.
+     *
+     * `exempt` marks the node's own txs: `sender` skips the per-sender cap,
+     * `all` skips every check (a relay tx must not be locked out by a flood
+     * it is not part of).
+     */
+    public static async checkAdmission(
+        tx: PoolTx,
+        origin: AdmissionOrigin,
+        exempt: "sender" | "all" | false = false,
+    ): Promise<{ reason: MempoolRejectReason } | { evict: string[] }> {
+        const refuse = (reason: MempoolRejectReason) => {
+            countMempoolRejection(reason)
+            return { reason }
+        }
+        // The node's own relay tx is held to nothing here (see notOwnRelaySql).
+        if (exempt === "all") return { evict: [] }
+
+        const limits = getMempoolLimits()
+        const now = Date.now()
+
+        const stale = checkTxAge(tx, now, limits)
+        if (stale) return refuse(stale)
+
+        // The sweep deletes rows, and the merge round must see a stable pool.
+        if (!getSharedState.inConsensusLoop) {
+            await this.pruneExpiredByAge(now)
+        }
+
+        const sender =
+            typeof tx.content?.from === "string"
+                ? tx.content.from.toLowerCase()
+                : null
+        if (sender !== null && !exempt) {
+            const counts = await this.countPendingBySenders([sender])
+            if ((counts.get(sender) ?? 0) >= limits.maxPerSender) {
+                return refuse("sender_limit")
+            }
+        }
+
+        const usage = await this.getUsage()
+        const bytes = txStoredBytes(tx)
+        const countFull = usage.count + 1 > limits.maxTxs
+        const bytesFull = usage.bytes + bytes > limits.maxBytes
+        if (!countFull && !bytesFull) {
+            return { evict: [] }
+        }
+
+        const full: MempoolRejectReason = countFull ? "pool_full" : "bytes_full"
+        // Deleting a held tx while a round runs would change the pool the
+        // committee is exchanging: members that already received it keep it,
+        // and this node's final read would not.
+        if (origin !== "rpc" || sender === null || getSharedState.inConsensusLoop) {
+            return refuse(full)
+        }
+
+        // One balance read, and only at a full pool.
+        const fee = txTotalFee(tx.content?.transaction_fee)
+        try {
+            const { default: GCR } = await import("./gcr/gcr")
+            if ((await GCR.getAccountBalance(sender)) < fee) {
+                return refuse("unfunded")
+            }
+        } catch (e) {
+            log.error(
+                `[Mempool.checkAdmission] balance read for ${sender} failed: ${e instanceof Error ? e.message : String(e)}`,
+            )
+            return refuse(full)
+        }
+
+        const victims = chooseVictims(
+            await this.listEvictionCandidates(),
+            { fee, bytes },
+            usage,
+            limits,
+        )
+        return victims ? { evict: victims.map(v => v.hash) } : refuse(full)
+    }
+
     /**
      * Case-insensitive mempool lookup by transaction hash. Returns the
      * MempoolTx row or null if the hash is not in the mempool.
@@ -162,9 +388,10 @@ export default class Mempool {
     public static async addTransactionWithLock(
         transaction: Transaction & { reference_block: number },
         blockRef?: number,
+        options?: AddTransactionOptions,
     ) {
         return await this.lock.runExclusive(
-            async () => await this.addTransaction(transaction, blockRef),
+            async () => await this.addTransaction(transaction, blockRef, options),
         )
     }
 
@@ -204,7 +431,11 @@ export default class Mempool {
             return { accepted: false, reason: edits.reason }
         }
 
-        const { confirmationBlock, error } = await this.addTransactionWithLock(tx)
+        const { confirmationBlock, error } = await this.addTransactionWithLock(
+            tx,
+            undefined,
+            { origin: "gossip" },
+        )
         if (error) {
             return { accepted: false, reason: error }
         }
@@ -214,6 +445,7 @@ export default class Mempool {
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
         blockRef?: number,
+        options: AddTransactionOptions = {},
     ) {
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
@@ -299,6 +531,26 @@ export default class Mempool {
             ownIdentityHex !== null &&
             senderFrom === ownIdentityHex
 
+        const verdict = await this.checkAdmission(
+            transaction,
+            options.origin ?? "internal",
+            isOwnSystemRelayTx
+                ? "all"
+                : senderFrom !== null && senderFrom === ownIdentityHex
+                  ? "sender"
+                  : false,
+        )
+        if ("reason" in verdict) {
+            const refusal = rejectMessage(verdict.reason)
+            return { confirmationBlock: null, error: refusal }
+        }
+        // Removed in the same database transaction as the insert, once the
+        // checks below have passed.
+        const evict = verdict.evict
+        const noteEvicted = () => {
+            for (let i = 0; i < evict.length; i++) countMempoolRejection("evicted")
+        }
+
         if (
             senderFrom &&
             typeof txNonce === "number" &&
@@ -367,12 +619,25 @@ export default class Mempool {
                             }
                         }
 
+                        if (evict.length > 0) {
+                            // A round can start between the admission check
+                            // and this delete.
+                            if (getSharedState.inConsensusLoop) {
+                                countMempoolRejection("pool_full")
+                                return {
+                                    confirmationBlock: null,
+                                    error: rejectMessage("pool_full"),
+                                }
+                            }
+                            await mempoolRepo.delete({ hash: In(evict) })
+                        }
                         const saved = await mempoolRepo.save({
                             ...transaction,
                             timestamp: BigInt(transaction.content.timestamp),
                             nonce: transaction.content.nonce,
                             blockNumber: blockRef,
                         })
+                        noteEvicted()
 
                         return {
                             confirmationBlock: saved.blockNumber,
@@ -395,12 +660,29 @@ export default class Mempool {
         }
 
         try {
-            const saved = await this.repo.save({
+            const row = {
                 ...transaction,
                 timestamp: BigInt(transaction.content.timestamp),
                 nonce: transaction.content.nonce,
                 blockNumber: blockRef,
-            })
+            }
+            if (evict.length > 0 && getSharedState.inConsensusLoop) {
+                // A round can start between the admission check and the delete.
+                countMempoolRejection("pool_full")
+                return {
+                    confirmationBlock: null,
+                    error: rejectMessage("pool_full"),
+                }
+            }
+            const saved =
+                evict.length === 0
+                    ? await this.repo.save(row)
+                    : await this.repo.manager.transaction(async em => {
+                          const repo = em.getRepository(MempoolTx)
+                          await repo.delete({ hash: In(evict) })
+                          return await repo.save(row)
+                      })
+            noteEvicted()
 
             return {
                 confirmationBlock: saved.blockNumber,
@@ -440,7 +722,8 @@ export default class Mempool {
         const res = await this.repo.delete({
             reference_block: LessThan(deepWindowCutoff(blockNumber)),
         })
-        return { included, expired: res.affected ?? 0 }
+        const aged = await this.pruneExpiredByAge(Date.now(), true)
+        return { included, expired: (res.affected ?? 0) + aged }
     }
 
     public static async removeTransactionsByHashes(
@@ -594,6 +877,10 @@ export default class Mempool {
             `[Mempool.receive] Valid transactions: ${validTransactions.length}`,
         )
 
+        // The merge is not subject to the admission caps or the tx lifetime:
+        // every committee member must end it holding the same pool, and a
+        // cap or a clock applied per node would have each one drop
+        // different txs. Callers bound the batch size.
         for (const tx of validTransactions) {
             noSendBackTxs.set(tx.hash, tx.hash)
             tx.status = TRANSACTION_STATUS.PENDING

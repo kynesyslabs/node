@@ -9,7 +9,7 @@ import * as dotenv from "dotenv"
 import { EnvKey } from "./envKeys"
 import { parseBoolFlag, parseIntSetting } from "./envFlags"
 import { DEFAULT_CONFIG } from "./defaults"
-import type { AppConfig } from "./types"
+import type { AppConfig, ForkScheduleMismatchPolicy } from "./types"
 import { validateBuildProvenance, validateExposedUrl } from "./nodeUrl"
 import { NODE_VERSION } from "../utilities/nodeVersion"
 
@@ -73,6 +73,15 @@ export function loadConfig(): Readonly<AppConfig> {
     const serverConfig = {
         serverPort,
         rpcPort: envInt(EnvKey.RPC_PORT, d.server.rpcPort),
+        rpcBind: envStr(EnvKey.RPC_BIND, d.server.rpcBind),
+        rpcMaxBodyBytes: envInt(
+            EnvKey.RPC_MAX_BODY_BYTES,
+            d.server.rpcMaxBodyBytes,
+        ),
+        rpcPeerMaxBodyBytes: envInt(
+            EnvKey.RPC_PEER_MAX_BODY_BYTES,
+            d.server.rpcPeerMaxBodyBytes,
+        ),
         rpcPgPort: envInt(EnvKey.RPC_PG_PORT, d.server.rpcPgPort),
         signalingServerPort: envInt(
             EnvKey.SIGNALING_SERVER_PORT,
@@ -174,6 +183,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.core.trustedProxies,
             ),
             xffMode: envStr(EnvKey.XFF_MODE, d.core.xffMode),
+            rateLimitBlockDurationMs: envInt(
+                EnvKey.RATE_LIMIT_BLOCK_DURATION_MS,
+                d.core.rateLimitBlockDurationMs,
+            ),
             mcpEnabled: envBool(EnvKey.MCP_ENABLED, d.core.mcpEnabled),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
             expectedGenesisHash: envStr(
@@ -191,6 +204,12 @@ export function loadConfig(): Readonly<AppConfig> {
             stallDetectionBlocks: envInt(
                 EnvKey.STALL_DETECTION_BLOCKS,
                 d.core.stallDetectionBlocks,
+            ),
+            forkScheduleMismatchPolicy: parseForkScheduleMismatchPolicy(
+                envStr(
+                    EnvKey.FORK_SCHEDULE_MISMATCH_POLICY,
+                    d.core.forkScheduleMismatchPolicy,
+                ),
             ),
         },
 
@@ -488,8 +507,23 @@ export function loadConfig(): Readonly<AppConfig> {
 
     assertConsensusTimingSane(config)
     assertL2psLimitsSane(config)
+    assertRpcLimitsSane(config)
 
     return deepFreeze(config)
+}
+
+/**
+ * An unrecognised policy must stop the node: falling back to a default would
+ * silently give an operator who typed "abstian" the opposite of what they meant.
+ */
+function parseForkScheduleMismatchPolicy(
+    raw: string,
+): ForkScheduleMismatchPolicy {
+    const value = raw.trim().toLowerCase()
+    if (value === "abstain" || value === "warn") return value
+    throw new Error(
+        `[config] FORK_SCHEDULE_MISMATCH_POLICY must be "abstain" or "warn" (got "${raw}")`,
+    )
 }
 
 /**
@@ -599,5 +633,35 @@ function assertL2psLimitsSane(config: AppConfig): void {
 
     if (problems.length > 0) {
         throw new Error(`[config] invalid L2PS configuration:\n  - ${problems.join("\n  - ")}`)
+    }
+}
+
+/**
+ * Reject request-size and block-duration settings that would switch a
+ * protection off or make peer traffic fail.
+ */
+function assertRpcLimitsSane(config: AppConfig): void {
+    const { rpcMaxBodyBytes: publicMax, rpcPeerMaxBodyBytes: peerMax } = config.server
+    const blockMs = config.core.rateLimitBlockDurationMs
+    const problems: string[] = []
+
+    if (!Number.isInteger(publicMax) || publicMax <= 0) {
+        problems.push(`RPC_MAX_BODY_BYTES must be a positive integer (got ${publicMax})`)
+    }
+    // Peers share the public port; a lower peer ceiling would cut off the
+    // public limit as well, since the server enforces the larger of the two.
+    if (!Number.isInteger(peerMax) || peerMax < publicMax) {
+        problems.push(
+            `RPC_PEER_MAX_BODY_BYTES (${peerMax}) must be an integer not below RPC_MAX_BODY_BYTES (${publicMax})`,
+        )
+    }
+    // A zero or negative duration makes a block expire as it is set, which is
+    // the same as having no block at all.
+    if (!Number.isInteger(blockMs) || blockMs <= 0) {
+        problems.push(`RATE_LIMIT_BLOCK_DURATION_MS must be a positive integer (got ${blockMs})`)
+    }
+
+    if (problems.length > 0) {
+        throw new Error(`[config] invalid RPC limits:\n  - ${problems.join("\n  - ")}`)
     }
 }

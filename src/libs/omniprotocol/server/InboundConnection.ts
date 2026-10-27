@@ -6,7 +6,12 @@ import { MessageFramer } from "../transport/MessageFramer"
 import { dispatchOmniMessage } from "../protocol/dispatcher"
 import { OmniMessageHeader, ParsedOmniMessage } from "../types/message"
 import { RateLimiter } from "../ratelimit"
-import { ConnectionError, InvalidAuthBlockFormatError } from "../types/errors"
+import {
+    ConnectionError,
+    InvalidAuthBlockFormatError,
+    OmniProtocolError,
+} from "../types/errors"
+import { ERROR_CODE_UNAUTHORIZED } from "../constants"
 
 export type ConnectionState =
     | "PENDING_AUTH" // Waiting for hello_peer
@@ -144,25 +149,6 @@ export class InboundConnection extends EventEmitter {
             )
         }
 
-        // REVIEW: Extract peer identity from auth block for ANY authenticated message
-        // This allows the connection to be authenticated by any message with valid auth,
-        // not just hello_peer (0x01). This is essential for stateless request patterns
-        // where clients send authenticated requests without explicit handshake.
-        if (message.auth && message.auth.identity && !this.peerIdentity) {
-            this.peerIdentity = "0x" + message.auth.identity.toString("hex")
-            this.state = "AUTHENTICATED"
-
-            if (this.authTimer) {
-                clearTimeout(this.authTimer)
-                this.authTimer = null
-            }
-
-            this.emit("authenticated", this.peerIdentity)
-            log.info(
-                `[InboundConnection] ${this.connectionId} authenticated via auth block as ${this.peerIdentity}`,
-            )
-        }
-
         // Check rate limits
         if (this.rateLimiter) {
             const ipAddress = this.socket.remoteAddress || "unknown"
@@ -217,13 +203,11 @@ export class InboundConnection extends EventEmitter {
                         "HTTP fallback not available on server side",
                     )
                 },
+                onAuthVerified: identity => this.adoptVerifiedIdentity(identity),
             })
 
             // Send response back to client
             await this.sendResponse(message.header.sequence, responsePayload)
-
-            // Note: Authentication is now handled at the top of this method
-            // for ANY message with a valid auth block, not just hello_peer
         } catch (error) {
             handleError(error, "NETWORK", { source: "OmniProtocol InboundConnection.handleMessage" })
 
@@ -248,7 +232,43 @@ export class InboundConnection extends EventEmitter {
                 }),
             )
             await this.sendResponse(message.header.sequence, errorPayload)
+
+            // A block that fails verification on a connection that has not
+            // proven who it is ends the connection. A missing block only
+            // gets the error, so a peer with a skewed clock can retry.
+            if (
+                message.auth &&
+                error instanceof OmniProtocolError &&
+                error.code === ERROR_CODE_UNAUTHORIZED &&
+                this.state === "PENDING_AUTH"
+            ) {
+                await this.close()
+            }
         }
+    }
+
+    /**
+     * Binds the connection to the identity a verified auth block proved.
+     * Called by the dispatcher after the signature checks out, never from the
+     * unverified claim in the block.
+     */
+    private adoptVerifiedIdentity(identity: string): void {
+        if (this.peerIdentity) {
+            return
+        }
+
+        this.peerIdentity = identity
+        this.state = "AUTHENTICATED"
+
+        if (this.authTimer) {
+            clearTimeout(this.authTimer)
+            this.authTimer = null
+        }
+
+        this.emit("authenticated", identity)
+        log.info(
+            `[InboundConnection] ${this.connectionId} authenticated via auth block as ${identity}`,
+        )
     }
 
     /**

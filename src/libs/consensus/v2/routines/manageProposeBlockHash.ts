@@ -8,10 +8,74 @@ import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "@/libs/peer/PeerManager"
 import getRoundCommittee from "./roundCommittee"
+import { getEligiblePool } from "./getShard"
 import { isNetworkAhead } from "./networkAheadVeto"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
+
+function getIncomingSignatures(
+    validationData: ValidationData,
+): Record<string, string> {
+    const signatures = validationData?.signatures as unknown
+    if (
+        signatures === null ||
+        typeof signatures !== "object" ||
+        Array.isArray(signatures)
+    ) {
+        return {}
+    }
+    return signatures as Record<string, string>
+}
+
+async function mergeIncomingSignatures(
+    incomingSignatures: Record<string, string>,
+    poolIdentities: Set<string>,
+): Promise<void> {
+    const candidateBlock = getSharedState.candidateBlock
+    for (const [identity, signature] of Object.entries(incomingSignatures)) {
+        // verifyBlock ignores signers outside the pool, so keeping them
+        // would only bloat the block and cost a verification.
+        if (!poolIdentities.has(identity)) {
+            log.error(
+                `[manageProposeBlockHash] Dropping signature by ${identity}: not in the eligible pool`,
+            )
+            continue
+        }
+
+        let isValid = false
+        try {
+            isValid = await TxValidatorPool.getInstance().verify({
+                algorithm: getSharedState.signingAlgorithm,
+                message: new TextEncoder().encode(candidateBlock.hash),
+                signature: hexToUint8Array(signature),
+                publicKey: hexToUint8Array(identity),
+            })
+        } catch (e) {
+            log.error(
+                `[manageProposeBlockHash] Signature verification failed for ${identity}: ${errorMessage(e)}`,
+            )
+            continue
+        }
+
+        if (isValid) {
+            candidateBlock.validation_data.signatures[identity] = signature
+            log.debug(
+                `Signature ${signature} from ${identity} added to the candidate block`,
+            )
+            continue
+        }
+
+        log.error(`Found invalid incoming signature by: ${identity}`)
+        log.error(`Proposed signature: ${signature}`)
+        log.error("Candidate block hash: " + candidateBlock.hash)
+        log.error("Signature verification failed. Signature not added.")
+    }
+}
+
+function errorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : String(e)
+}
 
 export default async function manageProposeBlockHash(
     blockHash: string,
@@ -91,46 +155,37 @@ export default async function manageProposeBlockHash(
         response.result = 200
         response.response = getSharedState.publicKeyHex
 
-        // INFO: Copy the incoming signatures to our candidate block
-        for (const [identity, signature] of Object.entries(
-            validationData["signatures"],
-        )) {
-            let isValid = false
-
-            try {
-                isValid = await TxValidatorPool.getInstance().verify({
-                    algorithm: getSharedState.signingAlgorithm,
-                    message: new TextEncoder().encode(
-                        getSharedState.candidateBlock.hash,
-                    ),
-                    signature: hexToUint8Array(signature),
-                    publicKey: hexToUint8Array(identity),
-                })
-            } catch (e) {
-                const errorMsg = e instanceof Error ? e.message : String(e)
-                log.error(
-                    `[manageProposeBlockHash] Signature verification failed for ${identity}: ${errorMsg}`,
-                )
-                continue
-            }
-
-            if (isValid) {
-                getSharedState.candidateBlock.validation_data.signatures[
-                    identity
-                ] = signature
-                log.debug(
-                    `Signature ${signature} from ${identity} added to the candidate block`,
-                )
-                continue
-            }
-
-            log.error(`Found invalid incoming signature by: ${identity}`)
-            log.error(`Proposed signature: ${signature}`)
+        // Signatures are judged the way verifyBlock judges them: against the
+        // eligible pool of the parent height, not against our own view of the
+        // shard, which may differ from the proposer's.
+        const incomingSignatures = getIncomingSignatures(validationData)
+        let pool: string[]
+        try {
+            pool = await getEligiblePool(candidate.number - 1)
+        } catch (e) {
             log.error(
-                "Candidate block hash: " + getSharedState.candidateBlock.hash,
+                `[manageProposeBlockHash] Could not resolve the eligible pool: ${errorMessage(e)}`,
             )
-            log.error("Signature verification failed. Signature not added.")
+            response.result = 500
+            response.response = getSharedState.publicKeyHex
+            response.extra = "Could not resolve the eligible signer pool"
+            return response
         }
+
+        // Honest nodes draw different committees, so the map accumulated over
+        // several relays can hold more signers than shardSize. Every signer
+        // must be a distinct pool member, which makes the pool the ceiling.
+        if (Object.keys(incomingSignatures).length > pool.length) {
+            log.error(
+                "[manageProposeBlockHash] Signature map larger than the eligible pool: refusing the block hash",
+            )
+            response.result = 400
+            response.response = getSharedState.publicKeyHex
+            response.extra = "Signature map is larger than the eligible pool"
+            return response
+        }
+
+        await mergeIncomingSignatures(incomingSignatures, new Set(pool))
 
         response.extra = getSharedState.candidateBlock.validation_data
         return response

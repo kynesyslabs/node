@@ -26,7 +26,9 @@ import {
     SigningError,
     InvalidAuthBlockFormatError,
     ConnectionError,
+    OmniProtocolError,
 } from "../types/errors"
+import { ERROR_CODE_UNAUTHORIZED } from "../constants"
 import { dispatchOmniMessage } from "../protocol/dispatcher"
 import { RateLimiter } from "../ratelimit"
 import { ConnectionPool } from "./ConnectionPool"
@@ -790,27 +792,6 @@ export class PeerConnection extends EventEmitter {
         auth: AuthBlock | null,
     ): Promise<void> {
 
-        // Extract peer identity from auth block for ANY authenticated message
-        if (
-            auth &&
-            auth.identity &&
-            this._state === ConnectionState.PENDING_AUTH
-        ) {
-            const newIdentity = "0x" + auth.identity.toString("hex")
-            this.setPeerIdentity(newIdentity)
-            this.setState(ConnectionState.READY)
-
-            if (this.authTimer) {
-                clearTimeout(this.authTimer)
-                this.authTimer = null
-            }
-
-            this.emit("authenticated", newIdentity)
-            log.info(
-                `[PeerConnection] ${this._peerIdentity} authenticated via auth block`,
-            )
-        }
-
         // Check rate limits (for inbound connections)
         if (this.rateLimiter) {
             const ipAddress = this.socket?.remoteAddress || "unknown"
@@ -863,6 +844,7 @@ export class PeerConnection extends EventEmitter {
                         "HTTP fallback not available on server side",
                     )
                 },
+                onAuthVerified: identity => this.adoptVerifiedIdentity(identity),
             })
 
             // Send response
@@ -886,7 +868,43 @@ export class PeerConnection extends EventEmitter {
                 JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
             )
             await this.sendResponse(header.sequence, errorPayload)
+
+            // A block that fails verification on a connection that has not
+            // proven who it is ends the connection. A missing block only
+            // gets the error, so a peer with a skewed clock can retry.
+            if (
+                auth &&
+                error instanceof OmniProtocolError &&
+                error.code === ERROR_CODE_UNAUTHORIZED &&
+                this._state === ConnectionState.PENDING_AUTH
+            ) {
+                await this.close()
+            }
         }
+    }
+
+    /**
+     * Binds an inbound connection to the identity a verified auth block
+     * proved. Called by the dispatcher after the signature checks out, never
+     * from the unverified claim in the block.
+     */
+    private adoptVerifiedIdentity(identity: string): void {
+        if (this._state !== ConnectionState.PENDING_AUTH) {
+            return
+        }
+
+        this.setPeerIdentity(identity)
+        this.setState(ConnectionState.READY)
+
+        if (this.authTimer) {
+            clearTimeout(this.authTimer)
+            this.authTimer = null
+        }
+
+        this.emit("authenticated", identity)
+        log.info(
+            `[PeerConnection] ${this._peerIdentity} authenticated via auth block`,
+        )
     }
 
     /**

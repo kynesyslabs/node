@@ -15,6 +15,7 @@ import { pki } from "node-forge"
 import * as bip39 from "bip39"
 import log from "@/utilities/logger"
 import { cryptography, type Ed25519KeyPair } from "../crypto"
+import { restrictIdentityFileMode } from "./identityFileMode"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import { getSharedState } from "src/utilities/sharedState"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
@@ -61,6 +62,7 @@ export default class Identity {
      */
     async ensureIdentity(): Promise<void> {
         if (fs.existsSync(getSharedState.identityFile)) {
+            restrictIdentityFileMode(getSharedState.identityFile)
             // Loading the identity
             // TODO Add load with cryptography
             this.ed25519 = await cryptography.load(getSharedState.identityFile)
@@ -143,6 +145,7 @@ export default class Identity {
         const demos = new Demos()
 
         if (fs.existsSync(getSharedState.identityFile)) {
+            restrictIdentityFileMode(getSharedState.identityFile)
             const mnemonic = fs.readFileSync(
                 getSharedState.identityFile,
                 "utf8",
@@ -154,6 +157,7 @@ export default class Identity {
             this.masterSeed = await this.mnemonicToSeed(mnemonic)
             await fs.promises.writeFile(getSharedState.identityFile, mnemonic, {
                 encoding: "utf8",
+                mode: 0o600,
             })
         }
 

@@ -275,6 +275,12 @@ export default class SharedState {
     networkAhead = false
     networkAheadCheckedAt: number | null = null
 
+    // Set by the fork-schedule watch when a peer's schedule differs inside the
+    // window before a scheduled fork; the consensus routine skips its rounds
+    // while it is true. The text names the peers and the nearest fork height.
+    forkScheduleAbstain = false
+    forkScheduleAbstainReason = ""
+
     // Batch sync configuration
     batchSyncBlockSize = BATCH_SYNC_BLOCK_SIZE
     batchSyncTxSize = BATCH_SYNC_TX_SIZE
@@ -529,7 +535,7 @@ export default class SharedState {
             maxRequests: RATE_LIMIT_DEFAULT_MAX_REQUESTS,
             windowMs: RATE_LIMIT_DEFAULT_WINDOW_MS,
         },
-        blockDurationMs: undefined,
+        blockDurationMs: Config.getInstance().core.rateLimitBlockDurationMs,
         whitelistedIPs: [
             ...LOCALHOST_IPS,
             ...Config.getInstance().core.whitelistedIPs,

@@ -8,6 +8,12 @@
 export interface ServerConfig {
     serverPort: number
     rpcPort: number
+    /** Interface the HTTP RPC server binds to. */
+    rpcBind: string
+    /** Largest accepted request body for ordinary callers, in bytes. */
+    rpcMaxBodyBytes: number
+    /** Largest accepted request body from an authenticated staked peer, in bytes. */
+    rpcPeerMaxBodyBytes: number
     rpcPgPort: number
     signalingServerPort: number
     rpcSignalingPort: number
@@ -33,6 +39,8 @@ export interface DatabaseConfig {
 }
 
 // --- Core Node ---
+
+export type ForkScheduleMismatchPolicy = "abstain" | "warn"
 
 export interface CoreConfig {
     prod: boolean
@@ -68,6 +76,8 @@ export interface CoreConfig {
      * Empty string means "auto" (off when list empty, strict otherwise).
      */
     xffMode: string
+    /** How long an IP stays blocked after it exceeds a rate limit, in ms. */
+    rateLimitBlockDurationMs: number
     mcpEnabled: boolean
     restore: boolean
     /**
@@ -81,6 +91,13 @@ export interface CoreConfig {
     /** Consecutive missed shard selections before the node exits for
      *  investigation. 0 or lower disables the exit. */
     stallDetectionBlocks: number
+    /**
+     * What a node does when a peer reports a different fork schedule inside the
+     * window before the nearest scheduled fork.
+     *   abstain — skip consensus rounds (forging and voting) until the schedules agree
+     *   warn    — only log, as before
+     */
+    forkScheduleMismatchPolicy: ForkScheduleMismatchPolicy
     rpcFee: number
     networkFee: number
     /** Per-tx burn — sat/lamport-style integer for now.

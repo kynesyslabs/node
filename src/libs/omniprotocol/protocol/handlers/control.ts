@@ -60,6 +60,50 @@ export const handlePeerlistSync: OmniHandler<Buffer> = async () => {
     })
 }
 
+// Methods reachable through the unauthenticated nodeCall opcode that act on
+// the sender's identity or change consensus, mempool or account state. Each
+// message must carry its own verified auth block.
+const SENDER_BOUND_METHODS: ReadonlySet<string> = new Set([
+    "mempool",
+    "hello_peer",
+    "consensus_routine",
+])
+
+// gcr_routine also serves plain reads that never look at the sender, and
+// peers on older builds call them without auth. Anything not listed here,
+// including methods added later, needs a verified block.
+const OPEN_GCR_METHODS: ReadonlySet<string> = new Set([
+    "getIdentities",
+    "getWeb2Identities",
+    "getXmIdentities",
+    "getUDIdentities",
+    "getPoints",
+    "getTopAccountsByPoints",
+    "getReferralInfo",
+    "validateReferralCode",
+    "getAccountByIdentity",
+    "getHumanPassportScore",
+    "getStorageProgram",
+    "getStorageProgramsByOwner",
+    "searchStoragePrograms",
+])
+
+function requiresVerifiedSender(request: {
+    method: string
+    params: unknown[]
+}): boolean {
+    if (SENDER_BOUND_METHODS.has(request.method)) {
+        return true
+    }
+    if (request.method !== "gcr_routine") {
+        return false
+    }
+    const inner = Array.isArray(request.params)
+        ? (request.params[0] as { method?: unknown } | undefined)
+        : undefined
+    return typeof inner?.method !== "string" || !OPEN_GCR_METHODS.has(inner.method)
+}
+
 export const handleNodeCall: OmniHandler<Buffer> = async ({
     message,
     context,
@@ -78,6 +122,15 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
     }
 
     const request = decodeNodeCallRequest(message.payload as Buffer)
+
+    if (requiresVerifiedSender(request) && !context.isAuthenticated) {
+        return encodeNodeCallResponse({
+            status: 401,
+            value: `Authentication required for ${request.method}`,
+            requireReply: false,
+            extra: null,
+        })
+    }
 
     // REVIEW: Handle top-level RPC methods that are NOT nodeCall messages
     // These are routed to ServerHandlers directly, not manageNodeCall

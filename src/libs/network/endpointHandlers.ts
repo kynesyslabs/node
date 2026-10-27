@@ -41,6 +41,11 @@ import { handleValidateTransaction } from "./endpointValidation"
 import { handleExecuteTransaction } from "./endpointExecution"
 import { handleConsensusRequest } from "./endpointConsensus"
 import { handleL2PSHashUpdate } from "./endpointL2PSHash"
+import { isMergePeerEligible } from "src/libs/consensus/mergePeerEligibility"
+import { getMempoolLimits } from "src/libs/blockchain/mempoolLimits"
+
+// Bounds the hellos one unauthenticated call can start.
+const MAX_ANNOUNCED_PEERS = 200
 
 /**
  * ServerHandlers facade — delegates to focused sub-modules:
@@ -123,6 +128,21 @@ export default class ServerHandlers {
     }
 
     static async handleMempool(content: any, sender = ""): Promise<any> {
+        // This is the consensus mempool merge between committee members. It
+        // admits txs on signature and coherence alone, with no nonce, balance
+        // or fee check, because the sending validator already admitted them;
+        // open to anyone it is a free way to fill the pool. Every transport
+        // that reaches it passes the sender it authenticated, so the gate
+        // lives here: only a node shard selection would admit may merge.
+        if (!(await isMergePeerEligible(sender))) {
+            return {
+                result: 401,
+                response: "Mempool exchange is limited to validators",
+                extra: "Mempool not merged",
+                requireReply: false,
+            }
+        }
+
         const envelope =
             Array.isArray(content) &&
             content.length === 1 &&
@@ -132,7 +152,19 @@ export default class ServerHandlers {
                 : null
         const txs: Transaction[] = envelope ? envelope.txs : content
 
-        let response = {
+        // Senders split their pool into requests of at most the pool cap, so
+        // a longer list is not from an honest node and is not worth
+        // validating.
+        if (!Array.isArray(txs) || txs.length > getMempoolLimits().maxTxs) {
+            return {
+                result: 400,
+                response: "Invalid mempool payload",
+                extra: "Mempool not merged",
+                requireReply: false,
+            }
+        }
+
+        let response: { success: boolean; mempool: unknown[] } = {
             success: false,
             mempool: [],
         }
@@ -169,21 +201,40 @@ export default class ServerHandlers {
         }
     }
 
-    static async handlePeerlist(content: Peer[]): Promise<any> {
-        const ourPeerList = PeerManager.getInstance().getPeers()
-        const mergedPeerList: Peer[] = []
-        for (const peer of content) {
-            if (!mergedPeerList.includes(peer)) {
-                mergedPeerList.push(peer)
+    /**
+     * Unauthenticated discovery: the submitted list contributes addresses of
+     * peers we do not know yet, each of which is verified with a hello before
+     * it is listed. Nothing else in the list (sync, status, verification) is
+     * read.
+     */
+    static async handlePeerlist(content: unknown): Promise<any> {
+        const requireReply = false
+
+        if (!Array.isArray(content)) {
+            return {
+                extra: { peerlistState: "rejected" },
+                requireReply,
+                response: false,
             }
         }
-        const orderedPeerList = mergedPeerList.sort((a, b) =>
-            a.identity.localeCompare(b.identity),
-        )
-        PeerManager.getInstance().setPeers(orderedPeerList)
-        const extra = { peerlistState: "merged" }
-        const requireReply = false
-        const response = true
-        return { extra, requireReply, response }
+
+        const announced: Peer[] = []
+        const seen = new Set<string>()
+        for (const entry of content.slice(0, MAX_ANNOUNCED_PEERS)) {
+            const identity = entry?.identity
+            const url = entry?.connection?.string
+            if (
+                typeof identity !== "string" ||
+                typeof url !== "string" ||
+                seen.has(identity)
+            ) {
+                continue
+            }
+            seen.add(identity)
+            announced.push(new Peer(url, identity))
+        }
+
+        PeerManager.getInstance().setPeers(announced)
+        return { extra: { peerlistState: "merged" }, requireReply, response: true }
     }
 }

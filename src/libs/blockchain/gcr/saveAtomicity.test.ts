@@ -17,6 +17,26 @@ function repoFor(staged: Map<string, unknown[]>, entity: { name: string }) {
             staged.set(entity.name, [...(staged.get(entity.name) ?? []), ...rows])
         },
         delete: async () => {},
+        // Bulk insert of assignment rows, as bulkUpdateAssignedTxs issues it
+        manager: { connection: { getMetadata: () => ({ columns: [0, 1, 2] }) } },
+        createQueryBuilder: () => {
+            let chunk: unknown[] = []
+            const query = {
+                insert: () => query,
+                values: (rows: unknown[]) => {
+                    chunk = rows
+                    return query
+                },
+                orIgnore: () => query,
+                execute: async () => {
+                    if (failOn === entity.name) {
+                        throw new Error(`injected failure writing ${entity.name}`)
+                    }
+                    staged.set(entity.name, [...(staged.get(entity.name) ?? []), ...chunk])
+                },
+            }
+            return query
+        },
     }
 }
 
@@ -80,4 +100,33 @@ describe("saveGCREditChanges at the persistence boundary", () => {
             expect(sideEffectRan).toBe(false)
         })
     }
+})
+
+describe("assignments saved with the edits", () => {
+    const assignments = () =>
+        new Map([["0xaa", [{ txHash: "0xtx", blockNumber: 7 }]]]) as any
+
+    it("persists the assignments in the same transaction as the edits", async () => {
+        await HandleGCR.saveGCREditChanges(caches(), [], assignments())
+
+        expect(durable.get("GCRMain")?.length).toBe(1)
+        expect(durable.get("GCRAssignedTx")).toEqual([
+            { pubkey: "0xaa", txHash: "0xtx", blockNumber: 7 },
+        ])
+    })
+
+    it("leaves no edits behind when recording the assignments fails", async () => {
+        failOn = "GCRAssignedTx"
+        let sideEffectRan = false
+        await expect(
+            HandleGCR.saveGCREditChanges(
+                caches(),
+                [async () => { sideEffectRan = true }],
+                assignments(),
+            ),
+        ).rejects.toThrow("injected failure")
+
+        expect(durable.size).toBe(0)
+        expect(sideEffectRan).toBe(false)
+    })
 })
