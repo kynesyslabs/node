@@ -7,6 +7,7 @@ import type {
     GasFeeSeparationConfig,
     NonceEnforcementConfig,
     AtomicWorkConfig,
+    EditBindingConfig,
     OsDenominationConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
@@ -280,6 +281,9 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "atomicWork":
             getSharedState.forkConfig.atomicWork = config as AtomicWorkConfig
             return
+        case "editBinding":
+            getSharedState.forkConfig.editBinding = config as EditBindingConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -400,6 +404,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as TlsnProofEnforcementConfig
         case "atomicWork":
             return base as AtomicWorkConfig
+        case "editBinding":
+            return base as EditBindingConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

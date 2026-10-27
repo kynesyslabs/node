@@ -128,6 +128,24 @@ export type TlsnProofEnforcementConfig = BaseForkConfig
 export type AtomicWorkConfig = BaseForkConfig
 
 /**
+ * `editBinding` fork: a block applies a transaction only when the edits it
+ * ships are exactly the ones the node regenerates from the signed body, for
+ * every transaction type, and each edit that names an account acts on the
+ * sender's own.
+ *
+ * Before it, the edits of a non-native transaction were applied as written:
+ * a self-signed transaction could carry a balance credit, a vote recorded
+ * under another validator or a nonce bump on someone else's account, and
+ * every node that applied or synced the block applied them too.
+ *
+ * Dormant by default (`activationHeight: null`): until a height is pinned,
+ * apply behaves exactly as it did, so a node carrying the code agrees with a
+ * node without it. A chain started from genesis with this build sets it to 0.
+ * No payload beyond the base.
+ */
+export type EditBindingConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -160,6 +178,7 @@ export type ForkConfig =
     | Web2ProofBindingConfig
     | TlsnProofEnforcementConfig
     | AtomicWorkConfig
+    | EditBindingConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -174,6 +193,7 @@ export type ForkName =
     | "web2ProofBinding"
     | "tlsnProofEnforcement"
     | "atomicWork"
+    | "editBinding"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -187,6 +207,7 @@ export interface ForkConfigByName {
     web2ProofBinding: Web2ProofBindingConfig
     tlsnProofEnforcement: TlsnProofEnforcementConfig
     atomicWork: AtomicWorkConfig
+    editBinding: EditBindingConfig
 }
 
 /**
@@ -303,6 +324,16 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Atomic Works: Work edits (resource-slot CAS, attempt, receipt, " +
             "storage put) applied all-or-nothing in one transition.",
     },
+    editBinding: {
+        // Dormant by default, like every rule that refuses traffic a running
+        // chain accepts today: a missing genesis entry hydrates from here, so
+        // a height-0 default would switch it on at the binary upgrade with no
+        // height agreed. A chain launched from genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "Apply refuses a transaction whose edits differ from the ones regenerated " +
+            "from its signed body, and an edit that acts on an account other than the sender's.",
+    },
 }
 
 /**
@@ -320,5 +351,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         web2ProofBinding: { ...DEFAULT_FORK_CONFIG.web2ProofBinding },
         tlsnProofEnforcement: { ...DEFAULT_FORK_CONFIG.tlsnProofEnforcement },
         atomicWork: { ...DEFAULT_FORK_CONFIG.atomicWork },
+        editBinding: { ...DEFAULT_FORK_CONFIG.editBinding },
     }
 }
