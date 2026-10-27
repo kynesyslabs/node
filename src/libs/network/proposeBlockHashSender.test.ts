@@ -1,7 +1,8 @@
 /**
  * proposeBlockHash acts for the authenticated sender: the peer id in the
- * params names nobody, the sender must be in the shard, and the signature map
- * it relays is bounded by the shard and limited to shard members.
+ * params names nobody and the sender must be in the round committee. The
+ * signature map it relays is judged like verifyBlock judges signatures:
+ * limited to the eligible pool and bounded by min(shardSize, pool).
  */
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
@@ -10,6 +11,8 @@ const OUR_KEY = "0x" + "aa".repeat(32)
 const MEMBER_A = "0x" + "a1".repeat(32)
 const MEMBER_B = "0x" + "b2".repeat(32)
 const OUTSIDER = "0x" + "ee".repeat(32)
+// In the eligible pool but not in this node's own round committee.
+const POOL_ONLY = "0x" + "c3".repeat(32)
 const CANDIDATE_HASH = "cand-hash"
 
 const candidate = {
@@ -22,7 +25,9 @@ const sharedState: Record<string, unknown> = {
     publicKeyHex: OUR_KEY,
     signingAlgorithm: "ed25519",
     candidateBlock: candidate,
+    shardSize: 4,
 }
+let pool = [OUR_KEY, MEMBER_A, MEMBER_B, POOL_ONLY]
 const shard = [OUR_KEY, MEMBER_A, MEMBER_B].map(identity => ({
     identity,
     connection: { string: "http://" + identity.slice(2, 6) },
@@ -59,6 +64,9 @@ jest.mock("src/libs/consensus/v2/routines/networkAheadVeto", () => ({
 jest.mock("src/libs/consensus/v2/routines/roundCommittee", () => ({
     __esModule: true,
     default: async () => ({ members: shard, seed: "seed", frozen: true }),
+}))
+jest.mock("src/libs/consensus/v2/routines/getShard", () => ({
+    getEligiblePool: async () => pool,
 }))
 jest.mock("src/libs/consensus/v2/routines/getCommonValidatorSeed", () => ({
     __esModule: true,
@@ -117,6 +125,8 @@ const propose = (sender: string, proposer: string, signatures: Record<string, st
 beforeEach(() => {
     candidate.validation_data.signatures = {}
     verified.length = 0
+    pool = [OUR_KEY, MEMBER_A, MEMBER_B, POOL_ONLY]
+    sharedState.shardSize = 4
 })
 
 describe("proposeBlockHash sender", () => {
@@ -134,7 +144,7 @@ describe("proposeBlockHash sender", () => {
         expect(res.result).toBe(200)
     })
 
-    it("drops a signature from a non-member and merges the members' own", async () => {
+    it("drops a signature from outside the eligible pool and merges the pool's own", async () => {
         const res = await propose(MEMBER_A, MEMBER_A, {
             [OUTSIDER]: sig,
             [MEMBER_B]: sig,
@@ -145,9 +155,28 @@ describe("proposeBlockHash sender", () => {
         expect(verified).toEqual([MEMBER_B.slice(2)])
     })
 
-    it("refuses a signature map larger than the shard", async () => {
+    it("keeps a pool signer that is not in our own committee view", async () => {
+        const res = await propose(MEMBER_A, MEMBER_A, { [POOL_ONLY]: sig })
+
+        expect(res.result).toBe(200)
+        expect(candidate.validation_data.signatures).toEqual({ [POOL_ONLY]: sig })
+    })
+
+    it("accepts a map as large as min(shardSize, pool), even when our committee is smaller", async () => {
+        const res = await propose(MEMBER_A, MEMBER_A, {
+            [OUR_KEY]: sig,
+            [MEMBER_A]: sig,
+            [MEMBER_B]: sig,
+            [POOL_ONLY]: sig,
+        })
+
+        expect(res.result).toBe(200)
+        expect(Object.keys(candidate.validation_data.signatures)).toHaveLength(4)
+    })
+
+    it("refuses a map larger than min(shardSize, pool)", async () => {
         const padded: Record<string, string> = {}
-        for (let i = 0; i < shard.length + 1; i++) {
+        for (let i = 0; i < 5; i++) {
             padded["0x" + String(i).padStart(2, "0").repeat(32)] = sig
         }
 
@@ -156,6 +185,19 @@ describe("proposeBlockHash sender", () => {
         expect(res.result).toBe(400)
         expect(verified).toHaveLength(0)
         expect(candidate.validation_data.signatures).toEqual({})
+    })
+
+    it("caps by the pool when the pool is smaller than the shard size", async () => {
+        pool = [MEMBER_A, MEMBER_B]
+        sharedState.shardSize = 10
+
+        const res = await propose(MEMBER_A, MEMBER_A, {
+            [MEMBER_A]: sig,
+            [MEMBER_B]: sig,
+            [OUR_KEY]: sig,
+        })
+
+        expect(res.result).toBe(400)
     })
 
     it("treats a missing signature map as empty", async () => {

@@ -208,9 +208,6 @@ export class InboundConnection extends EventEmitter {
 
             // Send response back to client
             await this.sendResponse(message.header.sequence, responsePayload)
-
-            // Note: Authentication is now handled at the top of this method
-            // for ANY message with a valid auth block, not just hello_peer
         } catch (error) {
             handleError(error, "NETWORK", { source: "OmniProtocol InboundConnection.handleMessage" })
 
@@ -236,9 +233,11 @@ export class InboundConnection extends EventEmitter {
             )
             await this.sendResponse(message.header.sequence, errorPayload)
 
-            // A connection that has not proven who it is and fails auth has
-            // nothing left to say to us.
+            // A block that fails verification on a connection that has not
+            // proven who it is ends the connection. A missing block only
+            // gets the error, so a peer with a skewed clock can retry.
             if (
+                message.auth &&
                 error instanceof OmniProtocolError &&
                 error.code === ERROR_CODE_UNAUTHORIZED &&
                 this.state === "PENDING_AUTH"

@@ -869,9 +869,11 @@ export class PeerConnection extends EventEmitter {
             )
             await this.sendResponse(header.sequence, errorPayload)
 
-            // A connection that has not proven who it is and fails auth has
-            // nothing left to say to us.
+            // A block that fails verification on a connection that has not
+            // proven who it is ends the connection. A missing block only
+            // gets the error, so a peer with a skewed clock can retry.
             if (
+                auth &&
                 error instanceof OmniProtocolError &&
                 error.code === ERROR_CODE_UNAUTHORIZED &&
                 this._state === ConnectionState.PENDING_AUTH

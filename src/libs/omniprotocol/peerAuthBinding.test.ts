@@ -37,6 +37,29 @@ jest.mock("src/libs/network/manageConsensusRoutines", () => ({
         return { result: 200, response: "ok", require_reply: false, extra: null }
     },
 }))
+const senderCalls: { kind: string; sender: string; arg: any }[] = []
+jest.mock("src/libs/network/endpointHandlers", () => ({
+    __esModule: true,
+    default: {
+        handleMempool: async (arg: any, sender: string) => {
+            senderCalls.push({ kind: "mempool", sender, arg })
+            return { result: 200, response: "ok", requireReply: false, extra: null }
+        },
+    },
+}))
+jest.mock("src/libs/network/manageHelloPeer", () => ({
+    manageHelloPeer: async (arg: any, sender: string) => {
+        senderCalls.push({ kind: "hello_peer", sender, arg })
+        return { result: 200, response: "ok", require_reply: false, extra: null }
+    },
+}))
+jest.mock("src/libs/network/manageGCRRoutines", () => ({
+    __esModule: true,
+    default: async (sender: string, arg: any) => {
+        senderCalls.push({ kind: "gcr_routine", sender, arg })
+        return { result: 200, response: "ok", require_reply: false, extra: null }
+    },
+}))
 const nodeCalls: any[] = []
 jest.mock("src/libs/network/manageNodeCall", () => ({
     manageNodeCall: async (content: any) => {
@@ -101,6 +124,7 @@ class FakeSocket extends EventEmitter {
     remotePort = 40000
     writable = true
     written: Buffer[] = []
+    ended = false
     setNoDelay() {}
     setKeepAlive() {}
     write(buf: Buffer, cb?: (e?: Error) => void) {
@@ -109,6 +133,7 @@ class FakeSocket extends EventEmitter {
         return true
     }
     end() {
+        this.ended = true
         setImmediate(() => this.emit("close"))
     }
     destroy() {
@@ -137,6 +162,7 @@ const greenlight = (blockRef = 7) =>
 
 beforeEach(() => {
     consensusCalls.length = 0
+    senderCalls.length = 0
     nodeCalls.length = 0
 })
 
@@ -183,6 +209,7 @@ for (const kind of connections) {
 
             expect(authenticated).not.toHaveBeenCalled()
             expect(kind.identity(conn)).not.toBe(idOf(victim))
+            expect(socket.ended).toBe(true)
 
             // The follow-up without auth must not arrive as the victim.
             const status = await exchange(socket, frame(OmniOpcode.NODE_CALL, greenlight()))
@@ -225,6 +252,89 @@ for (const kind of connections) {
             expect(status).toBe(401)
             expect(consensusCalls).toHaveLength(0)
             expect(kind.pending(conn)).toBe(false)
+        })
+
+        it("answers an auth-required opcode sent without a block with an error, and keeps the connection", async () => {
+            const socket = new FakeSocket()
+            const conn = kind.make(socket)
+
+            const before = socket.written.length
+            socket.emit(
+                "data",
+                frame(
+                    OmniOpcode.PROPOSE_BLOCK_HASH,
+                    encodeProposeBlockHashRequest({
+                        blockHash: "ab".repeat(32),
+                        validationData: {},
+                        proposer: "",
+                    }),
+                ),
+            )
+            for (let i = 0; i < 100 && socket.written.length === before; i++) {
+                await new Promise(r => setTimeout(r, 5))
+            }
+
+            expect(socket.written.length).toBe(before + 1)
+            expect(socket.written[before].toString("utf8")).toContain("Authentication required")
+            expect(socket.ended).toBe(false)
+            expect(kind.pending(conn)).toBe(true)
+            expect(consensusCalls).toHaveLength(0)
+        })
+
+        const gated: [string, string, unknown[]][] = [
+            ["mempool", "mempool", [{ txs: [] }]],
+            ["hello_peer", "hello_peer", [{ url: "http://x" }]],
+            ["gcr_routine", "gcr_routine", [{ method: "syncNewBlock", params: [] }]],
+            ["gcr_routine", "gcr_routine", [{ method: "updateSyncData", params: ["1:1:h"] }]],
+            ["gcr_routine", "gcr_routine", [{ method: "identity_assign_from_write", params: [{}] }]],
+            ["gcr_routine", "gcr_routine", [{ method: "getNomisIdentities", params: [] }]],
+            ["gcr_routine", "gcr_routine", [{ method: "somethingNew", params: [] }]],
+        ]
+        for (const [name, kindName, params] of gated) {
+            const label = name === "gcr_routine" ? `${name}.${(params[0] as any).method}` : name
+            it(`requires a verified block on each ${label} message`, async () => {
+                const peer = newKeys()
+                const socket = new FakeSocket()
+                kind.make(socket)
+                const call = encodeNodeCallRequest({ method: name, params })
+
+                expect(await exchange(socket, frame(OmniOpcode.NODE_CALL, call))).toBe(401)
+                expect(senderCalls).toHaveLength(0)
+
+                expect(
+                    await exchange(
+                        socket,
+                        frame(OmniOpcode.NODE_CALL, call, { claims: peer, signer: peer }),
+                    ),
+                ).toBe(200)
+                expect(senderCalls).toEqual([
+                    { kind: kindName, sender: idOf(peer), arg: expect.anything() },
+                ])
+
+                senderCalls.length = 0
+                expect(await exchange(socket, frame(OmniOpcode.NODE_CALL, call))).toBe(401)
+                expect(senderCalls).toHaveLength(0)
+            })
+        }
+
+        it("leaves a gcr_routine read open without auth", async () => {
+            const socket = new FakeSocket()
+            kind.make(socket)
+
+            const status = await exchange(
+                socket,
+                frame(
+                    OmniOpcode.NODE_CALL,
+                    encodeNodeCallRequest({
+                        method: "gcr_routine",
+                        params: [{ method: "getPoints", params: ["0xabc"] }],
+                    }),
+                ),
+            )
+
+            expect(status).toBe(200)
+            expect(senderCalls).toHaveLength(1)
+            expect(senderCalls[0].sender).toBe("")
         })
 
         it("leaves read-only nodeCall queries open without auth", async () => {
@@ -273,3 +383,36 @@ for (const kind of connections) {
         })
     })
 }
+
+describe("dispatcher identity", () => {
+    it("blanks the connection's identity for a message without a verified block", async () => {
+        const { dispatchOmniMessage } = await import("./protocol/dispatcher")
+        const { handlerRegistry } = await import("./protocol/registry")
+        const descriptor = handlerRegistry.get(OmniOpcode.GET_PEER_INFO)!
+        const original = descriptor.handler
+        const seen: any[] = []
+        descriptor.handler = async ({ context }) => {
+            seen.push({ ...context })
+            return Buffer.alloc(0)
+        }
+
+        try {
+            await dispatchOmniMessage({
+                message: {
+                    header: { version: 1, opcode: OmniOpcode.GET_PEER_INFO, sequence: 1, payloadLength: 0 },
+                    payload: Buffer.alloc(0),
+                    auth: null,
+                    checksum: 0,
+                } as any,
+                context: { peerIdentity: "0xvictim", isAuthenticated: true },
+                fallbackToHttp: async () => Buffer.alloc(0),
+            })
+        } finally {
+            descriptor.handler = original
+        }
+
+        expect(seen).toHaveLength(1)
+        expect(seen[0].peerIdentity).toBe("")
+        expect(seen[0].isAuthenticated).toBe(false)
+    })
+})
