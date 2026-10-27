@@ -1,0 +1,59 @@
+# Consensus-health alerts for mainnet validators. Delivered through the
+# Alertmanager in monitoring/docker-compose.yml; see docs/runbooks/mainnet-monitoring.md.
+groups:
+  - name: demos-consensus
+    rules:
+      - alert: HeightStalled
+        expr: demos_seconds_since_last_block > 300
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: No new block for over 5 minutes
+          description: "demos_seconds_since_last_block = {{ $value }} on {{ $labels.instance }}. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."
+
+      - alert: BlockHashMismatch
+        expr: increase(demos_consensus_block_hash_mismatch_total[10m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Peers disagree with this node's candidate block hash
+          description: "{{ $value }} peer disagreements on the candidate block hash in 10m on {{ $labels.instance }}. This node, or the peers, are forging different block content. Check the mempool, clock skew and the node logs for the tx-set diff."
+
+      - alert: MissedSignatures
+        expr: increase(demos_consensus_missed_signatures_total[15m]) >= 3
+        labels:
+          severity: warning
+        annotations:
+          summary: Validator was drawn into the shard but its signature is missing
+          description: "{{ $value }} blocks in 15m where {{ $labels.instance }} was selected for the shard and did not sign. The node is online but not taking part in consensus: check sync state and peer connectivity."
+
+      - alert: ForkScheduleMismatch
+        expr: demos_fork_schedule_mismatch == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: A peer has a different fork schedule
+          description: "{{ $labels.instance }} found a validator whose fork schedule differs from its own. Compare genesis.json with the published release; see docs/runbooks/fork-schedule-policy.md."
+
+      - alert: ConsensusAbstaining
+        expr: demos_consensus_abstaining == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Validator is sitting out consensus because of a fork schedule mismatch
+          description: "{{ $labels.instance }} skips forging and voting because most validators report a different fork schedule than its own. It keeps syncing and resumes once no majority differs. Confirm its genesis.json against the published hash first: if the majority is the one with the wrong schedule, this node is on the right side. See docs/runbooks/fork-schedule-policy.md."
+
+      - alert: MempoolBacklog
+        # Plain number, not derived from config: keep it below the mempool hard cap
+        # so the alert fires before the pool starts rejecting transactions.
+        expr: demos_mempool_size > 8000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Mempool backlog is large
+          description: "demos_mempool_size = {{ $value }} on {{ $labels.instance }} for over 5m. Blocks are not draining the pool, or a flood is in progress."

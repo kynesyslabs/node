@@ -15,17 +15,18 @@ global:
     external_labels:
         monitor: demos-network
 
-# Alerting configuration (optional, for future use)
-# alerting:
-#   alertmanagers:
-#     - static_configs:
-#         - targets:
-#           - alertmanager:9093
+# Alertmanager runs in monitoring/docker-compose.yml (service `alertmanager`).
+# The unified root compose file has none, so Prometheus there only logs that
+# the target is unreachable.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
 
 # Alert rules (Epic 13 T14). Files under alerts/ are loaded at startup
-# and reloaded on SIGHUP. Receiver/alertmanager wiring is deployment-
-# specific and stays in docs/runbooks/health-endpoint.md — only rules
-# ship in this repo.
+# and reloaded on SIGHUP. Routing to Slack is in monitoring/alertmanager/alertmanager.yml;
+# see docs/runbooks/mainnet-monitoring.md.
 rule_files:
   - alerts/*.yml
 
@@ -60,14 +61,16 @@ scrape_configs:
       metrics_path: /metrics
       scrape_interval: 15s
 # Additional scrape configs for multi-node setups
-# Uncomment and customize for your deployment
+# Uncomment and customize for your deployment. Mainnet: one monitoring host off
+# the validators scrapes each validator on its PRIVATE address (the node's
+# METRICS_BIND), and keeps job_name demos-node so the alert rules match.
 #
 # - job_name: 'demos-nodes-production'
 #   static_configs:
 #     - targets:
-#       - 'node1.demos.sh:9090'
-#       - 'node2.demos.sh:9090'
-#       - 'node3.demos.sh:9090'
+#       - '10.0.0.11:9090'
+#       - '10.0.0.12:9090'
+#       - '10.0.0.13:9090'
 #   relabel_configs:
 #     - source_labels: [__address__]
 #       target_label: instance

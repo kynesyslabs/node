@@ -9,7 +9,7 @@ import * as dotenv from "dotenv"
 import { EnvKey } from "./envKeys"
 import { parseBoolFlag, parseIntSetting } from "./envFlags"
 import { DEFAULT_CONFIG } from "./defaults"
-import type { AppConfig } from "./types"
+import type { AppConfig, ForkScheduleMismatchPolicy } from "./types"
 import { validateBuildProvenance, validateExposedUrl } from "./nodeUrl"
 import { NODE_VERSION } from "../utilities/nodeVersion"
 
@@ -191,6 +191,12 @@ export function loadConfig(): Readonly<AppConfig> {
             stallDetectionBlocks: envInt(
                 EnvKey.STALL_DETECTION_BLOCKS,
                 d.core.stallDetectionBlocks,
+            ),
+            forkScheduleMismatchPolicy: parseForkScheduleMismatchPolicy(
+                envStr(
+                    EnvKey.FORK_SCHEDULE_MISMATCH_POLICY,
+                    d.core.forkScheduleMismatchPolicy,
+                ),
             ),
         },
 
@@ -490,6 +496,20 @@ export function loadConfig(): Readonly<AppConfig> {
     assertL2psLimitsSane(config)
 
     return deepFreeze(config)
+}
+
+/**
+ * An unrecognised policy must stop the node: falling back to a default would
+ * silently give an operator who typed "abstian" the opposite of what they meant.
+ */
+function parseForkScheduleMismatchPolicy(
+    raw: string,
+): ForkScheduleMismatchPolicy {
+    const value = raw.trim().toLowerCase()
+    if (value === "abstain" || value === "warn") return value
+    throw new Error(
+        `[config] FORK_SCHEDULE_MISMATCH_POLICY must be "abstain" or "warn" (got "${raw}")`,
+    )
 }
 
 /**

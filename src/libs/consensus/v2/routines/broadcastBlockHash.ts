@@ -6,6 +6,7 @@ import log from "src/utilities/logger"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Mempool from "@/libs/blockchain/mempool"
+import { countBlockHashMismatch } from "@/features/metrics/consensusMetrics"
 
 /**
  * Per-peer vote outcome. The `signaturesToMerge` map carries every
@@ -146,12 +147,23 @@ async function proposeAndCollect(
         const extra = response.extra as
             | {
                   ourBlock?: {
+                      hash?: string
+                      number?: number
                       txHashes?: string[]
                       ordered_transactions?: string[]
                   }
               }
             | undefined
         if (extra?.ourBlock) {
+            // This is the one place a peer's candidate for our height is seen
+            // once per peer per round, so it is where disagreement is counted.
+            if (
+                extra.ourBlock.hash !== block.hash &&
+                (extra.ourBlock.number === undefined ||
+                    extra.ourBlock.number === block.number)
+            ) {
+                countBlockHashMismatch()
+            }
             const theirTxHashes: string[] =
                 extra.ourBlock.txHashes ??
                 extra.ourBlock.ordered_transactions ??

@@ -171,7 +171,7 @@ These ports should NOT be exposed publicly:
 | Port | Why |
 |------|-----|
 | 5432 | Postgres — internal compose network only |
-| 9090 | Node metrics — keep behind your firewall or VPN |
+| 9090 | Node metrics — published on loopback only (`METRICS_BIND`); a monitoring host off this machine needs a private interface or a tunnel |
 | 9091 | Prometheus — keep behind your firewall or VPN |
 | 3000 | Grafana — only public if you want a public dashboard |
 

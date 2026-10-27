@@ -31,6 +31,11 @@ import {
 } from "@/libs/blockchain/routines/Sync"
 import { isNetworkAhead } from "./routines/networkAheadVeto"
 import {
+    forkScheduleAbstainReason,
+    shouldLogForkScheduleAbstain,
+} from "./routines/forkScheduleAbstain"
+import { ensureWindowChecked } from "@/libs/peer/routines/forkScheduleWatch"
+import {
     filterMempoolByNonce,
     filterMempoolByRefBlock,
     type FailedTranscation,
@@ -126,6 +131,23 @@ export async function consensusRoutine(): Promise<void> {
             )
             return
         }
+
+        // A node that restarted inside the window has not compared its schedule
+        // yet, and the block-driven watch would only run it after the first round.
+        await ensureWindowChecked(getSharedState.lastBlockNumber)
+
+        // Placed after fastSync so an abstaining node keeps pulling blocks and
+        // can rejoin; before the shard is initialised so it neither forges nor votes.
+        const abstainReason = forkScheduleAbstainReason()
+        if (abstainReason !== null) {
+            if (shouldLogForkScheduleAbstain()) {
+                log.error(
+                    `[consensusRoutine] Abstaining from block ${blockRef}, not forging or voting: ${abstainReason}`,
+                )
+            }
+            return
+        }
+
         markStep("consensus", "waitForPeerStatus")
         const peersReady = await waitForPeerStatus()
         if (!peersReady) {
