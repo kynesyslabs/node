@@ -2,9 +2,12 @@ name: Release
 
 # Builds a tagged release twice from clean checkouts and publishes the image
 # only when both builds produce the same manifest digest. The tag must carry
-# a signature from a key listed in .github/allowed_signers. Every job checks
-# out the exact commit the signature was verified on, so a tag moved while
-# the workflow runs cannot change what gets built or published.
+# a signature from a key listed in .github/allowed_signers as it stands on
+# the protected release branch, and the tagged commit must be reachable from
+# that branch. The signer list is never read from the tag itself, so pushing
+# a tag cannot grant signing rights. Every job checks out the exact commit
+# the signature was verified on, so a tag moved while the workflow runs
+# cannot change what gets built or published.
 
 on:
   push:
@@ -15,6 +18,9 @@ permissions:
 
 env:
   IMAGE: ghcr.io/kynesyslabs/node
+  # Branch protection on this branch is what the release trust rests on:
+  # it supplies the signer list and bounds which commits may be released.
+  RELEASE_BRANCH: stabilisation
 
 jobs:
   verify-tag:
@@ -26,18 +32,25 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - name: Verify the signed, annotated tag against the allowed signers
+      - name: Verify the signed, annotated tag against the protected signers
         id: verify
         run: |
-          test -f .github/allowed_signers || {
-            echo "::error::.github/allowed_signers is missing; add the release signer's SSH public key"; exit 1; }
           # checkout may have flattened the tag; fetch the real tag object
           git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git fetch --no-tags origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
           [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ] || {
             echo "::error::$GITHUB_REF_NAME is not an annotated tag; sign it with git tag -s"; exit 1; }
-          git config gpg.ssh.allowedSignersFile .github/allowed_signers
+          sha=$(git rev-list -n 1 "$GITHUB_REF_NAME")
+          # a tag on an unmerged branch has not been through review
+          git merge-base --is-ancestor "$sha" "origin/$RELEASE_BRANCH" || {
+            echo "::error::$sha is not on $RELEASE_BRANCH; merge it before tagging"; exit 1; }
+          # the signer list comes from the protected branch, not from the tag
+          signers="$RUNNER_TEMP/allowed_signers"
+          git show "origin/$RELEASE_BRANCH:.github/allowed_signers" > "$signers" || {
+            echo "::error::.github/allowed_signers is missing on $RELEASE_BRANCH"; exit 1; }
+          git config gpg.ssh.allowedSignersFile "$signers"
           git verify-tag "$GITHUB_REF_NAME"
-          echo "sha=$(git rev-list -n 1 "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.run }}

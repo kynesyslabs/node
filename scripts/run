@@ -430,6 +430,17 @@ check_bun_version() {
 	exit 1
 }
 
+# Help must work on a machine that has neither Bun nor the dependencies,
+# so it is answered before anything is checked or installed.
+for arg in "$@"; do
+	case ${arg} in
+	-h | --help)
+		show_help
+		exit 0
+		;;
+	esac
+done
+
 if ! command -v bun &>/dev/null; then
 	echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
 	echo "Install bun following: https://bun.sh/docs/installation."
@@ -599,6 +610,9 @@ if [ "$GIT_PULL" = true ]; then
 	# Always run bun install after successful git pull
 	echo "📦 Installing dependencies..."
 	log_verbose "Running bun install after git pull"
+	# The pull may have moved .bun-version; the new pin applies before the
+	# new lockfile is installed.
+	check_bun_version
 	if ! bun install --frozen-lockfile; then
 		echo "❌ Failed to install dependencies"
 		exit 1

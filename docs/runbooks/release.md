@@ -45,6 +45,14 @@ git config --global user.signingkey ~/.ssh/<key>.pub
 
 Keep the private key off the validators and out of CI.
 
+The release workflow does not trust the tag to name its own signers. It
+reads `.github/allowed_signers` from the head of `stabilisation`, and it
+refuses a tag whose commit is not on `stabilisation`. Both rules depend on
+branch protection for `stabilisation` (required review, no force pushes):
+whoever can merge there decides who may sign a release. Add or remove a
+signer by merging a change to that file; a change made only on the tagged
+commit has no effect.
+
 ## Cutting a release candidate
 
 ```bash
@@ -56,7 +64,8 @@ git push origin v1.0.0-rc.1
 
 The `Release` workflow then:
 
-1. verifies the tag signature against `.github/allowed_signers`;
+1. checks the tagged commit is on `stabilisation` and verifies the tag
+   signature against the `.github/allowed_signers` of that branch's head;
 2. builds the image twice, in two independent jobs, from clean checkouts,
    with no cache, `SOURCE_DATE_EPOCH` and `BUILT_AT` taken from the commit,
    and file timestamps rewritten to the commit date;
@@ -91,8 +100,10 @@ A bare-metal validator (`./run`) checks out the tag instead and verifies it
 locally before starting:
 
 ```bash
-git fetch --tags && git checkout v1.0.0-rc.1
-git config gpg.ssh.allowedSignersFile .github/allowed_signers
+git fetch --tags origin stabilisation && git checkout v1.0.0-rc.1
+git show origin/stabilisation:.github/allowed_signers > /tmp/allowed_signers
+git config gpg.ssh.allowedSignersFile /tmp/allowed_signers
+git merge-base --is-ancestor v1.0.0-rc.1 origin/stabilisation
 git verify-tag v1.0.0-rc.1
 ./run
 ```

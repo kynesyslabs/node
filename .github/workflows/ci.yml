@@ -20,3 +20,4 @@ jobs:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - run: bun run type-check
+      - run: bunx jest --maxWorkers=1 tests/release/reproducibleRelease.test.ts
