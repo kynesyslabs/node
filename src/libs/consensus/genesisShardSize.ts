@@ -1,6 +1,7 @@
 import Chain from "@/libs/blockchain/chain"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
+import { readGenesisSudoPubkey } from "./genesisSudoPubkey"
 
 /**
  * Shard size is a static consensus constant committed in block 0.
@@ -78,6 +79,7 @@ export async function loadShardSizeFromGenesisBlock(): Promise<number> {
     }
     const shardSize = readGenesisShardSize(genesisData)
     getSharedState.setShardSizeFromGenesis(shardSize)
+    getSharedState.setSudoPubkeyFromGenesis(readGenesisSudoPubkey(genesisData))
     log.info(`[GENESIS] shardSize=${shardSize} (committed in block 0)`)
     return shardSize
 }

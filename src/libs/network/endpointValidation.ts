@@ -11,6 +11,10 @@ import Chain from "src/libs/blockchain/chain"
 import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "src/utilities/sharedState"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import {
+    editBindingState,
+    verifyAdmissionEdits,
+} from "src/libs/blockchain/validation/editBinding"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 
 export async function handleValidateTransaction(
@@ -78,7 +82,17 @@ export async function handleValidateTransaction(
             "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
         )
         log.debug("[handleValidateTransaction] SYMMETRIC-NORMALISE-V2 active")
-        const checksOut = txGcrEditsHash === gcrEditsHash
+        let checksOut = txGcrEditsHash === gcrEditsHash
+        // Once edits are bound, a transaction is accepted on the rule peers and
+        // apply use, judged on the edits as they were signed.
+        if ((await editBindingState()).active) {
+            const verdict = await verifyAdmissionEdits({
+                ...tx,
+                content: { ...tx.content, gcr_edits: txShippedGcrEdits },
+            } as Transaction)
+            if (!verdict.ok) log.error("[handleValidateTransaction] " + verdict.reason)
+            checksOut = verdict.ok
+        }
 
         if (!checksOut) {
             try {

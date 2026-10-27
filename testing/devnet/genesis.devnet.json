@@ -21,6 +21,9 @@
     },
     "signatureDomain": {
       "activationHeight": 0
+    },
+    "editBinding": {
+      "activationHeight": 0
     }
   },
   "balances": [

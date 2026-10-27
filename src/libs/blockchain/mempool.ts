@@ -11,11 +11,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
-import {
-    verifyGcrEditsMatch,
-    verifyNoUnexplainedValueEdits,
-} from "./validation/verifyGcrEdits"
-import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
+import { verifyAdmissionEdits } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
@@ -428,35 +424,11 @@ export default class Mempool {
             return { accepted: false, reason: `${admission.code}: ${admission.reason}` }
         }
 
-        // Native txs and txs carrying Work edits are bound to the full
-        // regenerated edit set. Every other type may ship only the value
-        // edits (balance, stake, points) the node regenerates from its
-        // signed body, since handleGCR applies gcr_edits for any type.
-        if (tx.content?.type === "native" || carriesWorkEdits(tx)) {
-            try {
-                const { match } = await verifyGcrEditsMatch(tx, {
-                    expectFeeEdits: false,
-                })
-                if (!match) {
-                    return {
-                        accepted: false,
-                        reason: "gcr_edits do not match regenerated set",
-                    }
-                }
-            } catch (e) {
-                return {
-                    accepted: false,
-                    reason: `gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,
-                }
-            }
-        } else {
-            const { ok, unexplained } = await verifyNoUnexplainedValueEdits(tx)
-            if (!ok) {
-                return {
-                    accepted: false,
-                    reason: `value edits with no counterpart in the regenerated set (${unexplained.join(", ")})`,
-                }
-            }
+        // handleGCR applies gcr_edits of any type as written, so every type
+        // is bound to the edits regenerated from its signed body.
+        const edits = await verifyAdmissionEdits(tx)
+        if (!edits.ok) {
+            return { accepted: false, reason: edits.reason }
         }
 
         const { confirmationBlock, error } = await this.addTransactionWithLock(
@@ -874,75 +846,28 @@ export default class Mempool {
             validTransactions.push(unseenTransactions[i])
         }
 
-        // AUDIT C1 (admission-side): the worker pool checks coherence +
-        // signature only — NOT that the attached gcr_edits are legitimately
-        // derived from the signed body. A self-signed tx carrying a forged
-        // edit (e.g. {balance, add, self, HUGE}) passes both and, before this
-        // gate, entered the mempool + gossiped shard-wide. Re-derive the
-        // expected edits here on the main thread and drop any tx whose shipped
-        // edits don't match. Runs on the main thread (not the worker, which
-        // deliberately avoids the SDK encryption index). Native txs only —
-        // non-native bundles carry no gcr_edits to forge.
+        // The worker pool checks coherence and signature only, not that the
+        // attached gcr_edits are what the signed body implies. A self-signed
+        // tx carrying a forged edit passes both and would enter the mempool
+        // and be gossiped shard-wide, and handleGCR applies the edits of any
+        // type as written. So the edits are re-derived here on the main
+        // thread (the worker deliberately avoids the SDK encryption index)
+        // and a tx whose edits differ is dropped.
         //
-        // A gossiped native tx was confirmed upstream, so when
-        // gasFeeSeparation is active it ALREADY carries the node-computed fee
-        // edits (verified: the originator's confirmTransaction prepended them;
-        // getMempool serves the stored mutated tx). verifyGcrEditsMatch with
-        // expectFeeEdits reproduces those fee edits from the SHIPPED
-        // transaction_fee (incl. the originator's rpc_address) so the match
-        // holds cross-node (audit 184). expectFeeEdits is keyed on the fork so
-        // pre-fork the regen stays fee-free.
-        // Epic #21 #204: at INGRESS the gossiped tx is byte-identical to what
-        // the sender signed — confirmTransaction no longer prepends fee edits
-        // onto it (those are derived at apply). So the shipped set carries NO
-        // fee edits here; the binding regen must NOT add them either, or every
-        // legit tx false-mismatches. (Fee edits are bound at apply, where they
-        // are derived: see HandleGCR.applyTransactions.)
+        // At ingress a gossiped tx is byte-identical to what the sender
+        // signed: fee edits are derived at apply, so neither side of the
+        // comparison carries them.
         {
             const editVerifiedTransactions: Transaction[] = []
             for (const tx of validTransactions) {
-                // Work edits are state the sender signs for, so a tx that
-                // carries them is bound like a native one whatever its type.
-                if (
-                    tx.content?.type !== "native" &&
-                    !carriesWorkEdits(tx)
-                ) {
-                    // Non-native transactions are not edit-bound as a whole
-                    // (regeneration is not byte-deterministic across nodes for
-                    // every type), but they must not move funds, stake or
-                    // points the node would not have generated: handleGCR
-                    // applies gcr_edits for ANY type, and this ingress is
-                    // unauthenticated, so an unbound edit here is an
-                    // unauthenticated mint.
-                    const { ok, unexplained } =
-                        await verifyNoUnexplainedValueEdits(tx)
-                    if (!ok) {
-                        log.error(
-                            `[Mempool.receive] Rejecting tx ${tx.hash}: value edits with no counterpart in the regenerated set (${unexplained.join(", ")})`,
-                        )
-                        continue
-                    }
-                    editVerifiedTransactions.push(tx)
+                const edits = await verifyAdmissionEdits(tx)
+                if (!edits.ok) {
+                    log.error(
+                        `[Mempool.receive] Rejecting tx ${tx.hash}: ${edits.reason}`,
+                    )
                     continue
                 }
-                try {
-                    const { match } = await verifyGcrEditsMatch(tx, {
-                        expectFeeEdits: false,
-                    })
-                    if (!match) {
-                        log.error(
-                            `[Mempool.receive] Rejecting tx ${tx.hash}: gcr_edits do not match regenerated set (forged-edit guard)`,
-                        )
-                        continue
-                    }
-                    editVerifiedTransactions.push(tx)
-                } catch (e) {
-                    // Could not verify → reject (fail closed). A tx we cannot
-                    // bind must not be admitted.
-                    log.error(
-                        `[Mempool.receive] Rejecting tx ${tx.hash}: gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,
-                    )
-                }
+                editVerifiedTransactions.push(tx)
             }
             validTransactions.length = 0
             validTransactions.push(...editVerifiedTransactions)

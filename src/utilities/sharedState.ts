@@ -135,6 +135,22 @@ export default class SharedState {
         }
         this._shardSize = shardSize
     }
+    /** The award signer committed in block 0; null when genesis declares none. */
+    private _genesisSudoPubkey: string | null = null
+    get genesisSudoPubkey(): string | null {
+        return this._genesisSudoPubkey
+    }
+    setSudoPubkeyFromGenesis(pubkey: string | null): void {
+        if (
+            this._genesisSudoPubkey !== null &&
+            this._genesisSudoPubkey !== pubkey
+        ) {
+            throw new Error(
+                "the genesis award signer is already pinned; refusing to change it",
+            )
+        }
+        this._genesisSudoPubkey = pubkey
+    }
     mainLoopSleepTime = Config.getInstance().core.mainLoopSleepTime
 
     // NOTE See calibrateTime.ts for this value

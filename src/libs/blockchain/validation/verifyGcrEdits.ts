@@ -47,6 +47,22 @@ import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import log from "src/utilities/logger"
 
+/** JSON with object keys in code-unit order: key order is not part of an edit's meaning. */
+export function canonical(value: unknown): string {
+    if (Array.isArray(value)) {
+        return `[${value.map(v => canonical(v === undefined ? null : v)).join(",")}]`
+    }
+    if (value !== null && typeof value === "object") {
+        const entries = Object.entries(value as Record<string, unknown>)
+            .filter(([, v]) => v !== undefined)
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        return `{${entries
+            .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
+            .join(",")}}`
+    }
+    return JSON.stringify(value) ?? "null"
+}
+
 export interface GcrEditsVerification {
     /** true when the shipped edits match the regenerated set. */
     match: boolean
@@ -109,7 +125,7 @@ function wireShapeNormaliser(
  */
 export async function verifyGcrEditsMatch(
     tx: Transaction,
-    options: { expectFeeEdits?: boolean } = {},
+    options: { expectFeeEdits?: boolean; keyOrderInsensitive?: boolean } = {},
 ): Promise<GcrEditsVerification> {
     // expectFeeEdits distinguishes WHERE the tx is being checked:
     //   - APPLY time (block txs, post-confirmTransaction): the shipped edits
@@ -118,7 +134,13 @@ export async function verifyGcrEditsMatch(
     //   - INGRESS time (peer gossip, pre-confirmTransaction): the shipped edits
     //     are the raw SDK shape with NO fee edits, so the regen must NOT add
     //     them -> pass false (default).
-    const { expectFeeEdits = false } = options
+    const { expectFeeEdits = false, keyOrderInsensitive = false } = options
+    // Admission under editBinding compares edits without regard to key order,
+    // so the same set must not be refused here for how its keys were written.
+    const digest = (edits: GCREdit[]): string =>
+        Hashing.sha256(
+            keyOrderInsensitive ? canonical(edits) : JSON.stringify(edits),
+        )
 
     // Snapshot the shipped edits (deep copy) so nothing downstream observes a
     // mutation from this read-only check.
@@ -209,12 +231,12 @@ export async function verifyGcrEditsMatch(
     const normalise = wireShapeNormaliser(tx, await osDenominationActive())
 
     const normalisedRegen = normalise(regen)
-    const regenEditsHash = Hashing.sha256(JSON.stringify(normalisedRegen))
+    const regenEditsHash = digest(normalisedRegen)
 
     const normalisedTxEdits = normalise(
         txShippedGcrEdits.map(blankVolatileEditFields),
     )
-    const txEditsHash = Hashing.sha256(JSON.stringify(normalisedTxEdits))
+    const txEditsHash = digest(normalisedTxEdits)
 
     const match = txEditsHash === regenEditsHash
     if (!match) {
