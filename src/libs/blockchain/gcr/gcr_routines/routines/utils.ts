@@ -2,6 +2,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { Repository } from "typeorm"
 import log from "@/utilities/logger"
 import { dataSource } from "@/model/datasource"
+import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
 
 /**
  * Safe wrapper for GCR repository saves.
@@ -67,7 +68,7 @@ export async function isFirstConnection(
 
         const result = await gcrMainRepository
             .createQueryBuilder("gcr")
-            .where(queryTemplate, { userId: data.userId })
+            .where(queryTemplate, { userId: web2UserIdLookupKey(data.userId) })
             .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
             .getOne()
 

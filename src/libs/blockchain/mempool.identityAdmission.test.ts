@@ -247,7 +247,7 @@ describe("identity proofs are checked when a transaction reaches the mempool fro
         it("refuses a web2 claim with a padded user id before calling the provider", async () => {
             const r = await gossip(twitterTx("0xpadded", " 42 "))
             expect(r.accepted).toBe(false)
-            expect(r.reason).toContain("decimal string")
+            expect(r.reason).toContain("whole number")
             expect(tweetLookups).toBe(0)
         })
 

@@ -1,5 +1,6 @@
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
+import { canonicalWeb2UserId, sameWeb2UserId } from "@/libs/identity/web2UserId"
 
 /** The well-known path a domain owner hosts to prove control. */
 export const DOMAIN_PROOF_PATH = "/.well-known/demos-cci.txt"
@@ -12,41 +13,24 @@ export type Web2Claim = {
 
 /**
  * Handles are compared without regard to case: Twitter, GitHub and Discord
- * all treat `Alice` and `alice` as one account.
+ * all treat `Alice` and `alice` as one account. No trimming: a padded handle
+ * is not the provider's spelling of any account.
  */
 export function sameHandle(a: unknown, b: unknown): boolean {
     return (
         typeof a === "string" &&
         typeof b === "string" &&
-        a.trim().length > 0 &&
-        a.trim().toLowerCase() === b.trim().toLowerCase()
+        a.length > 0 &&
+        a.toLowerCase() === b.toLowerCase()
     )
 }
 
 /**
- * The one spelling of a numeric account id: decimal digits with no sign,
- * padding or leading zero. Stored ids are compared as exact text (the
- * duplicate check in apply and the cross-account first-connection lookup),
- * so " 42 " or "042" would count as an account that has never been linked.
- */
-export function isCanonicalNumericId(id: unknown): id is string {
-    return typeof id === "string" && /^[1-9][0-9]{0,31}$/.test(id)
-}
-
-/**
- * The claimed id must be canonical and equal the provider's id. Providers
- * return ids as strings, except GitHub, which returns a number.
+ * The provider's id and the claimed id name the same account. GitHub returns
+ * a number, the others a string; the SDK passes them on as received.
  */
 export function sameId(provided: unknown, claimed: unknown): boolean {
-    const providedText =
-        typeof provided === "number" && Number.isSafeInteger(provided)
-            ? String(provided)
-            : provided
-    return (
-        typeof providedText === "string" &&
-        isCanonicalNumericId(claimed) &&
-        providedText === claimed
-    )
+    return sameWeb2UserId(provided, claimed)
 }
 
 /**
@@ -57,30 +41,25 @@ export function sameId(provided: unknown, claimed: unknown): boolean {
  */
 const NUMERIC_ID_CONTEXTS = new Set(["twitter", "github", "discord"])
 
-/**
- * Handles these providers treat case-insensitively, in lower case. The edit
- * is signed by the client, so the node refuses another spelling rather than
- * rewriting it, and one account has exactly one stored handle.
- */
-const CANONICAL_HANDLES: Record<string, RegExp> = {
-    twitter: /^[a-z0-9_]{1,15}$/,
-    github: /^[a-z0-9][a-z0-9-]{0,38}$/,
-}
+/** Contexts whose handle is checked against the provider's account. */
+const HANDLE_CONTEXTS = new Set(["twitter", "github"])
 
 /**
- * Returns why a web2 claim is not in canonical form, or null when it is.
+ * Returns why a web2 claim is malformed, or null when it is well formed.
  * Checked before any provider call, so a malformed claim costs nothing.
  */
 export function nonCanonicalClaim(
     context: string,
     claim: Web2Claim,
 ): string | null {
-    if (NUMERIC_ID_CONTEXTS.has(context) && !isCanonicalNumericId(claim.userId)) {
-        return `${context} user id must be a decimal string with no spaces or leading zeros`
+    if (NUMERIC_ID_CONTEXTS.has(context) && canonicalWeb2UserId(claim.userId) === null) {
+        return `${context} user id must be a whole number with no spaces or leading zeros`
     }
-    const handle = CANONICAL_HANDLES[context]
-    if (handle && !(typeof claim.username === "string" && handle.test(claim.username))) {
-        return `${context} username must be sent in lower case, without spaces`
+    if (
+        HANDLE_CONTEXTS.has(context) &&
+        !(typeof claim.username === "string" && /^\S+$/.test(claim.username))
+    ) {
+        return `${context} username must not be empty or contain spaces`
     }
     return null
 }

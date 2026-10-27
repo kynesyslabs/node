@@ -263,6 +263,14 @@ describe("web2 proofs are bound to the claimed account", () => {
             }
         })
 
+        it("accepts what the SDK sends today: a numeric GitHub id and mixed-case handles", async () => {
+            expect((await verifyWeb2Proof(gistClaim("Alice", 42), SENDER)).success).toBe(true)
+            expect((await verifyWeb2Proof(gistClaim("ALICE", "42"), SENDER)).success).toBe(true)
+            expect((await verifyWeb2Proof(twitterClaim("Alice", "42"), SENDER)).success).toBe(true)
+            expect((await verifyWeb2Proof(twitterClaim("alice", 42), SENDER)).success).toBe(true)
+            expect((await verifyWeb2Proof(discordClaim("42"), SENDER)).success).toBe(true)
+        })
+
         it("refuses a padded user id on every provider", async () => {
             for (const id of [" 42 ", "42 ", " 42", "4 2", "\t42"]) {
                 const results = [
@@ -272,44 +280,27 @@ describe("web2 proofs are bound to the claimed account", () => {
                 ]
                 for (const r of results) {
                     expect({ id, ok: r.success }).toEqual({ id, ok: false })
-                    expect(r.message).toContain("decimal string")
+                    expect(r.message).toContain("whole number")
                 }
             }
             expect(githubRequests).toEqual([])
         })
 
-        it("refuses a user id with leading zeros, a sign or a number type", async () => {
-            for (const id of ["042", "0", "+42", "-42", "4.2e1", 42, "", undefined]) {
+        it("refuses a user id with leading zeros, a sign, a fraction or no value", async () => {
+            for (const id of ["042", "0042", "+42", "-42", "4.2e1", 42.5, -42, 2 ** 60, "", undefined]) {
                 const r = await verifyWeb2Proof(twitterClaim("alice", id), SENDER)
                 expect({ id, ok: r.success }).toEqual({ id, ok: false })
+                const g = await verifyWeb2Proof(gistClaim("alice", id), SENDER)
+                expect({ id, ok: g.success }).toEqual({ id, ok: false })
             }
         })
 
-        it("refuses a second link of the same account under another spelling of its id", async () => {
-            // The account behind the post is id 42; only that spelling links.
-            const first = await verifyWeb2Proof(twitterClaim("alice", "42"), SENDER)
-            expect(first.success).toBe(true)
-            for (const id of ["042", " 42", "42 ", "0042"]) {
-                const again = await verifyWeb2Proof(twitterClaim("alice", id), SENDER)
-                expect({ id, ok: again.success }).toEqual({ id, ok: false })
-                const gist = await verifyWeb2Proof(gistClaim("alice", id), SENDER)
-                expect({ id, ok: gist.success }).toEqual({ id, ok: false })
-                const discord = await verifyWeb2Proof(discordClaim(id), SENDER)
-                expect({ id, ok: discord.success }).toEqual({ id, ok: false })
-            }
-        })
-
-        it("refuses Twitter and GitHub handles that are not lower case", async () => {
-            for (const name of ["Alice", "ALICE", " alice", "alice "]) {
+        it("refuses a padded or empty handle", async () => {
+            for (const name of [" alice", "alice ", "", "al ice"]) {
                 const t = await verifyWeb2Proof(twitterClaim(name, "42"), SENDER)
                 const g = await verifyWeb2Proof(gistClaim(name, "42"), SENDER)
                 expect({ name, t: t.success, g: g.success }).toEqual({ name, t: false, g: false })
-                expect(t.message).toContain("lower case")
             }
-            // The provider may print the handle in any case; the lower-case
-            // claim of the same account is accepted.
-            expect((await verifyWeb2Proof(twitterClaim("alice", "42"), SENDER)).success).toBe(true)
-            expect((await verifyWeb2Proof(gistClaim("alice", "42"), SENDER)).success).toBe(true)
         })
 
         it("leaves telegram ids to the exact match against the bot attestation", () => {
@@ -317,11 +308,11 @@ describe("web2 proofs are bound to the claimed account", () => {
             expect(nonCanonicalClaim("domain", { username: "Example.com" })).toBeNull()
         })
 
-        it("compares a numeric provider id with the claimed decimal string", () => {
+        it("treats a numeric id and its decimal string as one account", () => {
             expect(sameId(42, "42")).toBe(true)
-            expect(sameId("42", "42")).toBe(true)
+            expect(sameId("42", 42)).toBe(true)
             expect(sameId(42, " 42")).toBe(false)
-            expect(sameId("42", 42)).toBe(false)
+            expect(sameId("42", "042")).toBe(false)
             expect(sameId(2 ** 60, String(2 ** 60))).toBe(false)
         })
     })

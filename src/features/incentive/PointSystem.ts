@@ -11,6 +11,7 @@ import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentity
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
+import { sameWeb2UserId } from "@/libs/identity/web2UserId"
 
 const pointValues = {
     LINK_WEB3_WALLET: 0.5,
@@ -398,7 +399,7 @@ export class PointSystem {
             const twitter = Twitter.getInstance()
             const twitterUser = (account.identities.web2["twitter"] || []).find(
                 (twitterIdentity: Web2GCRData["data"]) =>
-                    twitterIdentity.userId === twitterUserId,
+                    sameWeb2UserId(twitterIdentity.userId, twitterUserId),
             )
 
             if (twitterUser && twitterUser.username) {
@@ -632,7 +633,7 @@ export class PointSystem {
             // Verify the GitHub account is actually linked to this user
             const githubIdentities = account.identities.web2?.github || []
             const isOwner = githubIdentities.some(
-                (gh: any) => gh.userId === githubUserId,
+                (gh: any) => sameWeb2UserId(gh.userId, githubUserId),
             )
 
             if (!isOwner) {

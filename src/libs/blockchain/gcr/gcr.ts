@@ -68,6 +68,7 @@ import TxValidatorPool from "../validation/txValidatorPool"
 import { GCRSubnetsTxs } from "@/model/entities/GCRv2/GCRSubnetsTxs"
 import { emptyResponse } from "@/libs/network"
 import { Validators } from "@/model/entities/Validators"
+import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
 import {
     IDENTITIES_DEFAULT_LIMIT,
     IDENTITIES_MAX_LIMIT,
@@ -364,15 +365,25 @@ export default class GCR {
                 return null
             }
 
+            // Twitter and GitHub treat handles case-insensitively, so a
+            // lookup by handle finds the account whatever case it was linked in.
+            const caseInsensitiveHandle =
+                identity.context === "twitter" || identity.context === "github"
+
             // Find accounts that have the specified web2 identity (by username or userId)
             const accounts = await gcrMainRepository
                 .createQueryBuilder("gcr")
                 .where(
                     identity.userId
                         ? "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE w2->>'userId' = :userId)"
-                        : "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE w2->>'username' = :username)",
+                        : caseInsensitiveHandle
+                          ? "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE LOWER(w2->>'username') = LOWER(:username))"
+                          : "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:context, '[]'::jsonb)) AS w2 WHERE w2->>'username' = :username)",
                     identity.userId
-                        ? { context: identity.context, userId: identity.userId }
+                        ? {
+                              context: identity.context,
+                              userId: web2UserIdLookupKey(identity.userId),
+                          }
                         : {
                               context: identity.context,
                               username: identity.username,
