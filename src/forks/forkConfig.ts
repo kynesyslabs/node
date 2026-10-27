@@ -166,6 +166,22 @@ export type AtomicWorkConfig = BaseForkConfig
 export type EditBindingConfig = BaseForkConfig
 
 /**
+ * `quorumParity` fork: a synced block is accepted only with the signatures
+ * a producer needs to commit it, 2/3 + 1 of a full committee
+ * (`shardSize`), however small the eligible pool at its height is.
+ *
+ * Before it, sync counted the quorum against min(shardSize, pool): a block
+ * whose parent committed a peerlist of two validators was accepted with two
+ * signatures, though no honest producer commits below the committee floor.
+ *
+ * Activation at H applies to block H and later. Dormant by default
+ * (`activationHeight: null`), so a node carrying the code syncs existing
+ * history exactly as before; a chain started from genesis with this build
+ * sets it to 0. No payload beyond the base.
+ */
+export type QuorumParityConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -200,6 +216,7 @@ export type ForkConfig =
     | TlsnProofEnforcementConfig
     | AtomicWorkConfig
     | EditBindingConfig
+    | QuorumParityConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -216,6 +233,7 @@ export type ForkName =
     | "tlsnProofEnforcement"
     | "atomicWork"
     | "editBinding"
+    | "quorumParity"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -231,6 +249,7 @@ export interface ForkConfigByName {
     tlsnProofEnforcement: TlsnProofEnforcementConfig
     atomicWork: AtomicWorkConfig
     editBinding: EditBindingConfig
+    quorumParity: QuorumParityConfig
 }
 
 /**
@@ -365,6 +384,16 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Apply refuses a transaction whose edits differ from the ones regenerated " +
             "from its signed body, and an edit that acts on an account other than the sender's.",
     },
+    quorumParity: {
+        // Dormant by default: blocks already on a running chain were synced
+        // under the pool-relative quorum, and a missing genesis entry
+        // hydrates from here. A chain launched from genesis with this build
+        // sets 0.
+        activationHeight: null,
+        description:
+            "Sync accepts a block only with 2/3 + 1 of a full committee's signatures, " +
+            "the same quorum a producer needs to commit it.",
+    },
 }
 
 /**
@@ -384,5 +413,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tlsnProofEnforcement: { ...DEFAULT_FORK_CONFIG.tlsnProofEnforcement },
         atomicWork: { ...DEFAULT_FORK_CONFIG.atomicWork },
         editBinding: { ...DEFAULT_FORK_CONFIG.editBinding },
+        quorumParity: { ...DEFAULT_FORK_CONFIG.quorumParity },
     }
 }

@@ -8,6 +8,7 @@ import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Validators } from "src/model/entities/Validators"
 import { compareIdentities } from "./peerlistMerge"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
+import { quorumThreshold } from "../quorum"
 
 // The eligible pool is a pure function of on-chain state at a given
 // block, so it is memoised per block number. Sync verification walks
@@ -27,7 +28,7 @@ export function __resetValidatorCache(): void {
  * a committee that cannot possibly meet quorum never forms at all.
  */
 export function getCommitteeFloor(): number {
-    return Math.floor((getSharedState.shardSize * 2) / 3) + 1
+    return quorumThreshold(getSharedState.shardSize)
 }
 
 /** Identities committed in a block's peerlist, normalised to lowercase. */

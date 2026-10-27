@@ -20,6 +20,8 @@ import { verifyBlockTxSignatures } from "./verifyBlockTxSignatures"
 import { getSharedState } from "@/utilities/sharedState"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getEligiblePool } from "src/libs/consensus/v2/routines/getShard"
+import { verifierThreshold } from "src/libs/consensus/v2/quorum"
+import { isForkActive } from "@/forks/forkGates"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 
 export interface BlockVerification {
@@ -173,15 +175,17 @@ export async function verifyBlock(
         }),
     )
 
-    // Verify block was signed by 2/3 + 1 of min(shardSize, pool): the
-    // denominator is pinned so a forger's liveness view cannot shrink
-    // the quorum
-    const denominator = Math.min(getSharedState.shardSize, pool.length)
-    const threshold = Math.floor((denominator * 2) / 3) + 1
+    // The bar is pinned to shardSize, not to the forger's liveness view;
+    // under quorumParity it is also the producer's, not shrunk by the pool.
+    const threshold = verifierThreshold(
+        getSharedState.shardSize,
+        pool.length,
+        isForkActive("quorumParity", block.number),
+    )
     if (verifiedSigners.size < threshold) {
         return {
             valid: false,
-            reason: `insufficient verified pool signatures: ${verifiedSigners.size}/${denominator} (need ${threshold})`,
+            reason: `insufficient verified pool signatures: ${verifiedSigners.size} of a pool of ${pool.length} (need ${threshold})`,
         }
     }
 
