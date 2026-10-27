@@ -269,12 +269,16 @@ curl http://localhost:53550/info    # node info (version, identity, etc.)
 
 ### Update the node
 
+A validator moves to a released image by tag and digest, never by building its own; see [docs/runbooks/release.md](docs/runbooks/release.md). Set `IMAGE_NAME` and `IMAGE_TAG` in `.env` from the release's `checksums.txt`, then:
+
 ```bash
-git pull
-docker compose up -d --build
+docker compose pull node
+docker compose up -d
 ```
 
-The `--build` rebuilds the node image against the new source. Volumes (and therefore your identity, chain data, peerlist cache) are preserved. Each update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
+Volumes (and therefore your identity, chain data, peerlist cache) are preserved.
+
+A development host that builds from source instead: `git pull && docker compose up -d --build`. Each such update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
 
 ### Stop the node
 
@@ -374,7 +378,7 @@ docker compose version
 curl https://mise.run | sh
 
 # Install Bun
-mise use -g bun@latest
+mise use -g bun@1.3.14   # the version in .bun-version
 
 # Verify Bun
 bun -v
@@ -438,7 +442,8 @@ OPTIONS:
     -d <port>                      PostgreSQL port (default: 5332)
     -i <path>                      Identity file path (default: .demos_identity)
     -c <true/false>                Clean database on startup
-    -n <true/false>                Skip git pull (useful for custom branches)
+    -U                             Update the checkout (git pull) before starting
+    -n <true/false>                Kept for compatibility: pull is already off by default
     -u <url>                       Override EXPOSED_URL
     -l <path>                      Peer list file (default: demos_peerlist.json)
     -r <runtime>                   Force runtime (bun only - node deprecated)
@@ -451,7 +456,7 @@ EXAMPLES:
     ./run -p 53551 -d 5333         # Run on custom ports
     ./run -c                       # Clean start (fresh database)
     ./run -v                       # Verbose output for troubleshooting
-    ./run -n                       # Skip git update (for development)
+    ./run -U                       # Pull origin first (development only)
 ```
 
 #### Custom Ports (Optional)

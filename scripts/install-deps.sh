@@ -16,8 +16,7 @@ command -v cargo >/dev/null 2>&1 || {
 	exit 1
 }
 
-bun install
-bun pm trust --all || true
+bun install --frozen-lockfile
 
 # Install wstcp only if not already present
 if ! command -v wstcp >/dev/null 2>&1; then

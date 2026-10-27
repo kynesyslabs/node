@@ -1,0 +1,163 @@
+name: Release
+
+# Builds a tagged release twice from clean checkouts and publishes the image
+# only when both builds produce the same manifest digest. The tag must carry
+# a signature from a key listed in .github/allowed_signers as it stands on
+# the protected release branch, and the tagged commit must be reachable from
+# that branch. The signer list is never read from the tag itself, so pushing
+# a tag cannot grant signing rights. Every job checks out the exact commit
+# the signature was verified on, so a tag moved while the workflow runs
+# cannot change what gets built or published.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/kynesyslabs/node
+  # Branch protection on this branch is what the release trust rests on:
+  # it supplies the signer list and bounds which commits may be released.
+  RELEASE_BRANCH: stabilisation
+
+jobs:
+  verify-tag:
+    name: Tag signature
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.verify.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Verify the signed, annotated tag against the protected signers
+        id: verify
+        run: |
+          # checkout may have flattened the tag; fetch the real tag object
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git fetch --no-tags origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+          [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ] || {
+            echo "::error::$GITHUB_REF_NAME is not an annotated tag; sign it with git tag -s"; exit 1; }
+          sha=$(git rev-list -n 1 "$GITHUB_REF_NAME")
+          # a tag on an unmerged branch has not been through review
+          git merge-base --is-ancestor "$sha" "origin/$RELEASE_BRANCH" || {
+            echo "::error::$sha is not on $RELEASE_BRANCH; merge it before tagging"; exit 1; }
+          # the signer list comes from the protected branch, not from the tag
+          signers="$RUNNER_TEMP/allowed_signers"
+          git show "origin/$RELEASE_BRANCH:.github/allowed_signers" > "$signers" || {
+            echo "::error::.github/allowed_signers is missing on $RELEASE_BRANCH"; exit 1; }
+          git config gpg.ssh.allowedSignersFile "$signers"
+          git verify-tag "$GITHUB_REF_NAME"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.run }}
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        run: [a, b]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.verify-tag.outputs.sha }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build inputs from the commit, not from the clock
+        run: |
+          [ "$(git rev-parse HEAD)" = "${{ needs.verify-tag.outputs.sha }}" ] || { echo "::error::checkout is not the verified commit"; exit 1; }
+          {
+            echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)"
+            echo "GIT_COMMIT=$(git rev-parse HEAD)"
+            echo "GIT_COMMIT_MESSAGE=$(git log -1 --format=%s)"
+            echo "BUILT_AT=$(TZ=UTC git log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd)"
+          } >> "$GITHUB_ENV"
+      - name: Build without cache, file timestamps rewritten to the commit date
+        run: |
+          docker buildx build \
+            --no-cache --provenance=false --sbom=false \
+            --platform linux/amd64 \
+            --build-arg SOURCE_DATE_EPOCH \
+            --build-arg GIT_COMMIT \
+            --build-arg "GIT_BRANCH=$GITHUB_REF_NAME" \
+            --build-arg GIT_COMMIT_MESSAGE \
+            --build-arg GIT_DIRTY=false \
+            --build-arg BUILT_AT \
+            --output type=oci,dest=image.tar,rewrite-timestamp=true \
+            .
+          tar -xOf image.tar index.json | jq -r '.manifests[0].digest' | tee digest.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digest-${{ matrix.run }}
+          path: digest.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.run == 'a'
+        with:
+          name: image
+          path: image.tar
+          compression-level: 0
+
+  verify-build:
+    name: Both builds match
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.compare.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: digest-*
+      - id: compare
+        run: |
+          a=$(cat digest-a/digest.txt); b=$(cat digest-b/digest.txt)
+          echo "build a: $a"; echo "build b: $b"
+          [ "$a" = "$b" ] || { echo "::error::the two builds differ; the release is not reproducible"; exit 1; }
+          echo "digest=$a" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish image and checksums
+    needs: [verify-tag, verify-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.verify-tag.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: image
+      - name: Install skopeo
+        run: sudo apt-get update -q && sudo apt-get install -y -q skopeo
+      - name: Push the verified image by digest
+        env:
+          EXPECTED: ${{ needs.verify-build.outputs.digest }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [ "$(git rev-parse HEAD)" = "${{ needs.verify-tag.outputs.sha }}" ] || { echo "::error::checkout is not the verified commit"; exit 1; }
+          printf '%s' "$TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          skopeo copy --preserve-digests --digestfile pushed.txt \
+            oci-archive:image.tar "docker://$IMAGE:$GITHUB_REF_NAME"
+          pushed=$(cat pushed.txt)
+          [ "$pushed" = "$EXPECTED" ] || { echo "::error::pushed digest $pushed differs from the verified $EXPECTED"; exit 1; }
+      - name: Source archive and checksums
+        env:
+          DIGEST: ${{ needs.verify-build.outputs.digest }}
+        run: |
+          git archive --format=tar --prefix="node-$GITHUB_REF_NAME/" HEAD > "node-$GITHUB_REF_NAME-src.tar"
+          {
+            echo "tag: $GITHUB_REF_NAME"
+            echo "commit: $(git rev-parse HEAD)"
+            echo "image: $IMAGE:$GITHUB_REF_NAME@$DIGEST"
+            echo "source: $(sha256sum "node-$GITHUB_REF_NAME-src.tar")"
+          } | tee checksums.txt
+      - name: Draft the GitHub release with the checksums attached
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+            --title "$GITHUB_REF_NAME" --notes-file checksums.txt \
+            checksums.txt "node-$GITHUB_REF_NAME-src.tar"
