@@ -42,13 +42,14 @@ export const handleProposeBlockHash: OmniHandler<Buffer> = async ({
         const { default: manageConsensusRoutines } =
             await import("../../../network/manageConsensusRoutines")
 
-        // Convert binary request to HTTP-style payload
+        // The proposer is whoever signed this message; the field in the
+        // request body is caller-supplied and not trusted.
         const httpPayload = {
             method: "proposeBlockHash" as const,
             params: [
                 request.blockHash,
                 { signatures: request.validationData },
-                request.proposer,
+                context.peerIdentity,
             ],
         }
 
