@@ -39,6 +39,11 @@ import { OS, PEER, SENDER, VICTIM, chainIs, demos, handMade, onTheWire, viaConfi
 const identities = new Identities()
 const SUDO = "0x" + "5d".repeat(32)
 
+/** What block 0 committed, as the node holds it after boot. */
+function pinAwardSigner(pubkey: string | null) {
+    ;(getSharedState as any)._genesisSudoPubkey = pubkey
+}
+
 const storageProgram = StorageProgram.createStorageProgram(SENDER, "probe", { a: 1 }, "json", undefined, { nonce: 1 })
 const storageAddress = storageProgram.storageAddress
 
@@ -224,11 +229,12 @@ describe("an amount is judged in the shape apply will use", () => {
         expect((await verifyEditsAtApply(tx)).ok).toBe(false)
     })
 
-    it("refuses the same on a native transaction at apply", async () => {
+    it("refuses the same on a native transaction, at admission and at apply", async () => {
         chainIs(true)
         const tx = await wire("native")
         const gas = edits(tx).filter(e => e.type === "balance" && e.operation === "remove")[1]
         gas.amount = 1
+        expect((await verifyAdmissionEdits(tx)).ok).toBe(false)
         expect((await verifyEditsAtApply(tx)).ok).toBe(false)
     })
 
@@ -397,7 +403,8 @@ describe("the award transaction", () => {
         }) as unknown as Transaction
 
     beforeEach(() => {
-        ;(getSharedState as any).SUDO_PUBKEY = SUDO
+        pinAwardSigner(SUDO)
+        ;(getSharedState as any).SUDO_PUBKEY = null
     })
 
     it("is accepted from the SUDO key with exactly the credits its data implies", async () => {
@@ -416,11 +423,29 @@ describe("the award transaction", () => {
         expect((await verifyEditsAtApply(tx)).ok).toBe(false)
     })
 
-    it("is refused when no SUDO key is configured", async () => {
-        ;(getSharedState as any).SUDO_PUBKEY = null
+    it("is refused when genesis names no award signer", async () => {
+        pinAwardSigner(null)
         expect((await verifyAdmissionEdits(award())).ok).toBe(false)
-        ;(getSharedState as any).SUDO_PUBKEY = ""
         expect((await verifyEditsAtApply(award())).ok).toBe(false)
+    })
+
+    it("is decided by genesis alone, whatever the node's own SUDO_PUBKEY says", async () => {
+        // A node configured with the signer's key still refuses when genesis names no signer.
+        pinAwardSigner(null)
+        ;(getSharedState as any).SUDO_PUBKEY = SUDO
+        expect((await verifyEditsAtApply(award())).ok).toBe(false)
+
+        // A node configured with another key still accepts what genesis allows.
+        pinAwardSigner(SUDO)
+        for (const configured of [null, "", SENDER, VICTIM]) {
+            ;(getSharedState as any).SUDO_PUBKEY = configured
+            expect((await verifyEditsAtApply(award())).ok).toBe(true)
+            expect((await verifyAdmissionEdits(award())).ok).toBe(true)
+        }
+
+        // And a transaction signed by the configured key, but not by genesis's, is refused.
+        ;(getSharedState as any).SUDO_PUBKEY = SENDER
+        expect((await verifyEditsAtApply(award({ from: SENDER, from_ed25519_address: SENDER }))).ok).toBe(false)
     })
 
     it("is refused with a credit its data does not imply", async () => {
