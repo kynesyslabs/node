@@ -322,7 +322,7 @@ export async function ensureWindowChecked(tip: number): Promise<void> {
             getSharedState.forkConfig as unknown as ForkConfigLike,
         )
         if (!plan.inWindow || windowCheckedFor === plan.nearest) return
-        if (running && currentRun) await currentRun.catch(() => undefined)
+        if (running && currentRun !== null) await currentRun.catch(() => undefined)
         if (windowCheckedFor === plan.nearest || running) return
         await runRounds(tip)
     } catch {
