@@ -55,8 +55,17 @@ function awardTx(from: string) {
     }
 }
 
+// The shared state serves the key from its prototype; an own property would
+// outlive this file's tests and be read by every later one.
+const ownKey = Object.getOwnPropertyDescriptor(getSharedState, "publicKeyHex")
+
 function nodeSignsWith(key: string) {
     Object.defineProperty(getSharedState, "publicKeyHex", { get: () => key, configurable: true })
+}
+
+function restoreNodeKey() {
+    if (ownKey) Object.defineProperty(getSharedState, "publicKeyHex", ownKey)
+    else delete (getSharedState as any).publicKeyHex
 }
 
 beforeEach(() => {
@@ -79,6 +88,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+    restoreNodeKey()
     getSharedState.forkConfig = savedForks
     ;(getSharedState as any)._genesisSudoPubkey = null
     ;(GCR as any).createAwardPointsTransaction = original.create

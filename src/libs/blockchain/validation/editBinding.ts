@@ -46,7 +46,11 @@ import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
-import { verifyGcrEditsMatch, verifyNoUnexplainedValueEdits } from "./verifyGcrEdits"
+import {
+    canonical,
+    verifyGcrEditsMatch,
+    verifyNoUnexplainedValueEdits,
+} from "./verifyGcrEdits"
 
 export interface EditVerdict {
     ok: boolean
@@ -73,22 +77,6 @@ const EDIT_FREE_TYPES = new Set<string>(["l2psBatch", "genesis"])
  * edits instead and is compared like any other type.
  */
 const EDIT_FREE_OR_BOUND_TYPES = new Set<string>(["instantMessaging"])
-
-/** JSON with object keys in code-unit order: key order is not part of an edit's meaning. */
-function canonical(value: unknown): string {
-    if (Array.isArray(value)) {
-        return `[${value.map(v => canonical(v === undefined ? null : v)).join(",")}]`
-    }
-    if (value !== null && typeof value === "object") {
-        const entries = Object.entries(value as Record<string, unknown>)
-            .filter(([, v]) => v !== undefined)
-            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        return `{${entries
-            .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
-            .join(",")}}`
-    }
-    return JSON.stringify(value) ?? "null"
-}
 
 /** The txhash is stamped on an edit when it is applied, so it is not part of what was signed. */
 function blankTxhash(edits: GCREdit[]): GCREdit[] {
@@ -384,6 +372,25 @@ export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict
             : refuse(
                   `value edits with no counterpart in the regenerated set (${unexplained.join(", ")})`,
               )
+    } catch (e) {
+        return refuse(
+            `gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,
+        )
+    }
+}
+
+/**
+ * The check a transaction submitted over RPC passes before this node reports
+ * it accepted or queues it, so the node never accepts what its peers and the
+ * apply step refuse.
+ *
+ * Inactive: nothing is checked here, because RPC intake keeps the comparison
+ * it always made. `tx` must carry the edits as the sender signed them.
+ */
+export async function verifyRpcEdits(tx: Transaction): Promise<EditVerdict> {
+    try {
+        const { active } = await editBindingState()
+        return active ? await verifyAdmissionEdits(tx) : OK
     } catch (e) {
         return refuse(
             `gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,

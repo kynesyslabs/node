@@ -6,7 +6,7 @@
  * the signature covers the edits, but the peer signs whatever it ships.
  */
 
-import { beforeEach, describe, expect, it, mock } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
 
 let tip = 100
 mock.module("src/libs/blockchain/chain", () => ({
@@ -612,7 +612,14 @@ describe("the editBinding fork gates admission as well as apply", () => {
 })
 
 describe("who may create an award", () => {
+    const ownKey = Object.getOwnPropertyDescriptor(getSharedState, "publicKeyHex")
     const setNodeKey = (key: string) => Object.defineProperty(getSharedState, "publicKeyHex", { get: () => key, configurable: true })
+
+    // An own property would outlive these tests and be read by every later one.
+    afterEach(() => {
+        if (ownKey) Object.defineProperty(getSharedState, "publicKeyHex", ownKey)
+        else delete (getSharedState as any).publicKeyHex
+    })
 
     it("is unconstrained while the fork is dormant", async () => {
         chainIs(true, null)

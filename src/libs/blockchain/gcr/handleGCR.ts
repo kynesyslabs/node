@@ -590,8 +590,12 @@ export default class HandleGCR {
                 "gasFeeSeparation",
                 getSharedState.lastBlockNumber ?? 0,
             )
+            // Once editBinding binds the set at admission and in the apply
+            // pre-pass, this check only has to agree with that comparison, which
+            // ignores the order of an edit's keys.
             const { match } = await verifyGcrEditsMatch(tx, {
                 expectFeeEdits,
+                keyOrderInsensitive: (await editBindingState()).active,
             })
             if (!match) {
                 log.error(

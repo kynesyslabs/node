@@ -241,6 +241,52 @@ describe("applyTransactions behind the editBinding fork", () => {
     })
 })
 
+describe("the shipped-edit check inside apply, under nonceEnforcement", () => {
+    const reordered = async () => {
+        const tx = onTheWire(await DemosTransactions.pay(PEER, 3n * OS, demos))
+        tx.content.gcr_edits = edits(tx).map(e => {
+            const swapped: Record<string, unknown> = {}
+            for (const k of Object.keys(e).reverse()) swapped[k] = e[k]
+            return swapped
+        }) as never
+        return tx
+    }
+
+    it("applies a native transfer whose edit keys were written in another order once edits are bound", async () => {
+        forks(0)
+        getSharedState.forkConfig.nonceEnforcement.activationHeight = 0
+        const tx = await reordered()
+
+        const out = await HandleGCR.applyTransactions([tx], false)
+
+        expect(out.failedTxs).toEqual([])
+        expect(balanceOf(PEER)).toBe(3n * OS)
+    })
+
+    it("keeps refusing it before the fork, as before", async () => {
+        forks(null)
+        getSharedState.forkConfig.nonceEnforcement.activationHeight = 0
+        const tx = await reordered()
+
+        const out = await HandleGCR.applyTransactions([tx], false)
+
+        expect(out.failedTxs).toEqual([tx.hash])
+        expect(balanceOf(PEER)).toBe(0n)
+    })
+
+    it("still refuses a forged native transfer under both forks", async () => {
+        forks(0)
+        getSharedState.forkConfig.nonceEnforcement.activationHeight = 0
+        const tx = await reordered()
+        edits(tx).push({ type: "balance", operation: "add", account: VICTIM, amount: String(1_000n * OS), isRollback: false, txhash: "" })
+
+        const out = await HandleGCR.applyTransactions([tx], false)
+
+        expect(out.failedTxs).toEqual([tx.hash])
+        expect(balanceOf(VICTIM)).toBe(5n * OS)
+    })
+})
+
 describe("the editBinding fork height", () => {
     it("binds from the block applied on tip H, which is block H + 1, judged from the chain tip", async () => {
         forks(150)

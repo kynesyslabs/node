@@ -3,6 +3,7 @@ import Mempool from "src/libs/blockchain/mempool"
 import { isWithinDeepWindow } from "src/libs/blockchain/referenceBlockWindow"
 import GossipManager from "src/libs/gossip/GossipManager"
 import { estimateNextConfirmationBlock } from "src/libs/consensus/confirmationEstimate"
+import { verifyRpcEdits } from "src/libs/blockchain/validation/editBinding"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
@@ -96,6 +97,12 @@ export async function submitValidatedTx(
     validityData: ValidityData,
     transaction: Transaction = validityData.data.transaction,
 ): Promise<TxSubmissionResult> {
+    const edits = await verifyRpcEdits(transaction)
+    if (!edits.ok) {
+        log.error(`[TX SUBMIT] refusing ${transaction.hash}: ${edits.reason}`)
+        return { ok: false, error: edits.reason }
+    }
+
     const { error } = await Mempool.addTransactionWithLock({
         ...transaction,
         reference_block: validityData.data.reference_block,
