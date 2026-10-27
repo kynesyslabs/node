@@ -25,7 +25,7 @@ docker buildx imagetools inspect oven/bun:1.3.14-debian | grep Digest
 ```
 
 The repo policy is enforced by `tests/release/reproducibleRelease.test.ts`
-(`bunx jest tests/release/reproducibleRelease.test.ts`).
+(`bun run test:release`, which uses the jest pinned in the lockfile).
 
 ## Signing keys
 
