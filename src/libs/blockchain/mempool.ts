@@ -13,6 +13,7 @@ import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
 import { verifyAdmissionEdits } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
+import { checkIdentityAdmission } from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
@@ -399,7 +400,7 @@ export default class Mempool {
      * Single-transaction ingest for the gossip path. The envelope was
      * already verified by the topic validator (staked publisher, envelope
      * signature); this runs the per-tx admission checks shared with RPC
-     * intake, the forged-edit guard for native txs, and then the normal
+     * intake, the forged-edit guard, the identity proof checks, and then the normal
      * `addTransaction` nonce and persistence rules — under the mempool
      * lock, since gossip delivery is concurrent with consensus.
      *
@@ -429,6 +430,11 @@ export default class Mempool {
         const edits = await verifyAdmissionEdits(tx)
         if (!edits.ok) {
             return { accepted: false, reason: edits.reason }
+        }
+
+        const identity = await checkIdentityAdmission(tx)
+        if (identity.ok === false) {
+            return { accepted: false, reason: identity.reason }
         }
 
         const { confirmationBlock, error } = await this.addTransactionWithLock(
@@ -871,6 +877,27 @@ export default class Mempool {
             }
             validTransactions.length = 0
             validTransactions.push(...editVerifiedTransactions)
+        }
+
+        // Proofs are checked concurrently so that provider latency is paid
+        // once per merge rather than once per identity transaction.
+        {
+            const verdicts = await Promise.all(
+                validTransactions.map(tx => checkIdentityAdmission(tx)),
+            )
+            const proofChecked: Transaction[] = []
+            verdicts.forEach((verdict, i) => {
+                const tx = validTransactions[i]
+                if (verdict.ok === false) {
+                    log.error(
+                        `[Mempool.receive] Rejecting tx ${tx.hash}: ${verdict.reason}`,
+                    )
+                    return
+                }
+                proofChecked.push(tx)
+            })
+            validTransactions.length = 0
+            validTransactions.push(...proofChecked)
         }
 
         log.only(

@@ -95,8 +95,27 @@ export type SignatureDomainConfig = BaseForkConfig
  * Pre-fork: both shapes verify, so clients can migrate without a flag day.
  * Post-fork: only the bound shape, and a proof lifted from someone else's
  * post stops verifying.
+ *
+ * The same height also switches block application to compare web2 account
+ * ids in canonical form (the number 42 and the string "42" as one account)
+ * in its duplicate, first-connection and points checks; that part is judged
+ * at the tip like the other apply-time gates.
  */
 export type Web2ProofBindingConfig = BaseForkConfig
+
+/**
+ * `xmProofBinding` fork: a cross-chain (xm) identity proof must sign
+ * `demos-xm:v1:<chain>:<targetAddress>:<sender>:<issuedAt>`, issued within the
+ * last ten minutes, instead of any text the client picks (see
+ * `libs/identity/xmProof.ts`).
+ *
+ * Pre-fork: any signed text verifies, so wallets and SDKs can migrate without
+ * a flag day. Post-fork: an old signature by the wallet (a login message,
+ * another dapp's challenge) stops being a valid proof, and a proof names the
+ * Demos account it was made for. Like `web2ProofBinding` it is an admission
+ * policy, judged for the block the proof would land in.
+ */
+export type XmProofBindingConfig = BaseForkConfig
 
 /**
  * `tlsnProofEnforcement` fork: refuse TLSNotary identity claims the node
@@ -177,6 +196,7 @@ export type ForkConfig =
     | NonceEnforcementConfig
     | SignatureDomainConfig
     | Web2ProofBindingConfig
+    | XmProofBindingConfig
     | TlsnProofEnforcementConfig
     | AtomicWorkConfig
     | EditBindingConfig
@@ -192,6 +212,7 @@ export type ForkName =
     | "nonceEnforcement"
     | "signatureDomain"
     | "web2ProofBinding"
+    | "xmProofBinding"
     | "tlsnProofEnforcement"
     | "atomicWork"
     | "editBinding"
@@ -206,6 +227,7 @@ export interface ForkConfigByName {
     nonceEnforcement: NonceEnforcementConfig
     signatureDomain: SignatureDomainConfig
     web2ProofBinding: Web2ProofBindingConfig
+    xmProofBinding: XmProofBindingConfig
     tlsnProofEnforcement: TlsnProofEnforcementConfig
     atomicWork: AtomicWorkConfig
     editBinding: EditBindingConfig
@@ -293,6 +315,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Web2 identity proofs sign demos-web2:v1:<context>:<username>:<sender>, " +
             "so a published proof cannot be reused to claim another handle.",
     },
+    xmProofBinding: {
+        // Inactive by default: wallets and SDKs have to sign the bound
+        // message before proofs signed the old way stop verifying.
+        activationHeight: null,
+        description:
+            "Cross-chain identity proofs sign demos-xm:v1:<chain>:<address>:<sender>:<issuedAt>, " +
+            "so an old signature by the wallet cannot be replayed as a proof.",
+    },
     signatureDomain: {
         // Inactive by default even on fresh chains: every signer in the
         // ecosystem (node, SDK, wallet) has to ship the new preimage before a
@@ -350,6 +380,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         nonceEnforcement: { ...DEFAULT_FORK_CONFIG.nonceEnforcement },
         signatureDomain: { ...DEFAULT_FORK_CONFIG.signatureDomain },
         web2ProofBinding: { ...DEFAULT_FORK_CONFIG.web2ProofBinding },
+        xmProofBinding: { ...DEFAULT_FORK_CONFIG.xmProofBinding },
         tlsnProofEnforcement: { ...DEFAULT_FORK_CONFIG.tlsnProofEnforcement },
         atomicWork: { ...DEFAULT_FORK_CONFIG.atomicWork },
         editBinding: { ...DEFAULT_FORK_CONFIG.editBinding },

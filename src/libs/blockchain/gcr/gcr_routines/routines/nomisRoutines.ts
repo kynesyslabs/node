@@ -20,11 +20,17 @@ export async function applyNomisIdentityUpsert(
         score,
         scoreType,
         mintedScore,
-        metadata,
         lastSyncedAt,
     } = editOperation.data
 
-    if (!chain || !subchain || !address || !score) {
+    if (!chain || !subchain || !address) {
+        return { success: false, message: "Invalid Nomis identity payload" }
+    }
+
+    // Every node applies this edit, including nodes replaying old blocks, so
+    // the stored record has to be a function of the signed payload alone. The
+    // score was checked against Nomis when the transaction was accepted.
+    if (typeof score !== "number" || !Number.isFinite(score) || score <= 0) {
         return { success: false, message: "Invalid Nomis identity payload" }
     }
 
@@ -46,10 +52,13 @@ export async function applyNomisIdentityUpsert(
     const record: SavedNomisIdentity = {
         address: normalizedAddress,
         score,
-        scoreType,
-        mintedScore: mintedScore ?? null,
-        lastSyncedAt: lastSyncedAt || new Date().toISOString(),
-        metadata,
+        scoreType: Number.isInteger(scoreType) ? scoreType : 0,
+        mintedScore:
+            typeof mintedScore === "number" && Number.isFinite(mintedScore)
+                ? mintedScore
+                : null,
+        // Client metadata is not checked against Nomis, so it is not stored.
+        lastSyncedAt: typeof lastSyncedAt === "string" ? lastSyncedAt : "",
     }
 
     filtered.push(record)

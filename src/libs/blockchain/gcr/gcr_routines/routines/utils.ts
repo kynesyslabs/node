@@ -2,6 +2,8 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { Repository } from "typeorm"
 import log from "@/utilities/logger"
 import { dataSource } from "@/model/datasource"
+import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
+import { web2CanonicalIdsActiveAtApply } from "@/forks/web2ProofBindingGate"
 
 /**
  * Safe wrapper for GCR repository saves.
@@ -67,7 +69,13 @@ export async function isFirstConnection(
 
         const result = await gcrMainRepository
             .createQueryBuilder("gcr")
-            .where(queryTemplate, { userId: data.userId })
+            .where(queryTemplate, {
+                // Runs during block application, so the canonical key only
+                // applies from the fork height.
+                userId: web2CanonicalIdsActiveAtApply()
+                    ? web2UserIdLookupKey(data.userId)
+                    : data.userId,
+            })
             .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
             .getOne()
 

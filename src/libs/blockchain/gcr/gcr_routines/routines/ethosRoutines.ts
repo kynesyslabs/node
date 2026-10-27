@@ -6,7 +6,6 @@ import {
     EthosWalletIdentity,
     SavedEthosIdentity,
 } from "@/model/entities/types/IdentityTypes"
-import { EthosApiClient } from "@/libs/identity/tools/ethos"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "../IncentiveManager"
 import { safeGCRSave, isFirstConnection, normalizeEthosAddress } from "./utils"
@@ -25,26 +24,18 @@ export async function applyEthosIdentityUpsert(
         }
     }
 
-    const normalizedAddress = normalizeEthosAddress(chain, address)
-
-    // Fetch authoritative score from Ethos API server-side
-    const ethosClient = EthosApiClient.getInstance()
-    let serverScore: number
-    let serverProfileId: number | undefined
-    let serverMetadata: { displayName?: string; username?: string } | undefined
-
-    try {
-        const ethosData = await ethosClient.getScore(normalizedAddress)
-        serverScore = ethosData.score
-        serverProfileId = ethosData.profileId
-        serverMetadata = {
-            displayName: ethosData.displayName,
-            username: ethosData.username,
+    // Every node applies this edit, including nodes replaying old blocks, so
+    // the stored record has to be a function of the signed payload alone. The
+    // score was checked against Ethos when the transaction was accepted.
+    const { score, profileId, lastSyncedAt, metadata } = editOperation.data
+    if (typeof score !== "number" || !Number.isFinite(score) || score < 0) {
+        return {
+            success: false,
+            message: "Invalid Ethos identity payload: missing score",
         }
-    } catch (error) {
-        log.error("[GCRIdentityRoutines] Failed to fetch Ethos score from API")
-        return { success: false, message: "Failed to fetch Ethos score" }
     }
+
+    const normalizedAddress = normalizeEthosAddress(chain, address)
 
     accountGCR.identities.ethos = accountGCR.identities.ethos || {}
     accountGCR.identities.ethos[chain] =
@@ -61,10 +52,26 @@ export async function applyEthosIdentityUpsert(
 
     const record: SavedEthosIdentity = {
         address: normalizedAddress,
-        score: serverScore,
-        profileId: serverProfileId,
-        lastSyncedAt: new Date().toISOString(),
-        metadata: serverMetadata,
+        score,
+        profileId:
+            typeof profileId === "number" && Number.isFinite(profileId)
+                ? profileId
+                : undefined,
+        lastSyncedAt: typeof lastSyncedAt === "string" ? lastSyncedAt : "",
+        // Only the fields compared with Ethos at acceptance are kept.
+        metadata:
+            metadata && typeof metadata === "object"
+                ? {
+                      displayName:
+                          typeof metadata.displayName === "string"
+                              ? metadata.displayName
+                              : undefined,
+                      username:
+                          typeof metadata.username === "string"
+                              ? metadata.username
+                              : undefined,
+                  }
+                : undefined,
     }
 
     filtered.push(record)
@@ -82,14 +89,14 @@ export async function applyEthosIdentityUpsert(
         )
 
         log.info(
-            `[EthosIdentity] LINKED: account=${accountGCR.pubkey.substring(0, 16)}..., chain=${chain}, subchain=${subchain}, score=${serverScore}, isFirstConnection=${isFirst}`,
+            `[EthosIdentity] LINKED: account=${accountGCR.pubkey.substring(0, 16)}..., chain=${chain}, subchain=${subchain}, score=${score}, isFirstConnection=${isFirst}`,
         )
 
         if (isFirst) {
             await IncentiveManager.ethosLinked(
                 accountGCR.pubkey,
                 chain,
-                serverScore,
+                score,
                 editOperation.referralCode,
             )
         }

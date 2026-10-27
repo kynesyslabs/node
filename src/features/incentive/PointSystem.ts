@@ -11,6 +11,19 @@ import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentity
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
+import { sameWeb2UserId } from "@/libs/identity/web2UserId"
+import { web2CanonicalIdsActiveAtApply } from "@/forks/web2ProofBindingGate"
+
+/**
+ * Points are awarded while a block is applied, so the canonical id comparison
+ * only applies from the fork height; before it the stored value must match
+ * exactly, as it always did.
+ */
+export function sameLinkedUserId(stored: unknown, claimed: unknown): boolean {
+    return web2CanonicalIdsActiveAtApply()
+        ? sameWeb2UserId(stored, claimed)
+        : stored === claimed
+}
 
 const pointValues = {
     LINK_WEB3_WALLET: 0.5,
@@ -398,7 +411,7 @@ export class PointSystem {
             const twitter = Twitter.getInstance()
             const twitterUser = (account.identities.web2["twitter"] || []).find(
                 (twitterIdentity: Web2GCRData["data"]) =>
-                    twitterIdentity.userId === twitterUserId,
+                    sameLinkedUserId(twitterIdentity.userId, twitterUserId),
             )
 
             if (twitterUser && twitterUser.username) {
@@ -632,7 +645,7 @@ export class PointSystem {
             // Verify the GitHub account is actually linked to this user
             const githubIdentities = account.identities.web2?.github || []
             const isOwner = githubIdentities.some(
-                (gh: any) => gh.userId === githubUserId,
+                (gh: any) => sameLinkedUserId(gh.userId, githubUserId),
             )
 
             if (!isOwner) {

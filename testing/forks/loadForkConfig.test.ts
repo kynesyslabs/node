@@ -118,6 +118,7 @@ describe("loadForkConfigFromGenesis", () => {
         expect(defaults.signatureDomain.activationHeight).toBeNull()
         expect(defaults.web2ProofBinding.activationHeight).toBeNull()
         expect(defaults.editBinding.activationHeight).toBeNull()
+        expect(defaults.xmProofBinding.activationHeight).toBeNull()
     })
 
     it("hydrates osDenomination activation height when present", () => {

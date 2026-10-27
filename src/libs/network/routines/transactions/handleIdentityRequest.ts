@@ -95,15 +95,28 @@ export default async function handleIdentityRequest(
                 payload.payload as PqcIdentityAssignPayload["payload"],
                 sender,
             )
-        case "web2_identity_assign":
+        case "web2_identity_assign": {
+            const web2Payload = payload.payload as Web2CoreTargetIdentityPayload
+            if (
+                ["twitter", "github", "discord"].includes(web2Payload.context) &&
+                (await IdentityManager.isWeb2AccountLinked(
+                    sender,
+                    web2Payload.context,
+                    web2Payload.userId,
+                ))
+            ) {
+                return {
+                    success: false,
+                    message: `${web2Payload.context} account is already linked to this account`,
+                }
+            }
             // NOTE: Sender here should be the ed25519 address coming from the request headers
-            return await verifyWeb2Proof(
-                payload.payload as Web2CoreTargetIdentityPayload,
-                sender,
-            )
+            return await verifyWeb2Proof(web2Payload, sender)
+        }
         case "nomis_identity_assign":
             return await IdentityManager.verifyNomisPayload(
                 payload.payload as NomisWalletIdentity,
+                sender,
             )
         case "humanpassport_identity_assign": {
             const hpPayload = payload.payload as HumanPassportIdentityData
@@ -115,6 +128,7 @@ export default async function handleIdentityRequest(
         case "ethos_identity_assign":
             return await IdentityManager.verifyEthosPayload(
                 payload.payload as EthosWalletIdentity,
+                sender,
             )
         case "tlsn_identity_assign":
             // TLSNotary identity verification - verify proof structure

@@ -12,6 +12,7 @@ import type {
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
+    XmProofBindingConfig,
 } from "./forkConfig"
 
 // REVIEW: P2 + DEM-665 — genesis loader for fork heights + per-fork payloads.
@@ -274,6 +275,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.web2ProofBinding =
                 config as Web2ProofBindingConfig
             return
+        case "xmProofBinding":
+            getSharedState.forkConfig.xmProofBinding =
+                config as XmProofBindingConfig
+            return
         case "tlsnProofEnforcement":
             getSharedState.forkConfig.tlsnProofEnforcement =
                 config as TlsnProofEnforcementConfig
@@ -399,6 +404,9 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
         case "web2ProofBinding":
             // No payload beyond the base.
             return base as Web2ProofBindingConfig
+        case "xmProofBinding":
+            // No payload beyond the base.
+            return base as XmProofBindingConfig
         case "tlsnProofEnforcement":
             // No payload beyond the base.
             return base as TlsnProofEnforcementConfig

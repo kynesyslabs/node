@@ -7,6 +7,8 @@ import Hashing from "@/libs/crypto/hashing"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "../IncentiveManager"
 import { safeGCRSave, isFirstConnection } from "./utils"
+import { sameWeb2UserId } from "@/libs/identity/web2UserId"
+import { web2CanonicalIdsActiveAtApply } from "@/forks/web2ProofBindingGate"
 
 export async function applyWeb2IdentityAdd(
     editOperation: any,
@@ -17,8 +19,11 @@ export async function applyWeb2IdentityAdd(
     accountGCR.identities.web2[context] =
         accountGCR.identities.web2[context] || []
 
+    const canonicalIds = web2CanonicalIdsActiveAtApply()
     const exists = accountGCR.identities.web2[context].some(
-        (id: Web2GCRData["data"]) => id.userId === data.userId,
+        (id: Web2GCRData["data"]) =>
+            id.userId === data.userId ||
+            (canonicalIds && sameWeb2UserId(id.userId, data.userId)),
     )
 
     if (exists) {

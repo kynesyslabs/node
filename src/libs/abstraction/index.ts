@@ -4,7 +4,7 @@ import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { DiscordProofParser } from "./web2/discord"
 import { DomainProofParser, DOMAIN_PROOF_PATH } from "./web2/domain"
-import { type Web2ProofParser } from "./web2/parsers"
+import { type Web2ProofParser, nonCanonicalClaim } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { Twitter } from "../identity/tools/twitter"
@@ -261,6 +261,14 @@ export async function verifyWeb2Proof(
             }
     }
 
+    const nonCanonical = nonCanonicalClaim(payload.context, {
+        username: payload.username,
+        userId: payload.userId,
+    })
+    if (nonCanonical) {
+        return { success: false, message: nonCanonical }
+    }
+
     // INFO: Check if Twitter account is a bot
     if (payload.context === "twitter") {
         const isBot = await Twitter.getInstance().checkIsBot(
@@ -288,6 +296,7 @@ export async function verifyWeb2Proof(
     try {
         const { message, type, signature } = await instance.readData(
             payload.proof as string,
+            { username: payload.username, userId: payload.userId },
         )
         // Domain proofs (#897 / DEM-767): the signed message is domain-separated
         // and bound to the verified host AND the sender, so a signature can't be

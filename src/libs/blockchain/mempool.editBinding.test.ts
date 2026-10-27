@@ -60,6 +60,12 @@ mock.module("./validation/txAdmission", () => ({
     checkTxAdmissible: async () => ({ ok: true }),
 }))
 
+// Identity proofs are checked by their own admission step; this file covers
+// only the edit binding.
+mock.module("./validation/identityAdmission", () => ({
+    checkIdentityAdmission: async () => ({ ok: true }),
+}))
+
 import { StorageProgram } from "@kynesyslabs/demosdk/storage"
 import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import { Identities } from "@kynesyslabs/demosdk/abstraction"

@@ -27,6 +27,28 @@ import { NomisWalletIdentity, SavedHumanPassportIdentity, EthosWalletIdentity } 
 import { HumanPassportProvider } from "@/libs/identity/tools/humanpassport"
 import { verifyMessage as verifyEvmMessage } from "ethers"
 import TxValidatorPool from "../../validation/txValidatorPool"
+import { NomisApiClient } from "@/libs/identity/tools/nomis"
+import { EthosApiClient } from "@/libs/identity/tools/ethos"
+import {
+    isParsableTimestamp,
+    sameOptionalProviderNumber,
+    sameOptionalString,
+    sameProviderNumber,
+} from "@/libs/identity/scoreBinding"
+import { normalizeEthosAddress, normalizeNomisAddress } from "./routines/utils"
+import { sameWeb2UserId } from "@/libs/identity/web2UserId"
+import { xmProofBindingActiveForPendingBlock } from "@/forks/xmProofBindingGate"
+import {
+    KEY_DERIVED_CHAINS,
+    checkAddressDerivedFromKey,
+    checkXmDisplayAddress,
+    canonicalXmAddress,
+    canonicalWalletAddress,
+    checkXmSignedData,
+    isNearNamedAccount,
+    nearKeyBytes,
+} from "@/libs/identity/xmProof"
+import { verifyNearNamedAccountKey } from "@/libs/identity/nearAccessKey"
 
 function normalizeComparableAddress(address: string | undefined | null): string {
     return (address || "").trim().toLowerCase()
@@ -207,11 +229,100 @@ export default class IdentityManager {
         // Filter out crosschain addresses without activity here!
 
         const chainId = payload.target_identity.chain
+        if (!Object.prototype.hasOwnProperty.call(chains, chainId)) {
+            return {
+                success: false,
+                message: `Unsupported chain: ${chainId}`,
+            }
+        }
+
+        const {
+            signature,
+            publicKey,
+            targetAddress,
+            signedData,
+            displayAddress,
+        } = payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
+
+        // The address is stored under displayAddress when one is sent, so it
+        // has to be the address that was proven.
+        const displayCheck = checkXmDisplayAddress(
+            chainId,
+            targetAddress,
+            displayAddress,
+        )
+        if (displayCheck.ok === false) {
+            return { success: false, message: displayCheck.message }
+        }
+
+        // The edit is built from the signed payload and apply stores
+        // displayAddress (or targetAddress) as it is, lower-cased only for
+        // EVM. Apply cannot rewrite it without changing the state that
+        // replayed blocks produce, so a payload whose stored spelling is not
+        // the canonical one is refused here instead.
+        const canonical = canonicalWalletAddress(chainId, targetAddress)
+        if (!canonical) {
+            return { success: false, message: `Invalid ${chainId} address` }
+        }
+        const subchain = payload.target_identity.subchain
+        if (await this.isXmWalletLinked(sender, chainId, canonical, subchain)) {
+            return {
+                success: false,
+                message: `${chainId} wallet is already linked to this account`,
+            }
+        }
+        const stored = displayAddress || targetAddress
+        const storedForm = payload.target_identity.isEVM
+            ? stored.toLowerCase()
+            : stored
+        if (storedForm !== canonical) {
+            return {
+                success: false,
+                message: `${chainId} address must be sent in its canonical form: ${canonical}`,
+            }
+        }
+
+        // These verifiers check the signature against the key the client
+        // sent; without this the key is not tied to the address at all.
+        if (chainId === "near" && isNearNamedAccount(canonical)) {
+            const key = typeof publicKey === "string" ? nearKeyBytes(publicKey) : null
+            if (!key) {
+                return { success: false, message: "near proof is missing publicKey" }
+            }
+            const keyCheck = await verifyNearNamedAccountKey({
+                network: subchain,
+                accountId: canonical,
+                publicKey: key,
+            })
+            if (keyCheck.ok === false) {
+                return { success: false, message: keyCheck.message }
+            }
+        } else if ((KEY_DERIVED_CHAINS as readonly string[]).includes(chainId)) {
+            const keyCheck = checkAddressDerivedFromKey({
+                chain: chainId,
+                subchain,
+                publicKey,
+                targetAddress,
+            })
+            if (keyCheck.ok === false) {
+                return { success: false, message: keyCheck.message }
+            }
+        }
+
+        if (xmProofBindingActiveForPendingBlock()) {
+            const bound = checkXmSignedData({
+                chain: chainId,
+                targetAddress,
+                sender,
+                signedData,
+            })
+            if (bound.ok === false) {
+                return { success: false, message: bound.message }
+            }
+        }
+
         // @ts-expect-error - This is a workaround to avoid type errors
         const sdk = await chains[chainId].create(null)
-
-        const { signature, publicKey, targetAddress, signedData } =
-            payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
 
         let messageVerified = false
         try {
@@ -306,20 +417,108 @@ export default class IdentityManager {
     }
 
     /**
-     * Verify the payload for a Nomis identity assign payload
+     * Whether `address` is already linked to `sender` through a verified xm
+     * identity. Score identities (Nomis, Ethos, Human Passport) read a public
+     * score for an address; they say nothing about who controls it, so the
+     * wallet-ownership proof is the xm signature the account already made.
+     * EVM and Solana addresses are the same on every subchain, so any subchain
+     * counts unless `subchain` is given. Stored entries are compared in their
+     * canonical form, so one linked before canonical spellings were enforced
+     * still matches.
+     */
+    static async isXmWalletLinked(
+        sender: string,
+        chain: string,
+        address: string,
+        subchain?: string,
+    ): Promise<boolean> {
+        const comparable = (a: string) =>
+            canonicalWalletAddress(chain, a) ?? canonicalXmAddress(chain, a)
+        const xm = (await this.getIdentities(sender, "xm")) || {}
+        const byChain = xm[chain] || {}
+        const lists =
+            subchain === undefined ? Object.values(byChain) : [byChain[subchain]]
+        const wanted = comparable(address)
+        return lists.some(
+            (list: any) =>
+                Array.isArray(list) &&
+                list.some(
+                    (id: { address?: string }) =>
+                        comparable(id?.address ?? "") === wanted,
+                ),
+        )
+    }
+
+    /**
+     * Verify a Nomis identity assign payload before the transaction is
+     * accepted. Apply stores the signed score as is and never asks Nomis, so
+     * this is the only place the score is checked against the provider: the
+     * signed score, scoreType and mintedScore must equal what Nomis reports
+     * for the default model now, and an unreachable Nomis refuses the
+     * transaction.
      *
-     * @param payload - The payload to verify
-     *
-     * @returns {success: boolean, message: string}
+     * @param payload - The signed payload
+     * @param sender - The Demos account the transaction comes from
      */
     static async verifyNomisPayload(
         payload: NomisWalletIdentity,
+        sender: string,
     ): Promise<{ success: boolean; message: string }> {
         if (!payload.chain || !payload.subchain || !payload.address) {
             return {
                 success: false,
                 message:
                     "Invalid Nomis identity payload: missing chain, subchain or address",
+            }
+        }
+
+        if (
+            typeof payload.score !== "number" ||
+            !Number.isFinite(payload.score) ||
+            payload.score <= 0 ||
+            !Number.isInteger(payload.scoreType) ||
+            !isParsableTimestamp(payload.lastSyncedAt)
+        ) {
+            return {
+                success: false,
+                message:
+                    "Invalid Nomis identity payload: score, scoreType and lastSyncedAt are required",
+            }
+        }
+
+        if (!(await this.isXmWalletLinked(sender, payload.chain, payload.address))) {
+            return {
+                success: false,
+                message:
+                    "Nomis wallet is not linked to this account: link it as a cross-chain identity first",
+            }
+        }
+
+        let fetched: Awaited<ReturnType<NomisApiClient["getWalletScore"]>>
+        try {
+            fetched = await NomisApiClient.getInstance().getWalletScore(
+                normalizeNomisAddress(payload.chain, payload.address),
+                { chain: payload.chain },
+            )
+        } catch {
+            return {
+                success: false,
+                message: "Could not confirm the Nomis score with Nomis; try again later",
+            }
+        }
+
+        if (
+            !sameProviderNumber(payload.score, fetched?.score) ||
+            payload.scoreType !== (fetched?.scoreType ?? 0) ||
+            !sameOptionalProviderNumber(
+                payload.mintedScore,
+                fetched?.mintData?.mintedScore,
+            )
+        ) {
+            return {
+                success: false,
+                message:
+                    "Nomis score in the transaction does not match the score Nomis reports; fetch it again",
             }
         }
 
@@ -330,23 +529,78 @@ export default class IdentityManager {
     }
 
     /**
-     * Verify the payload for an Ethos identity assign payload.
-     * NOTE: This only validates required fields (chain, subchain, address).
-     * The score is intentionally NOT validated here - it is fetched server-side
-     * from the Ethos API in applyEthosIdentityUpsert() to prevent score spoofing.
-     * Any client-supplied score in the payload is ignored.
+     * Verify an Ethos identity assign payload before the transaction is
+     * accepted. Apply stores the signed score as is and never asks Ethos, so
+     * this is the only place the score is checked against the provider: the
+     * signed score and profileId (and displayName/username when metadata is
+     * sent) must equal what Ethos reports now, and an unreachable Ethos
+     * refuses the transaction.
      *
-     * @param payload - The payload to verify
-     * @returns {success: boolean, message: string}
+     * @param payload - The signed payload
+     * @param sender - The Demos account the transaction comes from
      */
     static async verifyEthosPayload(
         payload: EthosWalletIdentity,
+        sender: string,
     ): Promise<{ success: boolean; message: string }> {
         if (!payload.chain || !payload.subchain || !payload.address) {
             return {
                 success: false,
                 message:
                     "Invalid Ethos identity payload: missing chain, subchain or address",
+            }
+        }
+
+        if (
+            typeof payload.score !== "number" ||
+            !Number.isFinite(payload.score) ||
+            payload.score < 0 ||
+            !isParsableTimestamp(payload.lastSyncedAt)
+        ) {
+            return {
+                success: false,
+                message:
+                    "Invalid Ethos identity payload: score and lastSyncedAt are required",
+            }
+        }
+
+        if (!(await this.isXmWalletLinked(sender, payload.chain, payload.address))) {
+            return {
+                success: false,
+                message:
+                    "Ethos wallet is not linked to this account: link it as a cross-chain identity first",
+            }
+        }
+
+        let fetched: Awaited<ReturnType<EthosApiClient["getScore"]>>
+        try {
+            fetched = await EthosApiClient.getInstance().getScore(
+                normalizeEthosAddress(payload.chain, payload.address),
+            )
+        } catch {
+            return {
+                success: false,
+                message: "Could not confirm the Ethos score with Ethos; try again later",
+            }
+        }
+
+        const metadataMatches =
+            payload.metadata == null ||
+            (sameOptionalString(
+                payload.metadata.displayName,
+                fetched?.displayName,
+            ) &&
+                sameOptionalString(payload.metadata.username, fetched?.username))
+
+        if (
+            !sameProviderNumber(payload.score, fetched?.score) ||
+            !sameOptionalProviderNumber(payload.profileId, fetched?.profileId) ||
+            !metadataMatches
+        ) {
+            return {
+                success: false,
+                message:
+                    "Ethos score in the transaction does not match the score Ethos reports; fetch it again",
             }
         }
 
@@ -410,6 +664,23 @@ export default class IdentityManager {
         return gcr.identities
     }
 
+    /**
+     * Whether the account already holds this web2 account under any spelling
+     * of its id. Apply compares ids exactly until web2ProofBinding, so a
+     * second link as the number 42 after the string "42" is refused here.
+     */
+    static async isWeb2AccountLinked(
+        sender: string,
+        context: string,
+        userId: unknown,
+    ): Promise<boolean> {
+        const web2 = (await this.getIdentities(sender, "web2")) || {}
+        const linked: Array<{ userId?: unknown }> = web2[context] || []
+        return linked.some(
+            id => id.userId === userId || sameWeb2UserId(id.userId, userId),
+        )
+    }
+
     static async getUDIdentities(address: string) {
         return await this.getIdentities(address, "ud")
     }
@@ -436,11 +707,8 @@ export default class IdentityManager {
         },
         sender: string,
     ): Promise<{ success: boolean; message: string; data?: SavedHumanPassportIdentity }> {
-        // TODO: Implement signature validation to bind payload.address to sender
-        // Currently sender is passed but not validated against payload.address
-        // This would prevent address spoofing by verifying the user signed a message
-        // linking their Human Passport address to their Demos account
-        // Related: payload.signature is accepted but not validated
+        // payload.signature is not consulted: ownership of the address is the
+        // xm identity the sender already proved, checked below.
 
         // TODO: Implement verificationMethod branching
         // Currently both "api" and "onchain" use identical API verification logic
@@ -455,6 +723,14 @@ export default class IdentityManager {
             return {
                 success: false,
                 message: "Invalid Human Passport payload: missing address",
+            }
+        }
+
+        if (!(await this.isXmWalletLinked(sender, "evm", address))) {
+            return {
+                success: false,
+                message:
+                    "Human Passport wallet is not linked to this account: link it as a cross-chain identity first",
             }
         }
 

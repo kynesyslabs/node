@@ -1,14 +1,73 @@
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
+import { canonicalWeb2UserId, sameWeb2UserId } from "@/libs/identity/web2UserId"
 
 /** The well-known path a domain owner hosts to prove control. */
 export const DOMAIN_PROOF_PATH = "/.well-known/demos-cci.txt"
+
+/** The account a web2 identity payload says it is linking. */
+export type Web2Claim = {
+    username?: string
+    userId?: string | number
+}
+
+/**
+ * Handles are compared without regard to case: Twitter, GitHub and Discord
+ * all treat `Alice` and `alice` as one account. No trimming: a padded handle
+ * is not the provider's spelling of any account.
+ */
+export function sameHandle(a: unknown, b: unknown): boolean {
+    return (
+        typeof a === "string" &&
+        typeof b === "string" &&
+        a.length > 0 &&
+        a.toLowerCase() === b.toLowerCase()
+    )
+}
+
+/**
+ * The provider's id and the claimed id name the same account. GitHub returns
+ * a number, the others a string; the SDK passes them on as received.
+ */
+export function sameId(provided: unknown, claimed: unknown): boolean {
+    return sameWeb2UserId(provided, claimed)
+}
+
+/**
+ * Contexts whose claimed id is checked against a provider id here. Telegram
+ * is not among them: its id is compared exactly with the bot-signed
+ * attestation, and that check also runs when a block is applied, where a new
+ * rule would change how existing blocks replay.
+ */
+const NUMERIC_ID_CONTEXTS = new Set(["twitter", "github", "discord"])
+
+/** Contexts whose handle is checked against the provider's account. */
+const HANDLE_CONTEXTS = new Set(["twitter", "github"])
+
+/**
+ * Returns why a web2 claim is malformed, or null when it is well formed.
+ * Checked before any provider call, so a malformed claim costs nothing.
+ */
+export function nonCanonicalClaim(
+    context: string,
+    claim: Web2Claim,
+): string | null {
+    if (NUMERIC_ID_CONTEXTS.has(context) && canonicalWeb2UserId(claim.userId) === null) {
+        return `${context} user id must be a whole number with no spaces or leading zeros`
+    }
+    if (
+        HANDLE_CONTEXTS.has(context) &&
+        !(typeof claim.username === "string" && /^\S+$/.test(claim.username))
+    ) {
+        return `${context} username must not be empty or contain spaces`
+    }
+    return null
+}
 
 export abstract class Web2ProofParser {
     formats = {
         github: [
             "https://gist.github.com",
-            "https://raw.githubusercontent.com",
             "https://gist.githubusercontent.com",
         ],
         twitter: ["https://x.com", "https://twitter.com"],
@@ -96,7 +155,10 @@ export abstract class Web2ProofParser {
     /**
      * Returns the payload from the proof url
      */
-    abstract readData(proofUrl: string): Promise<{
+    abstract readData(
+        proofUrl: string,
+        claim?: Web2Claim,
+    ): Promise<{
         message: string
         type: SigningAlgorithm
         signature: string
