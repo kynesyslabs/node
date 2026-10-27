@@ -294,10 +294,12 @@ export default async function manageConsensusRoutines(
             // TODO
             // compare the block hash with the one we have and reply
             try {
+                // The proposer is the authenticated sender; a peer id carried in
+                // the params is caller-supplied and could name another member.
                 return await manageProposeBlockHash(
                     payload.params[0],
                     payload.params[1] as ValidationData,
-                    payload.params[2] as string,
+                    sender,
                 )
             } catch (error) {
                 log.error(

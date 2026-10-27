@@ -13,6 +13,20 @@ import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
 
+function getIncomingSignatures(
+    validationData: ValidationData,
+): Record<string, string> {
+    const signatures = validationData?.signatures as unknown
+    if (
+        signatures === null ||
+        typeof signatures !== "object" ||
+        Array.isArray(signatures)
+    ) {
+        return {}
+    }
+    return signatures as Record<string, string>
+}
+
 export default async function manageProposeBlockHash(
     blockHash: string,
     validationData: ValidationData,
@@ -46,6 +60,18 @@ export default async function manageProposeBlockHash(
         response.result = 401
         response.response = getSharedState.publicKeyHex
         response.extra = "Validator is not in the shard"
+        return response
+    }
+
+    // A legitimate proposer relays at most one signature per shard member.
+    const incomingSignatures = getIncomingSignatures(validationData)
+    if (Object.keys(incomingSignatures).length > shard.length) {
+        log.error(
+            "[manageProposeBlockHash] Signature map larger than the shard: refusing the block hash",
+        )
+        response.result = 400
+        response.response = getSharedState.publicKeyHex
+        response.extra = "Signature map is larger than the shard"
         return response
     }
 
@@ -92,9 +118,19 @@ export default async function manageProposeBlockHash(
         response.response = getSharedState.publicKeyHex
 
         // INFO: Copy the incoming signatures to our candidate block
+        const memberIdentities = new Set(shard.map(member => member.identity))
         for (const [identity, signature] of Object.entries(
-            validationData["signatures"],
+            incomingSignatures,
         )) {
+            // Block validity counts shard signatures only; anything else would
+            // just bloat the block and cost a verification.
+            if (!memberIdentities.has(identity)) {
+                log.error(
+                    `[manageProposeBlockHash] Dropping signature by ${identity}: not a shard member`,
+                )
+                continue
+            }
+
             let isValid = false
 
             try {
