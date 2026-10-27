@@ -42,8 +42,12 @@ import {
     checkAddressDerivedFromKey,
     checkXmDisplayAddress,
     canonicalXmAddress,
+    canonicalWalletAddress,
     checkXmSignedData,
+    isNearNamedAccount,
+    nearKeyBytes,
 } from "@/libs/identity/xmProof"
+import { verifyNearNamedAccountKey } from "@/libs/identity/nearAccessKey"
 
 function normalizeComparableAddress(address: string | undefined | null): string {
     return (address || "").trim().toLowerCase()
@@ -250,12 +254,52 @@ export default class IdentityManager {
             return { success: false, message: displayCheck.message }
         }
 
+        // The edit is built from the signed payload and apply stores
+        // displayAddress (or targetAddress) as it is, lower-cased only for
+        // EVM. Apply cannot rewrite it without changing the state that
+        // replayed blocks produce, so a payload whose stored spelling is not
+        // the canonical one is refused here instead.
+        const canonical = canonicalWalletAddress(chainId, targetAddress)
+        if (!canonical) {
+            return { success: false, message: `Invalid ${chainId} address` }
+        }
+        const subchain = payload.target_identity.subchain
+        if (await this.isXmWalletLinked(sender, chainId, canonical, subchain)) {
+            return {
+                success: false,
+                message: `${chainId} wallet is already linked to this account`,
+            }
+        }
+        const stored = displayAddress || targetAddress
+        const storedForm = payload.target_identity.isEVM
+            ? stored.toLowerCase()
+            : stored
+        if (storedForm !== canonical) {
+            return {
+                success: false,
+                message: `${chainId} address must be sent in its canonical form: ${canonical}`,
+            }
+        }
+
         // These verifiers check the signature against the key the client
         // sent; without this the key is not tied to the address at all.
-        if ((KEY_DERIVED_CHAINS as readonly string[]).includes(chainId)) {
+        if (chainId === "near" && isNearNamedAccount(canonical)) {
+            const key = typeof publicKey === "string" ? nearKeyBytes(publicKey) : null
+            if (!key) {
+                return { success: false, message: "near proof is missing publicKey" }
+            }
+            const keyCheck = await verifyNearNamedAccountKey({
+                network: subchain,
+                accountId: canonical,
+                publicKey: key,
+            })
+            if (keyCheck.ok === false) {
+                return { success: false, message: keyCheck.message }
+            }
+        } else if ((KEY_DERIVED_CHAINS as readonly string[]).includes(chainId)) {
             const keyCheck = checkAddressDerivedFromKey({
                 chain: chainId,
-                subchain: payload.target_identity.subchain,
+                subchain,
                 publicKey,
                 targetAddress,
             })
@@ -377,22 +421,29 @@ export default class IdentityManager {
      * score for an address; they say nothing about who controls it, so the
      * wallet-ownership proof is the xm signature the account already made.
      * EVM and Solana addresses are the same on every subchain, so any subchain
-     * counts.
+     * counts unless `subchain` is given. Stored entries are compared in their
+     * canonical form, so one linked before canonical spellings were enforced
+     * still matches.
      */
     static async isXmWalletLinked(
         sender: string,
         chain: string,
         address: string,
+        subchain?: string,
     ): Promise<boolean> {
+        const comparable = (a: string) =>
+            canonicalWalletAddress(chain, a) ?? canonicalXmAddress(chain, a)
         const xm = (await this.getIdentities(sender, "xm")) || {}
         const byChain = xm[chain] || {}
-        const wanted = canonicalXmAddress(chain, address)
-        return Object.values(byChain).some(
+        const lists =
+            subchain === undefined ? Object.values(byChain) : [byChain[subchain]]
+        const wanted = comparable(address)
+        return lists.some(
             (list: any) =>
                 Array.isArray(list) &&
                 list.some(
                     (id: { address?: string }) =>
-                        canonicalXmAddress(chain, id?.address ?? "") === wanted,
+                        comparable(id?.address ?? "") === wanted,
                 ),
         )
     }

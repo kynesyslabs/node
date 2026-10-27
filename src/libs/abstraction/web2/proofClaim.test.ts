@@ -127,34 +127,34 @@ describe("web2 proofs are bound to the claimed account", () => {
     describe("github", () => {
         const claim = (proof: string, username: string, userId = "7") =>
             ({ context: "github", username, userId, proof }) as any
-        const gistUrl = "https://gist.github.com/alice/g1"
+        const gistUrl = "https://gist.github.com/alice/a1b2"
 
         it("accepts a gist owned by the claimed account", async () => {
-            gists.g1 = { owner: { login: "alice", id: 7 }, files: { a: { content: PROOF_TEXT } } }
+            gists.a1b2 = { owner: { login: "alice", id: 7 }, files: { a: { filename: "a", content: PROOF_TEXT } } }
             const r = await verifyWeb2Proof(claim(gistUrl, "Alice"), SENDER)
             expect(r.success).toBe(true)
         })
 
         it("refuses a gist whose owner is not the claimed username", async () => {
-            gists.g1 = { owner: { login: "alice", id: 7 }, files: { a: { content: PROOF_TEXT } } }
+            gists.a1b2 = { owner: { login: "alice", id: 7 }, files: { a: { filename: "a", content: PROOF_TEXT } } }
             const r = await verifyWeb2Proof(claim(gistUrl, "victim"), SENDER)
             expect(r.success).toBe(false)
             expect(r.message).toContain("claimed username")
         })
 
         it("refuses a gist whose owner id is not the claimed user id", async () => {
-            gists.g1 = { owner: { login: "alice", id: 7 }, files: { a: { content: PROOF_TEXT } } }
+            gists.a1b2 = { owner: { login: "alice", id: 7 }, files: { a: { filename: "a", content: PROOF_TEXT } } }
             const r = await verifyWeb2Proof(claim(gistUrl, "alice", "8"), SENDER)
             expect(r.success).toBe(false)
             expect(r.message).toContain("user id")
         })
 
         it("takes the raw gist host's owner from the API, not from the URL", async () => {
-            gists.g1 = { owner: { login: "alice", id: 7 }, files: {} }
+            gists.a1b2 = { owner: { login: "alice", id: 7 }, files: { a: { filename: "a", content: PROOF_TEXT } } }
             // The URL names "victim" and the claim says "victim", but the gist
             // is alice's.
             const r = await verifyWeb2Proof(
-                claim("https://gist.githubusercontent.com/victim/g1/raw/proof", "victim"),
+                claim("https://gist.githubusercontent.com/victim/a1b2/raw/proof", "victim"),
                 SENDER,
             )
             expect(r.success).toBe(false)
@@ -162,46 +162,68 @@ describe("web2 proofs are bound to the claimed account", () => {
         })
 
         it("accepts a raw gist whose real owner is the claimed account", async () => {
-            gists.g1 = { owner: { login: "alice", id: 7 }, files: {} }
+            gists.a1b2 = { owner: { login: "alice", id: 7 }, files: { a: { filename: "a", content: PROOF_TEXT } } }
             const r = await verifyWeb2Proof(
-                claim("https://gist.githubusercontent.com/alice/g1/raw/proof", "alice"),
+                claim("https://gist.githubusercontent.com/alice/a1b2/raw/proof", "alice"),
                 SENDER,
             )
             expect(r.success).toBe(true)
         })
 
-        it("accepts a raw repository file under the claimed owner", async () => {
-            users.alice = { login: "alice", id: 7 }
+        it("reads a raw gist's content from the API, ignoring the URL's revision", async () => {
+            // Whatever the revision in the URL serves (an old revision, or
+            // nothing), the proof is the current file the API returned.
+            rawBody = "demos:dw2p:ed25519:stale"
+            gists.a1b2 = {
+                owner: { login: "alice", id: 7 },
+                files: {
+                    "notes.txt": { filename: "notes.txt", content: "unrelated" },
+                    "proof.txt": { filename: "proof.txt", content: PROOF_TEXT + "\n" },
+                },
+            }
             const r = await verifyWeb2Proof(
-                claim("https://raw.githubusercontent.com/alice/repo/main/proof.txt", "alice"),
+                claim(
+                    "https://gist.githubusercontent.com/alice/a1b2/raw/0123456789abcdef0123456789abcdef01234567/proof.txt",
+                    "alice",
+                ),
                 SENDER,
             )
             expect(r.success).toBe(true)
+            expect(rawFetches).toEqual([])
+            expect(githubRequests.map(q => q.route)).toEqual(["GET /gists/a1b2"])
         })
 
-        it("refuses a raw file under someone else's account claimed as the sender's own", async () => {
-            users.attacker = { login: "attacker", id: 666 }
-            const r = await verifyWeb2Proof(
-                claim("https://raw.githubusercontent.com/attacker/repo/main/proof.txt", "victim"),
-                SENDER,
-            )
+        it("refuses a gist whose file the API reports as truncated", async () => {
+            gists.a1b2 = {
+                owner: { login: "alice", id: 7 },
+                files: { a: { filename: "a", content: PROOF_TEXT.slice(0, 5), truncated: true } },
+            }
+            const r = await verifyWeb2Proof(claim(gistUrl, "alice"), SENDER)
             expect(r.success).toBe(false)
-            expect(r.message).toContain("claimed username")
+            expect(rawFetches).toEqual([])
         })
 
-        it("refuses a raw file when the claimed user id belongs to another account", async () => {
-            users.attacker = { login: "attacker", id: 666 }
-            const r = await verifyWeb2Proof(
-                claim("https://raw.githubusercontent.com/attacker/repo/main/proof.txt", "attacker", "7"),
-                SENDER,
-            )
-            expect(r.success).toBe(false)
-            expect(r.message).toContain("user id")
+        it("refuses raw repository files, which a fork or collaborator can publish under the owner's path", async () => {
+            users.victim = { login: "victim", id: 7 }
+            for (const url of [
+                "https://raw.githubusercontent.com/victim/repo/main/proof.txt",
+                // A commit that exists only in the attacker's fork, served
+                // through the parent repository's path.
+                "https://raw.githubusercontent.com/victim/repo/9f2c1e0b7a6d5c4b3a291807f6e5d4c3b2a19087/proof.txt",
+                "https://raw.githubusercontent.com/victim/repo/refs/pull/12/head/proof.txt",
+                "https://github.com/victim/repo/blob/main/proof.txt",
+            ]) {
+                const r = await verifyWeb2Proof(claim(url, "victim"), SENDER)
+                expect({ url, ok: r.success }).toEqual({ url, ok: false })
+                expect(r.message).toContain("gist")
+            }
+            expect(rawFetches).toEqual([])
+            expect(githubRequests).toEqual([])
         })
 
         it("does not fetch from a look-alike host that only starts with an accepted prefix", async () => {
             const r = await verifyWeb2Proof(
-                claim("https://raw.githubusercontent.com.example.org/alice/repo/proof", "alice"),
+                claim("https://gist.githubusercontent.com.example.org/alice/a1b2/raw/proof", "alice"),
                 SENDER,
             )
             expect(r.success).toBe(false)

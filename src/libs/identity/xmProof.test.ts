@@ -3,6 +3,7 @@ import bs58 from "bs58"
 import { WalletContractV4, WalletContractV5R1 } from "@ton/ton"
 import {
     XM_PROOF_MAX_AGE_MS,
+    canonicalWalletAddress,
     checkAddressDerivedFromKey,
     checkXmDisplayAddress,
     checkXmSignedData,
@@ -15,7 +16,8 @@ import {
     tonFixture,
     xrplFixture,
     type ChainFixture,
-} from "./xmProof.fixtures"
+} from "./testSupport/xmProofFixtures"
+import { NEAR_RPC_DEFAULTS, nearRpcUrl } from "./nearAccessKey"
 
 const SENDER = "0x" + "AB".repeat(32)
 const NOW = 1_800_000_000_000
@@ -281,5 +283,48 @@ describe("checkAddressDerivedFromKey", () => {
         expect(
             checkAddressDerivedFromKey({ chain: "tron", publicKey: "00", targetAddress: "x" }).ok,
         ).toBe(false)
+    })
+})
+
+describe("canonicalWalletAddress", () => {
+    it("refuses what does not parse for the chain", () => {
+        for (const [chain, address] of [
+            ["ton", "EQ-not-an-address"],
+            ["aptos", "0x" + "g".repeat(64)],
+            ["atom", "cosmos1notbech32"],
+            ["near", "Alice.near"],
+            ["near", "a"],
+            ["near", "ed25519:" + bs58.encode(new Uint8Array(31))],
+            ["evm", "0x1234"],
+            ["solana", "   "],
+        ]) {
+            expect({ chain, address, c: canonicalWalletAddress(chain, address) }).toEqual({
+                chain,
+                address,
+                c: null,
+            })
+        }
+    })
+
+    it("keeps case-sensitive addresses as written, trimmed", () => {
+        expect(canonicalWalletAddress("xrpl", " rAbC ")).toBe("rAbC")
+        expect(canonicalWalletAddress("solana", "AbC")).toBe("AbC")
+        expect(canonicalWalletAddress("near", "alice.near")).toBe("alice.near")
+    })
+})
+
+describe("NEAR RPC endpoint", () => {
+    it("uses the fixed endpoint per network unless the operator overrides it", () => {
+        const saved = process.env.NEAR_RPC_MAINNET_URL
+        try {
+            delete process.env.NEAR_RPC_MAINNET_URL
+            expect(nearRpcUrl("mainnet")).toBe(NEAR_RPC_DEFAULTS.mainnet)
+            process.env.NEAR_RPC_MAINNET_URL = "https://near.example.org"
+            expect(nearRpcUrl("mainnet")).toBe("https://near.example.org")
+            expect(nearRpcUrl("testnet")).toBe(NEAR_RPC_DEFAULTS.testnet)
+        } finally {
+            if (saved === undefined) delete process.env.NEAR_RPC_MAINNET_URL
+            else process.env.NEAR_RPC_MAINNET_URL = saved
+        }
     })
 })

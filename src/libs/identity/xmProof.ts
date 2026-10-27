@@ -208,7 +208,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
     return a.length === b.length && a.every((v, i) => v === b[i])
 }
 
-function nearKeyBytes(publicKey: string): Uint8Array | null {
+export function nearKeyBytes(publicKey: string): Uint8Array | null {
     const body = publicKey.startsWith("ed25519:")
         ? publicKey.slice("ed25519:".length)
         : publicKey
@@ -223,16 +223,99 @@ function toHexLower(bytes: Uint8Array): string {
     return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("")
 }
 
+const NEAR_IMPLICIT = /^[0-9a-f]{64}$/
+// NEAR account id rules: 2 to 64 characters, lower-case parts separated by
+// dots, each part alphanumeric runs joined by single "-" or "_".
+const NEAR_ACCOUNT_ID = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/
+
+export function isNearImplicitAccount(address: string): boolean {
+    return NEAR_IMPLICIT.test(address)
+}
+
+export function isNearNamedAccount(address: string): boolean {
+    return (
+        address.length >= 2 &&
+        address.length <= 64 &&
+        !NEAR_IMPLICIT.test(address) &&
+        NEAR_ACCOUNT_ID.test(address)
+    )
+}
+
+/**
+ * The one spelling of a wallet address that is stored and compared. Several
+ * chains accept more than one spelling of the same account, and the stored
+ * address is what the per-account and cross-account uniqueness checks
+ * compare, so a second spelling would link the same wallet again and count
+ * as another first connection.
+ *
+ * - evm: lower-case hex.
+ * - ton: user-friendly, url-safe, non-bounceable, testOnly off (what the SDK's
+ *   TON getAddress returns), whatever form was given.
+ * - aptos: "0x" and the full 64 lower-case hex digits.
+ * - ibc, atom: lower-case bech32.
+ * - near: implicit accounts as 64 lower-case hex (an "ed25519:<base58>" key
+ *   string is converted); named accounts as given, which must already be a
+ *   valid lower-case account id.
+ * - every other chain: the trimmed address, as its alphabet is case-sensitive.
+ *
+ * Returns null when the address does not parse for its chain.
+ */
+export function canonicalWalletAddress(
+    chain: string,
+    address: string,
+): string | null {
+    if (typeof address !== "string") return null
+    const a = address.trim()
+    if (!a) return null
+    try {
+        switch (chain.toLowerCase()) {
+            case "evm":
+                return /^0x[0-9a-fA-F]{40}$/.test(a) ? a.toLowerCase() : null
+
+            case "ton":
+                return Address.parse(a).toString({
+                    urlSafe: true,
+                    bounceable: false,
+                    testOnly: false,
+                })
+
+            case "aptos":
+                return AccountAddress.from(a, {
+                    maxMissingChars: 63,
+                }).toStringLong()
+
+            case "ibc":
+            case "atom":
+                fromBech32(a)
+                return a.toLowerCase()
+
+            case "near": {
+                if (a.startsWith("ed25519:")) {
+                    const key = nearKeyBytes(a)
+                    return key ? toHexLower(key) : null
+                }
+                if (/^[0-9a-fA-F]{64}$/.test(a)) return a.toLowerCase()
+                return isNearNamedAccount(a) ? a : null
+            }
+
+            default:
+                return a
+        }
+    } catch {
+        return null
+    }
+}
+
 /**
  * Ties the public key the signature was verified against to the address being
  * linked, for the chains whose verifier checks the signature against a
  * client-supplied key. Without it the signer is only "some key", not the
  * owner of `targetAddress`.
  *
- * Each case derives the address from the key offline. Where an address cannot
- * be derived from a key without asking the network, the add is refused rather
- * than left unbound: NEAR named accounts (the key is an access key on the
- * account, not its name).
+ * Each case derives the address from the key offline. A NEAR named account
+ * cannot be derived from a key (the key is an access key on the account, not
+ * its name), so it is refused here and checked against the network by
+ * verifyNearNamedAccountKey at acceptance instead.
  */
 export function checkAddressDerivedFromKey(args: {
     chain: string
@@ -290,7 +373,7 @@ export function checkAddressDerivedFromKey(args: {
                 if (targetAddress === `ed25519:${bs58.encode(key)}`) {
                     return { ok: true }
                 }
-                if (/^[0-9a-f]{64}$/.test(targetAddress)) {
+                if (isNearImplicitAccount(targetAddress)) {
                     return toHexLower(key) === targetAddress
                         ? { ok: true }
                         : mismatch
@@ -298,7 +381,7 @@ export function checkAddressDerivedFromKey(args: {
                 return {
                     ok: false,
                     message:
-                        "near named accounts cannot be tied to a key without querying the network; link the implicit account (hex of the public key)",
+                        "near named accounts cannot be tied to a key offline; their access keys are checked on the network",
                 }
             }
 

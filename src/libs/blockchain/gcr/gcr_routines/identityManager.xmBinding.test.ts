@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from "bun:test"
+import { dirname, join } from "node:path"
+import { Address } from "@ton/core"
+import { AccountAddress } from "@aptos-labs/ts-sdk"
 import { cloneDefaultForkConfig, type ForkConfigByName } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
-import { xmBoundProofMessage } from "@/libs/identity/xmProof"
+import { canonicalWalletAddress, xmBoundProofMessage } from "@/libs/identity/xmProof"
 import {
     aptosFixture,
     evmFixture,
@@ -10,24 +13,26 @@ import {
     tonFixture,
     xrplFixture,
     type ChainFixture,
-} from "@/libs/identity/xmProof.fixtures"
+} from "@/libs/identity/testSupport/xmProofFixtures"
 
 const SENDER = "0x" + "ab".repeat(32)
 
 // The package barrel also loads the Tron module, whose generated protobuf code
 // does not initialise under `bun test`. The real chain modules the node uses
 // for these checks are loaded one by one instead.
-const LOCALSDK = "../../../../../node_modules/@kynesyslabs/demosdk/build/multichain/localsdk/"
+// Resolving the barrel does not load it; its directory holds the modules.
+const LOCALSDK = dirname(require.resolve("@kynesyslabs/demosdk/xm-localsdk"))
+const localsdk = (file: string) => require(join(LOCALSDK, file))
 mock.module("@kynesyslabs/demosdk/xm-localsdk", () => ({
-    XRPL: require(LOCALSDK + "xrp.js").XRPL,
-    EVM: require(LOCALSDK + "evm.js").EVM,
-    IBC: require(LOCALSDK + "ibc.js").IBC,
-    TON: require(LOCALSDK + "ton.js").TON,
-    SOLANA: require(LOCALSDK + "solana.js").SOLANA,
-    MULTIVERSX: require(LOCALSDK + "multiversx.js").MULTIVERSX,
-    NEAR: require(LOCALSDK + "near.js").NEAR,
-    BTC: require(LOCALSDK + "btc.js").BTC,
-    APTOS: require(LOCALSDK + "aptos.js").APTOS,
+    XRPL: localsdk("xrp.js").XRPL,
+    EVM: localsdk("evm.js").EVM,
+    IBC: localsdk("ibc.js").IBC,
+    TON: localsdk("ton.js").TON,
+    SOLANA: localsdk("solana.js").SOLANA,
+    MULTIVERSX: localsdk("multiversx.js").MULTIVERSX,
+    NEAR: localsdk("near.js").NEAR,
+    BTC: localsdk("btc.js").BTC,
+    APTOS: localsdk("aptos.js").APTOS,
 }))
 const IdentityManager = (await import("./identityManager")).default
 const { NomisApiClient } = await import("@/libs/identity/tools/nomis")
@@ -76,12 +81,18 @@ describe("IdentityManager.verifyPayload: xm proof quality", () => {
             twitterAccountConnected: true,
         })
         restores.push(() => filter.mockRestore())
+        linkedXm = {}
+        const ids = spyOn(IdentityManager, "getIdentities").mockImplementation(
+            async () => linkedXm,
+        )
+        restores.push(() => ids.mockRestore())
     })
     afterEach(() => {
         while (restores.length) restores.pop()!()
         getSharedState.forkConfig = forks
         getSharedState.lastBlockNumber = tip
     })
+    let linkedXm: any = {}
 
     async function allChains(): Promise<ChainFixture[]> {
         return [
@@ -157,14 +168,168 @@ describe("IdentityManager.verifyPayload: xm proof quality", () => {
             expect(r.success).toBe(false)
         })
 
-        it("refuses a NEAR named account", async () => {
-            const f = nearFixture()
-            const r = await IdentityManager.verifyPayload(
+    })
+
+    describe("NEAR named accounts", () => {
+        let rpcCalls: Array<{ url: string; body: any }>
+        let answer: () => Promise<Response>
+
+        beforeEach(() => {
+            rpcCalls = []
+            answer = async () => Response.json({ jsonrpc: "2.0", id: "demos", result: { nonce: 1, permission: "FullAccess" } })
+            const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (url: any, init: any) => {
+                rpcCalls.push({ url: String(url), body: JSON.parse(init.body) })
+                return answer()
+            }) as any)
+            restores.push(() => fetchSpy.mockRestore())
+        })
+
+        const named = async (subchain = "mainnet") => {
+            const f = { ...nearFixture(), subchain }
+            return IdentityManager.verifyPayload(
                 await payloadFor(f, SENDER, { targetAddress: "alice.near" }),
                 SENDER,
             )
+        }
+
+        it("accepts a full-access key of the account, asking the fixed RPC for that network", async () => {
+            const f = nearFixture()
+            expect((await named()).success).toBe(true)
+            expect((await named("testnet")).success).toBe(true)
+            expect(rpcCalls.map(c => c.url)).toEqual([
+                "https://rpc.mainnet.near.org",
+                "https://rpc.testnet.near.org",
+            ])
+            expect(rpcCalls[0].body.method).toBe("query")
+            expect(rpcCalls[0].body.params).toEqual({
+                request_type: "view_access_key",
+                finality: "final",
+                account_id: "alice.near",
+                public_key: f.publicKey,
+            })
+        })
+
+        it("refuses a function-call key", async () => {
+            answer = async () =>
+                Response.json({
+                    result: {
+                        nonce: 1,
+                        permission: { FunctionCall: { allowance: null, receiver_id: "app.near", method_names: [] } },
+                    },
+                })
+            expect((await named()).success).toBe(false)
+        })
+
+        it("refuses a key the account does not have", async () => {
+            answer = async () =>
+                Response.json({ error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCESS_KEY" } } })
+            expect((await named()).success).toBe(false)
+            // Older RPC nodes answer an unknown key with result.error.
+            answer = async () => Response.json({ result: { error: "access key does not exist" } })
+            expect((await named()).success).toBe(false)
+        })
+
+        it("refuses when the RPC times out or fails", async () => {
+            answer = async () => {
+                throw new DOMException("The operation timed out.", "TimeoutError")
+            }
+            expect((await named()).success).toBe(false)
+            answer = async () => new Response("bad gateway", { status: 502 })
+            expect((await named()).success).toBe(false)
+        })
+
+        it("refuses an unknown network and an invalid account id without asking", async () => {
+            expect((await named("betanet")).success).toBe(false)
+            const f = nearFixture()
+            const r = await IdentityManager.verifyPayload(
+                await payloadFor(f, SENDER, { targetAddress: "Alice.near" }),
+                SENDER,
+            )
             expect(r.success).toBe(false)
-            expect(r.message).toContain("named accounts")
+            expect(rpcCalls).toEqual([])
+        })
+
+        it("keeps implicit accounts offline", async () => {
+            expect((await IdentityManager.verifyPayload(await payloadFor(nearFixture(), SENDER), SENDER)).success).toBe(true)
+            expect(rpcCalls).toEqual([])
+        })
+    })
+
+    describe("one spelling per wallet", () => {
+        async function spellings(): Promise<Array<{ f: ChainFixture; others: string[] }>> {
+            const ton = tonFixture()
+            const tonAddr = Address.parse(ton.targetAddress)
+            const aptos = aptosFixture()
+            const aptosLong = AccountAddress.from(aptos.targetAddress).toStringLong()
+            const atom = await ibcFixture("atom")
+            const near = nearFixture()
+            return [
+                {
+                    f: ton,
+                    others: [
+                        tonAddr.toRawString(),
+                        tonAddr.toString(),
+                        tonAddr.toString({ urlSafe: false, bounceable: false }),
+                        tonAddr.toString({ bounceable: false, testOnly: true }),
+                    ],
+                },
+                { f: aptos, others: [aptosLong.slice(2), aptosLong.toUpperCase().replace("0X", "0x")] },
+                { f: atom, others: [atom.targetAddress.toUpperCase()] },
+                { f: near, others: [near.publicKey as string, near.targetAddress.toUpperCase()] },
+            ]
+        }
+
+        it("maps every spelling of a wallet to the stored one", async () => {
+            for (const { f, others } of await spellings()) {
+                for (const other of others) {
+                    expect({ other, canonical: canonicalWalletAddress(f.chain, other) }).toEqual({
+                        other,
+                        canonical: f.targetAddress,
+                    })
+                }
+            }
+        })
+
+        it("refuses another spelling than the canonical one, naming it", async () => {
+            for (const { f, others } of await spellings()) {
+                for (const other of others) {
+                    const r = await IdentityManager.verifyPayload(
+                        await payloadFor(f, SENDER, { targetAddress: other, displayAddress: other }),
+                        SENDER,
+                    )
+                    expect({ other, ok: r.success }).toEqual({ other, ok: false })
+                    expect(r.message).toContain(f.targetAddress)
+                }
+            }
+        })
+
+        it("refuses a second link of the same wallet in any spelling as a duplicate", async () => {
+            for (const { f, others } of await spellings()) {
+                linkedXm = { [f.chain]: { [f.subchain]: [{ address: f.targetAddress }] } }
+                for (const spelling of [f.targetAddress, ...others]) {
+                    const r = await IdentityManager.verifyPayload(
+                        await payloadFor(f, SENDER, { targetAddress: spelling }),
+                        SENDER,
+                    )
+                    expect({ spelling, ok: r.success }).toEqual({ spelling, ok: false })
+                    expect(r.message).toContain("already linked")
+                }
+            }
+        })
+
+        it("treats a wallet stored in an older spelling as the same wallet", async () => {
+            const f = tonFixture()
+            linkedXm = { ton: { mainnet: [{ address: Address.parse(f.targetAddress).toRawString() }] } }
+            const r = await IdentityManager.verifyPayload(await payloadFor(f, SENDER), SENDER)
+            expect(r.success).toBe(false)
+            expect(r.message).toContain("already linked")
+        })
+
+        it("refuses an EVM address that apply would store with mixed case", async () => {
+            const f = { ...evmFixture(), isEVM: false }
+            const r = await IdentityManager.verifyPayload(await payloadFor(f, SENDER), SENDER)
+            expect(r.success).toBe(false)
+            expect(r.message).toContain(f.targetAddress.toLowerCase())
         })
     })
 
