@@ -347,6 +347,12 @@ export default class PeerManager {
             }
         }
 
+        // A reported timestamp ahead of our clock would keep a peer fresh
+        // without it ever being probed.
+        if (typeof peer.status?.timestamp === "number") {
+            peer.status.timestamp = Math.min(peer.status.timestamp, Date.now())
+        }
+
         // REVIEW check for duplicates
         const identity = peer.identity
         let action = "added"
@@ -362,7 +368,14 @@ export default class PeerManager {
             // if the new peer has data && data is more recent. At equal
             // height a differing non-empty hash also wins: sync reports have
             // been validated against our chain by the time they get here.
+            // An owner-signed update carries sync data its receiver already
+            // checked against our chain, so it may also lower the height: a
+            // peer that restarted or rolled back must not stay pinned to a
+            // value it can no longer back.
+            const ownerReportsKnownSync =
+                urlSignedByOwner && Number.isInteger(peer.sync.block)
             if (
+                ownerReportsKnownSync ||
                 peer.sync.block > block ||
                 (peer.sync.block == block &&
                     (peer.sync.status !== status ||
@@ -471,10 +484,16 @@ export default class PeerManager {
         delete this.offlinePeers[identity]
     }
 
+    /**
+     * Learns the addresses of peers we do not know yet and verifies each with
+     * a hello. A list is only a pointer: for a peer we already track, its
+     * sync and status are never taken from the list, because any sender could
+     * write them. They come from that peer's own verified hello or from
+     * corroborated gossip.
+     */
     setPeers(peerlist: Peer[]) {
         for (const peer of peerlist) {
             if (this.peerList[peer.identity]) {
-                this.addPeer(peer)
                 continue
             }
             if (

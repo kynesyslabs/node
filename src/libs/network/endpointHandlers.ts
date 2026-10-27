@@ -42,6 +42,9 @@ import { handleExecuteTransaction } from "./endpointExecution"
 import { handleConsensusRequest } from "./endpointConsensus"
 import { handleL2PSHashUpdate } from "./endpointL2PSHash"
 
+// Bounds the hellos one unauthenticated call can start.
+const MAX_ANNOUNCED_PEERS = 200
+
 /**
  * ServerHandlers facade — delegates to focused sub-modules:
  *   endpointValidation.ts  — tx validation + GCR checks
@@ -169,21 +172,40 @@ export default class ServerHandlers {
         }
     }
 
-    static async handlePeerlist(content: Peer[]): Promise<any> {
-        const ourPeerList = PeerManager.getInstance().getPeers()
-        const mergedPeerList: Peer[] = []
-        for (const peer of content) {
-            if (!mergedPeerList.includes(peer)) {
-                mergedPeerList.push(peer)
+    /**
+     * Unauthenticated discovery: the submitted list contributes addresses of
+     * peers we do not know yet, each of which is verified with a hello before
+     * it is listed. Nothing else in the list (sync, status, verification) is
+     * read.
+     */
+    static async handlePeerlist(content: unknown): Promise<any> {
+        const requireReply = false
+
+        if (!Array.isArray(content)) {
+            return {
+                extra: { peerlistState: "rejected" },
+                requireReply,
+                response: false,
             }
         }
-        const orderedPeerList = mergedPeerList.sort((a, b) =>
-            a.identity.localeCompare(b.identity),
-        )
-        PeerManager.getInstance().setPeers(orderedPeerList)
-        const extra = { peerlistState: "merged" }
-        const requireReply = false
-        const response = true
-        return { extra, requireReply, response }
+
+        const announced: Peer[] = []
+        const seen = new Set<string>()
+        for (const entry of content.slice(0, MAX_ANNOUNCED_PEERS)) {
+            const identity = entry?.identity
+            const url = entry?.connection?.string
+            if (
+                typeof identity !== "string" ||
+                typeof url !== "string" ||
+                seen.has(identity)
+            ) {
+                continue
+            }
+            seen.add(identity)
+            announced.push(new Peer(url, identity))
+        }
+
+        PeerManager.getInstance().setPeers(announced)
+        return { extra: { peerlistState: "merged" }, requireReply, response: true }
     }
 }
