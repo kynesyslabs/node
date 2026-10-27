@@ -27,6 +27,14 @@ import { NomisWalletIdentity, SavedHumanPassportIdentity, EthosWalletIdentity } 
 import { HumanPassportProvider } from "@/libs/identity/tools/humanpassport"
 import { verifyMessage as verifyEvmMessage } from "ethers"
 import TxValidatorPool from "../../validation/txValidatorPool"
+import { xmProofBindingActiveForPendingBlock } from "@/forks/xmProofBindingGate"
+import {
+    KEY_DERIVED_CHAINS,
+    checkAddressDerivedFromKey,
+    checkXmDisplayAddress,
+    canonicalXmAddress,
+    checkXmSignedData,
+} from "@/libs/identity/xmProof"
 
 function normalizeComparableAddress(address: string | undefined | null): string {
     return (address || "").trim().toLowerCase()
@@ -207,11 +215,60 @@ export default class IdentityManager {
         // Filter out crosschain addresses without activity here!
 
         const chainId = payload.target_identity.chain
+        if (!Object.prototype.hasOwnProperty.call(chains, chainId)) {
+            return {
+                success: false,
+                message: `Unsupported chain: ${chainId}`,
+            }
+        }
+
+        const {
+            signature,
+            publicKey,
+            targetAddress,
+            signedData,
+            displayAddress,
+        } = payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
+
+        // The address is stored under displayAddress when one is sent, so it
+        // has to be the address that was proven.
+        const displayCheck = checkXmDisplayAddress(
+            chainId,
+            targetAddress,
+            displayAddress,
+        )
+        if (displayCheck.ok === false) {
+            return { success: false, message: displayCheck.message }
+        }
+
+        // These verifiers check the signature against the key the client
+        // sent; without this the key is not tied to the address at all.
+        if ((KEY_DERIVED_CHAINS as readonly string[]).includes(chainId)) {
+            const keyCheck = checkAddressDerivedFromKey({
+                chain: chainId,
+                subchain: payload.target_identity.subchain,
+                publicKey,
+                targetAddress,
+            })
+            if (keyCheck.ok === false) {
+                return { success: false, message: keyCheck.message }
+            }
+        }
+
+        if (xmProofBindingActiveForPendingBlock()) {
+            const bound = checkXmSignedData({
+                chain: chainId,
+                targetAddress,
+                sender,
+                signedData,
+            })
+            if (bound.ok === false) {
+                return { success: false, message: bound.message }
+            }
+        }
+
         // @ts-expect-error - This is a workaround to avoid type errors
         const sdk = await chains[chainId].create(null)
-
-        const { signature, publicKey, targetAddress, signedData } =
-            payload.target_identity as unknown as InferFromSignatureTargetIdentityPayload
 
         let messageVerified = false
         try {
@@ -306,6 +363,32 @@ export default class IdentityManager {
     }
 
     /**
+     * Whether `address` is already linked to `sender` through a verified xm
+     * identity. Score identities (Nomis, Ethos, Human Passport) read a public
+     * score for an address; they say nothing about who controls it, so the
+     * wallet-ownership proof is the xm signature the account already made.
+     * EVM and Solana addresses are the same on every subchain, so any subchain
+     * counts.
+     */
+    static async isXmWalletLinked(
+        sender: string,
+        chain: string,
+        address: string,
+    ): Promise<boolean> {
+        const xm = (await this.getIdentities(sender, "xm")) || {}
+        const byChain = xm[chain] || {}
+        const wanted = canonicalXmAddress(chain, address)
+        return Object.values(byChain).some(
+            (list: any) =>
+                Array.isArray(list) &&
+                list.some(
+                    (id: { address?: string }) =>
+                        canonicalXmAddress(chain, id?.address ?? "") === wanted,
+                ),
+        )
+    }
+
+    /**
      * Verify the payload for a Nomis identity assign payload
      *
      * @param payload - The payload to verify
@@ -314,12 +397,21 @@ export default class IdentityManager {
      */
     static async verifyNomisPayload(
         payload: NomisWalletIdentity,
+        sender: string,
     ): Promise<{ success: boolean; message: string }> {
         if (!payload.chain || !payload.subchain || !payload.address) {
             return {
                 success: false,
                 message:
                     "Invalid Nomis identity payload: missing chain, subchain or address",
+            }
+        }
+
+        if (!(await this.isXmWalletLinked(sender, payload.chain, payload.address))) {
+            return {
+                success: false,
+                message:
+                    "Nomis wallet is not linked to this account: link it as a cross-chain identity first",
             }
         }
 
@@ -341,12 +433,21 @@ export default class IdentityManager {
      */
     static async verifyEthosPayload(
         payload: EthosWalletIdentity,
+        sender: string,
     ): Promise<{ success: boolean; message: string }> {
         if (!payload.chain || !payload.subchain || !payload.address) {
             return {
                 success: false,
                 message:
                     "Invalid Ethos identity payload: missing chain, subchain or address",
+            }
+        }
+
+        if (!(await this.isXmWalletLinked(sender, payload.chain, payload.address))) {
+            return {
+                success: false,
+                message:
+                    "Ethos wallet is not linked to this account: link it as a cross-chain identity first",
             }
         }
 
@@ -436,11 +537,8 @@ export default class IdentityManager {
         },
         sender: string,
     ): Promise<{ success: boolean; message: string; data?: SavedHumanPassportIdentity }> {
-        // TODO: Implement signature validation to bind payload.address to sender
-        // Currently sender is passed but not validated against payload.address
-        // This would prevent address spoofing by verifying the user signed a message
-        // linking their Human Passport address to their Demos account
-        // Related: payload.signature is accepted but not validated
+        // payload.signature is not consulted: ownership of the address is the
+        // xm identity the sender already proved, checked below.
 
         // TODO: Implement verificationMethod branching
         // Currently both "api" and "onchain" use identical API verification logic
@@ -455,6 +553,14 @@ export default class IdentityManager {
             return {
                 success: false,
                 message: "Invalid Human Passport payload: missing address",
+            }
+        }
+
+        if (!(await this.isXmWalletLinked(sender, "evm", address))) {
+            return {
+                success: false,
+                message:
+                    "Human Passport wallet is not linked to this account: link it as a cross-chain identity first",
             }
         }
 

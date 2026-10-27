@@ -104,6 +104,7 @@ export default async function handleIdentityRequest(
         case "nomis_identity_assign":
             return await IdentityManager.verifyNomisPayload(
                 payload.payload as NomisWalletIdentity,
+                sender,
             )
         case "humanpassport_identity_assign": {
             const hpPayload = payload.payload as HumanPassportIdentityData
@@ -115,6 +116,7 @@ export default async function handleIdentityRequest(
         case "ethos_identity_assign":
             return await IdentityManager.verifyEthosPayload(
                 payload.payload as EthosWalletIdentity,
+                sender,
             )
         case "tlsn_identity_assign":
             // TLSNotary identity verification - verify proof structure

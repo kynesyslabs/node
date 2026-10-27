@@ -288,6 +288,7 @@ export async function verifyWeb2Proof(
     try {
         const { message, type, signature } = await instance.readData(
             payload.proof as string,
+            { username: payload.username, userId: payload.userId },
         )
         // Domain proofs (#897 / DEM-767): the signed message is domain-separated
         // and bound to the verified host AND the sender, so a signature can't be

@@ -4,6 +4,40 @@ import log from "@/utilities/logger"
 /** The well-known path a domain owner hosts to prove control. */
 export const DOMAIN_PROOF_PATH = "/.well-known/demos-cci.txt"
 
+/** The account a web2 identity payload says it is linking. */
+export type Web2Claim = {
+    username?: string
+    userId?: string | number
+}
+
+/**
+ * Handles are compared without regard to case: Twitter, GitHub and Discord
+ * all treat `Alice` and `alice` as one account.
+ */
+export function sameHandle(a: unknown, b: unknown): boolean {
+    return (
+        typeof a === "string" &&
+        typeof b === "string" &&
+        a.trim().length > 0 &&
+        a.trim().toLowerCase() === b.trim().toLowerCase()
+    )
+}
+
+/**
+ * Ids are compared as text because the payload carries them as numbers or
+ * strings depending on the client.
+ */
+export function sameId(a: unknown, b: unknown): boolean {
+    if (
+        (typeof a !== "string" && typeof a !== "number") ||
+        (typeof b !== "string" && typeof b !== "number")
+    ) {
+        return false
+    }
+    const left = String(a).trim()
+    return left.length > 0 && left === String(b).trim()
+}
+
 export abstract class Web2ProofParser {
     formats = {
         github: [
@@ -96,7 +130,10 @@ export abstract class Web2ProofParser {
     /**
      * Returns the payload from the proof url
      */
-    abstract readData(proofUrl: string): Promise<{
+    abstract readData(
+        proofUrl: string,
+        claim?: Web2Claim,
+    ): Promise<{
         message: string
         type: SigningAlgorithm
         signature: string

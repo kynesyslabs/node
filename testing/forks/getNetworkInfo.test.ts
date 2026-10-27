@@ -245,6 +245,19 @@ describe("getNetworkInfo RPC handler", () => {
         expect(body.forks.web2ProofBinding.activated).toBe(false)
     })
 
+    it("reports xmProofBinding with the same next-block convention as web2ProofBinding", async () => {
+        getSharedState.forkConfig.xmProofBinding.activationHeight = 1000
+        getSharedState.lastBlockNumber = 999
+
+        const response = await getNetworkInfo({}, makeResponse())
+        const body = response.response as {
+            forks: { xmProofBinding: ForkStatusResponse }
+        }
+
+        expect(body.forks.xmProofBinding.activationHeight).toBe(1000)
+        expect(body.forks.xmProofBinding.activated).toBe(true)
+    })
+
     it("answers not-ready until the fork configuration has been loaded", async () => {
         getSharedState.forkConfigLoaded = false
 

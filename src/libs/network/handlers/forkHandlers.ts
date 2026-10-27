@@ -113,14 +113,17 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
         const currentHeight = readCurrentHeight()
         const forkConfig = getSharedState.forkConfig
 
-        // signatureDomain and web2ProofBinding are judged at admission for the
-        // block a transaction or proof would land in, so they answer for the
-        // next block; a wallet asking at tip H-1 is about to sign for block H
+        // signatureDomain, web2ProofBinding and xmProofBinding are judged at
+        // admission for the block a transaction or proof would land in, so they
+        // answer for the next block; a wallet asking at tip H-1 is about to sign for block H
         // and must already be told to use the new rules. The others keep the
         // tip, as osDenomination always did.
         const forks: Record<string, ForkStatus> = {}
         for (const name of Object.keys(forkConfig) as ForkName[]) {
-            const nextBlock = name === "signatureDomain" || name === "web2ProofBinding"
+            const nextBlock =
+                name === "signatureDomain" ||
+                name === "web2ProofBinding" ||
+                name === "xmProofBinding"
             forks[name] = {
                 activationHeight: forkConfig[name]?.activationHeight ?? null,
                 activated: isForkActive(name, currentHeight + (nextBlock ? 1 : 0)),

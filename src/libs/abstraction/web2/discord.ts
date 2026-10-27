@@ -1,4 +1,4 @@
-import { Web2ProofParser } from "./parsers"
+import { Web2ProofParser, Web2Claim, sameId } from "./parsers"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { Discord } from "@/libs/identity/tools/discord"
 
@@ -24,7 +24,10 @@ export class DiscordProofParser extends Web2ProofParser {
         return await this.discord.getMessageByUrl(messageUrl)
     }
 
-    async readData(proofUrl: string): Promise<{
+    async readData(
+        proofUrl: string,
+        claim: Web2Claim,
+    ): Promise<{
         message: string
         signature: string
         type: SigningAlgorithm
@@ -34,6 +37,14 @@ export class DiscordProofParser extends Web2ProofParser {
         // Validate and fetch via shared client
         this.parseDiscordMessageUrl(proofUrl)
         const msg = await this.discord.getMessageByUrl(proofUrl)
+
+        // Anyone can post a signed proof in a channel; only the author's id
+        // says whose account it proves, and the payload's userId is what
+        // gets stored and rewarded.
+        if (!sameId(msg?.author?.id, claim?.userId)) {
+            throw new Error("Message author does not match the claimed user id")
+        }
+
         const content = (msg?.content as string) || ""
 
         const payload = this.parsePayload(content)
