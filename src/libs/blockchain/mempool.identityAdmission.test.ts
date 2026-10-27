@@ -251,6 +251,25 @@ describe("identity proofs are checked when a transaction reaches the mempool fro
             expect(tweetLookups).toBe(0)
         })
 
+        it("refuses a second link of an account already held under another spelling of its id", async () => {
+            const linked = spyOn(IdentityManager, "getIdentities").mockImplementation(
+                (async (_address: string, key?: string) =>
+                    key === "web2"
+                        ? { github: [{ username: "Alice", userId: 42 }] }
+                        : {}) as any,
+            )
+            restores.push(() => linked.mockRestore())
+            const tx = identityTx("0xgithubagain", "web2_identity_assign", {
+                context: "github",
+                username: "ALICE",
+                userId: "42",
+                proof: "https://gist.github.com/alice/a1b2",
+            })
+            const r = await gossip(tx)
+            expect(r.accepted).toBe(false)
+            expect(r.reason).toContain("already linked")
+        })
+
         it("refuses when the provider cannot be reached", async () => {
             ethosScore.mockImplementation(async () => {
                 throw new Error("ECONNREFUSED")

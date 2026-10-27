@@ -95,6 +95,11 @@ export type SignatureDomainConfig = BaseForkConfig
  * Pre-fork: both shapes verify, so clients can migrate without a flag day.
  * Post-fork: only the bound shape, and a proof lifted from someone else's
  * post stops verifying.
+ *
+ * The same height also switches block application to compare web2 account
+ * ids in canonical form (the number 42 and the string "42" as one account)
+ * in its duplicate, first-connection and points checks; that part is judged
+ * at the tip like the other apply-time gates.
  */
 export type Web2ProofBindingConfig = BaseForkConfig
 

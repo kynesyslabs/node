@@ -36,6 +36,7 @@ import {
     sameProviderNumber,
 } from "@/libs/identity/scoreBinding"
 import { normalizeEthosAddress, normalizeNomisAddress } from "./routines/utils"
+import { sameWeb2UserId } from "@/libs/identity/web2UserId"
 import { xmProofBindingActiveForPendingBlock } from "@/forks/xmProofBindingGate"
 import {
     KEY_DERIVED_CHAINS,
@@ -661,6 +662,23 @@ export default class IdentityManager {
         }
 
         return gcr.identities
+    }
+
+    /**
+     * Whether the account already holds this web2 account under any spelling
+     * of its id. Apply compares ids exactly until web2ProofBinding, so a
+     * second link as the number 42 after the string "42" is refused here.
+     */
+    static async isWeb2AccountLinked(
+        sender: string,
+        context: string,
+        userId: unknown,
+    ): Promise<boolean> {
+        const web2 = (await this.getIdentities(sender, "web2")) || {}
+        const linked: Array<{ userId?: unknown }> = web2[context] || []
+        return linked.some(
+            id => id.userId === userId || sameWeb2UserId(id.userId, userId),
+        )
     }
 
     static async getUDIdentities(address: string) {
