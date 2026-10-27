@@ -25,6 +25,11 @@ export interface TxSignatureContext {
  * the same default. Refusing to produce a context stops the node rather than
  * letting it sign or accept ambiguous transactions.
  *
+ * This is the height-aware entry point: pass the number of the block the
+ * transaction sits in (or would sit in), not the tip, wherever a signature is
+ * judged for a block that is not the next one: replaying history, or
+ * re-checking a received block (see verifyBlockTxSignatures).
+ *
  * @param blockHeight - Height to evaluate the fork against. Callers derive it
  *   from node-local state — the block being validated, or the tip plus one
  *   when admitting — never from a value carried by the transaction.

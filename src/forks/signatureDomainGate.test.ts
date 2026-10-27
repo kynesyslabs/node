@@ -59,6 +59,42 @@ describe("txSignatureContext", () => {
     })
 })
 
+describe("txSignatureContext for a sealed block", () => {
+    it("follows the block's own height, whatever the tip is", () => {
+        // Replaying history: the tip is far ahead of the block being judged,
+        // and the verdict must be the one the network reached at that height.
+        sharedState.forkConfig.signatureDomain = { activationHeight: 100 }
+        sharedState.chainId = 1337
+        sharedState.lastBlockNumber = 10_000
+
+        expect(txSignatureContext(99)).toEqual({ active: false, chainId: 0 })
+        expect(txSignatureContext(100)).toEqual({ active: true, chainId: 1337 })
+        expect(txSignatureContext(101)).toEqual({ active: true, chainId: 1337 })
+        // While the pending-block context at that tip is already domain-bound.
+        expect(pendingTxSignatureContext().active).toBe(true)
+    })
+
+    it("binds from genesis when the fork is scheduled at 0", () => {
+        sharedState.forkConfig.signatureDomain = { activationHeight: 0 }
+        sharedState.chainId = 1337
+
+        expect(txSignatureContext(0)).toEqual({ active: true, chainId: 1337 })
+        expect(txSignatureContext(1)).toEqual({ active: true, chainId: 1337 })
+    })
+
+    it("hands back the chain id of this network, not a default", () => {
+        sharedState.forkConfig.signatureDomain = { activationHeight: 0 }
+
+        sharedState.chainId = 1
+        const onMainnetLike = txSignatureContext(5)
+        sharedState.chainId = 1337
+        const onDevnetLike = txSignatureContext(5)
+
+        expect(onMainnetLike.chainId).toBe(1)
+        expect(onDevnetLike.chainId).toBe(1337)
+    })
+})
+
 describe("the node's own signing preimage", () => {
     it("switches one block before the tip reaches activation", () => {
         // A transaction signed while the chain sits at H-1 is included in
