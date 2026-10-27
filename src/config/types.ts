@@ -8,6 +8,12 @@
 export interface ServerConfig {
     serverPort: number
     rpcPort: number
+    /** Interface the HTTP RPC server binds to. */
+    rpcBind: string
+    /** Largest accepted request body for ordinary callers, in bytes. */
+    rpcMaxBodyBytes: number
+    /** Largest accepted request body from an authenticated staked peer, in bytes. */
+    rpcPeerMaxBodyBytes: number
     rpcPgPort: number
     signalingServerPort: number
     rpcSignalingPort: number
@@ -70,6 +76,8 @@ export interface CoreConfig {
      * Empty string means "auto" (off when list empty, strict otherwise).
      */
     xffMode: string
+    /** How long an IP stays blocked after it exceeds a rate limit, in ms. */
+    rateLimitBlockDurationMs: number
     mcpEnabled: boolean
     restore: boolean
     /**

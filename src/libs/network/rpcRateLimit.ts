@@ -17,7 +17,7 @@ export function handleIdentityTxRateLimit(
         return null
     }
 
-    const ipData = rateLimiter.ipRequests.get(ip)
+    const ipData = rateLimiter.getEntry("POST", ip)
     if (!ipData) {
         return new Response(
             JSON.stringify({
@@ -55,7 +55,7 @@ export function handleIdentityTxRateLimit(
     }
 
     if (ipData.lastSeenWithinBlockCount > rateLimiter.config.txPerBlock) {
-        rateLimiter.ipRequests.set(ip, ipData)
+        rateLimiter.setEntry("POST", ip, ipData)
 
         return new Response(
             JSON.stringify({

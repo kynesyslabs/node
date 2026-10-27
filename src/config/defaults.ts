@@ -7,11 +7,22 @@
 
 import type { AppConfig } from "./types"
 import { demToOs } from "@kynesyslabs/demosdk/utils"
+import { RATE_LIMIT_DEFAULT_BLOCK_DURATION_MS } from "../utilities/constants"
 
 export const DEFAULT_CONFIG: AppConfig = {
     server: {
         serverPort: 53550,
         rpcPort: 0,
+        // 0.0.0.0 keeps the docker bridge working; a validator behind a
+        // proxy narrows it to loopback or its private interface.
+        rpcBind: "0.0.0.0",
+        // Covers the largest single legitimate request: a block or a
+        // storage-program write (1 MiB of data, repeated inside the signed
+        // body and its edits) with JSON overhead.
+        rpcMaxBodyBytes: 4 * 1024 * 1024,
+        // The consensus mempool merge ships a whole mempool in one request,
+        // and the mempool is capped at 32 MiB, so peers get twice that.
+        rpcPeerMaxBodyBytes: 64 * 1024 * 1024,
         rpcPgPort: 5332,
         signalingServerPort: 3005,
         rpcSignalingPort: 0,
@@ -63,6 +74,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         whitelistedKeys: [],
         trustedProxies: [],
         xffMode: "",
+        rateLimitBlockDurationMs: RATE_LIMIT_DEFAULT_BLOCK_DURATION_MS,
         // MCP server (Model Context Protocol) is OFF by default. It currently
         // has no built-in authentication and exposes node identity + peer
         // topology via its `get_node_identity` / `get_peer_list` tools.
