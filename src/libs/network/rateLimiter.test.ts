@@ -6,7 +6,7 @@ const mockGetAuthContext = mock(() => ({
     publicKey: null,
     algorithm: null,
 }))
-const mockGetPeer = mock(() => undefined)
+const mockGetPeer = mock((_identity: string): unknown => undefined)
 
 mock.module("./authContext", () => ({
     getAuthContext: () => mockGetAuthContext(),
@@ -16,7 +16,7 @@ mock.module("./authContext", () => ({
 mock.module("@/libs/peer", () => ({
     PeerManager: {
         getInstance: () => ({
-            getPeer: () => mockGetPeer(),
+            getPeer: (identity: string) => mockGetPeer(identity),
         }),
     },
 }))

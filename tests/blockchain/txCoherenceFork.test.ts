@@ -1,28 +1,29 @@
 /**
- * Audit H1 — validateTxCoherence must canonicalize via the fork-aware
- * serializer, not raw JSON.stringify, and must thread the node-supplied
- * isPostFork flag through to it.
+ * Audit H1: validateTxCoherence must canonicalize through the node's
+ * fork-aware serializer (serializeTxContent), not raw JSON.stringify, and must
+ * thread the node-supplied isPostFork flag through to it.
  *
- * The real SDK serializer is an ESM build file jest can't load; it has its own
- * tests. Here we stub serializeTransactionContent with a controlled fn that
- * records its (content, isPostFork) args and returns a deterministic string,
- * then assert validateTxCoherence: (a) calls it with the forwarded isPostFork,
- * (b) reports coherent iff sha256(serialized) === tx.hash.
+ * The node serializer runs for real. Only the SDK's post-fork serializer it
+ * delegates to is stubbed, because that file is an ESM build jest cannot load
+ * (it has its own tests). The stub records each call and prefixes its output
+ * so post-fork bytes differ from the raw JSON.stringify the chain hashes
+ * pre-fork, which is the divergence the gate exists for.
  */
 
 import { describe, expect, it, jest } from "@jest/globals"
 import { createHash } from "crypto"
 
-const calls: Array<{ content: unknown; isPostFork: boolean }> = []
-// Deterministic stub: prefix encodes the fork flag so post/pre-fork produce
-// DIFFERENT serialized bytes for the same content (mirrors the real divergence).
+const sdkCalls: Array<{ content: unknown; isPostFork: boolean }> = []
 jest.mock(
     "../../node_modules/@kynesyslabs/demosdk/build/denomination/serializerGate.js",
     () => ({
         __esModule: true,
-        serializeTransactionContent: (content: unknown, isPostFork: boolean) => {
-            calls.push({ content, isPostFork })
-            return `${isPostFork ? "OS" : "DEM"}:${JSON.stringify(content)}`
+        serializeTransactionContent: (content: any, isPostFork: boolean) => {
+            sdkCalls.push({ content, isPostFork })
+            if (content?.amount === "malformed") {
+                throw new Error("amount is not a valid OS amount")
+            }
+            return `OS:${JSON.stringify(content)}`
         },
     }),
 )
@@ -49,47 +50,50 @@ function makeTx(content: object, hash: string): Transaction {
 }
 
 describe("validateTxCoherence fork-aware canonicalization (audit H1)", () => {
-    it("forwards isPostFork to the serializer", () => {
-        calls.length = 0
-        const content = { type: "native", amount: 5 }
-        const hash = sha256(`OS:${JSON.stringify(content)}`)
-        validateTxCoherence(makeTx(content, hash), true)
-        expect(calls.at(-1)?.isPostFork).toBe(true)
+    const content = { type: "native", amount: 5 }
+    const postForkHash = sha256(`OS:${JSON.stringify(content)}`)
+    const preForkHash = sha256(JSON.stringify(content))
 
-        validateTxCoherence(makeTx(content, hash), false)
-        expect(calls.at(-1)?.isPostFork).toBe(false)
-    })
-
-    it("coherent when hash matches the post-fork serialization", () => {
-        const content = { type: "native", amount: 5 }
-        const hash = sha256(`OS:${JSON.stringify(content)}`)
-        const r = validateTxCoherence(makeTx(content, hash), true)
+    it("post-fork serializes through the SDK OS shape", () => {
+        sdkCalls.length = 0
+        const r = validateTxCoherence(makeTx(content, postForkHash), true)
         expect(r.valid).toBe(true)
+        expect(sdkCalls).toHaveLength(1)
+        expect(sdkCalls[0].isPostFork).toBe(true)
+        expect(sdkCalls[0].content).toEqual(content)
     })
 
-    it("coherent when hash matches the pre-fork serialization", () => {
-        const content = { type: "native", amount: 5 }
-        const hash = sha256(`DEM:${JSON.stringify(content)}`)
-        const r = validateTxCoherence(makeTx(content, hash), false)
+    it("pre-fork hashes the raw JSON.stringify without the SDK serializer", () => {
+        sdkCalls.length = 0
+        const r = validateTxCoherence(makeTx(content, preForkHash), false)
         expect(r.valid).toBe(true)
+        expect(sdkCalls).toHaveLength(0)
     })
 
-    it("NOT coherent when a post-fork tx is checked with pre-fork shape", () => {
-        // hash committed over OS shape, but checked with isPostFork=false ->
-        // serializer yields DEM:... -> mismatch. This is the exact H1 bug the
-        // fix prevents from silently passing/failing inconsistently.
-        const content = { type: "native", amount: 5 }
-        const hash = sha256(`OS:${JSON.stringify(content)}`)
-        const r = validateTxCoherence(makeTx(content, hash), false)
+    it("NOT coherent when a post-fork tx is checked with the pre-fork shape", () => {
+        // Hash committed over the OS shape but judged pre-fork: the raw bytes
+        // differ, so the tx must be rejected rather than silently admitted.
+        const r = validateTxCoherence(makeTx(content, postForkHash), false)
+        expect(r.valid).toBe(false)
+        expect(r.reason).toMatch(/not coherent/i)
+    })
+
+    it("NOT coherent when a pre-fork tx is checked with the post-fork shape", () => {
+        const r = validateTxCoherence(makeTx(content, preForkHash), true)
         expect(r.valid).toBe(false)
         expect(r.reason).toMatch(/not coherent/i)
     })
 
     it("NOT coherent when content is tampered", () => {
-        const content = { type: "native", amount: 5 }
-        const hash = sha256(`OS:${JSON.stringify(content)}`)
         const tampered = { type: "native", amount: 6 }
-        const r = validateTxCoherence(makeTx(tampered, hash), true)
+        const r = validateTxCoherence(makeTx(tampered, postForkHash), true)
         expect(r.valid).toBe(false)
+    })
+
+    it("rejects content the post-fork serializer cannot canonicalize", () => {
+        const bad = { type: "native", amount: "malformed" }
+        const r = validateTxCoherence(makeTx(bad, postForkHash), true)
+        expect(r.valid).toBe(false)
+        expect(r.reason).toMatch(/cannot be serialized/i)
     })
 })
