@@ -27,6 +27,15 @@ import { NomisWalletIdentity, SavedHumanPassportIdentity, EthosWalletIdentity } 
 import { HumanPassportProvider } from "@/libs/identity/tools/humanpassport"
 import { verifyMessage as verifyEvmMessage } from "ethers"
 import TxValidatorPool from "../../validation/txValidatorPool"
+import { NomisApiClient } from "@/libs/identity/tools/nomis"
+import { EthosApiClient } from "@/libs/identity/tools/ethos"
+import {
+    isParsableTimestamp,
+    sameOptionalProviderNumber,
+    sameOptionalString,
+    sameProviderNumber,
+} from "@/libs/identity/scoreBinding"
+import { normalizeEthosAddress, normalizeNomisAddress } from "./routines/utils"
 import { xmProofBindingActiveForPendingBlock } from "@/forks/xmProofBindingGate"
 import {
     KEY_DERIVED_CHAINS,
@@ -389,11 +398,15 @@ export default class IdentityManager {
     }
 
     /**
-     * Verify the payload for a Nomis identity assign payload
+     * Verify a Nomis identity assign payload before the transaction is
+     * accepted. Apply stores the signed score as is and never asks Nomis, so
+     * this is the only place the score is checked against the provider: the
+     * signed score, scoreType and mintedScore must equal what Nomis reports
+     * for the default model now, and an unreachable Nomis refuses the
+     * transaction.
      *
-     * @param payload - The payload to verify
-     *
-     * @returns {success: boolean, message: string}
+     * @param payload - The signed payload
+     * @param sender - The Demos account the transaction comes from
      */
     static async verifyNomisPayload(
         payload: NomisWalletIdentity,
@@ -407,11 +420,53 @@ export default class IdentityManager {
             }
         }
 
+        if (
+            typeof payload.score !== "number" ||
+            !Number.isFinite(payload.score) ||
+            payload.score <= 0 ||
+            !Number.isInteger(payload.scoreType) ||
+            !isParsableTimestamp(payload.lastSyncedAt)
+        ) {
+            return {
+                success: false,
+                message:
+                    "Invalid Nomis identity payload: score, scoreType and lastSyncedAt are required",
+            }
+        }
+
         if (!(await this.isXmWalletLinked(sender, payload.chain, payload.address))) {
             return {
                 success: false,
                 message:
                     "Nomis wallet is not linked to this account: link it as a cross-chain identity first",
+            }
+        }
+
+        let fetched: Awaited<ReturnType<NomisApiClient["getWalletScore"]>>
+        try {
+            fetched = await NomisApiClient.getInstance().getWalletScore(
+                normalizeNomisAddress(payload.chain, payload.address),
+                { chain: payload.chain },
+            )
+        } catch {
+            return {
+                success: false,
+                message: "Could not confirm the Nomis score with Nomis; try again later",
+            }
+        }
+
+        if (
+            !sameProviderNumber(payload.score, fetched?.score) ||
+            payload.scoreType !== (fetched?.scoreType ?? 0) ||
+            !sameOptionalProviderNumber(
+                payload.mintedScore,
+                fetched?.mintData?.mintedScore,
+            )
+        ) {
+            return {
+                success: false,
+                message:
+                    "Nomis score in the transaction does not match the score Nomis reports; fetch it again",
             }
         }
 
@@ -422,14 +477,15 @@ export default class IdentityManager {
     }
 
     /**
-     * Verify the payload for an Ethos identity assign payload.
-     * NOTE: This only validates required fields (chain, subchain, address).
-     * The score is intentionally NOT validated here - it is fetched server-side
-     * from the Ethos API in applyEthosIdentityUpsert() to prevent score spoofing.
-     * Any client-supplied score in the payload is ignored.
+     * Verify an Ethos identity assign payload before the transaction is
+     * accepted. Apply stores the signed score as is and never asks Ethos, so
+     * this is the only place the score is checked against the provider: the
+     * signed score and profileId (and displayName/username when metadata is
+     * sent) must equal what Ethos reports now, and an unreachable Ethos
+     * refuses the transaction.
      *
-     * @param payload - The payload to verify
-     * @returns {success: boolean, message: string}
+     * @param payload - The signed payload
+     * @param sender - The Demos account the transaction comes from
      */
     static async verifyEthosPayload(
         payload: EthosWalletIdentity,
@@ -443,11 +499,56 @@ export default class IdentityManager {
             }
         }
 
+        if (
+            typeof payload.score !== "number" ||
+            !Number.isFinite(payload.score) ||
+            payload.score < 0 ||
+            !isParsableTimestamp(payload.lastSyncedAt)
+        ) {
+            return {
+                success: false,
+                message:
+                    "Invalid Ethos identity payload: score and lastSyncedAt are required",
+            }
+        }
+
         if (!(await this.isXmWalletLinked(sender, payload.chain, payload.address))) {
             return {
                 success: false,
                 message:
                     "Ethos wallet is not linked to this account: link it as a cross-chain identity first",
+            }
+        }
+
+        let fetched: Awaited<ReturnType<EthosApiClient["getScore"]>>
+        try {
+            fetched = await EthosApiClient.getInstance().getScore(
+                normalizeEthosAddress(payload.chain, payload.address),
+            )
+        } catch {
+            return {
+                success: false,
+                message: "Could not confirm the Ethos score with Ethos; try again later",
+            }
+        }
+
+        const metadataMatches =
+            payload.metadata == null ||
+            (sameOptionalString(
+                payload.metadata.displayName,
+                fetched?.displayName,
+            ) &&
+                sameOptionalString(payload.metadata.username, fetched?.username))
+
+        if (
+            !sameProviderNumber(payload.score, fetched?.score) ||
+            !sameOptionalProviderNumber(payload.profileId, fetched?.profileId) ||
+            !metadataMatches
+        ) {
+            return {
+                success: false,
+                message:
+                    "Ethos score in the transaction does not match the score Ethos reports; fetch it again",
             }
         }
 

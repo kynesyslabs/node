@@ -2,7 +2,7 @@ import { Ed25519PublicKey, AccountAddress } from "@aptos-labs/ts-sdk"
 import { fromBech32 } from "@cosmjs/encoding"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { ripemd160 } from "@noble/hashes/legacy.js"
-import { Address, WalletContractV4, WalletContractV5R1 } from "@ton/ton"
+import { Address, Cell, beginCell, contractAddress } from "@ton/core"
 import bs58 from "bs58"
 import { deriveAddress as deriveXrplAddress } from "ripple-keypairs"
 
@@ -148,6 +148,62 @@ function stripHexPrefix(value: string): string {
         : value
 }
 
+// Wallet contract code as deployed on chain; the address is the hash of the
+// code and initial data, so these bytes must never change. Copied from
+// @ton/ton (WalletContractV4 and WalletContractV5R1), which is not a direct
+// dependency here.
+const TON_WALLET_V4R2_CODE = Cell.fromBoc(
+    Buffer.from(
+        "te6ccgECFAEAAtQAART/APSkE/S88sgLAQIBIAIDAgFIBAUE+PKDCNcYINMf0x/THwL4I7vyZO1E0NMf0x/T//QE0VFDuvKhUVG68qIF+QFUEGT5EPKj+AAkpMjLH1JAyx9SMMv/UhD0AMntVPgPAdMHIcAAn2xRkyDXSpbTB9QC+wDoMOAhwAHjACHAAuMAAcADkTDjDQOkyMsfEssfy/8QERITAubQAdDTAyFxsJJfBOAi10nBIJJfBOAC0x8hghBwbHVnvSKCEGRzdHK9sJJfBeAD+kAwIPpEAcjKB8v/ydDtRNCBAUDXIfQEMFyBAQj0Cm+hMbOSXwfgBdM/yCWCEHBsdWe6kjgw4w0DghBkc3RyupJfBuMNBgcCASAICQB4AfoA9AQw+CdvIjBQCqEhvvLgUIIQcGx1Z4MesXCAGFAEywUmzxZY+gIZ9ADLaRfLH1Jgyz8gyYBA+wAGAIpQBIEBCPRZMO1E0IEBQNcgyAHPFvQAye1UAXKwjiOCEGRzdHKDHrFwgBhQBcsFUAPPFiP6AhPLassfyz/JgED7AJJfA+ICASAKCwBZvSQrb2omhAgKBrkPoCGEcNQICEekk30pkQzmkD6f+YN4EoAbeBAUiYcVnzGEAgFYDA0AEbjJftRNDXCx+AA9sp37UTQgQFA1yH0BDACyMoHy//J0AGBAQj0Cm+hMYAIBIA4PABmtznaiaEAga5Drhf/AABmvHfaiaEAQa5DrhY/AAG7SB/oA1NQi+QAFyMoHFcv/ydB3dIAYyMsFywIizxZQBfoCFMtrEszMyXP7AMhAFIEBCPRR8qcCAHCBAQjXGPoA0z/IVCBHgQEI9FHyp4IQbm90ZXB0gBjIywXLAlAGzxZQBPoCFMtqEssfyz/Jc/sAAgBsgQEI1xj6ANM/MFIkgQEI9Fnyp4IQZHN0cnB0gBjIywXLAlAFzxZQA/oCE8tqyx8Syz/Jc/sAAAr0AMntVA==",
+        "base64",
+    ),
+)[0]
+
+const TON_WALLET_V5R1_CODE = Cell.fromBoc(
+    Buffer.from(
+        "b5ee9c7241021401000281000114ff00f4a413f4bcf2c80b01020120020d020148030402dcd020d749c120915b8f6320d70b1f2082106578746ebd21821073696e74bdb0925f03e082106578746eba8eb48020d72101d074d721fa4030fa44f828fa443058bd915be0ed44d0810141d721f4058307f40e6fa1319130e18040d721707fdb3ce03120d749810280b99130e070e2100f020120050c020120060902016e07080019adce76a2684020eb90eb85ffc00019af1df6a2684010eb90eb858fc00201480a0b0017b325fb51341c75c875c2c7e00011b262fb513435c280200019be5f0f6a2684080a0eb90fa02c0102f20e011e20d70b1f82107369676ebaf2e08a7f0f01e68ef0eda2edfb218308d722028308d723208020d721d31fd31fd31fed44d0d200d31f20d31fd3ffd70a000af90140ccf9109a28945f0adb31e1f2c087df02b35007b0f2d0845125baf2e0855036baf2e086f823bbf2d0882292f800de01a47fc8ca00cb1f01cf16c9ed542092f80fde70db3cd81003f6eda2edfb02f404216e926c218e4c0221d73930709421c700b38e2d01d72820761e436c20d749c008f2e09320d74ac002f2e09320d71d06c712c2005230b0f2d089d74cd7393001a4e86c128407bbf2e093d74ac000f2e093ed55e2d20001c000915be0ebd72c08142091709601d72c081c12e25210b1e30f20d74a111213009601fa4001fa44f828fa443058baf2e091ed44d0810141d718f405049d7fc8ca0040048307f453f2e08b8e14038307f45bf2e08c22d70a00216e01b3b0f2d090e2c85003cf1612f400c9ed54007230d72c08248e2d21f2e092d200ed44d0d2005113baf2d08f54503091319c01810140d721d70a00f2e08ee2c8ca0058cf16c9ed5493f2c08de20010935bdb31e1d74cd0b4d6c35e",
+        "hex",
+    ),
+)[0]
+
+/** Default wallet v4r2 on workchain 0 (wallet id 698983191). */
+function tonWalletV4R2Address(publicKey: Buffer): Address {
+    const data = beginCell()
+        .storeUint(0, 32)
+        .storeUint(698983191, 32)
+        .storeBuffer(publicKey)
+        .storeBit(0)
+        .endCell()
+    return contractAddress(0, { code: TON_WALLET_V4R2_CODE, data })
+}
+
+/**
+ * Default wallet v5r1 on workchain 0: client context, version v5r1,
+ * subwallet 0, mixed with the network id so a mainnet and a testnet wallet of
+ * the same key have different addresses.
+ */
+function tonWalletV5R1Address(
+    publicKey: Buffer,
+    networkGlobalId: number,
+): Address {
+    const context = beginCell()
+        .storeUint(1, 1)
+        .storeInt(0, 8)
+        .storeUint(0, 8)
+        .storeUint(0, 15)
+        .endCell()
+        .beginParse()
+        .loadInt(32)
+    const data = beginCell()
+        .storeUint(1, 1)
+        .storeUint(0, 32)
+        .storeInt(BigInt(networkGlobalId) ^ BigInt(context), 32)
+        .storeBuffer(publicKey, 32)
+        .storeBit(0)
+        .endCell()
+    return contractAddress(0, { code: TON_WALLET_V5R1_CODE, data })
+}
+
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
     return a.length === b.length && a.every((v, i) => v === b[i])
 }
@@ -210,13 +266,8 @@ export function checkAddressDerivedFromKey(args: {
                 // so every contract the SDK and common wallets deploy is tried.
                 const networkGlobalId = subchain === "testnet" ? -3 : -239
                 const candidates = [
-                    WalletContractV5R1.create({
-                        publicKey: key,
-                        workchain: 0,
-                        walletId: { networkGlobalId },
-                    }).address,
-                    WalletContractV4.create({ publicKey: key, workchain: 0 })
-                        .address,
+                    tonWalletV5R1Address(key, networkGlobalId),
+                    tonWalletV4R2Address(key),
                 ]
                 return candidates.some(a => a.equals(target))
                     ? { ok: true }

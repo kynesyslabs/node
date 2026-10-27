@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test"
 import bs58 from "bs58"
+import { WalletContractV4, WalletContractV5R1 } from "@ton/ton"
 import {
     XM_PROOF_MAX_AGE_MS,
     checkAddressDerivedFromKey,
@@ -205,6 +206,51 @@ describe("checkAddressDerivedFromKey", () => {
             ).toBe(false)
             expect(
                 checkAddressDerivedFromKey({ chain, publicKey: "zz", targetAddress: "x" }).ok,
+            ).toBe(false)
+        }
+    })
+
+    it("derives the same TON wallet addresses as @ton/ton for v4r2 and v5r1", () => {
+        for (let i = 1; i <= 8; i++) {
+            const key = Buffer.alloc(32, i * 29)
+            const v4 = WalletContractV4.create({ publicKey: key, workchain: 0 })
+            const forms = (a: { toString: (o?: any) => string; toRawString: () => string }) => [
+                a.toRawString(),
+                a.toString(),
+                a.toString({ urlSafe: true, bounceable: false }),
+            ]
+            for (const [subchain, networkGlobalId] of [
+                ["mainnet", -239],
+                ["testnet", -3],
+            ] as const) {
+                const v5 = WalletContractV5R1.create({
+                    publicKey: key,
+                    workchain: 0,
+                    walletId: { networkGlobalId },
+                })
+                for (const target of [...forms(v4.address), ...forms(v5.address)]) {
+                    expect(
+                        checkAddressDerivedFromKey({
+                            chain: "ton",
+                            subchain,
+                            publicKey: key.toString("hex"),
+                            targetAddress: target,
+                        }).ok,
+                    ).toBe(true)
+                }
+            }
+            const mainnetV5 = WalletContractV5R1.create({
+                publicKey: key,
+                workchain: 0,
+                walletId: { networkGlobalId: -239 },
+            })
+            expect(
+                checkAddressDerivedFromKey({
+                    chain: "ton",
+                    subchain: "testnet",
+                    publicKey: key.toString("hex"),
+                    targetAddress: mainnetV5.address.toString(),
+                }).ok,
             ).toBe(false)
         }
     })

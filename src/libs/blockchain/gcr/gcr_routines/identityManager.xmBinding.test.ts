@@ -30,6 +30,8 @@ mock.module("@kynesyslabs/demosdk/xm-localsdk", () => ({
     APTOS: require(LOCALSDK + "aptos.js").APTOS,
 }))
 const IdentityManager = (await import("./identityManager")).default
+const { NomisApiClient } = await import("@/libs/identity/tools/nomis")
+const { EthosApiClient } = await import("@/libs/identity/tools/ethos")
 
 type Overrides = {
     signedData?: string
@@ -267,53 +269,158 @@ describe("IdentityManager.verifyPayload: xm proof quality", () => {
 describe("IdentityManager score identities need a linked wallet", () => {
     const evmAddr = "0x" + "AB".repeat(20)
     let getIdentities: ReturnType<typeof spyOn>
+    let nomis: ReturnType<typeof spyOn>
+    let ethos: ReturnType<typeof spyOn>
 
-    afterEach(() => getIdentities?.mockRestore())
+    beforeEach(() => {
+        nomis = spyOn(NomisApiClient.getInstance(), "getWalletScore").mockResolvedValue({
+            address: evmAddr.toLowerCase(),
+            score: 0.4237,
+            scoreType: 0,
+            mintData: { mintedScore: 40 },
+        } as any)
+        ethos = spyOn(EthosApiClient.getInstance(), "getScore").mockResolvedValue({
+            score: 1450,
+            profileId: 77,
+            displayName: "Ann",
+            username: "ann",
+        })
+    })
+    afterEach(() => {
+        getIdentities?.mockRestore()
+        nomis.mockRestore()
+        ethos.mockRestore()
+    })
 
     function linked(xm: any) {
         getIdentities = spyOn(IdentityManager, "getIdentities").mockResolvedValue(xm)
     }
 
+    const nomisPayload = (o: Record<string, unknown> = {}) =>
+        ({
+            chain: "evm",
+            subchain: "mainnet",
+            address: evmAddr,
+            score: 0.4237,
+            scoreType: 0,
+            mintedScore: 40,
+            lastSyncedAt: "2026-10-27T10:00:00.000Z",
+            ...o,
+        }) as any
+
+    const ethosPayload = (o: Record<string, unknown> = {}) =>
+        ({
+            chain: "evm",
+            subchain: "mainnet",
+            address: evmAddr,
+            score: 1450,
+            profileId: 77,
+            lastSyncedAt: "2026-10-27T10:00:00.000Z",
+            metadata: { displayName: "Ann", username: "ann" },
+            ...o,
+        }) as any
+
     it("refuses Nomis, Ethos and Human Passport for a wallet the account never linked", async () => {
         linked({})
-        const nomis = await IdentityManager.verifyNomisPayload(
-            { chain: "evm", subchain: "mainnet", address: evmAddr } as any,
-            SENDER,
-        )
-        const ethos = await IdentityManager.verifyEthosPayload(
-            { chain: "evm", subchain: "mainnet", address: evmAddr } as any,
-            SENDER,
-        )
+        const n = await IdentityManager.verifyNomisPayload(nomisPayload(), SENDER)
+        const e = await IdentityManager.verifyEthosPayload(ethosPayload(), SENDER)
         const hp = await IdentityManager.verifyHumanPassportPayload(
             { address: evmAddr, verificationMethod: "api" },
             SENDER,
         )
-        expect(nomis.success).toBe(false)
-        expect(ethos.success).toBe(false)
+        expect(n.success).toBe(false)
+        expect(e.success).toBe(false)
         expect(hp.success).toBe(false)
-        expect(nomis.message).toContain("not linked")
+        expect(n.message).toContain("not linked")
     })
 
     it("accepts Nomis and Ethos for a wallet linked on any subchain, ignoring address case", async () => {
         linked({ evm: { polygon: [{ address: evmAddr.toLowerCase() }] } })
-        const nomis = await IdentityManager.verifyNomisPayload(
-            { chain: "evm", subchain: "mainnet", address: evmAddr } as any,
-            SENDER,
-        )
-        const ethos = await IdentityManager.verifyEthosPayload(
-            { chain: "evm", subchain: "mainnet", address: evmAddr } as any,
-            SENDER,
-        )
-        expect(nomis.success).toBe(true)
-        expect(ethos.success).toBe(true)
+        const n = await IdentityManager.verifyNomisPayload(nomisPayload(), SENDER)
+        const e = await IdentityManager.verifyEthosPayload(ethosPayload(), SENDER)
+        expect(n).toEqual({ success: true, message: "Nomis identity payload verified" })
+        expect(e).toEqual({ success: true, message: "Ethos identity payload verified" })
+        expect(nomis.mock.calls[0]).toEqual([evmAddr.toLowerCase(), { chain: "evm" }])
+        expect(ethos.mock.calls[0]).toEqual([evmAddr.toLowerCase()])
     })
 
     it("does not accept a wallet linked on another chain", async () => {
         linked({ solana: { mainnet: [{ address: evmAddr }] } })
-        const nomis = await IdentityManager.verifyNomisPayload(
-            { chain: "evm", subchain: "mainnet", address: evmAddr } as any,
-            SENDER,
-        )
-        expect(nomis.success).toBe(false)
+        const n = await IdentityManager.verifyNomisPayload(nomisPayload(), SENDER)
+        expect(n.success).toBe(false)
+    })
+
+    describe("signed score against the provider", () => {
+        beforeEach(() => linked({ evm: { mainnet: [{ address: evmAddr }] } }))
+
+        it("refuses a Nomis score, model or minted score the provider does not report", async () => {
+            for (const o of [
+                { score: 0.9 },
+                { score: 0.4238 },
+                { scoreType: 1 },
+                { mintedScore: 41 },
+                { mintedScore: null },
+            ]) {
+                const r = await IdentityManager.verifyNomisPayload(nomisPayload(o), SENDER)
+                expect({ o, ok: r.success }).toEqual({ o, ok: false })
+            }
+        })
+
+        it("tolerates only float formatting noise on the fractional Nomis score", async () => {
+            const near = await IdentityManager.verifyNomisPayload(
+                nomisPayload({ score: 0.4237 + 1e-12 }),
+                SENDER,
+            )
+            const off = await IdentityManager.verifyNomisPayload(
+                nomisPayload({ score: 0.4237 + 1e-6 }),
+                SENDER,
+            )
+            expect(near.success).toBe(true)
+            expect(off.success).toBe(false)
+        })
+
+        it("requires an exact Ethos score, profile id and the names when sent", async () => {
+            for (const o of [
+                { score: 1451 },
+                { score: 1450.0000001 },
+                { profileId: 78 },
+                { profileId: undefined },
+                { metadata: { displayName: "Bob", username: "ann" } },
+                { metadata: { displayName: "Ann" } },
+            ]) {
+                const r = await IdentityManager.verifyEthosPayload(ethosPayload(o), SENDER)
+                expect({ o, ok: r.success }).toEqual({ o, ok: false })
+            }
+            const noMetadata = await IdentityManager.verifyEthosPayload(
+                ethosPayload({ metadata: undefined }),
+                SENDER,
+            )
+            expect(noMetadata.success).toBe(true)
+        })
+
+        it("refuses a payload without the score fields apply will store", async () => {
+            for (const o of [{ score: undefined }, { score: 0 }, { scoreType: "0" }, { lastSyncedAt: "soon" }]) {
+                const r = await IdentityManager.verifyNomisPayload(nomisPayload(o), SENDER)
+                expect({ o, ok: r.success }).toEqual({ o, ok: false })
+            }
+            for (const o of [{ score: undefined }, { score: -1 }, { lastSyncedAt: undefined }]) {
+                const r = await IdentityManager.verifyEthosPayload(ethosPayload(o), SENDER)
+                expect({ o, ok: r.success }).toEqual({ o, ok: false })
+            }
+        })
+
+        it("fails closed when the provider cannot be reached", async () => {
+            nomis.mockImplementation(async () => {
+                throw new Error("timeout")
+            })
+            ethos.mockImplementation(async () => {
+                throw new Error("timeout")
+            })
+            const n = await IdentityManager.verifyNomisPayload(nomisPayload(), SENDER)
+            const e = await IdentityManager.verifyEthosPayload(ethosPayload(), SENDER)
+            expect(n.success).toBe(false)
+            expect(e.success).toBe(false)
+            expect(n.message).toContain("try again later")
+        })
     })
 })

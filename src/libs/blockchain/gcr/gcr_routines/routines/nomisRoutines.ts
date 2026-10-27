@@ -7,44 +7,34 @@ import {
     SavedNomisIdentity,
 } from "@/model/entities/types/IdentityTypes"
 import { IncentiveManager } from "../IncentiveManager"
-import log from "@/utilities/logger"
-import {
-    NomisApiClient,
-    NomisWalletScorePayload,
-} from "@/libs/identity/tools/nomis"
 import { safeGCRSave, isFirstConnection, normalizeNomisAddress } from "./utils"
 
 export async function applyNomisIdentityUpsert(
     editOperation: any,
     accountGCR: GCRMain,
 ): Promise<GCRResult> {
-    const { chain, subchain, address } = editOperation.data
+    const {
+        chain,
+        subchain,
+        address,
+        score,
+        scoreType,
+        mintedScore,
+        lastSyncedAt,
+    } = editOperation.data
 
     if (!chain || !subchain || !address) {
         return { success: false, message: "Invalid Nomis identity payload" }
     }
 
+    // Every node applies this edit, including nodes replaying old blocks, so
+    // the stored record has to be a function of the signed payload alone. The
+    // score was checked against Nomis when the transaction was accepted.
+    if (typeof score !== "number" || !Number.isFinite(score) || score <= 0) {
+        return { success: false, message: "Invalid Nomis identity payload" }
+    }
+
     const normalizedAddress = normalizeNomisAddress(chain, address)
-
-    // The score decides the points awarded, so it comes from Nomis and never
-    // from the payload. scoreType, minted score and metadata are the client's
-    // to choose in the payload and are not carried over either: a different
-    // model or a made-up metadata blob would otherwise be stored as fact.
-    let serverPayload: NomisWalletScorePayload
-    try {
-        serverPayload = await NomisApiClient.getInstance().getWalletScore(
-            normalizedAddress,
-            { chain },
-        )
-    } catch (error) {
-        log.error("[GCRIdentityRoutines] Failed to fetch Nomis score from API")
-        return { success: false, message: "Failed to fetch Nomis score" }
-    }
-
-    const score = serverPayload.score
-    if (typeof score !== "number" || !Number.isFinite(score) || !score) {
-        return { success: false, message: "Nomis returned no score" }
-    }
 
     accountGCR.identities.nomis = accountGCR.identities.nomis || {}
     accountGCR.identities.nomis[chain] =
@@ -62,16 +52,13 @@ export async function applyNomisIdentityUpsert(
     const record: SavedNomisIdentity = {
         address: normalizedAddress,
         score,
-        scoreType: serverPayload.scoreType ?? 0,
-        mintedScore: serverPayload.mintData?.mintedScore ?? null,
-        lastSyncedAt: new Date().toISOString(),
-        metadata: {
-            referralCode: serverPayload.referralCode,
-            referrerCode: serverPayload.referrerCode,
-            deadline:
-                serverPayload.mintData?.deadline ??
-                serverPayload.migrationData?.deadline,
-        },
+        scoreType: Number.isInteger(scoreType) ? scoreType : 0,
+        mintedScore:
+            typeof mintedScore === "number" && Number.isFinite(mintedScore)
+                ? mintedScore
+                : null,
+        // Client metadata is not checked against Nomis, so it is not stored.
+        lastSyncedAt: typeof lastSyncedAt === "string" ? lastSyncedAt : "",
     }
 
     filtered.push(record)
