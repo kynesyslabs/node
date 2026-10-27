@@ -74,6 +74,13 @@ export async function verifySystemRelayTx(
         )
     }
 
+    // The aggregator labels the domain it signed under. The label is not
+    // signed, so the check below proves nothing on its own; it rejects a
+    // relay transaction that claims a different signing rule.
+    if ((tx.signature as { domain?: unknown }).domain !== BATCH_SIGNATURE_DOMAIN) {
+        return invalid("system relay transaction carries the wrong signature domain")
+    }
+
     if (!Array.isArray(content.data) || content.data[0] !== content.type) {
         return invalid("system relay payload does not match its type")
     }

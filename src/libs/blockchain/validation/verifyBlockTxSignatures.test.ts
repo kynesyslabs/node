@@ -320,6 +320,28 @@ describe("verifyBlockTxSignatures", () => {
             ).toBe(false)
         })
 
+        it("rejects a validly signed batch labelled with another signature domain", async () => {
+            const batch = await batchTx()
+            ;(batch.signature as any).domain = "L2PS_OTHER_V1"
+
+            const verdict = await verifyBlockTxSignatures(
+                blockOf(ACTIVATION, [batch]),
+                [batch],
+            )
+
+            expect(verdict.valid).toBe(false)
+            expect(verdict.reason).toContain("wrong signature domain")
+        })
+
+        it("rejects a validly signed batch with no signature domain label", async () => {
+            const batch = await batchTx()
+            delete (batch.signature as any).domain
+
+            expect(
+                (await verifyBlockTxSignatures(blockOf(ACTIVATION, [batch]), [batch])).valid,
+            ).toBe(false)
+        })
+
         it("rejects a batch whose signature belongs to another key", async () => {
             const batch = await batchTx()
             ;(batch.content as any).from = "0x" + "cd".repeat(32)
