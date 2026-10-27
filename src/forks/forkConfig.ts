@@ -128,20 +128,21 @@ export type TlsnProofEnforcementConfig = BaseForkConfig
 export type AtomicWorkConfig = BaseForkConfig
 
 /**
- * `editBinding` fork: a block applies a transaction only when the edits it
- * ships are exactly the ones the node regenerates from the signed body, for
- * every transaction type, and each edit that names an account acts on the
- * sender's own.
+ * `editBinding` fork: a transaction is admitted to a pool and applied by a
+ * block only when the edits it ships are exactly the ones the node
+ * regenerates from the signed body, for every transaction type, and each edit
+ * that names an account acts on the sender's own.
  *
  * Before it, the edits of a non-native transaction were applied as written:
  * a self-signed transaction could carry a balance credit, a vote recorded
  * under another validator or a nonce bump on someone else's account, and
  * every node that applied or synced the block applied them too.
  *
- * Dormant by default (`activationHeight: null`): until a height is pinned,
- * apply behaves exactly as it did, so a node carrying the code agrees with a
- * node without it. A chain started from genesis with this build sets it to 0.
- * No payload beyond the base.
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`): until a height is
+ * pinned, admission and apply behave exactly as they did, so a node carrying
+ * the code agrees with a node without it. A chain started from genesis with
+ * this build sets it to 0. No payload beyond the base.
  */
 export type EditBindingConfig = BaseForkConfig
 

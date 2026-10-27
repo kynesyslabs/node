@@ -126,6 +126,34 @@ beforeEach(() => {
     ;(Mempool as any).addTransactionWithLock = async () => ({ confirmationBlock: 101 })
 })
 
+describe("Mempool.ingestGossiped before the fork", () => {
+    beforeEach(() => chainIs(true, null))
+
+    it("admits what the old checks admitted, including edits only the new rule refuses", async () => {
+        const tx = await forged("unstake", forgeries[0][2])
+        expect(await Mempool.ingestGossiped(validity(tx))).toMatchObject({ accepted: true })
+    })
+
+    it("still refuses a balance credit on a non-native transaction", async () => {
+        const tx = await forged("unstake", forgeries[5][2])
+        const out = await Mempool.ingestGossiped(validity(tx))
+        expect(out.accepted).toBe(false)
+        expect(out.reason).toContain("value edits")
+    })
+})
+
+describe("Mempool.receive before the fork", () => {
+    beforeEach(() => chainIs(true, null))
+    const row = (tx: Transaction) => ({ ...tx, reference_block: 100, blockNumber: 100, status: "pending" }) as unknown as Transaction
+
+    it("admits what the old checks admitted and refuses a balance credit", async () => {
+        const nonceBump = await forged("unstake", forgeries[0][2])
+        const mint = await forged("storageWrite", forgeries[5][2])
+        await Mempool.receive([row(nonceBump), row(mint)], false)
+        expect(inserted.map(r => r.hash)).toEqual([nonceBump.hash])
+    })
+})
+
 describe("Mempool.ingestGossiped", () => {
     for (const name of Object.keys(builders)) {
         it(`admits an unmodified ${name} transaction`, async () => {

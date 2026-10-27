@@ -22,7 +22,12 @@ KyneSys Labs: https://www.kynesys.xyz/
  *
  * Two entry points:
  *  - `verifyAdmissionEdits`: gossip ingest and the consensus mempool merge.
- *  - `verifyEditsAtApply`: the apply step, behind the `editBinding` fork.
+ *  - `verifyEditsAtApply`: the apply step.
+ * Both are behind the `editBinding` fork. Inactive, admission keeps the
+ * checks it had before the fork, so nodes on either side of a rollout admit
+ * the same transactions and older clients keep working until the height.
+ * Active, both run the same rule. The fork and the denomination shape are
+ * judged from one source, the chain tip, so one call cannot straddle them.
  *
  * The comparison is exact and ordered, and it never reinterprets what a peer
  * shipped. Apply runs the shipped edits as they are, so a shipped amount is
@@ -39,7 +44,9 @@ import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
+import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
+import { verifyGcrEditsMatch, verifyNoUnexplainedValueEdits } from "./verifyGcrEdits"
 
 export interface EditVerdict {
     ok: boolean
@@ -105,6 +112,36 @@ function toWireShape(edits: GCREdit[], postFork: boolean): GCREdit[] {
 
 async function osDenominationActive(): Promise<boolean> {
     return isForkActive("osDenomination", await Chain.getLastBlockNumber())
+}
+
+/**
+ * Whether edits are bound, and the denomination shape expected, from one read
+ * of the chain tip (the source the native edit check always used for the
+ * shape). A fork activating at height H binds the block applied on tip H,
+ * which is block H + 1.
+ */
+export async function editBindingState(): Promise<{ active: boolean; postFork: boolean }> {
+    const tip = await Chain.getLastBlockNumber()
+    return {
+        active: isForkActive("editBinding", tip),
+        postFork: isForkActive("osDenomination", tip),
+    }
+}
+
+/**
+ * Why this node cannot create an award transaction that the network would
+ * accept, or null. Once `editBinding` is active a peer drops an award not
+ * signed by the genesis award signer, so a node signing with another key must
+ * say so instead of reporting an award that never lands.
+ */
+export async function awardSignerProblem(): Promise<string | null> {
+    if (!(await editBindingState()).active) return null
+    const signer = getSharedState.genesisSudoPubkey
+    if (!signer) return "genesis names no award signer, so no award is accepted"
+    if (getSharedState.publicKeyHex?.toLowerCase() !== signer) {
+        return "this node does not sign with the genesis award signer key"
+    }
+    return null
 }
 
 function senderOf(tx: Transaction): string {
@@ -319,18 +356,34 @@ export async function verifyEditsAtApply(
 }
 
 /**
- * The check at gossip ingest and consensus merge: the rule apply uses, for
- * every type including native and Work. A tx admitted here is one apply
- * accepts once the fork is active, and the other way round. Fee edits are
- * derived at apply, so neither side of the comparison carries them. A Work's
- * edits are the ones the node derives from its payload, which refuses an
- * invalid one.
+ * The check at gossip ingest and consensus merge.
+ *
+ * Active: the rule apply uses, for every type including native and Work, so a
+ * tx admitted here is one apply accepts, and the other way round. Fee edits are
+ * derived at apply, so neither side of the comparison carries them, and a
+ * Work's edits are the ones the node derives from its payload, which refuses
+ * an invalid one.
+ *
+ * Inactive: exactly what admission checked before the fork. Native and Work
+ * keep the whole-set match, every other type the value-edit projection.
  *
  * Fails closed: a transaction that cannot be checked is refused.
  */
 export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        return await verifyEditsAtApply(tx)
+        const { active, postFork } = await editBindingState()
+        if (active) return await verifyEditsAtApply(tx, { postFork })
+
+        if (tx.content?.type === "native" || carriesWorkEdits(tx)) {
+            const { match } = await verifyGcrEditsMatch(tx, { expectFeeEdits: false })
+            return match ? OK : refuse("gcr_edits do not match regenerated set")
+        }
+        const { ok, unexplained } = await verifyNoUnexplainedValueEdits(tx)
+        return ok
+            ? OK
+            : refuse(
+                  `value edits with no counterpart in the regenerated set (${unexplained.join(", ")})`,
+              )
     } catch (e) {
         return refuse(
             `gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,

@@ -41,7 +41,10 @@ import Chain from "src/libs/blockchain/chain"
 import { isForkActive } from "@/forks"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
-import { verifyEditsAtApply } from "src/libs/blockchain/validation/editBinding"
+import {
+    editBindingState,
+    verifyEditsAtApply,
+} from "src/libs/blockchain/validation/editBinding"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
@@ -1191,22 +1194,17 @@ export default class HandleGCR {
     private static async refuseUnboundEdits(
         txs: Transaction[],
         isRollback: boolean,
+        blockNumber?: number,
     ): Promise<Set<string>> {
         const refused = new Set<string>()
-        if (
-            isRollback ||
-            txs.length === 0 ||
-            !isForkActive("editBinding", getSharedState.lastBlockNumber ?? 0)
-        ) {
-            return refused
-        }
+        if (isRollback || txs.length === 0) return refused
 
-        // Resolved once for the block: the shape expected of an amount depends
-        // on the chain tip, not on the transaction.
-        const postFork = isForkActive(
-            "osDenomination",
-            await Chain.getLastBlockNumber(),
-        )
+        // One read of the tip decides both whether edits are bound and the
+        // shape expected of an amount, once for the block: neither depends on
+        // the transaction.
+        const { active, postFork } = await editBindingState()
+        if (!active) return refused
+
         for (const tx of txs) {
             let verdict: Awaited<ReturnType<typeof verifyEditsAtApply>>
             try {
@@ -1215,8 +1213,12 @@ export default class HandleGCR {
                 verdict = { ok: false, reason: `could not be verified: ${error}` }
             }
             if (!verdict.ok) {
+                // For a block being synced this means its forger shipped edits
+                // this node would not have accepted.
                 log.error(
-                    `[applyTransactions] Refusing tx ${tx.hash}: ${verdict.reason}`,
+                    `[applyTransactions] Refusing tx ${tx.hash}` +
+                        (blockNumber !== undefined ? ` of block ${blockNumber}` : "") +
+                        `: ${verdict.reason}`,
                 )
                 refused.add(tx.hash)
             }
@@ -1234,7 +1236,7 @@ export default class HandleGCR {
         const skippedTxs: string[] = []
         const assignedTxsUpdates = new Map<string, AssignedTxRecord[]>()
 
-        const refused = await this.refuseUnboundEdits(txs, isRollback)
+        const refused = await this.refuseUnboundEdits(txs, isRollback, clock?.height)
         const candidates =
             refused.size > 0 ? txs.filter(tx => !refused.has(tx.hash)) : txs
 

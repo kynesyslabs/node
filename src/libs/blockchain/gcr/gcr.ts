@@ -58,6 +58,10 @@ import log from "@/utilities/logger"
 import { skeletons } from "@kynesyslabs/demosdk/websdk"
 import { getSharedState } from "@/utilities/sharedState"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import {
+    awardSignerProblem,
+    verifyAdmissionEdits,
+} from "@/libs/blockchain/validation/editBinding"
 import HandleGCR from "./handleGCR"
 import Mempool from "../mempool"
 import {
@@ -1043,7 +1047,32 @@ export default class GCR {
             }
         }
 
+        // Peers drop an award this node is not allowed to sign, so say so now
+        // rather than report an award that never lands.
+        const signerProblem = await awardSignerProblem()
+        if (signerProblem) {
+            log.error("[awardPoints] refused: " + signerProblem)
+            return {
+                success: false,
+                error: signerProblem,
+                message: "Failed: " + signerProblem,
+                confirmationBlock: null,
+            }
+        }
+
         const tx = await this.createAwardPointsTransaction(accounts)
+
+        // The same check admission applies, before the award is queued.
+        const edits = await verifyAdmissionEdits(tx)
+        if (!edits.ok) {
+            log.error("[awardPoints] refused: " + edits.reason)
+            return {
+                success: false,
+                error: edits.reason,
+                message: "Failed: " + edits.reason,
+                confirmationBlock: null,
+            }
+        }
 
         const entities = await HandleGCR.prepareEntities([tx])
         const simulateResult = await HandleGCR.applyTransaction(

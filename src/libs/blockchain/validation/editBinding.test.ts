@@ -8,9 +8,10 @@
 
 import { beforeEach, describe, expect, it, mock } from "bun:test"
 
+let tip = 100
 mock.module("src/libs/blockchain/chain", () => ({
     __esModule: true,
-    default: { getLastBlockNumber: async () => 100 },
+    default: { getLastBlockNumber: async () => tip },
 }))
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
@@ -29,6 +30,8 @@ import { Identities } from "@kynesyslabs/demosdk/abstraction"
 import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import {
+    awardSignerProblem,
+    editBindingState,
     verifyAdmissionEdits,
     verifyEditsAgainstBody,
     verifyEditsAtApply,
@@ -98,7 +101,10 @@ async function refusedEverywhere(tx: Transaction) {
     }
 }
 
-beforeEach(() => chainIs(true))
+beforeEach(() => {
+    tip = 100
+    chainIs(true)
+})
 
 describe("a forged edit shipped by a peer that signed the transaction itself", () => {
     it("a nonce bump on another account", async () => {
@@ -541,5 +547,90 @@ describe("node-authored transactions that carry no edits", () => {
         expect((await verifyEditsAgainstBody(tx)).ok).toBe(true)
         edits(tx).find(e => e.type === "balance" && e.operation === "add")!.account = VICTIM
         expect((await verifyEditsAgainstBody(tx)).ok).toBe(false)
+    })
+})
+
+describe("the editBinding fork gates admission as well as apply", () => {
+    it("keeps admission as it was while the fork is dormant", async () => {
+        chainIs(true, null)
+
+        // Older wallets keep working: nothing the old checks admitted is refused.
+        const nonce = await wire("unstake")
+        edits(nonce).push({ type: "nonce", operation: "add", account: VICTIM, amount: 1000, isRollback: false, txhash: "" })
+        expect((await verifyAdmissionEdits(nonce)).ok).toBe(true)
+
+        const shape = await wire("native")
+        edits(shape).filter(e => e.type === "balance" && e.operation === "remove")[1].amount = 1
+        expect((await verifyAdmissionEdits(shape)).ok).toBe(true)
+
+        // What the old checks refused stays refused.
+        const mint = await wire("unstake")
+        edits(mint).push({ type: "balance", operation: "add", account: SENDER, amount: String(1_000n * OS), isRollback: false, txhash: "" })
+        expect(await verifyAdmissionEdits(mint)).toMatchObject({ ok: false, reason: expect.stringContaining("value edits") })
+        const nativeMint = await wire("native")
+        edits(nativeMint).push({ type: "balance", operation: "add", account: SENDER, amount: String(1_000n * OS), isRollback: false, txhash: "" })
+        expect(await verifyAdmissionEdits(nativeMint)).toMatchObject({ ok: false })
+
+        for (const kind of ["native", "storageWrite", "unstake", "identityXm"] as const) {
+            expect((await verifyAdmissionEdits(await wire(kind))).ok).toBe(true)
+        }
+    })
+
+    it("applies the single rule to every type once active", async () => {
+        chainIs(true, 0)
+        const nonce = await wire("unstake")
+        edits(nonce).push({ type: "nonce", operation: "add", account: VICTIM, amount: 1000, isRollback: false, txhash: "" })
+        expect((await verifyAdmissionEdits(nonce)).ok).toBe(false)
+
+        const shape = await wire("native")
+        edits(shape).filter(e => e.type === "balance" && e.operation === "remove")[1].amount = 1
+        expect((await verifyAdmissionEdits(shape)).ok).toBe(false)
+    })
+
+    it("binds from the block applied on tip H, which is block H + 1, judged from the chain tip alone", async () => {
+        chainIs(true, 150)
+        // The in-memory height says the opposite on purpose: it is not consulted.
+        for (const [chainTip, memoryHeight, active] of [
+            [149, 1_000, false],
+            [150, 0, true],
+            [151, 0, true],
+        ] as const) {
+            tip = chainTip
+            getSharedState.lastBlockNumber = memoryHeight
+            expect((await editBindingState()).active).toBe(active)
+        }
+    })
+
+    it("reads the denomination shape from the same tip", async () => {
+        chainIs(true, 0)
+        getSharedState.forkConfig.osDenomination.activationHeight = 120
+        tip = 119
+        expect(await editBindingState()).toEqual({ active: true, postFork: false })
+        tip = 120
+        expect(await editBindingState()).toEqual({ active: true, postFork: true })
+    })
+})
+
+describe("who may create an award", () => {
+    const setNodeKey = (key: string) => Object.defineProperty(getSharedState, "publicKeyHex", { get: () => key, configurable: true })
+
+    it("is unconstrained while the fork is dormant", async () => {
+        chainIs(true, null)
+        pinAwardSigner(null)
+        expect(await awardSignerProblem()).toBeNull()
+    })
+
+    it("needs the node to sign with the genesis award signer once active", async () => {
+        chainIs(true, 0)
+        setNodeKey(SUDO)
+        pinAwardSigner(SUDO)
+        expect(await awardSignerProblem()).toBeNull()
+
+        setNodeKey(SENDER)
+        expect(await awardSignerProblem()).toContain("does not sign with")
+
+        pinAwardSigner(null)
+        setNodeKey(SUDO)
+        expect(await awardSignerProblem()).toContain("names no award signer")
     })
 })

@@ -8,12 +8,14 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
 
 let tipReads = 0
+let tip = 100
+const logged: string[] = []
 mock.module("src/libs/blockchain/chain", () => ({
     __esModule: true,
     default: {
         getLastBlockNumber: async () => {
             tipReads++
-            return 100
+            return tip
         },
         getExistingTransactionHashes: async () => new Set<string>(),
     },
@@ -24,7 +26,7 @@ mock.module("src/utilities/logger", () => ({
         debug: () => {},
         info: () => {},
         warning: () => {},
-        error: () => {},
+        error: (m: unknown) => logged.push(String(m)),
         only: () => {},
         custom: () => {},
     },
@@ -65,6 +67,7 @@ function forks(editBinding: number | null) {
     getSharedState.forkConfig.gasFeeSeparation.activationHeight = null
     getSharedState.forkConfig.editBinding.activationHeight = editBinding
     getSharedState.lastBlockNumber = 100
+    tip = 100
 }
 
 const balanceOf = (key: string) => (caches.accounts.get(key) as any).balance as bigint
@@ -107,7 +110,7 @@ afterEach(() => {
 describe("applyTransactions before the editBinding fork", () => {
     beforeEach(() => forks(null))
 
-    it("applies the edits a transaction ships, forged or not, and reads nothing to check them", async () => {
+    it("applies the edits a transaction ships, forged or not", async () => {
         const forged = await mint()
         const honest = await legit()
         honest.hash = "11".repeat(32)
@@ -117,7 +120,6 @@ describe("applyTransactions before the editBinding fork", () => {
         expect(out.failedTxs).toEqual([])
         expect(out.successfulTxs).toEqual([forged.hash, honest.hash])
         expect(balanceOf(VICTIM)).toBe(1_005n * OS)
-        expect(tipReads).toBe(0)
     })
 
     it("applies a transaction whose edits cannot be regenerated", async () => {
@@ -240,18 +242,31 @@ describe("applyTransactions behind the editBinding fork", () => {
 })
 
 describe("the editBinding fork height", () => {
-    it("binds from the pinned height and not before", async () => {
+    it("binds from the block applied on tip H, which is block H + 1, judged from the chain tip", async () => {
         forks(150)
-        getSharedState.lastBlockNumber = 149
+        // The in-memory height says the opposite on purpose: it is not consulted.
+        tip = 149
+        getSharedState.lastBlockNumber = 1_000
         const early = await HandleGCR.applyTransactions([await mint()], false)
         expect(early.failedTxs).toEqual([])
         expect(balanceOf(VICTIM)).toBe(1_005n * OS)
 
         caches = freshCaches()
-        getSharedState.lastBlockNumber = 150
+        tip = 150
+        getSharedState.lastBlockNumber = 0
         const forged = await mint()
         const late = await HandleGCR.applyTransactions([forged], false)
         expect(late.failedTxs).toEqual([forged.hash])
         expect(balanceOf(VICTIM)).toBe(5n * OS)
+    })
+
+    it("names the block and the transaction when it refuses one", async () => {
+        forks(0)
+        logged.length = 0
+        const forged = await mint()
+
+        await HandleGCR.applyTransactions([forged], false, { height: 101, timestampSec: 1 })
+
+        expect(logged.some(m => m.includes(`Refusing tx ${forged.hash} of block 101`))).toBe(true)
     })
 })

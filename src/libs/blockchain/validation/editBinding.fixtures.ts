@@ -56,10 +56,14 @@ export function onTheWire<T>(tx: T): T {
     return JSON.parse(JSON.stringify(tx)) as T
 }
 
-/** Puts the chain tip and the SDK on one side of the osDenomination fork. */
-export function chainIs(postFork: boolean): void {
+/**
+ * Puts the chain tip and the SDK on one side of the osDenomination fork, with
+ * editBinding active from `editBinding` (null leaves it dormant).
+ */
+export function chainIs(postFork: boolean, editBinding: number | null = 0): void {
     getSharedState.forkConfig = cloneDefaultForkConfig()
     getSharedState.forkConfig.osDenomination.activationHeight = postFork ? 0 : null
+    getSharedState.forkConfig.editBinding.activationHeight = editBinding
     getSharedState.lastBlockNumber = 100
     sdkPostFork = postFork
 }
