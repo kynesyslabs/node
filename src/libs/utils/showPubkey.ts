@@ -115,6 +115,7 @@ async function main() {
         const newMnemonic = new Demos().newMnemonic()
         await fs.promises.writeFile(identityFile, newMnemonic, {
             encoding: "utf8",
+            mode: 0o600,
         })
         console.error(`Created new identity file at '${identityFile}'`)
     }

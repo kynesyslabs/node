@@ -302,8 +302,10 @@ Every line is a check; the scenario is `rehearsal.ts`.
   while the fork is unscheduled). **The gate is admission-only.** It is consulted
   when a web2 proof is verified for the mempool. The Telegram path returns
   before it, so Telegram proofs are not judged by the gate at all, and nothing
-  judges a proof at an explicit block height at validation or apply time, unlike
-  `signatureDomain` (`txSignatureContext(block.number)`). A legacy-shaped proof
+  judges a proof at an explicit block height at validation or apply time.
+  Transaction signatures under `signatureDomain` can be judged at a block's own
+  height: `verifyBlock` re-checks them when it is given the block's
+  transactions. A legacy-shaped proof
   admitted by a node whose tip lags, or included by a hostile proposer, can still
   land after H. A validation-time check is the recommended follow-up; it was not
   implemented here.
@@ -350,7 +352,7 @@ In `data/genesis.json`, identical on every validator and RPC node:
   `signatureDomain` is scheduled and `properties.id` is missing, because the
   signature binds to it. Pick an id that is unique to the network: two
   networks sharing one id give each other's signatures no protection. The
-  repository's `data/genesis.json` carries id 1.
+  repository's `data/genesis.json` carries id 1, the devnet genesis 1337.
 - `activationHeight` is a non-negative integer, or `null` for never. A fork is
   active for blocks at or above it as judged by the node's gate: for both forks
   admission and `getNetworkInfo` answer for the next block, so they flip when

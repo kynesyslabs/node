@@ -31,6 +31,11 @@ import {
 } from "@/libs/blockchain/routines/Sync"
 import { isNetworkAhead } from "./routines/networkAheadVeto"
 import {
+    forkScheduleAbstainReason,
+    shouldLogForkScheduleAbstain,
+} from "./routines/forkScheduleAbstain"
+import { ensureWindowChecked } from "@/libs/peer/routines/forkScheduleWatch"
+import {
     filterMempoolByNonce,
     filterMempoolByRefBlock,
     type FailedTranscation,
@@ -47,6 +52,10 @@ import {
     readNonces,
 } from "@/libs/debug/nonceTrace"
 import { markStep } from "@/utilities/loopScheduler"
+import {
+    DoubleSignError,
+    SigningRecordError,
+} from "@/libs/identity/signingRecord"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
 
@@ -122,6 +131,23 @@ export async function consensusRoutine(): Promise<void> {
             )
             return
         }
+
+        // A node that restarted inside the window has not compared its schedule
+        // yet, and the block-driven watch would only run it after the first round.
+        await ensureWindowChecked(getSharedState.lastBlockNumber)
+
+        // Placed after fastSync so an abstaining node keeps pulling blocks and
+        // can rejoin; before the shard is initialised so it neither forges nor votes.
+        const abstainReason = forkScheduleAbstainReason()
+        if (abstainReason !== null) {
+            if (shouldLogForkScheduleAbstain()) {
+                log.error(
+                    `[consensusRoutine] Abstaining from block ${blockRef}, not forging or voting: ${abstainReason}`,
+                )
+            }
+            return
+        }
+
         markStep("consensus", "waitForPeerStatus")
         const peersReady = await waitForPeerStatus()
         if (!peersReady) {
@@ -912,14 +938,28 @@ async function forgeBlock(
         await getCommonValidatorSeed()
 
     // REVIEW Add the GCR hash to the block should be done in createBlock
-    const block = await createBlock(
-        orderedTransactions,
-        commonValidatorSeed,
-        previousBlockHash,
-        lastBlockNumber + 1,
-        peerlist,
-        blockTimestamp,
-    )
+    let block: Block
+    try {
+        block = await createBlock(
+            orderedTransactions,
+            commonValidatorSeed,
+            previousBlockHash,
+            lastBlockNumber + 1,
+            peerlist,
+            blockTimestamp,
+        )
+    } catch (error) {
+        // A refused signature or an unusable signing record ends this round
+        // without signing; anything else keeps its existing handling.
+        if (
+            error instanceof DoubleSignError ||
+            error instanceof SigningRecordError
+        ) {
+            log.error(`[consensusRoutine] ${error.message}`)
+            throw new AbortConsensusError(error.message)
+        }
+        throw error
+    }
 
     // await updateValidatorStatus("forgedBlock", true, false, true)
     // Using the secretary to update the local statuses

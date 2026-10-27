@@ -47,6 +47,22 @@ import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import log from "src/utilities/logger"
 
+/** JSON with object keys in code-unit order: key order is not part of an edit's meaning. */
+export function canonical(value: unknown): string {
+    if (Array.isArray(value)) {
+        return `[${value.map(v => canonical(v === undefined ? null : v)).join(",")}]`
+    }
+    if (value !== null && typeof value === "object") {
+        const entries = Object.entries(value as Record<string, unknown>)
+            .filter(([, v]) => v !== undefined)
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        return `{${entries
+            .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
+            .join(",")}}`
+    }
+    return JSON.stringify(value) ?? "null"
+}
+
 export interface GcrEditsVerification {
     /** true when the shipped edits match the regenerated set. */
     match: boolean
@@ -69,15 +85,19 @@ function blankVolatileEditFields(edit: GCREdit): GCREdit {
 
 /**
  * Returns a function that rewrites an edit set into the wire shape the SDK
- * ships for the current chain tip: OS amount strings once osDenomination is
- * active, the raw author shape before. Both sides of an edit comparison go
- * through it.
+ * ships: OS amount strings once osDenomination is active, the raw author
+ * shape before. The fork decision comes from the local chain tip, never from
+ * the transaction: tx.blockNumber is attacker controlled.
  */
-async function wireShapeNormaliser(
-    tx: Transaction,
-): Promise<(edits: GCREdit[]) => GCREdit[]> {
+async function osDenominationActive(): Promise<boolean> {
     const blockHeight = await Chain.getLastBlockNumber()
-    const postFork = isForkActive("osDenomination", blockHeight)
+    return isForkActive("osDenomination", blockHeight)
+}
+
+function wireShapeNormaliser(
+    tx: Transaction,
+    postFork: boolean,
+): (edits: GCREdit[]) => GCREdit[] {
     return (edits: GCREdit[]): GCREdit[] => {
         const envelope = {
             ...tx.content,
@@ -87,7 +107,7 @@ async function wireShapeNormaliser(
             envelope as any,
             postFork,
         )
-        const parsed = JSON.parse(serialised) as { gcr_edits: GCREdit[] }
+        const parsed = JSON.parse(serialised) as { gcr_edits?: GCREdit[] }
         return parsed.gcr_edits ?? []
     }
 }
@@ -105,7 +125,7 @@ async function wireShapeNormaliser(
  */
 export async function verifyGcrEditsMatch(
     tx: Transaction,
-    options: { expectFeeEdits?: boolean } = {},
+    options: { expectFeeEdits?: boolean; keyOrderInsensitive?: boolean } = {},
 ): Promise<GcrEditsVerification> {
     // expectFeeEdits distinguishes WHERE the tx is being checked:
     //   - APPLY time (block txs, post-confirmTransaction): the shipped edits
@@ -114,7 +134,13 @@ export async function verifyGcrEditsMatch(
     //   - INGRESS time (peer gossip, pre-confirmTransaction): the shipped edits
     //     are the raw SDK shape with NO fee edits, so the regen must NOT add
     //     them -> pass false (default).
-    const { expectFeeEdits = false } = options
+    const { expectFeeEdits = false, keyOrderInsensitive = false } = options
+    // Admission under editBinding compares edits without regard to key order,
+    // so the same set must not be refused here for how its keys were written.
+    const digest = (edits: GCREdit[]): string =>
+        Hashing.sha256(
+            keyOrderInsensitive ? canonical(edits) : JSON.stringify(edits),
+        )
 
     // Snapshot the shipped edits (deep copy) so nothing downstream observes a
     // mutation from this read-only check.
@@ -202,15 +228,15 @@ export async function verifyGcrEditsMatch(
         gcredit.txhash = ""
     })
 
-    const normalise = await wireShapeNormaliser(tx)
+    const normalise = wireShapeNormaliser(tx, await osDenominationActive())
 
     const normalisedRegen = normalise(regen)
-    const regenEditsHash = Hashing.sha256(JSON.stringify(normalisedRegen))
+    const regenEditsHash = digest(normalisedRegen)
 
     const normalisedTxEdits = normalise(
         txShippedGcrEdits.map(blankVolatileEditFields),
     )
-    const txEditsHash = Hashing.sha256(JSON.stringify(normalisedTxEdits))
+    const txEditsHash = digest(normalisedTxEdits)
 
     const match = txEditsHash === regenEditsHash
     if (!match) {
@@ -287,19 +313,27 @@ export interface ValueEditsVerification {
 export async function verifyNoUnexplainedValueEdits(
     tx: Transaction,
 ): Promise<ValueEditsVerification> {
-    const shippedRaw = (tx.content?.gcr_edits ?? []) as GCREdit[]
-    if (projectValueEdits(shippedRaw).length === 0) {
+    const shipped = projectValueEdits(
+        (tx.content?.gcr_edits ?? []) as GCREdit[],
+    )
+    if (shipped.length === 0) {
         return { ok: true, unexplained: [] }
     }
 
-    // Shipped edits carry the signed wire shape and regenerated edits carry
-    // the generator's raw shape, so both are normalised before projection.
-    const normalise = await wireShapeNormaliser(tx)
-    const shipped = projectValueEdits(normalise(shippedRaw))
-
+    // The shipped amounts are compared exactly as the balance routines will
+    // apply them, so a shipped amount is never reinterpreted here. Only the
+    // regenerated side is brought to the wire shape: once osDenomination is
+    // active the SDK ships amounts as OS strings while regeneration yields the
+    // author shape, and comparing those as text explains nothing a peer sends.
+    // Before the fork both sides are already in the author shape.
     let regenerated: string[]
     try {
-        regenerated = projectValueEdits(normalise(await generateGcrEdits(tx)))
+        const regen = await generateGcrEdits(tx)
+        regenerated = projectValueEdits(
+            (await osDenominationActive())
+                ? wireShapeNormaliser(tx, true)(regen)
+                : regen,
+        )
     } catch (e) {
         log.error(
             `[verifyNoUnexplainedValueEdits] regeneration failed for tx ${tx.hash}: ` +

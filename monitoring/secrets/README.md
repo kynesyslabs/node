@@ -1,0 +1,1 @@
+Put the Slack incoming-webhook URL, alone on one line, in `monitoring/secrets/slack_webhook` (gitignored, `chmod 644` so the Alertmanager container can read it; keep this directory readable by the monitoring host's operators only).

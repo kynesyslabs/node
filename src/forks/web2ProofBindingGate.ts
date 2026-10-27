@@ -12,7 +12,9 @@ import { isForkActive } from "./forkGates"
  * is verified for the mempool and nowhere at block validation, and the
  * Telegram path returns before it. A legacy-shaped proof admitted at a lagging tip, or
  * included by a proposer that ignores the gate, is not re-judged at an explicit
- * height the way `signatureDomain` is (txSignatureContext(block.number)).
+ * height. Transaction signatures under `signatureDomain` can be: `verifyBlock`
+ * re-checks them at the block's own height (txSignatureContext(block.number))
+ * when it is given the block's transactions. This fork has no such check.
  */
 export function web2ProofBindingActiveForPendingBlock(): boolean {
     return isForkActive(

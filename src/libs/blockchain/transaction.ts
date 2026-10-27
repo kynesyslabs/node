@@ -233,19 +233,42 @@ export default class Transaction implements ITransaction {
         }
     }
 
-    // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
+    // INFO Checks that the hash is the digest of the content as the signer serialized it
     public static isCoherent(tx: Transaction, blockHeight?: number) {
-        // REVIEW: P2 — route through fork-aware serializer. In P2 the gate
-        // returns identical bytes to JSON.stringify(tx.content), so legacy
-        // tx hashes still match when re-derived. When a caller has the
-        // owning block context, it should pass `block.number`; otherwise
-        // we fall back to the chain head.
-        const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
-        const derivedHash = Hashing.sha256(
-            serializeTransactionContent(tx.content, height),
-        )
+        return this.checkCoherence(tx, blockHeight).coherent
+    }
 
+    /**
+     * Same check as {@link isCoherent}, with the reason it failed.
+     *
+     * The serializer throws on content it cannot canonicalize (a missing or
+     * null fee field after osDenomination, a malformed amount). That is a
+     * rejection of the transaction, not an error of the node, so it is
+     * reported here instead of escaping into the ingress handler.
+     *
+     * Pass the block's own number when judging a block that already exists;
+     * otherwise the chain head is used.
+     */
+    public static checkCoherence(
+        tx: Transaction,
+        blockHeight?: number,
+    ): { coherent: boolean; reason?: string } {
+        const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
+        let derivedHash: string
+        try {
+            derivedHash = Hashing.sha256(
+                serializeTransactionContent(tx.content, height),
+            )
+        } catch (e) {
+            const detail = e instanceof Error ? e.message : String(e)
+            return {
+                coherent: false,
+                reason: `Transaction content cannot be serialized: ${detail}`,
+            }
+        }
         return derivedHash === tx.hash
+            ? { coherent: true }
+            : { coherent: false, reason: "Transaction hash mismatch" }
     }
 
     /**
@@ -518,7 +541,13 @@ export default class Transaction implements ITransaction {
         tx.signature = JSON.parse(rawTx.signature) as ISignature
         tx.status = rawTx.status
         tx.hash = rawTx.hash
-        tx.content = {
+        // The stored body is what the sender signed: its key order and value
+        // encoding are what the hash was computed over. The columns are
+        // lossy views of it (bigint columns come back as strings, key order is
+        // fixed here), so a body rebuilt from them no longer hashes to
+        // tx.hash and a syncing peer cannot check it.
+        const stored = JSON.parse(rawTx.content)
+        const columnContent = {
             type: rawTx.type as
                 | "web2Request"
                 | "crosschainOperation"
@@ -557,9 +586,15 @@ export default class Transaction implements ITransaction {
                     null,
             },
 
-            data: JSON.parse(rawTx.content).data,
-            gcr_edits: JSON.parse(rawTx.content).gcr_edits,
+            data: stored.data,
+            gcr_edits: stored.gcr_edits,
         }
+
+        const content: Record<string, unknown> = { ...stored }
+        for (const [key, value] of Object.entries(columnContent)) {
+            if (!(key in content)) content[key] = value
+        }
+        tx.content = content as unknown as TransactionContent
         tx.ed25519_signature = rawTx.ed25519_signature
         tx.attrs = typeof rawTx.attrs === "string" ? JSON.parse(rawTx.attrs) : rawTx.attrs
 

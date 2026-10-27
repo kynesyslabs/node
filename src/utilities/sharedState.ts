@@ -135,6 +135,22 @@ export default class SharedState {
         }
         this._shardSize = shardSize
     }
+    /** The award signer committed in block 0; null when genesis declares none. */
+    private _genesisSudoPubkey: string | null = null
+    get genesisSudoPubkey(): string | null {
+        return this._genesisSudoPubkey
+    }
+    setSudoPubkeyFromGenesis(pubkey: string | null): void {
+        if (
+            this._genesisSudoPubkey !== null &&
+            this._genesisSudoPubkey !== pubkey
+        ) {
+            throw new Error(
+                "the genesis award signer is already pinned; refusing to change it",
+            )
+        }
+        this._genesisSudoPubkey = pubkey
+    }
     mainLoopSleepTime = Config.getInstance().core.mainLoopSleepTime
 
     // NOTE See calibrateTime.ts for this value
@@ -258,6 +274,12 @@ export default class SharedState {
     consecutiveMissedShardBlocks = 0
     networkAhead = false
     networkAheadCheckedAt: number | null = null
+
+    // Set by the fork-schedule watch when a peer's schedule differs inside the
+    // window before a scheduled fork; the consensus routine skips its rounds
+    // while it is true. The text names the peers and the nearest fork height.
+    forkScheduleAbstain = false
+    forkScheduleAbstainReason = ""
 
     // Batch sync configuration
     batchSyncBlockSize = BATCH_SYNC_BLOCK_SIZE
@@ -513,7 +535,7 @@ export default class SharedState {
             maxRequests: RATE_LIMIT_DEFAULT_MAX_REQUESTS,
             windowMs: RATE_LIMIT_DEFAULT_WINDOW_MS,
         },
-        blockDurationMs: undefined,
+        blockDurationMs: Config.getInstance().core.rateLimitBlockDurationMs,
         whitelistedIPs: [
             ...LOCALHOST_IPS,
             ...Config.getInstance().core.whitelistedIPs,

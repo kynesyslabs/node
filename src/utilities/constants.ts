@@ -29,6 +29,21 @@ export const PEER_LIVENESS_WINDOW_MS = 30_000
  */
 export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
 
+// --- Mempool admission caps ---
+// Identical on every validator, so the pool a committee member would drop is
+// the pool every other member drops too. They are not env settings on
+// purpose: a validator running looser limits would admit txs its peers evict.
+/** Most txs the pool holds. */
+export const MEMPOOL_MAX_TXS = 10_000
+/** Most bytes of stored tx data the pool holds (peer request ceiling is twice this). */
+export const MEMPOOL_MAX_BYTES = 32 * 1024 * 1024
+/** Most pending txs one sender may hold. */
+export const MEMPOOL_MAX_PENDING_PER_SENDER = 64
+/** A tx stays valid for this long after its signed timestamp. */
+export const MEMPOOL_TX_TTL_MS = 10 * 60 * 1000
+/** How far ahead of the node's clock a signed timestamp may be. */
+export const MEMPOOL_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
+
 /**
  * Validator identities guaranteed a committee slot whenever they are
  * eligible and online, placed at the front of the shard in this order so
@@ -53,6 +68,10 @@ export const RATE_LIMIT_DEFAULT_WINDOW_MS = 60_000
 export const RATE_LIMIT_POST_MAX_REQUESTS = 200_000
 export const RATE_LIMIT_POST_WINDOW_MS = 86_400_000
 export const RATE_LIMIT_TX_PER_BLOCK = 4
+/** How long an IP stays blocked after it exceeds a rate limit. */
+export const RATE_LIMIT_DEFAULT_BLOCK_DURATION_MS = 60_000
+/** Most per-source rate-limit counters held at once. */
+export const RATE_LIMIT_MAX_TRACKED_COUNTERS = 50_000
 
 // /identities is an expensive full-table read; throttle it far below the
 // default GET allowance (per-IP) and cap how many can run at once (global).

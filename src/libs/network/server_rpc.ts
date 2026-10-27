@@ -8,6 +8,10 @@ import Mempool from "../blockchain/mempool"
 import GCR from "../blockchain/gcr/gcr"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
 import { RateLimiter } from "./middleware/rateLimiter"
+import { bodyLimit } from "./middleware/bodyLimit"
+import { isOperatorRequest } from "./operatorAuth"
+import { isMergePeerEligible } from "../consensus/mergePeerEligibility"
+import { Config } from "src/config"
 import { getAuthContext } from "./authContext"
 import { handleError } from "src/errors"
 
@@ -33,7 +37,13 @@ export { emptyResponse }
  */
 export async function serverRpcBun() {
     const port = getSharedState.serverPort
-    const server = new BunServer(port)
+    const { rpcBind, rpcMaxBodyBytes, rpcPeerMaxBodyBytes } =
+        Config.getInstance().server
+    // Bun enforces the larger ceiling before a handler runs; the body-limit
+    // middleware below holds ordinary callers to the smaller one.
+    const server = new BunServer(port, rpcBind, {
+        maxRequestBodySize: Math.max(rpcMaxBodyBytes, rpcPeerMaxBodyBytes),
+    })
 
     // Initialize rate limiter
     const rateLimiter = RateLimiter.getInstance()
@@ -75,6 +85,22 @@ export async function serverRpcBun() {
     // })
     server.use(cors())
     server.use(rateLimiter.createMiddleware())
+    server.use(
+        bodyLimit({
+            maxBytes: rpcMaxBodyBytes,
+            peerMaxBytes: rpcPeerMaxBodyBytes,
+            // Only a signed request from a merge-eligible validator may send
+            // more than the public limit: the consensus mempool merge does.
+            isPeer: async req => {
+                const auth = getAuthContext(req)
+                if (!auth.verified || !auth.publicKey) return false
+                const key = auth.publicKey.includes(":")
+                    ? auth.publicKey.split(":")[1]
+                    : auth.publicKey
+                return await isMergePeerEligible(key)
+            },
+        }),
+    )
     server.use(json())
 
     // ── GET endpoints ─────────────────────────────────────────
@@ -371,7 +397,18 @@ export async function serverRpcBun() {
         }
     })
 
-    server.get("/rate-limit/stats", () => {
+    // Operator-only: it reveals how many clients are being throttled, which
+    // is a probe for the limiter's thresholds.
+    server.get("/rate-limit/stats", req => {
+        const allowed = isOperatorRequest({
+            auth: getAuthContext(req),
+            sudoPubkey: getSharedState.SUDO_PUBKEY,
+            socketAddress: server.server?.requestIP(req)?.address,
+            headers: req.headers,
+        })
+        if (!allowed) {
+            return jsonResponse({ error: "Unauthorized" }, 401)
+        }
         return jsonResponse(rateLimiter.getStats())
     })
 
@@ -443,7 +480,7 @@ export async function serverRpcBun() {
         log.warning("[RPC] Failed to register StorageProgram routes: " + error)
     }
 
-    log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
+    log.info(`[RPC Call] Server is running on ${rpcBind}:${port}`, true)
     server.start()
     return server
 }

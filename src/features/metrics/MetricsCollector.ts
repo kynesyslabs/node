@@ -336,6 +336,19 @@ export class MetricsCollector {
                 sharedState.lastBlockNumber,
             )
 
+            // The MempoolBacklog alert reads this; without a writer the gauge stays 0.
+            try {
+                const { default: Mempool } = await import(
+                    "@/libs/blockchain/mempool"
+                )
+                this.metricsService.setGauge(
+                    "mempool_size",
+                    await Mempool.count(),
+                )
+            } catch {
+                // Mempool repo not initialised yet: keep the last value.
+            }
+
             // Get last block for detailed metrics
             const lastBlock = await chain.getLastBlock()
             if (lastBlock) {

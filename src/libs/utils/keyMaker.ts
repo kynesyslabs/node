@@ -36,7 +36,9 @@ async function main() {
     log.info("KEYMAKER", "====\n\n")
     // Save to file
     await fs.promises.writeFile("public.key", publicKey)
-    await fs.promises.writeFile(".demos_identity", "0x" + privateKey)
+    await fs.promises.writeFile(".demos_identity", "0x" + privateKey, {
+        mode: 0o600,
+    })
     // Logging
     log.info(
         "KEYMAKER",

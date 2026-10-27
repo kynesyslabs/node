@@ -53,10 +53,9 @@ jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
     },
 }))
 
-const valueEditsOk = { ok: true, unexplained: [] as string[] }
-jest.mock("src/libs/blockchain/validation/verifyGcrEdits", () => ({
-    verifyGcrEditsMatch: jest.fn(async () => ({ match: true })),
-    verifyNoUnexplainedValueEdits: jest.fn(async () => valueEditsOk),
+const editsVerdict: { ok: boolean; reason?: string } = { ok: true }
+jest.mock("src/libs/blockchain/validation/editBinding", () => ({
+    verifyAdmissionEdits: jest.fn(async () => editsVerdict),
 }))
 
 let insertedRows: Array<Record<string, unknown>> = []
@@ -155,24 +154,23 @@ describe("Mempool.receive admission", () => {
         expect(insertedRows).toHaveLength(0)
     })
 
-    it("rejects a non-native tx whose value edits the node would not generate", async () => {
-        // This ingress is unauthenticated and applies gcr_edits for any tx
-        // type, so an unbound funds/points edit here is an unauthenticated
-        // mint. The whole-set binding only covers native txs; the value-edit
-        // guard covers the rest.
-        valueEditsOk.ok = false
-        valueEditsOk.unexplained = ["balance|0xattacker|add|1000"]
+    it("rejects a tx whose edits the node would not generate", async () => {
+        // This ingress is unauthenticated and handleGCR applies gcr_edits of
+        // any type as written, so an edit the signed body does not imply is an
+        // unauthenticated state change.
+        editsVerdict.ok = false
+        editsVerdict.reason = "gcr_edits do not match regenerated set"
 
         await Mempool.receive([tx("0xforged", 100)])
 
         expect(insertedRows).toHaveLength(0)
         expect(
             logError.mock.calls.filter(c =>
-                String(c[0]).includes("value edits with no counterpart"),
+                String(c[0]).includes("gcr_edits do not match regenerated set"),
             ),
         ).toHaveLength(1)
 
-        valueEditsOk.ok = true
-        valueEditsOk.unexplained = []
+        editsVerdict.ok = true
+        editsVerdict.reason = undefined
     })
 })

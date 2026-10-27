@@ -12,6 +12,7 @@
         "lint": "eslint . --ignore-pattern 'local_tests' --ignore-pattern 'aptos_tests' --ext .ts",
         "lint:fix": "eslint . --ignore-pattern 'local_tests' --ignore-pattern 'aptos_tests' --fix --ext .ts",
         "type-check": "bun build src/index.ts --target=bun --no-emit",
+        "test:release": "jest --maxWorkers=1 tests/release/reproducibleRelease.test.ts",
         "type-check-ts": "tsc --noEmit",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "format": "prettier --plugin-search-dir . --write .",
@@ -107,6 +108,11 @@
         "tsx": "^3.12.8",
         "typescript": "^5.9.3"
     },
+    "trustedDependencies": [
+        "bufferutil",
+        "sqlite3",
+        "utf-8-validate"
+    ],
     "dependencies": {
         "@aptos-labs/ts-sdk": "^5.2.0",
         "@coral-xyz/anchor": "^0.32.1",

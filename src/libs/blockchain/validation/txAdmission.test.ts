@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from "bun:test"
 
 const txStatics = {
     structured: jest.fn(() => ({ valid: true, message: "" })),
-    isCoherent: jest.fn(() => true),
+    checkCoherence: jest.fn((): { coherent: boolean; reason?: string } => ({ coherent: true })),
     validateSignature: jest.fn(async () => ({ success: true, message: "" })),
 }
 jest.mock("src/libs/blockchain/transaction", () => ({
@@ -31,7 +31,7 @@ describe("checkTxAdmissible", () => {
         chain.checkTxExists.mockClear()
         mempool.checkTransactionByHash.mockClear()
         txStatics.structured.mockImplementation(() => ({ valid: true, message: "" }))
-        txStatics.isCoherent.mockImplementation(() => true)
+        txStatics.checkCoherence.mockImplementation(() => ({ coherent: true }))
         txStatics.validateSignature.mockImplementation(async () => ({ success: true, message: "" }))
         chain.checkTxExists.mockImplementation(async () => false)
         mempool.checkTransactionByHash.mockImplementation(async () => null)
@@ -59,9 +59,25 @@ describe("checkTxAdmissible", () => {
     })
 
     it("rejects hash mismatch before verifying the signature", async () => {
-        txStatics.isCoherent.mockImplementation(() => false)
+        txStatics.checkCoherence.mockImplementation(() => ({
+            coherent: false,
+            reason: "Transaction hash mismatch",
+        }))
         const v = await checkTxAdmissible(tx(100), { head: 100 })
         expect(v.code).toBe("coherence")
+        expect(v.reason).toBe("Transaction hash mismatch")
+        expect(txStatics.validateSignature).not.toHaveBeenCalled()
+    })
+
+    it("reports content the serializer cannot canonicalize as a coherence failure with its reason", async () => {
+        txStatics.checkCoherence.mockImplementation(() => ({
+            coherent: false,
+            reason: "Transaction content cannot be serialized: null fee",
+        }))
+        const v = await checkTxAdmissible(tx(100), { head: 100 })
+        expect(v.ok).toBe(false)
+        expect(v.code).toBe("coherence")
+        expect(v.reason).toContain("cannot be serialized")
         expect(txStatics.validateSignature).not.toHaveBeenCalled()
     })
 

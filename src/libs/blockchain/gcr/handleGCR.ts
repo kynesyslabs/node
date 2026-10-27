@@ -41,13 +41,17 @@ import Chain from "src/libs/blockchain/chain"
 import { isForkActive } from "@/forks"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
+import {
+    editBindingState,
+    verifyEditsAtApply,
+} from "src/libs/blockchain/validation/editBinding"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
-import { In } from "typeorm"
+import { In, type EntityManager } from "typeorm"
 import { Mutex } from "async-mutex"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
@@ -309,6 +313,7 @@ export default class HandleGCR {
      */
     static async bulkUpdateAssignedTxs(
         updates: Map<string, AssignedTxRecord[]>,
+        manager?: EntityManager,
     ): Promise<void> {
         if (updates.size === 0) return
 
@@ -325,7 +330,7 @@ export default class HandleGCR {
         }
         if (rows.length === 0) return
 
-        const repo = dataSource.getRepository(GCRAssignedTx)
+        const repo = (manager ?? dataSource).getRepository(GCRAssignedTx)
         const chunkSize = maxRowsPerInsert(repo, GCRAssignedTx)
         for (let i = 0; i < rows.length; i += chunkSize) {
             const chunk = rows.slice(i, i + chunkSize)
@@ -586,8 +591,12 @@ export default class HandleGCR {
                 "gasFeeSeparation",
                 getSharedState.lastBlockNumber ?? 0,
             )
+            // Once editBinding binds the set at admission and in the apply
+            // pre-pass, this check only has to agree with that comparison, which
+            // ignores the order of an edit's keys.
             const { match } = await verifyGcrEditsMatch(tx, {
                 expectFeeEdits,
+                keyOrderInsensitive: (await editBindingState()).active,
             })
             if (!match) {
                 log.error(
@@ -1177,6 +1186,51 @@ export default class HandleGCR {
         return res.affected ?? 0
     }
 
+    /**
+     * The transactions of a block whose shipped edits are not the ones their
+     * signed body implies (`editBinding` fork). Apply runs the shipped edits
+     * as they are, so a block must never reach it with edits nobody derived.
+     *
+     * Judged on the transactions as received, before the node derives fee
+     * edits or drops the edits of types that do not mutate entities, and not
+     * on rollback, which replays edits a block already accepted. Inactive, it
+     * reads nothing and refuses nothing.
+     */
+    private static async refuseUnboundEdits(
+        txs: Transaction[],
+        isRollback: boolean,
+        blockNumber?: number,
+    ): Promise<Set<string>> {
+        const refused = new Set<string>()
+        if (isRollback || txs.length === 0) return refused
+
+        // One read of the tip decides both whether edits are bound and the
+        // shape expected of an amount, once for the block: neither depends on
+        // the transaction.
+        const { active, postFork } = await editBindingState()
+        if (!active) return refused
+
+        for (const tx of txs) {
+            let verdict: Awaited<ReturnType<typeof verifyEditsAtApply>>
+            try {
+                verdict = await verifyEditsAtApply(tx, { postFork })
+            } catch (error) {
+                verdict = { ok: false, reason: `could not be verified: ${error}` }
+            }
+            if (!verdict.ok) {
+                // For a block being synced this means its forger shipped edits
+                // this node would not have accepted.
+                log.error(
+                    `[applyTransactions] Refusing tx ${tx.hash}` +
+                        (blockNumber !== undefined ? ` of block ${blockNumber}` : "") +
+                        `: ${verdict.reason}`,
+                )
+                refused.add(tx.hash)
+            }
+        }
+        return refused
+    }
+
     static async applyTransactions(
         txs: Transaction[],
         isRollback: boolean,
@@ -1187,6 +1241,10 @@ export default class HandleGCR {
         const skippedTxs: string[] = []
         const assignedTxsUpdates = new Map<string, AssignedTxRecord[]>()
 
+        const refused = await this.refuseUnboundEdits(txs, isRollback, clock?.height)
+        const candidates =
+            refused.size > 0 ? txs.filter(tx => !refused.has(tx.hash)) : txs
+
         // filter out txs that don't mutate entities
         const toFilter = new Set<TransactionContent["type"]>([
             "web2Request",
@@ -1195,7 +1253,7 @@ export default class HandleGCR {
         ])
         let finalTxs = []
 
-        for (const tx of txs) {
+        for (const tx of candidates) {
             if (toFilter.has(tx.content.type)) {
                 // These types don't mutate GCR entities, but their universal
                 // edits (nonce increment + gas) must still apply; only the
@@ -1389,17 +1447,24 @@ export default class HandleGCR {
             if (successfulSet.has(tx.hash)) successfulTxs.push(tx.hash)
             else if (failedSet.has(tx.hash)) failedTxs.push(tx.hash)
         }
+        if (refused.size > 0) {
+            // Reported in the order they arrived, among the ones that failed.
+            const failedAll = new Set([...failedTxs, ...refused])
+            failedTxs.length = 0
+            for (const tx of txs) {
+                if (failedAll.has(tx.hash)) failedTxs.push(tx.hash)
+            }
+        }
 
         await HandleGCR.gcrWriteMutex.runExclusive(async () => {
-            await this.saveGCREditChanges(entities, mergedSideEffects)
-            if (assignedTxsUpdates.size > 0) {
-                log.debug(
-                    `[applyTransactions] Updating ${assignedTxsUpdates.size} assignedTxs`,
-                )
-
-                // TODO: Move this to after transactions have been saved to the database
-                await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
-            }
+            // The assignments are the record of which transactions took
+            // effect, so they share the edits' database transaction: a
+            // failure leaves neither, never edits without their record.
+            await this.saveGCREditChanges(
+                entities,
+                mergedSideEffects,
+                assignedTxsUpdates,
+            )
         })
 
         const end = Date.now()
@@ -1419,10 +1484,12 @@ export default class HandleGCR {
      *
      * @param entities All entity caches to flush
      * @param sideEffects The side-effects to apply
+     * @param assignedTxs Assignments to record in the same database transaction
      */
     static async saveGCREditChanges(
         entities: GCREntityCaches,
         sideEffects: (() => Promise<void>)[],
+        assignedTxs?: Map<string, AssignedTxRecord[]>,
     ) {
         const now = Date.now()
         // One database transaction for the whole set: a crash or a failed
@@ -1530,6 +1597,13 @@ export default class HandleGCR {
                 if (toDelete.length > 0) {
                     await repo.delete({ resourceKey: In(toDelete) })
                 }
+            }
+
+            if (assignedTxs && assignedTxs.size > 0) {
+                log.debug(
+                    `[saveGCREditChanges] Recording ${assignedTxs.size} assignedTxs`,
+                )
+                await HandleGCR.bulkUpdateAssignedTxs(assignedTxs, em)
             }
         })
 
