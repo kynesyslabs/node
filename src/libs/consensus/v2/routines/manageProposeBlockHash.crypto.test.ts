@@ -46,6 +46,10 @@ jest.mock("src/libs/consensus/v2/routines/ensureCandidateBlockFormed", () => ({
 jest.mock("src/libs/blockchain/validation/verifyBlock", () => ({
     checkTimestampAgainstParent: () => ({ valid: true }),
 }))
+const NETWORK_NOW = 2000
+jest.mock("src/libs/utils/calibrateTime", () => ({
+    getNetworkTimestamp: () => NETWORK_NOW,
+}))
 
 const { default: manageProposeBlockHash } = await import("./manageProposeBlockHash")
 const { getBoundCommittee, __resetValidatorCache: resetPoolCache } = await import("./getShard")
@@ -160,5 +164,31 @@ describe("proposeBlockHash with real ed25519 signatures", () => {
 
         expect(res.result).toBe(200)
         expect(merged()).toEqual([proposer.identity, outsider.identity].sort())
+    })
+
+    it("refuses to vote on a candidate stamped with a fractional timestamp", async () => {
+        sharedState.candidateBlock.content.timestamp = NETWORK_NOW - 0.5
+        const res = await manageProposeBlockHash(
+            CANDIDATE_HASH,
+            { signatures: { [proposer.identity]: await proposer.sign(CANDIDATE_HASH) } } as any,
+            proposer.identity,
+        )
+
+        expect(res.result).toBe(409)
+        expect(res.extra.reason).toContain("not a whole number")
+        expect(merged()).toEqual([])
+    })
+
+    it("refuses to vote on a candidate stamped far ahead of our clock", async () => {
+        sharedState.candidateBlock.content.timestamp = NETWORK_NOW + 30
+        const res = await manageProposeBlockHash(
+            CANDIDATE_HASH,
+            { signatures: { [proposer.identity]: await proposer.sign(CANDIDATE_HASH) } } as any,
+            proposer.identity,
+        )
+
+        expect(res.result).toBe(409)
+        expect(res.extra.reason).toContain("ahead of our clock")
+        expect(merged()).toEqual([])
     })
 })

@@ -52,6 +52,22 @@ const member = (identity: string) => ({
     sync: { block: 100, block_hash: "hash-100" },
 })
 
+const mergeCalls: unknown[][] = []
+const validateCalls: unknown[][] = []
+const realPeerlistMerge = await import("../routines/peerlistMerge")
+jest.mock("../routines/peerlistMerge", () => ({
+    ...realPeerlistMerge,
+    freezeLocalSyncObservations: () => {},
+    computeMergedPeerlist: async (...args: unknown[]) => {
+        mergeCalls.push(args)
+        return []
+    },
+    validateMergedPeerlist: async (...args: unknown[]) => {
+        validateCalls.push(args)
+        return args[1]
+    },
+}))
+
 const realGetShard = await import("../routines/getShard")
 jest.mock("../routines/getShard", () => ({
     ...realGetShard,
@@ -76,6 +92,8 @@ beforeEach(() => {
     (managers as any).instances.clear()
     boundCalls.length = 0
     shardCalls.length = 0
+    mergeCalls.length = 0
+    validateCalls.length = 0
     committee = [SECRETARY, OUR_KEY, MEMBER, "0x" + "33".repeat(32)]
     sharedState.lastBlockNumber = 101
     sharedState.lastBlockHash = "hash-101"
@@ -130,5 +148,35 @@ describe("SecretaryManager.initializeShard under committeeBinding", () => {
         expect(boundCalls).toHaveLength(0)
         expect(manager.boundCommittee).toBeNull()
         expect(shardCalls).toEqual([["seed", 100, undefined]])
+    })
+})
+
+describe("SecretaryManager peerlist voters", () => {
+    beforeEach(() => {
+        sharedState.lastBlockNumber = 100
+        sharedState.lastBlockHash = "hash-100"
+    })
+
+    test("under committeeBinding, the bound committee votes, not the live shard", async () => {
+        const manager = managers.getInstance(101, true)
+        await manager.initializeShard("seed", 100)
+        // Three members are live; the committee holds four.
+        expect(manager.shard.members).toHaveLength(3)
+
+        await manager.ensureMergedPeerlist()
+        await manager.receiveMergedPeerlist([])
+
+        expect(mergeCalls).toEqual([[101, committee]])
+        expect(validateCalls).toEqual([[101, [], committee]])
+    })
+
+    test("before the fork, the live shard votes", async () => {
+        sharedState.forkConfig.committeeBinding.activationHeight = null
+        const manager = managers.getInstance(101, true)
+        await manager.initializeShard("seed", 100)
+
+        await manager.ensureMergedPeerlist()
+
+        expect(mergeCalls).toEqual([[101, [SECRETARY, OUR_KEY, MEMBER]]])
     })
 })

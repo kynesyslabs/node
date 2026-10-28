@@ -1,3 +1,4 @@
+import { getSharedState } from "src/utilities/sharedState"
 import {
     __resetPeerlistMerge,
     computeMergedPeerlist,
@@ -44,6 +45,8 @@ jest.mock("src/utilities/sharedState", () => ({
         publicKeyHex: "aa".repeat(32),
         lastBlockNumber: 100,
         lastBlockHash: "tiphash",
+        shardSize: 4,
+        forkConfig: { committeeBinding: { activationHeight: null } },
     },
 }))
 
@@ -76,6 +79,8 @@ jest.mock("src/libs/blockchain/gcr/gcr", () => ({
 
 beforeEach(() => {
     __resetPeerlistMerge()
+    getSharedState.forkConfig.committeeBinding.activationHeight = null
+    Object.assign(getSharedState, { shardSize: 4 })
     validatorAddresses = [OUR_KEY, SYNCED_PEER, STALE_PEER, REPORTED_PEER]
     peers = [
         { identity: SYNCED_PEER, sync: { block: 100, block_hash: "tiphash" } },
@@ -154,9 +159,95 @@ describe("validateMergedPeerlist", () => {
             expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
         })
 
-        it("accepts extra identities some member observed at the parent", async () => {
+        it("before committeeBinding, accepts extra identities some member observed at the parent", async () => {
             const list = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
             expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
+        })
+
+        describe("under committeeBinding", () => {
+            beforeEach(() => {
+                getSharedState.forkConfig.committeeBinding.activationHeight = 0
+            })
+
+            it("accepts exactly the identities at quorum in our view", async () => {
+                const list = [OUR_KEY, SYNCED_PEER].sort()
+                expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
+                expect(await computeMergedPeerlist(101, shard)).toEqual(list)
+            })
+
+            it("rejects an identity observed below quorum, so the secretary has nothing to choose", async () => {
+                const list = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
+                expect(await validateMergedPeerlist(101, list, shard)).toBeNull()
+            })
+
+            it("accepts the identity once it reaches quorum", async () => {
+                contributePeerlist(101, "c3", [obs(REPORTED_PEER)])
+                const list = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
+                expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
+            })
+
+            it("rejects an entry the secretary saw at quorum through a contribution we lack", async () => {
+                // The secretary also holds c3's table naming REPORTED_PEER;
+                // ours misses it, so in our view the entry is optional.
+                const list = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
+                expect(await validateMergedPeerlist(101, list, shard)).toBeNull()
+            })
+
+            it("still rejects a list that drops an identity at quorum", async () => {
+                expect(await validateMergedPeerlist(101, [OUR_KEY], shard)).toBeNull()
+            })
+
+            it("applies from the activation height of the block being forged", async () => {
+                const list = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
+                getSharedState.forkConfig.committeeBinding.activationHeight = 102
+                expect(await validateMergedPeerlist(101, list, shard)).toEqual(list)
+                getSharedState.forkConfig.committeeBinding.activationHeight = 101
+                expect(await validateMergedPeerlist(101, list, shard)).toBeNull()
+            })
+
+            it("does not apply without the shard", async () => {
+                const list = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
+                expect(await validateMergedPeerlist(101, list)).toEqual(list)
+            })
+        })
+
+        describe("quorum when nodes see different live members (committeeBinding)", () => {
+            // shardSize 10, so the bar is 7 whatever the voter list holds.
+            const committee = [OUR_KEY, ...Array.from({ length: 9 }, (_, i) => `c${i + 1}`)]
+            const secretaryLive = committee.slice(0, 8) // 8 live: own-count bar would be 6
+            const memberLive = committee // all 10 live: own-count bar would be 7
+
+            beforeEach(() => {
+                __resetPeerlistMerge()
+                Object.assign(getSharedState, { shardSize: 10 })
+                getSharedState.forkConfig.committeeBinding.activationHeight = 0
+                // Seen by us + c1..c6 (7): at the bar. Seen by c1..c6 (6): below it.
+                for (const c of ["c1", "c2", "c3", "c4", "c5", "c6"]) {
+                    contributePeerlist(101, c, [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+                }
+                peers = [{ identity: SYNCED_PEER, sync: { block: 100, block_hash: "tiphash" } }]
+            })
+
+            it("secretary and member hold entries to the same bar", async () => {
+                const list = await computeMergedPeerlist(101, secretaryLive)
+                expect(list).toEqual([OUR_KEY, SYNCED_PEER].sort())
+                expect(await validateMergedPeerlist(101, list, memberLive)).toEqual(list)
+                expect(await validateMergedPeerlist(101, list, secretaryLive)).toEqual(list)
+            })
+
+            it("neither side lets a smaller live view lower the bar", async () => {
+                const withReported = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
+                expect(await validateMergedPeerlist(101, withReported, secretaryLive)).toBeNull()
+                expect(await validateMergedPeerlist(101, withReported, memberLive)).toBeNull()
+            })
+
+            it("before the fork, the bar still follows the voter count", async () => {
+                getSharedState.forkConfig.committeeBinding.activationHeight = null
+                expect(await computeMergedPeerlist(101, secretaryLive)).toEqual(
+                    [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort(),
+                )
+                expect(await computeMergedPeerlist(101, memberLive)).toEqual([OUR_KEY, SYNCED_PEER].sort())
+            })
         })
 
         it("rejects a list that drops an identity at quorum in our view", async () => {
