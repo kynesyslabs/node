@@ -374,11 +374,11 @@ export function committeePeers(committee: string[]): Peer[] {
  * and gather the precommits they answer with. Members that already
  * committed the height are reported, as in the prevote exchange.
  *
- * Returns once the book holds a quorum of precommits for the block, or once
- * every member has answered or failed: a dead member must not hold up a
- * block the others already certified. The sends still running carry on in
- * the background, so every member still receives our precommit. A member
- * already marked offline gets a single attempt.
+ * Returns once the book holds a quorum of precommits for the block, however
+ * they arrived, or once every member has answered or failed: a dead member
+ * must not hold up a block the others already certified. The sends still
+ * running carry on in the background, so every member still receives our
+ * precommit. A member already marked offline gets a single attempt.
  */
 export async function broadcastPrecommit(
     request: PrecommitRequest,
@@ -466,8 +466,19 @@ export async function broadcastPrecommit(
 
     const peers = committeePeers(committee)
     await new Promise<void>(resolve => {
+        let done = false
         let pending = peers.length
-        if (pending === 0) return resolve()
+        // Precommits also arrive through requests from the other members,
+        // which can complete the certificate while our own sends hang
+        const stopListening = book.onRecord(() => {
+            if (certified()) finish()
+        })
+        function finish() {
+            if (done) return
+            done = true
+            stopListening()
+            resolve()
+        }
         for (const peer of peers) {
             ask(peer)
                 .catch(e =>
@@ -477,9 +488,10 @@ export async function broadcastPrecommit(
                 )
                 .finally(() => {
                     pending--
-                    if (pending === 0 || certified()) resolve()
+                    if (pending === 0 || certified()) finish()
                 })
         }
+        if (pending === 0 || certified()) finish()
     })
 
     return {

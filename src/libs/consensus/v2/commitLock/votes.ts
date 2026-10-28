@@ -102,6 +102,18 @@ const ROUNDS_PER_MEMBER = 16
 export class PrecommitBook {
     private height: number | null = null
     private byMember = new Map<string, SeenPrecommit[]>()
+    private listeners = new Set<() => void>()
+
+    /**
+     * Call `listener` after each precommit the book takes in, whichever
+     * path delivered it. Returns the call that removes it.
+     */
+    onRecord(listener: () => void): () => void {
+        this.listeners.add(listener)
+        return () => {
+            this.listeners.delete(listener)
+        }
+    }
 
     /** Record a precommit whose signature the caller verified. */
     record(
@@ -139,6 +151,7 @@ export class PrecommitBook {
         seen.push({ round, hash, signature })
         if (seen.length > ROUNDS_PER_MEMBER) seen.shift()
         this.byMember.set(member, seen)
+        for (const listener of [...this.listeners]) listener()
         return outcome
     }
 

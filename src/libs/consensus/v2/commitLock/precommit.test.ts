@@ -417,6 +417,55 @@ describe("precommit exchange", () => {
         expect(Object.keys(tally.certificate).sort()).toEqual([node.identity, a.identity, b.identity].sort())
     })
 
+    it("returns when incoming precommits complete the certificate while every send hangs", async () => {
+        openPrevote(X, R1)
+        const pol = await prevotes(X, R1, others)
+        const own = await precommit.lockAndPrecommit({ height: H, round: R1, hash: X, pol })
+        if (!("signature" in own)) throw new Error(own.refused)
+        for (const s of others) {
+            peers.set(s.identity, { identity: s.identity, longCall: () => new Promise(() => undefined) })
+        }
+
+        const exchange = precommit.broadcastPrecommit({ height: H, round: R1, hash: X, pol }, own.signature, committee)
+        // Two members' own precommit requests reach us meanwhile
+        const [a, b] = others
+        await votes.admitPrecommits(H, R1, X, await precommitsOf(X, R1, [a]), committee, votes.precommitBook)
+        await votes.admitPrecommits(H, R1, X, await precommitsOf(X, R1, [b]), committee, votes.precommitBook)
+
+        const tally = await Promise.race([
+            exchange,
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 2000)),
+        ])
+        if (!tally) throw new Error("the exchange waited on its own hanging sends")
+        expect(Object.keys(tally.certificate).sort()).toEqual([node.identity, a.identity, b.identity].sort())
+    })
+
+    it("returns at once when the book already holds a quorum, still sending its precommit", async () => {
+        openPrevote(X, R1)
+        const pol = await prevotes(X, R1, others)
+        const own = await precommit.lockAndPrecommit({ height: H, round: R1, hash: X, pol })
+        if (!("signature" in own)) throw new Error(own.refused)
+        await votes.admitPrecommits(H, R1, X, await precommitsOf(X, R1, others.slice(0, 2)), committee, votes.precommitBook)
+
+        const asked: string[] = []
+        for (const s of others) {
+            peers.set(s.identity, {
+                identity: s.identity,
+                longCall: () => {
+                    asked.push(s.identity)
+                    return new Promise(() => undefined)
+                },
+            })
+        }
+        const tally = await Promise.race([
+            precommit.broadcastPrecommit({ height: H, round: R1, hash: X, pol }, own.signature, committee),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 2000)),
+        ])
+        if (!tally) throw new Error("the exchange waited with a quorum in hand")
+        expect(Object.keys(tally.certificate)).toHaveLength(3)
+        expect(asked.sort()).toEqual(others.map(s => s.identity).sort())
+    })
+
     it("makes a single attempt at a member marked offline", async () => {
         openPrevote(X, R1)
         const pol = await prevotes(X, R1, others)
