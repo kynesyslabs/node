@@ -15,8 +15,11 @@ jest.mock("src/utilities/logger", () => ({
 }))
 
 import {
+    __resetSigningHalt,
     checkBlockSignature,
     DoubleSignError,
+    haltSigning,
+    signedByThisProcess,
     recordBlockSignature,
     loadSigningRecord,
     SigningRecordError,
@@ -148,6 +151,31 @@ describe("signingRecord", () => {
         expect(() =>
             guardBlockSignature(identity, round(2, 200, "x", "genesis-new")),
         ).toThrow(DoubleSignError)
+    })
+
+    describe("halted signing", () => {
+        afterEach(() => __resetSigningHalt())
+
+        it("refuses every round once halted and names the reason", () => {
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            expect(haltSigning("key seen elsewhere")).toBe(true)
+            expect(haltSigning("again")).toBe(false)
+            expect(() =>
+                checkBlockSignature(identity, round(11, 2000, "bb")),
+            ).toThrow(/key seen elsewhere/)
+            expect(() =>
+                recordBlockSignature(identity, round(11, 2000, "bb")),
+            ).toThrow(DoubleSignError)
+            expect(loadSigningRecord(identity)?.height).toBe(10)
+        })
+    })
+
+    it("remembers the blocks this process recorded", () => {
+        guardBlockSignature(identity, round(10, 1000, "aa"))
+        guardBlockSignature(identity, round(10, 1005, "bb"))
+        expect(signedByThisProcess("aa")).toBe(true)
+        expect(signedByThisProcess("bb")).toBe(true)
+        expect(signedByThisProcess("cc")).toBe(false)
     })
 
     it("checking alone never writes a record", () => {

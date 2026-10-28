@@ -33,6 +33,46 @@ export class SigningRecordError extends Error {
     }
 }
 
+// Set once evidence shows another process signing with this key. Signing
+// stays refused until restart: whichever copy signs next could be the one
+// that double-signs.
+let haltReason: string | null = null
+
+/** Refuse every further signature in this process. True on the first call. */
+export function haltSigning(reason: string): boolean {
+    if (haltReason !== null) return false
+    haltReason = reason
+    return true
+}
+
+export function signingHaltReason(): string | null {
+    return haltReason
+}
+
+// eslint-disable-next-line @typescript-eslint/naming-convention
+export function __resetSigningHalt(): void {
+    haltReason = null
+    signedHere.clear()
+}
+
+// Block hashes this process recorded, newest last. A retried round replaces
+// the record, but the earlier block can still be finalised by the shard;
+// seeing it later must not look like another signer.
+const SIGNED_HERE_LIMIT = 64
+const signedHere = new Set<string>()
+
+function rememberSigned(hash: string): void {
+    signedHere.delete(hash)
+    signedHere.add(hash)
+    if (signedHere.size > SIGNED_HERE_LIMIT) {
+        signedHere.delete(signedHere.values().next().value as string)
+    }
+}
+
+export function signedByThisProcess(hash: string): boolean {
+    return signedHere.has(hash)
+}
+
 export function signingRecordPath(identityFile: string): string {
     return `${identityFile}.signed.json`
 }
@@ -251,6 +291,9 @@ type Verdict =
     | { action: "unchanged" }
 
 function evaluate(identityFile: string, request: BlockSigningRequest): Verdict {
+    if (haltReason !== null) {
+        throw new DoubleSignError(`refusing to sign: ${haltReason}`)
+    }
     if (
         !request.genesisHash ||
         !Number.isSafeInteger(request.height) ||
@@ -322,6 +365,7 @@ export function recordBlockSignature(
     const release = acquireRecordLock(file)
     try {
         const verdict = evaluate(identityFile, request)
+        rememberSigned(request.hash)
         if (verdict.action === "unchanged") return
         if (verdict.action === "rebind") {
             log.warning(

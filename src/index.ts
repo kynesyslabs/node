@@ -48,6 +48,7 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
+import { haltSigning } from "./libs/identity/signingRecord"
 import {
     assertIdentityNotLive,
     IdentityLiveError,
@@ -684,6 +685,9 @@ async function main() {
         await acquireIdentityLock(getSharedState.identityFile, {
             onLost: reason => {
                 log.error(`[IDENTITY] ${reason}`)
+                // Shutdown waits for an in-flight block apply; no round may
+                // sign meanwhile.
+                haltSigning(reason)
                 void gracefulShutdown("identity_lock_lost", 1)
             },
         })

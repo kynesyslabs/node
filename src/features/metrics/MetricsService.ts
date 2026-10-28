@@ -134,6 +134,11 @@ export class MetricsService {
             [],
             [0.1, 0.5, 1, 2, 5, 10, 30],
         )
+        this.createCounter(
+            "foreign_signature_total",
+            "Peer blocks carrying a signature by this node's key that this node never recorded",
+            [],
+        )
         this.createGauge("block_height", "Current block height", [])
         this.createGauge("mempool_size", "Number of pending transactions", [])
 
