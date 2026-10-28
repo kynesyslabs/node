@@ -111,6 +111,28 @@ function assertValidatorsNotRequired(reason: string): void {
 export async function getEligiblePool(
     lastBlockNumber: number,
 ): Promise<string[]> {
+    const pool = await chainEligiblePool(lastBlockNumber)
+    if (pool !== null) {
+        return pool
+    }
+    assertValidatorsNotRequired(
+        "no committed peerlist AND no active validators",
+    )
+    log.warning(
+        "[getShard] SECURITY: no committed peerlist and no active validators; " +
+            "falling back to local peer view. This is only acceptable on development networks.",
+    )
+    return localViewFallback()
+}
+
+/**
+ * The eligible pool as far as chain data defines it, or null when the
+ * block commits no peerlist and there are no active validators, the case
+ * getEligiblePool answers from the local peer view.
+ */
+async function chainEligiblePool(
+    lastBlockNumber: number,
+): Promise<string[] | null> {
     if (poolCache.has(lastBlockNumber)) {
         return poolCache.get(lastBlockNumber)
     }
@@ -137,14 +159,7 @@ export async function getEligiblePool(
         )
         pool = [...validatorAddresses]
     } else {
-        assertValidatorsNotRequired(
-            "no committed peerlist AND no active validators",
-        )
-        log.warning(
-            "[getShard] SECURITY: no committed peerlist and no active validators; " +
-                "falling back to local peer view. This is only acceptable on development networks.",
-        )
-        return localViewFallback()
+        return null
     }
 
     const result = [...new Set(pool)].sort(compareIdentities)
@@ -223,10 +238,20 @@ export function rankPool(seed: string, pool: string[]): string[] {
  * validator set at that block. A parent whose committed peerlist shrank
  * below the quorum would otherwise stop the chain for good, since staked
  * validators outside that peerlist could never be drawn. Both sources are
- * chain data, so every node falls back at the same height.
+ * chain data, so every node falls back at the same height. Empty when the
+ * chain defines no pool at all; the local-view fallback never applies.
  */
 export async function getBoundPool(parentNumber: number): Promise<string[]> {
-    const pool = await getEligiblePool(parentNumber)
+    const pool = await chainEligiblePool(parentNumber)
+    if (pool === null) {
+        // The local peer view differs between nodes, so a committee drawn
+        // from it would not be chain data: no committee at all instead.
+        log.error(
+            `[getShard] Block ${parentNumber} commits no peerlist and there are no active validators: ` +
+                "no bound committee can be drawn from chain data",
+        )
+        return []
+    }
     if (pool.length >= getCommitteeFloor()) {
         return pool
     }

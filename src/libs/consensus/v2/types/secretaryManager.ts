@@ -220,6 +220,11 @@ export default class SecretaryManager {
                     `Could not resolve the bound committee for block ${this.shard.blockRef}: ${e instanceof Error ? e.message : String(e)}`,
                 )
             }
+            if (this.boundCommittee.length === 0) {
+                throw new AbortConsensusError(
+                    `No bound committee for block ${this.shard.blockRef}: the chain defines no validator pool at block ${lastBlockNumber}`,
+                )
+            }
         }
 
         // The seed's own block, not the shared tip: the two can differ

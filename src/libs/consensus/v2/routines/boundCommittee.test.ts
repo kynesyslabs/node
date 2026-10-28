@@ -202,6 +202,24 @@ describe("getBoundPool", () => {
     })
 })
 
+describe("a chain that defines no pool", () => {
+    beforeEach(() => {
+        committedPeerlist = []
+        validatorAddresses = []
+    })
+
+    it("still answers getEligiblePool from the local peer view before the fork", async () => {
+        expect(await getEligiblePool(100)).toContain(SELF)
+    })
+
+    it("draws no bound committee from the local peer view", async () => {
+        expect(await getEligiblePool(100)).not.toHaveLength(0)
+        expect(await getBoundPool(100)).toEqual([])
+        expect(await getBoundCommittee(100, "seed")).toEqual([])
+        expect(await getShard("seed", 100)).toEqual([])
+    })
+})
+
 describe("getBoundCommittee", () => {
     it("derives the seed from the stored parent the way a producer at that tip does", async () => {
         // The tip and an older parent commit different peerlists, so a

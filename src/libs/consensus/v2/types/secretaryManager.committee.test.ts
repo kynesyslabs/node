@@ -108,6 +108,17 @@ describe("SecretaryManager.initializeShard under committeeBinding", () => {
         expect(shardCalls).toHaveLength(0)
     })
 
+    test("aborts the round when the chain defines no committee", async () => {
+        committee = []
+        const manager = managers.getInstance(101, true)
+
+        const failure = await manager.initializeShard("seed", 100).catch(e => e)
+
+        expect(failure).toBeInstanceOf(abortError)
+        expect(failure.message).toContain("No bound committee for block 101")
+        expect(shardCalls).toHaveLength(0)
+    })
+
     test("draws no bound committee before the fork", async () => {
         sharedState.forkConfig.committeeBinding.activationHeight = null
         sharedState.lastBlockNumber = 100
