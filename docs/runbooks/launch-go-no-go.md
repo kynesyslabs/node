@@ -29,9 +29,11 @@ chain still makes blocks; a 4th stops it until one comes back.
    provider runs more than a third of the launch validators (at most 3 of
    10). With `shardSize` equal to the validator count, one party above that
    can stop the chain on its own.
-3. **T-0:** GO when at least `q` (7 with `shardSize` 10) launch validators
-   are online on the same genesis hash and the cap holds. Otherwise NO-GO,
-   and retry at the next agreed slot.
+3. **T-0:** GO when at least 7 members of the first committee (block 1's
+   bound committee; `q` of `shardSize` 10) are online on the same genesis
+   hash, each proven to hold its identity key, and the cap holds. Online
+   validators outside that committee do not count toward it. Otherwise
+   NO-GO, and retry at the next agreed slot.
 4. A validator counts only after it has made a signed block on the
    rehearsal network from its production host, key and image.
 5. Mainnet validators run with `DEMOS_REQUIRE_VALIDATORS=true`.
@@ -68,14 +70,40 @@ with (`/info`), the genesis hash it holds (`/genesisBlock`), its head height
 and its commit (`/info` `commitHash`; the image digest itself is not
 exposed by the node, so it comes from the T-24h posts). Then:
 
-- `GO` (exit 0): at least `q` launch validators answer with their own
-  identity, on the agreed genesis hash (and on `--commit` when given), and
-  every validator has an operator/provider entry with no group above a
-  third of the launch set.
+- `GO` (exit 0): at least `q` members of the first committee answer with
+  their own proven identity, on the agreed genesis hash (and on `--commit`
+  when given), and every launch validator has a complete operator/provider
+  entry with no group above a third of the launch set.
 - `NO-GO` (exit 1): each failed condition is listed. A validator answering
-  with a different identity, another genesis or another commit is shown but
-  not counted.
+  with a different identity, an unproven identity, another genesis or
+  another commit is shown but not counted.
 - Exit 2: bad input.
+
+**Identity proof.** `/info` is a claim anyone can make, so an endpoint
+(for example a `--rpc` URL) could otherwise answer for an offline
+validator. The tool sends each endpoint the node's own `hello_peer`
+handshake with a fresh random nonce and the agreed genesis hash, and
+counts the validator only when the reply is signed by that validator's
+key over the domain-separated `DEMOS_PEER_AUTH_V1` message for that nonce
+and the dialed URL, checked with the node's verifier. The tool uses a
+throwaway key of its own for the handshake, in a private temporary
+directory it deletes afterwards. Anything else (no signature, a bad one,
+a timeout) is shown as `unproven-identity` and not counted.
+
+**First committee.** With more launch validators than `shardSize`, only
+the `shardSize` drawn for block 1 can sign it. The tool computes that
+committee the way the node does: the validators active at block 0 in the
+genesis file, ranked under block 0's seed (from the agreed genesis hash),
+pinned identities first, cut to `shardSize`. It counts only those members
+toward `q` and lists the others as reserve. When the genesis hash is not
+known (no `--genesis-hash` and no agreement among the validators) and the
+launch set is larger than `shardSize`, it returns NO-GO rather than count
+validators that might not be in the committee.
+
+**Operator entries.** Every launch validator needs an entry with a
+non-empty string `operator` and `provider`. A missing field, an empty
+string or a non-string value is NO-GO and names the validator, because a
+validator without a group would escape the cap.
 
 Without `--genesis-hash` the hash most validators report is used, and the
 output warns when they disagree. Pass the agreed hash on launch day.

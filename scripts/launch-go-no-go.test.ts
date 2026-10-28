@@ -17,6 +17,7 @@ function online(identity: string, overrides: Partial<ValidatorProbe> = {}): Vali
         genesisHash: GENESIS,
         head: 0,
         commit: "abc123",
+        identityProof: "verified",
         ...overrides,
     }
 }
@@ -57,20 +58,44 @@ describe("decideGoNoGo", () => {
         const below = launch.map((v, i) => (i < 6 ? online(v) : online(v, { reachable: false })))
         const d = decideGoNoGo(input({ probes: below }))
         expect(d.go).toBe(false)
-        expect(d.reasons.join("\n")).toContain("6 of 10 launch validators are online")
+        expect(d.reasons.join("\n")).toContain("6 of the 10 members of the first committee are online")
         expect(d.validators.filter(v => v.status === "unreachable")).toHaveLength(4)
     })
 
-    it("takes q from shardSize, not from the number of launch validators", () => {
-        // 13 validators, shardSize 10: still 7
+    describe("with more launch validators than shardSize", () => {
+        // 13 validators, shardSize 10: q is still 7, of the 10 in the first committee
         const launch = launchSet(13)
-        const probes = launch.map((v, i) => (i < 7 ? online(v) : online(v, { reachable: false })))
+        const committee = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => launch[(i * 4) % 13])
+        const reserve = launch.filter(v => !committee.includes(v))
         const operators = Object.fromEntries(
             launch.map((v, i) => [v, { operator: `op-${i % 5}`, provider: `cloud-${i % 5}` }]),
         )
-        const d = decideGoNoGo({ shardSize: 10, launchValidators: launch, probes, operators })
-        expect(d.quorum).toBe(7)
-        expect(d.go).toBe(true)
+        const only = (up: string[]) => launch.map(v => (up.includes(v) ? online(v) : online(v, { reachable: false })))
+
+        it("takes q from shardSize and is GO with 7 committee members online", () => {
+            const d = decideGoNoGo({ shardSize: 10, launchValidators: launch, probes: only(committee.slice(0, 7)), operators, committee })
+            expect(d.quorum).toBe(7)
+            expect(d.countedInCommittee).toHaveLength(7)
+            expect(d.go).toBe(true)
+        })
+
+        it("is NO-GO with 7 online when only 4 of them are in the committee", () => {
+            const up = [...committee.slice(0, 4), ...reserve]
+            expect(up).toHaveLength(7)
+            const d = decideGoNoGo({ shardSize: 10, launchValidators: launch, probes: only(up), operators, committee })
+            expect(d.counted).toHaveLength(7)
+            expect(d.countedInCommittee).toHaveLength(4)
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain("4 of the 10 members of the first committee are online")
+            expect(d.validators.filter(v => v.inCommittee === false)).toHaveLength(3)
+        })
+
+        it("refuses to decide without the committee", () => {
+            const d = decideGoNoGo({ shardSize: 10, launchValidators: launch, probes: only(launch), operators })
+            expect(d.go).toBe(false)
+            expect(d.committee).toBeNull()
+            expect(d.reasons.join("\n")).toContain("the first committee is unknown")
+        })
     })
 
     it("does not count validators on another genesis", () => {
@@ -104,10 +129,42 @@ describe("decideGoNoGo", () => {
 
     it("does not count an endpoint answering with another identity", () => {
         const launch = launchSet(10)
-        const probes = launch.map((v, i) => (i < 4 ? online(v, { reportedIdentity: id(50 + i) }) : online(v)))
+        const probes = launch.map((v, i) =>
+            i < 4 ? online(v, { reportedIdentity: id(50 + i), identityProof: "invalid" }) : online(v),
+        )
         const d = decideGoNoGo(input({ probes }))
         expect(d.validators.filter(v => v.status === "wrong-identity")).toHaveLength(4)
         expect(d.go).toBe(false)
+    })
+
+    it("never counts an identity /info claims without a signed nonce", () => {
+        // An endpoint impersonating offline validators: /info names them,
+        // genesis and head look right, but nothing is signed with their keys
+        const launch = launchSet(10)
+        for (const proof of ["invalid", "unsigned", "failed", null, undefined] as const) {
+            const probes = launch.map((v, i) => (i < 4 ? online(v, { identityProof: proof }) : online(v)))
+            const d = decideGoNoGo(input({ probes }))
+            expect(d.counted).toHaveLength(6)
+            expect(d.validators.filter(v => v.status === "unproven-identity")).toHaveLength(4)
+            expect(d.go).toBe(false)
+        }
+    })
+
+    it("leaves unproven validators out of the genesis vote", () => {
+        const launch = launchSet(10)
+        const probes = launch.map((v, i) =>
+            i < 6 ? online(v, { genesisHash: "genesis-b", identityProof: "invalid" }) : online(v),
+        )
+        expect(decideGoNoGo(input({ probes })).genesisHash).toBe(GENESIS)
+    })
+
+    it("compares genesis hashes without case or 0x", () => {
+        const launch = launchSet(10)
+        const hash = "ab".repeat(32)
+        const probes = launch.map(v => online(v, { genesisHash: hash.toUpperCase() }))
+        const d = decideGoNoGo(input({ probes, expectedGenesisHash: "0x" + hash }))
+        expect(d.genesisHash).toBe(hash)
+        expect(d.go).toBe(true)
     })
 
     it("matches identities case-insensitively", () => {
@@ -186,6 +243,39 @@ describe("decideGoNoGo", () => {
         const d = decideGoNoGo(input({ operators }))
         expect(d.go).toBe(false)
         expect(d.reasons.join("\n")).toContain("1 launch validators have no operator/provider entry")
+    })
+
+    it("is NO-GO on an operator entry without a non-empty operator and provider", () => {
+        const launch = launchSet(10)
+        const bad: Array<unknown> = [
+            { operator: "op-x" },
+            { provider: "cloud-x" },
+            { operator: "", provider: "cloud-x" },
+            { operator: "op-x", provider: "   " },
+            { operator: 7, provider: "cloud-x" },
+            "op-x",
+            null,
+        ]
+        for (const entry of bad) {
+            const operators: Record<string, unknown> = spread(launch)
+            operators[launch[2]] = entry
+            const d = decideGoNoGo(input({ operators }))
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain(`1 launch validators have an incomplete entry`)
+            expect(d.reasons.join("\n")).toContain(launch[2])
+        }
+    })
+
+    it("does not let incomplete entries hide an operator above the cap", () => {
+        // Four validators of one operator, two of them with no provider:
+        // the incomplete pair must not drop out of the operator count unseen
+        const launch = launchSet(10)
+        const operators: Record<string, unknown> = spread(launch)
+        for (const v of launch.slice(0, 2)) operators[v] = { operator: "big-op", provider: `cloud-${v.slice(-1)}` }
+        for (const v of launch.slice(2, 4)) operators[v] = { operator: "big-op" }
+        const d = decideGoNoGo(input({ operators }))
+        expect(d.go).toBe(false)
+        expect(d.reasons.join("\n")).toContain("2 launch validators have an incomplete entry")
     })
 
     it("marks a launch validator nobody probed", () => {
