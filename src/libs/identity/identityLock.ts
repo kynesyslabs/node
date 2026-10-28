@@ -28,6 +28,8 @@ interface LockHolder {
     seq?: number
     /** Epoch ms; for a lock without one, the file's mtime. */
     heartbeat: number
+    /** False for a lock written before the lease: it is never refreshed. */
+    beats: boolean
 }
 
 export interface LockClock {
@@ -94,6 +96,9 @@ function readHolder(lockPath: string): LockHolder | null {
                     typeof parsed.heartbeat === "number"
                         ? parsed.heartbeat
                         : mtimeMs,
+                beats:
+                    typeof parsed.heartbeat === "number" ||
+                    typeof parsed.seq === "number",
             }
         }
     } catch {
@@ -268,8 +273,9 @@ function startHolding(lockPath: string): void {
 export interface AcquireLockOptions {
     /**
      * Shorten the watch of a lock whose heartbeat is already stale to one
-     * beat period; defaults to DEMOS_IDENTITY_TAKEOVER. A lock that keeps
-     * beating is never replaced.
+     * beat period, and allow replacing a lock from another host written by
+     * a node without the lease; defaults to DEMOS_IDENTITY_TAKEOVER. A lock
+     * that keeps beating is never replaced.
      */
     takeover?: boolean
     /** Called when another process replaced our lock while we run. */
@@ -332,6 +338,23 @@ export async function acquireIdentityLock(
             }
             log.warning(
                 `[IDENTITY] stale lock ${lockPath} (pid ${holder.pid} on ${holder.hostname}); replacing`,
+            )
+            removeIfStill(lockPath, holder)
+            continue
+        }
+        // A node from before the lease on another host never rewrites its
+        // lock and never checks that it still owns it, so an unchanging lock
+        // proves nothing: replacing it could leave two nodes signing.
+        if (!sameHost && !holder.beats) {
+            if (!takeover) {
+                throw new IdentityLockError(
+                    `${identityFile} is locked by pid ${holder.pid} on host ${holder.hostname} (lock: ${lockPath}), ` +
+                        "a node version without the lock heartbeat; stop that node first, " +
+                        `or if it is gone set ${EnvKey.DEMOS_IDENTITY_TAKEOVER}=true to take the identity over`,
+                )
+            }
+            log.warning(
+                `[IDENTITY] identity taken over from host ${holder.hostname} (pid ${holder.pid}) via ${EnvKey.DEMOS_IDENTITY_TAKEOVER}; make sure that node is stopped`,
             )
             removeIfStill(lockPath, holder)
             continue

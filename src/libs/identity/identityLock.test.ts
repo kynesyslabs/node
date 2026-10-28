@@ -133,6 +133,57 @@ describe("identityLock", () => {
         })
     })
 
+    describe("lock without a heartbeat from another host", () => {
+        const legacy = () => {
+            writeLock({ pid: 4242, hostname: "elsewhere" })
+            // Old enough to look stale if it were judged by its age.
+            const old = (Date.now() - 10 * STALE_MS) / 1000
+            fs.utimesSync(lockFile, old, old)
+        }
+
+        it("refuses without takeover however old it is, naming pid, host and the flag", async () => {
+            legacy()
+            const clock = fakeClock()
+            let error: unknown
+            try {
+                await acquireIdentityLock(identity, { clock, takeover: false })
+            } catch (e) {
+                error = e
+            }
+            expect(error).toBeInstanceOf(IdentityLockError)
+            const message = (error as Error).message
+            expect(message).toContain("elsewhere")
+            expect(message).toContain("4242")
+            expect(message).toContain("DEMOS_IDENTITY_TAKEOVER")
+            expect(readLock()).toEqual({ pid: 4242, hostname: "elsewhere" })
+            expect(clock.slept).toBe(0)
+        })
+
+        it("replaces it with takeover", async () => {
+            legacy()
+            await acquireIdentityLock(identity, {
+                clock: fakeClock(),
+                takeover: true,
+            })
+            expect(readLock().pid).toBe(process.pid)
+            expect(readLock().hostname).toBe(os.hostname())
+        })
+
+        it("replaces it with DEMOS_IDENTITY_TAKEOVER=true", async () => {
+            process.env.DEMOS_IDENTITY_TAKEOVER = "true"
+            legacy()
+            await acquireIdentityLock(identity, { clock: fakeClock() })
+            expect(readLock().pid).toBe(process.pid)
+        })
+
+        it("refuses one that carries an instance id but no heartbeat or beat counter", async () => {
+            writeLock({ pid: 4242, hostname: "elsewhere", instance: "other" })
+            await expect(
+                acquireIdentityLock(identity, { clock: fakeClock() }),
+            ).rejects.toBeInstanceOf(IdentityLockError)
+        })
+    })
+
     it("replaces an unreadable lock once it is older than the stale window", async () => {
         fs.writeFileSync(lockFile, "garbage")
         const clock = fakeClock()

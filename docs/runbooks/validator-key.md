@@ -62,7 +62,12 @@ starting node that finds a lock:
 - replaces it once the beats have stopped. It watches for 10 to 25 seconds
   first, because clocks of two hosts can disagree;
 - replaces at once a lock from its own host whose heartbeat is older than 20
-  seconds, and a lock from an older node version whose pid is gone.
+  seconds, and a lock from an older node version whose pid is gone;
+- refuses to start when the lock was written by an older node version (no
+  heartbeat) on another host, however old the lock is, unless
+  `DEMOS_IDENTITY_TAKEOVER=true` is set. Such a node never rewrites its lock
+  and never notices that it lost it, so waiting cannot tell it from a dead
+  one.
 
 So a container recreated after a crash starts without any flag, but 10 to 25
 seconds late while it watches the old lock. With
@@ -82,6 +87,18 @@ still names it and was refreshed within the last 20 seconds. A node that
 stalled long enough for another node to take the lock refuses that round
 instead of waiting for its next beat to notice. Find out which node took the
 lock before starting this one again.
+
+## Upgrading from a node version without the lease
+
+A node from before the lease writes its lock once and never checks it again.
+When the new version starts on another host that shares the identity
+directory, stop the old node first and confirm it is down, then start the new
+one. A clean stop removes the old lock. If the lock is still there (the old
+node crashed or was killed), start the new node once with
+`DEMOS_IDENTITY_TAKEOVER=true` and remove the variable once it runs. Without
+either, the new node refuses to start. On the same host the
+old node's pid decides: a lock whose pid is gone is replaced, a live one is
+refused.
 
 ## Failover to another host
 
