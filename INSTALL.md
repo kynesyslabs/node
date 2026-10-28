@@ -396,10 +396,35 @@ bun -v
 
 ### 4. Clone Repository
 
+#### Mainnet validators: a signed release tag
+
+A validator runs a signed release tag, never a branch head (see [docs/runbooks/release.md](docs/runbooks/release.md)). Set `TAG` to the release announced for your network, then verify it before checking it out:
+
+```bash
+cd ~
+git clone https://github.com/kynesyslabs/node.git
+cd node
+TAG=v1.0.0-rc.1   # the announced release tag
+
+git fetch --tags origin stabilisation
+# Signers come from the protected branch, not from the tag itself
+git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers
+git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers
+# The tag must be on stabilisation and signed by a listed key
+git merge-base --is-ancestor "$TAG" origin/stabilisation && echo "on stabilisation"
+git verify-tag "$TAG"
+git checkout "$TAG"
+```
+
+`git verify-tag` must print `Good "git" signature` for a key in `allowed_signers`; if it prints anything else, or the `merge-base` check does not print `on stabilisation`, stop and ask on the release thread. The checkout leaves a detached `HEAD`, which is expected. To upgrade, repeat these steps with the next tag; do not use `./run -U`, which pulls a branch head.
+
+#### Testnet and development: the `testnet` branch
+
+Testnet nodes and contributors follow the `testnet` branch instead. It is unsigned and moves with every merge, so do not run it on mainnet.
+
 ```bash
 cd ~
 git clone -b testnet https://github.com/kynesyslabs/node.git
-# switch to your node directory
 cd node
 # Double check that you are on testnet
 git branch
