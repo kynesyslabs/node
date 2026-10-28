@@ -27,6 +27,9 @@
     },
     "quorumParity": {
       "activationHeight": 0
+    },
+    "committeeBinding": {
+      "activationHeight": 0
     }
   },
   "balances": [

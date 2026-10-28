@@ -10,6 +10,7 @@ import type {
     EditBindingConfig,
     OsDenominationConfig,
     QuorumParityConfig,
+    CommitteeBindingConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -293,6 +294,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "quorumParity":
             getSharedState.forkConfig.quorumParity = config as QuorumParityConfig
             return
+        case "committeeBinding":
+            getSharedState.forkConfig.committeeBinding =
+                config as CommitteeBindingConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -420,6 +425,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as EditBindingConfig
         case "quorumParity":
             return base as QuorumParityConfig
+        case "committeeBinding":
+            return base as CommitteeBindingConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
