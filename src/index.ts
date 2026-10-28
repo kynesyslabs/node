@@ -49,6 +49,10 @@ import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
 import {
+    haltSigning,
+    reportSigningHaltMarker,
+} from "./libs/identity/signingRecord"
+import {
     assertIdentityNotLive,
     IdentityLiveError,
 } from "./libs/peer/identityLiveness"
@@ -681,13 +685,23 @@ async function main() {
 
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
     try {
-        acquireIdentityLock(getSharedState.identityFile)
+        await acquireIdentityLock(getSharedState.identityFile, {
+            onLost: reason => {
+                log.error(`[IDENTITY] ${reason}`)
+                // Shutdown waits for an in-flight block apply; no round may
+                // sign meanwhile.
+                haltSigning(reason)
+                void gracefulShutdown("identity_lock_lost", 1)
+            },
+        })
     } catch (error) {
         log.error(
             `[IDENTITY] ${error instanceof Error ? error.message : String(error)}`,
         )
         process.exit(1)
     }
+    // The node still syncs and serves; only block signing stays refused.
+    reportSigningHaltMarker(getSharedState.identityFile)
     try {
         await TxValidatorPool.getInstance().start()
     } catch (error) {

@@ -25,6 +25,7 @@ jest.mock("src/utilities/logger", () => ({
 jest.mock("src/utilities/sharedState", () => ({
     getSharedState: {
         signingAlgorithm: "ed25519",
+        publicKeyHex: "aa".repeat(32),
         shardSize: 4,
         forkConfig: { quorumParity: { activationHeight: null } },
         getBlockTimestampMinDelta: () => 1,
@@ -89,6 +90,13 @@ jest.mock("./verifyBlockTxSignatures", () => ({
         (verifyBlockTxSignatures as any)(...args),
 }))
 
+const checkOwnSignature = jest.fn()
+jest.mock("src/libs/identity/foreignSignature", () => ({
+    __esModule: true,
+    checkOwnSignature: (...args: unknown[]) =>
+        (checkOwnSignature as any)(...args),
+}))
+
 function makeBlock(overrides: Record<string, any> = {}) {
     return {
         number: 10,
@@ -110,6 +118,7 @@ function makeBlock(overrides: Record<string, any> = {}) {
 }
 
 beforeEach(() => {
+    checkOwnSignature.mockClear()
     verifyBlockTxSignatures.mockClear()
     verifyBlockTxSignatures.mockImplementation(async () => ({ valid: true }))
     pool = [A, B, C, D]
@@ -248,6 +257,46 @@ describe("verifyBlock", () => {
         const result = await verifyBlock(block, [{ hash: "tx-1" }] as any)
         expect(result.valid).toBe(false)
         expect(verifyBlockTxSignatures).not.toHaveBeenCalled()
+    })
+
+    describe("own-key self-check", () => {
+        it("checks an accepted block that carries our verified signature", async () => {
+            await verifyBlock(makeBlock())
+            expect(checkOwnSignature).toHaveBeenCalledWith({
+                number: 10,
+                hash: "valid-hash",
+                timestamp: 1500,
+            })
+        })
+
+        it("skips blocks without our signature", async () => {
+            const block = makeBlock({
+                validation_data: {
+                    signatures: { [B]: "s2", [C]: "s3", [D]: "s4" },
+                },
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
+        it("skips our signature when it does not verify", async () => {
+            verifyingSigners = new Set([B, C, D])
+            const block = makeBlock({
+                validation_data: {
+                    signatures: { [A]: "s1", [B]: "s2", [C]: "s3", [D]: "s4" },
+                },
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
+        it("skips a block without quorum", async () => {
+            const block = makeBlock({
+                validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
+            })
+            expect((await verifyBlock(block)).valid).toBe(false)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
     })
 })
 

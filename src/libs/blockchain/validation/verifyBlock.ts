@@ -23,6 +23,7 @@ import { getEligiblePool } from "src/libs/consensus/v2/routines/getShard"
 import { verifierThreshold } from "src/libs/consensus/v2/quorum"
 import { isForkActive } from "@/forks/forkGates"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
+import { checkOwnSignature } from "src/libs/identity/foreignSignature"
 
 export interface BlockVerification {
     valid: boolean
@@ -49,6 +50,23 @@ export function checkTimestampAgainstParent(
     }
 
     return { valid: true }
+}
+
+// Verified separately from the quorum tally, so a garbage entry under our key
+// can never read as our signature, however the tally is computed.
+async function carriesOurSignature(block: Block): Promise<boolean> {
+    const ours = block.validation_data?.signatures?.[getSharedState.publicKeyHex]
+    if (typeof ours !== "string") return false
+    try {
+        return await TxValidatorPool.getInstance().verify({
+            algorithm: getSharedState.signingAlgorithm,
+            message: new TextEncoder().encode(block.hash),
+            signature: hexToUint8Array(ours),
+            publicKey: hexToUint8Array(getSharedState.publicKeyHex),
+        })
+    } catch {
+        return false
+    }
 }
 
 /**
@@ -187,6 +205,16 @@ export async function verifyBlock(
             valid: false,
             reason: `insufficient verified pool signatures: ${verifiedSigners.size} of a pool of ${pool.length} (need ${threshold})`,
         }
+    }
+
+    // After the quorum so a peer replaying one stray signature of ours on an
+    // unaccepted block cannot stop this node from signing.
+    if (await carriesOurSignature(block)) {
+        checkOwnSignature({
+            number: block.number,
+            hash: block.hash,
+            timestamp: blockTimestamp,
+        })
     }
 
     // Last, because it is the expensive check: only a block that already has
