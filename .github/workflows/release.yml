@@ -86,7 +86,11 @@ jobs:
             --build-arg BUILT_AT \
             --output type=oci,dest=image.tar,rewrite-timestamp=true \
             .
-          tar -xOf image.tar index.json | jq -r '.manifests[0].digest' | tee digest.txt
+          tar -xOf image.tar index.json > index.json
+          [ "$(jq '.manifests | length' index.json)" = 1 ] || { echo "::error::expected exactly one manifest in the OCI index"; exit 1; }
+          jq -r '.manifests[0].digest' index.json > digest.txt
+          grep -Eqx 'sha256:[0-9a-f]{64}' digest.txt || { echo "::error::no image digest in the build output"; exit 1; }
+          cat digest.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: digest-${{ matrix.run }}
@@ -112,6 +116,10 @@ jobs:
         run: |
           a=$(cat digest-a/digest.txt); b=$(cat digest-b/digest.txt)
           echo "build a: $a"; echo "build b: $b"
+          # Two missing digests are equal strings; only real digests may match.
+          for d in "$a" "$b"; do
+            [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::build produced no valid digest: '$d'"; exit 1; }
+          done
           [ "$a" = "$b" ] || { echo "::error::the two builds differ; the release is not reproducible"; exit 1; }
           echo "digest=$a" >> "$GITHUB_OUTPUT"
 
