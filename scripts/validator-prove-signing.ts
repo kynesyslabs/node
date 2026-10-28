@@ -163,7 +163,7 @@ async function signChallenge(identityFile: string, challenge: string): Promise<S
         )
     }
     const { getSharedState } = await import("src/utilities/sharedState")
-    const TxValidatorPool = (await import("src/libs/blockchain/validation/txValidatorPool")).default
+    const validatorPool = (await import("src/libs/blockchain/validation/txValidatorPool")).default
     const { uint8ArrayToHex } = await import("@kynesyslabs/demosdk/encryption")
 
     getSharedState.identityFile = identityFile
@@ -171,7 +171,7 @@ async function signChallenge(identityFile: string, challenge: string): Promise<S
     const identity = uint8ArrayToHex(keypair.publicKey as Uint8Array)
     const algorithm = getSharedState.signingAlgorithm
 
-    const pool = TxValidatorPool.getInstance()
+    const pool = validatorPool.getInstance()
     await pool.start(1)
     try {
         const signed = await pool.sign(algorithm, new TextEncoder().encode(challenge))

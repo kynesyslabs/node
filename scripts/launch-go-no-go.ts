@@ -288,7 +288,7 @@ function parseArgs(argv: string[]): CliArgs {
             case "-h":
             case "--help":
                 console.log(usage())
-                process.exit(0)
+                return process.exit(0)
             default:
                 throw new Error(`unknown argument ${flag}`)
         }
