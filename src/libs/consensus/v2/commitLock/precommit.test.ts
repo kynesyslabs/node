@@ -38,6 +38,7 @@ const chain: StubChain = { peerlist: [], staked: null, tip: 9 }
 mockCommitteeChain(sharedState, chain)
 
 const peers = new Map<string, any>()
+const offlinePeers = new Map<string, any>()
 class StubPeerManager {
     static getInstance() {
         return new StubPeerManager()
@@ -46,7 +47,7 @@ class StubPeerManager {
         return peers.get(id)
     }
     getOfflinePeers() {
-        return {}
+        return Object.fromEntries(offlinePeers)
     }
 }
 jest.mock("src/libs/peer/PeerManager", () => ({ __esModule: true, default: StubPeerManager }))
@@ -145,6 +146,7 @@ beforeEach(async () => {
     precommit.__resetPrecommitState()
     votes.precommitBook.reset()
     peers.clear()
+    offlinePeers.clear()
 })
 
 afterEach(() => {
@@ -389,5 +391,54 @@ describe("precommit exchange", () => {
         expect(tally.quorum).toBe(3)
         expect(tally.committed.map(r => r.peer.identity)).toEqual([c.identity])
         expect(sent[0]).toEqual([X, R1, H, pol, { [node.identity]: own.signature }])
+    })
+
+    it("returns on a quorum without waiting for a member that never answers", async () => {
+        openPrevote(X, R1)
+        const pol = await prevotes(X, R1, others)
+        const own = await precommit.lockAndPrecommit({ height: H, round: R1, hash: X, pol })
+        if (!("signature" in own)) throw new Error(own.refused)
+
+        const [a, b, c] = others
+        const reply = (extra: unknown) => ({ result: 200, response: "", require_reply: false, extra })
+        for (const s of [a, b]) {
+            peers.set(s.identity, {
+                identity: s.identity,
+                longCall: async () => reply({ precommits: await precommitsOf(X, R1, [s]) }),
+            })
+        }
+        peers.set(c.identity, { identity: c.identity, longCall: () => new Promise(() => undefined) })
+
+        const tally = await Promise.race([
+            precommit.broadcastPrecommit({ height: H, round: R1, hash: X, pol }, own.signature, committee),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 2000)),
+        ])
+        if (!tally) throw new Error("the exchange waited on the silent member")
+        expect(Object.keys(tally.certificate).sort()).toEqual([node.identity, a.identity, b.identity].sort())
+    })
+
+    it("makes a single attempt at a member marked offline", async () => {
+        openPrevote(X, R1)
+        const pol = await prevotes(X, R1, others)
+        const own = await precommit.lockAndPrecommit({ height: H, round: R1, hash: X, pol })
+        if (!("signature" in own)) throw new Error(own.refused)
+
+        const retries = new Map<string, number>()
+        const [a, b, c] = others
+        for (const s of [a, b, c]) {
+            const peer = {
+                identity: s.identity,
+                longCall: async (_req: unknown, _auth: boolean, options: { retries: number }) => {
+                    retries.set(s.identity, options.retries)
+                    return { result: 409, response: "", require_reply: false, extra: null }
+                },
+            }
+            if (s === c) offlinePeers.set(s.identity, peer)
+            else peers.set(s.identity, peer)
+        }
+        await precommit.broadcastPrecommit({ height: H, round: R1, hash: X, pol }, own.signature, committee)
+        expect(retries.get(c.identity)).toBe(1)
+        expect(retries.get(a.identity)).toBe(2)
+        expect(retries.get(b.identity)).toBe(2)
     })
 })

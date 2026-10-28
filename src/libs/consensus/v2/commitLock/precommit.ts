@@ -363,6 +363,12 @@ export function committeePeers(committee: string[]): Peer[] {
  * Send our precommit and the proof of lock to every other committee member
  * and gather the precommits they answer with. Members that already
  * committed the height are reported, as in the prevote exchange.
+ *
+ * Returns once the book holds a quorum of precommits for the block, or once
+ * every member has answered or failed: a dead member must not hold up a
+ * block the others already certified. The sends still running carry on in
+ * the background, so every member still receives our precommit. A member
+ * already marked offline gets a single attempt.
  */
 export async function broadcastPrecommit(
     request: PrecommitRequest,
@@ -373,80 +379,105 @@ export async function broadcastPrecommit(
     const { height, round, hash, pol } = request
     const ours = { [getSharedState.publicKeyHex]: ownSignature }
     const committed: CommittedReport[] = []
-
-    await Promise.all(
-        committeePeers(committee).map(async peer => {
-            let response: RPCResponse
-            try {
-                response = await peer.longCall(
-                    {
-                        method: "consensus_routine",
-                        params: [
-                            {
-                                method: "precommitBlockHash",
-                                params: [hash, round, height, pol, ours],
-                            },
-                        ],
-                    },
-                    true,
-                    {
-                        allowedCodes: [400, 401, 409, COMMITTED_HEIGHT_RESULT],
-                        retries: 2,
-                        sleepTime: 500,
-                    },
-                )
-            } catch (e) {
-                log.error(
-                    `[commitLock] precommitBlockHash to ${peer.identity} failed: ${e instanceof Error ? e.message : String(e)}`,
-                )
-                return
-            }
-
-            const committedHash = readCommittedRefusal(response, height)
-            if (committedHash !== null) {
-                log.warning(
-                    `[commitLock] ${peer.identity} already committed block ${height} as ${committedHash}`,
-                )
-                committed.push({ peer, hash: committedHash })
-                return
-            }
-            if (response.result !== 200) {
-                log.warning(
-                    `[commitLock] ${peer.identity} did not precommit ${hash}: result=${response.result} ${JSON.stringify(response.extra)}`,
-                )
-                return
-            }
-            const extra = response.extra as { precommits?: unknown } | null
-            const incoming = extra?.precommits
-            if (
-                !isSignatureMap(incoming) ||
-                Object.keys(incoming).length > committee.length
-            ) {
-                log.warning(
-                    `[commitLock] ${peer.identity} answered with a malformed precommit map`,
-                )
-                return
-            }
-            const admitted = await admitPrecommits(
-                height,
-                round,
-                hash,
-                incoming,
-                committee,
-                book,
-            )
-            if (!admitted.includes(peer.identity)) {
-                log.warning(
-                    `[commitLock] ${peer.identity} answered 200 without a valid precommit of its own`,
-                )
-            }
-        }),
+    const quorum = commitQuorum(committee.length)
+    const offline = new Set(
+        Object.keys(PeerManager.getInstance().getOfflinePeers()),
     )
+    const certified = () =>
+        Object.keys(certificateFrom(book, height, round, hash, committee))
+            .length >= quorum
+
+    const ask = async (peer: Peer): Promise<void> => {
+        let response: RPCResponse
+        try {
+            response = await peer.longCall(
+                {
+                    method: "consensus_routine",
+                    params: [
+                        {
+                            method: "precommitBlockHash",
+                            params: [hash, round, height, pol, ours],
+                        },
+                    ],
+                },
+                true,
+                {
+                    allowedCodes: [400, 401, 409, COMMITTED_HEIGHT_RESULT],
+                    retries: offline.has(peer.identity) ? 1 : 2,
+                    sleepTime: 500,
+                },
+            )
+        } catch (e) {
+            log.error(
+                `[commitLock] precommitBlockHash to ${peer.identity} failed: ${e instanceof Error ? e.message : String(e)}`,
+            )
+            return
+        }
+
+        const committedHash = readCommittedRefusal(response, height)
+        if (committedHash !== null) {
+            log.warning(
+                `[commitLock] ${peer.identity} already committed block ${height} as ${committedHash}`,
+            )
+            committed.push({ peer, hash: committedHash })
+            return
+        }
+        if (response.result !== 200) {
+            log.warning(
+                `[commitLock] ${peer.identity} did not precommit ${hash}: result=${response.result} ${JSON.stringify(response.extra)}`,
+            )
+            return
+        }
+        const extra = response.extra as { precommits?: unknown } | null
+        const incoming = extra?.precommits
+        if (
+            !isSignatureMap(incoming) ||
+            Object.keys(incoming).length > committee.length
+        ) {
+            log.warning(
+                `[commitLock] ${peer.identity} answered with a malformed precommit map`,
+            )
+            return
+        }
+        const admitted = await admitPrecommits(
+            height,
+            round,
+            hash,
+            incoming,
+            committee,
+            book,
+        )
+        if (!admitted.includes(peer.identity)) {
+            log.warning(
+                `[commitLock] ${peer.identity} answered 200 without a valid precommit of its own`,
+            )
+        }
+    }
+
+    const peers = committeePeers(committee)
+    await new Promise<void>(resolve => {
+        let pending = peers.length
+        if (pending === 0) return resolve()
+        for (const peer of peers) {
+            ask(peer)
+                .catch(e =>
+                    log.error(
+                        `[commitLock] Precommit exchange with ${peer.identity} failed: ${e instanceof Error ? e.message : String(e)}`,
+                    ),
+                )
+                .finally(() => {
+                    pending--
+                    if (pending === 0 || certified()) resolve()
+                })
+        }
+    })
 
     return {
         certificate: certificateFrom(book, height, round, hash, committee),
-        quorum: commitQuorum(committee.length),
-        committed,
+        quorum,
+        // A copy: answers arriving after we return must not change what
+        // the caller already acted on.
+        committed: [...committed],
     }
 }
 
