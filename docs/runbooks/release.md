@@ -8,7 +8,7 @@ the same manifest digest. This page is the operator side of that rule.
 
 | What | Where | Why |
 | --- | --- | --- |
-| Bun version | `.bun-version` (also read by CI's `setup-bun`) | the runtime and the lockfile reader are one exact version everywhere |
+| Bun version | `.bun-version` (also read by CI's `setup-bun`), mirrored in `package.json` `packageManager` | the runtime and the lockfile reader are one exact version everywhere |
 | Base images | `Dockerfile`, `testing/devnet/Dockerfile`: tag plus `@sha256` digest | a tag such as `1.3-debian` moves; a digest does not |
 | Node.js (gossip sidecar runtime) | `Dockerfile` `NODE_VERSION` + `NODE_SHA256` | one release, checked against its published checksum |
 | Dependencies | `bun.lock`, installed with `--frozen-lockfile` on every path (`Dockerfile`, `scripts/run`, `scripts/install-deps.sh`, `scripts/reset-node`, CI) | the install fails instead of silently rewriting the lockfile |
@@ -17,7 +17,8 @@ the same manifest digest. This page is the operator side of that rule.
 | Launcher, Bun | `./run` refuses a Bun other than `.bun-version` | same reader of the lockfile on every host |
 | Launcher, dependencies | `./run` installs from the lockfile on every start | a checkout moved to a new tag never runs on the previous tag's modules |
 
-When you bump Bun, change `.bun-version` and both Dockerfiles together.
+When you bump Bun, change `.bun-version`, `packageManager` in `package.json`
+and both Dockerfiles together.
 To find the digest of a new base image:
 
 ```bash

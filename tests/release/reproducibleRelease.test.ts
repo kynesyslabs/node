@@ -93,6 +93,27 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(problems).toEqual([])
     })
 
+    it("package.json packageManager, when set, names the Bun in .bun-version", () => {
+        const pkg = JSON.parse(read("package.json"))
+        if (pkg.packageManager === undefined) return
+        const wanted = read(".bun-version").trim()
+        expect(pkg.packageManager).toBe(`bun@${wanted}`)
+    })
+
+    it("the bun npm package is not a dependency", () => {
+        // It ships its own Bun binary into node_modules/.bin, a second
+        // version next to the pinned runtime; `import ... from "bun"` is the
+        // runtime's built-in module and its types come from @types/bun.
+        const pkg = JSON.parse(read("package.json"))
+        const declaredIn = [
+            "dependencies",
+            "devDependencies",
+            "optionalDependencies",
+            "peerDependencies",
+        ].filter(field => pkg[field]?.bun !== undefined)
+        expect(declaredIn).toEqual([])
+    })
+
     it("every CI setup-bun step pins bun-version or bun-version-file", () => {
         const unpinned: string[] = []
         for (const file of tracked(".github/workflows/*.yml")) {
