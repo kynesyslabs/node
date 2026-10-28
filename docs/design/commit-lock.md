@@ -179,6 +179,19 @@ Clarifications made while implementing the design:
 - Equivocation. Counted for two precommits by one key at one height in the
   same round for different blocks. Different blocks in different rounds
   are what a lock move looks like and are only logged.
+- Round bound. A lock outranks every lower round, so a lock taken in a
+  far-future round would refuse every honest round until the clocks caught
+  up. A member neither prevotes, precommits nor follows a reported lock in
+  a round more than COSIGN_TIMESTAMP_MAX_LEAD_SECONDS (5 s) ahead of its
+  network clock, the bound it applies to any timestamp it signs.
+- Lost lock. A signing record at H with no lock at H means the lock file
+  was lost after a precommit; the member refuses to precommit at H instead
+  of reading as unlocked.
+- Precommit exchange. It returns as soon as the book holds q precommits for
+  the block; the other sends finish in the background, and a member marked
+  offline gets one attempt, so a dead member does not delay each block.
+  getLock still waits for every reply (one attempt, 3 s at most): a
+  missing report can change the candidate, and it runs only on retries.
 - Activation. A genesis that schedules commitLock without committeeBinding
   active at or below the same height is refused at boot; fork state set
   any other way is treated as inactive.
