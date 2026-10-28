@@ -15,6 +15,14 @@ export function countBlockHashMismatch(): void {
     }
 }
 
+export function countConflictingBlock(): void {
+    try {
+        getMetricsService().incrementCounter("conflicting_block_total")
+    } catch {
+        /* ignore */
+    }
+}
+
 export function countMissedSignature(): void {
     try {
         getMetricsService().incrementCounter(

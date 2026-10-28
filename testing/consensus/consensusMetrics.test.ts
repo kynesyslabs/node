@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test"
 import { getMetricsService } from "src/features/metrics/MetricsService"
 import {
     countBlockHashMismatch,
+    countConflictingBlock,
     countMissedSignature,
     setConsensusAbstaining,
     setForkScheduleMismatch,
@@ -42,6 +43,12 @@ describe("consensus health metrics", () => {
         setConsensusAbstaining(false)
         expect(await sample("fork_schedule_mismatch")).toBe(0)
         expect(await sample("consensus_abstaining")).toBe(0)
+    })
+
+    it("exports the conflicting block counter from zero and counts through the helper", async () => {
+        expect(await sample("conflicting_block_total")).toBe(0)
+        countConflictingBlock()
+        expect(await sample("conflicting_block_total")).toBe(1)
     })
 
     it("a block hash counter bump cannot throw", () => {
