@@ -10,6 +10,8 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import { serializeBlockContent } from "@/forks"
 import Chain from "src/libs/blockchain/chain"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import { CosignTimestampError, checkCosignTimestamp } from "./cosignTimestamp"
 import {
     checkBlockSignature,
     recordBlockSignature,
@@ -69,6 +71,17 @@ export async function createBlock(
         blockTimestamp,
         blockNumber,
     )
+    // The secretary's value was screened on receipt; this covers the floor
+    // the clamp may have raised it to, at the point the signature is made.
+    const timestampVerdict = checkCosignTimestamp(
+        block.content.timestamp,
+        getNetworkTimestamp(),
+    )
+    if (!timestampVerdict.valid) {
+        throw new CosignTimestampError(
+            `refusing to sign block ${blockNumber}: ${timestampVerdict.reason}`,
+        )
+    }
     // REVIEW: P2 — route block hashing through the fork-aware serializer.
     // The block's own number is the correct height for gating.
     block.hash = Hashing.sha256(

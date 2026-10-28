@@ -62,8 +62,13 @@ jest.mock("src/libs/blockchain/chain", () => ({
     __esModule: true,
     default: { getBlockByNumber: async () => null },
 }))
+let networkNow = 10_000
+jest.mock("src/libs/utils/calibrateTime", () => ({
+    getNetworkTimestamp: () => networkNow,
+}))
 
 const { createBlock } = await import("./createBlock")
+const { CosignTimestampError } = await import("./cosignTimestamp")
 const {
     DoubleSignError,
     SigningRecordError,
@@ -80,6 +85,7 @@ beforeEach(() => {
     sharedState.candidateBlock = null
     sharedState.genesisBlockHash = "genesis-a"
     contentHash = "hash-1"
+    networkNow = 10_000
     sign.mockReset()
     sign.mockImplementation(async () => ({
         signature: new Uint8Array([1, 2, 3]),
@@ -171,5 +177,22 @@ describe("createBlock signing guard", () => {
         expect(loadSigningRecord(sharedState.identityFile)?.genesisHash).toBe(
             "genesis-a",
         )
+    })
+
+    it("refuses to sign a fractional timestamp", async () => {
+        await expect(forge(5, 1000.5)).rejects.toBeInstanceOf(CosignTimestampError)
+        expect(sign).not.toHaveBeenCalled()
+        expect(fs.existsSync(signingRecordPath(sharedState.identityFile))).toBe(false)
+        expect(sharedState.candidateBlock).toBeNull()
+    })
+
+    it("refuses to sign a timestamp far ahead of our clock", async () => {
+        networkNow = 1000
+        await expect(forge(5, 1030)).rejects.toBeInstanceOf(CosignTimestampError)
+        expect(sign).not.toHaveBeenCalled()
+        expect(sharedState.candidateBlock).toBeNull()
+        // A few seconds of clock skew is still signed.
+        await forge(5, 1005)
+        expect(sign).toHaveBeenCalledTimes(1)
     })
 })
