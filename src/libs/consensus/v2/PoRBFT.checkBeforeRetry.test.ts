@@ -9,6 +9,8 @@ import { afterAll, afterEach, describe, expect, it, mock, spyOn } from "bun:test
 const reached: string[] = []
 let adoptAnswer = false
 let adoptThrows = false
+let undoFails = false
+let latchedDrift: number | null = null
 let shardError: () => Error = () => new Error("unset")
 const recorded: Array<[number, string[]]> = []
 
@@ -26,11 +28,17 @@ mock.module("@/libs/blockchain/routines/Sync", () => ({
         reached.push("waitForPeerStatus")
         return true
     },
+    unreconciledGcrBlockNumber: () => latchedDrift,
 }))
 mock.module("./routines/committedBlock", () => ({
     ...realCommitted,
     adoptBeforeRetry: async (height: number) => {
         reached.push(`adoptBeforeRetry:${height}`)
+        if (undoFails) {
+            // syncBlock latches the drift when it cannot undo a failed apply
+            latchedDrift = height
+            throw new Error(`rollback of block ${height} failed`)
+        }
         if (adoptThrows) throw new Error("block 6 bodies missing from a")
         return adoptAnswer
     },
@@ -60,6 +68,9 @@ afterEach(() => {
     recorded.length = 0
     adoptAnswer = false
     adoptThrows = false
+    undoFails = false
+    latchedDrift = null
+    getSharedState.syncStatus = true
     getSharedState.inConsensusLoop = false
 })
 
@@ -97,5 +108,22 @@ describe("check before retry", () => {
         await consensusRoutine()
         expect(reached.at(-1)).toBe("initializeShard")
         expect(reached).not.toContain("process.exit")
+    }, 30000)
+
+    it("aborts without building or applying a block when the failed adoption could not be undone", async () => {
+        undoFails = true
+        shardError = () => new ForgingEndedError("stop here")
+        const height = getSharedState.lastBlockNumber + 1
+        await consensusRoutine()
+        expect(reached).toEqual([
+            "fastSync",
+            "waitForPeerStatus",
+            `adoptBeforeRetry:${height}`,
+        ])
+        expect(reached).not.toContain("process.exit")
+        expect(getSharedState.syncStatus).toBe(false)
+        // ended as an aborted round, so the next one asks the members first
+        expect(recorded.map(([h]) => h)).toEqual([height])
+        expect(getSharedState.inConsensusLoop).toBe(false)
     }, 30000)
 })

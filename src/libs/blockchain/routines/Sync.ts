@@ -984,6 +984,14 @@ async function applySyncedBlock(
 let unreconciledGcrBlock: number | null = null
 
 /**
+ * The block whose GCR edits were left applied without it, or null. Consensus
+ * reads it too: a round must not apply its own edits on top of that drift.
+ */
+export function unreconciledGcrBlockNumber(): number | null {
+    return unreconciledGcrBlock
+}
+
+/**
  * Refuse to apply another synced block once state has drifted.
  *
  * The block-exists guard cannot catch this case: the failed block was never

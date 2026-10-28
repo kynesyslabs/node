@@ -28,6 +28,7 @@ import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
     fastSync,
     syncLock,
+    unreconciledGcrBlockNumber,
     waitForPeerStatus,
 } from "@/libs/blockchain/routines/Sync"
 import { isNetworkAhead } from "./routines/networkAheadVeto"
@@ -384,6 +385,10 @@ export async function consensusRoutine(): Promise<void> {
             const startApplyNonces = traceEnabled
                 ? await readNonces(traceAccounts)
                 : {}
+
+            // Sync can latch drift between the adoption checks and here; the
+            // lock now held keeps it from latching during our apply.
+            abortIfGcrStateUnreconciled(blockRef)
 
             markStep("consensus", "applyGCREdits")
             const applyRes = await applyGCREditsFromMergedMempool(
@@ -1035,19 +1040,39 @@ async function voteOnBlock(
  * A failed attempt to take a peer's block only means we do not have it: the
  * round's catch treats unknown errors as fatal and exits the process, which
  * a peer serving a certified header and then dropping must not cause.
+ *
+ * The exception is a failed apply whose undo also failed: its edits stay in
+ * local state without the block, so the round must not fall back to its own
+ * tally and apply its edits on top of them.
  */
 async function adoptionSucceeded(
     blockRef: number,
     adopt: () => Promise<boolean>,
 ): Promise<boolean> {
+    let adopted = false
     try {
-        return await adopt()
+        adopted = await adopt()
     } catch (e) {
         log.error(
             `[consensusRoutine] Taking a member's block ${blockRef} failed, deciding on our own round: ${e instanceof Error ? e.message : String(e)}`,
         )
-        return false
     }
+    if (!adopted) abortIfGcrStateUnreconciled(blockRef)
+    return adopted
+}
+
+/**
+ * Sync has already marked the node unsynced and refuses every further apply
+ * until a resync; the round has to stop the same way, or it would certify a
+ * block computed from state no block authorizes.
+ */
+function abortIfGcrStateUnreconciled(blockRef: number): void {
+    const drifted = unreconciledGcrBlockNumber()
+    if (drifted === null) return
+    getSharedState.syncStatus = false
+    throw new AbortConsensusError(
+        `[consensusRoutine] GCR state for block ${drifted} is applied without its block; refusing to apply block ${blockRef} on top of it. The node must be resynced from scratch.`,
+    )
 }
 
 /**

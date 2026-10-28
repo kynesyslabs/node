@@ -11,6 +11,14 @@ import { afterAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:tes
 let adoptImpl: (height: number, peers: any[], context: string) => Promise<boolean>
 const adoptCalls: Array<[number, string[], string]> = []
 
+let latchedDrift: number | null = null
+
+const realSync = await import("@/libs/blockchain/routines/Sync")
+mock.module("@/libs/blockchain/routines/Sync", () => ({
+    ...realSync,
+    unreconciledGcrBlockNumber: () => latchedDrift,
+}))
+
 const realCommitted = await import("./routines/committedBlock")
 mock.module("./routines/committedBlock", () => ({
     ...realCommitted,
@@ -21,6 +29,8 @@ mock.module("./routines/committedBlock", () => ({
 }))
 
 const { adoptReportedCommit } = await import("./PoRBFT")
+const { AbortConsensusError } = await import("./types/secretaryManager")
+const { getSharedState } = await import("src/utilities/sharedState")
 
 const report = (identity: string, hash = "x6") => ({
     peer: { identity } as any,
@@ -36,6 +46,8 @@ afterAll(() => exitSpy.mockRestore())
 beforeEach(() => {
     adoptCalls.length = 0
     adoptImpl = async () => true
+    latchedDrift = null
+    getSharedState.syncStatus = true
     exitSpy.mockClear()
 })
 
@@ -56,6 +68,19 @@ describe("a proposal answered with a committed block", () => {
             throw new Error("transactions missing from a")
         }
         expect(await adoptReportedCommit(6, [report("a")])).toBe(false)
+        expect(exitSpy).not.toHaveBeenCalled()
+    })
+
+    it("aborts the round instead of falling back to its tally when the failed block's undo also failed", async () => {
+        adoptImpl = async () => {
+            // syncBlock latches the drift when it cannot undo a failed apply
+            latchedDrift = 6
+            throw new Error("rollback of block 6 failed")
+        }
+        await expect(adoptReportedCommit(6, [report("a")])).rejects.toBeInstanceOf(
+            AbortConsensusError,
+        )
+        expect(getSharedState.syncStatus).toBe(false)
         expect(exitSpy).not.toHaveBeenCalled()
     })
 
