@@ -100,6 +100,18 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(pkg.packageManager).toBe(`bun@${wanted}`)
     })
 
+    it("bunfig preloads the protobuf global for the node and for bun test", () => {
+        // Without it a start-up that loads tronweb can exit on
+        // "proto is not defined", depending on Bun's module evaluation order.
+        const preload = /preload\s*=\s*\[[^\]]*"\.\/src\/preload\/protobufGlobal\.ts"/
+        const [runtime, ...sections] = read("bunfig.toml").split(/^\[/m)
+        const test = sections.find(s => s.startsWith("test]")) ?? ""
+        expect({ runtime: preload.test(runtime), test: preload.test(test) }).toEqual({
+            runtime: true,
+            test: true,
+        })
+    })
+
     it("the bun npm package is not a dependency", () => {
         // It ships its own Bun binary into node_modules/.bin, a second
         // version next to the pinned runtime; `import ... from "bun"` is the
