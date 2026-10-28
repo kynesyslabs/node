@@ -14,7 +14,8 @@
 #
 # Everything lives in a per-run dir under runs/ (gitignored: it holds the
 # devnet keys) and is torn down on exit, failure or Ctrl-C.
-# Exit codes: 0 pass, 1 fail, 2 the run could not be carried out.
+# Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR:
+# a running node stopped answering mid-window, so no verdict is given).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,7 +41,7 @@ PARTITION_TIME="${PARTITION_TIME:-120}"
 SETTLE_TIMEOUT="${SETTLE_TIMEOUT:-300}"
 
 usage() {
-    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: IMAGE SRC_TREE BINDING CONSENSUS_TIME NODE_MEM NODE_EST_MB HEADROOM_MB"
     echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME (README.md)"
 }
@@ -203,7 +204,26 @@ running() { local i; for i in $(seq 1 "${N}"); do [ "${UP[i]}" = 1 ] && printf '
 live_count() { running | wc -w; }
 # "i=h" for every running node; a node that does not answer shows "?"
 heads_line() { local i h; for i in $(running); do h=$(head_of "${i}"); printf 'n%s=%s ' "${i}" "${h:-?}"; done; }
-max_head() { local i h m=0; for i in $(running); do h=$(head_of "${i}"); [ -n "${h}" ] && [ "${h}" -gt "${m}" ] && m="${h}"; done; echo "${m}"; }
+# Head of node $1, retried so one slow answer is not a failed read
+read_head() {
+    local k h
+    for k in 1 2 3; do
+        h=$(head_of "$1"); [[ "${h}" =~ ^[0-9]+$ ]] && { echo "${h}"; return 0; }
+        sleep 1
+    done
+    return 1
+}
+# Highest head across running nodes. Fails, printing "?", when a running node
+# cannot be read: a crashed node must not pass for one that stopped forging
+max_head() {
+    local i h m=-1
+    for i in $(running); do
+        h=$(read_head "${i}") || { echo "?"; return 1; }
+        [ "${h}" -gt "${m}" ] && m="${h}"
+    done
+    [ "${m}" -ge 0 ] || { echo "?"; return 1; }
+    echo "${m}"
+}
 start_node() {
     dc up -d "node-$1" >> "${STEP_LOG}" 2>&1 || dc start "node-$1" >> "${STEP_LOG}" 2>&1
     UP[$1]=1
@@ -264,7 +284,7 @@ reader() { local i; for i in $(running); do case " $* " in *" ${i} "*) ;; *) ech
 expect_progress() { # $1 phase name, $2 from height
     local deadline=$((SECONDS + PROGRESS_TIMEOUT)) m t0=${SECONDS} r times
     while [ ${SECONDS} -lt ${deadline} ]; do
-        m=$(max_head)
+        m=$(max_head) || read_error "$1"
         [ "${m}" -ge $(($2 + PROGRESS_BLOCKS)) ] && break
         sleep 2
     done
@@ -285,13 +305,13 @@ expect_progress() { # $1 phase name, $2 from height
 # already in flight when the window opens may still land, hence +1.
 expect_stall() { # $1 phase name, $2 height at the fault
     local deadline=$((SECONDS + STALL_WINDOW)) m last_change=${SECONDS} prev
-    prev=$(max_head)
+    prev=$(max_head) || read_error "$1"
     while [ ${SECONDS} -lt ${deadline} ]; do
         sleep 5
-        m=$(max_head)
+        m=$(max_head) || read_error "$1"
         [ "${m}" != "${prev}" ] && { last_change=${SECONDS}; prev="${m}"; }
     done
-    m=$(max_head)
+    m=$(max_head) || read_error "$1"
     local down=$((N - $(live_count)))
     if [ "${m}" -le $(($2 + 1)) ]; then
         say "$1: stalled at ${m} for ${STALL_WINDOW}s (fault at ${2}; heads $(heads_line))"
@@ -306,27 +326,57 @@ expect_stall() { # $1 phase name, $2 height at the fault
 # Stops node $1 once a round past the current head has started on node $2
 stop_mid_round() {
     local victim="$1" watcher="$2" h since line deadline
-    h=$(head_of "${watcher}")
+    h=$(read_head "${watcher}") || read_error "stop node-${victim}"
     since=$(date -u +%s)
     deadline=$((SECONDS + 60))
     while [ ${SECONDS} -lt ${deadline} ]; do
         line=$(docker logs --since "${since}" "$(cid_of "${watcher}")" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
-            grep -aoE 'We are forging block [0-9]+' | awk -v h="${h:-0}" '$5 > h' | head -1)
+            grep -aoE 'We are forging block [0-9]+' | awk -v h="${h}" '$5 > h' | head -1)
         [ -n "${line}" ] && break
         sleep 0.3
     done
     event "round start seen on node-${watcher}: ${line:-none within 60s}"
     stop_node "${victim}"
-    STOP_HEIGHT="${h:-0}"
+    STOP_HEIGHT="${h}"
 }
 
-# Log lines matching $1 across every node's current log
+# Log lines matching $1 across every node, logged at or after unix time $2
+# (default: the whole log; a restarted container keeps its earlier lines)
 grep_logs() {
     local i cid
     for i in $(seq 1 "${N}"); do
         cid=$(dc ps -aq "node-${i}" 2>/dev/null); [ -z "${cid}" ] && continue
-        docker logs "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "$1" | sed "s/^/node-${i}: /"
+        docker logs --since "${2:-0}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "$1" | sed "s/^/node-${i}: /"
     done
+}
+
+# Verdict, written after the scenario or when a window cannot be judged
+write_verdict() {
+    step 05-verdict
+    column -t -s $'\t' "${PHASES}" | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
+    sed 's/^/    /' "${EVENTS}" 2>/dev/null | tee -a "${LOG_DIR}/run.log" >/dev/null
+    jq -n --arg run "${RUN_ID}" --arg scenario "${SCENARIO}" --arg binding "${BINDING}" \
+        --argjson n "${N}" --argjson shardSize "${SHARD}" --argjson q "${Q}" --arg code "${CODE}" \
+        --arg image "${IMAGE}" --arg detail "${DETAIL}" --arg result "${RESULT}" \
+        '{run: $run, scenario: $scenario, binding: $binding, validators: $n, shardSize: $shardSize,
+          q: $q, code: $code, image: $image, detail: $detail, result: $result}' > "${LOG_DIR}/verdict.json"
+    local results="${RUNS_DIR}/results.tsv"
+    [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${RUN_ID}" "${SCENARIO}" "${BINDING}" "${N}" "${SHARD}" "${Q}" \
+        "${CODE}" "${DETAIL}" "${RESULT}" >> "${results}"
+    free -m | sed -n 2p | sed 's/^/host after run: /' >> "${LOG_DIR}/run.log"
+    say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
+}
+
+# A running node that cannot be read leaves the window without a verdict:
+# the run ends as ERROR, never as PASS
+read_error() { # $1 phase name
+    say "ERROR: $1: a running node does not answer its head (heads $(heads_line))"
+    printf '%s\t%s\t%s\t-\t-\t-\t-\t-\tunreadable\n' "$1" "$((N - $(live_count)))" "$(live_count)" >> "${PHASES}"
+    RESULT=ERROR
+    DETAIL="${DETAIL:+${DETAIL} }$1: node unreadable ($(heads_line))"
+    write_verdict
+    exit 2
 }
 
 # ── 3. bring-up ─────────────────────────────────────────────────────────
@@ -367,12 +417,14 @@ lockstep_or_abort() {
 
 scenario_floor() {
     # Wait past the genesis time plus several round intervals
-    local until_ts=$((GENESIS_TS + 8 * CONSENSUS_TIME + 30)) m lines
+    local until_ts=$((GENESIS_TS + 8 * CONSENSUS_TIME + 30)) m lines since
+    # Only refusals of this window count: rounds start at the genesis time
+    since=$(( GENESIS_TS < $(date -u +%s) ? $(date -u +%s) : GENESIS_TS ))
     while [ "$(date -u +%s)" -lt "${until_ts}" ]; do sleep 5; done
-    m=$(max_head)
-    lines=$(grep_logs "below the (floor|quorum) of ${Q}" | tee -a "${STEP_LOG}" | wc -l)
-    say "head after $((8 * CONSENSUS_TIME + 30))s past genesis: ${m}; floor/quorum refusals logged: ${lines}"
-    grep_logs "below the (floor|quorum) of ${Q}" | head -3 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
+    m=$(max_head) || read_error floor
+    lines=$(grep_logs "below the (floor|quorum) of ${Q}" "${since}" | tee -a "${STEP_LOG}" | wc -l)
+    say "head after $((8 * CONSENSUS_TIME + 30))s past genesis: ${m}; floor/quorum refusals logged in the window: ${lines}"
+    grep_logs "below the (floor|quorum) of ${Q}" "${since}" | head -3 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     printf 'floor\t0\t%s\t0\t%s\t%s\t-\t-\t%s\n' "${N}" "${m}" "${m}" "$([ "${m}" = 0 ] && echo stall || echo progress)" >> "${PHASES}"
     DETAIL="head=${m} refusals=${lines}"
     [ "${m}" = 0 ] && [ "${lines}" -gt 0 ] && RESULT=PASS
@@ -394,13 +446,14 @@ scenario_drop() {
         if [ "${expect}" = progress ]; then
             expect_progress "down-${k}" "${STOP_HEIGHT}" || ok=0
         else
+            local since; since=$(date -u +%s)
             expect_stall "down-${k}" "${STOP_HEIGHT}" || ok=0
-            grep_logs "below the (floor|quorum) of ${Q}" | tail -2 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
+            grep_logs "below the (floor|quorum) of ${Q}" "${since}" | tail -2 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
         fi
         DETAIL="${DETAIL}down${k}=${expect}:$(tail -1 "${PHASES}" | cut -f9) "
     done
     # Manual recovery: bring the stopped validators back
-    local h; h=$(max_head)
+    local h; h=$(max_head) || read_error restart
     for victim in "${stopped[@]}"; do start_node "${victim}" || say "node-${victim} did not come back"; done
     expect_progress "restarted" "${h}" || ok=0
     DETAIL="${DETAIL}restart=$(tail -1 "${PHASES}" | cut -f9)"
@@ -412,7 +465,7 @@ scenario_listed_stall() {
     local ok=1 r pl
     expect_progress "7-of-10-up" "${LOCK_HEIGHT}" || ok=0
     r=$(reader)
-    pl=$(block_at "${r}" "$(head_of "${r}")" | jq -r '.content.peerlist | length')
+    pl=$(block_at "${r}" "$(read_head "${r}")" | jq -r '.content.peerlist | length')
     say "the head block lists ${pl} validators (q=${Q}); 3 staked validators never started"
     stop_mid_round 7 1
     say "stopped listed node-7: $(live_count) live"
@@ -471,6 +524,7 @@ print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = 
     done
     event "block ${h} rewritten to list nodes 1-6 on all ${N} databases"
     say "all ${N} stopped at ${h}; block ${h} now lists 6 of 10 staked validators (q=${Q}); restarting all"
+    local since; since=$(date -u +%s)
     for i in $(seq 1 "${N}"); do start_node "${i}" || { say "ABORT: node-${i} did not come back"; exit 2; }; sleep 2; done
     if [ "${BINDING}" = on ]; then
         expect_progress "listed-below-q" "${h}" || ok=0
@@ -478,8 +532,8 @@ print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = 
         # Pre-fork rule: the pool is the 6 listed, below the floor, forever
         expect_stall "listed-below-q" "${h}" || ok=0
     fi
-    fallback_lines=$(grep_logs "drawing the committee from all" | tee -a "${STEP_LOG}" | wc -l)
-    grep_logs "drawing the committee from all|Shard of [0-9]+ is below the floor" | head -2 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
+    fallback_lines=$(grep_logs "drawing the committee from all" "${since}" | tee -a "${STEP_LOG}" | wc -l)
+    grep_logs "drawing the committee from all|Shard of [0-9]+ is below the floor" "${since}" | head -2 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     say "fallback log lines: ${fallback_lines}"
     if [ "${BINDING}" = on ] && [ "${fallback_lines}" = 0 ]; then ok=0; fi
     DETAIL="height=${h} outcome=$(tail -1 "${PHASES}" | cut -f9) fallbackLines=${fallback_lines}"
@@ -516,7 +570,7 @@ scenario_partition() {
     while [ ${SECONDS} -lt ${deadline} ]; do sleep 10; say "heads: $(heads_line)"; done
     a_max=0; b_max=0
     for i in $(running); do
-        local hh; hh=$(head_of "${i}"); hh=${hh:-0}
+        local hh; hh=$(read_head "${i}") || read_error partitioned
         if in_a "${i}"; then [ "${hh}" -gt "${a_max}" ] && a_max="${hh}"; else [ "${hh}" -gt "${b_max}" ] && b_max="${hh}"; fi
     done
     say "during the partition: group A reached ${a_max}, group B reached ${b_max} (from ${h0})"
@@ -532,7 +586,7 @@ scenario_partition() {
     wait_lockstep "$((top + 2))" "${SETTLE_TIMEOUT}" || say "no common head within ${SETTLE_TIMEOUT}s after the heal"
     # Every height from the split on: one hash across all nodes that hold it
     local hmin=999999 hh conflicts="" seen
-    for i in $(running); do hh=$(head_of "${i}"); [ -n "${hh}" ] && [ "${hh}" -lt "${hmin}" ] && hmin="${hh}"; done
+    for i in $(running); do hh=$(read_head "${i}") || read_error healed; [ "${hh}" -lt "${hmin}" ] && hmin="${hh}"; done
     local hmax_all=$(( top > hmin ? top : hmin ))
     for hh in $(seq "${h0}" "${hmax_all}"); do
         seen=$(for i in $(running); do hash_at "${i}" "${hh}"; done | grep . | sort -u | wc -l)
@@ -544,6 +598,7 @@ scenario_partition() {
     # One chain: every node past the split's top, holding one hash at the lowest head
     local converged=no
     if [ "${hmin}" -ge "$((top + 2))" ] &&
+        [ "$(for i in $(running); do hash_at "${i}" "${hmin}"; done | grep -c .)" = "$(live_count)" ] &&
         [ "$(for i in $(running); do hash_at "${i}" "${hmin}"; done | grep . | sort -u | wc -l)" = 1 ]; then
         converged=yes
     fi
@@ -566,20 +621,6 @@ case "${SCENARIO}" in
     partition) scenario_partition ;;
 esac
 
-# ── 5. verdict ──────────────────────────────────────────────────────────
-step 05-verdict
-column -t -s $'\t' "${PHASES}" | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
-sed 's/^/    /' "${EVENTS}" 2>/dev/null | tee -a "${LOG_DIR}/run.log" >/dev/null
-jq -n --arg run "${RUN_ID}" --arg scenario "${SCENARIO}" --arg binding "${BINDING}" \
-    --argjson n "${N}" --argjson shardSize "${SHARD}" --argjson q "${Q}" --arg code "${CODE}" \
-    --arg image "${IMAGE}" --arg detail "${DETAIL}" --arg result "${RESULT}" \
-    '{run: $run, scenario: $scenario, binding: $binding, validators: $n, shardSize: $shardSize,
-      q: $q, code: $code, image: $image, detail: $detail, result: $result}' > "${LOG_DIR}/verdict.json"
-RESULTS="${RUNS_DIR}/results.tsv"
-[ -f "${RESULTS}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${RESULTS}"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${RUN_ID}" "${SCENARIO}" "${BINDING}" "${N}" "${SHARD}" "${Q}" \
-    "${CODE}" "${DETAIL}" "${RESULT}" >> "${RESULTS}"
-free -m | sed -n 2p | sed 's/^/host after run: /' >> "${LOG_DIR}/run.log"
-say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
+write_verdict
 [ "${RESULT}" = PASS ] && exit 0
 exit 1

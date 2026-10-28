@@ -20,7 +20,11 @@ testing/devnet/quorum-drills/run.sh [--image IMAGE] [--src TREE] [--binding on|o
   the same code. `quorumParity` is active from block 0 in both.
 
 Exit code 0 means pass, 1 fail, 2 the run could not be carried out
-(preflight, boot, timing). Each run appends a row to `runs/results.tsv`.
+(preflight, boot, timing). A running node whose head cannot be read during
+an observation window (three tries) ends the run as `ERROR`, exit 2: a
+crashed node must not pass for a stalled one. Each run with a verdict
+appends a row to `runs/results.tsv`. Log-line counts (floor refusals,
+fallback lines) only take lines logged in the window being judged.
 
 ## Scenarios
 
