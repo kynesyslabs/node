@@ -19,7 +19,10 @@ import TxValidatorPool from "./txValidatorPool"
 import { verifyBlockTxSignatures } from "./verifyBlockTxSignatures"
 import { getSharedState } from "@/utilities/sharedState"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import { getEligiblePool } from "src/libs/consensus/v2/routines/getShard"
+import {
+    getBoundCommittee,
+    getEligiblePool,
+} from "src/libs/consensus/v2/routines/getShard"
 import { verifierThreshold } from "src/libs/consensus/v2/quorum"
 import { isForkActive } from "@/forks/forkGates"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
@@ -126,20 +129,27 @@ export async function verifyBlock(
     // Recompute the deterministic eligible signer pool for this height.
     // The forged shard is liveness-filtered and not reproducible here,
     // so signatures are validated against the pool it was drawn from.
+    // Under committeeBinding the committee itself is chain data, and only
+    // its members' signatures count: two blocks at one height then share
+    // at least 2q - shardSize signers.
+    const bound = isForkActive("committeeBinding", block.number)
+    const signerSet = bound ? "bound committee" : "eligible signer pool"
     let pool: string[]
     try {
-        pool = await getEligiblePool(block.number - 1)
+        pool = bound
+            ? await getBoundCommittee(block.number - 1)
+            : await getEligiblePool(block.number - 1)
     } catch (e) {
         return {
             valid: false,
-            reason: `could not resolve eligible signer pool: ${e instanceof Error ? e.message : String(e)}`,
+            reason: `could not resolve ${signerSet}: ${e instanceof Error ? e.message : String(e)}`,
         }
     }
 
     if (pool.length === 0) {
         return {
             valid: false,
-            reason: "eligible signer pool is empty",
+            reason: `${signerSet} is empty`,
         }
     }
     const poolIdentities = new Set(pool)
@@ -177,15 +187,19 @@ export async function verifyBlock(
 
     // The bar is pinned to shardSize, not to the forger's liveness view;
     // under quorumParity it is also the producer's, not shrunk by the pool.
+    // committeeBinding implies the same bar: the overlap of two accepted
+    // blocks is bounded against shardSize, not against a small committee.
     const threshold = verifierThreshold(
         getSharedState.shardSize,
         pool.length,
-        isForkActive("quorumParity", block.number),
+        bound || isForkActive("quorumParity", block.number),
     )
     if (verifiedSigners.size < threshold) {
         return {
             valid: false,
-            reason: `insufficient verified pool signatures: ${verifiedSigners.size} of a pool of ${pool.length} (need ${threshold})`,
+            reason: bound
+                ? `insufficient verified committee signatures: ${verifiedSigners.size} of a bound committee of ${pool.length} (need ${threshold})`
+                : `insufficient verified pool signatures: ${verifiedSigners.size} of a pool of ${pool.length} (need ${threshold})`,
         }
     }
 

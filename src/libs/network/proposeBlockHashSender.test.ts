@@ -28,6 +28,8 @@ const sharedState: Record<string, unknown> = {
     shardSize: 4,
 }
 let pool = [OUR_KEY, MEMBER_A, MEMBER_B, POOL_ONLY]
+// The bound committee once committeeBinding applies to the candidate.
+let committee = [OUR_KEY, MEMBER_A, MEMBER_B]
 const shard = [OUR_KEY, MEMBER_A, MEMBER_B].map(identity => ({
     identity,
     connection: { string: "http://" + identity.slice(2, 6) },
@@ -67,6 +69,7 @@ jest.mock("src/libs/consensus/v2/routines/roundCommittee", () => ({
 }))
 jest.mock("src/libs/consensus/v2/routines/getShard", () => ({
     getEligiblePool: async () => pool,
+    getBoundCommittee: async () => committee,
 }))
 jest.mock("src/libs/consensus/v2/routines/getCommonValidatorSeed", () => ({
     __esModule: true,
@@ -126,7 +129,9 @@ beforeEach(() => {
     candidate.validation_data.signatures = {}
     verified.length = 0
     pool = [OUR_KEY, MEMBER_A, MEMBER_B, POOL_ONLY]
+    committee = [OUR_KEY, MEMBER_A, MEMBER_B]
     sharedState.shardSize = 4
+    sharedState.forkConfig = { committeeBinding: { activationHeight: null } }
 })
 
 describe("proposeBlockHash sender", () => {
@@ -226,5 +231,64 @@ describe("proposeBlockHash sender", () => {
         })
 
         expect(res.result).toBe(200)
+    })
+})
+
+describe("proposeBlockHash sender under committeeBinding", () => {
+    beforeEach(() => {
+        sharedState.forkConfig = { committeeBinding: { activationHeight: 0 } }
+    })
+
+    it("drops a signature by a pool member outside the bound committee", async () => {
+        const res = await propose(MEMBER_A, MEMBER_A, {
+            [POOL_ONLY]: sig,
+            [MEMBER_B]: sig,
+        })
+
+        expect(res.result).toBe(200)
+        expect(candidate.validation_data.signatures).toEqual({ [MEMBER_B]: sig })
+        expect(verified).toEqual([MEMBER_B.slice(2)])
+    })
+
+    it("refuses more signatures than the bound committee holds", async () => {
+        // Pre-fork the same map is accepted: two committees of 3 drawn from a
+        // pool of 5 can jointly sign. Under the fork there is one committee.
+        const extra = ["0x" + "d4".repeat(32), "0x" + "e5".repeat(32)]
+        pool = [OUR_KEY, MEMBER_A, MEMBER_B, POOL_ONLY, ...extra]
+        sharedState.shardSize = 3
+
+        const res = await propose(MEMBER_A, MEMBER_A, {
+            [OUR_KEY]: sig,
+            [MEMBER_A]: sig,
+            [MEMBER_B]: sig,
+            [POOL_ONLY]: sig,
+            [extra[0]]: sig,
+        })
+
+        expect(res.result).toBe(400)
+        expect(res.extra).toBe("Signature map is larger than the bound committee")
+        expect(verified).toHaveLength(0)
+        expect(candidate.validation_data.signatures).toEqual({})
+    })
+
+    it("refuses a proposer that is in our round view but not in the bound committee", async () => {
+        committee = [OUR_KEY, MEMBER_B, POOL_ONLY]
+
+        const res = await propose(MEMBER_A, MEMBER_A, { [MEMBER_B]: sig })
+
+        expect(res.result).toBe(401)
+        expect(res.extra).toBe("Validator is not in the bound committee")
+        expect(candidate.validation_data.signatures).toEqual({})
+    })
+
+    it("merges a full committee's signatures", async () => {
+        const res = await propose(MEMBER_A, MEMBER_A, {
+            [OUR_KEY]: sig,
+            [MEMBER_A]: sig,
+            [MEMBER_B]: sig,
+        })
+
+        expect(res.result).toBe(200)
+        expect(Object.keys(candidate.validation_data.signatures)).toHaveLength(3)
     })
 })

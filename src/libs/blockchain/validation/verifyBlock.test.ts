@@ -8,6 +8,7 @@ const D = "dd".repeat(32)
 const OUTSIDER = "ee".repeat(32)
 
 let pool: string[] = []
+let committee: string[] | Error = []
 let networkNow = 2000
 let verifyingSigners: Set<string> = new Set()
 
@@ -26,7 +27,10 @@ jest.mock("src/utilities/sharedState", () => ({
     getSharedState: {
         signingAlgorithm: "ed25519",
         shardSize: 4,
-        forkConfig: { quorumParity: { activationHeight: null } },
+        forkConfig: {
+            quorumParity: { activationHeight: null },
+            committeeBinding: { activationHeight: null },
+        },
         getBlockTimestampMinDelta: () => 1,
         getBlockTimestampTolerance: () => 60,
     },
@@ -59,6 +63,10 @@ jest.mock("../chain", () => ({
 jest.mock("src/libs/consensus/v2/routines/getShard", () => ({
     __esModule: true,
     getEligiblePool: async () => pool,
+    getBoundCommittee: async () => {
+        if (committee instanceof Error) throw committee
+        return committee
+    },
 }))
 
 jest.mock("src/libs/debug/nonceTrace", () => ({
@@ -116,6 +124,8 @@ beforeEach(() => {
     networkNow = 2000
     verifyingSigners = new Set([A, B, C, D])
     getSharedState.forkConfig.quorumParity.activationHeight = null
+    getSharedState.forkConfig.committeeBinding.activationHeight = null
+    committee = [A, B, C, D]
 })
 
 describe("verifyBlock", () => {
@@ -282,5 +292,56 @@ describe("verifyBlock under quorumParity", () => {
         pool = [A, B]
         const result = await verifyBlock(twoOfTwo())
         expect(result.valid).toBe(false)
+    })
+})
+
+describe("verifyBlock under committeeBinding", () => {
+    beforeEach(() => {
+        getSharedState.forkConfig.committeeBinding.activationHeight = 0
+    })
+
+    it("accepts 2/3 + 1 of shardSize signed by bound committee members", async () => {
+        const result = await verifyBlock(makeBlock())
+        expect(result.valid).toBe(true)
+    })
+
+    it("does not count a pool member outside the bound committee", async () => {
+        pool = [A, B, C, D]
+        committee = [A, B, D]
+        const result = await verifyBlock(makeBlock())
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain(
+            "insufficient verified committee signatures: 2 of a bound committee of 3 (need 3)",
+        )
+    })
+
+    it("keeps the bar at shardSize when the committee is smaller", async () => {
+        committee = [A, B]
+        const result = await verifyBlock(
+            makeBlock({ validation_data: { signatures: { [A]: "s1", [B]: "s2" } } }),
+        )
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain("need 3")
+    })
+
+    it("rejects the block when the committee cannot be resolved", async () => {
+        committee = new Error("block 9 not found")
+        const result = await verifyBlock(makeBlock())
+        expect(result.valid).toBe(false)
+        expect(result.reason).toBe("could not resolve bound committee: block 9 not found")
+    })
+
+    it("rejects the block when the committee is empty", async () => {
+        committee = []
+        const result = await verifyBlock(makeBlock())
+        expect(result.valid).toBe(false)
+        expect(result.reason).toBe("bound committee is empty")
+    })
+
+    it("counts pool signers below the activation height", async () => {
+        getSharedState.forkConfig.committeeBinding.activationHeight = 11
+        committee = [A, B, D]
+        const result = await verifyBlock(makeBlock())
+        expect(result.valid).toBe(true)
     })
 })
