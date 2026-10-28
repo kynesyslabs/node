@@ -168,6 +168,26 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(undigested).toEqual([]) // tags like :1.3-debian or :1-slim are mutable
     })
 
+    it("the compose Postgres image is pinned by tag and @sha256 digest", () => {
+        const files = [
+            "docker-compose.yml",
+            "testing/devnet/docker-compose.yml",
+            "testing/multinode/docker-compose.companion.yml",
+        ]
+        const images = files.flatMap(file =>
+            [...read(file).matchAll(/^\s*image:\s*(postgres\S*)/gm)].map(
+                m => `${file}: ${m[1]}`,
+            ),
+        )
+        expect(images).toHaveLength(files.length)
+        const undigested = images.filter(
+            i => !/postgres:16-alpine@sha256:[0-9a-f]{64}$/.test(i),
+        )
+        expect(undigested).toEqual([])
+        // one digest everywhere, so devnet tests the server validators run
+        expect(new Set(images.map(i => i.split("@")[1])).size).toBe(1)
+    })
+
     it("no install path runs a blanket `bun pm trust --all`", () => {
         const scripts = tracked("scripts/**").concat(tracked("run"))
         const blanket = offendingLines(

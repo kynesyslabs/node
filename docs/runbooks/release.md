@@ -10,6 +10,7 @@ the same manifest digest. This page is the operator side of that rule.
 | --- | --- | --- |
 | Bun version | `.bun-version` (also read by CI's `setup-bun`), mirrored in `package.json` `packageManager` | the runtime and the lockfile reader are one exact version everywhere |
 | Base images | `Dockerfile`, `testing/devnet/Dockerfile`: tag plus `@sha256` digest | a tag such as `1.3-debian` moves; a digest does not |
+| Postgres | `docker-compose.yml` (and the devnet and multinode compose files): `postgres:16-alpine` plus `@sha256` index digest | every Docker-track validator runs the same database server build |
 | Node.js (gossip sidecar runtime) | `Dockerfile` `NODE_VERSION` + `NODE_SHA256` | one release, checked against its published checksum |
 | Dependencies | `bun.lock`, installed with `--frozen-lockfile` on every path (`Dockerfile`, `scripts/run`, `scripts/install-deps.sh`, `scripts/reset-node`, CI) | the install fails instead of silently rewriting the lockfile |
 | Lifecycle scripts | only the packages in `package.json` `trustedDependencies` (bufferutil, sqlite3, utf-8-validate); no `bun pm trust --all` anywhere | a new dependency's install script cannot run on a validator |

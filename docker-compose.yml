@@ -46,7 +46,9 @@ services:
   # Internal-only by default. Uncomment the ports stanza below to expose to host.
   # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:16-alpine
+    # Tag plus multi-arch index digest: the tag moves with every 16.x and
+    # Alpine rebuild, so two hosts could otherwise run different servers.
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     container_name: demos-postgres${INSTANCE_SUFFIX:-}
     restart: unless-stopped
     environment:
