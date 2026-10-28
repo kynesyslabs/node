@@ -454,11 +454,18 @@ scenario_fallback() {
     pl_json=$(echo "${listed}" | jq -R . | jq -sc .)
     for i in $(seq 1 "${N}"); do
         psql_node "${i}" "SELECT content FROM blocks WHERE number = ${h}" |
-            python3 -c 'import json,sys; c=json.loads(sys.stdin.read(), object_pairs_hook=dict); c["peerlist"]=json.loads(sys.argv[1]); print(json.dumps(c, separators=(",",":")))' "${pl_json}" \
-            > "${RUN_DIR}/inputs/content-${i}.json" || { say "ABORT: rewriting block ${h} failed"; exit 2; }
-        docker exec -i "$(dc ps -q postgres)" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q \
-            -c "\\set c \`cat\`" -c "UPDATE blocks SET content = :'c'::json WHERE number = ${h}" \
-            < "${RUN_DIR}/inputs/content-${i}.json" >> "${STEP_LOG}" 2>&1 || { say "ABORT: update failed on node${i}_db"; exit 2; }
+            python3 -c '
+import json, sys
+c = json.loads(sys.stdin.read(), object_pairs_hook=dict)
+c["peerlist"] = json.loads(sys.argv[1])
+text = json.dumps(c, separators=(",", ":"))
+# A dollar-quoted literal needs no escaping; psql does not interpolate
+# variables inside -c strings, so the text travels in the script itself
+assert "$qdrill$" not in text
+print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = {int(sys.argv[2])};")
+' "${pl_json}" "${h}" > "${RUN_DIR}/inputs/content-${i}.sql" || { say "ABORT: rewriting block ${h} failed"; exit 2; }
+        docker exec -i "$(dc ps -q postgres)" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q -f - \
+            < "${RUN_DIR}/inputs/content-${i}.sql" >> "${STEP_LOG}" 2>&1 || { say "ABORT: update failed on node${i}_db"; exit 2; }
         [ "$(psql_node "${i}" "SELECT json_array_length(content->'peerlist') FROM blocks WHERE number = ${h}")" = 6 ] ||
             { say "ABORT: node${i}_db does not list 6 at ${h}"; exit 2; }
     done
