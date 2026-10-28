@@ -52,23 +52,35 @@ so the lock is on the volume too, and two containers sharing that volume see
 each other's lock.
 
 The lock is a lease. The running node rewrites it every 5 seconds with its
-pid, hostname, a random instance id and a heartbeat time. A starting node
-that finds a lock:
+pid, hostname, a random instance id, a beat counter and a heartbeat time. A
+starting node that finds a lock:
 
-- refuses to start when the heartbeat keeps advancing while it watches. The
-  error names the other node's pid, host and how long ago it last beat;
-- replaces it once the heartbeat has stopped. It watches for 10 to 25
-  seconds first, because clocks of two hosts can disagree;
+- refuses to start when the lock keeps changing while it watches. The error
+  names the other node's pid, host and how long ago it last beat. The beat
+  counter decides, not the time, so a holder whose clock is wrong is still
+  seen alive;
+- replaces it once the beats have stopped. It watches for 10 to 25 seconds
+  first, because clocks of two hosts can disagree;
 - replaces at once a lock from its own host whose heartbeat is older than 20
   seconds, and a lock from an older node version whose pid is gone.
 
-So a container recreated after a crash starts without any flag, a few
-seconds late. `DEMOS_IDENTITY_TAKEOVER=true` only skips the watch for a lock
-whose heartbeat is already older than 20 seconds. It never replaces a lock
-that keeps beating: that is a second live node with this key.
+So a container recreated after a crash starts without any flag, but 10 to 25
+seconds late while it watches the old lock. With
+`DEMOS_IDENTITY_TAKEOVER=true` and a heartbeat already older than 20 seconds,
+the watch is shortened to about 7 seconds (one beat period plus margin). It
+never replaces a lock that beats during the watch: that is a second live node
+with this key.
 
-If the running node finds its lock deleted or rewritten by another instance,
-it logs an error, stops signing and shuts down. Find out which node took the
+The running node stops signing and shuts down with an error when:
+
+- its lock was deleted or rewritten by another instance;
+- it could not write a beat for 20 seconds (read-only or broken mount, full
+  disk), because other nodes then see its lock as free.
+
+Before each block signature leaves the node, it also checks that the lock
+still names it and was refreshed within the last 20 seconds. A node that
+stalled long enough for another node to take the lock refuses that round
+instead of waiting for its next beat to notice. Find out which node took the
 lock before starting this one again.
 
 ## Failover to another host
@@ -81,9 +93,9 @@ lock before starting this one again.
    a round the old one already signed. An older copy of the record makes the
    self-check below stop the new node.
 3. Start the new node. If the copied lock still beats, the old node is alive:
-   go back to step 1. A stale lock is replaced after a short watch;
-   `DEMOS_IDENTITY_TAKEOVER=true` skips that watch. Remove the variable once
-   the node runs.
+   go back to step 1. A stale lock is replaced after a watch of 10 to 25
+   seconds; `DEMOS_IDENTITY_TAKEOVER=true` shortens it to about 7 seconds.
+   Remove the variable once the node runs.
 
 ## Self-check against the chain
 
@@ -97,7 +109,14 @@ The node then:
 - logs `[SIGNING] another process is signing with this node's key`, with the
   block and the recorded round;
 - increments the metric `demos_foreign_signature_total`;
-- refuses to sign any further block until it is restarted. It keeps syncing.
+- writes `<signing record>.halted` next to the real signing record (on the
+  state volume under docker compose) and refuses to sign any further block.
+  It keeps syncing.
+
+The marker survives restarts, so a crash loop cannot clear the stop while the
+second copy may still run. On every start with the marker present the node
+logs `[SIGNING] signing is stopped by <marker>` and does not sign. Delete the
+marker only after the steps below.
 
 Blocks this process signed itself, older heights, and records of another
 chain never trigger it. A different block at the recorded height with an
@@ -110,8 +129,9 @@ When it fires:
 2. Find the second host: check where the key was copied, old hosts and
    containers, and restored backups. This node's log may already name it in
    `[IDENTITY] another process is using our identity ... at <url>`.
-3. Make sure only one copy can run, then start that one with the newest
-   state directory (identity file and record).
+3. Make sure only one copy can run. Then delete
+   `<identity file>.signed.json.halted` on that copy's state directory and
+   start it with the newest state directory (identity file and record).
 
 Alert on `demos_foreign_signature_total > 0`.
 
