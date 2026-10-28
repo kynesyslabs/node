@@ -158,39 +158,35 @@ export class OmniProtocolServer extends EventEmitter {
         log.debug(
             `==== DEBUG: New connection request from ${remoteAddress} ====`,
         )
-        // Log connection count from this IP for debugging
+        // Live count from this IP, including sockets still in PENDING_AUTH
         const connectionCount =
             this.connectionPool.getConnectionCountByIp(ipAddress)
         log.debug(
             `[OmniProtocolServer] Connections from ${ipAddress}: ${connectionCount}`,
         )
-        log.debug(`${ipAddress} Connection count: ${connectionCount}`)
 
-        if (connectionCount > 0) {
-            // Check rate limits for IP
-            const rateLimitResult = this.rateLimiter.checkConnection(
-                ipAddress,
-                "OmniProtocolServer",
+        // Check the per-IP limit on every new socket, including the first one
+        // from an IP, so unauthenticated sockets cannot bypass it.
+        const rateLimitResult = this.rateLimiter.checkConnection(
+            ipAddress,
+            "OmniProtocolServer",
+        )
+
+        if (!rateLimitResult.allowed) {
+            log.error(
+                `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
             )
 
-            if (!rateLimitResult.allowed) {
-                log.error(
-                    `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
-                )
-                log.error(
-                    `Rate limit result: ${JSON.stringify(rateLimitResult, null, 2)}`,
-                )
-
-                socket.destroy()
-                this.emit("connection_rejected", remoteAddress, "rate_limit")
-                this.emit("rate_limit_exceeded", ipAddress, rateLimitResult)
-                return
-            }
+            socket.destroy()
+            this.emit("connection_rejected", remoteAddress, "rate_limit")
+            this.emit("rate_limit_exceeded", ipAddress, rateLimitResult)
+            return
         }
 
-        // Check if we're at capacity
+        // Check if we're at capacity. getConnectionCount() includes
+        // pending (unauthenticated) sockets; getTotalConnectionCount() does not.
         if (
-            this.connectionPool.getTotalConnectionCount() >=
+            this.connectionPool.getConnectionCount() >=
             this.config.maxConnections
         ) {
             log.error(
@@ -220,10 +216,9 @@ export class OmniProtocolServer extends EventEmitter {
                 this.emit("peer_authenticated", peerIdentity, remoteAddress)
             })
 
-            // Listen for close to clean up rate limiter
-            peerConnection.once("close", () => {
-                this.rateLimiter.removeConnection(ipAddress)
-            })
+            // Rate limiter cleanup on close is done once, by
+            // ConnectionPool.handleConnectionClose(); doing it here as well
+            // decremented the per-IP counter twice per socket.
 
             this.emit("connection_accepted", remoteAddress)
         } catch (error) {
