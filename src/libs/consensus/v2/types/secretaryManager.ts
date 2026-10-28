@@ -16,6 +16,7 @@ import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import { checkCosignTimestamp } from "../routines/cosignTimestamp"
 import { isForkActive } from "@/forks/forkGates"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import { debugAssertionsEnabled } from "@/libs/debug/nonceTrace"
@@ -97,7 +98,7 @@ export default class SecretaryManager {
         if (!this.mergedPeerlist) {
             this.mergedPeerlist = await computeMergedPeerlist(
                 this.shard.blockRef,
-                this.shard.members.map(m => m.identity),
+                this.peerlistVoters(),
             )
             log.only(
                 `[SECRETARY ROUTINE] Merged peerlist for block ${this.shard.blockRef}: ${this.mergedPeerlist.length} validators`,
@@ -106,12 +107,22 @@ export default class SecretaryManager {
         return this.mergedPeerlist
     }
 
+    /**
+     * Whose observations count towards the merged peerlist. Under
+     * committeeBinding the bound committee, the same list on every node; the
+     * live shard is each node's own view and would give each a different
+     * quorum.
+     */
+    private peerlistVoters(): string[] {
+        return this.boundCommittee ?? this.shard.members.map(m => m.identity)
+    }
+
     /** Member only: adopts the secretary's merged peerlist after checking it. */
     public async receiveMergedPeerlist(peerlist: unknown): Promise<void> {
         const valid = await validateMergedPeerlist(
             this.shard.blockRef,
             peerlist,
-            this.shard.members.map(m => m.identity),
+            this.peerlistVoters(),
         )
         if (!valid) {
             log.error(
@@ -906,6 +917,14 @@ export default class SecretaryManager {
         log.debug(`Secretary: ${this.secretary.identity}`)
         log.debug("---- END DIAGNOSTICS ----")
 
+        if (
+            secretaryBlockTimestamp !== undefined &&
+            secretaryBlockTimestamp !== null &&
+            !this.acceptSecretaryTimestamp(secretaryBlockTimestamp, "greenlight")
+        ) {
+            return false
+        }
+
         if (secretaryBlockTimestamp < this.blockTimestamp) {
             log.debug(
                 "Greenlight received for an older block,returning false ...",
@@ -962,6 +981,23 @@ export default class SecretaryManager {
             `[SECRETARY] Secretary block timestamp: ${secretaryBlockTimestamp}`,
         )
         log.error(`[SECRETARY] Block timestamp: ${this.blockTimestamp}`)
+        return false
+    }
+
+    /**
+     * Whether the secretary's block timestamp is one we would sign. A value we
+     * would refuse at signing is refused here already, so it never becomes the
+     * round's timestamp.
+     */
+    private acceptSecretaryTimestamp(
+        timestamp: unknown,
+        source: "greenlight" | "getBlockTimestamp",
+    ): boolean {
+        const verdict = checkCosignTimestamp(timestamp, getNetworkTimestamp())
+        if (verdict.valid) return true
+        log.error(
+            `[SECRETARY] Refusing the ${source} timestamp from ${this.secretary?.identity} for block ${this.shard?.blockRef}: ${verdict.reason}`,
+        )
         return false
     }
 
@@ -1370,7 +1406,11 @@ export default class SecretaryManager {
         const res = await this.secretary.call(request)
 
         if (res.result === 200) {
-            this.blockTimestamp = res.response[0] as number
+            const timestamp = res.response[0]
+            if (!this.acceptSecretaryTimestamp(timestamp, "getBlockTimestamp")) {
+                return null
+            }
+            this.blockTimestamp = timestamp as number
             return this.blockTimestamp
         }
 

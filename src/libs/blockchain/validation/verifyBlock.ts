@@ -41,9 +41,22 @@ export interface BlockVerification {
 export function checkTimestampAgainstParent(
     blockTimestamp: unknown,
     parentTimestamp: unknown,
+    blockHeight: number,
 ): BlockVerification {
     if (typeof blockTimestamp !== "number") {
         return { valid: false, reason: "block has no timestamp" }
+    }
+    // Every honest clock reading is whole seconds; a fraction only adds
+    // values the secretary can try for the block hash, and through it the
+    // next committee seed. Gated because older blocks were never held to it.
+    if (
+        isForkActive("committeeBinding", blockHeight) &&
+        !Number.isInteger(blockTimestamp)
+    ) {
+        return {
+            valid: false,
+            reason: `block timestamp ${blockTimestamp} is not a whole number of seconds`,
+        }
     }
     if (typeof parentTimestamp !== "number") {
         return { valid: true }
@@ -250,6 +263,7 @@ export async function verifyBlock(
     const parentVerdict = checkTimestampAgainstParent(
         blockTimestamp,
         prevTimestamp,
+        block.number,
     )
     if (!parentVerdict.valid) {
         return parentVerdict

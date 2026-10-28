@@ -76,6 +76,7 @@ import {
 } from "./commitLock/candidate"
 import { broadcastPrecommit, lockAndPrecommit } from "./commitLock/precommit"
 import { proofOfLock } from "./commitLock/votes"
+import { CosignTimestampError } from "./routines/cosignTimestamp"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
 
@@ -1077,12 +1078,14 @@ async function forgeBlock(
         ) {
             throw error
         }
-        // A refused signature or an unusable signing record ends this round
-        // without signing; anything else keeps its existing handling.
+        // A refused signature, an unusable signing record or a timestamp we
+        // will not sign ends this round without signing; anything else keeps
+        // its existing handling.
         if (
             error instanceof DoubleSignError ||
             error instanceof SigningRecordError ||
-            error instanceof CommitLockError
+            error instanceof CommitLockError ||
+            error instanceof CosignTimestampError
         ) {
             log.error(`[consensusRoutine] ${error.message}`)
             throw new AbortConsensusError(error.message)

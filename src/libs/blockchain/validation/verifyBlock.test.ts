@@ -1,4 +1,4 @@
-import { verifyBlock } from "./verifyBlock"
+import { checkTimestampAgainstParent, verifyBlock } from "./verifyBlock"
 import { getSharedState } from "src/utilities/sharedState"
 
 const A = "aa".repeat(32)
@@ -404,5 +404,38 @@ describe("verifyBlock under committeeBinding", () => {
         committee = [A, B, D]
         const result = await verifyBlock(makeBlock())
         expect(result.valid).toBe(true)
+    })
+})
+
+describe("whole-second block timestamps", () => {
+    const fractional = () => makeBlock({ content: { timestamp: 1500.5 } })
+
+    it("accepts a fractional timestamp before committeeBinding", async () => {
+        const result = await verifyBlock(fractional())
+        expect(result.valid).toBe(true)
+    })
+
+    it("rejects a fractional timestamp under committeeBinding", async () => {
+        getSharedState.forkConfig.committeeBinding.activationHeight = 0
+        const result = await verifyBlock(fractional())
+        expect(result).toEqual({
+            valid: false,
+            reason: "block timestamp 1500.5 is not a whole number of seconds",
+        })
+    })
+
+    it("applies from the activation height itself, not below it", async () => {
+        getSharedState.forkConfig.committeeBinding.activationHeight = 11
+        expect((await verifyBlock(fractional())).valid).toBe(true)
+        getSharedState.forkConfig.committeeBinding.activationHeight = 10
+        expect((await verifyBlock(fractional())).valid).toBe(false)
+    })
+
+    it("is part of the parent check the proposeBlockHash handler shares", () => {
+        getSharedState.forkConfig.committeeBinding.activationHeight = 0
+        expect(checkTimestampAgainstParent(1500.5, 1000, 10).valid).toBe(false)
+        expect(checkTimestampAgainstParent(1500, 1000, 10).valid).toBe(true)
+        getSharedState.forkConfig.committeeBinding.activationHeight = null
+        expect(checkTimestampAgainstParent(1500.5, 1000, 10).valid).toBe(true)
     })
 })
