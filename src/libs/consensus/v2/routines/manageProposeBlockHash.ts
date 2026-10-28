@@ -14,6 +14,8 @@ import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
 import { isForkActive } from "@/forks/forkGates"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import { checkCosignTimestamp } from "./cosignTimestamp"
 
 function getIncomingSignatures(
     validationData: ValidationData,
@@ -201,10 +203,17 @@ export default async function manageProposeBlockHash(
 
     const candidate = getSharedState.candidateBlock
     const parentBlock = await Chain.getBlockByNumber(candidate.number - 1)
-    const timestampVerdict = checkTimestampAgainstParent(
+    let timestampVerdict = checkTimestampAgainstParent(
         candidate.content.timestamp,
         parentBlock?.content?.timestamp,
+        candidate.number,
     )
+    if (timestampVerdict.valid) {
+        timestampVerdict = checkCosignTimestamp(
+            candidate.content.timestamp,
+            getNetworkTimestamp(),
+        )
+    }
     if (!timestampVerdict.valid) {
         log.error(
             `[manageProposeBlockHash] Refusing to sign block ${candidate.number}: ${timestampVerdict.reason}`,

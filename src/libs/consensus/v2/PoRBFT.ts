@@ -66,6 +66,7 @@ import {
     DoubleSignError,
     SigningRecordError,
 } from "@/libs/identity/signingRecord"
+import { CosignTimestampError } from "./routines/cosignTimestamp"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
 
@@ -1014,11 +1015,13 @@ async function forgeBlock(
             blockTimestamp,
         )
     } catch (error) {
-        // A refused signature or an unusable signing record ends this round
-        // without signing; anything else keeps its existing handling.
+        // A refused signature, an unusable signing record or a timestamp we
+        // will not sign ends this round without signing; anything else keeps
+        // its existing handling.
         if (
             error instanceof DoubleSignError ||
-            error instanceof SigningRecordError
+            error instanceof SigningRecordError ||
+            error instanceof CosignTimestampError
         ) {
             log.error(`[consensusRoutine] ${error.message}`)
             throw new AbortConsensusError(error.message)
