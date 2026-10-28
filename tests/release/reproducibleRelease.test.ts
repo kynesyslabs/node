@@ -173,6 +173,7 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
             "docker-compose.yml",
             "testing/devnet/docker-compose.yml",
             "testing/multinode/docker-compose.companion.yml",
+            "postgres/docker-compose.yml",
         ]
         const images = files.flatMap(file =>
             [...read(file).matchAll(/^\s*image:\s*(postgres\S*)/gm)].map(
