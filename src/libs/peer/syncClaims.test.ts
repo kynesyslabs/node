@@ -22,9 +22,10 @@ mock.module("src/libs/consensus/v2/routines/committedBlock", () => ({
     scheduleHeightProbe: probe,
 }))
 
-const { corroborateSyncData, UNKNOWN_SYNC } = await import("./syncClaims")
+const { corroborateSyncData, unknownSync } = await import("./syncClaims")
 
 const from: any = { identity: "peer-a", connection: { string: "http://a" } }
+const UNKNOWN = { status: false, block: null, block_hash: null }
 
 beforeEach(() => {
     sharedState.lastBlockNumber = 100
@@ -46,34 +47,44 @@ describe("corroborateSyncData", () => {
     })
 
     it("reads a height ahead of ours as unknown", async () => {
-        expect(await corroborateSyncData({ status: true, block: 529479, block_hash: "x" })).toBe(UNKNOWN_SYNC)
+        expect(await corroborateSyncData({ status: true, block: 529479, block_hash: "x" })).toEqual(UNKNOWN)
     })
 
     it("reads a hash we do not have as unknown", async () => {
-        expect(await corroborateSyncData({ status: true, block: 100, block_hash: "other" })).toBe(UNKNOWN_SYNC)
-        expect(await corroborateSyncData({ status: true, block: 50, block_hash: "h50" })).toBe(UNKNOWN_SYNC)
+        expect(await corroborateSyncData({ status: true, block: 100, block_hash: "other" })).toEqual(UNKNOWN)
+        expect(await corroborateSyncData({ status: true, block: 50, block_hash: "h50" })).toEqual(UNKNOWN)
+    })
+
+    it("gives each unknown claim its own object, so a peer written in place leaves others unknown", async () => {
+        const first = await corroborateSyncData({ status: true, block: 101, block_hash: "x101" })
+        first.status = true
+        first.block = 100
+        first.block_hash = "h100"
+        expect(await corroborateSyncData(undefined)).toEqual(UNKNOWN)
+        expect(unknownSync()).toEqual(UNKNOWN)
+        expect(unknownSync()).not.toBe(unknownSync())
     })
 
     it("reads a malformed claim as unknown", async () => {
-        expect(await corroborateSyncData(undefined)).toBe(UNKNOWN_SYNC)
-        expect(await corroborateSyncData({ block: "100", block_hash: "h100" })).toBe(UNKNOWN_SYNC)
-        expect(await corroborateSyncData({ block: -1, block_hash: "h" })).toBe(UNKNOWN_SYNC)
-        expect(await corroborateSyncData({ block: 100, block_hash: "" })).toBe(UNKNOWN_SYNC)
+        expect(await corroborateSyncData(undefined)).toEqual(UNKNOWN)
+        expect(await corroborateSyncData({ block: "100", block_hash: "h100" })).toEqual(UNKNOWN)
+        expect(await corroborateSyncData({ block: -1, block_hash: "h" })).toEqual(UNKNOWN)
+        expect(await corroborateSyncData({ block: 100, block_hash: "" })).toEqual(UNKNOWN)
     })
 })
 
 describe("claims we cannot back", () => {
     it("hands a height ahead of ours to the probe of the peer that made it", async () => {
-        expect(await corroborateSyncData({ status: true, block: 101, block_hash: "x101" }, from)).toBe(
-            UNKNOWN_SYNC,
+        expect(await corroborateSyncData({ status: true, block: 101, block_hash: "x101" }, from)).toEqual(
+            UNKNOWN,
         )
         expect(probe).toHaveBeenCalledTimes(1)
         expect(probe.mock.calls[0]).toEqual([from, 101, "x101"])
     })
 
     it("hands a hash other than ours at a height we hold to the probe", async () => {
-        expect(await corroborateSyncData({ status: true, block: 100, block_hash: "other" }, from)).toBe(
-            UNKNOWN_SYNC,
+        expect(await corroborateSyncData({ status: true, block: 100, block_hash: "other" }, from)).toEqual(
+            UNKNOWN,
         )
         expect(probe.mock.calls[0]).toEqual([from, 100, "other"])
     })
@@ -90,8 +101,8 @@ describe("claims we cannot back", () => {
         probe.mockImplementationOnce(() => {
             throw new Error("boom")
         })
-        expect(await corroborateSyncData({ status: true, block: 101, block_hash: "x101" }, from)).toBe(
-            UNKNOWN_SYNC,
+        expect(await corroborateSyncData({ status: true, block: 101, block_hash: "x101" }, from)).toEqual(
+            UNKNOWN,
         )
     })
 })

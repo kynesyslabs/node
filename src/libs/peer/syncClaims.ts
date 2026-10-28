@@ -3,8 +3,15 @@ import { getSharedState } from "src/utilities/sharedState"
 import type Peer from "./Peer"
 import type { SyncData } from "./Peer"
 
-/** What a peer's sync state reads as until it has told us something we can check. */
-export const UNKNOWN_SYNC: SyncData = { status: false, block: null, block_hash: null }
+/**
+ * What a peer's sync state reads as until it has told us something we can
+ * check. A fresh object each time: callers store it as `peer.sync`, and
+ * peer updates later write into that object in place, so a shared one would
+ * make every peer with an unknown height read as whatever was written last.
+ */
+export function unknownSync(): SyncData {
+    return { status: false, block: null, block_hash: null }
+}
 
 /**
  * A peer's self-reported sync state, kept only when our own chain backs it:
@@ -20,13 +27,13 @@ export async function corroborateSyncData(
     claim: unknown,
     from?: Peer,
 ): Promise<SyncData> {
-    if (claim === null || typeof claim !== "object") return UNKNOWN_SYNC
+    if (claim === null || typeof claim !== "object") return unknownSync()
     const { status, block, block_hash: blockHash } = claim as Record<string, unknown>
-    if (!Number.isInteger(block) || (block as number) < 0) return UNKNOWN_SYNC
-    if (typeof blockHash !== "string" || blockHash.length === 0) return UNKNOWN_SYNC
+    if (!Number.isInteger(block) || (block as number) < 0) return unknownSync()
+    if (typeof blockHash !== "string" || blockHash.length === 0) return unknownSync()
     if ((block as number) > (getSharedState.lastBlockNumber ?? 0)) {
         await probeClaim(from, block as number, blockHash)
-        return UNKNOWN_SYNC
+        return unknownSync()
     }
     // Loaded here, not at module level: PeerManager imports this file and
     // the chain module imports PeerManager through the sync routines.
@@ -34,7 +41,7 @@ export async function corroborateSyncData(
     const ours = await chain.getBlockByNumber(block as number)
     if (!ours || ours.hash !== blockHash) {
         await probeClaim(from, block as number, blockHash)
-        return UNKNOWN_SYNC
+        return unknownSync()
     }
     return { status: status === true, block: block as number, block_hash: blockHash }
 }
