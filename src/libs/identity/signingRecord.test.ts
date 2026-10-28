@@ -25,6 +25,7 @@ import {
     setSigningLeaseCheck,
     signedByThisProcess,
     signingHaltMarkerPath,
+    signingHaltReason,
     recordBlockSignature,
     loadSigningRecord,
     SigningRecordError,
@@ -267,6 +268,62 @@ describe("signingRecord", () => {
                     path.join(state, ".demos_identity.signed.json.halted"),
                 ),
             ).toBe(true)
+        })
+
+        it("writes the marker durably: synced file renamed into place, then the directory synced", () => {
+            const marker = signingHaltMarkerPath(identity)
+            const steps: string[] = []
+            const realFsync = fs.fsyncSync
+            const realRename = fs.renameSync
+            jest.spyOn(fs, "fsyncSync").mockImplementation(fd => {
+                steps.push(
+                    fs.fstatSync(fd).isDirectory() ? "fsync dir" : "fsync file",
+                )
+                realFsync(fd)
+            })
+            jest.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+                if (to === marker) steps.push("rename")
+                realRename(from, to)
+            })
+            try {
+                haltSigning("key seen elsewhere", identity)
+            } finally {
+                jest.restoreAllMocks()
+            }
+            expect(steps).toEqual(["fsync file", "rename", "fsync dir"])
+            expect(JSON.parse(fs.readFileSync(marker, "utf8")).reason).toBe(
+                "key seen elsewhere",
+            )
+            expect(fs.statSync(marker).mode & 0o777).toBe(0o600)
+            const leftovers = fs
+                .readdirSync(dir)
+                .filter(f => f.endsWith(".tmp"))
+            expect(leftovers).toEqual([])
+        })
+
+        it("keeps the first marker's reason", () => {
+            haltSigning("first", identity)
+            haltSigning("second", identity)
+            expect(
+                JSON.parse(
+                    fs.readFileSync(signingHaltMarkerPath(identity), "utf8"),
+                ).reason,
+            ).toBe("first")
+        })
+
+        it("still stops this process when the marker cannot be made durable", () => {
+            jest.spyOn(fs, "fsyncSync").mockImplementation(() => {
+                throw Object.assign(new Error("EIO: sync failed"), {
+                    code: "EIO",
+                })
+            })
+            try {
+                expect(haltSigning("key seen elsewhere", identity)).toBe(true)
+            } finally {
+                jest.restoreAllMocks()
+            }
+            expect(signingHaltReason()).toBe("key seen elsewhere")
+            expect(fs.existsSync(signingHaltMarkerPath(identity))).toBe(false)
         })
 
         it("refuses every round once halted and names the reason", () => {

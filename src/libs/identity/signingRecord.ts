@@ -66,15 +66,15 @@ export function haltSigning(reason: string, identityFile?: string): boolean {
         const marker = signingHaltMarkerPath(identityFile)
         try {
             if (!fs.existsSync(marker)) {
-                fs.writeFileSync(
+                writeFileDurably(
                     marker,
                     JSON.stringify({ reason, at: Date.now() }),
-                    { mode: 0o600 },
+                    "signing stop marker",
                 )
             }
         } catch (e) {
             log.error(
-                `[SIGNING] cannot write signing stop marker ${marker}: ${(e as Error).message}; signing stays stopped until restart only`,
+                `[SIGNING] ${(e as Error).message}; signing stays stopped until restart only`,
             )
         }
     }
@@ -249,14 +249,15 @@ export function resolveWriteTarget(file: string): string {
     throw new SigningRecordError(`too many symlinks resolving ${file}`)
 }
 
-// The record must survive a crash that happens right after we sign, so the
-// bytes are fsynced before the rename and the directory entry afterwards.
-function writeRecordAtomically(file: string, record: SigningRecord): void {
+// The record must survive a crash that happens right after we sign, and the
+// signing stop a crash that happens right after we halt, so the bytes are
+// fsynced before the rename and the directory entry afterwards.
+function writeFileDurably(file: string, body: string, what: string): void {
     const tmp = `${file}.${process.pid}.tmp`
     let fd: number | null = null
     try {
         fd = fs.openSync(tmp, "w", 0o600)
-        fs.writeSync(fd, JSON.stringify(record))
+        fs.writeSync(fd, body)
         fs.fsyncSync(fd)
         fs.closeSync(fd)
         fd = null
@@ -271,10 +272,14 @@ function writeRecordAtomically(file: string, record: SigningRecord): void {
         }
         fs.rmSync(tmp, { force: true })
         throw new SigningRecordError(
-            `cannot persist signing record ${file}: ${(e as Error).message}`,
+            `cannot persist ${what} ${file}: ${(e as Error).message}`,
         )
     }
-    syncDirectory(path.dirname(file), file)
+    syncDirectory(path.dirname(file), file, what)
+}
+
+function writeRecordAtomically(file: string, record: SigningRecord): void {
+    writeFileDurably(file, JSON.stringify(record), "signing record")
 }
 
 // Only errors that mean "this filesystem cannot sync a directory" are
@@ -287,14 +292,14 @@ function errorCode(e: unknown): string | undefined {
     return (e as NodeJS.ErrnoException).code
 }
 
-function syncDirectory(dir: string, file: string): void {
+function syncDirectory(dir: string, file: string, what: string): void {
     let dirFd: number
     try {
         dirFd = fs.openSync(dir, "r")
     } catch (e) {
         if (DIR_OPEN_UNSUPPORTED.has(errorCode(e) ?? "")) return
         throw new SigningRecordError(
-            `cannot sync directory of signing record ${file}: ${(e as Error).message}`,
+            `cannot sync directory of ${what} ${file}: ${(e as Error).message}`,
         )
     }
     try {
@@ -302,7 +307,7 @@ function syncDirectory(dir: string, file: string): void {
     } catch (e) {
         if (DIR_FSYNC_UNSUPPORTED.has(errorCode(e) ?? "")) return
         throw new SigningRecordError(
-            `cannot sync directory of signing record ${file}: ${(e as Error).message}`,
+            `cannot sync directory of ${what} ${file}: ${(e as Error).message}`,
         )
     } finally {
         fs.closeSync(dirFd)
