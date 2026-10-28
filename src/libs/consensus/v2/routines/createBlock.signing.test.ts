@@ -58,9 +58,10 @@ jest.mock("@/libs/blockchain/validation/txValidatorPool", () => ({
     default: { getInstance: () => ({ sign }) },
 }))
 jest.mock("@/forks", () => ({ serializeBlockContent: () => "serialized" }))
+let parentBlock: { content: { timestamp: number } } | null = null
 jest.mock("src/libs/blockchain/chain", () => ({
     __esModule: true,
-    default: { getBlockByNumber: async () => null },
+    default: { getBlockByNumber: async () => parentBlock },
 }))
 let networkNow = 10_000
 jest.mock("src/libs/utils/calibrateTime", () => ({
@@ -86,6 +87,7 @@ beforeEach(() => {
     sharedState.genesisBlockHash = "genesis-a"
     contentHash = "hash-1"
     networkNow = 10_000
+    parentBlock = null
     sign.mockReset()
     sign.mockImplementation(async () => ({
         signature: new Uint8Array([1, 2, 3]),
@@ -194,5 +196,22 @@ describe("createBlock signing guard", () => {
         // A few seconds of clock skew is still signed.
         await forge(5, 1005)
         expect(sign).toHaveBeenCalledTimes(1)
+    })
+
+    it("signs the floor the clamp raises a low timestamp to", async () => {
+        parentBlock = { content: { timestamp: 1000 } } // floor 1010
+        networkNow = 1008
+        const block = await forge(5, 1003)
+        expect(block.content.timestamp).toBe(1010)
+        expect(sign).toHaveBeenCalledTimes(1)
+    })
+
+    it("refuses when the clamp lifts the timestamp past our clock", async () => {
+        // A parent stamped ahead of us puts its floor beyond the allowed lead.
+        parentBlock = { content: { timestamp: 1030 } } // floor 1040
+        networkNow = 1008
+        await expect(forge(5, 1008)).rejects.toBeInstanceOf(CosignTimestampError)
+        expect(sign).not.toHaveBeenCalled()
+        expect(sharedState.candidateBlock).toBeNull()
     })
 })
