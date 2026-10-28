@@ -15,6 +15,7 @@ import {
 import type Peer from "src/libs/peer/Peer"
 import PeerManager from "src/libs/peer/PeerManager"
 import { emptyResponse } from "src/libs/network/server_rpc"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import { getBoundCommittee } from "../routines/getShard"
@@ -23,7 +24,13 @@ import {
     type CommittedReport,
     readCommittedRefusal,
 } from "../routines/committedBlock"
-import { commitLockActive, isRound, precommitMessage } from "./domain"
+import {
+    commitLockActive,
+    isBlockHash,
+    isRound,
+    precommitMessage,
+    roundAheadRefusal,
+} from "./domain"
 import {
     CommitLockError,
     judgeLock,
@@ -92,6 +99,7 @@ async function lockAndPrecommitLocked(
         identityFile: getSharedState.identityFile,
         genesisHash: getSharedState.genesisBlockHash,
         production: getSharedState.PROD,
+        now: getNetworkTimestamp(),
         prevote: openPrevote(height, round, hash),
         sign: async message => {
             const signed = await TxValidatorPool.getInstance().sign(
@@ -119,6 +127,8 @@ export interface PrecommitSigner {
     identityFile: string
     genesisHash: string | null
     production: boolean
+    /** The member's network clock, in seconds. */
+    now: number
     /** The member's open prevote for the requested block and round, if any. */
     prevote: PrevoteState | null
     sign: (message: string) => Promise<string>
@@ -148,6 +158,10 @@ export async function precommitUnderLock(
     if (!genesisHash) {
         return { refused: "genesis block hash is not loaded" }
     }
+    // A lock in a round far ahead of every honest clock would outrank each
+    // honest round after it, so it is never taken, whatever the prevote.
+    const ahead = roundAheadRefusal(round, member.now)
+    if (ahead) return { refused: ahead }
     const signingRound = { genesisHash, height, timestamp: round, hash }
     const policy = { production: member.production }
 
@@ -231,14 +245,20 @@ export async function managePrecommitBlockHash(
 ): Promise<RPCResponse> {
     const [hash, round, height, pol, precommits] = params ?? []
     if (
-        typeof hash !== "string" ||
-        hash.length === 0 ||
+        !isBlockHash(hash) ||
         !isRound(round) ||
         typeof height !== "number" ||
         !Number.isSafeInteger(height) ||
         height < 1
     ) {
         return refuse(400, "Malformed precommit request")
+    }
+    const ahead = roundAheadRefusal(round, getNetworkTimestamp())
+    if (ahead) {
+        log.warning(
+            `[commitLock] Refused a precommit request from ${sender} for ${hash} at height ${height}: ${ahead}`,
+        )
+        return refuse(409, { message: "Round is ahead of our clock", reason: ahead })
     }
     if (height !== getSharedState.lastBlockNumber + 1) {
         return refuse(409, {

@@ -12,7 +12,13 @@ import {
     committedHeightRefusal,
     readCommittedRefusal,
 } from "../routines/committedBlock"
-import { commitLockActive, isRound } from "./domain"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import {
+    commitLockActive,
+    isBlockHash,
+    isRound,
+    roundAheadRefusal,
+} from "./domain"
 import { isLockInputs, type LockInputs, lockAt } from "./lockStore"
 import { proofOfLock } from "./votes"
 
@@ -106,6 +112,7 @@ export async function readLockReply<P extends { identity: string }>(
     height: number,
     committee: string[],
     source: P,
+    now: number = getNetworkTimestamp(),
 ): Promise<ReportedLock<P> | null> {
     if (response?.result !== 200) return null
     const lock = (response.extra as { lock?: unknown } | null)?.lock as {
@@ -118,13 +125,21 @@ export async function readLockReply<P extends { identity: string }>(
     if (!lock) return null
     if (
         lock.height !== height ||
-        typeof lock.hash !== "string" ||
-        lock.hash.length === 0 ||
+        !isBlockHash(lock.hash) ||
         !isRound(lock.round) ||
         !isLockInputs(lock.inputs)
     ) {
         log.warning(
             `[commitLock] ${source.identity} reported a malformed lock at height ${height}`,
+        )
+        return null
+    }
+    // A lock from a round we would not precommit in ranks above every
+    // honest round, so it is not a candidate to follow.
+    const ahead = roundAheadRefusal(lock.round, now)
+    if (ahead) {
+        log.warning(
+            `[commitLock] ${source.identity} reported a lock on ${lock.hash} we ignore: ${ahead}`,
         )
         return null
     }

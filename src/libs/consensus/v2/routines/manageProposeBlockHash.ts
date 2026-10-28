@@ -14,7 +14,12 @@ import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
 import { isForkActive } from "@/forks/forkGates"
-import { commitLockActive, voteMessageOf } from "../commitLock/domain"
+import {
+    commitLockActive,
+    roundAheadRefusal,
+    voteMessageOf,
+} from "../commitLock/domain"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 
 function getIncomingSignatures(
     validationData: ValidationData,
@@ -230,6 +235,19 @@ export default async function manageProposeBlockHash(
             response.result = 500
             response.response = getSharedState.publicKeyHex
             response.extra = "Candidate block carries no round"
+            return response
+        }
+        // Our candidate was refused at creation if its round led our clock
+        // too far; checked again so no path hands out such a prevote.
+        const ahead = roundAheadRefusal(
+            ourRound as number,
+            getNetworkTimestamp(),
+        )
+        if (ahead) {
+            log.warning(`[manageProposeBlockHash] Not handing out our prevote: ${ahead}`)
+            response.result = 409
+            response.response = getSharedState.publicKeyHex
+            response.extra = { message: "Round is ahead of our clock", reason: ahead }
             return response
         }
         if (round !== undefined && round !== ourRound) {

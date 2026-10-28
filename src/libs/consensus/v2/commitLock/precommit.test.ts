@@ -25,6 +25,7 @@ const sharedState: Record<string, any> = {
     lastBlockNumber: 9,
     lastBlockHash: "hash-9",
     genesisBlockHash: "hash-0",
+    timestampCorrection: 0,
     forkConfig: {
         quorumParity: { activationHeight: 0 },
         committeeBinding: { activationHeight: 0 },
@@ -84,6 +85,8 @@ const R1 = 5000
 const R2 = 5010
 const X = "a".repeat(64)
 const Y = "b".repeat(64)
+// A round an hour ahead of every clock, as a faulty secretary could stamp it
+const farRound = () => Math.floor(Date.now() / 1000) + 3600
 const inputs = {
     previousHash: "hash-9",
     orderedTransactions: ["t1"],
@@ -204,6 +207,21 @@ describe("lockAndPrecommit", () => {
         expect(loadSigningRecord(sharedState.identityFile)).toBeNull()
     })
 
+    it("takes no lock and signs nothing in a round far ahead of the clock", async () => {
+        const far = farRound()
+        openPrevote(X, far)
+        const outcome = await precommit.lockAndPrecommit({
+            height: H,
+            round: far,
+            hash: X,
+            pol: await prevotes(X, far, others),
+        })
+        expect("refused" in outcome && outcome.refused).toContain("ahead of our clock")
+        expect(lockStore.loadCommitLock(sharedState.identityFile)).toBeNull()
+        expect(loadSigningRecord(sharedState.identityFile)).toBeNull()
+        expect(metrics.locks).toBe(0)
+    })
+
     it("refuses another block while locked, until a later proof of lock moves it", async () => {
         openPrevote(X, R1)
         await precommit.lockAndPrecommit({ height: H, round: R1, hash: X, pol: await prevotes(X, R1, others) })
@@ -279,6 +297,22 @@ describe("precommitBlockHash handler", () => {
         expect(Object.keys(answered).sort()).toEqual([node.identity, others[0].identity].sort())
         const verified = await votes.verifiedPrecommitters(H, R1, X, answered, committee)
         expect(verified.size).toBe(2)
+    })
+
+    it("refuses a round far ahead of the clock before locking", async () => {
+        const far = farRound()
+        openPrevote(X, far)
+        const res = await call(others[0].identity, [X, far, H, await prevotes(X, far, others), {}])
+        expect(res.result).toBe(409)
+        expect((res.extra as any).message).toBe("Round is ahead of our clock")
+        expect(lockStore.loadCommitLock(sharedState.identityFile)).toBeNull()
+        expect(loadSigningRecord(sharedState.identityFile)).toBeNull()
+    })
+
+    it("refuses an oversized block hash", async () => {
+        openPrevote(X, R1)
+        const res = await call(others[0].identity, ["a".repeat(200), R1, H, {}, {}])
+        expect(res.result).toBe(400)
     })
 
     it("answers 409 when the lock rule refuses", async () => {

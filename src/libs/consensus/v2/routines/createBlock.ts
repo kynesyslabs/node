@@ -16,10 +16,12 @@ import {
     recordBlockSignature,
     SigningRecordError,
 } from "src/libs/identity/signingRecord"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import {
     commitLockActive,
     isRound,
     prevoteMessage,
+    roundAheadRefusal,
 } from "../commitLock/domain"
 import { CommitLockError } from "../commitLock/lockStore"
 import { recordPrevote } from "../commitLock/roundState"
@@ -158,6 +160,12 @@ async function prevoteCandidate(
     if (!isRound(round)) {
         throw new CommitLockError(
             `no round for the prevote on block ${block.number}; refusing to sign`,
+        )
+    }
+    const ahead = roundAheadRefusal(round, getNetworkTimestamp())
+    if (ahead) {
+        throw new CommitLockError(
+            `${ahead}; refusing to prevote block ${block.number}`,
         )
     }
     if (expectedHash !== undefined && expectedHash !== block.hash) {

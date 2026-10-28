@@ -18,6 +18,7 @@ const sharedState: any = {
     publicKeyHex: "pub",
     signingAlgorithm: "ed25519",
     getConsensusTime: () => 10,
+    timestampCorrection: 0,
     forkConfig: {
         committeeBinding: { activationHeight: 0 },
         commitLock: { activationHeight: 0 },
@@ -123,6 +124,18 @@ describe("createBlock under commitLock", () => {
         expect(sign).not.toHaveBeenCalled()
         expect(roundState.latestPrevote()).toBeNull()
         await forge({ round: 7000, expectedHash: "hash-1" })
+        expect(sign).toHaveBeenCalledTimes(1)
+    })
+
+    it("refuses a round far ahead of the clock before signing", async () => {
+        const far = Math.floor(Date.now() / 1000) + 3600
+        await expect(forge({ round: far })).rejects.toBeInstanceOf(CommitLockError)
+        expect(sign).not.toHaveBeenCalled()
+        expect(roundState.latestPrevote()).toBeNull()
+        expect(sharedState.candidateBlock).toBeNull()
+
+        // Within the lead an honest secretary's clock skew needs, it signs
+        await forge({ round: Math.floor(Date.now() / 1000) + 2 })
         expect(sign).toHaveBeenCalledTimes(1)
     })
 

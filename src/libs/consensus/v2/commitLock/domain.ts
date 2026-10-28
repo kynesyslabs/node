@@ -1,5 +1,6 @@
 import { isForkActive } from "@/forks/forkGates"
 import log from "src/utilities/logger"
+import { COSIGN_TIMESTAMP_MAX_LEAD_SECONDS } from "../routines/cosignTimestamp"
 
 /**
  * What a committee member signs under `commitLock`. The height and the round
@@ -31,11 +32,40 @@ export function commitLockActive(height: number): boolean {
     return false
 }
 
+/**
+ * The longest block hash a peer may send: hashes are 64 hex characters, so
+ * anything much longer is noise we should not verify signatures over.
+ */
+export const MAX_BLOCK_HASH_LENGTH = 128
+
+/** A block hash as a peer may send it: a non-empty, bounded string. */
+export function isBlockHash(value: unknown): value is string {
+    return (
+        typeof value === "string" &&
+        value.length > 0 &&
+        value.length <= MAX_BLOCK_HASH_LENGTH
+    )
+}
+
 /** A round is the secretary timestamp of an attempt: a positive integer. */
 export function isRound(value: unknown): value is number {
     return (
         typeof value === "number" && Number.isSafeInteger(value) && value > 0
     )
+}
+
+/**
+ * Why a vote in `round` must be neither signed nor accepted when our network
+ * clock reads `now`, or null when it may. An honest secretary stamps the
+ * round with its own clock, so only clock skew puts it ahead of ours. A
+ * round further ahead would let a lock taken in it outrank every honest
+ * round until the clocks caught up: the same bound as for any timestamp we
+ * sign.
+ */
+export function roundAheadRefusal(round: number, now: number): string | null {
+    const ceiling = now + COSIGN_TIMESTAMP_MAX_LEAD_SECONDS
+    if (round <= ceiling) return null
+    return `round ${round} is ${round - now}s ahead of our clock (at most ${COSIGN_TIMESTAMP_MAX_LEAD_SECONDS}s accepted)`
 }
 
 export function prevoteMessage(

@@ -75,6 +75,8 @@ type PrevoteState = import("./roundState").PrevoteState
 const H = 10
 const R1 = 5000
 const R2 = 5010
+// Every member's network clock: past each round the scenarios use
+const NOW = 6000
 
 interface Member {
     name: string
@@ -134,6 +136,7 @@ async function askPrecommit(m: Member, round: number, hash: string, pol: unknown
             identityFile: m.file,
             genesisHash: "hash-0",
             production: false,
+            now: NOW,
             prevote: m.prevote?.open ? m.prevote : null,
             sign: message => m.signer.sign(message),
         },
@@ -145,7 +148,7 @@ async function askPrecommit(m: Member, round: number, hash: string, pol: unknown
 async function lockReport(m: Member) {
     const lock = lockStore.lockAt(m.file, "hash-0", H)
     const response = { result: 200, response: "", require_reply: false, extra: { lock } }
-    return await readLockReply(response, H, committee, { identity: m.signer.identity })
+    return await readLockReply(response, H, committee, { identity: m.signer.identity }, NOW)
 }
 
 /** Step 1: the block `m` prevotes in its next attempt. */
@@ -307,6 +310,44 @@ describe("commit lock safety with a committee of four", () => {
             lockedAt: 1,
         })
         expect(await lockReport(D)).toBeNull()
+    })
+
+    it("locks nobody in a round far ahead of the clock, so honest rounds still certify", async () => {
+        // A faulty secretary greenlit a far-future round and gathered a full
+        // proof of lock for X in it: a lock there would outrank every honest
+        // round until the clocks caught up
+        const X = blocks.X.hash
+        const FAR = NOW + 3600
+        const polFar = Object.fromEntries(await Promise.all(all.map(m => prevote(m, FAR, X))))
+        expect(await votes.proofOfLock(H, FAR, X, polFar, committee)).not.toBeNull()
+        for (const m of all) {
+            expect(await askPrecommit(m, FAR, X, polFar)).toBeNull()
+            expect(lockStore.lockAt(m.file, "hash-0", H)).toBeNull()
+        }
+
+        // Nor is such a lock followed when a member reports one
+        lockStore.writeCommitLock(D.file, {
+            genesisHash: "hash-0",
+            height: H,
+            hash: X,
+            round: FAR,
+            pol: polFar,
+            inputs: inputsOf(X),
+            lockedAt: 1,
+        })
+        expect(await lockReport(D)).toBeNull()
+
+        // The next honest round goes through for any block
+        const Y = blocks.Y.hash
+        for (const m of all) nextAttempt(m)
+        const polY = Object.fromEntries(await Promise.all([A, B, C].map(m => prevote(m, R2, Y))))
+        const certificate: Record<string, string> = {}
+        for (const m of [A, B, C]) {
+            const sig = await askPrecommit(m, R2, Y, polY)
+            expect(sig).not.toBeNull()
+            certificate[m.signer.identity] = sig as string
+        }
+        expect(await certifies(Y, R2, certificate)).toBe(true)
     })
 
     it("locks nobody on a split round, so the retry forges fresh and completes", async () => {
