@@ -52,6 +52,23 @@ export function checkTimestampAgainstParent(
     return { valid: true }
 }
 
+// Verified separately from the quorum tally, so a garbage entry under our key
+// can never read as our signature, however the tally is computed.
+async function carriesOurSignature(block: Block): Promise<boolean> {
+    const ours = block.validation_data?.signatures?.[getSharedState.publicKeyHex]
+    if (typeof ours !== "string") return false
+    try {
+        return await TxValidatorPool.getInstance().verify({
+            algorithm: getSharedState.signingAlgorithm,
+            message: new TextEncoder().encode(block.hash),
+            signature: hexToUint8Array(ours),
+            publicKey: hexToUint8Array(getSharedState.publicKeyHex),
+        })
+    } catch {
+        return false
+    }
+}
+
 /**
  * Verify a synced block's hash + signature quorum.
  *
@@ -192,7 +209,7 @@ export async function verifyBlock(
 
     // After the quorum so a peer replaying one stray signature of ours on an
     // unaccepted block cannot stop this node from signing.
-    if (verifiedSigners.has(getSharedState.publicKeyHex)) {
+    if (await carriesOurSignature(block)) {
         checkOwnSignature({
             number: block.number,
             hash: block.hash,
