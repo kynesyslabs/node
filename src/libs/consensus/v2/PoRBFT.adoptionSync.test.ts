@@ -11,9 +11,14 @@ import { beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
 import { makeSignedTx, newAccount } from "src/libs/blockchain/testSupport/signedTx"
 
 const realVerifyBlock = await import("src/libs/blockchain/validation/verifyBlock")
+// Signatures a block must carry to verify; the hash does not cover them
+let quorumSignatures = 0
 mock.module("src/libs/blockchain/validation/verifyBlock", () => ({
     ...realVerifyBlock,
-    verifyBlock: async () => ({ valid: true }),
+    verifyBlock: async (b: any) =>
+        Object.keys(b?.validation_data?.signatures ?? {}).length >= quorumSignatures
+            ? { valid: true }
+            : { valid: false, reason: "signatures short of a quorum" },
 }))
 
 const NATIVE_HASHES = { native_subnets_txs: "subnets", native_tlsnotary: "tls" }
@@ -51,6 +56,7 @@ const { fastSync, syncLock, unreconciledGcrBlockNumber } = await import(
     "src/libs/blockchain/routines/Sync"
 )
 const { adoptReportedCommit } = await import("./PoRBFT")
+const { adoptBlockFromPeers } = await import("./routines/committedBlock")
 const secretaryTypes = await import("./types/secretaryManager")
 
 const HEIGHT = 12
@@ -164,7 +170,20 @@ beforeEach(() => {
     getSharedState.isInitialized = true
     getSharedState.inSyncLoop = false
     getSharedState.fastSyncCount = 1
+    quorumSignatures = 0
 })
+
+/** Forward applies always succeed; rollbacks too. */
+function applyCleanly(txs: any[]) {
+    applyTransactions.mockImplementation((async (_txs: any[], isRollback: boolean) =>
+        isRollback
+            ? { successfulTxs: [], failedTxs: [], skippedTxs: [] }
+            : { successfulTxs: txs.map(tx => tx.hash), failedTxs: [], skippedTxs: [] }) as any)
+    insertBlock.mockImplementation((async (inserted: any) => {
+        landInsert(inserted)
+        return {}
+    }) as any)
+}
 
 // The drift latch lives for the whole process, as it does on a node, so the
 // test that sets it runs last.
@@ -216,6 +235,60 @@ describe("adopting a member's block through the real sync path", () => {
         expect(forwardApplies()).toHaveLength(1)
         expect(rollbacks()).toHaveLength(0)
         expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
+    })
+
+    it("verifies each source on its own copy, so a copy short of a quorum does not hide a certified one", async () => {
+        const txs = [makeSignedTx(alice, bob, { height: HEIGHT })]
+        const partial = makeBlock(txs)
+        partial.validation_data.signatures = { a: "sig-a" }
+        const certified = makeBlock(txs)
+        certified.validation_data.signatures = { a: "sig-a", b: "sig-b", c: "sig-c" }
+        const early = member("early", partial, txs)
+        const full = member("full", certified, txs)
+        quorumSignatures = 3
+        applyCleanly(txs)
+
+        expect(await adoptBlockFromPeers(HEIGHT, [early, full], "test")).toBe(true)
+
+        expect(insertBlock).toHaveBeenCalledTimes(1)
+        expect(Object.keys(insertBlock.mock.calls[0][0].validation_data.signatures)).toHaveLength(3)
+        // rejected on its signatures, before any body was fetched from it
+        expect(early.longCall).not.toHaveBeenCalled()
+    })
+
+    it("cuts off a source stalling on its transactions at the deadline, before applying anything", async () => {
+        const txs = [makeSignedTx(alice, bob, { height: HEIGHT })]
+        const block = makeBlock(txs)
+        const stalled = member("stalled", block, txs)
+        stalled.longCall.mockImplementation(() => new Promise(() => undefined))
+        applyCleanly(txs)
+
+        const started = Date.now()
+        const adopted = await adoptBlockFromPeers(HEIGHT, [stalled], "test", 3_000, 150)
+
+        expect(adopted).toBe(false)
+        expect(Date.now() - started).toBeLessThan(1_000)
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(insertBlock).not.toHaveBeenCalled()
+        expect(syncLock.isLocked()).toBe(false)
+    })
+
+    it("moves on to the next source while budget remains", async () => {
+        const txs = [makeSignedTx(alice, bob, { height: HEIGHT })]
+        const block = makeBlock(txs)
+        const failing = member("failing", block, txs)
+        failing.longCall.mockImplementation(async () => {
+            await Bun.sleep(30)
+            return { result: 400, response: "Max retries reached" }
+        })
+        const serving = member("serving", block, txs)
+        applyCleanly(txs)
+
+        expect(
+            await adoptBlockFromPeers(HEIGHT, [failing, serving], "test", 3_000, 2_000),
+        ).toBe(true)
+        expect(serving.longCall).toHaveBeenCalled()
+        expect(insertBlock).toHaveBeenCalledTimes(1)
     })
 
     it("aborts instead of falling back to its tally when the block's insert and its undo both fail", async () => {

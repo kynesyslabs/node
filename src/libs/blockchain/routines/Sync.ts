@@ -635,7 +635,15 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
  * @param peer The peer that sent the block
  * @returns True if the block was synced successfully, false otherwise
  */
-export async function syncBlock(block: Block, peer: Peer) {
+/**
+ * @param fetchDeadline epoch ms after which fetching the block's transactions
+ *     is abandoned; it is never reached once GCR edits start applying.
+ */
+export async function syncBlock(
+    block: Block,
+    peer: Peer,
+    fetchDeadline?: number,
+) {
     let exists = await Chain.getBlockByNumber(block.number)
     if (exists) {
         log.debug("Block already exists, skipping ...")
@@ -666,7 +674,7 @@ export async function syncBlock(block: Block, peer: Peer) {
     log.info(`[fastSync] Merged peers from block: ${mergedPeerlist}`)
     // REVIEW Parse the txs hashes in the block
     log.info("[fastSync] Asking for transactions in the block", true)
-    const txs = await askTxsForBlock(block, peer)
+    const txs = await askTxsForBlock(block, peer, fetchDeadline)
     log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
     await assertNoUnreconciledGcrState()
@@ -1700,12 +1708,42 @@ async function fetchAllBlockTxs(
 export async function askTxsForBlock(
     block: Block,
     peer: Peer,
+    deadline?: number,
 ): Promise<Transaction[]> {
     const ordered = block.content.ordered_transactions
     if (!Array.isArray(ordered) || ordered.length === 0) {
         return []
     }
-    return await fetchAllBlockTxs(block, peer)
+    if (deadline === undefined) return await fetchAllBlockTxs(block, peer)
+
+    // Each fetch retries with sleeps in between, so a peer that stalls would
+    // otherwise keep a caller holding syncLock far past its budget. Nothing
+    // has been applied yet, so abandoning the fetch is safe.
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) {
+        throw new Error(
+            `transactions of block ${block.number} from ${peer?.identity}: no time left to fetch them`,
+        )
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+        return await Promise.race([
+            fetchAllBlockTxs(block, peer),
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(
+                    () =>
+                        reject(
+                            new Error(
+                                `transactions of block ${block.number} from ${peer?.identity} not received within ${remaining}ms`,
+                            ),
+                        ),
+                    remaining,
+                )
+            }),
+        ])
+    } finally {
+        clearTimeout(timer)
+    }
 }
 
 // Helper function to merge the peerlist from the last block

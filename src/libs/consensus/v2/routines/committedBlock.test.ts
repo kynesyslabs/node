@@ -30,6 +30,7 @@ let now = 1_000_000
 const conflicts = jest.fn()
 const credited: Array<[string, number]> = []
 let knownPeers: Record<string, any> = {}
+let offlinePeers: Record<string, any> = {}
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -79,7 +80,12 @@ jest.mock("src/libs/consensus/v2/routines/networkAheadVeto", () => ({
 }))
 jest.mock("src/libs/peer/PeerManager", () => ({
     __esModule: true,
-    default: { getInstance: () => ({ getPeer: (id: string) => knownPeers[id] }) },
+    default: {
+        getInstance: () => ({
+            getPeer: (id: string) => knownPeers[id],
+            getOfflinePeers: () => offlinePeers,
+        }),
+    },
 }))
 
 const {
@@ -143,6 +149,7 @@ beforeEach(() => {
     conflicts.mockClear()
     credited.length = 0
     knownPeers = {}
+    offlinePeers = {}
     resetCommittedBlockState()
 })
 
@@ -269,6 +276,16 @@ describe("check before retry", () => {
         expect(await adoptBeforeRetry(6)).toBe(true)
         expect(synced).toEqual(["x6"])
         expect(knownPeers.self.calls).toBe(0)
+    })
+
+    it("still asks a member marked offline after its proposal reply timed out", async () => {
+        const committer = peer("a", [b5, x6])
+        knownPeers = { b: peer("b", [b5]) }
+        offlinePeers = { a: committer }
+        recordFailedRound(6, ["a", "b"])
+        expect(await adoptBeforeRetry(6)).toBe(true)
+        expect(committer.calls).toBe(1)
+        expect(synced).toEqual(["x6"])
     })
 
     it("retries when no member holds the height, and asks only once", async () => {

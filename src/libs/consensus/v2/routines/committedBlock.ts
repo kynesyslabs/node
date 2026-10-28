@@ -30,10 +30,10 @@ export const COMMITTED_HEIGHT_MESSAGE = "Height already committed"
 export const COMMIT_POLL_TIMEOUT_MS = 3_000
 
 /**
- * Bound on trying further sources while syncLock is held: every insert path
- * and our own round's commit wait on that lock. A source already being
- * applied is never cut short, since stopping between its GCR edits and its
- * insert would leave the edits without the block.
+ * Bound on adopting while syncLock is held: every insert path and our own
+ * round's commit wait on that lock. It cuts off a source still fetching its
+ * transactions, but never one already applying, since stopping between its
+ * GCR edits and its insert would leave the edits without the block.
  */
 export const ADOPT_LOCK_BUDGET_MS = 3 * COMMIT_POLL_TIMEOUT_MS
 
@@ -223,9 +223,10 @@ export async function checkConflictingBlock(
 export async function adoptCommittedBlock(
     block: Block,
     peer: Peer | undefined,
+    fetchDeadline?: number,
 ): Promise<AdoptOutcome> {
     try {
-        return await adoptCommittedBlockUnguarded(block, peer)
+        return await adoptCommittedBlockUnguarded(block, peer, fetchDeadline)
     } catch (e) {
         log.error(
             `[committedBlock] Adopting block ${block?.number} (${block?.hash}) from ${peer?.identity ?? "unknown peer"} failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -237,6 +238,7 @@ export async function adoptCommittedBlock(
 async function adoptCommittedBlockUnguarded(
     block: Block,
     peer: Peer | undefined,
+    fetchDeadline?: number,
 ): Promise<AdoptOutcome> {
     const ours = await Chain.getBlockByNumber(block.number)
     if (ours) {
@@ -278,7 +280,7 @@ async function adoptCommittedBlockUnguarded(
         return "rejected"
     }
 
-    const ok = await syncBlock(block, peer)
+    const ok = await syncBlock(block, peer, fetchDeadline)
     if (!ok) return "rejected"
     log.info(
         `[committedBlock] Adopted block ${block.number} (${block.hash}) committed by ${peer?.identity}`,
@@ -296,6 +298,7 @@ export async function adoptBlockFromPeers(
     peers: Peer[],
     context: string,
     timeoutMs = COMMIT_POLL_TIMEOUT_MS,
+    budgetMs = ADOPT_LOCK_BUDGET_MS,
 ): Promise<boolean> {
     const selfId = getSharedState.publicKeyHex
     const targets = peers.filter(p => p && p.identity !== selfId)
@@ -308,12 +311,15 @@ export async function adoptBlockFromPeers(
         })),
     )
 
-    const variants = new Map<string, { block: Block; peers: Peer[] }>()
+    // Copies of one block share a hash but not their signatures, which the
+    // hash does not cover: each source is verified on the copy it served, so
+    // one copy short of a quorum cannot hide another source's full one.
+    const variants = new Map<string, { block: Block; peer: Peer }[]>()
     for (const { peer, block } of answers) {
         if (!block) continue
         const variant = variants.get(block.hash)
-        if (variant) variant.peers.push(peer)
-        else variants.set(block.hash, { block, peers: [peer] })
+        if (variant) variant.push({ block, peer })
+        else variants.set(block.hash, [{ block, peer }])
     }
     if (variants.size === 0) {
         log.info(
@@ -322,14 +328,12 @@ export async function adoptBlockFromPeers(
         return false
     }
 
-    const ordered = [...variants.values()].sort(
-        (a, b) => b.peers.length - a.peers.length,
-    )
+    const ordered = [...variants.values()].sort((a, b) => b.length - a.length)
     const release = await syncLock.acquire()
-    const deadline = Date.now() + ADOPT_LOCK_BUDGET_MS
+    const deadline = Date.now() + budgetMs
     try {
         sources: for (const variant of ordered) {
-            for (const source of variant.peers) {
+            for (const { block, peer: source } of variant) {
                 // Every further source would be refused by sync anyway
                 if (unreconciledGcrBlockNumber() !== null) {
                     log.error(
@@ -339,13 +343,17 @@ export async function adoptBlockFromPeers(
                 }
                 if (Date.now() >= deadline) {
                     log.warning(
-                        `[committedBlock] (${context}) No source of block ${height} adopted within ${ADOPT_LOCK_BUDGET_MS}ms; releasing the lock`,
+                        `[committedBlock] (${context}) No source of block ${height} adopted within ${budgetMs}ms; releasing the lock`,
                     )
                     break sources
                 }
-                const outcome = await adoptCommittedBlock(variant.block, source)
+                const outcome = await adoptCommittedBlock(
+                    block,
+                    source,
+                    deadline,
+                )
                 log.info(
-                    `[committedBlock] (${context}) Block ${height} ${variant.block.hash} from ${source.identity}: ${outcome}`,
+                    `[committedBlock] (${context}) Block ${height} ${block.hash} from ${source.identity}: ${outcome}`,
                 )
                 if (outcome === "adopted" || outcome === "already-held") {
                     return true
@@ -384,8 +392,11 @@ export async function adoptBeforeRetry(height: number): Promise<boolean> {
     const { members } = lastFailedRound
     lastFailedRound = null
     const peerman = PeerManager.getInstance()
+    // A member whose proposal reply timed out was marked offline, yet it may
+    // be the one that committed: its known address is still worth asking.
+    const offline = peerman.getOfflinePeers()
     const peers = members
-        .map(id => peerman.getPeer(id))
+        .map(id => peerman.getPeer(id) ?? offline[id])
         .filter((p): p is Peer => !!p)
     return await adoptBlockFromPeers(height, peers, "checkBeforeRetry")
 }
