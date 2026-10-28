@@ -25,6 +25,7 @@ const {
     DISCREDIT_MS,
     clearDiscreditedHeights,
     creditAdvertisedHeight,
+    creditVerifiedHeight,
     credibleHeight,
     discreditAdvertisedHeight,
     getAheadValidatorPeers,
@@ -82,6 +83,33 @@ describe("credibleHeight", () => {
         discreditAdvertisedHeight(honest)
         honest.gossip.height = 120
         expect(credibleHeight(honest)).toBe(120)
+    })
+})
+
+describe("heights backed by a verified block", () => {
+    it("count with gossip off, where nothing else lifts a peer above our head", () => {
+        const ahead = peer("honest", 100, 0)
+        expect(credibleHeight(ahead)).toBe(100)
+        creditVerifiedHeight(ahead, 117)
+        expect(credibleHeight(ahead)).toBe(117)
+        creditVerifiedHeight(ahead, 110)
+        expect(credibleHeight(ahead)).toBe(117)
+    })
+
+    it("are dropped when the peer then fails to serve them", () => {
+        const liar = peer("liar", 100, 0)
+        creditVerifiedHeight(liar, 500)
+        discreditAdvertisedHeight(liar)
+        expect(credibleHeight(liar)).toBe(100)
+        expect(credibleHeight(liar, Date.now() + DISCREDIT_MS + 1)).toBe(100)
+    })
+
+    it("make a staked peer count as ahead", async () => {
+        const ahead = peer("honest", 100, 0)
+        onlinePeers = [ahead]
+        expect(await getAheadValidatorPeers()).toEqual([])
+        creditVerifiedHeight(ahead, 101)
+        expect((await getAheadValidatorPeers()).map(p => p.identity)).toEqual(["honest"])
     })
 })
 

@@ -635,7 +635,15 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
  * @param peer The peer that sent the block
  * @returns True if the block was synced successfully, false otherwise
  */
-export async function syncBlock(block: Block, peer: Peer) {
+/**
+ * @param fetchDeadline epoch ms after which fetching the block's transactions
+ *     is abandoned; it is never reached once GCR edits start applying.
+ */
+export async function syncBlock(
+    block: Block,
+    peer: Peer,
+    fetchDeadline?: number,
+) {
     let exists = await Chain.getBlockByNumber(block.number)
     if (exists) {
         log.debug("Block already exists, skipping ...")
@@ -666,7 +674,7 @@ export async function syncBlock(block: Block, peer: Peer) {
     log.info(`[fastSync] Merged peers from block: ${mergedPeerlist}`)
     // REVIEW Parse the txs hashes in the block
     log.info("[fastSync] Asking for transactions in the block", true)
-    const txs = await askTxsForBlock(block, peer)
+    const txs = await askTxsForBlock(block, peer, fetchDeadline)
     log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
     await assertNoUnreconciledGcrState()
@@ -984,6 +992,14 @@ async function applySyncedBlock(
 let unreconciledGcrBlock: number | null = null
 
 /**
+ * The block whose GCR edits were left applied without it, or null. Consensus
+ * reads it too: a round must not apply its own edits on top of that drift.
+ */
+export function unreconciledGcrBlockNumber(): number | null {
+    return unreconciledGcrBlock
+}
+
+/**
  * Refuse to apply another synced block once state has drifted.
  *
  * The block-exists guard cannot catch this case: the failed block was never
@@ -996,7 +1012,7 @@ let unreconciledGcrBlock: number | null = null
  * are stamped with the block that produced them, and an assignment above the
  * chain tip can only mean its block never landed.
  */
-async function assertNoUnreconciledGcrState(): Promise<void> {
+export async function assertNoUnreconciledGcrState(): Promise<void> {
     if (unreconciledGcrBlock !== null) {
         throw new Error(
             "[applySyncedBlock] refusing to apply further blocks: GCR state for block " +
@@ -1692,12 +1708,42 @@ async function fetchAllBlockTxs(
 export async function askTxsForBlock(
     block: Block,
     peer: Peer,
+    deadline?: number,
 ): Promise<Transaction[]> {
     const ordered = block.content.ordered_transactions
     if (!Array.isArray(ordered) || ordered.length === 0) {
         return []
     }
-    return await fetchAllBlockTxs(block, peer)
+    if (deadline === undefined) return await fetchAllBlockTxs(block, peer)
+
+    // Each fetch retries with sleeps in between, so a peer that stalls would
+    // otherwise keep a caller holding syncLock far past its budget. Nothing
+    // has been applied yet, so abandoning the fetch is safe.
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) {
+        throw new Error(
+            `transactions of block ${block.number} from ${peer?.identity}: no time left to fetch them`,
+        )
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+        return await Promise.race([
+            fetchAllBlockTxs(block, peer),
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(
+                    () =>
+                        reject(
+                            new Error(
+                                `transactions of block ${block.number} from ${peer?.identity} not received within ${remaining}ms`,
+                            ),
+                        ),
+                    remaining,
+                )
+            }),
+        ])
+    } finally {
+        clearTimeout(timer)
+    }
 }
 
 // Helper function to merge the peerlist from the last block
@@ -1910,7 +1956,11 @@ export async function fastSync(
 
         log.debug("[fastSync] Fast sync routine ended ⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️")
         log.debug("[fastSync] Sync status: " + synced)
-        getSharedState.syncStatus = synced
+        // A node at the tip with drifted GCR state is not synced: reporting it
+        // as synced would start a round every tick only for that round to
+        // refuse to apply on top of the drift.
+        getSharedState.syncStatus =
+            synced && unreconciledGcrBlockNumber() === null
         void BroadcastManager.broadcastOurSyncData()
 
         log.debug("[fastSync] Broadcasted our sync data 📤📤📤📤📤📤📤📤📤")

@@ -7,6 +7,11 @@ import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Mempool from "@/libs/blockchain/mempool"
 import { countBlockHashMismatch } from "@/features/metrics/consensusMetrics"
+import {
+    COMMITTED_HEIGHT_RESULT,
+    type CommittedReport,
+    readCommittedRefusal,
+} from "./committedBlock"
 
 /**
  * Per-peer vote outcome. The `signaturesToMerge` map carries every
@@ -20,6 +25,8 @@ interface PeerVoteOutcome {
     vote: "pro" | "con"
     signaturesToMerge: Record<string, string>
     rejectionReason?: string
+    /** Hash the peer reports it already committed at our height. */
+    committedHash?: string
 }
 
 /**
@@ -88,6 +95,13 @@ async function verifyIncomingSignatures(
 }
 
 /**
+ * The block number travels last so receivers that predate it read the first
+ * three params unchanged; a receiver that has the height answers with its
+ * committed block instead of a vote.
+ */
+type ProposeParams = [string, Block["validation_data"], string, number]
+
+/**
  * Per-peer flow: call the peer's `proposeBlockHash`, classify the
  * response as pro/con, and (on pro) collect the signatures the peer
  * attached. Never throws — a network failure becomes a `con` vote
@@ -96,7 +110,7 @@ async function verifyIncomingSignatures(
 async function proposeAndCollect(
     peer: Peer,
     block: Block,
-    proposeParams: [string, Block["validation_data"], string],
+    proposeParams: ProposeParams,
 ): Promise<PeerVoteOutcome> {
     const peerId = peer.identity
     let response: RPCResponse
@@ -113,7 +127,7 @@ async function proposeAndCollect(
             },
             true,
             {
-                allowedCodes: [401, 409],
+                allowedCodes: [401, 409, COMMITTED_HEIGHT_RESULT],
             },
         )
     } catch (e) {
@@ -126,6 +140,20 @@ async function proposeAndCollect(
             vote: "con",
             signaturesToMerge: {},
             rejectionReason: `longCall threw: ${msg}`,
+        }
+    }
+
+    const committedHash = readCommittedRefusal(response, block.number)
+    if (committedHash !== null) {
+        log.warning(
+            `[broadcastBlockHash] ${peerId} already committed block ${block.number} as ${committedHash}`,
+        )
+        return {
+            peerId,
+            vote: "con",
+            signaturesToMerge: {},
+            rejectionReason: "height already committed",
+            committedHash,
         }
     }
 
@@ -352,7 +380,7 @@ async function proposeAndCollect(
 export async function broadcastBlockHash(
     block: Block,
     shard: Peer[],
-): Promise<[number, number]> {
+): Promise<[number, number, CommittedReport[]]> {
     const ourId = getSharedState.publicKeyHex
 
     log.debug(
@@ -374,10 +402,11 @@ export async function broadcastBlockHash(
     // same `validation_data` snapshot. Receivers still verify and
     // merge what they get; the freeze only affects what we ship.
     const validationDataSnapshot = structuredClone(block.validation_data)
-    const proposeParams: [string, Block["validation_data"], string] = [
+    const proposeParams: ProposeParams = [
         block.hash,
         validationDataSnapshot,
         ourId,
+        block.number,
     ]
 
     const outcomes = await Promise.all(
@@ -386,6 +415,7 @@ export async function broadcastBlockHash(
 
     let pro = 0
     let con = 0
+    const committed: CommittedReport[] = []
 
     // Serial merge: each `Object.assign` operation against the
     // shared `signatures` map is atomic, but we want a single
@@ -409,6 +439,11 @@ export async function broadcastBlockHash(
         }
     }
 
+    shard.forEach((peer, i) => {
+        const hash = outcomes[i].committedHash
+        if (hash) committed.push({ peer, hash })
+    })
+
     log.info(
         `[broadcastBlockHash] Vote tally for block ${block.hash}: ` +
             `pro=${pro}, con=${con} (shard size=${shard.length})`,
@@ -418,5 +453,5 @@ export async function broadcastBlockHash(
     // failures (pre-existing follow-up, unrelated to the vote-race
     // fix).
 
-    return [pro, con]
+    return [pro, con, committed]
 }

@@ -21,6 +21,14 @@ groups:
           summary: Peers disagree with this node's candidate block hash
           description: "{{ $value }} peer disagreements on the candidate block hash in 10m on {{ $labels.instance }}. This node, or the peers, are forging different block content. Check the mempool, clock skew and the node logs for the tx-set diff."
 
+      - alert: ConflictingBlock
+        expr: increase(demos_conflicting_block_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: Two blocks with a verified quorum exist at one height
+          description: "{{ $labels.instance }} holds a block at some height while a peer serves a different block there that carries a verified quorum. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep."
+
       - alert: MissedSignatures
         expr: increase(demos_consensus_missed_signatures_total[15m]) >= 3
         labels:

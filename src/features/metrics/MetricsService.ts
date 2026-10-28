@@ -301,6 +301,11 @@ export class MetricsService {
             [],
         )
         this.createCounter(
+            "conflicting_block_total",
+            "Distinct blocks a peer holds at a height where this node holds a different block, both with a verified quorum",
+            [],
+        )
+        this.createCounter(
             "consensus_missed_signatures_total",
             "Blocks where this node was drawn into the shard but its signature is missing",
             [],

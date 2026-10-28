@@ -27,11 +27,19 @@ import HandleGCR, { type BlockClock } from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
+    assertNoUnreconciledGcrState,
     fastSync,
     syncLock,
+    unreconciledGcrBlockNumber,
     waitForPeerStatus,
 } from "@/libs/blockchain/routines/Sync"
 import { isNetworkAhead } from "./routines/networkAheadVeto"
+import {
+    adoptBeforeRetry,
+    adoptBlockFromPeers,
+    type CommittedReport,
+    recordFailedRound,
+} from "./routines/committedBlock"
 import {
     forkScheduleAbstainReason,
     shouldLogForkScheduleAbstain,
@@ -134,6 +142,8 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
+        if (await gcrDriftBlocksRound(blockRef)) return
+
         // A node that restarted inside the window has not compared its schedule
         // yet, and the block-driven watch would only run it after the first round.
         await ensureWindowChecked(getSharedState.lastBlockNumber)
@@ -162,6 +172,16 @@ export async function consensusRoutine(): Promise<void> {
         if (getSharedState.lastBlockNumber + 1 !== blockRef) {
             log.warn(
                 `[consensusRoutine] Head moved to ${getSharedState.lastBlockNumber} while preparing block ${blockRef}`,
+            )
+            return
+        }
+
+        markStep("consensus", "checkBeforeRetry")
+        if (
+            await adoptionSucceeded(blockRef, () => adoptBeforeRetry(blockRef))
+        ) {
+            log.warn(
+                `[consensusRoutine] Block ${blockRef} was committed by a member of the failed round; adopted it instead of retrying`,
             )
             return
         }
@@ -283,7 +303,19 @@ export async function consensusRoutine(): Promise<void> {
                 (m.connection.string !== "" || m.isLocalNode),
         )
         markStep("consensus", "voteOnBlock")
-        const [pro, con] = await voteOnBlock(block, responsiveMembers)
+        const [pro, con, committed] = await voteOnBlock(
+            block,
+            responsiveMembers,
+        )
+
+        // Checked before our own tally: even with a quorum for our block, a
+        // member holding a certified block at this height means ours would be
+        // the second one.
+        if (await adoptReportedCommit(blockRef, committed)) {
+            throw new ForgingEndedError(
+                `[consensusRoutine] Block ${blockRef} was already committed by a shard member; adopted it`,
+            )
+        }
 
         // A bound committee member that is offline is a missing vote, not a
         // smaller committee.
@@ -373,6 +405,10 @@ export async function consensusRoutine(): Promise<void> {
             const startApplyNonces = traceEnabled
                 ? await readNonces(traceAccounts)
                 : {}
+
+            // Sync can latch drift between the adoption checks and here; the
+            // lock now held keeps it from latching during our apply.
+            abortIfGcrStateUnreconciled(blockRef)
 
             markStep("consensus", "applyGCREdits")
             const applyRes = await applyGCREditsFromMergedMempool(
@@ -470,8 +506,6 @@ export async function consensusRoutine(): Promise<void> {
                 )
             }
 
-            BroadcastManager.broadcastNewBlock(block)
-
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
             const l2psStart = Date.now()
@@ -505,6 +539,11 @@ export async function consensusRoutine(): Promise<void> {
                 block,
                 blockTxs.map(tx => txMap.get(tx.hash)),
             )
+
+            // Pushed only once inserted, so a receiver fetching the block's
+            // transactions from us finds them, and to every member including
+            // the signers, whose own tally may have failed.
+            void BroadcastManager.broadcastNewBlock(block)
 
             // Keep whitelisted failed txs in mempool for the next consensus round
             const failedTxsToRemove = failedTxs
@@ -543,6 +582,13 @@ export async function consensusRoutine(): Promise<void> {
         const invalid =
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
+
+        if (invalid && getSharedState.lastBlockNumber < blockRef) {
+            recordFailedRound(
+                blockRef,
+                (manager?.shard?.members ?? []).map(m => m.identity),
+            )
+        }
 
         if (aborted || invalid) {
             exitReason = "abortConsensus"
@@ -996,12 +1042,12 @@ async function forgeBlock(
 async function voteOnBlock(
     block: Block,
     shard: Peer[],
-): Promise<[number, number]> {
+): Promise<[number, number, CommittedReport[]]> {
     const now = Date.now()
     log.only(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
-    const [pro, con] = await broadcastBlockHash(block, shard)
+    const [pro, con, committed] = await broadcastBlockHash(block, shard)
     // await updateValidatorStatus("votedForBlock", true, false, true)
     // Using the secretary to update the local statuses
     await updateValidatorPhase(6, block.number)
@@ -1011,7 +1057,117 @@ async function voteOnBlock(
         `[consensusRoutine] Time taken: ${(end - now) / 1000}s for voting on the block`,
     )
 
-    return [pro, con]
+    return [pro, con, committed]
+}
+
+/**
+ * A failed attempt to take a peer's block only means we do not have it: the
+ * round's catch treats unknown errors as fatal and exits the process, which
+ * a peer serving a certified header and then dropping must not cause.
+ *
+ * The exception is a failed apply whose undo also failed: its edits stay in
+ * local state without the block, so the round must not fall back to its own
+ * tally and apply its edits on top of them.
+ */
+async function adoptionSucceeded(
+    blockRef: number,
+    adopt: () => Promise<boolean>,
+): Promise<boolean> {
+    let adopted = false
+    try {
+        adopted = await adopt()
+    } catch (e) {
+        log.error(
+            `[consensusRoutine] Taking a member's block ${blockRef} failed, deciding on our own round: ${e instanceof Error ? e.message : String(e)}`,
+        )
+    }
+    if (!adopted) abortIfGcrStateUnreconciled(blockRef)
+    return adopted
+}
+
+let driftWarnedHeight: number | null = null
+
+/**
+ * True when the round must not start: GCR edits of a block are applied
+ * without it and only an operator resync can reconcile them, so joining the
+ * shard would only lead to votes and blocks computed from drifted state.
+ *
+ * The latch is per process, so durable state is checked too: after a
+ * restart, orphaned edits are otherwise caught only when sync next applies a
+ * block, and a round at the same height would apply its own on top of them.
+ * That check rolls back what it can and latches what it cannot. It runs
+ * under syncLock because a block being applied has its edits stamped before
+ * its insert and would look orphaned. Before the first fast sync succeeds,
+ * sync applies without the lock, so the check is left to sync then.
+ *
+ * @throws AbortConsensusError when the durable check finds drift it cannot undo
+ */
+async function gcrDriftBlocksRound(blockRef: number): Promise<boolean> {
+    if (
+        unreconciledGcrBlockNumber() === null &&
+        getSharedState.fastSyncCount > 0
+    ) {
+        try {
+            await syncLock.runExclusive(() => assertNoUnreconciledGcrState())
+        } catch (e) {
+            throw new AbortConsensusError(
+                `[consensusRoutine] Not starting block ${blockRef}: ${e instanceof Error ? e.message : String(e)}`,
+            )
+        }
+    }
+
+    const drifted = unreconciledGcrBlockNumber()
+    if (drifted === null) return false
+    getSharedState.syncStatus = false
+    // The handler path can start a round on every proposal it receives
+    if (driftWarnedHeight !== blockRef) {
+        driftWarnedHeight = blockRef
+        log.warning(
+            `[consensusRoutine] Not joining the round for block ${blockRef}: GCR state for block ${drifted} is applied without its block. Operator action needed: resync this node from scratch.`,
+        )
+    }
+    return true
+}
+
+/**
+ * Sync has already marked the node unsynced and refuses every further apply
+ * until a resync; the round has to stop the same way, or it would certify a
+ * block computed from state no block authorizes.
+ */
+function abortIfGcrStateUnreconciled(blockRef: number): void {
+    const drifted = unreconciledGcrBlockNumber()
+    if (drifted === null) return
+    getSharedState.syncStatus = false
+    throw new AbortConsensusError(
+        `[consensusRoutine] GCR state for block ${drifted} is applied without its block; refusing to apply block ${blockRef} on top of it. The node must be resynced from scratch.`,
+    )
+}
+
+/**
+ * Members that answered our proposal with a block they already committed:
+ * true once we hold one of those blocks, so the round must end without
+ * committing its own. Otherwise our own tally decides, and those members
+ * already counted against it.
+ */
+export async function adoptReportedCommit(
+    blockRef: number,
+    committed: CommittedReport[],
+): Promise<boolean> {
+    if (committed.length === 0) return false
+    markStep("consensus", "adoptCommittedBlock")
+    const adopted = await adoptionSucceeded(blockRef, () =>
+        adoptBlockFromPeers(
+            blockRef,
+            committed.map(c => c.peer),
+            "proposeBlockHash",
+        ),
+    )
+    if (!adopted) {
+        log.error(
+            `[consensusRoutine] ${committed.length} member(s) report block ${blockRef} committed, but none served a block that verifies`,
+        )
+    }
+    return adopted
 }
 
 /**

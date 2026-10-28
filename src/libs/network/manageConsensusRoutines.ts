@@ -18,6 +18,7 @@ import { Waiter } from "src/utilities/waiter"
 import { PeerManager } from "../peer"
 import { fastSync } from "../blockchain/routines/Sync"
 import { handleError } from "src/errors/handleError"
+import { committedHeightRefusal } from "../consensus/v2/routines/committedBlock"
 
 export interface ConsensusMethod {
     method:
@@ -120,6 +121,15 @@ export default async function manageConsensusRoutines(
     log.debug("Payload: " + JSON.stringify(payload))
     log.debug("-----------------------------")
     const response = _.cloneDeep(emptyResponse)
+
+    // Answered before every gate below: right after our commit the consensus
+    // window for the next height is closed, and a proposer still on the
+    // height we committed must learn of the block rather than get a plain
+    // refusal and retry it.
+    if (payload.method === "proposeBlockHash") {
+        const refusal = await committedHeightRefusal(payload.params?.[3])
+        if (refusal) return refusal
+    }
 
     /* REVIEW
     We allow incoming requests when we are within the consensus time window.
