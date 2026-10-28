@@ -8,8 +8,13 @@ import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
-import { getCommitteeFloor, getEligiblePool } from "./routines/getShard"
+import {
+    getBoundCommittee,
+    getCommitteeFloor,
+    getEligiblePool,
+} from "./routines/getShard"
 import { producerCommits } from "./quorum"
+import { isForkActive } from "@/forks/forkGates"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, {
@@ -284,8 +289,14 @@ export async function consensusRoutine(): Promise<void> {
         markStep("consensus", "voteOnBlock")
         const [pro, con] = await voteOnBlock(block, responsiveMembers)
 
+        // A bound committee member that is offline is a missing vote, not a
+        // smaller committee.
+        const committeeSize = isForkActive("committeeBinding", blockRef)
+            ? (await getBoundCommittee(blockRef - 1, manager.shard.CVSA)).length
+            : manager.shard.members.length
+
         // Check if the block is valid
-        if (isBlockValid(pro, manager.shard.members.length)) {
+        if (isBlockValid(pro, committeeSize)) {
             markStep("consensus", "syncLock.acquire")
             releaseSyncLock = await syncLock.acquire()
 
