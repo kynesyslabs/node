@@ -25,6 +25,8 @@ import {
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { wordlist } from "@scure/bip39/wordlists/english.js"
+import { EnvKey } from "src/config/envKeys"
+import { parseBoolFlag } from "src/config/envFlags"
 
 export default class Identity {
     public masterSeed: Uint8Array
@@ -137,7 +139,8 @@ export default class Identity {
 
     /**
      * Loads the identity from the identity file.
-     * If the identity file does not exist, it creates a new one.
+     * If the identity file does not exist, it creates a new one, except in
+     * production without DEMOS_GENERATE_IDENTITY=true.
      *
      * @returns The keypair of the configured signing algorithm
      */
@@ -152,6 +155,18 @@ export default class Identity {
             )
             this.masterSeed = await this.mnemonicToSeed(mnemonic)
         } else {
+            // A validator whose volume failed to mount would otherwise come
+            // up as a brand-new key and silently stop validating.
+            if (
+                getSharedState.PROD &&
+                !parseBoolFlag(process.env[EnvKey.DEMOS_GENERATE_IDENTITY])
+            ) {
+                throw new Error(
+                    `identity file ${getSharedState.identityFile} does not exist; refusing to generate a new key in production. ` +
+                        "On a validator a missing key usually means the state volume is not mounted. " +
+                        `Set ${EnvKey.DEMOS_GENERATE_IDENTITY}=true only to create a brand-new identity on purpose`,
+                )
+            }
             // INFO: If the identity file does not exist, create a new one
             const mnemonic = demos.newMnemonic()
             this.masterSeed = await this.mnemonicToSeed(mnemonic)
