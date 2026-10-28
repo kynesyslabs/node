@@ -11,6 +11,7 @@ import type {
     OsDenominationConfig,
     QuorumParityConfig,
     CommitteeBindingConfig,
+    CommitLockConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -247,7 +248,30 @@ function loadForkConfigFromGenesisInner(genesisData: any): void {
         )
     }
 
+    assertCommitLockHasCommittee()
+
     primeFeeDistributionFromForkConfig()
+}
+
+/**
+ * commitLock takes its quorum and its two-quorum overlap from the bound
+ * committee. Scheduled at a height without committeeBinding it would count
+ * signatures of a liveness-filtered shard, whose quorums need not overlap,
+ * so such a genesis is refused at boot rather than left to run with a lock
+ * that does not protect anything.
+ */
+function assertCommitLockHasCommittee(): void {
+    const lock = getSharedState.forkConfig.commitLock?.activationHeight ?? null
+    if (lock === null) return
+    const binding =
+        getSharedState.forkConfig.committeeBinding?.activationHeight ?? null
+    if (binding === null || binding > lock) {
+        throw new ForkConfigValidationError(
+            `[FORKS] commitLock is scheduled at ${lock} but committeeBinding is ` +
+                (binding === null ? "not scheduled" : `scheduled only at ${binding}`) +
+                "; commitLock needs the bound committee at every height it applies to",
+        )
+    }
 }
 
 /**
@@ -297,6 +321,9 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "committeeBinding":
             getSharedState.forkConfig.committeeBinding =
                 config as CommitteeBindingConfig
+            return
+        case "commitLock":
+            getSharedState.forkConfig.commitLock = config as CommitLockConfig
             return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
@@ -427,6 +454,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as QuorumParityConfig
         case "committeeBinding":
             return base as CommitteeBindingConfig
+        case "commitLock":
+            return base as CommitLockConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
