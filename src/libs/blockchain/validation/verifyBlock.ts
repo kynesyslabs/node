@@ -25,6 +25,7 @@ import {
 } from "src/libs/consensus/v2/routines/getShard"
 import { verifierThreshold } from "src/libs/consensus/v2/quorum"
 import { isForkActive } from "@/forks/forkGates"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 
 export interface BlockVerification {
@@ -79,12 +80,79 @@ export async function verifiedSignersOf(
                 if (ok) verifiedSigners.add(identity)
             } catch (e) {
                 log.error(
-                    `[verifyBlock] signature verify threw for ${identity}: ${e instanceof Error ? e.message : String(e)}`,
+                    `[verifyBlock] signature verify threw for ${identity}: ${getErrorMessage(e)}`,
                 )
             }
         }),
     )
     return verifiedSigners
+}
+
+/** Whether `block` carries a verified signer quorum from the signers its height admits. */
+async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
+    // Recompute the deterministic eligible signer pool for this height.
+    // The forged shard is liveness-filtered and not reproducible here,
+    // so signatures are validated against the pool it was drawn from.
+    // Under committeeBinding the committee itself is chain data, and only
+    // its members' signatures count: two blocks at one height then share
+    // at least 2q - shardSize signers.
+    const bound = isForkActive("committeeBinding", block.number)
+    const signerSet = bound ? "bound committee" : "eligible signer pool"
+    let pool: string[]
+    try {
+        pool = bound
+            ? await getBoundCommittee(block.number - 1)
+            : await getEligiblePool(block.number - 1)
+    } catch (e) {
+        return {
+            valid: false,
+            reason: `could not resolve ${signerSet}: ${getErrorMessage(e)}`,
+        }
+    }
+
+    if (pool.length === 0) {
+        return {
+            valid: false,
+            reason: `${signerSet} is empty`,
+        }
+    }
+    const poolIdentities = new Set(pool)
+
+    // Resolve eligible signer set for this block.
+    const signatures = block.validation_data?.signatures
+    if (!signatures || typeof signatures !== "object") {
+        return {
+            valid: false,
+            reason: "block has no validation_data.signatures",
+        }
+    }
+
+    // Verify each signature over the recomputed hash;
+    const verifiedSigners = await verifiedSignersOf(
+        block.hash,
+        signatures,
+        poolIdentities,
+    )
+
+    // The bar is pinned to shardSize, not to the forger's liveness view;
+    // under quorumParity it is also the producer's, not shrunk by the pool.
+    // committeeBinding implies the same bar: the overlap of two accepted
+    // blocks is bounded against shardSize, not against a small committee.
+    const threshold = verifierThreshold(
+        getSharedState.shardSize,
+        pool.length,
+        bound || isForkActive("quorumParity", block.number),
+    )
+    if (verifiedSigners.size < threshold) {
+        return {
+            valid: false,
+            reason: bound
+                ? `insufficient verified committee signatures: ${verifiedSigners.size} of a bound committee of ${pool.length} (need ${threshold})`
+                : `insufficient verified pool signatures: ${verifiedSigners.size} of a pool of ${pool.length} (need ${threshold})`,
+        }
+    }
+
+    return { valid: true }
 }
 
 /**
@@ -159,66 +227,9 @@ export async function verifyBlock(
         }
     }
 
-    // Recompute the deterministic eligible signer pool for this height.
-    // The forged shard is liveness-filtered and not reproducible here,
-    // so signatures are validated against the pool it was drawn from.
-    // Under committeeBinding the committee itself is chain data, and only
-    // its members' signatures count: two blocks at one height then share
-    // at least 2q - shardSize signers.
-    const bound = isForkActive("committeeBinding", block.number)
-    const signerSet = bound ? "bound committee" : "eligible signer pool"
-    let pool: string[]
-    try {
-        pool = bound
-            ? await getBoundCommittee(block.number - 1)
-            : await getEligiblePool(block.number - 1)
-    } catch (e) {
-        return {
-            valid: false,
-            reason: `could not resolve ${signerSet}: ${e instanceof Error ? e.message : String(e)}`,
-        }
-    }
-
-    if (pool.length === 0) {
-        return {
-            valid: false,
-            reason: `${signerSet} is empty`,
-        }
-    }
-    const poolIdentities = new Set(pool)
-
-    // Resolve eligible signer set for this block.
-    const signatures = block.validation_data?.signatures
-    if (!signatures || typeof signatures !== "object") {
-        return {
-            valid: false,
-            reason: "block has no validation_data.signatures",
-        }
-    }
-
-    // Verify each signature over the recomputed hash;
-    const verifiedSigners = await verifiedSignersOf(
-        block.hash,
-        signatures,
-        poolIdentities,
-    )
-
-    // The bar is pinned to shardSize, not to the forger's liveness view;
-    // under quorumParity it is also the producer's, not shrunk by the pool.
-    // committeeBinding implies the same bar: the overlap of two accepted
-    // blocks is bounded against shardSize, not against a small committee.
-    const threshold = verifierThreshold(
-        getSharedState.shardSize,
-        pool.length,
-        bound || isForkActive("quorumParity", block.number),
-    )
-    if (verifiedSigners.size < threshold) {
-        return {
-            valid: false,
-            reason: bound
-                ? `insufficient verified committee signatures: ${verifiedSigners.size} of a bound committee of ${pool.length} (need ${threshold})`
-                : `insufficient verified pool signatures: ${verifiedSigners.size} of a pool of ${pool.length} (need ${threshold})`,
-        }
+    const quorum = await checkSignerQuorum(block)
+    if (!quorum.valid) {
+        return quorum
     }
 
     // Last, because it is the expensive check: only a block that already has

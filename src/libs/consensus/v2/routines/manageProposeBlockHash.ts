@@ -79,6 +79,75 @@ function errorMessage(e: unknown): string {
     return e instanceof Error ? e.message : String(e)
 }
 
+/**
+ * The proposer's hash matches our candidate: admit its signatures into the
+ * candidate and answer with the merged validation data, or refuse.
+ */
+async function mergeSignaturesForCandidate(
+    response: RPCResponse,
+    validationData: ValidationData,
+    peerId: string,
+    candidate: typeof getSharedState.candidateBlock,
+): Promise<RPCResponse> {
+    // Signatures are judged the way verifyBlock judges them: against the
+    // eligible pool of the parent height, not against our own view of the
+    // shard, which may differ from the proposer's. Under committeeBinding,
+    // against the bound committee of the parent height.
+    const incomingSignatures = getIncomingSignatures(validationData)
+    const bound = isForkActive("committeeBinding", candidate.number)
+    let pool: string[]
+    try {
+        pool = bound
+            ? await getBoundCommittee(candidate.number - 1)
+            : await getEligiblePool(candidate.number - 1)
+    } catch (e) {
+        log.error(
+            `[manageProposeBlockHash] Could not resolve the ${bound ? "bound committee" : "eligible pool"}: ${errorMessage(e)}`,
+        )
+        response.result = 500
+        response.response = getSharedState.publicKeyHex
+        response.extra = bound
+            ? "Could not resolve the bound committee"
+            : "Could not resolve the eligible signer pool"
+        return response
+    }
+
+    if (bound && !pool.includes(peerId)) {
+        log.error(
+            `[manageProposeBlockHash] Proposer ${peerId} is not in the bound committee: refusing the block hash`,
+        )
+        response.result = 401
+        response.response = getSharedState.publicKeyHex
+        response.extra = "Validator is not in the bound committee"
+        return response
+    }
+
+    // Honest nodes draw different committees, so the map accumulated over
+    // several relays can hold more signers than shardSize. Every signer
+    // must be a distinct pool member, which makes the pool the ceiling.
+    // Under committeeBinding every honest selection is a subset of one
+    // committee, which makes the committee the ceiling.
+    if (Object.keys(incomingSignatures).length > pool.length) {
+        const scope = bound ? "bound committee" : "eligible pool"
+        log.error(
+            `[manageProposeBlockHash] Signature map larger than the ${scope}: refusing the block hash`,
+        )
+        response.result = 400
+        response.response = getSharedState.publicKeyHex
+        response.extra = `Signature map is larger than the ${scope}`
+        return response
+    }
+
+    await mergeIncomingSignatures(
+        incomingSignatures,
+        new Set(pool),
+        bound ? "bound committee" : "eligible pool",
+    )
+
+    response.extra = getSharedState.candidateBlock.validation_data
+    return response
+}
+
 export default async function manageProposeBlockHash(
     blockHash: string,
     validationData: ValidationData,
@@ -157,63 +226,12 @@ export default async function manageProposeBlockHash(
         response.result = 200
         response.response = getSharedState.publicKeyHex
 
-        // Signatures are judged the way verifyBlock judges them: against the
-        // eligible pool of the parent height, not against our own view of the
-        // shard, which may differ from the proposer's. Under committeeBinding,
-        // against the bound committee of the parent height.
-        const incomingSignatures = getIncomingSignatures(validationData)
-        const bound = isForkActive("committeeBinding", candidate.number)
-        let pool: string[]
-        try {
-            pool = bound
-                ? await getBoundCommittee(candidate.number - 1)
-                : await getEligiblePool(candidate.number - 1)
-        } catch (e) {
-            log.error(
-                `[manageProposeBlockHash] Could not resolve the ${bound ? "bound committee" : "eligible pool"}: ${errorMessage(e)}`,
-            )
-            response.result = 500
-            response.response = getSharedState.publicKeyHex
-            response.extra = bound
-                ? "Could not resolve the bound committee"
-                : "Could not resolve the eligible signer pool"
-            return response
-        }
-
-        if (bound && !pool.includes(peerId)) {
-            log.error(
-                `[manageProposeBlockHash] Proposer ${peerId} is not in the bound committee: refusing the block hash`,
-            )
-            response.result = 401
-            response.response = getSharedState.publicKeyHex
-            response.extra = "Validator is not in the bound committee"
-            return response
-        }
-
-        // Honest nodes draw different committees, so the map accumulated over
-        // several relays can hold more signers than shardSize. Every signer
-        // must be a distinct pool member, which makes the pool the ceiling.
-        // Under committeeBinding every honest selection is a subset of one
-        // committee, which makes the committee the ceiling.
-        if (Object.keys(incomingSignatures).length > pool.length) {
-            const scope = bound ? "bound committee" : "eligible pool"
-            log.error(
-                `[manageProposeBlockHash] Signature map larger than the ${scope}: refusing the block hash`,
-            )
-            response.result = 400
-            response.response = getSharedState.publicKeyHex
-            response.extra = `Signature map is larger than the ${scope}`
-            return response
-        }
-
-        await mergeIncomingSignatures(
-            incomingSignatures,
-            new Set(pool),
-            bound ? "bound committee" : "eligible pool",
+        return await mergeSignaturesForCandidate(
+            response,
+            validationData,
+            peerId,
+            candidate,
         )
-
-        response.extra = getSharedState.candidateBlock.validation_data
-        return response
     }
 
     response.result = 401

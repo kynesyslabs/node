@@ -2,7 +2,10 @@ import { ValidationPhase, emptyValidationPhase } from "./validationStatusTypes"
 import { Shard } from "./shardTypes"
 import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
-import getShard, { getBoundCommittee } from "../routines/getShard"
+import getShard, {
+    getBoundCommittee,
+    getCommitteeFloor,
+} from "../routines/getShard"
 import Chain from "src/libs/blockchain/chain"
 import _ from "lodash"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
@@ -13,8 +16,8 @@ import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import { getCommitteeFloor } from "../routines/getShard"
 import { isForkActive } from "@/forks/forkGates"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import { debugAssertionsEnabled } from "@/libs/debug/nonceTrace"
 import {
     computeMergedPeerlist,
@@ -217,7 +220,7 @@ export default class SecretaryManager {
                 )
             } catch (e) {
                 throw new AbortConsensusError(
-                    `Could not resolve the bound committee for block ${this.shard.blockRef}: ${e instanceof Error ? e.message : String(e)}`,
+                    `Could not resolve the bound committee for block ${this.shard.blockRef}: ${getErrorMessage(e)}`,
                 )
             }
             if (this.boundCommittee.length === 0) {
