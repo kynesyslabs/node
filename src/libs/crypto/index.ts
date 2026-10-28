@@ -11,4 +11,3 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 export { default as cryptography, type Ed25519KeyPair } from "./cryptography"
 export { default as hashing } from "./hashing"
-export { default as rsa } from "./rsa"
