@@ -270,7 +270,7 @@ describe("getShard under committeeBinding", () => {
 
         const shard = ids(await getShard("seed", 100))
         expect(shard).not.toContain(offline)
-        expect(shard.length).toBe(committee.length - 1)
+        expect(shard).toHaveLength(committee.length - 1)
         expect(shard.every(id => committee.includes(id))).toBe(true)
     })
 

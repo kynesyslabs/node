@@ -9,6 +9,10 @@
  */
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
+import {
+    type StubChain,
+    mockCommitteeChain,
+} from "../../../../testing/consensus/committeeTestKit"
 
 const sharedState: Record<string, any> = {
     signingAlgorithm: "ed25519",
@@ -24,27 +28,9 @@ const sharedState: Record<string, any> = {
     getBlockTimestampTolerance: () => 60,
 }
 
-let peerlist: string[] = []
-// Staked validators per the GCR; null means exactly the committed peerlist.
-let staked: string[] | null = null
+const chain: StubChain = { peerlist: [], staked: null, tip: 9 }
+mockCommitteeChain(sharedState, chain)
 
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-        custom: jest.fn(),
-    },
-}))
-jest.mock("src/utilities/sharedState", () => ({
-    __esModule: true,
-    default: sharedState,
-    getSharedState: sharedState,
-}))
 jest.mock("src/libs/utils/calibrateTime", () => ({
     getNetworkTimestamp: () => 2000,
 }))
@@ -53,44 +39,6 @@ jest.mock("src/libs/debug/nonceTrace", () => ({
 }))
 jest.mock("src/libs/blockchain/validation/verifyBlockTxSignatures", () => ({
     verifyBlockTxSignatures: async () => ({ valid: true }),
-}))
-class FakePeerManager {
-    static getInstance() {
-        return new FakePeerManager()
-    }
-    async getOnlinePeers() {
-        return []
-    }
-    getPeers() {
-        return []
-    }
-    getPeer() {
-        return undefined
-    }
-}
-jest.mock("src/libs/peer/PeerManager", () => ({
-    __esModule: true,
-    default: FakePeerManager,
-}))
-jest.mock("src/libs/peer", () => ({
-    Peer: class {},
-    PeerManager: FakePeerManager,
-}))
-jest.mock("src/libs/blockchain/chain", () => ({
-    __esModule: true,
-    default: {
-        getBlockByNumber: async (n: number) =>
-            n >= 0 && n <= 9
-                ? { number: n, hash: `hash-${n}`, content: { peerlist, timestamp: 1000 + n } }
-                : null,
-        getGenesisBlockHash: async () => "hash-0",
-    },
-}))
-jest.mock("src/libs/blockchain/gcr/gcr", () => ({
-    __esModule: true,
-    default: {
-        getGCRValidatorsAtBlock: async () => (staked ?? peerlist).map(address => ({ address })),
-    },
 }))
 
 const toHex = (bytes: Uint8Array) => "0x" + Buffer.from(bytes).toString("hex")
@@ -130,9 +78,9 @@ const accepted = async (variant: string, signers: string[]) =>
     (await verifyBlock(blockSignedBy(variant, signers))).valid
 
 function setPool(size: number): string[] {
-    peerlist = Array.from({ length: size }, (_, i) => identity(i))
+    chain.peerlist = Array.from({ length: size }, (_, i) => identity(i))
     resetPoolCache()
-    return peerlist
+    return chain.peerlist
 }
 
 /** Deterministic PRNG so a failing sample is reproducible. */
@@ -152,7 +100,7 @@ const overlap = (a: string[], b: string[]) => {
 
 beforeEach(() => {
     sharedState.forkConfig.committeeBinding.activationHeight = 0
-    staked = null
+    chain.staked = null
 })
 
 /**
@@ -184,7 +132,7 @@ describe("committeeBinding verifier safety", () => {
                 const pool = setPool(poolSize)
                 const committee = await getBoundCommittee(9)
                 const outside = pool.filter(id => !committee.includes(id))
-                expect(committee.length).toBe(Math.min(poolSize, shardSize))
+                expect(committee).toHaveLength(Math.min(poolSize, shardSize))
 
                 if (committee.length < q) {
                     // No committee can reach the bar: even every pool member signing fails.
@@ -283,14 +231,15 @@ describe("committeeBinding safety with a pinned identity in the pool", () => {
             sharedState.shardSize = shardSize
             const q = quorumThreshold(shardSize)
             const pin = PINNED_SHARD_IDENTITIES[0]
-            peerlist = [...Array.from({ length: 2 * shardSize }, (_, i) => identity(i)), pin]
+            const pool = [...Array.from({ length: 2 * shardSize }, (_, i) => identity(i)), pin]
+            chain.peerlist = pool
             resetPoolCache()
 
             const committee = await getBoundCommittee(9)
             expect(committee).toHaveLength(shardSize)
             expect(committee[0]).toBe(pin)
 
-            const outside = peerlist.filter(id => !committee.includes(id))
+            const outside = pool.filter(id => !committee.includes(id))
             const shared = await minimalOverlap(committee, outside)
             expect(shared).toBe(2 * q - shardSize)
             expect(shared).toBeGreaterThan(Math.floor((shardSize - 1) / 3))
@@ -308,8 +257,10 @@ describe("committeeBinding safety when the committee falls back to the staked se
         it(`shardSize ${shardSize}: a peerlist below q draws from the staked set, with the same overlap`, async () => {
             sharedState.shardSize = shardSize
             const q = quorumThreshold(shardSize)
-            staked = Array.from({ length: 2 * shardSize }, (_, i) => identity(i))
-            peerlist = staked.slice(0, q - 1)
+            const staked = Array.from({ length: 2 * shardSize }, (_, i) => identity(i))
+            const peerlist = staked.slice(0, q - 1)
+            chain.staked = staked
+            chain.peerlist = peerlist
             resetPoolCache()
 
             const committee = await getBoundCommittee(9)

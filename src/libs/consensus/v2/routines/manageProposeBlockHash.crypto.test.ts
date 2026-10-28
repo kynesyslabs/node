@@ -6,7 +6,12 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "bun:test"
-import { getUnifiedCryptoInstance, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import {
+    type Signer,
+    type StubChain,
+    makeSigner,
+    mockCommitteeChain,
+} from "../../../../../testing/consensus/committeeTestKit"
 
 const sharedState: Record<string, any> = {
     signingAlgorithm: "ed25519",
@@ -19,26 +24,11 @@ const sharedState: Record<string, any> = {
     identity: { masterSeed: new Uint8Array(128).fill(42) },
 }
 
-let peerlist: string[] = []
+const chain: StubChain = { peerlist: [], staked: null, tip: 100 }
+mockCommitteeChain(sharedState, chain)
+
 let roundMembers: { identity: string; connection: { string: string } }[] = []
 
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-        custom: jest.fn(),
-    },
-}))
-jest.mock("src/utilities/sharedState", () => ({
-    __esModule: true,
-    default: sharedState,
-    getSharedState: sharedState,
-}))
 jest.mock("src/libs/network/server_rpc", () => ({
     emptyResponse: { result: 0, response: "", require_reply: false, extra: null },
 }))
@@ -56,67 +46,10 @@ jest.mock("src/libs/consensus/v2/routines/ensureCandidateBlockFormed", () => ({
 jest.mock("src/libs/blockchain/validation/verifyBlock", () => ({
     checkTimestampAgainstParent: () => ({ valid: true }),
 }))
-class FakePeerManager {
-    static getInstance() {
-        return new FakePeerManager()
-    }
-    async getOnlinePeers() {
-        return []
-    }
-    getPeers() {
-        return []
-    }
-    getPeer() {
-        return undefined
-    }
-}
-jest.mock("src/libs/peer/PeerManager", () => ({
-    __esModule: true,
-    default: FakePeerManager,
-}))
-jest.mock("src/libs/peer", () => ({
-    Peer: class {},
-    PeerManager: FakePeerManager,
-}))
-jest.mock("src/libs/blockchain/chain", () => ({
-    __esModule: true,
-    default: {
-        getBlockByNumber: async (n: number) =>
-            n >= 0 && n <= 100
-                ? { number: n, hash: `hash-${n}`, content: { peerlist, timestamp: 1000 + n } }
-                : null,
-        getGenesisBlockHash: async () => "hash-0",
-    },
-}))
-jest.mock("src/libs/blockchain/gcr/gcr", () => ({
-    __esModule: true,
-    default: {
-        getGCRValidatorsAtBlock: async () => peerlist.map(address => ({ address })),
-    },
-}))
 
 const { default: manageProposeBlockHash } = await import("./manageProposeBlockHash")
 const { getBoundCommittee, __resetValidatorCache: resetPoolCache } = await import("./getShard")
 const validatorPool = (await import("src/libs/blockchain/validation/txValidatorPool")).default.getInstance()
-
-interface Signer {
-    identity: string
-    sign: (message: string) => Promise<string>
-}
-
-async function makeSigner(index: number): Promise<Signer> {
-    const seed = new Uint8Array(128).fill(index + 101)
-    const crypto = getUnifiedCryptoInstance(`handler-test-${index}`, seed)
-    await crypto.generateIdentity("ed25519", seed)
-    const { publicKey } = await crypto.getIdentity("ed25519")
-    return {
-        identity: uint8ArrayToHex(publicKey as Uint8Array),
-        sign: async message => {
-            const signed = await crypto.sign("ed25519", new TextEncoder().encode(message))
-            return uint8ArrayToHex(signed.signature as Uint8Array)
-        },
-    }
-}
 
 const CANDIDATE_HASH = "c0ffee".repeat(10)
 const OTHER_HASH = "beef".repeat(16)
@@ -130,7 +63,7 @@ const flipLastByte = (sig: string) => sig.slice(0, -2) + (sig.slice(-2) === "00"
 const merged = () => Object.keys(sharedState.candidateBlock.validation_data.signatures).sort()
 
 beforeAll(async () => {
-    signers = await Promise.all(Array.from({ length: 6 }, (_, i) => makeSigner(i)))
+    signers = await Promise.all(Array.from({ length: 6 }, (_, i) => makeSigner(`handler-test-${i}`, i + 101)))
     await validatorPool.start(1)
 })
 
@@ -141,7 +74,7 @@ afterAll(async () => {
 beforeEach(async () => {
     resetPoolCache()
     sharedState.forkConfig.committeeBinding.activationHeight = 0
-    peerlist = signers.map(s => s.identity)
+    chain.peerlist = signers.map(s => s.identity)
     const committee = await getBoundCommittee(100)
     members = committee.map(id => signers.find(s => s.identity === id))
     outsider = signers.find(s => !committee.includes(s.identity))
