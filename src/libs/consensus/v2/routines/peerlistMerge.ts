@@ -4,6 +4,8 @@ import GCR from "src/libs/blockchain/gcr/gcr"
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import type { Validators } from "src/model/entities/Validators"
+import { isForkActive } from "@/forks/forkGates"
+import { quorumThreshold } from "../quorum"
 
 export const MERGE_PEERLIST_MAX_ENTRIES_PER_PEER = 1000
 
@@ -269,7 +271,7 @@ async function collectParentVotes(
         observation.block_hash === parentHash
 
     const voters = new Set(shardMembers.map(m => m.toLowerCase()))
-    const quorum = Math.floor((voters.size * 2) / 3) + 1
+    const quorum = quorumThreshold(voters.size)
     const votes = new Map<string, Set<string>>()
     const vote = (voter: string, observation: SyncObservation) => {
         if (!isAtParent(observation)) return
@@ -309,7 +311,14 @@ async function collectParentVotes(
  * every entry must have been observed at the parent block by some member,
  * and every staked identity that reaches quorum in our view must be
  * present. The secretary can then neither invent a validator nor drop one
- * the shard agreed on. Returns the list or null when it fails.
+ * the shard agreed on.
+ *
+ * Under committeeBinding every entry must itself reach quorum in our view,
+ * the rule computeMergedPeerlist applies. The list is the pool the next
+ * committee is drawn from, so an identity below quorum would be an optional
+ * entry: with k of them the secretary could pick among 2^k pools, hence
+ * committees. Without them the list is fixed by the shard's observations.
+ * Returns the list or null when it fails.
  */
 export async function validateMergedPeerlist(
     blockRef: number,
@@ -358,6 +367,17 @@ export async function validateMergedPeerlist(
                 `[peerlistMerge] dictated peerlist for block ${blockRef} names ${invented.length} identit(ies) nobody observed at the parent block: ${invented.join(", ")}`,
             )
             return null
+        }
+        if (isForkActive("committeeBinding", blockRef)) {
+            const belowQuorum = list.filter(
+                id => (votes.get(id)?.size ?? 0) < quorum,
+            )
+            if (belowQuorum.length > 0) {
+                log.error(
+                    `[peerlistMerge] dictated peerlist for block ${blockRef} names ${belowQuorum.length} identit(ies) below quorum (${quorum}) in our view: ${belowQuorum.join(", ")}`,
+                )
+                return null
+            }
         }
         const dropped = [...votes]
             .filter(
