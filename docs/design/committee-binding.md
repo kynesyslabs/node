@@ -144,9 +144,12 @@ that some member had observed at the parent block, so with k identities
 observed below quorum the secretary could choose among 2^k pools.
 
 Under `committeeBinding` a member accepts a dictated list only when every
-entry reaches quorum (`quorumThreshold` of the shard) in its own view of
-the contributions, and every staked identity at quorum is present, so the
-list is fixed by the shard's observations. Sync does not re-run this check
+entry reaches quorum in its own view of the contributions, and every
+staked identity at quorum is present, so the list is fixed by the shard's
+observations. The voters are the bound committee and the quorum is the
+block's signature bar (2/3 + 1 of shardSize), both chain data: a quorum
+counted from the members each node sees live would differ between the
+secretary and its members and make them disagree on an honest list. Sync does not re-run this check
 (contributions are not chain data), so it is gated for the rollout rather
 than for history: it makes a member's view agree exactly with the
 secretary's, and a member that missed a contribution another member gave

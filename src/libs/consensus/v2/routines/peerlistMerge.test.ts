@@ -45,6 +45,7 @@ jest.mock("src/utilities/sharedState", () => ({
         publicKeyHex: "aa".repeat(32),
         lastBlockNumber: 100,
         lastBlockHash: "tiphash",
+        shardSize: 4,
         forkConfig: { committeeBinding: { activationHeight: null } },
     },
 }))
@@ -79,6 +80,7 @@ jest.mock("src/libs/blockchain/gcr/gcr", () => ({
 beforeEach(() => {
     __resetPeerlistMerge()
     getSharedState.forkConfig.committeeBinding.activationHeight = null
+    Object.assign(getSharedState, { shardSize: 4 })
     validatorAddresses = [OUR_KEY, SYNCED_PEER, STALE_PEER, REPORTED_PEER]
     peers = [
         { identity: SYNCED_PEER, sync: { block: 100, block_hash: "tiphash" } },
@@ -206,6 +208,45 @@ describe("validateMergedPeerlist", () => {
             it("does not apply without the shard", async () => {
                 const list = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
                 expect(await validateMergedPeerlist(101, list)).toEqual(list)
+            })
+        })
+
+        describe("quorum when nodes see different live members (committeeBinding)", () => {
+            // shardSize 10, so the bar is 7 whatever the voter list holds.
+            const committee = [OUR_KEY, ...Array.from({ length: 9 }, (_, i) => `c${i + 1}`)]
+            const secretaryLive = committee.slice(0, 8) // 8 live: own-count bar would be 6
+            const memberLive = committee // all 10 live: own-count bar would be 7
+
+            beforeEach(() => {
+                __resetPeerlistMerge()
+                Object.assign(getSharedState, { shardSize: 10 })
+                getSharedState.forkConfig.committeeBinding.activationHeight = 0
+                // Seen by us + c1..c6 (7): at the bar. Seen by c1..c6 (6): below it.
+                for (const c of ["c1", "c2", "c3", "c4", "c5", "c6"]) {
+                    contributePeerlist(101, c, [obs(OUR_KEY), obs(SYNCED_PEER), obs(REPORTED_PEER)])
+                }
+                peers = [{ identity: SYNCED_PEER, sync: { block: 100, block_hash: "tiphash" } }]
+            })
+
+            it("secretary and member hold entries to the same bar", async () => {
+                const list = await computeMergedPeerlist(101, secretaryLive)
+                expect(list).toEqual([OUR_KEY, SYNCED_PEER].sort())
+                expect(await validateMergedPeerlist(101, list, memberLive)).toEqual(list)
+                expect(await validateMergedPeerlist(101, list, secretaryLive)).toEqual(list)
+            })
+
+            it("neither side lets a smaller live view lower the bar", async () => {
+                const withReported = [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort()
+                expect(await validateMergedPeerlist(101, withReported, secretaryLive)).toBeNull()
+                expect(await validateMergedPeerlist(101, withReported, memberLive)).toBeNull()
+            })
+
+            it("before the fork, the bar still follows the voter count", async () => {
+                getSharedState.forkConfig.committeeBinding.activationHeight = null
+                expect(await computeMergedPeerlist(101, secretaryLive)).toEqual(
+                    [OUR_KEY, SYNCED_PEER, REPORTED_PEER].sort(),
+                )
+                expect(await computeMergedPeerlist(101, memberLive)).toEqual([OUR_KEY, SYNCED_PEER].sort())
             })
         })
 
