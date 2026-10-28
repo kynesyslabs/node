@@ -2,7 +2,10 @@ import { ValidationPhase, emptyValidationPhase } from "./validationStatusTypes"
 import { Shard } from "./shardTypes"
 import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
-import getShard from "../routines/getShard"
+import getShard, {
+    getBoundCommittee,
+    getCommitteeFloor,
+} from "../routines/getShard"
 import Chain from "src/libs/blockchain/chain"
 import _ from "lodash"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
@@ -13,7 +16,8 @@ import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import { getCommitteeFloor } from "../routines/getShard"
+import { isForkActive } from "@/forks/forkGates"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import { debugAssertionsEnabled } from "@/libs/debug/nonceTrace"
 import {
     computeMergedPeerlist,
@@ -66,6 +70,9 @@ export default class SecretaryManager {
 
     // Internal variables
     public shard: Shard
+    // The committeeBinding committee for this round, drawn once so the vote
+    // tally and the pre-commit check cannot see a later redraw. Null pre-fork.
+    public boundCommittee: string[] | null = null
     public get secretary() {
         return (
             this.shard.members.find(
@@ -204,8 +211,32 @@ export default class SecretaryManager {
         this.registerUnderShardBlockRef()
         freezeLocalSyncObservations(this.shard.blockRef)
 
-        // Reusing the method to create the members
-        this.shard.members = await getShard(cVSA)
+        this.boundCommittee = null
+        if (isForkActive("committeeBinding", this.shard.blockRef)) {
+            try {
+                this.boundCommittee = await getBoundCommittee(
+                    lastBlockNumber,
+                    cVSA,
+                )
+            } catch (e) {
+                throw new AbortConsensusError(
+                    `Could not resolve the bound committee for block ${this.shard.blockRef}: ${getErrorMessage(e)}`,
+                )
+            }
+            if (this.boundCommittee.length === 0) {
+                throw new AbortConsensusError(
+                    `No bound committee for block ${this.shard.blockRef}: the chain defines no validator pool at block ${lastBlockNumber}`,
+                )
+            }
+        }
+
+        // The seed's own block, not the shared tip: the two can differ
+        // when a block lands while the round starts.
+        this.shard.members = await getShard(
+            cVSA,
+            lastBlockNumber,
+            this.boundCommittee ?? undefined,
+        )
         // this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
         this.ourKey = getSharedState.publicKeyHex
 

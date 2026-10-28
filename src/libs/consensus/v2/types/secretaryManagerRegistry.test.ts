@@ -20,6 +20,7 @@ jest.mock("../routines/getShard", () => ({
     __esModule: true,
     default: async () => [],
     getCommitteeFloor: () => 1,
+    getBoundCommittee: async () => [],
 }))
 jest.mock("../routines/getCommonValidatorSeed", () => ({
     __esModule: true,

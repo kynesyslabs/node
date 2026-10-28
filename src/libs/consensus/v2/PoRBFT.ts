@@ -10,6 +10,7 @@ import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
 import { getCommitteeFloor, getEligiblePool } from "./routines/getShard"
 import { producerCommits } from "./quorum"
+import { producerCommitRefusal } from "./routines/committeeCommit"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, {
@@ -284,8 +285,24 @@ export async function consensusRoutine(): Promise<void> {
         markStep("consensus", "voteOnBlock")
         const [pro, con] = await voteOnBlock(block, responsiveMembers)
 
+        // A bound committee member that is offline is a missing vote, not a
+        // smaller committee.
+        const committee = manager.boundCommittee
+        const committeeSize = committee
+            ? committee.length
+            : manager.shard.members.length
+
         // Check if the block is valid
-        if (isBlockValid(pro, manager.shard.members.length)) {
+        if (isBlockValid(pro, committeeSize)) {
+            const refusal = await producerCommitRefusal(
+                block,
+                committee,
+                getSharedState.shardSize,
+            )
+            if (refusal) {
+                throw new AbortConsensusError(refusal)
+            }
+
             markStep("consensus", "syncLock.acquire")
             releaseSyncLock = await syncLock.acquire()
 
@@ -529,6 +546,10 @@ export async function consensusRoutine(): Promise<void> {
 
         if (aborted || invalid) {
             exitReason = "abortConsensus"
+            // Its message is the only record of why the round stopped.
+            if (error instanceof AbortConsensusError) {
+                log.warning(`[consensusRoutine] ${error.message}`)
+            }
             if (aborted) {
                 log.error(error)
                 log.error("[consensusRoutine] Exiting consensus routine")

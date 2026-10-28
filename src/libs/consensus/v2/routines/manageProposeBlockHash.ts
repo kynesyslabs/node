@@ -8,11 +8,12 @@ import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "@/libs/peer/PeerManager"
 import getRoundCommittee from "./roundCommittee"
-import { getEligiblePool } from "./getShard"
+import { getBoundCommittee, getEligiblePool } from "./getShard"
 import { isNetworkAhead } from "./networkAheadVeto"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
+import { isForkActive } from "@/forks/forkGates"
 
 function getIncomingSignatures(
     validationData: ValidationData,
@@ -31,6 +32,7 @@ function getIncomingSignatures(
 async function mergeIncomingSignatures(
     incomingSignatures: Record<string, string>,
     poolIdentities: Set<string>,
+    signerSet: string,
 ): Promise<void> {
     const candidateBlock = getSharedState.candidateBlock
     for (const [identity, signature] of Object.entries(incomingSignatures)) {
@@ -38,7 +40,7 @@ async function mergeIncomingSignatures(
         // would only bloat the block and cost a verification.
         if (!poolIdentities.has(identity)) {
             log.error(
-                `[manageProposeBlockHash] Dropping signature by ${identity}: not in the eligible pool`,
+                `[manageProposeBlockHash] Dropping signature by ${identity}: not in the ${signerSet}`,
             )
             continue
         }
@@ -75,6 +77,75 @@ async function mergeIncomingSignatures(
 
 function errorMessage(e: unknown): string {
     return e instanceof Error ? e.message : String(e)
+}
+
+/**
+ * The proposer's hash matches our candidate: admit its signatures into the
+ * candidate and answer with the merged validation data, or refuse.
+ */
+async function mergeSignaturesForCandidate(
+    response: RPCResponse,
+    validationData: ValidationData,
+    peerId: string,
+    candidate: typeof getSharedState.candidateBlock,
+): Promise<RPCResponse> {
+    // Signatures are judged the way verifyBlock judges them: against the
+    // eligible pool of the parent height, not against our own view of the
+    // shard, which may differ from the proposer's. Under committeeBinding,
+    // against the bound committee of the parent height.
+    const incomingSignatures = getIncomingSignatures(validationData)
+    const bound = isForkActive("committeeBinding", candidate.number)
+    let pool: string[]
+    try {
+        pool = bound
+            ? await getBoundCommittee(candidate.number - 1)
+            : await getEligiblePool(candidate.number - 1)
+    } catch (e) {
+        log.error(
+            `[manageProposeBlockHash] Could not resolve the ${bound ? "bound committee" : "eligible pool"}: ${errorMessage(e)}`,
+        )
+        response.result = 500
+        response.response = getSharedState.publicKeyHex
+        response.extra = bound
+            ? "Could not resolve the bound committee"
+            : "Could not resolve the eligible signer pool"
+        return response
+    }
+
+    if (bound && !pool.includes(peerId)) {
+        log.error(
+            `[manageProposeBlockHash] Proposer ${peerId} is not in the bound committee: refusing the block hash`,
+        )
+        response.result = 401
+        response.response = getSharedState.publicKeyHex
+        response.extra = "Validator is not in the bound committee"
+        return response
+    }
+
+    // Honest nodes draw different committees, so the map accumulated over
+    // several relays can hold more signers than shardSize. Every signer
+    // must be a distinct pool member, which makes the pool the ceiling.
+    // Under committeeBinding every honest selection is a subset of one
+    // committee, which makes the committee the ceiling.
+    if (Object.keys(incomingSignatures).length > pool.length) {
+        const scope = bound ? "bound committee" : "eligible pool"
+        log.error(
+            `[manageProposeBlockHash] Signature map larger than the ${scope}: refusing the block hash`,
+        )
+        response.result = 400
+        response.response = getSharedState.publicKeyHex
+        response.extra = `Signature map is larger than the ${scope}`
+        return response
+    }
+
+    await mergeIncomingSignatures(
+        incomingSignatures,
+        new Set(pool),
+        bound ? "bound committee" : "eligible pool",
+    )
+
+    response.extra = getSharedState.candidateBlock.validation_data
+    return response
 }
 
 export default async function manageProposeBlockHash(
@@ -155,40 +226,12 @@ export default async function manageProposeBlockHash(
         response.result = 200
         response.response = getSharedState.publicKeyHex
 
-        // Signatures are judged the way verifyBlock judges them: against the
-        // eligible pool of the parent height, not against our own view of the
-        // shard, which may differ from the proposer's.
-        const incomingSignatures = getIncomingSignatures(validationData)
-        let pool: string[]
-        try {
-            pool = await getEligiblePool(candidate.number - 1)
-        } catch (e) {
-            log.error(
-                `[manageProposeBlockHash] Could not resolve the eligible pool: ${errorMessage(e)}`,
-            )
-            response.result = 500
-            response.response = getSharedState.publicKeyHex
-            response.extra = "Could not resolve the eligible signer pool"
-            return response
-        }
-
-        // Honest nodes draw different committees, so the map accumulated over
-        // several relays can hold more signers than shardSize. Every signer
-        // must be a distinct pool member, which makes the pool the ceiling.
-        if (Object.keys(incomingSignatures).length > pool.length) {
-            log.error(
-                "[manageProposeBlockHash] Signature map larger than the eligible pool: refusing the block hash",
-            )
-            response.result = 400
-            response.response = getSharedState.publicKeyHex
-            response.extra = "Signature map is larger than the eligible pool"
-            return response
-        }
-
-        await mergeIncomingSignatures(incomingSignatures, new Set(pool))
-
-        response.extra = getSharedState.candidateBlock.validation_data
-        return response
+        return await mergeSignaturesForCandidate(
+            response,
+            validationData,
+            peerId,
+            candidate,
+        )
     }
 
     response.result = 401

@@ -182,6 +182,24 @@ export type EditBindingConfig = BaseForkConfig
 export type QuorumParityConfig = BaseForkConfig
 
 /**
+ * `committeeBinding` fork: the committee for block h is a pure function of
+ * the chain up to h - 1 (eligible pool, common validator seed, pins), and a
+ * block counts only signatures by members of that committee.
+ *
+ * Before it, the committee was the ranked pool filtered by the forger's own
+ * view of who is online, and sync counted signatures from any pool member.
+ * With a pool larger than the quorum allows to split, two partitions could
+ * each draw a committee, reach 2/3 + 1 of shardSize and finalize different
+ * blocks at one height, both accepted by sync.
+ *
+ * Activation at H applies to block H and later. Dormant by default
+ * (`activationHeight: null`), so a node carrying the code agrees with one
+ * without it; a chain started from genesis with this build sets it to 0.
+ * No payload beyond the base.
+ */
+export type CommitteeBindingConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -217,6 +235,7 @@ export type ForkConfig =
     | AtomicWorkConfig
     | EditBindingConfig
     | QuorumParityConfig
+    | CommitteeBindingConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -234,6 +253,7 @@ export type ForkName =
     | "atomicWork"
     | "editBinding"
     | "quorumParity"
+    | "committeeBinding"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -250,6 +270,7 @@ export interface ForkConfigByName {
     atomicWork: AtomicWorkConfig
     editBinding: EditBindingConfig
     quorumParity: QuorumParityConfig
+    committeeBinding: CommitteeBindingConfig
 }
 
 /**
@@ -394,6 +415,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Sync accepts a block only with 2/3 + 1 of a full committee's signatures, " +
             "the same quorum a producer needs to commit it.",
     },
+    committeeBinding: {
+        // Dormant by default: the committee rule changes which signatures
+        // count, and a missing genesis entry hydrates from here. A chain
+        // launched from genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "The committee for a block is drawn from chain data alone, and only its " +
+            "members' signatures count toward the block's quorum.",
+    },
 }
 
 /**
@@ -414,5 +444,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         atomicWork: { ...DEFAULT_FORK_CONFIG.atomicWork },
         editBinding: { ...DEFAULT_FORK_CONFIG.editBinding },
         quorumParity: { ...DEFAULT_FORK_CONFIG.quorumParity },
+        committeeBinding: { ...DEFAULT_FORK_CONFIG.committeeBinding },
     }
 }

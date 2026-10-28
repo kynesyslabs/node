@@ -9,6 +9,8 @@ import type { Validators } from "src/model/entities/Validators"
 import { compareIdentities } from "./peerlistMerge"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import { quorumThreshold } from "../quorum"
+import { isForkActive } from "@/forks/forkGates"
+import getCommonValidatorSeed from "./getCommonValidatorSeed"
 
 // The eligible pool is a pure function of on-chain state at a given
 // block, so it is memoised per block number. Sync verification walks
@@ -109,6 +111,28 @@ function assertValidatorsNotRequired(reason: string): void {
 export async function getEligiblePool(
     lastBlockNumber: number,
 ): Promise<string[]> {
+    const pool = await chainEligiblePool(lastBlockNumber)
+    if (pool !== null) {
+        return pool
+    }
+    assertValidatorsNotRequired(
+        "no committed peerlist AND no active validators",
+    )
+    log.warning(
+        "[getShard] SECURITY: no committed peerlist and no active validators; " +
+            "falling back to local peer view. This is only acceptable on development networks.",
+    )
+    return localViewFallback()
+}
+
+/**
+ * The eligible pool as far as chain data defines it, or null when the
+ * block commits no peerlist and there are no active validators, the case
+ * getEligiblePool answers from the local peer view.
+ */
+async function chainEligiblePool(
+    lastBlockNumber: number,
+): Promise<string[] | null> {
     if (poolCache.has(lastBlockNumber)) {
         return poolCache.get(lastBlockNumber)
     }
@@ -135,14 +159,7 @@ export async function getEligiblePool(
         )
         pool = [...validatorAddresses]
     } else {
-        assertValidatorsNotRequired(
-            "no committed peerlist AND no active validators",
-        )
-        log.warning(
-            "[getShard] SECURITY: no committed peerlist and no active validators; " +
-                "falling back to local peer view. This is only acceptable on development networks.",
-        )
-        return localViewFallback()
+        return null
     }
 
     const result = [...new Set(pool)].sort(compareIdentities)
@@ -160,7 +177,7 @@ export async function getEligiblePool(
  * front of the committee, in `PINNED_SHARD_IDENTITIES` order, mutating
  * `shard` in place.
  *
- * Deterministic given (seed, pool, online view)
+ * The result is deterministic given the seed, the pool and the online view.
  *
  * @returns A per-pin outcome summary for the debug log.
  */
@@ -216,22 +233,119 @@ export function rankPool(seed: string, pool: string[]): string[] {
 }
 
 /**
+ * Pool the bound committee is drawn from at `parentNumber`: the eligible
+ * pool, or, when it holds fewer identities than a quorum, the whole staked
+ * validator set at that block. A parent whose committed peerlist shrank
+ * below the quorum would otherwise stop the chain for good, since staked
+ * validators outside that peerlist could never be drawn. Both sources are
+ * chain data, so every node falls back at the same height. Empty when the
+ * chain defines no pool at all; the local-view fallback never applies.
+ */
+export async function getBoundPool(parentNumber: number): Promise<string[]> {
+    const pool = await chainEligiblePool(parentNumber)
+    if (pool === null) {
+        // The local peer view differs between nodes, so a committee drawn
+        // from it would not be chain data: no committee at all instead.
+        log.error(
+            `[getShard] Block ${parentNumber} commits no peerlist and there are no active validators: ` +
+                "no bound committee can be drawn from chain data",
+        )
+        return []
+    }
+    if (pool.length >= getCommitteeFloor()) {
+        return pool
+    }
+
+    const staked = await readActiveValidatorAddresses(parentNumber)
+    if (staked.size <= pool.length) {
+        return pool
+    }
+    log.warning(
+        `[getShard] Eligible pool at block ${parentNumber} holds ${pool.length}, below the quorum of ` +
+            `${getCommitteeFloor()}: drawing the committee from all ${staked.size} staked validators`,
+    )
+    return [...staked].sort(compareIdentities)
+}
+
+/**
+ * Ranked pool with every pinned identity it contains moved to the front in
+ * `PINNED_SHARD_IDENTITIES` order. Unlike `pinShardIdentities` it ignores
+ * who is online, so the result depends on chain data only.
+ */
+export function pinRankedPool(ranked: string[]): string[] {
+    const byLowercase = new Map(ranked.map(id => [id.toLowerCase(), id]))
+    const front: string[] = []
+    for (const pinned of PINNED_SHARD_IDENTITIES) {
+        const id = byLowercase.get(pinned)
+        if (id !== undefined && !front.includes(id)) front.push(id)
+    }
+    if (front.length === 0) return ranked
+    return [...front, ...ranked.filter(id => !front.includes(id))]
+}
+
+/** The first `shardSize` identities of the pinned ranking of `pool` under `seed`. */
+export function drawBoundCommittee(
+    seed: string,
+    pool: string[],
+    shardSize: number,
+): string[] {
+    return pinRankedPool(rankPool(seed, pool)).slice(0, shardSize)
+}
+
+/**
+ * Committee for block `parentNumber + 1` once `committeeBinding` applies:
+ * a function of the chain up to the parent alone, so the producer, its
+ * peers and a node syncing the block years later compute the same members.
+ * Members that are offline stay in it and count as missing votes.
+ *
+ * `seed` is the common validator seed of the parent; when omitted it is
+ * derived from the stored parent block, which is how sync obtains it.
+ */
+export async function getBoundCommittee(
+    parentNumber: number,
+    seed?: string,
+): Promise<string[]> {
+    if (seed === undefined) {
+        const parent = await Chain.getBlockByNumber(parentNumber)
+        if (!parent) {
+            throw new Error(`block ${parentNumber} not found`)
+        }
+        seed = (await getCommonValidatorSeed(parent)).commonValidatorSeed
+    }
+    const pool = await getBoundPool(parentNumber)
+    return drawBoundCommittee(seed, pool, getSharedState.shardSize)
+}
+
+/**
  * Committee for the next block: the deterministic eligible pool at
  * `lastBlockNumber` ranked with Alea(seed), then filtered to peers
  * currently indexed in the PeerManager online list (ourselves always
  * included), taking the first shardSize survivors. Liveness-filtered and
- * therefore view-dependent — verifyBlock must validate signers against
- * getEligiblePool, never against this selection.
+ * therefore view-dependent, so before committeeBinding verifyBlock
+ * validates signers against getEligiblePool, never against this selection.
+ *
+ * Once `committeeBinding` applies to the next block, it returns the live
+ * members of the bound committee instead, and verifyBlock counts only that
+ * committee's signatures. An offline member is not replaced, so every
+ * node's selection is a subset of the same committee. A caller that
+ * already holds the committee for this (seed, block) passes it as
+ * `committee`, so the live members come from the very list it tallies
+ * votes against.
  */
 export default async function getShard(
     seed: string,
     lastBlockNumber: number = undefined,
+    committee?: string[],
 ): Promise<Peer[]> {
     if (lastBlockNumber === undefined || lastBlockNumber === null) {
         lastBlockNumber = getSharedState.lastBlockNumber
     }
 
-    const pool = await getEligiblePool(lastBlockNumber)
+    const bound = isForkActive("committeeBinding", lastBlockNumber + 1)
+    if (bound && committee === undefined) {
+        committee = await getBoundCommittee(lastBlockNumber, seed)
+    }
+    const pool = bound ? committee : await getEligiblePool(lastBlockNumber)
     const peerman = PeerManager.getInstance()
 
     const onlineByIdentity = new Map<string, Peer>()
@@ -266,6 +380,10 @@ export default async function getShard(
     }
     const candidates = [...liveByIdentity.values()]
 
+    if (bound) {
+        return liveBoundMembers(committee, lastBlockNumber, liveByIdentity)
+    }
+
     const shard = rankPool(seed, pool)
         .filter(identity => liveByIdentity.has(identity))
         .slice(0, getSharedState.shardSize)
@@ -294,5 +412,32 @@ export default async function getShard(
             2,
         ),
     )
+    return shard
+}
+
+function liveBoundMembers(
+    committee: string[],
+    lastBlockNumber: number,
+    liveByIdentity: Map<string, Peer>,
+): Peer[] {
+    const shard = committee
+        .filter(identity => liveByIdentity.has(identity))
+        .map(identity => liveByIdentity.get(identity))
+
+    log.debug(
+        `[getShard] bound committee for block ${lastBlockNumber + 1}: ${committee.length}; ` +
+            `live members: ${shard.length}`,
+    )
+
+    if (shard.length < getCommitteeFloor()) {
+        // Every retry at this height draws the same committee, so operators
+        // recover by bringing these members back; name them.
+        const offline = committee.filter(identity => !liveByIdentity.has(identity))
+        log.warning(
+            `[getShard] ${shard.length} of the ${committee.length} bound committee members for block ` +
+                `${lastBlockNumber + 1} are live, below the quorum of ${getCommitteeFloor()}: ` +
+                `the block cannot be forged until more of them are online. Offline: ${offline.join(", ")}`,
+        )
+    }
     return shard
 }

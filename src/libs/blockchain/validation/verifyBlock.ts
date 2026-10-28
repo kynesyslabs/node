@@ -19,9 +19,13 @@ import TxValidatorPool from "./txValidatorPool"
 import { verifyBlockTxSignatures } from "./verifyBlockTxSignatures"
 import { getSharedState } from "@/utilities/sharedState"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import { getEligiblePool } from "src/libs/consensus/v2/routines/getShard"
+import {
+    getBoundCommittee,
+    getEligiblePool,
+} from "src/libs/consensus/v2/routines/getShard"
 import { verifierThreshold } from "src/libs/consensus/v2/quorum"
 import { isForkActive } from "@/forks/forkGates"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { checkOwnSignature } from "src/libs/identity/foreignSignature"
 
@@ -67,6 +71,106 @@ async function carriesOurSignature(block: Block): Promise<boolean> {
     } catch {
         return false
     }
+}
+
+/**
+ * The members of `eligible` whose signature in `signatures` verifies over
+ * `blockHash`. Sync and a producer about to commit count with this one
+ * function, so they cannot disagree on which signatures count.
+ */
+export async function verifiedSignersOf(
+    blockHash: string,
+    signatures: Record<string, unknown>,
+    eligible: Set<string>,
+): Promise<Set<string>> {
+    const message = new TextEncoder().encode(blockHash)
+    const verifiedSigners = new Set<string>()
+    await Promise.all(
+        Object.entries(signatures).map(async ([identity, signature]) => {
+            if (!eligible.has(identity)) return
+            try {
+                const ok = await TxValidatorPool.getInstance().verify({
+                    algorithm: getSharedState.signingAlgorithm,
+                    message,
+                    signature: hexToUint8Array(signature as string),
+                    publicKey: hexToUint8Array(identity),
+                })
+                if (ok) verifiedSigners.add(identity)
+            } catch (e) {
+                log.error(
+                    `[verifyBlock] signature verify threw for ${identity}: ${getErrorMessage(e)}`,
+                )
+            }
+        }),
+    )
+    return verifiedSigners
+}
+
+/** Whether `block` carries a verified signer quorum from the signers its height admits. */
+async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
+    // Recompute the deterministic eligible signer pool for this height.
+    // The forged shard is liveness-filtered and not reproducible here,
+    // so signatures are validated against the pool it was drawn from.
+    // Under committeeBinding the committee itself is chain data, and only
+    // its members' signatures count: two blocks at one height then share
+    // at least 2q - shardSize signers.
+    const bound = isForkActive("committeeBinding", block.number)
+    const signerSet = bound ? "bound committee" : "eligible signer pool"
+    let pool: string[]
+    try {
+        pool = bound
+            ? await getBoundCommittee(block.number - 1)
+            : await getEligiblePool(block.number - 1)
+    } catch (e) {
+        return {
+            valid: false,
+            reason: `could not resolve ${signerSet}: ${getErrorMessage(e)}`,
+        }
+    }
+
+    if (pool.length === 0) {
+        return {
+            valid: false,
+            reason: `${signerSet} is empty`,
+        }
+    }
+    const poolIdentities = new Set(pool)
+
+    // Resolve eligible signer set for this block.
+    const signatures = block.validation_data?.signatures
+    if (!signatures || typeof signatures !== "object") {
+        return {
+            valid: false,
+            reason: "block has no validation_data.signatures",
+        }
+    }
+
+    // Verify each signature over the recomputed hash;
+    const verifiedSigners = await verifiedSignersOf(
+        block.hash,
+        signatures,
+        poolIdentities,
+    )
+
+    // The bar is pinned to shardSize, not to the forger's liveness view;
+    // under quorumParity it is also the producer's, not shrunk by the pool.
+    // committeeBinding implies the same bar: the overlap of two accepted
+    // blocks is bounded against shardSize, not against a small committee.
+    const threshold = verifierThreshold(
+        getSharedState.shardSize,
+        pool.length,
+        bound || isForkActive("quorumParity", block.number),
+    )
+    if (verifiedSigners.size < threshold) {
+        return {
+            valid: false,
+            reason: bound
+                ? `insufficient verified committee signatures: ${verifiedSigners.size} of a bound committee of ${pool.length} (need ${threshold})`
+                : `insufficient verified pool signatures: ${verifiedSigners.size} of a pool of ${pool.length} (need ${threshold})`,
+        }
+    }
+
+    return { valid: true }
 }
 
 /**
@@ -141,70 +245,9 @@ export async function verifyBlock(
         }
     }
 
-    // Recompute the deterministic eligible signer pool for this height.
-    // The forged shard is liveness-filtered and not reproducible here,
-    // so signatures are validated against the pool it was drawn from.
-    let pool: string[]
-    try {
-        pool = await getEligiblePool(block.number - 1)
-    } catch (e) {
-        return {
-            valid: false,
-            reason: `could not resolve eligible signer pool: ${e instanceof Error ? e.message : String(e)}`,
-        }
-    }
-
-    if (pool.length === 0) {
-        return {
-            valid: false,
-            reason: "eligible signer pool is empty",
-        }
-    }
-    const poolIdentities = new Set(pool)
-
-    // Resolve eligible signer set for this block.
-    const signatures = block.validation_data?.signatures
-    if (!signatures || typeof signatures !== "object") {
-        return {
-            valid: false,
-            reason: "block has no validation_data.signatures",
-        }
-    }
-
-    // Verify each signature over the recomputed hash;
-    const message = new TextEncoder().encode(block.hash)
-    const verifiedSigners = new Set<string>()
-    await Promise.all(
-        Object.entries(signatures).map(async ([identity, signature]) => {
-            if (!poolIdentities.has(identity)) return
-            try {
-                const ok = await TxValidatorPool.getInstance().verify({
-                    algorithm: getSharedState.signingAlgorithm,
-                    message,
-                    signature: hexToUint8Array(signature as string),
-                    publicKey: hexToUint8Array(identity),
-                })
-                if (ok) verifiedSigners.add(identity)
-            } catch (e) {
-                log.error(
-                    `[verifyBlock] signature verify threw for ${identity}: ${e instanceof Error ? e.message : String(e)}`,
-                )
-            }
-        }),
-    )
-
-    // The bar is pinned to shardSize, not to the forger's liveness view;
-    // under quorumParity it is also the producer's, not shrunk by the pool.
-    const threshold = verifierThreshold(
-        getSharedState.shardSize,
-        pool.length,
-        isForkActive("quorumParity", block.number),
-    )
-    if (verifiedSigners.size < threshold) {
-        return {
-            valid: false,
-            reason: `insufficient verified pool signatures: ${verifiedSigners.size} of a pool of ${pool.length} (need ${threshold})`,
-        }
+    const quorum = await checkSignerQuorum(block)
+    if (!quorum.valid) {
+        return quorum
     }
 
     // After the quorum so a peer replaying one stray signature of ours on an

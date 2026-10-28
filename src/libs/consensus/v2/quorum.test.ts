@@ -77,6 +77,79 @@ describe("producer and verifier parity under quorumParity", () => {
     })
 })
 
+/**
+ * Under committeeBinding the committee is the bound one, min(shardSize,
+ * pool) members whatever is online. The producer forges only with at least
+ * the floor of them live, tallies its pro votes from live members against
+ * the full committee, and every pro vote leaves its signature on the block.
+ * Sync counts committee signatures against verifierThreshold with parity.
+ */
+function* boundProducerStates() {
+    for (const shardSize of SHARD_SIZES) {
+        for (let pool = 1; pool <= 2 * shardSize + 4; pool++) {
+            const committee = Math.min(shardSize, pool)
+            for (let live = 0; live <= committee; live++) {
+                for (let pro = 0; pro <= live; pro++) {
+                    yield { shardSize, pool, committee, live, pro }
+                }
+            }
+        }
+    }
+}
+
+const boundProducerCommits = (s: {
+    shardSize: number
+    committee: number
+    live: number
+    pro: number
+}) =>
+    s.live >= quorumThreshold(s.shardSize) &&
+    producerCommits(s.pro, s.committee, s.shardSize)
+
+describe("producer and verifier parity under committeeBinding", () => {
+    it("sync accepts every block a producer commits", () => {
+        for (const s of boundProducerStates()) {
+            if (!boundProducerCommits(s)) continue
+            const needed = verifierThreshold(s.shardSize, s.pool, true)
+            expect({ ...s, accepted: s.pro >= needed }).toEqual({
+                ...s,
+                accepted: true,
+            })
+        }
+    })
+
+    it("sync accepts no committee signer count a producer would not commit", () => {
+        for (const shardSize of SHARD_SIZES) {
+            for (let pool = 1; pool <= 2 * shardSize + 4; pool++) {
+                const committee = Math.min(shardSize, pool)
+                for (let signers = 0; signers <= committee; signers++) {
+                    if (signers < verifierThreshold(shardSize, pool, true)) {
+                        continue
+                    }
+                    // Every signer was a live member that voted pro.
+                    const state = { shardSize, pool, committee, live: signers, pro: signers }
+                    expect({ ...state, commits: boundProducerCommits(state) }).toEqual({
+                        ...state,
+                        commits: true,
+                    })
+                }
+            }
+        }
+    })
+
+    it("no committee smaller than the floor commits or is accepted", () => {
+        for (const shardSize of SHARD_SIZES) {
+            for (let pool = 1; pool < quorumThreshold(shardSize); pool++) {
+                const committee = Math.min(shardSize, pool)
+                expect(verifierThreshold(shardSize, pool, true)).toBeGreaterThan(committee)
+                expect(
+                    boundProducerCommits({ shardSize, committee, live: committee, pro: committee }),
+                ).toBe(false)
+            }
+        }
+    })
+})
+
 describe("pre-fork verifier", () => {
     it("accepted 2 of a pool of 2 at shardSize 4, below the producer's 3", () => {
         expect(verifierThreshold(4, 2, false)).toBe(2)
