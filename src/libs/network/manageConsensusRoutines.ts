@@ -25,6 +25,8 @@ export interface ConsensusMethod {
         | "vote"
         | "voteRequest"
         | "proposeBlockHash"
+        | "precommitBlockHash"
+        | "getLock"
         | "broadcastBlock"
         | "getCommonValidatorSeed"
         | "getValidatorTimestamp"
@@ -129,6 +131,26 @@ export default async function manageConsensusRoutines(
     if (payload.method === "proposeBlockHash") {
         const refusal = await committedHeightRefusal(payload.params?.[3])
         if (refusal) return refusal
+    }
+
+    // The commit lock exchange is answered outside the consensus window
+    // and never starts a round: a member's late precommit request or a
+    // retry's lock query must not make us forge, and each handler checks
+    // the sender against the bound committee itself. They are loaded on use,
+    // so the dispatcher's own module graph stays what it was without them.
+    if (payload.method === "precommitBlockHash") {
+        const refusal = await committedHeightRefusal(payload.params?.[2])
+        if (refusal) return refusal
+        const { managePrecommitBlockHash } = await import(
+            "../consensus/v2/commitLock/precommit"
+        )
+        return await managePrecommitBlockHash(sender, payload.params)
+    }
+    if (payload.method === "getLock") {
+        const { manageGetLock } = await import(
+            "../consensus/v2/commitLock/getLock"
+        )
+        return await manageGetLock(sender, payload.params)
     }
 
     /* REVIEW
@@ -310,6 +332,7 @@ export default async function manageConsensusRoutines(
                     payload.params[0],
                     payload.params[1] as ValidationData,
                     sender,
+                    payload.params[4],
                 )
             } catch (error) {
                 log.error(
