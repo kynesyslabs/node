@@ -443,13 +443,18 @@ export async function startIdentityProver(timeoutMs: number): Promise<IdentityPr
     const PeerManager = (await import("src/libs/peer/PeerManager")).default
     const { Peer } = await import("src/libs/peer")
     const validatorPool = (await import("src/libs/blockchain/validation/txValidatorPool")).default
+    const { CategorizedLogger } = await import("src/utilities/tui")
+    // The node's own log lines would land on stdout in the middle of --json
+    // output; each probe's result carries the reason instead
+    CategorizedLogger.getInstance().enableTuiMode()
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "go-no-go-"))
     fs.chmodSync(dir, 0o700)
     const identityFile = path.join(dir, "checker.identity")
     fs.writeFileSync(identityFile, new Demos().newMnemonic(), { mode: 0o600 })
     getSharedState.identityFile = identityFile
-    await getSharedState.identity.loadIdentity()
+    // As the node boots: the hello request is signed with this keypair
+    getSharedState.keypair = await getSharedState.identity.loadIdentity()
     getSharedState.exposedUrl = `http://192.0.2.1:${20000 + Math.floor(Math.random() * 40000)}`
     const pool = validatorPool.getInstance()
     await pool.start(1)
