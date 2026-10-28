@@ -14,14 +14,32 @@ export const DISCREDIT_MS = 60_000
 // re-advertising one block higher buys nothing.
 const discredited = new Map<string, number>()
 
+// Heights a peer backed by serving a quorum-verified child of our head.
+// handleUpdatePeerSyncData still keeps peer.sync at or below our head, so
+// without this a lagging node with gossip off never sees the network ahead.
+const verifiedClaims = new Map<string, number>()
+
+/** `peer` served a verified block above our head while claiming `height`. */
+export function creditVerifiedHeight(peer: Peer, height: number): void {
+    const key = peer.identity.toLowerCase()
+    verifiedClaims.set(key, Math.max(verifiedClaims.get(key) ?? 0, height))
+    discredited.delete(key)
+}
+
 /**
  * Records that `peer` failed to serve blocks it advertised. A peer that
  * is really ahead serves them on a later attempt and is credited again.
  */
 export function discreditAdvertisedHeight(peer: Peer): void {
-    const height = peer.gossip?.height ?? 0
+    const key = peer.identity.toLowerCase()
+    const height = Math.max(
+        peer.gossip?.height ?? 0,
+        verifiedClaims.get(key) ?? 0,
+    )
     if (height <= getSharedState.lastBlockNumber) return
-    discredited.set(peer.identity.toLowerCase(), Date.now() + DISCREDIT_MS)
+    // A later probe has to verify the claim again
+    verifiedClaims.delete(key)
+    discredited.set(key, Date.now() + DISCREDIT_MS)
     log.warning(
         `[networkAheadVeto] ${peer.identity} advertised height ${height} but could not serve it; ignoring its claims for ${DISCREDIT_MS / 1000}s`,
     )
@@ -34,6 +52,7 @@ export function creditAdvertisedHeight(peer: Peer): void {
 
 export function clearDiscreditedHeights(): void {
     discredited.clear()
+    verifiedClaims.clear()
 }
 
 /** The height this peer is believed to be at, discredited claims excluded. */
@@ -45,7 +64,11 @@ export function credibleHeight(peer: Peer, now = Date.now()): number {
         if (until > now) return corroborated
         discredited.delete(key)
     }
-    return Math.max(corroborated, peer.gossip?.height ?? 0)
+    return Math.max(
+        corroborated,
+        peer.gossip?.height ?? 0,
+        verifiedClaims.get(key) ?? 0,
+    )
 }
 
 export async function getAheadValidatorPeers(): Promise<Peer[]> {

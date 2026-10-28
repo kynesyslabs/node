@@ -32,6 +32,12 @@ import {
 } from "@/libs/blockchain/routines/Sync"
 import { isNetworkAhead } from "./routines/networkAheadVeto"
 import {
+    adoptBeforeRetry,
+    adoptBlockFromPeers,
+    type CommittedReport,
+    recordFailedRound,
+} from "./routines/committedBlock"
+import {
     forkScheduleAbstainReason,
     shouldLogForkScheduleAbstain,
 } from "./routines/forkScheduleAbstain"
@@ -165,6 +171,14 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
+        markStep("consensus", "checkBeforeRetry")
+        if (await adoptBeforeRetry(blockRef)) {
+            log.warn(
+                `[consensusRoutine] Block ${blockRef} was committed by a member of the failed round; adopted it instead of retrying`,
+            )
+            return
+        }
+
         log.only("[consensusRoutine] Consensus state initialized")
 
         // await fastSync([], "consensusRoutine")
@@ -282,7 +296,30 @@ export async function consensusRoutine(): Promise<void> {
                 (m.connection.string !== "" || m.isLocalNode),
         )
         markStep("consensus", "voteOnBlock")
-        const [pro, con] = await voteOnBlock(block, responsiveMembers)
+        const [pro, con, committed] = await voteOnBlock(
+            block,
+            responsiveMembers,
+        )
+
+        // Checked before our own tally: even with a quorum for our block, a
+        // member holding a certified block at this height means ours would be
+        // the second one.
+        if (committed.length > 0) {
+            markStep("consensus", "adoptCommittedBlock")
+            const adopted = await adoptBlockFromPeers(
+                blockRef,
+                committed.map(c => c.peer),
+                "proposeBlockHash",
+            )
+            if (adopted) {
+                throw new ForgingEndedError(
+                    `[consensusRoutine] Block ${blockRef} was already committed by a shard member; adopted it`,
+                )
+            }
+            log.error(
+                `[consensusRoutine] ${committed.length} member(s) report block ${blockRef} committed, but none served a block that verifies`,
+            )
+        }
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {
@@ -453,8 +490,6 @@ export async function consensusRoutine(): Promise<void> {
                 )
             }
 
-            BroadcastManager.broadcastNewBlock(block)
-
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
             const l2psStart = Date.now()
@@ -488,6 +523,11 @@ export async function consensusRoutine(): Promise<void> {
                 block,
                 blockTxs.map(tx => txMap.get(tx.hash)),
             )
+
+            // Pushed only once inserted, so a receiver fetching the block's
+            // transactions from us finds them, and to every member including
+            // the signers, whose own tally may have failed.
+            void BroadcastManager.broadcastNewBlock(block)
 
             // Keep whitelisted failed txs in mempool for the next consensus round
             const failedTxsToRemove = failedTxs
@@ -526,6 +566,13 @@ export async function consensusRoutine(): Promise<void> {
         const invalid =
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
+
+        if (invalid && getSharedState.lastBlockNumber < blockRef) {
+            recordFailedRound(
+                blockRef,
+                (manager?.shard?.members ?? []).map(m => m.identity),
+            )
+        }
 
         if (aborted || invalid) {
             exitReason = "abortConsensus"
@@ -975,12 +1022,12 @@ async function forgeBlock(
 async function voteOnBlock(
     block: Block,
     shard: Peer[],
-): Promise<[number, number]> {
+): Promise<[number, number, CommittedReport[]]> {
     const now = Date.now()
     log.only(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
-    const [pro, con] = await broadcastBlockHash(block, shard)
+    const [pro, con, committed] = await broadcastBlockHash(block, shard)
     // await updateValidatorStatus("votedForBlock", true, false, true)
     // Using the secretary to update the local statuses
     await updateValidatorPhase(6, block.number)
@@ -990,7 +1037,7 @@ async function voteOnBlock(
         `[consensusRoutine] Time taken: ${(end - now) / 1000}s for voting on the block`,
     )
 
-    return [pro, con]
+    return [pro, con, committed]
 }
 
 /**

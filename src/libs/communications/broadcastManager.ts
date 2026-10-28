@@ -2,7 +2,6 @@ import log from "src/utilities/logger"
 import Block from "../blockchain/block"
 import Chain from "../blockchain/chain"
 import { Peer, PeerManager } from "../peer"
-import { syncBlock } from "../blockchain/routines/Sync"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { Waiter } from "@/utilities/waiter"
 import { getSharedState } from "@/utilities/sharedState"
@@ -10,6 +9,11 @@ import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { Mutex } from "async-mutex"
 import GossipManager from "../gossip/GossipManager"
 import { observeBlockFirstSeen } from "../gossip/metrics"
+import {
+    adoptCommittedBlock,
+    checkConflictingBlock,
+    scheduleHeightProbe,
+} from "../consensus/v2/routines/committedBlock"
 
 /**
  *
@@ -46,13 +50,10 @@ export class BroadcastManager {
                 GossipManager.isEnabled() ? "not ready" : "disabled"
             })`,
         )
-        const peerlist = PeerManager.getInstance().getPeers()
-
-        // filter by block signers
-        const peers = peerlist.filter(
-            peer =>
-                block.validation_data.signatures[peer.identity] == undefined,
-        )
+        // Signers are included: a member that signed this block can still have
+        // failed its own tally, and without the block it would retry the height
+        // and certify a second block there.
+        const peers = PeerManager.getInstance().getPeers()
 
         if (peers.length === 0) {
             return
@@ -115,6 +116,7 @@ export class BroadcastManager {
         const peerman = PeerManager.getInstance()
 
         if (block.number <= getSharedState.lastBlockNumber) {
+            await this.checkBlockAtKnownHeight(sender, block)
             return {
                 result: 200,
                 message: "Block is already processed",
@@ -153,19 +155,10 @@ export class BroadcastManager {
             }
         }
 
-        // If we signed the block, exit
-        if (block.validation_data.signatures[getSharedState.publicKeyHex]) {
-            log.only("Block is already signed by us, ignoring it")
-            return {
-                result: 200,
-                message: "Block is already signed by us, ignoring it",
-                syncData: peerman.ourSyncDataString,
-            }
-        }
-
         // If block is greater than our last block + 1, exit
         if (block.number > getSharedState.lastBlockNumber + 1) {
             log.only("Block is greater than our last block + 1, ignoring it")
+            scheduleHeightProbe(peerman.getPeer(sender), block.number)
 
             return {
                 result: 200,
@@ -185,17 +178,13 @@ export class BroadcastManager {
             }
         }
 
-        // check if we're in the consensus for received block
-        const manager = SecretaryManager.getInstance(block.number)
-
-        if (manager) {
-            log.debug("Received block while in consensus")
-
-            return {
-                result: 200,
-                message: "Cannot process block, still in consensus",
-                syncData: peerman.ourSyncDataString,
-            }
+        // A block committed by another member ends our own round for that
+        // height: we hold syncLock, so the round finds the height filled when
+        // it next checks and exits on ForgingEndedError.
+        if (SecretaryManager.getInstance(block.number)) {
+            log.info(
+                `Received committed block ${block.number} while our round for it is live; adopting it if it verifies`,
+            )
         }
 
         observeBlockFirstSeen(
@@ -203,8 +192,11 @@ export class BroadcastManager {
             Math.max(0, Date.now() - (block.content?.timestamp ?? 0) * 1000),
         )
 
-        const peer = peerman.getPeer(sender)
-        const res = await syncBlock(block, peer)
+        // The committer may already be marked offline here (it can drop right
+        // after its push), and its transactions are still fetched from it
+        const peer = peerman.getPeer(sender) ?? peerman.getOfflinePeers()[sender]
+        const outcome = await adoptCommittedBlock(block, peer)
+        const res = outcome === "adopted" || outcome === "already-held"
 
         void this.broadcastOurSyncData()
 
@@ -212,6 +204,22 @@ export class BroadcastManager {
             result: res ? 200 : 400,
             message: res ? "Block synced successfully" : "Block sync failed",
             syncData: peerman.ourSyncDataString,
+        }
+    }
+
+    /**
+     * A pushed block at a height we already hold: a different hash with a
+     * verified quorum is a fork that must not pass silently.
+     */
+    static async checkBlockAtKnownHeight(sender: string, block: Block) {
+        try {
+            const ours = await Chain.getBlockByNumber(block.number)
+            if (!ours || ours.hash === block.hash) return
+            await checkConflictingBlock(ours, block, sender)
+        } catch (e) {
+            log.error(
+                `[handleNewBlock] Conflict check of block ${block?.number} failed: ${e instanceof Error ? e.message : String(e)}`,
+            )
         }
     }
 
@@ -355,6 +363,7 @@ export class BroadcastManager {
         }
 
         if (claimedBlock > (getSharedState.lastBlockNumber ?? 0)) {
+            scheduleHeightProbe(ePeer, claimedBlock, claimedHash)
             return {
                 result: 400,
                 message:
@@ -365,6 +374,7 @@ export class BroadcastManager {
 
         const ourBlock = await Chain.getBlockByNumber(claimedBlock)
         if (!ourBlock || ourBlock.hash !== claimedHash) {
+            scheduleHeightProbe(ePeer, claimedBlock, claimedHash)
             return {
                 result: 400,
                 message: "Reported sync block hash does not match our chain",

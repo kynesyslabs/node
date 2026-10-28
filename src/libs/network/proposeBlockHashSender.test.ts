@@ -87,6 +87,9 @@ jest.mock("src/libs/consensus/v2/types/secretaryManager", () => ({
 jest.mock("src/libs/blockchain/routines/Sync", () => ({
     fastSync: async () => undefined,
 }))
+jest.mock("src/libs/consensus/v2/routines/committedBlock", () => ({
+    committedHeightRefusal: async () => null,
+}))
 jest.mock("src/libs/blockchain/chain", () => ({
     __esModule: true,
     default: { getBlockByNumber: async () => ({ content: { timestamp: 900 } }) },
