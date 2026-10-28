@@ -8,13 +8,9 @@ import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
-import {
-    getBoundCommittee,
-    getCommitteeFloor,
-    getEligiblePool,
-} from "./routines/getShard"
+import { getCommitteeFloor, getEligiblePool } from "./routines/getShard"
 import { producerCommits } from "./quorum"
-import { isForkActive } from "@/forks/forkGates"
+import { committeeCommitShortfall } from "./routines/committeeCommit"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, {
@@ -291,12 +287,26 @@ export async function consensusRoutine(): Promise<void> {
 
         // A bound committee member that is offline is a missing vote, not a
         // smaller committee.
-        const committeeSize = isForkActive("committeeBinding", blockRef)
-            ? (await getBoundCommittee(blockRef - 1, manager.shard.CVSA)).length
+        const committee = manager.boundCommittee
+        const committeeSize = committee
+            ? committee.length
             : manager.shard.members.length
 
         // Check if the block is valid
         if (isBlockValid(pro, committeeSize)) {
+            if (committee) {
+                const shortfall = await committeeCommitShortfall(
+                    block,
+                    committee,
+                    getSharedState.shardSize,
+                )
+                if (shortfall) {
+                    throw new AbortConsensusError(
+                        `Not committing: ${shortfall}`,
+                    )
+                }
+            }
+
             markStep("consensus", "syncLock.acquire")
             releaseSyncLock = await syncLock.acquire()
 

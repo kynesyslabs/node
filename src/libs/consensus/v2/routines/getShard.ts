@@ -162,7 +162,7 @@ export async function getEligiblePool(
  * front of the committee, in `PINNED_SHARD_IDENTITIES` order, mutating
  * `shard` in place.
  *
- * Deterministic given (seed, pool, online view)
+ * The result is deterministic given the seed, the pool and the online view.
  *
  * @returns A per-pin outcome summary for the debug log.
  */
@@ -296,25 +296,31 @@ export async function getBoundCommittee(
  * `lastBlockNumber` ranked with Alea(seed), then filtered to peers
  * currently indexed in the PeerManager online list (ourselves always
  * included), taking the first shardSize survivors. Liveness-filtered and
- * therefore view-dependent — verifyBlock must validate signers against
- * getEligiblePool, never against this selection.
+ * therefore view-dependent, so before committeeBinding verifyBlock
+ * validates signers against getEligiblePool, never against this selection.
  *
- * Once `committeeBinding` applies to the next block, the live members of
- * the bound committee instead: an offline member is not replaced, so
- * every node's selection is a subset of the same committee.
+ * Once `committeeBinding` applies to the next block, it returns the live
+ * members of the bound committee instead, and verifyBlock counts only that
+ * committee's signatures. An offline member is not replaced, so every
+ * node's selection is a subset of the same committee. A caller that
+ * already holds the committee for this (seed, block) passes it as
+ * `committee`, so the live members come from the very list it tallies
+ * votes against.
  */
 export default async function getShard(
     seed: string,
     lastBlockNumber: number = undefined,
+    committee?: string[],
 ): Promise<Peer[]> {
     if (lastBlockNumber === undefined || lastBlockNumber === null) {
         lastBlockNumber = getSharedState.lastBlockNumber
     }
 
     const bound = isForkActive("committeeBinding", lastBlockNumber + 1)
-    const pool = bound
-        ? await getBoundPool(lastBlockNumber)
-        : await getEligiblePool(lastBlockNumber)
+    if (bound && committee === undefined) {
+        committee = await getBoundCommittee(lastBlockNumber, seed)
+    }
+    const pool = bound ? committee : await getEligiblePool(lastBlockNumber)
     const peerman = PeerManager.getInstance()
 
     const onlineByIdentity = new Map<string, Peer>()
@@ -350,7 +356,7 @@ export default async function getShard(
     const candidates = [...liveByIdentity.values()]
 
     if (bound) {
-        return liveBoundMembers(seed, pool, lastBlockNumber, liveByIdentity)
+        return liveBoundMembers(committee, lastBlockNumber, liveByIdentity)
     }
 
     const shard = rankPool(seed, pool)
@@ -385,26 +391,27 @@ export default async function getShard(
 }
 
 function liveBoundMembers(
-    seed: string,
-    pool: string[],
+    committee: string[],
     lastBlockNumber: number,
     liveByIdentity: Map<string, Peer>,
 ): Peer[] {
-    const committee = drawBoundCommittee(seed, pool, getSharedState.shardSize)
     const shard = committee
         .filter(identity => liveByIdentity.has(identity))
         .map(identity => liveByIdentity.get(identity))
 
     log.debug(
-        `[getShard] pool at block ${lastBlockNumber}: ${pool.length}; ` +
-            `bound committee: ${committee.length}; live members: ${shard.length}`,
+        `[getShard] bound committee for block ${lastBlockNumber + 1}: ${committee.length}; ` +
+            `live members: ${shard.length}`,
     )
 
     if (shard.length < getCommitteeFloor()) {
+        // Every retry at this height draws the same committee, so operators
+        // recover by bringing these members back; name them.
+        const offline = committee.filter(identity => !liveByIdentity.has(identity))
         log.warning(
             `[getShard] ${shard.length} of the ${committee.length} bound committee members for block ` +
                 `${lastBlockNumber + 1} are live, below the quorum of ${getCommitteeFloor()}: ` +
-                "the block cannot be forged until more of them are online",
+                `the block cannot be forged until more of them are online. Offline: ${offline.join(", ")}`,
         )
     }
     return shard

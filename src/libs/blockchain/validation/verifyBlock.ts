@@ -55,6 +55,39 @@ export function checkTimestampAgainstParent(
 }
 
 /**
+ * The members of `eligible` whose signature in `signatures` verifies over
+ * `blockHash`. Sync and a producer about to commit count with this one
+ * function, so they cannot disagree on which signatures count.
+ */
+export async function verifiedSignersOf(
+    blockHash: string,
+    signatures: Record<string, unknown>,
+    eligible: Set<string>,
+): Promise<Set<string>> {
+    const message = new TextEncoder().encode(blockHash)
+    const verifiedSigners = new Set<string>()
+    await Promise.all(
+        Object.entries(signatures).map(async ([identity, signature]) => {
+            if (!eligible.has(identity)) return
+            try {
+                const ok = await TxValidatorPool.getInstance().verify({
+                    algorithm: getSharedState.signingAlgorithm,
+                    message,
+                    signature: hexToUint8Array(signature as string),
+                    publicKey: hexToUint8Array(identity),
+                })
+                if (ok) verifiedSigners.add(identity)
+            } catch (e) {
+                log.error(
+                    `[verifyBlock] signature verify threw for ${identity}: ${e instanceof Error ? e.message : String(e)}`,
+                )
+            }
+        }),
+    )
+    return verifiedSigners
+}
+
+/**
  * Verify a synced block's hash + signature quorum.
  *
  * When the block's transactions are supplied (an empty array counts) they are re-judged at the
@@ -164,25 +197,10 @@ export async function verifyBlock(
     }
 
     // Verify each signature over the recomputed hash;
-    const message = new TextEncoder().encode(block.hash)
-    const verifiedSigners = new Set<string>()
-    await Promise.all(
-        Object.entries(signatures).map(async ([identity, signature]) => {
-            if (!poolIdentities.has(identity)) return
-            try {
-                const ok = await TxValidatorPool.getInstance().verify({
-                    algorithm: getSharedState.signingAlgorithm,
-                    message,
-                    signature: hexToUint8Array(signature as string),
-                    publicKey: hexToUint8Array(identity),
-                })
-                if (ok) verifiedSigners.add(identity)
-            } catch (e) {
-                log.error(
-                    `[verifyBlock] signature verify threw for ${identity}: ${e instanceof Error ? e.message : String(e)}`,
-                )
-            }
-        }),
+    const verifiedSigners = await verifiedSignersOf(
+        block.hash,
+        signatures,
+        poolIdentities,
     )
 
     // The bar is pinned to shardSize, not to the forger's liveness view;
