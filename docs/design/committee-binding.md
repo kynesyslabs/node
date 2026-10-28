@@ -69,8 +69,10 @@ members, more than n - q offline members of C now stall the height until
 they come back or operators intervene. Recovery is manual: restart the
 offline members of C (the stalled producer logs the committee and which
 members are not live); as a last resort, a coordinated restart of the
-network. With pool close to n, C is the whole pool and the behaviour is
-unchanged.
+network. With pool <= n, C is the whole pool and the behaviour is
+unchanged. With a pool even slightly larger than n it changes: the old
+liveness filter would have substituted the few members outside C for
+offline members of C, and now nothing does.
 
 The fallback in step 1 covers a peerlist that shrank below q, which used to
 stop the chain for good. It does not help when the pool holds q or more
