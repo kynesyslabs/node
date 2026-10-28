@@ -160,10 +160,16 @@ export async function manageHelloPeer(
     peerObject.status.online = true
     peerObject.status.timestamp = Date.now()
 
-    peerObject.sync = await corroborateSyncData(content.syncData)
+    const known = peerManager.getPeer(peerObject.identity)
+
+    // Only a known caller's claim is probed: a stranger's URL is not yet
+    // shown to reach it, and our hello back probes it once it is.
+    peerObject.sync = await corroborateSyncData(
+        content.syncData,
+        known ? peerObject : undefined,
+    )
 
     // Where we last saw the caller online, if that is somewhere else.
-    const known = peerManager.getPeer(peerObject.identity)
     const knownOrigin = known
         ? parseNodeUrl(known.connection.string)?.origin
         : null

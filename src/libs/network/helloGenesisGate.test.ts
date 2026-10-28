@@ -66,9 +66,12 @@ jest.mock("../peer/helloAuth", () => ({ helloResponseMessage: () => new Uint8Arr
 jest.mock("../gossip/GossipManager", () => ({ __esModule: true, default: { isEnabled: () => false } }))
 jest.mock("src/config", () => ({ parseNodeUrl: (u: string) => ({ origin: u }) }))
 jest.mock("../peer/identityLiveness", () => ({ reportTwin: jest.fn() }))
-jest.mock("../peer/syncClaims", () => ({
-    corroborateSyncData: async () => ({ status: false, block: null, block_hash: null }),
+const corroborate = jest.fn(async (_claim: unknown, _from?: unknown) => ({
+    status: false,
+    block: null,
+    block_hash: null,
 }))
+jest.mock("../peer/syncClaims", () => ({ corroborateSyncData: corroborate }))
 
 const { manageHelloPeer } = await import("./manageHelloPeer")
 
@@ -87,6 +90,7 @@ beforeEach(() => {
     removed.length = 0
     added.length = 0
     known = null
+    corroborate.mockClear()
 })
 
 describe("hello genesis gate", () => {
@@ -118,5 +122,22 @@ describe("hello genesis gate", () => {
         expect(reply.result).toBe(200)
         expect(reply.extra.genesisHash).toBe(GENESIS)
         expect(added).toEqual([CALLER])
+    })
+})
+
+describe("a caller's height claim", () => {
+    it("is probed for a known caller, whose blocks may be what we missed", async () => {
+        known = { status: { online: true }, connection: { string: "http://caller:53550" } }
+        await manageHelloPeer(hello(GENESIS), CALLER)
+        const [claim, from] = corroborate.mock.calls[0] as [any, any]
+        expect(claim.block).toBe(529479)
+        expect(from.identity).toBe(CALLER)
+        expect(from.connection.string).toBe("http://caller:53550")
+    })
+
+    it("is not probed for a stranger until our hello back reaches it", async () => {
+        await manageHelloPeer(hello(GENESIS), CALLER)
+        expect(corroborate).toHaveBeenCalledTimes(1)
+        expect(corroborate.mock.calls[0][1]).toBeUndefined()
     })
 })
