@@ -81,8 +81,10 @@ docker info --format '{{.Driver}} {{json .DriverStatus}}'
 ```bash
 git clone https://github.com/kynesyslabs/node.git && cd node
 cp .env.example .env  # defaults are fine; edit only if you want to override
-docker compose up
+./run --docker        # docker compose up, with the commit the image is built from
 ```
+
+The image refuses to build without the git commit it is built from. `./run --docker` exports it; to call compose directly, export it first: `export GIT_COMMIT=$(git rev-parse HEAD)`, then `docker compose up`.
 
 The first run pulls images and builds the node container, so expect a few minutes. Subsequent starts are near-instant.
 
@@ -278,7 +280,7 @@ docker compose up -d
 
 Volumes (and therefore your identity, chain data, peerlist cache) are preserved.
 
-A development host that builds from source instead: `git pull && docker compose up -d --build`. Each such update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
+A development host that builds from source instead: `git pull && ./run --docker -d --build`. Each such update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
 
 ### Stop the node
 
@@ -378,7 +380,7 @@ docker compose version
 curl https://mise.run | sh
 
 # Install Bun
-mise use -g bun@1.3.14   # the version in .bun-version
+mise use -g bun@1.4.4    # the version in .bun-version
 
 # Verify Bun
 bun -v
@@ -396,10 +398,36 @@ bun -v
 
 ### 4. Clone Repository
 
+#### Mainnet validators: a signed release tag
+
+A validator runs a signed release tag, never a branch head (see [docs/runbooks/release.md](docs/runbooks/release.md)). Set `TAG` to the release announced for your network, then verify it before checking it out:
+
+```bash
+cd ~
+git clone https://github.com/kynesyslabs/node.git
+cd node
+TAG=v1.0.0-rc.1   # the announced release tag
+
+git fetch --tags origin stabilisation
+# Signers come from the protected branch, not from the tag itself
+git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers
+git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers
+# The tag must be on stabilisation and signed by a listed key;
+# the checkout runs only when both checks pass
+git merge-base --is-ancestor "$TAG" origin/stabilisation && echo "on stabilisation" &&
+git verify-tag "$TAG" &&
+git checkout "$TAG"
+```
+
+`git verify-tag` must print `Good "git" signature` for a key in `allowed_signers`. If the block stops before the checkout, or `on stabilisation` is not printed, stop and ask on the release thread. The checkout leaves a detached `HEAD`, which is expected. To upgrade, repeat these steps with the next tag; do not use `./run -U`, which pulls a branch head.
+
+#### Testnet and development: the `testnet` branch
+
+Testnet nodes and contributors follow the `testnet` branch instead. It is unsigned and moves with every merge, so do not run it on mainnet.
+
 ```bash
 cd ~
 git clone -b testnet https://github.com/kynesyslabs/node.git
-# switch to your node directory
 cd node
 # Double check that you are on testnet
 git branch
