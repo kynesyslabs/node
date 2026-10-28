@@ -79,6 +79,7 @@ const { signingRecordPath, DoubleSignError, haltSigning, __resetSigningHalt } =
     await import("src/libs/identity/signingRecord")
 const { CommitLockError } = await import("../commitLock/lockStore")
 const roundState = await import("../commitLock/roundState")
+const { prevoteRecordPath } = await import("../commitLock/prevoteRecord")
 
 const forge = (options: { round?: number; expectedHash?: string }) =>
     createBlock([{ hash: "t1" } as any], "seed", "prev", 5, ["p"], 1000, options)
@@ -136,6 +137,36 @@ describe("createBlock under commitLock", () => {
 
         // Within the lead an honest secretary's clock skew needs, it signs
         await forge({ round: Math.floor(Date.now() / 1000) + 2 })
+        expect(sign).toHaveBeenCalledTimes(1)
+    })
+
+    it("never prevotes in a round lower than one it prevoted in, across a restart", async () => {
+        await forge({ round: 7000 })
+        expect(JSON.parse(fs.readFileSync(prevoteRecordPath(sharedState.identityFile), "utf8"))).toMatchObject({
+            height: 5,
+            round: 7000,
+            hash: "hash-1",
+        })
+
+        // A restart: nothing in memory, the record on disk
+        roundState.__resetRoundState()
+        sharedState.candidateBlock = null
+        await expect(forge({ round: 6990 })).rejects.toBeInstanceOf(CommitLockError)
+        contentHash = "hash-2"
+        await expect(forge({ round: 7000 })).rejects.toBeInstanceOf(CommitLockError)
+        expect(sign).toHaveBeenCalledTimes(1)
+        expect(sharedState.candidateBlock).toBeNull()
+
+        // A retry's later round goes ahead
+        await forge({ round: 7010 })
+        expect(sign).toHaveBeenCalledTimes(2)
+    })
+
+    it("refuses to prevote when the prevote record is damaged", async () => {
+        await forge({ round: 7000 })
+        fs.writeFileSync(prevoteRecordPath(sharedState.identityFile), "{")
+        sharedState.candidateBlock = null
+        await expect(forge({ round: 7010 })).rejects.toBeInstanceOf(CommitLockError)
         expect(sign).toHaveBeenCalledTimes(1)
     })
 

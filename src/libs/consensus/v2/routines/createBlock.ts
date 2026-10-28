@@ -24,7 +24,8 @@ import {
     roundAheadRefusal,
 } from "../commitLock/domain"
 import { CommitLockError } from "../commitLock/lockStore"
-import { recordPrevote } from "../commitLock/roundState"
+import { recordPrevoteRound } from "../commitLock/prevoteRecord"
+import { recordPrevote, withLockMutex } from "../commitLock/roundState"
 
 export interface CandidateOptions {
     /** The attempt's round; required under commitLock, where it is signed. */
@@ -174,27 +175,47 @@ async function prevoteCandidate(
         )
     }
     assertSigningAllowed(getSharedState.identityFile)
-
-    const prevote = await TxValidatorPool.getInstance().sign(
-        getSharedState.signingAlgorithm,
-        new TextEncoder().encode(prevoteMessage(block.number, round, block.hash)),
-    )
-    block.validation_data = {
-        signatures: {
-            [getSharedState.publicKeyHex]: uint8ArrayToHex(prevote.signature),
-        },
-        round,
+    const genesisHash = getSharedState.genesisBlockHash
+    if (!genesisHash) {
+        throw new CommitLockError(
+            `genesis block hash is not loaded; refusing to prevote block ${block.number}`,
+        )
     }
-    recordPrevote({
-        height: block.number,
-        round,
-        hash: block.hash,
-        inputs: {
-            previousHash: block.content.previousHash,
-            orderedTransactions: [...block.content.ordered_transactions],
-            peerlist: [...(block.content.peerlist as unknown as string[])],
-            timestamp: block.content.timestamp,
-        },
+
+    // Under the mutex the precommit decision takes, so a precommit is never
+    // decided between this prevote's record and its opening
+    await withLockMutex(async () => {
+        recordPrevoteRound(getSharedState.identityFile, {
+            genesisHash,
+            height: block.number,
+            round,
+            hash: block.hash,
+        })
+        const prevote = await TxValidatorPool.getInstance().sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(
+                prevoteMessage(block.number, round, block.hash),
+            ),
+        )
+        block.validation_data = {
+            signatures: {
+                [getSharedState.publicKeyHex]: uint8ArrayToHex(
+                    prevote.signature,
+                ),
+            },
+            round,
+        }
+        recordPrevote({
+            height: block.number,
+            round,
+            hash: block.hash,
+            inputs: {
+                previousHash: block.content.previousHash,
+                orderedTransactions: [...block.content.ordered_transactions],
+                peerlist: [...(block.content.peerlist as unknown as string[])],
+                timestamp: block.content.timestamp,
+            },
+        })
     })
 
     const { commonValidatorSeed: nextProposer } = await getCommonValidatorSeed(

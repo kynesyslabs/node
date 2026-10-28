@@ -70,6 +70,7 @@ const { precommitUnderLock } = await import("./precommit")
 const { readLockReply } = await import("./getLock")
 const { chooseCandidates } = await import("./candidate")
 const lockStore = await import("./lockStore")
+const { prevoteRecordPath, recordPrevoteRound } = await import("./prevoteRecord")
 type PrevoteState = import("./roundState").PrevoteState
 
 const H = 10
@@ -106,9 +107,22 @@ function key(hash: string, round: number) {
     return `${round}:${hash}`
 }
 
+/**
+ * An honest member's prevote, under the rules createBlock applies before
+ * signing one: it throws for a round too far ahead of the clock, or below
+ * one the member already prevoted in.
+ */
 async function prevote(m: Member, round: number, hash: string): Promise<[string, string]> {
+    const ahead = domain.roundAheadRefusal(round, NOW)
+    if (ahead) throw new lockStore.CommitLockError(ahead)
+    recordPrevoteRound(m.file, { genesisHash: "hash-0", height: H, round, hash })
     m.prevote = { height: H, round, hash, inputs: inputsOf(hash), open: true }
-    return [m.signer.identity, await m.signer.sign(domain.prevoteMessage(H, round, hash))]
+    return [m.signer.identity, await signedPrevote(m, round, hash)]
+}
+
+/** A prevote signature made with the member's key outside its rules. */
+async function signedPrevote(m: Member, round: number, hash: string): Promise<string> {
+    return await m.signer.sign(domain.prevoteMessage(H, round, hash))
 }
 
 /** Deliver prevotes to a member, as the proposeBlockHash exchange does. */
@@ -318,9 +332,13 @@ describe("commit lock safety with a committee of four", () => {
         // round until the clocks caught up
         const X = blocks.X.hash
         const FAR = NOW + 3600
-        const polFar = Object.fromEntries(await Promise.all(all.map(m => prevote(m, FAR, X))))
+        const polFar: Record<string, string> = {}
+        for (const m of all) polFar[m.signer.identity] = await signedPrevote(m, FAR, X)
         expect(await votes.proofOfLock(H, FAR, X, polFar, committee)).not.toBeNull()
         for (const m of all) {
+            await expect(prevote(m, FAR, X)).rejects.toBeInstanceOf(lockStore.CommitLockError)
+            // Even a member whose clock let it prevote there takes no lock
+            m.prevote = { height: H, round: FAR, hash: X, inputs: inputsOf(X), open: true }
             expect(await askPrecommit(m, FAR, X, polFar)).toBeNull()
             expect(lockStore.lockAt(m.file, "hash-0", H)).toBeNull()
         }
@@ -348,6 +366,76 @@ describe("commit lock safety with a committee of four", () => {
             certificate[m.signer.identity] = sig as string
         }
         expect(await certifies(Y, R2, certificate)).toBe(true)
+    })
+
+    it("never acts in a lower round, so prevotes hidden from it cannot certify a second block", async () => {
+        // A faulty secretary gathers B, C and D's prevotes for Y in a round
+        // and hides them, then drives a lower round to a certificate for X;
+        // on the retry the hidden proof of lock would outrank the lock on X
+        const X = blocks.X.hash
+        const Y = blocks.Y.hash
+        const [low, high, retry] = [R1, R2, R2 + 10]
+        const hiddenY = Object.fromEntries(await Promise.all([B, C, D].map(m => prevote(m, high, Y))))
+        expect(await votes.proofOfLock(H, high, Y, hiddenY, committee)).not.toBeNull()
+
+        // Having prevoted in the higher round, B, C and D sit the lower out
+        for (const m of [B, C, D]) {
+            nextAttempt(m)
+            await expect(prevote(m, low, X)).rejects.toBeInstanceOf(lockStore.CommitLockError)
+        }
+        const pvA = await prevote(A, low, X)
+        expect(await votes.proofOfLock(H, low, X, Object.fromEntries([pvA]), committee)).toBeNull()
+
+        // Even with their keys' prevotes for X in the lower round and a stale
+        // open prevote for it, the durable record refuses the precommit
+        const polX: Record<string, string> = Object.fromEntries([pvA])
+        for (const m of [B, C, D]) polX[m.signer.identity] = await signedPrevote(m, low, X)
+        expect(await votes.proofOfLock(H, low, X, polX, committee)).not.toBeNull()
+        const certificateX: Record<string, string> = {}
+        for (const m of all) {
+            m.prevote = { height: H, round: low, hash: X, inputs: inputsOf(X), open: true }
+            const sig = await askPrecommit(m, low, X, polX)
+            if (sig) certificateX[m.signer.identity] = sig
+        }
+        expect(Object.keys(certificateX)).toEqual([A.signer.identity])
+        expect(await certifies(X, low, certificateX)).toBe(false)
+        for (const m of [B, C, D]) expect(lockStore.lockAt(m.file, "hash-0", H)).toBeNull()
+
+        // The retry follows the only proof of lock there is: Y certifies,
+        // and it is the only block that does
+        for (const m of all) nextAttempt(m)
+        const polY = Object.fromEntries(await Promise.all(all.map(m => prevote(m, retry, Y))))
+        const certificateY: Record<string, string> = {}
+        for (const m of all) {
+            const sig = await askPrecommit(m, retry, Y, polY)
+            if (sig) certificateY[m.signer.identity] = sig
+        }
+        expect(await certifies(Y, retry, certificateY)).toBe(true)
+    })
+
+    it("keeps refusing the lower round after a restart, and on a damaged record", async () => {
+        const X = blocks.X.hash
+        const Y = blocks.Y.hash
+        await prevote(B, R2, Y)
+        // A restart: nothing in memory, the record on disk
+        B.prevote = null
+        await expect(prevote(B, R1, X)).rejects.toBeInstanceOf(lockStore.CommitLockError)
+
+        const polX: Record<string, string> = {}
+        for (const m of all) polX[m.signer.identity] = await signedPrevote(m, R1, X)
+        B.prevote = { height: H, round: R1, hash: X, inputs: inputsOf(X), open: true }
+        expect(await askPrecommit(B, R1, X, polX)).toBeNull()
+        expect(lockStore.lockAt(B.file, "hash-0", H)).toBeNull()
+
+        // The same block in the same round may be prevoted again; another may not
+        B.prevote = null
+        await prevote(B, R2, Y)
+        await expect(prevote(B, R2, X)).rejects.toBeInstanceOf(lockStore.CommitLockError)
+
+        fs.writeFileSync(prevoteRecordPath(B.file), "{")
+        await expect(prevote(B, R2 + 10, Y)).rejects.toBeInstanceOf(lockStore.CommitLockError)
+        B.prevote = { height: H, round: R2 + 10, hash: Y, inputs: inputsOf(Y), open: true }
+        expect(await askPrecommit(B, R2 + 10, Y, polX)).toBeNull()
     })
 
     it("locks nobody on a split round, so the retry forges fresh and completes", async () => {

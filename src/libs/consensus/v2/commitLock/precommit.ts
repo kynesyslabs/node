@@ -39,6 +39,7 @@ import {
     loadCommitLock,
     writeCommitLock,
 } from "./lockStore"
+import { precommitAfterPrevoteRefusal } from "./prevoteRecord"
 import { openPrevote, type PrevoteState, withLockMutex } from "./roundState"
 import {
     admitPrecommits,
@@ -169,6 +170,15 @@ export async function precommitUnderLock(
 
     try {
         checkBlockSignature(identityFile, signingRound, policy)
+        // The open prevote already implies this within one process; the
+        // durable record makes it hold across a restart too
+        const later = precommitAfterPrevoteRefusal(
+            identityFile,
+            genesisHash,
+            height,
+            round,
+        )
+        if (later) return { refused: later }
 
         const current = loadCommitLock(identityFile)
         // Under the fork the record holds only precommits, each signed after
