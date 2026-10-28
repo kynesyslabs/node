@@ -8,7 +8,8 @@ import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
-import { getEligiblePool } from "./routines/getShard"
+import { getCommitteeFloor, getEligiblePool } from "./routines/getShard"
+import { producerCommits } from "./quorum"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, {
@@ -188,10 +189,7 @@ export async function consensusRoutine(): Promise<void> {
         )
 
         // if we have less than shard size of nodes, abort the consensus routine
-        if (
-            manager.shard.members.length <
-            Math.floor((getSharedState.shardSize * 2) / 3) + 1
-        ) {
+        if (manager.shard.members.length < getCommitteeFloor()) {
             log.error(
                 "[consensusRoutine] Less than shard size of nodes, aborting consensus routine",
             )
@@ -1003,21 +1001,13 @@ async function voteOnBlock(
  * @returns True if the block is valid, false otherwise
  */
 function isBlockValid(pro: number, totalVotes: number): boolean {
-    // vote count threshold
-    const threshold = Math.floor((totalVotes * 2) / 3) + 1
-
-    // minimum validators threshold
-    // attempts to fix forking bug
-    const minValidators = Math.floor((getSharedState.shardSize * 2) / 3) + 1
-    const isMinimumValidators = pro >= minValidators
-
     // DEBUG: DO NOT REMOVE COMMENTED CODE
     // if (totalVotes >= minValidators && pro < threshold) {
     //     log.error("[consensusRoutine] Block is not valid")
     //     process.exit(0)
     // }
 
-    return isMinimumValidators && pro >= threshold
+    return producerCommits(pro, totalVotes, getSharedState.shardSize)
 }
 
 /**

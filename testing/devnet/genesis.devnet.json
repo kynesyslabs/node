@@ -24,6 +24,9 @@
     },
     "editBinding": {
       "activationHeight": 0
+    },
+    "quorumParity": {
+      "activationHeight": 0
     }
   },
   "balances": [

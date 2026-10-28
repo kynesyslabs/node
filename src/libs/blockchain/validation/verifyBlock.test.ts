@@ -1,4 +1,5 @@
 import { verifyBlock } from "./verifyBlock"
+import { getSharedState } from "src/utilities/sharedState"
 
 const A = "aa".repeat(32)
 const B = "bb".repeat(32)
@@ -25,6 +26,7 @@ jest.mock("src/utilities/sharedState", () => ({
     getSharedState: {
         signingAlgorithm: "ed25519",
         shardSize: 4,
+        forkConfig: { quorumParity: { activationHeight: null } },
         getBlockTimestampMinDelta: () => 1,
         getBlockTimestampTolerance: () => 60,
     },
@@ -113,6 +115,7 @@ beforeEach(() => {
     pool = [A, B, C, D]
     networkNow = 2000
     verifyingSigners = new Set([A, B, C, D])
+    getSharedState.forkConfig.quorumParity.activationHeight = null
 })
 
 describe("verifyBlock", () => {
@@ -160,7 +163,7 @@ describe("verifyBlock", () => {
         expect(result.valid).toBe(true)
     })
 
-    it("counts quorum against min(shardSize, pool size)", async () => {
+    it("pre-fork: counts quorum against min(shardSize, pool size)", async () => {
         pool = [A, B, C]
         const block = makeBlock({
             validation_data: {
@@ -171,7 +174,7 @@ describe("verifyBlock", () => {
         expect(result.valid).toBe(true)
     })
 
-    it("accepts a small network reaching quorum of its pool", async () => {
+    it("pre-fork: accepts a small network reaching quorum of its pool", async () => {
         pool = [A, B]
         const block = makeBlock({
             validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
@@ -245,5 +248,39 @@ describe("verifyBlock", () => {
         const result = await verifyBlock(block, [{ hash: "tx-1" }] as any)
         expect(result.valid).toBe(false)
         expect(verifyBlockTxSignatures).not.toHaveBeenCalled()
+    })
+})
+
+describe("verifyBlock under quorumParity", () => {
+    const twoOfTwo = () =>
+        makeBlock({ validation_data: { signatures: { [A]: "s1", [B]: "s2" } } })
+
+    it("rejects two signatures from a pool of two at shardSize 4", async () => {
+        getSharedState.forkConfig.quorumParity.activationHeight = 0
+        pool = [A, B]
+        const result = await verifyBlock(twoOfTwo())
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain("need 3")
+    })
+
+    it("accepts three signatures, the producer's bar at shardSize 4", async () => {
+        getSharedState.forkConfig.quorumParity.activationHeight = 0
+        pool = [A, B, C]
+        const result = await verifyBlock(makeBlock())
+        expect(result.valid).toBe(true)
+    })
+
+    it("keeps the pool-relative rule below the activation height", async () => {
+        getSharedState.forkConfig.quorumParity.activationHeight = 11
+        pool = [A, B]
+        const result = await verifyBlock(twoOfTwo())
+        expect(result.valid).toBe(true)
+    })
+
+    it("applies from the activation height itself", async () => {
+        getSharedState.forkConfig.quorumParity.activationHeight = 10
+        pool = [A, B]
+        const result = await verifyBlock(twoOfTwo())
+        expect(result.valid).toBe(false)
     })
 })
