@@ -18,6 +18,10 @@ For block h the committee C is a function of the chain up to h - 1:
 
 1. Pool: the eligible pool at h - 1; if it holds fewer than q identities,
    the whole staked validator set at h - 1, sorted (recovery fallback).
+   If the chain defines no pool at all (no committed peerlist and no
+   active validators), there is no committee and no block at h: the
+   local peer view that development networks fall back to differs
+   between nodes, so it is never used.
 2. Seed: the common validator seed of block h - 1 (hashes and numbers of
    h - 1, h - 2, h - 3 and the genesis hash). It does not depend on time or
    on the retry round, so it is stable across retries at h, and a syncing
