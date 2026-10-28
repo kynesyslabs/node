@@ -7,7 +7,7 @@ const C = "cc".repeat(32)
 const D = "dd".repeat(32)
 const OUTSIDER = "ee".repeat(32)
 
-let pool: string[] = []
+let pool: string[] | Error = []
 let committee: string[] | Error = []
 let networkNow = 2000
 let verifyingSigners: Set<string> = new Set()
@@ -62,7 +62,10 @@ jest.mock("../chain", () => ({
 
 jest.mock("src/libs/consensus/v2/routines/getShard", () => ({
     __esModule: true,
-    getEligiblePool: async () => pool,
+    getEligiblePool: async () => {
+        if (pool instanceof Error) throw pool
+        return pool
+    },
     getBoundCommittee: async () => {
         if (committee instanceof Error) throw committee
         return committee
@@ -144,6 +147,15 @@ describe("verifyBlock", () => {
         const result = await verifyBlock(block)
         expect(result.valid).toBe(false)
         expect(result.reason).toContain("insufficient verified pool")
+    })
+
+    it("rejects the block with the original reason when the pool cannot be resolved", async () => {
+        pool = new Error("block 9 not found")
+        const result = await verifyBlock(makeBlock())
+        expect(result).toEqual({
+            valid: false,
+            reason: "could not resolve eligible signer pool: block 9 not found",
+        })
     })
 
     it("rejects a back-dated block", async () => {

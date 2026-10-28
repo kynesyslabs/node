@@ -18,6 +18,8 @@ interface FakePeerShape {
 }
 
 let committedPeerlist: string[] = []
+// Per-height peerlists; heights not listed commit `committedPeerlist`.
+let peerlistAt: Record<number, string[]> = {}
 let validatorAddresses: string[] = []
 let onlinePeers: FakePeerShape[] = []
 
@@ -83,7 +85,7 @@ jest.mock("src/libs/peer", () => ({
 const block = (n: number) => ({
     number: n,
     hash: `hash-${n}`,
-    content: { peerlist: committedPeerlist, timestamp: 1000 + n },
+    content: { peerlist: peerlistAt[n] ?? committedPeerlist, timestamp: 1000 + n },
 })
 
 jest.mock("src/libs/blockchain/chain", () => ({
@@ -127,6 +129,9 @@ beforeEach(() => {
     resetPoolCache()
     sharedState.shardSize = 4
     sharedState.forkConfig = { committeeBinding: { activationHeight: 0 } }
+    sharedState.lastBlockNumber = 100
+    sharedState.lastBlockHash = "hash-100"
+    peerlistAt = {}
     committedPeerlist = [V(1), V(2), V(3), V(4), V(5), V(6), V(7), V(8)]
     validatorAddresses = [...committedPeerlist]
     onlinePeers = committedPeerlist.slice(1).map(id => onlinePeer(id))
@@ -198,13 +203,28 @@ describe("getBoundPool", () => {
 })
 
 describe("getBoundCommittee", () => {
-    it("derives the seed from the parent block the way a producer at that tip does", async () => {
-        const { commonValidatorSeed: tipSeed } = await getCommonValidatorSeed()
+    it("derives the seed from the stored parent the way a producer at that tip does", async () => {
+        // The tip and an older parent commit different peerlists, so a
+        // committee drawn from the wrong height or seed would differ.
+        peerlistAt[105] = [V(2), V(4), V(6), V(8), V(9), V(10), V(11)]
+        validatorAddresses = [...committedPeerlist, V(9), V(10), V(11)]
+        sharedState.lastBlockNumber = 105
+        sharedState.lastBlockHash = "hash-105"
+
+        const tip = await getCommonValidatorSeed()
+        expect(tip.lastBlockNumber).toBe(105)
+        const producerCommittee = await getBoundCommittee(105, tip.commonValidatorSeed)
+        expect(await getBoundCommittee(105)).toEqual(producerCommittee)
+        expect(producerCommittee.every(id => peerlistAt[105].includes(id))).toBe(true)
+
         const { commonValidatorSeed: parentSeed } = await getCommonValidatorSeed(
             block(100) as any,
         )
-        expect(parentSeed).toBe(tipSeed)
-        expect(await getBoundCommittee(100)).toEqual(await getBoundCommittee(100, tipSeed))
+        expect(parentSeed).not.toBe(tip.commonValidatorSeed)
+        const olderCommittee = await getBoundCommittee(100)
+        expect(olderCommittee).toEqual(await getBoundCommittee(100, parentSeed))
+        expect(olderCommittee.every(id => committedPeerlist.includes(id))).toBe(true)
+        expect(olderCommittee).not.toEqual(producerCommittee)
     })
 
     it("depends only on chain data, not on who is online", async () => {

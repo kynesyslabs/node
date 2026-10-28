@@ -25,6 +25,8 @@ const sharedState: Record<string, any> = {
 }
 
 let peerlist: string[] = []
+// Staked validators per the GCR; null means exactly the committed peerlist.
+let staked: string[] | null = null
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -87,7 +89,7 @@ jest.mock("src/libs/blockchain/chain", () => ({
 jest.mock("src/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
     default: {
-        getGCRValidatorsAtBlock: async () => peerlist.map(address => ({ address })),
+        getGCRValidatorsAtBlock: async () => (staked ?? peerlist).map(address => ({ address })),
     },
 }))
 
@@ -108,6 +110,7 @@ const { getBoundCommittee, __resetValidatorCache: resetPoolCache } = await impor
     "./routines/getShard"
 )
 const { quorumThreshold } = await import("./quorum")
+const { PINNED_SHARD_IDENTITIES } = await import("src/utilities/constants")
 const sha256 = (await import("src/libs/crypto/hashing")).default.sha256
 
 const identity = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
@@ -149,7 +152,23 @@ const overlap = (a: string[], b: string[]) => {
 
 beforeEach(() => {
     sharedState.forkConfig.committeeBinding.activationHeight = 0
+    staked = null
 })
+
+/**
+ * The two accepted signer sets sharing the fewest committee members: a
+ * quorum from either end of the committee, each padded with every signer
+ * outside it. Returns how many members they share.
+ */
+async function minimalOverlap(committee: string[], outside: string[]): Promise<number> {
+    const q = quorumThreshold(sharedState.shardSize)
+    const low = [...committee.slice(0, q), ...outside]
+    const high = [...committee.slice(committee.length - q), ...outside]
+    expect(await accepted("low", low)).toBe(true)
+    expect(await accepted("high", high)).toBe(true)
+    expect(await accepted("short", [...committee.slice(0, q - 1), ...outside])).toBe(false)
+    return overlap(low, high) - outside.length
+}
 
 describe("committeeBinding verifier safety", () => {
     for (const shardSize of [4, 7, 10]) {
@@ -256,4 +275,55 @@ describe("disjoint signer groups of 7 from a pool of 14 at shardSize 10", () => 
         // A side holding 7 of the 10 committee members keeps its block.
         expect(oneAccepted).toBeGreaterThan(0)
     })
+})
+
+describe("committeeBinding safety with a pinned identity in the pool", () => {
+    for (const shardSize of [4, 7]) {
+        it(`shardSize ${shardSize}: the pin takes a seat and accepted sets still overlap in 2q - n`, async () => {
+            sharedState.shardSize = shardSize
+            const q = quorumThreshold(shardSize)
+            const pin = PINNED_SHARD_IDENTITIES[0]
+            peerlist = [...Array.from({ length: 2 * shardSize }, (_, i) => identity(i)), pin]
+            resetPoolCache()
+
+            const committee = await getBoundCommittee(9)
+            expect(committee).toHaveLength(shardSize)
+            expect(committee[0]).toBe(pin)
+
+            const outside = peerlist.filter(id => !committee.includes(id))
+            const shared = await minimalOverlap(committee, outside)
+            expect(shared).toBe(2 * q - shardSize)
+            expect(shared).toBeGreaterThan(Math.floor((shardSize - 1) / 3))
+
+            // The pin alone with outsiders cannot carry a block.
+            expect(await accepted("pin", [pin, ...committee.slice(1, q - 1), ...outside])).toBe(
+                false,
+            )
+        })
+    }
+})
+
+describe("committeeBinding safety when the committee falls back to the staked set", () => {
+    for (const shardSize of [4, 7]) {
+        it(`shardSize ${shardSize}: a peerlist below q draws from the staked set, with the same overlap`, async () => {
+            sharedState.shardSize = shardSize
+            const q = quorumThreshold(shardSize)
+            staked = Array.from({ length: 2 * shardSize }, (_, i) => identity(i))
+            peerlist = staked.slice(0, q - 1)
+            resetPoolCache()
+
+            const committee = await getBoundCommittee(9)
+            expect(committee).toHaveLength(shardSize)
+            expect(committee.every(id => staked.includes(id))).toBe(true)
+            expect(committee.some(id => !peerlist.includes(id))).toBe(true)
+
+            // Every committed peer signing is still short of the bar.
+            expect(await accepted("peerlist", peerlist)).toBe(false)
+
+            const outside = staked.filter(id => !committee.includes(id))
+            const shared = await minimalOverlap(committee, outside)
+            expect(shared).toBe(2 * q - shardSize)
+            expect(shared).toBeGreaterThan(Math.floor((shardSize - 1) / 3))
+        })
+    }
 })
