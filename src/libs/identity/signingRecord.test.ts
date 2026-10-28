@@ -153,6 +153,75 @@ describe("signingRecord", () => {
         ).toThrow(DoubleSignError)
     })
 
+    describe("another genesis in production", () => {
+        const production = { production: true }
+        const savedEnv = process.env.DEMOS_SIGNING_RECORD_REBIND
+        beforeEach(() => {
+            delete process.env.DEMOS_SIGNING_RECORD_REBIND
+        })
+        afterEach(() => {
+            if (savedEnv === undefined) {
+                delete process.env.DEMOS_SIGNING_RECORD_REBIND
+            } else {
+                process.env.DEMOS_SIGNING_RECORD_REBIND = savedEnv
+            }
+        })
+
+        it("refuses before signing and keeps the old record", () => {
+            guardBlockSignature(identity, round(500, 9000, "old", "genesis-old"))
+            let message = ""
+            try {
+                checkBlockSignature(
+                    identity,
+                    round(3, 100, "new", "genesis-new"),
+                    production,
+                )
+            } catch (e) {
+                expect(e).toBeInstanceOf(DoubleSignError)
+                message = (e as Error).message
+            }
+            expect(message).toContain("genesis-old")
+            expect(message).toContain("genesis-new")
+            expect(message).toContain("DEMOS_SIGNING_RECORD_REBIND")
+            expect(() =>
+                recordBlockSignature(
+                    identity,
+                    round(3, 100, "new", "genesis-new"),
+                    production,
+                ),
+            ).toThrow(DoubleSignError)
+            expect(loadSigningRecord(identity)?.genesisHash).toBe(
+                "genesis-old",
+            )
+        })
+
+        it("re-binds when DEMOS_SIGNING_RECORD_REBIND=true", () => {
+            process.env.DEMOS_SIGNING_RECORD_REBIND = "true"
+            guardBlockSignature(identity, round(500, 9000, "old", "genesis-old"))
+            checkBlockSignature(
+                identity,
+                round(3, 100, "new", "genesis-new"),
+                production,
+            )
+            recordBlockSignature(
+                identity,
+                round(3, 100, "new", "genesis-new"),
+                production,
+            )
+            expect(loadSigningRecord(identity)?.genesisHash).toBe(
+                "genesis-new",
+            )
+            expect(warning).toHaveBeenCalled()
+        })
+
+        it("still accepts the same chain", () => {
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            expect(() =>
+                checkBlockSignature(identity, round(11, 1010, "bb"), production),
+            ).not.toThrow()
+        })
+    })
+
     describe("halted signing", () => {
         afterEach(() => __resetSigningHalt())
 

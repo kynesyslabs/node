@@ -155,4 +155,21 @@ describe("createBlock signing guard", () => {
             height: 1,
         })
     })
+
+    it("in production, refuses a record of another chain without signing", async () => {
+        await forge(500, 9000)
+        sharedState.candidateBlock = null
+        sharedState.genesisBlockHash = "genesis-b"
+        sharedState.PROD = true
+        sign.mockClear()
+        try {
+            await expect(forge(1, 100)).rejects.toBeInstanceOf(DoubleSignError)
+        } finally {
+            sharedState.PROD = undefined
+        }
+        expect(sign).not.toHaveBeenCalled()
+        expect(loadSigningRecord(sharedState.identityFile)?.genesisHash).toBe(
+            "genesis-a",
+        )
+    })
 })

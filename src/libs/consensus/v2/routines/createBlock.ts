@@ -88,7 +88,8 @@ export async function createBlock(
         timestamp: block.content.timestamp,
         hash: block.hash,
     }
-    checkBlockSignature(getSharedState.identityFile, round)
+    const policy = { production: getSharedState.PROD }
+    checkBlockSignature(getSharedState.identityFile, round, policy)
 
     const blockSignature = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
@@ -97,7 +98,7 @@ export async function createBlock(
 
     // Persisted before the block is returned so the signature cannot leave
     // the process without a record of it, and only once signing succeeded.
-    recordBlockSignature(getSharedState.identityFile, round)
+    recordBlockSignature(getSharedState.identityFile, round, policy)
 
     // ? Probably to remove once we have the mechanism working for v2
     if (!block.validation_data) {

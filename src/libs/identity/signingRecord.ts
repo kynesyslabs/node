@@ -2,6 +2,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import log from "src/utilities/logger"
+import { EnvKey } from "src/config/envKeys"
+import { parseBoolFlag } from "src/config/envFlags"
 
 export interface SigningRecord {
     /** Block 0 hash of the chain the record belongs to. */
@@ -17,6 +19,15 @@ export interface BlockSigningRequest {
     height: number
     timestamp: number
     hash: string
+}
+
+export interface SigningPolicy {
+    /**
+     * In production a record of another genesis is refused unless
+     * DEMOS_SIGNING_RECORD_REBIND=true: a validator handed the wrong chain
+     * must not quietly lose its history.
+     */
+    production?: boolean
 }
 
 export class DoubleSignError extends Error {
@@ -290,7 +301,11 @@ type Verdict =
     | { action: "rebind"; last: SigningRecord }
     | { action: "unchanged" }
 
-function evaluate(identityFile: string, request: BlockSigningRequest): Verdict {
+function evaluate(
+    identityFile: string,
+    request: BlockSigningRequest,
+    policy: SigningPolicy,
+): Verdict {
     if (haltReason !== null) {
         throw new DoubleSignError(`refusing to sign: ${haltReason}`)
     }
@@ -309,6 +324,17 @@ function evaluate(identityFile: string, request: BlockSigningRequest): Verdict {
     // A record from another chain says nothing about this one: after a
     // network reset the old heights would otherwise block signing forever.
     if (last.genesisHash !== request.genesisHash) {
+        if (
+            policy.production &&
+            !parseBoolFlag(process.env[EnvKey.DEMOS_SIGNING_RECORD_REBIND])
+        ) {
+            throw new DoubleSignError(
+                `refusing to sign: signing record ${signingRecordPath(identityFile)} belongs to another chain ` +
+                    `(genesis ${last.genesisHash}, last signed height ${last.height}; current genesis ${request.genesisHash}). ` +
+                    `If this network was reset on purpose, start once with ${EnvKey.DEMOS_SIGNING_RECORD_REBIND}=true; ` +
+                    "otherwise this node is on the wrong chain",
+            )
+        }
         return { action: "rebind", last }
     }
 
@@ -346,8 +372,9 @@ function evaluate(identityFile: string, request: BlockSigningRequest): Verdict {
 export function checkBlockSignature(
     identityFile: string,
     request: BlockSigningRequest,
+    policy: SigningPolicy = {},
 ): void {
-    evaluate(identityFile, request)
+    evaluate(identityFile, request, policy)
 }
 
 /**
@@ -360,11 +387,12 @@ export function checkBlockSignature(
 export function recordBlockSignature(
     identityFile: string,
     request: BlockSigningRequest,
+    policy: SigningPolicy = {},
 ): void {
     const file = resolveWriteTarget(signingRecordPath(identityFile))
     const release = acquireRecordLock(file)
     try {
-        const verdict = evaluate(identityFile, request)
+        const verdict = evaluate(identityFile, request, policy)
         rememberSigned(request.hash)
         if (verdict.action === "unchanged") return
         if (verdict.action === "rebind") {
