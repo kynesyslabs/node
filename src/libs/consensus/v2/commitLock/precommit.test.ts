@@ -222,6 +222,31 @@ describe("lockAndPrecommit", () => {
         expect(metrics.locks).toBe(0)
     })
 
+    it("refuses when the record holds a precommit at the height but the lock file is gone", async () => {
+        openPrevote(X, R1)
+        await precommit.lockAndPrecommit({ height: H, round: R1, hash: X, pol: await prevotes(X, R1, others) })
+        fs.rmSync(lockStore.commitLockPath(sharedState.identityFile))
+        roundState.__resetRoundState()
+        precommit.__resetPrecommitState()
+
+        openPrevote(Y, R2)
+        const outcome = await precommit.lockAndPrecommit({
+            height: H,
+            round: R2,
+            hash: Y,
+            pol: await prevotes(Y, R2, others),
+        })
+        expect("refused" in outcome && outcome.refused).toContain("lock file was lost")
+        expect(lockStore.loadCommitLock(sharedState.identityFile)).toBeNull()
+        expect(loadSigningRecord(sharedState.identityFile)).toMatchObject({ height: H, timestamp: R1, hash: X })
+
+        // The next height is not held back by the lost lock
+        sharedState.lastBlockNumber = H
+        roundState.recordPrevote({ height: H + 1, round: R2, hash: Y, inputs })
+        const next = await precommit.lockAndPrecommit({ height: H + 1, round: R2, hash: Y, pol: {} })
+        expect("signature" in next).toBe(true)
+    })
+
     it("refuses another block while locked, until a later proof of lock moves it", async () => {
         openPrevote(X, R1)
         await precommit.lockAndPrecommit({ height: H, round: R1, hash: X, pol: await prevotes(X, R1, others) })

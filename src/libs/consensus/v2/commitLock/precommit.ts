@@ -9,6 +9,7 @@ import {
 import {
     checkBlockSignature,
     DoubleSignError,
+    loadSigningRecord,
     recordBlockSignature,
     SigningRecordError,
 } from "src/libs/identity/signingRecord"
@@ -33,6 +34,7 @@ import {
 } from "./domain"
 import {
     CommitLockError,
+    commitLockPath,
     judgeLock,
     loadCommitLock,
     writeCommitLock,
@@ -169,6 +171,27 @@ export async function precommitUnderLock(
         checkBlockSignature(identityFile, signingRound, policy)
 
         const current = loadCommitLock(identityFile)
+        // Under the fork the record holds only precommits, each signed after
+        // its lock was written: a record at this height without the lock
+        // means the lock file was lost, and the lock it held still binds us.
+        if (
+            !current ||
+            current.genesisHash !== genesisHash ||
+            current.height < height
+        ) {
+            const record = loadSigningRecord(identityFile)
+            if (
+                record &&
+                record.genesisHash === genesisHash &&
+                record.height >= height
+            ) {
+                const reason =
+                    `the signing record holds a precommit at height ${record.height} (round ${record.timestamp}) ` +
+                    `but ${commitLockPath(identityFile)} has no lock for height ${height}; the lock file was lost`
+                log.error(`[commitLock] Not precommitting ${hash}: ${reason}`)
+                return { refused: reason }
+            }
+        }
         const decision = judgeLock(current, {
             genesisHash,
             height,
