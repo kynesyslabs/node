@@ -324,9 +324,12 @@ export async function consensusRoutine(): Promise<void> {
             }
         }
         if (!block) {
+            // The captured round, not blockTimestamp again: the lock
+            // exchange above awaits, and the content timestamp must equal
+            // the round the block is prevoted in.
             block = await forgeBlock(
                 blockTxs,
-                manager.blockTimestamp,
+                round,
                 mergedPeerlist,
                 lockOn ? { round } : {},
             ) // NOTE The GCR hash is calculated here and added to the block
