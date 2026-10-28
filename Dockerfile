@@ -150,10 +150,11 @@ RUN if [ "$PRUNE_MODULES" = "true" ]; then \
 # with an nginx 502 / CloseEvent 1006 on the prover.
 FROM rust:1.99.1-slim@sha256:e6cd1d294a300601eaaa4a294b337e5f0826f427fb2d481e9f76e69e7981e244 AS wstcp
 # Pin the version so an upstream wstcp release can't silently change
-# behaviour or break the build. `--locked` is intentionally omitted: the
-# crate's bundled Cargo.lock pins dependency versions that no longer
-# compile on the current toolchain, so we let cargo resolve compatible
-# deps for this exact wstcp version.
+# behaviour or break the build; scripts/install-deps.sh and ensureWstcp()
+# install the same version. `--locked` is intentionally omitted: the
+# crate's bundled Cargo.lock pins time 0.3.25, which does not compile on
+# Rust 1.80 or later, so we let cargo resolve compatible deps for this
+# exact wstcp version.
 RUN cargo install wstcp --version 0.2.1 --root /wstcp
 
 FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS runtime

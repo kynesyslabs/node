@@ -119,6 +119,10 @@ function getTLSNotaryState(): TLSNotaryState {
     return sharedState.tlsnotary
 }
 
+// The version the Docker image bakes in and scripts/install-deps.sh
+// installs; an unpinned install would pick whatever crates.io serves today.
+const WSTCP_VERSION = "0.2.1"
+
 /**
  * Ensure wstcp binary is available, installing if needed
  * @throws Error if wstcp cannot be found or installed
@@ -134,7 +138,9 @@ export async function ensureWstcp(): Promise<void> {
     } catch {
         log.info("[TLSNotary] wstcp not found, installing via cargo...")
         try {
-            await execAsync(`"${cargoPath}" install wstcp`)
+            await execAsync(
+                `"${cargoPath}" install wstcp --version ${WSTCP_VERSION}`,
+            )
             log.info("[TLSNotary] wstcp installed successfully")
         } catch (installError: any) {
             throw new Error(`Failed to install wstcp: ${installError.message}`)

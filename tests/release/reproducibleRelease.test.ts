@@ -204,4 +204,34 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(help).toBeLessThan(run.indexOf("\ncheck_bun_version\n"))
         expect(help).toBeLessThan(run.indexOf("bun install --frozen-lockfile"))
     })
+
+    it("every wstcp install names the same --version", () => {
+        const files = [
+            "Dockerfile",
+            "scripts/install-deps.sh",
+            "src/features/tlsnotary/proxyManager.ts",
+        ]
+        const sites: string[] = []
+        const versions = new Set<string>()
+        for (const file of files) {
+            read(file)
+                .split("\n")
+                .forEach((line, i) => {
+                    const code = line.trim()
+                    if (code.startsWith("#") || code.startsWith("//")) return
+                    if (/cargo\S*\s+install\s+wstcp\b/.test(code)) {
+                        sites.push(`${file}:${i + 1}: ${code}`)
+                    }
+                })
+            for (const m of read(file).matchAll(
+                /WSTCP_VERSION\s*=\s*"?(\d+\.\d+\.\d+)|wstcp --version (\d+\.\d+\.\d+)/g,
+            )) {
+                versions.add(m[1] ?? m[2])
+            }
+        }
+        expect(sites).toHaveLength(files.length)
+        const unpinned = sites.filter(s => !/--version\b/.test(s))
+        expect(unpinned).toEqual([]) // each entry installs whatever crates.io serves today
+        expect([...versions]).toHaveLength(1)
+    })
 })
