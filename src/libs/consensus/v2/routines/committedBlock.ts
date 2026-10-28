@@ -28,6 +28,12 @@ export const COMMIT_POLL_TIMEOUT_MS = 3_000
 /** One probe per peer per window: sync data and pushes arrive every block. */
 export const HEIGHT_PROBE_INTERVAL_MS = 10_000
 
+/**
+ * Blocks one probe may verify and adopt in a row. Enough to close the gap a
+ * short partition leaves; longer gaps are what fast sync is for.
+ */
+export const PROBE_CATCHUP_MAX_BLOCKS = 32
+
 export interface CommittedReport {
     peer: Peer
     hash: string
@@ -195,8 +201,28 @@ export async function checkConflictingBlock(
  * Insert a block another member committed. The caller holds syncLock, the
  * lock every insert path takes, so a round that reaches its own commit
  * afterwards finds the height filled and ends on ForgingEndedError.
+ *
+ * Never throws: syncBlock throws on bodies it cannot verify (a source that
+ * served the header and then dropped, or bad bodies), and that must reject
+ * this source, not end the caller. syncBlock undoes the GCR edits of a block
+ * whose apply or insert fails, and latches the node out of further applies
+ * when that undo itself fails, which is the same guard fastSync relies on.
  */
 export async function adoptCommittedBlock(
+    block: Block,
+    peer: Peer | undefined,
+): Promise<AdoptOutcome> {
+    try {
+        return await adoptCommittedBlockUnguarded(block, peer)
+    } catch (e) {
+        log.error(
+            `[committedBlock] Adopting block ${block?.number} (${block?.hash}) from ${peer?.identity ?? "unknown peer"} failed: ${e instanceof Error ? e.message : String(e)}`,
+        )
+        return "rejected"
+    }
+}
+
+async function adoptCommittedBlockUnguarded(
     block: Block,
     peer: Peer | undefined,
 ): Promise<AdoptOutcome> {
@@ -213,6 +239,16 @@ export async function adoptCommittedBlock(
     }
 
     if (block.number !== getSharedState.lastBlockNumber + 1) return "not-next"
+
+    // Until one fast sync has succeeded, every fast sync runs without
+    // syncLock, so holding the lock would not keep one from applying this
+    // same block, whether it is running already or starts mid-apply
+    if (getSharedState.fastSyncCount === 0) {
+        log.info(
+            `[committedBlock] Initial sync not complete; leaving block ${block.number} to it`,
+        )
+        return "rejected"
+    }
 
     // Checked here so a foreign parent is a plain rejection: verifyBlock
     // treats it as an assertion failure under debug assertions
@@ -361,10 +397,9 @@ export function scheduleHeightProbe(
 }
 
 /**
- * Above our head: once the peer serves a quorum-verified child of our head,
- * adopt it and credit the claim, which lets the regular sync path pull the
- * rest. At or below it: look for a second certified block at a height we
- * hold.
+ * Above our head: adopt the peer's blocks one by one while each is a
+ * quorum-verified child of our head, crediting only the heights verified.
+ * At or below it: look for a second certified block at a height we hold.
  */
 export async function probePeerHeight(
     peer: Peer,
@@ -384,44 +419,58 @@ export async function probePeerHeight(
             : "none"
     }
 
-    const headHash = getSharedState.lastBlockHash
-    const next = await fetchBlockAt(peer, head + 1)
-    if (!next) return "none"
+    let verifiedUpTo = head
+    for (let i = 0; i < PROBE_CATCHUP_MAX_BLOCKS; i++) {
+        const tip = getSharedState.lastBlockNumber
+        if (tip >= claimedHeight) break
+        const tipHash = getSharedState.lastBlockHash
+        const next = await fetchBlockAt(peer, tip + 1)
+        if (!next) break
 
-    if (next.content?.previousHash !== headHash) {
-        const [ours, theirs] = await Promise.all([
-            Chain.getBlockByNumber(head),
-            fetchBlockAt(peer, head),
-        ])
-        if (!ours || !theirs) return "none"
-        return (await checkConflictingBlock(ours, theirs, peer.identity))
-            ? "conflict"
-            : "none"
-    }
+        if (next.content?.previousHash !== tipHash) {
+            if (verifiedUpTo > head) break
+            const [ours, theirs] = await Promise.all([
+                Chain.getBlockByNumber(tip),
+                fetchBlockAt(peer, tip),
+            ])
+            if (!ours || !theirs) return "none"
+            return (await checkConflictingBlock(ours, theirs, peer.identity))
+                ? "conflict"
+                : "none"
+        }
 
-    const verdict = await verifyBlock(next as never)
-    if (!verdict.valid) {
-        log.warning(
-            `[committedBlock] Peer ${peer.identity} claims height ${claimedHeight} but its block ${head + 1} does not verify: ${verdict.reason}`,
-        )
-        return "none"
-    }
+        const verdict = await verifyBlock(next as never)
+        if (!verdict.valid) {
+            log.warning(
+                `[committedBlock] Peer ${peer.identity} claims height ${claimedHeight} but its block ${tip + 1} does not verify: ${verdict.reason}`,
+            )
+            break
+        }
 
-    creditVerifiedHeight(peer, claimedHeight)
-    log.info(
-        `[committedBlock] Peer ${peer.identity} is ahead: block ${head + 1} verified with quorum, crediting its height ${claimedHeight}`,
-    )
-
-    // Taken now rather than on the next sync pass: if our own round for this
-    // height is live, a later pass may come after it has built a second block
-    const release = await syncLock.acquire()
-    try {
-        const outcome = await adoptCommittedBlock(next, peer)
+        // Only what was verified counts: a claimed height alone would let any
+        // staked peer veto our forging through the network-ahead check
+        verifiedUpTo = tip + 1
+        creditVerifiedHeight(peer, verifiedUpTo)
         log.info(
-            `[committedBlock] Block ${head + 1} ${next.hash} from ${peer.identity}: ${outcome}`,
+            `[committedBlock] Peer ${peer.identity} is ahead: block ${verifiedUpTo} verified with quorum (claims ${claimedHeight})`,
         )
-    } finally {
-        release()
+
+        // Taken now rather than on the next sync pass: if our own round for
+        // this height is live, a later pass may come after it has built a
+        // second block
+        const release = await syncLock.acquire()
+        let outcome: AdoptOutcome | "left-to-sync"
+        try {
+            outcome = getSharedState.inSyncLoop
+                ? "left-to-sync"
+                : await adoptCommittedBlock(next, peer)
+        } finally {
+            release()
+        }
+        log.info(
+            `[committedBlock] Block ${verifiedUpTo} ${next.hash} from ${peer.identity}: ${outcome}`,
+        )
+        if (outcome !== "adopted") break
     }
-    return "credited"
+    return verifiedUpTo > head ? "credited" : "none"
 }

@@ -11,11 +11,15 @@ const state = {
     lastBlockNumber: 5,
     lastBlockHash: "h5",
     publicKeyHex: "self",
+    inSyncLoop: false,
+    fastSyncCount: 1,
 }
 let chain: Record<number, any> = {}
 let verdicts: Record<string, { valid: boolean; reason?: string }> = {}
 const synced: string[] = []
 let syncOk = true
+// Sources whose block bodies make syncBlock throw, as verifyBlockAttrs does
+let throwingSources = new Set<string>()
 const conflicts = jest.fn()
 const credited: Array<[string, number]> = []
 let knownPeers: Record<string, any> = {}
@@ -41,7 +45,10 @@ jest.mock("src/libs/blockchain/validation/verifyBlock", () => ({
 jest.mock("src/libs/blockchain/routines/Sync", () => ({
     syncLock: { acquire: async () => () => undefined },
     // Like the real one: verify, then insert
-    syncBlock: async (b: any) => {
+    syncBlock: async (b: any, p: any) => {
+        if (throwingSources.has(p?.identity)) {
+            throw new Error(`transactions of ${b.hash} missing from ${p.identity}`)
+        }
         if (!syncOk || !verdicts[b.hash]?.valid) return false
         synced.push(b.hash)
         chain[b.number] = b
@@ -111,6 +118,9 @@ beforeEach(() => {
     verdicts = { x6: { valid: true }, y6: { valid: true } }
     synced.length = 0
     syncOk = true
+    throwingSources = new Set()
+    state.inSyncLoop = false
+    state.fastSyncCount = 1
     conflicts.mockClear()
     credited.length = 0
     knownPeers = {}
@@ -195,6 +205,33 @@ describe("adopting a committed block", () => {
         expect(synced).toEqual([])
     })
 
+    it("rejects a source whose bodies make the apply throw, without throwing itself", async () => {
+        throwingSources = new Set(["a"])
+        expect(await adoptCommittedBlock(x6, peer("a", []))).toBe("rejected")
+        expect(synced).toEqual([])
+    })
+
+    it("does not apply next to the initial sync, which runs without the lock", async () => {
+        state.inSyncLoop = true
+        state.fastSyncCount = 0
+        expect(await adoptCommittedBlock(x6, peer("a", []))).toBe("rejected")
+        expect(synced).toEqual([])
+    })
+
+    it("does not apply before any sync succeeded, since the next one may start mid-apply", async () => {
+        state.inSyncLoop = false
+        state.fastSyncCount = 0
+        expect(await adoptCommittedBlock(x6, peer("a", []))).toBe("rejected")
+        expect(synced).toEqual([])
+    })
+
+    it("applies under the lock once syncs take it, even while one waits for it", async () => {
+        state.inSyncLoop = true
+        state.fastSyncCount = 3
+        expect(await adoptCommittedBlock(x6, peer("a", []))).toBe("adopted")
+        expect(synced).toEqual(["x6"])
+    })
+
     it("rejects a block on another parent and one that is not next", async () => {
         expect(await adoptCommittedBlock(block(6, "z6", "other"), peer("a", []))).toBe(
             "rejected",
@@ -241,6 +278,27 @@ describe("check before retry", () => {
         expect(synced).toEqual(["y6"])
     })
 
+    it("moves on to the next source when one throws mid-apply", async () => {
+        throwingSources = new Set(["a"])
+        const ok = await adoptBlockFromPeers(
+            6,
+            [peer("a", [x6]), peer("b", [x6])],
+            "test",
+        )
+        expect(ok).toBe(true)
+        expect(synced).toEqual(["x6"])
+    })
+
+    it("reports no block when every source throws", async () => {
+        throwingSources = new Set(["a", "b"])
+        const ok = await adoptBlockFromPeers(
+            6,
+            [peer("a", [x6]), peer("b", [x6])],
+            "test",
+        )
+        expect(ok).toBe(false)
+    })
+
     it("is not held up by an unreachable member", async () => {
         const started = Date.now()
         const ok = await adoptBlockFromPeers(
@@ -255,12 +313,29 @@ describe("check before retry", () => {
 })
 
 describe("peers reporting heights", () => {
-    it("credits a peer ahead once it serves a verified child of our head", async () => {
+    it("credits and adopts only verified blocks, never the bare claimed height", async () => {
         const ahead = peer("a", [b5, x6, block(7, "x7", "x6")])
-        expect(await probePeerHeight(ahead, 7)).toBe("credited")
-        expect(credited).toEqual([["a", 7]])
-        // the verified child is adopted at once, not left to a later sync pass
+        verdicts.x7 = { valid: true }
+        expect(await probePeerHeight(ahead, 1_000_000)).toBe("credited")
+        expect(credited).toEqual([
+            ["a", 6],
+            ["a", 7],
+        ])
+        expect(synced).toEqual(["x6", "x7"])
+    })
+
+    it("stops at the first block that does not verify, keeping what was verified", async () => {
+        const ahead = peer("a", [b5, x6, block(7, "x7", "x6")])
+        expect(await probePeerHeight(ahead, 9)).toBe("credited")
+        expect(credited).toEqual([["a", 6]])
         expect(synced).toEqual(["x6"])
+    })
+
+    it("leaves the block to a running sync instead of applying it alongside", async () => {
+        state.inSyncLoop = true
+        expect(await probePeerHeight(peer("a", [b5, x6]), 6)).toBe("credited")
+        expect(credited).toEqual([["a", 6]])
+        expect(synced).toEqual([])
     })
 
     it("does not credit a claim whose next block does not verify", async () => {

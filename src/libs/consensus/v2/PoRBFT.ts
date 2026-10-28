@@ -172,7 +172,9 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         markStep("consensus", "checkBeforeRetry")
-        if (await adoptBeforeRetry(blockRef)) {
+        if (
+            await adoptionSucceeded(blockRef, () => adoptBeforeRetry(blockRef))
+        ) {
             log.warn(
                 `[consensusRoutine] Block ${blockRef} was committed by a member of the failed round; adopted it instead of retrying`,
             )
@@ -304,20 +306,9 @@ export async function consensusRoutine(): Promise<void> {
         // Checked before our own tally: even with a quorum for our block, a
         // member holding a certified block at this height means ours would be
         // the second one.
-        if (committed.length > 0) {
-            markStep("consensus", "adoptCommittedBlock")
-            const adopted = await adoptBlockFromPeers(
-                blockRef,
-                committed.map(c => c.peer),
-                "proposeBlockHash",
-            )
-            if (adopted) {
-                throw new ForgingEndedError(
-                    `[consensusRoutine] Block ${blockRef} was already committed by a shard member; adopted it`,
-                )
-            }
-            log.error(
-                `[consensusRoutine] ${committed.length} member(s) report block ${blockRef} committed, but none served a block that verifies`,
+        if (await adoptReportedCommit(blockRef, committed)) {
+            throw new ForgingEndedError(
+                `[consensusRoutine] Block ${blockRef} was already committed by a shard member; adopted it`,
             )
         }
 
@@ -1038,6 +1029,52 @@ async function voteOnBlock(
     )
 
     return [pro, con, committed]
+}
+
+/**
+ * A failed attempt to take a peer's block only means we do not have it: the
+ * round's catch treats unknown errors as fatal and exits the process, which
+ * a peer serving a certified header and then dropping must not cause.
+ */
+async function adoptionSucceeded(
+    blockRef: number,
+    adopt: () => Promise<boolean>,
+): Promise<boolean> {
+    try {
+        return await adopt()
+    } catch (e) {
+        log.error(
+            `[consensusRoutine] Taking a member's block ${blockRef} failed, deciding on our own round: ${e instanceof Error ? e.message : String(e)}`,
+        )
+        return false
+    }
+}
+
+/**
+ * Members that answered our proposal with a block they already committed:
+ * true once we hold one of those blocks, so the round must end without
+ * committing its own. Otherwise our own tally decides, and those members
+ * already counted against it.
+ */
+export async function adoptReportedCommit(
+    blockRef: number,
+    committed: CommittedReport[],
+): Promise<boolean> {
+    if (committed.length === 0) return false
+    markStep("consensus", "adoptCommittedBlock")
+    const adopted = await adoptionSucceeded(blockRef, () =>
+        adoptBlockFromPeers(
+            blockRef,
+            committed.map(c => c.peer),
+            "proposeBlockHash",
+        ),
+    )
+    if (!adopted) {
+        log.error(
+            `[consensusRoutine] ${committed.length} member(s) report block ${blockRef} committed, but none served a block that verifies`,
+        )
+    }
+    return adopted
 }
 
 /**

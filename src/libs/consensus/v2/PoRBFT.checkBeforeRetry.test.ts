@@ -4,10 +4,11 @@
  * anything: a fresh round at that height would build a different block.
  */
 
-import { afterEach, describe, expect, it, mock } from "bun:test"
+import { afterAll, afterEach, describe, expect, it, mock, spyOn } from "bun:test"
 
 const reached: string[] = []
 let adoptAnswer = false
+let adoptThrows = false
 let shardError: () => Error = () => new Error("unset")
 const recorded: Array<[number, string[]]> = []
 
@@ -30,6 +31,7 @@ mock.module("./routines/committedBlock", () => ({
     ...realCommitted,
     adoptBeforeRetry: async (height: number) => {
         reached.push(`adoptBeforeRetry:${height}`)
+        if (adoptThrows) throw new Error("block 6 bodies missing from a")
         return adoptAnswer
     },
     recordFailedRound: (height: number, members: string[]) => {
@@ -47,10 +49,17 @@ mock.module("./routines/getCommonValidatorSeed", () => ({
 const { getSharedState } = await import("src/utilities/sharedState")
 const { consensusRoutine } = await import("./PoRBFT")
 
+const exitSpy = spyOn(process, "exit").mockImplementation((() => {
+    reached.push("process.exit")
+    throw new Error("process.exit called")
+}) as never)
+afterAll(() => exitSpy.mockRestore())
+
 afterEach(() => {
     reached.length = 0
     recorded.length = 0
     adoptAnswer = false
+    adoptThrows = false
     getSharedState.inConsensusLoop = false
 })
 
@@ -80,5 +89,13 @@ describe("check before retry", () => {
         const height = getSharedState.lastBlockNumber + 1
         await consensusRoutine()
         expect(recorded.map(([h]) => h)).toEqual([height])
+    }, 30000)
+
+    it("goes on with its own round, without exiting, when taking the block throws", async () => {
+        adoptThrows = true
+        shardError = () => new ForgingEndedError("stop here")
+        await consensusRoutine()
+        expect(reached.at(-1)).toBe("initializeShard")
+        expect(reached).not.toContain("process.exit")
     }, 30000)
 })
