@@ -681,7 +681,12 @@ async function main() {
 
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
     try {
-        acquireIdentityLock(getSharedState.identityFile)
+        await acquireIdentityLock(getSharedState.identityFile, {
+            onLost: reason => {
+                log.error(`[IDENTITY] ${reason}`)
+                void gracefulShutdown("identity_lock_lost", 1)
+            },
+        })
     } catch (error) {
         log.error(
             `[IDENTITY] ${error instanceof Error ? error.message : String(error)}`,

@@ -88,7 +88,7 @@ export function loadSigningRecord(identityFile: string): SigningRecord | null {
 // Container entrypoints bridge this file into a persistent volume with a
 // symlink; renaming over the link would replace it with a plain file that
 // disappears with the container, so the write goes to the link's target.
-function resolveWriteTarget(file: string): string {
+export function resolveWriteTarget(file: string): string {
     let current = file
     for (let hops = 0; hops < 8; hops++) {
         let target: string
