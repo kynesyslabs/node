@@ -1,6 +1,6 @@
 # Commit lock: one certified block per height
 
-Status: proposed, behind the `commitLock` fork (dormant until a height is set).
+Status: implemented behind the `commitLock` fork (dormant until a height is set).
 
 ## Problem
 
@@ -120,6 +120,68 @@ only stall is the inherent one: fewer than q committee members online.
   equivocation counter for two precommits by one key at one height.
 
 Before the fork height nothing changes, so testnet history still verifies.
+
+## Implementation notes
+
+Clarifications made while implementing the design:
+
+- Round. The secretary timestamp as forging starts, captured once per
+  attempt; a later greenlight may raise the manager's timestamp, not the
+  attempt's round. Every member forges with the same secretary timestamp,
+  so the members of one attempt share its round.
+- Wire. proposeBlockHash carries the round as a fifth param, and a member
+  whose candidate is for another round answers 409. precommitBlockHash
+  takes [hash, round, height, POL, precommits] and answers with every
+  precommit the member holds for that block and round, its own included.
+  getLock takes [height]. Both new methods are answered outside the
+  consensus window and never start a round; both check the authenticated
+  sender against the bound committee and cap vote maps at its size; a
+  height already committed is answered with the block (410), as for a
+  proposal.
+- Step 3 gate. Under the fork the producer moves on when its candidate
+  holds a POL (q verified committee prevotes), in place of counting the
+  members that answered 200.
+- Step 4, "X is its own candidate", is narrowed to: X is the block of the
+  member's latest prevote, in that round, and the member has not yet begun
+  choosing the candidate of its next attempt. The next attempt closes the
+  prevote under the same mutex as the lock decision. Without this a member
+  could prevote X' in r' and afterwards precommit X in an earlier round,
+  and the safety argument relies on an honest member's precommit in r
+  never following its own prevote in a later round. A late precommit
+  request after a failed tally is still served until then, which is what
+  lets the others lock on a block one member already committed.
+- Signing record. Under the fork it records precommits only, keyed by
+  (height, round); its rule (no earlier round, one block per round) agrees
+  with the lock rule, so it is a second guard. Prevotes are not recorded,
+  but are refused while signing is stopped (halt, marker, lease). The
+  own-signature check compares a block's round with the record.
+- Lock store. `<identity>.commitlock.json` next to the real signing record
+  (following its symlink), written with writeFileDurably before the
+  precommit is signed. A lock that exists but cannot be read stops
+  precommits instead of reading as absent.
+- Retry. getLock is asked when this process's previous attempt at H
+  failed, or when its own lock binds H (which covers a restart). A first
+  attempt asks nobody: a member that missed earlier attempts forges fresh,
+  which an unlocked member may, and learns the locks on its next retry.
+- Candidate fallback. Locked on X: blocks with a POL from a round above the
+  lock's, highest first, then X; never a fresh block. If none can be
+  rebuilt, the attempt ends without prevoting. Unlocked: reported blocks
+  by POL round, then a fresh block. A reported POL is kept only if it
+  verifies against the committee. Every set of inputs reported for a block
+  is tried, and the rebuilt block must hash to it before anything is
+  signed. The transactions are fetched from the members that reported the
+  block when missing, admitted through the mempool's own validation, and
+  must pass the same mempool filters unchanged.
+- Certificate. The committed block is a copy of the candidate whose
+  validation data is exactly the round's verified committee precommits and
+  the round; the candidate keeps its prevotes, which inbound proposals may
+  still be merging into.
+- Equivocation. Counted for two precommits by one key at one height in the
+  same round for different blocks. Different blocks in different rounds
+  are what a lock move looks like and are only logged.
+- Activation. A genesis that schedules commitLock without committeeBinding
+  active at or below the same height is refused at boot; fork state set
+  any other way is treated as inactive.
 
 ## Cost
 
