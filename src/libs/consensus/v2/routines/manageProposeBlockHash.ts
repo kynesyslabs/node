@@ -206,6 +206,7 @@ export default async function manageProposeBlockHash(
     let timestampVerdict = checkTimestampAgainstParent(
         candidate.content.timestamp,
         parentBlock?.content?.timestamp,
+        candidate.number,
     )
     if (timestampVerdict.valid) {
         timestampVerdict = checkCosignTimestamp(
