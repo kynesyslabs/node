@@ -11,10 +11,28 @@ import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import { serializeBlockContent } from "@/forks"
 import Chain from "src/libs/blockchain/chain"
 import {
+    assertSigningAllowed,
     checkBlockSignature,
     recordBlockSignature,
     SigningRecordError,
 } from "src/libs/identity/signingRecord"
+import {
+    commitLockActive,
+    isRound,
+    prevoteMessage,
+} from "../commitLock/domain"
+import { CommitLockError } from "../commitLock/lockStore"
+import { recordPrevote } from "../commitLock/roundState"
+
+export interface CandidateOptions {
+    /** The attempt's round; required under commitLock, where it is signed. */
+    round?: number
+    /**
+     * The hash a rebuilt locked or proof-of-lock block must reproduce. A
+     * different hash is refused before anything is signed.
+     */
+    expectedHash?: string
+}
 
 export async function resolveBlockTimestamp(
     secretaryTimestamp: number,
@@ -46,6 +64,7 @@ export async function createBlock(
     blockNumber: number,
     peerlist: string[],
     blockTimestamp: number,
+    options: CandidateOptions = {},
 ): Promise<Block> {
     if (getSharedState.candidateBlock) {
         log.warning(
@@ -82,6 +101,10 @@ export async function createBlock(
             "genesis block hash is not loaded; refusing to sign",
         )
     }
+
+    if (commitLockActive(blockNumber)) {
+        return await prevoteCandidate(block, options)
+    }
     const round = {
         genesisHash,
         height: blockNumber,
@@ -117,6 +140,59 @@ export async function createBlock(
     log.debug(`nextProposer: ${nextProposer}`)
     block.next_proposer = nextProposer
     // Add the candidate to the shared state
+    getSharedState.candidateBlock = block
+    return block
+}
+
+/**
+ * Under commitLock the candidate carries our prevote, bound to the height
+ * and round. Prevotes are not kept in the signing record: only a precommit
+ * can sit in a certificate, and the commit lock decides what this member
+ * prevotes. Signing still stops when the key may run elsewhere.
+ */
+async function prevoteCandidate(
+    block: Block,
+    options: CandidateOptions,
+): Promise<Block> {
+    const { round, expectedHash } = options
+    if (!isRound(round)) {
+        throw new CommitLockError(
+            `no round for the prevote on block ${block.number}; refusing to sign`,
+        )
+    }
+    if (expectedHash !== undefined && expectedHash !== block.hash) {
+        throw new CommitLockError(
+            `rebuilt block ${block.number} hashes to ${block.hash}, not the locked ${expectedHash}; refusing to sign`,
+        )
+    }
+    assertSigningAllowed(getSharedState.identityFile)
+
+    const prevote = await TxValidatorPool.getInstance().sign(
+        getSharedState.signingAlgorithm,
+        new TextEncoder().encode(prevoteMessage(block.number, round, block.hash)),
+    )
+    block.validation_data = {
+        signatures: {
+            [getSharedState.publicKeyHex]: uint8ArrayToHex(prevote.signature),
+        },
+        round,
+    }
+    recordPrevote({
+        height: block.number,
+        round,
+        hash: block.hash,
+        inputs: {
+            previousHash: block.content.previousHash,
+            orderedTransactions: [...block.content.ordered_transactions],
+            peerlist: [...(block.content.peerlist as unknown as string[])],
+            timestamp: block.content.timestamp,
+        },
+    })
+
+    const { commonValidatorSeed: nextProposer } = await getCommonValidatorSeed(
+        block as any,
+    )
+    block.next_proposer = nextProposer
     getSharedState.candidateBlock = block
     return block
 }

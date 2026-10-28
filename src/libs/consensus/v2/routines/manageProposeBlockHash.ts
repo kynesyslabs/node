@@ -14,6 +14,7 @@ import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
 import { isForkActive } from "@/forks/forkGates"
+import { commitLockActive, voteMessageOf } from "../commitLock/domain"
 
 function getIncomingSignatures(
     validationData: ValidationData,
@@ -35,6 +36,8 @@ async function mergeIncomingSignatures(
     signerSet: string,
 ): Promise<void> {
     const candidateBlock = getSharedState.candidateBlock
+    // Under commitLock the signatures are prevotes of the candidate's round
+    const signedMessage = voteMessageOf(candidateBlock) ?? candidateBlock.hash
     for (const [identity, signature] of Object.entries(incomingSignatures)) {
         // verifyBlock ignores signers outside the pool, so keeping them
         // would only bloat the block and cost a verification.
@@ -49,7 +52,7 @@ async function mergeIncomingSignatures(
         try {
             isValid = await TxValidatorPool.getInstance().verify({
                 algorithm: getSharedState.signingAlgorithm,
-                message: new TextEncoder().encode(candidateBlock.hash),
+                message: new TextEncoder().encode(signedMessage),
                 signature: hexToUint8Array(signature),
                 publicKey: hexToUint8Array(identity),
             })
@@ -152,6 +155,7 @@ export default async function manageProposeBlockHash(
     blockHash: string,
     validationData: ValidationData,
     peerId: string,
+    round?: unknown,
 ): Promise<RPCResponse> {
     log.debug("Received manageProposeBlockHash, block hash: " + blockHash)
     const response = _.cloneDeep(emptyResponse)
@@ -216,6 +220,30 @@ export default async function manageProposeBlockHash(
             reason: timestampVerdict.reason,
         }
         return response
+    }
+
+    // Prevotes of another round cannot verify against ours, and agreeing
+    // on the hash alone would answer with prevotes the proposer cannot use.
+    if (commitLockActive(candidate.number)) {
+        const ourRound = candidate.validation_data?.round
+        if (voteMessageOf(candidate) === null) {
+            response.result = 500
+            response.response = getSharedState.publicKeyHex
+            response.extra = "Candidate block carries no round"
+            return response
+        }
+        if (round !== undefined && round !== ourRound) {
+            log.warning(
+                `[manageProposeBlockHash] Proposal from ${peerId} is for round ${String(round)}, ours is ${ourRound}`,
+            )
+            response.result = 409
+            response.response = getSharedState.publicKeyHex
+            response.extra = {
+                message: "Proposal is for another round",
+                round: ourRound,
+            }
+            return response
+        }
     }
 
     const ourCandidateHash = candidate.hash

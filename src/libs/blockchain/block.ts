@@ -23,7 +23,9 @@ export default class Block implements BlockType {
     status: "derived" | "confirmed"
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
     next_proposer: string
-    validation_data: { signatures: { [key: string]: string } }
+    // round: the commitLock round whose votes the signatures are; absent
+    // before the fork.
+    validation_data: { signatures: { [key: string]: string }; round?: number }
     attrs: Record<string, any> | null
 
     constructor() {
