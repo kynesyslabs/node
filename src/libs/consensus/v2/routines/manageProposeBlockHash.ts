@@ -32,6 +32,7 @@ function getIncomingSignatures(
 async function mergeIncomingSignatures(
     incomingSignatures: Record<string, string>,
     poolIdentities: Set<string>,
+    signerSet: string,
 ): Promise<void> {
     const candidateBlock = getSharedState.candidateBlock
     for (const [identity, signature] of Object.entries(incomingSignatures)) {
@@ -39,7 +40,7 @@ async function mergeIncomingSignatures(
         // would only bloat the block and cost a verification.
         if (!poolIdentities.has(identity)) {
             log.error(
-                `[manageProposeBlockHash] Dropping signature by ${identity}: not in the eligible pool`,
+                `[manageProposeBlockHash] Dropping signature by ${identity}: not in the ${signerSet}`,
             )
             continue
         }
@@ -205,7 +206,11 @@ export default async function manageProposeBlockHash(
             return response
         }
 
-        await mergeIncomingSignatures(incomingSignatures, new Set(pool))
+        await mergeIncomingSignatures(
+            incomingSignatures,
+            new Set(pool),
+            bound ? "bound committee" : "eligible pool",
+        )
 
         response.extra = getSharedState.candidateBlock.validation_data
         return response
