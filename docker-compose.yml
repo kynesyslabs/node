@@ -181,7 +181,9 @@ services:
       # prometheus.yml scrape target (node:9090) stays valid. Use
       # METRICS_HOST_PORT in the ports stanza to remap on the host.
       METRICS_PORT: 9090
-      METRICS_HOST: ${METRICS_HOST:-0.0.0.0}
+      # Container-internal bind, pinned like METRICS_PORT. Host exposure is
+      # decided by METRICS_BIND in the ports stanza, not by this value.
+      METRICS_HOST: 0.0.0.0
       # TLSNotary — service name from this compose. The port matches the
       # notary's NS_PORT (and its 1:1 host mapping), so the value the node
       # advertises on the tlsn endpoints is dialable from outside.
@@ -368,7 +370,8 @@ services:
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
       - --web.console.libraries=/etc/prometheus/console_libraries
       - --web.console.templates=/etc/prometheus/consoles
-      - --web.enable-lifecycle
+      # --web.enable-lifecycle removed: it lets any HTTP caller POST
+      # /-/quit or /-/reload. Reload rules with SIGHUP instead.
       # NOTE — sub-path serving behind Caddy (Epic 12 T11):
       # The Caddyfile uses `handle_path /prometheus/*` which strips the
       # prefix before forwarding here, so Prom can stay at root with
@@ -382,9 +385,12 @@ services:
       # docs/runbooks/proxy-setup.md §"Prometheus sub-path caveats".
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # rule_files: alerts/*.yml in prometheus.yml resolves here; without
+      # this mount HeightStalled / NodeDown are never evaluated.
+      - ./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus_data:/prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9091}:9090"
+      - "${MONITORING_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9091}:9090"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
       interval: 30s
@@ -448,7 +454,7 @@ services:
       - ./monitoring/grafana/branding/demos-icon.svg:/usr/share/grafana/public/img/demos-icon.svg:ro
       - ./monitoring/grafana/branding/favicon.png:/usr/share/grafana/public/img/favicon.png:ro
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${MONITORING_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1"]
       interval: 30s
@@ -478,7 +484,7 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
     ports:
-      - "${NODE_EXPORTER_PORT:-9100}:9100"
+      - "${MONITORING_BIND:-127.0.0.1}:${NODE_EXPORTER_PORT:-9100}:9100"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9100/metrics"]
       interval: 30s
