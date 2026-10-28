@@ -70,7 +70,9 @@ signature at one height or round from counting at another.
 
 Lock rule: a member locked on X with POL round p precommits only X. It may
 move its lock to X' only on seeing POL(X', r') with r' > p. Prevotes are not
-restricted by the signing record beyond what step 1 decides.
+restricted by the signing record beyond what step 1 decides, but a member
+never prevotes or precommits in a round lower than one it already prevoted
+in (see Prevote record under Implementation notes).
 
 ### Retry
 
@@ -152,9 +154,21 @@ Clarifications made while implementing the design:
   lets the others lock on a block one member already committed.
 - Signing record. Under the fork it records precommits only, keyed by
   (height, round); its rule (no earlier round, one block per round) agrees
-  with the lock rule, so it is a second guard. Prevotes are not recorded,
-  but are refused while signing is stopped (halt, marker, lease). The
-  own-signature check compares a block's round with the record.
+  with the lock rule, so it is a second guard. The own-signature check
+  compares a block's round with the record.
+- Prevote record. A member never acts in a round lower than one it already
+  acted in. Without this a secretary could gather prevotes for Y in round
+  r2 and hide them, drive a lower round r1 < r2 to a certificate for X,
+  and on the retry the hidden proof of lock from r2 would outrank the
+  locks on X from r1 and certify Y too. The latest prevote (height, round,
+  block) is written durably to `<identity>.prevote.json`, next to the
+  lock, before the prevote is signed, under the lock mutex. A prevote in a
+  lower round or height, or for another block in the same round, is
+  refused, and so is a precommit in a round below the recorded prevote.
+  An unreadable record refuses both. Prevotes are also refused while
+  signing is stopped (halt, marker, lease). Honest retries carry later
+  secretary timestamps, so their rounds rise anyway; a member asked to
+  vote in a lower round sits that round out.
 - Lock store. `<identity>.commitlock.json` next to the real signing record
   (following its symlink), written with writeFileDurably before the
   precommit is signed. A lock that exists but cannot be read stops
@@ -188,7 +202,8 @@ Clarifications made while implementing the design:
   was lost after a precommit; the member refuses to precommit at H instead
   of reading as unlocked.
 - Precommit exchange. It returns as soon as the book holds q precommits for
-  the block; the other sends finish in the background, and a member marked
+  the block, whether they came back from our sends or arrived in the other
+  members' own requests; the other sends finish in the background, and a member marked
   offline gets one attempt, so a dead member does not delay each block.
   getLock still waits for every reply (one attempt, 3 s at most): a
   missing report can change the candidate, and it runs only on retries.
