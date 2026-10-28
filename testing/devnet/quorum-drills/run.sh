@@ -541,11 +541,17 @@ scenario_partition() {
     local fork=no; [ -n "${conflicts}" ] && fork=yes
     say "heights ${h0}..${hmax_all}: fork=${fork}${conflicts:+ at${conflicts}}; final heads $(heads_line)"
     grep_logs '\[FORK\]' | head -3 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
-    DETAIL="split@${h0} A=${a_max} B=${b_max} fork=${fork}${conflicts:+(${conflicts# })} converged=$([ "${hmin}" -ge "$((top + 2))" ] && echo yes || echo no)"
+    # One chain: every node past the split's top, holding one hash at the lowest head
+    local converged=no
+    if [ "${hmin}" -ge "$((top + 2))" ] &&
+        [ "$(for i in $(running); do hash_at "${i}" "${hmin}"; done | grep . | sort -u | wc -l)" = 1 ]; then
+        converged=yes
+    fi
+    DETAIL="split@${h0} A=${a_max} B=${b_max} fork=${fork}${conflicts:+(${conflicts# })} converged=${converged}"
     if [ "${BINDING}" = on ]; then
         # No conflicting blocks, at most one side forged, and one chain after
         if [ "${fork}" = no ] && { [ "${a_max}" -le $((h0 + 1)) ] || [ "${b_max}" -le $((h0 + 1)) ]; } &&
-            [ "${hmin}" -ge "$((top + 2))" ]; then RESULT=PASS; fi
+            [ "${converged}" = yes ]; then RESULT=PASS; fi
     else
         # Pre-fork rule: both sides are expected to finalize their own block
         [ "${fork}" = yes ] && RESULT=PASS
