@@ -83,7 +83,10 @@ blocks, mean and longest gap between block timestamps, outcome),
 
 ## Notes
 
-- Gossip is off (`GOSSIP_ENABLED=false`), as in the race harness.
+- Gossip is off by default, as in the race harness; `GOSSIP_ENABLED=true`
+  turns it on. With gossip off, a node learns that a peer is ahead only
+  from that peer's block push: a sync claim above our own height is
+  discarded until it can be checked.
 - Validators are stopped with `docker compose stop -t 0` right after a
   round start is logged, so the restart policy leaves them down.
 - Round times come from block timestamps, so they show the chain's own

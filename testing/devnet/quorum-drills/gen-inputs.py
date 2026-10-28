@@ -83,8 +83,10 @@ node_env = {
     "CONSENSUS_TIME": str(a.consensus_time),
     "OMNI_MODE": "HTTP_ONLY",
     "TLSNOTARY_ENABLED": "false",
-    # The gossip sidecar needs a node runtime the Bun-only image lacks
-    "GOSSIP_ENABLED": "false",
+    # Off by default, as in the race harness: the sidecar's node runtime in
+    # the image is Bun's fallback wrapper. GOSSIP_ENABLED=true runs the
+    # production default, where heights ahead of ours arrive as gossip.
+    "GOSSIP_ENABLED": "true" if os.environ.get("GOSSIP_ENABLED") == "true" else "false",
     "IDENTITY_FILE": "/app/state/node.identity",
 }
 
