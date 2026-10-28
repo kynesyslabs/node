@@ -94,7 +94,7 @@ jest.mock("src/libs/blockchain/gcr/gcr", () => ({
 }))
 
 const { verifyBlock } = await import("src/libs/blockchain/validation/verifyBlock")
-const { committeeCommitShortfall } = await import("./committeeCommit")
+const { committeeCommitShortfall, producerCommitRefusal } = await import("./committeeCommit")
 const { getBoundCommittee, __resetValidatorCache: resetPoolCache } = await import("./getShard")
 const validatorPool = (
     await import("src/libs/blockchain/validation/txValidatorPool")
@@ -193,5 +193,23 @@ describe("committeeCommitShortfall", () => {
             const accepted = (await verifyBlock(block)).valid
             expect({ mask, commits }).toEqual({ mask, commits: accepted })
         }
+    })
+})
+
+describe("producerCommitRefusal", () => {
+    it("lets the vote tally decide before the fork, without checking signatures", async () => {
+        expect(await producerCommitRefusal(makeBlock("a"), null, 4)).toBeNull()
+    })
+
+    it("returns the abort reason when the committee signatures fall short", async () => {
+        const block = await signedBy(makeBlock("a"), [...committeeSigners.slice(0, 2), ...outsiders])
+        expect(await producerCommitRefusal(block, committee, 4)).toBe(
+            "Not committing: block 10 carries 2 verified signatures of its bound committee of 4, below the 3 sync requires",
+        )
+    })
+
+    it("lets the commit proceed with a quorum of committee signatures", async () => {
+        const block = await signedBy(makeBlock("a"), committeeSigners.slice(0, 3))
+        expect(await producerCommitRefusal(block, committee, 4)).toBeNull()
     })
 })

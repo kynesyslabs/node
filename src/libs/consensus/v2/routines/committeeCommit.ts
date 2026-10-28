@@ -31,3 +31,18 @@ export async function committeeCommitShortfall(
         `committee of ${committee.length}, below the ${needed} sync requires`
     )
 }
+
+/**
+ * The producer's commit gate: the reason to abort instead of committing
+ * `block`, or null to proceed. `committee` is the round's bound committee,
+ * null before committeeBinding, when the vote tally alone decides.
+ */
+export async function producerCommitRefusal(
+    block: SignedBlock,
+    committee: string[] | null,
+    shardSize: number,
+): Promise<string | null> {
+    if (!committee) return null
+    const shortfall = await committeeCommitShortfall(block, committee, shardSize)
+    return shortfall ? `Not committing: ${shortfall}` : null
+}

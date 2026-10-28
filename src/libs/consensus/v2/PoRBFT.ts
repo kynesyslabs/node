@@ -10,7 +10,7 @@ import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
 import { getCommitteeFloor, getEligiblePool } from "./routines/getShard"
 import { producerCommits } from "./quorum"
-import { committeeCommitShortfall } from "./routines/committeeCommit"
+import { producerCommitRefusal } from "./routines/committeeCommit"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, {
@@ -294,17 +294,13 @@ export async function consensusRoutine(): Promise<void> {
 
         // Check if the block is valid
         if (isBlockValid(pro, committeeSize)) {
-            if (committee) {
-                const shortfall = await committeeCommitShortfall(
-                    block,
-                    committee,
-                    getSharedState.shardSize,
-                )
-                if (shortfall) {
-                    throw new AbortConsensusError(
-                        `Not committing: ${shortfall}`,
-                    )
-                }
+            const refusal = await producerCommitRefusal(
+                block,
+                committee,
+                getSharedState.shardSize,
+            )
+            if (refusal) {
+                throw new AbortConsensusError(refusal)
             }
 
             markStep("consensus", "syncLock.acquire")
