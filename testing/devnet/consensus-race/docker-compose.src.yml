@@ -1,5 +1,6 @@
-# Override: run the image with a source tree's src/ mounted read-only over
-# the image's /app/src, to test code changes without rebuilding the image.
+# Override: run the image with a source tree's src/, and the bunfig.toml that
+# preloads modules from it, mounted read-only over the image's copies, to
+# test code changes without rebuilding the image.
 # The tree must stay dependency-compatible with the image's node_modules.
 # run.sh adds this file when --src (or SRC_TREE) is given.
 
@@ -7,12 +8,16 @@ services:
   node-1:
     volumes:
       - ${SRC_TREE}/src:/app/src:ro
+      - ${SRC_TREE}/bunfig.toml:/app/bunfig.toml:ro
   node-2:
     volumes:
       - ${SRC_TREE}/src:/app/src:ro
+      - ${SRC_TREE}/bunfig.toml:/app/bunfig.toml:ro
   node-3:
     volumes:
       - ${SRC_TREE}/src:/app/src:ro
+      - ${SRC_TREE}/bunfig.toml:/app/bunfig.toml:ro
   node-4:
     volumes:
       - ${SRC_TREE}/src:/app/src:ro
+      - ${SRC_TREE}/bunfig.toml:/app/bunfig.toml:ro
