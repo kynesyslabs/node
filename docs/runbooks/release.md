@@ -102,13 +102,17 @@ A bare-metal validator (`./run`) checks out the tag instead and verifies it
 locally before starting:
 
 ```bash
-git fetch --tags origin stabilisation && git checkout v1.0.0-rc.1
-git show origin/stabilisation:.github/allowed_signers > /tmp/allowed_signers
-git config gpg.ssh.allowedSignersFile /tmp/allowed_signers
-git merge-base --is-ancestor v1.0.0-rc.1 origin/stabilisation
-git verify-tag v1.0.0-rc.1
+git fetch --tags origin stabilisation &&
+git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers &&
+git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers &&
+git merge-base --is-ancestor v1.0.0-rc.1 origin/stabilisation &&
+git verify-tag v1.0.0-rc.1 &&
+git checkout v1.0.0-rc.1 &&
 ./run
 ```
+
+The chain stops at the first failing check, so `./run` never starts an
+unverified tree. The full walk-through is in `INSTALL.md`.
 
 ## Known limits
 
