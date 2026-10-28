@@ -44,13 +44,40 @@ export class SigningRecordError extends Error {
     }
 }
 
-// Set once evidence shows another process signing with this key. Signing
-// stays refused until restart: whichever copy signs next could be the one
-// that double-signs.
+// Set once evidence shows another process signing with this key: whichever
+// copy signs next could be the one that double-signs.
 let haltReason: string | null = null
 
-/** Refuse every further signature in this process. True on the first call. */
-export function haltSigning(reason: string): boolean {
+/**
+ * Next to the real signing record, so it survives a restart: a crash loop
+ * must not clear the stop while the second copy of the key may still run.
+ */
+export function signingHaltMarkerPath(identityFile: string): string {
+    return `${resolveWriteTarget(signingRecordPath(identityFile))}.halted`
+}
+
+/**
+ * Refuse every further signature in this process, and with an identity file
+ * also after restarts until an operator removes the marker. True on the
+ * first call.
+ */
+export function haltSigning(reason: string, identityFile?: string): boolean {
+    if (identityFile) {
+        const marker = signingHaltMarkerPath(identityFile)
+        try {
+            if (!fs.existsSync(marker)) {
+                fs.writeFileSync(
+                    marker,
+                    JSON.stringify({ reason, at: Date.now() }),
+                    { mode: 0o600 },
+                )
+            }
+        } catch (e) {
+            log.error(
+                `[SIGNING] cannot write signing stop marker ${marker}: ${(e as Error).message}; signing stays stopped until restart only`,
+            )
+        }
+    }
     if (haltReason !== null) return false
     haltReason = reason
     return true
@@ -60,10 +87,41 @@ export function signingHaltReason(): string | null {
     return haltReason
 }
 
+function markerRefusal(identityFile: string): string | null {
+    const marker = signingHaltMarkerPath(identityFile)
+    if (!fs.existsSync(marker)) return null
+    let reason = "reason unknown"
+    try {
+        reason = JSON.parse(fs.readFileSync(marker, "utf8"))?.reason ?? reason
+    } catch {
+        /* the marker's presence is what counts */
+    }
+    return (
+        `signing is stopped by ${marker} (${reason}). ` +
+        "Delete it only after confirming that a single copy of this key runs"
+    )
+}
+
+/** Log at boot when an earlier run stopped signing for good. */
+export function reportSigningHaltMarker(identityFile: string): boolean {
+    const refusal = markerRefusal(identityFile)
+    if (refusal) log.error(`[SIGNING] ${refusal}`)
+    return refusal !== null
+}
+
+// The identity lease, checked when a signature is about to be released.
+let leaseCheck: (() => string | null) | null = null
+
+export function setSigningLeaseCheck(check: (() => string | null) | null): void {
+    leaseCheck = check
+}
+
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export function __resetSigningHalt(): void {
     haltReason = null
     signedHere.clear()
+    cached = null
+    leaseCheck = null
 }
 
 // Block hashes this process recorded, newest last. A retried round replaces
@@ -86,6 +144,44 @@ export function signedByThisProcess(hash: string): boolean {
 
 export function signingRecordPath(identityFile: string): string {
     return `${identityFile}.signed.json`
+}
+
+// The record changes once per signed block but is read for every verified
+// peer block that carries our signature, so readers outside the signing path
+// use a copy refreshed only when the file's mtime moves.
+let cached: {
+    identityFile: string
+    record: SigningRecord | null
+    mtimeMs: number | null
+} | null = null
+
+function recordMtime(identityFile: string): number | null {
+    try {
+        return fs.statSync(signingRecordPath(identityFile)).mtimeMs
+    } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") return null
+        throw new SigningRecordError(
+            `cannot stat signing record ${signingRecordPath(identityFile)}: ${(e as Error).message}`,
+        )
+    }
+}
+
+/** The last record this process loaded or wrote, without touching the disk. */
+export function cachedSigningRecord(identityFile: string): SigningRecord | null {
+    return cached?.identityFile === identityFile ? cached.record : null
+}
+
+/** loadSigningRecord, re-read only when the file changed since last time. */
+export function currentSigningRecord(
+    identityFile: string,
+): SigningRecord | null {
+    const mtimeMs = recordMtime(identityFile)
+    if (cached?.identityFile === identityFile && cached.mtimeMs === mtimeMs) {
+        return cached.record
+    }
+    const record = loadSigningRecord(identityFile)
+    cached = { identityFile, record, mtimeMs }
+    return record
 }
 
 function isValidRecord(value: unknown): value is SigningRecord {
@@ -309,6 +405,8 @@ function evaluate(
     if (haltReason !== null) {
         throw new DoubleSignError(`refusing to sign: ${haltReason}`)
     }
+    const stopped = markerRefusal(identityFile)
+    if (stopped) throw new DoubleSignError(`refusing to sign: ${stopped}`)
     if (
         !request.genesisHash ||
         !Number.isSafeInteger(request.height) ||
@@ -392,6 +490,8 @@ export function recordBlockSignature(
     const file = resolveWriteTarget(signingRecordPath(identityFile))
     const release = acquireRecordLock(file)
     try {
+        const lease = leaseCheck?.()
+        if (lease) throw new DoubleSignError(`refusing to sign: ${lease}`)
         const verdict = evaluate(identityFile, request, policy)
         rememberSigned(request.hash)
         if (verdict.action === "unchanged") return
@@ -400,13 +500,15 @@ export function recordBlockSignature(
                 `[SIGNING] signing record ${signingRecordPath(identityFile)} belongs to another chain (genesis ${verdict.last.genesisHash}, current ${request.genesisHash}); overwriting it`,
             )
         }
-        writeRecordAtomically(file, {
+        const record = {
             genesisHash: request.genesisHash,
             height: request.height,
             timestamp: request.timestamp,
             hash: request.hash,
             signedAt: Date.now(),
-        })
+        }
+        writeRecordAtomically(file, record)
+        cached = { identityFile, record, mtimeMs: recordMtime(identityFile) }
     } finally {
         release()
     }

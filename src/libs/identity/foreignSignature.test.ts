@@ -25,6 +25,7 @@ const {
     checkBlockSignature,
     DoubleSignError,
     recordBlockSignature,
+    signingHaltMarkerPath,
     signingHaltReason,
 } = await import("./signingRecord")
 
@@ -149,6 +150,16 @@ describe("checkOwnSignature", () => {
         expect(() =>
             checkBlockSignature(sharedState.identityFile, round(13, 1030, "dd")),
         ).toThrow(DoubleSignError)
+        expect(fs.existsSync(signingHaltMarkerPath(sharedState.identityFile))).toBe(
+            true,
+        )
+    })
+
+    it("judges history below the known record without reading the file", () => {
+        recordBlockSignature(sharedState.identityFile, round(10, 1000, "aa"))
+        fs.writeFileSync(`${sharedState.identityFile}.signed.json`, "{")
+        expect(checkOwnSignature(block(9, "old", 900)).kind).toBe("ours")
+        expect(warning).not.toHaveBeenCalled()
     })
 
     it("leaves signing alone for blocks this process signed", () => {

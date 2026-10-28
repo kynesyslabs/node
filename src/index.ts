@@ -48,7 +48,10 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
-import { haltSigning } from "./libs/identity/signingRecord"
+import {
+    haltSigning,
+    reportSigningHaltMarker,
+} from "./libs/identity/signingRecord"
 import {
     assertIdentityNotLive,
     IdentityLiveError,
@@ -697,6 +700,8 @@ async function main() {
         )
         process.exit(1)
     }
+    // The node still syncs and serves; only block signing stays refused.
+    reportSigningHaltMarker(getSharedState.identityFile)
     try {
         await TxValidatorPool.getInstance().start()
     } catch (error) {

@@ -2,9 +2,11 @@ import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { getMetricsService } from "src/features/metrics/MetricsService"
 import {
+    cachedSigningRecord,
+    currentSigningRecord,
     haltSigning,
-    loadSigningRecord,
     signedByThisProcess,
+    signingHaltMarkerPath,
     signingRecordPath,
     type SigningRecord,
 } from "./signingRecord"
@@ -81,9 +83,20 @@ function countForeignSignature(): void {
  */
 export function checkOwnSignature(block: SignedBlock): OwnSignatureVerdict {
     const identityFile = getSharedState.identityFile
+    const genesisHash = getSharedState.genesisBlockHash
+    // History below the last known record is the common case on resync;
+    // it needs no disk access.
+    const known = cachedSigningRecord(identityFile)
+    if (
+        known &&
+        known.genesisHash === genesisHash &&
+        block.number < known.height
+    ) {
+        return { kind: "ours" }
+    }
     let record: SigningRecord | null
     try {
-        record = loadSigningRecord(identityFile)
+        record = currentSigningRecord(identityFile)
     } catch (e) {
         // Signing already refuses an unreadable record.
         log.warning(
@@ -94,7 +107,7 @@ export function checkOwnSignature(block: SignedBlock): OwnSignatureVerdict {
     const verdict = judgeOwnSignature(
         block,
         record,
-        getSharedState.genesisBlockHash,
+        genesisHash,
         signedByThisProcess,
     )
     if (verdict.kind === "ambiguous") {
@@ -102,9 +115,10 @@ export function checkOwnSignature(block: SignedBlock): OwnSignatureVerdict {
     } else if (verdict.kind === "foreign") {
         countForeignSignature()
         const reason = `another process is signing with this node's key: ${verdict.reason} (record ${signingRecordPath(identityFile)})`
-        if (haltSigning(reason)) {
+        if (haltSigning(reason, identityFile)) {
             log.error(
-                `[SIGNING] ${reason}. Block signing is stopped until restart: stop every copy of this key and find the second host before starting one again`,
+                `[SIGNING] ${reason}. Block signing is stopped, also across restarts, until ${signingHaltMarkerPath(identityFile)} is deleted: ` +
+                    "stop every copy of this key and find the second host first",
             )
         }
     }

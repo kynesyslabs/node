@@ -16,10 +16,15 @@ jest.mock("src/utilities/logger", () => ({
 
 import {
     __resetSigningHalt,
+    cachedSigningRecord,
     checkBlockSignature,
+    currentSigningRecord,
     DoubleSignError,
     haltSigning,
+    reportSigningHaltMarker,
+    setSigningLeaseCheck,
     signedByThisProcess,
+    signingHaltMarkerPath,
     recordBlockSignature,
     loadSigningRecord,
     SigningRecordError,
@@ -225,6 +230,45 @@ describe("signingRecord", () => {
     describe("halted signing", () => {
         afterEach(() => __resetSigningHalt())
 
+        it("keeps refusing after a restart while the marker exists", () => {
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            haltSigning("key seen elsewhere", identity)
+            expect(fs.existsSync(signingHaltMarkerPath(identity))).toBe(true)
+            // A restart forgets the in-memory stop; the marker does not.
+            __resetSigningHalt()
+            let message = ""
+            try {
+                checkBlockSignature(identity, round(11, 2000, "bb"))
+            } catch (e) {
+                expect(e).toBeInstanceOf(DoubleSignError)
+                message = (e as Error).message
+            }
+            expect(message).toContain(signingHaltMarkerPath(identity))
+            expect(message).toContain("key seen elsewhere")
+            expect(message).toContain("single copy")
+            expect(reportSigningHaltMarker(identity)).toBe(true)
+            fs.rmSync(signingHaltMarkerPath(identity))
+            expect(reportSigningHaltMarker(identity)).toBe(false)
+            expect(() =>
+                guardBlockSignature(identity, round(11, 2000, "bb")),
+            ).not.toThrow()
+        })
+
+        it("puts the marker next to the real record behind a symlink", () => {
+            const state = path.join(dir, "state")
+            fs.mkdirSync(state)
+            fs.symlinkSync(
+                path.join(state, ".demos_identity.signed.json"),
+                signingRecordPath(identity),
+            )
+            haltSigning("x", identity)
+            expect(
+                fs.existsSync(
+                    path.join(state, ".demos_identity.signed.json.halted"),
+                ),
+            ).toBe(true)
+        })
+
         it("refuses every round once halted and names the reason", () => {
             guardBlockSignature(identity, round(10, 1000, "aa"))
             expect(haltSigning("key seen elsewhere")).toBe(true)
@@ -236,6 +280,46 @@ describe("signingRecord", () => {
                 recordBlockSignature(identity, round(11, 2000, "bb")),
             ).toThrow(DoubleSignError)
             expect(loadSigningRecord(identity)?.height).toBe(10)
+        })
+    })
+
+    describe("identity lease at record time", () => {
+        afterEach(() => __resetSigningHalt())
+
+        it("refuses to release a signature when the lease is not ours", () => {
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            setSigningLeaseCheck(() => "identity lock is held by pid 7 on elsewhere")
+            expect(() =>
+                recordBlockSignature(identity, round(11, 2000, "bb")),
+            ).toThrow(/held by pid 7 on elsewhere/)
+            expect(loadSigningRecord(identity)?.height).toBe(10)
+        })
+
+        it("records normally while the lease holds", () => {
+            setSigningLeaseCheck(() => null)
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            expect(loadSigningRecord(identity)?.height).toBe(10)
+        })
+    })
+
+    describe("record cache", () => {
+        afterEach(() => __resetSigningHalt())
+
+        it("is filled by a write and follows changes to the file", () => {
+            __resetSigningHalt()
+            expect(cachedSigningRecord(identity)).toBeNull()
+            guardBlockSignature(identity, round(10, 1000, "aa"))
+            expect(cachedSigningRecord(identity)?.height).toBe(10)
+            expect(currentSigningRecord(identity)?.height).toBe(10)
+            const file = signingRecordPath(identity)
+            const changed = {
+                ...JSON.parse(fs.readFileSync(file, "utf8")),
+                height: 12,
+            }
+            fs.writeFileSync(file, JSON.stringify(changed))
+            const later = new Date(Date.now() + 5_000)
+            fs.utimesSync(file, later, later)
+            expect(currentSigningRecord(identity)?.height).toBe(12)
         })
     })
 

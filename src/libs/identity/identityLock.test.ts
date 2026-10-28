@@ -16,6 +16,7 @@ jest.mock("src/utilities/logger", () => ({
 import {
     acquireIdentityLock,
     HEARTBEAT_MS,
+    identityLeaseProblem,
     identityLockHeartbeat,
     IdentityLockError,
     releaseIdentityLock,
@@ -99,13 +100,14 @@ describe("identityLock", () => {
         )
     })
 
-    it("refreshes the heartbeat on each beat", async () => {
+    it("refreshes the heartbeat and bumps the beat counter on each beat", async () => {
         const clock = fakeClock()
         await acquireIdentityLock(identity, { clock })
-        const first = readLock().heartbeat
+        const first = readLock()
         clock.advance(HEARTBEAT_MS)
         identityLockHeartbeat()
-        expect(readLock().heartbeat).toBe(first + HEARTBEAT_MS)
+        expect(readLock().heartbeat).toBe(first.heartbeat + HEARTBEAT_MS)
+        expect(readLock().seq).toBe(first.seq + 1)
     })
 
     describe("lock without a heartbeat on this host", () => {
@@ -211,12 +213,13 @@ describe("identityLock", () => {
             ).rejects.toBeInstanceOf(IdentityLockError)
         })
 
-        it("with takeover, replaces a stale heartbeat without waiting", async () => {
+        it("with takeover, replaces a stale heartbeat after one beat period", async () => {
             const clock = fakeClock()
             foreign(clock.now() - STALE_MS - 1)
             await acquireIdentityLock(identity, { clock, takeover: true })
             expect(readLock().pid).toBe(process.pid)
-            expect(clock.slept).toBe(0)
+            expect(clock.slept).toBeGreaterThan(HEARTBEAT_MS)
+            expect(clock.slept).toBeLessThan(2 * HEARTBEAT_MS)
         })
 
         it("reads takeover from DEMOS_IDENTITY_TAKEOVER", async () => {
@@ -224,7 +227,59 @@ describe("identityLock", () => {
             const clock = fakeClock()
             foreign(clock.now() - STALE_MS - 1)
             await acquireIdentityLock(identity, { clock })
-            expect(clock.slept).toBe(0)
+            expect(clock.slept).toBeLessThan(2 * HEARTBEAT_MS)
+        })
+
+        it("with takeover, still refuses a stale-looking holder that beats (clock behind ours)", async () => {
+            const start = Date.now()
+            let beats = 0
+            const clock = fakeClock(now => {
+                if (now - start >= HEARTBEAT_MS) {
+                    beats += 1
+                    writeLock({
+                        pid: 4242,
+                        hostname: "elsewhere",
+                        instance: "other",
+                        seq: 1 + beats,
+                        heartbeat: start - 10 * STALE_MS,
+                    })
+                }
+            })
+            writeLock({
+                pid: 4242,
+                hostname: "elsewhere",
+                instance: "other",
+                seq: 1,
+                heartbeat: start - 10 * STALE_MS,
+            })
+            await expect(
+                acquireIdentityLock(identity, { clock, takeover: true }),
+            ).rejects.toBeInstanceOf(IdentityLockError)
+        })
+
+        it("counts a beat whose time steps backwards as alive", async () => {
+            const start = Date.now()
+            let n = 1
+            const clock = fakeClock(() => {
+                n += 1
+                writeLock({
+                    pid: 4242,
+                    hostname: "elsewhere",
+                    instance: "other",
+                    seq: n,
+                    heartbeat: start - 1_000 - n * 1_000,
+                })
+            })
+            writeLock({
+                pid: 4242,
+                hostname: "elsewhere",
+                instance: "other",
+                seq: n,
+                heartbeat: start - 1_000,
+            })
+            await expect(
+                acquireIdentityLock(identity, { clock }),
+            ).rejects.toBeInstanceOf(IdentityLockError)
         })
 
         it("with takeover, never replaces a heartbeat that keeps advancing", async () => {
@@ -276,6 +331,24 @@ describe("identityLock", () => {
             expect(fs.existsSync(lockFile)).toBe(false)
         })
 
+        it("keeps running through a short write failure and stops once the lock would look stale", async () => {
+            const onLost = jest.fn()
+            const clock = fakeClock()
+            await acquireIdentityLock(identity, { clock, onLost })
+            // A directory where the beat's temporary file goes makes every
+            // write fail, like a read-only or broken mount.
+            fs.mkdirSync(`${lockFile}.${readLock().instance}.tmp`)
+            clock.advance(HEARTBEAT_MS)
+            identityLockHeartbeat()
+            expect(onLost).not.toHaveBeenCalled()
+            expect(identityLeaseProblem()).toBeNull()
+            clock.advance(STALE_MS)
+            expect(identityLeaseProblem()).toContain("last refreshed")
+            identityLockHeartbeat()
+            expect(onLost).toHaveBeenCalledTimes(1)
+            expect(onLost.mock.calls[0][0]).toContain("cannot refresh")
+        })
+
         it("does nothing after release", async () => {
             const onLost = jest.fn()
             await acquireIdentityLock(identity, {
@@ -285,6 +358,41 @@ describe("identityLock", () => {
             releaseIdentityLock()
             identityLockHeartbeat()
             expect(onLost).not.toHaveBeenCalled()
+        })
+    })
+
+    describe("lease check at signing time", () => {
+        it("passes while the lock names this node", async () => {
+            await acquireIdentityLock(identity, { clock: fakeClock() })
+            expect(identityLeaseProblem()).toBeNull()
+        })
+
+        it("fails as soon as another node replaced the lock, before the next beat", async () => {
+            await acquireIdentityLock(identity, {
+                clock: fakeClock(),
+                onLost: jest.fn(),
+            })
+            writeLock({
+                pid: 4242,
+                hostname: "elsewhere",
+                instance: "intruder",
+                seq: 1,
+                heartbeat: Date.now(),
+            })
+            expect(identityLeaseProblem()).toContain("elsewhere")
+        })
+
+        it("fails after a stall longer than the stale window", async () => {
+            const clock = fakeClock()
+            await acquireIdentityLock(identity, { clock, onLost: jest.fn() })
+            clock.advance(STALE_MS)
+            expect(identityLeaseProblem()).toContain("last refreshed")
+        })
+
+        it("fails once the lock was released", async () => {
+            await acquireIdentityLock(identity, { clock: fakeClock() })
+            releaseIdentityLock()
+            expect(identityLeaseProblem()).not.toBeNull()
         })
     })
 })

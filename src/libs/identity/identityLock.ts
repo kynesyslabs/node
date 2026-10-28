@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import log from "src/utilities/logger"
 import { EnvKey } from "src/config/envKeys"
 import { parseBoolFlag } from "src/config/envFlags"
-import { resolveWriteTarget } from "./signingRecord"
+import { resolveWriteTarget, setSigningLeaseCheck } from "./signingRecord"
 
 export class IdentityLockError extends Error {
     constructor(message: string) {
@@ -24,6 +24,8 @@ interface LockHolder {
     hostname: string
     /** Absent in locks written before the lease existed. */
     instance?: string
+    /** Bumped on every beat; liveness never depends on the holder's clock. */
+    seq?: number
     /** Epoch ms; for a lock without one, the file's mtime. */
     heartbeat: number
 }
@@ -43,6 +45,8 @@ const realClock: LockClock = {
 const instance = randomUUID()
 
 let heldPath: string | null = null
+let seq = 0
+let lastBeatOk = 0
 let clock: LockClock = realClock
 let onLost: (reason: string) => void = defaultOnLost
 let timer: ReturnType<typeof setInterval> | null = null
@@ -85,6 +89,7 @@ function readHolder(lockPath: string): LockHolder | null {
                     typeof parsed.instance === "string"
                         ? parsed.instance
                         : undefined,
+                seq: typeof parsed.seq === "number" ? parsed.seq : undefined,
                 heartbeat:
                     typeof parsed.heartbeat === "number"
                         ? parsed.heartbeat
@@ -95,6 +100,33 @@ function readHolder(lockPath: string): LockHolder | null {
         /* malformed: the caller judges it by file age */
     }
     return null
+}
+
+type Ownership = "ours" | "missing" | "unreadable" | LockHolder
+
+// A read error is not proof of a takeover (a flaky mount recovers), so it is
+// told apart from a missing file or a lock naming someone else.
+function ownership(lockPath: string): Ownership {
+    let raw: string
+    try {
+        raw = fs.readFileSync(lockPath, "utf8")
+    } catch (e) {
+        return (e as NodeJS.ErrnoException).code === "ENOENT"
+            ? "missing"
+            : "unreadable"
+    }
+    try {
+        if (JSON.parse(raw)?.instance === instance) return "ours"
+    } catch {
+        return "unreadable"
+    }
+    return readHolder(lockPath) ?? "unreadable"
+}
+
+function describeOwnership(lockPath: string, own: Exclude<Ownership, "ours">): string {
+    if (own === "missing") return `identity lock ${lockPath} is gone`
+    if (own === "unreadable") return `identity lock ${lockPath} is unreadable`
+    return `identity lock ${lockPath} is held by pid ${own.pid} on ${own.hostname}`
 }
 
 function fileAge(lockPath: string): number | null {
@@ -114,11 +146,12 @@ function pidAlive(pid: number): boolean {
     }
 }
 
-function lockBody(): string {
+function lockBody(beat: number): string {
     return JSON.stringify({
         pid: process.pid,
         hostname: os.hostname(),
         instance,
+        seq: beat,
         heartbeat: clock.now(),
     })
 }
@@ -132,24 +165,37 @@ function tryCreate(lockPath: string): boolean {
         throw e
     }
     try {
-        fs.writeSync(fd, lockBody())
+        fs.writeSync(fd, lockBody(seq + 1))
     } finally {
         fs.closeSync(fd)
     }
+    seq += 1
     return true
 }
 
 // A rename in the same directory replaces the lock in one step, so a reader
-// never sees a half-written heartbeat.
-function rewrite(lockPath: string): void {
+// never sees a half-written heartbeat. Ownership is checked after the slow
+// write, right before the rename. A newcomer can still replace the lock in
+// between (a plain filesystem has no compare-and-swap); the rename then
+// overwrites its lock and the newcomer stops at its own next beat.
+function beat(lockPath: string): Ownership {
+    const next = seq + 1
     const tmp = `${lockPath}.${instance}.tmp`
     try {
-        fs.writeFileSync(tmp, lockBody(), { mode: 0o600 })
+        fs.writeFileSync(tmp, lockBody(next), { mode: 0o600 })
+        const own = ownership(lockPath)
+        if (own !== "ours") {
+            fs.rmSync(tmp, { force: true })
+            return own
+        }
         fs.renameSync(tmp, lockPath)
     } catch (e) {
         fs.rmSync(tmp, { force: true })
         throw e
     }
+    seq = next
+    lastBeatOk = clock.now()
+    return "ours"
 }
 
 function sameHolder(a: LockHolder | null, b: LockHolder): boolean {
@@ -158,17 +204,29 @@ function sameHolder(a: LockHolder | null, b: LockHolder): boolean {
         a.pid === b.pid &&
         a.hostname === b.hostname &&
         a.instance === b.instance &&
+        a.seq === b.seq &&
         a.heartbeat === b.heartbeat
     )
+}
+
+// Delete only the lock that was judged. Between this read and the unlink a
+// newcomer can still slip in (no compare-and-delete on a plain filesystem);
+// its next beat then finds our lock instead of its own and it stops.
+function removeIfStill(lockPath: string, judged: LockHolder): void {
+    if (sameHolder(readHolder(lockPath), judged)) {
+        fs.rmSync(lockPath, { force: true })
+    }
 }
 
 type Observation = "alive" | "stale" | "changed"
 
 /**
- * Watch the holder's heartbeat. Clocks of two hosts sharing a volume can
- * disagree, so the holder's age alone never proves it dead: unless takeover
- * was asked for an already stale lock, it must also fail to beat while we
- * watch. A live holder beats every HEARTBEAT_MS, so two periods are enough.
+ * Watch the holder beat. Clocks of two hosts sharing a volume can disagree,
+ * so the holder's age alone never proves it dead: it must also fail to beat
+ * while we watch. A live holder beats every HEARTBEAT_MS, so two periods are
+ * enough; takeover of an already stale lock shortens that to one period.
+ * Any change of the lock counts as a beat, so a holder whose clock steps
+ * backwards is still seen alive.
  */
 async function observe(
     lockPath: string,
@@ -177,27 +235,26 @@ async function observe(
 ): Promise<Observation> {
     const start = clock.now()
     const age = start - observed.heartbeat
-    if (takeover && age >= STALE_MS) return "stale"
-    const window = Math.min(
-        STALE_MS + HEARTBEAT_MS,
-        Math.max(STALE_MS - age, 2 * HEARTBEAT_MS),
-    )
+    const window =
+        takeover && age >= STALE_MS
+            ? HEARTBEAT_MS + 2 * POLL_MS
+            : Math.min(
+                  STALE_MS + HEARTBEAT_MS,
+                  Math.max(STALE_MS - age, 2 * HEARTBEAT_MS),
+              )
     while (clock.now() - start < window) {
         await clock.sleep(POLL_MS)
         const current = readHolder(lockPath)
         if (!current) return "changed"
-        if (
-            current.instance !== observed.instance ||
-            current.heartbeat > observed.heartbeat
-        ) {
-            return "alive"
-        }
+        if (!sameHolder(current, observed)) return "alive"
     }
     return "stale"
 }
 
 function startHolding(lockPath: string): void {
     heldPath = lockPath
+    lastBeatOk = clock.now()
+    setSigningLeaseCheck(identityLeaseProblem)
     if (!exitHookInstalled) {
         exitHookInstalled = true
         process.on("exit", releaseIdentityLock)
@@ -210,8 +267,9 @@ function startHolding(lockPath: string): void {
 
 export interface AcquireLockOptions {
     /**
-     * Skip the wait for a lock whose heartbeat is already stale; defaults to
-     * DEMOS_IDENTITY_TAKEOVER. A lock that keeps beating is never replaced.
+     * Shorten the watch of a lock whose heartbeat is already stale to one
+     * beat period; defaults to DEMOS_IDENTITY_TAKEOVER. A lock that keeps
+     * beating is never replaced.
      */
     takeover?: boolean
     /** Called when another process replaced our lock while we run. */
@@ -252,7 +310,7 @@ export async function acquireIdentityLock(
                 log.warning(
                     `[IDENTITY] unreadable identity lock ${lockPath}; replacing`,
                 )
-                fs.rmSync(lockPath, { force: true })
+                if (!readHolder(lockPath)) fs.rmSync(lockPath, { force: true })
                 continue
             }
             await clock.sleep(POLL_MS)
@@ -275,7 +333,7 @@ export async function acquireIdentityLock(
             log.warning(
                 `[IDENTITY] stale lock ${lockPath} (pid ${holder.pid} on ${holder.hostname}); replacing`,
             )
-            fs.rmSync(lockPath, { force: true })
+            removeIfStill(lockPath, holder)
             continue
         }
         // Pids are not trusted for a beating lock: containers sharing the
@@ -285,7 +343,7 @@ export async function acquireIdentityLock(
             log.warning(
                 `[IDENTITY] stale lock ${lockPath} (pid ${holder.pid} on ${holder.hostname}, no heartbeat for ${STALE_MS / 1000}s); replacing`,
             )
-            fs.rmSync(lockPath, { force: true })
+            removeIfStill(lockPath, holder)
             continue
         }
 
@@ -305,44 +363,74 @@ export async function acquireIdentityLock(
                     `(heartbeat ${ageSec}s ago, lock: ${lockPath}); two nodes with one key can double-sign, stop the other node first`,
             )
         }
-        // Only remove what was judged: a holder that replaced it meanwhile
-        // is judged on the next pass.
+        // A holder that replaced it meanwhile is judged on the next pass.
         if (!sameHolder(readHolder(lockPath), holder)) continue
         log.warning(
             `[IDENTITY] identity lock ${lockPath} from pid ${holder.pid} on ${holder.hostname} stopped beating; ` +
                 `replacing it${takeover ? ` (${EnvKey.DEMOS_IDENTITY_TAKEOVER})` : ""}. Make sure that node is stopped`,
         )
-        fs.rmSync(lockPath, { force: true })
+        removeIfStill(lockPath, holder)
     }
     throw new IdentityLockError(`could not create ${lockPath}`)
+}
+
+function lose(reason: string): void {
+    stopHeartbeat()
+    heldPath = null
+    onLost(reason)
 }
 
 /**
  * One heartbeat; the timer started by acquireIdentityLock runs it. A lock
  * that is gone or names another instance means the identity was taken over
- * while we run, and this process must stop before it signs again.
+ * while we run, and this process must stop before it signs again. So must a
+ * holder that cannot write its beat for the stale window: other nodes
+ * already see its lock as free.
  */
 export function identityLockHeartbeat(): void {
     if (!heldPath) return
     const lockPath = heldPath
-    const current = readHolder(lockPath)
-    if (!current || current.instance !== instance) {
-        stopHeartbeat()
-        heldPath = null
-        onLost(
-            current
-                ? `identity lock ${lockPath} was taken over by pid ${current.pid} on ${current.hostname}; another node holds this key, stopping`
-                : `identity lock ${lockPath} disappeared while this node held it; stopping so two nodes cannot sign with one key`,
+    let failure: string
+    try {
+        const own = beat(lockPath)
+        if (own === "ours") return
+        if (own !== "unreadable") {
+            lose(
+                `${describeOwnership(lockPath, own)} while this node held it; another node may hold this key, stopping`,
+            )
+            return
+        }
+        failure = "the lock is unreadable"
+    } catch (e) {
+        failure = (e as Error).message
+    }
+    const silent = clock.now() - lastBeatOk
+    if (silent >= STALE_MS) {
+        lose(
+            `cannot refresh identity lock ${lockPath} for ${Math.round(silent / 1000)}s (${failure}); ` +
+                "other nodes now see it as free, stopping",
         )
         return
     }
-    try {
-        rewrite(lockPath)
-    } catch (e) {
-        log.warning(
-            `[IDENTITY] cannot refresh identity lock ${lockPath}: ${(e as Error).message}`,
-        )
+    log.warning(
+        `[IDENTITY] cannot refresh identity lock ${lockPath}: ${failure}`,
+    )
+}
+
+/**
+ * Checked under the signing-record lock before a signature is released. The
+ * timer alone notices a takeover only at its next beat; a node that stalled
+ * past the stale window could otherwise sign one more round after a
+ * newcomer replaced its lock.
+ */
+export function identityLeaseProblem(): string | null {
+    if (!heldPath) return "this node does not hold the identity lock"
+    const silent = clock.now() - lastBeatOk
+    if (silent >= STALE_MS) {
+        return `the identity lock was last refreshed ${Math.round(silent / 1000)}s ago; another node may have taken it over`
     }
+    const own = ownership(heldPath)
+    return own === "ours" ? null : describeOwnership(heldPath, own)
 }
 
 function stopHeartbeat(): void {
