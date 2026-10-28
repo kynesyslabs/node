@@ -23,7 +23,7 @@ and both Dockerfiles together.
 To find the digest of a new base image:
 
 ```bash
-docker buildx imagetools inspect oven/bun:1.3.14-debian | grep Digest
+docker buildx imagetools inspect oven/bun:1.4.4-debian | grep Digest
 ```
 
 The repo policy is enforced by `tests/release/reproducibleRelease.test.ts`

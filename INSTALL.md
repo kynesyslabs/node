@@ -380,7 +380,7 @@ docker compose version
 curl https://mise.run | sh
 
 # Install Bun
-mise use -g bun@1.3.14   # the version in .bun-version
+mise use -g bun@1.4.4    # the version in .bun-version
 
 # Verify Bun
 bun -v

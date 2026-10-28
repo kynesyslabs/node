@@ -21,7 +21,7 @@
 # Base images are pinned by digest: a tag like 1.3-debian moves, so two
 # builds of the same commit could otherwise start from different images.
 # Bump the tag and digest together with .bun-version.
-FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS builder
+FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS builder
 
 # No compiler: lifecycle scripts are blocked, and the native modules the
 # node uses (bufferutil, utf-8-validate) ship prebuilt binaries.
@@ -165,7 +165,7 @@ RUN cargo install wstcp --version 0.2.1 --root /wstcp
 # than after the dependency install and the Rust compile.
 # Set REQUIRE_GIT_COMMIT=false for a throwaway build from a tree without
 # git history.
-FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS provenance
+FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS provenance
 ARG GIT_COMMIT=
 ARG REQUIRE_GIT_COMMIT=true
 RUN if [ "$REQUIRE_GIT_COMMIT" = "true" ]; then \
@@ -183,7 +183,7 @@ RUN if [ "$REQUIRE_GIT_COMMIT" = "true" ]; then \
         fi; \
     fi
 
-FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS runtime
+FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS runtime
 
 # OCI image metadata.
 LABEL org.opencontainers.image.source="https://github.com/kynesyslabs/node" \
