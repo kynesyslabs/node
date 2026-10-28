@@ -412,13 +412,14 @@ git fetch --tags origin stabilisation
 # Signers come from the protected branch, not from the tag itself
 git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers
 git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers
-# The tag must be on stabilisation and signed by a listed key
-git merge-base --is-ancestor "$TAG" origin/stabilisation && echo "on stabilisation"
-git verify-tag "$TAG"
+# The tag must be on stabilisation and signed by a listed key;
+# the checkout runs only when both checks pass
+git merge-base --is-ancestor "$TAG" origin/stabilisation && echo "on stabilisation" &&
+git verify-tag "$TAG" &&
 git checkout "$TAG"
 ```
 
-`git verify-tag` must print `Good "git" signature` for a key in `allowed_signers`; if it prints anything else, or the `merge-base` check does not print `on stabilisation`, stop and ask on the release thread. The checkout leaves a detached `HEAD`, which is expected. To upgrade, repeat these steps with the next tag; do not use `./run -U`, which pulls a branch head.
+`git verify-tag` must print `Good "git" signature` for a key in `allowed_signers`. If the block stops before the checkout, or `on stabilisation` is not printed, stop and ask on the release thread. The checkout leaves a detached `HEAD`, which is expected. To upgrade, repeat these steps with the next tag; do not use `./run -U`, which pulls a branch head.
 
 #### Testnet and development: the `testnet` branch
 
