@@ -1,7 +1,11 @@
 import type { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import type Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
-import { syncBlock, syncLock } from "src/libs/blockchain/routines/Sync"
+import {
+    syncBlock,
+    syncLock,
+    unreconciledGcrBlockNumber,
+} from "src/libs/blockchain/routines/Sync"
 import { verifyBlock } from "src/libs/blockchain/validation/verifyBlock"
 import type Peer from "src/libs/peer/Peer"
 import PeerManager from "src/libs/peer/PeerManager"
@@ -24,6 +28,14 @@ export const COMMITTED_HEIGHT_MESSAGE = "Height already committed"
  * sits in front of a retry, so a dead member may only cost this much.
  */
 export const COMMIT_POLL_TIMEOUT_MS = 3_000
+
+/**
+ * Bound on trying further sources while syncLock is held: every insert path
+ * and our own round's commit wait on that lock. A source already being
+ * applied is never cut short, since stopping between its GCR edits and its
+ * insert would leave the edits without the block.
+ */
+export const ADOPT_LOCK_BUDGET_MS = 3 * COMMIT_POLL_TIMEOUT_MS
 
 /** One probe per peer per window: sync data and pushes arrive every block. */
 export const HEIGHT_PROBE_INTERVAL_MS = 10_000
@@ -314,9 +326,23 @@ export async function adoptBlockFromPeers(
         (a, b) => b.peers.length - a.peers.length,
     )
     const release = await syncLock.acquire()
+    const deadline = Date.now() + ADOPT_LOCK_BUDGET_MS
     try {
-        for (const variant of ordered) {
+        sources: for (const variant of ordered) {
             for (const source of variant.peers) {
+                // Every further source would be refused by sync anyway
+                if (unreconciledGcrBlockNumber() !== null) {
+                    log.error(
+                        `[committedBlock] (${context}) GCR state drifted while adopting block ${height}; trying no further sources`,
+                    )
+                    break sources
+                }
+                if (Date.now() >= deadline) {
+                    log.warning(
+                        `[committedBlock] (${context}) No source of block ${height} adopted within ${ADOPT_LOCK_BUDGET_MS}ms; releasing the lock`,
+                    )
+                    break sources
+                }
                 const outcome = await adoptCommittedBlock(variant.block, source)
                 log.info(
                     `[committedBlock] (${context}) Block ${height} ${variant.block.hash} from ${source.identity}: ${outcome}`,

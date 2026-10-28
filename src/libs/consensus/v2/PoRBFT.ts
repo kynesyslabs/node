@@ -26,6 +26,7 @@ import HandleGCR, { type BlockClock } from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
+    assertNoUnreconciledGcrState,
     fastSync,
     syncLock,
     unreconciledGcrBlockNumber,
@@ -139,6 +140,8 @@ export async function consensusRoutine(): Promise<void> {
             )
             return
         }
+
+        if (await gcrDriftBlocksRound(blockRef)) return
 
         // A node that restarted inside the window has not compared its schedule
         // yet, and the block-driven watch would only run it after the first round.
@@ -1059,6 +1062,50 @@ async function adoptionSucceeded(
     }
     if (!adopted) abortIfGcrStateUnreconciled(blockRef)
     return adopted
+}
+
+let driftWarnedHeight: number | null = null
+
+/**
+ * True when the round must not start: GCR edits of a block are applied
+ * without it and only an operator resync can reconcile them, so joining the
+ * shard would only lead to votes and blocks computed from drifted state.
+ *
+ * The latch is per process, so durable state is checked too: after a
+ * restart, orphaned edits are otherwise caught only when sync next applies a
+ * block, and a round at the same height would apply its own on top of them.
+ * That check rolls back what it can and latches what it cannot. It runs
+ * under syncLock because a block being applied has its edits stamped before
+ * its insert and would look orphaned. Before the first fast sync succeeds,
+ * sync applies without the lock, so the check is left to sync then.
+ *
+ * @throws AbortConsensusError when the durable check finds drift it cannot undo
+ */
+async function gcrDriftBlocksRound(blockRef: number): Promise<boolean> {
+    if (
+        unreconciledGcrBlockNumber() === null &&
+        getSharedState.fastSyncCount > 0
+    ) {
+        try {
+            await syncLock.runExclusive(() => assertNoUnreconciledGcrState())
+        } catch (e) {
+            throw new AbortConsensusError(
+                `[consensusRoutine] Not starting block ${blockRef}: ${e instanceof Error ? e.message : String(e)}`,
+            )
+        }
+    }
+
+    const drifted = unreconciledGcrBlockNumber()
+    if (drifted === null) return false
+    getSharedState.syncStatus = false
+    // The handler path can start a round on every proposal it receives
+    if (driftWarnedHeight !== blockRef) {
+        driftWarnedHeight = blockRef
+        log.warning(
+            `[consensusRoutine] Not joining the round for block ${blockRef}: GCR state for block ${drifted} is applied without its block. Operator action needed: resync this node from scratch.`,
+        )
+    }
+    return true
 }
 
 /**

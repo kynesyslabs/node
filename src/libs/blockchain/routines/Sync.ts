@@ -1004,7 +1004,7 @@ export function unreconciledGcrBlockNumber(): number | null {
  * are stamped with the block that produced them, and an assignment above the
  * chain tip can only mean its block never landed.
  */
-async function assertNoUnreconciledGcrState(): Promise<void> {
+export async function assertNoUnreconciledGcrState(): Promise<void> {
     if (unreconciledGcrBlock !== null) {
         throw new Error(
             "[applySyncedBlock] refusing to apply further blocks: GCR state for block " +
@@ -1918,7 +1918,11 @@ export async function fastSync(
 
         log.debug("[fastSync] Fast sync routine ended ⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️")
         log.debug("[fastSync] Sync status: " + synced)
-        getSharedState.syncStatus = synced
+        // A node at the tip with drifted GCR state is not synced: reporting it
+        // as synced would start a round every tick only for that round to
+        // refuse to apply on top of the drift.
+        getSharedState.syncStatus =
+            synced && unreconciledGcrBlockNumber() === null
         void BroadcastManager.broadcastOurSyncData()
 
         log.debug("[fastSync] Broadcasted our sync data 📤📤📤📤📤📤📤📤📤")

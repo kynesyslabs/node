@@ -29,7 +29,7 @@ mock.module("./routines/committedBlock", () => ({
 }))
 
 const { adoptReportedCommit } = await import("./PoRBFT")
-const { AbortConsensusError } = await import("./types/secretaryManager")
+const secretaryTypes = await import("./types/secretaryManager")
 const { getSharedState } = await import("src/utilities/sharedState")
 
 const report = (identity: string, hash = "x6") => ({
@@ -78,7 +78,7 @@ describe("a proposal answered with a committed block", () => {
             throw new Error("rollback of block 6 failed")
         }
         await expect(adoptReportedCommit(6, [report("a")])).rejects.toBeInstanceOf(
-            AbortConsensusError,
+            secretaryTypes.AbortConsensusError,
         )
         expect(getSharedState.syncStatus).toBe(false)
         expect(exitSpy).not.toHaveBeenCalled()

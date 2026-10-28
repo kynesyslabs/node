@@ -20,6 +20,13 @@ const synced: string[] = []
 let syncOk = true
 // Sources whose block bodies make syncBlock throw, as verifyBlockAttrs does
 let throwingSources = new Set<string>()
+// Sources whose apply fails and cannot be undone, which latches the drift
+let latchingSources = new Set<string>()
+let latchedDrift: number | null = null
+const attempts: string[] = []
+// Time each attempt takes, on a clock the test controls
+let attemptCostMs = 0
+let now = 1_000_000
 const conflicts = jest.fn()
 const credited: Array<[string, number]> = []
 let knownPeers: Record<string, any> = {}
@@ -44,8 +51,15 @@ jest.mock("src/libs/blockchain/validation/verifyBlock", () => ({
 }))
 jest.mock("src/libs/blockchain/routines/Sync", () => ({
     syncLock: { acquire: async () => () => undefined },
+    unreconciledGcrBlockNumber: () => latchedDrift,
     // Like the real one: verify, then insert
     syncBlock: async (b: any, p: any) => {
+        attempts.push(p?.identity)
+        now += attemptCostMs
+        if (latchingSources.has(p?.identity)) {
+            latchedDrift = b.number
+            throw new Error(`rollback of block ${b.number} failed`)
+        }
         if (throwingSources.has(p?.identity)) {
             throw new Error(`transactions of ${b.hash} missing from ${p.identity}`)
         }
@@ -69,6 +83,7 @@ jest.mock("src/libs/peer/PeerManager", () => ({
 }))
 
 const {
+    ADOPT_LOCK_BUDGET_MS,
     COMMITTED_HEIGHT_RESULT,
     adoptBeforeRetry,
     adoptBlockFromPeers,
@@ -119,6 +134,10 @@ beforeEach(() => {
     synced.length = 0
     syncOk = true
     throwingSources = new Set()
+    latchingSources = new Set()
+    latchedDrift = null
+    attempts.length = 0
+    attemptCostMs = 0
     state.inSyncLoop = false
     state.fastSyncCount = 1
     conflicts.mockClear()
@@ -297,6 +316,35 @@ describe("check before retry", () => {
             "test",
         )
         expect(ok).toBe(false)
+    })
+
+    it("tries no further source once a failed apply could not be undone", async () => {
+        latchingSources = new Set(["a"])
+        const ok = await adoptBlockFromPeers(
+            6,
+            [peer("a", [x6]), peer("b", [x6])],
+            "test",
+        )
+        expect(ok).toBe(false)
+        expect(attempts).toEqual(["a"])
+        expect(synced).toEqual([])
+    })
+
+    it("stops trying sources under the lock once its time budget is spent", async () => {
+        throwingSources = new Set(["a", "b", "c"])
+        attemptCostMs = ADOPT_LOCK_BUDGET_MS / 2
+        const clock = jest.spyOn(Date, "now").mockImplementation(() => now)
+        try {
+            const ok = await adoptBlockFromPeers(
+                6,
+                [peer("a", [x6]), peer("b", [x6]), peer("c", [x6])],
+                "test",
+            )
+            expect(ok).toBe(false)
+            expect(attempts).toEqual(["a", "b"])
+        } finally {
+            clock.mockRestore()
+        }
     })
 
     it("is not held up by an unreachable member", async () => {
