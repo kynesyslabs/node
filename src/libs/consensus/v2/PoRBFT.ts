@@ -546,6 +546,10 @@ export async function consensusRoutine(): Promise<void> {
 
         if (aborted || invalid) {
             exitReason = "abortConsensus"
+            // Its message is the only record of why the round stopped.
+            if (error instanceof AbortConsensusError) {
+                log.warning(`[consensusRoutine] ${error.message}`)
+            }
             if (aborted) {
                 log.error(error)
                 log.error("[consensusRoutine] Exiting consensus routine")
