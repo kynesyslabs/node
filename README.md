@@ -44,8 +44,10 @@ Docker Compose is now the recommended way to run a Demos node. For full installa
 ```bash
 git clone https://github.com/kynesyslabs/node.git && cd node
 cp .env.example .env  # defaults are fine; edit only if you want to override
-docker compose up
+./run --docker        # docker compose up, with the commit the image is built from
 ```
+
+The image refuses to build without the git commit it is built from. `./run --docker` exports it; to call compose directly, export it first: `export GIT_COMMIT=$(git rev-parse HEAD)`, then `docker compose up`.
 
 Once the stack is healthy: RPC at http://localhost:53550 (try `curl http://localhost:53550/info`) and Grafana at http://localhost:3000 (default `admin` / `demos`).
 

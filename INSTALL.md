@@ -81,8 +81,10 @@ docker info --format '{{.Driver}} {{json .DriverStatus}}'
 ```bash
 git clone https://github.com/kynesyslabs/node.git && cd node
 cp .env.example .env  # defaults are fine; edit only if you want to override
-docker compose up
+./run --docker        # docker compose up, with the commit the image is built from
 ```
+
+The image refuses to build without the git commit it is built from. `./run --docker` exports it; to call compose directly, export it first: `export GIT_COMMIT=$(git rev-parse HEAD)`, then `docker compose up`.
 
 The first run pulls images and builds the node container, so expect a few minutes. Subsequent starts are near-instant.
 
@@ -278,7 +280,7 @@ docker compose up -d
 
 Volumes (and therefore your identity, chain data, peerlist cache) are preserved.
 
-A development host that builds from source instead: `git pull && docker compose up -d --build`. Each such update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
+A development host that builds from source instead: `git pull && ./run --docker -d --build`. Each such update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
 
 ### Stop the node
 

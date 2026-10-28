@@ -120,11 +120,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # Build-time provenance. Compose interpolates these from the
-      # host's git + shell at `docker compose build` time. The wrapper
-      # script `./scripts/docker-run` (and CI) export them; manual
-      # invocations also work because every variable has a sensible
-      # `:-` default so an unset host falls back gracefully.
+      # Build-time provenance, interpolated from the host shell. The
+      # image refuses to build without the real commit, so a local build
+      # goes through `./run --docker` (which exports these from git) or
+      # `GIT_COMMIT=$(git rev-parse HEAD) docker compose build node`.
+      # GIT_COMMIT keeps an empty default instead of `:?`: a required
+      # variable would make compose refuse every command, including
+      # `pull`, `logs` and `down` on hosts that run a released image.
       args:
         GIT_COMMIT: ${GIT_COMMIT:-}
         GIT_BRANCH: ${GIT_BRANCH:-}

@@ -157,6 +157,32 @@ FROM rust:1.99.1-slim@sha256:e6cd1d294a300601eaaa4a294b337e5f0826f427fb2d481e9f7
 # exact wstcp version.
 RUN cargo install wstcp --version 0.2.1 --root /wstcp
 
+# ── provenance check ─────────────────────────────────────────────────
+# A node started with PROD=true refuses to boot without a commit, so the
+# image must carry the real one. The check lives in its own small stage
+# that the runtime stage mounts: BuildKit starts it alongside the builder
+# and wstcp stages, so a missing commit fails the build in seconds rather
+# than after the dependency install and the Rust compile.
+# Set REQUIRE_GIT_COMMIT=false for a throwaway build from a tree without
+# git history.
+FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS provenance
+ARG GIT_COMMIT=
+ARG REQUIRE_GIT_COMMIT=true
+RUN if [ "$REQUIRE_GIT_COMMIT" = "true" ]; then \
+        case "$GIT_COMMIT" in \
+            *[!0-9a-fA-F]*|"") \
+                echo >&2 "ERROR: GIT_COMMIT build arg is missing or not a hex SHA (got '$GIT_COMMIT')."; \
+                echo >&2 "       Start the stack with ./run --docker, which sets it, or build with"; \
+                echo >&2 "       GIT_COMMIT=\$(git rev-parse HEAD) docker compose build node"; \
+                echo >&2 "       docker build: --build-arg GIT_COMMIT=\$(git rev-parse HEAD)"; \
+                echo >&2 "       Use --build-arg REQUIRE_GIT_COMMIT=false to build without provenance."; \
+                exit 1 ;; \
+        esac; \
+        if [ "${#GIT_COMMIT}" -lt 7 ] || [ "${#GIT_COMMIT}" -gt 40 ]; then \
+            echo >&2 "ERROR: GIT_COMMIT must be 7-40 hex chars (got ${#GIT_COMMIT})."; exit 1; \
+        fi; \
+    fi
+
 FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS runtime
 
 # OCI image metadata.
@@ -221,32 +247,19 @@ RUN chmod 0755 /app/scripts/docker-entrypoint.sh \
 COPY --from=wstcp --chown=demos:demos /wstcp/bin/wstcp /app/.cargo/bin/wstcp
 
 # Build-time provenance. These ARGs are populated by the build driver
-# (compose passes `git rev-parse HEAD` + `git rev-parse --abbrev-ref HEAD`
-# + `git diff --quiet; echo $?` + an ISO timestamp). They land in the
-# image as ENV so `process.env.GIT_COMMIT` etc. resolve from
-# `src/utilities/nodeVersion.ts` without shipping `.git/` into the runtime
-# layer. A node started with PROD=true refuses to boot without a commit,
-# so the image build fails early when GIT_COMMIT is missing or malformed.
-# Set REQUIRE_GIT_COMMIT=false for a throwaway build from a tree without
-# git history.
+# (./run --docker exports `git rev-parse HEAD` + `git rev-parse
+# --abbrev-ref HEAD` + a dirty flag + an ISO timestamp; compose forwards
+# them). They land in the image as ENV so `process.env.GIT_COMMIT` etc.
+# resolve from `src/utilities/nodeVersion.ts` without shipping `.git/`
+# into the runtime layer.
 ARG GIT_COMMIT=
 ARG GIT_BRANCH=
 ARG GIT_COMMIT_MESSAGE=
 ARG GIT_DIRTY=false
 ARG BUILT_AT=
-ARG REQUIRE_GIT_COMMIT=true
-RUN if [ "$REQUIRE_GIT_COMMIT" = "true" ]; then \
-        case "$GIT_COMMIT" in \
-            *[!0-9a-fA-F]*|"") \
-                echo >&2 "ERROR: GIT_COMMIT build arg is missing or not a hex SHA (got '$GIT_COMMIT')."; \
-                echo >&2 "       Build through scripts/docker-run, or pass --build-arg GIT_COMMIT=\$(git rev-parse HEAD)."; \
-                echo >&2 "       Use --build-arg REQUIRE_GIT_COMMIT=false to build without provenance."; \
-                exit 1 ;; \
-        esac; \
-        if [ "${#GIT_COMMIT}" -lt 7 ] || [ "${#GIT_COMMIT}" -gt 40 ]; then \
-            echo >&2 "ERROR: GIT_COMMIT must be 7-40 hex chars (got ${#GIT_COMMIT})."; exit 1; \
-        fi; \
-    fi
+# Depends on the provenance stage, so the image is never produced without
+# its check passing. The mount adds nothing to the image.
+RUN --mount=type=bind,from=provenance,target=/mnt true
 
 # Sensible image-level defaults. Anything else (DATABASE_URL, EXPOSED_URL,
 # IDENTITY_FILE, PEER_LIST_FILE, etc.) must be supplied at runtime.
