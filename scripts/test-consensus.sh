@@ -8,6 +8,7 @@ cd "$(dirname "$0")/.."
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
 # Single files outside SUITE_DIRS whose code the consensus suites depend on.
 SUITE_FILES=(
+    src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/network/helloGenesisGate.test.ts
     src/libs/peer/syncClaims.test.ts

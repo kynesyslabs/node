@@ -1764,8 +1764,8 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
             continue
         }
 
-        const success = peerManager.addPeer(peerObject)
-        if (success) {
+        const [added] = peerManager.addPeer(peerObject)
+        if (added) {
             mergedPeers.push(peerObject.identity)
         }
     }
