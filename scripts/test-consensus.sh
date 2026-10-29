@@ -6,17 +6,20 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
-# Outside those trees: the launch go/no-go tooling, the signing guards and
-# the consensus routes.
-# A listed file that is gone fails its run instead of dropping out silently
+# Single files outside SUITE_DIRS: the launch go/no-go tooling, the signing
+# guards and the consensus and sync routes the suites depend on. A listed
+# file that is gone fails its run instead of dropping out silently
 SUITE_FILES=(
     scripts/launch-go-no-go*.test.ts
     scripts/validator-prove-signing.test.ts
+    src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
+    src/libs/network/helloGenesisGate.test.ts
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
+    src/libs/peer/syncClaims.test.ts
 )
 
 runner_for() {
