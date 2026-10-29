@@ -205,6 +205,18 @@ describe("block 0 validator set", () => {
         expect(set.reasons.join("\n")).toContain(`validators.jsonl lists these validators more than once: ${id(0)}`)
     })
 
+    it("is NO-GO when a snapshot row does not fit the database's integer column", async () => {
+        const rows = [...genesisRows.slice(0, 9), { ...row(9), first_seen: 2 ** 31 }]
+        const set = await readBlockZeroValidators(genesis, snapshotDir(rows))
+        expect(set.reasons.join("\n")).toContain(`${id(9)} has first_seen = 2147483648, outside the database's integer range`)
+    })
+
+    it("is NO-GO when a genesis row does not fit the database's integer column", async () => {
+        const bad = { ...genesis, validators: [...genesisRows.slice(0, 9), { ...row(9), valid_at: 2 ** 31 }] }
+        const set = await readBlockZeroValidators(bad, snapshotDir(null))
+        expect(set.reasons.join("\n")).toContain(`genesis.validators: ${id(9)} has valid_at = 2147483648`)
+    })
+
     it("leaves the node's snapshot directory variable as it was", async () => {
         const before = process.env.DEMOS_SNAPSHOT_DIR
         await readBlockZeroValidators(genesis, snapshotDir(null))

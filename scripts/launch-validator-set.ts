@@ -71,6 +71,28 @@ async function genesisSeedReasons(rows: ValidatorRow[]): Promise<string[]> {
     }
 }
 
+// The validators table stores these as PostgreSQL integer: a larger value
+// passes the JSON parse and stops the node at boot when the row is inserted.
+const INT_COLUMNS = ["first_seen", "valid_at", "unstake_requested_at", "unstake_available_at"] as const
+const PG_INT_MIN = -(2 ** 31)
+const PG_INT_MAX = 2 ** 31 - 1
+
+export function columnBoundReasons(rows: ValidatorRow[], source: string): string[] {
+    const reasons: string[] = []
+    for (const row of rows) {
+        for (const column of INT_COLUMNS) {
+            const value = (row as Record<string, unknown>)[column]
+            if (typeof value === "number" && (value < PG_INT_MIN || value > PG_INT_MAX)) {
+                reasons.push(
+                    `${source}: ${String(row.address)} has ${column} = ${value}, outside the database's integer range, ` +
+                        "so the node would stop at boot",
+                )
+            }
+        }
+    }
+    return reasons
+}
+
 /**
  * Addresses listed more than once. The validators table keys on the
  * address, so an exact repeat stops the node at boot; a repeat that
@@ -142,7 +164,11 @@ export async function readBlockZeroValidators(
         return {
             rows: genesisRows,
             source: "genesis",
-            reasons: [...duplicateReasons(genesisRows, "genesis.validators"), ...(await genesisSeedReasons(genesisRows))],
+            reasons: [
+                ...duplicateReasons(genesisRows, "genesis.validators"),
+                ...columnBoundReasons(genesisRows, "genesis.validators"),
+                ...(await genesisSeedReasons(genesisRows)),
+            ],
             warnings: [],
         }
     }
@@ -164,5 +190,11 @@ export async function readBlockZeroValidators(
             )
         }
     }
-    return { rows, source: "snapshot", reasons: duplicateReasons(rows, "the snapshot's validators.jsonl"), warnings }
+    const source = "the snapshot's validators.jsonl"
+    return {
+        rows,
+        source: "snapshot",
+        reasons: [...duplicateReasons(rows, source), ...columnBoundReasons(rows, source)],
+        warnings,
+    }
 }
