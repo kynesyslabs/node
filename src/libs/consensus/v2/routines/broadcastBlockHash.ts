@@ -12,6 +12,7 @@ import {
     type CommittedReport,
     readCommittedRefusal,
 } from "./committedBlock"
+import { commitLockActive, voteMessageOf } from "../commitLock/domain"
 
 /**
  * Per-peer vote outcome. The `signaturesToMerge` map carries every
@@ -43,6 +44,7 @@ async function verifyIncomingSignatures(
     incoming: Record<string, string>,
     candidateBlockHash: string,
     peerId: string,
+    signedMessage: string = candidateBlockHash,
 ): Promise<Record<string, string>> {
     const entries = Object.entries(incoming)
     const checks = await Promise.all(
@@ -50,7 +52,7 @@ async function verifyIncomingSignatures(
             try {
                 const isValid = await TxValidatorPool.getInstance().verify({
                     algorithm: getSharedState.signingAlgorithm,
-                    message: new TextEncoder().encode(candidateBlockHash),
+                    message: new TextEncoder().encode(signedMessage),
                     signature: hexToUint8Array(signature),
                     publicKey: hexToUint8Array(identity),
                 })
@@ -95,11 +97,14 @@ async function verifyIncomingSignatures(
 }
 
 /**
- * The block number travels last so receivers that predate it read the first
- * three params unchanged; a receiver that has the height answers with its
- * committed block instead of a vote.
+ * The block number travels after the first three params so receivers that
+ * predate it read those unchanged; a receiver that has the height answers
+ * with its committed block instead of a vote. Under commitLock the round of
+ * the prevotes follows it.
  */
-type ProposeParams = [string, Block["validation_data"], string, number]
+type ProposeParams =
+    | [string, Block["validation_data"], string, number]
+    | [string, Block["validation_data"], string, number, number]
 
 /**
  * Per-peer flow: call the peer's `proposeBlockHash`, classify the
@@ -309,6 +314,7 @@ async function proposeAndCollect(
         incomingSignatures,
         block.hash,
         peerId,
+        voteMessageOf(block) ?? block.hash,
     )
 
     // PR #888 Greptile P1 (continued): a peer's signature on our
@@ -402,12 +408,23 @@ export async function broadcastBlockHash(
     // same `validation_data` snapshot. Receivers still verify and
     // merge what they get; the freeze only affects what we ship.
     const validationDataSnapshot = structuredClone(block.validation_data)
-    const proposeParams: ProposeParams = [
+    let proposeParams: ProposeParams = [
         block.hash,
         validationDataSnapshot,
         ourId,
         block.number,
     ]
+    if (commitLockActive(block.number)) {
+        // A candidate under the fork without a round has no prevote anyone
+        // could verify: nothing to propose.
+        if (voteMessageOf(block) === null) {
+            log.error(
+                `[broadcastBlockHash] Candidate ${block.hash} carries no round; not proposing it`,
+            )
+            return [0, shard.length, []]
+        }
+        proposeParams = [...proposeParams, block.validation_data.round]
+    }
 
     const outcomes = await Promise.all(
         shard.map(peer => proposeAndCollect(peer, block, proposeParams)),

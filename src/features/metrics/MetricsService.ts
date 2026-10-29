@@ -306,6 +306,21 @@ export class MetricsService {
             [],
         )
         this.createCounter(
+            "commit_lock_total",
+            "Commit locks this validator wrote: a first lock at a height, or the same block in a later round",
+            [],
+        )
+        this.createCounter(
+            "lock_moved_total",
+            "Commit locks this validator moved to another block on a proof of lock from a later round",
+            [],
+        )
+        this.createCounter(
+            "precommit_equivocation_total",
+            "Committee members seen precommitting two different blocks at one height and round",
+            [],
+        )
+        this.createCounter(
             "consensus_missed_signatures_total",
             "Blocks where this node was drawn into the shard but its signature is missing",
             [],

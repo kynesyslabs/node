@@ -383,6 +383,11 @@ export function recordFailedRound(height: number, members: string[]): void {
     lastFailedRound = { height, members: [...members] }
 }
 
+/** Whether the last round that ended without a block was at `height`. */
+export function peekFailedRound(height: number): boolean {
+    return lastFailedRound?.height === height
+}
+
 /**
  * Before a retry at `height`: true when a member of the failed round served
  * a verified block for it and we adopted it, so no new block may be built.

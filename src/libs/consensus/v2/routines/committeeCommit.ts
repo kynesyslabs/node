@@ -1,10 +1,11 @@
 import { verifiedSignersOf } from "@/libs/blockchain/validation/verifyBlock"
 import { verifierThreshold } from "../quorum"
+import { certificateMessageOf } from "../commitLock/domain"
 
 interface SignedBlock {
     number: number
     hash: string
-    validation_data?: { signatures?: Record<string, unknown> }
+    validation_data?: { signatures?: Record<string, unknown>; round?: unknown }
 }
 
 /**
@@ -20,9 +21,12 @@ export async function committeeCommitShortfall(
     shardSize: number,
 ): Promise<string | null> {
     const signatures = block.validation_data?.signatures
+    // Under commitLock sync counts one round's precommits, so they are what
+    // the producer must count too.
+    const message = certificateMessageOf(block)
     const signed =
-        signatures && typeof signatures === "object"
-            ? (await verifiedSignersOf(block.hash, signatures, new Set(committee))).size
+        message !== null && signatures && typeof signatures === "object"
+            ? (await verifiedSignersOf(message, signatures, new Set(committee))).size
             : 0
     const needed = verifierThreshold(shardSize, committee.length, true)
     if (signed >= needed) return null

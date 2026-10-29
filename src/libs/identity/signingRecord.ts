@@ -252,7 +252,7 @@ export function resolveWriteTarget(file: string): string {
 // The record must survive a crash that happens right after we sign, and the
 // signing stop a crash that happens right after we halt, so the bytes are
 // fsynced before the rename and the directory entry afterwards.
-function writeFileDurably(file: string, body: string, what: string): void {
+export function writeFileDurably(file: string, body: string, what: string): void {
     const tmp = `${file}.${process.pid}.tmp`
     let fd: number | null = null
     try {
@@ -464,6 +464,22 @@ function evaluate(
         }
     }
     return { action: "write", last }
+}
+
+/**
+ * Throws when this key must not sign anything at all: signing was stopped in
+ * this process or by the marker, or the identity lease is lost. For
+ * signatures that the record does not track, which still must not leave a
+ * process whose key may run elsewhere.
+ */
+export function assertSigningAllowed(identityFile: string): void {
+    if (haltReason !== null) {
+        throw new DoubleSignError(`refusing to sign: ${haltReason}`)
+    }
+    const stopped = markerRefusal(identityFile)
+    if (stopped) throw new DoubleSignError(`refusing to sign: ${stopped}`)
+    const lease = leaseCheck?.()
+    if (lease) throw new DoubleSignError(`refusing to sign: ${lease}`)
 }
 
 /**

@@ -105,7 +105,9 @@ exit, including Ctrl-C. Only containers the run started are touched.
   at H and stays there (`Committee of 1 is below the floor`), the other
   three certify Y with 3 votes and move on. Depending on timing the same
   code can instead stall with A alone at H; both are a FAIL.
-- On the fixed code, race-strict is expected to end in FORK-DETECTED: when
-  nobody can fetch the committed block from its only holder, the others
-  still certify a second one; closing that needs the members to lock on
-  the block they signed.
+- Without the commit lock, race-strict ends in FORK-DETECTED: when nobody
+  can fetch the committed block from its only holder, the others still
+  certify a second one. With `commitLock` active (the devnet genesis
+  activates it at 0) the others are locked on the block A committed and
+  certify that same block in their retry, so race-strict is expected to
+  PASS.

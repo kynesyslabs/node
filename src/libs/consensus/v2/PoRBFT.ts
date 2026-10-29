@@ -7,7 +7,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
-import { createBlock } from "./routines/createBlock"
+import { type CandidateOptions, createBlock } from "./routines/createBlock"
 import { getCommitteeFloor, getEligiblePool } from "./routines/getShard"
 import { producerCommits } from "./quorum"
 import { producerCommitRefusal } from "./routines/committeeCommit"
@@ -38,6 +38,7 @@ import {
     adoptBeforeRetry,
     adoptBlockFromPeers,
     type CommittedReport,
+    peekFailedRound,
     probeCommitteeForHeight,
     recordFailedRound,
 } from "./routines/committedBlock"
@@ -67,6 +68,15 @@ import {
     DoubleSignError,
     SigningRecordError,
 } from "@/libs/identity/signingRecord"
+import { commitLockActive } from "./commitLock/domain"
+import { CommitLockError } from "./commitLock/lockStore"
+import {
+    gatherRetryCandidates,
+    rebuildTransactions,
+    type RebuiltTransactions,
+} from "./commitLock/candidate"
+import { broadcastPrecommit, lockAndPrecommit } from "./commitLock/precommit"
+import { proofOfLock } from "./commitLock/votes"
 import { CosignTimestampError } from "./routines/cosignTimestamp"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
@@ -178,6 +188,10 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
+        // Read before the adoption check consumes the failed round: under
+        // commitLock a retry first asks the committee for its locks.
+        const retrying = peekFailedRound(blockRef)
+
         markStep("consensus", "checkBeforeRetry")
         if (
             await adoptionSucceeded(blockRef, () => adoptBeforeRetry(blockRef))
@@ -240,7 +254,7 @@ export async function consensusRoutine(): Promise<void> {
         const resRef = filterMempoolByRefBlock(initialMempool, true)
         failedTxs.push(...resRef.failedTxs)
 
-        const resNonce = await filterMempoolByNonce(resRef.validTxs)
+        let resNonce = await filterMempoolByNonce(resRef.validTxs)
         failedTxs.push(...resNonce.failedTxs)
 
         // Write final mempool used to forge the block
@@ -286,11 +300,42 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 5: Forge the block
         markStep("consensus", "forgeBlock")
-        const block = await forgeBlock(
-            blockTxs,
-            manager.blockTimestamp,
-            mergedPeerlist,
-        ) // NOTE The GCR hash is calculated here and added to the block
+        const lockOn = commitLockActive(blockRef)
+        // The round is the secretary timestamp as forging starts; a later
+        // greenlight may move blockTimestamp, but not this attempt's round.
+        const round = manager.blockTimestamp
+        let block: Block | null = null
+        if (lockOn) {
+            const rebuilt = await forgeLockedCandidate(
+                blockRef,
+                retrying,
+                round,
+                manager.boundCommittee,
+            )
+            if (rebuilt) {
+                block = rebuilt.block
+                blockTxs.length = 0
+                blockTxs.push(...rebuilt.txs.txs)
+                failedTxs.length = 0
+                failedTxs.push(...rebuilt.txs.failedTxs)
+                resNonce = rebuilt.txs.nonce
+                txMap.clear()
+                for (const tx of blockTxs) {
+                    txMap.set(tx.hash, tx)
+                }
+            }
+        }
+        if (!block) {
+            // The captured round, not blockTimestamp again: the lock
+            // exchange above awaits, and the content timestamp must equal
+            // the round the block is prevoted in.
+            block = await forgeBlock(
+                blockTxs,
+                round,
+                mergedPeerlist,
+                lockOn ? { round } : {},
+            ) // NOTE The GCR hash is calculated here and added to the block
+        }
         preventForgingEnded(blockRef)
         if (await isNetworkAhead("preVote")) {
             throw new AbortConsensusError(
@@ -326,8 +371,16 @@ export async function consensusRoutine(): Promise<void> {
             ? committee.length
             : manager.shard.members.length
 
+        // Under commitLock the prevotes only lock: the block is certified
+        // by one round's precommits, and that block is the one committed.
+        let certified: Block | null = null
+        if (lockOn) {
+            certified = await precommitPhase(block, round, committee)
+            block = certified
+        }
+
         // Check if the block is valid
-        if (isBlockValid(pro, committeeSize)) {
+        if (lockOn ? certified !== null : isBlockValid(pro, committeeSize)) {
             const refusal = await producerCommitRefusal(
                 block,
                 committee,
@@ -1012,6 +1065,7 @@ async function forgeBlock(
     orderedTransactions: Transaction[],
     blockTimestamp: number,
     peerlist: string[] = [],
+    options: CandidateOptions = {},
 ): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     // const lastBlockNumber = await Chain.getLastBlockNumber()
@@ -1028,14 +1082,27 @@ async function forgeBlock(
             lastBlockNumber + 1,
             peerlist,
             blockTimestamp,
+            options,
         )
     } catch (error) {
+        // A rebuild that does not reproduce its block, or whose reported
+        // timestamp we will not sign, is the caller's to judge: the proof of
+        // lock does not cover the reported inputs, so another set may still
+        // rebuild the block.
+        if (
+            (error instanceof CommitLockError ||
+                error instanceof CosignTimestampError) &&
+            options.expectedHash !== undefined
+        ) {
+            throw error
+        }
         // A refused signature, an unusable signing record or a timestamp we
         // will not sign ends this round without signing; anything else keeps
         // its existing handling.
         if (
             error instanceof DoubleSignError ||
             error instanceof SigningRecordError ||
+            error instanceof CommitLockError ||
             error instanceof CosignTimestampError
         ) {
             log.error(`[consensusRoutine] ${error.message}`)
@@ -1048,6 +1115,149 @@ async function forgeBlock(
     // Using the secretary to update the local statuses
     // await updateValidatorPhase(5, block.number)
     return block
+}
+
+/**
+ * The candidate step 1 of a commitLock round decides on before a fresh
+ * block: our locked block, or a block with a later proof of lock that the
+ * committee reports. Null when nothing binds this attempt and a fresh
+ * block may be forged. A locked member that cannot rebuild its block ends
+ * the attempt instead: prevoting anything else would break its lock.
+ */
+export async function forgeLockedCandidate(
+    blockRef: number,
+    retrying: boolean,
+    round: number,
+    committee: string[] | null,
+): Promise<{ block: Block; txs: RebuiltTransactions } | null> {
+    if (!committee || committee.length === 0) {
+        throw new AbortConsensusError(
+            `[commitLock] No bound committee for block ${blockRef}; not forging`,
+        )
+    }
+
+    let gathered: Awaited<ReturnType<typeof gatherRetryCandidates>>
+    try {
+        gathered = await gatherRetryCandidates(blockRef, retrying, committee)
+    } catch (e) {
+        if (e instanceof CommitLockError) {
+            throw new AbortConsensusError(`[commitLock] ${e.message}`)
+        }
+        throw e
+    }
+    preventForgingEnded(blockRef)
+    if (await adoptReportedCommit(blockRef, gathered.committed)) {
+        throw new ForgingEndedError(
+            `[consensusRoutine] Block ${blockRef} was already committed by a committee member; adopted it`,
+        )
+    }
+
+    for (const option of gathered.options) {
+        for (const inputs of option.variants) {
+            const txs = await rebuildTransactions(
+                blockRef,
+                inputs,
+                option.sources,
+            )
+            if (!txs) continue
+            try {
+                const block = await forgeBlock(
+                    txs.txs,
+                    inputs.timestamp,
+                    inputs.peerlist,
+                    { round, expectedHash: option.hash },
+                )
+                log.info(
+                    `[commitLock] Prevoting ${option.origin === "lock" ? "our locked" : "a proof-of-lock"} block ${option.hash} ` +
+                        `(proof of lock round ${option.round}) at height ${blockRef} in round ${round}`,
+                )
+                return { block, txs }
+            } catch (e) {
+                if (
+                    !(e instanceof CommitLockError) &&
+                    !(e instanceof CosignTimestampError)
+                ) {
+                    throw e
+                }
+                log.warning(`[commitLock] ${e.message}`)
+            }
+        }
+    }
+
+    if (gathered.locked) {
+        throw new AbortConsensusError(
+            `[commitLock] Locked on ${gathered.locked.hash} at height ${blockRef} but cannot rebuild it; not prevoting another block`,
+        )
+    }
+    return null
+}
+
+/**
+ * Lock, precommit and gather the certificate of our candidate. Returns the
+ * block to commit: the candidate carrying one round's precommits instead of
+ * its prevotes. The candidate object itself keeps the prevotes, which
+ * inbound proposals may still be merging into.
+ */
+async function precommitPhase(
+    block: Block,
+    round: number,
+    committee: string[] | null,
+): Promise<Block> {
+    if (!committee || committee.length === 0) {
+        throw new AbortConsensusError(
+            `[commitLock] No bound committee for block ${block.number}; not precommitting`,
+        )
+    }
+    const height = block.number
+    const pol = await proofOfLock(
+        height,
+        round,
+        block.hash,
+        block.validation_data?.signatures,
+        committee,
+    )
+    if (!pol) {
+        throw new BlockInvalidError(
+            `[consensusRoutine] [result] Block ${block.hash} has no proof of lock in round ${round}`,
+        )
+    }
+    log.info(
+        `[commitLock] Proof of lock for block ${block.hash}: ${Object.keys(pol).length} prevotes in round ${round}`,
+    )
+
+    markStep("consensus", "precommit")
+    const request = { height, round, hash: block.hash, pol }
+    const outcome = await lockAndPrecommit(request)
+    if ("refused" in outcome) {
+        throw new AbortConsensusError(
+            `[commitLock] Not precommitting ${block.hash}: ${outcome.refused}`,
+        )
+    }
+    const tally = await broadcastPrecommit(
+        request,
+        outcome.signature,
+        committee,
+    )
+    const precommits = Object.keys(tally.certificate).length
+    log.info(
+        `[commitLock] Precommit tally for block ${block.hash}: ` +
+            `precommits=${precommits}, quorum=${tally.quorum} (round ${round})`,
+    )
+
+    if (await adoptReportedCommit(height, tally.committed)) {
+        throw new ForgingEndedError(
+            `[consensusRoutine] Block ${height} was already committed by a committee member; adopted it`,
+        )
+    }
+    if (precommits < tally.quorum) {
+        throw new BlockInvalidError(
+            `[consensusRoutine] [result] Block ${block.hash} has ${precommits} precommits in round ${round}, needs ${tally.quorum}`,
+        )
+    }
+
+    const certified = Object.assign(new Block(), block)
+    certified.validation_data = { signatures: tally.certificate, round }
+    return certified
 }
 
 /**

@@ -200,6 +200,25 @@ export type QuorumParityConfig = BaseForkConfig
 export type CommitteeBindingConfig = BaseForkConfig
 
 /**
+ * `commitLock` fork: a committee member signs a block twice, a prevote and
+ * a precommit, each bound to the height and round, and locks on a block
+ * once it holds a proof of lock (2/3 + 1 committee prevotes in one round).
+ * A block carries 2/3 + 1 committee precommits of one round.
+ *
+ * Before it, a member's single signature was both its vote and part of the
+ * certificate, so a retried height could certify a second block with the
+ * same signers while the first was committed by a member that was then cut
+ * off.
+ *
+ * It relies on the bound committee for its quorum and its overlap argument,
+ * so the loader refuses a genesis that schedules it at a height where
+ * `committeeBinding` is not active. Activation at H applies to block H and
+ * later. Dormant by default (`activationHeight: null`); a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type CommitLockConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -236,6 +255,7 @@ export type ForkConfig =
     | EditBindingConfig
     | QuorumParityConfig
     | CommitteeBindingConfig
+    | CommitLockConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -254,6 +274,7 @@ export type ForkName =
     | "editBinding"
     | "quorumParity"
     | "committeeBinding"
+    | "commitLock"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -271,6 +292,7 @@ export interface ForkConfigByName {
     editBinding: EditBindingConfig
     quorumParity: QuorumParityConfig
     committeeBinding: CommitteeBindingConfig
+    commitLock: CommitLockConfig
 }
 
 /**
@@ -424,6 +446,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "The committee for a block is drawn from chain data alone, and only its " +
             "members' signatures count toward the block's quorum.",
     },
+    commitLock: {
+        // Dormant by default: it changes what a block's signatures sign, and
+        // a missing genesis entry hydrates from here. A chain launched from
+        // genesis with this build sets 0, together with committeeBinding.
+        activationHeight: null,
+        description:
+            "Members prevote and precommit with the height and round in the signed message, " +
+            "lock on a block with a proof of lock, and a block carries one round's precommits.",
+    },
 }
 
 /**
@@ -445,5 +476,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         editBinding: { ...DEFAULT_FORK_CONFIG.editBinding },
         quorumParity: { ...DEFAULT_FORK_CONFIG.quorumParity },
         committeeBinding: { ...DEFAULT_FORK_CONFIG.committeeBinding },
+        commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
     }
 }

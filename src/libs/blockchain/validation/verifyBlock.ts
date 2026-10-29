@@ -28,6 +28,10 @@ import { isForkActive } from "@/forks/forkGates"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { checkOwnSignature } from "src/libs/identity/foreignSignature"
+import {
+    certificateMessageOf,
+    commitLockActive,
+} from "src/libs/consensus/v2/commitLock/domain"
 
 export interface BlockVerification {
     valid: boolean
@@ -70,14 +74,17 @@ export function checkTimestampAgainstParent(
 }
 
 // Verified separately from the quorum tally, so a garbage entry under our key
-// can never read as our signature, however the tally is computed.
+// can never read as our signature, however the tally is computed. Under
+// commitLock the signature that can sit in a block is our precommit.
 async function carriesOurSignature(block: Block): Promise<boolean> {
     const ours = block.validation_data?.signatures?.[getSharedState.publicKeyHex]
     if (typeof ours !== "string") return false
+    const message = certificateMessageOf(block)
+    if (message === null) return false
     try {
         return await TxValidatorPool.getInstance().verify({
             algorithm: getSharedState.signingAlgorithm,
-            message: new TextEncoder().encode(block.hash),
+            message: new TextEncoder().encode(message),
             signature: hexToUint8Array(ours),
             publicKey: hexToUint8Array(getSharedState.publicKeyHex),
         })
@@ -88,15 +95,16 @@ async function carriesOurSignature(block: Block): Promise<boolean> {
 
 /**
  * The members of `eligible` whose signature in `signatures` verifies over
- * `blockHash`. Sync and a producer about to commit count with this one
- * function, so they cannot disagree on which signatures count.
+ * `signedMessage`: the block hash, or under commitLock the vote message.
+ * Sync and a producer about to commit count with this one function, so
+ * they cannot disagree on which signatures count.
  */
 export async function verifiedSignersOf(
-    blockHash: string,
+    signedMessage: string,
     signatures: Record<string, unknown>,
     eligible: Set<string>,
 ): Promise<Set<string>> {
-    const message = new TextEncoder().encode(blockHash)
+    const message = new TextEncoder().encode(signedMessage)
     const verifiedSigners = new Set<string>()
     await Promise.all(
         Object.entries(signatures).map(async ([identity, signature]) => {
@@ -158,9 +166,19 @@ async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
         }
     }
 
-    // Verify each signature over the recomputed hash;
+    // Under commitLock the certificate is one round's precommits; a block
+    // without a valid round has no certificate at all.
+    const message = certificateMessageOf(block)
+    if (message === null) {
+        return {
+            valid: false,
+            reason: "block has no valid validation_data.round for its precommits",
+        }
+    }
+
+    // Verify each signature over the recomputed hash (or its precommit message)
     const verifiedSigners = await verifiedSignersOf(
-        block.hash,
+        message,
         signatures,
         poolIdentities,
     )
@@ -267,10 +285,14 @@ export async function verifyBlock(
     // After the quorum so a peer replaying one stray signature of ours on an
     // unaccepted block cannot stop this node from signing.
     if (await carriesOurSignature(block)) {
+        // Under commitLock the signing record keeps the round of each
+        // precommit, so that is the time the record is compared against.
         checkOwnSignature({
             number: block.number,
             hash: block.hash,
-            timestamp: blockTimestamp,
+            timestamp: commitLockActive(block.number)
+                ? (block.validation_data as { round: number }).round
+                : blockTimestamp,
         })
     }
 
