@@ -173,6 +173,18 @@ describe("block 0 validator set", () => {
         expect(activeAtBlockZero(set.rows)).toHaveLength(9)
     })
 
+    it("is NO-GO when genesis.validators lists an address twice", async () => {
+        const dup = { ...genesis, validators: [...genesisRows.slice(0, 9), row(0)] }
+        const set = await readBlockZeroValidators(dup, snapshotDir(null))
+        expect(set.reasons.join("\n")).toContain(`genesis.validators lists these validators more than once: ${id(0)}`)
+    })
+
+    it("is NO-GO when the snapshot lists one identity twice in different case", async () => {
+        const rows = [...genesisRows.slice(0, 9), { ...row(0), address: id(0).toUpperCase().replace("0X", "0x") }]
+        const set = await readBlockZeroValidators(genesis, snapshotDir(rows))
+        expect(set.reasons.join("\n")).toContain(`validators.jsonl lists these validators more than once: ${id(0)}`)
+    })
+
     it("leaves the node's snapshot directory variable as it was", async () => {
         const before = process.env.DEMOS_SNAPSHOT_DIR
         await readBlockZeroValidators(genesis, snapshotDir(null))

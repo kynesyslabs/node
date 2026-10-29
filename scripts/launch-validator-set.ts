@@ -63,6 +63,21 @@ async function genesisSeedReasons(rows: ValidatorRow[]): Promise<string[]> {
     }
 }
 
+/**
+ * Addresses listed more than once. The validators table keys on the
+ * address, so an exact repeat stops the node at boot; a repeat that
+ * differs only in case is one identity counted twice against the caps.
+ */
+export function duplicateReasons(rows: ValidatorRow[], source: string): string[] {
+    const seen = new Map<string, number>()
+    for (const row of rows) {
+        const id = norm(String(row.address))
+        seen.set(id, (seen.get(id) ?? 0) + 1)
+    }
+    const repeated = [...seen].filter(([, n]) => n > 1).map(([id]) => id)
+    return repeated.length === 0 ? [] : [`${source} lists these validators more than once: ${repeated.join(", ")}`]
+}
+
 /** Distinct identities of the rows active at block 0, lowercased. */
 export function launchIdentities(rows: ValidatorRow[]): string[] {
     return [...new Set(activeAtBlockZero(rows).map(v => norm(String(v.address))))]
@@ -116,7 +131,12 @@ export async function readBlockZeroValidators(
         }
     }
     if (snapshot.manifest.files["validators.jsonl"] === undefined) {
-        return { rows: genesisRows, source: "genesis", reasons: await genesisSeedReasons(genesisRows), warnings: [] }
+        return {
+            rows: genesisRows,
+            source: "genesis",
+            reasons: [...duplicateReasons(genesisRows, "genesis.validators"), ...(await genesisSeedReasons(genesisRows))],
+            warnings: [],
+        }
     }
 
     const rows: ValidatorRow[] = []
@@ -136,5 +156,5 @@ export async function readBlockZeroValidators(
             )
         }
     }
-    return { rows, source: "snapshot", reasons: [], warnings }
+    return { rows, source: "snapshot", reasons: duplicateReasons(rows, "the snapshot's validators.jsonl"), warnings }
 }
