@@ -207,5 +207,55 @@ describe("two blocks at one height from disjoint signer groups", () => {
         expect(verdictB.valid).toBe(false)
         expect(verdictB.reason).toContain("3 of a bound committee of 10 (need 7)")
     })
+
+    it("never accepts both halves of a 7 + 7 split of the pool", async () => {
+        // Every pool member signs both blocks once; each split then picks
+        // its side's genuine signatures, so the splits run on real ed25519
+        // without re-signing. The stubbed-signature safety suite covers all
+        // 3432 splits; a real verification costs tens of milliseconds, so
+        // this checks every 24th split in enumeration order.
+        const signedA = await signedBy(makeBlock("A"), allSigners)
+        const signedB = await signedBy(makeBlock("B"), allSigners)
+        const bound = new Set(await getBoundCommittee(9))
+        const withSigners = (signed: any, group: Signer[]) => ({
+            ...signed,
+            validation_data: {
+                signatures: Object.fromEntries(
+                    group.map(s => [s.identity, signed.validation_data.signatures[s.identity]]),
+                ),
+            },
+        })
+        const boundIn = (group: Signer[]) => group.filter(s => bound.has(s.identity)).length
+
+        const splits: number[][] = []
+        const visit = (start: number, picked: number[]) => {
+            if (picked.length === 7) {
+                splits.push(picked)
+                return
+            }
+            for (let i = start; i <= allSigners.length - (7 - picked.length); i++) {
+                visit(i + 1, [...picked, i])
+            }
+        }
+        visit(0, [])
+        expect(splits).toHaveLength(3432)
+
+        let accepted = 0
+        let rejectedBoth = 0
+        for (let k = 0; k < splits.length; k += 24) {
+            const sideA = splits[k].map(i => allSigners[i])
+            const sideB = allSigners.filter((_, i) => !splits[k].includes(i))
+            const a = (await verifyBlock(withSigners(signedA, sideA))).valid
+            const b = (await verifyBlock(withSigners(signedB, sideB))).valid
+            expect([a, b]).not.toEqual([true, true])
+            // Only a side holding 7 of the 10 bound members is accepted
+            expect(a).toBe(boundIn(sideA) >= 7)
+            expect(b).toBe(boundIn(sideB) >= 7)
+            if (a || b) accepted++
+            else rejectedBoth++
+        }
+        expect(accepted).toBeGreaterThan(0)
+        expect(rejectedBoth).toBeGreaterThan(0)
+    }, 60_000)
 })
 
