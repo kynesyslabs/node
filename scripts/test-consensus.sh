@@ -6,6 +6,12 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
+# Single files outside SUITE_DIRS whose code the consensus suites depend on.
+SUITE_FILES=(
+    src/libs/communications/broadcastManager.syncData.test.ts
+    src/libs/network/helloGenesisGate.test.ts
+    src/libs/peer/syncClaims.test.ts
+)
 
 runner_for() {
     if grep -q 'from "bun:test"' "$1"; then
@@ -33,7 +39,7 @@ while IFS= read -r file; do
         failed+=("$file")
         echo "::error file=$file::test file failed"
     fi
-done < <(find "${SUITE_DIRS[@]}" -name '*.test.ts' | sort)
+done < <({ find "${SUITE_DIRS[@]}" -name '*.test.ts'; printf '%s\n' "${SUITE_FILES[@]}"; } | sort -u)
 
 echo "consensus suites: $count files, ${#failed[@]} failed"
 if [ "$count" -eq 0 ]; then

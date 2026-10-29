@@ -83,6 +83,7 @@ jest.mock("src/libs/peer/PeerManager", () => ({
     default: {
         getInstance: () => ({
             getPeer: (id: string) => knownPeers[id],
+            getPeers: () => Object.values(knownPeers),
             getOfflinePeers: () => offlinePeers,
         }),
     },
@@ -440,7 +441,7 @@ describe("peers reporting heights", () => {
 })
 
 describe("a round short of its bound committee", () => {
-    it("asks each online member it could not count for the block, and adopts it once verified", async () => {
+    it("asks each member it could not count for the block, and adopts it once verified", async () => {
         const signer = peer("a", [b5, x6])
         const level = peer("c", [b5])
         knownPeers = { a: signer, c: level }
@@ -454,6 +455,23 @@ describe("a round short of its bound committee", () => {
         expect(level.calls).toBe(0)
         expect(credited).toEqual([["a", 6]])
         expect(synced).toEqual(["x6"])
+    })
+
+    it("asks a member marked offline at its last known address", async () => {
+        const signer = peer("a", [b5, x6])
+        offlinePeers = { a: signer }
+        probeCommitteeForHeight(6, ["self", "a"], [{ identity: "self" } as any])
+        await new Promise(r => setTimeout(r, 10))
+        expect(signer.calls).toBe(1)
+        expect(credited).toEqual([["a", 6]])
+    })
+
+    it("finds a member whose announced identity differs in case from the committee's", async () => {
+        const signer = peer("0xAbC", [b5, x6])
+        offlinePeers = { "0xAbC": signer }
+        probeCommitteeForHeight(6, ["self", "0xabc"], [{ identity: "self" } as any])
+        await new Promise(r => setTimeout(r, 10))
+        expect(signer.calls).toBe(1)
     })
 
     it("adopts nothing a member cannot back with a verified block", async () => {

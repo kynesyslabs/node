@@ -39,6 +39,8 @@ const makePeer = (identity: string) => ({
     },
 })
 let online: any[] = []
+let chainBlocks: Record<number, { hash: string }> = {}
+let addPeerResult: [boolean, string] = [true, ""]
 
 let gossipReady = false
 const publish = jest.fn(async () => true)
@@ -58,17 +60,26 @@ mock.module("@/utilities/sharedState", () => ({ getSharedState: state }))
 mock.module("src/utilities/sharedState", () => ({ getSharedState: state }))
 mock.module("src/libs/blockchain/chain", () => ({
     __esModule: true,
-    default: { getBlockByNumber: async () => null, getBlockByHash: async () => null },
+    default: {
+        getBlockByNumber: async (n: number) => chainBlocks[n] ?? null,
+        getBlockByHash: async () => null,
+    },
 }))
 mock.module("src/libs/peer", () => ({
-    Peer: class {},
+    Peer: class {
+        sync: any = {}
+        constructor(
+            public url?: string,
+            public identity?: string,
+        ) {}
+    },
     PeerManager: {
         getInstance: () => ({
             getPeers: () => online,
             getPeer: (id: string) => online.find(p => p.identity === id),
             getOfflinePeers: () => ({}),
             ourSyncDataString: "1:5:h5",
-            addPeer: () => true,
+            addPeer: () => addPeerResult,
         }),
     },
 }))
@@ -99,6 +110,8 @@ beforeEach(() => {
     state.lastBlockNumber = 5
     state.lastBlockHash = "h5"
     online = [makePeer("a"), makePeer("b")]
+    chainBlocks = {}
+    addPeerResult = [true, ""]
     for (const id of Object.keys(replies)) delete replies[id]
     sent.length = 0
     gossipReady = false
@@ -172,5 +185,21 @@ describe("sync data over gossip", () => {
         await BroadcastManager.broadcastOurSyncData()
         expect(publish).toHaveBeenCalledTimes(2)
         expect(sent).toEqual([])
+    })
+})
+
+describe("a peer's sync data report", () => {
+    it("is answered 200 once the peer is added", async () => {
+        chainBlocks = { 5: { hash: "h5" } }
+        const reply = await BroadcastManager.handleUpdatePeerSyncData("a", "1:5:h5")
+        expect(reply.result).toBe(200)
+    })
+
+    it("is answered 400 with the reason when the peer is refused", async () => {
+        chainBlocks = { 5: { hash: "h5" } }
+        addPeerResult = [false, "URL already bound to another identity: http://a"]
+        const reply = await BroadcastManager.handleUpdatePeerSyncData("a", "1:5:h5")
+        expect(reply.result).toBe(400)
+        expect(reply.message).toBe("URL already bound to another identity: http://a")
     })
 })

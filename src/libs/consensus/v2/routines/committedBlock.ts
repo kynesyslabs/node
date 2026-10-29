@@ -399,9 +399,8 @@ export async function adoptBeforeRetry(height: number): Promise<boolean> {
     const peerman = PeerManager.getInstance()
     // A member whose proposal reply timed out was marked offline, yet it may
     // be the one that committed: its known address is still worth asking.
-    const offline = peerman.getOfflinePeers()
     const peers = members
-        .map(id => peerman.getPeer(id) ?? offline[id])
+        .map(id => knownPeer(peerman, id))
         .filter((p): p is Peer => !!p)
     return await adoptBlockFromPeers(height, peers, "checkBeforeRetry")
 }
@@ -443,7 +442,8 @@ export function scheduleHeightProbe(
  * member counts as not live while its height is unknown to us, which is
  * also how a member that already certified `height` looks to a node that
  * missed the push. Only that committee can certify the block, so each of
- * its online members is asked for it, through the rate-limited probe.
+ * its members is asked for it, through the rate-limited probe: one marked
+ * offline is asked at its last known address, as in adoptBeforeRetry.
  */
 export function probeCommitteeForHeight(
     height: number,
@@ -454,8 +454,23 @@ export function probeCommitteeForHeight(
     const liveIds = new Set(live.map(p => p.identity.toLowerCase()))
     for (const identity of committee) {
         if (liveIds.has(identity.toLowerCase())) continue
-        scheduleHeightProbe(peerman.getPeer(identity), height)
+        scheduleHeightProbe(knownPeer(peerman, identity), height)
     }
+}
+
+/**
+ * A peer we know by identity, online or marked offline. Committee ids are
+ * lowercased while the peer manager keys peers by the identity they
+ * announced, so an exact miss falls back to a case-insensitive match.
+ */
+function knownPeer(peerman: PeerManager, identity: string): Peer | undefined {
+    const offline = peerman.getOfflinePeers()
+    const exact = peerman.getPeer(identity) ?? offline[identity]
+    if (exact) return exact
+    const wanted = identity.toLowerCase()
+    return [...peerman.getPeers(), ...Object.values(offline)].find(
+        p => p.identity.toLowerCase() === wanted,
+    )
 }
 
 /**
