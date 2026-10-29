@@ -142,37 +142,46 @@ async function fetchMissingTransactions(
         )
         const missing = hashes.filter(h => !have.has(h))
         if (missing.length === 0) return
-        let response: RPCResponse
-        try {
-            response = await source.call(
-                {
-                    method: "nodeCall",
-                    params: [
-                        {
-                            message: "getTxsByHashes",
-                            data: { hashes: missing },
-                            muid: null,
-                        },
-                    ],
-                },
-                false,
+        // getTxsByHashes serves at most batchSyncTxLimit hashes per call, so
+        // a large block is asked for in batches, as sync does.
+        const batchSize = getSharedState.batchSyncTxSize
+        for (let i = 0; i < missing.length; i += batchSize) {
+            const batch = missing.slice(i, i + batchSize)
+            let response: RPCResponse
+            try {
+                response = await source.call(
+                    {
+                        method: "nodeCall",
+                        params: [
+                            {
+                                message: "getTxsByHashes",
+                                data: { hashes: batch },
+                                muid: null,
+                            },
+                        ],
+                    },
+                    false,
+                )
+            } catch (e) {
+                log.warning(
+                    `[commitLock] getTxsByHashes from ${source.identity} failed: ${e instanceof Error ? e.message : String(e)}`,
+                )
+                break
+            }
+            if (
+                response?.result !== 200 ||
+                !Array.isArray(response.response)
+            ) {
+                continue
+            }
+            const wanted = new Set(batch)
+            const served = (response.response as MempoolTransaction[]).filter(
+                tx => tx && wanted.has(tx.hash),
             )
-        } catch (e) {
-            log.warning(
-                `[commitLock] getTxsByHashes from ${source.identity} failed: ${e instanceof Error ? e.message : String(e)}`,
-            )
-            continue
+            if (served.length === 0) continue
+            // Admitted only through the mempool's own validation
+            await Mempool.receive(served, false)
         }
-        if (response?.result !== 200 || !Array.isArray(response.response)) {
-            continue
-        }
-        const wanted = new Set(missing)
-        const served = (response.response as MempoolTransaction[]).filter(
-            tx => tx && wanted.has(tx.hash),
-        )
-        if (served.length === 0) continue
-        // Admitted only through the mempool's own validation
-        await Mempool.receive(served, false)
     }
 }
 

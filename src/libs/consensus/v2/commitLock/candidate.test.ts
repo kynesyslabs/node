@@ -16,6 +16,7 @@ const sharedState: Record<string, any> = {
     identityFile: "",
     publicKeyHex: "self",
     referenceBlockRoom: 10,
+    batchSyncTxSize: 1000,
 }
 
 jest.mock("src/utilities/logger", () => ({
@@ -224,6 +225,27 @@ describe("rebuilding a block's transactions", () => {
         expect(calls).toEqual([["t2"]])
         expect(received[0].map(t => t.hash)).toEqual(["t2"])
         expect(rebuilt?.txs.map(t => t.hash)).toEqual(["t1", "t2"])
+    })
+
+    it("asks for a large block's missing transactions in batches", async () => {
+        sharedState.batchSyncTxSize = 2
+        try {
+            const calls: string[][] = []
+            const source = {
+                identity: "a",
+                call: async (req: any) => {
+                    const hashes: string[] = req.params[0].data.hashes
+                    calls.push(hashes)
+                    return { result: 200, response: hashes.map(h => tx(h, 1, h)) }
+                },
+            }
+            const block = ["t1", "t2", "t3", "t4", "t5"]
+            const rebuilt = await rebuildTransactions(10, inputs(block), [source as any])
+            expect(calls).toEqual([["t1", "t2"], ["t3", "t4"], ["t5"]])
+            expect(rebuilt?.txs.map(t => t.hash)).toEqual(block)
+        } finally {
+            sharedState.batchSyncTxSize = 1000
+        }
     })
 
     it("gives up when a transaction cannot be found", async () => {
