@@ -16,11 +16,29 @@ import {
 } from "../consensus/v2/routines/committedBlock"
 
 /**
+ * Whether a peer took our sync data. Its handler answers inside a 200
+ * envelope, and refuses a head it cannot corroborate yet (it is behind us)
+ * with a 400 there: that peer must get the value again, both so it keeps
+ * probing until it has caught up and so it then records where we are.
+ */
+function isSyncDataAccepted(reply: RPCResponse): boolean {
+    return (
+        reply?.result === 200 &&
+        (reply.response as { result?: unknown } | null)?.result === 200
+    )
+}
+
+/**
  *
  * Manages the broadcasting of messages to the network
  */
 export class BroadcastManager {
+    // Gossip publishes to the mesh, not to a peer, so it keeps one record
     private static lastBroadcastSyncData: string | null = null
+    // Over HTTP each peer keeps its own: one that missed our head (it was
+    // unreachable, or could not corroborate it yet) is sent it again rather
+    // than skipped because the content did not change
+    private static deliveredSyncData = new Map<string, string>()
     private static syncDataBroadcastInFlight = false
     private static syncDataBroadcastPending = false
 
@@ -241,25 +259,28 @@ export class BroadcastManager {
                     getSharedState.lastBlockNumber
                 }:${getSharedState.lastBlockHash}`
 
-                if (syncData !== BroadcastManager.lastBroadcastSyncData) {
-                    BroadcastManager.lastBroadcastSyncData = syncData
-                    let successful: boolean
-                    if (
-                        GossipManager.isEnabled() &&
-                        GossipManager.getInstance().isReady()
-                    ) {
+                let successful = false
+                if (
+                    GossipManager.isEnabled() &&
+                    GossipManager.getInstance().isReady()
+                ) {
+                    if (syncData !== BroadcastManager.lastBroadcastSyncData) {
                         log.debug(
                             `[GOSSIP] routing sync data over gossip: ${syncData}`,
                         )
                         successful = await GossipManager.getInstance()
                             .publishOwnHeights()
                             .catch(() => false)
-                    } else {
-                        successful =
-                            await BroadcastManager.sendSyncDataToPeers(syncData)
+                        // Marked only once published, so a failure is retried
+                        if (successful) {
+                            BroadcastManager.lastBroadcastSyncData = syncData
+                        }
                     }
-                    anySuccessful = anySuccessful || successful
+                } else {
+                    successful =
+                        await BroadcastManager.sendSyncDataToPeers(syncData)
                 }
+                anySuccessful = anySuccessful || successful
             } while (BroadcastManager.syncDataBroadcastPending)
 
             return anySuccessful
@@ -268,8 +289,24 @@ export class BroadcastManager {
         }
     }
 
+    /**
+     * Sends our sync data to each online peer that has not yet accepted this
+     * exact value. A peer is marked only on an answer that took it; a peer
+     * that went offline loses its mark, so it is sent our head again once it
+     * is back, even if our head has not moved meanwhile.
+     */
     private static async sendSyncDataToPeers(syncData: string) {
-        const peerlist = PeerManager.getInstance().getPeers()
+        const delivered = BroadcastManager.deliveredSyncData
+        const online = PeerManager.getInstance().getPeers()
+        const onlineIds = new Set(online.map(peer => peer.identity))
+        for (const identity of [...delivered.keys()]) {
+            if (!onlineIds.has(identity)) delivered.delete(identity)
+        }
+        const peerlist = online.filter(
+            peer => delivered.get(peer.identity) !== syncData,
+        )
+        if (peerlist.length === 0) return false
+
         const promises = peerlist.map(async peer => {
             const request: RPCRequest = {
                 method: "gcr_routine",
@@ -300,6 +337,14 @@ export class BroadcastManager {
             )
             .map(r => r.value)
         const successful = responses.filter(res => res.result.result === 200)
+
+        for (const res of responses) {
+            if (isSyncDataAccepted(res.result)) {
+                delivered.set(res.pubkey, syncData)
+            } else {
+                delivered.delete(res.pubkey)
+            }
+        }
 
         for (const res of responses) {
             if (res.result.result !== 200) {

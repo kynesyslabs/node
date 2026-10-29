@@ -96,6 +96,7 @@ const {
     adoptCommittedBlock,
     committedHeightRefusal,
     fetchBlockAt,
+    probeCommitteeForHeight,
     probePeerHeight,
     readCommittedRefusal,
     recordFailedRound,
@@ -435,5 +436,44 @@ describe("peers reporting heights", () => {
         scheduleHeightProbe({ ...p, identity: "self" }, 9)
         await new Promise(r => setTimeout(r, 10))
         expect(p.calls).toBe(1)
+    })
+})
+
+describe("a round short of its bound committee", () => {
+    it("asks each online member it could not count for the block, and adopts it once verified", async () => {
+        const signer = peer("a", [b5, x6])
+        const level = peer("c", [b5])
+        knownPeers = { a: signer, c: level }
+        // b is offline, c counted live, self is us
+        probeCommitteeForHeight(6, ["self", "a", "b", "c"], [
+            { identity: "self" } as any,
+            { identity: "C" } as any,
+        ])
+        await new Promise(r => setTimeout(r, 10))
+        expect(signer.calls).toBe(1)
+        expect(level.calls).toBe(0)
+        expect(credited).toEqual([["a", 6]])
+        expect(synced).toEqual(["x6"])
+    })
+
+    it("adopts nothing a member cannot back with a verified block", async () => {
+        verdicts.x6 = { valid: false, reason: "insufficient signatures" }
+        const signer = peer("a", [b5, x6])
+        knownPeers = { a: signer }
+        probeCommitteeForHeight(6, ["self", "a"], [{ identity: "self" } as any])
+        await new Promise(r => setTimeout(r, 10))
+        expect(signer.calls).toBe(1)
+        expect(credited).toEqual([])
+        expect(synced).toEqual([])
+    })
+
+    it("asks a member at most once per window across failed rounds", async () => {
+        const behind = peer("a", [b5])
+        knownPeers = { a: behind }
+        for (let round = 0; round < 5; round++) {
+            probeCommitteeForHeight(6, ["self", "a"], [{ identity: "self" } as any])
+        }
+        await new Promise(r => setTimeout(r, 10))
+        expect(behind.calls).toBe(1)
     })
 })
