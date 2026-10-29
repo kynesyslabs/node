@@ -38,6 +38,60 @@ nodes sharing a state directory cannot both record a different block for one
 round. A lock held by a live process makes the round abort without signing; a
 lock from a dead process or older than 30 seconds is replaced.
 
+## Signing state files
+
+Under the commit-lock fork the node keeps three more files next to the real
+signing record (on the state volume under docker compose):
+
+| File | Holds |
+|------|-------|
+| `<identity file>` | the key |
+| `<identity file>.signed.json` | the last block the key signed (under the fork: the last precommit) |
+| `<identity file>.commitlock.json` | the block the node is locked on, with its proof of lock and what rebuilds it |
+| `<identity file>.prevote.json` | the last round the node prevoted in |
+| `<identity file>.signed.json.halted` | present only after a foreign signature; see below |
+
+Back them up and restore them together, as one copy taken while the node was
+stopped. A mix of files from different times can let the node vote against a
+vote it already cast.
+
+Restore signing state from the newest complete copy. An older copy is safe
+only once the network has committed a block above every height at which the
+key may have voted after that copy was made: the node from the old copy has
+no record of those later votes. Comparing the network head with the height
+in the restored `.signed.json` is not enough. Take the highest height the key
+can have voted at (the last height the old host reached, from its logs or
+from the network's blocks signed by the key), and start the restored node
+only when the network head is above it. Let it sync to the head before it
+joins the committee: it votes only at the height after its own head, so
+every earlier vote is then behind it.
+
+### Damaged commit-lock file
+
+A commit-lock file that cannot be read stops the node from voting: every round
+at that height aborts with `commit lock ... is not valid JSON` or `has an
+unexpected shape`. To recover:
+
+1. Stop the node.
+2. Move the file aside by hand, for example
+   `mv .demos_identity.commitlock.json .demos_identity.commitlock.json.damaged`.
+   Do not touch `.signed.json`.
+3. Start the node.
+
+This is safe because the signing record holds the last block the node
+precommitted and its round. After a lost lock file the record stands in for
+the lock: the node votes as if it were still locked on that block, and writes
+a new lock file with its next precommit.
+
+To vote for that block again the node needs the block's contents, which it
+rebuilds from the transactions its peers still hold. When no peer can supply
+them, every round at that height aborts on this node. That is by design: it
+waits rather than vote for a different block. It resumes once the missing
+transactions reach it, or once the network commits past the height without
+it and it syncs the block.
+Do not move a damaged `.signed.json` or `.prevote.json` aside this way; wait
+until the network has committed past the height first.
+
 ## One host signs for each key
 
 Exactly one named host runs a validator for a given key at any time. Write the
@@ -105,10 +159,10 @@ refused.
 1. Stop the old node and confirm it is down: no process, no container, no
    answer on its RPC port. If the machine cannot be reached, make sure it
    cannot start again (power it off or revoke its access) before going on.
-2. Copy the whole state directory to the new host: the identity file and its
-   `.signed.json` record. The record is what keeps the new host from signing
-   a round the old one already signed. An older copy of the record makes the
-   self-check below stop the new node.
+2. Copy the whole state directory to the new host: the identity file and
+   every signing state file listed above. The record is what keeps the new
+   host from signing a round the old one already signed. An older copy of the
+   record makes the self-check below stop the new node.
 3. Start the new node. If the copied lock still beats, the old node is alive:
    go back to step 1. A stale lock is replaced after a watch of 10 to 25
    seconds; `DEMOS_IDENTITY_TAKEOVER=true` shortens it to about 7 seconds.
@@ -150,7 +204,8 @@ When it fires:
    `<identity file>.signed.json.halted` on that copy's state directory and
    start it with the newest state directory (identity file and record).
 
-Alert on `demos_foreign_signature_total > 0`.
+The `ForeignSignature` alert fires on any increase of
+`demos_foreign_signature_total`.
 
 ## Production refusals
 

@@ -220,6 +220,7 @@ export class MetricsCollector {
                 this.collectPeerMetrics(),
                 this.collectNodeHttpHealth(),
                 this.collectObservability(),
+                this.collectSigningState(),
                 this.config.dockerHealthEnabled
                     ? this.collectDockerHealth()
                     : Promise.resolve(),
@@ -230,6 +231,25 @@ export class MetricsCollector {
         } catch (error) {
             log.error(
                 `[METRICS COLLECTOR] Collection error: ${error instanceof Error ? error.message : String(error)}`,
+            )
+        }
+    }
+
+    private async collectSigningState(): Promise<void> {
+        try {
+            const { getSharedState } = await import("@/utilities/sharedState")
+            const { signingStopState } = await import(
+                "src/libs/identity/signingRecord"
+            )
+            const state = signingStopState(getSharedState.identityFile)
+            this.metricsService.setGauge("signing_halted", state.stopped ? 1 : 0)
+            this.metricsService.setGauge(
+                "signing_halt_marker_present",
+                state.markerPresent ? 1 : 0,
+            )
+        } catch (error) {
+            log.debug(
+                `[METRICS COLLECTOR] signing state: ${error instanceof Error ? error.message : String(error)}`,
             )
         }
     }

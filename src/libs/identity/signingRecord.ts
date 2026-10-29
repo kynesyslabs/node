@@ -87,6 +87,27 @@ export function signingHaltReason(): string | null {
     return haltReason
 }
 
+/**
+ * Whether this node refuses to sign right now: stopped in this process, or
+ * by a marker on disk. A stop whose marker write failed counts here but is
+ * lost on restart, which is why the marker is checked separately.
+ */
+export function signingStopState(identityFile?: string): {
+    stopped: boolean
+    markerPresent: boolean
+} {
+    let markerPresent = false
+    if (identityFile) {
+        try {
+            markerPresent = fs.existsSync(signingHaltMarkerPath(identityFile))
+        } catch {
+            // A marker path that cannot be resolved also refuses signing
+            markerPresent = true
+        }
+    }
+    return { stopped: haltReason !== null || markerPresent, markerPresent }
+}
+
 function markerRefusal(identityFile: string): string | null {
     const marker = signingHaltMarkerPath(identityFile)
     if (!fs.existsSync(marker)) return null

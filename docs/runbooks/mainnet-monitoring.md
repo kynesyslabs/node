@@ -55,6 +55,9 @@ validator (`instance` label).
 |-------|-----------|----------|---------|
 | HeightStalled | no new block for 300 s, held 2 min | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. |
 | BlockHashMismatch | more than 3 peer disagreements on the candidate block hash in 10 min, held 5 min | warning | This node and its peers are building different blocks (mempool or clock divergence). |
+| ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, within 10 min | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. |
+| SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If it is 0, the marker write failed: keep the node stopped until every other copy of the key is stopped. |
+| PrecommitEquivocation | a committee member precommitted two different blocks at one height and round, within 10 min | critical | That member's key runs twice or its signing state was rolled back. The log line `[commitLock] Equivocation` names it. |
 | MissedSignatures | 3 or more blocks in 15 min where the node was drawn into the shard and did not sign | warning | The node is online but not taking part in consensus. |
 | ForkScheduleMismatch | at least one validator reports a different fork schedule, held 5 min | critical | Genesis fork schedules differ; see `fork-schedule-policy.md`. |
 | ConsensusAbstaining | the node is skipping rounds because most validators differ from it, held 1 min | critical | The node has taken itself out of consensus; see `fork-schedule-policy.md`. |

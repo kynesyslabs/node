@@ -1,4 +1,8 @@
-import { beforeAll, describe, expect, it } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { createHash } from "node:crypto"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { getUnifiedCryptoInstance, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import {
     type SigningProof,
@@ -96,7 +100,7 @@ describe("verifyProofs with real ed25519 signatures", () => {
     it("rejects a key outside the genesis validator list", async () => {
         const r = await verifyProofs([await proofBy(keys[3])], validators)
         expect(r.ok).toBe(false)
-        expect(r.reports[0].reason).toBe("not a genesis validator")
+        expect(r.reports[0].reason).toBe("not a launch validator")
     })
 
     it("rejects another genesis or another date", async () => {
@@ -140,4 +144,76 @@ describe("verifyProofs with real ed25519 signatures", () => {
     it("is not ok with no proofs at all", async () => {
         expect((await verifyProofs([], validators)).ok).toBe(false)
     })
+})
+
+describe("verify CLI", () => {
+    const sha256 = (s: string) => createHash("sha256").update(s).digest("hex")
+    const row = (address: string) => ({
+        address,
+        status: "2",
+        connection_url: null,
+        staked_amount: "1",
+        first_seen: 0,
+        valid_at: 0,
+        unstake_requested_at: null,
+        unstake_available_at: null,
+    })
+    let dir = ""
+    afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+    /** Genesis lists keys 0 and 3; the snapshot's validators.jsonl, which the node uses, keys 0-2. */
+    function fixture(): { genesis: string; snapshot: string; proofs: string } {
+        dir = mkdtempSync(join(tmpdir(), "prove-signing-"))
+        const snapshot = join(dir, "snapshot")
+        const empty = sha256("")
+        const body = keys.slice(0, 3).map(k => JSON.stringify(row(k.identity))).join("\n") + "\n"
+        mkdirSync(snapshot)
+        for (const f of ["gcr_main.jsonl", "gcr_storageprogram.jsonl", "identity_commitments.jsonl"]) {
+            writeFileSync(join(snapshot, f), "")
+        }
+        writeFileSync(join(snapshot, "validators.jsonl"), body)
+        writeFileSync(
+            join(snapshot, "manifest.json"),
+            JSON.stringify({
+                schemaVersion: 2,
+                source: { host: "t", chain_block_height: 0, chain_block_hash: "0x0", node_version: "t", pg_version: "t", dumped_at: "t" },
+                files: {
+                    "gcr_main.jsonl": { sha256: empty, rows: 0, balance_sum: "0" },
+                    "gcr_storageprogram.jsonl": { sha256: empty, rows: 0, size_bytes_sum: 0 },
+                    "identity_commitments.jsonl": { sha256: empty, rows: 0 },
+                    "validators.jsonl": { sha256: sha256(body), rows: 3 },
+                },
+                fork_state: [],
+                transforms_applied: { nonces_reset_to_zero: true, assigned_txs_emptied: true, test_identity_commitments_dropped: true },
+            }),
+        )
+        const genesis = join(dir, "genesis.json")
+        writeFileSync(genesis, JSON.stringify({ validators: [row(keys[0].identity), row(keys[3].identity)] }))
+        return { genesis, snapshot, proofs: join(dir, "proofs.json") }
+    }
+
+    function run(args: string[]) {
+        const r = Bun.spawnSync(["bun", "scripts/validator-prove-signing.ts", ...args], {
+            cwd: join(import.meta.dir, ".."),
+            stdout: "pipe",
+            stderr: "pipe",
+        })
+        return { code: r.exitCode, out: String(r.stdout) + String(r.stderr) }
+    }
+
+    it("checks proofs against the snapshot's validator set when --snapshot has one", async () => {
+        const f = fixture()
+        writeFileSync(f.proofs, JSON.stringify(await Promise.all(keys.slice(0, 3).map(k => proofBy(k)))))
+        const common = ["--verify", f.proofs, "--genesis", f.genesis, "--genesis-hash", GENESIS, "--require-all"]
+
+        const withSnapshot = run([...common, "--snapshot", f.snapshot])
+        expect(withSnapshot.out).toContain("3 of 3 launch validators proven")
+        expect(withSnapshot.out).toContain("differs from genesis.validators")
+        expect(withSnapshot.code).toBe(0)
+
+        // The genesis alone does not say who the node seeds at block 0
+        const genesisOnly = run(common)
+        expect(genesisOnly.out).toContain("--verify needs --snapshot")
+        expect(genesisOnly.code).toBe(2)
+    }, 30_000)
 })

@@ -77,6 +77,16 @@ jest.mock("./precommit", () => ({ committeePeers: () => [] }))
 const { chooseCandidates, gatherRetryCandidates, rebuildTransactions } = await import("./candidate")
 const lockStore = await import("./lockStore")
 const roundState = await import("./roundState")
+const signingRecord = await import("src/libs/identity/signingRecord")
+
+function recordPrecommit(height: number, round: number, hash: string, genesisHash = "hash-0") {
+    signingRecord.recordBlockSignature(sharedState.identityFile, {
+        genesisHash,
+        height,
+        timestamp: round,
+        hash,
+    })
+}
 
 const inputs = (txs: string[], timestamp = 1500) => ({
     previousHash: "hash-9",
@@ -182,7 +192,7 @@ describe("gathering the retry's candidates", () => {
     it("asks nobody on a first attempt without a lock", async () => {
         const result = await gatherRetryCandidates(10, false, ["self", "a"])
         expect(fetched.asked).toBe(0)
-        expect(result).toEqual({ locked: null, options: [], committed: [] })
+        expect(result).toEqual({ locked: null, bound: null, options: [], committed: [] })
     })
 
     it("asks the committee on a retry", async () => {
@@ -198,6 +208,76 @@ describe("gathering the retry's candidates", () => {
         expect(fetched.asked).toBe(1)
         expect(result.locked?.hash).toBe("x")
         expect(result.options.map(o => o.hash)).toEqual(["x"])
+    })
+})
+
+describe("a precommit in the signing record without its lock file", () => {
+    it("binds a first attempt and asks the committee, even with nobody reporting", async () => {
+        recordPrecommit(10, 5000, "x")
+        const result = await gatherRetryCandidates(10, false, ["self", "a"])
+        expect(fetched.asked).toBe(1)
+        expect(result.locked).toBeNull()
+        expect(result.bound).toContain("height 10")
+        expect(result.options).toEqual([])
+    })
+
+    it("takes the recorded block as a member reports it", async () => {
+        recordPrecommit(10, 5000, "x")
+        fetched.locks = [reported("x", 5000, "a")]
+        const result = await gatherRetryCandidates(10, false, ["self", "a"])
+        expect(result.options.map(o => [o.origin, o.hash])).toEqual([["lock", "x"]])
+    })
+
+    it("takes another block only on a proof of lock above the recorded round", async () => {
+        recordPrecommit(10, 5000, "x")
+        fetched.locks = [reported("y", 5000, "a"), reported("z", 4000, "b")]
+        expect((await gatherRetryCandidates(10, true, ["self", "a", "b"])).options).toEqual([])
+
+        fetched.locks = [reported("y", 5010, "a"), reported("x", 5000, "b")]
+        const result = await gatherRetryCandidates(10, true, ["self", "a", "b"])
+        expect(result.bound).not.toBeNull()
+        expect(result.options.map(o => o.hash)).toEqual(["y", "x"])
+    })
+
+    it("allows nothing when the record is above the height", async () => {
+        recordPrecommit(11, 5000, "x")
+        fetched.locks = [reported("y", 6000, "a")]
+        const result = await gatherRetryCandidates(10, false, ["self", "a"])
+        expect(result.bound).toContain("height 11")
+        expect(result.options).toEqual([])
+    })
+
+    it("does not bind the next height", async () => {
+        recordPrecommit(9, 5000, "x")
+        const result = await gatherRetryCandidates(10, false, ["self", "a"])
+        expect(fetched.asked).toBe(0)
+        expect(result).toEqual({ locked: null, bound: null, options: [], committed: [] })
+    })
+
+    it("ignores a record of another chain", async () => {
+        recordPrecommit(10, 5000, "x", "other-genesis")
+        const result = await gatherRetryCandidates(10, false, ["self", "a"])
+        expect(result).toEqual({ locked: null, bound: null, options: [], committed: [] })
+    })
+
+    it("leaves the lock rule to the lock file when it binds the height", async () => {
+        lockStore.writeCommitLock(sharedState.identityFile, ownLock("x", 5000))
+        recordPrecommit(10, 5000, "x")
+        fetched.locks = [reported("y", 5010, "a")]
+        const result = await gatherRetryCandidates(10, false, ["self", "a"])
+        expect(result.bound).toBeNull()
+        expect(result.options.map(o => [o.origin, o.hash])).toEqual([
+            ["pol", "y"],
+            ["lock", "x"],
+        ])
+    })
+
+    it("fails on a record it cannot read", async () => {
+        fs.writeFileSync(signingRecord.signingRecordPath(sharedState.identityFile), "{")
+        await expect(gatherRetryCandidates(10, false, ["self", "a"])).rejects.toBeInstanceOf(
+            signingRecord.SigningRecordError,
+        )
+        expect(fetched.asked).toBe(0)
     })
 })
 

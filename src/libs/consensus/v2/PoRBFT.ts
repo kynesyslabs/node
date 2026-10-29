@@ -1121,7 +1121,8 @@ async function forgeBlock(
  * The candidate step 1 of a commitLock round decides on before a fresh
  * block: our locked block, or a block with a later proof of lock that the
  * committee reports. Null when nothing binds this attempt and a fresh
- * block may be forged. A locked member that cannot rebuild its block ends
+ * block may be forged. A member bound by its lock, or by a precommit in
+ * its signing record, that cannot rebuild a block the lock allows ends
  * the attempt instead: prevoting anything else would break its lock.
  */
 export async function forgeLockedCandidate(
@@ -1140,7 +1141,7 @@ export async function forgeLockedCandidate(
     try {
         gathered = await gatherRetryCandidates(blockRef, retrying, committee)
     } catch (e) {
-        if (e instanceof CommitLockError) {
+        if (e instanceof CommitLockError || e instanceof SigningRecordError) {
             throw new AbortConsensusError(`[commitLock] ${e.message}`)
         }
         throw e
@@ -1187,6 +1188,11 @@ export async function forgeLockedCandidate(
     if (gathered.locked) {
         throw new AbortConsensusError(
             `[commitLock] Locked on ${gathered.locked.hash} at height ${blockRef} but cannot rebuild it; not prevoting another block`,
+        )
+    }
+    if (gathered.bound) {
+        throw new AbortConsensusError(
+            `[commitLock] ${gathered.bound}, and no block it allows could be rebuilt; not prevoting another block`,
         )
     }
     return null
