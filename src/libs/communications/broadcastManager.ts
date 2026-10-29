@@ -431,9 +431,12 @@ export class BroadcastManager {
         peer.sync.block_hash = claimedHash
         peer.sync.status = splits[0] === "1" ? true : false
 
+        // addPeer returns [added, reason]: a refused peer must get a 400 so
+        // the sender does not record the value as delivered.
+        const [added, reason] = peerman.addPeer(peer)
         return {
-            result: peerman.addPeer(peer) ? 200 : 400,
-            message: "Sync data updated",
+            result: added ? 200 : 400,
+            message: added ? "Sync data updated" : reason,
             syncData: peerman.ourSyncDataString,
         }
     }

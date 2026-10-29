@@ -443,7 +443,8 @@ export function scheduleHeightProbe(
  * member counts as not live while its height is unknown to us, which is
  * also how a member that already certified `height` looks to a node that
  * missed the push. Only that committee can certify the block, so each of
- * its online members is asked for it, through the rate-limited probe.
+ * its members is asked for it, through the rate-limited probe: one marked
+ * offline is asked at its last known address, as in adoptBeforeRetry.
  */
 export function probeCommitteeForHeight(
     height: number,
@@ -451,10 +452,14 @@ export function probeCommitteeForHeight(
     live: Peer[],
 ): void {
     const peerman = PeerManager.getInstance()
+    const offline = peerman.getOfflinePeers()
     const liveIds = new Set(live.map(p => p.identity.toLowerCase()))
     for (const identity of committee) {
         if (liveIds.has(identity.toLowerCase())) continue
-        scheduleHeightProbe(peerman.getPeer(identity), height)
+        scheduleHeightProbe(
+            peerman.getPeer(identity) ?? offline[identity],
+            height,
+        )
     }
 }
 
