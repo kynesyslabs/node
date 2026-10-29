@@ -725,7 +725,10 @@ export default class PeerManager {
                 return { peers: [], verdict: "invalid" }
             }
 
-            peer.sync = await corroborateSyncData(response.extra.syncData)
+            peer.sync = await corroborateSyncData(
+                response.extra.syncData,
+                peer,
+            )
 
             if (typeof response.extra.gossip?.multiaddr === "string") {
                 void import("../gossip/GossipManager").then(

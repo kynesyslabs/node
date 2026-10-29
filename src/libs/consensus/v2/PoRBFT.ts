@@ -39,6 +39,7 @@ import {
     adoptBlockFromPeers,
     type CommittedReport,
     peekFailedRound,
+    probeCommitteeForHeight,
     recordFailedRound,
 } from "./routines/committedBlock"
 import {
@@ -641,6 +642,20 @@ export async function consensusRoutine(): Promise<void> {
             recordFailedRound(
                 blockRef,
                 (manager?.shard?.members ?? []).map(m => m.identity),
+            )
+        }
+
+        if (
+            error instanceof NotInShardError &&
+            manager?.boundCommittee &&
+            manager.shard?.blockRef === blockRef &&
+            manager.shard.members.length < getCommitteeFloor() &&
+            getSharedState.lastBlockNumber < blockRef
+        ) {
+            probeCommitteeForHeight(
+                blockRef,
+                manager.boundCommittee,
+                manager.shard.members,
             )
         }
 
