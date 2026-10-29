@@ -6,6 +6,18 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
+# Outside those trees: the launch go/no-go tooling, the signing guards and
+# the consensus routes.
+# A listed file that is gone fails its run instead of dropping out silently
+SUITE_FILES=(
+    scripts/launch-go-no-go*.test.ts
+    scripts/validator-prove-signing.test.ts
+    src/libs/identity/foreignSignature.test.ts
+    src/libs/identity/signingRecord.test.ts
+    src/libs/network/manageConsensusRoutines.commitLock.test.ts
+    src/libs/network/manageConsensusRoutines.committed.test.ts
+    src/libs/network/proposeBlockHashSender.test.ts
+)
 
 runner_for() {
     if grep -q 'from "bun:test"' "$1"; then
@@ -23,9 +35,9 @@ while IFS= read -r file; do
     count=$((count + 1))
     echo "::group::$file ($(runner_for "$file"))"
     if [ "$(runner_for "$file")" = jest ]; then
-        npx jest --maxWorkers=1 "$file"
+        npx jest --maxWorkers=1 "$file" < /dev/null
     else
-        bun test "./$file"
+        bun test "./$file" < /dev/null
     fi
     status=$?
     echo "::endgroup::"
@@ -33,7 +45,7 @@ while IFS= read -r file; do
         failed+=("$file")
         echo "::error file=$file::test file failed"
     fi
-done < <(find "${SUITE_DIRS[@]}" -name '*.test.ts' | sort)
+done < <({ find "${SUITE_DIRS[@]}" -name '*.test.ts'; printf '%s\n' "${SUITE_FILES[@]}"; } | sort -u)
 
 echo "consensus suites: $count files, ${#failed[@]} failed"
 if [ "$count" -eq 0 ]; then
