@@ -121,6 +121,26 @@ describe("block 0 validator set", () => {
         expect(set.reasons).toEqual([])
     })
 
+    it("keeps the node's seeding logs off stdout", async () => {
+        const written: string[] = []
+        const realWrite = process.stdout.write.bind(process.stdout)
+        const realLog = console.log
+        process.stdout.write = ((chunk: string | Uint8Array) => {
+            written.push(String(chunk))
+            return true
+        }) as typeof process.stdout.write
+        console.log = (...a: unknown[]) => void written.push(a.join(" "))
+        try {
+            await readBlockZeroValidators(genesis, snapshotDir(null))
+            // The terminal sink flushes on a later tick
+            await new Promise(r => setTimeout(r, 50))
+        } finally {
+            process.stdout.write = realWrite
+            console.log = realLog
+        }
+        expect(written).toEqual([])
+    })
+
     it("does not warn when the snapshot matches genesis.validators", async () => {
         const set = await readBlockZeroValidators(genesis, snapshotDir(genesisRows))
         expect(set.source).toBe("snapshot")

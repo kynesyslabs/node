@@ -12,6 +12,7 @@ import * as path from "path"
 import type { EntityManager } from "typeorm"
 import { loadSnapshot } from "src/libs/blockchain/genesis/loadSnapshot"
 import { type GenesisValidatorSeed, seedValidators } from "src/libs/blockchain/genesis/seedValidators"
+import { CategorizedLogger } from "src/utilities/tui"
 
 export interface ValidatorRow {
     address?: unknown
@@ -55,11 +56,18 @@ async function genesisSeedReasons(rows: ValidatorRow[]): Promise<string[]> {
         query: async () => [{ count: "0" }],
         insert: async () => undefined,
     } as unknown as EntityManager
+    // The seeding logs to the terminal, which would land in the middle of
+    // --json output; a refused row comes back as the reason instead
+    const logger = CategorizedLogger.getInstance()
+    const wasQuiet = logger.isTuiMode()
+    if (!wasQuiet) logger.enableTuiMode()
     try {
         await seedValidators(em, rows as GenesisValidatorSeed[])
         return []
     } catch (e) {
         return [`genesis.validators would stop the node at boot: ${(e as Error).message}`]
+    } finally {
+        if (!wasQuiet) logger.disableTuiMode()
     }
 }
 

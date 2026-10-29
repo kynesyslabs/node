@@ -35,7 +35,15 @@ groups:
           severity: critical
         annotations:
           summary: Another process is signing with this validator's key
-          description: "{{ $labels.instance }} saw a peer block carrying a signature by its own key that it never recorded. Signing is stopped on this node, also across restarts, until the marker named in its [SIGNING] log line is deleted. Stop every copy of this key and find the second host before deleting it; see docs/runbooks/validator-key.md."
+          description: "{{ $labels.instance }} saw a peer block carrying a signature by its own key that it never recorded, and stopped signing. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force."
+
+      - alert: SigningHalted
+        expr: demos_signing_halted == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: Block signing is stopped on this validator
+          description: "{{ $labels.instance }} refuses to sign blocks; its log has a [SIGNING] or [IDENTITY] line with the reason. The stop survives a restart only while the marker file exists (demos_signing_halt_marker_present = 1). If the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. Delete the marker only after confirming a single copy of the key runs; see docs/runbooks/validator-key.md."
 
       - alert: PrecommitEquivocation
         expr: increase(demos_precommit_equivocation_total[10m]) > 0

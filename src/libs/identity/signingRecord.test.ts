@@ -25,6 +25,7 @@ import {
     setSigningLeaseCheck,
     signedByThisProcess,
     signingHaltMarkerPath,
+    signingStopState,
     signingHaltReason,
     recordBlockSignature,
     loadSigningRecord,
@@ -324,6 +325,24 @@ describe("signingRecord", () => {
             }
             expect(signingHaltReason()).toBe("key seen elsewhere")
             expect(fs.existsSync(signingHaltMarkerPath(identity))).toBe(false)
+            // What the halt alert tells the operator: stopped now, not after a restart
+            expect(signingStopState(identity)).toEqual({
+                stopped: true,
+                markerPresent: false,
+            })
+        })
+
+        it("reports the stop from the marker alone after a restart", () => {
+            expect(signingStopState(identity)).toEqual({
+                stopped: false,
+                markerPresent: false,
+            })
+            haltSigning("key seen elsewhere", identity)
+            __resetSigningHalt()
+            expect(signingStopState(identity)).toEqual({
+                stopped: true,
+                markerPresent: true,
+            })
         })
 
         it("refuses every round once halted and names the reason", () => {

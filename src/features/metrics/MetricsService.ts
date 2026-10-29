@@ -331,6 +331,16 @@ export class MetricsService {
             [],
         )
         this.createGauge(
+            "signing_halted",
+            "1 while block signing is stopped (foreign signature, lost identity lock or a stop marker on disk), else 0",
+            [],
+        )
+        this.createGauge(
+            "signing_halt_marker_present",
+            "1 while the signing stop marker exists on disk, so the stop also holds after a restart, else 0",
+            [],
+        )
+        this.createGauge(
             "consensus_abstaining",
             "1 while the node skips consensus rounds because its fork schedule differs from its peers, else 0",
             [],

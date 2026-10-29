@@ -10,7 +10,9 @@ SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
 # guards and the consensus and sync routes the suites depend on. A listed
 # file that is gone fails its run instead of dropping out silently
 SUITE_FILES=(
-    scripts/launch-go-no-go*.test.ts
+    scripts/launch-go-no-go.committee.test.ts
+    scripts/launch-go-no-go.test.ts
+    scripts/launch-go-no-go.snapshot.test.ts
     scripts/validator-prove-signing.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/identity/foreignSignature.test.ts

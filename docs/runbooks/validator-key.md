@@ -55,11 +55,16 @@ Back them up and restore them together, as one copy taken while the node was
 stopped. A mix of files from different times can let the node vote against a
 vote it already cast.
 
-Restore signing state only once the network has committed a block above the
-last height in the restored `.signed.json`. The node votes only at the height
-after its head, so everything it signed before is then behind it. Check the
-height with `jq .height <identity file>.signed.json` against the network's
-head before starting.
+Restore signing state from the newest complete copy. An older copy is safe
+only once the network has committed a block above every height at which the
+key may have voted after that copy was made: the node from the old copy has
+no record of those later votes. Comparing the network head with the height
+in the restored `.signed.json` is not enough. Take the highest height the key
+can have voted at (the last height the old host reached, from its logs or
+from the network's blocks signed by the key), and start the restored node
+only when the network head is above it. Let it sync to the head before it
+joins the committee: it votes only at the height after its own head, so
+every earlier vote is then behind it.
 
 ### Damaged commit-lock file
 
@@ -77,6 +82,13 @@ This is safe because the signing record holds the last block the node
 precommitted and its round. After a lost lock file the record stands in for
 the lock: the node votes as if it were still locked on that block, and writes
 a new lock file with its next precommit.
+
+To vote for that block again the node needs the block's contents, which it
+rebuilds from the transactions its peers still hold. When no peer can supply
+them, every round at that height aborts on this node. That is by design: it
+waits rather than vote for a different block. It resumes once the missing
+transactions reach it, or once the network commits past the height without
+it and it syncs the block.
 Do not move a damaged `.signed.json` or `.prevote.json` aside this way; wait
 until the network has committed past the height first.
 
