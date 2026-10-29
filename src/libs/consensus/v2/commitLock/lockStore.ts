@@ -168,15 +168,21 @@ export interface LockRequest {
     round: number
 }
 
+/** What the lock rule judges by: which block, and from which round. */
+export type LockPosition = Pick<
+    CommitLock,
+    "genesisHash" | "height" | "hash" | "round"
+>
+
 export type LockDecision =
     /** No lock binds this height: take one. */
     | { action: "lock" }
     /** Locked on the same block: precommit, the lock already says so. */
     | { action: "keep" }
     /** Locked on the same block in an earlier round: advance the round. */
-    | { action: "relock"; from: CommitLock }
+    | { action: "relock"; from: LockPosition }
     /** Locked on another block, with a proof of lock from a later round. */
-    | { action: "move"; from: CommitLock }
+    | { action: "move"; from: LockPosition }
     | { action: "refuse"; reason: string }
 
 /**
@@ -186,7 +192,7 @@ export type LockDecision =
  * precommit can never be for a round the member has already moved past.
  */
 export function judgeLock(
-    current: CommitLock | null,
+    current: LockPosition | null,
     request: LockRequest,
 ): LockDecision {
     if (

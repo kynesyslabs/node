@@ -438,6 +438,24 @@ describe("commit lock safety with a committee of four", () => {
         expect(await askPrecommit(B, R2 + 10, Y, polX)).toBeNull()
     })
 
+    it("keeps the round of its precommit as the prevote floor when the prevote record is lost", async () => {
+        const X = blocks.X.hash
+        const Y = blocks.Y.hash
+        const pol = Object.fromEntries(await Promise.all(all.map(m => prevote(m, R2, X))))
+        expect(await askPrecommit(B, R2, X, pol)).not.toBeNull()
+
+        fs.rmSync(prevoteRecordPath(B.file))
+        await expect(prevote(B, R1, Y)).rejects.toBeInstanceOf(lockStore.CommitLockError)
+        await expect(prevote(B, R2, Y)).rejects.toBeInstanceOf(lockStore.CommitLockError)
+
+        // The signing record keeps it once the lock file is gone too
+        fs.rmSync(lockStore.commitLockPath(B.file))
+        await expect(prevote(B, R1, Y)).rejects.toBeInstanceOf(lockStore.CommitLockError)
+        await expect(prevote(B, R2, Y)).rejects.toBeInstanceOf(lockStore.CommitLockError)
+        await prevote(B, R2, X)
+        await prevote(B, R2 + 10, X)
+    })
+
     it("locks nobody on a split round, so the retry forges fresh and completes", async () => {
         const X = blocks.X.hash
         const Y = blocks.Y.hash

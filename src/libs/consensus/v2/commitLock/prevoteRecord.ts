@@ -1,6 +1,9 @@
 import fs from "node:fs"
-import { writeFileDurably } from "src/libs/identity/signingRecord"
-import { CommitLockError, commitLockPath } from "./lockStore"
+import {
+    loadSigningRecord,
+    writeFileDurably,
+} from "src/libs/identity/signingRecord"
+import { CommitLockError, commitLockPath, loadCommitLock } from "./lockStore"
 
 /**
  * The latest prevote this validator signed. A member never acts in a round
@@ -91,7 +94,7 @@ export function loadPrevoteRecord(identityFile: string): PrevoteRecord | null {
  * nothing about this one.
  */
 export function prevoteRefusal(
-    last: PrevoteRecord | null,
+    last: PrevoteRequest | null,
     request: PrevoteRequest,
 ): string | null {
     if (!last || last.genesisHash !== request.genesisHash) return null
@@ -109,6 +112,20 @@ export function prevoteRefusal(
 }
 
 /**
+ * The rounds our precommits show we prevoted in: each precommit follows our
+ * prevote for its block in its round. They keep the floor when the prevote
+ * record was lost or restored from an older copy.
+ */
+function precommittedRounds(identityFile: string): PrevoteRequest[] {
+    const rounds: PrevoteRequest[] = []
+    const lock = loadCommitLock(identityFile)
+    if (lock) rounds.push(lock)
+    const record = loadSigningRecord(identityFile)
+    if (record) rounds.push({ ...record, round: record.timestamp })
+    return rounds
+}
+
+/**
  * Durably record that we are about to prevote `request`, or throw when an
  * earlier prevote forbids it. Called before the signature exists.
  */
@@ -119,6 +136,14 @@ export function recordPrevoteRound(
     const last = loadPrevoteRecord(identityFile)
     const refusal = prevoteRefusal(last, request)
     if (refusal) throw new CommitLockError(`refusing to prevote: ${refusal}`)
+    for (const acted of precommittedRounds(identityFile)) {
+        const below = prevoteRefusal(acted, request)
+        if (below) {
+            throw new CommitLockError(
+                `refusing to prevote: precommitted ${acted.hash} at height ${acted.height} in round ${acted.round}; ${below}`,
+            )
+        }
+    }
     if (
         last &&
         last.genesisHash === request.genesisHash &&

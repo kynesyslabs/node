@@ -1,5 +1,9 @@
 import type { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Mempool from "src/libs/blockchain/mempool"
+import {
+    loadSigningRecord,
+    type SigningRecord,
+} from "src/libs/identity/signingRecord"
 import type Peer from "src/libs/peer/Peer"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
@@ -91,15 +95,43 @@ export function chooseCandidates<P>(
 export interface RetryCandidates {
     /** Whether our own lock binds this height: no fresh block then. */
     locked: CommitLock | null
+    /**
+     * Why the height binds us although no lock file does: the signing
+     * record holds a precommit at it or above. No fresh block then either.
+     */
+    bound: string | null
     options: RebuildOption[]
     committed: CommittedReport[]
 }
 
 /**
+ * The candidates a precommit known only from the signing record allows.
+ * The record holds the lost lock's block and round, but not the inputs
+ * that rebuild it, so that block is taken only as a member reports it.
+ * Above this height nothing is safe to prevote: our head is behind a
+ * height we already voted at.
+ */
+export function chooseRecordBoundCandidates<P>(
+    record: SigningRecord,
+    height: number,
+    reported: ReportedLock<P>[],
+): RebuildOption<P>[] {
+    if (record.height > height) return []
+    const options = chooseCandidates(null, reported)
+    const above = options.filter(
+        o => o.hash !== record.hash && o.round > record.timestamp,
+    )
+    const same = options
+        .filter(o => o.hash === record.hash)
+        .map(o => ({ ...o, origin: "lock" as const }))
+    return [...above, ...same]
+}
+
+/**
  * Close the previous attempt's prevote and gather what decides this
  * attempt's candidate. The other members' locks are asked for only on a
- * retry or while our own lock binds the height: on a first attempt
- * nobody can hold a lock at it yet.
+ * retry or while our own lock or a precommit in the signing record binds
+ * the height: on a first attempt nobody can hold a lock at it yet.
  */
 export async function gatherRetryCandidates(
     height: number,
@@ -114,14 +146,32 @@ export async function gatherRetryCandidates(
     if (!genesisHash) {
         throw new Error("genesis block hash is not loaded")
     }
-    const locked = lockAt(getSharedState.identityFile, genesisHash, height)
-    if (!retrying && !locked) {
-        return { locked: null, options: [], committed: [] }
+    const identityFile = getSharedState.identityFile
+    const locked = lockAt(identityFile, genesisHash, height)
+    // Under the fork the record holds only precommits, each signed after
+    // its lock was written: a record at this height without the lock
+    // means the lock file was lost, and the lock it held still binds us.
+    let record: SigningRecord | null = null
+    if (!locked) {
+        const last = loadSigningRecord(identityFile)
+        if (last && last.genesisHash === genesisHash && last.height >= height) {
+            record = last
+        }
+    }
+    if (!retrying && !locked && !record) {
+        return { locked: null, bound: null, options: [], committed: [] }
     }
     if (locked) {
         log.info(
             `[commitLock] Locked on ${locked.hash} at height ${height} (proof of lock round ${locked.round})`,
         )
+    }
+    let bound: string | null = null
+    if (record) {
+        bound =
+            `the signing record holds a precommit for ${record.hash} at height ${record.height} (round ${record.timestamp}) ` +
+            `but there is no commit lock for height ${height}`
+        log.error(`[commitLock] ${bound}`)
     }
 
     const { locks, committed } = await fetchLocks(
@@ -129,7 +179,10 @@ export async function gatherRetryCandidates(
         committee,
         committeePeers(committee),
     )
-    return { locked, options: chooseCandidates(locked, locks), committed }
+    const options = record
+        ? chooseRecordBoundCandidates(record, height, locks)
+        : chooseCandidates(locked, locks)
+    return { locked, bound, options, committed }
 }
 
 async function fetchMissingTransactions(

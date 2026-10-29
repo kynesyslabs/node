@@ -37,6 +37,7 @@ import {
     commitLockPath,
     judgeLock,
     loadCommitLock,
+    type LockPosition,
     writeCommitLock,
 } from "./lockStore"
 import { precommitAfterPrevoteRefusal } from "./prevoteRecord"
@@ -180,26 +181,42 @@ export async function precommitUnderLock(
         )
         if (later) return { refused: later }
 
-        const current = loadCommitLock(identityFile)
-        // Under the fork the record holds only precommits, each signed after
-        // its lock was written: a record at this height without the lock
-        // means the lock file was lost, and the lock it held still binds us.
+        const lock = loadCommitLock(identityFile)
+        let current: LockPosition | null = lock
+        // Under the fork the record is written before every precommit
+        // signature, so it holds the latest precommit this key signed. A
+        // record at this height without the lock means the lock file was
+        // lost; judged against the record instead, the lock rule binds us
+        // exactly as far as our signed precommits do, since a lock written
+        // without a signed precommit binds nobody else.
+        let restore = false
         if (
-            !current ||
-            current.genesisHash !== genesisHash ||
-            current.height < height
+            !lock ||
+            lock.genesisHash !== genesisHash ||
+            lock.height < height
         ) {
             const record = loadSigningRecord(identityFile)
-            if (
-                record &&
-                record.genesisHash === genesisHash &&
-                record.height >= height
-            ) {
-                const reason =
-                    `the signing record holds a precommit at height ${record.height} (round ${record.timestamp}) ` +
-                    `but ${commitLockPath(identityFile)} has no lock for height ${height}; the lock file was lost`
-                log.error(`[commitLock] Not precommitting ${hash}: ${reason}`)
-                return { refused: reason }
+            if (record && record.genesisHash === genesisHash) {
+                if (record.height > height) {
+                    const reason =
+                        `the signing record holds a precommit at height ${record.height} (round ${record.timestamp}), ` +
+                        `above the requested ${height}`
+                    log.error(`[commitLock] Not precommitting ${hash}: ${reason}`)
+                    return { refused: reason }
+                }
+                if (record.height === height) {
+                    log.warning(
+                        `[commitLock] ${commitLockPath(identityFile)} has no lock for height ${height}; ` +
+                            `judging by the signing record (${record.hash}, round ${record.timestamp})`,
+                    )
+                    current = {
+                        genesisHash,
+                        height,
+                        hash: record.hash,
+                        round: record.timestamp,
+                    }
+                    restore = true
+                }
             }
         }
         const decision = judgeLock(current, {
@@ -211,7 +228,7 @@ export async function precommitUnderLock(
         if (decision.action === "refuse") {
             return { refused: decision.reason }
         }
-        if (decision.action !== "keep") {
+        if (decision.action !== "keep" || restore) {
             writeCommitLock(identityFile, {
                 genesisHash,
                 height,
