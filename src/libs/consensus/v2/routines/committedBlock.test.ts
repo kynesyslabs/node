@@ -83,6 +83,7 @@ jest.mock("src/libs/peer/PeerManager", () => ({
     default: {
         getInstance: () => ({
             getPeer: (id: string) => knownPeers[id],
+            getPeers: () => Object.values(knownPeers),
             getOfflinePeers: () => offlinePeers,
         }),
     },
@@ -463,6 +464,14 @@ describe("a round short of its bound committee", () => {
         await new Promise(r => setTimeout(r, 10))
         expect(signer.calls).toBe(1)
         expect(credited).toEqual([["a", 6]])
+    })
+
+    it("finds a member whose announced identity differs in case from the committee's", async () => {
+        const signer = peer("0xAbC", [b5, x6])
+        offlinePeers = { "0xAbC": signer }
+        probeCommitteeForHeight(6, ["self", "0xabc"], [{ identity: "self" } as any])
+        await new Promise(r => setTimeout(r, 10))
+        expect(signer.calls).toBe(1)
     })
 
     it("adopts nothing a member cannot back with a verified block", async () => {
