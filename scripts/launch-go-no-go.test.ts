@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test"
-import { type GoNoGoInput, type ValidatorProbe, decideGoNoGo } from "./launch-go-no-go"
+import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
+import {
+    type GoNoGoInput,
+    MAINNET_FORKS,
+    type ValidatorProbe,
+    checkLaunch,
+    decideGoNoGo,
+} from "./launch-go-no-go"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
 const GENESIS = "genesis-a"
@@ -210,19 +217,72 @@ describe("decideGoNoGo", () => {
         expect(d.reasons.join("\n")).toContain("provider cloud-x runs 4 of 10")
     })
 
-    it("allows exactly a third", () => {
+    it("allows exactly shardSize - q seats per operator and provider", () => {
+        // 10 validators, q 7: three may drop and seven still sign
+        const launch = launchSet(10)
+        const operators = Object.fromEntries(
+            launch.map((v, i) => [v, { operator: `op-${i % 4}`, provider: `cloud-${i % 4}` }]),
+        )
+        const d = decideGoNoGo(input({ operators }))
+        expect(d.groupCap).toBe(3)
+        expect(Math.max(...Object.values(d.operatorCounts))).toBe(3)
+        expect(d.go).toBe(true)
+    })
+
+    it("caps 9 validators at 2 per group, since losing 3 leaves 6 of the 7 needed", () => {
         const launch = launchSet(9)
         const operators = Object.fromEntries(
             launch.map((v, i) => [v, { operator: `op-${i % 3}`, provider: `cloud-${i % 3}` }]),
         )
+        for (const shardSize of [9, 10]) {
+            const d = decideGoNoGo({ shardSize, launchValidators: launch, probes: launch.map(v => online(v)), operators })
+            expect(d.quorum).toBe(7)
+            expect(d.groupCap).toBe(2)
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain("operator op-0 runs 3 of 9")
+        }
+    })
+
+    it("caps 12 and 13 validators at the committee's spare seats, not a third of the set", () => {
+        // floor(13 / 3) = 4 seats of one operator in a committee of 10 leave 6 signers, below q = 7
+        for (const n of [12, 13]) {
+            const launch = launchSet(n)
+            const operators = Object.fromEntries(
+                launch.map((v, i) => [v, { operator: i < 4 ? "big-op" : `op-${i}`, provider: `cloud-${i % 5}` }]),
+            )
+            const d = decideGoNoGo({ shardSize: 10, launchValidators: launch, probes: launch.map(v => online(v)), operators, committee: launch.slice(0, 10) })
+            expect(d.groupCap).toBe(3)
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain(`operator big-op runs 4 of ${n}`)
+        }
+    })
+
+    it("compares operator and provider names without case or surrounding spaces", () => {
+        const launch = launchSet(10)
+        const operators = spread(launch)
+        const spellings = ["AWS", "aws", " Aws ", "aws"]
+        launch.slice(0, 4).forEach((v, i) => (operators[v] = { operator: `solo-${i}`, provider: spellings[i] }))
+        const d = decideGoNoGo(input({ operators }))
+        expect(d.go).toBe(false)
+        expect(d.providerCounts.aws).toBe(4)
+        expect(d.reasons.join("\n")).toContain("provider aws runs 4 of 10")
+
+        const ops = spread(launch)
+        launch.slice(0, 4).forEach((v, i) => (ops[v] = { operator: ["Acme", "acme ", "ACME", "acme"][i], provider: `c-${i}` }))
+        expect(decideGoNoGo(input({ operators: ops })).reasons.join("\n")).toContain("operator acme runs 4 of 10")
+    })
+
+    it("is NO-GO when a launch validator holds a pinned committee identity", () => {
+        const pinned = PINNED_SHARD_IDENTITIES[1]
+        const launch = [...launchSet(9), pinned.toUpperCase().replace(/^0X/, "0x")]
         const d = decideGoNoGo({
-            shardSize: 9,
+            shardSize: 10,
             launchValidators: launch,
             probes: launch.map(v => online(v)),
-            operators,
+            operators: spread(launch),
         })
-        expect(d.groupCap).toBe(3)
-        expect(d.go).toBe(true)
+        expect(d.go).toBe(false)
+        expect(d.reasons.join("\n")).toContain(`pinned committee identity: ${pinned}`)
     })
 
     it("applies the cap to the launch set even when the big operator is offline", () => {
@@ -295,5 +355,83 @@ describe("decideGoNoGo", () => {
         })
         expect(d.go).toBe(false)
         expect(d.reasons.join("\n")).toContain("need 7")
+    })
+})
+
+const mainnetForks = () => Object.fromEntries(MAINNET_FORKS.map(name => [name, { activationHeight: 0 }]))
+
+function genesisFile(rows: Array<{ address: string; status: string; valid_at: number | null }>, forks: Record<string, unknown> = mainnetForks()) {
+    return { properties: { id: 1, shardSize: 10 }, forks, validators: rows }
+}
+
+describe("checkLaunch", () => {
+    const launch = launchSet(10)
+    const rows: Array<{ address: string; status: string; valid_at: number | null }> = launch.map(address => ({ address, status: "2", valid_at: 0 }))
+    const base = {
+        shardSize: 10,
+        probes: launch.map(v => online(v)),
+        operators: spread(launch),
+        expectedGenesisHash: GENESIS,
+    }
+    const blockZero = (r: typeof rows) => ({ rows: r, source: "genesis" as const, reasons: [], warnings: [] })
+
+    it("is GO on a mainnet genesis with every launch validator online", () => {
+        const d = checkLaunch({ ...base, genesis: genesisFile(rows), blockZero: blockZero(rows) })
+        expect(d.reasons).toEqual([])
+        expect(d.go).toBe(true)
+        expect(d.committee).toHaveLength(10)
+    })
+
+    it("leaves validators not staked at block 0 out of the launch set and the caps", () => {
+        // A fourth validator of big-op that is not active at block 0 must not
+        // count toward its cap, nor toward the launch count
+        const extra = [
+            { address: id(20), status: "1", valid_at: 0 },
+            { address: id(21), status: "2", valid_at: 5 },
+            { address: id(22), status: "2", valid_at: null },
+        ]
+        const operators = {
+            ...spread(launch),
+            ...Object.fromEntries([20, 21, 22].map(i => [id(i), { operator: "op-0", provider: "cloud-0" }])),
+        }
+        const all = [...rows, ...extra]
+        const d = checkLaunch({ ...base, operators, genesis: genesisFile(all), blockZero: blockZero(all) })
+        expect(d.launchCount).toBe(10)
+        expect(d.validators.map(v => v.identity)).not.toContain(id(20))
+        expect(d.validators.map(v => v.identity)).not.toContain(id(21))
+        expect(d.validators.map(v => v.identity)).not.toContain(id(22))
+        expect(d.operatorCounts["op-0"]).toBe(3)
+        expect(d.go).toBe(true)
+    })
+
+    for (const fork of MAINNET_FORKS) {
+        it(`is NO-GO when ${fork} is not scheduled at block 0`, () => {
+            for (const forks of [
+                Object.fromEntries(Object.entries(mainnetForks()).filter(([name]) => name !== fork)),
+                { ...mainnetForks(), [fork]: { activationHeight: 1 } },
+                { ...mainnetForks(), [fork]: { activationHeight: null } },
+            ]) {
+                const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain(`fork ${fork} is not scheduled at activationHeight 0`)
+            }
+        })
+    }
+
+    it("is NO-GO without a genesis file, whose forks and validators it cannot check", () => {
+        const d = checkLaunch({ ...base, genesis: null, blockZero: null, launchValidators: launch })
+        expect(d.go).toBe(false)
+        expect(d.reasons.join("\n")).toContain("no genesis file")
+    })
+
+    it("carries the validator set's reasons and warnings into the decision", () => {
+        const d = checkLaunch({
+            ...base,
+            genesis: genesisFile(rows),
+            blockZero: { rows, source: "genesis", reasons: ["set reason"], warnings: ["set warning"] },
+        })
+        expect(d.go).toBe(false)
+        expect(d.reasons).toContain("set reason")
+        expect(d.warnings).toContain("set warning")
     })
 })

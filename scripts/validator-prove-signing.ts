@@ -18,11 +18,12 @@
  * Verify mode, anywhere:
  *
  *   bun scripts/validator-prove-signing.ts --verify proofs.json --genesis genesis.json
- *       [--genesis-hash HASH] [--date YYYY-MM-DD] [--require-all]
+ *       --snapshot DIR [--genesis-hash HASH] [--date YYYY-MM-DD] [--require-all]
  *
  * proofs.json is an array of sign-mode outputs. Every proof must come from a
- * genesis validator, carry the expected challenge and verify; with
- * --require-all every genesis validator must have one.
+ * launch validator (staked at block 0: from the snapshot's validators.jsonl
+ * when it has one, else from the genesis), carry the expected challenge and
+ * verify; with --require-all every launch validator must have one.
  * Exit codes: 0 ok, 1 a proof failed or one is missing, 2 bad input or refused.
  */
 
@@ -88,7 +89,7 @@ export interface VerifyResult {
 }
 
 /**
- * Checks proofs against the genesis validator list. Without an expected
+ * Checks proofs against the launch validator list. Without an expected
  * genesis hash, every proof must name the same one.
  */
 export async function verifyProofs(
@@ -114,7 +115,7 @@ export async function verifyProofs(
             continue
         }
         if (!listed.has(identity)) {
-            fail("not a genesis validator")
+            fail("not a launch validator")
             continue
         }
         const parsed = parseChallenge(proof.challenge)
@@ -196,7 +197,7 @@ function usage(): string {
         "sign:   bun scripts/validator-prove-signing.ts --genesis-hash HASH [--date YYYY-MM-DD]",
         "            [--identity-file PATH] [--out FILE]",
         "verify: bun scripts/validator-prove-signing.ts --verify proofs.json --genesis genesis.json",
-        "            [--genesis-hash HASH] [--date YYYY-MM-DD] [--require-all]",
+        "            --snapshot DIR [--genesis-hash HASH] [--date YYYY-MM-DD] [--require-all]",
     ].join("\n")
 }
 
@@ -209,7 +210,7 @@ async function main(argv: string[]): Promise<number> {
             console.log(usage())
             return 0
         } else if (
-            ["--genesis-hash", "--date", "--identity-file", "--out", "--verify", "--genesis"].includes(flag)
+            ["--genesis-hash", "--date", "--identity-file", "--out", "--verify", "--genesis", "--snapshot"].includes(flag)
         ) {
             const v = argv[++i]
             if (v === undefined) {
@@ -228,8 +229,23 @@ async function main(argv: string[]): Promise<number> {
             console.error(`--verify needs --genesis\n${usage()}`)
             return 2
         }
+        if (typeof opts.snapshot !== "string") {
+            const { NO_SNAPSHOT_REASON } = await import("./launch-validator-set")
+            console.error(`--verify needs --snapshot: ${NO_SNAPSHOT_REASON}\n${usage()}`)
+            return 2
+        }
         const genesis = JSON.parse(fs.readFileSync(opts.genesis, "utf8"))
-        const validators: string[] = (genesis?.validators ?? []).map((v: { address: string }) => String(v.address))
+        const { readBlockZeroValidators, launchIdentities } = await import("./launch-validator-set")
+        let blockZero: Awaited<ReturnType<typeof readBlockZeroValidators>>
+        try {
+            blockZero = await readBlockZeroValidators(genesis, opts.snapshot)
+        } catch (e) {
+            console.error(`snapshot: ${(e as Error).message}`)
+            return 2
+        }
+        for (const w of blockZero.warnings) console.log(`warning: ${w}`)
+        for (const r of blockZero.reasons) console.log(`FAIL ${r}`)
+        const validators = launchIdentities(blockZero.rows)
         const raw = JSON.parse(fs.readFileSync(opts.verify, "utf8"))
         const proofs: SigningProof[] = Array.isArray(raw) ? raw : [raw]
         const result = await verifyProofs(proofs, validators, {
@@ -242,10 +258,10 @@ async function main(argv: string[]): Promise<number> {
         }
         for (const m of result.missing) console.log(`${opts.requireAll ? "MISSING" : "no proof"} ${m}`)
         console.log(
-            `${result.reports.filter(r => r.ok).length} of ${validators.length} genesis validators proven` +
-                ` on genesis ${result.genesisHash ?? "-"}: ${result.ok ? "OK" : "NOT OK"}`,
+            `${result.reports.filter(r => r.ok).length} of ${validators.length} launch validators proven` +
+                ` on genesis ${result.genesisHash ?? "-"}: ${result.ok && blockZero.reasons.length === 0 ? "OK" : "NOT OK"}`,
         )
-        return result.ok ? 0 : 1
+        return result.ok && blockZero.reasons.length === 0 ? 0 : 1
     }
 
     if (typeof opts["genesis-hash"] !== "string") {

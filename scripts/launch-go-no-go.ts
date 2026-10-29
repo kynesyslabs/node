@@ -3,15 +3,18 @@
  *
  * Probes every launch validator and decides GO only when at least q
  * members of the first block's bound committee (q = 2/3 + 1 of shardSize,
- * the block quorum) are online on one genesis hash, and no operator or
- * cloud provider holds more than a third of the launch validators. A
- * validator counts only after its endpoint signs a fresh nonce with the
- * validator's key (the node's own hello handshake); what /info claims is
- * never enough. See docs/runbooks/launch-go-no-go.md.
+ * the block quorum) are online on one genesis hash, no operator or cloud
+ * provider holds more launch validators than the committee can lose
+ * (shardSize - q), the genesis schedules the mainnet forks at block 0, and
+ * no launch validator is a pinned committee identity. A validator counts
+ * only after its endpoint signs a fresh nonce with the validator's key (the
+ * node's own hello handshake); what /info claims is never enough. See
+ * docs/runbooks/launch-go-no-go.md.
  *
  *   bun scripts/launch-go-no-go.ts --genesis data/genesis.json \
- *       --operators operators.json [--peerlist demos_peerlist.json] \
- *       [--rpc URL[,URL...]] [--genesis-hash HASH] [--commit SHA] [--json]
+ *       --operators operators.json --snapshot data/snapshot \
+ *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] \
+ *       [--genesis-hash HASH] [--commit SHA] [--json]
  *
  * operators.json maps each validator identity to { operator, provider }.
  * Exit codes: 0 GO, 1 NO-GO, 2 bad input.
@@ -24,6 +27,15 @@ import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import { drawBoundCommittee } from "src/libs/consensus/v2/routines/getShard"
 import { compareIdentities } from "src/libs/consensus/v2/routines/peerlistMerge"
 import Hashing from "src/libs/crypto/hashing"
+import type { ForkName } from "src/forks/forkConfig"
+import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
+import {
+    type BlockZeroValidators,
+    type ValidatorRow,
+    activeAtBlockZero,
+    launchIdentities,
+    readBlockZeroValidators,
+} from "./launch-validator-set"
 
 export interface OperatorEntry {
     operator: string
@@ -99,11 +111,22 @@ export interface GoNoGoDecision {
     }>
     operatorCounts: Record<string, number>
     providerCounts: Record<string, number>
-    /** Most validators any single operator or provider may hold. */
+    /** Most validators any single operator or provider may hold: the committee seats q can spare. */
     groupCap: number
 }
 
+/** Forks a mainnet genesis must switch on at block 0. */
+export const MAINNET_FORKS: readonly ForkName[] = [
+    "signatureDomain",
+    "editBinding",
+    "quorumParity",
+    "committeeBinding",
+    "commitLock",
+]
+
 const norm = (id: string) => id.trim().toLowerCase()
+/** Operator and provider names are free text typed by people. */
+const groupName = (name: string) => name.trim().toLowerCase()
 /** Genesis hashes compare without case or a 0x prefix. */
 export const normHash = (hash: string) => hash.trim().toLowerCase().replace(/^0x/, "")
 
@@ -126,12 +149,6 @@ export function firstCommitteeSeed(genesisHash: string): string {
     return Hashing.sha256(`${genesisHash}:0|genesis:${genesisHash}`)
 }
 
-interface GenesisValidatorRow {
-    address?: unknown
-    status?: unknown
-    valid_at?: unknown
-}
-
 /**
  * Bound committee of block 1, from the genesis file and the genesis block
  * hash. Block 0 commits no peerlist, so the pool is the staked set at
@@ -139,17 +156,11 @@ interface GenesisValidatorRow {
  * draw is the node's own.
  */
 export function firstCommittee(
-    validators: GenesisValidatorRow[],
+    validators: ValidatorRow[],
     genesisHash: string,
     shardSize: number,
 ): string[] {
-    const pool = [
-        ...new Set(
-            validators
-                .filter(v => String(v.status) === "2" && Number(v.valid_at ?? 0) <= 0)
-                .map(v => String(v.address)),
-        ),
-    ].sort(compareIdentities)
+    const pool = [...new Set(activeAtBlockZero(validators).map(v => String(v.address)))].sort(compareIdentities)
     return drawBoundCommittee(firstCommitteeSeed(normHash(genesisHash)), pool, shardSize).map(norm)
 }
 
@@ -177,7 +188,7 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
     const incomplete = new Set<string>()
     for (const [id, entry] of Object.entries(input.operators ?? {})) {
         if (isOperatorEntry(entry)) {
-            operators.set(norm(id), { operator: entry.operator.trim(), provider: entry.provider.trim() })
+            operators.set(norm(id), { operator: groupName(entry.operator), provider: groupName(entry.provider) })
         } else {
             incomplete.add(norm(id))
         }
@@ -290,9 +301,10 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         warnings.push(`counted validators run ${commits.size} different commits: ${[...commits].join(", ")}`)
     }
 
-    // A third of the launch set: one operator or provider above it can stop
-    // the chain on its own when shardSize equals the validator count
-    const groupCap = Math.floor(launch.length / 3)
+    // The committee seats that can go dark with q still signing. The cap is
+    // on the launch set: which of a group's validators the draw seats is
+    // unknown until the genesis hash is, so all of them may be
+    const groupCap = Math.max(0, Math.min(launch.length, input.shardSize) - quorum)
     const unmapped = launch.filter(id => !operators.has(id) && !incomplete.has(id))
     const badEntries = launch.filter(id => incomplete.has(id))
     if (input.operators === null) {
@@ -317,10 +329,18 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         for (const [name, n] of Object.entries(counts)) {
             if (n > groupCap) {
                 reasons.push(
-                    `${kind} ${name} runs ${n} of ${launch.length} launch validators; the cap is ${groupCap} (a third)`,
+                    `${kind} ${name} runs ${n} of ${launch.length} launch validators; the cap is ${groupCap} ` +
+                        `(shardSize ${input.shardSize} - quorum ${quorum})`,
                 )
             }
         }
+    }
+
+    // A pinned identity takes a committee seat on any network whose pool
+    // holds it, ahead of the draw
+    const pinned = new Set(PINNED_SHARD_IDENTITIES.map(norm))
+    for (const id of launch.filter(v => pinned.has(v))) {
+        reasons.push(`launch validator is a pinned committee identity: ${id}`)
     }
 
     return {
@@ -340,10 +360,54 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
     }
 }
 
+/** NO-GO reasons for a genesis that does not switch the mainnet forks on at block 0. */
+export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[] {
+    if (!genesis) {
+        return ["no genesis file: its fork schedule and block 0's validator set cannot be checked"]
+    }
+    const forks = (genesis.forks ?? {}) as Record<string, { activationHeight?: unknown } | undefined>
+    return MAINNET_FORKS.filter(name => forks[name]?.activationHeight !== 0).map(
+        name =>
+            `fork ${name} is not scheduled at activationHeight 0 in the genesis ` +
+            `(found ${JSON.stringify(forks[name]?.activationHeight ?? null)})`,
+    )
+}
+
+export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" | "committee"> {
+    /** The parsed genesis file, or null when only endpoints were given. */
+    genesis: { forks?: unknown; validators?: unknown } | null
+    /** Block 0's validators as the node seeds them; required with a genesis. */
+    blockZero: BlockZeroValidators | null
+    /** The launch set when there is no genesis (peerlist or --rpc). */
+    launchValidators?: string[]
+}
+
+/**
+ * The whole check on the inputs the CLI gathers: the launch set is block
+ * 0's staked validators, and the first committee is drawn from them under
+ * the genesis hash the probes agree on (or the expected one).
+ */
+export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
+    const { genesis, blockZero, launchValidators, ...rest } = input
+    const rows = genesis && blockZero ? blockZero.rows : null
+    const base: GoNoGoInput = {
+        ...rest,
+        launchValidators: rows ? launchIdentities(rows) : (launchValidators ?? []),
+    }
+    const agreedHash = decideGoNoGo(base).genesisHash
+    const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize) : null
+    const decision = decideGoNoGo({ ...base, committee })
+    decision.reasons.push(...(blockZero?.reasons ?? []), ...mainnetForkReasons(genesis))
+    decision.warnings.push(...(blockZero?.warnings ?? []))
+    decision.go = decision.reasons.length === 0
+    return decision
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────
 
 interface CliArgs {
     genesis: string | null
+    snapshot: string | null
     peerlist: string | null
     operators: string | null
     rpc: string[]
@@ -357,7 +421,10 @@ interface CliArgs {
 function usage(): string {
     return [
         "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE [options]",
-        "  --genesis FILE       genesis JSON: launch validators, their URLs and shardSize",
+        "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
+        "  --snapshot DIR       the snapshot directory the validators boot with; its validators.jsonl,",
+        "                       when present, is block 0's validator set instead of the genesis list;",
+        "                       without it the result is NO-GO",
         "  --peerlist FILE      identity -> URL map (demos_peerlist.json) overriding genesis URLs",
         "  --rpc URL[,URL...]   probe these URLs; each counts for the identity it proves by signing",
         "                       a fresh nonce; without --genesis they define the launch set",
@@ -373,6 +440,7 @@ function usage(): string {
 function parseArgs(argv: string[]): CliArgs {
     const args: CliArgs = {
         genesis: null,
+        snapshot: null,
         peerlist: null,
         operators: null,
         rpc: [],
@@ -391,6 +459,7 @@ function parseArgs(argv: string[]): CliArgs {
         }
         switch (flag) {
             case "--genesis": args.genesis = value(); break
+            case "--snapshot": args.snapshot = value(); break
             case "--peerlist": args.peerlist = value(); break
             case "--operators": args.operators = value(); break
             case "--rpc": args.rpc.push(...value().split(",").map(s => s.trim()).filter(Boolean)); break
@@ -552,20 +621,31 @@ async function main(): Promise<number> {
         console.error(`give --genesis or --rpc\n${usage()}`)
         return 2
     }
+    if (args.snapshot && !args.genesis) {
+        console.error(`--snapshot needs --genesis\n${usage()}`)
+        return 2
+    }
 
     let shardSize = args.shardSize
     // identity -> URL to probe; "" identity means "learn it from /info"
     const targets = new Map<string, string>()
     let launch: string[] = []
     let genesis: any = null
+    let blockZero: BlockZeroValidators | null = null
     if (args.genesis) {
         genesis = readJson(args.genesis)
         shardSize ??= Number(genesis?.properties?.shardSize)
-        for (const v of genesis?.validators ?? []) {
-            const id = norm(String(v.address))
-            launch.push(id)
-            targets.set(id, v.connection_url ?? "")
+        try {
+            blockZero = await readBlockZeroValidators(genesis, args.snapshot)
+        } catch (e) {
+            console.error(`snapshot: ${(e as Error).message}`)
+            return 2
         }
+        for (const v of activeAtBlockZero(blockZero.rows)) {
+            const id = norm(String(v.address))
+            targets.set(id, typeof v.connection_url === "string" ? v.connection_url : "")
+        }
+        launch = launchIdentities(blockZero.rows)
     }
     if (args.peerlist) {
         for (const [id, url] of Object.entries(readJson(args.peerlist) as Record<string, string>)) {
@@ -613,29 +693,16 @@ async function main(): Promise<number> {
         launch = [...merged.keys()]
     }
 
-    const base = {
+    const decision = checkLaunch({
         shardSize,
+        genesis,
+        blockZero,
         launchValidators: launch,
         probes: [...merged.values()],
         operators,
         expectedGenesisHash: args.genesisHash,
         expectedCommit: args.commit,
-    }
-    // The committee depends on the genesis hash: the agreed one, or else the
-    // one most proven validators report
-    const agreedHash = decideGoNoGo(base).genesisHash
-    let committee: string[] | null = null
-    const forkAt = genesis?.forks?.committeeBinding?.activationHeight
-    if (genesis && agreedHash) {
-        committee = firstCommittee(genesis.validators ?? [], agreedHash, shardSize)
-    }
-    const decision = decideGoNoGo({ ...base, committee })
-    if (genesis && !(Number.isInteger(forkAt) && forkAt <= 1)) {
-        decision.warnings.push(
-            "committeeBinding is not active at block 1 in this genesis: block 1's committee is drawn from " +
-                "who is online, and the first-committee count is only a lower bound",
-        )
-    }
+    })
 
     if (args.json) {
         console.log(JSON.stringify({ ...decision, probes: [...merged.values()] }, null, 2))
