@@ -1070,10 +1070,13 @@ async function forgeBlock(
             options,
         )
     } catch (error) {
-        // A rebuild that does not reproduce its block is the caller's to
-        // judge: another set of inputs may still rebuild it.
+        // A rebuild that does not reproduce its block, or whose reported
+        // timestamp we will not sign, is the caller's to judge: the proof of
+        // lock does not cover the reported inputs, so another set may still
+        // rebuild the block.
         if (
-            error instanceof CommitLockError &&
+            (error instanceof CommitLockError ||
+                error instanceof CosignTimestampError) &&
             options.expectedHash !== undefined
         ) {
             throw error
@@ -1106,7 +1109,7 @@ async function forgeBlock(
  * block may be forged. A locked member that cannot rebuild its block ends
  * the attempt instead: prevoting anything else would break its lock.
  */
-async function forgeLockedCandidate(
+export async function forgeLockedCandidate(
     blockRef: number,
     retrying: boolean,
     round: number,
@@ -1155,7 +1158,12 @@ async function forgeLockedCandidate(
                 )
                 return { block, txs }
             } catch (e) {
-                if (!(e instanceof CommitLockError)) throw e
+                if (
+                    !(e instanceof CommitLockError) &&
+                    !(e instanceof CosignTimestampError)
+                ) {
+                    throw e
+                }
                 log.warning(`[commitLock] ${e.message}`)
             }
         }
