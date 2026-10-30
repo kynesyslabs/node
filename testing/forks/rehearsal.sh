@@ -6,7 +6,8 @@
 #
 # UPGRADE_PATH=1     start the chain with no fork schedule, then add it to the running
 #                    chain's genesis files and restart every node (the real upgrade)
-# UPGRADE_LEAD       blocks between the genesis edit and the height in that mode (default 30)
+# UPGRADE_LEAD       blocks between the genesis edit and the height in that mode (default 60;
+#                    a node refuses a schedule edit at or below its tip + 50)
 # ACTIVATION_HEIGHT  block height both forks are scheduled at from block 0 (default 30)
 # CHAIN_ID           genesis properties.id; the signature preimage binds to it (default 31337)
 # CONSENSUS_TIME     seconds per block (default 10)
@@ -34,7 +35,7 @@ PROJECT="forkrehearsal"
 # there is no TLS between containers; TLS terminates at the reverse proxy in front of a real node.
 DEVNET_RPC_SCHEME="${DEVNET_RPC_SCHEME:-http}"
 UPGRADE_PATH="${UPGRADE_PATH:-0}"
-UPGRADE_LEAD="${UPGRADE_LEAD:-30}"
+UPGRADE_LEAD="${UPGRADE_LEAD:-60}"
 # The tag names the tree the image holds, so a stale image is never reused.
 sha="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo nogit)"
 image_paths=(src package.json bun.lock testing/devnet)
@@ -216,6 +217,21 @@ fi
 printf '%s\n' "$peerlist" >"$DATA/demos_peerlist.json"
 # One genesis file per node, so the mixed-version step can change a single one.
 for i in 1 2 3 4; do cp "$DATA/genesis.json" "$DATA/genesis.node$i.json"; done
+# Node 4 later restarts with both forks taken out of its file, below its tip.
+# A node refuses such an edit unless the operator names the exact schedule, so
+# node 4 carries that name from the start; it is consulted only on a refusal.
+NODE4_STRIPPED_DIGEST="$(cd "$ROOT" && GENESIS="$DATA/genesis.json" bun -e '
+const { readFileSync } = require("node:fs")
+const { loadForkConfigFromGenesis } = require("./src/forks")
+const { getSharedState } = require("./src/utilities/sharedState")
+const { forkScheduleDigest } = require("./src/libs/peer/routines/forkScheduleAgreement")
+const g = JSON.parse(readFileSync(process.env.GENESIS, "utf8"))
+delete g.forks.signatureDomain
+delete g.forks.web2ProofBinding
+loadForkConfigFromGenesis(g)
+console.log(forkScheduleDigest(getSharedState.forkConfig, getSharedState.chainId))
+' 2>/dev/null | tail -1)"
+[[ "$NODE4_STRIPPED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || die "could not compute node 4's stripped schedule digest"
 cp -r "$DEVNET/postgres-init" "$DEVNET/l2ps" "$DATA/"
 mkdir -p "$DATA/empty-snapshot"
 
@@ -248,6 +264,7 @@ step "compose override: unique names, memory caps, no notary container"
         [[ "$i" == 1 ]] || printf '      node-1:\n        condition: service_started\n'
         echo "    environment:"
         echo "      - TLSNOTARY_ENABLED=false"
+        [[ "$i" == 4 && "$UPGRADE_PATH" != 1 ]] && echo "      - DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=$NODE4_STRIPPED_DIGEST"
         echo "    volumes:"
         echo "      - ./identities/node$i.identity:/app/.demos_identity:ro"
         echo "      - ./demos_peerlist.json:/app/demos_peerlist.json:ro"

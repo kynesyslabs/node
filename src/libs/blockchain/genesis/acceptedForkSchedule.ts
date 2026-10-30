@@ -78,9 +78,21 @@ export function acceptSchedule(
     const changes: string[] = []
 
     if (accepted.chainId !== current.chainId) {
-        problems.push(
-            `chain id changed from ${String(accepted.chainId)} to ${String(current.chainId)}`,
-        )
+        // The chain id only enters consensus through the signature domain, so it
+        // may change while that fork lies beyond the line in both versions; a
+        // chain that started without one adds it together with the fork.
+        const describe = `chain id: ${String(accepted.chainId)} -> ${String(current.chainId)}`
+        changes.push(describe)
+        const bound = [
+            accepted.forks.signatureDomain?.activationHeight,
+            current.forks.signatureDomain?.activationHeight,
+        ].filter((h): h is number => typeof h === "number" && h <= line)
+        if (bound.length > 0) {
+            problems.push(
+                `${describe} while signatureDomain, which signs over it, is at height ${Math.min(...bound)}, ` +
+                    `at or below tip ${tip} + ${lead}`,
+            )
+        }
     }
 
     const names = [...new Set([...Object.keys(accepted.forks), ...Object.keys(current.forks)])].sort()

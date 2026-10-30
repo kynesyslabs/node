@@ -193,3 +193,12 @@ describe("parseStoredGenesisData", () => {
         expect(parseStoredGenesisData(JSON.stringify(JSON.stringify(data)))).toEqual(data)
     })
 })
+
+describe("pin as peer bootstrap compares it", () => {
+    it("normalizes the forms findGenesisBlock accepts, so both compare the same value", () => {
+        const hash = "ab".repeat(32)
+        for (const raw of [hash, `0x${hash}`, ` ${hash.toUpperCase()}\n`]) {
+            expect(parseGenesisPin(raw)).toBe(hash)
+        }
+    })
+})

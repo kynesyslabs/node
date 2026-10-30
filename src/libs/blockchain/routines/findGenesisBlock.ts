@@ -205,9 +205,18 @@ export default async function findGenesisBlock() {
     // Adding the genesis block to the chain
     const genesisBlock = await Chain.generateGenesisBlock(genesisData)
     getSharedState.genesisCreatedThisBoot = true
-    await acceptLoadedForkSchedule(0)
+    // Block 0 was just created from this schedule; a row left by an earlier
+    // chain in a partly wiped database says nothing about this one.
+    await writeAcceptedSchedule(currentSchedule(), 0)
     await loadShardSizeFromGenesisBlock()
     return genesisBlock
+}
+
+function currentSchedule() {
+    return scheduleFromForkConfig(
+        getSharedState.forkConfig as unknown as ForkConfigLike,
+        getSharedState.chainId,
+    )
 }
 
 function refuse(problems: string[]): void {
@@ -224,10 +233,7 @@ function refuse(problems: string[]): void {
  */
 async function acceptLoadedForkSchedule(tip: number): Promise<void> {
     if (isForkMachineryDisabled()) return
-    const current = scheduleFromForkConfig(
-        getSharedState.forkConfig as unknown as ForkConfigLike,
-        getSharedState.chainId,
-    )
+    const current = currentSchedule()
     const accepted = await readAcceptedSchedule()
     if (accepted === null) {
         await writeAcceptedSchedule(current, tip)

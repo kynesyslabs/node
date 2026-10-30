@@ -98,7 +98,7 @@ describe("acceptSchedule", () => {
         if (verdict.status === "refused") expect(verdict.problems.join()).toContain("payload changed")
     })
 
-    it("refuses a chain id change", () => {
+    it("refuses a chain id change once the signature domain is near or active", () => {
         const verdict = acceptSchedule(
             launched,
             schedule({ signatureDomain: 0, commitLock: 0 }, 8),
@@ -107,6 +107,18 @@ describe("acceptSchedule", () => {
             null,
         )
         expect(verdict.status).toBe("refused")
+        const planned = schedule({ signatureDomain: TIP + 20 }, null)
+        expect(
+            acceptSchedule(planned, schedule({ signatureDomain: TIP + 20 }, 8), TIP, LEAD, null).status,
+        ).toBe("refused")
+    })
+
+    it("accepts adding a chain id together with a signature domain beyond the window", () => {
+        const before = schedule({ osDenomination: 0 }, null)
+        const after = schedule({ osDenomination: 0, signatureDomain: TIP + LEAD + 10 }, 1337)
+        const verdict = acceptSchedule(before, after, TIP, LEAD, null)
+        expect(verdict.status).toBe("accepted")
+        if (verdict.status === "accepted") expect(verdict.changes.join()).toContain("chain id: null -> 1337")
     })
 
     it("accepts a refused schedule only under its own override digest", () => {

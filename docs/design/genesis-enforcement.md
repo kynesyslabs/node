@@ -47,7 +47,8 @@ not 64 hex characters stops the boot.
 With `NODE_ENV=production`, a node without a pin refuses to start unless
 `DEMOS_ALLOW_UNPINNED_GENESIS=true` is set. The release image sets
 `NODE_ENV=production`, so every production install either pins its genesis or
-opts out explicitly. Testnet installs that predate the pin set the opt-out once.
+opts out explicitly. Testnet installs that predate the pin set the opt-out once; the devnet compose
+overlay sets it.
 
 ### Fresh database (no block 0)
 
@@ -95,8 +96,11 @@ At every boot, once block 0 and the tip are known:
 3. Otherwise each fork whose height or payload differs from the stored row is
    checked. The change is allowed only if both the old height and the new height
    are null or above `tip + 50` (`WINDOW_BLOCKS`, the window the schedule watch
-   already uses). A change at or below that line, a payload change of a fork
-   that is already active, and a chain id change stop the boot.
+   already uses). A change at or below that line, including a payload change of
+   a fork that is already active, stops the boot. The chain id enters consensus
+   only through `signatureDomain`, so it may change (a chain that started
+   without one adds it together with that fork) only while `signatureDomain`
+   lies beyond the line in both versions.
 4. An allowed change is stored as the new accepted schedule.
 
 An operator who must change the schedule inside the window, for example to undo

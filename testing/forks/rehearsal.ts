@@ -36,7 +36,7 @@ const ROOT = env("ROOT")
 const RUN_DIR = env("RUN_DIR")
 const PROJECT = env("PROJECT")
 const UPGRADE = process.env.UPGRADE_PATH === "1"
-const UPGRADE_LEAD = Number(process.env.UPGRADE_LEAD ?? 30)
+const UPGRADE_LEAD = Number(process.env.UPGRADE_LEAD ?? 60)
 // In the upgrade path the height is only known once the schedule is added to the running chain.
 let H = Number(env("ACTIVATION_HEIGHT"))
 const CHAIN_ID = Number(env("CHAIN_ID"))
@@ -504,6 +504,11 @@ const restartedEpoch = Math.floor(Date.now() / 1000)
 restartsAfterManual = restartCounts()
 const back = await until(async () => (await tipOf(PORTS[3])) >= common - 1, 150, 3000)
 check(back, "node 4 restarted and is serving again")
+check(
+    /Refusing to boot/.test(nodeLog(4, restartedAt)) === false &&
+        /accepted by DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=/.test(nodeLog(4, restartedAt)),
+    "node 4 loaded the edit below its tip only because its operator named that exact schedule",
+)
 // Peer bootstrap runs some seconds after the RPC is up.
 const warned = await until(() => /FORK SCHEDULE MISMATCH/.test(nodeLog(4, restartedAt)), 90, 2000)
 check(warned, "node 4's bootstrap logged FORK SCHEDULE MISMATCH against its peers")

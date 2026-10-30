@@ -18,6 +18,7 @@ import PeerManager from "../PeerManager"
 import { sleep } from "@kynesyslabs/demosdk/utils"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
+import { parseGenesisPin } from "@/libs/blockchain/genesis/genesisPin"
 import { hashGenesisCore, hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
 import Chain from "@/libs/blockchain/chain"
 import {
@@ -200,7 +201,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
             },
             {
                 storedHash,
-                expectedHash: Config.getInstance().core.expectedGenesisHash,
+                expectedHash: parseGenesisPin(Config.getInstance().core.expectedGenesisHash),
             },
         )
         logGenesisVerdict(verdict, verifiedPeer)
