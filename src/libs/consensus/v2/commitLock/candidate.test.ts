@@ -272,6 +272,36 @@ describe("a precommit in the signing record without its lock file", () => {
         ])
     })
 
+    it("is bound by the record, not by an older lock file it outranks at the height", async () => {
+        // Locked on x in 5000, then moved to y and precommitted it in 5010;
+        // the lock file was later replaced by the older copy holding x
+        lockStore.writeCommitLock(sharedState.identityFile, ownLock("x", 5000))
+        recordPrecommit(10, 5010, "y")
+        fetched.locks = [reported("z", 5005, "a"), reported("x", 5000, "b")]
+        const result = await gatherRetryCandidates(10, false, ["self", "a", "b"])
+        // After a precommit for y in 5010 neither x nor a proof of lock
+        // from 5005 may be prevoted
+        expect(result.locked).toBeNull()
+        expect(result.bound).toContain("height 10")
+        expect(result.options).toEqual([])
+
+        fetched.locks = [reported("y", 5010, "a"), reported("w", 5020, "b"), reported("x", 5000, "c")]
+        const later = await gatherRetryCandidates(10, true, ["self", "a", "b", "c"])
+        expect(later.options.map(o => [o.origin, o.hash])).toEqual([
+            ["pol", "w"],
+            ["lock", "y"],
+        ])
+    })
+
+    it("is bound by the record over a lock for another block in the same round", async () => {
+        lockStore.writeCommitLock(sharedState.identityFile, ownLock("x", 5000))
+        recordPrecommit(10, 5000, "y")
+        fetched.locks = [reported("x", 5000, "a")]
+        const result = await gatherRetryCandidates(10, true, ["self", "a"])
+        expect(result.locked).toBeNull()
+        expect(result.options).toEqual([])
+    })
+
     it("fails on a record it cannot read", async () => {
         fs.writeFileSync(signingRecord.signingRecordPath(sharedState.identityFile), "{")
         await expect(gatherRetryCandidates(10, false, ["self", "a"])).rejects.toBeInstanceOf(

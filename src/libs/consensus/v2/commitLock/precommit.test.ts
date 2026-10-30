@@ -287,6 +287,50 @@ describe("lockAndPrecommit", () => {
             }
         })
 
+        it("judges by the record when an older lock file trails it at the height", async () => {
+            // Precommits X in R1, then moves to Y in R2; the lock file is then
+            // replaced by the older copy that still holds X in R1
+            openPrevote(X, R1)
+            expect("signature" in (await precommit.lockAndPrecommit({ height: H, round: R1, hash: X, pol: await prevotes(X, R1, others) }))).toBe(true)
+            const olderCopy = fs.readFileSync(lockStore.commitLockPath(sharedState.identityFile), "utf8")
+            openPrevote(Y, R2)
+            expect("signature" in (await precommit.lockAndPrecommit({ height: H, round: R2, hash: Y, pol: await prevotes(Y, R2, others) }))).toBe(true)
+            fs.writeFileSync(lockStore.commitLockPath(sharedState.identityFile), olderCopy)
+            roundState.__resetRoundState()
+            precommit.__resetPrecommitState()
+            metrics.locks = 0
+            metrics.moves = 0
+
+            // Against the record (Y in R2) a precommit for X needs a later
+            // proof of lock and moves the lock; the older copy would call it
+            // a relock of X
+            openPrevote(X, R2 + 10)
+            const outcome = await precommit.lockAndPrecommit({ height: H, round: R2 + 10, hash: X, pol: await prevotes(X, R2 + 10, others) })
+            expect("signature" in outcome).toBe(true)
+            expect(metrics.moves).toBe(1)
+            expect(metrics.locks).toBe(0)
+            expect(lockStore.lockAt(sharedState.identityFile, "hash-0", H)).toMatchObject({ hash: X, round: R2 + 10 })
+        })
+
+        it("restores the recorded block over a lock for another block in the same round", async () => {
+            // A lock for X in R2 that was never signed, beside a signed
+            // precommit for Y in R2: the record is what binds us
+            recordBlockSignature(sharedState.identityFile, { genesisHash: "hash-0", height: H, timestamp: R2, hash: Y })
+            lockStore.writeCommitLock(sharedState.identityFile, {
+                genesisHash: "hash-0",
+                height: H,
+                hash: X,
+                round: R2,
+                pol: {},
+                inputs,
+                lockedAt: 1,
+            })
+            openPrevote(Y, R2)
+            const outcome = await precommit.lockAndPrecommit({ height: H, round: R2, hash: Y, pol: await prevotes(Y, R2, others) })
+            expect("signature" in outcome).toBe(true)
+            expect(lockStore.lockAt(sharedState.identityFile, "hash-0", H)).toMatchObject({ hash: Y, round: R2 })
+        })
+
         it("does not hold back the next height", async () => {
             await precommitXThenLoseLock()
             sharedState.lastBlockNumber = H

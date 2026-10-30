@@ -29,7 +29,7 @@ const {
     lockAt,
     writeCommitLock,
 } = await import("./lockStore")
-const { signingRecordPath } = await import("src/libs/identity/signingRecord")
+const { recordBlockSignature, signingRecordPath } = await import("src/libs/identity/signingRecord")
 
 type Lock = Parameters<typeof writeCommitLock>[1]
 
@@ -99,6 +99,34 @@ describe("lock store", () => {
         expect(lockAt(identityFile, "genesis-a", 10)?.hash).toBe("x")
         expect(lockAt(identityFile, "genesis-b", 10)).toBeNull()
         expect(lockAt(identityFile, "genesis-a", 11)).toBeNull()
+    })
+
+    it("does not bind when the signing record outranks it at its height", () => {
+        writeCommitLock(identityFile, lock())
+        const record = (height: number, timestamp: number, hash: string, genesisHash = "genesis-a") =>
+            fs.writeFileSync(
+                signingRecordPath(identityFile),
+                JSON.stringify({ genesisHash, height, timestamp, hash, signedAt: 1 }),
+            )
+        // The precommit that followed the lock: the lock still binds
+        recordBlockSignature(identityFile, { genesisHash: "genesis-a", height: 10, timestamp: 5000, hash: "x" })
+        expect(lockAt(identityFile, "genesis-a", 10)?.hash).toBe("x")
+        // A precommit from a later round, or for another block in the lock's
+        // round: the lock file is an older copy
+        record(10, 5010, "y")
+        expect(lockAt(identityFile, "genesis-a", 10)).toBeNull()
+        record(10, 5010, "x")
+        expect(lockAt(identityFile, "genesis-a", 10)).toBeNull()
+        record(10, 5000, "y")
+        expect(lockAt(identityFile, "genesis-a", 10)).toBeNull()
+        // Records of an earlier round, another height or another chain
+        // say nothing against it
+        record(10, 4990, "y")
+        expect(lockAt(identityFile, "genesis-a", 10)?.hash).toBe("x")
+        record(9, 9999, "y")
+        expect(lockAt(identityFile, "genesis-a", 10)?.hash).toBe("x")
+        record(10, 9999, "y", "genesis-b")
+        expect(lockAt(identityFile, "genesis-a", 10)?.hash).toBe("x")
     })
 
     it("refuses to read a damaged lock as absent", () => {

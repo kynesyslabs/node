@@ -1,6 +1,8 @@
 import fs from "node:fs"
 import {
+    loadSigningRecord,
     resolveWriteTarget,
+    type SigningRecord,
     signingRecordPath,
     writeFileDurably,
 } from "src/libs/identity/signingRecord"
@@ -132,9 +134,34 @@ export function loadCommitLock(identityFile: string): CommitLock | null {
 }
 
 /**
+ * Whether the signing record holds a precommit that the lock does not
+ * account for at the lock's height: from a later round, or for another
+ * block in the lock's round. Under the fork every precommit is signed after
+ * its lock is written, so such a lock file is an older copy, and the record
+ * is what binds us at that height.
+ */
+export function recordOutranksLock(
+    lock: LockPosition,
+    record: SigningRecord | null,
+): boolean {
+    if (
+        !record ||
+        record.genesisHash !== lock.genesisHash ||
+        record.height !== lock.height
+    ) {
+        return false
+    }
+    return (
+        record.timestamp > lock.round ||
+        (record.timestamp === lock.round && record.hash !== lock.hash)
+    )
+}
+
+/**
  * The lock that binds this validator at `height` of the chain with
  * `genesisHash`, or null. A lock of another chain or another height says
- * nothing about this one.
+ * nothing about this one, and neither does a lock the signing record
+ * outranks.
  */
 export function lockAt(
     identityFile: string,
@@ -145,6 +172,7 @@ export function lockAt(
     if (!lock || lock.genesisHash !== genesisHash || lock.height !== height) {
         return null
     }
+    if (recordOutranksLock(lock, loadSigningRecord(identityFile))) return null
     return lock
 }
 
