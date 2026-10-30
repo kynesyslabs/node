@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import {
     loadSigningRecord,
+    restartFloorRefusal,
     writeFileDurably,
 } from "src/libs/identity/signingRecord"
 import { CommitLockError, commitLockPath, loadCommitLock } from "./lockStore"
@@ -133,6 +134,10 @@ export function recordPrevoteRound(
     identityFile: string,
     request: PrevoteRequest,
 ): void {
+    // Before the files: they may be an older copy, or the prevote record may
+    // be gone while the signing record survives
+    const early = restartFloorRefusal(request.round)
+    if (early) throw new CommitLockError(`refusing to prevote: ${early}`)
     const last = loadPrevoteRecord(identityFile)
     const refusal = prevoteRefusal(last, request)
     if (refusal) throw new CommitLockError(`refusing to prevote: ${refusal}`)

@@ -38,6 +38,7 @@ import {
     judgeLock,
     loadCommitLock,
     type LockPosition,
+    recordOutranksLock,
     writeCommitLock,
 } from "./lockStore"
 import { precommitAfterPrevoteRefusal } from "./prevoteRecord"
@@ -182,20 +183,23 @@ export async function precommitUnderLock(
         if (later) return { refused: later }
 
         const lock = loadCommitLock(identityFile)
+        const record = loadSigningRecord(identityFile)
         let current: LockPosition | null = lock
-        // Under the fork the record is written before every precommit
-        // signature, so it holds the latest precommit this key signed. A
-        // record at this height without the lock means the lock file was
-        // lost; judged against the record instead, the lock rule binds us
-        // exactly as far as our signed precommits do, since a lock written
-        // without a signed precommit binds nobody else.
+        // Under the fork the lock is written before each precommit is
+        // signed and the record right after the signature, before it leaves
+        // the process, so the record holds the latest precommit this key
+        // released. A record at this height without the lock, or ahead of
+        // the lock at it, means the lock file was lost or replaced by an
+        // older copy; judged against the record instead, the lock rule binds
+        // us exactly as far as our signed precommits do, since a lock
+        // written without a signed precommit binds nobody else.
         let restore = false
         if (
             !lock ||
             lock.genesisHash !== genesisHash ||
-            lock.height < height
+            lock.height < height ||
+            recordOutranksLock(lock, record)
         ) {
-            const record = loadSigningRecord(identityFile)
             if (record && record.genesisHash === genesisHash) {
                 if (record.height > height) {
                     const reason =
@@ -206,7 +210,7 @@ export async function precommitUnderLock(
                 }
                 if (record.height === height) {
                     log.warning(
-                        `[commitLock] ${commitLockPath(identityFile)} has no lock for height ${height}; ` +
+                        `[commitLock] ${commitLockPath(identityFile)} has no current lock for height ${height}; ` +
                             `judging by the signing record (${record.hash}, round ${record.timestamp})`,
                     )
                     current = {

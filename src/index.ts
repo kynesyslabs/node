@@ -40,18 +40,20 @@ import {
 } from "./libs/blockchain/routines/Sync"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import {
+    getBootTimestampCorrection,
     getNetworkTimestamp,
     startTimestampRecalibration,
 } from "./libs/utils/calibrateTime"
-import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
 import {
     haltSigning,
+    holdSigningUntilRestartFloor,
     reportSigningHaltMarker,
 } from "./libs/identity/signingRecord"
+import { armRestartSigningFloor } from "./libs/consensus/v2/commitLock/restartFloor"
 import {
     assertIdentityNotLive,
     IdentityLiveError,
@@ -240,7 +242,7 @@ function parseL2PSMessagingPort(raw: string | undefined): number {
 
 // ANCHOR Calibrating the time
 async function calibrateTime() {
-    await getTimestampCorrection()
+    await getBootTimestampCorrection()
     startTimestampRecalibration()
     log.info(
         "[SYNC] Timestamp correction: " + getSharedState.timestampCorrection,
@@ -672,6 +674,10 @@ async function preMainLoop() {
  */
 async function main() {
     getSharedState.isInitialized = false
+    // The RPC server can start a consensus round before the clock is
+    // calibrated, and without the floor that round could be one an earlier
+    // run of this key already signed
+    holdSigningUntilRestartFloor()
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
@@ -791,6 +797,9 @@ async function main() {
 
     // INFO Calibrating the time at the start of the node
     await calibrateTime()
+    // Releases the hold taken at the top of main(); a throw here stops the
+    // boot, so signing never opens without a floor
+    armRestartSigningFloor(getSharedState.identityFile, getNetworkTimestamp())
 
     // INFO Preparing the main loop
     bootTracker.start("pre_main_loop")

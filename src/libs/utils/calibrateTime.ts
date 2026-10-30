@@ -12,6 +12,10 @@ const fallbackNtpServers = [
 const RECALIBRATION_INTERVAL_MS = 10 * 60 * 1000
 const MAX_CORRECTION_STEP_S = 30
 const MAX_CONSECUTIVE_REJECTIONS = 3
+// A server that is not synchronised answers with a zero timestamp, which
+// ntp-client turns into 1900. No real reading is older than this (2024-01-01).
+const MIN_PLAUSIBLE_TIME_S = 1_704_067_200
+const BOOT_ATTEMPTS = 5
 
 let recalibrationTimer: NodeJS.Timeout | null = null
 let consecutiveRejections = 0
@@ -25,6 +29,42 @@ export default async function getTimestampCorrection(): Promise<number> {
     const timeDelta = await getMeasuredTimeDelta()
     getSharedState.timestampCorrection = timeDelta
     return timeDelta
+}
+
+/**
+ * The correction the node boots with. The restart signing floor is derived
+ * from it once and never revisited, so one wrong answer would either reopen
+ * rounds an earlier run signed (a clock behind) or stop this node signing
+ * until the next restart (a clock ahead). Two readings in a row must agree.
+ */
+export async function getBootTimestampCorrection(): Promise<number> {
+    let last = ""
+    for (let attempt = 1; attempt <= BOOT_ATTEMPTS; attempt++) {
+        try {
+            const first = await getMeasuredTimeDelta()
+            const second = await getMeasuredTimeDelta()
+            if (Math.abs(first - second) <= MAX_CORRECTION_STEP_S) {
+                getSharedState.timestampCorrection = second
+                return second
+            }
+            last = `readings disagree: ${first}s and ${second}s`
+        } catch (error) {
+            last = error instanceof Error ? error.message : String(error)
+        }
+        log.warning(`[calibrateTime] Boot calibration attempt ${attempt}/${BOOT_ATTEMPTS} failed: ${last}`)
+    }
+    throw new Error(
+        `[calibrateTime] No two agreeing NTP readings after ${BOOT_ATTEMPTS} attempts (${last}); ` +
+            "refusing to start without a trusted clock",
+    )
+}
+
+function plausibleSeconds(time: Date, server: string): number {
+    const seconds = Math.floor(time.getTime() / 1000)
+    if (!Number.isFinite(seconds) || seconds < MIN_PLAUSIBLE_TIME_S) {
+        throw new Error(`${server} answered an implausible time (${String(time)})`)
+    }
+    return seconds
 }
 
 export function startTimestampRecalibration(): void {
@@ -130,7 +170,7 @@ async function getNtpTime(): Promise<number> {
                 }
             })
         })
-        return Math.floor(time.getTime() / 1000)
+        return plausibleSeconds(time, primaryNtpServer)
     } catch (error) {
         log.warning(`Failed to fetch time from ${primaryNtpServer}:`, error)
         return getFallbackNtpTime()
@@ -149,7 +189,7 @@ async function getFallbackNtpTime(): Promise<number> {
                     }
                 })
             })
-            return Math.floor(time.getTime() / 1000)
+            return plausibleSeconds(time, server)
         } catch (error) {
             log.warning(`Failed to fetch time from ${server}:`, error)
         }

@@ -149,8 +149,9 @@ export async function gatherRetryCandidates(
     const identityFile = getSharedState.identityFile
     const locked = lockAt(identityFile, genesisHash, height)
     // Under the fork the record holds only precommits, each signed after
-    // its lock was written: a record at this height without the lock
-    // means the lock file was lost, and the lock it held still binds us.
+    // its lock was written: a record at this height without a lock that
+    // binds it means the lock file was lost or replaced by an older copy,
+    // and the lock it held still binds us.
     let record: SigningRecord | null = null
     if (!locked) {
         const last = loadSigningRecord(identityFile)
@@ -170,7 +171,7 @@ export async function gatherRetryCandidates(
     if (record) {
         bound =
             `the signing record holds a precommit for ${record.hash} at height ${record.height} (round ${record.timestamp}) ` +
-            `but there is no commit lock for height ${height}`
+            `but no commit lock for height ${height} accounts for it`
         log.error(`[commitLock] ${bound}`)
     }
 
