@@ -303,7 +303,12 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
     // split at launch: the operators fix it before the chain starts
     for (const v of validators) {
         const p = probeOf.get(v.identity)
-        if (v.status === "other-genesis-data") {
+        if (v.status === "other-genesis" && genesisHash !== null) {
+            reasons.push(
+                `${v.identity} runs genesis block ${p?.genesisHash ?? "(not reported)"}, ` +
+                    `the launch genesis block is ${genesisHash}`,
+            )
+        } else if (v.status === "other-genesis-data") {
             reasons.push(
                 `${v.identity} runs genesis data ${p?.genesisDataHash ?? "(not reported)"}, ` +
                     `the launch genesis is ${normHash(input.expectedGenesisDataHash ?? "")}`,

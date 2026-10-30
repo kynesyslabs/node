@@ -121,6 +121,12 @@ describe("freshGenesisProblems", () => {
         })
         expect(noTs.join()).toContain("no timestamp")
 
+        for (const bad of [0, "0", "1.5e9", "soon", -1]) {
+            const odd = { ...genesis, timestamp: bad }
+            const problems = freshGenesisProblems({ ...ok, genesisData: odd, pin: hashGenesisData(odd) })
+            expect(problems.join()).toContain("not a positive integer")
+        }
+
         const { snapshot: _s, ...unbound } = genesis
         const noDecl = freshGenesisProblems({
             ...ok,

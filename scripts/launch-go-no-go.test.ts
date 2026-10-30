@@ -369,6 +369,20 @@ describe("decideGoNoGo", () => {
             expect(d.reasons.join("\n")).toContain("runs genesis data")
         })
 
+        it("is NO-GO on one validator on another genesis block, even with quorum online", () => {
+            const launch = launchSet(10)
+            const d = decideGoNoGo(
+                input({
+                    ...expected,
+                    probes: launch.map((v, i) => (i === 0 ? good(v, { genesisHash: "a".repeat(64) }) : good(v))),
+                }),
+            )
+            expect(d.validators[0].status).toBe("other-genesis")
+            expect(d.counted).toHaveLength(9)
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain("runs genesis block")
+        })
+
         it("is NO-GO on a validator with another fork schedule", () => {
             const launch = launchSet(10)
             const d = decideGoNoGo(

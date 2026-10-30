@@ -126,9 +126,17 @@ export function freshGenesisProblems(input: FreshGenesisInput): string[] {
         problems.push("RESTORE is on: a recovery overlay would change the pinned genesis")
     }
     const timestamp = (input.genesisData as Record<string, unknown> | null)?.timestamp
+    // generateGenesisBlock takes the host clock for any falsy value (0 included)
+    // and parseInt for the rest, so only a positive integer gives every node
+    // the same block 0
     if (timestamp === undefined || timestamp === null || timestamp === "") {
         problems.push(
             "genesis has no timestamp: block 0 would take this host's clock and differ from every other node's",
+        )
+    } else if (!/^[1-9][0-9]*$/.test(String(timestamp)) || !Number.isSafeInteger(Number(timestamp))) {
+        problems.push(
+            `genesis timestamp ${JSON.stringify(timestamp)} is not a positive integer: ` +
+                "block 0 would take this host's clock or an invalid time",
         )
     }
     if (declared === null && input.snapshotManifestHash !== null) {

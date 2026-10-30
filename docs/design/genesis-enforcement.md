@@ -56,8 +56,9 @@ All checks run before anything is written to the database.
 
 1. `hashGenesisData(file) == pin`.
 2. `RESTORE` is off: a recovery overlay would change the data after the check.
-3. The file has a `timestamp`: without one, block 0 takes the wall clock and
-   every node creates a different block 0.
+3. The file has a `timestamp` that is a positive integer: block 0 takes the
+   wall clock for a missing or zero value, so every node would create a
+   different block 0.
 4. If the file declares `snapshot.manifestSha256`, the snapshot directory exists
    and the raw manifest hashes to it. If the file declares none, no snapshot may
    be present: it would be loaded without being bound by the pin.
