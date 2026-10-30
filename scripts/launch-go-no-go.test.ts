@@ -338,6 +338,85 @@ describe("decideGoNoGo", () => {
         expect(d.reasons.join("\n")).toContain("2 launch validators have an incomplete entry")
     })
 
+    describe("launch genesis expectations", () => {
+        const DATA = "d".repeat(64)
+        const DIGEST = "e".repeat(64)
+        const expected = {
+            expectedGenesisDataHash: DATA,
+            expectedScheduleDigest: DIGEST,
+            requiredForks: MAINNET_FORKS,
+        }
+        const good = (v: string, o: Partial<ValidatorProbe> = {}) =>
+            online(v, { genesisDataHash: DATA, scheduleDigest: DIGEST, activeForks: [...MAINNET_FORKS], ...o })
+
+        it("is GO when every validator reports the launch genesis, schedule and forks", () => {
+            const d = decideGoNoGo(input({ ...expected, probes: launchSet(10).map(v => good(v)) }))
+            expect(d.reasons).toEqual([])
+            expect(d.go).toBe(true)
+        })
+
+        it("is NO-GO on one validator with other genesis data, even with quorum online", () => {
+            const launch = launchSet(10)
+            const d = decideGoNoGo(
+                input({
+                    ...expected,
+                    probes: launch.map((v, i) => (i === 0 ? good(v, { genesisDataHash: "f".repeat(64) }) : good(v))),
+                }),
+            )
+            expect(d.validators[0].status).toBe("other-genesis-data")
+            expect(d.counted).toHaveLength(9)
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain("runs genesis data")
+        })
+
+        it("is NO-GO on one validator on another genesis block, even with quorum online", () => {
+            const launch = launchSet(10)
+            const d = decideGoNoGo(
+                input({
+                    ...expected,
+                    probes: launch.map((v, i) => (i === 0 ? good(v, { genesisHash: "a".repeat(64) }) : good(v))),
+                }),
+            )
+            expect(d.validators[0].status).toBe("other-genesis")
+            expect(d.counted).toHaveLength(9)
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain("runs genesis block")
+        })
+
+        it("is NO-GO on a validator with another fork schedule", () => {
+            const launch = launchSet(10)
+            const d = decideGoNoGo(
+                input({
+                    ...expected,
+                    probes: launch.map((v, i) => (i === 3 ? good(v, { scheduleDigest: "0".repeat(64) }) : good(v))),
+                }),
+            )
+            expect(d.validators[3].status).toBe("other-schedule")
+            expect(d.go).toBe(false)
+        })
+
+        it("is NO-GO on a validator that does not report a mainnet fork as active", () => {
+            const launch = launchSet(10)
+            const d = decideGoNoGo(
+                input({
+                    ...expected,
+                    probes: launch.map((v, i) =>
+                        i === 5 ? good(v, { activeForks: MAINNET_FORKS.filter(f => f !== "commitLock") }) : good(v),
+                    ),
+                }),
+            )
+            expect(d.validators[5].status).toBe("forks-inactive")
+            expect(d.reasons.join("\n")).toContain("commitLock")
+            expect(d.go).toBe(false)
+        })
+
+        it("does not count an older build that reports none of them", () => {
+            const d = decideGoNoGo(input({ ...expected }))
+            expect(d.validators.every(v => v.status === "other-genesis-data")).toBe(true)
+            expect(d.go).toBe(false)
+        })
+    })
+
     it("marks a launch validator nobody probed", () => {
         const launch = launchSet(10)
         const d = decideGoNoGo(input({ probes: launch.slice(1).map(v => online(v)) }))
@@ -433,5 +512,30 @@ describe("checkLaunch", () => {
         expect(d.go).toBe(false)
         expect(d.reasons).toContain("set reason")
         expect(d.warnings).toContain("set warning")
+    })
+})
+
+describe("launchGenesisExpectations", () => {
+    it("derives the data hash and schedule digest the way a node reports them", async () => {
+        const { launchGenesisExpectations } = await import("./launch-go-no-go")
+        const { hashGenesisData } = await import("src/libs/blockchain/genesis/normalizeGenesisForHash")
+        const genesis = {
+            properties: { id: 7, shardSize: 10 },
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0, description: "x" }])),
+        }
+        const a = await launchGenesisExpectations(genesis)
+        expect(a.expectedGenesisDataHash).toBe(hashGenesisData(genesis))
+        expect(a.requiredForks).toEqual(MAINNET_FORKS)
+        // A description is not part of the schedule; a height is
+        const b = await launchGenesisExpectations({
+            ...genesis,
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0 }])),
+        })
+        expect(b.expectedScheduleDigest).toBe(a.expectedScheduleDigest)
+        const c = await launchGenesisExpectations({
+            ...genesis,
+            forks: { ...genesis.forks, commitLock: { activationHeight: 1 } },
+        })
+        expect(c.expectedScheduleDigest).not.toBe(a.expectedScheduleDigest)
     })
 })

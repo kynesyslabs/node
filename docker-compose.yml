@@ -176,6 +176,14 @@ services:
       PG_USER: ${PG_USER:-demosuser}
       PG_PASSWORD: ${PG_PASSWORD:-demospassword}
       PG_DATABASE: ${PG_DATABASE:-demos}
+      # Genesis pin. A production node refuses to start without it unless
+      # DEMOS_ALLOW_UNPINNED_GENESIS=true. Mainnet mounts its genesis file and
+      # snapshot read-only and points DEMOS_SNAPSHOT_DIR at the snapshot; see
+      # docs/design/genesis-enforcement.md.
+      EXPECTED_GENESIS_HASH: ${EXPECTED_GENESIS_HASH:-}
+      DEMOS_ALLOW_UNPINNED_GENESIS: ${DEMOS_ALLOW_UNPINNED_GENESIS:-}
+      DEMOS_SNAPSHOT_DIR: ${DEMOS_SNAPSHOT_DIR:-}
+      DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST: ${DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST:-}
       # Identity & peers — entrypoint symlinks these into /app/state on boot
       IDENTITY_FILE: ${IDENTITY_FILE:-.demos_identity}
       PEER_LIST_FILE: ${PEER_LIST_FILE:-demos_peerlist.json}

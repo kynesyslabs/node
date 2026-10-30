@@ -16,6 +16,28 @@ import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
 import { Config } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks"
+import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
+import {
+    GenesisRefusal,
+    freshGenesisProblems,
+    parseGenesisPin,
+    parseStoredGenesisData,
+    pinRequirementProblem,
+    restartGenesisProblems,
+} from "@/libs/blockchain/genesis/genesisPin"
+import {
+    acceptSchedule,
+    parseOverrideDigest,
+    scheduleDigest,
+    scheduleFromForkConfig,
+} from "@/libs/blockchain/genesis/acceptedForkSchedule"
+import {
+    readAcceptedSchedule,
+    writeAcceptedSchedule,
+} from "@/libs/blockchain/genesis/acceptedForkScheduleStore"
+import { snapshotManifestHash } from "@/libs/blockchain/genesis/loadSnapshot"
+import type { ForkConfigLike } from "@/libs/peer/routines/forkScheduleAgreement"
+import { WINDOW_BLOCKS } from "@/libs/peer/routines/forkScheduleWatch"
 import {
     loadShardSizeFromGenesisBlock,
     readGenesisShardSize,
@@ -119,10 +141,28 @@ export default async function findGenesisBlock() {
         getSharedState.forkConfigLoaded = true
     }
 
+    const pin = parseGenesisPin(Config.getInstance().core.expectedGenesisHash)
+    const pinProblem = pinRequirementProblem(pin, process.env)
+    if (pinProblem) refuse([pinProblem])
+
     log.info("[GENESIS] Looking for the genesis block...")
     const genesisBlockHash = await Chain.getGenesisBlockHash()
     if (genesisBlockHash) {
         log.info(`[GENESIS] Genesis block found. Hash: ${genesisBlockHash}`)
+        const genesisContent = (await Chain.getGenesisBlock())?.content as
+            | { extra?: { genesisData?: unknown } }
+            | undefined
+        const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
+        refuse(
+            restartGenesisProblems({
+                storedGenesisData: stored,
+                // Without a file only the pin can be checked; the schedule check
+                // below still sees the defaults this node would run with.
+                fileGenesisData: hasGenesisFile ? readGenesisFile() : stored,
+                pin,
+            }),
+        )
+        await acceptLoadedForkSchedule(await Chain.getLastBlockNumber())
         await loadShardSizeFromGenesisBlock()
         return
     }
@@ -139,6 +179,20 @@ export default async function findGenesisBlock() {
     // Loading the genesis block
     const genesisData = readGenesisFile()
 
+    // Everything is checked before the first write: a refused node must leave
+    // an empty database, or its next boot finds a block 0 and trusts it.
+    refuse(
+        freshGenesisProblems({
+            genesisData,
+            pin,
+            restore: Config.getInstance().core.restore,
+            snapshotManifestHash: await snapshotManifestHash(),
+        }),
+    )
+    if (pin !== "") {
+        log.info(`[GENESIS] data/genesis.json matches EXPECTED_GENESIS_HASH ${pin}`)
+    }
+
     const recoveryGenesis = getLatestGCRRecoveryData()
     if (recoveryGenesis) {
         applyRecoveryData(genesisData, recoveryGenesis)
@@ -151,6 +205,62 @@ export default async function findGenesisBlock() {
     // Adding the genesis block to the chain
     const genesisBlock = await Chain.generateGenesisBlock(genesisData)
     getSharedState.genesisCreatedThisBoot = true
+    // Block 0 was just created from this schedule; a row left by an earlier
+    // chain in a partly wiped database says nothing about this one.
+    await writeAcceptedSchedule(currentSchedule(), 0)
     await loadShardSizeFromGenesisBlock()
     return genesisBlock
+}
+
+function currentSchedule() {
+    return scheduleFromForkConfig(
+        getSharedState.forkConfig as unknown as ForkConfigLike,
+        getSharedState.chainId,
+    )
+}
+
+function refuse(problems: string[]): void {
+    if (problems.length === 0) return
+    for (const problem of problems) {
+        log.error(`[GENESIS] Refusing to boot: ${problem}`)
+    }
+    throw new GenesisRefusal(`[GENESIS] Refusing to boot: ${problems.join("; ")}`)
+}
+
+/**
+ * Compare the schedule just loaded from the genesis file with the one this
+ * node last ran with, and store it when the change is allowed.
+ */
+async function acceptLoadedForkSchedule(tip: number): Promise<void> {
+    if (isForkMachineryDisabled()) return
+    const current = currentSchedule()
+    const accepted = await readAcceptedSchedule()
+    if (accepted === null) {
+        await writeAcceptedSchedule(current, tip)
+        log.info(
+            `[FORKS] Accepted fork schedule ${scheduleDigest(current)} at tip ${tip}`,
+        )
+        return
+    }
+    const verdict = acceptSchedule(
+        accepted,
+        current,
+        tip,
+        WINDOW_BLOCKS,
+        parseOverrideDigest(process.env.DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST),
+    )
+    if (verdict.status === "unchanged") return
+    if (verdict.status === "refused") {
+        refuse([
+            `fork schedule in data/genesis.json differs from the one this node ran with: ` +
+                verdict.problems.join("; ") +
+                `. If every operator agreed to this exact schedule, restart with ` +
+                `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=${verdict.digest}`,
+        ])
+        return
+    }
+    for (const change of verdict.changes) {
+        log.warning(`[FORKS] Fork schedule change accepted at tip ${tip}: ${change}`)
+    }
+    await writeAcceptedSchedule(current, tip)
 }

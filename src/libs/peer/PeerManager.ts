@@ -33,6 +33,8 @@ export type HelloVerdict =
     | "verified"
     | "unsigned"
     | "invalid"
+    /** The peer proved its key but runs another chain (genesis block hash differs). */
+    | "other-genesis"
     | "unreachable"
     | "skipped"
 
@@ -722,7 +724,7 @@ export default class PeerManager {
                 )
                 peerman.removeOnlinePeer(peer.identity)
                 peerman.removeOfflinePeer(peer.identity)
-                return { peers: [], verdict: "invalid" }
+                return { peers: [], verdict: "other-genesis" }
             }
 
             peer.sync = await corroborateSyncData(
@@ -752,7 +754,7 @@ export default class PeerManager {
             )
             peerman.removeOnlinePeer(peer.identity)
             peerman.removeOfflinePeer(peer.identity)
-            return { peers: [], verdict: "invalid" }
+            return { peers: [], verdict: "other-genesis" }
         } else {
             PeerManager.markPeerOffline(peer)
         }

@@ -1337,7 +1337,7 @@ async function main() {
 main().catch((error: Error) => {
     console.error(error)
     handleError(error, "CORE", { source: ErrorSource.MAIN, fatal: true })
-    gracefulShutdown("main_error").catch(() => {
+    gracefulShutdown("main_error", 1).catch(() => {
         process.exit(1)
     })
 })
