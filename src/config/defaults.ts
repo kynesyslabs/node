@@ -147,7 +147,10 @@ export const DEFAULT_CONFIG: AppConfig = {
     metrics: {
         enabled: true,
         port: 9090,
-        host: "0.0.0.0",
+        // Loopback by default: /metrics has no authentication. Compose pins
+        // METRICS_HOST=0.0.0.0 inside the container and controls host
+        // exposure with METRICS_BIND; bare-metal operators opt in explicitly.
+        host: "127.0.0.1",
     },
 
     diagnostics: {

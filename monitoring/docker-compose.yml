@@ -21,13 +21,13 @@ services:
             - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
             - --web.console.libraries=/etc/prometheus/console_libraries
             - --web.console.templates=/etc/prometheus/consoles
-            - --web.enable-lifecycle
+            # --web.enable-lifecycle removed (unauthenticated /-/quit, /-/reload).
         volumes:
             - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
             - ./prometheus/alerts:/etc/prometheus/alerts:ro
             - prometheus_data:/prometheus
         ports:
-            - "${PROMETHEUS_PORT:-9091}:9090"
+            - "${MONITORING_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9091}:9090"
         networks:
             - demos-monitoring
         extra_hosts:
@@ -114,7 +114,7 @@ services:
             - ./grafana/branding/demos-icon.svg:/usr/share/grafana/public/img/demos-icon.svg:ro
             - ./grafana/branding/favicon.png:/usr/share/grafana/public/img/favicon.png:ro
         ports:
-            - "${GRAFANA_PORT:-3000}:3000"
+            - "${MONITORING_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
         networks:
             - demos-monitoring
         depends_on:
@@ -137,7 +137,7 @@ services:
             - /sys:/host/sys:ro
             - /:/rootfs:ro
         ports:
-            - "${NODE_EXPORTER_PORT:-9100}:9100"
+            - "${MONITORING_BIND:-127.0.0.1}:${NODE_EXPORTER_PORT:-9100}:9100"
         networks:
             - demos-monitoring
 
