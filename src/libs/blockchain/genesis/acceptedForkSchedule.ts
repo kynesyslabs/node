@@ -95,7 +95,7 @@ export function acceptSchedule(
         }
     }
 
-    const names = [...new Set([...Object.keys(accepted.forks), ...Object.keys(current.forks)])].sort()
+    const names = [...new Set([...Object.keys(accepted.forks), ...Object.keys(current.forks)])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     for (const name of names) {
         const before = accepted.forks[name]
         const after = current.forks[name]
