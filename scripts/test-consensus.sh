@@ -22,6 +22,11 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
     src/libs/peer/syncClaims.test.ts
+    testing/forks/loadForkConfig.test.ts
+    testing/genesis/acceptedForkSchedule.test.ts
+    testing/genesis/genesisMismatch.test.ts
+    testing/genesis/genesisPin.test.ts
+    testing/genesis/normalizeGenesisForHash.test.ts
 )
 
 runner_for() {

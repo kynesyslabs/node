@@ -6,7 +6,9 @@
  * the block quorum) are online on one genesis hash, no operator or cloud
  * provider holds more launch validators than the committee can lose
  * (shardSize - q), the genesis schedules the mainnet forks at block 0, and
- * no launch validator is a pinned committee identity. A validator counts
+ * no launch validator is a pinned committee identity. With a genesis file,
+ * every validator must also report that file's genesis data hash and fork
+ * schedule digest, and the mainnet forks as active. A validator counts
  * only after its endpoint signs a fresh nonce with the validator's key (the
  * node's own hello handshake); what /info claims is never enough. See
  * docs/runbooks/launch-go-no-go.md.
@@ -50,6 +52,12 @@ export interface ValidatorProbe {
     /** Identity the endpoint reports in /info. */
     reportedIdentity?: string | null
     genesisHash?: string | null
+    /** hashGenesisData of the node's stored block 0 (getGenesisDataHash): what EXPECTED_GENESIS_HASH pins. */
+    genesisDataHash?: string | null
+    /** forkScheduleDigest the node reports in getNetworkInfo. */
+    scheduleDigest?: string | null
+    /** Forks getNetworkInfo reports as activated. */
+    activeForks?: string[] | null
     head?: number | null
     commit?: string | null
     version?: string | null
@@ -69,6 +77,12 @@ export interface GoNoGoInput {
     probes: ValidatorProbe[]
     operators: Record<string, unknown> | null
     expectedGenesisHash?: string | null
+    /** The launch genesis data hash; a validator that reports another one does not count. */
+    expectedGenesisDataHash?: string | null
+    /** The launch fork schedule digest; a validator that reports another one does not count. */
+    expectedScheduleDigest?: string | null
+    /** Forks every counted validator must report as activated. */
+    requiredForks?: readonly string[] | null
     expectedCommit?: string | null
     /**
      * Bound committee of block 1 (see firstCommittee). Without it only a
@@ -85,6 +99,9 @@ export type ValidatorStatus =
     | "unproven-identity"
     | "no-genesis"
     | "other-genesis"
+    | "other-genesis-data"
+    | "other-schedule"
+    | "forks-inactive"
     | "other-commit"
     | "not-probed"
 
@@ -244,6 +261,19 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         }
         if (typeof p.genesisHash !== "string" || p.genesisHash.length === 0) return "no-genesis"
         if (genesisHash === null || normHash(p.genesisHash) !== genesisHash) return "other-genesis"
+        // A node on an older build reports neither value; it cannot show it runs the launch genesis
+        if (
+            input.expectedGenesisDataHash &&
+            normHash(p.genesisDataHash ?? "") !== normHash(input.expectedGenesisDataHash)
+        ) {
+            return "other-genesis-data"
+        }
+        if (input.expectedScheduleDigest && p.scheduleDigest !== input.expectedScheduleDigest) {
+            return "other-schedule"
+        }
+        if (input.requiredForks?.some(name => !(p.activeForks ?? []).includes(name))) {
+            return "forks-inactive"
+        }
         if (input.expectedCommit && p.commit !== input.expectedCommit) return "other-commit"
         return "counted"
     }
@@ -268,6 +298,26 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         }
     })
     const counted = validators.filter(v => v.status === "counted").map(v => v.identity)
+
+    // A launch validator that proved its key but runs other rules would abstain or
+    // split at launch: the operators fix it before the chain starts
+    for (const v of validators) {
+        const p = probeOf.get(v.identity)
+        if (v.status === "other-genesis-data") {
+            reasons.push(
+                `${v.identity} runs genesis data ${p?.genesisDataHash ?? "(not reported)"}, ` +
+                    `the launch genesis is ${normHash(input.expectedGenesisDataHash ?? "")}`,
+            )
+        } else if (v.status === "other-schedule") {
+            reasons.push(
+                `${v.identity} runs fork schedule ${p?.scheduleDigest ?? "(not reported)"}, ` +
+                    `the launch schedule is ${input.expectedScheduleDigest}`,
+            )
+        } else if (v.status === "forks-inactive") {
+            const missing = (input.requiredForks ?? []).filter(f => !(p?.activeForks ?? []).includes(f))
+            reasons.push(`${v.identity} does not report these forks as active: ${missing.join(", ")}`)
+        }
+    }
     const countedInCommittee = counted.filter(id => inCommittee.has(id))
 
     if (launch.length === 0) {
@@ -371,6 +421,31 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
             `fork ${name} is not scheduled at activationHeight 0 in the genesis ` +
             `(found ${JSON.stringify(forks[name]?.activationHeight ?? null)})`,
     )
+}
+
+/**
+ * What every launch validator must report for the launch genesis file: its
+ * genesis data hash, its fork schedule digest as the node computes it after
+ * loading the file, and the mainnet forks as activated.
+ */
+export async function launchGenesisExpectations(genesis: unknown): Promise<{
+    expectedGenesisDataHash: string
+    expectedScheduleDigest: string
+    requiredForks: readonly string[]
+}> {
+    const { hashGenesisData } = await import("src/libs/blockchain/genesis/normalizeGenesisForHash")
+    const { loadForkConfigFromGenesis } = await import("src/forks")
+    const { getSharedState } = await import("src/utilities/sharedState")
+    const { forkScheduleDigest } = await import("src/libs/peer/routines/forkScheduleAgreement")
+    loadForkConfigFromGenesis(genesis)
+    return {
+        expectedGenesisDataHash: hashGenesisData(genesis),
+        expectedScheduleDigest: forkScheduleDigest(
+            getSharedState.forkConfig as unknown as Parameters<typeof forkScheduleDigest>[0],
+            getSharedState.chainId,
+        ),
+        requiredForks: MAINNET_FORKS,
+    }
 }
 
 export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" | "committee"> {
@@ -584,6 +659,31 @@ export async function probeValidator(
         probe.error = `genesis: ${(e as Error).message}`
     }
     try {
+        const res = await fetchJson(base, timeoutMs, {
+            method: "nodeCall",
+            params: [{ message: "getGenesisDataHash", data: {}, muid: null }],
+        })
+        probe.genesisDataHash =
+            res?.result === 200 && typeof res.response === "string" ? res.response : null
+    } catch (e) {
+        probe.error = `${probe.error ? probe.error + "; " : ""}genesis data: ${(e as Error).message}`
+    }
+    try {
+        const res = await fetchJson(base, timeoutMs, {
+            method: "nodeCall",
+            params: [{ message: "getNetworkInfo", data: {}, muid: null }],
+        })
+        const info = res?.result === 200 ? res.response : null
+        probe.scheduleDigest =
+            typeof info?.forkScheduleDigest === "string" ? info.forkScheduleDigest : null
+        probe.activeForks =
+            info?.forks && typeof info.forks === "object"
+                ? Object.keys(info.forks).filter(name => info.forks[name]?.activated === true)
+                : null
+    } catch (e) {
+        probe.error = `${probe.error ? probe.error + "; " : ""}network info: ${(e as Error).message}`
+    }
+    try {
         const head = await fetchJson(base, timeoutMs, {
             method: "nodeCall",
             params: [{ message: "getLastBlockNumber", data: {}, muid: null }],
@@ -664,6 +764,16 @@ async function main(): Promise<number> {
     }
     const operators = operatorsRaw as Record<string, unknown> | null
 
+    let expectations = {}
+    if (genesis) {
+        try {
+            expectations = await launchGenesisExpectations(genesis)
+        } catch (e) {
+            console.error(`genesis: ${(e as Error).message}`)
+            return 2
+        }
+    }
+
     const prover = await startIdentityProver(args.timeoutMs)
     let probes: ValidatorProbe[]
     try {
@@ -701,6 +811,7 @@ async function main(): Promise<number> {
         probes: [...merged.values()],
         operators,
         expectedGenesisHash: args.genesisHash,
+        ...expectations,
         expectedCommit: args.commit,
     })
 

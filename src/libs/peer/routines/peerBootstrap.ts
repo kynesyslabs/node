@@ -334,6 +334,12 @@ async function tryConnectPeer(peer: Peer) {
                 `Anchor ${verifiedPeer.identity} @ ${currentPeerUrl} failed identity verification: the URL is not served by that key.`,
             )
         }
+        if (verdict === "other-genesis") {
+            throw new Error(
+                `Anchor ${verifiedPeer.identity} @ ${currentPeerUrl} runs another chain: its genesis block hash differs from this node's ` +
+                    `(${getSharedState.genesisBlockHash}). Check data/genesis.json and EXPECTED_GENESIS_HASH, or pick an anchor on this network.`,
+            )
+        }
 
         // INFO: Confirmed we paired with anchor node
         if (
