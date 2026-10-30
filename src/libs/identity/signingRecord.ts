@@ -87,6 +87,42 @@ export function signingHaltReason(): string | null {
     return haltReason
 }
 
+// Every round and block timestamp this key signs is a whole second of the
+// network clock, at most a few seconds ahead of it. A floor set at boot
+// above anything an earlier run can have signed keeps that run's rounds
+// closed even when the state files on disk are an older copy (a restored
+// backup, a lost prevote record): those files are all the gates read.
+let restartFloor: number | null = null
+// From process start until the floor is known, every round is refused: the
+// RPC server can start a round before the clock is calibrated.
+let restartFloorPending = false
+
+/** At process start: refuse every round until setRestartSigningFloor. */
+export function holdSigningUntilRestartFloor(): void {
+    restartFloorPending = true
+}
+
+/** Once the clock is calibrated: rounds at or below `floor` stay refused. */
+export function setRestartSigningFloor(floor: number): void {
+    if (!Number.isFinite(floor)) {
+        throw new SigningRecordError(`invalid restart signing floor ${floor}`)
+    }
+    restartFloor = floor
+    restartFloorPending = false
+}
+
+/** Why `round` must not be signed by this process, or null. */
+export function restartFloorRefusal(round: number): string | null {
+    if (restartFloorPending) {
+        return "the restart signing floor is not set yet (network clock not calibrated)"
+    }
+    if (restartFloor === null || round > restartFloor) return null
+    return (
+        `round ${round} is not after ${restartFloor}, the restart signing floor: ` +
+        "an earlier run of this key may have signed it, whatever the files on disk say"
+    )
+}
+
 /**
  * Whether this node refuses to sign right now: stopped in this process, or
  * by a marker on disk. A stop whose marker write failed counts here but is
@@ -140,6 +176,8 @@ export function setSigningLeaseCheck(check: (() => string | null) | null): void 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export function __resetSigningHalt(): void {
     haltReason = null
+    restartFloor = null
+    restartFloorPending = false
     signedHere.clear()
     cached = null
     leaseCheck = null
@@ -433,6 +471,8 @@ function evaluate(
     }
     const stopped = markerRefusal(identityFile)
     if (stopped) throw new DoubleSignError(`refusing to sign: ${stopped}`)
+    const early = restartFloorRefusal(request.timestamp)
+    if (early) throw new DoubleSignError(`refusing to sign: ${early}`)
     if (
         !request.genesisHash ||
         !Number.isSafeInteger(request.height) ||

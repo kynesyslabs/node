@@ -66,6 +66,30 @@ only when the network head is above it. Let it sync to the head before it
 joins the committee: it votes only at the height after its own head, so
 every earlier vote is then behind it.
 
+### Restart signing floor
+
+At every start, once the network clock is calibrated, the node refuses to
+sign any round up to the network time plus 5 seconds (the most a round may
+lead the clock), or up to the highest round in the files above when that is
+later. It logs `[SIGNING] Restart signing floor: only rounds after <round>
+are signed`, and signs nothing before that line. Every round an earlier run
+of the key can have signed is at or below the floor, so neither an older copy
+of the files nor a `.prevote.json` lost beside a surviving `.signed.json` can
+reopen such a round after a restart. Each restart sits out about 5 seconds of
+rounds.
+
+The floor does not cover:
+
+- a file deleted or replaced while the node runs. The node reads the files
+  before every vote, so a `.prevote.json` lost under a running node can let
+  it prevote a second block in a round it already prevoted in. Stop the node
+  before touching any of its signing state files;
+- a network clock that is behind the earlier run's clock by more than the
+  files show;
+- the lock an older copy has forgotten: in a later round the node may still
+  prevote a block its real lock forbids. The rule for older copies above
+  still applies.
+
 ### Damaged commit-lock file
 
 A commit-lock file that cannot be read stops the node from voting: every round

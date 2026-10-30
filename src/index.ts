@@ -50,8 +50,10 @@ import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorS
 import { acquireIdentityLock } from "./libs/identity/identityLock"
 import {
     haltSigning,
+    holdSigningUntilRestartFloor,
     reportSigningHaltMarker,
 } from "./libs/identity/signingRecord"
+import { armRestartSigningFloor } from "./libs/consensus/v2/commitLock/restartFloor"
 import {
     assertIdentityNotLive,
     IdentityLiveError,
@@ -672,6 +674,10 @@ async function preMainLoop() {
  */
 async function main() {
     getSharedState.isInitialized = false
+    // The RPC server can start a consensus round before the clock is
+    // calibrated, and without the floor that round could be one an earlier
+    // run of this key already signed
+    holdSigningUntilRestartFloor()
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
@@ -791,6 +797,7 @@ async function main() {
 
     // INFO Calibrating the time at the start of the node
     await calibrateTime()
+    armRestartSigningFloor(getSharedState.identityFile, getNetworkTimestamp())
 
     // INFO Preparing the main loop
     bootTracker.start("pre_main_loop")
