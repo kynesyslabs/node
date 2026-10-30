@@ -217,6 +217,15 @@ describe("the floor itself", () => {
         ).not.toThrow()
     })
 
+    it("keeps signing held when the clock reading is not a number", () => {
+        signing.holdSigningUntilRestartFloor()
+        expect(() => armRestartSigningFloor(identityFile, Number.NaN)).toThrow(
+            /invalid restart signing floor/,
+        )
+        const v = { height: 11, round: BOOT_NOW + 1000, hash: "block-11-x" }
+        expect(blockSignature(v)).toThrow(/not set yet/)
+    })
+
     it("skips a file it cannot read, which the gates still refuse on", () => {
         fs.writeFileSync(commitLockPath(identityFile), "{")
         expect(armRestartSigningFloor(identityFile, BOOT_NOW)).toBe(BOOT_NOW + LEAD)

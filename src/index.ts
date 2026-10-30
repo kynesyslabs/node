@@ -40,10 +40,10 @@ import {
 } from "./libs/blockchain/routines/Sync"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import {
+    getBootTimestampCorrection,
     getNetworkTimestamp,
     startTimestampRecalibration,
 } from "./libs/utils/calibrateTime"
-import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
@@ -242,7 +242,7 @@ function parseL2PSMessagingPort(raw: string | undefined): number {
 
 // ANCHOR Calibrating the time
 async function calibrateTime() {
-    await getTimestampCorrection()
+    await getBootTimestampCorrection()
     startTimestampRecalibration()
     log.info(
         "[SYNC] Timestamp correction: " + getSharedState.timestampCorrection,
@@ -797,6 +797,8 @@ async function main() {
 
     // INFO Calibrating the time at the start of the node
     await calibrateTime()
+    // Releases the hold taken at the top of main(); a throw here stops the
+    // boot, so signing never opens without a floor
     armRestartSigningFloor(getSharedState.identityFile, getNetworkTimestamp())
 
     // INFO Preparing the main loop

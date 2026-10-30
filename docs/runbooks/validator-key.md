@@ -78,6 +78,19 @@ of the files nor a `.prevote.json` lost beside a surviving `.signed.json` can
 reopen such a round after a restart. Each restart sits out about 5 seconds of
 rounds.
 
+The node will not start without two NTP readings in a row that agree within
+30 seconds. A server that is not synchronised answers 1900, which is
+rejected. When every server fails, the boot stops with `refusing to start
+without a trusted clock`. Fix the host's outbound NTP (UDP 123) and start
+again.
+
+The files are not tied to a chain. When the key moves to another network
+with its old files, a round in them later than the network clock holds the
+floor up to that time. The node then logs `The signing state files hold round
+<round>, <n>s ahead of the network clock` and signs nothing until the clock
+passes that round. Move the old files aside only when the key never signed on
+the new network.
+
 The floor does not cover:
 
 - a file deleted or replaced while the node runs. The node reads the files

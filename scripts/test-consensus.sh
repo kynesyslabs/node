@@ -22,6 +22,7 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
     src/libs/peer/syncClaims.test.ts
+    src/libs/utils/calibrateTime.boot.test.ts
 )
 
 runner_for() {
