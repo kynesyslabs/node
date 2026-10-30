@@ -90,8 +90,12 @@ exposed by the node, so it comes from the T-24h posts). Then:
   a seat on any network whose pool holds them. Without `--genesis` the
   forks cannot be checked and the result is always NO-GO.
 - `NO-GO` (exit 1): each failed condition is listed. A validator answering
-  with a different identity, an unproven identity, another genesis or
-  another commit is shown but not counted.
+  with a different identity, an unproven identity or another commit is
+  shown but not counted. A launch validator with a proven identity that
+  runs other rules is NO-GO on its own, whatever the quorum: another genesis
+  block, other genesis data (`getGenesisDataHash`), another fork schedule
+  digest, or one of the five forks not active. It would abstain or split at
+  launch, so its operator fixes it before the chain starts.
 - Exit 2: bad input.
 
 **Identity proof.** `/info` is a claim anyone can make, so an endpoint

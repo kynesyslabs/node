@@ -5,7 +5,7 @@
  *  - Be a no-op when the genesis payload has no `forks` field (default
  *    case in production today; confirms bit-identical to pre-P2).
  *  - Hydrate known fork names with their declared `activationHeight`.
- *  - Ignore unknown fork names defensively (logs a warning, no throw).
+ *  - Refuse a scheduled unknown fork; ignore an unscheduled one (warning only).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
@@ -289,11 +289,24 @@ describe("loadForkConfigFromGenesis", () => {
         ).toBeUndefined()
     })
 
-    it("ignores unknown fork names without throwing", () => {
+    it("refuses a scheduled fork this build does not know", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: { futureFork: { activationHeight: 1 } },
+            }),
+        ).toThrow(ForkConfigValidationError)
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: { futureFork: { activationHeight: 0 } },
+            }),
+        ).toThrow(/futureFork/)
+    })
+
+    it("ignores unknown fork names that are not scheduled", () => {
         expect(() =>
             loadForkConfigFromGenesis({
                 forks: {
-                    futureFork: { activationHeight: 1 },
+                    futureFork: { activationHeight: null },
                     osDenomination: { activationHeight: 999 },
                 },
             }),

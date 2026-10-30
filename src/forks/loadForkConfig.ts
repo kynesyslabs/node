@@ -145,9 +145,10 @@ export function isForkMachineryDisabled(): boolean {
  *
  * The genesis JSON may optionally include a top-level `forks` object whose
  * keys are {@link ForkName} values and whose values are per-fork
- * {@link ForkConfig} payloads. Unknown fork names are ignored with a
- * warning so a forward-dated genesis can be loaded by an older node
- * without crashing — the unknown fork simply has no rule effect.
+ * {@link ForkConfig} payloads. An unknown fork that is scheduled stops the
+ * boot, since this build cannot enforce it; an unknown fork whose
+ * activationHeight is null is ignored with a warning, so a genesis that
+ * only declares a newer fork can still be loaded by an older node.
  *
  * Absence of the `forks` field is the supported default and leaves the
  * config in its `cloneDefaultForkConfig()` state (all forks inactive).
@@ -217,6 +218,16 @@ function loadForkConfigFromGenesisInner(genesisData: any): void {
         // entry would otherwise pass the membership check and write
         // into the shared registry).
         if (!Object.hasOwn(getSharedState.forkConfig, name)) {
+            // A build that does not know a scheduled fork cannot enforce it and
+            // would split from its peers at the activation height.
+            const height = (rawConfig as { activationHeight?: unknown } | null)
+                ?.activationHeight
+            if (height !== null && height !== undefined) {
+                throw new ForkConfigValidationError(
+                    `[FORKS] Genesis schedules fork "${name}" at ${JSON.stringify(height)}, ` +
+                        "which this build does not know; run a build that implements it",
+                )
+            }
             log.warning(
                 `[FORKS] Genesis declares unknown fork "${name}" — ignoring`,
             )

@@ -104,6 +104,7 @@ When the stack is healthy:
 | `TLSNOTARY_SIGNING_KEY` | _(empty)_ | **Leave empty in docker mode (the default).** The TLSNotary sidecar manages its own key. Only set this if you've switched `TLSNOTARY_MODE` to `ffi` (in-process Rust binding). |
 | `RPC_PORT` | `53550` | Host-mapped port for the node RPC. Change if 53550 is taken. |
 | `EXPOSED_URL` | `http://localhost:53550` | Public URL advertised to peers. Set to your public IP/domain when running on a VPS. |
+| `EXPECTED_GENESIS_HASH` | _(empty)_ | The network's published genesis hash. Required in the image (`NODE_ENV=production`) unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; see "Pin the network's genesis" below. |
 | `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | `demosuser` / `demospassword` / `demos` | Postgres credentials. Change `PG_PASSWORD` if you're paranoid; it never leaves the compose network. |
 | `METRICS_ENABLED` / `METRICS_PORT` | `true` / `9090` | Prometheus scrape endpoint on the node. |
 | `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password. Change this. |
@@ -118,7 +119,7 @@ Leave `PG_HOST=postgres` and `TLSNOTARY_HOST=tlsnotary` exactly as shipped — t
 
 ### Joining the network — required steps before real-world use
 
-A fresh node will run as an isolated single-validator chain by default. To participate in the actual Demos testnet/mainnet, you must do **two things**:
+A fresh node will run as an isolated single-validator chain by default. To participate in the actual Demos testnet/mainnet, you must do **three things**:
 
 **1. Set `EXPOSED_URL` to your reachable address.**
 
@@ -157,6 +158,32 @@ docker compose up
 ```
 
 Replace `bootstrap1.demos.network` etc. with current bootstrap nodes from the team. The node will merge any peers it learns from these into the file as it runs.
+
+**3. Pin the network's genesis.**
+
+The image runs with `NODE_ENV=production`, and a production node refuses to start (exit code 1) unless it knows which genesis it joins. Set the hash the network publishes:
+
+```env
+# In .env
+EXPECTED_GENESIS_HASH=<published genesis hash>
+```
+
+At every start the node checks it before it signs anything: on an empty database against `data/genesis.json` (and the snapshot that genesis declares), before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; mainnet validators never set it.
+
+On mainnet, mount the published genesis file and snapshot read-only instead of using the files bundled in the image, which belong to the testnet:
+
+```yaml
+# docker-compose.override.yml
+services:
+  node:
+    volumes:
+      - ./mainnet/genesis.json:/app/data/genesis.json:ro
+      - ./mainnet/snapshot:/app/mainnet-snapshot:ro
+    environment:
+      DEMOS_SNAPSHOT_DIR: /app/mainnet-snapshot
+```
+
+The node also remembers the fork schedule it last ran with. A restart whose `data/genesis.json` adds, moves or removes a fork at or below the current height plus 50 blocks is refused, and the refusal names the change. If every operator agreed to that exact schedule, restart once with `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST` set to the digest the refusal prints. See `docs/design/genesis-enforcement.md`.
 
 ### Network Exposure
 

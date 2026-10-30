@@ -23,6 +23,11 @@ SUITE_FILES=(
     src/libs/network/proposeBlockHashSender.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts
+    testing/forks/loadForkConfig.test.ts
+    testing/genesis/acceptedForkSchedule.test.ts
+    testing/genesis/genesisMismatch.test.ts
+    testing/genesis/genesisPin.test.ts
+    testing/genesis/normalizeGenesisForHash.test.ts
 )
 
 runner_for() {
