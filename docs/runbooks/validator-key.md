@@ -79,12 +79,15 @@ reopen such a round after a restart. Each restart sits out about 5 seconds of
 rounds.
 
 The node will not start without two NTP readings in a row that agree within
-2 seconds, and the second one sets the clock. Agreement bounds the error, it
-does not remove it: a reading up to 2 seconds behind puts the floor up to 2
-seconds lower. A round still in the files above stays refused whatever the
-clock says; a round missing from them is covered only when the restart took
-longer than that error, which a normal boot (database, peers, two NTP
-readings) does. A server that is not synchronised answers 1900, which is
+2 seconds, and the second one sets the clock. Agreement shows the readings are
+consistent, not that they are right: both normally come from the same server
+(`pool.ntp.org`, with fallbacks only when it fails), so a server that is off
+by some seconds moves the floor by the same amount. A round still in the files
+above stays refused whatever the clock says; a round missing from them is
+covered only when the restart took longer than the clock's actual error. A
+normal boot (database, peers, two NTP readings) takes longer than the error of
+a healthy NTP server; a host whose NTP path can be tampered with, or which
+answers from a misconfigured local server, gets no such guarantee. A server that is not synchronised answers 1900, which is
 rejected. When every server fails, the boot stops with `refusing to start
 without a trusted clock`. Fix the host's outbound NTP (UDP 123) and start
 again.
