@@ -230,6 +230,18 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(code).not.toMatch(/allowedSignersFile\s+\.github\/allowed_signers/)
     })
 
+    it("the release workflow refuses a tag that is not v + package.json version", () => {
+        const workflow = read(".github/workflows/release.yml")
+        expect(workflow).toMatch(/git show "\$sha:package\.json" \| jq -r \.version/)
+        expect(workflow).toMatch(/\[ "v\$version" = "\$GITHUB_REF_NAME" \]/)
+    })
+
+    it("package.json carries a release version, not the pre-release 0.9.x line", () => {
+        const { version } = JSON.parse(read("package.json"))
+        expect(version).toMatch(/^\d+\.\d+\.\d+(-rc\.\d+)?$/)
+        expect(version).not.toMatch(/^0\./)
+    })
+
     it("the launcher answers -h before checking Bun or installing anything", () => {
         const run = read("scripts/run")
         const help = run.indexOf("-h | --help)")

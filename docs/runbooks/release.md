@@ -57,6 +57,11 @@ commit has no effect.
 
 ## Cutting a release candidate
 
+First merge a change that sets `version` in `package.json` to the tag
+without its `v` (for example `1.0.0-rc.1`). The node reports that version in
+`getNetworkInfo` and the fork-status RPC, and the workflow refuses a tag that
+does not match it, so every release names itself.
+
 ```bash
 git checkout stabilisation && git pull --ff-only
 git tag -s v1.0.0-rc.1 -m "v1.0.0-rc.1"
@@ -66,8 +71,9 @@ git push origin v1.0.0-rc.1
 
 The `Release` workflow then:
 
-1. checks the tagged commit is on `stabilisation` and verifies the tag
-   signature against the `.github/allowed_signers` of that branch's head;
+1. checks the tagged commit is on `stabilisation`, verifies the tag
+   signature against the `.github/allowed_signers` of that branch's head,
+   and checks that the tag is `v` plus `package.json`'s version;
 2. builds the image twice, in two independent jobs, from clean checkouts,
    with no cache, `SOURCE_DATE_EPOCH` and `BUILT_AT` taken from the commit,
    and file timestamps rewritten to the commit date;
