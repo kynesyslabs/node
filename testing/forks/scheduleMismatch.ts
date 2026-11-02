@@ -1,12 +1,12 @@
 /**
  * Scenario for validators that run with different fork schedules. Start it with
  * MISMATCH=1 or MISMATCH=2 ./rehearsal.sh, which brings up the 4-validator devnet
- * with the last MISMATCH validators scheduling both forks at MINORITY_HEIGHT
- * instead of ACTIVATION_HEIGHT, and sets the environment this reads.
+ * with both forks at ACTIVATION_HEIGHT and sets the environment this reads.
  *
  * Steps (each writes its own log and raw responses under $RUN_DIR/steps):
- *   1  every node loaded the schedule its genesis file names
- *   2  the schedule watch finds the difference inside the window
+ *   1  the last MISMATCH validators move web2ProofBinding to MINORITY_HEIGHT while
+ *      that is still beyond tip + 50; the boot check accepts such an edit
+ *   2  the schedule watch finds the difference once the window opens
  *      MISMATCH=1: only the odd validator abstains; the other three report it
  *      MISMATCH=2: no side is a majority from where it stands, so every validator abstains
  *   3  what the chain does meanwhile
@@ -16,6 +16,10 @@
  *   5  the operators put the agreed schedule back and the network is whole again
  *   6  the fork activates on every validator at the same block
  *   7  no container ran out of memory
+ *
+ * Only web2ProofBinding moves, so both sides have the same nearest height and
+ * enter the window together; otherwise the side that enters first could stop
+ * the chain before the other side ever compares.
  */
 import { execFileSync } from "node:child_process"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -36,7 +40,6 @@ const PORTS = [53551, 53553, 53555, 53557]
 const NODES = [1, 2, 3, 4]
 const MINORITY = NODES.slice(4 - MISMATCH)
 const MAJORITY = NODES.slice(0, 4 - MISMATCH)
-const FORKS = ["signatureDomain", "web2ProofBinding"]
 const pubkey = (n: number) =>
     readFileSync(`${RUN_DIR}/data/identities/node${n}.pubkey`, "utf8").trim().toLowerCase().replace(/^0x/, "")
 
@@ -143,35 +146,58 @@ const oomKilled = () =>
     NODES.map(n => execFileSync(DOCKER, ["inspect", "-f", "{{.State.OOMKilled}}", `${PROJECT}-node-${n}`]).toString().trim())
 
 const genesisPath = (n: number) => `${RUN_DIR}/data/genesis.node${n}.json`
-function writeSchedule(n: number, height: number) {
+function writeSchedule(n: number, height: number, web2Height = height) {
     const g = JSON.parse(readFileSync(genesisPath(n), "utf8"))
-    for (const fork of FORKS) g.forks[fork] = { activationHeight: height }
+    g.forks.signatureDomain = { activationHeight: height }
+    g.forks.web2ProofBinding = { activationHeight: web2Height }
     // In place, so the container's bind mount sees it.
     writeFileSync(genesisPath(n), JSON.stringify(g, null, 2) + "\n")
 }
 const ABSTAIN = "[FORK SCHEDULE] Abstaining from consensus from block"
 const RESUME = "[FORK SCHEDULE] No majority of validators differs"
-const loadedLine = (height: number) => `Loaded fork "signatureDomain" with activationHeight=${height}`
+const loadedLine = (height: number, fork = "signatureDomain") => `Loaded fork "${fork}" with activationHeight=${height}`
 
-say(`== schedule mismatch: ${MISMATCH} of 4 validators (nodes ${MINORITY.join(", ")}) schedule the forks at ${MINORITY_H}, the others at ${H}`)
+say(`== schedule mismatch: ${MISMATCH} of 4 validators (nodes ${MINORITY.join(", ")}) move web2ProofBinding to ${MINORITY_H}; every fork is at ${H} on the others`)
 const startedAt = new Date().toISOString()
 
 // ---- 1 ---------------------------------------------------------------------
-step("every node loaded the schedule its genesis file names")
+step(`nodes ${MINORITY.join(", ")} move web2ProofBinding to ${MINORITY_H} beyond tip + 50`)
 const bootLogs = NODES.map(n => nodeLog(n))
 check(
-    MAJORITY.every(n => bootLogs[n - 1].includes(loadedLine(H))) &&
-        MINORITY.every(n => bootLogs[n - 1].includes(loadedLine(MINORITY_H))),
-    `nodes ${MAJORITY.join(", ")} loaded height ${H}, nodes ${MINORITY.join(", ")} loaded height ${MINORITY_H}`,
+    NODES.every(n => bootLogs[n - 1].includes(loadedLine(H)) && bootLogs[n - 1].includes(loadedLine(H, "web2ProofBinding"))),
+    `every node booted with both forks at ${H}`,
 )
-record("accepted-digests", NODES.map(acceptedDigest))
+const tipAtMove = await tipOf(1)
+check(tipAtMove >= 0 && tipAtMove + 50 < H, `the edit lands at tip ${tipAtMove}, while both ${H} and ${MINORITY_H} still lie beyond tip + 50`)
+for (const n of MINORITY) writeSchedule(n, H, MINORITY_H)
+for (const n of MINORITY) restartNode(n)
+const movedAt = new Date().toISOString()
+const movedBack = await until(async () => (await Promise.all(MINORITY.map(tipOf))).every(t => t >= tipAtMove), 180, 3000)
+check(
+    movedBack &&
+        MINORITY.every(n => {
+            const log = nodeLog(n, movedAt)
+            return log.includes(loadedLine(MINORITY_H, "web2ProofBinding")) &&
+                log.includes("Fork schedule change accepted at tip") &&
+                !log.includes("Refusing to boot")
+        }),
+    `nodes ${MINORITY.join(", ")} restarted with web2ProofBinding at ${MINORITY_H}, accepted by the boot check without an override`,
+)
+const digestsAfterMove = NODES.map(acceptedDigest)
+record("accepted-digests", digestsAfterMove)
+check(
+    MINORITY.every(n => digestsAfterMove[n - 1] !== digestsAfterMove[0]) &&
+        MAJORITY.every(n => digestsAfterMove[n - 1] === digestsAfterMove[0]),
+    "the odd validators now hold a different accepted schedule",
+)
 
 // ---- 2 ---------------------------------------------------------------------
 step("the schedule watch finds the difference inside the window")
 const expectedAbstainers = MISMATCH === 1 ? MINORITY : NODES
+// The window opens at H - 50 and the watch compares every 10 blocks inside it.
 const detected = await until(
     () => expectedAbstainers.every(n => nodeLog(n).includes(ABSTAIN)),
-    Math.max(300, BLOCK_SECS * 30),
+    Math.max(0, H - 50 + 10 - (await tipOf(1))) * BLOCK_SECS * 2 + 180,
     5000,
 )
 check(detected, `nodes ${expectedAbstainers.join(", ")} logged that they abstain from consensus`)
@@ -185,8 +211,8 @@ const firstAbstainBlock = (n: number) => {
 if (MISMATCH === 1) {
     const [odd] = MINORITY
     check(
-        linesWith(nodeLog(odd), ABSTAIN).some(l => l.includes("(3 of 3 validators)") && l.includes(`nearest scheduled height ${MINORITY_H}`)),
-        `node ${odd}'s reason names all 3 peers as differing and its own nearest height ${MINORITY_H}`,
+        linesWith(nodeLog(odd), ABSTAIN).some(l => l.includes("(3 of 3 validators)") && l.includes(`nearest scheduled height ${H}`)),
+        `node ${odd}'s reason names all 3 peers as differing and the nearest height ${H}`,
     )
     const oddUrl = `node-${odd}:${PORTS[odd - 1]}`
     check(
@@ -260,13 +286,16 @@ step("a further local edit inside the window is refused at boot")
 const edited = MINORITY[MINORITY.length - 1]
 const digestBefore = acceptedDigest(edited)
 const tipAtEdit = await tipOf(1)
-writeSchedule(edited, MINORITY_H + 3)
+// Below H, so it lands inside tip + 50 even where the chain stopped as the window opened.
+const badHeight = H - 2
+check(badHeight > tipAtEdit && badHeight <= tipAtEdit + 50, `height ${badHeight} lies between tip ${tipAtEdit} and tip + 50`)
+writeSchedule(edited, H, badHeight)
 restartNode(edited)
 const editAt = new Date().toISOString()
 const refused = await until(() => nodeLog(edited, editAt).includes("[GENESIS] Refusing to boot: fork schedule in data/genesis.json differs"), 120, 3000)
 const refusal = linesWith(nodeLog(edited, editAt), "Refusing to boot").slice(0, 2).map(l => l.slice(0, 700))
 record("refusal", refusal)
-check(refused, `node ${edited} refused to boot on its schedule moved to ${MINORITY_H + 3} at tip ${tipAtEdit}`)
+check(refused, `node ${edited} refused to boot on web2ProofBinding moved again, to ${badHeight}, at tip ${tipAtEdit}`)
 check(
     refusal.some(l => l.includes(`touches height`) && /DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=[0-9a-f]{64}/.test(l)),
     "the refusal names the height it touches and the digest an operator would have to name",
@@ -288,7 +317,7 @@ check(rejoined, `nodes ${MINORITY.join(", ")} are serving again at or above tip 
 check(
     MINORITY.every(n => {
         const log = nodeLog(n, fixedAt)
-        return log.includes(loadedLine(H)) && log.includes("accepted by DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=")
+        return log.includes(loadedLine(H, "web2ProofBinding")) && log.includes("accepted by DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=")
     }),
     `nodes ${MINORITY.join(", ")} loaded height ${H}, the change inside the window accepted only because the operator named that exact schedule`,
 )

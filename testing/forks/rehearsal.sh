@@ -8,10 +8,11 @@
 #                    chain's genesis files and restart every node (the real upgrade)
 # UPGRADE_LEAD       blocks between the genesis edit and the height in that mode (default 60;
 #                    a node refuses a schedule edit at or below its tip + 50)
-# MISMATCH=1|2       instead of the activation scenario, the last 1 or 2 validators schedule
-#                    both forks at MINORITY_HEIGHT and the rest at ACTIVATION_HEIGHT; the
-#                    scenario is scheduleMismatch.ts (default ACTIVATION_HEIGHT 50)
-# MINORITY_HEIGHT    the odd validators' height in that mode (default ACTIVATION_HEIGHT + 5)
+# MISMATCH=1|2       instead of the activation scenario, the chain starts with both forks
+#                    at ACTIVATION_HEIGHT and the last 1 or 2 validators then move
+#                    web2ProofBinding to MINORITY_HEIGHT; the scenario is scheduleMismatch.ts
+#                    (default ACTIVATION_HEIGHT 70, so the edit still lies beyond tip + 50)
+# MINORITY_HEIGHT    where the odd validators move web2ProofBinding (default ACTIVATION_HEIGHT + 5)
 # ACTIVATION_HEIGHT  block height both forks are scheduled at from block 0 (default 30)
 # CHAIN_ID           genesis properties.id; the signature preimage binds to it (default 31337)
 # CONSENSUS_TIME     seconds per block (default 10)
@@ -60,8 +61,9 @@ if [[ -n "$(git -C "$ROOT" status --porcelain -- "${image_paths[@]}" 2>/dev/null
     sha="$sha-dirty-$dirty_hash"
 fi
 IMAGE="${IMAGE:-forkrehearsal-node:$sha}"
-if [[ "$MISMATCH" != 0 ]]; then ACTIVATION_HEIGHT="${ACTIVATION_HEIGHT:-50}"; else ACTIVATION_HEIGHT="${ACTIVATION_HEIGHT:-30}"; fi
+if [[ "$MISMATCH" != 0 ]]; then ACTIVATION_HEIGHT="${ACTIVATION_HEIGHT:-70}"; else ACTIVATION_HEIGHT="${ACTIVATION_HEIGHT:-30}"; fi
 MINORITY_HEIGHT="${MINORITY_HEIGHT:-$((ACTIVATION_HEIGHT + 5))}"
+[[ "$MISMATCH" == 0 || "$MINORITY_HEIGHT" -gt "$ACTIVATION_HEIGHT" ]] || { echo "MINORITY_HEIGHT must lie above ACTIVATION_HEIGHT, so both sides share the nearest height" >&2; exit 2; }
 CHAIN_ID="${CHAIN_ID:-31337}"
 CONSENSUS_TIME="${CONSENSUS_TIME:-10}"
 PG_PORT="${PG_PORT:-55433}"
@@ -73,8 +75,8 @@ LOGS="$RUN_DIR/logs"
 # Checks the scenario has in each mode; fewer means it stopped early.
 EXPECTED_CHECKS_FRESH=58
 EXPECTED_CHECKS_UPGRADE=48
-EXPECTED_CHECKS_MISMATCH_1=24
-EXPECTED_CHECKS_MISMATCH_2=22
+EXPECTED_CHECKS_MISMATCH_1=28
+EXPECTED_CHECKS_MISMATCH_2=26
 mkdir -p "$DATA/identities" "$LOGS" "$RUN_DIR/steps"
 MAIN_LOG="$LOGS/rehearsal.log"
 
@@ -216,12 +218,13 @@ for who in alice carol; do
 done
 if [[ "$UPGRADE_PATH" == 1 ]]; then
     jq --argjson v "$validators" --argjson b "$balances" '
-        del(.properties.id) | .validators = $v | .balances = $b
+        del(.properties.id) | .properties.shardSize = 4 | .validators = $v | .balances = $b
         | .forks |= del(.signatureDomain, .web2ProofBinding)' \
         "$DEVNET/genesis.devnet.json" >"$DATA/genesis.json"
 else
     jq --argjson h "$ACTIVATION_HEIGHT" --argjson cid "$CHAIN_ID" --argjson v "$validators" --argjson b "$balances" '
         .properties.id = $cid
+        | .properties.shardSize = 4
         | .validators = $v
         | .balances = $b
         | .forks.signatureDomain = {activationHeight: $h}
@@ -231,16 +234,10 @@ fi
 printf '%s\n' "$peerlist" >"$DATA/demos_peerlist.json"
 # One genesis file per node, so the mixed-version step can change a single one.
 for i in 1 2 3 4; do cp "$DATA/genesis.json" "$DATA/genesis.node$i.json"; done
-# The odd validators of the mismatch mode: the last MISMATCH of the four.
+# The odd validators of the mismatch mode: the last MISMATCH of the four. They boot
+# on the same file as the rest; a schedule that differs from block 0 on a fresh
+# chain is another block 0, which the anchor refuses as another chain.
 minority() { [[ "$MISMATCH" != 0 && "$1" -gt $((4 - MISMATCH)) ]]; }
-if [[ "$MISMATCH" != 0 ]]; then
-    step "nodes $((5 - MISMATCH))-4 schedule both forks at $MINORITY_HEIGHT instead"
-    for i in 1 2 3 4; do
-        minority "$i" || continue
-        jq --argjson h "$MINORITY_HEIGHT" '.forks.signatureDomain = {activationHeight: $h} | .forks.web2ProofBinding = {activationHeight: $h}' \
-            "$DATA/genesis.json" >"$DATA/genesis.node$i.json"
-    done
-fi
 # Node 4 later restarts with both forks taken out of its file, below its tip; in
 # the mismatch mode the odd validators are later put back on the agreed schedule.
 # A node refuses such an edit unless the operator names the exact schedule, so
