@@ -206,7 +206,7 @@ describe("leaving a differing validator out of the shard", () => {
 
     it("takes it back and stops the timer once its schedule agrees", async () => {
         await applyRoundOutcome(960, inWindow, odd)
-        await applyRoundOutcome(970, inWindow, { mismatched: [], mismatchedIdentities: [], agreed: 3 })
+        await applyRoundOutcome(970, inWindow, { mismatched: [], mismatchedIdentities: [], agreed: 3, agreedIdentities: ["0xa", "0xb", "0xDD"] })
         expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
         expect(intervalsCleared).toBe(1)
     })
@@ -221,7 +221,7 @@ describe("leaving a differing validator out of the shard", () => {
         await applyRoundOutcome(960, inWindow, odd)
         await applyRoundOutcome(1100, past, odd)
         expect([...getSharedState.forkScheduleDifferingPeers]).toEqual(["0xdd"])
-        await applyRoundOutcome(1110, past, { mismatched: [], mismatchedIdentities: [], agreed: 3 })
+        await applyRoundOutcome(1110, past, { mismatched: [], mismatchedIdentities: [], agreed: 3, agreedIdentities: ["0xa", "0xb", "0xdd"] })
         expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
     })
 
@@ -235,6 +235,32 @@ describe("leaving a differing validator out of the shard", () => {
         await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], mismatchedIdentities: ["0xa", "0xb"], agreed: 1 })
         expect(getSharedState.forkScheduleAbstain).toBe(true)
         expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
+    })
+
+    it("keeps it out and keeps rechecking when it does not answer while the others agree", async () => {
+        await applyRoundOutcome(960, inWindow, odd)
+        await applyRoundOutcome(970, inWindow, { mismatched: [], mismatchedIdentities: [], agreed: 2, agreedIdentities: ["0xa", "0xb"] })
+        expect([...getSharedState.forkScheduleDifferingPeers]).toEqual(["0xdd"])
+        expect(intervalsCleared).toBe(0)
+    })
+
+    it("keeps one that did not answer while adding another that differs", async () => {
+        await applyRoundOutcome(960, inWindow, odd)
+        await applyRoundOutcome(970, inWindow, { mismatched: ["http://e"], mismatchedIdentities: ["0xEE"], agreed: 2, agreedIdentities: ["0xa", "0xb"] })
+        expect([...getSharedState.forkScheduleDifferingPeers].sort()).toEqual(["0xdd", "0xee"])
+    })
+
+    it("drops it once it leaves the validator set", async () => {
+        await applyRoundOutcome(960, inWindow, odd)
+        await applyRoundOutcome(970, inWindow, {
+            mismatched: [],
+            mismatchedIdentities: [],
+            agreed: 2,
+            agreedIdentities: ["0xa", "0xb"],
+            validatorIdentities: ["0xa", "0xb"],
+        })
+        expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
+        expect(intervalsCleared).toBe(1)
     })
 
     it("keeps the set on a round that reached nobody", async () => {
@@ -350,6 +376,26 @@ describe("the recheck timer while abstaining", () => {
             await waitFor(() => !getSharedState.forkScheduleAbstain)
             expect(intervalsCleared).toBeGreaterThan(0)
             expect(gauges.consensus_abstaining).toBe(0)
+        })
+    }, 30000)
+
+    it("takes a left-out validator back when it answers with our schedule", async () => {
+        const ours = (await import("src/libs/peer/routines/forkScheduleAgreement")).localScheduleView(
+            schedule as never,
+            1,
+        )
+        const answer = async () => ({
+            result: 200,
+            response: {
+                chainId: 1,
+                forks: { signatureDomain: { activationHeight: 1000 } },
+                forkScheduleDigest: ours.digest,
+            },
+        })
+        await withPeers(answer, async () => {
+            getSharedState.forkScheduleDifferingPeers = new Set(["peer"])
+            await onBlockInserted(950)
+            expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
         })
     }, 30000)
 
