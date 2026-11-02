@@ -16,7 +16,10 @@
 
 import L2PSProofManager from "./L2PSProofManager"
 import { L2PSProof } from "@/model/entities/L2PSProofs"
-import HandleGCR, { isGCRMainEdit } from "@/libs/blockchain/gcr/handleGCR"
+import HandleGCR, {
+    isGCRMainEdit,
+    type PendingGCRWrite,
+} from "@/libs/blockchain/gcr/handleGCR"
 import Chain from "@/libs/blockchain/chain"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
@@ -148,11 +151,16 @@ export default class L2PSConsensus {
     }
 
     /**
-     * Apply all pending L2PS proofs at consensus time
+     * Apply all pending L2PS proofs at consensus time.
+     *
+     * With `pending`, the proofs' edits and status changes join the block's
+     * pending state and commit with the block; the bookkeeping that follows
+     * from them runs once the block is durable.
      */
     static async applyPendingProofs(
         blockNumber: number,
         simulate = false,
+        pending?: PendingGCRWrite,
     ): Promise<L2PSConsensusResult> {
         const result: L2PSConsensusResult = {
             success: true,
@@ -184,6 +192,7 @@ export default class L2PSConsensus {
                     proof,
                     blockNumber,
                     simulate,
+                    pending,
                 )
                 result.proofResults.push(proofResult)
 
@@ -200,12 +209,18 @@ export default class L2PSConsensus {
 
             // Process successfully applied proofs
             if (!simulate && result.proofsApplied > 0) {
-                await this.processAppliedProofs(
-                    pendingProofs,
-                    result.proofResults,
-                    blockNumber,
-                    result,
-                )
+                const process = () =>
+                    this.processAppliedProofs(
+                        pendingProofs,
+                        result.proofResults,
+                        blockNumber,
+                        result,
+                    )
+                if (pending) {
+                    pending.sideEffects.push(process)
+                } else {
+                    await process()
+                }
             }
 
             result.message = `Applied ${result.proofsApplied}/${pendingProofs.length} L2PS proofs with ${result.totalEditsApplied} GCR edits`
@@ -271,6 +286,7 @@ export default class L2PSConsensus {
         proof: L2PSProof,
         simulate: boolean,
         proofResult: ProofResult,
+        pending?: PendingGCRWrite,
     ): Promise<boolean> {
         // const editResults: GCRResult[] = []
 
@@ -315,6 +331,17 @@ export default class L2PSConsensus {
 
         const mockTx = this.createMockTx(proof, account)
         const entities = await HandleGCR.prepareEntities([mockTx])
+        // An account the block already edited is read from the pending
+        // state, not the database, so the proof builds on the block's
+        // balances and the block's write does not overwrite the proof's.
+        if (pending) {
+            for (const pubkey of entities.accounts.keys()) {
+                const edited = pending.entities.accounts.get(pubkey)
+                if (edited) {
+                    entities.accounts.set(pubkey, structuredClone(edited))
+                }
+            }
+        }
         const editResult = await HandleGCR.applyTransaction(
             entities,
             mockTx,
@@ -337,11 +364,19 @@ export default class L2PSConsensus {
             return false
         }
 
-        if (!simulate) {
+        if (!simulate && pending) {
+            for (const [pubkey, entity] of editResult.entities.accounts) {
+                pending.entities.accounts.set(pubkey, entity)
+            }
+            pending.sideEffects.push(...editResult.sideEffects)
+            pending.deferredWrites.push(...editResult.deferredWrites)
+        } else if (!simulate) {
             await HandleGCR.gcrWriteMutex.runExclusive(async () => {
                 await HandleGCR.saveGCREditChanges(
                     editResult.entities,
                     editResult.sideEffects,
+                    undefined,
+                    editResult.deferredWrites,
                 )
             })
         }
@@ -354,6 +389,7 @@ export default class L2PSConsensus {
         proof: L2PSProof,
         blockNumber: number,
         simulate: boolean,
+        pending?: PendingGCRWrite,
     ): Promise<ProofResult> {
         const proofResult: ProofResult = {
             proofId: proof.id,
@@ -382,14 +418,28 @@ export default class L2PSConsensus {
                 proof,
                 simulate,
                 proofResult,
+                pending,
             )
             if (!success) {
                 return proofResult
             }
 
-            // Mark proof as applied
+            // Mark proof as applied, in the block's transaction when there is one
             if (!simulate) {
-                await L2PSProofManager.markProofApplied(proof.id, blockNumber)
+                if (pending) {
+                    pending.deferredWrites.push(em =>
+                        L2PSProofManager.markProofApplied(
+                            proof.id,
+                            blockNumber,
+                            em,
+                        ),
+                    )
+                } else {
+                    await L2PSProofManager.markProofApplied(
+                        proof.id,
+                        blockNumber,
+                    )
+                }
             }
 
             proofResult.success = true

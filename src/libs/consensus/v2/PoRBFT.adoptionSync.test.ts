@@ -43,6 +43,7 @@ mock.module("src/utilities/logger", () => ({
 const { default: chain } = await import("src/libs/blockchain/chain")
 const { default: handleGCR } = await import("src/libs/blockchain/gcr/handleGCR")
 const { default: gcr } = await import("src/libs/blockchain/gcr/gcr")
+const { default: mempool } = await import("src/libs/blockchain/mempool")
 const { default: datasource } = await import("@/model/datasource")
 const { default: txValidatorPool } = await import(
     "src/libs/blockchain/validation/txValidatorPool"
@@ -92,12 +93,15 @@ const member = (identity: string, block: any, txs: any[]) =>
         longCall: jest.fn(async () => ({ result: 200, response: clone(txs) })),
     }) as any
 
+/** The highest block stamped on a GCR assignment, when one sits above the tip. */
+let orphanedStamp: number | null = null
 const queryBuilder: any = {
     select: () => queryBuilder,
     addSelect: () => queryBuilder,
     where: () => queryBuilder,
-    getRawOne: async () => ({ max: null }),
-    getRawMany: async () => [],
+    getRawOne: async () => ({ max: orphanedStamp }),
+    getRawMany: async () =>
+        orphanedStamp === null ? [] : [{ hash: "0xorphan", block: orphanedStamp }],
 }
 let assignedRows: { txHash: string }[] = []
 const fakeDatasource = {
@@ -130,6 +134,7 @@ beforeEach(() => {
     stored = {}
     knownPeers = {}
     assignedRows = []
+    orphanedStamp = null
     spyOn(chain, "getBlockByNumber").mockImplementation((async (n: number) =>
         stored[n] ?? null) as any)
     spyOn(chain, "getBlockByHash").mockImplementation((async (hash: string) =>
@@ -291,15 +296,12 @@ describe("adopting a member's block through the real sync path", () => {
         expect(insertBlock).toHaveBeenCalledTimes(1)
     })
 
-    it("aborts instead of falling back to its tally when the block's insert and its undo both fail", async () => {
+    it("decides on its own round when the block's insert fails: the edits commit with the block, so nothing drifts", async () => {
         const txs = [makeSignedTx(alice, bob, { height: HEIGHT })]
         const block = makeBlock(txs)
         const first = member("first", block, txs)
         const second = member("second", block, txs)
-        applyTransactions.mockImplementation((async (_txs: any[], isRollback: boolean) =>
-            isRollback
-                ? { successfulTxs: [], failedTxs: txs.map(tx => tx.hash), skippedTxs: [] }
-                : { successfulTxs: txs.map(tx => tx.hash), failedTxs: [], skippedTxs: [] }) as any)
+        applyCleanly(txs)
         insertBlock.mockRejectedValue(new Error("connection reset during insert"))
         expect(unreconciledGcrBlockNumber()).toBeNull()
         getSharedState.syncStatus = true
@@ -309,16 +311,32 @@ describe("adopting a member's block through the real sync path", () => {
             { peer: second, hash: block.hash },
         ]).catch(e => e)
 
+        expect(outcome).toBe(false)
+        expect(unreconciledGcrBlockNumber()).toBeNull()
+        expect(insertBlock).toHaveBeenCalled()
+        expect(rollbacks()).toHaveLength(0)
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+    })
+
+    it("aborts instead of falling back to its tally when stamps left by an older binary cannot be rolled back", async () => {
+        const txs = [makeSignedTx(alice, bob, { height: HEIGHT })]
+        const block = makeBlock(txs)
+        const first = member("first", block, txs)
+        applyCleanly(txs)
+        // An assignment stamped above the tip whose body is no longer held
+        orphanedStamp = HEIGHT
+        spyOn(mempool, "getTransactionsByHashes").mockResolvedValue([] as any)
+        expect(unreconciledGcrBlockNumber()).toBeNull()
+        getSharedState.syncStatus = true
+
+        const outcome = await adoptReportedCommit(HEIGHT, [
+            { peer: first, hash: block.hash },
+        ]).catch(e => e)
+
         expect(outcome).toBeInstanceOf(secretaryTypes.AbortConsensusError)
         expect(unreconciledGcrBlockNumber()).toBe(HEIGHT)
         expect(getSharedState.syncStatus).toBe(false)
-        expect(insertBlock).toHaveBeenCalledTimes(1)
-        expect(rollbacks()).toHaveLength(1)
-        // sync would refuse the second source anyway; it is not even asked for bodies
-        const askedForBodies = [first, second].filter(
-            p => p.longCall.mock.calls.length > 0,
-        )
-        expect(askedForBodies).toHaveLength(1)
+        expect(insertBlock).not.toHaveBeenCalled()
         expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
     })
 

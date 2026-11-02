@@ -1,6 +1,6 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../../handleGCR"
-import { Repository } from "typeorm"
+import { EntityManager, Repository } from "typeorm"
 import ensureGCRForUser from "../ensureGCRForUser"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment"
@@ -82,40 +82,44 @@ export async function applyZkCommitmentAdd(
     const dataSource = db.getDataSource()
     const commitmentRepo = dataSource.getRepository(IdentityCommitment)
 
-    // REVIEW: Removed check-then-insert TOCTOU race condition
-    // Primary key constraint on commitmentHash prevents duplicates at DB level
-    if (!simulate) {
-        try {
-            await commitmentRepo.save({
-                commitmentHash: normalizedCommitment,
-                leafIndex: -1, // Placeholder, will be updated during Merkle tree insertion
-                provider: payload.provider,
-                blockNumber: 0, // Will be updated during block commit
-                timestamp: payload.timestamp.toString(),
-                transactionHash: editOperation.txhash || "",
-            })
-
-            log.info(
-                `✅ ZK commitment stored: ${normalizedCommitment.slice(0, 10)}... (provider: ${payload.provider})`,
-            )
-        } catch (error) {
-            // Handle primary key constraint violation (commitment already exists)
-            // REVIEW: Use startsWith for SQLite constraint codes (handles all variants)
-            const errCode = (error as { code?: string })?.code
-            if (errCode === "23505" || errCode?.startsWith("SQLITE_CONSTRAINT")) {
-                return {
-                    success: false,
-                    message: "Commitment already exists",
-                }
-            }
-            // Re-throw other errors
-            throw error
+    if (simulate) {
+        return {
+            success: true,
+            message: "ZK commitment stored (pending Merkle tree insertion)",
         }
+    }
+
+    // Refused here, not in the block's transaction, so a duplicate fails
+    // this transaction alone. The primary key still guards the write.
+    const existing = await commitmentRepo.findOne({
+        where: { commitmentHash: normalizedCommitment },
+    })
+    if (existing) {
+        return {
+            success: false,
+            message: "Commitment already exists",
+        }
+    }
+
+    const row = {
+        commitmentHash: normalizedCommitment,
+        leafIndex: -1, // Placeholder, will be updated during Merkle tree insertion
+        provider: payload.provider,
+        blockNumber: 0, // Will be updated during block commit
+        timestamp: payload.timestamp.toString(),
+        transactionHash: editOperation.txhash || "",
     }
 
     return {
         success: true,
         message: "ZK commitment stored (pending Merkle tree insertion)",
+        // Stored with the block that carries the transaction
+        deferredWrite: async (em: EntityManager) => {
+            await em.getRepository(IdentityCommitment).insert(row)
+            log.info(
+                `✅ ZK commitment stored: ${normalizedCommitment.slice(0, 10)}... (provider: ${payload.provider})`,
+            )
+        },
     }
 }
 
@@ -183,49 +187,70 @@ export async function applyZkAttestationAdd(
         }
     }
 
-    // REVIEW: CRITICAL FIX - Perform verification and points awarding atomically within transaction
-    // This ensures nullifier marking uses correct values and prevents dirty data
-    if (!simulate) {
-        const queryRunner = dataSource.createQueryRunner()
-        await queryRunner.connect()
-        await queryRunner.startTransaction()
+    // Checked now, without marking the nullifier, so an invalid proof fails
+    // this transaction alone. The nullifier is marked and the points awarded
+    // in the block's transaction, where the proof is verified once more
+    // under a lock on the nullifier.
+    const verificationResult = await verifier.checkIdentityAttestation({
+        proof: payload.proof,
+        publicSignals: payload.public_signals,
+    })
 
-        try {
-            // REVIEW: CRITICAL FIX - Verify ZK proof WITH transactional manager for pessimistic locking
-            // Pass manager and metadata to ensure nullifier is marked with correct values only after verification
-            const verificationResult = await verifier.verifyIdentityAttestation(
+    if (!verificationResult.valid) {
+        log.warn(
+            `❌ ZK attestation verification failed${simulate ? " (simulate)" : ""}: ${verificationResult.reason}`,
+        )
+        return {
+            success: false,
+            message: `ZK proof verification failed: ${verificationResult.reason}`,
+        }
+    }
+
+    if (simulate) {
+        log.info(
+            "✅ ZK attestation verified (simulate mode - no points awarded)",
+        )
+        return {
+            success: true,
+            message: "ZK attestation verified (simulation)",
+        }
+    }
+
+    const submitter = editOperation.account as string
+    const transactionHash = editOperation.txhash || ""
+
+    return {
+        success: true,
+        message: "ZK attestation verified and points awarded",
+        deferredWrite: async (em: EntityManager) => {
+            // Pessimistic lock on the nullifier, then marked with the real values
+            const locked = await verifier.verifyIdentityAttestation(
                 {
                     proof: payload.proof,
                     publicSignals: payload.public_signals,
                 },
-                queryRunner.manager,
+                em,
                 {
                     blockNumber: 0, // Will be updated during block commit
-                    transactionHash: editOperation.txhash || "",
+                    transactionHash,
                 },
             )
-
-            if (!verificationResult.valid) {
-                await queryRunner.rollbackTransaction()
-                log.warn(
-                    `❌ ZK attestation verification failed: ${verificationResult.reason}`,
+            if (!locked.valid) {
+                throw new Error(
+                    `ZK proof verification failed at commit: ${locked.reason}`,
                 )
-                return {
-                    success: false,
-                    message: `ZK proof verification failed: ${verificationResult.reason}`,
-                }
             }
 
-            // REVIEW: Award points for ZK attestation atomically with nullifier update
-            // REVIEW: Phase 10.1 - Configurable ZK attestation points
-            //
             // Design Note: ZK Privacy vs Points
             // - The ZK proof preserves identity privacy (we don't know WHICH identity proved ownership)
             // - The transaction submitter (editOperation.account) receives points
             // - The submitter may or may not be the identity holder (could be a relayer)
             // - This is intentional: points reward the transaction submission, not identity disclosure
             // - For fully private identities, users can choose not to submit attestation transactions
-            const account = await ensureGCRForUser(editOperation.account)
+            //
+            // Read through the manager: the block's balance and nonce edits for
+            // this account are already written in this transaction.
+            const account = await ensureGCRForUser(submitter, em)
 
             const zkAttestationEntry = {
                 date: new Date().toISOString(),
@@ -242,47 +267,11 @@ export async function applyZkAttestationAdd(
                 (account.points.totalPoints || 0) + zkAttestationPoints
             account.points.lastUpdated = new Date()
 
-            // Save account with transaction manager for atomicity
-            await queryRunner.manager.save(account)
-
-            // Commit transaction - both nullifier update and points awarding succeed together
-            await queryRunner.commitTransaction()
+            await em.save(account)
 
             log.info(
                 `✅ ZK attestation verified and points awarded (nullifier: ${payload.nullifier_hash.slice(0, 10)}...)`,
             )
-        } catch (error) {
-            await queryRunner.rollbackTransaction()
-            throw error
-        } finally {
-            await queryRunner.release()
-        }
-    } else {
-        // REVIEW: CRITICAL FIX - Simulate path: verify without transaction
-        const verificationResult = await verifier.verifyIdentityAttestation({
-            proof: payload.proof,
-            publicSignals: payload.public_signals,
-        })
-
-        if (!verificationResult.valid) {
-            log.warn(
-                `❌ ZK attestation verification failed (simulate): ${verificationResult.reason}`,
-            )
-            return {
-                success: false,
-                message: `ZK proof verification failed: ${verificationResult.reason}`,
-            }
-        }
-
-        log.info(
-            "✅ ZK attestation verified (simulate mode - no points awarded)",
-        )
-    }
-
-    return {
-        success: true,
-        message: simulate
-            ? "ZK attestation verified (simulation)"
-            : "ZK attestation verified and points awarded",
+        },
     }
 }

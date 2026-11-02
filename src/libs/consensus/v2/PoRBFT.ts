@@ -23,7 +23,10 @@ import {
     ForgingEndedError,
     NotInShardError,
 } from "@/errors"
-import HandleGCR, { type BlockClock } from "src/libs/blockchain/gcr/handleGCR"
+import HandleGCR, {
+    type BlockClock,
+    type PendingGCRWrite,
+} from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
@@ -61,6 +64,7 @@ import {
     assertForgedNonceTrace,
     buildNonceTrace,
     debugAssertionsEnabled,
+    noncesAfterApply,
     readNonces,
 } from "@/libs/debug/nonceTrace"
 import { markStep } from "@/utilities/loopScheduler"
@@ -136,6 +140,8 @@ export async function consensusRoutine(): Promise<void> {
     const blockTxs: MempoolTransaction[] = []
     const blockAttrs: Record<string, any> = {}
     const traceEnabled = debugAssertionsEnabled()
+    // The block's state, held in memory until the block commits it.
+    let pendingGCR: PendingGCRWrite | undefined
 
     try {
         log.only("[consensusRoutine] Initializing the consensus state")
@@ -471,9 +477,15 @@ export async function consensusRoutine(): Promise<void> {
                 // The forged block's own time: what syncing nodes will read.
                 { height: block.number, timestampSec: block.content.timestamp },
             )
+            // A block with no transactions still commits its L2PS proofs
+            pendingGCR = applyRes.pending ?? HandleGCR.emptyPendingWrite()
 
             if (traceEnabled) {
-                const endApplyNonces = await readNonces(traceAccounts)
+                const endApplyNonces = noncesAfterApply(
+                    pendingGCR,
+                    traceAccounts,
+                    startApplyNonces,
+                )
                 const nonceTrace = buildNonceTrace(
                     traceAccounts,
                     resNonce.startFilterNonces,
@@ -563,10 +575,12 @@ export async function consensusRoutine(): Promise<void> {
 
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
+            // Their edits join the block's pending state and commit with it.
             const l2psStart = Date.now()
             const l2psResult = await L2PSConsensus.applyPendingProofs(
                 blockRef,
                 false,
+                pendingGCR,
             )
             const l2psEnd = Date.now()
             log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
@@ -593,7 +607,9 @@ export async function consensusRoutine(): Promise<void> {
             await finalizeBlock(
                 block,
                 blockTxs.map(tx => txMap.get(tx.hash)),
+                pendingGCR,
             )
+            pendingGCR = undefined
 
             // Pushed only once inserted, so a receiver fetching the block's
             // transactions from us finds them, and to every member including
@@ -675,27 +691,13 @@ export async function consensusRoutine(): Promise<void> {
                         manager.ourValidatorPhase.currentPhase,
                 )
             }
-            // Nothing persisted yet: nothing to undo.
-            if (successfulTxs.length > 0) {
+            // The block's state only commits with the block, so a round that
+            // ends before the insert leaves nothing on disk to undo.
+            if (pendingGCR) {
                 log.warn(
-                    `[consensusRoutine] Round ended after GCR edits were applied for block ${blockRef}. Rolling back ${successfulTxs.length} tx(s)`,
+                    `[consensusRoutine] Round ended after GCR edits were applied for block ${blockRef}. Dropping the uncommitted state of ${successfulTxs.length} tx(s)`,
                 )
-
-                // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
-                // Getting the txs from the hashes
-                const txsToRollback: Transaction[] = []
-
-                for (const txHash of successfulTxs) {
-                    const tx = txMap.get(txHash)
-                    if (tx) {
-                        txsToRollback.push(tx)
-                    }
-                }
-                await rollbackGCREditsFromTxs(txsToRollback)
-                await HandleGCR.deleteAssignedTxsForBlock(blockRef)
-
-                // Also rollback any L2PS proofs that were applied
-                await L2PSConsensus.rollbackProofsForBlock(blockRef)
+                pendingGCR = undefined
             }
 
             if (
@@ -932,26 +934,16 @@ async function mergeAndOrderMempools(
 }
 
 /**
- * Rollback the GCREdits from a set of txs
- *
- * @param txs - The txs
- * @returns The successful and failed GCREdits
- */
-async function rollbackGCREditsFromTxs(txs: Transaction[]) {
-    return await HandleGCR.applyTransactions(txs, true)
-}
-
-/**
  * Apply the GCREdits from the merged mempool using batched entity processing.
  *
  * This optimized version:
  * 1. Pre-filters already-executed txs in a single batch query
  * 2. Batch loads all affected GCRMain entities
  * 3. Processes edits in-memory without per-edit DB operations
- * 4. Commits all changes in a single batch at the end
+ * 4. Returns the outcome as `pending`, committed with the block
  *
  * @param mempool - The mempool
- * @returns The successful and failed GCREdits
+ * @returns The successful and failed GCREdits, and the state to commit
  */
 async function applyGCREditsFromMergedMempool(
     mempool: MempoolTransaction[],
@@ -960,6 +952,7 @@ async function applyGCREditsFromMergedMempool(
     successfulTxs: string[]
     appliedTxs: string[]
     failedTxs: FailedTranscation[]
+    pending?: PendingGCRWrite
 }> {
     let failedTxs: FailedTranscation[] = []
 
@@ -989,7 +982,9 @@ async function applyGCREditsFromMergedMempool(
         return { successfulTxs: [], appliedTxs: [], failedTxs }
     }
 
-    const res = await HandleGCR.applyTransactions(pendingTxs, false, clock)
+    const res = await HandleGCR.applyTransactions(pendingTxs, false, clock, {
+        defer: true,
+    })
     failedTxs = failedTxs.concat(
         res.failedTxs.map(txhash => ({
             txhash: txhash,
@@ -1008,7 +1003,12 @@ async function applyGCREditsFromMergedMempool(
         }
     }
 
-    return { successfulTxs, appliedTxs: res.successfulTxs, failedTxs }
+    return {
+        successfulTxs,
+        appliedTxs: res.successfulTxs,
+        failedTxs,
+        pending: res.pending,
+    }
 }
 
 // /**
@@ -1329,10 +1329,11 @@ let driftWarnedHeight: number | null = null
  * The latch is per process, so durable state is checked too: after a
  * restart, orphaned edits are otherwise caught only when sync next applies a
  * block, and a round at the same height would apply its own on top of them.
- * That check rolls back what it can and latches what it cannot. It runs
- * under syncLock because a block being applied has its edits stamped before
- * its insert and would look orphaned. Before the first fast sync succeeds,
- * sync applies without the lock, so the check is left to sync then.
+ * That check rolls back what it can and latches what it cannot. A block's
+ * edits now commit with the block, so orphaned stamps can only be left by an
+ * older binary. It runs under syncLock so it never races a block apply.
+ * Before the first fast sync succeeds, sync applies without the lock, so the
+ * check is left to sync then.
  *
  * @throws AbortConsensusError when the durable check finds drift it cannot undo
  */
@@ -1422,16 +1423,19 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
 }
 
 /**
- * Finalize the block. Inserts the block into the chain.
+ * Finalize the block. Inserts the block into the chain together with the
+ * state its transactions produced.
  *
  * @param block - The block
- * @param pro - The number of votes for the block
+ * @param txs - The block's transactions
+ * @param pendingGCR - The state to commit with the block
  */
 async function finalizeBlock(
     block: Block,
     txs: MempoolTransaction[],
+    pendingGCR?: PendingGCRWrite,
 ): Promise<void> {
-    await Chain.insertBlock(block, txs) // NOTE Transactions are added to the Transactions table here
+    await Chain.insertBlock(block, txs, undefined, pendingGCR) // NOTE Transactions are added to the Transactions table here
     getSharedState.consecutiveMissedShardBlocks = 0
     log.info("[CONSENSUS] Block added to the chain")
 }
