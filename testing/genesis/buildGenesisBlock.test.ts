@@ -15,6 +15,16 @@ function launchGenesis(): Record<string, any> {
 }
 
 describe("buildGenesisBlock", () => {
+    // Block 0 of a running chain can never change; a different value here means
+    // nodes on this build would reject the chain they already hold.
+    it("builds the block 0 this repository's genesis has always produced", () => {
+        const genesis = launchGenesis()
+        loadForkConfigFromGenesis(genesis)
+        expect(buildGenesisBlock(genesis).genesisBlock.hash).toBe(
+            "0cb7dac8af30ca2dfc0d6f40993acad5250d1b0d952043d9cf11312709d4dd0b",
+        )
+    })
+
     it("builds the same block 0 from the same file", () => {
         const genesis = launchGenesis()
         loadForkConfigFromGenesis(genesis)

@@ -368,7 +368,7 @@ observed_text() {
 }
 
 # A fresh database, a node that must be refused before block 0 is written
-fresh_refused() { # id name genesis pin [extra docker args]
+fresh_refused() { # id name genesis pin [extra docker args]; NEEDLE= a regex the refusal must contain
     local sid="$1" name="$2" gen="$3" pin="$4"
     shift 4
     CUR="${sid}-${name}"
@@ -387,6 +387,10 @@ fresh_refused() { # id name genesis pin [extra docker args]
     notes=$(refusal_line "${CUR}")
     [ -z "${notes}" ] && notes="no refusal line in the log"
     if [ "${OBS}" = exit ] && [ "${code}" = 1 ] && [ "${rows}" = 0 ] && genesis_refusal "${CUR}"; then verdict=PASS; else verdict=FAIL; fi
+    if [ -n "${NEEDLE:-}" ]; then
+        if grep -E "${REFUSAL_RE}" "${EVID}/${CUR}.node.log" | grep -qE -- "${NEEDLE}"; then notes="${notes} [refusal names ${NEEDLE}]"
+        else verdict=FAIL; notes="${notes} [refusal does not name ${NEEDLE}]"; fi
+    fi
     [ "${OBS}" = up ] && notes="block 0 written, node served RPC; stopped by the harness (exit ${code}). ${notes}"
     record "${sid}" "${name}" "refused (exit 1, no block 0)" "${observed}" "${verdict}" "${code}" "${rows}" "${notes}"
     admin "DROP DATABASE IF EXISTS ${sid} WITH (FORCE)"
@@ -554,7 +558,7 @@ else
 fi
 
 # ── 12. fresh-block-pin-wrong ───────────────────────────────────────────
-fresh_refused s12 fresh-block-pin-wrong "${FIX}/launch.json" "${PIN}" -e "EXPECTED_GENESIS_BLOCK_HASH=${OTHER_PIN}"
+NEEDLE='EXPECTED_GENESIS_BLOCK_HASH is' fresh_refused s12 fresh-block-pin-wrong "${FIX}/launch.json" "${PIN}" -e "EXPECTED_GENESIS_BLOCK_HASH=${OTHER_PIN}"
 
 # ── summary ─────────────────────────────────────────────────────────────
 TOTAL=$(($(wc -l < "${EVID}/results.tsv") - 1))
