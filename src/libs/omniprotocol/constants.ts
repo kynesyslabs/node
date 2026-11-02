@@ -62,6 +62,14 @@ export const DEFAULT_POOL_AUTH_TIMEOUT_MS = 5_000
 /** Interval for periodic cleanup of idle/dead pooled connections in milliseconds (1 minute) */
 export const POOL_CLEANUP_INTERVAL_MS = 60 * 1000 // 60_000
 
+/**
+ * How long a closing connection waits for the peer to finish the TCP close
+ * before the socket is destroyed. end() only half-closes: a peer that never
+ * sends its FIN would otherwise keep the socket, and everything buffered for
+ * it, alive indefinitely.
+ */
+export const PEER_CLOSE_GRACE_MS = 1_000
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Rate Limiter Defaults (RateLimiter)
 // ─────────────────────────────────────────────────────────────────────────────

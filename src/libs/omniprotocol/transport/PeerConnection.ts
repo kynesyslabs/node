@@ -28,7 +28,7 @@ import {
     ConnectionError,
     OmniProtocolError,
 } from "../types/errors"
-import { ERROR_CODE_UNAUTHORIZED } from "../constants"
+import { ERROR_CODE_UNAUTHORIZED, PEER_CLOSE_GRACE_MS } from "../constants"
 import { dispatchOmniMessage } from "../protocol/dispatcher"
 import { RateLimiter } from "../ratelimit"
 import { ConnectionPool } from "./ConnectionPool"
@@ -656,18 +656,32 @@ export class PeerConnection extends EventEmitter {
             }
         }
 
+        this.framer.clear()
+
         // Close socket
         return new Promise(resolve => {
-            if (this.socket) {
-                this.socket.once("close", () => {
-                    this.setState(ConnectionState.CLOSED)
-                    resolve()
-                })
-                this.socket.end()
-            } else {
+            const socket = this.socket
+            if (!socket) {
+                this.setState(ConnectionState.CLOSED)
+                resolve()
+                return
+            }
+
+            let settled = false
+            const finish = () => {
+                if (settled) return
+                settled = true
+                clearTimeout(forceTimer)
                 this.setState(ConnectionState.CLOSED)
                 resolve()
             }
+            const forceTimer = setTimeout(() => {
+                socket.destroy()
+                finish()
+            }, PEER_CLOSE_GRACE_MS)
+
+            socket.once("close", finish)
+            socket.end()
         })
     }
 
@@ -708,6 +722,12 @@ export class PeerConnection extends EventEmitter {
      * Handle incoming TCP data
      */
     private handleIncomingData(chunk: Buffer): void {
+        // Nothing read after close() is ever handled, and a peer that keeps
+        // the socket open must not be able to grow the framer meanwhile.
+        if (ConnectionStateUtils.isTerminal(this._state)) {
+            return
+        }
+
         this.lastActivity = Date.now()
         this.resetIdleTimer()
 
@@ -926,6 +946,7 @@ export class PeerConnection extends EventEmitter {
             pending.reject(new Error("Connection closed"))
         }
         this.inFlightRequests.clear()
+        this.framer.clear()
 
         if (
             this._state !== ConnectionState.CLOSING &&
