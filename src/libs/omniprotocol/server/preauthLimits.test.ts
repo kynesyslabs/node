@@ -213,6 +213,27 @@ describe("OmniProtocolServer pre-auth limits", () => {
         expect(live.length).toBe(MAX_PER_IP)
     })
 
+    it("frees a socket's per-IP slot once it authenticates, and only once", () => {
+        current = makeServer(1000)
+        const ip = "198.51.100.20" // several validators behind one NAT address
+        const first = Array.from({ length: MAX_PER_IP }, () => current.open(ip))
+        expect(first.every((s: any) => !s.destroyed)).toBe(true)
+        const authenticated = current.pending()
+        authenticated.forEach((c: FakePeerConnection, i: number) => c.simulateAuth(`validator-${i}`))
+        expect(current.pending().length).toBe(0)
+
+        // Authenticated links no longer count: the IP can open a full set of
+        // pending sockets again without being blocked.
+        for (let i = 0; i < MAX_PER_IP; i++) {
+            expect(current.open(ip).destroyed).toBe(false)
+        }
+
+        // Closing the authenticated links must not free a second slot each.
+        for (const c of authenticated) c.simulateClose()
+        expect(current.open(ip).destroyed).toBe(true)
+        expect(current.pending().length).toBe(MAX_PER_IP)
+    })
+
     it("applies the per-IP check to the first socket from a blocked IP", () => {
         current = makeServer(1000)
         const ip = "198.51.100.9"

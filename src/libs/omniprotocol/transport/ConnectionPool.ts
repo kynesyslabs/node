@@ -57,9 +57,10 @@ export class ConnectionPool extends EventEmitter {
     private static instance: ConnectionPool | null = null
     private connections: Map<string, PeerConnection[]> = new Map()
     private pendingConnections: Map<string, PeerConnection> = new Map() // Temp tracking before auth
-    // Inbound connections that hold a per-IP slot in the rate limiter, with
-    // the IP captured at accept time: remoteAddress is gone once the socket
-    // is destroyed, and outbound connections never took a slot to give back.
+    // Pending inbound connections that hold a per-IP slot in the rate
+    // limiter, with the IP captured at accept time: remoteAddress is gone
+    // once the socket is destroyed, and outbound connections never took a
+    // slot to give back.
     private ipSlots: Map<PeerConnection, string> = new Map()
     private config: PoolConfig
     private cleanupTimer: NodeJS.Timeout | null = null
@@ -157,6 +158,11 @@ export class ConnectionPool extends EventEmitter {
     ): void {
         // Remove from pending tracking
         this.pendingConnections.delete(tempId)
+
+        // The per-IP limit bounds unauthenticated sockets only. Validators
+        // behind one NAT address share an IP, and once proven they are held
+        // by the per-identity limit below instead.
+        this.releaseIpSlot(connection)
 
         // Get existing connections for this peer
         const existing = this.connections.get(peerIdentity) || []
