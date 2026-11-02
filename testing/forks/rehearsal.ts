@@ -619,7 +619,8 @@ step("recovery: the operator corrects the genesis file and restarts the validato
 const exits = () =>
     readFileSync(`${RUN_DIR}/logs/docker-events.log`, "utf8")
         .split("\n")
-        .filter(l => / die forkrehearsal-node-4 /.test(l) && Number(l.split(" ")[0]) >= restartedEpoch)
+        // Strictly after: the restart's own kill can share restartedEpoch's second.
+        .filter(l => / die forkrehearsal-node-4 /.test(l) && Number(l.split(" ")[0]) > restartedEpoch)
 check(exits().length === 0 && !stallExit(nodeLog(4, restartedAt)), "node 4 did not exit since its manual restart: no stall watchdog, it just stays behind")
 const info4s = (await nodeCall(PORTS[3], "getNetworkInfo")).response
 check(
