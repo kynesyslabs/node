@@ -26,6 +26,7 @@ import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { hashGenesisData } from "../../src/libs/blockchain/genesis/normalizeGenesisForHash"
 import { txSignaturePreimage } from "../../src/libs/crypto/txSignaturePreimage"
+import { DEFAULT_FORK_CONFIG } from "../../src/forks/forkConfig"
 
 const env = (k: string) => {
     const v = process.env[k]
@@ -331,11 +332,13 @@ check(
     infos.every(i => i.response.forks.web2ProofBinding?.activationHeight === H),
     `all 4 nodes report web2ProofBinding at ${H} through getNetworkInfo`,
 )
+// From the registry, so a release that adds a fork does not need this file edited.
+const knownForks = Object.keys(DEFAULT_FORK_CONFIG).sort().join(",")
 check(
-    infos.every(i => Object.keys(i.response.forks).length === 7) &&
+    infos.every(i => Object.keys(i.response.forks).sort().join(",") === knownForks) &&
         new Set(infos.map(i => i.response.forkScheduleDigest)).size === 1 &&
         /^[0-9a-f]{64}$/.test(infos[0].response.forkScheduleDigest),
-    "all 4 nodes report all 7 forks and one and the same schedule digest",
+    `all 4 nodes report the ${Object.keys(DEFAULT_FORK_CONFIG).length} forks this build knows and one and the same schedule digest`,
 )
 const loaded = (n: number) =>
     execFileSync(DOCKER, ["logs", `${PROJECT}-node-${n}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
