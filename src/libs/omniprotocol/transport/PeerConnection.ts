@@ -5,7 +5,7 @@ import { Socket } from "net"
 import { EventEmitter } from "events"
 import forge from "node-forge"
 import { keccak_256 } from "@noble/hashes/sha3.js"
-import { MessageFramer } from "./MessageFramer"
+import { FrameTooLargeError, MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader, ParsedOmniMessage } from "../types/message"
 import type { AuthBlock } from "../auth/types"
 import { SignatureAlgorithm, SignatureMode } from "../auth/types"
@@ -28,7 +28,11 @@ import {
     ConnectionError,
     OmniProtocolError,
 } from "../types/errors"
-import { ERROR_CODE_UNAUTHORIZED, PEER_CLOSE_GRACE_MS } from "../constants"
+import {
+    ERROR_CODE_UNAUTHORIZED,
+    PEER_CLOSE_GRACE_MS,
+    PREAUTH_MAX_PAYLOAD_SIZE,
+} from "../constants"
 import { dispatchOmniMessage } from "../protocol/dispatcher"
 import { RateLimiter } from "../ratelimit"
 import { ConnectionPool } from "./ConnectionPool"
@@ -151,6 +155,9 @@ export class PeerConnection extends EventEmitter {
             this.socket = socket
             this._state = ConnectionState.PENDING_AUTH
             this.connectedAt = Date.now()
+            // An unproven socket must not make us buffer a 16 MiB frame;
+            // the full limit comes back in adoptVerifiedIdentity().
+            this.framer.setMaxPayloadSize(PREAUTH_MAX_PAYLOAD_SIZE)
             this.setupSocketHandlers()
             this.startAuthTimeout()
         } else {
@@ -746,6 +753,18 @@ export class PeerConnection extends EventEmitter {
                 message = this.framer.extractMessage()
             }
         } catch (error) {
+            if (
+                error instanceof FrameTooLargeError &&
+                this._state === ConnectionState.PENDING_AUTH
+            ) {
+                // The rest of the oversized frame would only be misread as
+                // new headers, and the peer has not proven who it is.
+                log.warning(
+                    `[PeerConnection] ${this._peerIdentity} closed before auth: ${error.message}`,
+                )
+                this.close().catch(() => {})
+                return
+            }
             handleError(error, "NETWORK", {
                 source: "OmniProtocol PeerConnection.handleIncomingData",
             })
@@ -915,6 +934,7 @@ export class PeerConnection extends EventEmitter {
 
         this.setPeerIdentity(identity)
         this.setState(ConnectionState.READY)
+        this.framer.setMaxPayloadSize(MessageFramer.MAX_PAYLOAD_SIZE)
 
         if (this.authTimer) {
             clearTimeout(this.authTimer)

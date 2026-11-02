@@ -5,22 +5,22 @@
  * afterwards was still appended to the framer.
  */
 
-import { describe, expect, it, jest } from "bun:test"
+import { describe, expect, it, mock } from "bun:test"
 import { EventEmitter } from "events"
 
-jest.mock("src/utilities/logger", () => ({
+mock.module("src/utilities/logger", () => ({
     __esModule: true,
     default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-        custom: jest.fn(),
+        debug: mock(() => {}),
+        info: mock(() => {}),
+        warn: mock(() => {}),
+        warning: mock(() => {}),
+        error: mock(() => {}),
+        only: mock(() => {}),
+        custom: mock(() => {}),
     },
 }))
-jest.mock("src/utilities/sharedState", () => ({
+mock.module("src/utilities/sharedState", () => ({
     getSharedState: {
         getConnectionString: async () => "",
         version: "test",
@@ -30,7 +30,10 @@ jest.mock("src/utilities/sharedState", () => ({
 
 const { PeerConnection } = await import("./PeerConnection")
 const { ConnectionState } = await import("./types")
-const { PEER_CLOSE_GRACE_MS } = await import("../constants")
+const { MessageFramer } = await import("./MessageFramer")
+const { InvalidAuthBlockFormatError } = await import("../types/errors")
+const { PEER_CLOSE_GRACE_MS, PREAUTH_MAX_PAYLOAD_SIZE } = await import("../constants")
+const log: any = (await import("src/utilities/logger")).default
 
 /** A client that ignores our FIN: end() never leads to "close". */
 class StubbornSocket extends EventEmitter {
@@ -73,7 +76,7 @@ describe("PeerConnection pre-auth buffering", () => {
     it("destroys a socket that ignores the FIN after the auth timeout", async () => {
         const socket = new StubbornSocket()
         const conn: any = new PeerConnection("pending:test", "", socket as any)
-        const closed = jest.fn()
+        const closed = mock(() => {})
         conn.on("close", closed)
 
         // Restart the auth timer with a short timeout instead of waiting 5 s.
@@ -110,5 +113,69 @@ describe("PeerConnection pre-auth buffering", () => {
 
         await closing
         expect(socket.destroyed).toBe(true)
+    })
+
+    it("closes a pending connection that announces a frame above the pre-auth cap", () => {
+        const socket = new StubbornSocket()
+        const conn: any = new PeerConnection("pending:test", "", socket as any)
+
+        socket.emit("data", partialFrame(PREAUTH_MAX_PAYLOAD_SIZE + 1, 64 * 1024))
+
+        expect(bufferedBytes(conn)).toBe(0)
+        expect(socket.ended).toBe(true)
+        expect(conn.getState()).toBeLessThanOrEqual(ConnectionState.CLOSING)
+    })
+
+    it("accepts a frame up to the pre-auth cap before authentication", () => {
+        const socket = new StubbornSocket()
+        const conn: any = new PeerConnection("pending:test", "", socket as any)
+
+        socket.emit("data", partialFrame(PREAUTH_MAX_PAYLOAD_SIZE, 64 * 1024))
+
+        expect(bufferedBytes(conn)).toBeGreaterThan(64 * 1024)
+        expect(conn.getState()).toBe(ConnectionState.PENDING_AUTH)
+        expect(socket.ended).toBe(false)
+        conn.close()
+    })
+
+    it("restores the full frame limit once the connection authenticates", () => {
+        const socket = new StubbornSocket()
+        const conn: any = new PeerConnection("pending:test", "", socket as any)
+        conn.adoptVerifiedIdentity("0x" + "ab".repeat(32))
+
+        socket.emit("data", partialFrame(PREAUTH_MAX_PAYLOAD_SIZE * 2, 64 * 1024))
+
+        expect(bufferedBytes(conn)).toBeGreaterThan(64 * 1024)
+        expect(conn.getState()).toBe(ConnectionState.READY)
+        expect(socket.ended).toBe(false)
+        conn.close()
+    })
+})
+
+describe("MessageFramer auth block parse errors", () => {
+    it("logs a bounded line instead of the whole buffer", () => {
+        // Header with the auth flag, then an auth block whose identity claims
+        // 65535 bytes and is cut short, so parsing fails on every chunk.
+        const header = Buffer.alloc(12)
+        header.writeUInt16BE(1, 0)
+        header.writeUInt8(0x10, 2)
+        header.writeUInt8(0x01, 3)
+        header.writeUInt32BE(8, 4)
+        header.writeUInt32BE(1, 8)
+        const authHead = Buffer.alloc(12)
+        authHead.writeUInt8(1, 0) // algorithm
+        authHead.writeUInt8(1, 1) // signature mode
+        authHead.writeUInt16BE(0xffff, 10) // identity length
+        const framer = new MessageFramer()
+        framer.addData(Buffer.concat([header, authHead, Buffer.alloc(60 * 1024, 0x43)]))
+
+        log.error.mockClear()
+        expect(() => framer.extractMessage()).toThrow(InvalidAuthBlockFormatError)
+
+        const lines: string[] = log.error.mock.calls.map((c: unknown[]) => String(c[0]))
+        expect(lines.length).toBeGreaterThan(0)
+        for (const line of lines) {
+            expect(line.length).toBeLessThan(512)
+        }
     })
 })
