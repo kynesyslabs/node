@@ -1,5 +1,5 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { GCRResult } from "../../handleGCR"
+import type { GCREntityCaches, GCRResult } from "../../handleGCR"
 import { EntityManager, Repository } from "typeorm"
 import ensureGCRForUser from "../ensureGCRForUser"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
@@ -19,6 +19,8 @@ import log from "@/utilities/logger"
 export async function applyZkCommitmentAdd(
     editOperation: any,
     simulate: boolean,
+    /** The set being applied; a hash it already claims is refused. */
+    entities?: GCREntityCaches,
 ): Promise<GCRResult> {
     const payload = Array.isArray(editOperation.data)
         ? (editOperation.data[0] as IdentityCommitmentPayload | undefined)
@@ -90,7 +92,16 @@ export async function applyZkCommitmentAdd(
     }
 
     // Refused here, not in the block's transaction, so a duplicate fails
-    // this transaction alone. The primary key still guards the write.
+    // this transaction alone, whether an earlier block or an earlier
+    // transaction of this one stored it. The primary key still guards the
+    // write.
+    const claimed = entities ? (entities.zkCommitments ??= new Map()) : null
+    if (claimed?.has(normalizedCommitment)) {
+        return {
+            success: false,
+            message: "Commitment already exists in this block",
+        }
+    }
     const existing = await commitmentRepo.findOne({
         where: { commitmentHash: normalizedCommitment },
     })
@@ -100,6 +111,7 @@ export async function applyZkCommitmentAdd(
             message: "Commitment already exists",
         }
     }
+    claimed?.set(normalizedCommitment, true)
 
     const row = {
         commitmentHash: normalizedCommitment,
@@ -130,6 +142,8 @@ export async function applyZkCommitmentAdd(
 export async function applyZkAttestationAdd(
     editOperation: any,
     simulate: boolean,
+    /** The set being applied; a nullifier it already claims is refused. */
+    entities?: GCREntityCaches,
 ): Promise<GCRResult> {
     const payload = Array.isArray(editOperation.data)
         ? (editOperation.data[0] as IdentityAttestationPayload | undefined)
@@ -214,6 +228,21 @@ export async function applyZkAttestationAdd(
             success: true,
             message: "ZK attestation verified (simulation)",
         }
+    }
+
+    // The nullifier the verifier will mark, as the proof carries it, not
+    // as the payload states it. An earlier transaction of this set that
+    // claimed it wins.
+    const claimed = entities ? (entities.zkNullifiers ??= new Map()) : null
+    const nullifier = verificationResult.nullifier
+    if (claimed && nullifier) {
+        if (claimed.has(nullifier)) {
+            return {
+                success: false,
+                message: "Nullifier already used in this block",
+            }
+        }
+        claimed.set(nullifier, true)
     }
 
     const submitter = editOperation.account as string

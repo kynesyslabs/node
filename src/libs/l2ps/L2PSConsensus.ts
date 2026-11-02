@@ -331,17 +331,10 @@ export default class L2PSConsensus {
 
         const mockTx = this.createMockTx(proof, account)
         const entities = await HandleGCR.prepareEntities([mockTx])
-        // An account the block already edited is read from the pending
-        // state, not the database, so the proof builds on the block's
-        // balances and the block's write does not overwrite the proof's.
-        if (pending) {
-            for (const pubkey of entities.accounts.keys()) {
-                const edited = pending.entities.accounts.get(pubkey)
-                if (edited) {
-                    entities.accounts.set(pubkey, structuredClone(edited))
-                }
-            }
-        }
+        // A row the block already edited is read from the pending state,
+        // not the database, so the proof builds on the block's edits and
+        // the block's write does not overwrite the proof's.
+        if (pending) HandleGCR.overlayPending(entities, pending)
         const editResult = await HandleGCR.applyTransaction(
             entities,
             mockTx,
@@ -365,11 +358,7 @@ export default class L2PSConsensus {
         }
 
         if (!simulate && pending) {
-            for (const [pubkey, entity] of editResult.entities.accounts) {
-                pending.entities.accounts.set(pubkey, entity)
-            }
-            pending.sideEffects.push(...editResult.sideEffects)
-            pending.deferredWrites.push(...editResult.deferredWrites)
+            HandleGCR.mergeIntoPending(pending, editResult)
         } else if (!simulate) {
             await HandleGCR.gcrWriteMutex.runExclusive(async () => {
                 await HandleGCR.saveGCREditChanges(

@@ -51,7 +51,13 @@ import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
-import { In, type EntityManager, type Repository } from "typeorm"
+import {
+    FindOperator,
+    In,
+    type EntityManager,
+    type FindManyOptions,
+    type Repository,
+} from "typeorm"
 import { Validators } from "@/model/entities/Validators"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
 import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
@@ -159,12 +165,102 @@ export interface GCREntityCaches {
      * as deferred writes.
      */
     validators?: Map<string, Validators | null>
+    /** Proposal rows staged by this set, by proposal id. */
+    networkUpgrades?: Map<string, NetworkUpgrade>
+    /** Vote rows staged by this set, by proposal id and voter. */
+    networkUpgradeVotes?: Map<string, NetworkUpgradeVote>
+    /** ZK commitment hashes claimed by this set. */
+    zkCommitments?: Map<string, true>
+    /** ZK nullifiers claimed by this set. */
+    zkNullifiers?: Map<string, true>
+}
+
+/** The caches a set stages outside the entity maps, as one transaction saw them. */
+type StagedSnapshot = Pick<
+    GCREntityCaches,
+    | "validators"
+    | "networkUpgrades"
+    | "networkUpgradeVotes"
+    | "zkCommitments"
+    | "zkNullifiers"
+>
+
+/** The key under which a vote row is staged. */
+const voteKey = (row: { proposalId: string; voterAddress: string }) =>
+    `${row.proposalId}:${row.voterAddress}`
+
+/**
+ * The partition key of an edit that reads or writes a staged cache. Every
+ * edit on one cache shares a key, so they apply in block order and every
+ * node resolves a conflict between them the same way.
+ */
+function stagedKeyOf(edit: GCREdit): "zk" | "validators" | "gov" | null {
+    switch (edit.type as string) {
+        case "identity": {
+            const op = (edit as { operation?: string }).operation ?? ""
+            return op.startsWith("zk_") ? "zk" : null
+        }
+        case "validatorStake":
+            return "validators"
+        case "networkUpgrade":
+        case "networkUpgradeVote":
+            return "gov"
+        default:
+            return null
+    }
+}
+
+const STAGED_CACHES_BY_KEY: Record<"zk" | "validators" | "gov", (keyof StagedSnapshot)[]> = {
+    zk: ["zkCommitments", "zkNullifiers"],
+    validators: ["validators"],
+    gov: ["networkUpgrades", "networkUpgradeVotes"],
+}
+
+/** The staged caches a transaction's edits read or write. */
+function stagedCachesOf(edits: GCREdit[]): (keyof StagedSnapshot)[] {
+    const names = new Set<keyof StagedSnapshot>()
+    for (const edit of edits) {
+        const key = stagedKeyOf(edit)
+        if (key) for (const name of STAGED_CACHES_BY_KEY[key]) names.add(name)
+    }
+    return [...names]
+}
+
+/**
+ * Copies of the staged caches a transaction's edits touch, to put back
+ * when it fails. Only those: another group may be filling the rest.
+ */
+function snapshotStaged(
+    entities: GCREntityCaches,
+    edits: GCREdit[],
+): Partial<StagedSnapshot> {
+    const caches = entities as unknown as Record<string, Map<string, unknown> | undefined>
+    const snapshot: Record<string, Map<string, unknown> | undefined> = {}
+    for (const name of stagedCachesOf(edits)) {
+        const cache = caches[name]
+        snapshot[name] =
+            cache &&
+            new Map(
+                [...cache].map(([k, v]) => [
+                    k,
+                    v && typeof v === "object" ? structuredClone(v) : v,
+                ]),
+            )
+    }
+    return snapshot as Partial<StagedSnapshot>
+}
+
+function restoreStaged(entities: GCREntityCaches, snapshot: Partial<StagedSnapshot>) {
+    const caches = entities as unknown as Record<string, unknown>
+    for (const [name, copy] of Object.entries(snapshot)) caches[name] = copy
 }
 
 /**
  * A repository whose saves are collected instead of issued, for an edit
  * routine that writes its own table. The collected rows are written in the
- * block's transaction through the edit's `deferredWrite`.
+ * block's transaction through the edit's `deferredWrite`. The row is copied
+ * as saved, so a later edit that changes it and then fails leaves the write
+ * as it was.
  */
 function stagedRepository<T extends object>(
     repo: Repository<T>,
@@ -176,8 +272,9 @@ function stagedRepository<T extends object>(
             if (property === "save") {
                 return async (row: T) => {
                     onSaved?.(row)
+                    const saved = structuredClone(row)
                     staged.push(async em => {
-                        await em.getRepository(target.target).save(row)
+                        await em.getRepository(target.target).save(saved)
                     })
                     return row
                 }
@@ -956,6 +1053,7 @@ export default class HandleGCR {
 
         // Capture snapshots for potential rollback
         const snapshots: GCRMainSnapshot[] = []
+        const staged = snapshotStaged(entities, gcrEdits)
         const editPubkeys = new Set<string>()
 
         for (const edit of gcrEdits) {
@@ -1013,11 +1111,12 @@ export default class HandleGCR {
                         entities.accounts.set(snap.pubkey, snap.entity)
                     }
                 }
-
                 // INFO: If on a serious run, rollback hard edits
                 if (!simulate && !this.GCRTxTypes.has(edit.type)) {
                     await this.rollback(tx, entities, appliedEdits)
                 }
+                // After the rollback, which may have edited the staged rows
+                restoreStaged(entities, staged)
 
                 return {
                     success: false,
@@ -1169,6 +1268,8 @@ export default class HandleGCR {
                             keys.push("acc:" + normalizePubkey(tlsEdit.account))
                         }
                     }
+                    const stagedKey = stagedKeyOf(edit)
+                    if (stagedKey) keys.push(stagedKey)
                 }
             }
 
@@ -1626,6 +1727,158 @@ export default class HandleGCR {
         })
     }
 
+    /**
+     * The governance repositories for one edit: proposals and votes this set
+     * already staged are read back, including by the open-proposal and
+     * highest-version queries, and saves are staged for the block's
+     * transaction.
+     */
+    static stagedGovernanceRepos(
+        entities: GCREntityCaches,
+        staged: DeferredWrite[],
+    ): {
+        proposals: Repository<NetworkUpgrade>
+        votes: Repository<NetworkUpgradeVote>
+    } {
+        const proposals = (entities.networkUpgrades ??= new Map())
+        const votes = (entities.networkUpgradeVotes ??= new Map())
+        const proposalRepo = dataSource.getRepository(NetworkUpgrade)
+        const voteRepo = dataSource.getRepository(NetworkUpgradeVote)
+
+        const proposalsView = new Proxy(
+            stagedRepository(proposalRepo, staged, row =>
+                proposals.set(row.proposalId, row),
+            ),
+            {
+                get(target, property, receiver) {
+                    if (property === "findOneBy") {
+                        return async (where: { proposalId: string }) =>
+                            proposals.get(where.proposalId) ??
+                            (await proposalRepo.findOneBy(where))
+                    }
+                    if (property === "find") {
+                        return async (options?: FindManyOptions<NetworkUpgrade>) => {
+                            const rows = await proposalRepo.find(options)
+                            const status = (
+                                options?.where as { status?: unknown } | undefined
+                            )?.status
+                            const wanted =
+                                status instanceof FindOperator
+                                    ? (status.value as string[])
+                                    : status === undefined
+                                      ? null
+                                      : [status as string]
+                            const seen = new Set(rows.map(r => r.proposalId))
+                            for (const row of proposals.values()) {
+                                if (seen.has(row.proposalId)) continue
+                                if (wanted && !wanted.includes(row.status)) continue
+                                rows.push(row)
+                            }
+                            return rows
+                        }
+                    }
+                    if (property === "maximum") {
+                        return async (column: keyof NetworkUpgrade) => {
+                            let max = await proposalRepo.maximum(
+                                column as "version",
+                            )
+                            for (const row of proposals.values()) {
+                                const value = row[column]
+                                if (
+                                    typeof value === "number" &&
+                                    (max === null || value > max)
+                                ) {
+                                    max = value
+                                }
+                            }
+                            return max
+                        }
+                    }
+                    return Reflect.get(target, property, receiver)
+                },
+            },
+        )
+
+        const votesView = new Proxy(
+            stagedRepository(voteRepo, staged, row =>
+                votes.set(voteKey(row), row),
+            ),
+            {
+                get(target, property, receiver) {
+                    if (property === "findOne") {
+                        return async (options: {
+                            where: { proposalId: string; voterAddress: string }
+                        }) =>
+                            votes.get(voteKey(options.where)) ??
+                            (await voteRepo.findOne(options))
+                    }
+                    return Reflect.get(target, property, receiver)
+                },
+            },
+        )
+
+        return { proposals: proposalsView, votes: votesView }
+    }
+
+    /** The row caches of a set, loaded for the keys its edits touch. */
+    private static readonly ROW_CACHES = [
+        "accounts",
+        "storagePrograms",
+        "tlsNotaries",
+        "atomicWorks",
+        "resourceSlots",
+        "validators",
+        "networkUpgrades",
+        "networkUpgradeVotes",
+    ] as const
+
+    /** The claim caches of a set, which hold every claim of the block so far. */
+    private static readonly CLAIM_CACHES = ["zkCommitments", "zkNullifiers"] as const
+
+    /**
+     * Replaces every row `entities` loaded with the copy `pending` holds for
+     * the same key, and takes over its claims, so a set applied on top of a
+     * pending one builds on its edits rather than on the database.
+     */
+    static overlayPending(entities: GCREntityCaches, pending: PendingGCRWrite) {
+        const own = entities as unknown as Record<string, Map<string, unknown> | undefined>
+        const theirs = pending.entities as unknown as Record<
+            string,
+            Map<string, unknown> | undefined
+        >
+        for (const name of HandleGCR.ROW_CACHES) {
+            const mine = own[name]
+            const pendingRows = theirs[name]
+            if (!mine || !pendingRows) continue
+            for (const key of mine.keys()) {
+                if (pendingRows.has(key)) {
+                    const row = pendingRows.get(key)
+                    mine.set(key, row ? structuredClone(row) : row)
+                }
+            }
+        }
+        for (const name of HandleGCR.CLAIM_CACHES) {
+            if (theirs[name]) own[name] = new Map(theirs[name])
+        }
+    }
+
+    /** Folds the outcome of a set into `pending`, which commits it with the block. */
+    static mergeIntoPending(pending: PendingGCRWrite, result: GCRApplyResult) {
+        const own = pending.entities as unknown as Record<string, Map<string, unknown> | undefined>
+        const theirs = result.entities as unknown as Record<
+            string,
+            Map<string, unknown> | undefined
+        >
+        for (const name of [...HandleGCR.ROW_CACHES, ...HandleGCR.CLAIM_CACHES]) {
+            const rows = theirs[name]
+            if (!rows || rows.size === 0) continue
+            const mine = (own[name] ??= new Map())
+            for (const [key, row] of rows) mine.set(key, row)
+        }
+        pending.sideEffects.push(...result.sideEffects)
+        pending.deferredWrites.push(...result.deferredWrites)
+    }
+
     /** A pending write with no edits, for a block whose state comes from elsewhere. */
     static emptyPendingWrite(): PendingGCRWrite {
         return HandleGCR.pendingWrite(
@@ -1922,7 +2175,12 @@ export default class HandleGCR {
                 result = await GCRNonceRoutines.apply(editOperation, account)
                 break
             case "identity":
-                result = await GCRIdentityRoutines.apply(editOperation, account)
+                result = await GCRIdentityRoutines.apply(
+                    editOperation,
+                    account,
+                    undefined,
+                    entities,
+                )
                 break
             case "assign":
             case "subnetsTx":
@@ -2004,12 +2262,10 @@ export default class HandleGCR {
                         "./gcr_routines/GCRNetworkUpgradeRoutines"
                     )
                     const staged: DeferredWrite[] = []
+                    const repos = HandleGCR.stagedGovernanceRepos(entities, staged)
                     result = await GCRNetworkUpgradeRoutines.applyProposal(
                         editOperation,
-                        stagedRepository(
-                            dataSource.getRepository(NetworkUpgrade),
-                            staged,
-                        ),
+                        repos.proposals,
                     )
                     result.deferredWrite = deferredWriteOf(staged)
                 }
@@ -2022,12 +2278,11 @@ export default class HandleGCR {
                         "./gcr_routines/GCRNetworkUpgradeRoutines"
                     )
                     const staged: DeferredWrite[] = []
+                    const repos = HandleGCR.stagedGovernanceRepos(entities, staged)
                     result = await GCRNetworkUpgradeRoutines.applyVote(
                         editOperation,
-                        stagedRepository(
-                            dataSource.getRepository(NetworkUpgradeVote),
-                            staged,
-                        ),
+                        repos.votes,
+                        repos.proposals,
                     )
                     result.deferredWrite = deferredWriteOf(staged)
                 }

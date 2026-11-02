@@ -12,14 +12,15 @@
  *    wallet that streams transfers through the SDK for the whole run.
  *
  * Action, repeated for each round:
- *  1. Send a burst of transfers to node-1 and node-2.
+ *  1. Stream transfers through node-1 and node-3 for the whole round.
  *  2. Wait for a new block, then `docker kill` one validator at a random
  *     offset inside the block interval. node-4 and node-2 alternate so
  *     both the consensus path (a signing member) and the sync path (the
  *     restarted node catching up) are exercised.
  *  3. `docker compose start` it and wait until it is back at the tip.
- *  4. Check its database: MAX(gcr_assigned_txs.block_number) <= MAX(blocks.number),
- *     and no drift or resync-from-scratch line in its logs.
+ *  4. Check that the block in flight at the kill carried transactions,
+ *     and the victim's database: MAX(gcr_assigned_txs.block_number) <=
+ *     MAX(blocks.number), no drift or resync-from-scratch line in its logs.
  *
  * Asserts, at the end:
  *  - Every node holds the same block hash at a common height.
@@ -64,7 +65,8 @@ const SCENARIO_ID = "11-sigkill-replay"
 const NODE_IDS = [1, 2, 3, 4]
 const ACTIVATION_HEIGHT = 5
 const ROUNDS = Number(process.env.SIGKILL_ROUNDS ?? 4)
-const BURST = Number(process.env.SIGKILL_BURST ?? 3)
+/** Pause between transfers of the stream that runs through each kill. */
+const STREAM_GAP_MS = Number(process.env.SIGKILL_STREAM_GAP_MS ?? 500)
 const BLOCK_SECS = Number(process.env.CONSENSUS_TIME ?? 10)
 /** Set when the `demos-devnet-node` image is built beforehand. */
 const PREBUILT_IMAGE = process.env.DEVNET_PREBUILT_IMAGE === "1"
@@ -83,7 +85,7 @@ const VALIDATOR_STAKE = "1000000000000000000"
  * and sizes the shard to them, so the committee floor can be met. The
  * fixture itself names no validators and a shard of 10.
  */
-function stakeDevnetValidators(): void {
+function stakeDevnetValidators(funded: string[]): void {
     const genesis = JSON.parse(readFileSync(PROD_GENESIS_PATH, "utf8"))
     const validators = NODE_IDS.map(id => ({
         address: readFileSync(resolve(DEVNET_DIR, "identities", `node${id}.pubkey`), "utf8").trim(),
@@ -97,7 +99,10 @@ function stakeDevnetValidators(): void {
     genesis.validators = validators
     genesis.balances = [
         ...validators.map(v => [v.address, VALIDATOR_STAKE]),
-        ...(genesis.balances ?? []).filter((pair: [string, string]) => !staked.has(pair[0])),
+        ...funded.map(address => [address, HARNESS_BALANCE]),
+        ...(genesis.balances ?? []).filter(
+            (pair: [string, string]) => !staked.has(pair[0]) && !funded.includes(pair[0]),
+        ),
     ]
     genesis.properties.shardSize = NODE_IDS.length
     writeFileSync(PROD_GENESIS_PATH, JSON.stringify(genesis, null, 4) + "\n")
@@ -118,7 +123,7 @@ function overrideYaml(): string {
         lines.push(
             `  node-${id}:`,
             "    environment:",
-            '      GOSSIP_ENABLED: "false"',
+            "      GOSSIP_ENABLED: \"false\"",
             // Proposals travel as plain JSON over HTTP, as in the race harness.
             "      OMNI_MODE: HTTP_ONLY",
             "    volumes:",
@@ -132,15 +137,31 @@ function overrideYaml(): string {
     return lines.join("\n") + "\n"
 }
 
-async function client(nodeId: number, seed: Uint8Array): Promise<Demos> {
+/** A funded wallet and the one node it sends through, so its nonces come from one view. */
+interface Sender {
+    demos: Demos
+    wallet: string
+}
+
+async function client(nodeId: number, seed: Uint8Array): Promise<Sender> {
     const demos = new Demos()
     await demos.connect(`http://127.0.0.1:${NODE_RPC_PORTS[nodeId]}`)
     await demos.connectWallet(seed)
-    return demos
+    // Nonces are sequenced on the client: the node reports the confirmed
+    // nonce, so every transfer of one block interval would otherwise repeat
+    // it and all but the first would fail.
+    demos.enableAutoNonce()
+    return { demos, wallet: demos.getAddress() }
+}
+
+/** Records a note and prints it, so a failed run still shows how far it got. */
+function note(ctx: ScenarioContext, text: string): void {
+    ctx.notes.push(text)
+    console.log(`[note] ${text}`)
 }
 
 /** confirm + broadcast; the hash when the node accepted it, else null. */
-async function transfer(demos: Demos): Promise<string | null> {
+async function transfer({ demos }: Sender): Promise<string | null> {
     const tx = await demos.pay(RECIPIENT, AMOUNT)
     const confirmed = await DemosTransactions.confirm(tx, demos).catch(() => null)
     if (confirmed?.result !== 200 || confirmed?.response?.data?.valid === false) {
@@ -150,11 +171,21 @@ async function transfer(demos: Demos): Promise<string | null> {
     return sent?.result === 200 ? (tx.hash as string) : null
 }
 
+/** How many confirmed transactions one node stored for a block. */
+async function txCountIn(nodeId: number, blockNumber: number): Promise<number> {
+    const rows = await query<{ count: string }>(
+        nodeId,
+        "SELECT COUNT(*)::text AS count FROM transactions WHERE \"blockNumber\" = $1 AND status = 'confirmed'",
+        [blockNumber],
+    )
+    return Number(rows[0]?.count ?? 0)
+}
+
 /** The block a stored transaction landed in on one node, or null. */
 async function landedOn(nodeId: number, hash: string): Promise<number | null> {
     const rows = await query<{ blockNumber: number | string | null }>(
         nodeId,
-        'SELECT "blockNumber" FROM transactions WHERE hash = $1',
+        "SELECT \"blockNumber\" FROM transactions WHERE hash = $1",
         [hash],
     )
     const value = rows[0]?.blockNumber
@@ -210,13 +241,18 @@ async function waitAtTip(nodeId: number, description: string): Promise<void> {
 async function scenario(ctx: ScenarioContext): Promise<void> {
     regenerateIdentities(4)
 
-    const seed = new Uint8Array(randomBytes(32))
-    const probe = new Demos()
-    await probe.connectWallet(seed)
-    const wallet = probe.getAddress()
-    stageGenesisWithFundedAccount(GENESIS_FORK_LOW_GAS_FEE, wallet, HARNESS_BALANCE)
-    stakeDevnetValidators()
-    ctx.notes.push(`harness wallet ${wallet}`)
+    // One wallet per entry node: a wallet that sent through two nodes could
+    // be given the same nonce twice, and the loser would never land.
+    const seeds = [new Uint8Array(randomBytes(32)), new Uint8Array(randomBytes(32))]
+    const wallets: string[] = []
+    for (const seed of seeds) {
+        const probe = new Demos()
+        await probe.connectWallet(seed)
+        wallets.push(probe.getAddress())
+    }
+    stageGenesisWithFundedAccount(GENESIS_FORK_LOW_GAS_FEE, wallets[0], HARNESS_BALANCE)
+    stakeDevnetValidators(wallets)
+    note(ctx, `harness wallets ${wallets.join(", ")}`)
 
     writeOverride(SCENARIO_ID, overrideYaml())
     composeWithOverride(SCENARIO_ID, ["up", "-d", ...(PREBUILT_IMAGE ? [] : ["--build"])])
@@ -225,28 +261,30 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
         timeoutMs: 600_000,
         intervalMs: 2_000,
     })
-    ctx.notes.push("all nodes crossed the fork")
+    note(ctx, "all nodes crossed the fork")
 
-    const senders = [await client(1, seed), await client(2, seed)]
+    // Entry nodes that are never killed, so the stream outlives the victim.
+    const senders = [await client(1, seeds[0]), await client(3, seeds[1])]
     const accepted: string[] = []
 
     for (let round = 0; round < ROUNDS; round++) {
         const victim = victimOf(round)
         const victimId = Number(victim.slice(-1))
 
-        // A burst of transfers, alternating entry nodes.
+        // Transfers flow through the kill, alternating entry nodes, so the
+        // victim dies while blocks carry state.
+        let streaming = true
         let sent = 0
-        for (let i = 0; i < BURST; i++) {
-            const hash = await transfer(senders[i % senders.length])
-            if (hash) {
-                accepted.push(hash)
-                sent++
+        const stream = (async () => {
+            for (let i = 0; streaming; i++) {
+                const hash = await transfer(senders[i % senders.length])
+                if (hash) {
+                    accepted.push(hash)
+                    sent++
+                }
+                await sleep(STREAM_GAP_MS)
             }
-            await sleep(500)
-        }
-        if (sent === 0) {
-            throw new Error(`round ${round}: no transfer was accepted`)
-        }
+        })()
 
         // Kill inside the block interval, at a random offset after the next block.
         const before = await getLastBlockNumber(1)
@@ -258,15 +296,36 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
         const offsetMs = Math.floor(Math.random() * BLOCK_SECS * 1000)
         await sleep(offsetMs)
         killService(victim)
-        ctx.notes.push(
-            `round ${round}: sent ${sent}, killed ${victim} ${offsetMs}ms into the block interval after block ${before + 1}`,
+        const inFlight = before + 2
+        note(ctx, 
+            `round ${round}: killed ${victim} ${offsetMs}ms into the interval of block ${inFlight}`,
         )
         await sleep(3_000)
         startService(victim)
+        streaming = false
+        await stream
+        if (sent === 0) {
+            throw new Error(`round ${round}: no transfer was accepted`)
+        }
+
+        // The block the victim was applying when it died must have carried
+        // state, or the kill interrupted nothing.
+        await waitFor(async () => (await getLastBlockNumber(1)) >= inFlight, {
+            description: `round ${round}: block ${inFlight} lands`,
+            timeoutMs: 120_000,
+            intervalMs: 500,
+        })
+        const carried = await txCountIn(1, inFlight)
+        if (carried === 0) {
+            throw new Error(
+                `round ${round}: block ${inFlight} carried no confirmed transaction, the kill interrupted no state write`,
+            )
+        }
+        note(ctx, `round ${round}: sent ${sent}, block ${inFlight} carried ${carried} confirmed`)
 
         await waitAtTip(victimId, `round ${round}: ${victim} back at the tip`)
         await assertNoPartialState(victimId, `round ${round}`)
-        ctx.notes.push(`round ${round}: ${victim} restarted at tip ${await getLastBlockNumber(victimId)} with no partial state`)
+        note(ctx, `round ${round}: ${victim} restarted at tip ${await getLastBlockNumber(victimId)} with no partial state`)
     }
 
     // Let the last transfers land, then compare every node.
@@ -276,21 +335,26 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     const tips = await Promise.all(NODE_IDS.map(id => getLastBlockNumber(id)))
     const common = Math.min(...tips)
     const hash = await assertBlockHashConvergence(NODE_IDS, common)
-    ctx.notes.push(`block ${common} is ${hash.slice(0, 16)}… on every node`)
+    note(ctx, `block ${common} is ${hash.slice(0, 16)}… on every node`)
 
-    const accounts = await Promise.all(NODE_IDS.map(id => getGcrAccount(id, wallet)))
-    const nonces = await Promise.all(
-        NODE_IDS.map(async id =>
-            query<{ nonce: number }>(id, "SELECT nonce FROM gcr_main WHERE pubkey = $1", [wallet]),
-        ),
-    )
-    const views = NODE_IDS.map(
-        (id, i) => `node-${id}=${accounts[i]?.balance ?? "<none>"}/${nonces[i][0]?.nonce ?? "<none>"}`,
-    )
-    if (new Set(views.map(v => v.split("=")[1])).size !== 1) {
-        throw new Error(`harness wallet differs across nodes: ${views.join(", ")}`)
+    for (const { wallet } of senders) {
+        const accounts = await Promise.all(NODE_IDS.map(id => getGcrAccount(id, wallet)))
+        const nonces = await Promise.all(
+            NODE_IDS.map(async id =>
+                query<{ nonce: number }>(id, "SELECT nonce FROM gcr_main WHERE pubkey = $1", [
+                    wallet,
+                ]),
+            ),
+        )
+        const views = NODE_IDS.map(
+            (id, i) =>
+                `node-${id}=${accounts[i]?.balance ?? "<none>"}/${nonces[i][0]?.nonce ?? "<none>"}`,
+        )
+        if (new Set(views.map(v => v.split("=")[1])).size !== 1) {
+            throw new Error(`wallet ${wallet} differs across nodes: ${views.join(", ")}`)
+        }
+        note(ctx, `wallet ${wallet.slice(0, 10)}… balance/nonce agrees: ${views[0].split("=")[1]}`)
     }
-    ctx.notes.push(`harness wallet balance/nonce agrees: ${views[0].split("=")[1]}`)
 
     const sums = await Promise.all(NODE_IDS.map(id => sumGcrMain(id)))
     if (new Set(sums.map(String)).size !== 1) {
@@ -298,7 +362,7 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
             `gcr_main sums differ: ${NODE_IDS.map((id, i) => `node-${id}=${sums[i]}`).join(", ")}`,
         )
     }
-    ctx.notes.push(`gcr_main sum agrees on every node: ${sums[0]}`)
+    note(ctx, `gcr_main sum agrees on every node: ${sums[0]}`)
 
     for (const txHash of accepted) {
         const blocks = await Promise.all(NODE_IDS.map(id => landedOn(id, txHash)))
@@ -308,7 +372,7 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
             )
         }
     }
-    ctx.notes.push(`${accepted.length} accepted transfers are in the same block on every node`)
+    note(ctx, `${accepted.length} accepted transfers are in the same block on every node`)
     clearOverride(SCENARIO_ID)
 }
 

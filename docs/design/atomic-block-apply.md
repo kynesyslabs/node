@@ -49,10 +49,33 @@ committed.
 - The validator stake and governance routines write their own tables and
   take a repository argument. The dispatch hands them a staged repository
   whose `save` is collected into the edit's deferred write instead of
-  issued. The stake repository also reads through the rows this set already
-  staged, so two stake edits for one validator in a block compose.
+  issued. The row is copied as saved, so a later edit that changes it and
+  then fails leaves the write as it was.
 - A block with no transactions still carries an empty pending write, so its
   L2PS proofs commit with it too.
+
+## Conflicts inside one block
+
+A deferred write that throws fails the block transaction, and on the
+consensus path that is a fatal error. So two transactions of one block
+that would collide at commit must be resolved during the apply, where the
+second fails alone:
+
+- The entity caches carry what the block has staged so far: validator rows,
+  proposal and vote rows, and the ZK commitment hashes and nullifiers it
+  has claimed. The ZK routines refuse a hash or nullifier the block already
+  claims, before they read the database. The nullifier is the one the
+  verifier reads from the proof, not the one the payload states.
+- The governance repositories read through the staged rows: a proposal id
+  the block already carries is reported as persisted, a parameter an
+  earlier proposal locked stays locked, the next version counts the staged
+  proposals, and a second vote from one validator is reported as persisted.
+- Every edit on one of these caches shares a partition key (`zk`,
+  `validators`, `gov`), so such transactions apply in block order rather
+  than in parallel groups, and every node resolves a conflict the same way.
+- A transaction that fails part-way restores the staged caches along with
+  its accounts, so the claims and rows of a failed transaction do not block
+  a later one.
 
 ## Edit types and where they write
 
@@ -67,11 +90,11 @@ committed.
 
 Points awards attached to identity edits are side effects and run after the
 commit, as before.
-- L2PS proofs applied at consensus join the block's pending state: an
-  account the block already edited is read from `pending`, not the
-  database, and the proof's result is written back into it. The proof is
-  marked applied in the block transaction; its bookkeeping runs after the
-  commit.
+- L2PS proofs applied at consensus join the block's pending state: a row
+  the block already edited, of any cache, is read from `pending`, not the
+  database, and every cache of the proof's result is written back into
+  it. The proof is marked applied in the block transaction; its
+  bookkeeping runs after the commit.
 - Consensus: `applyGCREditsFromMergedMempool` applies deferred, the vote
   runs on the in-memory outcome, and `finalizeBlock` commits it with the
   block. A round that ends before the insert drops `pending`; there is
@@ -101,13 +124,17 @@ adoption suites check that a rejected block and a failed insert both leave
 state untouched and never call a rollback.
 
 `testing/forks/rehearsal/scenarios/11-sigkill-replay.ts` runs the four-node
-devnet with a funded wallet streaming transfers, kills node-4 and node-2 in
-turn with SIGKILL at a random point in the block interval, restarts them,
-and checks each restarted node for an assignment stamp above its tip or a
-drift line in its logs. At the end every node must hold the same block
-hash, the same wallet balance and nonce, the same `gcr_main` sum, and every
-accepted transfer in the same block. It passed on 2026-11-01 with four
-rounds:
+devnet with a funded wallet streaming transfers through the nodes that
+stay up, kills node-4 and node-2 in turn with SIGKILL at a random point in
+the block interval, restarts them, checks that the block in flight at the
+kill carried transactions, and checks each restarted node for an
+assignment stamp above its tip or a drift line in its logs. At the end
+every node must hold the same block hash, the same balance and nonce for
+each harness wallet, the same `gcr_main` sum, and every accepted transfer
+in the same block. Each wallet sends through one node with the SDK's
+client-side nonce sequencing on, so its transfers all confirm. It passed
+on 2026-11-02 with four rounds, 125 transfers, and 9 to 54 confirmed
+transfers in each block that was in flight at a kill:
 
 ```
 DEVNET_PREBUILT_IMAGE=1 bun run testing/forks/rehearsal/scenarios/11-sigkill-replay.ts
