@@ -123,6 +123,7 @@ const nodeLog = (n: number, since?: string) =>
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         maxBuffer: 256 * 1024 * 1024,
+        // eslint-disable-next-line no-control-regex -- strips ANSI colour codes from docker logs
     }).replace(/\u001b\[[0-9;]*m/g, "")
 const linesWith = (text: string, needle: string) => text.split("\n").filter(l => l.includes(needle))
 /** One gauge from the node's own metrics endpoint, read inside its container. */
@@ -276,10 +277,19 @@ if (MISMATCH === 1) {
     }, BLOCK_SECS * 6 * 4 + 60, 1000)
     record("tips-while-stopped", before)
     check(quiet, `no node's tip moved for ${BLOCK_SECS * 6} s (${before.join(", ")}): the chain stopped instead of splitting`)
+    // Agreement at the lowest tip covers every block below it through the
+    // parent hashes; above it each height is compared among the nodes that hold it.
     const common = Math.min(...before)
-    const hashes = await Promise.all(NODES.map(n => hashAt(n, common)))
-    record("hash-at-" + common, hashes)
-    check(hashes.every(h => h !== null && h === hashes[0]), `all four nodes hold the same block ${common}`)
+    const top = Math.max(...before)
+    const byHeight: Record<number, (string | null)[]> = {}
+    for (let h = common; h <= top; h++) {
+        byHeight[h] = await Promise.all(NODES.filter((_, i) => before[i] >= h).map(n => hashAt(n, h)))
+    }
+    record("hashes-from-lowest-tip", byHeight)
+    check(
+        Object.values(byHeight).every(hs => hs.every(h => h !== null && h === hs[0])),
+        `no two nodes hold different blocks at any height from ${common} to ${top}`,
+    )
 }
 
 // ---- 4 ---------------------------------------------------------------------
@@ -363,6 +373,17 @@ for (const height of [H - 1, H, H + 1]) {
     record(`hash-at-${height}`, hashes)
     check(hashes.every(h => h !== null && h === hashes[0]), `all four nodes hold the same block ${height}`)
 }
+const active = await Promise.all(
+    PORTS.map(async port => {
+        const forks = (await nodeCall(port, "getNetworkInfo")).response?.forks ?? {}
+        return { signatureDomain: forks.signatureDomain?.activated, web2ProofBinding: forks.web2ProofBinding?.activated }
+    }),
+)
+record("forks-active-past-H", active)
+check(
+    active.every(f => f.signatureDomain === true && f.web2ProofBinding === true),
+    `every node reports signatureDomain and web2ProofBinding active past ${H}`,
+)
 
 // ---- 7 ---------------------------------------------------------------------
 step("resources")

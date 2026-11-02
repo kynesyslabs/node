@@ -75,8 +75,8 @@ LOGS="$RUN_DIR/logs"
 # Checks the scenario has in each mode; fewer means it stopped early.
 EXPECTED_CHECKS_FRESH=59
 EXPECTED_CHECKS_UPGRADE=48
-EXPECTED_CHECKS_MISMATCH_1=28
-EXPECTED_CHECKS_MISMATCH_2=26
+EXPECTED_CHECKS_MISMATCH_1=29
+EXPECTED_CHECKS_MISMATCH_2=27
 mkdir -p "$DATA/identities" "$LOGS" "$RUN_DIR/steps"
 MAIN_LOG="$LOGS/rehearsal.log"
 
