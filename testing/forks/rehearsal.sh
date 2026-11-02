@@ -242,7 +242,8 @@ minority() { [[ "$MISMATCH" != 0 && "$1" -gt $((4 - MISMATCH)) ]]; }
 # the mismatch mode the odd validators are later put back on the agreed schedule.
 # A node refuses such an edit unless the operator names the exact schedule, so
 # those nodes carry that name from the start; it is consulted only on a refusal.
-ACCEPT_DIGEST="$(cd "$ROOT" && GENESIS="$DATA/genesis.json" STRIP="$([[ "$MISMATCH" == 0 ]] && echo 1)" bun -e '
+schedule_digest() {
+    (cd "$ROOT" && GENESIS="$DATA/genesis.json" STRIP="$1" bun -e '
 const { readFileSync } = require("node:fs")
 const { loadForkConfigFromGenesis } = require("./src/forks")
 const { getSharedState } = require("./src/utilities/sharedState")
@@ -254,8 +255,14 @@ if (process.env.STRIP) {
 }
 loadForkConfigFromGenesis(g)
 console.log(forkScheduleDigest(getSharedState.forkConfig, getSharedState.chainId))
-' 2>/dev/null | tail -1)"
-[[ "$ACCEPT_DIGEST" =~ ^[0-9a-f]{64}$ ]] || die "could not compute the schedule digest node 4 or the odd validators accept"
+' 2>/dev/null | tail -1)
+}
+ACCEPT_DIGEST="$(schedule_digest "$([[ "$MISMATCH" == 0 ]] && echo 1)")"
+# Node 4's recovery puts the agreed schedule back below its tip, which it refuses
+# until the operator names that schedule too.
+AGREED_DIGEST="$(schedule_digest "")"
+[[ "$ACCEPT_DIGEST" =~ ^[0-9a-f]{64}$ && "$AGREED_DIGEST" =~ ^[0-9a-f]{64}$ ]] ||
+    die "could not compute the schedule digest node 4 or the odd validators accept"
 cp -r "$DEVNET/postgres-init" "$DEVNET/l2ps" "$DATA/"
 mkdir -p "$DATA/empty-snapshot"
 
@@ -302,6 +309,7 @@ step "compose override: unique names, memory caps, no notary container"
         echo "      - ./empty-snapshot:/app/data/snapshot:ro"
     done
 } >"$DATA/compose.rehearsal.yml"
+printf 'services:\n  node-4:\n    environment:\n      - DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=%s\n' "$AGREED_DIGEST" >"$DATA/compose.node4-agreed.yml"
 
 rpc_height() {
     local port=$1
@@ -343,7 +351,7 @@ trap - ERR
 set +e
 ROOT="$ROOT" RUN_DIR="$RUN_DIR" PROJECT="$PROJECT" ACTIVATION_HEIGHT="$ACTIVATION_HEIGHT" CHAIN_ID="$CHAIN_ID" \
     CONSENSUS_TIME="$CONSENSUS_TIME" PG_PORT="$PG_PORT" UPGRADE_PATH="$UPGRADE_PATH" UPGRADE_LEAD="$UPGRADE_LEAD" \
-    MISMATCH="$MISMATCH" MINORITY_HEIGHT="$MINORITY_HEIGHT" \
+    MISMATCH="$MISMATCH" MINORITY_HEIGHT="$MINORITY_HEIGHT" DEVNET="$DEVNET" AGREED_DIGEST="$AGREED_DIGEST" \
     bun "$ROOT/testing/forks/$([[ "$MISMATCH" == 0 ]] && echo rehearsal.ts || echo scheduleMismatch.ts)" 2>&1 | grep --line-buffered -vE '^\[config\]|^bigint:' | tee "$LOGS/scenario.log"
 scenario_status=${PIPESTATUS[0]}
 set -e
