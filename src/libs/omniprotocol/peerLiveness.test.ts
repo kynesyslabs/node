@@ -191,6 +191,31 @@ describe("Omni ping", () => {
 
         expect(await target.connect()).toBe(true)
         expect(httpCall).not.toHaveBeenCalled()
+        expect(target.status.timestamp).toBeGreaterThan(STALE)
+        sharedState.omniAdapter = null
+    })
+
+    it("keeps failing the probe against a peer that answers ping with 404, as an older node does", async () => {
+        const ours = newKeys()
+        const adapter = new PeerOmniAdapter({ config: DEFAULT_OMNIPROTOCOL_CONFIG })
+        adapter.migrationMode = "OMNI_ONLY"
+        ;(adapter as any).getPrivateKey = () => ours.privateKey
+        ;(adapter as any).getPublicKey = () => ours.publicKey
+        ;(adapter as any).connectionPool = {
+            sendAuthenticated: async () =>
+                (await import("./serialization/control")).encodeNodeCallResponse({
+                    status: 404,
+                    value: "Unknown message",
+                    requireReply: false,
+                    extra: null,
+                }),
+        }
+        sharedState.omniAdapter = adapter
+
+        const target = stalePeer(idOf(newKeys()))
+        target.httpCall = jest.fn() as any
+
+        expect(await target.connect()).toBe(false)
         sharedState.omniAdapter = null
     })
 })
