@@ -33,7 +33,7 @@
  * applied twice.
  */
 
-import { randomBytes } from "crypto"
+import { randomBytes, randomInt } from "crypto"
 import { mkdirSync, readFileSync, writeFileSync } from "fs"
 import { resolve } from "path"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
@@ -293,7 +293,7 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
             timeoutMs: 120_000,
             intervalMs: 500,
         })
-        const offsetMs = Math.floor(Math.random() * BLOCK_SECS * 1000)
+        const offsetMs = randomInt(BLOCK_SECS * 1000)
         await sleep(offsetMs)
         killService(victim)
         const inFlight = before + 2
