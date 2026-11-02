@@ -49,18 +49,33 @@ mock.module("@/libs/peer", () => ({
 const PENDING_AUTH = 3
 const CLOSED = -2
 
+const READY = 11
+
 class FakePeerConnection extends EventEmitter {
-    public readonly origin = "inbound"
+    public readonly origin: "inbound" | "outbound"
     public socket: any
     private state = PENDING_AUTH
     private readonly createdAt = Date.now()
     constructor(
         private id: string,
-        _connectionString: string,
+        private connectionString: string,
         socket?: any,
     ) {
         super()
         this.socket = socket
+        this.origin = socket ? "inbound" : "outbound"
+    }
+    /** Outbound dial: the socket's remote end is the peer's address. */
+    async connect() {
+        const { hostname } = new URL(this.connectionString)
+        this.socket = fakeSocket(hostname)
+        this.state = READY
+    }
+    /** What PeerConnection does once an auth block verifies. */
+    simulateAuth(identity: string) {
+        this.id = identity
+        this.state = READY
+        this.emit("authenticated", identity)
     }
     get peerIdentity() {
         return this.id
@@ -173,6 +188,27 @@ describe("OmniProtocolServer pre-auth limits", () => {
 
         // Keep trying; the IP must never exceed MAX_PER_IP live sockets.
         for (let i = 0; i < 10; i++) current.open(ip)
+        const live = current.pending().filter((c: FakePeerConnection) => c.socket.remoteAddress === ip)
+        expect(live.length).toBe(MAX_PER_IP)
+    })
+
+    it("does not give an IP inbound slots when outbound connections to it close", async () => {
+        current = makeServer(1000)
+        const ip = "192.0.2.44"
+        for (let i = 0; i < MAX_PER_IP; i++) {
+            expect(current.open(ip).destroyed).toBe(false)
+        }
+
+        // We dial the same host (a peer behind that IP) and those links close.
+        const pool = current.server.connectionPool
+        for (let i = 0; i < 3; i++) {
+            const outbound = await pool.acquire(`peer-${i}`, `tcp://${ip}:53551`)
+            expect(outbound.origin).toBe("outbound")
+            outbound.simulateClose()
+        }
+
+        // The IP's own inbound sockets are still all live, so it gets no more.
+        for (let i = 0; i < 5; i++) current.open(ip)
         const live = current.pending().filter((c: FakePeerConnection) => c.socket.remoteAddress === ip)
         expect(live.length).toBe(MAX_PER_IP)
     })

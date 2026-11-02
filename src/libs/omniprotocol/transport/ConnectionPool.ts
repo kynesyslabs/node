@@ -57,6 +57,10 @@ export class ConnectionPool extends EventEmitter {
     private static instance: ConnectionPool | null = null
     private connections: Map<string, PeerConnection[]> = new Map()
     private pendingConnections: Map<string, PeerConnection> = new Map() // Temp tracking before auth
+    // Inbound connections that hold a per-IP slot in the rate limiter, with
+    // the IP captured at accept time: remoteAddress is gone once the socket
+    // is destroyed, and outbound connections never took a slot to give back.
+    private ipSlots: Map<PeerConnection, string> = new Map()
     private config: PoolConfig
     private cleanupTimer: NodeJS.Timeout | null = null
     public rateLimiter?: RateLimiter
@@ -114,9 +118,9 @@ export class ConnectionPool extends EventEmitter {
         this.pendingConnections.set(tempId, connection)
         log.debug(`Pending connections: ${this.pendingConnections.size}`)
 
-        // Register rate limiter connection
         if (this.rateLimiter) {
             this.rateLimiter.addConnection(remoteAddress)
+            this.ipSlots.set(connection, remoteAddress)
         }
 
         // Listen for authentication to re-register under real identity
@@ -204,12 +208,21 @@ export class ConnectionPool extends EventEmitter {
             }
         }
 
-        // Notify rate limiter
-        if (this.rateLimiter && connection.socket?.remoteAddress) {
-            this.rateLimiter.removeConnection(connection.socket.remoteAddress)
-        }
+        this.releaseIpSlot(connection)
 
         this.emit("connection_closed", peerIdentity)
+    }
+
+    /**
+     * Give back the per-IP slot taken in handleInboundSocket. Safe to call
+     * on every exit path: only the first call for a counted connection
+     * decrements.
+     */
+    private releaseIpSlot(connection: PeerConnection): void {
+        const ip = this.ipSlots.get(connection)
+        if (ip === undefined) return
+        this.ipSlots.delete(connection)
+        this.rateLimiter?.removeConnection(ip)
     }
 
     /**
