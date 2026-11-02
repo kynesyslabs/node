@@ -198,7 +198,7 @@ describe("SecretaryManager secretary choice", () => {
         const manager = managers.getInstance(101, true)
         await manager.initializeShard("seed", 100)
         expect(manager.shard.secretaryKey).toBe(SECRETARY)
-        expect([...manager.unresponsiveMembers]).toEqual([])
+        expect([...manager.behindMembers]).toEqual([])
     })
 
     test("a head of the draw one block behind is passed over for the next member that holds our tip", async () => {
@@ -218,7 +218,7 @@ describe("SecretaryManager secretary choice", () => {
         const manager = managers.getInstance(101, true)
         await manager.initializeShard("seed", 100)
         expect(manager.shard.secretaryKey).toBe(SECRETARY)
-        expect(manager.unresponsiveMembers.has(SECRETARY)).toBe(false)
+        expect(manager.behindMembers.has(SECRETARY)).toBe(false)
     }, 10_000)
 
     test("a head of the draw on another block at our height is passed over too", async () => {
@@ -237,9 +237,12 @@ describe("SecretaryManager secretary choice", () => {
         shardMembers = () => [member(MEMBER), member(SECRETARY, 99), member(OUR_KEY), member(FOURTH)]
         const manager = managers.getInstance(101, true)
         await manager.initializeShard("seed", 100)
-        expect([...manager.unresponsiveMembers]).toEqual([SECRETARY])
-        await manager.receiveValidatorPhase(SECRETARY, 1)
+        expect([...manager.behindMembers]).toEqual([SECRETARY])
+        // Still asked to vote: its report may only have been in flight.
         expect(manager.unresponsiveMembers.has(SECRETARY)).toBe(false)
+        expect(manager.getWaitingMembers()).not.toContain(SECRETARY)
+        await manager.receiveValidatorPhase(SECRETARY, 1)
+        expect(manager.behindMembers.has(SECRETARY)).toBe(false)
     })
 
     test("a secretary gone offline is replaced by the next member that holds our tip", async () => {

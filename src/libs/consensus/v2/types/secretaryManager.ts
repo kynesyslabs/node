@@ -91,6 +91,10 @@ export default class SecretaryManager {
     public runSecretaryRoutine = false
     public blockTimestamp: number = null
     public unresponsiveMembers = new Set<string>()
+    // Members behind our tip at the start of the round. Only the secretary's
+    // wait reads it; the vote still goes to them, in case their report was
+    // only in flight.
+    public behindMembers = new Set<string>()
     public ended = false
     /** The peerlist committed in this round's block, dictated by the secretary. */
     public mergedPeerlist: string[] | null = null
@@ -221,6 +225,7 @@ export default class SecretaryManager {
             blockRef: lastBlockNumber + 1,
         }
         this.unresponsiveMembers = new Set<string>()
+        this.behindMembers = new Set<string>()
         this.blockTimestamp = null
         this.mergedPeerlist = null
         this.registerUnderShardBlockRef()
@@ -303,7 +308,7 @@ export default class SecretaryManager {
         // secretary would otherwise wait out a timeout for it on every block.
         // One that reports a phase leaves the set again.
         for (const member of this.shard.members) {
-            if (!this.canLead(member)) this.unresponsiveMembers.add(member.identity)
+            if (!this.canLead(member)) this.behindMembers.add(member.identity)
         }
 
         log.only("\n\n\n")
@@ -714,6 +719,7 @@ export default class SecretaryManager {
         this.shard.validationPhases[memberKey].phases[theirPhase][1] = true
         this.shard.validationPhases[memberKey].waitStatus = true
         this.unresponsiveMembers.delete(memberKey)
+        this.behindMembers.delete(memberKey)
 
         if (!this.checkIfWeAreSecretary()) {
             log.debug(
@@ -799,7 +805,7 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
-            if (this.unresponsiveMembers.has(pubKey)) {
+            if (this.unresponsiveMembers.has(pubKey) || this.behindMembers.has(pubKey)) {
                 continue
             }
             if (phase.currentPhase !== ourPhase || !phase.waitStatus) {
@@ -1048,7 +1054,7 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
-            if (this.unresponsiveMembers.has(pubKey)) {
+            if (this.unresponsiveMembers.has(pubKey) || this.behindMembers.has(pubKey)) {
                 continue
             }
             if (phase.currentPhase === ourPhase && phase.waitStatus) {
