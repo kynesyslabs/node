@@ -696,9 +696,27 @@ const mempool4 = sql("node4_db", `select count(*) from mempooltx where hash='${c
 record("recovery-observation", { legacyTxInMempool: mempool4 })
 say(`   legacy-signed transfer in node 4's mempool table: ${mempool4}`)
 check(mempool4 === "0", "the legacy-signed transfer only node 4 had admitted is gone from its mempool after the restarts")
-const tail7 = Array.from({ length: 2 }, (_, i) => common2 - 1 + i).map(n => ({ n, signers: signersOf(n).length, node4: signersOf(n).includes(NODE4_KEY) }))
+// Node 4 re-enters the committee only once a committed peerlist names it,
+// which takes a block or two after the catch-up; from then on it signs.
+const signedBy = (n: number) => ({ n, signers: signersOf(n).length, node4: signersOf(n).includes(NODE4_KEY) })
+let firstBack: number | null = null
+await until(async () => {
+    const tip = Math.min(...(await Promise.all(PORTS.slice(0, 3).map(tipOf))))
+    for (let n = tipAtCatchUp + 1; n <= tip; n++) {
+        if (signedBy(n).node4) {
+            firstBack = n
+            return tip >= n + 2
+        }
+    }
+    return false
+}, BLOCK_SECS * 10 + 60, 3000)
+const tail7 = Array.from({ length: Math.max(0, (await tipOf(PORTS[0])) - tipAtCatchUp) }, (_, i) => signedBy(tipAtCatchUp + 1 + i))
 record("signers-per-block-after-recovery", tail7)
-check(tail7.every(b => b.signers === 4 && b.node4), `blocks ${tail7[0].n} and ${tail7[1].n}, four blocks after the catch-up, carry all four signatures, node 4's again`)
+const after = firstBack === null ? [] : tail7.filter(b => b.n >= firstBack!).slice(0, 3)
+check(
+    firstBack !== null && firstBack <= tipAtCatchUp + 6 && after.length === 3 && after.every(b => b.signers === 4 && b.node4),
+    `node 4 signs again from block ${firstBack}, within six blocks of the catch-up at ${tipAtCatchUp}, and the blocks after it carry all four signatures`,
+)
 
 }
 
