@@ -73,7 +73,7 @@ RUN_DIR="${RUN_DIR:-$ROOT/testing/runs/fork-rehearsal-$(date +%Y%m%dT%H%M%S)}"
 DATA="$RUN_DIR/data"
 LOGS="$RUN_DIR/logs"
 # Checks the scenario has in each mode; fewer means it stopped early.
-EXPECTED_CHECKS_FRESH=58
+EXPECTED_CHECKS_FRESH=59
 EXPECTED_CHECKS_UPGRADE=48
 EXPECTED_CHECKS_MISMATCH_1=28
 EXPECTED_CHECKS_MISMATCH_2=26

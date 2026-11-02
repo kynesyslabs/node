@@ -641,6 +641,8 @@ check(
     plainRefused && plainLines.some(l => l.includes(`DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=${env("AGREED_DIGEST")}`)),
     "a plain restart on the corrected file is refused, and the refusal names the agreed schedule's digest",
 )
+// Recreating the container drops its log; keep the refusals and step 6's evidence.
+writeFileSync(`${RUN_DIR}/logs/node-4.pre-recreate.log`, nodeLog(4))
 // The operator sets that digest and recreates the container, as compose needs for a new variable.
 const fixedAt = new Date(Date.now() - 2000).toISOString()
 execFileSync(DOCKER, [
@@ -659,7 +661,6 @@ const reloaded = await until(
     3000,
 )
 check(reloaded, `recreated with that digest, node 4 loaded signatureDomain at ${H}`)
-check(!/FORK SCHEDULE MISMATCH/.test(nodeLog(4, fixedAt)), "and logged no schedule mismatch")
 const info4b = await until(
     async () => {
         try {
@@ -673,11 +674,12 @@ const info4b = await until(
 )
 check(info4b, `node 4 reports signatureDomain at ${H} again`)
 check(
-    (await nodeCall(PORTS[3], "getNetworkInfo")).response.forkScheduleDigest === infos[0].response.forkScheduleDigest,
+    info4b && (await nodeCall(PORTS[3], "getNetworkInfo")).response.forkScheduleDigest === infos[0].response.forkScheduleDigest,
     "and the same schedule digest as the quorum",
 )
 const tipTarget = async () => Math.min(...(await Promise.all(PORTS.slice(0, 3).map(tipOf))))
 check(await until(async () => (await tipOf(PORTS[3])) >= (await tipTarget()) - 1, 180, 3000), "node 4 catches up with the quorum")
+check(!/FORK SCHEDULE MISMATCH/.test(nodeLog(4, fixedAt)), "and, caught up with its peers, logged no schedule mismatch")
 const stateAfter = await settledStates()
 check(stateAfter !== null && new Set(stateAfter).size === 1, "balances and nonces identical on all 4 nodes again")
 const tipAtCatchUp = Math.min(...(await Promise.all(PORTS.map(tipOf))))
