@@ -169,9 +169,10 @@ check(
 )
 const tipAtMove = await tipOf(1)
 check(tipAtMove >= 0 && tipAtMove + 50 < H, `the edit lands at tip ${tipAtMove}, while both ${H} and ${MINORITY_H} still lie beyond tip + 50`)
+// Taken before the restart: the boot check logs within a second of the start.
+const movedAt = new Date(Date.now() - 2000).toISOString()
 for (const n of MINORITY) writeSchedule(n, H, MINORITY_H)
 for (const n of MINORITY) restartNode(n)
-const movedAt = new Date().toISOString()
 const movedBack = await until(async () => (await Promise.all(MINORITY.map(tipOf))).every(t => t >= tipAtMove), 180, 3000)
 check(
     movedBack &&
@@ -289,9 +290,9 @@ const tipAtEdit = await tipOf(1)
 // Below H, so it lands inside tip + 50 even where the chain stopped as the window opened.
 const badHeight = H - 2
 check(badHeight > tipAtEdit && badHeight <= tipAtEdit + 50, `height ${badHeight} lies between tip ${tipAtEdit} and tip + 50`)
+const editAt = new Date(Date.now() - 2000).toISOString()
 writeSchedule(edited, H, badHeight)
 restartNode(edited)
-const editAt = new Date().toISOString()
 const refused = await until(() => nodeLog(edited, editAt).includes("[GENESIS] Refusing to boot: fork schedule in data/genesis.json differs"), 120, 3000)
 const refusal = linesWith(nodeLog(edited, editAt), "Refusing to boot").slice(0, 2).map(l => l.slice(0, 700))
 record("refusal", refusal)
@@ -304,9 +305,9 @@ check(acceptedDigest(edited) === digestBefore, `node ${edited}'s accepted schedu
 
 // ---- 5 ---------------------------------------------------------------------
 step("the operators put the agreed schedule back")
+const fixedAt = new Date(Date.now() - 2000).toISOString()
 for (const n of MINORITY) writeSchedule(n, H)
 for (const n of MINORITY) restartNode(n)
-const fixedAt = new Date().toISOString()
 const fixedTip = await tipOf(1)
 const rejoined = await until(
     async () => (await Promise.all(MINORITY.map(tipOf))).every(t => t >= fixedTip),
