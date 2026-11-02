@@ -282,9 +282,16 @@ export default class SecretaryManager {
             )
         }
 
-        // The secretary is the first member: the first online pinned
-        // identity, or the head of the deterministic draw when no pin is online
-        this.shard.secretaryKey = this.shard.members[0].identity
+        // The secretary is the first member that holds our tip: the first
+        // online pinned identity, or the head of the deterministic draw. A
+        // member behind the tip has no manager for this block and refuses
+        // every phase, and with the seed unchanged on each retry it would be
+        // drawn again, so the chain would stand until it caught up.
+        const leader =
+            this.shard.members.find(
+                m => m.identity === this.ourKey || validMembers.includes(m),
+            ) ?? this.shard.members[0]
+        this.shard.secretaryKey = leader.identity
 
         log.only("\n\n\n")
         log.only("INITIALIZED SHARD:")

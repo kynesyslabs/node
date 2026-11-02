@@ -46,11 +46,12 @@ jest.mock("../routines/getCommonValidatorSeed", () => ({
     default: async () => ({ commonValidatorSeed: "seed", lastBlockNumber: 100 }),
 }))
 
-const member = (identity: string) => ({
+const member = (identity: string, block = 100) => ({
     identity,
     connection: { string: `http://${identity.slice(2, 6)}` },
-    sync: { block: 100, block_hash: "hash-100" },
+    sync: { block, block_hash: `hash-${block}` },
 })
+let shardMembers = () => [member(SECRETARY), member(OUR_KEY), member(MEMBER)]
 
 const mergeCalls: unknown[][] = []
 const validateCalls: unknown[][] = []
@@ -74,7 +75,7 @@ jest.mock("../routines/getShard", () => ({
     __esModule: true,
     default: async (...args: unknown[]) => {
         shardCalls.push(args)
-        return [member(SECRETARY), member(OUR_KEY), member(MEMBER)]
+        return shardMembers()
     },
     getCommitteeFloor: () => 3,
     getBoundCommittee: async (...args: unknown[]) => {
@@ -95,6 +96,7 @@ beforeEach(() => {
     mergeCalls.length = 0
     validateCalls.length = 0
     committee = [SECRETARY, OUR_KEY, MEMBER, "0x" + "33".repeat(32)]
+    shardMembers = () => [member(SECRETARY), member(OUR_KEY), member(MEMBER)]
     sharedState.lastBlockNumber = 101
     sharedState.lastBlockHash = "hash-101"
     sharedState.forkConfig.committeeBinding.activationHeight = 0
@@ -178,5 +180,41 @@ describe("SecretaryManager peerlist voters", () => {
         await manager.ensureMergedPeerlist()
 
         expect(mergeCalls).toEqual([[101, [SECRETARY, OUR_KEY, MEMBER]]])
+    })
+})
+
+describe("SecretaryManager secretary choice", () => {
+    const FOURTH = "0x" + "33".repeat(32)
+
+    beforeEach(() => {
+        sharedState.lastBlockNumber = 100
+        sharedState.lastBlockHash = "hash-100"
+    })
+
+    test("the head of the draw is secretary while it holds our tip", async () => {
+        shardMembers = () => [member(SECRETARY), member(MEMBER), member(OUR_KEY), member(FOURTH)]
+        const manager = managers.getInstance(101, true)
+        await manager.initializeShard("seed", 100)
+        expect(manager.shard.secretaryKey).toBe(SECRETARY)
+    })
+
+    test("a head of the draw one block behind is passed over for the next member that holds our tip", async () => {
+        shardMembers = () => [member(SECRETARY, 99), member(MEMBER), member(OUR_KEY), member(FOURTH)]
+        const manager = managers.getInstance(101, true)
+        await manager.initializeShard("seed", 100)
+        expect(manager.shard.secretaryKey).toBe(MEMBER)
+        expect(manager.shard.members.map(m => m.identity)).toContain(SECRETARY)
+    })
+
+    test("a head of the draw on another block at our height is passed over too", async () => {
+        shardMembers = () => [
+            { ...member(SECRETARY), sync: { block: 100, block_hash: "other-100" } },
+            member(MEMBER),
+            member(OUR_KEY),
+            member(FOURTH),
+        ]
+        const manager = managers.getInstance(101, true)
+        await manager.initializeShard("seed", 100)
+        expect(manager.shard.secretaryKey).toBe(MEMBER)
     })
 })
