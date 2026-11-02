@@ -211,9 +211,17 @@ describe("leaving a differing validator out of the shard", () => {
         expect(intervalsCleared).toBe(1)
     })
 
-    it("leaves nobody out outside the window", async () => {
+    it("does not start leaving anyone out outside the window", async () => {
+        await applyRoundOutcome(300, outsideWindow, odd)
+        expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
+    })
+
+    it("keeps it out past the window while it still differs, as it still abstains", async () => {
+        const past: CheckPlan = { due: true, inWindow: false, nearest: null }
         await applyRoundOutcome(960, inWindow, odd)
-        await applyRoundOutcome(1100, outsideWindow, odd)
+        await applyRoundOutcome(1100, past, odd)
+        expect([...getSharedState.forkScheduleDifferingPeers]).toEqual(["0xdd"])
+        await applyRoundOutcome(1110, past, { mismatched: [], mismatchedIdentities: [], agreed: 3 })
         expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
     })
 

@@ -160,10 +160,12 @@ async function recheckOnce(): Promise<void> {
  * inconclusive and changes nothing: clearing on silence would let a node whose
  * peers are all unreachable resume consensus on a schedule it never confirmed.
  *
- * A node in the majority leaves the differing validators out of its shard
- * while the round is inside the window: they abstain, so waiting for them
- * would only stretch every round to its timeouts. Outside the window, under
- * `warn`, or while this node abstains itself, nobody is left out.
+ * A node in the majority leaves the differing validators out of its shard:
+ * they abstain, so waiting for them would only stretch every round to its
+ * timeouts. The set is started only inside the window, but kept past it while
+ * peers still differ, because an abstaining node stays out until its schedule
+ * agrees, after the fork height too. Under `warn`, or while this node abstains
+ * itself, nobody is left out.
  */
 export async function applyRoundOutcome(
     tip: number,
@@ -182,11 +184,14 @@ export async function applyRoundOutcome(
     if (plan.inWindow) windowCheckedFor = plan.nearest
     setForkScheduleMismatch(differing > 0)
 
+    const before = getSharedState.forkScheduleDifferingPeers
     const leaveOut =
-        policy === "abstain" && plan.inWindow && differing > 0 && differing <= outcome.agreed
+        policy === "abstain" &&
+        (plan.inWindow || before.size > 0) &&
+        differing > 0 &&
+        differing <= outcome.agreed
             ? (outcome.mismatchedIdentities ?? []).map(id => id.toLowerCase())
             : []
-    const before = getSharedState.forkScheduleDifferingPeers
     if (leaveOut.length !== before.size || leaveOut.some(id => !before.has(id))) {
         getSharedState.forkScheduleDifferingPeers = new Set(leaveOut)
         if (leaveOut.length > 0) {
