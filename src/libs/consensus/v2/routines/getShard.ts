@@ -366,6 +366,8 @@ export default async function getShard(
         }
         const online = onlineByIdentity.get(identity)
         if (!online) continue
+        // Abstaining on a differing fork schedule: as good as offline.
+        if (getSharedState.forkScheduleDifferingPeers?.has(identity.toLowerCase())) continue
         // A peer more than one block behind the tip cannot validate the
         // next block. One block behind is usually a status report in flight.
         const knownHeight = Math.max(
