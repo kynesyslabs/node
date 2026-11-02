@@ -89,6 +89,7 @@ describe("unpinnedWarning", () => {
     it("is quiet with a pin or an explicit opt-out", () => {
         expect(unpinnedWarning("ab".repeat(32), {})).toBeNull()
         expect(unpinnedWarning("", { DEMOS_ALLOW_UNPINNED_GENESIS: "true" })).toBeNull()
+        expect(unpinnedWarning("", {}, "cd".repeat(32))).toBeNull()
     })
 })
 

@@ -75,8 +75,10 @@ export function pinRequirementProblem(
 export function unpinnedWarning(
     pin: string,
     env: Record<string, string | undefined>,
+    blockPin = "",
 ): string | null {
-    if (pin !== "") return null
+    // A pinned block 0 already refuses any other genesis.
+    if (pin !== "" || blockPin !== "") return null
     if (isTrue(env.DEMOS_ALLOW_UNPINNED_GENESIS)) return null
     return (
         "EXPECTED_GENESIS_HASH is not set: this node accepts whatever genesis data/genesis.json " +

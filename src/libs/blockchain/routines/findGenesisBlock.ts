@@ -150,7 +150,7 @@ export default async function findGenesisBlock() {
     )
     const pinProblem = pinRequirementProblem(pin, process.env)
     if (pinProblem) refuse([pinProblem])
-    const unpinned = unpinnedWarning(pin, process.env)
+    const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
     log.info("[GENESIS] Looking for the genesis block...")

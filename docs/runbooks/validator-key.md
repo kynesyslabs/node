@@ -79,8 +79,12 @@ reopen such a round after a restart. Each restart sits out about 5 seconds of
 rounds.
 
 The node will not start without two NTP readings in a row that agree within
-2 seconds, closer than the 5-second lead, so one wrong reading cannot pull the
-floor back over a signed round. A server that is not synchronised answers 1900, which is
+2 seconds, and the second one sets the clock. Agreement bounds the error, it
+does not remove it: a reading up to 2 seconds behind puts the floor up to 2
+seconds lower. A round still in the files above stays refused whatever the
+clock says; a round missing from them is covered only when the restart took
+longer than that error, which a normal boot (database, peers, two NTP
+readings) does. A server that is not synchronised answers 1900, which is
 rejected. When every server fails, the boot stops with `refusing to start
 without a trusted clock`. Fix the host's outbound NTP (UDP 123) and start
 again.
