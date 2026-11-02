@@ -20,7 +20,7 @@ via the `proxy` compose profile (opt-in — no impact when off).
 | `https://${PROXY_DOMAIN}/mcp/` | MCP `node:3001` | basic-auth (rejects all by default) |
 | `https://${PROXY_DOMAIN}/metrics` | Node metrics `node:9090` | basic-auth |
 | `https://${PROXY_DOMAIN}/grafana/` | Grafana `grafana:3000` | Grafana login |
-| `https://${PROXY_DOMAIN}/prometheus/` | Prometheus `prometheus:9090` | none (read-only UI) |
+| `https://${PROXY_DOMAIN}/prometheus/` | Prometheus `prometheus:9090` | basic-auth (same credential as `/metrics`) |
 
 OmniProtocol (`:53551`) stays direct — its custom-fingerprint TLS cannot
 survive proxy termination.
@@ -87,8 +87,8 @@ curl -fsS "https://${PROXY_DOMAIN}/health" | jq
 # Grafana
 curl -fsS -o /dev/null -w "%{http_code}\n" "https://${PROXY_DOMAIN}/grafana/api/health"
 
-# Prometheus
-curl -fsS "https://${PROXY_DOMAIN}/prometheus/-/healthy"
+# Prometheus (basic-auth, same credential as /metrics)
+curl -u metrics:YOUR_PASSWORD_HERE -fsS "https://${PROXY_DOMAIN}/prometheus/-/healthy"
 
 # Metrics (basic-auth)
 curl -u metrics:YOUR_PASSWORD_HERE -fsS "https://${PROXY_DOMAIN}/metrics" | head -20

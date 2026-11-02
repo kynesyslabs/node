@@ -173,7 +173,7 @@ These ports should NOT be exposed publicly:
 | 5432 | Postgres — internal compose network only |
 | 9090 | Node metrics — published on loopback only (`METRICS_BIND`); a monitoring host off this machine needs a private interface or a tunnel |
 | 9091 | Prometheus — keep behind your firewall or VPN |
-| 3000 | Grafana — only public if you want a public dashboard |
+| 3000 | Grafana — published on `MONITORING_BIND` (loopback by default); only public if you want a public dashboard |
 
 `ufw` example for an Ubuntu VPS:
 
