@@ -22,6 +22,8 @@
 # NODE_MODULES_FROM  an installed node_modules to layer onto the bun image instead of
 #                    running testing/devnet/Dockerfile (apt + bun install need the network)
 # NODE_MEM / PG_MEM  per-container memory caps (default 4g / 1g)
+# GOSSIP_ENABLED     passed to every node when set; false for an image without the gossip
+#                    sidecar (the NODE_MODULES_FROM image has no Node runtime for it)
 # IMAGE_ONLY=1       build the image and stop
 # KEEP=1             leave the network running afterwards, for debugging
 # RUN_DIR            where genesis copies, logs and raw responses are kept
@@ -287,6 +289,7 @@ step "compose override: unique names, memory caps, no notary container"
         [[ "$i" == 1 ]] || printf '      node-1:\n        condition: service_started\n'
         echo "    environment:"
         echo "      - TLSNOTARY_ENABLED=false"
+        [[ -z "${GOSSIP_ENABLED:-}" ]] || echo "      - GOSSIP_ENABLED=$GOSSIP_ENABLED"
         [[ "$i" == 4 && "$UPGRADE_PATH" != 1 && "$MISMATCH" == 0 ]] && echo "      - DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=$ACCEPT_DIGEST"
         # The odd validators are later put back on the agreed schedule inside the window.
         minority "$i" && echo "      - DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=$ACCEPT_DIGEST"
