@@ -207,7 +207,9 @@ for i in 1 2 3 4; do
     validators=$(jq --arg a "$(pub node$i)" --arg u "$node_url" \
         '. + [{address: $a, status: "2", connection_url: $u, staked_amount: "1000000000000000000", first_seen: 0, valid_at: 0}]' <<<"$validators")
     balances=$(jq --arg a "$(pub node$i)" '. + [[$a, "1000000000000000000"]]' <<<"$balances")
-    peerlist=$(jq --arg a "$(pub node$i)" --arg u "$node_url" '. + {($a): $u}' <<<"$peerlist")
+    # Node 1 is the only anchor, as in the quorum drills: a node exits when a listed
+    # peer does not answer, so a list naming all four could never start cold.
+    [[ "$i" != 1 ]] || peerlist=$(jq --arg a "$(pub node$i)" --arg u "$node_url" '. + {($a): $u}' <<<"$peerlist")
 done
 for who in alice carol; do
     balances=$(jq --arg a "$(pub $who)" '. + [[$a, "1000000000000000000"]]' <<<"$balances")
