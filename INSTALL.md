@@ -105,6 +105,7 @@ When the stack is healthy:
 | `RPC_PORT` | `53550` | Host-mapped port for the node RPC. Change if 53550 is taken. |
 | `EXPOSED_URL` | `http://localhost:53550` | Public URL advertised to peers. Set to your public IP/domain when running on a VPS. |
 | `EXPECTED_GENESIS_HASH` | _(empty)_ | The network's published genesis hash. Required in the image (`NODE_ENV=production`) unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; see "Pin the network's genesis" below. |
+| `EXPECTED_GENESIS_BLOCK_HASH` | _(empty)_ | The network's published block 0 hash. Optional; when set, the node refuses any other block 0. |
 | `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | `demosuser` / `demospassword` / `demos` | Postgres credentials. Change `PG_PASSWORD` if you're paranoid; it never leaves the compose network. |
 | `METRICS_ENABLED` / `METRICS_PORT` | `true` / `9090` | Prometheus scrape endpoint on the node. |
 | `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password. Change this. |
@@ -166,9 +167,12 @@ The image runs with `NODE_ENV=production`, and a production node refuses to star
 ```env
 # In .env
 EXPECTED_GENESIS_HASH=<published genesis hash>
+EXPECTED_GENESIS_BLOCK_HASH=<published block 0 hash>
 ```
 
-At every start the node checks it before it signs anything: on an empty database against `data/genesis.json` (and the snapshot that genesis declares), before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; mainnet validators never set it.
+At every start the node checks it before it signs anything: on an empty database against `data/genesis.json` (and the snapshot that genesis declares), before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; mainnet validators never set it. A node started without a pin and without that opt-out (a bare-metal `./run` install runs as development, so nothing refuses it) logs a `[GENESIS] EXPECTED_GENESIS_HASH is not set` warning at every boot.
+
+The genesis hash leaves out the validators' `connection_url` and the order of the keys in the file, and block 0 does not, so two files with the same genesis hash can still build different blocks 0. `EXPECTED_GENESIS_BLOCK_HASH` closes that: an empty database refuses to write any other block 0, and an existing one refuses to boot on it.
 
 On mainnet, mount the published genesis file and snapshot read-only instead of using the files bundled in the image, which belong to the testnet:
 

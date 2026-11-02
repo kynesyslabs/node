@@ -7,6 +7,9 @@
  * Prints:
  *   - genesisDataHash: the value validators set as EXPECTED_GENESIS_HASH, and
  *     the one each node reports through getGenesisDataHash;
+ *   - genesisBlockHash: the hash of block 0 a node builds from this file, the
+ *     value validators set as EXPECTED_GENESIS_BLOCK_HASH. It also depends on
+ *     how the file orders its keys, which the data hash leaves out;
  *   - forkScheduleDigest: what each node reports in getNetworkInfo once it has
  *     loaded this genesis;
  *   - snapshotManifestSha256: the value genesis must carry as
@@ -21,6 +24,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { freshGenesisProblems } from "src/libs/blockchain/genesis/genesisPin"
 import { hashGenesisData } from "src/libs/blockchain/genesis/normalizeGenesisForHash"
+import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
 import { forkScheduleDigest } from "src/libs/peer/routines/forkScheduleAgreement"
 import { loadForkConfigFromGenesis } from "src/forks"
 import { getSharedState } from "src/utilities/sharedState"
@@ -73,6 +77,12 @@ function main(): number {
         problems.push((e as Error).message)
     }
     const genesisDataHash = hashGenesisData(genesis)
+    let genesisBlockHash: string | null = null
+    try {
+        genesisBlockHash = buildGenesisBlock(genesis).genesisBlock.hash
+    } catch (e) {
+        problems.push(`block 0 could not be built: ${(e as Error).message}`)
+    }
     try {
         problems.push(
             ...freshGenesisProblems({
@@ -87,6 +97,7 @@ function main(): number {
     }
     const result = {
         genesisDataHash,
+        genesisBlockHash,
         forkScheduleDigest: forkScheduleDigest(
             getSharedState.forkConfig as unknown as Parameters<typeof forkScheduleDigest>[0],
             getSharedState.chainId,
@@ -100,6 +111,7 @@ function main(): number {
         console.log(JSON.stringify(result, null, 2))
     } else {
         console.log(`EXPECTED_GENESIS_HASH=${result.genesisDataHash}`)
+        console.log(`EXPECTED_GENESIS_BLOCK_HASH=${result.genesisBlockHash ?? "(block 0 could not be built)"}`)
         console.log(`fork schedule digest: ${result.forkScheduleDigest} (chain id ${result.chainId})`)
         console.log(`snapshot manifest sha256: ${result.snapshotManifestSha256 ?? "(no snapshot given)"}`)
         for (const p of problems) console.log(`problem: ${p}`)

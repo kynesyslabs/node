@@ -31,12 +31,15 @@ export class GenesisRefusal extends Error {
  * value that is set but cannot be a sha256: a pin that never matches would
  * only refuse later, with a less useful message.
  */
-export function parseGenesisPin(raw: string | undefined | null): string {
+export function parseGenesisPin(
+    raw: string | undefined | null,
+    name = "EXPECTED_GENESIS_HASH",
+): string {
     const value = (raw ?? "").trim().replace(/^0x/i, "").toLowerCase()
     if (value === "") return ""
     if (!SHA256_HEX.test(value)) {
         throw new GenesisRefusal(
-            `EXPECTED_GENESIS_HASH must be 64 hex characters (sha256), got ${JSON.stringify(
+            `${name} must be 64 hex characters (sha256), got ${JSON.stringify(
                 (raw ?? "").slice(0, 80),
             )}`,
         )
@@ -62,6 +65,39 @@ export function pinRequirementProblem(
         "set it to the published genesis hash, or set DEMOS_ALLOW_UNPINNED_GENESIS=true " +
         "on a network that has none"
     )
+}
+
+/**
+ * The warning for a node that runs without a pin and was not told that is
+ * intended. Outside production nothing refuses such a node (a bare-metal
+ * install runs as development), so the operator must at least see it.
+ */
+export function unpinnedWarning(
+    pin: string,
+    env: Record<string, string | undefined>,
+): string | null {
+    if (pin !== "") return null
+    if (isTrue(env.DEMOS_ALLOW_UNPINNED_GENESIS)) return null
+    return (
+        "EXPECTED_GENESIS_HASH is not set: this node accepts whatever genesis data/genesis.json " +
+        "holds and could start a chain of its own. Set it to the published genesis hash to join " +
+        "a network, or set DEMOS_ALLOW_UNPINNED_GENESIS=true to silence this on a local network"
+    )
+}
+
+/**
+ * The problem with a block 0 whose hash is not the pinned one, or null. Run on
+ * the block a fresh node is about to write and on the block a restarted node
+ * already holds.
+ */
+export function blockPinProblem(blockHash: string, blockPin: string, fresh: boolean): string | null {
+    if (blockPin === "") return null
+    const hash = blockHash.trim().replace(/^0x/i, "").toLowerCase()
+    if (hash === blockPin) return null
+    return fresh
+        ? `block 0 built from data/genesis.json hashes to ${hash}, EXPECTED_GENESIS_BLOCK_HASH is ${blockPin}`
+        : `block 0 in this database hashes to ${hash}, EXPECTED_GENESIS_BLOCK_HASH is ${blockPin}; ` +
+              "this database belongs to another chain"
 }
 
 /** The manifest hash a genesis declares, or null when it declares no snapshot. */

@@ -8,12 +8,14 @@ import { describe, it, expect } from "bun:test"
 import { readFileSync } from "node:fs"
 import {
     GenesisRefusal,
+    blockPinProblem,
     declaredManifestHash,
     freshGenesisProblems,
     parseGenesisPin,
     parseStoredGenesisData,
     pinRequirementProblem,
     restartGenesisProblems,
+    unpinnedWarning,
 } from "src/libs/blockchain/genesis/genesisPin"
 import { hashGenesisData } from "src/libs/blockchain/genesis/normalizeGenesisForHash"
 
@@ -47,6 +49,46 @@ describe("parseGenesisPin", () => {
         expect(() => parseGenesisPin(hash.slice(1))).toThrow(GenesisRefusal)
         expect(() => parseGenesisPin(`${hash}00`)).toThrow(GenesisRefusal)
         expect(() => parseGenesisPin("z".repeat(64))).toThrow(GenesisRefusal)
+    })
+
+    it("names the variable it parsed in the refusal", () => {
+        expect(() => parseGenesisPin("abc", "EXPECTED_GENESIS_BLOCK_HASH")).toThrow(
+            /^EXPECTED_GENESIS_BLOCK_HASH must be/,
+        )
+    })
+})
+
+describe("blockPinProblem", () => {
+    const hash = "cd".repeat(32)
+
+    it("checks nothing without a block pin", () => {
+        expect(blockPinProblem("ef".repeat(32), "", true)).toBeNull()
+    })
+
+    it("accepts the pinned block in the forms hashes are stored", () => {
+        expect(blockPinProblem(hash, hash, true)).toBeNull()
+        expect(blockPinProblem(`0x${hash.toUpperCase()}`, hash, false)).toBeNull()
+    })
+
+    it("refuses another block 0, fresh or stored", () => {
+        expect(blockPinProblem("ef".repeat(32), hash, true)).toContain(
+            "built from data/genesis.json",
+        )
+        expect(blockPinProblem("ef".repeat(32), hash, false)).toContain(
+            "belongs to another chain",
+        )
+    })
+})
+
+describe("unpinnedWarning", () => {
+    it("warns a node with no pin that did not opt out, whatever NODE_ENV says", () => {
+        expect(unpinnedWarning("", {})).toContain("EXPECTED_GENESIS_HASH is not set")
+        expect(unpinnedWarning("", { NODE_ENV: "development" })).toContain("DEMOS_ALLOW_UNPINNED_GENESIS")
+    })
+
+    it("is quiet with a pin or an explicit opt-out", () => {
+        expect(unpinnedWarning("ab".repeat(32), {})).toBeNull()
+        expect(unpinnedWarning("", { DEMOS_ALLOW_UNPINNED_GENESIS: "true" })).toBeNull()
     })
 })
 
