@@ -714,9 +714,11 @@ await until(async () => {
 const tail7 = Array.from({ length: Math.max(0, (await tipOf(PORTS[0])) - tipAtCatchUp) }, (_, i) => signedBy(tipAtCatchUp + 1 + i))
 record("signers-per-block-after-recovery", tail7)
 const after = firstBack === null ? [] : tail7.filter(b => b.n >= firstBack!).slice(0, 3)
+// A block commits once a quorum of precommits is in, so it can carry three
+// signatures while all four validators took part; node 4 must be among them.
 check(
-    firstBack !== null && firstBack <= tipAtCatchUp + 6 && after.length === 3 && after.every(b => b.signers === 4 && b.node4),
-    `node 4 signs again from block ${firstBack}, within six blocks of the catch-up at ${tipAtCatchUp}, and the blocks after it carry all four signatures`,
+    firstBack !== null && firstBack <= tipAtCatchUp + 6 && after.length === 3 && after.every(b => b.signers >= 3 && b.node4),
+    `node 4 signs again from block ${firstBack}, within six blocks of the catch-up at ${tipAtCatchUp}, and signs the three blocks from there`,
 )
 
 }
