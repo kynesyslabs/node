@@ -14,6 +14,7 @@ SUITE_FILES=(
     scripts/launch-go-no-go.test.ts
     scripts/launch-go-no-go.snapshot.test.ts
     scripts/validator-prove-signing.test.ts
+    src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
