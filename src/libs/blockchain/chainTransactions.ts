@@ -93,6 +93,10 @@ export async function getTxByHash(hash: string): Promise<Transaction | null> {
  * caller's height bound (read before both) still makes true, rather than
  * pending after it is in a block.
  */
+// Attrs of a synced block come from a peer; bound what is echoed to clients.
+const MAX_CODE_LENGTH = 64
+const MAX_MESSAGE_LENGTH = 512
+
 export async function getTransactionStatus(hash: string): Promise<TxStatus> {
     const tx = await getTxByHash(hash)
     if (tx) {
@@ -103,8 +107,8 @@ export async function getTransactionStatus(hash: string): Promise<TxStatus> {
             return {
                 state: "failed",
                 blockNumber,
-                ...(typeof code === "string" ? { code } : {}),
-                ...(typeof message === "string" ? { message } : {}),
+                ...(typeof code === "string" ? { code: code.slice(0, MAX_CODE_LENGTH) } : {}),
+                ...(typeof message === "string" ? { message: message.slice(0, MAX_MESSAGE_LENGTH) } : {}),
             }
         }
         return { state: "included", blockNumber }

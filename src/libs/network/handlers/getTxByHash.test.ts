@@ -108,8 +108,17 @@ describe("getTransactionHistory", () => {
         expect(getTransactionHistory).toHaveBeenCalledWith("0xa", "native", 20, 10)
     })
 
+    it("keeps the old meaning of 0 and numeric strings", async () => {
+        await history({ address: "0xa", type: "all", start: "5", limit: "10" })
+        await history({ address: "0xa", type: "all", limit: 0 })
+        expect(getTransactionHistory.mock.calls).toEqual([
+            ["0xa", "all", 5, 10],
+            ["0xa", "all", 0, 100],
+        ])
+    })
+
     it("refuses a negative, fractional or non-numeric start or limit", async () => {
-        for (const bad of [{ start: -1 }, { limit: 0 }, { limit: 2.5 }, { start: "5" }, { limit: "all" }]) {
+        for (const bad of [{ start: -1 }, { limit: -1 }, { limit: 2.5 }, { start: "-5" }, { limit: "all" }]) {
             const reply = await history({ address: "0xa", type: "all", ...bad })
             expect(reply.result).toBe(400)
         }

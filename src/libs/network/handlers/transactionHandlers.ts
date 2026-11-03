@@ -8,6 +8,13 @@ import type { NodeCallHandler } from "./types"
 
 const HISTORY_MAX_LIMIT = 100
 
+/** Missing → undefined, a non-negative integer (or its digits) → the number, anything else → -1. */
+function toPageInt(value: unknown): number | undefined {
+    if (value === undefined || value === null) return undefined
+    const n = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value
+    return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : -1
+}
+
 export const transactionHandlers: Record<string, NodeCallHandler> = {
     getTransactions: async (data, _response) => {
         return await getTransactions(data)
@@ -69,14 +76,12 @@ export const transactionHandlers: Record<string, NodeCallHandler> = {
             response.response = "No address or type specified"
             return response
         }
-        const start = data.start ?? 0
-        const limit = data.limit ?? HISTORY_MAX_LIMIT
-        if (
-            !Number.isSafeInteger(start) || start < 0 ||
-            !Number.isSafeInteger(limit) || limit < 1
-        ) {
+        // 0, missing and numeric strings keep their old meaning (`|| 100`).
+        const start = toPageInt(data.start) ?? 0
+        const limit = toPageInt(data.limit) || HISTORY_MAX_LIMIT
+        if (start < 0 || limit < 0) {
             response.result = 400
-            response.response = "start must be a non-negative integer and limit a positive integer"
+            response.response = "start and limit must be non-negative integers"
             return response
         }
         // Unbounded pages let one caller make the node read and serialise

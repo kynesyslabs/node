@@ -13,9 +13,11 @@ interface InterfaceGetTransactionStatusData {
  * Returns the lifecycle state of a transaction by hash (see TxStatus), with
  * `checkedThroughBlock`: the height this node had searched through.
  *
- * A hash not found is answered 404, or 503 when this node knows it is still
- * syncing, so "not in this chain through H" is never confused with "this
- * node is behind"; a failed lookup is 500. The state stays in the body in
+ * A hash not found is answered 404, or 503 when this node knows it is two or
+ * more blocks behind, so "not in this chain through H" is never confused
+ * with "this node is behind"; a failed lookup is 500. `inSyncLoop` is not
+ * used: every consensus round starts with a sync pass, so a node at the tip
+ * would flap to 503. The state stays in the body in
  * every case, because SDK clients read only the body and keep polling on
  * "unknown".
  */
@@ -45,7 +47,7 @@ export default async function getTransactionStatus(
                 require_reply: false,
             }
         }
-        const synced = getSharedState.syncStatus && !getSharedState.inSyncLoop
+        const synced = getSharedState.syncStatus
         return {
             result: synced ? 404 : 503,
             response: { state: "unknown", checkedThroughBlock },

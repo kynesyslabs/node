@@ -14,7 +14,9 @@ export interface L2PSHashUpdatePayload {
  *   - "unknown"  — not found anywhere
  *
  * "included" keeps its name for SDKs that wait on it; it is never returned
- * for a transaction that did not execute.
+ * for a transaction that did not execute. `code` and `message` are advisory:
+ * the block does not commit to them, and a node that synced the block keeps
+ * what the forger served for failures inside apply.
  */
 export type TxStatus = {
     state: "pending" | "included" | "failed" | "unknown"

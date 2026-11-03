@@ -68,16 +68,17 @@ describe("getTransactionStatus", () => {
         expect(reply.extra).toEqual({ reason: "not_found" })
     })
 
-    it("answers 503 instead while the node is still syncing", async () => {
-        sharedState.inSyncLoop = true
+    it("answers 503 instead while the node is behind", async () => {
+        sharedState.syncStatus = false
         const reply = await getTransactionStatusCall({ hash: HASH })
         expect(reply.result).toBe(503)
         expect(reply.response).toEqual({ state: "unknown", checkedThroughBlock: 4242 })
         expect(reply.extra).toEqual({ reason: "node_not_synced" })
+    })
 
-        sharedState.inSyncLoop = false
-        sharedState.syncStatus = false
-        expect((await getTransactionStatusCall({ hash: HASH })).result).toBe(503)
+    it("keeps answering 404 during the sync pass every round starts with", async () => {
+        sharedState.inSyncLoop = true
+        expect((await getTransactionStatusCall({ hash: HASH })).result).toBe(404)
     })
 
     it("still answers a found transaction while syncing", async () => {
