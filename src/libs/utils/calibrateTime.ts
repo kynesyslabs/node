@@ -16,6 +16,11 @@ const MAX_CONSECUTIVE_REJECTIONS = 3
 // ntp-client turns into 1900. No real reading is older than this (2024-01-01).
 const MIN_PLAUSIBLE_TIME_S = 1_704_067_200
 const BOOT_ATTEMPTS = 5
+// The restart floor sits COSIGN_TIMESTAMP_MAX_LEAD_SECONDS ahead of network
+// time. Two boot readings must agree more closely than that lead: a window as
+// wide as the lead would let a reading that far behind put the floor at or
+// below rounds an earlier run already signed.
+export const BOOT_AGREEMENT_S = 2
 
 let recalibrationTimer: NodeJS.Timeout | null = null
 let consecutiveRejections = 0
@@ -43,7 +48,7 @@ export async function getBootTimestampCorrection(): Promise<number> {
         try {
             const first = await getMeasuredTimeDelta()
             const second = await getMeasuredTimeDelta()
-            if (Math.abs(first - second) <= MAX_CORRECTION_STEP_S) {
+            if (Math.abs(first - second) <= BOOT_AGREEMENT_S) {
                 getSharedState.timestampCorrection = second
                 return second
             }

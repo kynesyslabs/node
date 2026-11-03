@@ -132,6 +132,18 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
         })
     }
 
+    // Peer.connect() probes liveness with this method. It is not a nodeCall
+    // message, so without this branch manageNodeCall answers 404 and every
+    // quiet Omni peer gets marked offline. Same answer as the HTTP route.
+    if (request.method === "ping") {
+        return encodeNodeCallResponse({
+            status: 200,
+            value: "pong",
+            requireReply: false,
+            extra: null,
+        })
+    }
+
     // REVIEW: Handle top-level RPC methods that are NOT nodeCall messages
     // These are routed to ServerHandlers directly, not manageNodeCall
     // Format: { method: "mempool", params: [{ data: [...] }] }

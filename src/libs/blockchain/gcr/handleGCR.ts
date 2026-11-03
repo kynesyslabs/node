@@ -51,8 +51,17 @@ import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
-import { In, type EntityManager } from "typeorm"
-import { Mutex } from "async-mutex"
+import {
+    FindOperator,
+    In,
+    type EntityManager,
+    type FindManyOptions,
+    type Repository,
+} from "typeorm"
+import { Validators } from "@/model/entities/Validators"
+import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
+import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
+import { gcrWriteMutex } from "./gcrWriteMutex"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
@@ -132,8 +141,13 @@ export interface GCRResult {
     storageProgram?: GCRStorageProgram
     tlsNotary?: GCRTLSNotary
     sideEffect?: () => Promise<void>
+    /** A database write that belongs in the transaction the edits commit in. */
+    deferredWrite?: DeferredWrite
     response?: any
 }
+
+/** A write issued through the entity manager of the committing transaction. */
+export type DeferredWrite = (em: EntityManager) => Promise<void>
 
 export interface GCRTLSNotaryResult extends GCRResult {
     tlsNotary: GCRTLSNotary | null
@@ -145,6 +159,138 @@ export interface GCREntityCaches {
     tlsNotaries: Map<string, GCRTLSNotary | null>
     atomicWorks: Map<string, WorkRecord | null>
     resourceSlots: Map<string, SlotRecord | null>
+    /**
+     * Validator rows read or written by this set, so a later stake edit in
+     * the same block sees an earlier one. The rows themselves are written
+     * as deferred writes.
+     */
+    validators?: Map<string, Validators | null>
+    /** Proposal rows staged by this set, by proposal id. */
+    networkUpgrades?: Map<string, NetworkUpgrade>
+    /** Vote rows staged by this set, by proposal id and voter. */
+    networkUpgradeVotes?: Map<string, NetworkUpgradeVote>
+    /** ZK commitment hashes claimed by this set. */
+    zkCommitments?: Map<string, true>
+    /** ZK nullifiers claimed by this set. */
+    zkNullifiers?: Map<string, true>
+}
+
+/** The caches a set stages outside the entity maps, as one transaction saw them. */
+type StagedSnapshot = Pick<
+    GCREntityCaches,
+    | "validators"
+    | "networkUpgrades"
+    | "networkUpgradeVotes"
+    | "zkCommitments"
+    | "zkNullifiers"
+>
+
+/** The key under which a vote row is staged. */
+const voteKey = (row: { proposalId: string; voterAddress: string }) =>
+    `${row.proposalId}:${row.voterAddress}`
+
+/**
+ * The partition key of an edit that reads or writes a staged cache. Every
+ * edit on one cache shares a key, so they apply in block order and every
+ * node resolves a conflict between them the same way.
+ */
+function stagedKeyOf(edit: GCREdit): "zk" | "validators" | "gov" | null {
+    switch (edit.type as string) {
+        case "identity": {
+            const op = (edit as { operation?: string }).operation ?? ""
+            return op.startsWith("zk_") ? "zk" : null
+        }
+        case "validatorStake":
+            return "validators"
+        case "networkUpgrade":
+        case "networkUpgradeVote":
+            return "gov"
+        default:
+            return null
+    }
+}
+
+const STAGED_CACHES_BY_KEY: Record<"zk" | "validators" | "gov", (keyof StagedSnapshot)[]> = {
+    zk: ["zkCommitments", "zkNullifiers"],
+    validators: ["validators"],
+    gov: ["networkUpgrades", "networkUpgradeVotes"],
+}
+
+/** The staged caches a transaction's edits read or write. */
+function stagedCachesOf(edits: GCREdit[]): (keyof StagedSnapshot)[] {
+    const names = new Set<keyof StagedSnapshot>()
+    for (const edit of edits) {
+        const key = stagedKeyOf(edit)
+        if (key) for (const name of STAGED_CACHES_BY_KEY[key]) names.add(name)
+    }
+    return [...names]
+}
+
+/**
+ * Copies of the staged caches a transaction's edits touch, to put back
+ * when it fails. Only those: another group may be filling the rest.
+ */
+function snapshotStaged(
+    entities: GCREntityCaches,
+    edits: GCREdit[],
+): Partial<StagedSnapshot> {
+    const caches = entities as unknown as Record<string, Map<string, unknown> | undefined>
+    const snapshot: Record<string, Map<string, unknown> | undefined> = {}
+    for (const name of stagedCachesOf(edits)) {
+        const cache = caches[name]
+        snapshot[name] =
+            cache &&
+            new Map(
+                [...cache].map(([k, v]) => [
+                    k,
+                    v && typeof v === "object" ? structuredClone(v) : v,
+                ]),
+            )
+    }
+    return snapshot as Partial<StagedSnapshot>
+}
+
+function restoreStaged(entities: GCREntityCaches, snapshot: Partial<StagedSnapshot>) {
+    const caches = entities as unknown as Record<string, unknown>
+    for (const [name, copy] of Object.entries(snapshot)) caches[name] = copy
+}
+
+/**
+ * A repository whose saves are collected instead of issued, for an edit
+ * routine that writes its own table. The collected rows are written in the
+ * block's transaction through the edit's `deferredWrite`. The row is copied
+ * as saved, so a later edit that changes it and then fails leaves the write
+ * as it was.
+ */
+function stagedRepository<T extends object>(
+    repo: Repository<T>,
+    staged: DeferredWrite[],
+    onSaved?: (row: T) => void,
+): Repository<T> {
+    return new Proxy(repo, {
+        get(target, property, receiver) {
+            if (property === "save") {
+                return async (row: T) => {
+                    onSaved?.(row)
+                    const saved = structuredClone(row)
+                    staged.push(async em => {
+                        await em.getRepository(target.target).save(saved)
+                    })
+                    return row
+                }
+            }
+            const value = Reflect.get(target, property, receiver)
+            return typeof value === "function" ? value.bind(target) : value
+        },
+    })
+}
+
+/** One deferred write that issues the staged saves in order. */
+function deferredWriteOf(staged: DeferredWrite[]): DeferredWrite | undefined {
+    if (staged.length === 0) return undefined
+    return async em => {
+        for (const write of staged) await write(em)
+    }
 }
 
 /**
@@ -164,7 +310,40 @@ export interface GCRApplyResult {
     entities: GCREntityCaches
     message: string
     sideEffects: (() => Promise<void>)[]
+    deferredWrites: DeferredWrite[]
     appliedEditsCount: number
+}
+
+/**
+ * The outcome of applying a block's transactions, held in memory until the
+ * block itself is inserted. `write` flushes it through the entity manager of
+ * the block's transaction, so the state, its assignment stamps and the block
+ * commit together or not at all. `afterCommit` runs the side effects that
+ * follow from the state once it is durable.
+ */
+export interface PendingGCRWrite {
+    entities: GCREntityCaches
+    assignedTxs: Map<string, AssignedTxRecord[]>
+    sideEffects: (() => Promise<void>)[]
+    deferredWrites: DeferredWrite[]
+    write(em: EntityManager): Promise<void>
+    afterCommit(): Promise<void>
+}
+
+export interface ApplyTransactionsOptions {
+    /**
+     * Keep the result in memory and return it as `pending` instead of
+     * committing it. The caller commits it with the block.
+     */
+    defer?: boolean
+}
+
+export interface ApplyTransactionsResult {
+    successfulTxs: string[]
+    failedTxs: string[]
+    skippedTxs: string[]
+    /** Set only when applied with `defer`. */
+    pending?: PendingGCRWrite
 }
 
 /** Per-assignment record for the gcr_assigned_txs relation. */
@@ -176,6 +355,11 @@ export interface AssignedTxRecord {
 type IndexedSideEffect = {
     txIndex: number
     fn: () => Promise<void>
+}
+
+type IndexedDeferredWrite = {
+    txIndex: number
+    fn: DeferredWrite
 }
 
 /**
@@ -283,7 +467,7 @@ interface GCRMainSnapshot {
 // ? Maybe sanitize the options?
 export default class HandleGCR {
     /** Mutex to serialize gcr_main writes and prevent deadlocks */
-    static gcrWriteMutex = new Mutex()
+    static gcrWriteMutex = gcrWriteMutex
 
     /**
      * Set of GCR transaction types that can be batch processed with in-mem
@@ -551,6 +735,7 @@ export default class HandleGCR {
                 entities,
                 message: "No GCR edits to apply",
                 sideEffects: [],
+                deferredWrites: [],
                 appliedEditsCount: 0,
             }
         }
@@ -607,6 +792,7 @@ export default class HandleGCR {
                     entities,
                     message: "GCREdit mismatch",
                     sideEffects: [],
+                    deferredWrites: [],
                     appliedEditsCount: 0,
                 }
             }
@@ -631,6 +817,7 @@ export default class HandleGCR {
                     entities,
                     message,
                     sideEffects: [],
+                    deferredWrites: [],
                     appliedEditsCount: 0,
                 }
             }
@@ -802,6 +989,7 @@ export default class HandleGCR {
                 entities,
                 message,
                 sideEffects: r.sideEffects,
+                deferredWrites: [],
                 appliedEditsCount: r.appliedEditsCount,
             })
 
@@ -865,6 +1053,7 @@ export default class HandleGCR {
 
         // Capture snapshots for potential rollback
         const snapshots: GCRMainSnapshot[] = []
+        const staged = snapshotStaged(entities, gcrEdits)
         const editPubkeys = new Set<string>()
 
         for (const edit of gcrEdits) {
@@ -881,6 +1070,7 @@ export default class HandleGCR {
             }
         }
         const sideEffects: (() => Promise<void>)[] = []
+        const deferredWrites: DeferredWrite[] = []
         const appliedEdits: GCREdit[] = []
 
         // Apply all edits for this tx
@@ -921,23 +1111,28 @@ export default class HandleGCR {
                         entities.accounts.set(snap.pubkey, snap.entity)
                     }
                 }
-
                 // INFO: If on a serious run, rollback hard edits
                 if (!simulate && !this.GCRTxTypes.has(edit.type)) {
                     await this.rollback(tx, entities, appliedEdits)
                 }
+                // After the rollback, which may have edited the staged rows
+                restoreStaged(entities, staged)
 
                 return {
                     success: false,
                     entities,
                     message: result.message,
                     sideEffects: [],
+                    deferredWrites: [],
                     appliedEditsCount: 0,
                 }
             }
 
             if (result.sideEffect) {
                 sideEffects.push(result.sideEffect)
+            }
+            if (result.deferredWrite) {
+                deferredWrites.push(result.deferredWrite)
             }
 
             appliedEdits.push(edit)
@@ -963,6 +1158,7 @@ export default class HandleGCR {
             entities,
             message: "Successfully applied GCR edits",
             sideEffects: sideEffects,
+            deferredWrites: deferredWrites,
             appliedEditsCount: appliedEdits.length,
         }
     }
@@ -1072,6 +1268,8 @@ export default class HandleGCR {
                             keys.push("acc:" + normalizePubkey(tlsEdit.account))
                         }
                     }
+                    const stagedKey = stagedKeyOf(edit)
+                    if (stagedKey) keys.push(stagedKey)
                 }
             }
 
@@ -1117,6 +1315,7 @@ export default class HandleGCR {
         const successful: string[] = []
         const failed: string[] = []
         const sideEffects: IndexedSideEffect[] = []
+        const deferredWrites: IndexedDeferredWrite[] = []
         const assignedTxs = new Map<string, AssignedTxRecord[]>()
 
         for (let j = 0; j < group.length; j++) {
@@ -1141,6 +1340,9 @@ export default class HandleGCR {
             for (const fn of applyResult.sideEffects) {
                 sideEffects.push({ txIndex: idx, fn })
             }
+            for (const fn of applyResult.deferredWrites) {
+                deferredWrites.push({ txIndex: idx, fn })
+            }
 
             const sender = normalizePubkey(
                 tx.content?.from_ed25519_address || tx.content.from,
@@ -1160,7 +1362,7 @@ export default class HandleGCR {
             successful.push(tx.hash)
         }
 
-        return { successful, failed, sideEffects, assignedTxs }
+        return { successful, failed, sideEffects, deferredWrites, assignedTxs }
     }
 
     /**
@@ -1235,7 +1437,8 @@ export default class HandleGCR {
         txs: Transaction[],
         isRollback: boolean,
         clock?: BlockClock,
-    ) {
+        options: ApplyTransactionsOptions = {},
+    ): Promise<ApplyTransactionsResult> {
         log.debug("Applying GCR Edits for merged mempool (parallel groups)")
         const now = Date.now()
         const skippedTxs: string[] = []
@@ -1393,7 +1596,6 @@ export default class HandleGCR {
 
         // Within a group, apply sequentially; across groups, apply in
         // parallel with bounded fan-out to protect the DB connection pool.
-        // The ZK attestation handler opens its own queryRunner per tx.
 
         const CONCURRENCY = 8
         const groupResults: Awaited<ReturnType<typeof HandleGCR.runGroup>>[] =
@@ -1419,11 +1621,13 @@ export default class HandleGCR {
         const successfulSet = new Set<string>()
         const failedSet = new Set<string>()
         const allIndexedSideEffects: IndexedSideEffect[] = []
+        const allIndexedDeferredWrites: IndexedDeferredWrite[] = []
 
         for (const r of groupResults) {
             for (const h of r.successful) successfulSet.add(h)
             for (const h of r.failed) failedSet.add(h)
             allIndexedSideEffects.push(...r.sideEffects)
+            allIndexedDeferredWrites.push(...r.deferredWrites)
             for (const [sender, records] of r.assignedTxs) {
                 const existing = assignedTxsUpdates.get(sender)
                 if (existing) {
@@ -1438,6 +1642,8 @@ export default class HandleGCR {
         // matches the sequential baseline.
         allIndexedSideEffects.sort((a, b) => a.txIndex - b.txIndex)
         const mergedSideEffects = allIndexedSideEffects.map(s => s.fn)
+        allIndexedDeferredWrites.sort((a, b) => a.txIndex - b.txIndex)
+        const mergedDeferredWrites = allIndexedDeferredWrites.map(s => s.fn)
 
         // Preserve original tx order in returned arrays.
         const successfulTxs: string[] = []
@@ -1456,16 +1662,27 @@ export default class HandleGCR {
             }
         }
 
-        await HandleGCR.gcrWriteMutex.runExclusive(async () => {
-            // The assignments are the record of which transactions took
-            // effect, so they share the edits' database transaction: a
-            // failure leaves neither, never edits without their record.
-            await this.saveGCREditChanges(
+        let pending: PendingGCRWrite | undefined
+        if (options.defer) {
+            pending = HandleGCR.pendingWrite(
                 entities,
-                mergedSideEffects,
                 assignedTxsUpdates,
+                mergedSideEffects,
+                mergedDeferredWrites,
             )
-        })
+        } else {
+            await HandleGCR.gcrWriteMutex.runExclusive(async () => {
+                // The assignments are the record of which transactions took
+                // effect, so they share the edits' database transaction: a
+                // failure leaves neither, never edits without their record.
+                await this.saveGCREditChanges(
+                    entities,
+                    mergedSideEffects,
+                    assignedTxsUpdates,
+                    mergedDeferredWrites,
+                )
+            })
+        }
 
         const end = Date.now()
         log.only(
@@ -1476,7 +1693,228 @@ export default class HandleGCR {
         )
         log.only(`[applyTransactions] Total txs: ${txs.length}`)
 
-        return { successfulTxs, failedTxs, skippedTxs }
+        return { successfulTxs, failedTxs, skippedTxs, pending }
+    }
+
+    /**
+     * The validators repository for one stake edit: reads come from the
+     * rows this set already touched, then the database; saves are staged
+     * for the block's transaction and kept for the next edit to read.
+     */
+    static stagedValidatorsRepo(
+        entities: GCREntityCaches,
+        staged: DeferredWrite[],
+    ): Repository<Validators> {
+        const cache = (entities.validators ??= new Map())
+        const repo = dataSource.getRepository(Validators)
+        const stagedRepo = stagedRepository(repo, staged, row => {
+            if (row.address) cache.set(row.address, row)
+        })
+        return new Proxy(stagedRepo, {
+            get(target, property, receiver) {
+                if (property === "findOneBy") {
+                    return async (where: { address: string }) => {
+                        if (cache.has(where.address)) {
+                            return cache.get(where.address)
+                        }
+                        const row = await repo.findOneBy(where)
+                        cache.set(where.address, row)
+                        return row
+                    }
+                }
+                return Reflect.get(target, property, receiver)
+            },
+        })
+    }
+
+    /**
+     * The governance repositories for one edit: proposals and votes this set
+     * already staged are read back, including by the open-proposal and
+     * highest-version queries, and saves are staged for the block's
+     * transaction.
+     */
+    static stagedGovernanceRepos(
+        entities: GCREntityCaches,
+        staged: DeferredWrite[],
+    ): {
+        proposals: Repository<NetworkUpgrade>
+        votes: Repository<NetworkUpgradeVote>
+    } {
+        const proposals = (entities.networkUpgrades ??= new Map())
+        const votes = (entities.networkUpgradeVotes ??= new Map())
+        const proposalRepo = dataSource.getRepository(NetworkUpgrade)
+        const voteRepo = dataSource.getRepository(NetworkUpgradeVote)
+
+        const proposalsView = new Proxy(
+            stagedRepository(proposalRepo, staged, row =>
+                proposals.set(row.proposalId, row),
+            ),
+            {
+                get(target, property, receiver) {
+                    if (property === "findOneBy") {
+                        return async (where: { proposalId: string }) =>
+                            proposals.get(where.proposalId) ??
+                            (await proposalRepo.findOneBy(where))
+                    }
+                    if (property === "find") {
+                        return async (options?: FindManyOptions<NetworkUpgrade>) => {
+                            const rows = await proposalRepo.find(options)
+                            const status = (
+                                options?.where as { status?: unknown } | undefined
+                            )?.status
+                            const wanted =
+                                status instanceof FindOperator
+                                    ? (status.value as string[])
+                                    : status === undefined
+                                      ? null
+                                      : [status as string]
+                            const seen = new Set(rows.map(r => r.proposalId))
+                            for (const row of proposals.values()) {
+                                if (seen.has(row.proposalId)) continue
+                                if (wanted && !wanted.includes(row.status)) continue
+                                rows.push(row)
+                            }
+                            return rows
+                        }
+                    }
+                    if (property === "maximum") {
+                        return async (column: keyof NetworkUpgrade) => {
+                            let max = await proposalRepo.maximum(
+                                column as "version",
+                            )
+                            for (const row of proposals.values()) {
+                                const value = row[column]
+                                if (
+                                    typeof value === "number" &&
+                                    (max === null || value > max)
+                                ) {
+                                    max = value
+                                }
+                            }
+                            return max
+                        }
+                    }
+                    return Reflect.get(target, property, receiver)
+                },
+            },
+        )
+
+        const votesView = new Proxy(
+            stagedRepository(voteRepo, staged, row =>
+                votes.set(voteKey(row), row),
+            ),
+            {
+                get(target, property, receiver) {
+                    if (property === "findOne") {
+                        return async (options: {
+                            where: { proposalId: string; voterAddress: string }
+                        }) =>
+                            votes.get(voteKey(options.where)) ??
+                            (await voteRepo.findOne(options))
+                    }
+                    return Reflect.get(target, property, receiver)
+                },
+            },
+        )
+
+        return { proposals: proposalsView, votes: votesView }
+    }
+
+    /** The row caches of a set, loaded for the keys its edits touch. */
+    private static readonly ROW_CACHES = [
+        "accounts",
+        "storagePrograms",
+        "tlsNotaries",
+        "atomicWorks",
+        "resourceSlots",
+        "validators",
+        "networkUpgrades",
+        "networkUpgradeVotes",
+    ] as const
+
+    /** The claim caches of a set, which hold every claim of the block so far. */
+    private static readonly CLAIM_CACHES = ["zkCommitments", "zkNullifiers"] as const
+
+    /**
+     * Replaces every row `entities` loaded with the copy `pending` holds for
+     * the same key, and takes over its claims, so a set applied on top of a
+     * pending one builds on its edits rather than on the database.
+     */
+    static overlayPending(entities: GCREntityCaches, pending: PendingGCRWrite) {
+        const own = entities as unknown as Record<string, Map<string, unknown> | undefined>
+        const theirs = pending.entities as unknown as Record<
+            string,
+            Map<string, unknown> | undefined
+        >
+        for (const name of HandleGCR.ROW_CACHES) {
+            const mine = own[name]
+            const pendingRows = theirs[name]
+            if (!mine || !pendingRows) continue
+            for (const key of mine.keys()) {
+                if (pendingRows.has(key)) {
+                    const row = pendingRows.get(key)
+                    mine.set(key, row ? structuredClone(row) : row)
+                }
+            }
+        }
+        for (const name of HandleGCR.CLAIM_CACHES) {
+            if (theirs[name]) own[name] = new Map(theirs[name])
+        }
+    }
+
+    /** Folds the outcome of a set into `pending`, which commits it with the block. */
+    static mergeIntoPending(pending: PendingGCRWrite, result: GCRApplyResult) {
+        const own = pending.entities as unknown as Record<string, Map<string, unknown> | undefined>
+        const theirs = result.entities as unknown as Record<
+            string,
+            Map<string, unknown> | undefined
+        >
+        for (const name of [...HandleGCR.ROW_CACHES, ...HandleGCR.CLAIM_CACHES]) {
+            const rows = theirs[name]
+            if (!rows || rows.size === 0) continue
+            const mine = (own[name] ??= new Map())
+            for (const [key, row] of rows) mine.set(key, row)
+        }
+        pending.sideEffects.push(...result.sideEffects)
+        pending.deferredWrites.push(...result.deferredWrites)
+    }
+
+    /** A pending write with no edits, for a block whose state comes from elsewhere. */
+    static emptyPendingWrite(): PendingGCRWrite {
+        return HandleGCR.pendingWrite(
+            {
+                accounts: new Map(),
+                storagePrograms: new Map(),
+                tlsNotaries: new Map(),
+                atomicWorks: new Map(),
+                resourceSlots: new Map(),
+            },
+            new Map(),
+        )
+    }
+
+    /** The in-memory outcome of an apply, ready to commit with its block. */
+    static pendingWrite(
+        entities: GCREntityCaches,
+        assignedTxs: Map<string, AssignedTxRecord[]>,
+        sideEffects: (() => Promise<void>)[] = [],
+        deferredWrites: DeferredWrite[] = [],
+    ): PendingGCRWrite {
+        const pending: PendingGCRWrite = {
+            entities,
+            assignedTxs,
+            sideEffects,
+            deferredWrites,
+            write: em =>
+                HandleGCR.writeGCREditChanges(
+                    em,
+                    pending.entities,
+                    pending.assignedTxs,
+                    pending.deferredWrites,
+                ),
+            afterCommit: () => HandleGCR.runSideEffects(pending.sideEffects),
+        }
+        return pending
     }
 
     /**
@@ -1485,11 +1923,13 @@ export default class HandleGCR {
      * @param entities All entity caches to flush
      * @param sideEffects The side-effects to apply
      * @param assignedTxs Assignments to record in the same database transaction
+     * @param deferredWrites Writes issued inside that same transaction
      */
     static async saveGCREditChanges(
         entities: GCREntityCaches,
         sideEffects: (() => Promise<void>)[],
         assignedTxs?: Map<string, AssignedTxRecord[]>,
+        deferredWrites: DeferredWrite[] = [],
     ) {
         const now = Date.now()
         // One database transaction for the whole set: a crash or a failed
@@ -1497,117 +1937,24 @@ export default class HandleGCR {
         // payment without the Work that justified it. Side effects run only
         // once the state they follow from is durable.
         await dataSource.transaction(async em => {
-            // Save GCRMain entities
-            const entitiesToSave = entities.accounts.values().toArray()
-            entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
-            if (entitiesToSave.length > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Saving ${entitiesToSave.length} GCRMain entities`,
-                )
-                const gcrMainRepo = em.getRepository(GCRMain)
-                await gcrMainRepo.save(entitiesToSave)
-            }
-
-            // Save/delete GCRStorageProgram entities
-            if (entities.storagePrograms.size > 0) {
-                const spToSave: GCRStorageProgram[] = []
-                const spToDelete: string[] = []
-                for (const [key, entity] of entities.storagePrograms) {
-                    if (entity === null) {
-                        spToDelete.push(key)
-                    } else {
-                        spToSave.push(entity)
-                    }
-                }
-
-                const spRepo = em.getRepository(GCRStorageProgram)
-                if (spToSave.length > 0) {
-                    log.debug(
-                        `[saveGCREditChanges] Saving ${spToSave.length} StorageProgram entities`,
-                    )
-                    await spRepo.save(spToSave)
-                }
-                if (spToDelete.length > 0) {
-                    log.debug(
-                        `[saveGCREditChanges] Deleting ${spToDelete.length} StorageProgram entities`,
-                    )
-                    await spRepo.delete({ storageAddress: In(spToDelete) })
-                }
-            }
-
-            // Save/delete GCRTLSNotary entities
-            if (entities.tlsNotaries.size > 0) {
-                const tlsToSave: GCRTLSNotary[] = []
-                const tlsToDelete: string[] = []
-                for (const [key, entity] of entities.tlsNotaries) {
-                    if (entity === null) {
-                        tlsToDelete.push(key)
-                    } else {
-                        tlsToSave.push(entity)
-                    }
-                }
-
-                const tlsRepo = em.getRepository(GCRTLSNotary)
-                if (tlsToSave.length > 0) {
-                    log.debug(
-                        `[saveGCREditChanges] Saving ${tlsToSave.length} TLSNotary entities`,
-                    )
-                    await tlsRepo.save(tlsToSave)
-                }
-                if (tlsToDelete.length > 0) {
-                    log.debug(
-                        `[saveGCREditChanges] Deleting ${tlsToDelete.length} TLSNotary entities`,
-                    )
-                    await tlsRepo.delete({ tokenId: In(tlsToDelete) })
-                }
-            }
-
-            if (entities.atomicWorks?.size > 0) {
-                const repo = em.getRepository(GCRAtomicWork)
-                const toSave: GCRAtomicWork[] = []
-                const toDelete: string[] = []
-                for (const [workId, record] of entities.atomicWorks) {
-                    if (record === null) toDelete.push(workId)
-                    else toSave.push(repo.create(record))
-                }
-                if (toSave.length > 0) await repo.save(toSave)
-                if (toDelete.length > 0) await repo.delete({ workId: In(toDelete) })
-            }
-
-            if (entities.resourceSlots?.size > 0) {
-                const repo = em.getRepository(GCRResourceSlot)
-                const toSave: GCRResourceSlot[] = []
-                const toDelete: string[] = []
-                for (const [resourceKey, record] of entities.resourceSlots) {
-                    if (record === null) {
-                        toDelete.push(resourceKey)
-                        continue
-                    }
-                    toSave.push(
-                        repo.create({
-                            resourceKey,
-                            state: record.state,
-                            generation: record.generation,
-                            workId: "workId" in record ? record.workId : "",
-                            record,
-                        }),
-                    )
-                }
-                if (toSave.length > 0) await repo.save(toSave)
-                if (toDelete.length > 0) {
-                    await repo.delete({ resourceKey: In(toDelete) })
-                }
-            }
-
-            if (assignedTxs && assignedTxs.size > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Recording ${assignedTxs.size} assignedTxs`,
-                )
-                await HandleGCR.bulkUpdateAssignedTxs(assignedTxs, em)
-            }
+            await HandleGCR.writeGCREditChanges(
+                em,
+                entities,
+                assignedTxs,
+                deferredWrites,
+            )
         })
 
-        // INFO: Apply side-effects in sequence
+        await HandleGCR.runSideEffects(sideEffects)
+
+        const end = Date.now()
+        log.only(
+            `[saveGCREditChanges] Time taken: ${(end - now) / 1000}s for ${sideEffects.length} side effects`,
+        )
+    }
+
+    /** Runs side effects in order once the state they follow from is durable. */
+    static async runSideEffects(sideEffects: (() => Promise<void>)[]) {
         for (const sideEffect of sideEffects) {
             try {
                 await sideEffect()
@@ -1617,11 +1964,132 @@ export default class HandleGCR {
                 )
             }
         }
+    }
 
-        const end = Date.now()
-        log.only(
-            `[saveGCREditChanges] Time taken: ${(end - now) / 1000}s for ${sideEffects.length} side effects`,
-        )
+    /**
+     * Writes the entity caches, the assignment stamps and the deferred writes
+     * through one entity manager. The caller owns the transaction.
+     */
+    static async writeGCREditChanges(
+        em: EntityManager,
+        entities: GCREntityCaches,
+        assignedTxs?: Map<string, AssignedTxRecord[]>,
+        deferredWrites: DeferredWrite[] = [],
+    ) {
+        // Save GCRMain entities
+        const entitiesToSave = entities.accounts.values().toArray()
+        entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
+        if (entitiesToSave.length > 0) {
+            log.debug(
+                `[saveGCREditChanges] Saving ${entitiesToSave.length} GCRMain entities`,
+            )
+            const gcrMainRepo = em.getRepository(GCRMain)
+            await gcrMainRepo.save(entitiesToSave)
+        }
+
+        // Save/delete GCRStorageProgram entities
+        if (entities.storagePrograms.size > 0) {
+            const spToSave: GCRStorageProgram[] = []
+            const spToDelete: string[] = []
+            for (const [key, entity] of entities.storagePrograms) {
+                if (entity === null) {
+                    spToDelete.push(key)
+                } else {
+                    spToSave.push(entity)
+                }
+            }
+
+            const spRepo = em.getRepository(GCRStorageProgram)
+            if (spToSave.length > 0) {
+                log.debug(
+                    `[saveGCREditChanges] Saving ${spToSave.length} StorageProgram entities`,
+                )
+                await spRepo.save(spToSave)
+            }
+            if (spToDelete.length > 0) {
+                log.debug(
+                    `[saveGCREditChanges] Deleting ${spToDelete.length} StorageProgram entities`,
+                )
+                await spRepo.delete({ storageAddress: In(spToDelete) })
+            }
+        }
+
+        // Save/delete GCRTLSNotary entities
+        if (entities.tlsNotaries.size > 0) {
+            const tlsToSave: GCRTLSNotary[] = []
+            const tlsToDelete: string[] = []
+            for (const [key, entity] of entities.tlsNotaries) {
+                if (entity === null) {
+                    tlsToDelete.push(key)
+                } else {
+                    tlsToSave.push(entity)
+                }
+            }
+
+            const tlsRepo = em.getRepository(GCRTLSNotary)
+            if (tlsToSave.length > 0) {
+                log.debug(
+                    `[saveGCREditChanges] Saving ${tlsToSave.length} TLSNotary entities`,
+                )
+                await tlsRepo.save(tlsToSave)
+            }
+            if (tlsToDelete.length > 0) {
+                log.debug(
+                    `[saveGCREditChanges] Deleting ${tlsToDelete.length} TLSNotary entities`,
+                )
+                await tlsRepo.delete({ tokenId: In(tlsToDelete) })
+            }
+        }
+
+        if (entities.atomicWorks?.size > 0) {
+            const repo = em.getRepository(GCRAtomicWork)
+            const toSave: GCRAtomicWork[] = []
+            const toDelete: string[] = []
+            for (const [workId, record] of entities.atomicWorks) {
+                if (record === null) toDelete.push(workId)
+                else toSave.push(repo.create(record))
+            }
+            if (toSave.length > 0) await repo.save(toSave)
+            if (toDelete.length > 0) await repo.delete({ workId: In(toDelete) })
+        }
+
+        if (entities.resourceSlots?.size > 0) {
+            const repo = em.getRepository(GCRResourceSlot)
+            const toSave: GCRResourceSlot[] = []
+            const toDelete: string[] = []
+            for (const [resourceKey, record] of entities.resourceSlots) {
+                if (record === null) {
+                    toDelete.push(resourceKey)
+                    continue
+                }
+                toSave.push(
+                    repo.create({
+                        resourceKey,
+                        state: record.state,
+                        generation: record.generation,
+                        workId: "workId" in record ? record.workId : "",
+                        record,
+                    }),
+                )
+            }
+            if (toSave.length > 0) await repo.save(toSave)
+            if (toDelete.length > 0) {
+                await repo.delete({ resourceKey: In(toDelete) })
+            }
+        }
+
+        if (assignedTxs && assignedTxs.size > 0) {
+            log.debug(
+                `[saveGCREditChanges] Recording ${assignedTxs.size} assignedTxs`,
+            )
+            await HandleGCR.bulkUpdateAssignedTxs(assignedTxs, em)
+        }
+
+        // After the caches, so a write that re-reads an account through
+        // the manager sees the balance and nonce this set gives it.
+        for (const write of deferredWrites) {
+            await write(em)
+        }
     }
 
     // REVIEW Implement the execution of GCREdit objects
@@ -1707,7 +2175,12 @@ export default class HandleGCR {
                 result = await GCRNonceRoutines.apply(editOperation, account)
                 break
             case "identity":
-                result = await GCRIdentityRoutines.apply(editOperation, account)
+                result = await GCRIdentityRoutines.apply(
+                    editOperation,
+                    account,
+                    undefined,
+                    entities,
+                )
                 break
             case "assign":
             case "subnetsTx":
@@ -1762,18 +2235,21 @@ export default class HandleGCR {
                 }
                 break
             }
-            // KNOWN GAP: these branches persist via the default datasource
-            // (not the transactionalEntityManager that wraps insertBlock),
-            // so a partially-failed block leaves orphaned rows. Threading
-            // the EM through HandleGCR + every routine is a separate
-            // refactor — tracked in the upgradable-network testing doc.
+            // These routines write their own tables. Their saves are staged
+            // and issued in the block's transaction as the edit's deferred
+            // write, so a block that fails to commit leaves no row behind.
             case "validatorStake":
                 if (simulate) {
                     // Validation already ran during handleStakingTx; we don't
                     // mutate state during mempool simulation.
                     result = { success: true, message: "Simulated" }
                 } else {
-                    result = await GCRValidatorStakeRoutines.apply(editOperation)
+                    const staged: DeferredWrite[] = []
+                    result = await GCRValidatorStakeRoutines.apply(
+                        editOperation,
+                        HandleGCR.stagedValidatorsRepo(entities, staged),
+                    )
+                    result.deferredWrite = deferredWriteOf(staged)
                 }
                 break
             // Phase 1 governance: persists proposal/vote rows on every
@@ -1785,9 +2261,13 @@ export default class HandleGCR {
                     const { default: GCRNetworkUpgradeRoutines } = await import(
                         "./gcr_routines/GCRNetworkUpgradeRoutines"
                     )
+                    const staged: DeferredWrite[] = []
+                    const repos = HandleGCR.stagedGovernanceRepos(entities, staged)
                     result = await GCRNetworkUpgradeRoutines.applyProposal(
                         editOperation,
+                        repos.proposals,
                     )
+                    result.deferredWrite = deferredWriteOf(staged)
                 }
                 break
             case "networkUpgradeVote":
@@ -1797,9 +2277,14 @@ export default class HandleGCR {
                     const { default: GCRNetworkUpgradeRoutines } = await import(
                         "./gcr_routines/GCRNetworkUpgradeRoutines"
                     )
+                    const staged: DeferredWrite[] = []
+                    const repos = HandleGCR.stagedGovernanceRepos(entities, staged)
                     result = await GCRNetworkUpgradeRoutines.applyVote(
                         editOperation,
+                        repos.votes,
+                        repos.proposals,
                     )
+                    result.deferredWrite = deferredWriteOf(staged)
                 }
                 break
             default:

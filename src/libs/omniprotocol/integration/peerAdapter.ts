@@ -9,6 +9,7 @@ import log from "src/utilities/logger"
 import { handleError } from "src/errors"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Peer, { CallOptions } from "src/libs/peer/Peer"
+import PeerManager from "src/libs/peer/PeerManager"
 
 import { BaseOmniAdapter, BaseAdapterOptions } from "./BaseAdapter"
 import {
@@ -102,6 +103,12 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
 
             // Decode response from binary NodeCall format
             const decoded = decodeNodeCallResponse(responseBuffer)
+
+            // Any answer proves the peer is alive, as on the HTTP path.
+            if (!peer.isLocalNode) {
+                PeerManager.getInstance().updatePeerLastSeen(peer.identity)
+            }
+
             return {
                 result: decoded.status,
                 response: decoded.value,

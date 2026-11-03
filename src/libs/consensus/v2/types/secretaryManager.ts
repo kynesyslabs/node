@@ -28,6 +28,10 @@ import {
 
 /** The phase whose greenlight carries the secretary's merged peerlist. */
 export const PEERLIST_PHASE = 3
+// How long a round waits for the head of the draw to report our tip before
+// passing it over: long enough for a status report in flight, short against
+// the block time.
+export const HEAD_ALIGN_WAIT_MS = 2000
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
@@ -87,6 +91,10 @@ export default class SecretaryManager {
     public runSecretaryRoutine = false
     public blockTimestamp: number = null
     public unresponsiveMembers = new Set<string>()
+    // Members behind our tip at the start of the round. Only the secretary's
+    // wait reads it; the vote still goes to them, in case their report was
+    // only in flight.
+    public behindMembers = new Set<string>()
     public ended = false
     /** The peerlist committed in this round's block, dictated by the secretary. */
     public mergedPeerlist: string[] | null = null
@@ -217,6 +225,7 @@ export default class SecretaryManager {
             blockRef: lastBlockNumber + 1,
         }
         this.unresponsiveMembers = new Set<string>()
+        this.behindMembers = new Set<string>()
         this.blockTimestamp = null
         this.mergedPeerlist = null
         this.registerUnderShardBlockRef()
@@ -269,9 +278,7 @@ export default class SecretaryManager {
 
         const validMembers = this.shard.members.filter(
             member =>
-                Boolean(member.connection.string) &&
-                member.sync.block === getSharedState.lastBlockNumber &&
-                member.sync.block_hash === getSharedState.lastBlockHash,
+                Boolean(member.connection.string) && this.holdsOurTip(member),
         )
         if (
             validMembers.length <
@@ -282,9 +289,27 @@ export default class SecretaryManager {
             )
         }
 
-        // The secretary is the first member: the first online pinned
-        // identity, or the head of the deterministic draw when no pin is online
-        this.shard.secretaryKey = this.shard.members[0].identity
+        // The secretary is the first member that holds our tip: the first
+        // online pinned identity, or the head of the deterministic draw. A
+        // member behind the tip has no manager for this block and refuses
+        // every phase, and with the seed unchanged on each retry it would be
+        // drawn again, so the chain would stand until it caught up. The head
+        // gets a short wait first, so a report still in flight does not make
+        // nodes pick different secretaries.
+        const head = this.shard.members[0]
+        const deadline = Date.now() + HEAD_ALIGN_WAIT_MS
+        while (!this.canLead(head) && Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 100))
+        }
+        this.shard.secretaryKey = (
+            this.shard.members.find(m => this.canLead(m)) ?? head
+        ).identity
+        // A member behind our tip cannot reach any phase of this round; the
+        // secretary would otherwise wait out a timeout for it on every block.
+        // One that reports a phase leaves the set again.
+        for (const member of this.shard.members) {
+            if (!this.canLead(member)) this.behindMembers.add(member.identity)
+        }
 
         log.only("\n\n\n")
         log.only("INITIALIZED SHARD:")
@@ -329,6 +354,21 @@ export default class SecretaryManager {
 
         this.ourValidatorPhase = _.cloneDeep(emptyValidationPhase)
         return this.shard.members
+    }
+
+    private holdsOurTip(member: Peer): boolean {
+        return (
+            member.sync?.block === getSharedState.lastBlockNumber &&
+            member.sync?.block_hash === getSharedState.lastBlockHash
+        )
+    }
+
+    /** Ourselves, or a reachable member on our tip. */
+    private canLead(member: Peer): boolean {
+        return (
+            member.identity === this.ourKey ||
+            (Boolean(member.connection.string) && this.holdsOurTip(member))
+        )
     }
 
     // SECTION Methods called by the Secretary only
@@ -542,9 +582,9 @@ export default class SecretaryManager {
         )
 
         const exSecretary = this.secretary.identity
-        this.shard.secretaryKey = this.shard.members.find(
-            m => m.identity !== exSecretary,
-        ).identity
+        const rest = this.shard.members.filter(m => m.identity !== exSecretary)
+        this.shard.secretaryKey = (rest.find(m => this.canLead(m)) ?? rest[0])
+            .identity
         // remove secretary from the list of members
         this.shard.members = this.shard.members.filter(
             m => m.identity !== exSecretary,
@@ -679,6 +719,7 @@ export default class SecretaryManager {
         this.shard.validationPhases[memberKey].phases[theirPhase][1] = true
         this.shard.validationPhases[memberKey].waitStatus = true
         this.unresponsiveMembers.delete(memberKey)
+        this.behindMembers.delete(memberKey)
 
         if (!this.checkIfWeAreSecretary()) {
             log.debug(
@@ -764,7 +805,7 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
-            if (this.unresponsiveMembers.has(pubKey)) {
+            if (this.unresponsiveMembers.has(pubKey) || this.behindMembers.has(pubKey)) {
                 continue
             }
             if (phase.currentPhase !== ourPhase || !phase.waitStatus) {
@@ -1013,7 +1054,7 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
-            if (this.unresponsiveMembers.has(pubKey)) {
+            if (this.unresponsiveMembers.has(pubKey) || this.behindMembers.has(pubKey)) {
                 continue
             }
             if (phase.currentPhase === ourPhase && phase.waitStatus) {

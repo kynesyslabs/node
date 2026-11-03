@@ -5,6 +5,7 @@ import Transaction from "src/libs/blockchain/transaction"
 import { Config } from "@/config"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { normalizeAccount } from "@/libs/l2ps/editConservation"
+import type { PendingGCRWrite } from "@/libs/blockchain/gcr/handleGCR"
 
 export const NONCE_TRACE_ATTR_KEY = "nonceTrace"
 
@@ -26,6 +27,25 @@ export async function readNonces(
 ): Promise<Record<string, number>> {
     if (accounts.length === 0) return {}
     return await GCR.getAccountNonces(accounts)
+}
+
+/**
+ * The nonces an apply leaves, read from its uncommitted outcome. An account
+ * the apply did not touch keeps its `before` value.
+ */
+export function noncesAfterApply(
+    pending: PendingGCRWrite | undefined,
+    accounts: string[],
+    before: Record<string, number>,
+): Record<string, number> {
+    const after: Record<string, number> = {}
+    for (const account of accounts) {
+        const entity =
+            pending?.entities.accounts.get(account) ??
+            pending?.entities.accounts.get(normalizeAccount(account))
+        after[account] = entity?.nonce ?? before[account] ?? 0
+    }
+    return after
 }
 
 function nonceEdits(tx: Transaction): GCREditNonce[] {

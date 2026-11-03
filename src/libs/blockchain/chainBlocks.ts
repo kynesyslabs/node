@@ -29,6 +29,8 @@ import { isForkActive } from "@/forks/forkGates"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import { BlockInvalidError } from "@/errors"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
+import { gcrWriteMutex } from "./gcr/gcrWriteMutex"
+import type { PendingGCRWrite } from "./gcr/handleGCR"
 import type { FindManyOptions } from "typeorm"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 
@@ -203,10 +205,17 @@ export async function getOnlinePeersForLastThreeBlocks(): Promise<any[]> {
     }
 }
 
+/**
+ * Inserts a block and, when given, the state its transactions produced.
+ * `pendingGCR` is written in the block's own database transaction: the
+ * balances, nonces, assignment stamps and the block that authorises them
+ * commit together or not at all.
+ */
 export async function insertBlock(
     block: Block,
     blockTxs: Transaction[],
     position?: number,
+    pendingGCR?: PendingGCRWrite,
 ): Promise<Blocks> {
     const blocksRepo = getBlocksRepo()
     const orderedTransactionsHashes = block.content.ordered_transactions
@@ -228,6 +237,15 @@ export async function insertBlock(
     existingBlock = await blocksRepo.findOneBy({
         hash: block.hash,
     })
+
+    if (existingBlock && pendingGCR) {
+        // The state of a block commits with the block, so a block already on
+        // disk already carries it.
+        log.warning(
+            `[ChainDB] block ${block.number} (${block.hash}) already exists; its state was committed with it, dropping the pending edits`,
+        )
+        return existingBlock
+    }
 
     if (existingBlock && position) {
         log.info(
@@ -329,8 +347,14 @@ export async function insertBlock(
     const dataSource = db.getDataSource()
 
     try {
-        const result = await dataSource.transaction(
+        const commit = () => dataSource.transaction(
             async transactionalEntityManager => {
+                // The block's state goes first, before the fork hooks that
+                // migrate it and before the block that authorises it.
+                if (pendingGCR) {
+                    await pendingGCR.write(transactionalEntityManager)
+                }
+
                 const saveBlockStart = Date.now()
                 // REVIEW: P3b — fork-activation hook. Runs *before* the
                 // block is persisted so balances are migrated atomically
@@ -485,6 +509,14 @@ export async function insertBlock(
                 return savedBlock
             },
         )
+        // State writers are serialised; a block carrying state is one.
+        const result = pendingGCR
+            ? await gcrWriteMutex.runExclusive(commit)
+            : await commit()
+
+        if (pendingGCR) {
+            await pendingGCR.afterCommit()
+        }
 
         if (block.number > getSharedState.lastBlockNumber) {
             getSharedState.lastBlockNumber = block.number
