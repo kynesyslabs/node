@@ -230,6 +230,57 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(code).not.toMatch(/allowedSignersFile\s+\.github\/allowed_signers/)
     })
 
+    it("the release workflow refuses a tag that is not v + package.json version", () => {
+        const workflow = read(".github/workflows/release.yml")
+            .split("\n")
+            .filter(line => !line.trim().startsWith("#"))
+            .join("\n")
+        expect(workflow).toMatch(/git show "\$sha:package\.json" \| jq -r \.version/)
+        expect(workflow).toMatch(/\[ "v\$version" = "\$GITHUB_REF_NAME" \]/)
+    })
+
+    it("the release workflow's version check passes a matching tag and fails a mismatched one", () => {
+        const lines = read(".github/workflows/release.yml").split("\n")
+        const start = lines.findIndex(l => /^\s*version=\$\(git show "\$sha:package\.json"/.test(l))
+        const end = lines.findIndex((l, i) => i > start && /exit 1; }\s*$/.test(l))
+        expect(start).toBeGreaterThan(-1)
+        expect(end).toBeGreaterThan(start)
+        // The snippet runs the real jq, as the workflow does; without it every
+        // tag would read as a mismatch, so say so instead.
+        try {
+            execFileSync("jq", ["--version"], { stdio: "pipe" })
+        } catch {
+            throw new Error("jq is required to run the release workflow's version check")
+        }
+        // git is stubbed: the snippet only reads package.json at the tagged commit
+        const script = [
+            "git() { printf '{\"version\":\"1.0.0-rc.5\"}'; }",
+            "sha=abc",
+            ...lines.slice(start, end + 1),
+        ].join("\n")
+        const run = (tag: string) => {
+            try {
+                execFileSync("bash", ["-c", script], {
+                    env: { ...process.env, GITHUB_REF_NAME: tag },
+                    stdio: "pipe",
+                })
+                return "pass"
+            } catch {
+                return "fail"
+            }
+        }
+        expect({ matching: run("v1.0.0-rc.5"), mismatched: run("v1.0.0-rc.4") }).toEqual({
+            matching: "pass",
+            mismatched: "fail",
+        })
+    })
+
+    it("package.json carries a release version, not the pre-release 0.9.x line", () => {
+        const { version } = JSON.parse(read("package.json"))
+        expect(version).toMatch(/^\d+\.\d+\.\d+(-rc\.\d+)?$/)
+        expect(version).not.toMatch(/^0\./)
+    })
+
     it("the launcher answers -h before checking Bun or installing anything", () => {
         const run = read("scripts/run")
         const help = run.indexOf("-h | --help)")

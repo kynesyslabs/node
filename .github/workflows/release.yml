@@ -50,6 +50,10 @@ jobs:
             echo "::error::.github/allowed_signers is missing on $RELEASE_BRANCH"; exit 1; }
           git config gpg.ssh.allowedSignersFile "$signers"
           git verify-tag "$GITHUB_REF_NAME"
+          # the node reports package.json's version, so a release must carry its own
+          version=$(git show "$sha:package.json" | jq -r .version)
+          [ "v$version" = "$GITHUB_REF_NAME" ] || {
+            echo "::error::package.json version is $version at $sha; tag v$version, or set the version to ${GITHUB_REF_NAME#v} and merge that first"; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   build:
