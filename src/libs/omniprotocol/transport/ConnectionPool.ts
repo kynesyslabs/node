@@ -291,8 +291,10 @@ export class ConnectionPool extends EventEmitter {
                 return null
             })
 
+            // The request timeout bounds the answer, not the TCP connect: a
+            // closed or filtered Omni port must fail within connectTimeout.
             await connection.connect({
-                timeout: options.timeout ?? this.config.connectTimeout,
+                timeout: this.config.connectTimeout,
                 retries: options.retries,
             })
 

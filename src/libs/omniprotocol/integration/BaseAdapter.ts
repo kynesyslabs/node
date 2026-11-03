@@ -45,6 +45,8 @@ function cloneConfig(config: OmniProtocolConfig): OmniProtocolConfig {
 export abstract class BaseOmniAdapter {
     protected readonly config: OmniProtocolConfig
     protected readonly connectionPool: ConnectionPool
+    /** Peers answered over HTTP only, keyed by identity, until the given time. */
+    private readonly httpOnlyUntil = new Map<string, number>()
 
     constructor(options: BaseAdapterOptions = {}) {
         this.config = cloneConfig(options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG)
@@ -72,10 +74,16 @@ export abstract class BaseOmniAdapter {
     }
 
     /**
-     * Check if OmniProtocol should be used for a peer based on migration mode
+     * Check if OmniProtocol should be used for a peer based on migration mode.
+     * A peer whose OmniProtocol call failed stays on HTTP for the cooldown,
+     * so a closed Omni port costs one connect timeout, not one per call.
      */
     shouldUseOmni(peerIdentity: string): boolean {
         const { mode, omniPeers } = this.config.migration
+
+        if (this.isHttpOnly(peerIdentity)) {
+            return false
+        }
 
         switch (mode) {
             case "HTTP_ONLY":
@@ -90,17 +98,37 @@ export abstract class BaseOmniAdapter {
     }
 
     /**
+     * Whether the peer is inside its HTTP-only cooldown
+     */
+    isHttpOnly(peerIdentity: string): boolean {
+        const until = this.httpOnlyUntil.get(peerIdentity)
+        if (until === undefined) {
+            return false
+        }
+        if (Date.now() >= until) {
+            this.httpOnlyUntil.delete(peerIdentity)
+            return false
+        }
+        return true
+    }
+
+    /**
      * Mark a peer as OmniProtocol-capable
      */
     markOmniPeer(peerIdentity: string): void {
+        this.httpOnlyUntil.delete(peerIdentity)
         this.config.migration.omniPeers.add(peerIdentity)
     }
 
     /**
-     * Mark a peer as HTTP-only (e.g., after OmniProtocol failure)
+     * Mark a peer as HTTP-only for the cooldown (e.g., after OmniProtocol failure)
      */
     markHttpPeer(peerIdentity: string): void {
         this.config.migration.omniPeers.delete(peerIdentity)
+        this.httpOnlyUntil.set(
+            peerIdentity,
+            Date.now() + this.config.migration.httpFallbackCooldown,
+        )
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

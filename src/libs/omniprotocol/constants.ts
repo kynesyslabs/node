@@ -127,6 +127,9 @@ export const DEFAULT_CIRCUIT_BREAKER_TIMEOUT_MS = 30_000
 /** Default fallback timeout for migration mode in milliseconds (1 second) */
 export const DEFAULT_MIGRATION_FALLBACK_TIMEOUT_MS = 1_000
 
+/** How long a peer stays HTTP-only after an OmniProtocol failure (1 minute) */
+export const DEFAULT_HTTP_FALLBACK_COOLDOWN_MS = 60_000
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Protocol Config Defaults (types/config.ts - ProtocolRuntimeConfig)
 // ─────────────────────────────────────────────────────────────────────────────

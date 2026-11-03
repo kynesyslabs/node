@@ -16,13 +16,16 @@ SUITE_FILES=(
     scripts/launch-go-no-go.snapshot.test.ts
     scripts/validator-prove-signing.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
+    src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
     src/libs/network/helloGenesisGate.test.ts
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
+    src/libs/omniprotocol/integration/BaseAdapter.test.ts
     src/libs/omniprotocol/peerLiveness.test.ts
+    src/libs/omniprotocol/transport/ConnectionPool.connectTimeout.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts

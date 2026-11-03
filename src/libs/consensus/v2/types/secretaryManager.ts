@@ -423,21 +423,8 @@ export default class SecretaryManager {
                     log.error(
                         "[SECRETARY ROUTINE] Timeout waiting for SET_WAIT_STATUS",
                     )
-                    const waitingMembers = this.getWaitingMembers()
-                    const stillOnlineMembers =
-                        await this.handleNodesGoneOffline(waitingMembers)
-
-                    const allOnlineMembers =
-                        waitingMembers.concat(stillOnlineMembers)
                     // NOTE: We don't await this. We just trigger it and continue the routine
-                    log.debug(
-                        "[SECRETARY ROUTINE] Releasing the waiting members",
-                    )
-                    this.releaseWaitingMembers(
-                        allOnlineMembers,
-                        null,
-                        "secretaryRoutine_TIMEOUT",
-                    )
+                    this.releaseAfterTimeout()
                 }
 
                 if (error instanceof AbortError) {
@@ -449,6 +436,40 @@ export default class SecretaryManager {
                 }
             }
         }
+    }
+
+    /**
+     * Releases the members still waiting at our phase after SET_WAIT_STATUS
+     * timed out.
+     *
+     * The offline check can take a while, and members may report a later
+     * phase meanwhile. Those are left alone: resetting their wait status
+     * would make the next phase time out as well.
+     */
+    public async releaseAfterTimeout() {
+        const waitingMembers = this.getWaitingMembers()
+        const stillOnlineMembers =
+            await this.handleNodesGoneOffline(waitingMembers)
+
+        const ourPhase = this.ourValidatorPhase.currentPhase
+        const notAhead = (pubKey: string) =>
+            (this.shard.validationPhases[pubKey]?.currentPhase ?? 0) <=
+            ourPhase
+        const toRelease = [
+            ...new Set(this.getWaitingMembers().concat(stillOnlineMembers)),
+        ].filter(notAhead)
+
+        log.debug(
+            `[SECRETARY ROUTINE] Releasing the waiting members at phase ${ourPhase}: ${toRelease.length}`,
+        )
+        if (toRelease.length === 0) {
+            return
+        }
+        await this.releaseWaitingMembers(
+            toRelease,
+            ourPhase,
+            "secretaryRoutine_TIMEOUT",
+        )
     }
 
     /**
