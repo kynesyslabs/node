@@ -8,12 +8,17 @@ export interface L2PSHashUpdatePayload {
  * Transaction lifecycle state returned by Chain.getTransactionStatus.
  *
  *   - "pending"  — present in mempool, not yet included in a block
- *   - "included" — present in the transactions table, has a block number
- *   - "failed"   — reserved (the node does not currently record execution
- *                  failures, so failed txs surface as "unknown")
+ *   - "included" — in a block and executed
+ *   - "failed"   — in a block but not executed (blocks keep failed
+ *                  transactions); `code` and `message` say why
  *   - "unknown"  — not found anywhere
+ *
+ * "included" keeps its name for SDKs that wait on it; it is never returned
+ * for a transaction that did not execute.
  */
 export type TxStatus = {
     state: "pending" | "included" | "failed" | "unknown"
     blockNumber?: number
+    code?: string
+    message?: string
 }

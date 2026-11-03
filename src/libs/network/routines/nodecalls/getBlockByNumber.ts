@@ -6,8 +6,16 @@ import log from "src/utilities/logger"
 export default async function getBlockByNumber(
     data: any,
 ): Promise<RPCResponse> {
-    if (!data.blockNumber) {
-        log.error("[SERVER ERROR] Missing blockNumber 💀")
+    // Block 0 is a valid height: a truthiness check refused a numeric 0.
+    const raw = data?.blockNumber
+    const blockNumber =
+        typeof raw === "number"
+            ? raw
+            : typeof raw === "string" && /^\d+$/.test(raw)
+              ? Number(raw)
+              : NaN
+    if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) {
+        log.error("[SERVER ERROR] Missing or invalid blockNumber")
         return {
             result: 400,
             response: "error",
@@ -15,7 +23,6 @@ export default async function getBlockByNumber(
             require_reply: false,
         }
     } else {
-        const blockNumber = parseInt(data.blockNumber)
         log.debug(`[SERVER] Received getBlockByNumber: ${blockNumber}`)
 
         let block: Blocks

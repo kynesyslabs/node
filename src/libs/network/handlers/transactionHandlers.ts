@@ -6,6 +6,8 @@ import Mempool from "../../blockchain/mempool"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 
+const HISTORY_MAX_LIMIT = 100
+
 export const transactionHandlers: Record<string, NodeCallHandler> = {
     getTransactions: async (data, _response) => {
         return await getTransactions(data)
@@ -67,11 +69,23 @@ export const transactionHandlers: Record<string, NodeCallHandler> = {
             response.response = "No address or type specified"
             return response
         }
+        const start = data.start ?? 0
+        const limit = data.limit ?? HISTORY_MAX_LIMIT
+        if (
+            !Number.isSafeInteger(start) || start < 0 ||
+            !Number.isSafeInteger(limit) || limit < 1
+        ) {
+            response.result = 400
+            response.response = "start must be a non-negative integer and limit a positive integer"
+            return response
+        }
+        // Unbounded pages let one caller make the node read and serialise
+        // an address's whole history.
         response.response = await Chain.getTransactionHistory(
             data.address,
             data.type,
-            data.start || 0,
-            data.limit || 100,
+            start,
+            Math.min(limit, HISTORY_MAX_LIMIT),
         )
         return response
     },
