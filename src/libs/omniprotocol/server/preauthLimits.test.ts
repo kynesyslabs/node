@@ -46,6 +46,19 @@ mock.module("@/libs/peer", () => ({
     PeerManager: { getInstance: () => ({ getPeer: () => null }) },
 }))
 
+// Identities the chain lists as validators. A lookup can be held open to
+// let a connection close while it is in flight.
+const validators = new Set<string>()
+let lookupGate: Promise<void> | null = null
+const eligibility = {
+    isMergePeerEligible: async (identity: string) => {
+        if (lookupGate) await lookupGate
+        return validators.has(identity)
+    },
+}
+mock.module("src/libs/consensus/mergePeerEligibility", () => eligibility)
+mock.module("@/libs/consensus/mergePeerEligibility", () => eligibility)
+
 const PENDING_AUTH = 3
 const CLOSED = -2
 
@@ -135,7 +148,12 @@ function fakeSocket(ip: string) {
     return s
 }
 
+/** Lets the async validator lookups started by authentication settle. */
+const settle = () => new Promise(r => setTimeout(r, 0))
+
 function makeServer(maxConnections: number) {
+    validators.clear()
+    lookupGate = null
     ;(ConnectionPool as any).instance = null
     ;(RateLimiter as any).instance = null
     const server = new OmniProtocolServer({ port: 1, maxConnections })
@@ -213,13 +231,15 @@ describe("OmniProtocolServer pre-auth limits", () => {
         expect(live.length).toBe(MAX_PER_IP)
     })
 
-    it("frees a socket's per-IP slot once it authenticates, and only once", () => {
+    it("frees a validator's per-IP slot once it authenticates, and only once", async () => {
         current = makeServer(1000)
         const ip = "198.51.100.20" // several validators behind one NAT address
+        for (let i = 0; i < MAX_PER_IP; i++) validators.add(`validator-${i}`)
         const first = Array.from({ length: MAX_PER_IP }, () => current.open(ip))
         expect(first.every((s: any) => !s.destroyed)).toBe(true)
         const authenticated = current.pending()
         authenticated.forEach((c: FakePeerConnection, i: number) => c.simulateAuth(`validator-${i}`))
+        await settle()
         expect(current.pending().length).toBe(0)
 
         // Authenticated links no longer count: the IP can open a full set of
@@ -232,6 +252,51 @@ describe("OmniProtocolServer pre-auth limits", () => {
         for (const c of authenticated) c.simulateClose()
         expect(current.open(ip).destroyed).toBe(true)
         expect(current.pending().length).toBe(MAX_PER_IP)
+    })
+
+    it("keeps the per-IP slot of an identity that is not a validator", async () => {
+        current = makeServer(1000)
+        const ip = "203.0.113.66"
+        // Each socket proves a fresh self-made key, one at a time.
+        for (let i = 0; i < MAX_PER_IP; i++) {
+            expect(current.open(ip).destroyed).toBe(false)
+            current.pending()[0].simulateAuth(`throwaway-key-${i}`)
+            await settle()
+        }
+        expect(current.pending().length).toBe(0)
+
+        // Proven but unknown identities still count against the IP.
+        expect(current.open(ip).destroyed).toBe(true)
+        // A different IP is unaffected.
+        expect(current.open("203.0.113.67").destroyed).toBe(false)
+    })
+
+    it("frees the slot once when a validator closes before its lookup returns", async () => {
+        current = makeServer(1000)
+        const ip = "198.51.100.30"
+        validators.add("validator-a")
+        let openGate!: () => void
+        lookupGate = new Promise<void>(r => (openGate = r))
+
+        const slotsHeld = () =>
+            (current.server.getRateLimiter() as any).ipLimits.get(ip).connections
+
+        for (let i = 0; i < MAX_PER_IP; i++) current.open(ip)
+        const conn = current.pending()[0]
+        conn.simulateAuth("validator-a")
+        await settle()
+        // The slot is held while the lookup is in flight ...
+        expect(slotsHeld()).toBe(MAX_PER_IP)
+        // ... and the close frees it before the lookup answers.
+        conn.simulateClose()
+        expect(slotsHeld()).toBe(MAX_PER_IP - 1)
+        openGate()
+        await settle()
+
+        // The late "validator" answer must not free a second slot.
+        expect(slotsHeld()).toBe(MAX_PER_IP - 1)
+        expect(current.open(ip).destroyed).toBe(false)
+        expect(current.open(ip).destroyed).toBe(true)
     })
 
     it("applies the per-IP check to the first socket from a blocked IP", () => {

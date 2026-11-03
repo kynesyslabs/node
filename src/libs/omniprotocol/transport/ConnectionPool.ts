@@ -57,10 +57,10 @@ export class ConnectionPool extends EventEmitter {
     private static instance: ConnectionPool | null = null
     private connections: Map<string, PeerConnection[]> = new Map()
     private pendingConnections: Map<string, PeerConnection> = new Map() // Temp tracking before auth
-    // Pending inbound connections that hold a per-IP slot in the rate
-    // limiter, with the IP captured at accept time: remoteAddress is gone
-    // once the socket is destroyed, and outbound connections never took a
-    // slot to give back.
+    // Inbound connections that hold a per-IP slot in the rate limiter
+    // (pending ones, and those authenticated as non-validators), with the IP
+    // captured at accept time: remoteAddress is gone once the socket is
+    // destroyed, and outbound connections never took a slot to give back.
     private ipSlots: Map<PeerConnection, string> = new Map()
     private config: PoolConfig
     private cleanupTimer: NodeJS.Timeout | null = null
@@ -159,10 +159,11 @@ export class ConnectionPool extends EventEmitter {
         // Remove from pending tracking
         this.pendingConnections.delete(tempId)
 
-        // The per-IP limit bounds unauthenticated sockets only. Validators
-        // behind one NAT address share an IP, and once proven they are held
-        // by the per-identity limit below instead.
-        this.releaseIpSlot(connection)
+        // A verified auth block proves only that the peer holds the key, and
+        // keys are free, so an identity alone does not earn its way out of
+        // the per-IP limit. Validators behind one NAT address share an IP:
+        // they give the slot back once the chain says they are validators.
+        void this.releaseIpSlotIfValidator(connection, peerIdentity)
 
         // Get existing connections for this peer
         const existing = this.connections.get(peerIdentity) || []
@@ -217,6 +218,34 @@ export class ConnectionPool extends EventEmitter {
         this.releaseIpSlot(connection)
 
         this.emit("connection_closed", peerIdentity)
+    }
+
+    /**
+     * Give back the connection's per-IP slot if its proven identity is in
+     * the validator set. The lookup is async, so the connection may close
+     * (and free the slot) first; releaseIpSlot makes the late call a no-op.
+     */
+    private async releaseIpSlotIfValidator(
+        connection: PeerConnection,
+        peerIdentity: string,
+    ): Promise<void> {
+        if (!this.ipSlots.has(connection)) return
+        let validator = false
+        try {
+            const { isMergePeerEligible } = await import(
+                "src/libs/consensus/mergePeerEligibility"
+            )
+            // Same rule as committee membership: the staked set and the
+            // eligible pool from chain state, not the self-reported peerlist.
+            validator = await isMergePeerEligible(peerIdentity)
+        } catch (error) {
+            log.warning(
+                `[ConnectionPool] Validator lookup failed for ${peerIdentity}, keeping its per-IP slot: ${error}`,
+            )
+        }
+        if (validator) {
+            this.releaseIpSlot(connection)
+        }
     }
 
     /**
