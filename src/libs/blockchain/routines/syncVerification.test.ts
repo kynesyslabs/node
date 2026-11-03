@@ -366,6 +366,19 @@ describe("failure codes", () => {
         expect(stale.attrs).toMatchObject({ code: "TX_NONCE_INVALID_LOW", message: "served" })
         expect(applied.attrs).toMatchObject({ code: "TX_EXECUTE_FAILED" })
     })
+
+    it("replaces a served code that cannot be converted to text without throwing", async () => {
+        getAccountNonces.mockResolvedValue({ [alice.address]: 5 })
+        const stale = makeTx(alice, {
+            nonce: 1,
+            status: "failed",
+            attrs: { reference_block: HEIGHT - 1, code: { toString: 0, valueOf: 0 } },
+        })
+        const plan = await planBlockOutcome(makeBlock([stale]), [stale])
+
+        expect(() => pinFailureCodes([stale], plan)).not.toThrow()
+        expect(stale.attrs).toMatchObject({ code: "TX_NONCE_INVALID_LOW" })
+    })
 })
 
 describe("fork activation blocks", () => {

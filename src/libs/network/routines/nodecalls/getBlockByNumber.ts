@@ -8,12 +8,9 @@ export default async function getBlockByNumber(
 ): Promise<RPCResponse> {
     // Block 0 is a valid height: a truthiness check refused a numeric 0.
     const raw = data?.blockNumber
-    const blockNumber =
-        typeof raw === "number"
-            ? raw
-            : typeof raw === "string" && /^\d+$/.test(raw)
-              ? Number(raw)
-              : NaN
+    let blockNumber = Number.NaN
+    if (typeof raw === "number") blockNumber = raw
+    else if (typeof raw === "string" && /^\d+$/.test(raw)) blockNumber = Number(raw)
     if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) {
         log.error("[SERVER ERROR] Missing or invalid blockNumber")
         return {

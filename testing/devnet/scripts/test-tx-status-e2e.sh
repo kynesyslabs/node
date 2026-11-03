@@ -106,7 +106,7 @@ wait_for_rpc() {
             return 0
         fi
         if [[ "${i}" -eq 60 ]]; then
-            echo "[tx-status-e2e] ERROR: ${name} RPC never came up; logs:"
+            echo "[tx-status-e2e] ERROR: ${name} RPC never came up; logs:" >&2
             docker compose "${COMPOSE_FILES[@]}" logs --tail=80 "${name}"
             return 1
         fi
@@ -140,18 +140,18 @@ get_balance_os() {
 # HTTP error, or empty grep doesn't trip `set -e` mid-substitution and
 # kill the harness before the diagnostic block runs.
 if ! SENDER_BAL_OS="$(get_balance_os "${NODE1_URL}" "${SENDER_PUBKEY}")"; then
-    echo "[tx-status-e2e] ERROR: failed to query sender balance from node-1."
+    echo "[tx-status-e2e] ERROR: failed to query sender balance from node-1." >&2
     docker compose "${COMPOSE_FILES[@]}" logs --tail=80 node-1
     exit 1
 fi
 echo "[tx-status-e2e] sender pre-balance on node-1: ${SENDER_BAL_OS} OS"
 if [[ -z "${SENDER_BAL_OS}" ]] || [[ "${SENDER_BAL_OS}" = "0" ]]; then
-    echo "[tx-status-e2e] ERROR: sender balance is 0 or empty — genesis fixture didn't apply or response shape changed."
+    echo "[tx-status-e2e] ERROR: sender balance is 0 or empty — genesis fixture didn't apply or response shape changed." >&2
     exit 1
 fi
 
 if ! SENDER_BAL_OS_2="$(get_balance_os "${NODE2_URL}" "${SENDER_PUBKEY}")"; then
-    echo "[tx-status-e2e] ERROR: failed to query sender balance from node-2."
+    echo "[tx-status-e2e] ERROR: failed to query sender balance from node-2." >&2
     docker compose "${COMPOSE_FILES[@]}" logs --tail=80 node-2
     exit 1
 fi
@@ -167,7 +167,7 @@ STATUS_SCRIPT="${SCRIPT_DIR}/tx_status_failed.mjs"
 # Balances exceed 64 bits, so shell arithmetic would overflow.
 AMOUNT_OS="$(bun -e 'console.log(String(BigInt(process.argv[1]) / 100n))' "${SENDER_BAL_OS}")"
 if [[ "${AMOUNT_OS}" == "0" ]]; then
-    echo "[tx-status-e2e] ERROR: sender balance ${SENDER_BAL_OS} OS is too small for the transfers."
+    echo "[tx-status-e2e] ERROR: sender balance ${SENDER_BAL_OS} OS is too small for the transfers." >&2
     exit 1
 fi
 echo "[tx-status-e2e] transfer amounts: ${AMOUNT_OS} and twice that, in OS"

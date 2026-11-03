@@ -336,9 +336,10 @@ export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): voi
     for (const tx of txs) {
         const code = plan.failedBeforeApply.get(tx.hash)
         if (code === undefined || code === ErrorCode.TX_EXISTS || tx.attrs?.code === code) continue
-        log.warn(
-            `[sync] tx ${tx.hash}: served failure code ${String(tx.attrs?.code)} replaced by local ${code}`,
-        )
+        // The served code is unsigned peer data; never convert it to text.
+        const served = tx.attrs?.code
+        const shown = typeof served === "string" ? JSON.stringify(served.slice(0, 64)) : typeof served
+        log.warn(`[sync] tx ${tx.hash}: served failure code ${shown} replaced by local ${code}`)
         tx.attrs = { ...(tx.attrs ?? {}), code }
     }
 }

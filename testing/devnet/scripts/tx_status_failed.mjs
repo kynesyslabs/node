@@ -24,8 +24,13 @@ if (!NODE1_URL || !NODE2_URL || !IDENTITY_PATH || !RECEIVER_PUBKEY || !AMOUNT_OS
 }
 
 let failures = 0
+// Node answers are echoed; keep each check on one line.
+const oneLine = text => String(text).replace(/[\r\n]+/g, " ")
+
 function check(ok, label, detail = "") {
-    console.log(`[tx-status] ${ok ? "PASS" : "FAIL"} ${label}${detail ? `: ${detail}` : ""}`)
+    const verdict = ok ? "PASS" : "FAIL"
+    const suffix = detail ? ": " + oneLine(detail) : ""
+    console.log(`[tx-status] ${verdict} ${label}${suffix}`)
     if (!ok) failures++
 }
 
