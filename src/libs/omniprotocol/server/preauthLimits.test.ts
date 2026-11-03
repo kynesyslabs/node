@@ -128,9 +128,9 @@ let ConnectionPool: any
 let RateLimiter: any
 
 beforeAll(async () => {
-    ;({ OmniProtocolServer } = await import("./OmniProtocolServer"))
-    ;({ ConnectionPool } = await import("../transport/ConnectionPool"))
-    ;({ RateLimiter } = await import("../ratelimit"))
+    OmniProtocolServer = (await import("./OmniProtocolServer")).OmniProtocolServer
+    ConnectionPool = (await import("../transport/ConnectionPool")).ConnectionPool
+    RateLimiter = (await import("../ratelimit")).RateLimiter
 })
 
 let port = 40000
@@ -154,14 +154,14 @@ const settle = () => new Promise(r => setTimeout(r, 0))
 function makeServer(maxConnections: number) {
     validators.clear()
     lookupGate = null
-    ;(ConnectionPool as any).instance = null
-    ;(RateLimiter as any).instance = null
+    ConnectionPool.instance = null
+    RateLimiter.instance = null
     const server = new OmniProtocolServer({ port: 1, maxConnections })
     const accepted: any[] = []
     server.connectionPool.on("connection_accepted", () => {})
     const open = (ip: string) => {
         const socket = fakeSocket(ip)
-        ;(server as any).handleNewConnection(socket)
+        server.handleNewConnection(socket)
         if (!socket.destroyed) accepted.push(socket)
         return socket
     }
