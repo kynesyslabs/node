@@ -213,7 +213,11 @@ function makeProposalRepo() {
             return rows.get(row.proposalId)
         }),
         create: jest.fn((row: any) => ({ ...row })),
-        createQueryBuilder: jest.fn(queryBuilderFn),
+        maximum: jest.fn(async () => {
+            let max = 0
+            for (const v of rows.values()) max = Math.max(max, v.version ?? 0)
+            return max
+        }),
     }
 }
 

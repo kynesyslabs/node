@@ -18,7 +18,7 @@ const nameOf = (entity: any) => entity?.name ?? String(entity)
 
 const matches = (row: any, where: Record<string, any>) =>
     Object.entries(where).every(([k, v]) =>
-        v instanceof In([]).constructor ? (v.value as unknown[]).includes(row[k]) : row[k] === v,
+        v instanceof In([]).constructor ? ((v as { value: unknown[] }).value).includes(row[k]) : row[k] === v,
     )
 
 function repoFor(table: string, sink: Map<string, unknown[]>, tag: string) {
@@ -401,8 +401,8 @@ describe("a set applied on top of a pending one", () => {
             deferredWrites: [],
             appliedEditsCount: 1,
         })
-        expect(pending.entities.storagePrograms.get("sp1")).toEqual({ address: "sp1", data: "proof" })
-        expect(pending.entities.tlsNotaries.get("t1")).toEqual({ tokenId: "t1" })
+        expect(pending.entities.storagePrograms.get("sp1") as unknown).toEqual({ address: "sp1", data: "proof" })
+        expect(pending.entities.tlsNotaries.get("t1") as unknown).toEqual({ tokenId: "t1" })
         expect(pending.sideEffects).toHaveLength(1)
     })
 })
