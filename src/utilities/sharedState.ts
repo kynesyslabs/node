@@ -280,6 +280,11 @@ export default class SharedState {
     // while it is true. The text names the peers and the nearest fork height.
     forkScheduleAbstain = false
     forkScheduleAbstainReason = ""
+    // Validators whose schedule differs from ours, from the watch's latest
+    // conclusive round inside the window while we are in the majority. They
+    // abstain, so the shard treats them as offline instead of waiting on them
+    // every round. Lower-case identities.
+    forkScheduleDifferingPeers: ReadonlySet<string> = new Set()
 
     // Batch sync configuration
     batchSyncBlockSize = BATCH_SYNC_BLOCK_SIZE
