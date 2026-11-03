@@ -171,8 +171,9 @@ async function recheckOnce(): Promise<void> {
  * agrees, after the fork height too. A validator leaves the set only by
  * answering with our schedule or by leaving the validator set: one that did not
  * answer (restarting, slow, not ready) may still abstain, and putting it back
- * in the shard could make it secretary of a round it never runs. Under `warn`,
- * or while this node abstains itself, nobody is left out.
+ * in the shard could make it secretary of a round it never runs; so does a
+ * round where the agreeing validators did not answer. Under `warn`, or while
+ * this node abstains itself, nobody is left out.
  */
 export async function applyRoundOutcome(
     tip: number,
@@ -191,15 +192,26 @@ export async function applyRoundOutcome(
     if (plan.inWindow) windowCheckedFor = plan.nearest
     setForkScheduleMismatch(differing > 0)
 
+    const majorityDiffers = differing > outcome.agreed
+    const abstaining =
+        policy === "abstain" &&
+        majorityDiffers &&
+        (plan.inWindow || getSharedState.forkScheduleAbstain)
     const before = getSharedState.forkScheduleDifferingPeers
     const leaveOut = new Set<string>()
-    if (policy === "abstain" && differing <= outcome.agreed) {
+    if (policy === "abstain" && !abstaining) {
         const agreed = new Set((outcome.agreedIdentities ?? []).map(id => id.toLowerCase()))
         const staked = outcome.validatorIdentities ? new Set(outcome.validatorIdentities) : null
         for (const id of before) {
             if (!agreed.has(id) && (staked === null || staked.has(id))) leaveOut.add(id)
         }
-        if (differing > 0 && (plan.inWindow || before.size > 0)) {
+        // A round where the differing side outnumbers the answers that agreed
+        // is not grounds to add anyone: the agreeing validators may just have
+        // timed out.
+        // A node that abstained itself is past a mismatch too: the minority
+        // still differing when it resumes may still abstain.
+        const pastMismatch = before.size > 0 || getSharedState.forkScheduleAbstain
+        if (!majorityDiffers && differing > 0 && (plan.inWindow || pastMismatch)) {
             for (const id of outcome.mismatchedIdentities ?? []) leaveOut.add(id.toLowerCase())
         }
     }
@@ -216,7 +228,8 @@ export async function applyRoundOutcome(
         }
     }
 
-    if (differing > outcome.agreed) {
+    if (majorityDiffers) {
+        if (!abstaining && leaveOut.size > 0) startRecheck()
         if (policy === "abstain" && plan.inWindow) {
             const reason =
                 "fork schedule differs from " +
