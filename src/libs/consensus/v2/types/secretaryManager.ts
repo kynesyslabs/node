@@ -89,6 +89,8 @@ export default class SecretaryManager {
     public unresponsiveMembers = new Set<string>()
     /** The timeout release in flight, so a second timeout does not start another. */
     private timeoutRelease: Promise<void> | null = null
+    /** A timeout that fired while a release was in flight; rerun when it finishes. */
+    private timeoutReleaseQueued = false
     public ended = false
     /** The peerlist committed in this round's block, dictated by the secretary. */
     public mergedPeerlist: string[] | null = null
@@ -441,12 +443,18 @@ export default class SecretaryManager {
         }
     }
 
-    /** Starts releaseAfterTimeout unless one is already running. */
+    /**
+     * Starts releaseAfterTimeout, one at a time. A release holds the lock
+     * through its greenlight sends, which can take a while; a timeout that
+     * fires meanwhile is queued and rerun once the release finishes, so the
+     * next phase is not left waiting for yet another timeout.
+     */
     private startTimeoutRelease() {
         if (this.timeoutRelease) {
             log.debug(
-                "[SECRETARY ROUTINE] A timeout release is already running, not starting another",
+                "[SECRETARY ROUTINE] A timeout release is already running, queuing this one",
             )
+            this.timeoutReleaseQueued = true
             return
         }
         this.timeoutRelease = this.releaseAfterTimeout()
@@ -457,6 +465,12 @@ export default class SecretaryManager {
             })
             .finally(() => {
                 this.timeoutRelease = null
+                if (this.timeoutReleaseQueued) {
+                    this.timeoutReleaseQueued = false
+                    if (this.runSecretaryRoutine) {
+                        this.startTimeoutRelease()
+                    }
+                }
             })
     }
 
