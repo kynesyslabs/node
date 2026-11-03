@@ -299,6 +299,45 @@ describe("OmniProtocolServer pre-auth limits", () => {
         expect(current.open(ip).destroyed).toBe(true)
     })
 
+    it("lifts a connection-count block once validators behind the IP give their slots back", async () => {
+        current = makeServer(1000)
+        const ip = "198.51.100.40"
+        let openGate!: () => void
+        lookupGate = new Promise<void>(r => (openGate = r))
+
+        for (let i = 0; i < MAX_PER_IP; i++) current.open(ip)
+        current.pending().forEach((c, i) => {
+            validators.add(`validator-${i}`)
+            c.simulateAuth(`validator-${i}`)
+        })
+        await settle()
+        // Every slot is still held while the lookups run, so one more
+        // socket is refused and blocks the IP.
+        expect(current.open(ip).destroyed).toBe(true)
+
+        openGate()
+        await settle()
+        // The validators gave their slots back; the block must not lock
+        // them out for the rest of the block window.
+        expect(current.open(ip).destroyed).toBe(false)
+    })
+
+    it("keeps a request-flood block when a validator gives its slot back", async () => {
+        current = makeServer(1000)
+        const ip = "198.51.100.41"
+        validators.add("validator-a")
+        current.open(ip)
+        const limiter = current.server.getRateLimiter() as any
+        const entry = limiter.ipLimits.get(ip)
+        entry.blocked = true
+        entry.blockExpiry = Date.now() + 60_000
+        entry.connectionLimitBlock = false
+
+        current.pending()[0].simulateAuth("validator-a")
+        await settle()
+        expect(entry.blocked).toBe(true)
+    })
+
     it("applies the per-IP check to the first socket from a blocked IP", () => {
         current = makeServer(1000)
         const ip = "198.51.100.9"

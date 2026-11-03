@@ -244,7 +244,7 @@ export class ConnectionPool extends EventEmitter {
             )
         }
         if (validator) {
-            this.releaseIpSlot(connection)
+            this.releaseIpSlot(connection, true)
         }
     }
 
@@ -253,11 +253,18 @@ export class ConnectionPool extends EventEmitter {
      * on every exit path: only the first call for a counted connection
      * decrements.
      */
-    private releaseIpSlot(connection: PeerConnection): void {
+    private releaseIpSlot(
+        connection: PeerConnection,
+        provenValidator = false,
+    ): void {
         const ip = this.ipSlots.get(connection)
         if (ip === undefined) return
         this.ipSlots.delete(connection)
-        this.rateLimiter?.removeConnection(ip)
+        if (provenValidator) {
+            this.rateLimiter?.releaseValidatorConnection(ip)
+        } else {
+            this.rateLimiter?.removeConnection(ip)
+        }
     }
 
     /**
