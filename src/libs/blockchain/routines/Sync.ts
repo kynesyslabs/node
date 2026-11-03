@@ -22,6 +22,7 @@ import { verifyBlock } from "../validation/verifyBlock"
 import {
     SyncBlockRejectedError,
     localStatuses,
+    pinFailureCodes,
     planBlockOutcome,
     statusDisagreements,
     verifyBlockTransactions,
@@ -1160,6 +1161,7 @@ async function applyVerifiedBlock(
             )
         }
 
+        pinFailureCodes(txs, plan)
         await insertBlockOrHalt(block, txs, outcome.pending)
     })
 }

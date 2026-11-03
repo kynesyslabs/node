@@ -65,6 +65,7 @@ const { getSharedState } = await import("@/utilities/sharedState")
 const {
     SyncBlockRejectedError,
     localStatuses,
+    pinFailureCodes,
     planBlockOutcome,
     statusDisagreements,
     verifyBlockTransactions,
@@ -341,6 +342,42 @@ describe("local statuses", () => {
         expect(statusDisagreements(txs, local).sort()).toEqual(
             [wrongConfirmed.hash, wrongFailed.hash].sort(),
         )
+    })
+})
+
+describe("failure codes", () => {
+    it("takes the code of a transaction that fails before apply from the local derivation", async () => {
+        getAccountNonces.mockResolvedValue({ [alice.address]: 5, [bob.address]: 0 })
+        const stale = makeTx(alice, {
+            nonce: 1,
+            status: "failed",
+            attrs: { reference_block: HEIGHT - 1, code: "SOMETHING_ELSE", message: "served" },
+        })
+        const applied = makeTx(bob, {
+            nonce: 1,
+            status: "failed",
+            attrs: { reference_block: HEIGHT - 1, code: "TX_EXECUTE_FAILED" },
+        })
+        const txs = [stale, applied]
+        const plan = await planBlockOutcome(makeBlock(txs), txs)
+
+        pinFailureCodes(txs, plan)
+
+        expect(stale.attrs).toMatchObject({ code: "TX_NONCE_INVALID_LOW", message: "served" })
+        expect(applied.attrs).toMatchObject({ code: "TX_EXECUTE_FAILED" })
+    })
+
+    it("replaces a served code that cannot be converted to text without throwing", async () => {
+        getAccountNonces.mockResolvedValue({ [alice.address]: 5 })
+        const stale = makeTx(alice, {
+            nonce: 1,
+            status: "failed",
+            attrs: { reference_block: HEIGHT - 1, code: { toString: 0, valueOf: 0 } },
+        })
+        const plan = await planBlockOutcome(makeBlock([stale]), [stale])
+
+        expect(() => pinFailureCodes([stale], plan)).not.toThrow()
+        expect(stale.attrs).toMatchObject({ code: "TX_NONCE_INVALID_LOW" })
     })
 })
 
