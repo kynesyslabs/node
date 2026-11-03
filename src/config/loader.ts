@@ -193,6 +193,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.EXPECTED_GENESIS_HASH,
                 d.core.expectedGenesisHash,
             ).toLowerCase(),
+            expectedGenesisBlockHash: envStr(
+                EnvKey.EXPECTED_GENESIS_BLOCK_HASH,
+                d.core.expectedGenesisBlockHash,
+            ).toLowerCase(),
             blockWatchdogEnabled: envBool(
                 EnvKey.BLOCK_WATCHDOG_ENABLED,
                 d.core.blockWatchdogEnabled,

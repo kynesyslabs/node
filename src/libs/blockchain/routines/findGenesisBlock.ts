@@ -19,11 +19,13 @@ import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import {
     GenesisRefusal,
+    blockPinProblem,
     freshGenesisProblems,
     parseGenesisPin,
     parseStoredGenesisData,
     pinRequirementProblem,
     restartGenesisProblems,
+    unpinnedWarning,
 } from "@/libs/blockchain/genesis/genesisPin"
 import {
     acceptSchedule,
@@ -142,8 +144,14 @@ export default async function findGenesisBlock() {
     }
 
     const pin = parseGenesisPin(Config.getInstance().core.expectedGenesisHash)
+    const blockPin = parseGenesisPin(
+        Config.getInstance().core.expectedGenesisBlockHash,
+        "EXPECTED_GENESIS_BLOCK_HASH",
+    )
     const pinProblem = pinRequirementProblem(pin, process.env)
     if (pinProblem) refuse([pinProblem])
+    const unpinned = unpinnedWarning(pin, process.env, blockPin)
+    if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
     log.info("[GENESIS] Looking for the genesis block...")
     const genesisBlockHash = await Chain.getGenesisBlockHash()
@@ -162,6 +170,8 @@ export default async function findGenesisBlock() {
                 pin,
             }),
         )
+        const storedBlockProblem = blockPinProblem(genesisBlockHash, blockPin, false)
+        if (storedBlockProblem) refuse([storedBlockProblem])
         await acceptLoadedForkSchedule(await Chain.getLastBlockNumber())
         await loadShardSizeFromGenesisBlock()
         return
@@ -203,7 +213,13 @@ export default async function findGenesisBlock() {
     readGenesisShardSize(genesisData)
 
     // Adding the genesis block to the chain
-    const genesisBlock = await Chain.generateGenesisBlock(genesisData)
+    const genesisBlock = await Chain.generateGenesisBlock(genesisData, hash => {
+        const problem = blockPinProblem(hash, blockPin, true)
+        if (problem) refuse([problem])
+    })
+    if (blockPin !== "") {
+        log.info(`[GENESIS] Block 0 matches EXPECTED_GENESIS_BLOCK_HASH ${blockPin}`)
+    }
     getSharedState.genesisCreatedThisBoot = true
     // Block 0 was just created from this schedule; a row left by an earlier
     // chain in a partly wiped database says nothing about this one.

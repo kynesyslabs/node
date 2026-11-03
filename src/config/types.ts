@@ -86,6 +86,12 @@ export interface CoreConfig {
      * a peer only when it hashes to this. Empty means no pin.
      */
     expectedGenesisHash: string
+    /**
+     * Hash of block 0 itself (sha256 hex). The genesis data hash leaves out how
+     * block 0 serialises that data, so the block can differ while the data
+     * hash matches. Empty means no pin.
+     */
+    expectedGenesisBlockHash: string
     blockWatchdogEnabled: boolean
     blockWatchdogTimeoutSeconds: number
     /** Consecutive missed shard selections before the node exits for

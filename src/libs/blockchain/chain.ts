@@ -165,7 +165,10 @@ export default class Chain {
     }
 
     // ── Genesis ───────────────────────────────────────────────
-    static async generateGenesisBlock(genesisData: any): Promise<Block> {
-        return genesisOps.generateGenesisBlock(genesisData)
+    static async generateGenesisBlock(
+        genesisData: any,
+        checkHash?: (hash: string) => void,
+    ): Promise<Block> {
+        return genesisOps.generateGenesisBlock(genesisData, checkHash)
     }
 }
