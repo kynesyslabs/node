@@ -160,6 +160,25 @@ if [[ "${SENDER_BAL_OS}" != "${SENDER_BAL_OS_2}" ]]; then
     echo "[tx-status-e2e] WARN: nodes disagree on sender balance (likely just sync lag)"
 fi
 
+# A cold start of every validator can take a minute to agree on block 1;
+# transfers sent before that wait in the mempool past the SDK's timeout.
+last_block() {
+    curl -sS -m 5 -X POST -H 'Content-Type: application/json' \
+        -d '{"method":"nodeCall","params":[{"type":"nodeCall","message":"getLastBlockNumber","data":{}}]}' \
+        "${NODE1_URL}/" | grep -oE '"response":[0-9]+' | grep -oE '[0-9]+$' || true
+}
+echo "[tx-status-e2e] waiting for the chain to reach block 2..."
+for _ in $(seq 1 60); do
+    [[ "$(last_block)" -ge 2 ]] 2>/dev/null && break
+    sleep 5
+done
+if ! [[ "$(last_block)" -ge 2 ]] 2>/dev/null; then
+    echo "[tx-status-e2e] ERROR: the chain did not reach block 2 within 5 minutes." >&2
+    docker compose "${COMPOSE_FILES[@]}" logs --tail=80 node-1
+    exit 1
+fi
+echo "[tx-status-e2e] chain at block $(last_block)"
+
 # -----------------------------------------------------------------------------
 # 5. Run the status script (bun)
 # -----------------------------------------------------------------------------
