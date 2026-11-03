@@ -7,7 +7,8 @@ cd "$(dirname "$0")/.."
 
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
 # Single files outside SUITE_DIRS: the launch go/no-go tooling, the signing
-# guards and the consensus and sync routes the suites depend on. A listed
+# guards, the consensus and sync routes the suites depend on and the peer
+# liveness checks that decide which committee members count. A listed
 # file that is gone fails its run instead of dropping out silently
 SUITE_FILES=(
     scripts/launch-go-no-go.committee.test.ts
@@ -22,6 +23,8 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
+    src/libs/omniprotocol/peerLiveness.test.ts
+    src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts
     testing/forks/loadForkConfig.test.ts

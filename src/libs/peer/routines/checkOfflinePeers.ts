@@ -34,7 +34,11 @@ export default async function checkOfflinePeers(): Promise<void> {
     const quietPeers = peerman.getQuietPeers()
     const probePromises = quietPeers.map(async quietPeer => {
         const alive = await quietPeer.connect()
-        if (!alive) {
+        if (alive) {
+            // The probe is the proof of life here; do not depend on the
+            // transport having refreshed it.
+            peerman.updatePeerLastSeen(quietPeer.identity)
+        } else {
             log.warning(
                 `[PEER RECHECK] ${quietPeer.identity} @ ${quietPeer.connection.string} silent for ${Math.round((now - (quietPeer.status.timestamp ?? 0)) / 1000)}s and not answering: marking offline`,
             )
