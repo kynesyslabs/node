@@ -85,6 +85,10 @@ export async function getTxByHash(hash: string): Promise<Transaction | null> {
     }
 }
 
+// Attrs of a synced block come from a peer; bound what is echoed to clients.
+const MAX_CODE_LENGTH = 64
+const MAX_MESSAGE_LENGTH = 512
+
 /**
  * Lifecycle status of a transaction by hash.
  *
@@ -93,10 +97,6 @@ export async function getTxByHash(hash: string): Promise<Transaction | null> {
  * caller's height bound (read before both) still makes true, rather than
  * pending after it is in a block.
  */
-// Attrs of a synced block come from a peer; bound what is echoed to clients.
-const MAX_CODE_LENGTH = 64
-const MAX_MESSAGE_LENGTH = 512
-
 export async function getTransactionStatus(hash: string): Promise<TxStatus> {
     const tx = await getTxByHash(hash)
     if (tx) {

@@ -329,12 +329,13 @@ export function localStatuses(
  * The block does not commit to transaction attrs, so the failure code of a
  * transaction this node also saw fail before apply is taken from the local
  * derivation, not from the peer. Failures inside apply keep the served code:
- * the local apply does not report one.
+ * the local apply does not report one. TX_EXISTS is left alone: the forger
+ * checks nonce and reference block first, so an honest code can differ.
  */
 export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): void {
     for (const tx of txs) {
         const code = plan.failedBeforeApply.get(tx.hash)
-        if (code === undefined || tx.attrs?.code === code) continue
+        if (code === undefined || code === ErrorCode.TX_EXISTS || tx.attrs?.code === code) continue
         log.warn(
             `[sync] tx ${tx.hash}: served failure code ${String(tx.attrs?.code)} replaced by local ${code}`,
         )
