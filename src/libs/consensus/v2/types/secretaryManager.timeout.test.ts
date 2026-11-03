@@ -138,6 +138,67 @@ describe("SecretaryManager.releaseAfterTimeout", () => {
         expect(members[SILENT_OFFLINE].longCall).not.toHaveBeenCalled()
     })
 
+    test("a member that reports the next phase while the peerlist is being merged is left alone", async () => {
+        const manager = SecretaryManager.getInstance(101, true)
+        const late = member(AHEAD, async () => false)
+        const waiting = member(WAITING_A, async () => false)
+        manager.shard = {
+            CVSA: "seed",
+            members: [late, waiting],
+            validationPhases: {
+                [AHEAD]: phase(3, true),
+                [WAITING_A]: phase(3, true),
+            },
+            secretaryKey: OUR_KEY,
+            blockRef: 101,
+        } as any
+        manager.ourValidatorPhase = phase(3, true) as any
+        manager.blockTimestamp = 1_000
+        // The peerlist is not merged yet, so the release awaits it; the
+        // member reports phase 6 during that await.
+        manager.mergedPeerlist = null
+        manager.ensureMergedPeerlist = async () => {
+            manager.shard.validationPhases[AHEAD] = phase(6, true) as any
+            manager.mergedPeerlist = []
+            return []
+        }
+
+        await manager.releaseWaitingMembers([AHEAD, WAITING_A], 3, "test")
+
+        expect(late.longCall).not.toHaveBeenCalled()
+        expect(manager.shard.validationPhases[AHEAD].waitStatus).toBe(true)
+        expect(waiting.longCall).toHaveBeenCalledTimes(1)
+        expect(manager.shard.validationPhases[WAITING_A].waitStatus).toBe(false)
+    })
+
+    test("a second timeout while a release is running does not start another", async () => {
+        const manager = SecretaryManager.getInstance(101, true)
+        let pings = 0
+        const silent = member(SILENT_ONLINE, async () => {
+            pings++
+            await sleep(30)
+            return true
+        })
+        manager.shard = {
+            CVSA: "seed",
+            members: [silent],
+            validationPhases: { [SILENT_ONLINE]: phase(1, false) },
+            secretaryKey: OUR_KEY,
+            blockRef: 101,
+        } as any
+        manager.ourValidatorPhase = phase(3, true) as any
+        manager.blockTimestamp = 1_000
+        manager.mergedPeerlist = []
+
+        ;(manager as any).startTimeoutRelease()
+        ;(manager as any).startTimeoutRelease()
+        await (manager as any).timeoutRelease
+
+        expect(pings).toBe(1)
+        expect(silent.longCall).toHaveBeenCalledTimes(1)
+        expect((manager as any).timeoutRelease).toBeNull()
+    })
+
     test("sends nothing when every member moved on during the ping", async () => {
         const manager = SecretaryManager.getInstance(101, true)
         const ahead = member(AHEAD, async () => false)

@@ -121,10 +121,10 @@ export abstract class BaseOmniAdapter {
     }
 
     /**
-     * Mark a peer as HTTP-only for the cooldown (e.g., after OmniProtocol failure)
+     * Mark a peer as HTTP-only for the cooldown (e.g., after OmniProtocol failure).
+     * Its Omni capability is kept, so it is retried over Omni afterwards.
      */
     markHttpPeer(peerIdentity: string): void {
-        this.config.migration.omniPeers.delete(peerIdentity)
         this.httpOnlyUntil.set(
             peerIdentity,
             Date.now() + this.config.migration.httpFallbackCooldown,

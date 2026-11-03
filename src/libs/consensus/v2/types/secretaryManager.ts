@@ -87,6 +87,8 @@ export default class SecretaryManager {
     public runSecretaryRoutine = false
     public blockTimestamp: number = null
     public unresponsiveMembers = new Set<string>()
+    /** The timeout release in flight, so a second timeout does not start another. */
+    private timeoutRelease: Promise<void> | null = null
     public ended = false
     /** The peerlist committed in this round's block, dictated by the secretary. */
     public mergedPeerlist: string[] | null = null
@@ -423,8 +425,9 @@ export default class SecretaryManager {
                     log.error(
                         "[SECRETARY ROUTINE] Timeout waiting for SET_WAIT_STATUS",
                     )
-                    // NOTE: We don't await this. We just trigger it and continue the routine
-                    this.releaseAfterTimeout()
+                    // NOTE: Not awaited, so the routine keeps taking reports;
+                    // one release at a time, and its failure is logged, not thrown.
+                    this.startTimeoutRelease()
                 }
 
                 if (error instanceof AbortError) {
@@ -436,6 +439,25 @@ export default class SecretaryManager {
                 }
             }
         }
+    }
+
+    /** Starts releaseAfterTimeout unless one is already running. */
+    private startTimeoutRelease() {
+        if (this.timeoutRelease) {
+            log.debug(
+                "[SECRETARY ROUTINE] A timeout release is already running, not starting another",
+            )
+            return
+        }
+        this.timeoutRelease = this.releaseAfterTimeout()
+            .catch(error => {
+                log.error(
+                    `[SECRETARY ROUTINE] Timeout release failed: ${error}`,
+                )
+            })
+            .finally(() => {
+                this.timeoutRelease = null
+            })
     }
 
     /**
@@ -832,6 +854,15 @@ export default class SecretaryManager {
         const contactedMembers: string[] = []
 
         for (const pubKey of waitingMembers) {
+            // The peerlist await above is a gap; a member that reported a
+            // later phase during it must keep its wait status.
+            const memberPhase = this.shard.validationPhases[pubKey]?.currentPhase
+            if (memberPhase !== undefined && memberPhase > phase) {
+                log.debug(
+                    `[SECRETARY ROUTINE] Not releasing ${pubKey} at phase ${phase}: it already reported phase ${memberPhase}`,
+                )
+                continue
+            }
             const request: RPCRequest = {
                 method: "consensus_routine",
                 params: [

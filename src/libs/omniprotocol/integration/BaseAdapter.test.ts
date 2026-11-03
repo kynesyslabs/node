@@ -4,7 +4,7 @@
  * one per call.
  */
 
-import { describe, expect, it, jest } from "bun:test"
+import { afterEach, describe, expect, it, jest, setSystemTime } from "bun:test"
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -29,7 +29,11 @@ const { PeerOmniAdapter } = await import("./peerAdapter")
 const { DEFAULT_OMNIPROTOCOL_CONFIG } = await import("../types/config")
 
 const PEER = "0x" + "ab".repeat(32)
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+const T0 = new Date("2026-01-01T00:00:00.000Z")
+
+afterEach(() => {
+    setSystemTime()
+})
 
 function adapterWithCooldown(cooldown: number) {
     const adapter = new PeerOmniAdapter({
@@ -46,15 +50,33 @@ function adapterWithCooldown(cooldown: number) {
 }
 
 describe("HTTP-only cooldown", () => {
-    it("keeps a failed peer on HTTP for the cooldown, in OMNI_ONLY mode too", async () => {
-        const adapter = adapterWithCooldown(40)
+    it("keeps a failed peer on HTTP for the cooldown, in OMNI_ONLY mode too", () => {
+        setSystemTime(T0)
+        const adapter = adapterWithCooldown(60_000)
         expect(adapter.shouldUseOmni(PEER)).toBe(true)
 
         adapter.markHttpPeer(PEER)
         expect(adapter.shouldUseOmni(PEER)).toBe(false)
         expect(adapter.isHttpOnly(PEER)).toBe(true)
 
-        await sleep(50)
+        setSystemTime(new Date(T0.getTime() + 59_999))
+        expect(adapter.shouldUseOmni(PEER)).toBe(false)
+
+        setSystemTime(new Date(T0.getTime() + 60_000))
+        expect(adapter.shouldUseOmni(PEER)).toBe(true)
+    })
+
+    it("keeps the peer's Omni capability through the cooldown in OMNI_PREFERRED", () => {
+        setSystemTime(T0)
+        const adapter = adapterWithCooldown(60_000)
+        adapter.migrationMode = "OMNI_PREFERRED"
+        adapter.markOmniPeer(PEER)
+        expect(adapter.shouldUseOmni(PEER)).toBe(true)
+
+        adapter.markHttpPeer(PEER)
+        expect(adapter.shouldUseOmni(PEER)).toBe(false)
+
+        setSystemTime(new Date(T0.getTime() + 60_000))
         expect(adapter.shouldUseOmni(PEER)).toBe(true)
     })
 
