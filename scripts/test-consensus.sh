@@ -8,11 +8,15 @@ cd "$(dirname "$0")/.."
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
 # Single files outside SUITE_DIRS: the launch go/no-go tooling, the signing
 # guards, the consensus and sync routes the suites depend on, the peer
-# liveness checks that decide which committee members count, the read
+# calls clients use to tell whether a transaction executed and which head
 # calls clients use to tell whether a transaction executed, the hashing
+# file that is gone fails its run instead of dropping out silently
+# is final. A listed file that is gone fails its run instead of dropping
+# liveness checks that decide which committee members count, and the read
+# liveness checks that decide which committee members count, the read
+# out silently
 # primitives finality commitments are built on, and the storage state root
 # with the writes and sync checks that feed it. A listed
-# file that is gone fails its run instead of dropping out silently
 SUITE_FILES=(
     scripts/launch-go-no-go.committee.test.ts
     scripts/launch-go-no-go.test.ts
@@ -40,6 +44,7 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
+    src/libs/network/routines/nodecalls/getFinalizedHead.test.ts
     src/libs/network/routines/nodecalls/readApi.test.ts
     src/libs/omniprotocol/peerLiveness.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
