@@ -245,6 +245,13 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         const end = lines.findIndex((l, i) => i > start && /exit 1; }\s*$/.test(l))
         expect(start).toBeGreaterThan(-1)
         expect(end).toBeGreaterThan(start)
+        // The snippet runs the real jq, as the workflow does; without it every
+        // tag would read as a mismatch, so say so instead.
+        try {
+            execFileSync("jq", ["--version"], { stdio: "pipe" })
+        } catch {
+            throw new Error("jq is required to run the release workflow's version check")
+        }
         // git is stubbed: the snippet only reads package.json at the tagged commit
         const script = [
             "git() { printf '{\"version\":\"1.0.0-rc.5\"}'; }",
