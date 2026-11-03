@@ -1,7 +1,7 @@
 // TODO GCREditIdentity but typed as any due to union type constraints <- we have a lot of editOperations marked as any. Why is that? Should we standardize the identity operation types?
 
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { GCRResult } from "../handleGCR"
+import type { GCREntityCaches, GCRResult } from "../handleGCR"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import {
@@ -32,6 +32,8 @@ export default class GCRIdentityRoutines {
         editOperation: GCREdit,
         accountGCR: GCRMain,
         simulate?: boolean, // NEEDED by zk transactions
+        /** The set being applied, whose ZK claims a proof must not repeat. */
+        entities?: GCREntityCaches,
     ): Promise<GCRResult> {
         if (
             editOperation.type !== "identity" ||
@@ -67,12 +69,14 @@ export default class GCRIdentityRoutines {
                 result = await applyZkCommitmentAdd(
                     identityEdit,
                     simulate,
+                    entities,
                 )
                 break
             case "zk_attestationadd":
                 result = await applyZkAttestationAdd(
                     identityEdit,
                     simulate,
+                    entities,
                 )
                 break
             default:

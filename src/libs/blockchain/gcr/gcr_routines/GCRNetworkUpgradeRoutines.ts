@@ -199,9 +199,5 @@ export default class GCRNetworkUpgradeRoutines {
 async function computeNextVersion(
     repo: Repository<NetworkUpgrade>,
 ): Promise<number> {
-    const row = await repo
-        .createQueryBuilder("u")
-        .select("MAX(u.version)", "max")
-        .getRawOne<{ max: number | null }>()
-    return (row?.max ?? 0) + 1
+    return ((await repo.maximum("version")) ?? 0) + 1
 }

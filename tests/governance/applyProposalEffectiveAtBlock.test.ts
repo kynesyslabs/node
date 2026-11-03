@@ -56,10 +56,7 @@ function makeRepo() {
             rows.set(row.proposalId, { ...row })
             return row
         }),
-        createQueryBuilder: jest.fn(() => ({
-            select: jest.fn().mockReturnThis(),
-            getRawOne: jest.fn(async () => ({ max: nextVersion - 1 })),
-        })),
+        maximum: jest.fn(async () => nextVersion - 1),
     }
 }
 
