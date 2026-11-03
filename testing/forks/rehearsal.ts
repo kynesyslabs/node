@@ -333,9 +333,10 @@ check(
     `all 4 nodes report web2ProofBinding at ${H} through getNetworkInfo`,
 )
 // From the registry, so a release that adds a fork does not need this file edited.
-const knownForks = Object.keys(DEFAULT_FORK_CONFIG).sort().join(",")
+const byName = (a: string, b: string) => a.localeCompare(b)
+const knownForks = Object.keys(DEFAULT_FORK_CONFIG).sort(byName).join(",")
 check(
-    infos.every(i => Object.keys(i.response.forks).sort().join(",") === knownForks) &&
+    infos.every(i => Object.keys(i.response.forks).sort(byName).join(",") === knownForks) &&
         new Set(infos.map(i => i.response.forkScheduleDigest)).size === 1 &&
         /^[0-9a-f]{64}$/.test(infos[0].response.forkScheduleDigest),
     `all 4 nodes report the ${Object.keys(DEFAULT_FORK_CONFIG).length} forks this build knows and one and the same schedule digest`,
@@ -502,7 +503,7 @@ execFileSync(DOCKER, ["restart", `${PROJECT}-node-4`])
 // Taken after the restart returns, so the old process's last lines and its kill
 // event fall before both marks.
 const restartedAt = new Date().toISOString()
-const restartedEpoch = Math.floor(Date.now() / 1000)
+const restartedNs = BigInt(Date.now()) * 1_000_000n
 // A manual restart zeroes the engine's restart counter; count from here.
 restartsAfterManual = restartCounts()
 const back = await until(async () => (await tipOf(PORTS[3])) >= common - 1, 150, 3000)
@@ -619,8 +620,9 @@ step("recovery: the operator corrects the genesis file and restarts the validato
 const exits = () =>
     readFileSync(`${RUN_DIR}/logs/docker-events.log`, "utf8")
         .split("\n")
-        // Strictly after: the restart's own kill can share restartedEpoch's second.
-        .filter(l => / die forkrehearsal-node-4 /.test(l) && Number(l.split(" ")[0]) > restartedEpoch)
+        // Nanosecond event times: the restart's own kill precedes restartedNs,
+        // a later exit in the same second does not.
+        .filter(l => / die forkrehearsal-node-4 /.test(l) && /^\d+ /.test(l) && BigInt(l.split(" ")[0]) > restartedNs)
 check(exits().length === 0 && !stallExit(nodeLog(4, restartedAt)), "node 4 did not exit since its manual restart: no stall watchdog, it just stays behind")
 const info4s = (await nodeCall(PORTS[3], "getNetworkInfo")).response
 check(
@@ -714,11 +716,12 @@ await until(async () => {
 const tail7 = Array.from({ length: Math.max(0, (await tipOf(PORTS[0])) - tipAtCatchUp) }, (_, i) => signedBy(tipAtCatchUp + 1 + i))
 record("signers-per-block-after-recovery", tail7)
 const after = firstBack === null ? [] : tail7.filter(b => b.n >= firstBack!).slice(0, 3)
-// A block commits once a quorum of precommits is in, so it can carry three
-// signatures while all four validators took part; node 4 must be among them.
+// A block commits once a quorum of precommits is in, so a healthy block can
+// carry three signatures without node 4's; its first signature proves it is
+// back, and the blocks from there only need a quorum.
 check(
-    firstBack !== null && firstBack <= tipAtCatchUp + 6 && after.length === 3 && after.every(b => b.signers >= 3 && b.node4),
-    `node 4 signs again from block ${firstBack}, within six blocks of the catch-up at ${tipAtCatchUp}, and signs the three blocks from there`,
+    firstBack !== null && firstBack <= tipAtCatchUp + 6 && after.length === 3 && after[0].node4 && after.every(b => b.signers >= 3),
+    `node 4 signs again from block ${firstBack}, within six blocks of the catch-up at ${tipAtCatchUp}, and the three blocks from there reach a quorum`,
 )
 
 }

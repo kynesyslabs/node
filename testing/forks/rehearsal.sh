@@ -330,7 +330,7 @@ step "network up (staggered: node 1 initialises genesis before the others pair w
 # Engine-level record of every start, die (with exit code) and oom of these containers.
 docker events --filter "container=$PROJECT-node-1" --filter "container=$PROJECT-node-2" \
     --filter "container=$PROJECT-node-3" --filter "container=$PROJECT-node-4" --filter "container=$PROJECT-postgres" \
-    --format '{{.Time}} {{.Action}} {{.Actor.Attributes.name}} exit={{.Actor.Attributes.exitCode}}' \
+    --format '{{.TimeNano}} {{.Action}} {{.Actor.Attributes.name}} exit={{.Actor.Attributes.exitCode}}' \
     >"$LOGS/docker-events.log" 2>&1 &
 EVENTS_PID=$!
 compose up -d --no-build postgres node-1 >>"$LOGS/compose-up.log" 2>&1 ||
