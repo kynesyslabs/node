@@ -7,6 +7,8 @@
 
 import { describe, expect, it, mock } from "bun:test"
 import { EventEmitter } from "events"
+import forge from "node-forge"
+import { OmniOpcode } from "../protocol/opcodes"
 
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
@@ -28,11 +30,16 @@ mock.module("src/utilities/sharedState", () => ({
     },
 }))
 
+mock.module("src/libs/network/manageNodeCall", () => ({
+    manageNodeCall: async () => ({ result: 200, response: "ok", require_reply: false, extra: null }),
+}))
+
 const { PeerConnection } = await import("./PeerConnection")
 const { ConnectionState } = await import("./types")
 const { MessageFramer } = await import("./MessageFramer")
 const { InvalidAuthBlockFormatError } = await import("../types/errors")
 const { PEER_CLOSE_GRACE_MS, PREAUTH_MAX_PAYLOAD_SIZE } = await import("../constants")
+const { encodeNodeCallRequest, decodeNodeCallResponse } = await import("../serialization/control")
 const log: any = (await import("src/utilities/logger")).default
 
 /** A client that ignores our FIN: end() never leads to "close". */
@@ -177,5 +184,112 @@ describe("MessageFramer auth block parse errors", () => {
         for (const line of lines) {
             expect(line.length).toBeLessThan(512)
         }
+    })
+})
+
+/** One end of an in-memory TCP link; closing either end closes both. */
+class LinkedSocket extends EventEmitter {
+    peer!: LinkedSocket
+    remoteAddress = "198.51.100.1"
+    remotePort = 42000
+    localAddress = "198.51.100.2"
+    localPort = 53551
+    writable = true
+    destroyed = false
+    ended = false
+    written: Buffer[] = []
+    setNoDelay() {}
+    setKeepAlive() {}
+    write(buf: Buffer, cb?: (e?: Error) => void) {
+        this.written.push(buf)
+        const peer = this.peer
+        setImmediate(() => {
+            if (!peer.destroyed) peer.emit("data", buf)
+        })
+        cb?.()
+        return true
+    }
+    end() {
+        this.ended = true
+        this.destroy()
+    }
+    destroy() {
+        for (const side of [this, this.peer]) {
+            if (side.destroyed) continue
+            side.destroyed = true
+            side.writable = false
+            setImmediate(() => side.emit("close"))
+        }
+    }
+}
+
+function link(): [LinkedSocket, LinkedSocket] {
+    const a = new LinkedSocket()
+    const b = new LinkedSocket()
+    a.peer = b
+    b.peer = a
+    return [a, b]
+}
+
+describe("PeerConnection large first request", () => {
+    const pair = forge.pki.ed25519.generateKeyPair()
+    const publicKey = Buffer.from(pair.publicKey)
+    const privateKey = Buffer.from(pair.privateKey)
+
+    /** A dialled connection and the peer's fresh inbound side of it. */
+    function connected() {
+        const [outSocket, inSocket] = link()
+        const outbound: any = new PeerConnection("0x" + "cd".repeat(32), "tcp://198.51.100.2:53551")
+        outbound.socket = outSocket
+        outbound.setupSocketHandlers()
+        outbound._state = ConnectionState.READY
+        const inbound: any = new PeerConnection("pending:test", "", inSocket as any)
+        return { outbound, inbound, outSocket, inSocket }
+    }
+
+    const nodeCall = (bytes: number) =>
+        encodeNodeCallRequest({ method: "getBulk", params: [{ blob: "x".repeat(bytes) }] })
+    const opcodesSent = (socket: LinkedSocket) => socket.written.map(frame => frame.readUInt8(2))
+
+    it("gets a request above the pre-auth cap through on a fresh connection", async () => {
+        const { outbound, inbound, inSocket } = connected()
+        const payload = nodeCall(PREAUTH_MAX_PAYLOAD_SIZE + 1024)
+        expect(payload.length).toBeGreaterThan(PREAUTH_MAX_PAYLOAD_SIZE)
+
+        const response = await outbound.sendAuthenticated(OmniOpcode.NODE_CALL, payload, privateKey, publicKey)
+
+        expect(decodeNodeCallResponse(response).status).toBe(200)
+        expect(inbound.getState()).toBe(ConnectionState.READY)
+        expect(inbound.peerIdentity).toBe("0x" + publicKey.toString("hex"))
+        expect(inSocket.destroyed).toBe(false)
+        await outbound.close()
+    })
+
+    it("proves the identity once for concurrent large requests", async () => {
+        const { outbound, outSocket } = connected()
+        const payload = nodeCall(PREAUTH_MAX_PAYLOAD_SIZE + 1)
+
+        await Promise.all([
+            outbound.sendAuthenticated(OmniOpcode.NODE_CALL, payload, privateKey, publicKey),
+            outbound.sendAuthenticated(OmniOpcode.NODE_CALL, payload, privateKey, publicKey),
+        ])
+        await outbound.sendAuthenticated(OmniOpcode.NODE_CALL, payload, privateKey, publicKey)
+
+        expect(opcodesSent(outSocket)).toEqual([
+            OmniOpcode.PROTO_PING,
+            OmniOpcode.NODE_CALL,
+            OmniOpcode.NODE_CALL,
+            OmniOpcode.NODE_CALL,
+        ])
+        await outbound.close()
+    })
+
+    it("adds no round trip to a request within the pre-auth cap", async () => {
+        const { outbound, outSocket } = connected()
+
+        await outbound.sendAuthenticated(OmniOpcode.NODE_CALL, nodeCall(1024), privateKey, publicKey)
+
+        expect(opcodesSent(outSocket)).toEqual([OmniOpcode.NODE_CALL])
+        await outbound.close()
     })
 })

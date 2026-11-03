@@ -73,12 +73,13 @@ export const PEER_CLOSE_GRACE_MS = 1_000
 /**
  * Largest frame payload an inbound connection may announce before it has
  * authenticated. Auth is carried per message and there is no handshake, so
- * the first frame on a fresh connection is a full request (a block, a
- * storage-program write, a mempool merge batch) and cannot be held to a
- * hello-sized cap. 4 MiB matches the public HTTP body limit
- * (RPC_MAX_BODY_BYTES), the largest request an unauthenticated caller may
- * make the node buffer; it keeps an unproven socket at a quarter of the
- * 16 MiB frame ceiling.
+ * the first frame on a fresh connection is usually a full request and cannot
+ * be held to a hello-sized cap. A sender whose first request is larger (a
+ * mempool merge batch can reach the 16 MiB frame ceiling) first proves its
+ * identity with a small signed ping; see PeerConnection.sendAuthenticated.
+ * 4 MiB matches the public HTTP body limit (RPC_MAX_BODY_BYTES), the largest
+ * request an unauthenticated caller may make the node buffer; it keeps an
+ * unproven socket at a quarter of the 16 MiB frame ceiling.
  */
 export const PREAUTH_MAX_PAYLOAD_SIZE = 4 * 1024 * 1024
 
