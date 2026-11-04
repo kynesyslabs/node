@@ -156,6 +156,15 @@ export class GCRStorageProgram {
     @Column({ type: "text", name: "deletedByTx", nullable: true })
     deletedByTx: string | null
 
+    /**
+     * Value hash of this program's leaf in the storage state root (see
+     * finality/storageRecord.ts), written with the row. Null for a row
+     * inserted another way, such as a genesis restore; the root computes
+     * those from the row and fills them in.
+     */
+    @Column({ type: "text", name: "smtLeaf", nullable: true })
+    smtLeaf: string | null
+
     @CreateDateColumn({ type: "timestamp", name: "createdAt" })
     createdAt: Date
 
