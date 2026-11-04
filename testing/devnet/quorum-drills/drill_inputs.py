@@ -15,7 +15,11 @@ CLI (used by the rehearsal harness):
     drill_inputs.py stage --genesis FILE --pub PUB [--pub PUB ...] \
         --node1-port PORT --genesis-ts TS --out-dir DIR
 reads the genesis FILE and writes genesis.json, peerlist.json and an empty
-empty-snapshot/ into DIR.
+empty-snapshot/ into DIR, readable by any uid (see make_readable).
+
+    drill_inputs.py readable --dir DIR
+sets every file under DIR to 644 and every directory to 755 (run.sh, once all
+its inputs are written).
 """
 import argparse
 import json
@@ -49,11 +53,30 @@ def write_json(path, body):
         json.dump(body, f, indent=2)
 
 
+def make_readable(root, include_root=True):
+    """Files under `root` to 644 and directories to 755, whatever the umask.
+
+    The containers run as an image user (uid 1000 in the release image) that
+    is not the host user, and bind-mounted files must be readable by it. The
+    keys are throwaway devnet keys, and the directory that holds `root` is
+    0700, so other host users still cannot reach them.
+    """
+    if include_root:
+        os.chmod(root, 0o755)
+    for dirpath, dirnames, filenames in os.walk(root):
+        for d in dirnames:
+            os.chmod(os.path.join(dirpath, d), 0o755)
+        for f in filenames:
+            os.chmod(os.path.join(dirpath, f), 0o644)
+
+
 def stage(genesis, pubs, node1_port, genesis_ts, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     write_json(os.path.join(out_dir, "genesis.json"), with_genesis_timestamp(genesis, genesis_ts))
     write_json(os.path.join(out_dir, "peerlist.json"), seed_peerlist(pubs, node1_port))
     make_empty_snapshot(out_dir)
+    # The staging dir itself keeps the mode its creator gave it (0700 from mkdtemp)
+    make_readable(out_dir, include_root=False)
 
 
 def main():
@@ -65,7 +88,12 @@ def main():
     st.add_argument("--node1-port", required=True)
     st.add_argument("--genesis-ts", type=int, required=True)
     st.add_argument("--out-dir", required=True)
+    rd = sub.add_parser("readable")
+    rd.add_argument("--dir", required=True)
     a = ap.parse_args()
+    if a.cmd == "readable":
+        make_readable(a.dir)
+        return
     with open(a.genesis) as f:
         genesis = json.load(f)
     stage(genesis, a.pub, a.node1_port, a.genesis_ts, a.out_dir)

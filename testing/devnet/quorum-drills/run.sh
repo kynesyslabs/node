@@ -184,11 +184,24 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
         echo "${out}" | grep '^MNEMONIC:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/node${i}.identity"
         echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/pub${i}"
     done
-    chmod 600 "${RUN_DIR}"/inputs/node*.identity
     python3 "${HERE}/gen-inputs.py" --run-dir "${RUN_DIR}" --repo "${REPO_ROOT}" \
         --nodes "${N}" --shard-size "${SHARD}" --binding "${BINDING}" --genesis-ts "${GENESIS_TS}" \
         --image "${IMAGE}" --src "${SRC_TREE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}"
+    # Once, after everything is written, so the modes do not depend on the umask.
+    # 644 files in a 755 inputs/ under the 0700 ${RUN_DIR}: the node runs as the
+    # image's user (uid 1000), not the host user, and these are throwaway devnet
+    # keys; other host users still cannot traverse to them.
+    python3 -I "${HERE}/drill_inputs.py" readable --dir "${RUN_DIR}/inputs"
 } >> "${STEP_LOG}" 2>&1 || { say "ABORT: generating inputs failed (see 02-inputs.log)"; exit 2; }
+
+# The image's own user must be able to read what the nodes mount: a throwaway
+# container, no network, inputs/ read-only, the image's default user.
+readable_fail=$(docker run --rm --network none --memory 64m --entrypoint sh \
+    -v "${RUN_DIR}/inputs:/inputs:ro" "${IMAGE}" -c '
+    for f in node1.identity genesis.json; do
+        cat "/inputs/${f}" > /dev/null 2>&1 || { echo "${f} (image uid $(id -u))"; exit 1; }
+    done' 2>&1) ||
+    abort_pre "inputs not readable by the image user: ${readable_fail:-docker run failed} in ${RUN_DIR}/inputs, host uid $(id -u); mode $(stat -c %a "${RUN_DIR}/inputs/node1.identity")"
 declare -a PUB UP
 for i in $(seq 1 "${N}"); do PUB[i]=$(tr 'A-Z' 'a-z' < "${RUN_DIR}/inputs/pub${i}"); UP[i]=0; done
 say "inputs ready (genesis in ${GENESIS_DELAY}s)"
