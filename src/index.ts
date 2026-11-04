@@ -75,6 +75,7 @@ import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
 import ParallelNetworks from "./libs/l2ps/parallelNetworks"
 import { enforceGuidedSetup } from "./cli/setup/startupGate"
 import { parseMessagingEnabled, parseMessagingPort } from "./config/envFlags"
+import { findProxyAuthPlaceholders } from "./config/proxyChecks"
 
 dotenv.config()
 
@@ -686,6 +687,17 @@ async function preMainLoop() {
  */
 async function main() {
     getSharedState.isInitialized = false
+    // Behind the Caddy proxy the shipped placeholder hash answers 401 to every
+    // caller without a log line; stop here, before anything else starts
+    const proxyAuthPlaceholders = findProxyAuthPlaceholders(process.env)
+    if (proxyAuthPlaceholders.length > 0) {
+        log.error(
+            `[PROXY] Proxy mode is enabled but ${proxyAuthPlaceholders.join(", ")} is unset or still the placeholder, so the proxy would reject every caller. ` +
+                "Set a bcrypt hash from `caddy hash-password` in .env (see docs/runbooks/proxy-setup.md), " +
+                "or set PROXY_ALLOW_PLACEHOLDER_AUTH=true to keep the route closed on purpose.",
+        )
+        process.exit(1)
+    }
     // The RPC server can start a consensus round before the clock is
     // calibrated, and without the floor that round could be one an earlier
     // run of this key already signed

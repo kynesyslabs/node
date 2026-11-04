@@ -24,6 +24,15 @@
 
 services:
   node:
+    # The node refuses to boot while a basic-auth hash below is empty or still
+    # the placeholder (src/config/proxyChecks.ts). Caddy gets its own copy of
+    # the hashes in docker-compose.yml. PROXY_ALLOW_PLACEHOLDER_AUTH=true keeps
+    # a route closed on purpose.
+    environment:
+      PROXY_ENABLED: "true"
+      PROXY_ALLOW_PLACEHOLDER_AUTH: ${PROXY_ALLOW_PLACEHOLDER_AUTH:-}
+      METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-}
+      MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-}
     # `!override` (Compose Spec, supported by Compose v2.20+) replaces
     # the parent's ports list with this one instead of unioning them.
     # Without it, Compose merges lists across files — leaves every host

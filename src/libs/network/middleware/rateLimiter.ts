@@ -341,6 +341,11 @@ export class RateLimiter {
     private announceXffMode(): void {
         const count = this.trustedProxies.length
         if (this.xffMode === "legacy") {
+            log.warning(
+                "[Rate Limiter] DEPRECATED: XFF_MODE=legacy still works but " +
+                    "is an insecure escape hatch. Set TRUSTED_PROXIES and " +
+                    "drop XFF_MODE (or use XFF_MODE=strict) instead.",
+            )
             log.error(
                 "[Rate Limiter] XFF_MODE=legacy — proxy headers trusted from " +
                     "ANY source. This is INSECURE; set TRUSTED_PROXIES or " +
