@@ -46,10 +46,17 @@ if [[ ! -f identities/node5.identity ]]; then
     grep "^PUBKEY:" "${LOG}" | cut -d: -f2- > identities/node5.pubkey
 fi
 
-"${SCRIPT_DIR}/test-tx-status-e2e.sh" "${PASS_ARGS[@]}" | tee "${LOG}"
+# A failed run still leaves the stack up (--keep), so read its teardown
+# command before giving up.
+TX_STATUS=0
+"${SCRIPT_DIR}/test-tx-status-e2e.sh" "${PASS_ARGS[@]}" | tee "${LOG}" || TX_STATUS=$?
 
 # The kept stack prints its own teardown command; reuse its compose files.
-read -r -a COMPOSE_FILES <<< "$(grep -oE 'docker compose .* down -v' "${LOG}" | tail -1 | sed -E 's/^docker compose //; s/ down -v$//')"
+read -r -a COMPOSE_FILES <<< "$(grep -oE 'docker compose .* down -v' "${LOG}" | tail -1 | sed -E 's/^docker compose //; s/ down -v$//' || true)"
+if [[ "${TX_STATUS}" -ne 0 ]]; then
+    echo "[finality-sync] FAIL test-tx-status-e2e.sh exited with ${TX_STATUS}"
+    exit "${TX_STATUS}"
+fi
 OVERRIDE="$(printf '%s\n' "${COMPOSE_FILES[@]}" | grep genesis-override.yml)"
 GENESIS="$(dirname "${OVERRIDE}")/genesis.json"
 NODE5_OVERRIDE="$(dirname "${OVERRIDE}")/node5-override.yml"
@@ -63,13 +70,27 @@ EOF
 COMPOSE_FILES+=(-f "${NODE5_OVERRIDE}")
 
 node_call() {
-    curl -s -m 5 -X POST "$1/" -H 'Content-Type: application/json' \
-        -d "{\"method\":\"nodeCall\",\"params\":[{\"type\":\"nodeCall\",\"message\":\"$2\",\"data\":$3}]}"
+    local url="$1" message="$2" data="$3"
+    curl -s -m 5 -X POST "${url}/" -H 'Content-Type: application/json' \
+        -d "{\"method\":\"nodeCall\",\"params\":[{\"type\":\"nodeCall\",\"message\":\"${message}\",\"data\":${data}}]}"
 }
-head_of() { node_call "$1" getLastBlockNumber '{}' | grep -oE '"response":[0-9]+' | grep -oE '[0-9]+$' || echo -1; }
-hash_at() { node_call "$1" getBlockByNumber "{\"blockNumber\":$2}" | grep -oE '"hash":"[0-9a-f]{64}"' | head -1; }
+head_of() {
+    local url="$1"
+    node_call "${url}" getLastBlockNumber '{}' | grep -oE '"response":[0-9]+' | grep -oE '[0-9]+$' || echo -1
+}
+hash_at() {
+    local url="$1" number="$2"
+    node_call "${url}" getBlockByNumber "{\"blockNumber\":${number}}" | grep -oE '"hash":"[0-9a-f]{64}"' | head -1 || true
+}
+# An unreachable node answers with an empty hash, which must not count as equal.
+same_hash_at() {
+    local url="$1" number="$2" expected
+    expected="$(hash_at "${NODE1}" "${number}")"
+    [[ -n "${expected}" && "$(hash_at "${url}" "${number}")" == "${expected}" ]]
+}
 snapshot_count() {
-    docker exec demos-devnet-postgres psql -U "${POSTGRES_USER:-demosuser}" -d "$1" -tAc \
+    local db="$1"
+    docker exec demos-devnet-postgres psql -U "${POSTGRES_USER:-demosuser}" -d "${db}" -tAc \
         "SELECT count(*) FROM validator_set_snapshots" 2>/dev/null | tr -d '[:space:]'
 }
 
@@ -88,7 +109,7 @@ done
 SYNCED="$(head_of "${NODE5}")"
 [[ "${SYNCED}" -ge "${TARGET}" ]] || fail "node-5 reached ${SYNCED}, expected ${TARGET}"
 for n in $(seq 1 "${TARGET}"); do
-    [[ "$(hash_at "${NODE5}" "$n")" == "$(hash_at "${NODE1}" "$n")" ]] || fail "block $n differs on node-5"
+    same_hash_at "${NODE5}" "$n" || fail "block $n differs on node-5"
 done
 echo "[finality-sync] PASS node-5 synced blocks 1..${TARGET} with identical hashes"
 if docker compose "${COMPOSE_FILES[@]}" logs node-5 2>&1 | grep -qE "parent_results_root|validator_set_hash|SyncBlockRejected|ValidatorSetHistoryError"; then
@@ -108,7 +129,7 @@ for _ in $(seq 1 120); do
     sleep 2
 done
 [[ "$(head_of "http://localhost:${NODE2_PORT:-53553}")" -ge "${AFTER}" ]] || fail "node-2 did not follow the chain after restart"
-[[ "$(hash_at "http://localhost:${NODE2_PORT:-53553}" "${AFTER}")" == "$(hash_at "${NODE1}" "${AFTER}")" ]] || fail "block ${AFTER} differs on node-2"
+same_hash_at "http://localhost:${NODE2_PORT:-53553}" "${AFTER}" || fail "block ${AFTER} differs on node-2"
 S2_AFTER="$(snapshot_count node2_db)"
 [[ "${S2_AFTER}" == "${S2_BEFORE}" ]] || fail "node-2 snapshots ${S2_BEFORE} -> ${S2_AFTER} across a restart"
 echo "[finality-sync] PASS node-2 restarted, followed to ${AFTER} and recorded no new snapshot"
