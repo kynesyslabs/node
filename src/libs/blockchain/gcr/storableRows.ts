@@ -8,7 +8,9 @@ import { Validators } from "@/model/entities/Validators"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
 import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
 import {
+    NOT_STORABLE,
     isJsonbStorable,
+    isKeyStorable,
     isTextStorable,
 } from "@/libs/blockchain/validation/postgresStorable"
 
@@ -88,4 +90,72 @@ export function unstorableClaim(cache: string, claims: Map<string, unknown> | un
         if (!isTextStorable(key)) return cache
     }
     return null
+}
+
+type EditView = {
+    type?: unknown
+    operation?: unknown
+    account?: unknown
+    target?: unknown
+    workId?: unknown
+    resourceKey?: unknown
+    data?: unknown
+}
+
+const ACCOUNT_EDITS = new Set(["balance", "nonce", "identity"])
+const TARGET_EDITS = new Set(["storageProgram", "storage-program-put"])
+const WORK_EDITS = new Set(["work-attempt", "work-receipt"])
+
+/**
+ * Why a transaction's edits cannot have their rows loaded, as "where: why",
+ * or null. Loading reads the rows by keys taken from the edits, before any
+ * edit applies and outside the per-edit failure handling, so a key that
+ * throws there (Postgres refusing it, or an account the node cannot load or
+ * create) fails the whole block on every node. Refused here, the transaction
+ * fails alone. Mirrors HandleGCR.prepareEntities, key by key; `accountProblem`
+ * judges an account key, `loaded` false for one that is only grouped by.
+ *
+ * Text keys must also be free of unpaired surrogates: Postgres stores one as
+ * U+FFFD, so two keys that differ in memory would share a row.
+ */
+export function unloadableEditKey(
+    tx: unknown,
+    accountProblem: (account: unknown, loaded: boolean) => string | null,
+): string | null {
+    const content = (tx as { content?: { gcr_edits?: unknown; from_ed25519_address?: unknown } })?.content
+    const edits: unknown[] = Array.isArray(content?.gcr_edits) ? content.gcr_edits : []
+    const account = (where: string, value: unknown, loaded = true) => {
+        const problem = accountProblem(value, loaded)
+        return problem === null ? null : `${where}: ${problem}`
+    }
+    const text = (where: string, value: unknown) =>
+        isKeyStorable(value) ? null : `${where}: ${NOT_STORABLE}`
+
+    for (const [i, item] of edits.entries()) {
+        if (typeof item !== "object" || item === null) return `gcr_edits[${i}]: not an edit`
+        const edit = item as EditView
+        const type = String(edit.type)
+        const where = `gcr_edits[${i}] ${type}`
+        // Grouping the block's transactions reads it as a string.
+        if (type === "identity" && edit.operation != null && typeof edit.operation !== "string") {
+            return `${where}: operation is not a string`
+        }
+        const refusal = ACCOUNT_EDITS.has(type)
+            ? account(`${where} account`, edit.account)
+            : TARGET_EDITS.has(type)
+              ? text(`${where} target`, edit.target)
+              : type === "tlsnotary"
+                ? typeof edit.data === "object" && edit.data !== null
+                    ? text(`${where} tokenId`, (edit.data as { tokenId?: unknown }).tokenId) ??
+                      (edit.account ? account(`${where} account`, edit.account, false) : null)
+                    : `${where}: no data`
+                : WORK_EDITS.has(type)
+                  ? text(`${where} workId`, edit.workId)
+                  : type === "resource-slot-cas"
+                    ? text(`${where} resourceKey`, edit.resourceKey)
+                    : null
+        if (refusal !== null) return refusal
+    }
+    const sender = content?.from_ed25519_address
+    return sender ? account("from_ed25519_address", sender) : null
 }

@@ -117,8 +117,8 @@ import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
 
 type AtomicWorkPayloadView = WorkEnvelope & { transfers?: { to?: unknown; amount?: unknown }[] }
 import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
-import { unstorableClaim, unstorableRow } from "./storableRows"
-import { NOT_STORABLE } from "@/libs/blockchain/validation/postgresStorable"
+import { unloadableEditKey, unstorableClaim, unstorableRow } from "./storableRows"
+import { NOT_STORABLE, isKeyStorable } from "@/libs/blockchain/validation/postgresStorable"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -501,13 +501,16 @@ function firstUnstorable(cache: string, rows: Map<string, unknown> | undefined):
 /**
  * Where a row `edit` has just written cannot be stored, as "cache.column",
  * or null. Judged on the rows rather than the edit, so only what a routine
- * really stores counts. Balance and nonce edits store numbers under a key
- * that must already be 64 hex characters; an identity edit may also credit
- * another account.
+ * really stores counts. Balance and nonce edits store numbers, under a key
+ * nothing checks for shape: a native send credits whatever its body names.
+ * An identity edit may also credit another account.
  */
 function unstorableAfter(edit: GCREdit, entities: GCREntityCaches): string | null {
     const fields = edit as unknown as Record<string, any>
     switch (edit.type as string) {
+        case "balance":
+        case "nonce":
+            return isKeyStorable(normalizePubkey(fields.account)) ? null : "accounts.pubkey"
         case "identity":
             return (
                 firstUnstorable("accounts", entities.accounts) ??
@@ -534,6 +537,39 @@ function unstorableAfter(edit: GCREdit, entities: GCREntityCaches): string | nul
         default:
             return null
     }
+}
+
+/**
+ * Why `pubkey` cannot be the key HandleGCR.createAccount builds an account
+ * under, or null. Kept in step with it by a test: the referral code it
+ * derives needs 64 characters after an optional 0x, so every stored account
+ * key has that shape.
+ */
+export function uncreatableAccountKey(pubkey: unknown): string | null {
+    if (typeof pubkey !== "string" || pubkey.trim().length === 0) return "not a public key"
+    const bare = pubkey.startsWith("0x") ? pubkey.slice(2) : pubkey
+    return bare.length === 64 ? null : "not 64 characters after 0x"
+}
+
+/**
+ * Why an edit's account cannot be loaded, as prepareEntities loads it, or
+ * null. A missing account is created, so an account that is `loaded` must be
+ * creatable; one that is only grouped by must normalize. Either must be a
+ * storable key.
+ */
+function accountKeyProblem(account: unknown, loaded: boolean): string | null {
+    let pubkey: string
+    try {
+        pubkey = normalizePubkey(account as string)
+    } catch {
+        return "not a public key"
+    }
+    if (typeof pubkey !== "string") return "not a public key"
+    if (loaded) {
+        const problem = uncreatableAccountKey(pubkey)
+        if (problem !== null) return problem
+    }
+    return isKeyStorable(pubkey) ? null : NOT_STORABLE
 }
 
 /**
@@ -1550,6 +1586,27 @@ export default class HandleGCR {
         return refused
     }
 
+    /**
+     * The transactions prepareEntities could not load the rows of (see
+     * unloadableEditKey): they fail here, the same way on every node, instead
+     * of failing the block. Rollback is not checked: it replays only
+     * transactions that applied, whose rows loaded.
+     */
+    static refuseUnloadableKeys(txs: Transaction[], blockNumber?: number): Set<string> {
+        const refused = new Set<string>()
+        for (const tx of txs) {
+            const reason = unloadableEditKey(tx, accountKeyProblem)
+            if (reason === null) continue
+            log.error(
+                `[applyTransactions] Refusing tx ${tx.hash}` +
+                    (blockNumber !== undefined ? ` of block ${blockNumber}` : "") +
+                    `: ${reason}`,
+            )
+            refused.add(tx.hash)
+        }
+        return refused
+    }
+
     static async applyTransactions(
         txs: Transaction[],
         isRollback: boolean,
@@ -1690,6 +1747,14 @@ export default class HandleGCR {
         // own orderings, and a winner picked by input position could differ
         // between them for the same block.
         const blockOrder = finalTxs
+        // Before contention, so a transaction that can never apply does not
+        // win a Work, slot or address over one that can.
+        const unkeyed = isRollback
+            ? new Set<string>()
+            : this.refuseUnloadableKeys(finalTxs, clock?.height)
+        if (unkeyed.size > 0) {
+            finalTxs = finalTxs.filter(tx => !unkeyed.has(tx.hash))
+        }
         const contended = this.contendedInBlock(finalTxs)
         if (contended.size > 0) {
             log.warning(
@@ -1766,6 +1831,7 @@ export default class HandleGCR {
         const successfulTxs: string[] = []
         const failedTxs: string[] = []
         for (const h of contended) failedSet.add(h)
+        for (const h of unkeyed) failedSet.add(h)
         for (const tx of blockOrder) {
             if (successfulSet.has(tx.hash)) successfulTxs.push(tx.hash)
             else if (failedSet.has(tx.hash)) failedTxs.push(tx.hash)
