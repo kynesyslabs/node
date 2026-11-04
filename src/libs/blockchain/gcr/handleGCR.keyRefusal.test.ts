@@ -18,6 +18,9 @@ const queried: unknown[] = []
 const holdsNul = (value: unknown): boolean =>
     typeof value === "string" ? value.includes("\u0000") : Array.isArray(value) && value.some(holdsNul)
 
+/** gcr_main rows the fake database holds, by key. */
+const storedAccounts = new Map<string, unknown>()
+
 function find({ where }: { where: Record<string, { value?: unknown }> }) {
     for (const operator of Object.values(where)) {
         const values = Array.isArray(operator?.value) ? operator.value : [operator]
@@ -26,7 +29,10 @@ function find({ where }: { where: Record<string, { value?: unknown }> }) {
             throw Object.assign(new Error('invalid byte sequence for encoding "UTF8": 0x00'), { code: "22021" })
         }
     }
-    return Promise.resolve([])
+    const keys = where.pubkey?.value
+    return Promise.resolve(
+        Array.isArray(keys) ? keys.filter(k => storedAccounts.has(k)).map(k => storedAccounts.get(k)) : [],
+    )
 }
 
 const fakeDataSource = { getRepository: () => ({ find }) }
@@ -96,6 +102,7 @@ const credited = (tx: Transaction) =>
 let savedForks: ForkConfigByName
 beforeEach(() => {
     queried.length = 0
+    storedAccounts.clear()
     savedForks = getSharedState.forkConfig
     getSharedState.forkConfig = cloneDefaultForkConfig()
     getSharedState.forkConfig.osDenomination.activationHeight = 0
@@ -152,6 +159,25 @@ describe("an account the node cannot load", () => {
             expect(out.successfulTxs).toEqual([good.hash])
         })
     }
+
+    it("is only one that would be created: a stored row of another shape is credited", async () => {
+        const legacy = "0x1234"
+        storedAccounts.set(
+            legacy,
+            Object.assign(new GCRMain(), {
+                pubkey: legacy,
+                balance: 0n,
+                nonce: 0,
+                identities: { xm: {}, web2: {}, pqc: {}, ud: [] },
+                points: { totalPoints: 0, breakdown: {} },
+                referralInfo: { totalReferrals: 0, referralCode: "", referrals: [] },
+            }),
+        )
+        const tx = await sendTo(legacy)
+        const out = await apply([tx])
+        expect(out.failedTxs).toEqual([])
+        expect(out.successfulTxs).toEqual([tx.hash])
+    })
 
     it("a tlsnotary edit without data fails its transaction", async () => {
         const tx = await sendTo(PEER)

@@ -273,6 +273,14 @@ describe("granular storage operations", () => {
         expect(result.success).toBe(false)
     })
 
+    it("appends only to an absent field, never over one holding null", async () => {
+        const p = program({ data: { n: 1, list: null } })
+        const result = await apply(edit("APPEND_ITEM", { field: "list", value: 1 }), p)
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("is not an array")
+        expect(p.data).toEqual({ n: 1, list: null })
+    })
+
     it("treats inherited names as absent fields", async () => {
         expect((await apply(edit("DELETE_FIELD", { field: "toString" }), p)).success).toBe(false)
         expect((await apply(edit("APPEND_ITEM", { field: "constructor", value: 1 }), p)).success).toBe(true)

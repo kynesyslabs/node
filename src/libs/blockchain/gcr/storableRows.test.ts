@@ -135,6 +135,37 @@ describe("a storage program row Postgres would refuse", () => {
     })
 })
 
+describe("the rows an identity edit is judged on", () => {
+    const OTHER = "0x" + "cd".repeat(32)
+    const pqcAdd = (signature: string) => ({
+        type: "identity",
+        context: "pqc",
+        operation: "add",
+        account: SENDER,
+        data: [{ algorithm: "falcon", address: "pqc-addr", signature, timestamp: 1 }],
+        isRollback: false,
+        txhash: "",
+    })
+
+    it("are its own account's, not one another group holds mid-apply", async () => {
+        const entities = await caches()
+        const other = await HandleGCR.createAccount(OTHER, {}, true)
+        other.identities.pqc = { falcon: [{ address: "x", signature: "\u0000", timestamp: 1 }] }
+        entities.accounts.set(OTHER, other)
+        entities.zkCommitments = new Map([["\u0000", true]])
+
+        const result = await HandleGCR.applyStorableEdit(pqcAdd("sig") as never, entities)
+        expect(result.success).toBe(true)
+    })
+
+    it("refuse what the edit wrote into its own account", async () => {
+        const entities = await caches()
+        const result = await HandleGCR.applyStorableEdit(pqcAdd("sig\u0000") as never, entities)
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("accounts.identities")
+    })
+})
+
 describe("text a routine does not store", () => {
     it("applies a create whose U+0000 sits in a variable the row does not keep", async () => {
         const entities = await caches()

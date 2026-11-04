@@ -321,6 +321,32 @@ function ownField(data: Record<string, unknown>, field: string): unknown {
     return Object.hasOwn(data, field) ? data[field] : undefined
 }
 
+/** The array field an item operation names and the position it resolves to. */
+function granularItem(
+    data: Record<string, unknown>,
+    variables: GranularVariables,
+): { error: GCRResult } | { items: unknown[]; index: number } {
+    const items = ownField(data, variables.field)
+    if (!Array.isArray(items)) {
+        return {
+            error: {
+                success: false,
+                message: `Field ${variables.field} is not an array`,
+            },
+        }
+    }
+    const index = resolveIndex(variables.index, items.length)
+    if (index === null) {
+        return {
+            error: {
+                success: false,
+                message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${items.length})`,
+            },
+        }
+    }
+    return { items, index }
+}
+
 /** A whole index into an array of `length`, negative counting from the end. */
 function resolveIndex(index: unknown, length: number): number | null {
     if (typeof index !== "number" || !Number.isInteger(index)) return null
@@ -1266,6 +1292,9 @@ export class GCRStorageProgramRoutines {
 
         // The edit carries only the new value, so the old one cannot be put
         // back. Re-applying it forward would append twice or keep the write.
+        // A failed transaction is undone from its row snapshot instead, and
+        // the orphan rollback in sync only meets state an older binary wrote,
+        // which never applied these edits and so recorded nothing to undo.
         if (edit.isRollback) {
             return fail(`${operation} cannot be rolled back`)
         }
@@ -1419,20 +1448,9 @@ export class GCRStorageProgramRoutines {
         if ("error" in target) return target.error
         const { variables, data } = target
 
-        const items = ownField(data, variables.field)
-        if (!Array.isArray(items)) {
-            return {
-                success: false,
-                message: `Field ${variables.field} is not an array`,
-            }
-        }
-        const index = resolveIndex(variables.index, items.length)
-        if (index === null) {
-            return {
-                success: false,
-                message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${items.length})`,
-            }
-        }
+        const item = granularItem(data, variables)
+        if ("error" in item) return item.error
+        const { items, index } = item
         const written = this.granularValue(variables, "SET_ITEM")
         if ("error" in written) return written.error
 
@@ -1461,7 +1479,11 @@ export class GCRStorageProgramRoutines {
         if ("error" in target) return target.error
         const { variables, data } = target
 
-        const items = ownField(data, variables.field) ?? []
+        // Only an absent field starts a new array: one holding null is a
+        // value that is not an array.
+        const items = Object.hasOwn(data, variables.field)
+            ? data[variables.field]
+            : []
         if (!Array.isArray(items)) {
             return {
                 success: false,
@@ -1525,20 +1547,9 @@ export class GCRStorageProgramRoutines {
         if ("error" in target) return target.error
         const { variables, data } = target
 
-        const items = ownField(data, variables.field)
-        if (!Array.isArray(items)) {
-            return {
-                success: false,
-                message: `Field ${variables.field} is not an array`,
-            }
-        }
-        const index = resolveIndex(variables.index, items.length)
-        if (index === null) {
-            return {
-                success: false,
-                message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${items.length})`,
-            }
-        }
+        const item = granularItem(data, variables)
+        if ("error" in item) return item.error
+        const { items, index } = item
 
         return this.commitGranular(
             edit,
