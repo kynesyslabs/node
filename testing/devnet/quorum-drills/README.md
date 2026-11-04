@@ -278,6 +278,15 @@ needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
 
 ## Notes
 
+- The lockstep wait reads every node's head at once (one background job per
+  node, each with the timeout and one retry above). It holds at height `h`
+  when every running node answered, `max(head) - min(head) <= 1`, and every
+  node returns the same non-empty hash at `h = min(head)`; the drills use that
+  `h` as their baseline and pre-stop height. A sequential read of 13 loaded
+  nodes can span a block boundary, which a requirement of equal heads cannot
+  survive. `fallback` and `partition` need every node on one head and wait for
+  exactly that. Window: `max(120, 60 + 10·N)` s. `lockstep-stub.test.sh` runs
+  the wait against a fake `rpc`.
 - Gossip is off by default, as in the race harness; `GOSSIP_ENABLED=true`
   turns it on. With gossip off, a node learns that a peer is ahead only
   from that peer's block push: a sync claim above our own height is

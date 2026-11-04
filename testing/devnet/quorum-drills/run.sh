@@ -377,64 +377,110 @@ stop_node() {
     event "node-$1 stopped"
 }
 
-# Window (s) for a fresh lockstep: each attempt costs about 2 reads per node, so
-# it grows with N (120 up to N=6, 160 at 10, 190 at 13)
+# Window (s) for a fresh lockstep, 120 up to N=6, 160 at 10, 190 at 13. The reads
+# of one attempt run in parallel, so an attempt takes about two reads however
+# large N is; the window is the slack for slow nodes and for waiting out a block.
 lockstep_window() { local w=$((60 + 10 * N)); [ "${w}" -lt 120 ] && w=120; echo "${w}"; }
 
-# All running nodes on one head >= $1 with one hash, within $2 seconds.
-# Returns 0 on lockstep (LOCK_HEIGHT set); 3 when two nodes hold different hashes
-# at one height (at once with LOCKSTEP_FAIL_ON_DIVERGENCE=1, else when the window
-# ends on such an attempt); 1 when a node could not be read or was behind.
+# Parallel reads: one background job per running node, each writing its answer
+# to ${LOCKSTEP_DIR}/<kind>.<node>, then a wait on exactly those jobs. A node is
+# read at the same moment as the others, so a block that lands during the reads
+# shows on a few nodes at most, not on every node read after it.
+LOCKSTEP_DIR=""
+par_begin() { LOCKSTEP_DIR="${LOG_DIR}/lockstep"; mkdir -p "${LOCKSTEP_DIR}"; rm -f "${LOCKSTEP_DIR}/$1".*; PAR_PIDS=(); }
+par_end() { [ "${#PAR_PIDS[@]}" -gt 0 ] && wait "${PAR_PIDS[@]}"; return 0; }
+# Head of every running node: a number, or empty after the retry with READ_TIMEOUT
+par_heads() {
+    local i
+    par_begin head
+    for i in $(running); do
+        ( h=$(head_of "${i}")
+          [[ "${h}" =~ ^[0-9]+$ ]] || h=$(head_of "${i}" "${READ_TIMEOUT}")
+          [[ "${h}" =~ ^[0-9]+$ ]] || h=""
+          printf '%s\n' "${h}" > "${LOCKSTEP_DIR}/head.${i}" ) &
+        PAR_PIDS+=($!)
+    done
+    par_end
+}
+# Hash of block $1 on every running node: the hash, or EMPTY / TIMEOUT (hash_read)
+par_hashes() {
+    local i
+    par_begin hash
+    for i in $(running); do
+        hash_read "${i}" "$1" > "${LOCKSTEP_DIR}/hash.${i}" &
+        PAR_PIDS+=($!)
+    done
+    par_end
+}
+par_value() { local v=""; read -r v < "${LOCKSTEP_DIR}/$1.$2" 2>/dev/null; printf '%s' "${v}"; }
+
+# The running nodes level on a common height h, within $2 seconds, h >= $1:
+#   - every running node answers with its head,
+#   - max(head) - min(head) <= 1 (3rd argument "exact": == 0), and
+#   - with h = min(head), every running node returns the same non-empty hash at h.
+# Heads are read in parallel, then the hashes at h are, so a block landing while
+# the nodes are read does not look like a gap: the nodes ahead hold h too, and
+# their hash at h is what is compared. "exact" is for a scenario that needs every
+# node on one head (see scenario_fallback, scenario_partition).
+# Returns 0 on lockstep (LOCK_HEIGHT = h; LOCK_MIN, LOCK_MAX the heads read);
+# 3 when two nodes hold different hashes at h (at once with
+# LOCKSTEP_FAIL_ON_DIVERGENCE=1, else when the window ends on such an attempt);
+# 1 when a node could not be read, was behind $1 or the heads were too far apart.
 # LOCKSTEP_WHY holds the reason. An empty or timed-out read is retried inside
 # the attempt (head_of, hash_read); two different hashes are never retried.
-# The step log gets, per attempt, each node's hash (nodes sharing one are
-# grouped) or EMPTY / TIMEOUT; the console gets the heads and a final summary.
+# The step log gets, per attempt, the heads, h and each node's hash (nodes
+# sharing one are grouped) or EMPTY / TIMEOUT; the console gets the heads and a
+# final summary.
 LOCKSTEP_FAIL_ON_DIVERGENCE=0
 wait_lockstep() {
-    local deadline=$((SECONDS + $2)) t0=${SECONDS} tries=0 i h v k g first hl ok skew
+    local deadline=$((SECONDS + $2)) t0=${SECONDS} tries=0 i h v k g hl ok spread lo hi maxspread=1
     local ul bl el gl why ecs
     local -A grp ec
-    ok=0; skew=0; first=""; ul=""; bl=""; el=""; gl=""; grp=(); ec=()
+    [ "${3:-}" = exact ] && maxspread=0
+    ok=0; spread=0; lo=""; hi=""; ul=""; bl=""; el=""; gl=""; grp=(); ec=()
     LOCKSTEP_WHY=""
     while [ ${SECONDS} -lt ${deadline} ]; do
-        tries=$((tries + 1)); ok=1; skew=0; first=""; hl=""; ul=""; bl=""; el=""; gl=""; grp=()
+        tries=$((tries + 1)); ok=1; spread=0; lo=""; hi=""; hl=""; ul=""; bl=""; el=""; gl=""; grp=()
+        par_heads
         for i in $(running); do
-            h=$(head_of "${i}")
-            [[ "${h}" =~ ^[0-9]+$ ]] || h=$(head_of "${i}" "${READ_TIMEOUT}")
+            h=$(par_value head "${i}")
             if ! [[ "${h}" =~ ^[0-9]+$ ]]; then ok=0; ul+=" n${i}"; hl+="n${i}=? "; continue; fi
             hl+="n${i}=${h} "
             [ "${h}" -lt "$1" ] && { ok=0; bl+=" n${i}"; }
-            [ -z "${first}" ] && first="${h}"
-            [ "${h}" != "${first}" ] && { ok=0; skew=1; }
+            { [ -z "${lo}" ] || [ "${h}" -lt "${lo}" ]; } && lo="${h}"
+            { [ -z "${hi}" ] || [ "${h}" -gt "${hi}" ]; } && hi="${h}"
         done
+        [ -n "${lo}" ] && spread=$((hi - lo))
+        [ "${spread}" -gt "${maxspread}" ] && ok=0
         if [ "${ok}" = 1 ]; then
+            par_hashes "${lo}"
             for i in $(running); do
-                v=$(hash_read "${i}" "${first}")
+                v=$(par_value hash "${i}")
                 case "${v}" in
-                    EMPTY|TIMEOUT) el+=" n${i}:${v}"; ec[${i}]=$(( ${ec[${i}]:-0} + 1 )) ;;
+                    EMPTY|TIMEOUT|"") v="${v:-EMPTY}"; el+=" n${i}:${v}"; ec[${i}]=$(( ${ec[${i}]:-0} + 1 )) ;;
                     *) grp[${v}]+=" n${i}" ;;
                 esac
             done
             for k in "${!grp[@]}"; do g="${grp[${k}]# }"; gl+=" ${k}=${g// /,}"; done
-            echo "[qdrill $(date -u +%H:%M:%S)] lockstep try ${tries} at ${first}:${gl:- no hash}${el:+ EMPTY/TIMEOUT:${el}}" >> "${STEP_LOG}"
+            echo "[qdrill $(date -u +%H:%M:%S)] lockstep try ${tries} at h=${lo} (heads ${lo}..${hi}: ${hl}):${gl:- no hash}${el:+ EMPTY/TIMEOUT:${el}}" >> "${STEP_LOG}"
             if [ "${#grp[@]}" -gt 1 ]; then
-                LOCKSTEP_WHY="different hashes at ${first}:${gl}"
+                LOCKSTEP_WHY="different hashes at ${lo}:${gl}"
                 say "lockstep: ${LOCKSTEP_WHY}"
                 [ "${LOCKSTEP_FAIL_ON_DIVERGENCE}" = 1 ] && return 3
             elif [ -z "${el}" ]; then
-                LOCK_HEIGHT="${first}"; return 0
+                LOCK_HEIGHT="${lo}"; LOCK_MIN="${lo}"; LOCK_MAX="${hi}"; return 0
             fi
         else
-            echo "[qdrill $(date -u +%H:%M:%S)] lockstep try ${tries}: hashes not read, heads not level >= $1 (behind:${bl:- none} unreadable:${ul:- none} apart:${skew})" >> "${STEP_LOG}"
+            echo "[qdrill $(date -u +%H:%M:%S)] lockstep try ${tries}: hashes not read, heads not level >= $1 (behind:${bl:- none} unreadable:${ul:- none} apart:${spread}, allowed ${maxspread})" >> "${STEP_LOG}"
         fi
         say "heads: ${hl}"
         sleep 5
     done
     # The deadline passed: say what the last attempt saw, empty reads apart from disagreement
     if [ "${ok}" = 1 ]; then
-        why="hashes at ${first}: empty/timeout:${el:- none}; disagree:$([ "${#grp[@]}" -gt 1 ] && echo "${gl}" || echo " none")"
+        why="hashes at h=${lo}: empty/timeout:${el:- none}; disagree:$([ "${#grp[@]}" -gt 1 ] && echo "${gl}" || echo " none")"
     else
-        why="heads not level (behind:${bl:- none} unreadable:${ul:- none} apart:${skew})"
+        why="heads not level (behind:${bl:- none} unreadable:${ul:- none} apart:${spread} of at most ${maxspread}; min ${lo:-?} max ${hi:-?})"
     fi
     ecs=""; for i in "${!ec[@]}"; do ecs+=" n${i}x${ec[${i}]}"; done
     LOCKSTEP_WHY="no lockstep >= $1 after $((SECONDS - t0))s, ${tries} tries; last try: ${why}${ecs:+; empty/timeout reads over all tries:${ecs}}"
@@ -593,6 +639,8 @@ step 04-scenario
 RESULT=FAIL
 DETAIL=""
 LOCK_HEIGHT=0
+LOCK_MIN=0
+LOCK_MAX=0
 PHASE_END=0
 STOP_HEIGHT=0
 
@@ -608,7 +656,7 @@ lockstep_fail() {
 
 lockstep_or_abort() {
     wait_lockstep "$1" "${LOCKSTEP_TIMEOUT}" || lockstep_fail $? "the running nodes never reached one head >= $1 with one hash"
-    say "running nodes in lockstep at ${LOCK_HEIGHT}"
+    say "running nodes in lockstep at ${LOCK_HEIGHT}: one hash there, heads ${LOCK_MIN}..${LOCK_MAX}"
 }
 
 scenario_floor() {
@@ -686,8 +734,10 @@ psql_node() { # $1 node, $2 SQL
 scenario_fallback() {
     lockstep_or_abort 3
     local i h heads_db listed pl_json fallback_lines ok=1
-    # Stop every node at once right after a commit, so they all hold one head
-    wait_lockstep "$((LOCK_HEIGHT + 1))" "$(lockstep_window)" || lockstep_fail $? "no fresh lockstep"
+    # Stop every node at once right after a commit, so they all hold one head.
+    # Exact, not within one block: block h is rewritten on every database below,
+    # so every node must hold h and nothing above it when it stops
+    wait_lockstep "$((LOCK_HEIGHT + 1))" "$(lockstep_window)" exact || lockstep_fail $? "no fresh lockstep"
     for i in $(running); do dc stop -t 0 "node-${i}" >> "${STEP_LOG}" 2>&1 & done
     wait
     for i in $(seq 1 "${N}"); do UP[i]=0; done
@@ -750,7 +800,10 @@ scenario_partition() {
         SIDECARS+=("$(sidecar "${i}")")
     done
     in_a() { case " ${groupA} " in *" $1 "*) return 0 ;; esac; return 1; }
-    wait_lockstep "$((LOCK_HEIGHT + 1))" "$(lockstep_window)" || lockstep_fail $? "no fresh lockstep"
+    # Exact, not within one block: the verdict counts blocks forged past h0 + 1 on
+    # each side, which assumes both sides start on h0 (one block of slack is
+    # already in those bounds for a block in flight)
+    wait_lockstep "$((LOCK_HEIGHT + 1))" "$(lockstep_window)" exact || lockstep_fail $? "no fresh lockstep"
     h0="${LOCK_HEIGHT}"
     for i in $(seq 1 "${N}"); do
         for j in $(seq 1 "${N}"); do
@@ -892,7 +945,10 @@ drill_stop() {
     say "P1 baseline: ${N}/${N} at ${BASE_HEIGHT}"
     phase_row baseline 0 "${N}" 0 "${BASE_HEIGHT}" progress
 
-    # A fresh block with every node on it, so the stop lands on a settled chain
+    # A fresh common height with one hash on every node, so the stop lands on a
+    # settled chain. PRE_HEIGHT is the lowest head: a node may already hold the
+    # next block, which the judge treats as a settle block (quorum signatures,
+    # one hash on every survivor) like any block after PRE_HEIGHT
     wait_lockstep "$((BASE_HEIGHT + 1))" "$(lockstep_window)" || lockstep_fail $? "no fresh lockstep before the stop"
     PRE_HEIGHT="${LOCK_HEIGHT}"
     PRE_PEERLIST=$(block_at "${SURVIVORS[0]}" "${PRE_HEIGHT}" | jq -r '.content.peerlist | length')
