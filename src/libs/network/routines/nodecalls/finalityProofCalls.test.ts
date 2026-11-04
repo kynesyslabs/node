@@ -1,8 +1,9 @@
 /**
  * The finality proof read calls: what each answers for a stored chain, the
  * refusals a client must tell apart (not found, not yet committed, behind,
- * busy, state ahead of the anchor, bad input), and that the transaction and
- * storage proofs served pass the offline reference verifier unchanged.
+ * busy, outside the storage history window, a rebuilt root that does not
+ * match, bad input), and that the transaction and storage proofs served pass
+ * the offline reference verifier unchanged.
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
@@ -55,9 +56,16 @@ mock.module("src/libs/blockchain/finality/validatorSet", () => ({
         structuredClone(snapshots.filter(s => s.block <= height).sort((a, b) => b.block - a.block)[0] ?? null),
 }))
 
-const proveStoragePrograms = jest.fn(async (_addresses: string[]) => ({ root: "", proofs: [] as any[] }))
+const proveStoragePrograms = jest.fn(async (_addresses: string[], _undo?: { fromBlock: number; toBlock: number }) => ({
+    root: "",
+    proofs: [] as any[],
+}))
 const realStorageRoot = await import("src/libs/blockchain/finality/storageRoot")
 mock.module("src/libs/blockchain/finality/storageRoot", () => ({ ...realStorageRoot, proveStoragePrograms }))
+
+const countStorageProofRootMismatch = jest.fn()
+const realMetrics = await import("@/features/metrics/consensusMetrics")
+mock.module("@/features/metrics/consensusMetrics", () => ({ ...realMetrics, countStorageProofRootMismatch }))
 
 const { jcsCanonicalize } = await import("src/libs/crypto/jcs")
 const { root: rfcRoot, toHex } = await import("src/libs/crypto/merkle/rfc6962")
@@ -73,6 +81,7 @@ const { default: getTransactionProof } = await import("./getTransactionProof")
 const { default: getValidatorSet } = await import("./getValidatorSet")
 const { default: getBlockSegment, MAX_SEGMENT_BLOCKS } = await import("./getBlockSegment")
 const { default: getStorageProof } = await import("./getStorageProof")
+const { STORAGE_HISTORY_BLOCKS } = await import("src/libs/blockchain/finality/storageHistory")
 
 interface Key {
     identity: string
@@ -271,7 +280,7 @@ describe("getBlockSegment", () => {
 })
 
 describe("getStorageProof", () => {
-    const row = (i: number) => ({
+    const row = (i: number, overrides: Record<string, unknown> = {}) => ({
         storageAddress: `stor-${i}`,
         owner: keys[0].identity,
         programName: `p${i}`,
@@ -283,61 +292,143 @@ describe("getStorageProof", () => {
         createdByTx: TX.ok,
         lastModifiedByTx: TX.ok,
         isDeleted: false,
+        ...overrides,
+    })
+    type Row = ReturnType<typeof row>
+
+    /** The live table after the head and its undo log, as the node keeps them. */
+    let table: Map<string, Row & { smtLeaf: string }>
+    let history: { block: number; storageAddress: string; record: any }[]
+    /** Records as of the state after each block, keyed by block then address. */
+    let stateAfter: Map<number, Map<string, any>>
+
+    const tableRoot = () =>
+        SparseMerkleTree.build([...table.values()].map(r => ({ key: storageProgramKey(r.storageAddress), valueHash: r.smtLeaf }))).rootHex
+    const snapshotRecords = () => new Map([...table.values()].map(r => [r.storageAddress, storageProgramRecord(r)]))
+
+    const root = new realStorageRoot.StorageProgramsRoot({
+        read: async work =>
+            await work({
+                leaves: async () => [...table.values()].map(r => ({ storageAddress: r.storageAddress, smtLeaf: r.smtLeaf, version: "1" })),
+                rows: async addresses => addresses.flatMap(a => (table.has(a) ? [structuredClone(table.get(a)!)] : [])),
+                history: async (from, to) =>
+                    structuredClone(history.filter(h => h.block >= from && h.block <= to).sort((a, b) => b.block - a.block)),
+            }),
+        fillLeaves: async () => {},
     })
 
-    function withStorage() {
-        const rows = [row(1), row(2)]
-        const tree = SparseMerkleTree.build(rows.map(r => ({ key: storageProgramKey(r.storageAddress), valueHash: storageProgramLeafHex(r) })))
-        // Blocks 4 and 5 commit the same root: block 4 wrote nothing.
-        store(4, header(4, blocks.get(3)!.hash, { native_tables_hashes: { native_storage_programs: tree.rootHex } }))
-        store(5, header(5, blocks.get(4)!.hash, { native_tables_hashes: { native_storage_programs: tree.rootHex } }))
-        proveStoragePrograms.mockImplementation(async (addresses: string[]) => ({
-            root: tree.rootHex,
-            proofs: addresses.map(a => {
-                const r = rows.find(x => x.storageAddress === a)
-                return { storageAddress: a, record: r ? storageProgramRecord(r) : null, ...tree.prove(storageProgramKey(a)) }
-            }),
-        }))
-        return tree
+    /**
+     * Stores block `number`, committing the root of the state after the
+     * block before it, then applies its writes with their undo rows.
+     */
+    function storeBlock(number: number, writes: [string, Row | null][] = []) {
+        store(number, header(number, blocks.get(number - 1)!.hash, { native_tables_hashes: { native_storage_programs: tableRoot() } }))
+        for (const [address, next] of writes) {
+            const before = table.get(address)
+            history.push({ block: number, storageAddress: address, record: before ? storageProgramRecord(before) : null })
+            if (next === null) table.delete(address)
+            else table.set(address, { ...next, smtLeaf: storageProgramLeafHex(next) })
+        }
+        stateAfter.set(number, snapshotRecords())
     }
 
-    it("serves proofs against the head's root that the offline verifier accepts", async () => {
-        withStorage()
-        const reply = await getStorageProof({ storageAddresses: ["stor-1", "stor-9", "stor-1"] })
-        expect(reply.result).toBe(200)
-        expect(reply.response.asOfBlock).toBe(4)
-        expect(reply.response.anchor.number).toBe(5)
-        expect(reply.response.anchorParent.number).toBe(4)
-        expect(reply.response.proofs.map((p: any) => p.storageAddress)).toEqual(["stor-1", "stor-9", "stor-1"])
-        expect(proveStoragePrograms).toHaveBeenCalledWith(["stor-1", "stor-9"])
-        const verdict = verifyStorageProof(reply.response, trusted, rules)
-        expect(verdict.verdict).toBe("final")
-        expect(verdict.records?.[1].record).toBeNull()
+    /** Blocks 4..6 write storage; the head, block 6, deletes one program. */
+    function withStorage() {
+        storeBlock(4, [["stor-1", row(1)]])
+        storeBlock(5, [["stor-1", row(1, { data: { i: 1, v: 2 } })], ["stor-2", row(2)]])
+        storeBlock(6, [["stor-2", null]])
+    }
+
+    beforeEach(() => {
+        table = new Map()
+        history = []
+        stateAfter = new Map([[3, new Map()]])
+        countStorageProofRootMismatch.mockReset()
+        proveStoragePrograms.mockImplementation((addresses, undo) => root.prove(addresses, undo))
     })
 
-    it("answers 503 state_ahead_of_anchor when the table moved past the head's root", async () => {
+    function expectServedState(reply: any, blockNumber: number, addresses: string[]) {
+        expect(reply.result).toBe(200)
+        expect(reply.response.anchor.number).toBe(blockNumber)
+        expect(reply.response.anchorParent.number).toBe(blockNumber - 1)
+        expect(reply.response.asOfBlock).toBe(blockNumber - 1)
+        const verdict = verifyStorageProof(reply.response, trusted, rules)
+        expect(verdict.verdict).toBe("final")
+        expect(verdict.asOfBlock).toBe(blockNumber - 1)
+        const expected = stateAfter.get(blockNumber - 1)!
+        expect(verdict.records).toEqual(addresses.map(a => ({ storageAddress: a, record: expected.get(a) ?? null })))
+    }
+
+    it("serves the head even when the head block wrote storage", async () => {
         withStorage()
-        proveStoragePrograms.mockResolvedValue({ root: "11".repeat(32), proofs: [] })
+        expect(tableRoot()).not.toBe(blocks.get(6)!.content.native_tables_hashes.native_storage_programs)
+        const reply = await getStorageProof({ storageAddresses: ["stor-1", "stor-2", "stor-9", "stor-1"] })
+        expectServedState(reply, 6, ["stor-1", "stor-2", "stor-9", "stor-1"])
+        expect(proveStoragePrograms).toHaveBeenCalledWith(["stor-1", "stor-2", "stor-9"], { fromBlock: 6, toBlock: 6 })
+        // Deleted by the head itself: served as it stood before the head.
+        expect(reply.response.proofs[1].record).toEqual(storageProgramRecord(row(2)))
+    })
+
+    it("serves each recent block's committed state after several writes and a delete", async () => {
+        withStorage()
+        storeBlock(7)
+        for (const blockNumber of [4, 5, 6, 7]) {
+            const reply = await getStorageProof({ storageAddresses: ["stor-1", "stor-2"], blockNumber })
+            expectServedState(reply, blockNumber, ["stor-1", "stor-2"])
+        }
+        // Before block 4 nothing existed; after block 5 both did.
+        const before = await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: "4" })
+        expect(before.response.proofs[0].record).toBeNull()
+        const after5 = await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: 6 })
+        expect(after5.response.proofs[0].record.dataHash).toBe(sha256(JSON.stringify({ i: 1, v: 2 })))
+    })
+
+    it("answers 410 history_unavailable below the window, 404 above the head", async () => {
+        withStorage()
+        const head = 6 + STORAGE_HISTORY_BLOCKS
+        for (let n = 7; n <= head; n++) storeBlock(n)
+        const oldest = head - STORAGE_HISTORY_BLOCKS + 1
+        const gone = await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: oldest - 1 })
+        expect(gone.result).toBe(410)
+        expect(gone.extra).toEqual({ reason: "history_unavailable" })
+        expect(gone.response).toMatchObject({ head, oldestBlock: oldest })
+        expectServedState(await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: oldest }), oldest, ["stor-1"])
+
+        const above = await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: head + 1 })
+        expect(above.result).toBe(404)
+        expect(above.extra).toEqual({ reason: "not_found" })
+        expect((await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: 0 })).extra).toEqual({ reason: "no_storage_commitment" })
+        for (const blockNumber of [-1, 1.5, "x", {}]) {
+            expect((await getStorageProof({ storageAddresses: ["stor-1"], blockNumber })).result).toBe(400)
+        }
+    })
+
+    it("answers 500 root_mismatch, counted, when the undo log cannot rebuild the committed root", async () => {
+        withStorage()
+        history = history.filter(h => !(h.block === 6 && h.storageAddress === "stor-2"))
         const reply = await getStorageProof({ storageAddresses: ["stor-1"] })
-        expect(reply.result).toBe(503)
-        expect(reply.extra).toEqual({ reason: "state_ahead_of_anchor" })
-        expect(reply.response.retryAfterSeconds).toBeGreaterThan(0)
+        expect(reply.result).toBe(500)
+        expect(reply.extra).toEqual({ reason: "root_mismatch" })
+        expect(reply.response).toMatchObject({ blockNumber: 6, head: 6 })
+        expect(countStorageProofRootMismatch).toHaveBeenCalledTimes(1)
+        // Blocks the gap does not reach are still served.
+        storeBlock(7)
+        expectServedState(await getStorageProof({ storageAddresses: ["stor-1"] }), 7, ["stor-1"])
     })
 
     it("builds the proof while holding the sync lock", async () => {
         withStorage()
         let lockedDuringProof = false
-        const impl = proveStoragePrograms.getMockImplementation()!
-        proveStoragePrograms.mockImplementation(async addresses => {
+        proveStoragePrograms.mockImplementation(async (addresses, undo) => {
             lockedDuringProof = syncLock.isLocked()
-            return await impl(addresses)
+            return await root.prove(addresses, undo)
         })
         expect((await getStorageProof({ storageAddresses: ["stor-2"] })).result).toBe(200)
         expect(lockedDuringProof).toBe(true)
         expect(syncLock.isLocked()).toBe(false)
     })
 
-    it("answers 404 no_storage_commitment when the head commits no storage root", async () => {
+    it("answers 404 no_storage_commitment when the block commits no storage root", async () => {
         store(4, header(4, blocks.get(3)!.hash, { native_tables_hashes: {} }))
         const reply = await getStorageProof({ storageAddresses: ["stor-1"] })
         expect(reply.result).toBe(404)

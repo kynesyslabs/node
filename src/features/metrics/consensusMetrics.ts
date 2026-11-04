@@ -67,6 +67,16 @@ export function countStorageRootSyncMismatch(): void {
     }
 }
 
+export function countStorageProofRootMismatch(): void {
+    try {
+        getMetricsService().incrementCounter(
+            "storage_proof_root_mismatch_total",
+        )
+    } catch {
+        /* ignore */
+    }
+}
+
 export function setForkScheduleMismatch(mismatch: boolean): void {
     try {
         getMetricsService().setGauge("fork_schedule_mismatch", mismatch ? 1 : 0)
