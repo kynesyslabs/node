@@ -152,7 +152,7 @@ describe("scenario 12 stages the drill genesis from the regenerated identities",
     )
     it("regenerates identities before it stages the genesis", () => {
         const regenerate = src.indexOf("regenerateIdentities(NODE_IDS.length)")
-        const stage = src.indexOf("\n    stageDrillGenesis()")
+        const stage = src.indexOf("\n    const genesis = buildDrillGenesis()")
         expect(regenerate).toBeGreaterThan(-1)
         expect(stage).toBeGreaterThan(regenerate)
     })

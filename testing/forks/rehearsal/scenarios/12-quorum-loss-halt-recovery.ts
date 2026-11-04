@@ -12,6 +12,11 @@
  *  - quorumParity, committeeBinding and commitLock active from height 0,
  *    as on a chain launched from genesis with this build, so the drill
  *    runs the consensus rules mainnet will run.
+ *  - Inputs a 4-node devnet needs to forge, mounted through a compose
+ *    override for this scenario only (lib/drillInputs.ts): genesis time 60 s
+ *    ahead, a peerlist seeding node-1 only, an empty directory over
+ *    /app/data/snapshot (else the image's 35 testnet validators replace the
+ *    genesis ones). Once the containers are up, nodes 2-4 are restarted once.
  *
  * Action:
  *  1. Bring up. Wait until all 4 reach BASELINE_HEIGHT and agree on it.
@@ -49,12 +54,15 @@
  */
 
 import { spawnSync } from "child_process"
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "fs"
+import { mkdtempSync, readFileSync, rmSync } from "fs"
+import { tmpdir } from "os"
+import { join } from "path"
 import {
     GENESIS_FORK_LOW,
-    PROD_GENESIS_BACKUP_PATH,
-    PROD_GENESIS_PATH,
+    compose,
+    isServiceRunning,
     regenerateIdentities,
+    restartService,
     sleep,
     startService,
     stopService,
@@ -62,7 +70,9 @@ import {
     waitFor,
 } from "../lib/devnetControl"
 import { allReachedHeight, assertBlockHashConvergence } from "../lib/assertions"
+import { clearOverride, overridePath, writeOverride } from "../lib/composeOverrides"
 import { withCurrentDevnetValidators } from "../lib/drillGenesis"
+import { drillOverrideYaml, genesisTimestamp, stageDrillInputs } from "../lib/drillInputs"
 import { getLastBlockNumber, query } from "../lib/nodeQueries"
 import {
     type BlockRow,
@@ -77,6 +87,7 @@ import {
 } from "../lib/haltDrill"
 import { runScenarioCli, type ScenarioContext } from "../lib/scenario"
 
+const SCENARIO_ID = "12-quorum-loss"
 const NODE_IDS = [1, 2, 3, 4]
 const STOPPED = [3, 4]
 const SURVIVORS = NODE_IDS.filter(id => !STOPPED.includes(id))
@@ -99,11 +110,12 @@ const LAUNCH_FORKS = ["quorumParity", "committeeBinding", "commitLock"]
  * Must run after `regenerateIdentities`: the genesis validators are the keys
  * that call just wrote. With any other set, the bound committee holds no
  * running node and the chain never leaves block 0.
+ *
+ * Not written to `data/genesis.json`: the genesis time has to be set once the
+ * image is built, so the file is mounted into the nodes instead (see
+ * `stageDrillInputs`).
  */
-function stageDrillGenesis(): void {
-    if (!existsSync(PROD_GENESIS_BACKUP_PATH) && existsSync(PROD_GENESIS_PATH)) {
-        copyFileSync(PROD_GENESIS_PATH, PROD_GENESIS_BACKUP_PATH)
-    }
+function buildDrillGenesis(): Record<string, any> {
     const genesis = withCurrentDevnetValidators(
         JSON.parse(readFileSync(GENESIS_FORK_LOW, "utf8")),
         NODE_IDS.length,
@@ -116,7 +128,7 @@ function stageDrillGenesis(): void {
             description: "Rehearsal: active from genesis, as on mainnet.",
         }
     }
-    writeFileSync(PROD_GENESIS_PATH, JSON.stringify(genesis, null, 4) + "\n")
+    return genesis
 }
 
 function restartCount(id: number): number {
@@ -176,9 +188,46 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
 
     // Identities first: the genesis is built from the keys this writes.
     regenerateIdentities(NODE_IDS.length)
-    stageDrillGenesis()
-    up({ build: true })
+    const genesis = buildDrillGenesis()
+    // Build before the genesis time is set, so the build does not eat the delay.
+    compose(["build"])
 
+    const stagingDir = mkdtempSync(join(tmpdir(), "rehearsal-drill-"))
+    try {
+        const staged = stageDrillInputs({
+            genesis,
+            genesisTs: genesisTimestamp(Date.now()),
+            dir: stagingDir,
+        })
+        writeOverride(SCENARIO_ID, drillOverrideYaml(staged, NODE_IDS))
+        up({ overrideFiles: [overridePath(SCENARIO_ID)] })
+        await restartForColdStart()
+        await drill(ctx, quorum)
+    } finally {
+        if (ctx.keepState) {
+            ctx.notes.push(`--keep-state: left ${stagingDir} and ${overridePath(SCENARIO_ID)} in place`)
+        } else {
+            clearOverride(SCENARIO_ID)
+            rmSync(stagingDir, { recursive: true, force: true })
+        }
+    }
+}
+
+/**
+ * The peerlist seeds node-1 only, so at a cold start nodes 2-4 each see 2 of 4
+ * live and refuse to forge. One restart of them, once all containers are up,
+ * lets them find the whole set.
+ */
+async function restartForColdStart(): Promise<void> {
+    await waitFor(async () => NODE_IDS.every(id => isServiceRunning(`node-${id}`)), {
+        description: "all 4 node containers running",
+        timeoutMs: 120_000,
+        intervalMs: 2_000,
+    })
+    for (const id of NODE_IDS.slice(1)) restartService(`node-${id}`)
+}
+
+async function drill(ctx: ScenarioContext, quorum: number): Promise<void> {
     // P1 baseline
     await waitFor(async () => allReachedHeight(NODE_IDS, BASELINE_HEIGHT), {
         description: `all nodes reach height >= ${BASELINE_HEIGHT}`,

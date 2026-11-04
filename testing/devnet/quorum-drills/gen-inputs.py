@@ -11,6 +11,8 @@ import argparse
 import json
 import os
 
+from drill_inputs import make_empty_snapshot, seed_peerlist, with_genesis_timestamp, write_json
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--run-dir", required=True)
 ap.add_argument("--repo", required=True)
@@ -35,7 +37,7 @@ def port(i):
 pubs = [open(f"{inputs}/pub{i}").read().strip() for i in range(1, n + 1)]
 
 g = json.load(open(f"{a.repo}/testing/devnet/genesis.devnet.json"))
-g["timestamp"] = a.genesis_ts
+g = with_genesis_timestamp(g, a.genesis_ts)
 g["properties"]["shardSize"] = a.shard_size
 forks = g.setdefault("forks", {})
 forks["quorumParity"] = {"activationHeight": 0}
@@ -56,11 +58,10 @@ g["validators"] = [
 ]
 others = [b for b in g.get("balances", []) if b[0] not in set(pubs)]
 g["balances"] = [[pk, stake] for pk in pubs] + others
-json.dump(g, open(f"{inputs}/genesis.json", "w"), indent=2)
+write_json(f"{inputs}/genesis.json", g)
 
-# Every node seeds only node-1 and learns the rest from it: a full seed list
-# makes a node fail hard on a peer that is not up yet at a cold start
-json.dump({pubs[0]: f"http://node-1:{port(1)}"}, open(f"{inputs}/peerlist.json", "w"), indent=2)
+write_json(f"{inputs}/peerlist.json", seed_peerlist(pubs, port(1)))
+make_empty_snapshot(inputs)
 
 pg_init = os.path.join(inputs, "pg-init")
 os.makedirs(pg_init, exist_ok=True)

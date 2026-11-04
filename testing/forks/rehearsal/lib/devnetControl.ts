@@ -107,13 +107,21 @@ export function compose(args: string[], opts: { allowFail?: boolean } = {}): str
  *
  * @param services Optional list of services to start. Defaults to "all".
  * @param profiles Optional docker-compose profiles to enable.
+ * @param overrideFiles Optional compose override files (absolute paths),
+ *   layered over docker-compose.yml. Without it the command is exactly the
+ *   plain `docker compose up -d`.
  */
 export function up(opts: {
     services?: string[]
     profiles?: string[]
     build?: boolean
+    overrideFiles?: string[]
 } = {}): void {
     const args: string[] = []
+    if (opts.overrideFiles && opts.overrideFiles.length > 0) {
+        args.push("-f", "docker-compose.yml")
+        for (const f of opts.overrideFiles) args.push("-f", f)
+    }
     for (const p of opts.profiles ?? []) {
         args.push("--profile", p)
     }
@@ -148,6 +156,16 @@ export function startService(name: string): void {
 /** Restarts a service. */
 export function restartService(name: string): void {
     compose(["restart", name])
+}
+
+/** True when the container of `service` exists and is running. */
+export function isServiceRunning(service: string): boolean {
+    const r = spawnSync(
+        "docker",
+        ["inspect", "-f", "{{.State.Running}}", `demos-devnet-${service}`],
+        { encoding: "utf8" },
+    )
+    return r.status === 0 && r.stdout.trim() === "true"
 }
 
 /** Kill (SIGKILL) a service container. Used for ungraceful-shutdown tests. */
