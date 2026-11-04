@@ -279,6 +279,8 @@ export class RateLimiter {
     private xffRejectLastLog = new Map<string, number>()
     /** Staked validator keys as of the last signed request; lowercase. */
     private validatorKeys: ReadonlySet<string> = new Set()
+    /** The set is empty because the network has no validator rows, not because they could not be read. */
+    private noValidatorRows = false
 
     constructor(config: RateLimitConfig) {
         this.config = config
@@ -604,7 +606,29 @@ export class RateLimiter {
      * height. Kept here because the trust check below cannot await.
      */
     public async refreshValidatorKeys(): Promise<void> {
-        this.validatorKeys = await getStakedSet()
+        const staked = await getStakedSet()
+        this.validatorKeys = staked
+        if (staked.size > 0) {
+            this.noValidatorRows = false
+            return
+        }
+        // The cached set is also empty after a failed refresh. Only a
+        // network that really has no validators gets the peer-table
+        // fallback; a read failure must not open it.
+        try {
+            const { default: GCR } = await import("@/libs/blockchain/gcr/gcr")
+            const rows = await GCR.getGCRValidatorsAtBlock(
+                getSharedState.lastBlockNumber ?? 0,
+            )
+            this.noValidatorRows = rows.length === 0
+        } catch (e) {
+            this.noValidatorRows = false
+            log.warning(
+                `[Rate Limiter] cannot read the validator set (${
+                    e instanceof Error ? e.message : String(e)
+                }); no peer-table exemption until it can`,
+            )
+        }
     }
 
     private isValidatorKey(publicKey: string): boolean {
@@ -647,6 +671,7 @@ export class RateLimiter {
         // know each other only from the peer table.
         if (
             this.validatorKeys.size === 0 &&
+            this.noValidatorRows &&
             process.env.DEMOS_REQUIRE_VALIDATORS !== "true"
         ) {
             return !!PeerManager.getInstance().getPeer(authCtx.publicKey)
