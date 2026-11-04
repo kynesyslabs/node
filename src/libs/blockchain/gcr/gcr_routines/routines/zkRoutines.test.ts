@@ -6,7 +6,12 @@ import { describe, expect, it, mock } from "bun:test"
  * node. Checked when the edit applies, it fails this transaction alone.
  */
 
-const fakeDataSource = { getRepository: () => ({ findOne: async () => null }) }
+let treeState: { leafCount: number } | null = null
+const fakeDataSource = {
+    getRepository: (entity: { name?: string }) => ({
+        findOne: async () => (entity?.name === "MerkleTreeState" ? treeState : null),
+    }),
+}
 const datasourceModule = () => ({
     __esModule: true,
     dataSource: fakeDataSource,
@@ -50,4 +55,41 @@ describe("applyZkCommitmentAdd", () => {
             expect(entities.zkCommitments.size).toBe(0)
         })
     }
+})
+
+/**
+ * The block commit inserts each commitment into the global tree, which throws
+ * past its capacity: inside the block's transaction, that failed the block on
+ * every node. The commitment that would not fit fails its transaction.
+ */
+describe("applyZkCommitmentAdd at the tree's capacity", () => {
+    const capacity = 2 ** 20
+    const commitment = (n: number) => edit({ commitment_hash: n.toString(16).padStart(64, "0") })
+
+    it("takes the last leaf, then refuses the next one claimed in the same block", async () => {
+        treeState = { leafCount: capacity - 1 }
+        try {
+            const entities = caches()
+            const last = await applyZkCommitmentAdd(commitment(1), false, entities)
+            expect(last.success).toBe(true)
+            const over = await applyZkCommitmentAdd(commitment(2), false, entities)
+            expect(over.success).toBe(false)
+            expect(over.message).toContain("full")
+            expect(over.deferredWrite).toBeUndefined()
+            expect(entities.zkCommitments.size).toBe(1)
+        } finally {
+            treeState = null
+        }
+    })
+
+    it("refuses any commitment once the tree is full", async () => {
+        treeState = { leafCount: capacity }
+        try {
+            const result = await applyZkCommitmentAdd(commitment(1), false, caches())
+            expect(result.success).toBe(false)
+            expect(result.deferredWrite).toBeUndefined()
+        } finally {
+            treeState = null
+        }
+    })
 })

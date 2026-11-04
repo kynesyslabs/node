@@ -4,6 +4,8 @@ import { EntityManager, Repository } from "typeorm"
 import ensureGCRForUser from "../ensureGCRForUser"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment"
+import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState"
+import { GLOBAL_TREE_CAPACITY, GLOBAL_TREE_ID } from "@/features/zk/merkle/globalTree"
 import {
     IdentityCommitmentPayload,
     IdentityAttestationPayload,
@@ -97,6 +99,23 @@ export async function applyZkCommitmentAdd(
     const db = await Datasource.getInstance()
     const dataSource = db.getDataSource()
     const commitmentRepo = dataSource.getRepository(IdentityCommitment)
+
+    // The block commit inserts every commitment it carries into the tree, and
+    // one past its capacity throws there, failing the block on every node.
+    // Counted as that insert counts: the leaves the tree held when this block
+    // began, plus the commitments earlier transactions of the block claimed.
+    // Every zk edit of a block applies in one group, in block order, so each
+    // node counts the same claims.
+    const tree = await dataSource
+        .getRepository(MerkleTreeState)
+        .findOne({ where: { treeId: GLOBAL_TREE_ID } })
+    const pending = entities?.zkCommitments?.size ?? 0
+    if ((tree?.leafCount ?? 0) + pending >= GLOBAL_TREE_CAPACITY) {
+        return {
+            success: false,
+            message: `Identity commitment tree is full (${GLOBAL_TREE_CAPACITY} leaves)`,
+        }
+    }
 
     if (simulate) {
         return {
