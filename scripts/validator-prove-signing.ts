@@ -24,8 +24,11 @@
  * launch validator (staked at block 0: from the snapshot's validators.jsonl
  * when it has one, else from the genesis), name the block 0 hash the genesis
  * file builds (as must --genesis-hash when given), carry the expected date
- * and verify; with --require-all every launch validator must have one.
- * Exit codes: 0 ok, 1 a proof failed or one is missing, 2 bad input or refused.
+ * and verify; with --require-all every launch validator must have one. A
+ * genesis file a node would refuse at its first boot fails the check, and
+ * one whose fork schedule this build cannot load is refused.
+ * Exit codes: 0 ok, 1 a proof failed, one is missing or a node would refuse
+ * the genesis, 2 bad input or refused.
  */
 
 import * as fs from "fs"
@@ -160,14 +163,15 @@ export interface GenesisBlock {
     /** null when block 0 cannot be known before launch. */
     blockHash: string | null
     dataHash: string
+    /** What a node would refuse in the file at its first boot (genesisValues). */
     problems: string[]
 }
 
 /**
  * verifyProofs against the launch genesis file: every proof must name the
- * block 0 that file builds, and so must --genesis-hash when given. Proofs
- * that agree only with each other prove nothing about the chain the file
- * starts.
+ * block 0 that file builds, and so must --genesis-hash when given, and a
+ * node must accept the file. Proofs that agree only with each other prove
+ * nothing about the chain the file starts.
  */
 export async function verifyLaunchProofs(
     proofs: SigningProof[],
@@ -181,11 +185,9 @@ export async function verifyLaunchProofs(
     const dataHash = normHex(genesis.dataHash)
     const flag = opts.genesisHash ? normHex(opts.genesisHash) : null
     const dataHashNote = "that is the genesis data hash; proofs sign the genesis block hash scripts/genesis-hash.ts prints"
-    if (blockHash === null) {
-        problems.push(
-            `block 0 of the genesis file cannot be known before launch: ${genesis.problems.join("; ") || "unknown reason"}`,
-        )
-    }
+    // A hash computed from a file the node refuses is block 0 of no chain
+    for (const p of genesis.problems) problems.push(`a node would refuse this genesis at its first boot: ${p}`)
+    if (blockHash === null) problems.push("block 0 of the genesis file cannot be known before launch")
     if (flag !== null && blockHash !== null && flag !== blockHash) {
         problems.push(
             `--genesis-hash ${flag} is not block 0 of the genesis file, which builds ${blockHash}` +
@@ -286,9 +288,18 @@ async function main(argv: string[]): Promise<number> {
             console.error(`--verify needs --snapshot: ${NO_SNAPSHOT_REASON}\n${usage()}`)
             return 2
         }
-        const { readGenesisFile, genesisValues } = await import("./genesis-hash")
+        const { readGenesisFile, genesisValues, snapshotManifestSha256 } = await import("./genesis-hash")
         const genesis = readGenesisFile(opts.genesis)
-        const values = genesisValues(genesis)
+        const { loadForkConfigFromGenesis } = await import("src/forks")
+        // A fork schedule this build cannot load stops the node's boot, so there is nothing to verify against
+        try {
+            loadForkConfigFromGenesis(genesis)
+        } catch (e) {
+            console.error(`genesis: a node would refuse its fork schedule: ${(e as Error).message}`)
+            return 2
+        }
+        // The node checks the genesis against the snapshot it boots with
+        const values = genesisValues(genesis, snapshotManifestSha256(opts.snapshot))
         const { readBlockZeroValidators, launchIdentities } = await import("./launch-validator-set")
         let blockZero: Awaited<ReturnType<typeof readBlockZeroValidators>>
         try {

@@ -197,8 +197,18 @@ describe("verify CLI", () => {
     const dirs: string[] = []
     afterAll(() => dirs.forEach(d => rmSync(d, { recursive: true, force: true })))
 
-    /** Genesis lists keys 0 and 3; the snapshot's validators.jsonl, which the node uses, keys 0-2. */
-    function fixture(): { genesis: string; snapshot: string; proofs: string; blockHash: string; dataHash: string } {
+    /**
+     * Genesis lists keys 0 and 3; the snapshot's validators.jsonl, which the
+     * node uses, keys 0-2. The genesis binds the snapshot's manifest, as a
+     * node requires; `edit` changes the genesis before it is written.
+     */
+    function fixture(edit: (data: Record<string, unknown>) => void = () => {}): {
+        genesis: string
+        snapshot: string
+        proofs: string
+        blockHash: string
+        dataHash: string
+    } {
         dir = mkdtempSync(join(tmpdir(), "prove-signing-"))
         dirs.push(dir)
         const snapshot = join(dir, "snapshot")
@@ -209,29 +219,29 @@ describe("verify CLI", () => {
             writeFileSync(join(snapshot, f), "")
         }
         writeFileSync(join(snapshot, "validators.jsonl"), body)
-        writeFileSync(
-            join(snapshot, "manifest.json"),
-            JSON.stringify({
-                schemaVersion: 2,
-                source: { host: "t", chain_block_height: 0, chain_block_hash: "0x0", node_version: "t", pg_version: "t", dumped_at: "t" },
-                files: {
-                    "gcr_main.jsonl": { sha256: empty, rows: 0, balance_sum: "0" },
-                    "gcr_storageprogram.jsonl": { sha256: empty, rows: 0, size_bytes_sum: 0 },
-                    "identity_commitments.jsonl": { sha256: empty, rows: 0 },
-                    "validators.jsonl": { sha256: sha256(body), rows: 3 },
-                },
-                fork_state: [],
-                transforms_applied: { nonces_reset_to_zero: true, assigned_txs_emptied: true, test_identity_commitments_dropped: true },
-            }),
-        )
+        const manifest = JSON.stringify({
+            schemaVersion: 2,
+            source: { host: "t", chain_block_height: 0, chain_block_hash: "0x0", node_version: "t", pg_version: "t", dumped_at: "t" },
+            files: {
+                "gcr_main.jsonl": { sha256: empty, rows: 0, balance_sum: "0" },
+                "gcr_storageprogram.jsonl": { sha256: empty, rows: 0, size_bytes_sum: 0 },
+                "identity_commitments.jsonl": { sha256: empty, rows: 0 },
+                "validators.jsonl": { sha256: sha256(body), rows: 3 },
+            },
+            fork_state: [],
+            transforms_applied: { nonces_reset_to_zero: true, assigned_txs_emptied: true, test_identity_commitments_dropped: true },
+        })
+        writeFileSync(join(snapshot, "manifest.json"), manifest)
         const genesis = join(dir, "genesis.json")
-        const data = {
+        const data: Record<string, unknown> = {
             properties: { id: 1, shardSize: 10 },
             validators: [row(keys[0].identity), row(keys[3].identity)],
             timestamp: 1793318400,
+            snapshot: { manifestSha256: sha256(manifest) },
         }
+        edit(data)
         writeFileSync(genesis, JSON.stringify(data))
-        const values = genesisValues(data)
+        const values = genesisValues(data, sha256(manifest))
         return {
             genesis,
             snapshot,
@@ -291,6 +301,37 @@ describe("verify CLI", () => {
         expect(wrongFlag.out).toContain(`--genesis-hash ${f.dataHash} is not block 0 of the genesis file`)
         expect(wrongFlag.code).toBe(1)
     }, 60_000)
+
+    it("fails a genesis a node would refuse, though block 0 can be built from it", async () => {
+        // Binds another snapshot than the one the node boots with
+        const f = fixture(data => {
+            data.snapshot = { manifestSha256: "00".repeat(32) }
+        })
+        writeFileSync(
+            f.proofs,
+            JSON.stringify(await Promise.all(keys.slice(0, 3).map(k => proofBy(k, buildChallenge(f.blockHash, DATE))))),
+        )
+        const r = run(["--verify", f.proofs, "--snapshot", f.snapshot, "--genesis", f.genesis, "--require-all"])
+        expect(r.out).toContain("a node would refuse this genesis at its first boot: snapshot manifest hashes to")
+        expect(r.out).toContain("NOT OK")
+        expect(r.code).toBe(1)
+    }, 30_000)
+
+    it("refuses a genesis whose fork schedule this build cannot load", async () => {
+        // Block 0 is still built from the forks that do load; proofs name that hash
+        const f = fixture(data => {
+            data.forks = { forkThisBuildDoesNotKnow: { activationHeight: 0 } }
+        })
+        expect(f.blockHash).toMatch(/^[0-9a-f]{64}$/)
+        writeFileSync(
+            f.proofs,
+            JSON.stringify(await Promise.all(keys.slice(0, 3).map(k => proofBy(k, buildChallenge(f.blockHash, DATE))))),
+        )
+        const r = run(["--verify", f.proofs, "--snapshot", f.snapshot, "--genesis", f.genesis, "--require-all"])
+        expect(r.out).toContain('a node would refuse its fork schedule: [FORKS] Genesis schedules fork "forkThisBuildDoesNotKnow"')
+        expect(r.out).not.toContain("launch validators proven")
+        expect(r.code).toBe(2)
+    }, 30_000)
 })
 
 describe("verifyLaunchProofs against the genesis file", () => {
@@ -339,6 +380,25 @@ describe("verifyLaunchProofs against the genesis file", () => {
             { genesisHash: GENESIS, requireAll: true },
         )
         expect(r.ok).toBe(false)
-        expect(r.problems.join("\n")).toContain("cannot be known before launch: genesis has no timestamp")
+        expect(r.problems).toEqual([
+            "a node would refuse this genesis at its first boot: genesis has no timestamp: x",
+            "block 0 of the genesis file cannot be known before launch",
+        ])
+    })
+
+    it("fails proofs of a block 0 built from a file a node would refuse", async () => {
+        const proofs = await Promise.all(keys.slice(0, 3).map(k => proofBy(k)))
+        // Every proof names the hash the file builds and verifies
+        const r = await verifyLaunchProofs(
+            proofs,
+            validators,
+            { ...file, problems: ["snapshot manifest hashes to aa, genesis declares bb"] },
+            { genesisHash: GENESIS, requireAll: true },
+        )
+        expect(r.reports.every(x => x.ok)).toBe(true)
+        expect(r.ok).toBe(false)
+        expect(r.problems).toEqual([
+            "a node would refuse this genesis at its first boot: snapshot manifest hashes to aa, genesis declares bb",
+        ])
     })
 })
