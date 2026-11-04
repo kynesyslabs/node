@@ -278,6 +278,30 @@ describe("verifyTransactionProof", () => {
         ).toBe("final-executed")
     })
 
+    it("is indeterminate without a committee when the pool is larger than the shard", () => {
+        // Seven eligible validators, a shard of four: three signers outside
+        // the drawn committee would reach the quorum of three by themselves.
+        const extra = Array.from({ length: 3 }, newKey)
+        const wide = {
+            validators: [...members, ...extra].map(k => ({
+                identity: k.identity,
+                stake: "1000000000000000000000",
+                status: "2",
+                validAt: 0,
+            })),
+        }
+        const proof = txProof(0, {
+            peerlist: [...members, ...extra].map(k => k.identity),
+            setHash: validatorSetHash(wide.validators),
+            signers: extra,
+        })
+        const verdict = verifyTransactionProof(proof, wide, rules)
+        expect(verdict.verdict).toBe("indeterminate")
+        expect(verdict.reason).toMatch(/drawn from 7 identities/)
+        const committee = members.map(k => k.identity)
+        expect(verifyTransactionProof(proof, wide, { ...rules, committee }).verdict).toBe("invalid")
+    })
+
     it("answers invalid, never throws, on malformed input", () => {
         for (const broken of [null, {}, { ...txProof(0), auditPath: "x" }, { ...txProof(0), commitBlock: null }, { ...txProof(0), leaf: "{" }]) {
             expect(verifyTransactionProof(broken as never, trusted, rules).verdict).toBe("invalid")
