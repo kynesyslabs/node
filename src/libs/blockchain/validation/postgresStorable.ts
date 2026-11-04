@@ -119,6 +119,178 @@ export function isBigintStorable(value: unknown): boolean {
     return n >= INT8_MIN && n <= INT8_MAX
 }
 
+/** The bytes Postgres' integer input skips around a number (C isspace). */
+const PG_SPACE = new Set([" ", "\t", "\n", "\v", "\f", "\r"])
+
+const RADIX_DIGITS: Record<number, RegExp> = {
+    2: /^[01]$/,
+    8: /^[0-7]$/,
+    10: /^[0-9]$/,
+    16: /^[0-9a-fA-F]$/,
+}
+
+const RADIX_PREFIX: Record<string, number> = { x: 16, X: 16, o: 8, O: 8, b: 2, B: 2 }
+
+/**
+ * Whether Postgres 16 reads `text` as an int8 (pg_strtoint64_safe):
+ * whitespace around it, an optional sign, then decimal digits or a 0x/0o/0b
+ * prefix and digits of that base, single underscores between digits (and
+ * after a prefix), and a value in range. Leading zeros are allowed. No
+ * decimal point, no exponent. Confirmed against the pinned postgres:16
+ * image; see postgresStorable.rowInsert.test.ts.
+ */
+export function isInt8Text(text: string): boolean {
+    let i = 0
+    while (i < text.length && PG_SPACE.has(text[i])) i++
+    let negative = false
+    if (text[i] === "-") {
+        negative = true
+        i++
+    } else if (text[i] === "+") {
+        i++
+    }
+    let radix = 10
+    if (text[i] === "0" && Object.hasOwn(RADIX_PREFIX, text[i + 1] ?? "")) {
+        radix = RADIX_PREFIX[text[i + 1]]
+        i += 2
+    }
+    const isDigit = (c: string | undefined) => c !== undefined && RADIX_DIGITS[radix].test(c)
+    const first = i
+    let digits = ""
+    while (i < text.length) {
+        if (isDigit(text[i])) {
+            digits += text[i++]
+        } else if (text[i] === "_") {
+            if (radix === 10 && i === first) return false
+            i++
+            if (!isDigit(text[i])) return false
+        } else {
+            break
+        }
+    }
+    if (digits === "") return false
+    while (i < text.length && PG_SPACE.has(text[i])) i++
+    if (i !== text.length) return false
+    // Past 64 significant digits no base fits int8; BigInt is not asked to
+    // parse a long one.
+    const significant = digits.replace(/^0+/, "")
+    if (significant.length > 64) return false
+    const prefix = radix === 16 ? "0x" : radix === 8 ? "0o" : radix === 2 ? "0b" : ""
+    const magnitude = significant === "" ? 0n : BigInt(prefix + significant)
+    const value = negative ? -magnitude : magnitude
+    return value >= INT8_MIN && value <= INT8_MAX
+}
+
+/**
+ * Whether a `bigint` column takes `value` as the driver sends it: a number
+ * as its toString() (so 1e21 arrives as "1e+21"), a string as is. A boolean
+ * arrives as "true", an object as JSON text and an array as an array
+ * literal, none of which int8 reads. `undefined` is left out of the insert,
+ * so the column default applies; null is NULL.
+ */
+function isInt8ColumnValue(
+    value: unknown,
+    column: { nullable: boolean; hasDefault: boolean },
+): boolean {
+    if (value === undefined) return column.hasDefault || column.nullable
+    if (value === null) return column.nullable
+    if (typeof value === "number" || typeof value === "bigint") return isInt8Text(value.toString())
+    if (typeof value === "string") return isInt8Text(value)
+    return false
+}
+
+/** numeric(38, 0) holds up to 38 digits. */
+const NUMERIC_38_LIMIT = 10n ** 38n
+
+/**
+ * The bigint the block insert makes of an amount or fee (toEntityBigint in
+ * transaction.ts: null and undefined are 0, anything else goes through
+ * BigInt()), or undefined where that throws. JavaScript's grammar decides
+ * here, not Postgres': the column receives the bigint's decimal text.
+ */
+export function entityBigint(value: unknown): bigint | undefined {
+    if (value === null || value === undefined) return 0n
+    if (typeof value === "bigint") return value
+    if (typeof value === "boolean") return value ? 1n : 0n
+    if (typeof value === "number") return Number.isInteger(value) ? BigInt(value) : undefined
+    let text: string
+    if (typeof value === "string") {
+        text = value
+    } else if (Array.isArray(value)) {
+        // BigInt reads an array as its join(), which throws on an element
+        // with its own toString.
+        try {
+            text = String(value)
+        } catch {
+            return undefined
+        }
+    } else {
+        // A plain object reads as "[object Object]" or throws.
+        return undefined
+    }
+    // Over 130 significant digits no base is below 10^38, so a long string
+    // is refused without asking BigInt to parse it. trim() drops what
+    // BigInt skips.
+    const significant = text
+        .trim()
+        .replace(/^[+-]/, "")
+        .replace(/^0[xXoObB]/, "")
+        .replace(/^0+/, "")
+    if (significant.length > 130) return undefined
+    try {
+        return BigInt(text)
+    } catch {
+        return undefined
+    }
+}
+
+/**
+ * What the block insert stores for `to` or `from` (toRawTransaction): a
+ * value whose `data` stringifies to something non-empty with
+ * toString("hex") (a Buffer, or its JSON form, read as its join()) is
+ * replaced by that string, anything else is kept. Throws where
+ * toRawTransaction throws: on null or undefined, on a numeric `data` (no
+ * radix "hex"), and on a `data` or array element with its own toString.
+ */
+export function storedAddress(value: unknown): unknown {
+    const converted = (value as Record<string, any>)["data"]?.toString("hex")
+    return converted ? converted : value
+}
+
+const storedAddressOrRaw = (value: unknown): unknown => {
+    try {
+        return storedAddress(value)
+    } catch {
+        return value
+    }
+}
+
+/**
+ * Nesting the values copied into the row's own columns may have. Turning
+ * one into text recurses (Array.prototype.join, the driver's array literal,
+ * JSON.stringify), and how deep that gets before the stack runs out
+ * depends on the thread and its stack: about 3,400 levels for join in a
+ * validator worker, 4,300 on the main thread. Checked against that, a
+ * value could pass in the worker and fail the block insert. Honest values
+ * are scalars, a signature object or a Buffer's JSON form.
+ */
+export const ROW_VALUE_MAX_DEPTH = 256
+
+/** Whether arrays and objects in `value` nest deeper than `max`. */
+export function nestsDeeperThan(value: unknown, max: number): boolean {
+    const pending: Array<[unknown, number]> = [[value, 0]]
+    while (pending.length > 0) {
+        const [item, depth] = pending.pop()!
+        if (typeof item !== "object" || item === null) continue
+        if (depth + 1 > max) return true
+        if (ArrayBuffer.isView(item)) continue
+        for (const element of Array.isArray(item) ? item : Object.values(item)) {
+            if (typeof element === "object" && element !== null) pending.push([element, depth + 1])
+        }
+    }
+    return false
+}
+
 /**
  * Whether a JSON-shaped value can be written to a `jsonb` column: no string
  * or key holds U+0000 or an unpaired surrogate. Walked without recursion: the
@@ -157,6 +329,7 @@ export function admissionRefusal(tx: unknown): string | null {
 
 type TxLike = {
     hash?: unknown
+    signature?: unknown
     status?: unknown
     ed25519_signature?: unknown
     blockNumber?: unknown
@@ -180,12 +353,17 @@ type TxLike = {
 
 /**
  * The values a `transactions` row copies out of a transaction into columns
- * that are neither `json` nor `jsonb`, by column name. `signature` is left out:
- * it is stored as JSON.stringify output, which escapes U+0000. `content` is
- * `json` and `attrs` is node-written jsonb, cleaned before it is stored.
- * Kept in step with the entity by a test.
+ * that are neither `json` nor `jsonb`, by column name, `to` and `from` as
+ * the insert converts them. `signature` is left out: it is stored as
+ * JSON.stringify output, which escapes U+0000. `content` is `json` and
+ * `attrs` is node-written jsonb, cleaned before it is stored. Kept in step
+ * with the entity by a test.
  */
 export function transactionRowColumns(tx: TxLike): Record<string, unknown> {
+    return rowColumns(tx, storedAddressOrRaw)
+}
+
+function rowColumns(tx: TxLike, address: (value: unknown) => unknown): Record<string, unknown> {
     const content = tx?.content ?? {}
     const fee = content.transaction_fee ?? {}
     return {
@@ -194,9 +372,9 @@ export function transactionRowColumns(tx: TxLike): Record<string, unknown> {
         status: tx?.status,
         hash: tx?.hash,
         type: content.type,
-        from: content.from,
+        from: address(content.from),
         from_ed25519_address: content.from_ed25519_address,
-        to: content.to,
+        to: address(content.to),
         amount: content.amount,
         nonce: content.nonce,
         timestamp: content.timestamp,
@@ -229,15 +407,75 @@ export function l2psHashRowColumns(tx: TxLike): Record<string, unknown> | null {
     return { l2ps_uid: row.l2ps_uid, consolidated_hash: row.consolidated_hash }
 }
 
+/**
+ * What the block insert of the `transactions` row throws on, so that a
+ * block carrying it never committed: a dereference toRawTransaction makes
+ * of a missing value (`to`, `from`, `transaction_fee`), a NOT NULL column
+ * left NULL (`type`, `hash`, `signature`, `timestamp`), an int8 column
+ * Postgres cannot read (`timestamp`, `nonce`), and an amount or fee
+ * BigInt() cannot read or numeric(38, 0) cannot hold. Nothing stricter:
+ * history that committed passes. `status` and `blockNumber` are written by
+ * this node before the insert, not taken from the transaction.
+ *
+ * Mirrors toRawTransaction and toTransactionsEntity in transaction.ts;
+ * a test runs both on the refused values.
+ */
+export function transactionRowValueRefusal(tx: TxLike): string | null {
+    const content = tx?.content
+    const nested = { ...rowColumns(tx, value => value), signature: tx?.signature }
+    for (const [column, value] of Object.entries(nested)) {
+        if (nestsDeeperThan(value, ROW_VALUE_MAX_DEPTH)) {
+            return `Transaction ${column} nests deeper than ${ROW_VALUE_MAX_DEPTH} levels`
+        }
+    }
+    for (const column of ["to", "from"] as const) {
+        const value = content?.[column]
+        if (value === null || value === undefined) return `Transaction ${column} is missing`
+        try {
+            storedAddress(value)
+        } catch {
+            return `Transaction ${column} cannot be read as an address`
+        }
+    }
+    const fee = content?.transaction_fee
+    if (fee === null || fee === undefined) return "Transaction transaction_fee is missing"
+    if (content?.type === null || content?.type === undefined) return "Transaction type is missing"
+    if (tx?.hash === null || tx?.hash === undefined) return "Transaction hash is missing"
+    // JSON.stringify(undefined) is undefined, which leaves the NOT NULL
+    // column to its absent default; null is stored as "null".
+    if (tx?.signature === undefined) return "Transaction signature is missing"
+    if (!isInt8ColumnValue(content?.timestamp, { nullable: false, hasDefault: false })) {
+        return "Transaction timestamp is not an int8 Postgres reads"
+    }
+    if (!isInt8ColumnValue(content?.nonce, { nullable: true, hasDefault: true })) {
+        return "Transaction nonce is not an int8 Postgres reads"
+    }
+    const money = {
+        amount: content?.amount,
+        network_fee: fee.network_fee,
+        rpc_fee: fee.rpc_fee,
+        additional_fee: fee.additional_fee,
+    }
+    for (const [field, value] of Object.entries(money)) {
+        const n = entityBigint(value)
+        if (n === undefined) return `Transaction ${field} is not an integer`
+        if (n >= NUMERIC_38_LIMIT || n <= -NUMERIC_38_LIMIT) {
+            return `Transaction ${field} has more than the 38 digits its column holds`
+        }
+    }
+    return null
+}
+
 /** Columns of the `transactions` row a b-tree index covers. */
 const INDEXED_TRANSACTION_COLUMNS = ["hash", "from_ed25519_address", "to"] as const
 
 /**
- * Block and sync verification: only what Postgres refuses in a row the block
- * insert writes for every transaction it lists, failed or not: U+0000 in the
- * transaction's own row and, for an `l2ps_hash_update`, its `l2ps_hashes`
- * row, and an indexed value too long for its b-tree entry. A block carrying
- * one never committed. A NUL elsewhere in the body sits in the `json` column
+ * Block and sync verification: only what fails the rows the block insert
+ * writes for every transaction it lists, failed or not: a value the
+ * `transactions` row cannot be built from or Postgres refuses there (see
+ * transactionRowValueRefusal), U+0000 in that row and, for an
+ * `l2ps_hash_update`, its `l2ps_hashes` row, and an indexed value too long
+ * for its b-tree entry. A block carrying one never committed. A NUL elsewhere in the body sits in the `json` column
  * and did commit; the edits it implies are judged when they are applied (see
  * storableRows). The l2ps_hashes uid is not capped here: a row that does not
  * fit is skipped, not written.
@@ -251,6 +489,8 @@ const INDEXED_TRANSACTION_COLUMNS = ["hash", "from_ed25519_address", "to"] as co
  * spellings before, and blocks that carry them committed.
  */
 export function transactionRowRefusal(tx: TxLike): string | null {
+    const unwritable = transactionRowValueRefusal(tx)
+    if (unwritable !== null) return unwritable
     const columns = transactionRowColumns(tx)
     for (const [column, value] of Object.entries(columns)) {
         if (!isTextStorable(value)) return `Transaction ${column} ${NUL_NOT_STORABLE}`

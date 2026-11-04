@@ -23,6 +23,29 @@ import {
 
 const { default: Transaction } = await import("src/libs/blockchain/transaction")
 
+const ACCOUNT = "0x" + "ab".repeat(32)
+
+/** A transaction as an SDK client signs it and a node stores it. */
+const honest = (content: Record<string, unknown> = {}, rest: Record<string, unknown> = {}): any => ({
+    hash: "cd".repeat(32),
+    signature: { type: "ed25519", data: "ef".repeat(64) },
+    status: "confirmed",
+    ...rest,
+    content: {
+        type: "native",
+        from: ACCOUNT,
+        from_ed25519_address: ACCOUNT,
+        to: ACCOUNT,
+        amount: 0,
+        data: ["native", {}],
+        gcr_edits: [],
+        nonce: 1,
+        timestamp: 1_760_000_000_000,
+        transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0, rpc_address: null },
+        ...content,
+    },
+})
+
 describe("isJsonbStorable", () => {
     it("refuses U+0000 and unpaired surrogates in any string or key, at any depth", () => {
         expect(isJsonbStorable("a\u0000")).toBe(false)
@@ -68,22 +91,27 @@ describe("the transaction row", () => {
     })
 
     it("refuses U+0000 in a column but not in the json body", () => {
-        const tx = (content: Record<string, unknown>) => ({ hash: "h", status: "confirmed", content })
-        expect(transactionRowRefusal(tx({ to: "0x" + "ab".repeat(32) + "\u0000" }))).toContain("to")
-        expect(transactionRowRefusal(tx({ to: "0xab", data: ["native", { memo: "\u0000", ["\u0000"]: 1 }] }))).toBeNull()
-        expect(transactionRowRefusal(tx({ to: "0xab\ud800" }))).toBeNull()
-        expect(transactionRowRefusal({ hash: "h\u0000", content: {} })).toContain("hash")
+        expect(transactionRowRefusal(honest({ to: ACCOUNT + "\u0000" }))).toContain("to")
+        expect(transactionRowRefusal(honest({ to: "0xab", data: ["native", { memo: "\u0000", ["\u0000"]: 1 }] }))).toBeNull()
+        expect(transactionRowRefusal(honest({ to: "0xab\ud800" }))).toBeNull()
+        expect(transactionRowRefusal(honest({}, { hash: "h\u0000" }))).toContain("hash")
+    })
+
+    it("refuses U+0000 in the address the insert makes of a Buffer's JSON form", () => {
+        // The stored value is data.toString("hex"), the array's join().
+        expect(transactionRowRefusal(honest({ to: { type: "Buffer", data: ["a\u0000"] } }))).toContain("to")
+        expect(transactionRowRefusal(honest({ from: { type: "Buffer", data: [1, "\u0000"] } }))).toContain("from")
     })
 })
 
 describe("the l2ps_hashes row of an l2ps_hash_update", () => {
     // Written on block insert for every listed update, failed or not, so a
     // block carrying U+0000 there never committed.
-    const update = (payload: Record<string, unknown>) => ({
-        hash: "h",
-        status: "failed",
-        content: { type: "l2ps_hash_update", data: ["l2ps_hash_update", { l2ps_uid: "u", consolidated_hash: "c", transaction_count: 1, ...payload }] },
-    })
+    const update = (payload: Record<string, unknown>) =>
+        honest(
+            { type: "l2ps_hash_update", data: ["l2ps_hash_update", { l2ps_uid: "u", consolidated_hash: "c", transaction_count: 1, ...payload }] },
+            { status: "failed" },
+        )
 
     it("refuses U+0000 in the uid or the hash", () => {
         expect(transactionRowRefusal(update({ l2ps_uid: "u\u0000" }))).toContain("l2ps_uid")
@@ -94,8 +122,8 @@ describe("the l2ps_hashes row of an l2ps_hash_update", () => {
         expect(transactionRowRefusal(update({}))).toBeNull()
         expect(transactionRowRefusal(update({ l2ps_uid: "u\ud800" }))).toBeNull()
         // Without every field the projection skips it, so nothing is written.
-        expect(transactionRowRefusal({ hash: "h", content: { type: "l2ps_hash_update", data: ["l2ps_hash_update", { l2ps_uid: "\u0000" }] } })).toBeNull()
-        expect(transactionRowRefusal({ hash: "h", content: { type: "native", data: ["native", { l2ps_uid: "\u0000", consolidated_hash: "c", transaction_count: 1 }] } })).toBeNull()
+        expect(transactionRowRefusal(honest({ type: "l2ps_hash_update", data: ["l2ps_hash_update", { l2ps_uid: "\u0000" }] }))).toBeNull()
+        expect(transactionRowRefusal(honest({ type: "native", data: ["native", { l2ps_uid: "\u0000", consolidated_hash: "c", transaction_count: 1 }] }))).toBeNull()
     })
 })
 
@@ -194,8 +222,6 @@ describe("storage program admission", () => {
 const random = (length: number) =>
     Array.from({ length }, (_, i) => String.fromCharCode(0x21 + ((i * 7919 + 13) % 89))).join("")
 
-const ACCOUNT = "0x" + "ab".repeat(32)
-
 describe("fitsIndexKey", () => {
     it("measures a string in UTF-8, as the driver sends it", () => {
         expect(fitsIndexKey("a".repeat(1024))).toBe(true)
@@ -240,10 +266,7 @@ describe("the recipient at admission", () => {
 })
 
 describe("indexed columns of the transaction row", () => {
-    const tx = (content: Record<string, unknown>): any => ({
-        hash: "cd".repeat(32),
-        content: { type: "native", from: ACCOUNT, from_ed25519_address: ACCOUNT, to: ACCOUNT, ...content },
-    })
+    const tx = honest
 
     it("pass at the lengths clients and nodes write", () => {
         expect(transactionRowRefusal(tx({}))).toBeNull()

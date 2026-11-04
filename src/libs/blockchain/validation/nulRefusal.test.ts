@@ -235,7 +235,23 @@ describe("received block verification", () => {
     })
 
     it("rejects a relay transaction carrying it", async () => {
-        const relay = { hash: "aa", content: { type: "l2psBatch", from: "x\u0000" }, signature: { data: "00" } }
+        // Shaped as the L2PS batch aggregator builds it.
+        const relay = {
+            hash: "aa",
+            content: {
+                type: "l2psBatch",
+                from: "x\u0000",
+                to: "x",
+                from_ed25519_address: "x",
+                amount: 0,
+                timestamp: 1_760_000_000,
+                nonce: 1,
+                fee: 0,
+                data: ["l2psBatch", {}],
+                transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0, rpc_address: null },
+            },
+            signature: { data: "00" },
+        }
         const verdict = await verifySystemRelayTx(relay as never)
         expect(verdict.valid).toBe(false)
         expect(verdict.reason).toContain("U+0000")
