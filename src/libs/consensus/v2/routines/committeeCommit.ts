@@ -1,4 +1,5 @@
 import { verifiedSignersOf } from "@/libs/blockchain/validation/verifyBlock"
+import { isForkActive } from "@/forks/forkGates"
 import { verifierThreshold } from "../quorum"
 import { certificateMessageOf } from "../commitLock/domain"
 
@@ -22,11 +23,19 @@ export async function committeeCommitShortfall(
 ): Promise<string | null> {
     const signatures = block.validation_data?.signatures
     // Under commitLock sync counts one round's precommits, so they are what
-    // the producer must count too.
+    // the producer must count too, compared in the case sync compares them.
     const message = certificateMessageOf(block)
+    const canonical = isForkActive("canonicalSigners", block.number)
     const signed =
         message !== null && signatures && typeof signatures === "object"
-            ? (await verifiedSignersOf(message, signatures, new Set(committee))).size
+            ? (
+                  await verifiedSignersOf(
+                      message,
+                      signatures,
+                      new Set(committee),
+                      canonical,
+                  )
+              ).size
             : 0
     const needed = verifierThreshold(shardSize, committee.length, true)
     if (signed >= needed) return null

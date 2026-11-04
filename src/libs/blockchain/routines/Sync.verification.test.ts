@@ -22,6 +22,8 @@ mock.module("../validation/verifyBlock", () => ({
     ...realVerifyBlock,
     verifyBlock,
     verifyBlockCertificate,
+    // This suite's blocks carry no signatures; the signature tally has its own suite
+    withCountedSignatures: async (block: unknown) => block,
 }))
 
 const hashGCRTables = jest.fn(async (_height: number) => ({}) as any)

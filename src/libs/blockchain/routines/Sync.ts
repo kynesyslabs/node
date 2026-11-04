@@ -22,6 +22,7 @@ import {
     type BlockVerification,
     verifyBlock,
     verifyBlockCertificate,
+    withCountedSignatures,
 } from "../validation/verifyBlock"
 import {
     SyncBlockRejectedError,
@@ -1217,6 +1218,7 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
  * With the next block in hand, its result root must match the results about
  * to be stored: once stored, a status is final and a failure code changes
  * only by repair against a later verified block.
+ * The block is stored with only the signatures its quorum counted.
  *
  * @throws SyncBlockRejectedError when the block must not be applied
  */
@@ -1225,6 +1227,14 @@ async function applyVerifiedBlock(
     txs: Transaction[],
     next?: Block,
 ): Promise<void> {
+    let certified: Block
+    try {
+        certified = await withCountedSignatures(block)
+    } catch (e) {
+        throw new SyncBlockRejectedError(
+            e instanceof Error ? e.message : String(e),
+        )
+    }
     await verifyBlockTransactions(block, txs)
     await verifyNativeTablesHashes(block)
     const plan = await planBlockOutcome(block, txs)
@@ -1247,7 +1257,7 @@ async function applyVerifiedBlock(
         // Rejects only what this peer served: the caller cools it down and
         // syncs the block from another one.
         await checkResultsAgainstNextBlock(block, txs, next)
-        await insertBlockOrHalt(block, txs, outcome.pending)
+        await insertBlockOrHalt(certified, txs, outcome.pending)
     })
 }
 

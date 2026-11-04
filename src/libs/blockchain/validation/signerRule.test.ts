@@ -2,7 +2,8 @@
  * The signer rule sync applies to a block, which getFinalizedHead also hands
  * to clients: the bound committee and 2/3 + 1 of shardSize under
  * committeeBinding, the eligible pool and the pool-relative bar before it
- * (shardSize again under quorumParity).
+ * (shardSize again under quorumParity). Under canonicalSigners a member
+ * listed in two cases sizes the pool once.
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
@@ -12,6 +13,7 @@ const sharedState: Record<string, any> = {
     forkConfig: {
         committeeBinding: { activationHeight: null },
         quorumParity: { activationHeight: null },
+        canonicalSigners: { activationHeight: null },
     },
 }
 const getBoundCommittee = jest.fn(async (_parent: number) => ["a", "b", "c", "d"])
@@ -32,6 +34,7 @@ beforeEach(() => {
     getEligiblePool.mockClear()
     sharedState.forkConfig.committeeBinding.activationHeight = null
     sharedState.forkConfig.quorumParity.activationHeight = null
+    sharedState.forkConfig.canonicalSigners.activationHeight = null
 })
 
 describe("signerRuleOf", () => {
@@ -45,6 +48,16 @@ describe("signerRuleOf", () => {
         sharedState.forkConfig.quorumParity.activationHeight = 10
         expect((await signerRuleOf(10)).threshold).toBe(3)
         expect((await signerRuleOf(9)).threshold).toBe(2)
+    })
+
+    it("sizes the bar by lowercase identity under canonicalSigners", async () => {
+        const listedTwice = ["a", "b", "A", "B"]
+        sharedState.forkConfig.canonicalSigners.activationHeight = 10
+        getEligiblePool.mockResolvedValueOnce(listedTwice).mockResolvedValueOnce(listedTwice)
+        const under = await signerRuleOf(10)
+        const before = await signerRuleOf(9)
+        expect(under).toEqual({ bound: false, members: listedTwice, threshold: 2 })
+        expect(before.threshold).toBe(3)
     })
 
     it("is the committee bound at the parent under committeeBinding", async () => {

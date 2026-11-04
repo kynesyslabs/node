@@ -99,21 +99,28 @@ async function carriesOurSignature(block: Block): Promise<boolean> {
 }
 
 /**
- * The members of `eligible` whose signature in `signatures` verifies over
+ * The signatures in `signatures` by members of `eligible` that verify over
  * `signedMessage`: the block hash, or under commitLock the vote message.
- * Sync and a producer about to commit count with this one function, so
- * they cannot disagree on which signatures count.
+ * With `canonical` (the `canonicalSigners` fork) identities compare in
+ * lowercase, and a member whose key appears in two cases counts once, under
+ * its lowercase identity with the first of its signatures that verifies.
+ * Without it they compare as written, as they always have.
  */
-export async function verifiedSignersOf(
+export async function countedSignatures(
     signedMessage: string,
     signatures: Record<string, unknown>,
     eligible: Set<string>,
-): Promise<Set<string>> {
+    canonical = false,
+): Promise<Map<string, string>> {
     const message = new TextEncoder().encode(signedMessage)
-    const verifiedSigners = new Set<string>()
-    await Promise.all(
-        Object.entries(signatures).map(async ([identity, signature]) => {
-            if (!eligible.has(identity)) return
+    const members = canonical
+        ? new Set([...eligible].map(id => id.toLowerCase()))
+        : eligible
+    const entries = Object.entries(signatures)
+    const signers = await Promise.all(
+        entries.map(async ([key, signature]) => {
+            const identity = canonical ? key.toLowerCase() : key
+            if (!members.has(identity)) return null
             try {
                 const ok = await TxValidatorPool.getInstance().verify({
                     algorithm: getSharedState.signingAlgorithm,
@@ -121,19 +128,70 @@ export async function verifiedSignersOf(
                     signature: hexToUint8Array(signature as string),
                     publicKey: hexToUint8Array(identity),
                 })
-                if (ok) verifiedSigners.add(identity)
+                return ok ? identity : null
             } catch (e) {
                 log.error(
-                    `[verifyBlock] signature verify threw for ${identity}: ${getErrorMessage(e)}`,
+                    `[verifyBlock] signature verify threw for ${key}: ${getErrorMessage(e)}`,
                 )
+                return null
             }
         }),
     )
-    return verifiedSigners
+    const counted = new Map<string, string>()
+    entries.forEach(([, signature], i) => {
+        const identity = signers[i]
+        if (identity !== null && !counted.has(identity)) {
+            counted.set(identity, signature as string)
+        }
+    })
+    return counted
 }
 
-/** Whether `block` carries a verified signer quorum from the signers its height admits. */
-async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
+/**
+ * The members of `eligible` whose signature in `signatures` verifies over
+ * `signedMessage`. Sync and a producer about to commit count with this one
+ * function, so they cannot disagree on which signatures count.
+ */
+export async function verifiedSignersOf(
+    signedMessage: string,
+    signatures: Record<string, unknown>,
+    eligible: Set<string>,
+    canonical = false,
+): Promise<Set<string>> {
+    const counted = await countedSignatures(
+        signedMessage,
+        signatures,
+        eligible,
+        canonical,
+    )
+    return new Set(counted.keys())
+}
+
+interface SignedBlock {
+    number: number
+    hash: string
+    validation_data?: {
+        signatures?: Record<string, unknown>
+        round?: unknown
+    } | null
+}
+
+type SignerTally =
+    | { valid: false; reason: string }
+    | {
+          valid: true
+          counted: Map<string, string>
+          poolSize: number
+          bound: boolean
+          threshold: number
+      }
+
+/**
+ * The signatures `block` carries from the signers its height admits that
+ * verify. The quorum check and the certificate sync stores both come from
+ * here, so a block is never stored with a signature its quorum did not count.
+ */
+async function tallySigners(block: SignedBlock): Promise<SignerTally> {
     // Recompute the deterministic eligible signer pool for this height.
     // The forged shard is liveness-filtered and not reproducible here,
     // so signatures are validated against the pool it was drawn from.
@@ -181,20 +239,34 @@ async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
     }
 
     // Verify each signature over the recomputed hash (or its precommit message)
-    const verifiedSigners = await verifiedSignersOf(
+    const canonical = isForkActive("canonicalSigners", block.number)
+    const counted = await countedSignatures(
         message,
         signatures,
         poolIdentities,
+        canonical,
     )
+    const poolSize = canonical
+        ? new Set(pool.map(id => id.toLowerCase())).size
+        : pool.length
+    return { valid: true, counted, poolSize, bound, threshold: rule.threshold }
+}
+
+/** Whether `block` carries a verified signer quorum from the signers its height admits. */
+async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
+    const tally = await tallySigners(block)
+    if (tally.valid === false) {
+        return { valid: false, reason: tally.reason }
+    }
+    const { counted, poolSize, bound, threshold } = tally
 
     // The bar is pinned to shardSize; see signerRuleOf.
-    const threshold = rule.threshold
-    if (verifiedSigners.size < threshold) {
+    if (counted.size < threshold) {
         return {
             valid: false,
             reason: bound
-                ? `insufficient verified committee signatures: ${verifiedSigners.size} of a bound committee of ${pool.length} (need ${threshold})`
-                : `insufficient verified pool signatures: ${verifiedSigners.size} of a pool of ${pool.length} (need ${threshold})`,
+                ? `insufficient verified committee signatures: ${counted.size} of a bound committee of ${poolSize} (need ${threshold})`
+                : `insufficient verified pool signatures: ${counted.size} of a pool of ${poolSize} (need ${threshold})`,
         }
     }
 
@@ -221,6 +293,34 @@ export async function verifyBlockCertificate(
     } catch (e) {
         return { valid: false, reason: getErrorMessage(e) }
     }
+}
+
+/**
+ * A copy of `block` whose signature map holds only the signatures its
+ * quorum counts: by the signers its height admits, verifying over its
+ * certificate message. Sync stores this copy, so a signature that never
+ * counted is neither kept nor served to peers again. The block hash does
+ * not cover the signatures, so the copy is the same block; the caller's
+ * block and its maps are left as they are.
+ *
+ * @throws when the signer set or the signed message cannot be resolved
+ */
+export async function withCountedSignatures<T extends SignedBlock>(
+    block: T,
+): Promise<T> {
+    const tally = await tallySigners(block)
+    if (tally.valid === false) {
+        throw new Error(
+            `cannot rebuild the signatures of block ${block.number}: ${tally.reason}`,
+        )
+    }
+    const validationData = {
+        ...block.validation_data,
+        signatures: Object.fromEntries(tally.counted),
+    }
+    return Object.assign(Object.create(Object.getPrototypeOf(block)), block, {
+        validation_data: validationData,
+    }) as T
 }
 
 /**

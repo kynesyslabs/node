@@ -424,6 +424,23 @@ export type InstantMessagingBindingConfig = BaseForkConfig
 export type BlockCapsConfig = BaseForkConfig
 
 /**
+ * `canonicalSigners` fork: a block's signatures are matched to its signer
+ * set by lowercase identity, and a key written in two cases is one signer
+ * that counts once.
+ *
+ * Before it, identities compared as written: a signature keyed in another
+ * case than its pool entry did not count, and a key the validator set
+ * listed in two cases could count twice. Sync stores only the counted
+ * signatures either way; this fork changes which ones count.
+ *
+ * Activation at H applies to block H and later. Dormant by default
+ * (`activationHeight: null`), so a node carrying the code counts exactly
+ * as one without it; a chain started from genesis with this build sets it
+ * to 0. No payload beyond the base.
+ */
+export type CanonicalSignersConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -471,6 +488,7 @@ export type ForkConfig =
     | CanonicalAddressesConfig
     | FeeBindingConfig
     | BlockCapsConfig
+    | CanonicalSignersConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -501,6 +519,7 @@ export type ForkName =
     | "canonicalAddresses"
     | "feeBinding"
     | "blockCaps"
+    | "canonicalSigners"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -530,6 +549,7 @@ export interface ForkConfigByName {
     canonicalAddresses: CanonicalAddressesConfig
     feeBinding: FeeBindingConfig
     blockCaps: BlockCapsConfig
+    canonicalSigners: CanonicalSignersConfig
 }
 
 /**
@@ -790,6 +810,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A block takes a bounded, deterministic share of the pool by tx count and " +
             "content bytes, and the mempool merge holds each sender to the admission cap.",
     },
+    canonicalSigners: {
+        // Dormant by default: it changes which signatures count toward a
+        // block's quorum, and a missing genesis entry hydrates from here. A
+        // chain launched from genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "A block's signatures match its signer set by lowercase identity, and a key " +
+            "written in two cases counts once.",
+    },
 }
 
 /**
@@ -823,5 +852,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         canonicalAddresses: { ...DEFAULT_FORK_CONFIG.canonicalAddresses },
         feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
         blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
+        canonicalSigners: { ...DEFAULT_FORK_CONFIG.canonicalSigners },
     }
 }
