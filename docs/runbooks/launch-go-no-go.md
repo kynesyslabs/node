@@ -105,12 +105,15 @@ any of them the result is NO-GO and says which one is missing.
   ignored). Passing the genesis data hash instead is NO-GO with a reason
   that names the mistake.
 - `--commit` is the release commit, as a full or short SHA (at least 7
-  hex characters). It is matched against each node's reported commit
-  with case, a `0x` and any branch prefix (`stabilisation@<sha>`) ignored,
-  and a short SHA matches the full one it abbreviates. Any launch
-  validator with a proven identity on another commit, or reporting none,
-  is NO-GO on its own, whatever the quorum: mixed builds at launch are
-  not allowed.
+  hex characters). A node reports `/info` `commitHash` as
+  `<GIT_BRANCH><sha>`, and a release image carries its tag there
+  (`<v1.0.0-rc.4>e30ee46...`); the `<...>` prefix, a `branch@` prefix, a
+  `0x` and case are ignored, and a short SHA matches the full one it
+  abbreviates. A node whose `getNetworkInfo` reports `nodeVersion.dirty`
+  (built with uncommitted changes) does not match, whatever SHA it names.
+  Any launch validator with a proven identity on another commit, a dirty
+  build, or no commit at all is NO-GO on its own, whatever the quorum:
+  mixed builds at launch are not allowed.
 - `--shard-size` is only for runs without `--genesis`. With `--genesis` the
   tool reads `properties.shardSize` the way the node does (block 0 fixes
   it), and a `--shard-size` that differs is refused with exit 2, so a flag

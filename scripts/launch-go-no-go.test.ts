@@ -236,6 +236,18 @@ describe("decideGoNoGo", () => {
             expect(d.reasons.join("\n")).toContain(`${launch[0]} runs commit fedcba98`)
         })
 
+        it("is NO-GO on a dirty build of the launch commit", () => {
+            const launch = launchSet(10)
+            const probes = launch.map((v, i) =>
+                online(v, { commit: `<v1.0.0-rc.4>${COMMIT}`, dirty: i === 2 ? true : i === 3 ? null : false }),
+            )
+            const d = decideGoNoGo(input({ probes }))
+            expect(d.validators[2].status).toBe("other-commit")
+            expect(d.validators[3].status).toBe("counted")
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain(`${launch[2]} runs a dirty build of <v1.0.0-rc.4>${COMMIT}`)
+        })
+
         it("is NO-GO on a validator that reports no commit", () => {
             const launch = launchSet(10)
             const probes = launch.map((v, i) => (i === 0 ? online(v, { commit: null }) : online(v)))
@@ -248,9 +260,13 @@ describe("decideGoNoGo", () => {
             for (const reported of [
                 COMMIT,
                 COMMIT.toUpperCase(),
+                // What /info reports: <GIT_BRANCH>sha, the release tag in a release image
+                `<v1.0.0-rc.4>${COMMIT}`,
+                `<mainnet-20261115>${COMMIT}`,
+                `<abcdef1234567>${COMMIT}`,
+                `<stabilisation>${COMMIT}`,
+                `<unknown>${COMMIT}`,
                 `stabilisation@${COMMIT}`,
-                `stabilisation-${COMMIT}`,
-                `refs/heads/stabilisation/${COMMIT}`,
                 `0x${COMMIT}`,
             ]) {
                 for (const expected of [COMMIT, COMMIT.slice(0, 7), COMMIT.slice(0, 12).toUpperCase(), `main@${COMMIT.slice(0, 9)}`]) {
@@ -610,6 +626,12 @@ describe("commitSha", () => {
         expect(commitSha("stabilisation@E30EE46")).toBe("e30ee46")
         expect(commitSha(" e30ee460 ")).toBe("e30ee460")
         expect(commitSha("0xe30ee46")).toBe("e30ee46")
+        // A tag with its own long hex or digit run must not hide the SHA
+        expect(commitSha(`<v1.0.0-rc.4>${COMMIT}`)).toBe(COMMIT)
+        expect(commitSha(`<release-20261115>${COMMIT}`)).toBe(COMMIT)
+        expect(commitSha(`<deadbeef42>${COMMIT}`)).toBe(COMMIT)
+        expect(commitSha("<v1.0.0-rc.4>")).toBeNull()
+        expect(commitSha("<v1.0.0-rc.4>null")).toBeNull()
         expect(commitSha("stabilisation")).toBeNull()
         expect(commitSha("abc12")).toBeNull()
         expect(commitSha("abc1234-def5678")).toBeNull()
@@ -621,6 +643,7 @@ describe("commitSha", () => {
         expect(sameCommit("stabilisation@abc1234", "abd")).toBe(false)
         expect(sameCommit(null, "abc1234")).toBe(false)
         expect(sameCommit("abc1234ff", "abc1234")).toBe(true)
+        expect(sameCommit(`<20261115>${COMMIT}`, "2026111")).toBe(false)
     })
 })
 

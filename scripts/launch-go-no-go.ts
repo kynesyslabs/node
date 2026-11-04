@@ -61,6 +61,8 @@ export interface ValidatorProbe {
     activeForks?: string[] | null
     head?: number | null
     commit?: string | null
+    /** getNetworkInfo nodeVersion.dirty: the build had uncommitted changes. */
+    dirty?: boolean | null
     version?: string | null
     /**
      * Outcome of the signed-nonce challenge: "verified" only when the
@@ -152,13 +154,20 @@ export const normHash = (hash: string) => hash.trim().toLowerCase().replace(/^0x
 
 /**
  * The SHA in a commit as given or as a node reports it, without case, a 0x
- * or a branch prefix: "stabilisation@E30EE46" gives "e30ee46". null when
- * there is not exactly one 7 to 40 character hex run to take.
+ * or a branch prefix. A node reports `<GIT_BRANCH>sha` (a release image
+ * carries the tag there: "<v1.0.0-rc.4>e30ee46..."); "stabilisation@e30ee46"
+ * is accepted too. What is left after the prefix must be the SHA alone, or
+ * the result is null.
  */
 export function commitSha(commit: string | null | undefined): string | null {
     if (typeof commit !== "string") return null
-    const runs = [...commit.trim().toLowerCase().matchAll(/(?<![0-9a-f])(?:0x)?([0-9a-f]{7,40})(?![0-9a-f])/g)]
-    return runs.length === 1 ? runs[0][1] : null
+    const rest = commit
+        .trim()
+        .toLowerCase()
+        .replace(/^<[^>]*>/, "")
+        .replace(/^[^@]*@/, "")
+    const match = /^(?:0x)?([0-9a-f]{7,40})$/.exec(rest)
+    return match ? match[1] : null
 }
 
 /** A short SHA matches the full one it abbreviates, in either direction. */
@@ -301,7 +310,10 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         if (input.requiredForks?.some(name => !(p.activeForks ?? []).includes(name))) {
             return "forks-inactive"
         }
-        if (input.expectedCommit && !sameCommit(p.commit, input.expectedCommit)) return "other-commit"
+        // A dirty build is not the release commit, whatever SHA it names
+        if (input.expectedCommit && (!sameCommit(p.commit, input.expectedCommit) || p.dirty === true)) {
+            return "other-commit"
+        }
         return "counted"
     }
 
@@ -350,7 +362,11 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
             reasons.push(`${v.identity} does not report these forks as active: ${missing.join(", ")}`)
         } else if (v.status === "other-commit") {
             reasons.push(
-                `${v.identity} runs commit ${p?.commit ?? "(not reported)"}, the launch commit is ${input.expectedCommit}`,
+                p?.dirty === true && sameCommit(p.commit, input.expectedCommit)
+                    ? `${v.identity} runs a dirty build of ${p.commit} (uncommitted changes), ` +
+                          `not the launch commit ${input.expectedCommit}`
+                    : `${v.identity} runs commit ${p?.commit ?? "(not reported)"}, ` +
+                          `the launch commit is ${input.expectedCommit}`,
             )
         }
     }
@@ -756,6 +772,7 @@ export async function probeValidator(
             info?.forks && typeof info.forks === "object"
                 ? Object.keys(info.forks).filter(name => info.forks[name]?.activated === true)
                 : null
+        probe.dirty = typeof info?.nodeVersion?.dirty === "boolean" ? info.nodeVersion.dirty : null
     } catch (e) {
         probe.error = `${probe.error ? probe.error + "; " : ""}network info: ${(e as Error).message}`
     }
