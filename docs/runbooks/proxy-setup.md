@@ -31,6 +31,12 @@ survive proxy termination.
 2. **Firewall**: ports 80 + 443 (TCP + UDP for HTTP/3) open inbound.
 3. **Epic 14 must be deployed first.** Caddy will set `X-Forwarded-For`;
    the node needs `TRUSTED_PROXIES` populated to honour it (see step 4).
+4. **`TRUSTED_PROXIES` is required behind any proxy.** Left empty, the node
+   counts every rate limit per proxy address, so all clients share each
+   bucket: one client's flood blocks everyone, and failed request
+   signatures from anyone (60 a minute) block signed requests from every
+   non-validator behind the proxy. Requests signed by a staked validator
+   are exempt from these limits.
 
 ## Step-by-step
 

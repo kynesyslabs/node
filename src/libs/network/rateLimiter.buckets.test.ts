@@ -467,4 +467,36 @@ describe("RateLimiter signed requests", () => {
     it("lets a staked validator through", async () => {
         for (let i = 0; i < 5; i++) expect((await signedBy("0xbeef")).status).toBe(200)
     })
+
+    // A bad signature claiming `key`, as a POST to the RPC root.
+    const forged = (key: string) => {
+        signer = null
+        const req = new Request("http://node/", {
+            method: "POST",
+            headers: { identity: `ed25519:${key}`, signature: "0xforged", timestamp: "1" },
+        })
+        return limiter.createMiddleware()(req, ok, server)
+    }
+
+    it("lets a staked validator through from an address whose failure bucket is exhausted", async () => {
+        // Proxy or NAT: other clients share the validator's address.
+        expect((await forged("0xabc")).status).toBe(401)
+        expect((await forged("0xabc")).status).toBe(401)
+        expect((await forged("0xabc")).status).toBe(429)
+
+        expect((await signedBy("0xbeef")).status).toBe(200)
+
+        verifyCalls = 0
+        expect((await forged("0xabc")).status).toBe(429)
+        expect(verifyCalls).toBe(0)
+    })
+
+    it("counts a forged validator claim on the request quota, not the failure bucket", async () => {
+        for (let i = 0; i < 3; i++) expect((await forged("0xBEEF")).status).toBe(401)
+        expect((await forged("0xbeef")).status).toBe(429)
+        expect([...limiter.ipRequests.keys()]).toEqual([`POST|${IP}`])
+
+        // The real validator never draws on that quota.
+        expect((await signedBy("0xbeef")).status).toBe(200)
+    })
 })

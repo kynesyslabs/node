@@ -607,6 +607,11 @@ export class RateLimiter {
         this.validatorKeys = await getStakedSet()
     }
 
+    private isValidatorKey(publicKey: string): boolean {
+        const key = publicKey.trim().toLowerCase()
+        return this.validatorKeys.has(key.startsWith("0x") ? key : `0x${key}`)
+    }
+
     public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
         if (
             clientIP &&
@@ -635,15 +640,13 @@ export class RateLimiter {
 
         // Any node that sends hello_peer lands in the peer table, so being
         // there earns no exemption; a staked validator's does.
-        const key = authCtx.publicKey.toLowerCase()
-        const staked = this.validatorKeys
-        if (staked.has(key.startsWith("0x") ? key : `0x${key}`)) {
+        if (this.isValidatorKey(authCtx.publicKey)) {
             return true
         }
         // A bare development network has no validator rows, and its nodes
         // know each other only from the peer table.
         if (
-            staked.size === 0 &&
+            this.validatorKeys.size === 0 &&
             process.env.DEMOS_REQUIRE_VALIDATORS !== "true"
         ) {
             return !!PeerManager.getInstance().getPeer(authCtx.publicKey)
@@ -727,13 +730,23 @@ export class RateLimiter {
             let verifyResult: VerificationResult | null = null
 
             if (identity && signature) {
+                await this.refreshValidatorKeys()
+                // The failure bucket is per address, and a proxy or NAT puts
+                // many clients behind one: a request claiming a staked key
+                // is kept out of it, so failures from others there cannot
+                // lock a validator out. Its signature is still verified.
+                const claimsValidator = this.isValidatorKey(
+                    identity.slice(identity.indexOf(":") + 1),
+                )
+                const countFailures = !whitelistedIP && !claimsValidator
+
                 // A source past the failure limit is refused before another
                 // verification is spent on it.
                 const failures = this.ipRequests.get(
                     bucketKey(AUTH_FAILURE_BUCKET, clientIP),
                 )
                 if (
-                    !whitelistedIP &&
+                    countFailures &&
                     failures?.blocked &&
                     failures.blockExpiry > Date.now()
                 ) {
@@ -763,10 +776,14 @@ export class RateLimiter {
                         `[Rate Limiter] Invalid signature: ${verifyResult.error}`,
                     )
                     // Verification is the costly part of a request, so a
-                    // failed one is counted rather than answered for free.
+                    // failed one is counted rather than answered for free. A
+                    // forged validator claim draws on the ordinary request
+                    // quota instead, which a real validator never spends.
                     if (!whitelistedIP) {
                         const limited = this.consume(
-                            AUTH_FAILURE_BUCKET,
+                            countFailures
+                                ? AUTH_FAILURE_BUCKET
+                                : this.bucketFor(this.getMethodFromRequest(req)),
                             clientIP,
                             Date.now(),
                         )
@@ -791,7 +808,6 @@ export class RateLimiter {
                     publicKey: verifyResult.publicKey,
                     algorithm: verifyResult.algorithm,
                 })
-                await this.refreshValidatorKeys()
             }
 
             // Check if key is whitelisted
