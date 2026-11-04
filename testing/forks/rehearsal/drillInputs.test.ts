@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { spawnSync } from "child_process"
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "fs"
 import { tmpdir } from "os"
 import { join, resolve } from "path"
@@ -98,6 +99,21 @@ describe("stageDrillInputs (drill_inputs.py)", () => {
     })
     it("fails loudly on a genesis it cannot stage", () => {
         expect(() => stageDrillInputs({ genesis: {}, genesisTs: 1, dir })).toThrow(/no validators/)
+    })
+})
+
+describe("node tmpfs options (drill_inputs.py tmpfs)", () => {
+    const script = resolve(import.meta.dir, "../../devnet/quorum-drills/drill_inputs.py")
+    const run = (...args: string[]) => spawnSync("python3", ["-I", script, "tmpfs", ...args], { encoding: "utf8" })
+
+    it("mounts /app/state owned by the given uid and gid, owner-only", () => {
+        const r = run("--uid", "1000", "--gid", "1001")
+        expect(r.status).toBe(0)
+        expect(r.stdout.trim().split("\n")).toEqual(["/app/state:uid=1000,gid=1001,mode=0700"])
+    })
+    it("needs a numeric uid and gid", () => {
+        expect(run("--gid", "1000").status).not.toBe(0)
+        expect(run("--uid", "demos", "--gid", "1000").status).not.toBe(0)
     })
 })
 

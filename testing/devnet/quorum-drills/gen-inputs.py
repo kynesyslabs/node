@@ -11,7 +11,7 @@ import argparse
 import json
 import os
 
-from drill_inputs import make_empty_snapshot, seed_peerlist, with_genesis_timestamp, write_json
+from drill_inputs import make_empty_snapshot, node_tmpfs_specs, seed_peerlist, with_genesis_timestamp, write_json
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--run-dir", required=True)
@@ -21,6 +21,10 @@ ap.add_argument("--shard-size", type=int, required=True)
 ap.add_argument("--binding", choices=["on", "off"], required=True)
 ap.add_argument("--genesis-ts", type=int, required=True)
 ap.add_argument("--image", required=True)
+# The image's user, read from the image by run.sh: the node tmpfs is mounted
+# owned by it
+ap.add_argument("--uid", type=int, required=True)
+ap.add_argument("--gid", type=int, required=True)
 ap.add_argument("--src", default="")
 ap.add_argument("--node-mem", required=True)
 ap.add_argument("--consensus-time", required=True)
@@ -126,9 +130,10 @@ for i in range(1, n + 1):
         volumes += [f"{a.src}/src:/app/src:ro", f"{a.src}/bunfig.toml:/app/bunfig.toml:ro"]
     services[f"node-{i}"] = {
         "image": a.image,
-        # The identity is copied into a tmpfs state dir so the identity lock
-        # and signing record stay inside the container. A readable stdin
-        # keeps the node from exiting at boot.
+        # The identity is copied into a tmpfs state dir (owned by the image
+        # user, see node_tmpfs_specs) so the identity lock and signing record
+        # stay inside the container. A readable stdin keeps the node from
+        # exiting at boot.
         "entrypoint": [
             "bash",
             "-lc",
@@ -141,7 +146,7 @@ for i in range(1, n + 1):
         # code 0; it is restarted until the mesh forms. A drill stops a
         # validator with `docker compose stop`, which this policy respects.
         "restart": "unless-stopped",
-        "tmpfs": ["/app/state"],
+        "tmpfs": node_tmpfs_specs(a.uid, a.gid),
         "hostname": f"node{i}-host",
         "depends_on": {"postgres": {"condition": "service_healthy"}},
         "environment": {

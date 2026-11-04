@@ -171,6 +171,12 @@ for img in "${IMAGE}" "${NETSHOOT_IMAGE}" postgres:16-alpine; do
     docker image inspect "${img}" >/dev/null 2>&1 || abort_pre "image ${img} is not present locally"
 done
 IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
+# The image's user (uid 1000 in the release image, root in the devnet image),
+# read from the image: the node tmpfs is mounted owned by it
+IMAGE_UID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE}" -u 2>/dev/null)
+IMAGE_GID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE}" -g 2>/dev/null)
+[[ "${IMAGE_UID}" =~ ^[0-9]+$ && "${IMAGE_GID}" =~ ^[0-9]+$ ]] ||
+    abort_pre "could not read the user of ${IMAGE} (id -u '${IMAGE_UID}', id -g '${IMAGE_GID}')"
 CODE="image"
 [ -n "${SRC_TREE}" ] && CODE="src:$(basename "${SRC_TREE}")@$(git -C "${SRC_TREE}" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "${SRC_TREE}" diff --quiet HEAD -- src 2>/dev/null || echo '+dirty')"
 say "scenario=${SCENARIO} N=${N} shardSize=${SHARD} q=${Q} binding=${BINDING} image=${IMAGE} (${IMAGE_ID:7:12}) code=${CODE}"
@@ -186,7 +192,7 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
     done
     python3 "${HERE}/gen-inputs.py" --run-dir "${RUN_DIR}" --repo "${REPO_ROOT}" \
         --nodes "${N}" --shard-size "${SHARD}" --binding "${BINDING}" --genesis-ts "${GENESIS_TS}" \
-        --image "${IMAGE}" --src "${SRC_TREE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}"
+        --image "${IMAGE}" --uid "${IMAGE_UID}" --gid "${IMAGE_GID}" --src "${SRC_TREE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}"
     # Once, after everything is written, so the modes do not depend on the umask.
     # 644 files in a 755 inputs/ under the 0700 ${RUN_DIR}: the node runs as the
     # image's user (uid 1000), not the host user, and these are throwaway devnet
@@ -194,14 +200,30 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
     python3 -I "${HERE}/drill_inputs.py" readable --dir "${RUN_DIR}/inputs"
 } >> "${STEP_LOG}" 2>&1 || { say "ABORT: generating inputs failed (see 02-inputs.log)"; exit 2; }
 
-# The image's own user must be able to read what the nodes mount: a throwaway
-# container, no network, inputs/ read-only, the image's default user.
-readable_fail=$(docker run --rm --network none --memory 64m --entrypoint sh \
-    -v "${RUN_DIR}/inputs:/inputs:ro" "${IMAGE}" -c '
+# The image's own user must be able to read what the nodes mount and write
+# what they write: a throwaway container, no network, inputs/ read-only, the
+# image's default user, and every node tmpfs mounted with exactly the options
+# the compose file gives it (the same strings, from drill_inputs.py). The
+# identity is copied into each tmpfs as the entrypoint does, then its mode is
+# restricted and it is read back; the image directories the node writes
+# outside the tmpfs must be writable.
+mapfile -t NODE_TMPFS < <(python3 -I "${HERE}/drill_inputs.py" tmpfs --uid "${IMAGE_UID}" --gid "${IMAGE_GID}")
+[ "${#NODE_TMPFS[@]}" -gt 0 ] || abort_pre "no node tmpfs options from drill_inputs.py"
+tmpfs_args=(); tmpfs_paths=()
+for spec in "${NODE_TMPFS[@]}"; do tmpfs_args+=(--tmpfs "${spec}"); tmpfs_paths+=("${spec%%:*}"); done
+probe_fail=$(docker run --rm --network none --memory 64m --entrypoint sh \
+    -v "${RUN_DIR}/inputs:/inputs:ro" "${tmpfs_args[@]}" "${IMAGE}" -c '
     for f in node1.identity genesis.json; do
-        cat "/inputs/${f}" > /dev/null 2>&1 || { echo "${f} (image uid $(id -u))"; exit 1; }
-    done' 2>&1) ||
-    abort_pre "inputs not readable by the image user: ${readable_fail:-docker run failed} in ${RUN_DIR}/inputs, host uid $(id -u); mode $(stat -c %a "${RUN_DIR}/inputs/node1.identity")"
+        cat "/inputs/${f}" > /dev/null 2>&1 || { echo "cannot read /inputs/${f}"; exit 1; }
+    done
+    for d in /app /app/data /app/logs; do
+        [ -w "${d}" ] || { echo "image dir ${d} is not writable"; exit 1; }
+    done
+    for d in "$@"; do
+        err=$(cp /inputs/node1.identity "${d}/probe" 2>&1 && chmod 600 "${d}/probe" 2>&1 && cat "${d}/probe" 2>&1 > /dev/null) ||
+            { echo "cannot write and read ${d}/probe: ${err} (dir is $(stat -c "%u:%g mode %a" "${d}" 2>&1))"; exit 1; }
+    done' sh "${tmpfs_paths[@]}" 2>&1) ||
+    abort_pre "image user (uid ${IMAGE_UID} gid ${IMAGE_GID}) of ${IMAGE}: ${probe_fail:-docker run failed}; node tmpfs options: ${NODE_TMPFS[*]}; inputs in ${RUN_DIR}/inputs, host uid $(id -u), mode $(stat -c %a "${RUN_DIR}/inputs/node1.identity")"
 declare -a PUB UP
 for i in $(seq 1 "${N}"); do PUB[i]=$(tr 'A-Z' 'a-z' < "${RUN_DIR}/inputs/pub${i}"); UP[i]=0; done
 say "inputs ready (genesis in ${GENESIS_DELAY}s)"
