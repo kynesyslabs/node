@@ -82,6 +82,20 @@ describe("stageDrillInputs (drill_inputs.py)", () => {
         expect(statSync(staged.emptySnapshot).isDirectory()).toBe(true)
         expect(readdirSync(staged.emptySnapshot)).toEqual([])
     })
+    it("makes the staged files readable by any uid, whatever the umask", () => {
+        const mode = (p: string) => statSync(p).mode & 0o777
+        const before = process.umask(0o077)
+        try {
+            const staged = stageDrillInputs({ genesis: genesis(), genesisTs: 1_800_000_000, dir })
+            expect(mode(staged.genesis)).toBe(0o644)
+            expect(mode(staged.peerlist)).toBe(0o644)
+            expect(mode(staged.emptySnapshot)).toBe(0o755)
+            // The staging dir keeps the 0700 it was created with
+            expect(mode(dir)).toBe(0o700)
+        } finally {
+            process.umask(before)
+        }
+    })
     it("fails loudly on a genesis it cannot stage", () => {
         expect(() => stageDrillInputs({ genesis: {}, genesisTs: 1, dir })).toThrow(/no validators/)
     })
