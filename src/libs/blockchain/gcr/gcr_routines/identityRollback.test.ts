@@ -8,6 +8,7 @@ import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import Hashing from "@/libs/crypto/hashing"
 import GCRIdentityRoutines from "./GCRIdentityRoutines"
+import type { EditPlace, RemovedIdentities } from "./routines/removedIdentities"
 
 const ACCOUNT = "0x" + "11".repeat(32)
 const PROOF = "https://x.com/alice/status/1"
@@ -102,9 +103,36 @@ const xmAdd = (targetAddress: string) =>
         timestamp: 5,
     })
 
+/** The records of one block apply, as handleGCR keeps them in its caches. */
+let records: RemovedIdentities
+beforeEach(() => {
+    records = new Map()
+})
+const placeOf = (e: any, position = 1): EditPlace => ({
+    txhash: e.txhash,
+    position,
+    removed: records,
+})
+
+/** A block apply of the edit at `position` in its transaction. */
+const apply = (e: any, acc: any, position = 1) =>
+    GCRIdentityRoutines.apply(
+        structuredClone(e),
+        acc,
+        undefined,
+        undefined,
+        placeOf(e, position),
+    )
+
 /** What the node does with an edit the block already applied, on undo. */
-const undo = (e: any, acc: any) =>
-    GCRIdentityRoutines.apply({ ...structuredClone(e), isRollback: true }, acc)
+const undo = (e: any, acc: any, position = 1) =>
+    GCRIdentityRoutines.apply(
+        { ...structuredClone(e), isRollback: true },
+        acc,
+        undefined,
+        undefined,
+        placeOf(e, position),
+    )
 
 describe("undoing a web2 link", () => {
     it("removes exactly the link the add put there", async () => {
@@ -112,7 +140,7 @@ describe("undoing a web2 link", () => {
         const before = structuredClone(acc.identities)
         const add = web2Add("alice", "42")
 
-        const applied = await GCRIdentityRoutines.apply(structuredClone(add), acc)
+        const applied = await apply(add, acc)
         expect(applied.success).toBe(true)
         expect(acc.identities.web2.twitter).toHaveLength(2)
 
@@ -134,7 +162,7 @@ describe("undoing a web2 link", () => {
         const before = structuredClone(acc.identities)
         const add = web2Add("alice", "42")
 
-        expect((await GCRIdentityRoutines.apply(structuredClone(add), acc)).success).toBe(true)
+        expect((await apply(add, acc)).success).toBe(true)
         expect((await undo(add, acc)).success).toBe(true)
 
         expect(acc.identities).toEqual(before)
@@ -164,7 +192,7 @@ describe("undoing a web2 unlink", () => {
         const before = structuredClone(acc.identities)
         const remove = edit("web2", "remove", { context: "twitter", username: "carol" })
 
-        const applied = await GCRIdentityRoutines.apply(structuredClone(remove), acc)
+        const applied = await apply(remove, acc)
         expect(applied.success).toBe(true)
         expect(acc.identities.web2.twitter.map((i: any) => i.username)).toEqual(["dave"])
 
@@ -177,7 +205,7 @@ describe("undoing a web2 unlink", () => {
     it("fails without a record of what that unlink removed, changing nothing", async () => {
         const acc = account()
         const remove = edit("web2", "remove", { context: "twitter", username: "carol" })
-        expect((await GCRIdentityRoutines.apply(structuredClone(remove), acc)).success).toBe(true)
+        expect((await apply(remove, acc)).success).toBe(true)
         const after = structuredClone(acc.identities)
 
         const other = { ...structuredClone(remove), txhash: nextHash() }
@@ -194,7 +222,7 @@ describe("undoing a cross-chain link", () => {
         const before = structuredClone(acc.identities)
         const add = xmAdd("0x" + "BB".repeat(20))
 
-        expect((await GCRIdentityRoutines.apply(structuredClone(add), acc)).success).toBe(true)
+        expect((await apply(add, acc)).success).toBe(true)
         expect(acc.identities.xm.evm.mainnet).toHaveLength(2)
 
         const undone = await undo(add, acc)
@@ -214,7 +242,7 @@ describe("undoing a cross-chain link", () => {
             displayAddress: "alice.near",
         })
 
-        expect((await GCRIdentityRoutines.apply(structuredClone(add), acc)).success).toBe(true)
+        expect((await apply(add, acc)).success).toBe(true)
         expect(acc.identities.xm.near.mainnet[0].address).toBe("alice.near")
         expect((await undo(add, acc)).success).toBe(true)
 
@@ -231,7 +259,7 @@ describe("undoing a cross-chain link", () => {
             isEVM: false,
         })
 
-        expect((await GCRIdentityRoutines.apply(structuredClone(add), acc)).success).toBe(true)
+        expect((await apply(add, acc)).success).toBe(true)
         expect((await undo(add, acc)).success).toBe(true)
 
         expect(acc.identities.xm.solana.mainnet).toEqual([])
@@ -256,7 +284,7 @@ describe("undoing a cross-chain unlink", () => {
             targetAddress: "0x" + "AA".repeat(20),
         })
 
-        const applied = await GCRIdentityRoutines.apply(structuredClone(remove), acc)
+        const applied = await apply(remove, acc)
         expect(applied.success).toBe(true)
         expect(acc.identities.xm.evm.mainnet).toHaveLength(1)
 
@@ -274,7 +302,7 @@ describe("undoing a cross-chain unlink", () => {
             isEVM: true,
             targetAddress: "0x" + "aa".repeat(20),
         })
-        expect((await GCRIdentityRoutines.apply(structuredClone(remove), acc)).success).toBe(true)
+        expect((await apply(remove, acc)).success).toBe(true)
         const after = structuredClone(acc.identities)
 
         const undone = await undo({ ...structuredClone(remove), txhash: nextHash() }, acc)
@@ -288,11 +316,11 @@ describe("applying links and unlinks", () => {
     it("is unchanged: add appends the signed data, remove filters it out", async () => {
         const acc = account()
         const add = web2Add("alice", "42")
-        await GCRIdentityRoutines.apply(structuredClone(add), acc)
+        await apply(add, acc)
         expect(acc.identities.web2.twitter.at(-1)).toEqual(add.data.data)
 
         const xm = xmAdd("0x" + "BB".repeat(20))
-        await GCRIdentityRoutines.apply(structuredClone(xm), acc)
+        await apply(xm, acc)
         expect(acc.identities.xm.evm.mainnet.at(-1)).toEqual({
             address: "0x" + "bb".repeat(20),
             signature: "0xsig-new",
@@ -301,10 +329,57 @@ describe("applying links and unlinks", () => {
             signedData: "signed",
         })
 
-        await GCRIdentityRoutines.apply(
+        await apply(
             edit("web2", "remove", { context: "twitter", username: "alice" }),
             acc,
         )
         expect(acc.identities.web2.twitter.map((i: any) => i.username)).toEqual(["carol"])
+    })
+})
+
+describe("undo records", () => {
+    const remove = () =>
+        edit("web2", "remove", { context: "twitter", username: "carol" })
+
+    it("are not written by a simulation, which has no place", async () => {
+        const acc = account()
+        const e = remove()
+
+        const simulated = await GCRIdentityRoutines.apply(structuredClone(e), acc)
+
+        expect(simulated.success).toBe(true)
+        expect(records.size).toBe(0)
+        expect((await undo(e, acc)).success).toBe(false)
+    })
+
+    it("keep each unlink of one link in one transaction apart", async () => {
+        const acc = account()
+        const before = structuredClone(acc.identities)
+        const first = remove()
+        const relink = {
+            ...edit("web2", "add", {
+                context: "twitter",
+                data: {
+                    username: "carol",
+                    userId: "7",
+                    proof: PROOF,
+                    proofHash: Hashing.sha256(PROOF),
+                    timestamp: 9,
+                },
+            }),
+            txhash: first.txhash,
+        }
+        const second = { ...remove(), txhash: first.txhash }
+
+        expect((await apply(first, acc, 1)).success).toBe(true)
+        expect((await apply(relink, acc, 2)).success).toBe(true)
+        const relinked = structuredClone(acc.identities)
+        expect((await apply(second, acc, 3)).success).toBe(true)
+
+        expect((await undo(second, acc, 3)).success).toBe(true)
+        expect(acc.identities).toEqual(relinked)
+        expect((await undo(relink, acc, 2)).success).toBe(true)
+        expect((await undo(first, acc, 1)).success).toBe(true)
+        expect(acc.identities).toEqual(before)
     })
 })

@@ -30,6 +30,7 @@ import {
     applyTLSNIdentityAdd,
     applyTLSNIdentityRemove,
 } from "./routines"
+import type { EditPlace } from "./routines/removedIdentities"
 
 export default class GCRIdentityRoutines {
     static async apply(
@@ -38,6 +39,8 @@ export default class GCRIdentityRoutines {
         simulate?: boolean, // NEEDED by zk transactions
         /** The set being applied, whose ZK claims a proof must not repeat. */
         entities?: GCREntityCaches,
+        /** Set on a block apply only: where an unlink's undo record goes. */
+        place?: EditPlace,
     ): Promise<GCRResult> {
         if (
             editOperation.type !== "identity" ||
@@ -64,11 +67,19 @@ export default class GCRIdentityRoutines {
                 case "web2add":
                     return rollbackWeb2IdentityAdd(identityEdit, accountGCR)
                 case "web2remove":
-                    return rollbackWeb2IdentityRemove(identityEdit, accountGCR)
+                    return rollbackWeb2IdentityRemove(
+                        identityEdit,
+                        accountGCR,
+                        place,
+                    )
                 case "xmadd":
                     return rollbackXmIdentityAdd(identityEdit, accountGCR)
                 case "xmremove":
-                    return rollbackXmIdentityRemove(identityEdit, accountGCR)
+                    return rollbackXmIdentityRemove(
+                        identityEdit,
+                        accountGCR,
+                        place,
+                    )
             }
         }
 
@@ -110,6 +121,7 @@ export default class GCRIdentityRoutines {
                         result = await applyXmIdentityRemove(
                             identityEdit,
                             accountGCR,
+                            place,
                         )
                         break
                     case "web2add":
@@ -122,6 +134,7 @@ export default class GCRIdentityRoutines {
                         result = await applyWeb2IdentityRemove(
                             identityEdit,
                             accountGCR,
+                            place,
                         )
                         break
                     case "pqcadd":

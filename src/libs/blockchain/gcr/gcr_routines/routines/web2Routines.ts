@@ -8,10 +8,10 @@ import log from "@/utilities/logger"
 import { IncentiveManager } from "../IncentiveManager"
 import { safeGCRSave, isFirstConnection } from "./utils"
 import {
+    type EditPlace,
     type RemovedEntry,
-    recordRemovedIdentities,
+    recordedRemoval,
     reinsert,
-    removedIdentities,
     removedIdentityKey,
 } from "./removedIdentities"
 import { sameWeb2UserId } from "@/libs/identity/web2UserId"
@@ -115,6 +115,7 @@ export async function applyWeb2IdentityAdd(
 export async function applyWeb2IdentityRemove(
     editOperation: any,
     accountGCR: GCRMain,
+    place?: EditPlace,
 ): Promise<GCRResult> {
     const { context, username } = editOperation.data as {
         context: string
@@ -135,9 +136,10 @@ export async function applyWeb2IdentityRemove(
         return { success: false, message: "Identity not found" }
     }
 
-    recordRemovedIdentities(
+    // A simulation leaves nothing to undo, and must not grow the records.
+    place?.removed.set(
         removedIdentityKey(
-            editOperation.txhash,
+            place,
             editOperation.account,
             "web2",
             context,
@@ -194,14 +196,15 @@ export async function rollbackWeb2IdentityAdd(
 export async function rollbackWeb2IdentityRemove(
     editOperation: any,
     accountGCR: GCRMain,
+    place?: EditPlace,
 ): Promise<GCRResult> {
     const { context, username } = (editOperation.data ?? {}) as {
         context: string
         username: string
     }
-    const removed = removedIdentities<Web2GCRData["data"]>(
+    const removed = recordedRemoval<Web2GCRData["data"]>(place, at =>
         removedIdentityKey(
-            editOperation.txhash,
+            at,
             editOperation.account,
             "web2",
             context,

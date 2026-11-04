@@ -6,10 +6,10 @@ import { SavedXmIdentity } from "@/model/entities/types/IdentityTypes"
 import { IncentiveManager } from "../IncentiveManager"
 import { safeGCRSave, isFirstConnection } from "./utils"
 import {
+    type EditPlace,
     type RemovedEntry,
-    recordRemovedIdentities,
+    recordedRemoval,
     reinsert,
-    removedIdentities,
     removedIdentityKey,
 } from "./removedIdentities"
 
@@ -112,6 +112,7 @@ export async function applyXmIdentityAdd(
 export async function applyXmIdentityRemove(
     editOperation: any,
     accountGCR: GCRMain,
+    place?: EditPlace,
 ): Promise<GCRResult> {
     const { chain, isEVM, subchain, targetAddress } = editOperation.data
 
@@ -149,9 +150,10 @@ export async function applyXmIdentityRemove(
         return { success: false, message: "Identity not found" }
     }
 
-    recordRemovedIdentities(
+    // A simulation leaves nothing to undo, and must not grow the records.
+    place?.removed.set(
         removedIdentityKey(
-            editOperation.txhash,
+            place,
             editOperation.account,
             "xm",
             chain,
@@ -231,6 +233,7 @@ export async function rollbackXmIdentityAdd(
 export async function rollbackXmIdentityRemove(
     editOperation: any,
     accountGCR: GCRMain,
+    place?: EditPlace,
 ): Promise<GCRResult> {
     const { chain, isEVM, subchain, targetAddress } = editOperation.data ?? {}
     if (!chain || !subchain || !targetAddress) {
@@ -240,9 +243,9 @@ export async function rollbackXmIdentityRemove(
         ? targetAddress.toLowerCase()
         : targetAddress
 
-    const removed = removedIdentities<SavedXmIdentity>(
+    const removed = recordedRemoval<SavedXmIdentity>(place, at =>
         removedIdentityKey(
-            editOperation.txhash,
+            at,
             editOperation.account,
             "xm",
             chain,

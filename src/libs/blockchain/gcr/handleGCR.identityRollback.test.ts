@@ -39,6 +39,7 @@ const PROOF = "https://x.com/alice/status/1"
 const EVM_ADDR = "0x" + "aa".repeat(20)
 
 let caches: GCREntityCaches
+let applies: GCREntityCaches[]
 let savedForks: ForkConfigByName
 let savedTip: number
 const original = {
@@ -158,7 +159,13 @@ beforeEach(() => {
         atomicWorks: new Map(),
         resourceSlots: new Map(),
     } as GCREntityCaches
-    ;(HandleGCR as any).prepareEntities = async () => caches
+    applies = []
+    // Each apply gets its own caches over the same rows, as from the database.
+    ;(HandleGCR as any).prepareEntities = async () => {
+        const set = { ...caches }
+        applies.push(set)
+        return set
+    }
     ;(HandleGCR as any).saveGCREditChanges = async () => {}
     ;(HandleGCR as any).bulkUpdateAssignedTxs = async () => {}
 })
@@ -169,12 +176,10 @@ afterEach(() => {
     Object.assign(HandleGCR, original)
 })
 
-describe("rolling back a block's identity transactions", () => {
+describe("rolling back a block's identity transactions in a later apply", () => {
     for (const [name, make] of [
         ["web2 link", web2Add],
-        ["web2 unlink", web2Remove],
         ["cross-chain link", xmAdd],
-        ["cross-chain unlink", xmRemove],
     ] as const) {
         it(`restores the account after a ${name}`, async () => {
             const before = structuredClone(account())
@@ -192,17 +197,41 @@ describe("rolling back a block's identity transactions", () => {
         })
     }
 
-    it("undoes a link and a later unlink of it in reverse order", async () => {
-        const before = structuredClone(account())
-        const add = web2Add()
-        const remove = identityTx("web2", "remove", { context: "twitter", username: "alice" })
+    // What an unlink removed is recorded only for the apply that ran it.
+    for (const [name, make] of [
+        ["web2 unlink", web2Remove],
+        ["cross-chain unlink", xmRemove],
+    ] as const) {
+        it(`fails after a ${name}, changing nothing`, async () => {
+            const tx = make()
+            expect((await HandleGCR.applyTransactions([tx], false)).failedTxs).toEqual([])
+            const after = structuredClone(account())
 
-        await HandleGCR.applyTransactions([add], false)
-        await HandleGCR.applyTransactions([remove], false)
-        const undone = await HandleGCR.applyTransactions([remove, add], true)
+            const undone = await HandleGCR.applyTransactions([tx], true)
 
-        expect(undone.failedTxs).toEqual([])
-        expect(account()).toEqual(before)
+            expect(undone.failedTxs).toEqual([tx.hash])
+            expect(account()).toEqual(after)
+        })
+    }
+})
+
+describe("undo records of an unlink", () => {
+    it("are kept by a block apply, in that apply's caches only", async () => {
+        await HandleGCR.applyTransactions([web2Remove()], false)
+
+        expect(applies).toHaveLength(1)
+        expect(applies[0].removedIdentities?.size).toBe(1)
+        expect(caches.removedIdentities).toBeUndefined()
+    })
+
+    it("are not written by a simulation, whatever txhash its edits carry", async () => {
+        for (const make of [web2Remove, xmRemove]) {
+            const set = { ...caches }
+            const result = await HandleGCR.applyTransaction(set, make(), false, true)
+
+            expect(result.success).toBe(true)
+            expect(set.removedIdentities?.size ?? 0).toBe(0)
+        }
     })
 })
 
