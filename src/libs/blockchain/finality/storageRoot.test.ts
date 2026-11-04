@@ -14,6 +14,7 @@ import {
     storageRecordLeafHex,
     type StorageProgramRow,
 } from "./storageRecord"
+import type { StorageHistoryRow } from "./storageHistory"
 import {
     StorageProgramsRoot,
     type StorageRootReader,
@@ -39,6 +40,8 @@ class FakeTable implements StorageRootReader {
     rowReads = 0
     fills: StoredLeaf[][] = []
     failFill = false
+    /** The undo log, as storageHistory.ts writes it. */
+    history: StorageHistoryRow[] = []
     /** Runs between the leaf read and the row read, inside the snapshot. */
     duringRead: (() => void) | null = null
 
@@ -75,6 +78,12 @@ class FakeTable implements StorageRootReader {
                 this.rowReads += addresses.length
                 return addresses.flatMap(a => view.get(a) ?? [])
             },
+            history: async (from: number, to: number) =>
+                structuredClone(
+                    this.history
+                        .filter(h => h.block >= from && h.block <= to)
+                        .sort((a, b) => b.block - a.block),
+                ),
         })
     }
 
@@ -326,5 +335,66 @@ describe("storage proofs", () => {
         table.write(program(5))
         storedRow(program(5).storageAddress).sizeBytes = 9999
         await expect(root.prove([program(5).storageAddress])).rejects.toThrow(/does not match its row/)
+    })
+})
+
+describe("storage proofs at a past block", () => {
+    /** Applies one block's writes as the write path does: the undo row first, then the row. */
+    function applyBlock(block: number, writes: [string, StorageProgramRow | null][]) {
+        for (const [address, next] of writes) {
+            if (!table.history.some(h => h.block === block && h.storageAddress === address)) {
+                const before = table.rows.get(address)
+                table.history.push({ block, storageAddress: address, record: before ? storageProgramRecord(before) : null })
+            }
+            if (next === null) table.delete(address)
+            else table.write(next)
+        }
+    }
+    const state = () => [...table.rows.values()]
+
+    it("rebuilds the root of the state before each undone block, and serves that state's records", async () => {
+        const a = program(1)
+        const b = program(2)
+        const after: StorageProgramRow[][] = [state()]
+        applyBlock(1, [[a.storageAddress, a], [b.storageAddress, b]])
+        after.push(state())
+        applyBlock(2, [[a.storageAddress, program(1, { data: { v: 2 } })]])
+        after.push(state())
+        applyBlock(3, [[b.storageAddress, null], [a.storageAddress, program(1, { isDeleted: true })]])
+        after.push(state())
+
+        for (let block = 1; block <= 3; block++) {
+            const { root: provedRoot, proofs } = await root.prove([a.storageAddress, b.storageAddress], { fromBlock: block, toBlock: 3 })
+            expect(provedRoot).toBe(expectedRoot(after[block - 1]))
+            for (const proof of proofs) {
+                const before = after[block - 1].find(r => r.storageAddress === proof.storageAddress)
+                expect(proof.record).toEqual(before ? storageProgramRecord(before) : null)
+                const key = storageProgramKey(proof.storageAddress)
+                const holds = proof.record
+                    ? verifyMembership(key, storageRecordLeafHex(proof.record), proof, provedRoot)
+                    : verifyNonMembership(key, proof, provedRoot)
+                expect(holds).toBe(true)
+            }
+        }
+        expect((await root.prove([a.storageAddress])).root).toBe(expectedRoot(after[3]))
+    })
+
+    it("keeps the record from before the oldest undone block when several blocks touched a program", async () => {
+        const a = program(4)
+        applyBlock(5, [[a.storageAddress, a]])
+        applyBlock(6, [[a.storageAddress, program(4, { data: "x" })]])
+        applyBlock(7, [[a.storageAddress, program(4, { data: "y" })]])
+        const { proofs } = await root.prove([a.storageAddress], { fromBlock: 6, toBlock: 7 })
+        expect(proofs[0].record).toEqual(storageProgramRecord(a))
+        expect((await root.prove([a.storageAddress], { fromBlock: 5, toBlock: 7 })).proofs[0].record).toBeNull()
+    })
+
+    it("leaves programs no undone block touched at their live rows", async () => {
+        const untouched = program(8)
+        table.write(untouched)
+        applyBlock(9, [[program(9).storageAddress, program(9)]])
+        const { proofs } = await root.prove([untouched.storageAddress], { fromBlock: 9, toBlock: 9 })
+        expect(proofs[0].record).toEqual(storageProgramRecord(untouched))
+        expect(table.rowReads).toBe(1)
     })
 })

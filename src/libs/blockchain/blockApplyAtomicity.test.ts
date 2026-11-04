@@ -225,6 +225,39 @@ describe("a block and its state commit together", () => {
         expect(events).toEqual(["side effect"])
     })
 
+    it("logs a storage program's record from before the block with the block, or not at all", async () => {
+        const program = {
+            storageAddress: "stor-new",
+            owner: "0xaa",
+            programName: "p",
+            encoding: "json",
+            data: { a: 1 },
+            sizeBytes: 7,
+            acl: { mode: "owner" },
+            metadata: null,
+            createdByTx: "0xtx",
+            lastModifiedByTx: "0xtx",
+            isDeleted: false,
+        }
+        const withProgram = () => {
+            const pending = pendingState([])
+            pending.entities.storagePrograms.set(program.storageAddress, { ...program } as any)
+            return pending
+        }
+
+        failOn = "StorageProgramHistory"
+        await expect(insertBlock(block(), [tx()], undefined, withProgram())).rejects.toThrow("injected failure")
+        expect(durable.size).toBe(0)
+
+        failOn = null
+        await insertBlock(block(), [tx()], undefined, withProgram())
+        // The fake table holds no row yet, so the program is new in this block.
+        expect(durable.get("StorageProgramHistory")).toEqual([
+            { block: HEIGHT, storageAddress: "stor-new", record: null },
+        ])
+        expect(durable.get("GCRStorageProgram")?.length).toBe(1)
+    })
+
     it("a deferred apply writes nothing until the block commits it", async () => {
         const result = await HandleGCR.applyTransactions([], false, undefined, { defer: true })
 

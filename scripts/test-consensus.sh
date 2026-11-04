@@ -12,8 +12,8 @@ SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
 # clients use to tell whether a transaction executed and which head is
 # final, the finality proof calls and their offline verifier, the hashing
 # primitives finality commitments are built on, and the storage state root
-# with the writes and sync checks that feed it. A listed file that is gone
-# fails its run instead of dropping out silently.
+# with the writes, sync checks and undo log that feed it. A listed file
+# that is gone fails its run instead of dropping out silently.
 SUITE_FILES=(
     scripts/launch-go-no-go.committee.test.ts
     scripts/launch-go-no-go.test.ts
@@ -22,6 +22,7 @@ SUITE_FILES=(
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/finality/commitments.test.ts
+    src/libs/blockchain/finality/storageHistory.test.ts
     src/libs/blockchain/finality/storageRecord.test.ts
     src/libs/blockchain/finality/storageRoot.test.ts
     src/libs/blockchain/finality/validatorSet.test.ts

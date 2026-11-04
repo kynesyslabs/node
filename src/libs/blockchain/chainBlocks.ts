@@ -37,6 +37,7 @@ import {
     pruneValidatorSetSnapshots,
     recordValidatorSetSnapshot,
 } from "./finality/validatorSet"
+import { pruneStorageHistory, resetStorageHistory } from "./finality/storageHistory"
 
 export function isGenesis(block: Block): boolean {
     if (block.number === 0) {
@@ -361,10 +362,14 @@ export async function insertBlock(
     try {
         const commit = () => dataSource.transaction(
             async transactionalEntityManager => {
+                // Before the block's state, which logs into this block's
+                // rows of the storage undo log.
+                await resetStorageHistory(transactionalEntityManager, block.number)
+
                 // The block's state goes first, before the fork hooks that
                 // migrate it and before the block that authorises it.
                 if (pendingGCR) {
-                    await pendingGCR.write(transactionalEntityManager)
+                    await pendingGCR.write(transactionalEntityManager, block.number)
                 }
 
                 const saveBlockStart = Date.now()
@@ -602,6 +607,7 @@ export async function insertBlock(
 export async function pruneBlocksToGenesisBlock(): Promise<void> {
     await getBlocksRepo().delete({ number: MoreThan(0) })
     await pruneValidatorSetSnapshots(0)
+    await pruneStorageHistory(0)
     log.info("Pruned all blocks except the genesis block.")
 }
 

@@ -19,10 +19,12 @@ import { SparseMerkleTree, type SparseTerminal } from "@/libs/crypto/merkle/spar
 import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import log from "src/utilities/logger"
+import { readStorageHistory, type StorageHistoryRow } from "./storageHistory"
 import {
     storageProgramKey,
     storageProgramLeafHex,
     storageProgramRecord,
+    storageRecordLeafHex,
     type StorageProgramRecord,
     type StorageProgramRow,
 } from "./storageRecord"
@@ -34,10 +36,12 @@ export interface StoredLeaf {
     version: string
 }
 
-/** One consistent view of the table. */
+/** One consistent view of the table and its undo log. */
 export interface StorageRootSnapshot {
     leaves(): Promise<StoredLeaf[]>
     rows(addresses: string[]): Promise<StorageProgramRow[]>
+    /** Undo-log rows of blocks `from`..`to`, newest block first. */
+    history(from: number, to: number): Promise<StorageHistoryRow[]>
 }
 
 export interface StorageRootReader {
@@ -142,24 +146,49 @@ export interface StorageProofSet {
     proofs: StorageProgramProof[]
 }
 
+/** Blocks whose storage writes a proof undoes: `fromBlock`..`toBlock`. */
+export interface StorageUndo {
+    fromBlock: number
+    toBlock: number
+}
+
 /**
  * Proofs for `addresses` from one snapshot of the table, against the root of
- * that same snapshot. A client rebuilds each leaf from the record served, so
+ * that same snapshot, or with `undo`, of the table as it stood before
+ * `undo.fromBlock`. A client rebuilds each leaf from the record served, so
  * a stored leaf that no longer matches its row is refused here instead of
  * being served as a proof that cannot verify.
  */
 async function proveIn(
     snapshot: StorageRootSnapshot,
     addresses: string[],
+    undo?: StorageUndo,
 ): Promise<StorageProofSet> {
     const { leaves } = await currentLeaves(snapshot)
+    // Newest block first, so the record from before the oldest undone
+    // block is the one left for each address.
+    const undone = new Map<string, StorageProgramRecord | null>()
+    if (undo) {
+        for (const row of await snapshot.history(undo.fromBlock, undo.toBlock)) {
+            undone.set(row.storageAddress, row.record)
+        }
+    }
+    for (const [storageAddress, record] of undone) {
+        if (record === null) leaves.delete(storageAddress)
+        else leaves.set(storageAddress, storageRecordLeafHex(record))
+    }
+
     const tree = treeOf(leaves)
     const rows = new Map<string, StorageProgramRow>()
-    for (const row of await snapshot.rows(addresses)) rows.set(row.storageAddress, row)
+    const live = addresses.filter(address => !undone.has(address))
+    for (const row of await snapshot.rows(live)) rows.set(row.storageAddress, row)
 
     const proofs = addresses.map(storageAddress => {
-        const row = rows.get(storageAddress) ?? null
         const { siblings, terminal } = tree.prove(storageProgramKey(storageAddress))
+        if (undone.has(storageAddress)) {
+            return { storageAddress, record: undone.get(storageAddress), siblings, terminal }
+        }
+        const row = rows.get(storageAddress) ?? null
         if (row !== null && storageProgramLeafHex(row) !== leaves.get(storageAddress)) {
             throw new Error(
                 `storage proof: stored leaf of ${storageAddress} does not match its row`,
@@ -234,8 +263,8 @@ export class StorageProgramsRoot {
     }
 
     /** Proofs for `addresses` and the root they verify against, from one snapshot. */
-    async prove(addresses: string[]): Promise<StorageProofSet> {
-        return await this.reader.read(snapshot => proveIn(snapshot, addresses))
+    async prove(addresses: string[], undo?: StorageUndo): Promise<StorageProofSet> {
+        return await this.reader.read(snapshot => proveIn(snapshot, addresses, undo))
     }
 }
 
@@ -252,10 +281,13 @@ const databaseReader: StorageRootReader = {
                         )
                     return rows
                 },
-                rows: addresses =>
-                    em.getRepository(GCRStorageProgram).find({
-                        where: { storageAddress: In(addresses) },
-                    }),
+                rows: async addresses =>
+                    addresses.length === 0
+                        ? []
+                        : await em.getRepository(GCRStorageProgram).find({
+                              where: { storageAddress: In(addresses) },
+                          }),
+                history: (from, to) => readStorageHistory(em, from, to),
             }),
         )
     },
@@ -288,12 +320,18 @@ export function storageProgramsRoot(): Promise<string> {
 }
 
 /**
- * Proofs for `addresses` against the root of the committed table. The caller
- * holds the sync lock, so no block lands between the read and the anchor it
- * is checked against.
+ * Proofs for `addresses` against the root of the committed table, or with
+ * `undo`, against the root of the table before `undo.fromBlock`, rebuilt by
+ * undoing the logged writes of blocks `fromBlock`..`toBlock` (the head).
+ * Nothing is cached: the rebuild reads every leaf, about 60 ms for 10^4
+ * programs. The caller holds the sync lock, so no block lands between the
+ * read and the anchor it is checked against.
  */
-export function proveStoragePrograms(addresses: string[]): Promise<StorageProofSet> {
-    return storageRoot.prove(addresses)
+export function proveStoragePrograms(
+    addresses: string[],
+    undo?: StorageUndo,
+): Promise<StorageProofSet> {
+    return storageRoot.prove(addresses, undo)
 }
 
 /** Call when a write to `gcr_storageprogram` is issued and once it commits. */

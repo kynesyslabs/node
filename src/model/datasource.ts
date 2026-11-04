@@ -45,6 +45,7 @@ import { NetworkUpgradeVote } from "./entities/NetworkUpgradeVote.js"
 import { ForkState } from "./entities/ForkState.js"
 import { Validators } from "./entities/Validators.js"
 import { ValidatorSetSnapshots } from "./entities/ValidatorSetSnapshots.js"
+import { StorageProgramHistory } from "./entities/StorageProgramHistory.js"
 // L2PS Messaging
 import { L2PSMessage } from "@/features/l2ps-messaging/entities/L2PSMessage"
 
@@ -83,6 +84,7 @@ export const dataSource = new DataSource({
         GCRResourceSlot,
         Validators,
         ValidatorSetSnapshots,
+        StorageProgramHistory,
         // ZK Identity entities
         IdentityCommitment,
         UsedNullifier,
