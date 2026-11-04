@@ -12,6 +12,10 @@ import { getBlockByHash } from "./chainBlocks"
 import { txMap as consensusTxMap } from "../consensus/v2/PoRBFT"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
+import {
+    NUL_NOT_STORABLE,
+    isTextStorable,
+} from "./validation/postgresStorable"
 
 export function getL2PSHashUpdatePayload(
     tx: Transaction,
@@ -34,6 +38,33 @@ export function getL2PSHashUpdatePayload(
     return payload as L2PSHashUpdatePayload
 }
 
+const INT4_MIN = -(2 ** 31)
+const INT4_MAX = 2 ** 31 - 1
+
+const isInt4 = (value: unknown) =>
+    (typeof value === "number" || (typeof value === "string" && /^-?\d+$/.test(value))) &&
+    Number.isSafeInteger(Number(value)) &&
+    Number(value) >= INT4_MIN &&
+    Number(value) <= INT4_MAX
+
+/**
+ * Why the `l2ps_hashes` row of `payload` cannot be written, or null. The row
+ * is written inside the block's database transaction for every listed
+ * l2ps_hash_update, failed or not, so a value Postgres refuses there would
+ * fail the block's commit on every node.
+ */
+export function l2psHashRowRefusal(payload: L2PSHashUpdatePayload): string | null {
+    for (const column of ["l2ps_uid", "consolidated_hash"] as const) {
+        const value: unknown = payload[column]
+        if (typeof value !== "string") return `${column} is not a string`
+        if (!isTextStorable(value)) return `${column} ${NUL_NOT_STORABLE}`
+    }
+    if (!isInt4(payload.transaction_count)) {
+        return "transaction_count is not a 32-bit integer"
+    }
+    return null
+}
+
 export async function persistConfirmedTransactionProjection(
     tx: Transaction,
     blockNumber: number,
@@ -41,6 +72,13 @@ export async function persistConfirmedTransactionProjection(
 ): Promise<void> {
     const l2psHashPayload = getL2PSHashUpdatePayload(tx)
     if (!l2psHashPayload) {
+        return
+    }
+    const refusal = l2psHashRowRefusal(l2psHashPayload)
+    if (refusal !== null) {
+        log.warning(
+            `[ChainDB] l2ps_hash_update ${tx.hash} in block ${blockNumber} not materialized: ${refusal}`,
+        )
         return
     }
 

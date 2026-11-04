@@ -9,7 +9,10 @@ import { getMetadataArgsStorage } from "typeorm"
 import { Transactions } from "@/model/entities/Transactions"
 import {
     admissionRefusal,
+    blockRowRefusal,
+    isBigintStorable,
     isJsonbStorable,
+    isKeyStorable,
     isTextStorable,
     transactionRowColumns,
     transactionRowRefusal,
@@ -61,6 +64,59 @@ describe("the transaction row", () => {
         expect(transactionRowRefusal(tx({ to: "0xab", data: ["native", { memo: "\u0000", ["\u0000"]: 1 }] }))).toBeNull()
         expect(transactionRowRefusal(tx({ to: "0xab\ud800" }))).toBeNull()
         expect(transactionRowRefusal({ hash: "h\u0000", content: {} })).toContain("hash")
+    })
+})
+
+describe("the l2ps_hashes row of an l2ps_hash_update", () => {
+    // Written on block insert for every listed update, failed or not, so a
+    // block carrying U+0000 there never committed.
+    const update = (payload: Record<string, unknown>) => ({
+        hash: "h",
+        status: "failed",
+        content: { type: "l2ps_hash_update", data: ["l2ps_hash_update", { l2ps_uid: "u", consolidated_hash: "c", transaction_count: 1, ...payload }] },
+    })
+
+    it("refuses U+0000 in the uid or the hash", () => {
+        expect(transactionRowRefusal(update({ l2ps_uid: "u\u0000" }))).toContain("l2ps_uid")
+        expect(transactionRowRefusal(update({ consolidated_hash: "\u0000" }))).toContain("consolidated_hash")
+    })
+
+    it("accepts what the projection would store, or does not project", () => {
+        expect(transactionRowRefusal(update({}))).toBeNull()
+        expect(transactionRowRefusal(update({ l2ps_uid: "u\ud800" }))).toBeNull()
+        // Without every field the projection skips it, so nothing is written.
+        expect(transactionRowRefusal({ hash: "h", content: { type: "l2ps_hash_update", data: ["l2ps_hash_update", { l2ps_uid: "\u0000" }] } })).toBeNull()
+        expect(transactionRowRefusal({ hash: "h", content: { type: "native", data: ["native", { l2ps_uid: "\u0000", consolidated_hash: "c", transaction_count: 1 }] } })).toBeNull()
+    })
+})
+
+describe("isKeyStorable", () => {
+    it("refuses U+0000 and unpaired surrogates, which Postgres would merge into one key", () => {
+        expect(isKeyStorable("a\u0000")).toBe(false)
+        expect(isKeyStorable("a\ud800")).toBe(false)
+        expect(isKeyStorable("a😀")).toBe(true)
+        expect(isKeyStorable(5)).toBe(true)
+    })
+})
+
+describe("isBigintStorable", () => {
+    it("takes whole numbers in the int8 range, as the driver sends them", () => {
+        for (const ok of [0, -5, 1_760_000_000_000, "9223372036854775807", -(2n ** 63n)]) {
+            expect(isBigintStorable(ok)).toBe(true)
+        }
+        for (const bad of [1.5, 1e21, Number.NaN, "9223372036854775808", "1.0", "", null, "1e3"]) {
+            expect(isBigintStorable(bad)).toBe(false)
+        }
+    })
+})
+
+describe("blockRowRefusal", () => {
+    it("refuses U+0000 and unpaired surrogates in the columns a peer serves unhashed", () => {
+        const block = { proposer: "ab".repeat(32), next_proposer: "cd".repeat(32), status: "confirmed" }
+        expect(blockRowRefusal(block)).toBeNull()
+        expect(blockRowRefusal({ ...block, proposer: "a\u0000" })).toContain("proposer")
+        expect(blockRowRefusal({ ...block, next_proposer: "\udfff" })).toContain("next_proposer")
+        expect(blockRowRefusal({ ...block, status: "\u0000" })).toContain("status")
     })
 })
 

@@ -30,6 +30,30 @@ const isJsonbString = (value: string) =>
     !value.includes("\u0000") && value.isWellFormed()
 
 /**
+ * Whether a string can be a key of a stored row, or be looked up as one. On
+ * top of U+0000, an unpaired surrogate is refused: the driver turns it into
+ * U+FFFD, so "a\ud800" and "a\udfff" are two keys in memory but one row in
+ * Postgres, and their writes collide or overwrite each other.
+ */
+export function isKeyStorable(value: unknown): boolean {
+    return typeof value !== "string" || isJsonbString(value)
+}
+
+const INT8_MIN = -(2n ** 63n)
+const INT8_MAX = 2n ** 63n - 1n
+
+/** Whether `value`, as the driver sends it, is accepted by a `bigint` column. */
+export function isBigintStorable(value: unknown): boolean {
+    const text =
+        typeof value === "bigint" || typeof value === "number" ? value.toString()
+        : typeof value === "string" ? value
+        : null
+    if (text === null || !/^-?\d+$/.test(text)) return false
+    const n = BigInt(text)
+    return n >= INT8_MIN && n <= INT8_MAX
+}
+
+/**
  * Whether a JSON-shaped value can be written to a `jsonb` column: no string
  * or key holds U+0000 or an unpaired surrogate. Walked without recursion: the
  * value may come from a transaction nested deeper than the call stack.
@@ -78,6 +102,7 @@ type TxLike = {
         amount?: unknown
         nonce?: unknown
         timestamp?: unknown
+        data?: unknown
         transaction_fee?: {
             network_fee?: unknown
             rpc_fee?: unknown
@@ -117,15 +142,41 @@ export function transactionRowColumns(tx: TxLike): Record<string, unknown> {
 }
 
 /**
- * Block and sync verification: only U+0000 in a column of the transaction's
- * own row. Such a row is written for every transaction a block lists, failed
- * or not, so a block carrying one never committed. A NUL elsewhere in the
- * body sits in the `json` column and did commit; the edits it implies are
- * judged when they are applied (see storableRows).
+ * The text columns of the `l2ps_hashes` row an `l2ps_hash_update` writes when
+ * its block is inserted, failed or not, or null for any other transaction.
+ * Recognised exactly as the projection recognises it.
+ */
+export function l2psHashRowColumns(tx: TxLike): Record<string, unknown> | null {
+    const content = tx?.content
+    if (content?.type !== "l2ps_hash_update" || !Array.isArray(content.data)) return null
+    const payload = content.data[1]
+    if (
+        typeof payload !== "object" ||
+        payload === null ||
+        !("l2ps_uid" in payload) ||
+        !("consolidated_hash" in payload) ||
+        !("transaction_count" in payload)
+    ) {
+        return null
+    }
+    const row = payload as Record<string, unknown>
+    return { l2ps_uid: row.l2ps_uid, consolidated_hash: row.consolidated_hash }
+}
+
+/**
+ * Block and sync verification: only U+0000 in a column of a row the block
+ * insert writes for every transaction it lists, failed or not: the
+ * transaction's own row and, for an `l2ps_hash_update`, its `l2ps_hashes`
+ * row. A block carrying one never committed. A NUL elsewhere in the body sits
+ * in the `json` column and did commit; the edits it implies are judged when
+ * they are applied (see storableRows).
  */
 export function transactionRowRefusal(tx: TxLike): string | null {
     for (const [column, value] of Object.entries(transactionRowColumns(tx))) {
         if (!isTextStorable(value)) return `Transaction ${column} ${NUL_NOT_STORABLE}`
+    }
+    for (const [column, value] of Object.entries(l2psHashRowColumns(tx) ?? {})) {
+        if (!isTextStorable(value)) return `Transaction l2ps_hash_update ${column} ${NUL_NOT_STORABLE}`
     }
     return null
 }
@@ -164,4 +215,22 @@ export function withStorableText<T>(value: T): T {
         }
     }
     return root.value as T
+}
+
+/**
+ * Block columns a peer serves outside the hashed content. No check binds
+ * them, and the block insert writes them as served, so one Postgres refuses
+ * would fail the insert on every node that accepted the block. An unpaired
+ * surrogate is refused too: no honest node writes one, and the driver would
+ * store a different string than the one served.
+ */
+export function blockRowRefusal(block: {
+    proposer?: unknown
+    next_proposer?: unknown
+    status?: unknown
+}): string | null {
+    for (const column of ["proposer", "next_proposer", "status"] as const) {
+        if (!isKeyStorable(block?.[column])) return `Block ${column} ${NOT_STORABLE}`
+    }
+    return null
 }

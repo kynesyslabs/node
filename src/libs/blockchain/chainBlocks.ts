@@ -33,6 +33,10 @@ import { gcrWriteMutex } from "./gcr/gcrWriteMutex"
 import type { PendingGCRWrite } from "./gcr/handleGCR"
 import type { FindManyOptions } from "typeorm"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import {
+    blockRowRefusal,
+    withStorableText,
+} from "./validation/postgresStorable"
 
 export function isGenesis(block: Block): boolean {
     if (block.number === 0) {
@@ -217,6 +221,13 @@ export async function insertBlock(
     position?: number,
     pendingGCR?: PendingGCRWrite,
 ): Promise<Blocks> {
+    // verifyBlock refuses these for a served block; checked again here so no
+    // path can carry them into the block's database transaction.
+    const unstorable = blockRowRefusal(block)
+    if (unstorable !== null) {
+        throw new BlockInvalidError(`${unstorable} (block ${block.number})`)
+    }
+
     const blocksRepo = getBlocksRepo()
     const orderedTransactionsHashes = block.content.ordered_transactions
 
@@ -230,7 +241,10 @@ export async function insertBlock(
     newBlock.content = block.content
     newBlock.status = "confirmed"
     newBlock.content.ordered_transactions = orderedTransactionsHashes
-    newBlock.attrs = block.attrs
+    // attrs are not hashed and a peer serves them as it likes; jsonb refuses
+    // U+0000 and unpaired surrogates, so they are cleaned as transaction
+    // attrs are.
+    newBlock.attrs = withStorableText(block.attrs)
 
     let existingBlock = null
 

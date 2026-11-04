@@ -17,6 +17,7 @@ import Hashing from "src/libs/crypto/hashing"
 import { serializeBlockContent } from "@/forks"
 import TxValidatorPool from "./txValidatorPool"
 import { verifyBlockTxSignatures } from "./verifyBlockTxSignatures"
+import { blockRowRefusal } from "./postgresStorable"
 import { getSharedState } from "@/utilities/sharedState"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import {
@@ -220,6 +221,11 @@ export async function verifyBlock(
     // Genesis has no shard or signatures
     if (block.number === 0) {
         return { valid: true }
+    }
+
+    const unstorable = blockRowRefusal(block)
+    if (unstorable !== null) {
+        return { valid: false, reason: unstorable }
     }
 
     // Recompute the block hash and compare with incoming.

@@ -236,6 +236,21 @@ describe("verifyBlock", () => {
         expect(result.reason).toContain("hash mismatch")
     })
 
+    // Outside the hash, so only this check stands between them and the
+    // block insert, which Postgres would fail on every node that took it.
+    for (const [column, value] of [
+        ["proposer", A + "\u0000"],
+        ["next_proposer", "\u0000"],
+        ["proposer", A + "\ud800"],
+        ["status", "confirmed\u0000"],
+    ] as const) {
+        it(`rejects a served block whose ${column} Postgres cannot store`, async () => {
+            const result = await verifyBlock(makeBlock({ proposer: A, next_proposer: B, [column]: value }))
+            expect(result.valid).toBe(false)
+            expect(result.reason).toContain(`Block ${column}`)
+        })
+    }
+
     it("accepts genesis without signatures", async () => {
         const result = await verifyBlock(makeBlock({ number: 0 }))
         expect(result.valid).toBe(true)
