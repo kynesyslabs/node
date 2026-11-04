@@ -34,6 +34,7 @@ SUITE_FILES=(
     testing/forks/loadForkConfig.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
     testing/genesis/buildGenesisBlock.test.ts
+    testing/genesis/genesisHashTool.test.ts
     testing/genesis/genesisMismatch.test.ts
     testing/genesis/genesisPin.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
