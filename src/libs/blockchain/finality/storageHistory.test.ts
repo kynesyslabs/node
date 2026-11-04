@@ -237,7 +237,7 @@ describe("storage undo log", () => {
         const blocks = history.map(h => h.block)
         expect(Math.min(...blocks)).toBe(oldestProvableBlock(tip))
         expect(Math.max(...blocks)).toBe(tip)
-        expect(blocks.length).toBe(STORAGE_HISTORY_BLOCKS)
+        expect(blocks).toHaveLength(STORAGE_HISTORY_BLOCKS)
         expect(oldestProvableBlock(tip)).toBe(tip - 63)
         expect(oldestProvableBlock(10)).toBe(1)
     })

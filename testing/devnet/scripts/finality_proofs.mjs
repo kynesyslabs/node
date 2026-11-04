@@ -55,9 +55,11 @@ const HEX32 = /^[0-9a-f]{64}$/
 let failures = 0
 const oneLine = text => String(text).replace(/[\r\n]+/g, " ")
 const sleep = ms => new Promise(r => setTimeout(r, ms))
+// Labels and details carry node answers; one record per line keeps them from forging log lines.
+const say = text => console.log(oneLine(text))
 function check(ok, label, detail = "") {
-    const suffix = detail ? ": " + oneLine(detail) : ""
-    console.log(`[proofs] ${ok ? "PASS" : "FAIL"} ${label}${suffix}`)
+    const suffix = detail ? ": " + detail : ""
+    say(`[proofs] ${ok ? "PASS" : "FAIL"} ${label}${suffix}`)
     if (!ok) failures++
 }
 
@@ -401,7 +403,7 @@ if (Number.isInteger(HISTORY_BLOCKS) && storageHead > HISTORY_BLOCKS + 1) {
     const stale = await storageProofAt(storageHead - HISTORY_BLOCKS - 1)
     check(stale.result === 410 && stale.extra?.reason === "history_unavailable", "a proof past the history window is refused with 410", answerProblem(stale))
 } else {
-    console.log(`[proofs] SKIP 410 check: head ${storageHead} is still inside the ${HISTORY_BLOCKS}-block window`)
+    say(`[proofs] SKIP 410 check: head ${storageHead} is still inside the ${HISTORY_BLOCKS}-block window`)
 }
 const ahead = await storageProofAt(storageHead + 1000)
 check(ahead.result === 404 && ahead.extra?.reason === "not_found", "a proof above the head is refused with 404", answerProblem(ahead))

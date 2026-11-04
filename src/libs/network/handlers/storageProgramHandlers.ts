@@ -38,9 +38,7 @@ export const storageProgramHandlers: Record<string, NodeCallHandler> = {
     getStorageProgramFieldType: async data => {
         return await getStorageProgramFieldType(data)
     },
-    getStorageProgramLimits: async () => {
-        return await getStorageProgramLimits()
-    },
+    getStorageProgramLimits: async () => getStorageProgramLimits(),
     getStorageProgramItem: async data => {
         return await getStorageProgramItem(data)
     },

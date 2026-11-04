@@ -14,7 +14,7 @@ import { MAX_STORAGE_PROOF_ADDRESSES } from "./getStorageProof"
  * program, and the fee per started pricing chunk (a decimal string, since
  * fees are bigints).
  */
-export default async function getStorageProgramLimits(): Promise<RPCResponse> {
+export default function getStorageProgramLimits(): RPCResponse {
     return answer({
         maxAddressesPerProof: MAX_STORAGE_PROOF_ADDRESSES,
         historyBlocks: STORAGE_HISTORY_BLOCKS,
