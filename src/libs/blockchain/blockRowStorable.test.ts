@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test"
 
+import { installFakeBlockDatabase, stubBlockInsertCollaborators } from "./blockInsert.fixtures"
+
 /**
  * The block insert writes what peers serve outside the block hash (attrs,
  * proposer, next proposer) and, for every l2ps_hash_update a block lists,
@@ -7,8 +9,6 @@ import { beforeEach, describe, expect, it, mock } from "bun:test"
  * Postgres refuses in any of them failed the commit on every node. The fake
  * database below refuses what Postgres refuses, column by column.
  */
-
-const durable = new Map<string, unknown[]>()
 
 const refuses = (value: unknown, jsonb: boolean): boolean => {
     if (typeof value === "string") return value.includes("\u0000") || (jsonb && !value.isWellFormed())
@@ -39,94 +39,17 @@ function postgresRefusal(name: string, row: Record<string, unknown>): string | n
     return null
 }
 
-function repoFor(staged: Map<string, unknown[]>, name: string) {
-    const stage = (rows: unknown[]) => {
-        for (const row of rows) {
-            const refusal = postgresRefusal(name, row as Record<string, unknown>)
-            if (refusal) throw new Error(`invalid input for ${refusal}`)
-        }
-        staged.set(name, [...(staged.get(name) ?? []), ...rows])
+const durable = installFakeBlockDatabase((name, rows) => {
+    for (const row of rows) {
+        const refusal = postgresRefusal(name, row as Record<string, unknown>)
+        if (refusal) throw new Error(`invalid input for ${refusal}`)
     }
-    const query: any = {
-        insert: () => query,
-        update: () => query,
-        set: () => query,
-        where: () => query,
-        andWhere: () => query,
-        values: (rows: unknown[]) => {
-            query.rows = rows
-            return query
-        },
-        orIgnore: () => query,
-        execute: async () => stage(query.rows ?? []),
-    }
-    return {
-        create: (row: unknown) => row,
-        save: async (rows: unknown) => stage(Array.isArray(rows) ? rows : [rows]),
-        delete: async () => {},
-        insert: async (row: unknown) => stage([row]),
-        findOneBy: async () => null,
-        manager: { connection: { getMetadata: () => ({ columns: [0, 1, 2] }) } },
-        createQueryBuilder: () => query,
-    }
-}
-
-const nameOf = (entity: any) => entity?.name ?? entity?.options?.name ?? String(entity)
-
-function managerFor(staged: Map<string, unknown[]>) {
-    const em: any = {
-        getRepository: (entity: any) => repoFor(staged, nameOf(entity)),
-        save: async (entity: any, rows?: unknown) =>
-            repoFor(staged, rows === undefined ? "entity" : nameOf(entity)).save(
-                rows === undefined ? entity : rows,
-            ),
-        createQueryBuilder: () => repoFor(staged, "IdentityCommitment").createQueryBuilder(),
-    }
-    return em
-}
-
-const fakeDataSource = {
-    transaction: async (work: (em: unknown) => Promise<unknown>) => {
-        const staged = new Map<string, unknown[]>()
-        const result = await work(managerFor(staged))
-        for (const [name, rows] of staged) {
-            durable.set(name, [...(durable.get(name) ?? []), ...rows])
-        }
-        return result
-    },
-    getRepository: (entity: any) => repoFor(durable, nameOf(entity)),
-}
-
-const datasourceModule = () => ({
-    __esModule: true,
-    dataSource: fakeDataSource,
-    default: { getInstance: async () => ({ getDataSource: () => fakeDataSource }) },
 })
-mock.module("src/model/datasource", datasourceModule)
-mock.module("@/model/datasource", datasourceModule)
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
     default: { debug: () => {}, info: () => {}, warn: () => {}, warning: () => {}, error: () => {}, only: () => {}, custom: () => {} },
 }))
-
-const partial = async (path: string, overrides: Record<string, unknown>) => {
-    const real = await import(path)
-    mock.module(path, () => ({ ...real, ...overrides }))
-}
-await partial("./chainDb", {
-    getBlocksRepo: () => ({ target: { name: "Blocks" }, findOneBy: async () => null }),
-    chunkedInsert: async (em: any, entity: any, rows: unknown[]) => {
-        await em.getRepository(entity).save(rows)
-        return { skipped: 0 }
-    },
-})
-await partial("@/features/zk/merkle/updateMerkleTreeAfterBlock", {
-    updateMerkleTreeAfterBlock: async () => 0,
-})
-await partial("./routines/tallyUpgradeVotes", { default: async () => {} })
-await partial("./routines/applyNetworkUpgrade", { default: async () => {} })
-await partial("./routines/loadNetworkParameters", { loadNetworkParameters: async () => {} })
-await partial("src/libs/consensus/stakedSet", { getStakedSet: async () => new Set() })
+await stubBlockInsertCollaborators()
 const { insertBlock } = await import("./chainBlocks")
 const { getSharedState } = await import("src/utilities/sharedState")
 const { BlockInvalidError } = await import("@/errors")

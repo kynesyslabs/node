@@ -64,12 +64,9 @@ export async function confirmTransaction(
         sender,
     })
     if (!admission.ok) {
-        const label =
-            admission.code === "on_chain" || admission.code === "in_mempool"
-                ? "TX EXISTS ERROR"
-                : admission.code === "structure"
-                  ? "STRUCTURE ERROR"
-                  : "SIGNATURE ERROR"
+        let label = "SIGNATURE ERROR"
+        if (admission.code === "on_chain" || admission.code === "in_mempool") label = "TX EXISTS ERROR"
+        else if (admission.code === "structure") label = "STRUCTURE ERROR"
         validityData.data.message =
             `[Tx Validation] [${label}] ` + admission.reason + "\n"
         validityData.data.valid = false
