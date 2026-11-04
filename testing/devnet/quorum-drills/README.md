@@ -19,6 +19,51 @@ testing/devnet/quorum-drills/run.sh [--image IMAGE] [--src TREE] [--binding on|o
   at block 0; `off` keeps it dormant to reproduce the pre-fork behaviour on
   the same code. `quorumParity` is active from block 0 in both.
 
+### How a node starts
+
+`run.sh` looks in the image for `./testing/devnet/run-devnet` and picks the
+start path from the result (`start=` in the preflight line of `run.sh`'s log):
+
+- **Image has `run-devnet`** (a devnet-style image, `testing/devnet/Dockerfile`):
+  `bash -lc 'cp the identity into /app/state && exec ./testing/devnet/run-devnet'`,
+  as in every earlier round. The generated compose of the seven older
+  scenarios is byte-identical to before on this path.
+- **Image has none** (a release image, root `Dockerfile`, which copies only
+  `src/ scripts/ data/ sdk/ libs/ sidecar/` and never `testing/`): the image's
+  own `ENTRYPOINT` (`scripts/docker-entrypoint.sh`) and `CMD`
+  (`bun -r tsconfig-paths/register src/index.ts -- --no-tui`), read from the
+  image with `docker image inspect` and written into the compose file. The only
+  addition is a `/bin/sh -c` step before them that copies the mounted identity
+  and peerlist into the uid-owned `/app/state` tmpfs (the node keeps its
+  identity lock and signing record next to the identity file, and `/app/keys`
+  is read-only), then `exec`s the image's entrypoint with its CMD. The drill
+  sets `RPC_PORT` (run-devnet turns its `PORT` into it), `IDENTITY_FILE`,
+  `EXPOSED_URL`, `PG_*`, `CONSENSUS_TIME`, `OMNI_*`, `GOSSIP_ENABLED` and the
+  mounts; the peerlist is mounted at `/app/keys/demos_peerlist.json`, not at
+  `/app/demos_peerlist.json`, because the entrypoint `mv`s a real file it finds
+  there into `/app/state` and a bind mount cannot be moved.
+
+What still differs from mainnet on the image path: `NODE_ENV=development` (a
+production node needs `EXPECTED_GENESIS_HASH` for a genesis that is new each
+run, `genesisPin.ts:56-67`), postgres and `/app/state` on tmpfs, the generated
+genesis and the empty snapshot, `OMNI_MODE=HTTP_ONLY`, TLSNotary off, and no
+published ports.
+
+The preflight checks that everything the node service execs exists and is
+executable for the image's user (`docker run` as its default user): `sh cp`, the
+image's entrypoint and the first word of its CMD on the image path; `bash cp
+./testing/devnet/run-devnet bun` on the other. On the image path it also runs
+node-1's generated entrypoint once, with its mounts and tmpfs and a check in
+place of the CMD, so an entrypoint that would abort before the node starts, or
+a missing identity or peerlist, ends the run as `ABORT` (exit 2) before any
+node is started.
+
+`demos-node:candidate-5979a716` is not described anywhere in the repo: only
+`run.sh` and the two READMEs name it, and the harness never builds images, so
+how it was built is not recorded here. The consensus-race harness execs
+`run-devnet` in it, so it probably has the file; the check above decides, not
+that guess.
+
 Exit code 0 means pass, 1 fail, 2 the run could not be carried out
 (preflight, boot, timing). A running node whose head cannot be read during
 an observation window (three tries) ends the run as `ERROR`, exit 2: a
@@ -234,7 +279,16 @@ needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
 - Gossip is off by default, as in the race harness; `GOSSIP_ENABLED=true`
   turns it on. With gossip off, a node learns that a peer is ahead only
   from that peer's block push: a sync claim above our own height is
-  discarded until it can be checked.
+  discarded until it can be checked. That default is unchanged for the
+  scenarios other than `halt-n10s10`, `halt-n13s10` and `ride-n13s10`; those
+  three always run with `GOSSIP_ENABLED=true`, whatever the environment says
+  (`run.sh`), because with gossip off a restarted node never sees that the
+  network is ahead (`Sync.ts:129-136`, `networkAheadVeto.ts:59`) and the
+  recovery result would measure that, not the halt. Gossip needs the sidecar
+  (`node sidecar/dist/gossip-sidecar.mjs`, started by the node process itself
+  from `/app`, so under either start path): the preflight aborts when the image
+  has no bundle or its `node` is not a real Node.js >= 20 (a devnet-style
+  image has Bun's wrapper), so those three cases need a release image.
 - Validators are stopped with `docker compose stop -t 0` right after a
   round start is logged, so the restart policy leaves them down.
 - Round times come from block timestamps, so they show the chain's own
