@@ -94,4 +94,14 @@ describe("applyAtomicStoragePut", () => {
         expect(applyAtomicStoragePut(put(), programs, true).success).toBe(true)
         expect(programs.get(target)).toBeNull()
     })
+
+    it("refuses U+0000, which Postgres cannot store, in the value or the row's text", () => {
+        const programs = new Map<string, GCRStorageProgram | null>()
+        const nulValue = put({ value: { note: "a\u0000b" } })
+        expect(applyAtomicStoragePut(nulValue, programs, false).message).toContain("U+0000")
+        const name = "re\u0000sult"
+        const nulName = put({ name, target: deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, WRITER, name, "1") })
+        expect(applyAtomicStoragePut(nulName, programs, false).message).toContain("U+0000")
+        expect(programs.size).toBe(0)
+    })
 })
