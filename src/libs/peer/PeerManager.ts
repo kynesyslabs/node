@@ -636,7 +636,8 @@ export default class PeerManager {
             {
                 sleepTime: 250,
                 retries: 1,
-                allowedCodes: [500, 504],
+                // 409 must reach the callback: it is the peer saying we are on another network
+                allowedCodes: [409, 500, 504],
             },
         )
 
