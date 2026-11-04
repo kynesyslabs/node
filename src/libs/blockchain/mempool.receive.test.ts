@@ -154,6 +154,15 @@ describe("Mempool.receive admission", () => {
         expect(insertedRows).toHaveLength(0)
     })
 
+    it("drops a tx admission would refuse before the chain is queried by its hash", async () => {
+        // Postgres refuses U+0000 in the lookup's parameter, which would fail
+        // the whole merge rather than this tx.
+        await Mempool.receive([tx("0xbad\u0000", 100), tx("0xnew", 100)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xnew"])
+        const queried = getExistingTransactionHashes.mock.calls[0][0] as string[]
+        expect(queried).toEqual(["0xnew"])
+    })
+
     it("rejects a tx whose edits the node would not generate", async () => {
         // This ingress is unauthenticated and handleGCR applies gcr_edits of
         // any type as written, so an edit the signed body does not imply is an

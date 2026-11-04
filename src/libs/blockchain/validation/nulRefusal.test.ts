@@ -2,10 +2,10 @@
  * Postgres refuses U+0000 in `varchar` and `jsonb`, so a transaction carrying
  * one into a column that refuses it fails the block's commit on every node and
  * stops the chain. Admission (RPC, gossip, the mempool insert) refuses any
- * text jsonb would refuse anywhere in the transaction. The consensus mempool
- * merge and the re-check of a received or synced block refuse only U+0000 in
- * a column of the transaction's own row: anything else did commit, in the
- * json body, and history holding it must still verify.
+ * text jsonb would refuse anywhere in the transaction, and so does the
+ * consensus mempool merge. The re-check of a received or synced block refuses
+ * only U+0000 in a column of a row the block insert writes: anything else did
+ * commit, in the json body, and history holding it must still verify.
  *
  * The transactions are signed by the real SDK signer and the validators are
  * the real ones; only the chain, the database and the worker threads are
@@ -207,10 +207,12 @@ describe("consensus mempool merge", () => {
         expect(inserted.map(row => row.hash)).toEqual([good.hash])
     })
 
-    it("keeps one whose U+0000 sits only in the json body, which commits", async () => {
+    it("drops one whose U+0000 or surrogate sits only in the json body, as admission does", async () => {
         const memo = await withNulMemo()
-        await Mempool.receive([pending(memo)], false)
-        expect(inserted.map(row => row.hash)).toEqual([memo.hash])
+        const surrogate = await withMemo("note", "\ud800")
+        const good = await transfer(PEER)
+        await Mempool.receive([pending(memo), pending(surrogate), pending(good)], false)
+        expect(inserted.map(row => row.hash)).toEqual([good.hash])
     })
 })
 

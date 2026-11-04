@@ -773,9 +773,21 @@ export default class Mempool {
         // include them in a block as failed.
         const lastBlock = await Chain.getLastBlockNumber()
 
-        const unseenCandidates = incoming.filter(
-            tx => !existingHashes[tx.hash],
-        )
+        // The merge holds what admission would have let in, whatever a peer
+        // sends: an unstorable string the block re-check does not look for,
+        // in the json body, still reaches the rows the edits write. Checked
+        // first, since the chain lookup below queries by the hash.
+        const unseenCandidates = incoming.filter(tx => {
+            if (existingHashes[tx.hash]) return false
+            const unstorable = admissionRefusal(tx)
+            if (unstorable !== null) {
+                log.error(
+                    `[Mempool.receive] Rejecting tx ${String(tx?.hash).slice(0, 80)}: ${unstorable}`,
+                )
+                return false
+            }
+            return true
+        })
         const onChain =
             unseenCandidates.length > 0
                 ? await Chain.getExistingTransactionHashes(
