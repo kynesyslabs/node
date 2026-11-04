@@ -5,10 +5,13 @@ import {
     agreedHeight,
     committeeFloor,
     drillPreconditionError,
+    emptyMarks,
     evaluateHalt,
     evaluateNoCrash,
     evaluateRecovery,
     evaluateSettle,
+    formatSeconds,
+    phaseDurations,
     signatureQuorum,
 } from "./lib/haltDrill"
 
@@ -161,5 +164,54 @@ describe("no-crash verdict", () => {
     it("fails when a survivor's restart count moved", () => {
         expect(evaluateNoCrash({ 1: 0, 2: 0 }, { 1: 0, 2: 1 }, [1, 2]).pass).toBe(false)
         expect(evaluateNoCrash({ 1: 0, 2: 0 }, { 1: 0, 2: 0 }, [1, 2]).pass).toBe(true)
+    })
+})
+
+describe("phase durations", () => {
+    const full = {
+        t_up: 1_000,
+        t_baseline: 61_000,
+        t_stop: 65_000,
+        t_halt_confirmed: 90_000,
+        t_hold_end: 210_000,
+        t_restart: 212_000,
+        t_first_new_block: 242_000,
+        t_converged: 300_000,
+    }
+
+    it("computes every phase from a full set of marks", () => {
+        expect(phaseDurations(full)).toEqual({
+            coldStartToBaselineMs: 60_000,
+            stopToHaltConfirmedMs: 25_000,
+            haltHoldMs: 120_000,
+            restartToFirstNewBlockMs: 30_000,
+            restartToConvergedMs: 88_000,
+            totalMs: 299_000,
+        })
+    })
+    it("gives null for the phases that use a missing mark", () => {
+        const d = phaseDurations({ ...full, t_first_new_block: null, t_up: null })
+        expect(d.restartToFirstNewBlockMs).toBeNull()
+        expect(d.coldStartToBaselineMs).toBeNull()
+        expect(d.totalMs).toBeNull()
+        expect(d.stopToHaltConfirmedMs).toBe(25_000)
+        expect(d.haltHoldMs).toBe(120_000)
+        expect(d.restartToConvergedMs).toBe(88_000)
+    })
+    it("gives all null when no mark was taken", () => {
+        expect(Object.values(phaseDurations(emptyMarks())).every(v => v === null)).toBe(true)
+    })
+    it("reports marks out of order as they are", () => {
+        const d = phaseDurations({ ...full, t_hold_end: 80_000, t_first_new_block: 200_000 })
+        expect(d.haltHoldMs).toBe(-10_000)
+        expect(d.restartToFirstNewBlockMs).toBe(-12_000)
+        // untouched phases are unchanged
+        expect(d.restartToConvergedMs).toBe(88_000)
+    })
+    it("formats seconds with one decimal and n/a for a missing value", () => {
+        expect(formatSeconds(60_040)).toBe("60.0s")
+        expect(formatSeconds(88_460)).toBe("88.5s")
+        expect(formatSeconds(-10_000)).toBe("-10.0s")
+        expect(formatSeconds(null)).toBe("n/a")
     })
 })

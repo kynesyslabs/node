@@ -76,13 +76,17 @@ import { drillOverrideYaml, genesisTimestamp, stageDrillInputs } from "../lib/dr
 import { getLastBlockNumber, query } from "../lib/nodeQueries"
 import {
     type BlockRow,
+    type DrillMarks,
     type HeightSample,
     agreedHeight,
     drillPreconditionError,
+    emptyMarks,
     evaluateHalt,
     evaluateNoCrash,
     evaluateRecovery,
     evaluateSettle,
+    formatSeconds,
+    phaseDurations,
     signatureQuorum,
 } from "../lib/haltDrill"
 import { runScenarioCli, type ScenarioContext } from "../lib/scenario"
@@ -181,6 +185,57 @@ function fail(phase: string, reasons: string[]): never {
     throw new Error(`${phase} failed:\n  - ${reasons.join("\n  - ")}`)
 }
 
+/** Heights the drill observed, null until observed. Reported with the timings. */
+interface DrillHeights {
+    preStopHeight: number | null
+    haltHeight: number | null
+    targetHeight: number | null
+    settleBlocks: number | null
+}
+
+function iso(ms: number | null): string | null {
+    return ms === null ? null : new Date(ms).toISOString()
+}
+
+/**
+ * Pushes the per-phase timings to `ctx.notes` and prints one `DRILL_TIMINGS`
+ * JSON line to stdout. Runs on failure too, with the marks not reached as
+ * null. The scenario context has no run/log directory, so nothing is written
+ * to a file.
+ */
+function reportTimings(
+    ctx: ScenarioContext,
+    marks: DrillMarks,
+    observed: DrillHeights,
+    forks: Record<string, number | null>,
+): void {
+    const d = phaseDurations(marks)
+    const forkText = Object.entries(forks)
+        .map(([name, height]) => `${name}@${height}`)
+        .join(", ")
+    ctx.notes.push(
+        `timing: cold start to baseline ${formatSeconds(d.coldStartToBaselineMs)}`,
+        `timing: stop to halt confirmed ${formatSeconds(d.stopToHaltConfirmedMs)}`,
+        `timing: halt hold ${formatSeconds(d.haltHoldMs)}`,
+        `timing: restart to first new block ${formatSeconds(d.restartToFirstNewBlockMs)}`,
+        `timing: restart to all 4 converged ${formatSeconds(d.restartToConvergedMs)}`,
+        `timing: total ${formatSeconds(d.totalMs)} (first up() return to convergence)`,
+        `heights: pre-stop ${observed.preStopHeight ?? "n/a"}, halt ${observed.haltHeight ?? "n/a"}, ` +
+            `target ${observed.targetHeight ?? "n/a"}, ${observed.settleBlocks ?? "n/a"} block(s) landed during settle`,
+        `config: CONSENSUS_TIME ${CONSENSUS_TIME_S}s, shardSize ${DRILL_SHARD_SIZE}, forks ${forkText}`,
+    )
+    const line = {
+        scenario: SCENARIO_ID,
+        marks: Object.fromEntries(Object.entries(marks).map(([k, v]) => [k, iso(v)])),
+        durationsMs: d,
+        ...observed,
+        consensusTimeS: CONSENSUS_TIME_S,
+        shardSize: DRILL_SHARD_SIZE,
+        forks,
+    }
+    process.stdout.write(`DRILL_TIMINGS ${JSON.stringify(line)}\n`)
+}
+
 async function scenario(ctx: ScenarioContext): Promise<void> {
     const pre = drillPreconditionError(DRILL_SHARD_SIZE, NODE_IDS.length, SURVIVORS.length)
     if (pre) fail("precondition", [pre])
@@ -189,6 +244,16 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     // Identities first: the genesis is built from the keys this writes.
     regenerateIdentities(NODE_IDS.length)
     const genesis = buildDrillGenesis()
+    const forks: Record<string, number | null> = Object.fromEntries(
+        Object.entries<any>(genesis.forks).map(([name, f]) => [name, f?.activationHeight ?? null]),
+    )
+    const marks = emptyMarks()
+    const observed: DrillHeights = {
+        preStopHeight: null,
+        haltHeight: null,
+        targetHeight: null,
+        settleBlocks: null,
+    }
     // Build before the genesis time is set, so the build does not eat the delay.
     compose(["build"])
 
@@ -201,9 +266,16 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
         })
         writeOverride(SCENARIO_ID, drillOverrideYaml(staged, NODE_IDS))
         up({ overrideFiles: [overridePath(SCENARIO_ID)] })
+        marks.t_up = Date.now()
         await restartForColdStart()
-        await drill(ctx, quorum)
+        await drill(ctx, quorum, marks, observed)
     } finally {
+        // Also on failure: print what was collected before the error propagates.
+        try {
+            reportTimings(ctx, marks, observed, forks)
+        } catch (e) {
+            process.stderr.write(`[WARN] could not report drill timings: ${String(e)}\n`)
+        }
         if (ctx.keepState) {
             ctx.notes.push(`--keep-state: left ${stagingDir} and ${overridePath(SCENARIO_ID)} in place`)
         } else {
@@ -227,7 +299,12 @@ async function restartForColdStart(): Promise<void> {
     for (const id of NODE_IDS.slice(1)) restartService(`node-${id}`)
 }
 
-async function drill(ctx: ScenarioContext, quorum: number): Promise<void> {
+async function drill(
+    ctx: ScenarioContext,
+    quorum: number,
+    marks: DrillMarks,
+    observed: DrillHeights,
+): Promise<void> {
     // P1 baseline
     await waitFor(async () => allReachedHeight(NODE_IDS, BASELINE_HEIGHT), {
         description: `all nodes reach height >= ${BASELINE_HEIGHT}`,
@@ -235,6 +312,7 @@ async function drill(ctx: ScenarioContext, quorum: number): Promise<void> {
         intervalMs: 2_000,
     })
     await assertBlockHashConvergence(NODE_IDS, BASELINE_HEIGHT)
+    marks.t_baseline = Date.now()
     ctx.notes.push(`P1 baseline: 4/4 at >= ${BASELINE_HEIGHT}, hashes agree`)
 
     const countsBefore = Object.fromEntries(SURVIVORS.map(id => [id, restartCount(id)]))
@@ -243,7 +321,9 @@ async function drill(ctx: ScenarioContext, quorum: number): Promise<void> {
         "all 4 nodes report the same head before the stop",
         2 * ROUND_MS,
     )
+    observed.preStopHeight = preStopHeight
     for (const id of STOPPED) stopService(`node-${id}`)
+    marks.t_stop = Date.now()
     ctx.notes.push(
         `stopped ${STOPPED.map(id => `node-${id}`).join(", ")} at pre-stop height ${preStopHeight}`,
     )
@@ -253,6 +333,8 @@ async function drill(ctx: ScenarioContext, quorum: number): Promise<void> {
     let haltHeight: number
     try {
         haltHeight = await agreedHead(SURVIVORS, "survivors agree on a head", AGREE_TIMEOUT_MS)
+        observed.haltHeight = haltHeight
+        observed.settleBlocks = haltHeight - preStopHeight
     } catch (e) {
         fail("P2 settle", [
             `survivors did not agree on a head after settle: ${JSON.stringify(await heads(SURVIVORS))}`,
@@ -267,6 +349,7 @@ async function drill(ctx: ScenarioContext, quorum: number): Promise<void> {
         quorum,
     )
     if (!settle.pass) fail("P2 settle", settle.reasons)
+    marks.t_halt_confirmed = Date.now()
     ctx.notes.push(
         `P2 settle: ${haltHeight - preStopHeight} block(s) landed after the stop, all with >= ${quorum} signatures`,
     )
@@ -280,6 +363,7 @@ async function drill(ctx: ScenarioContext, quorum: number): Promise<void> {
     }
     const halt = evaluateHalt(SURVIVORS, haltHeight, samples, HALT_ROUNDS)
     if (!halt.pass) fail("P3 halt", halt.reasons)
+    marks.t_hold_end = Date.now()
     ctx.notes.push(`P3 halt: survivors held at ${haltHeight} for ${HALT_ROUNDS} rounds`)
 
     // P4 halt agreement
@@ -288,12 +372,25 @@ async function drill(ctx: ScenarioContext, quorum: number): Promise<void> {
 
     // P5 recovery
     for (const id of STOPPED) startService(`node-${id}`)
+    marks.t_restart = Date.now()
     const target = haltHeight + RECOVERY_BLOCKS
-    await waitFor(async () => allReachedHeight(NODE_IDS, target), {
-        description: `all nodes reach ${target} after restart`,
-        timeoutMs: RECOVERY_TIMEOUT_MS,
-        intervalMs: 2_000,
-    })
+    observed.targetHeight = target
+    await waitFor(
+        async () => {
+            // Extra read only to time the first block above the halt height; the
+            // pass criterion is still allReachedHeight, with the same timeout.
+            if (marks.t_first_new_block === null) {
+                const hs = await heads(NODE_IDS)
+                if (Math.max(...Object.values(hs)) > haltHeight) marks.t_first_new_block = Date.now()
+            }
+            return allReachedHeight(NODE_IDS, target)
+        },
+        {
+            description: `all nodes reach ${target} after restart`,
+            timeoutMs: RECOVERY_TIMEOUT_MS,
+            intervalMs: 2_000,
+        },
+    )
     const recovery = evaluateRecovery(
         NODE_IDS,
         preStopHeight,
@@ -303,6 +400,7 @@ async function drill(ctx: ScenarioContext, quorum: number): Promise<void> {
         quorum,
     )
     if (!recovery.pass) fail("P5 recovery", recovery.reasons)
+    marks.t_converged = Date.now()
     ctx.notes.push(
         `P5 recovery: chain resumed; 4/4 at >= ${target}, hashes agree from ${preStopHeight}, ` +
             `>= ${quorum} signatures per block`,
