@@ -48,9 +48,9 @@ export class Proxy {
      *
      * `params.targetAuthorization` is the RAW token: the node adds the
      * `Bearer ` prefix itself, so pass `abc123`, not `Bearer abc123` (that
-     * would be sent as `Bearer Bearer abc123`). `targetAuthorization` is the
-     * only credential channel the SDK does not record: `targetHeaders` is copied
-     * into the signed on-chain `web2Request` tx, so do not put secrets there.
+     * would be sent as `Bearer Bearer abc123`). `targetHeaders` and the URL
+     * are copied into the signed on-chain `web2Request` tx; `targetAuthorization`
+     * is not, so pass credentials there, not in `targetHeaders`.
      * @returns Promise resolving to the response data
      * @throws Error if the proxy server fails to start or if the request fails
      */

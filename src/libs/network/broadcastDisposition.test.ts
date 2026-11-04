@@ -136,6 +136,7 @@ describe("broadcastTx disposition", () => {
                     headers: { Authorization: "Bearer tok", "X-Api-Key": "k", "content-type": "application/json" },
                 },
             },
+            authorization: "Bearer tx-token",
         }))
         const data = validityData()
         data.data.transaction.content = { type: "web2Request", from: "0xaa", data: ["web2Request", { message: {} }] }
@@ -145,5 +146,6 @@ describe("broadcastTx disposition", () => {
         expect(handleWeb2ProxyRequest).toHaveBeenCalledTimes(1)
         const replayed = handleWeb2ProxyRequest.mock.calls[0][0] as any
         expect(replayed.web2Request.raw.headers).toEqual({ "content-type": "application/json" })
+        expect(replayed.authorization).toBeUndefined()
     })
 })
