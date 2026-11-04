@@ -234,6 +234,13 @@ exactly as it was signed.
 
 `--snapshot` is required here too (exit 2 without it).
 
+The tool builds block 0 from `--genesis` (read the way the node reads it)
+and holds every proof to that hash, with or without `--genesis-hash`. It
+is NOT OK when the file's block 0 cannot be known (no fixed timestamp),
+when `--genesis-hash` names another block 0, or when the proofs name
+another hash; proofs of the genesis data hash are named as that mistake.
+Proofs that only agree with each other are not enough.
+
 Every proof must come from a launch validator, name the agreed genesis
 (and date), and verify; `--require-all` also fails on any launch
 validator without a proof. Always pass `--require-all` for the rule 1
