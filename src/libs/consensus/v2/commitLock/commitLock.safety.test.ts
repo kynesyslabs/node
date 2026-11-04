@@ -50,6 +50,7 @@ jest.mock("@/features/metrics/consensusMetrics", () => ({
     countPrecommitEquivocation: () => undefined,
     countMissedSignature: () => undefined,
     countStorageRootSyncMismatch: () => undefined,
+    countStorageProofRootMismatch: () => undefined,
     setForkScheduleMismatch: () => undefined,
     setConsensusAbstaining: () => undefined,
 }))
