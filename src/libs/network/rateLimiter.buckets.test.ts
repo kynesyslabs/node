@@ -28,14 +28,9 @@ mock.module("@/libs/consensus/stakedSet", () => ({
     getStakedSet: async () => stakedKeys as ReadonlySet<string>,
 }))
 
-let validatorRows: unknown[] | Error = []
-const getGCRValidatorsAtBlock = mock(async (_height: number) => {
-    if (validatorRows instanceof Error) throw validatorRows
-    return validatorRows
-})
 mock.module("@/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
-    default: { getGCRValidatorsAtBlock: (height: number) => getGCRValidatorsAtBlock(height) },
+    default: { getGCRValidatorsAtBlockOrThrow: async (_height: number) => [] },
 }))
 
 let verifyCalls = 0

@@ -28,13 +28,21 @@ mock.module("@/libs/consensus/stakedSet", () => ({
 }))
 
 let validatorRows: unknown[] | Error = []
-const getGCRValidatorsAtBlock = mock(async (_height: number) => {
+// The real getter answers a failed read with [], exactly like an empty table.
+const getGCRValidatorsAtBlock = mock(async (_height: number) =>
+    validatorRows instanceof Error ? [] : validatorRows,
+)
+const getGCRValidatorsAtBlockOrThrow = mock(async (_height: number) => {
     if (validatorRows instanceof Error) throw validatorRows
     return validatorRows
 })
 mock.module("@/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
-    default: { getGCRValidatorsAtBlock: (height: number) => getGCRValidatorsAtBlock(height) },
+    default: {
+        getGCRValidatorsAtBlock: (height: number) => getGCRValidatorsAtBlock(height),
+        getGCRValidatorsAtBlockOrThrow: (height: number) =>
+            getGCRValidatorsAtBlockOrThrow(height),
+    },
 }))
 
 mock.module("@kynesyslabs/demosdk/encryption", () => ({
@@ -91,6 +99,7 @@ describe("RateLimiter trusted internal requests", () => {
         mockGetPeer.mockClear()
         refreshStakedSet.mockClear()
         getGCRValidatorsAtBlock.mockClear()
+        getGCRValidatorsAtBlockOrThrow.mockClear()
     })
 
     it("re-reads an empty validator set at most every few seconds", async () => {
@@ -98,7 +107,7 @@ describe("RateLimiter trusted internal requests", () => {
         await rateLimiter.refreshValidatorKeys()
         await rateLimiter.refreshValidatorKeys()
         expect(refreshStakedSet).toHaveBeenCalledTimes(1)
-        expect(getGCRValidatorsAtBlock).toHaveBeenCalledTimes(1)
+        expect(getGCRValidatorsAtBlockOrThrow).toHaveBeenCalledTimes(1)
 
         stakedKeys = new Set(["0xbeef"])
         setSystemTime(new Date(1_005_000))
@@ -107,7 +116,7 @@ describe("RateLimiter trusted internal requests", () => {
 
         await rateLimiter.refreshValidatorKeys()
         expect(refreshStakedSet).toHaveBeenCalledTimes(3)
-        expect(getGCRValidatorsAtBlock).toHaveBeenCalledTimes(1)
+        expect(getGCRValidatorsAtBlockOrThrow).toHaveBeenCalledTimes(1)
     })
 
     it("backs off after a failed validator read too", async () => {
@@ -116,7 +125,7 @@ describe("RateLimiter trusted internal requests", () => {
         await rateLimiter.refreshValidatorKeys()
         await rateLimiter.refreshValidatorKeys()
         expect(refreshStakedSet).toHaveBeenCalledTimes(1)
-        expect(getGCRValidatorsAtBlock).toHaveBeenCalledTimes(1)
+        expect(getGCRValidatorsAtBlockOrThrow).toHaveBeenCalledTimes(1)
     })
 
     it("trusts an authenticated staked validator", async () => {
@@ -199,8 +208,8 @@ describe("RateLimiter trusted internal requests", () => {
     })
 
     it("gives no peer-table exemption when the validator set cannot be read", async () => {
-        // The staked set is empty after a failed read too; that is not a
-        // network without validators.
+        // The staked set is empty after a failed read too, and the plain
+        // getter answers one with []; neither is a network without validators.
         validatorRows = new Error("connection terminated")
         mockGetAuthContext.mockImplementation(() => ({
             verified: true,
@@ -212,6 +221,7 @@ describe("RateLimiter trusted internal requests", () => {
         await rateLimiter.refreshValidatorKeys()
 
         expect(rateLimiter.isTrustedInternalRequest(new Request("http://localhost/"), "172.25.0.4")).toBe(false)
+        expect(getGCRValidatorsAtBlock).not.toHaveBeenCalled()
 
         validatorRows = [{ address: "0xbeef" }]
         await rateLimiter.refreshValidatorKeys()

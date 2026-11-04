@@ -628,7 +628,8 @@ export class RateLimiter {
         // fallback; a read failure must not open it.
         try {
             const { default: GCR } = await import("@/libs/blockchain/gcr/gcr")
-            const rows = await GCR.getGCRValidatorsAtBlock(
+            // getGCRValidatorsAtBlock answers a failed read with [].
+            const rows = await GCR.getGCRValidatorsAtBlockOrThrow(
                 getSharedState.lastBlockNumber ?? 0,
             )
             this.noValidatorRows = rows.length === 0
