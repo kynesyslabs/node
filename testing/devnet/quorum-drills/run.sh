@@ -42,6 +42,8 @@ PROGRESS_TIMEOUT="${PROGRESS_TIMEOUT:-180}"
 STALL_WINDOW="${STALL_WINDOW:-120}"
 PARTITION_TIME="${PARTITION_TIME:-120}"
 SETTLE_TIMEOUT="${SETTLE_TIMEOUT:-300}"
+# Curl timeout (s) of the retry after an empty or timed-out read of a node's head or hash
+READ_TIMEOUT="${READ_TIMEOUT:-8}"
 # halt-* and ride-* drills; the defaults are scenario 12's
 BASELINE_HEIGHT="${BASELINE_HEIGHT:-6}"
 SETTLE_ROUNDS="${SETTLE_ROUNDS:-2}"
@@ -54,7 +56,7 @@ RIDE_TIMEOUT="${RIDE_TIMEOUT:-300}"
 usage() {
     sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: IMAGE SRC_TREE BINDING CONSENSUS_TIME NODE_MEM NODE_EST_MB HEADROOM_MB"
-    echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME (README.md)"
+    echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME READ_TIMEOUT (README.md)"
     echo "             BASELINE_HEIGHT SETTLE_ROUNDS HALT_ROUNDS RECOVERY_BLOCKS RECOVERY_TIMEOUT"
     echo "             RIDE_BLOCKS RIDE_TIMEOUT (halt-* and ride-* drills)"
 }
@@ -303,20 +305,36 @@ say "inputs ready (genesis in ${GENESIS_DELAY}s)"
 # ── helpers ─────────────────────────────────────────────────────────────
 port_of() { echo $((53549 + 2 * $1)); }
 cid_of() { dc ps -q "node-$1" 2>/dev/null; }
-rpc() { # $1 node, $2 JSON body
+rpc() { # $1 node, $2 JSON body, $3 curl timeout in s (default 4)
     local cid; cid=$(cid_of "$1"); [ -z "${cid}" ] && return 1
-    docker exec "${cid}" curl -sS -m4 -X POST -H 'Content-Type: application/json' \
+    docker exec "${cid}" curl -sS -m"${3:-4}" -X POST -H 'Content-Type: application/json' \
         -d "$2" "http://localhost:$(port_of "$1")/" 2>/dev/null
 }
-head_of() {
-    rpc "$1" '{"method":"nodeCall","params":[{"message":"getLastBlockNumber","data":{},"muid":null}]}' |
+head_of() { # $1 node, $2 curl timeout in s (default 4)
+    rpc "$1" '{"method":"nodeCall","params":[{"message":"getLastBlockNumber","data":{},"muid":null}]}' "${2:-4}" |
         jq -r 'select(.result == 200) | .response' 2>/dev/null
 }
+block_req() { echo "{\"method\":\"nodeCall\",\"params\":[{\"message\":\"getBlockByNumber\",\"data\":{\"blockNumber\":$1},\"muid\":null}]}"; }
 block_at() { # $1 node, $2 height -> the block's JSON
-    rpc "$1" "{\"method\":\"nodeCall\",\"params\":[{\"message\":\"getBlockByNumber\",\"data\":{\"blockNumber\":$2},\"muid\":null}]}" |
+    rpc "$1" "$(block_req "$2")" |
         jq -c 'select(.result == 200) | .response' 2>/dev/null
 }
-hash_at() { block_at "$1" "$2" | jq -r '.hash // empty' 2>/dev/null; }
+# Hash of block $2 on node $1, for comparing nodes. Prints the hash, or TIMEOUT
+# (curl timed out) / EMPTY (no usable answer) after one retry with READ_TIMEOUT.
+# Only a missing answer is retried: a hash is returned as read, never re-read.
+hash_read() {
+    local t out rc h
+    for t in 4 "${READ_TIMEOUT}"; do
+        out=$(rpc "$1" "$(block_req "$2")" "${t}"); rc=$?
+        h=$(printf '%s' "${out}" | jq -r 'select(.result == 200) | .response.hash // empty' 2>/dev/null)
+        [ -n "${h}" ] && { echo "${h}"; return 0; }
+        [ "${t}" = 4 ] && sleep 1
+    done
+    if [ "${rc}" = 28 ]; then echo TIMEOUT; else echo EMPTY; fi
+    return 1
+}
+# The hash, or nothing when it could not be read (after hash_read's retry)
+hash_at() { local h; h=$(hash_read "$1" "$2") && echo "${h}"; }
 serving() { local cid; cid=$(cid_of "$1"); [ -n "${cid}" ] && docker exec "${cid}" curl -sS -m3 "http://localhost:$(port_of "$1")/" 2>/dev/null | grep -q Hello; }
 wait_serve() {
     local deadline=$((SECONDS + $2))
@@ -359,28 +377,69 @@ stop_node() {
     event "node-$1 stopped"
 }
 
-# All running nodes on one head >= $1 with one hash
+# Window (s) for a fresh lockstep: each attempt costs about 2 reads per node, so
+# it grows with N (120 up to N=6, 160 at 10, 190 at 13)
+lockstep_window() { local w=$((60 + 10 * N)); [ "${w}" -lt 120 ] && w=120; echo "${w}"; }
+
+# All running nodes on one head >= $1 with one hash, within $2 seconds.
+# Returns 0 on lockstep (LOCK_HEIGHT set); 3 when two nodes hold different hashes
+# at one height (at once with LOCKSTEP_FAIL_ON_DIVERGENCE=1, else when the window
+# ends on such an attempt); 1 when a node could not be read or was behind.
+# LOCKSTEP_WHY holds the reason. An empty or timed-out read is retried inside
+# the attempt (head_of, hash_read); two different hashes are never retried.
+# The step log gets, per attempt, each node's hash (nodes sharing one are
+# grouped) or EMPTY / TIMEOUT; the console gets the heads and a final summary.
+LOCKSTEP_FAIL_ON_DIVERGENCE=0
 wait_lockstep() {
-    local deadline=$((SECONDS + $2)) i h first hs ok
+    local deadline=$((SECONDS + $2)) t0=${SECONDS} tries=0 i h v k g first hl ok skew
+    local ul bl el gl why ecs
+    local -A grp ec
+    ok=0; skew=0; first=""; ul=""; bl=""; el=""; gl=""; grp=(); ec=()
+    LOCKSTEP_WHY=""
     while [ ${SECONDS} -lt ${deadline} ]; do
-        ok=1; first=""
+        tries=$((tries + 1)); ok=1; skew=0; first=""; hl=""; ul=""; bl=""; el=""; gl=""; grp=()
         for i in $(running); do
             h=$(head_of "${i}")
-            if [ -z "${h}" ] || [ "${h}" -lt "$1" ]; then ok=0; break; fi
+            [[ "${h}" =~ ^[0-9]+$ ]] || h=$(head_of "${i}" "${READ_TIMEOUT}")
+            if ! [[ "${h}" =~ ^[0-9]+$ ]]; then ok=0; ul+=" n${i}"; hl+="n${i}=? "; continue; fi
+            hl+="n${i}=${h} "
+            [ "${h}" -lt "$1" ] && { ok=0; bl+=" n${i}"; }
             [ -z "${first}" ] && first="${h}"
-            [ "${h}" != "${first}" ] && { ok=0; break; }
+            [ "${h}" != "${first}" ] && { ok=0; skew=1; }
         done
         if [ "${ok}" = 1 ]; then
-            hs=""
-            for i in $(running); do hs="${hs} $(hash_at "${i}" "${first}")"; done
-            if [ "$(echo "${hs}" | tr ' ' '\n' | grep -c .)" = "$(live_count)" ] &&
-                [ "$(echo "${hs}" | tr ' ' '\n' | grep . | sort -u | wc -l)" = 1 ]; then
+            for i in $(running); do
+                v=$(hash_read "${i}" "${first}")
+                case "${v}" in
+                    EMPTY|TIMEOUT) el+=" n${i}:${v}"; ec[${i}]=$(( ${ec[${i}]:-0} + 1 )) ;;
+                    *) grp[${v}]+=" n${i}" ;;
+                esac
+            done
+            for k in "${!grp[@]}"; do g="${grp[${k}]# }"; gl+=" ${k}=${g// /,}"; done
+            echo "[qdrill $(date -u +%H:%M:%S)] lockstep try ${tries} at ${first}:${gl:- no hash}${el:+ EMPTY/TIMEOUT:${el}}" >> "${STEP_LOG}"
+            if [ "${#grp[@]}" -gt 1 ]; then
+                LOCKSTEP_WHY="different hashes at ${first}:${gl}"
+                say "lockstep: ${LOCKSTEP_WHY}"
+                [ "${LOCKSTEP_FAIL_ON_DIVERGENCE}" = 1 ] && return 3
+            elif [ -z "${el}" ]; then
                 LOCK_HEIGHT="${first}"; return 0
             fi
+        else
+            echo "[qdrill $(date -u +%H:%M:%S)] lockstep try ${tries}: hashes not read, heads not level >= $1 (behind:${bl:- none} unreadable:${ul:- none} apart:${skew})" >> "${STEP_LOG}"
         fi
-        say "heads: $(heads_line)"
+        say "heads: ${hl}"
         sleep 5
     done
+    # The deadline passed: say what the last attempt saw, empty reads apart from disagreement
+    if [ "${ok}" = 1 ]; then
+        why="hashes at ${first}: empty/timeout:${el:- none}; disagree:$([ "${#grp[@]}" -gt 1 ] && echo "${gl}" || echo " none")"
+    else
+        why="heads not level (behind:${bl:- none} unreadable:${ul:- none} apart:${skew})"
+    fi
+    ecs=""; for i in "${!ec[@]}"; do ecs+=" n${i}x${ec[${i}]}"; done
+    LOCKSTEP_WHY="no lockstep >= $1 after $((SECONDS - t0))s, ${tries} tries; last try: ${why}${ecs:+; empty/timeout reads over all tries:${ecs}}"
+    say "lockstep: ${LOCKSTEP_WHY}"
+    [ "${#grp[@]}" -gt 1 ] && return 3
     return 1
 }
 
@@ -537,8 +596,18 @@ LOCK_HEIGHT=0
 PHASE_END=0
 STOP_HEIGHT=0
 
+# After a failed wait_lockstep ($1 its status, $2 what was awaited): a divergence
+# is a failure (exit 1) in the drills that set LOCKSTEP_FAIL_ON_DIVERGENCE.
+# Everything else, a node that could not be read included, gives no verdict: exit 2
+lockstep_fail() {
+    if [ "$1" = 3 ] && [ "${LOCKSTEP_FAIL_ON_DIVERGENCE}" = 1 ]; then
+        say "FAIL: ${LOCKSTEP_WHY}"; exit 1
+    fi
+    say "ABORT: $2 (${LOCKSTEP_WHY})"; exit 2
+}
+
 lockstep_or_abort() {
-    wait_lockstep "$1" "${LOCKSTEP_TIMEOUT}" || { say "ABORT: the running nodes never reached one head >= $1 with one hash"; exit 2; }
+    wait_lockstep "$1" "${LOCKSTEP_TIMEOUT}" || lockstep_fail $? "the running nodes never reached one head >= $1 with one hash"
     say "running nodes in lockstep at ${LOCK_HEIGHT}"
 }
 
@@ -618,7 +687,7 @@ scenario_fallback() {
     lockstep_or_abort 3
     local i h heads_db listed pl_json fallback_lines ok=1
     # Stop every node at once right after a commit, so they all hold one head
-    wait_lockstep "$((LOCK_HEIGHT + 1))" 120 || { say "ABORT: no fresh lockstep"; exit 2; }
+    wait_lockstep "$((LOCK_HEIGHT + 1))" "$(lockstep_window)" || lockstep_fail $? "no fresh lockstep"
     for i in $(running); do dc stop -t 0 "node-${i}" >> "${STEP_LOG}" 2>&1 & done
     wait
     for i in $(seq 1 "${N}"); do UP[i]=0; done
@@ -681,7 +750,7 @@ scenario_partition() {
         SIDECARS+=("$(sidecar "${i}")")
     done
     in_a() { case " ${groupA} " in *" $1 "*) return 0 ;; esac; return 1; }
-    wait_lockstep "$((LOCK_HEIGHT + 1))" 120 || { say "ABORT: no fresh lockstep"; exit 2; }
+    wait_lockstep "$((LOCK_HEIGHT + 1))" "$(lockstep_window)" || lockstep_fail $? "no fresh lockstep"
     h0="${LOCK_HEIGHT}"
     for i in $(seq 1 "${N}"); do
         for j in $(seq 1 "${N}"); do
@@ -802,6 +871,8 @@ phase_row() { # $1 phase, $2 down, $3 live, $4 from, $5 to, $6 outcome
 # stays up. Sets VICTIMS, SURVIVORS, VICTIM_SERVICES and the T_* and *_HEIGHT values.
 drill_stop() {
     local i v
+    # Two hashes at one height before the stop is a fork, not a missing read
+    LOCKSTEP_FAIL_ON_DIVERGENCE=1
     VICTIMS=(); SURVIVORS=(); VICTIM_SERVICES=()
     for i in $(seq 1 "${N}"); do
         if [ "${i}" -gt $((N - STOPS)) ]; then VICTIMS+=("${i}"); VICTIM_SERVICES+=("node-${i}"); else SURVIVORS+=("${i}"); fi
@@ -822,7 +893,7 @@ drill_stop() {
     phase_row baseline 0 "${N}" 0 "${BASE_HEIGHT}" progress
 
     # A fresh block with every node on it, so the stop lands on a settled chain
-    wait_lockstep "$((BASE_HEIGHT + 1))" 120 || { say "ABORT: no fresh lockstep before the stop"; exit 2; }
+    wait_lockstep "$((BASE_HEIGHT + 1))" "$(lockstep_window)" || lockstep_fail $? "no fresh lockstep before the stop"
     PRE_HEIGHT="${LOCK_HEIGHT}"
     PRE_PEERLIST=$(block_at "${SURVIVORS[0]}" "${PRE_HEIGHT}" | jq -r '.content.peerlist | length')
     [[ "${PRE_PEERLIST}" =~ ^[0-9]+$ ]] || { say "ABORT: cannot read the peerlist of block ${PRE_HEIGHT}"; exit 2; }
