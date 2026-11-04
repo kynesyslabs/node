@@ -7,8 +7,10 @@ import { getSharedState } from "src/utilities/sharedState"
 import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
-import { createBlock } from "./routines/createBlock"
-import { getEligiblePool } from "./routines/getShard"
+import { type CandidateOptions, createBlock } from "./routines/createBlock"
+import { getCommitteeFloor, getEligiblePool } from "./routines/getShard"
+import { producerCommits } from "./quorum"
+import { producerCommitRefusal } from "./routines/committeeCommit"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, {
@@ -21,15 +23,28 @@ import {
     ForgingEndedError,
     NotInShardError,
 } from "@/errors"
-import HandleGCR, { type BlockClock } from "src/libs/blockchain/gcr/handleGCR"
+import HandleGCR, {
+    type BlockClock,
+    type PendingGCRWrite,
+} from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
+    assertNoUnreconciledGcrState,
     fastSync,
     syncLock,
+    unreconciledGcrBlockNumber,
     waitForPeerStatus,
 } from "@/libs/blockchain/routines/Sync"
 import { isNetworkAhead } from "./routines/networkAheadVeto"
+import {
+    adoptBeforeRetry,
+    adoptBlockFromPeers,
+    type CommittedReport,
+    peekFailedRound,
+    probeCommitteeForHeight,
+    recordFailedRound,
+} from "./routines/committedBlock"
 import {
     forkScheduleAbstainReason,
     shouldLogForkScheduleAbstain,
@@ -49,6 +64,7 @@ import {
     assertForgedNonceTrace,
     buildNonceTrace,
     debugAssertionsEnabled,
+    noncesAfterApply,
     readNonces,
 } from "@/libs/debug/nonceTrace"
 import { markStep } from "@/utilities/loopScheduler"
@@ -56,6 +72,16 @@ import {
     DoubleSignError,
     SigningRecordError,
 } from "@/libs/identity/signingRecord"
+import { commitLockActive } from "./commitLock/domain"
+import { CommitLockError } from "./commitLock/lockStore"
+import {
+    gatherRetryCandidates,
+    rebuildTransactions,
+    type RebuiltTransactions,
+} from "./commitLock/candidate"
+import { broadcastPrecommit, lockAndPrecommit } from "./commitLock/precommit"
+import { proofOfLock } from "./commitLock/votes"
+import { CosignTimestampError } from "./routines/cosignTimestamp"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
 
@@ -114,6 +140,8 @@ export async function consensusRoutine(): Promise<void> {
     const blockTxs: MempoolTransaction[] = []
     const blockAttrs: Record<string, any> = {}
     const traceEnabled = debugAssertionsEnabled()
+    // The block's state, held in memory until the block commits it.
+    let pendingGCR: PendingGCRWrite | undefined
 
     try {
         log.only("[consensusRoutine] Initializing the consensus state")
@@ -131,6 +159,8 @@ export async function consensusRoutine(): Promise<void> {
             )
             return
         }
+
+        if (await gcrDriftBlocksRound(blockRef)) return
 
         // A node that restarted inside the window has not compared its schedule
         // yet, and the block-driven watch would only run it after the first round.
@@ -164,6 +194,20 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
+        // Read before the adoption check consumes the failed round: under
+        // commitLock a retry first asks the committee for its locks.
+        const retrying = peekFailedRound(blockRef)
+
+        markStep("consensus", "checkBeforeRetry")
+        if (
+            await adoptionSucceeded(blockRef, () => adoptBeforeRetry(blockRef))
+        ) {
+            log.warn(
+                `[consensusRoutine] Block ${blockRef} was committed by a member of the failed round; adopted it instead of retrying`,
+            )
+            return
+        }
+
         log.only("[consensusRoutine] Consensus state initialized")
 
         // await fastSync([], "consensusRoutine")
@@ -188,10 +232,7 @@ export async function consensusRoutine(): Promise<void> {
         )
 
         // if we have less than shard size of nodes, abort the consensus routine
-        if (
-            manager.shard.members.length <
-            Math.floor((getSharedState.shardSize * 2) / 3) + 1
-        ) {
+        if (manager.shard.members.length < getCommitteeFloor()) {
             log.error(
                 "[consensusRoutine] Less than shard size of nodes, aborting consensus routine",
             )
@@ -219,7 +260,7 @@ export async function consensusRoutine(): Promise<void> {
         const resRef = filterMempoolByRefBlock(initialMempool, true)
         failedTxs.push(...resRef.failedTxs)
 
-        const resNonce = await filterMempoolByNonce(resRef.validTxs)
+        let resNonce = await filterMempoolByNonce(resRef.validTxs)
         failedTxs.push(...resNonce.failedTxs)
 
         // Write final mempool used to forge the block
@@ -265,11 +306,42 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 5: Forge the block
         markStep("consensus", "forgeBlock")
-        const block = await forgeBlock(
-            blockTxs,
-            manager.blockTimestamp,
-            mergedPeerlist,
-        ) // NOTE The GCR hash is calculated here and added to the block
+        const lockOn = commitLockActive(blockRef)
+        // The round is the secretary timestamp as forging starts; a later
+        // greenlight may move blockTimestamp, but not this attempt's round.
+        const round = manager.blockTimestamp
+        let block: Block | null = null
+        if (lockOn) {
+            const rebuilt = await forgeLockedCandidate(
+                blockRef,
+                retrying,
+                round,
+                manager.boundCommittee,
+            )
+            if (rebuilt) {
+                block = rebuilt.block
+                blockTxs.length = 0
+                blockTxs.push(...rebuilt.txs.txs)
+                failedTxs.length = 0
+                failedTxs.push(...rebuilt.txs.failedTxs)
+                resNonce = rebuilt.txs.nonce
+                txMap.clear()
+                for (const tx of blockTxs) {
+                    txMap.set(tx.hash, tx)
+                }
+            }
+        }
+        if (!block) {
+            // The captured round, not blockTimestamp again: the lock
+            // exchange above awaits, and the content timestamp must equal
+            // the round the block is prevoted in.
+            block = await forgeBlock(
+                blockTxs,
+                round,
+                mergedPeerlist,
+                lockOn ? { round } : {},
+            ) // NOTE The GCR hash is calculated here and added to the block
+        }
         preventForgingEnded(blockRef)
         if (await isNetworkAhead("preVote")) {
             throw new AbortConsensusError(
@@ -284,10 +356,46 @@ export async function consensusRoutine(): Promise<void> {
                 (m.connection.string !== "" || m.isLocalNode),
         )
         markStep("consensus", "voteOnBlock")
-        const [pro, con] = await voteOnBlock(block, responsiveMembers)
+        const [pro, con, committed] = await voteOnBlock(
+            block,
+            responsiveMembers,
+        )
+
+        // Checked before our own tally: even with a quorum for our block, a
+        // member holding a certified block at this height means ours would be
+        // the second one.
+        if (await adoptReportedCommit(blockRef, committed)) {
+            throw new ForgingEndedError(
+                `[consensusRoutine] Block ${blockRef} was already committed by a shard member; adopted it`,
+            )
+        }
+
+        // A bound committee member that is offline is a missing vote, not a
+        // smaller committee.
+        const committee = manager.boundCommittee
+        const committeeSize = committee
+            ? committee.length
+            : manager.shard.members.length
+
+        // Under commitLock the prevotes only lock: the block is certified
+        // by one round's precommits, and that block is the one committed.
+        let certified: Block | null = null
+        if (lockOn) {
+            certified = await precommitPhase(block, round, committee)
+            block = certified
+        }
 
         // Check if the block is valid
-        if (isBlockValid(pro, manager.shard.members.length)) {
+        if (lockOn ? certified !== null : isBlockValid(pro, committeeSize)) {
+            const refusal = await producerCommitRefusal(
+                block,
+                committee,
+                getSharedState.shardSize,
+            )
+            if (refusal) {
+                throw new AbortConsensusError(refusal)
+            }
+
             markStep("consensus", "syncLock.acquire")
             releaseSyncLock = await syncLock.acquire()
 
@@ -359,15 +467,25 @@ export async function consensusRoutine(): Promise<void> {
                 ? await readNonces(traceAccounts)
                 : {}
 
+            // Sync can latch drift between the adoption checks and here; the
+            // lock now held keeps it from latching during our apply.
+            abortIfGcrStateUnreconciled(blockRef)
+
             markStep("consensus", "applyGCREdits")
             const applyRes = await applyGCREditsFromMergedMempool(
                 refRes.validTxs,
                 // The forged block's own time: what syncing nodes will read.
                 { height: block.number, timestampSec: block.content.timestamp },
             )
+            // A block with no transactions still commits its L2PS proofs
+            pendingGCR = applyRes.pending ?? HandleGCR.emptyPendingWrite()
 
             if (traceEnabled) {
-                const endApplyNonces = await readNonces(traceAccounts)
+                const endApplyNonces = noncesAfterApply(
+                    pendingGCR,
+                    traceAccounts,
+                    startApplyNonces,
+                )
                 const nonceTrace = buildNonceTrace(
                     traceAccounts,
                     resNonce.startFilterNonces,
@@ -455,14 +573,14 @@ export async function consensusRoutine(): Promise<void> {
                 )
             }
 
-            BroadcastManager.broadcastNewBlock(block)
-
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
+            // Their edits join the block's pending state and commit with it.
             const l2psStart = Date.now()
             const l2psResult = await L2PSConsensus.applyPendingProofs(
                 blockRef,
                 false,
+                pendingGCR,
             )
             const l2psEnd = Date.now()
             log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
@@ -489,7 +607,14 @@ export async function consensusRoutine(): Promise<void> {
             await finalizeBlock(
                 block,
                 blockTxs.map(tx => txMap.get(tx.hash)),
+                pendingGCR,
             )
+            pendingGCR = undefined
+
+            // Pushed only once inserted, so a receiver fetching the block's
+            // transactions from us finds them, and to every member including
+            // the signers, whose own tally may have failed.
+            void BroadcastManager.broadcastNewBlock(block)
 
             // Keep whitelisted failed txs in mempool for the next consensus round
             const failedTxsToRemove = failedTxs
@@ -529,8 +654,33 @@ export async function consensusRoutine(): Promise<void> {
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
 
+        if (invalid && getSharedState.lastBlockNumber < blockRef) {
+            recordFailedRound(
+                blockRef,
+                (manager?.shard?.members ?? []).map(m => m.identity),
+            )
+        }
+
+        if (
+            error instanceof NotInShardError &&
+            manager?.boundCommittee &&
+            manager.shard?.blockRef === blockRef &&
+            manager.shard.members.length < getCommitteeFloor() &&
+            getSharedState.lastBlockNumber < blockRef
+        ) {
+            probeCommitteeForHeight(
+                blockRef,
+                manager.boundCommittee,
+                manager.shard.members,
+            )
+        }
+
         if (aborted || invalid) {
             exitReason = "abortConsensus"
+            // Its message is the only record of why the round stopped.
+            if (error instanceof AbortConsensusError) {
+                log.warning(`[consensusRoutine] ${error.message}`)
+            }
             if (aborted) {
                 log.error(error)
                 log.error("[consensusRoutine] Exiting consensus routine")
@@ -541,27 +691,13 @@ export async function consensusRoutine(): Promise<void> {
                         manager.ourValidatorPhase.currentPhase,
                 )
             }
-            // Nothing persisted yet: nothing to undo.
-            if (successfulTxs.length > 0) {
+            // The block's state only commits with the block, so a round that
+            // ends before the insert leaves nothing on disk to undo.
+            if (pendingGCR) {
                 log.warn(
-                    `[consensusRoutine] Round ended after GCR edits were applied for block ${blockRef}. Rolling back ${successfulTxs.length} tx(s)`,
+                    `[consensusRoutine] Round ended after GCR edits were applied for block ${blockRef}. Dropping the uncommitted state of ${successfulTxs.length} tx(s)`,
                 )
-
-                // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
-                // Getting the txs from the hashes
-                const txsToRollback: Transaction[] = []
-
-                for (const txHash of successfulTxs) {
-                    const tx = txMap.get(txHash)
-                    if (tx) {
-                        txsToRollback.push(tx)
-                    }
-                }
-                await rollbackGCREditsFromTxs(txsToRollback)
-                await HandleGCR.deleteAssignedTxsForBlock(blockRef)
-
-                // Also rollback any L2PS proofs that were applied
-                await L2PSConsensus.rollbackProofsForBlock(blockRef)
+                pendingGCR = undefined
             }
 
             if (
@@ -798,26 +934,16 @@ async function mergeAndOrderMempools(
 }
 
 /**
- * Rollback the GCREdits from a set of txs
- *
- * @param txs - The txs
- * @returns The successful and failed GCREdits
- */
-async function rollbackGCREditsFromTxs(txs: Transaction[]) {
-    return await HandleGCR.applyTransactions(txs, true)
-}
-
-/**
  * Apply the GCREdits from the merged mempool using batched entity processing.
  *
  * This optimized version:
  * 1. Pre-filters already-executed txs in a single batch query
  * 2. Batch loads all affected GCRMain entities
  * 3. Processes edits in-memory without per-edit DB operations
- * 4. Commits all changes in a single batch at the end
+ * 4. Returns the outcome as `pending`, committed with the block
  *
  * @param mempool - The mempool
- * @returns The successful and failed GCREdits
+ * @returns The successful and failed GCREdits, and the state to commit
  */
 async function applyGCREditsFromMergedMempool(
     mempool: MempoolTransaction[],
@@ -826,6 +952,7 @@ async function applyGCREditsFromMergedMempool(
     successfulTxs: string[]
     appliedTxs: string[]
     failedTxs: FailedTranscation[]
+    pending?: PendingGCRWrite
 }> {
     let failedTxs: FailedTranscation[] = []
 
@@ -855,7 +982,9 @@ async function applyGCREditsFromMergedMempool(
         return { successfulTxs: [], appliedTxs: [], failedTxs }
     }
 
-    const res = await HandleGCR.applyTransactions(pendingTxs, false, clock)
+    const res = await HandleGCR.applyTransactions(pendingTxs, false, clock, {
+        defer: true,
+    })
     failedTxs = failedTxs.concat(
         res.failedTxs.map(txhash => ({
             txhash: txhash,
@@ -874,7 +1003,12 @@ async function applyGCREditsFromMergedMempool(
         }
     }
 
-    return { successfulTxs, appliedTxs: res.successfulTxs, failedTxs }
+    return {
+        successfulTxs,
+        appliedTxs: res.successfulTxs,
+        failedTxs,
+        pending: res.pending,
+    }
 }
 
 // /**
@@ -931,6 +1065,7 @@ async function forgeBlock(
     orderedTransactions: Transaction[],
     blockTimestamp: number,
     peerlist: string[] = [],
+    options: CandidateOptions = {},
 ): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     // const lastBlockNumber = await Chain.getLastBlockNumber()
@@ -947,13 +1082,28 @@ async function forgeBlock(
             lastBlockNumber + 1,
             peerlist,
             blockTimestamp,
+            options,
         )
     } catch (error) {
-        // A refused signature or an unusable signing record ends this round
-        // without signing; anything else keeps its existing handling.
+        // A rebuild that does not reproduce its block, or whose reported
+        // timestamp we will not sign, is the caller's to judge: the proof of
+        // lock does not cover the reported inputs, so another set may still
+        // rebuild the block.
+        if (
+            (error instanceof CommitLockError ||
+                error instanceof CosignTimestampError) &&
+            options.expectedHash !== undefined
+        ) {
+            throw error
+        }
+        // A refused signature, an unusable signing record or a timestamp we
+        // will not sign ends this round without signing; anything else keeps
+        // its existing handling.
         if (
             error instanceof DoubleSignError ||
-            error instanceof SigningRecordError
+            error instanceof SigningRecordError ||
+            error instanceof CommitLockError ||
+            error instanceof CosignTimestampError
         ) {
             log.error(`[consensusRoutine] ${error.message}`)
             throw new AbortConsensusError(error.message)
@@ -968,6 +1118,155 @@ async function forgeBlock(
 }
 
 /**
+ * The candidate step 1 of a commitLock round decides on before a fresh
+ * block: our locked block, or a block with a later proof of lock that the
+ * committee reports. Null when nothing binds this attempt and a fresh
+ * block may be forged. A member bound by its lock, or by a precommit in
+ * its signing record, that cannot rebuild a block the lock allows ends
+ * the attempt instead: prevoting anything else would break its lock.
+ */
+export async function forgeLockedCandidate(
+    blockRef: number,
+    retrying: boolean,
+    round: number,
+    committee: string[] | null,
+): Promise<{ block: Block; txs: RebuiltTransactions } | null> {
+    if (!committee || committee.length === 0) {
+        throw new AbortConsensusError(
+            `[commitLock] No bound committee for block ${blockRef}; not forging`,
+        )
+    }
+
+    let gathered: Awaited<ReturnType<typeof gatherRetryCandidates>>
+    try {
+        gathered = await gatherRetryCandidates(blockRef, retrying, committee)
+    } catch (e) {
+        if (e instanceof CommitLockError || e instanceof SigningRecordError) {
+            throw new AbortConsensusError(`[commitLock] ${e.message}`)
+        }
+        throw e
+    }
+    preventForgingEnded(blockRef)
+    if (await adoptReportedCommit(blockRef, gathered.committed)) {
+        throw new ForgingEndedError(
+            `[consensusRoutine] Block ${blockRef} was already committed by a committee member; adopted it`,
+        )
+    }
+
+    for (const option of gathered.options) {
+        for (const inputs of option.variants) {
+            const txs = await rebuildTransactions(
+                blockRef,
+                inputs,
+                option.sources,
+            )
+            if (!txs) continue
+            try {
+                const block = await forgeBlock(
+                    txs.txs,
+                    inputs.timestamp,
+                    inputs.peerlist,
+                    { round, expectedHash: option.hash },
+                )
+                log.info(
+                    `[commitLock] Prevoting ${option.origin === "lock" ? "our locked" : "a proof-of-lock"} block ${option.hash} ` +
+                        `(proof of lock round ${option.round}) at height ${blockRef} in round ${round}`,
+                )
+                return { block, txs }
+            } catch (e) {
+                if (
+                    !(e instanceof CommitLockError) &&
+                    !(e instanceof CosignTimestampError)
+                ) {
+                    throw e
+                }
+                log.warning(`[commitLock] ${e.message}`)
+            }
+        }
+    }
+
+    if (gathered.locked) {
+        throw new AbortConsensusError(
+            `[commitLock] Locked on ${gathered.locked.hash} at height ${blockRef} but cannot rebuild it; not prevoting another block`,
+        )
+    }
+    if (gathered.bound) {
+        throw new AbortConsensusError(
+            `[commitLock] ${gathered.bound}, and no block it allows could be rebuilt; not prevoting another block`,
+        )
+    }
+    return null
+}
+
+/**
+ * Lock, precommit and gather the certificate of our candidate. Returns the
+ * block to commit: the candidate carrying one round's precommits instead of
+ * its prevotes. The candidate object itself keeps the prevotes, which
+ * inbound proposals may still be merging into.
+ */
+async function precommitPhase(
+    block: Block,
+    round: number,
+    committee: string[] | null,
+): Promise<Block> {
+    if (!committee || committee.length === 0) {
+        throw new AbortConsensusError(
+            `[commitLock] No bound committee for block ${block.number}; not precommitting`,
+        )
+    }
+    const height = block.number
+    const pol = await proofOfLock(
+        height,
+        round,
+        block.hash,
+        block.validation_data?.signatures,
+        committee,
+    )
+    if (!pol) {
+        throw new BlockInvalidError(
+            `[consensusRoutine] [result] Block ${block.hash} has no proof of lock in round ${round}`,
+        )
+    }
+    log.info(
+        `[commitLock] Proof of lock for block ${block.hash}: ${Object.keys(pol).length} prevotes in round ${round}`,
+    )
+
+    markStep("consensus", "precommit")
+    const request = { height, round, hash: block.hash, pol }
+    const outcome = await lockAndPrecommit(request)
+    if ("refused" in outcome) {
+        throw new AbortConsensusError(
+            `[commitLock] Not precommitting ${block.hash}: ${outcome.refused}`,
+        )
+    }
+    const tally = await broadcastPrecommit(
+        request,
+        outcome.signature,
+        committee,
+    )
+    const precommits = Object.keys(tally.certificate).length
+    log.info(
+        `[commitLock] Precommit tally for block ${block.hash}: ` +
+            `precommits=${precommits}, quorum=${tally.quorum} (round ${round})`,
+    )
+
+    if (await adoptReportedCommit(height, tally.committed)) {
+        throw new ForgingEndedError(
+            `[consensusRoutine] Block ${height} was already committed by a committee member; adopted it`,
+        )
+    }
+    if (precommits < tally.quorum) {
+        throw new BlockInvalidError(
+            `[consensusRoutine] [result] Block ${block.hash} has ${precommits} precommits in round ${round}, needs ${tally.quorum}`,
+        )
+    }
+
+    const certified = Object.assign(new Block(), block)
+    certified.validation_data = { signatures: tally.certificate, round }
+    return certified
+}
+
+/**
  * Vote on the block by broadcasting the block hash to the shard
  *
  * @param block - The block
@@ -977,12 +1276,12 @@ async function forgeBlock(
 async function voteOnBlock(
     block: Block,
     shard: Peer[],
-): Promise<[number, number]> {
+): Promise<[number, number, CommittedReport[]]> {
     const now = Date.now()
     log.only(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
-    const [pro, con] = await broadcastBlockHash(block, shard)
+    const [pro, con, committed] = await broadcastBlockHash(block, shard)
     // await updateValidatorStatus("votedForBlock", true, false, true)
     // Using the secretary to update the local statuses
     await updateValidatorPhase(6, block.number)
@@ -992,7 +1291,118 @@ async function voteOnBlock(
         `[consensusRoutine] Time taken: ${(end - now) / 1000}s for voting on the block`,
     )
 
-    return [pro, con]
+    return [pro, con, committed]
+}
+
+/**
+ * A failed attempt to take a peer's block only means we do not have it: the
+ * round's catch treats unknown errors as fatal and exits the process, which
+ * a peer serving a certified header and then dropping must not cause.
+ *
+ * The exception is a failed apply whose undo also failed: its edits stay in
+ * local state without the block, so the round must not fall back to its own
+ * tally and apply its edits on top of them.
+ */
+async function adoptionSucceeded(
+    blockRef: number,
+    adopt: () => Promise<boolean>,
+): Promise<boolean> {
+    let adopted = false
+    try {
+        adopted = await adopt()
+    } catch (e) {
+        log.error(
+            `[consensusRoutine] Taking a member's block ${blockRef} failed, deciding on our own round: ${e instanceof Error ? e.message : String(e)}`,
+        )
+    }
+    if (!adopted) abortIfGcrStateUnreconciled(blockRef)
+    return adopted
+}
+
+let driftWarnedHeight: number | null = null
+
+/**
+ * True when the round must not start: GCR edits of a block are applied
+ * without it and only an operator resync can reconcile them, so joining the
+ * shard would only lead to votes and blocks computed from drifted state.
+ *
+ * The latch is per process, so durable state is checked too: after a
+ * restart, orphaned edits are otherwise caught only when sync next applies a
+ * block, and a round at the same height would apply its own on top of them.
+ * That check rolls back what it can and latches what it cannot. A block's
+ * edits now commit with the block, so orphaned stamps can only be left by an
+ * older binary. It runs under syncLock so it never races a block apply.
+ * Before the first fast sync succeeds, sync applies without the lock, so the
+ * check is left to sync then.
+ *
+ * @throws AbortConsensusError when the durable check finds drift it cannot undo
+ */
+async function gcrDriftBlocksRound(blockRef: number): Promise<boolean> {
+    if (
+        unreconciledGcrBlockNumber() === null &&
+        getSharedState.fastSyncCount > 0
+    ) {
+        try {
+            await syncLock.runExclusive(() => assertNoUnreconciledGcrState())
+        } catch (e) {
+            throw new AbortConsensusError(
+                `[consensusRoutine] Not starting block ${blockRef}: ${e instanceof Error ? e.message : String(e)}`,
+            )
+        }
+    }
+
+    const drifted = unreconciledGcrBlockNumber()
+    if (drifted === null) return false
+    getSharedState.syncStatus = false
+    // The handler path can start a round on every proposal it receives
+    if (driftWarnedHeight !== blockRef) {
+        driftWarnedHeight = blockRef
+        log.warning(
+            `[consensusRoutine] Not joining the round for block ${blockRef}: GCR state for block ${drifted} is applied without its block. Operator action needed: resync this node from scratch.`,
+        )
+    }
+    return true
+}
+
+/**
+ * Sync has already marked the node unsynced and refuses every further apply
+ * until a resync; the round has to stop the same way, or it would certify a
+ * block computed from state no block authorizes.
+ */
+function abortIfGcrStateUnreconciled(blockRef: number): void {
+    const drifted = unreconciledGcrBlockNumber()
+    if (drifted === null) return
+    getSharedState.syncStatus = false
+    throw new AbortConsensusError(
+        `[consensusRoutine] GCR state for block ${drifted} is applied without its block; refusing to apply block ${blockRef} on top of it. The node must be resynced from scratch.`,
+    )
+}
+
+/**
+ * Members that answered our proposal with a block they already committed:
+ * true once we hold one of those blocks, so the round must end without
+ * committing its own. Otherwise our own tally decides, and those members
+ * already counted against it.
+ */
+export async function adoptReportedCommit(
+    blockRef: number,
+    committed: CommittedReport[],
+): Promise<boolean> {
+    if (committed.length === 0) return false
+    markStep("consensus", "adoptCommittedBlock")
+    const adopted = await adoptionSucceeded(blockRef, () =>
+        adoptBlockFromPeers(
+            blockRef,
+            committed.map(c => c.peer),
+            "proposeBlockHash",
+        ),
+    )
+    if (!adopted) {
+        log.error(
+            `[consensusRoutine] ${committed.length} member(s) report block ${blockRef} committed, but none served a block that verifies`,
+        )
+    }
+    return adopted
 }
 
 /**
@@ -1003,34 +1413,29 @@ async function voteOnBlock(
  * @returns True if the block is valid, false otherwise
  */
 function isBlockValid(pro: number, totalVotes: number): boolean {
-    // vote count threshold
-    const threshold = Math.floor((totalVotes * 2) / 3) + 1
-
-    // minimum validators threshold
-    // attempts to fix forking bug
-    const minValidators = Math.floor((getSharedState.shardSize * 2) / 3) + 1
-    const isMinimumValidators = pro >= minValidators
-
     // DEBUG: DO NOT REMOVE COMMENTED CODE
     // if (totalVotes >= minValidators && pro < threshold) {
     //     log.error("[consensusRoutine] Block is not valid")
     //     process.exit(0)
     // }
 
-    return isMinimumValidators && pro >= threshold
+    return producerCommits(pro, totalVotes, getSharedState.shardSize)
 }
 
 /**
- * Finalize the block. Inserts the block into the chain.
+ * Finalize the block. Inserts the block into the chain together with the
+ * state its transactions produced.
  *
  * @param block - The block
- * @param pro - The number of votes for the block
+ * @param txs - The block's transactions
+ * @param pendingGCR - The state to commit with the block
  */
 async function finalizeBlock(
     block: Block,
     txs: MempoolTransaction[],
+    pendingGCR?: PendingGCRWrite,
 ): Promise<void> {
-    await Chain.insertBlock(block, txs) // NOTE Transactions are added to the Transactions table here
+    await Chain.insertBlock(block, txs, undefined, pendingGCR) // NOTE Transactions are added to the Transactions table here
     getSharedState.consecutiveMissedShardBlocks = 0
     log.info("[CONSENSUS] Block added to the chain")
 }

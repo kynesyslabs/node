@@ -166,6 +166,59 @@ export type AtomicWorkConfig = BaseForkConfig
 export type EditBindingConfig = BaseForkConfig
 
 /**
+ * `quorumParity` fork: a synced block is accepted only with the signatures
+ * a producer needs to commit it, 2/3 + 1 of a full committee
+ * (`shardSize`), however small the eligible pool at its height is.
+ *
+ * Before it, sync counted the quorum against min(shardSize, pool): a block
+ * whose parent committed a peerlist of two validators was accepted with two
+ * signatures, though no honest producer commits below the committee floor.
+ *
+ * Activation at H applies to block H and later. Dormant by default
+ * (`activationHeight: null`), so a node carrying the code syncs existing
+ * history exactly as before; a chain started from genesis with this build
+ * sets it to 0. No payload beyond the base.
+ */
+export type QuorumParityConfig = BaseForkConfig
+
+/**
+ * `committeeBinding` fork: the committee for block h is a pure function of
+ * the chain up to h - 1 (eligible pool, common validator seed, pins), and a
+ * block counts only signatures by members of that committee.
+ *
+ * Before it, the committee was the ranked pool filtered by the forger's own
+ * view of who is online, and sync counted signatures from any pool member.
+ * With a pool larger than the quorum allows to split, two partitions could
+ * each draw a committee, reach 2/3 + 1 of shardSize and finalize different
+ * blocks at one height, both accepted by sync.
+ *
+ * Activation at H applies to block H and later. Dormant by default
+ * (`activationHeight: null`), so a node carrying the code agrees with one
+ * without it; a chain started from genesis with this build sets it to 0.
+ * No payload beyond the base.
+ */
+export type CommitteeBindingConfig = BaseForkConfig
+
+/**
+ * `commitLock` fork: a committee member signs a block twice, a prevote and
+ * a precommit, each bound to the height and round, and locks on a block
+ * once it holds a proof of lock (2/3 + 1 committee prevotes in one round).
+ * A block carries 2/3 + 1 committee precommits of one round.
+ *
+ * Before it, a member's single signature was both its vote and part of the
+ * certificate, so a retried height could certify a second block with the
+ * same signers while the first was committed by a member that was then cut
+ * off.
+ *
+ * It relies on the bound committee for its quorum and its overlap argument,
+ * so the loader refuses a genesis that schedules it at a height where
+ * `committeeBinding` is not active. Activation at H applies to block H and
+ * later. Dormant by default (`activationHeight: null`); a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type CommitLockConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -200,6 +253,9 @@ export type ForkConfig =
     | TlsnProofEnforcementConfig
     | AtomicWorkConfig
     | EditBindingConfig
+    | QuorumParityConfig
+    | CommitteeBindingConfig
+    | CommitLockConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -216,6 +272,9 @@ export type ForkName =
     | "tlsnProofEnforcement"
     | "atomicWork"
     | "editBinding"
+    | "quorumParity"
+    | "committeeBinding"
+    | "commitLock"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -231,6 +290,9 @@ export interface ForkConfigByName {
     tlsnProofEnforcement: TlsnProofEnforcementConfig
     atomicWork: AtomicWorkConfig
     editBinding: EditBindingConfig
+    quorumParity: QuorumParityConfig
+    committeeBinding: CommitteeBindingConfig
+    commitLock: CommitLockConfig
 }
 
 /**
@@ -365,6 +427,34 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Apply refuses a transaction whose edits differ from the ones regenerated " +
             "from its signed body, and an edit that acts on an account other than the sender's.",
     },
+    quorumParity: {
+        // Dormant by default: blocks already on a running chain were synced
+        // under the pool-relative quorum, and a missing genesis entry
+        // hydrates from here. A chain launched from genesis with this build
+        // sets 0.
+        activationHeight: null,
+        description:
+            "Sync accepts a block only with 2/3 + 1 of a full committee's signatures, " +
+            "the same quorum a producer needs to commit it.",
+    },
+    committeeBinding: {
+        // Dormant by default: the committee rule changes which signatures
+        // count, and a missing genesis entry hydrates from here. A chain
+        // launched from genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "The committee for a block is drawn from chain data alone, and only its " +
+            "members' signatures count toward the block's quorum.",
+    },
+    commitLock: {
+        // Dormant by default: it changes what a block's signatures sign, and
+        // a missing genesis entry hydrates from here. A chain launched from
+        // genesis with this build sets 0, together with committeeBinding.
+        activationHeight: null,
+        description:
+            "Members prevote and precommit with the height and round in the signed message, " +
+            "lock on a block with a proof of lock, and a block carries one round's precommits.",
+    },
 }
 
 /**
@@ -384,5 +474,8 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tlsnProofEnforcement: { ...DEFAULT_FORK_CONFIG.tlsnProofEnforcement },
         atomicWork: { ...DEFAULT_FORK_CONFIG.atomicWork },
         editBinding: { ...DEFAULT_FORK_CONFIG.editBinding },
+        quorumParity: { ...DEFAULT_FORK_CONFIG.quorumParity },
+        committeeBinding: { ...DEFAULT_FORK_CONFIG.committeeBinding },
+        commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
     }
 }

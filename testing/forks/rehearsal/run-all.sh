@@ -11,7 +11,8 @@
 #   7. Scenario 3 — fresh-node-post-fork             (decimals last)
 #   8. Scenario 9 — gasFeeSeparation co-activation   (DEM-665)
 #   9. Scenario 10 — burn-spend-rejection            (DEM-665, placeholder)
-#  10. Scenario 11 — quorum-loss halt and recovery   (G3-6)
+#  10. Scenario 11 — sigkill-replay                   (atomic block apply)
+#  11. Scenario 12 — quorum-loss halt and recovery   (G3-6)
 #
 # Note: scenario 5 (cap-policy-fires-loud) was retired alongside the
 # legacy `global_change_registry` backend — the CAP policy only ever
@@ -36,7 +37,8 @@ SCENARIOS=(
     "scenarios/03-fresh-node-post-fork.ts"
     "scenarios/09-fee-distribution.ts"
     "scenarios/10-burn-spend-rejection.ts"
-    "scenarios/11-quorum-loss-halt-recovery.ts"
+    "scenarios/11-sigkill-replay.ts"
+    "scenarios/12-quorum-loss-halt-recovery.ts"
 )
 
 EXTRA_ARGS=()

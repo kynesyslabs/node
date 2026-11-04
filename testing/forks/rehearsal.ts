@@ -26,6 +26,7 @@ import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { hashGenesisData } from "../../src/libs/blockchain/genesis/normalizeGenesisForHash"
 import { txSignaturePreimage } from "../../src/libs/crypto/txSignaturePreimage"
+import { DEFAULT_FORK_CONFIG } from "../../src/forks/forkConfig"
 
 const env = (k: string) => {
     const v = process.env[k]
@@ -36,7 +37,7 @@ const ROOT = env("ROOT")
 const RUN_DIR = env("RUN_DIR")
 const PROJECT = env("PROJECT")
 const UPGRADE = process.env.UPGRADE_PATH === "1"
-const UPGRADE_LEAD = Number(process.env.UPGRADE_LEAD ?? 30)
+const UPGRADE_LEAD = Number(process.env.UPGRADE_LEAD ?? 60)
 // In the upgrade path the height is only known once the schedule is added to the running chain.
 let H = Number(env("ACTIVATION_HEIGHT"))
 const CHAIN_ID = Number(env("CHAIN_ID"))
@@ -331,11 +332,14 @@ check(
     infos.every(i => i.response.forks.web2ProofBinding?.activationHeight === H),
     `all 4 nodes report web2ProofBinding at ${H} through getNetworkInfo`,
 )
+// From the registry, so a release that adds a fork does not need this file edited.
+const byName = (a: string, b: string) => a.localeCompare(b)
+const knownForks = Object.keys(DEFAULT_FORK_CONFIG).sort(byName).join(",")
 check(
-    infos.every(i => Object.keys(i.response.forks).length === 7) &&
+    infos.every(i => Object.keys(i.response.forks).sort(byName).join(",") === knownForks) &&
         new Set(infos.map(i => i.response.forkScheduleDigest)).size === 1 &&
         /^[0-9a-f]{64}$/.test(infos[0].response.forkScheduleDigest),
-    "all 4 nodes report all 7 forks and one and the same schedule digest",
+    `all 4 nodes report the ${Object.keys(DEFAULT_FORK_CONFIG).length} forks this build knows and one and the same schedule digest`,
 )
 const loaded = (n: number) =>
     execFileSync(DOCKER, ["logs", `${PROJECT}-node-${n}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
@@ -499,11 +503,16 @@ execFileSync(DOCKER, ["restart", `${PROJECT}-node-4`])
 // Taken after the restart returns, so the old process's last lines and its kill
 // event fall before both marks.
 const restartedAt = new Date().toISOString()
-const restartedEpoch = Math.floor(Date.now() / 1000)
+const restartedNs = BigInt(Date.now()) * 1_000_000n
 // A manual restart zeroes the engine's restart counter; count from here.
 restartsAfterManual = restartCounts()
 const back = await until(async () => (await tipOf(PORTS[3])) >= common - 1, 150, 3000)
 check(back, "node 4 restarted and is serving again")
+check(
+    /Refusing to boot/.test(nodeLog(4, restartedAt)) === false &&
+        /accepted by DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=/.test(nodeLog(4, restartedAt)),
+    "node 4 loaded the edit below its tip only because its operator named that exact schedule",
+)
 // Peer bootstrap runs some seconds after the RPC is up.
 const warned = await until(() => /FORK SCHEDULE MISMATCH/.test(nodeLog(4, restartedAt)), 90, 2000)
 check(warned, "node 4's bootstrap logged FORK SCHEDULE MISMATCH against its peers")
@@ -561,35 +570,39 @@ const r4Legacy = await submit(carol4, carolLegacy)
 record("legacy-signed-to-node4", r4Legacy)
 check(r4Legacy.accepted, "node 4 accepts the very same legacy-signed transfer: the admission rules now disagree")
 
-// Node 4 keeps being drawn into shards with a candidate block nobody else agrees
-// with; after three such draws its stall watchdog ends the process.
-const stalled = await until(() => stallExit(nodeLog(4, restartedAt)), 180, 3000)
-check(stalled, "node 4 logged the stall watchdog's exit after three shard draws without its signature")
-const log4s = nodeLog(4, restartedAt)
-const stallBlocks = [...log4s.matchAll(/Drawn into the shard for block (\d+) but our signature is missing/g)].map(m => Number(m[1]))
-const refusedCandidates = (log4s.match(/Hash does not correspond to our candidate block/g) ?? []).length
-say(`   node 4 log since the restart: ${refusedCandidates} candidate-block refusals by peers; missing-signature stalls at blocks ${stallBlocks.join(", ")}`)
-check(
-    refusedCandidates > 0 && stallBlocks.length >= 3,
-    "peers refused node 4's candidate blocks, and it was drawn into at least three shards without signing",
-)
-const incl = landed(splitBase.hash)
+// Sync checks every transaction's signature under the node's own schedule, so
+// node 4 refuses the first block holding a domain-signed transfer and stays
+// below it. Nothing is scheduled ahead in its view, so it does not abstain.
+const incl = await (async () => {
+    let seen = landed(splitBase.hash)
+    await until(() => (seen = landed(splitBase.hash)).slice(0, 3).every(b => b !== null), 120, 3000)
+    return seen
+})()
 record("split-tx-block-per-node", incl)
 const majorityBlock = incl.slice(0, 3).find(b => b !== null) ?? null
 check(
     majorityBlock !== null && incl.slice(0, 3).every(b => b === majorityBlock),
     `nodes 1-3 included the domain-signed transfer in block ${majorityBlock}`,
 )
+const syncRefusal = `[syncVerify] block ${majorityBlock} tx ${splitBase.hash} rejected`
 check(
-    incl[3] === majorityBlock,
-    "node 4 still stored that block, which holds a transaction its own rules refuse: sync accepted it without that check (inferred, the sync code was not read)",
+    await until(() => nodeLog(4, restartedAt).includes(syncRefusal), 90, 3000),
+    `node 4 refused block ${majorityBlock} at sync: the domain-signed transfer fails its own signature rules`,
 )
-const stallSigners = stallBlocks.map(n => ({ n, signers: signersOf(n).length, node4: signersOf(n).includes(NODE4_KEY) }))
-record("signers-per-stall-block", stallSigners)
+const ahead = await until(async () => Math.min(...(await Promise.all(PORTS.slice(0, 3).map(tipOf)))) >= majorityBlock! + 3, 120, 3000)
+const tips6 = await Promise.all(PORTS.map(tipOf))
+record("tips-after-split", tips6)
 check(
-    stallSigners.every(b => !b.node4 && b.signers === 3),
-    `the blocks node 4 was drawn into (${stallBlocks.join(", ")}) were signed by the other 3 validators; none carries node 4's signature`,
+    ahead && tips6[3] === majorityBlock! - 1 && landed(splitBase.hash)[3] === null,
+    `nodes 1-3 moved on to ${Math.min(...tips6.slice(0, 3))} while node 4 stays at ${majorityBlock! - 1} and never stored block ${majorityBlock}`,
 )
+const splitSigners = [0, 1, 2].map(k => majorityBlock! + k).map(n => ({ n, signers: signersOf(n).length, node4: signersOf(n).includes(NODE4_KEY) }))
+record("signers-after-split", splitSigners)
+check(
+    splitSigners.every(b => !b.node4 && b.signers === 3),
+    `blocks ${majorityBlock}..${majorityBlock! + 2} were signed by the other 3 validators; none carries node 4's signature`,
+)
+const log4s = nodeLog(4, restartedAt)
 const legacyLanded = landed(carolBase.hash)
 record("legacy-tx-block-per-node", legacyLanded)
 check(legacyLanded.every(b => b === null), "the legacy-signed transfer accepted only by node 4 landed in no block on any node")
@@ -597,7 +610,7 @@ record(
     "node4-log-evidence",
     log4s
         .split("\n")
-        .filter(l => /Hash does not correspond|STALL DETECTION|FORK SCHEDULE MISMATCH|Block is invalid/.test(l))
+        .filter(l => /syncVerify|Rejecting (synced )?block|STALL DETECTION|FORK SCHEDULE MISMATCH/.test(l))
         .slice(-8)
         .map(l => l.slice(0, 220)),
 )
@@ -607,29 +620,50 @@ step("recovery: the operator corrects the genesis file and restarts the validato
 const exits = () =>
     readFileSync(`${RUN_DIR}/logs/docker-events.log`, "utf8")
         .split("\n")
-        .filter(l => / die forkrehearsal-node-4 exit=0/.test(l) && Number(l.split(" ")[0]) >= restartedEpoch)
+        // Nanosecond event times: the restart's own kill precedes restartedNs,
+        // a later exit in the same second does not.
+        .filter(l => / die forkrehearsal-node-4 /.test(l) && /^\d+ /.test(l) && BigInt(l.split(" ")[0]) > restartedNs)
+check(exits().length === 0 && !stallExit(nodeLog(4, restartedAt)), "node 4 did not exit since its manual restart: no stall watchdog, it just stays behind")
+const info4s = (await nodeCall(PORTS[3], "getNetworkInfo")).response
 check(
-    await until(() => exits().length === 1, 30, 1000),
-    "the engine saw exactly one exit with code 0 from node 4 since its manual restart: the watchdog's process.exit(0)",
+    (await tipOf(PORTS[3])) === majorityBlock! - 1 && info4s.forks.signatureDomain.activationHeight === null,
+    `node 4 is still at ${majorityBlock! - 1} and still on the wrong schedule: nothing heals it`,
 )
-// This devnet's compose restarts the node (restart: unless-stopped). The root compose
-// file runs it with restart "no", where the node would stay down here instead.
-const secondBoot = await until(
-    () => /FORK SCHEDULE MISMATCH/.test(nodeLog(4, restartedAt).split("exiting for log investigation").pop() ?? ""),
+writeFileSync(`${RUN_DIR}/data/genesis.node4.json`, readFileSync(`${RUN_DIR}/data/genesis.node1.json`, "utf8"))
+// The corrected file moves both forks back to H, below node 4's tip.
+const plainAt = new Date(Date.now() - 2000).toISOString()
+execFileSync(DOCKER, ["restart", `${PROJECT}-node-4`])
+const plainRefused = await until(
+    () => nodeLog(4, plainAt).includes("[GENESIS] Refusing to boot: fork schedule in data/genesis.json differs"),
     120,
     3000,
 )
-check(secondBoot, "restarted by the engine from the same file, node 4 warns again and is still on the wrong schedule: nothing heals it")
-writeFileSync(`${RUN_DIR}/data/genesis.node4.json`, readFileSync(`${RUN_DIR}/data/genesis.node1.json`, "utf8"))
-const fixedAt = (execFileSync(DOCKER, ["restart", `${PROJECT}-node-4`]), new Date().toISOString())
+const plainLines = nodeLog(4, plainAt).split("\n").filter(l => l.includes("Refusing to boot")).slice(0, 1)
+record("plain-restart-refusal", plainLines.map(l => l.slice(0, 700)))
+check(
+    plainRefused && plainLines.some(l => l.includes(`DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=${env("AGREED_DIGEST")}`)),
+    "a plain restart on the corrected file is refused, and the refusal names the agreed schedule's digest",
+)
+// Recreating the container drops its log; keep the refusals and step 6's evidence.
+writeFileSync(`${RUN_DIR}/logs/node-4.pre-recreate.log`, nodeLog(4))
+// The operator sets that digest and recreates the container, as compose needs for a new variable.
+const fixedAt = new Date(Date.now() - 2000).toISOString()
+execFileSync(DOCKER, [
+    "compose", "-p", PROJECT, "--project-directory", `${RUN_DIR}/data`,
+    "-f", `${env("DEVNET")}/docker-compose.yml`, "-f", `${RUN_DIR}/data/compose.rehearsal.yml`,
+    "-f", `${RUN_DIR}/data/compose.node4-agreed.yml`,
+    "up", "-d", "--no-deps", "--no-build", "node-4",
+], { stdio: ["ignore", "ignore", "pipe"] })
 restartsAfterManual = restartCounts()
 const reloaded = await until(
-    () => nodeLog(4, fixedAt).includes(forkLoadedLine("signatureDomain", H)),
+    () => {
+        const log = nodeLog(4, fixedAt)
+        return log.includes(forkLoadedLine("signatureDomain", H)) && log.includes(`accepted by DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=${env("AGREED_DIGEST")}`)
+    },
     120,
     3000,
 )
-check(reloaded, `after the file was corrected and node 4 restarted, it loaded signatureDomain at ${H}`)
-check(!/FORK SCHEDULE MISMATCH/.test(nodeLog(4, fixedAt)), "and logged no schedule mismatch")
+check(reloaded, `recreated with that digest, node 4 loaded signatureDomain at ${H}`)
 const info4b = await until(
     async () => {
         try {
@@ -643,14 +677,14 @@ const info4b = await until(
 )
 check(info4b, `node 4 reports signatureDomain at ${H} again`)
 check(
-    (await nodeCall(PORTS[3], "getNetworkInfo")).response.forkScheduleDigest === infos[0].response.forkScheduleDigest,
+    info4b && (await nodeCall(PORTS[3], "getNetworkInfo")).response.forkScheduleDigest === infos[0].response.forkScheduleDigest,
     "and the same schedule digest as the quorum",
 )
 const tipTarget = async () => Math.min(...(await Promise.all(PORTS.slice(0, 3).map(tipOf))))
 check(await until(async () => (await tipOf(PORTS[3])) >= (await tipTarget()) - 1, 180, 3000), "node 4 catches up with the quorum")
+check(!/FORK SCHEDULE MISMATCH/.test(nodeLog(4, fixedAt)), "and, caught up with its peers, logged no schedule mismatch")
 const stateAfter = await settledStates()
 check(stateAfter !== null && new Set(stateAfter).size === 1, "balances and nonces identical on all 4 nodes again")
-const refusalsAtCatchUp = (nodeLog(4, fixedAt).match(/Hash does not correspond to our candidate block/g) ?? []).length
 const tipAtCatchUp = Math.min(...(await Promise.all(PORTS.map(tipOf))))
 await until(async () => Math.min(...(await Promise.all(PORTS.map(tipOf)))) >= tipAtCatchUp + 4, 120, 3000)
 const common2 = Math.min(...(await Promise.all(PORTS.map(tipOf))))
@@ -661,14 +695,34 @@ check(
     grid2.every(g => g.hashes.every(h => h !== null && h === g.hashes[0])),
     `block hashes identical on all 4 nodes for blocks ${heights2[0]}..${common2}, from before the split to after the recovery`,
 )
-const stillRefused = (nodeLog(4, fixedAt).match(/Hash does not correspond to our candidate block/g) ?? []).length
 const mempool4 = sql("node4_db", `select count(*) from mempooltx where hash='${carolBase.hash}'`)
-record("recovery-observation", { refusalsAtCatchUp, stillRefused, legacyTxInMempool: mempool4 })
-say(`   candidate-block refusals in node 4's log: ${refusalsAtCatchUp} up to the catch-up, ${stillRefused} four blocks later; legacy-signed transfer in node 4's mempool table: ${mempool4}`)
+record("recovery-observation", { legacyTxInMempool: mempool4 })
+say(`   legacy-signed transfer in node 4's mempool table: ${mempool4}`)
 check(mempool4 === "0", "the legacy-signed transfer only node 4 had admitted is gone from its mempool after the restarts")
-const tail7 = Array.from({ length: 2 }, (_, i) => common2 - 1 + i).map(n => ({ n, signers: signersOf(n).length, node4: signersOf(n).includes(NODE4_KEY) }))
+// Node 4 re-enters the committee only once a committed peerlist names it,
+// which takes a block or two after the catch-up; from then on it signs.
+const signedBy = (n: number) => ({ n, signers: signersOf(n).length, node4: signersOf(n).includes(NODE4_KEY) })
+let firstBack: number | null = null
+await until(async () => {
+    const tip = Math.min(...(await Promise.all(PORTS.slice(0, 3).map(tipOf))))
+    for (let n = tipAtCatchUp + 1; n <= tip; n++) {
+        if (signedBy(n).node4) {
+            firstBack = n
+            return tip >= n + 2
+        }
+    }
+    return false
+}, BLOCK_SECS * 10 + 60, 3000)
+const tail7 = Array.from({ length: Math.max(0, (await tipOf(PORTS[0])) - tipAtCatchUp) }, (_, i) => signedBy(tipAtCatchUp + 1 + i))
 record("signers-per-block-after-recovery", tail7)
-check(tail7.every(b => b.signers === 4 && b.node4), `blocks ${tail7[0].n} and ${tail7[1].n}, four blocks after the catch-up, carry all four signatures, node 4's again`)
+const after = firstBack === null ? [] : tail7.filter(b => b.n >= firstBack!).slice(0, 3)
+// A block commits once a quorum of precommits is in, so a healthy block can
+// carry three signatures without node 4's; its first signature proves it is
+// back, and the blocks from there only need a quorum.
+check(
+    firstBack !== null && firstBack <= tipAtCatchUp + 6 && after.length === 3 && after[0].node4 && after.every(b => b.signers >= 3),
+    `node 4 signs again from block ${firstBack}, within six blocks of the catch-up at ${tipAtCatchUp}, and the three blocks from there reach a quorum`,
+)
 
 }
 

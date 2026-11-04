@@ -1,3 +1,4 @@
+import log from "src/utilities/logger"
 import { OmniProtocolError, UnknownOpcodeError } from "../types/errors"
 import {
     HandlerContext,
@@ -18,6 +19,26 @@ export interface DispatchOptions<TPayload = unknown> {
      * The connection uses it to adopt an identity only after proof.
      */
     onAuthVerified?: (identity: string) => void
+}
+
+type PeerManagerClass = typeof import("src/libs/peer/PeerManager").default
+let peerManager: PeerManagerClass | null = null
+
+/**
+ * A verified message refreshes the sender's last-seen time, as the HTTP route
+ * does. Without it a peer that talks only over Omni goes quiet in the
+ * peerlist and the liveness probe takes it offline. Loaded lazily so the
+ * protocol layer does not pull the peer stack in at import time.
+ */
+async function notePeerAlive(identity: string): Promise<void> {
+    try {
+        peerManager ??= (await import("src/libs/peer/PeerManager")).default
+        peerManager.getInstance().updatePeerLastSeen(identity)
+    } catch (error) {
+        log.debug(
+            `[OmniDispatcher] Could not refresh last-seen for ${identity}: ${error}`,
+        )
+    }
 }
 
 export async function dispatchOmniMessage<TPayload = unknown>(
@@ -67,6 +88,7 @@ export async function dispatchOmniMessage<TPayload = unknown>(
         options.context.peerIdentity = verificationResult.peerIdentity!
         options.context.isAuthenticated = true
         options.onAuthVerified?.(verificationResult.peerIdentity!)
+        await notePeerAlive(verificationResult.peerIdentity!)
     }
 
     const handlerContext: HandlerContext<TPayload> = {

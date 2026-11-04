@@ -15,8 +15,9 @@ export default async function isValidatorForNextBlock(): Promise<{
     validators: Peer[]
     lastBlockHash: string
 }> {
-    const { commonValidatorSeed } = await getCommonValidatorSeed()
-    const validators = await getShard(commonValidatorSeed)
+    const { commonValidatorSeed, lastBlockNumber } =
+        await getCommonValidatorSeed()
+    const validators = await getShard(commonValidatorSeed, lastBlockNumber)
 
     return {
         isValidator: validators.some(

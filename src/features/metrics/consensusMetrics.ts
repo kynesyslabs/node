@@ -15,6 +15,38 @@ export function countBlockHashMismatch(): void {
     }
 }
 
+export function countConflictingBlock(): void {
+    try {
+        getMetricsService().incrementCounter("conflicting_block_total")
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countCommitLock(): void {
+    try {
+        getMetricsService().incrementCounter("commit_lock_total")
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countLockMoved(): void {
+    try {
+        getMetricsService().incrementCounter("lock_moved_total")
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countPrecommitEquivocation(): void {
+    try {
+        getMetricsService().incrementCounter("precommit_equivocation_total")
+    } catch {
+        /* ignore */
+    }
+}
+
 export function countMissedSignature(): void {
     try {
         getMetricsService().incrementCounter(

@@ -113,6 +113,9 @@ const applyTransactions = spyOn(HandleGCR, "applyTransactions")
 const deleteAssignedTxsForBlock = spyOn(HandleGCR, "deleteAssignedTxsForBlock")
 const insertBlock = spyOn(Chain, "insertBlock")
 
+/** The uncommitted state an apply hands back for the block to commit. */
+const PENDING = { write: async () => {}, afterCommit: async () => {} }
+
 function applyResult(result: {
     successfulTxs?: string[]
     failedTxs?: string[]
@@ -121,6 +124,8 @@ function applyResult(result: {
     applyTransactions.mockImplementation((async (
         _txs: any[],
         isRollback: boolean,
+        _clock: unknown,
+        options?: { defer?: boolean },
     ) =>
         isRollback
             ? { successfulTxs: [], failedTxs: [], skippedTxs: [] }
@@ -128,6 +133,7 @@ function applyResult(result: {
                   successfulTxs: result.successfulTxs ?? [],
                   failedTxs: result.failedTxs ?? [],
                   skippedTxs: result.skippedTxs ?? [],
+                  pending: options?.defer ? PENDING : undefined,
               }) as any)
 }
 
@@ -184,7 +190,10 @@ describe("syncBlock verification", () => {
         expect(synced).toBe(true)
         expect(applyTransactions).toHaveBeenCalledTimes(1)
         expect(applyTransactions.mock.calls[0][1]).toBe(false)
+        expect((applyTransactions.mock.calls[0] as any[])[3]).toEqual({ defer: true })
         expect(insertBlock).toHaveBeenCalledTimes(1)
+        // The state is committed by the block's own insert
+        expect((insertBlock.mock.calls[0] as any[])[3]).toBe(PENDING)
         expect(deleteAssignedTxsForBlock).not.toHaveBeenCalled()
     })
 
@@ -225,7 +234,7 @@ describe("syncBlock verification", () => {
         expect(insertBlock).not.toHaveBeenCalled()
     })
 
-    it("rejects a transaction the peer flipped to confirmed that fails here, and undoes what it applied", async () => {
+    it("rejects a transaction the peer flipped to confirmed that fails here, committing nothing", async () => {
         const ok = makeTx(alice)
         const flipped = makeTx(bob, { status: "confirmed" })
         applyResult({ successfulTxs: [ok.hash], failedTxs: [flipped.hash] })
@@ -233,14 +242,13 @@ describe("syncBlock verification", () => {
         const synced = await syncBlock(makeBlock([ok, flipped]), servingPeer([ok, flipped]))
 
         expect(synced).toBe(false)
+        // The apply was held in memory, so there is nothing to insert or undo
         expect(insertBlock).not.toHaveBeenCalled()
-        const rollback = applyTransactions.mock.calls.find(call => call[1] === true)
-        expect(rollback).toBeDefined()
-        expect((rollback![0] as any[]).map(tx => tx.hash)).toEqual([ok.hash])
-        expect(deleteAssignedTxsForBlock).toHaveBeenCalledWith(HEIGHT)
+        expect(applyTransactions.mock.calls.filter(call => call[1] === true)).toHaveLength(0)
+        expect(deleteAssignedTxsForBlock).not.toHaveBeenCalled()
     })
 
-    it("rejects a transaction the peer flipped to failed that applies here, and undoes it", async () => {
+    it("rejects a transaction the peer flipped to failed that applies here, committing nothing", async () => {
         const ok = makeTx(alice)
         const flipped = makeTx(bob, { status: "failed" })
         applyResult({ successfulTxs: [ok.hash, flipped.hash] })
@@ -249,11 +257,8 @@ describe("syncBlock verification", () => {
 
         expect(synced).toBe(false)
         expect(insertBlock).not.toHaveBeenCalled()
-        // The peer-failed transaction was run here too, so it had to be undone
-        const rollback = applyTransactions.mock.calls.find(call => call[1] === true)
-        expect((rollback![0] as any[]).map(tx => tx.hash).sort()).toEqual(
-            [ok.hash, flipped.hash].sort(),
-        )
+        expect(applyTransactions.mock.calls.filter(call => call[1] === true)).toHaveLength(0)
+        expect(deleteAssignedTxsForBlock).not.toHaveBeenCalled()
     })
 
     it("rejects a block whose native table hashes differ from the local state before it, without applying", async () => {
@@ -371,23 +376,35 @@ describe("rejection handling", () => {
         expect(coolingDown()).toHaveLength(0)
     })
 
-    it("undoes the transactions an apply had already assigned when it throws, and lets the error through", async () => {
+    it("lets a throwing apply through without touching state", async () => {
         const ok = makeTx(alice)
         const other = makeTx(bob)
-        applyTransactions.mockImplementation((async (_txs: any[], isRollback: boolean) => {
-            if (isRollback) return { successfulTxs: [], failedTxs: [], skippedTxs: [] }
-            assignedRows = [{ txHash: ok.hash }]
+        applyTransactions.mockImplementation((async () => {
             throw new Error("database went away")
         }) as any)
 
         const failure = await syncBlock(makeBlock([ok, other]), servingPeer([ok, other])).catch(e => e)
 
         expect(failure.message).toBe("database went away")
-        const rollback = applyTransactions.mock.calls.filter(call => call[1] === true)
-        expect(rollback).toHaveLength(1)
-        expect((rollback[0][0] as any[]).map(tx => tx.hash)).toEqual([ok.hash])
-        expect(deleteAssignedTxsForBlock).toHaveBeenCalledWith(HEIGHT)
+        // Nothing was committed, so nothing is undone
+        expect(applyTransactions.mock.calls.filter(call => call[1] === true)).toHaveLength(0)
+        expect(deleteAssignedTxsForBlock).not.toHaveBeenCalled()
         expect(insertBlock).not.toHaveBeenCalled()
+    })
+
+    it("leaves state alone when the block's insert fails: the edits commit with it or not at all", async () => {
+        const tx = makeTx(alice)
+        applyResult({ successfulTxs: [tx.hash] })
+        insertBlock.mockRejectedValue(new Error("connection reset during insert"))
+
+        const failure = await syncBlock(makeBlock([tx]), servingPeer([tx])).catch(e => e)
+
+        expect(failure.message).toBe("connection reset during insert")
+        expect(insertBlock).toHaveBeenCalledTimes(1)
+        expect((insertBlock.mock.calls[0] as any[])[3]).toBe(PENDING)
+        expect(applyTransactions.mock.calls.filter(call => call[1] === true)).toHaveLength(0)
+        expect(deleteAssignedTxsForBlock).not.toHaveBeenCalled()
+        expect(getSharedState.syncStatus).toBe(false)
     })
 
     it("leaves state alone when a throwing apply had assigned nothing", async () => {

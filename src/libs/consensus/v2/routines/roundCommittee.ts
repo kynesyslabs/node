@@ -11,13 +11,14 @@ export interface RoundCommittee {
 
 /** Committee for the next block: the running round's shard, else a fresh draw. */
 export default async function getRoundCommittee(): Promise<RoundCommittee> {
-    const { commonValidatorSeed } = await getCommonValidatorSeed()
+    const { commonValidatorSeed, lastBlockNumber } =
+        await getCommonValidatorSeed()
     const running = SecretaryManager.runningShard()
     if (running) {
         return { members: running, seed: commonValidatorSeed, frozen: true }
     }
     return {
-        members: await getShard(commonValidatorSeed),
+        members: await getShard(commonValidatorSeed, lastBlockNumber),
         seed: commonValidatorSeed,
         frozen: false,
     }

@@ -108,9 +108,15 @@ export interface RoundOutcome {
     mismatched: string[]
     /** Validators that answered and have the same schedule. */
     agreed: number
+    /** Identities of the validators in `mismatched`. */
+    mismatchedIdentities?: string[]
+    /** Identities of the validators that answered with the same schedule. */
+    agreedIdentities?: string[]
+    /** Staked validators at this tip, lowercased; null when every peer counts. */
+    validatorIdentities?: string[] | null
 }
 
-/** How often the comparison is repeated while the node abstains. */
+/** How often the comparison is repeated while the node abstains or leaves peers out. */
 export const RECHECK_INTERVAL_MS = 30_000
 
 let recheckTimer: ReturnType<typeof setInterval> | null = null
@@ -122,7 +128,9 @@ function stopRecheck(): void {
 }
 
 /**
- * Re-runs the comparison on a timer while the abstain flag is up. A tick that
+ * Re-runs the comparison on a timer while the abstain flag is up or differing
+ * peers are left out of the shard, so either clears soon after an operator
+ * fixes a schedule rather than at the next due block. A tick that
  * finds a round still running is skipped, so rounds never overlap and the timer
  * cannot build a backlog.
  */
@@ -137,7 +145,7 @@ function startRecheck(): void {
 
 async function recheckOnce(): Promise<void> {
     const { getSharedState } = await import("@/utilities/sharedState")
-    if (!getSharedState.forkScheduleAbstain) {
+    if (!getSharedState.forkScheduleAbstain && getSharedState.forkScheduleDifferingPeers.size === 0) {
         stopRecheck()
         return
     }
@@ -155,6 +163,17 @@ async function recheckOnce(): Promise<void> {
  * its peers still disagree with it. A round that reached no validator is
  * inconclusive and changes nothing: clearing on silence would let a node whose
  * peers are all unreachable resume consensus on a schedule it never confirmed.
+ *
+ * A node in the majority leaves the differing validators out of its shard:
+ * they abstain, so waiting for them would only stretch every round to its
+ * timeouts. The set is started only inside the window, but kept past it while
+ * peers still differ, because an abstaining node stays out until its schedule
+ * agrees, after the fork height too. A validator leaves the set only by
+ * answering with our schedule or by leaving the validator set: one that did not
+ * answer (restarting, slow, not ready) may still abstain, and putting it back
+ * in the shard could make it secretary of a round it never runs; so does a
+ * round where the agreeing validators did not answer. Under `warn`, or while
+ * this node abstains itself, nobody is left out.
  */
 export async function applyRoundOutcome(
     tip: number,
@@ -173,7 +192,44 @@ export async function applyRoundOutcome(
     if (plan.inWindow) windowCheckedFor = plan.nearest
     setForkScheduleMismatch(differing > 0)
 
-    if (differing > outcome.agreed) {
+    const majorityDiffers = differing > outcome.agreed
+    const abstaining =
+        policy === "abstain" &&
+        majorityDiffers &&
+        (plan.inWindow || getSharedState.forkScheduleAbstain)
+    const before = getSharedState.forkScheduleDifferingPeers
+    const leaveOut = new Set<string>()
+    if (policy === "abstain" && !abstaining) {
+        const agreed = new Set((outcome.agreedIdentities ?? []).map(id => id.toLowerCase()))
+        const staked = outcome.validatorIdentities ? new Set(outcome.validatorIdentities) : null
+        for (const id of before) {
+            if (!agreed.has(id) && (staked === null || staked.has(id))) leaveOut.add(id)
+        }
+        // A round where the differing side outnumbers the answers that agreed
+        // is not grounds to add anyone: the agreeing validators may just have
+        // timed out.
+        // A node that abstained itself is past a mismatch too: the minority
+        // still differing when it resumes may still abstain.
+        const pastMismatch = before.size > 0 || getSharedState.forkScheduleAbstain
+        if (!majorityDiffers && differing > 0 && (plan.inWindow || pastMismatch)) {
+            for (const id of outcome.mismatchedIdentities ?? []) leaveOut.add(id.toLowerCase())
+        }
+    }
+    if (leaveOut.size !== before.size || [...leaveOut].some(id => !before.has(id))) {
+        getSharedState.forkScheduleDifferingPeers = leaveOut
+        if (leaveOut.size > 0) {
+            log.warn(
+                `[FORK SCHEDULE] Leaving ${leaveOut.size} validator(s) out of the shard from block ${tip}` +
+                    (differing > 0 ? ` (differing this round: ${outcome.mismatched.join(", ")})` : "") +
+                    ": their schedule differs, so they abstain",
+            )
+        } else {
+            log.info(`[FORK SCHEDULE] No validator left out of the shard from block ${tip}`)
+        }
+    }
+
+    if (majorityDiffers) {
+        if (!abstaining && leaveOut.size > 0) startRecheck()
         if (policy === "abstain" && plan.inWindow) {
             const reason =
                 "fork schedule differs from " +
@@ -197,7 +253,8 @@ export async function applyRoundOutcome(
         return
     }
 
-    stopRecheck()
+    if (leaveOut.size > 0) startRecheck()
+    else stopRecheck()
     if (getSharedState.forkScheduleAbstain) {
         getSharedState.forkScheduleAbstain = false
         getSharedState.forkScheduleAbstainReason = ""
@@ -243,7 +300,13 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
                 validators === null ||
                 validators.has(String(peer.identity).toLowerCase()),
         )
-    const outcome: RoundOutcome = { mismatched: [], agreed: 0 }
+    const outcome: RoundOutcome = {
+        mismatched: [],
+        agreed: 0,
+        mismatchedIdentities: [],
+        agreedIdentities: [],
+        validatorIdentities: validators === null ? null : [...validators],
+    }
     await mapWithLimit(peers, PEER_CONCURRENCY, async peer => {
         try {
             const result = await withTimeout<Awaited<ReturnType<typeof agreement.checkPeerSchedule>>>(
@@ -251,9 +314,13 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
                 PEER_TIMEOUT_MS,
                 { status: "unreachable", reason: "timed out" },
             )
-            if (result.status === "agree") outcome.agreed++
+            if (result.status === "agree") {
+                outcome.agreed++
+                outcome.agreedIdentities!.push(String(peer.identity))
+            }
             if (result.status !== "mismatch") return
             outcome.mismatched.push(peer.connection.string)
+            outcome.mismatchedIdentities!.push(String(peer.identity))
             const text =
                 "[FORK SCHEDULE] MISMATCH with " +
                 peer.connection.string +

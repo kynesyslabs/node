@@ -263,6 +263,7 @@ export default async function manageGCRRoutines(
             const block = params[0]
 
             if (block.number <= getSharedState.lastBlockNumber) {
+                void BroadcastManager.checkBlockAtKnownHeight(sender, block)
                 response.result = 200
                 response.response = "Block is already processed"
                 break

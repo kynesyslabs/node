@@ -119,6 +119,10 @@ function getTLSNotaryState(): TLSNotaryState {
     return sharedState.tlsnotary
 }
 
+// The version the Docker image bakes in and scripts/install-deps.sh
+// installs; an unpinned install would pick whatever crates.io serves today.
+const WSTCP_VERSION = "0.2.1"
+
 /**
  * Ensure wstcp binary is available, installing if needed
  * @throws Error if wstcp cannot be found or installed
@@ -128,18 +132,40 @@ export async function ensureWstcp(): Promise<void> {
     const wstcpPath = `${cargoHome}/bin/wstcp`
     const cargoPath = `${cargoHome}/bin/cargo`
 
-    try {
-        await execAsync(`test -x "${wstcpPath}"`)
-        log.debug("[TLSNotary] wstcp binary found at " + wstcpPath)
-    } catch {
-        log.info("[TLSNotary] wstcp not found, installing via cargo...")
-        try {
-            await execAsync(`"${cargoPath}" install wstcp`)
-            log.info("[TLSNotary] wstcp installed successfully")
-        } catch (installError: any) {
-            throw new Error(`Failed to install wstcp: ${installError.message}`)
+    const present = await execAsync(`test -x "${wstcpPath}"`).then(
+        () => true,
+        () => false,
+    )
+    if (present) {
+        // The image bakes the pinned binary and ships no cargo, so there is
+        // nothing to ask; a bare-metal host may still carry an older
+        // unpinned install, which cargo's own install list reveals.
+        const listing = await execAsync(`"${cargoPath}" install --list`).then(
+            ({ stdout }) => stdout,
+            () => null,
+        )
+        if (listing === null || hasPinnedWstcp(listing)) {
+            log.debug("[TLSNotary] wstcp binary found at " + wstcpPath)
+            return
         }
+        log.info(`[TLSNotary] wstcp is not ${WSTCP_VERSION}, reinstalling via cargo...`)
+    } else {
+        log.info("[TLSNotary] wstcp not found, installing via cargo...")
     }
+    try {
+        await execAsync(
+            `"${cargoPath}" install wstcp --version ${WSTCP_VERSION} --force`,
+        )
+        log.info("[TLSNotary] wstcp installed successfully")
+    } catch (installError: any) {
+        throw new Error(`Failed to install wstcp: ${installError.message}`)
+    }
+}
+
+export function hasPinnedWstcp(cargoInstallList: string): boolean {
+    return cargoInstallList
+        .split("\n")
+        .some(line => line.trim() === `wstcp v${WSTCP_VERSION}:`)
 }
 
 /**

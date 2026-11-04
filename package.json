@@ -1,10 +1,11 @@
 {
     "name": "demos-node-software",
-    "version": "0.9.8",
+    "version": "1.0.0-rc.5",
     "description": "Demos Network Node - RPC and consensus implementation for the Demos blockchain",
     "author": "Kynesys Labs",
     "license": "CC-BY-NC-SA-4.0",
     "private": true,
+    "packageManager": "bun@1.4.4",
     "main": "src/index.ts",
     "scripts": {
         "check": "trunk check",
@@ -13,6 +14,7 @@
         "lint:fix": "eslint . --ignore-pattern 'local_tests' --ignore-pattern 'aptos_tests' --fix --ext .ts",
         "type-check": "bun build src/index.ts --target=bun --no-emit",
         "test:release": "jest --maxWorkers=1 tests/release/reproducibleRelease.test.ts",
+        "test:consensus": "scripts/test-consensus.sh",
         "type-check-ts": "tsc --noEmit",
         "prettier-format": "prettier --config .prettierrc.json modules/**/*.ts --write",
         "format": "prettier --plugin-search-dir . --write .",
@@ -138,7 +140,6 @@
         "big-integer": "^1.6.52",
         "bip39": "^3.1.0",
         "bs58": "^6.0.0",
-        "bun": "^1.2.10",
         "circomlib": "^2.0.5",
         "circomlibjs": "^0.1.7",
         "cli-progress": "^3.12.0",
