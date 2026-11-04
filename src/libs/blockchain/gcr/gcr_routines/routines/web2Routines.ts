@@ -164,6 +164,8 @@ export async function applyWeb2IdentityRemove(
 /**
  * Undo of an add: takes out the one link the add appended. The add refuses
  * a second link of the same account id, so username and id name it.
+ * Points are awarded once per context, so while another link of the context
+ * remains they are that link's, and the undo leaves them.
  */
 export async function rollbackWeb2IdentityAdd(
     editOperation: any,
@@ -183,12 +185,15 @@ export async function rollbackWeb2IdentityAdd(
     }
 
     const [link] = linked.splice(index, 1)
+    const wasLastOfContext = linked.length === 0
 
     return {
         success: true,
         message: "Web2 identity add rolled back",
         entity: accountGCR,
-        sideEffect: () => deductWeb2Points(context, link, editOperation.account),
+        sideEffect: wasLastOfContext
+            ? () => deductWeb2Points(context, link, editOperation.account)
+            : undefined,
     }
 }
 

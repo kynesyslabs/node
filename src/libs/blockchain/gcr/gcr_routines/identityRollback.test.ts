@@ -3,11 +3,12 @@
  * was before the edit. The remove edits name a link without carrying it, so
  * undoing one relies on what this node recorded when it applied the remove.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import Hashing from "@/libs/crypto/hashing"
 import GCRIdentityRoutines from "./GCRIdentityRoutines"
+import { IncentiveManager } from "./IncentiveManager"
 import type { EditPlace, RemovedIdentities } from "./routines/removedIdentities"
 
 const ACCOUNT = "0x" + "11".repeat(32)
@@ -176,6 +177,39 @@ describe("undoing a web2 link", () => {
 
         expect(undone.success).toBe(false)
         expect(acc.identities).toEqual(before)
+    })
+})
+
+describe("the points an undone web2 link takes back", () => {
+    let spy: ReturnType<typeof spyOn> | undefined
+    const unlinked = () => (spy = spyOn(IncentiveManager, "twitterUnlinked").mockResolvedValue(undefined as never))
+    afterEach(() => spy?.mockRestore())
+
+    it("are none while another link of the context remains: they are that link's", async () => {
+        const acc = account()
+        const add = web2Add("alice", "42")
+        expect((await apply(add, acc)).success).toBe(true)
+        const spy = unlinked()
+
+        const undone = await undo(add, acc)
+        await undone.sideEffect?.()
+
+        expect(undone.success).toBe(true)
+        expect(spy).not.toHaveBeenCalled()
+    })
+
+    it("are the context's when the undone link was its only one", async () => {
+        const acc = account()
+        acc.identities.web2.twitter = []
+        const add = web2Add("alice", "42")
+        expect((await apply(add, acc)).success).toBe(true)
+        const spy = unlinked()
+
+        const undone = await undo(add, acc)
+        await undone.sideEffect?.()
+
+        expect(spy).toHaveBeenCalledTimes(1)
+        expect(spy).toHaveBeenCalledWith(ACCOUNT)
     })
 })
 
