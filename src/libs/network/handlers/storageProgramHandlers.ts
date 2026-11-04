@@ -2,6 +2,7 @@ import getStorageProgram from "../routines/nodecalls/getStorageProgram"
 import getStorageProgramAll from "../routines/nodecalls/getStorageProgramAll"
 import getStorageProgramFieldType from "../routines/nodecalls/getStorageProgramFieldType"
 import getStorageProgramFields from "../routines/nodecalls/getStorageProgramFields"
+import getStorageProgramLimits from "../routines/nodecalls/getStorageProgramLimits"
 import getStorageProgramItem from "../routines/nodecalls/getStorageProgramItem"
 import getStorageProgramValue from "../routines/nodecalls/getStorageProgramValue"
 import getStorageProof from "../routines/nodecalls/getStorageProof"
@@ -36,6 +37,9 @@ export const storageProgramHandlers: Record<string, NodeCallHandler> = {
     },
     getStorageProgramFieldType: async data => {
         return await getStorageProgramFieldType(data)
+    },
+    getStorageProgramLimits: async () => {
+        return await getStorageProgramLimits()
     },
     getStorageProgramItem: async data => {
         return await getStorageProgramItem(data)

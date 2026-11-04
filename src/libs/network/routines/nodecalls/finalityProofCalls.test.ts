@@ -81,6 +81,7 @@ const { default: getTransactionProof } = await import("./getTransactionProof")
 const { default: getValidatorSet } = await import("./getValidatorSet")
 const { default: getBlockSegment, MAX_SEGMENT_BLOCKS } = await import("./getBlockSegment")
 const { default: getStorageProof } = await import("./getStorageProof")
+const { default: getStorageProgramLimits } = await import("./getStorageProgramLimits")
 const { STORAGE_HISTORY_BLOCKS } = await import("src/libs/blockchain/finality/storageHistory")
 
 interface Key {
@@ -441,5 +442,19 @@ describe("getStorageProof", () => {
         for (const storageAddresses of [undefined, [], many, [""], [5], "stor-1", ["x".repeat(257)]]) {
             expect((await getStorageProof({ storageAddresses })).result).toBe(400)
         }
+    })
+})
+
+describe("getStorageProgramLimits", () => {
+    it("names the proof batch, the history window and the program pricing", async () => {
+        const reply = await getStorageProgramLimits()
+        expect(reply.result).toBe(200)
+        expect(reply.response).toEqual({
+            maxAddressesPerProof: 16,
+            historyBlocks: 64,
+            maxProgramSizeBytes: 1_048_576,
+            pricingChunkBytes: 10_240,
+            feePerChunk: "1",
+        })
     })
 })
