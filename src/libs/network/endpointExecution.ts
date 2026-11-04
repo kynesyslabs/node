@@ -235,8 +235,9 @@ export async function handleExecuteTransaction(
             const handleWeb2RequestStart = Date.now()
             payload = tx.content.data[1] as IWeb2Payload
             const params = parseWeb2ProxyRequest(payload)
-            // This re-runs the request when the tx is broadcast. The caller's
-            // credentials belong to the attested RPC call only; never replay them.
+            // This re-runs the request when the tx is broadcast. Drop the
+            // credential headers on the sensitive-key list so the replay does
+            // not carry them; other credentials are not covered.
             params.web2Request.raw.headers = headersForReplay(
                 params.web2Request.raw.headers,
             )

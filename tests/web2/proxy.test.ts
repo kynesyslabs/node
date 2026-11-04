@@ -15,6 +15,7 @@ jest.mock("src/libs/crypto/hashing", () => ({
 }))
 
 import { Proxy } from "@/features/web2/proxy/Proxy"
+import { headersForReplay } from "@/features/web2/sanitizeWeb2Request"
 
 /**
  * Build a Proxy with both config objects supplied so construction never reaches
@@ -93,7 +94,6 @@ describe("Proxy outbound Authorization header", () => {
     })
 })
 
-import { headersForReplay } from "@/features/web2/sanitizeWeb2Request"
 
 describe("headersForReplay (broadcast-time replay of a web2Request tx)", () => {
     it("drops credential headers, keeps the rest", () => {
