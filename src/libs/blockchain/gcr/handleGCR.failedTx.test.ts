@@ -211,3 +211,27 @@ describe("a transaction that fails part-way", () => {
         expect(entities.storagePrograms.get(ADDRESS).data).toEqual({ n: 2 })
     })
 })
+
+// The stored body must still hash to tx.hash: an apply that writes into the
+// signed edits (a stamped txhash, a routine keeping a reference and changing
+// it) makes every node that syncs the block reject it.
+describe("the signed content", () => {
+    const cases: Array<[string, () => unknown, () => Promise<any>]> = [
+        ["a storage create", () => storage("CREATE_STORAGE_PROGRAM", { programName: "p", data: { a: { b: 1 } } }), () => caches(null)],
+        ["a granular SET_FIELD", () => storage("SET_FIELD", { field: "n", value: { deep: [1] } }), () => caches()],
+    ]
+    for (const [name, edit, setup] of cases) {
+        for (const [outcome, trailing] of [
+            ["applies", [] as unknown[]],
+            ["fails part-way", [burn(1000)]],
+        ] as const) {
+            it(`is left as signed when ${name} ${outcome}`, async () => {
+                const signed = tx([burn(1), edit(), ...trailing])
+                const before = structuredClone(signed.content)
+                const result = await HandleGCR.applyTransaction(await setup(), signed, false, false)
+                expect(result.success).toBe(outcome === "applies")
+                expect(signed.content).toEqual(before)
+            })
+        }
+    }
+})
