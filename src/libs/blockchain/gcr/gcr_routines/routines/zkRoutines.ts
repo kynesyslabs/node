@@ -11,6 +11,11 @@ import {
 import Datasource from "@/model/datasource"
 import { Config } from "src/config"
 import log from "@/utilities/logger"
+import {
+    NUL_NOT_STORABLE,
+    isBigintStorable,
+    isTextStorable,
+} from "@/libs/blockchain/validation/postgresStorable"
 
 /**
  * Process ZK commitment addition
@@ -77,6 +82,15 @@ export async function applyZkCommitmentAdd(
             success: false,
             message: "Invalid or missing timestamp",
         }
+    }
+
+    // The row is inserted in the block's database transaction, where a value
+    // Postgres refuses would fail the block on every node, not this one.
+    if (!isTextStorable(payload.provider)) {
+        return { success: false, message: `Provider ${NUL_NOT_STORABLE}` }
+    }
+    if (!isBigintStorable(payload.timestamp)) {
+        return { success: false, message: "Timestamp must be a whole number in the bigint range" }
     }
 
     // Get datasource for IdentityCommitment repository
