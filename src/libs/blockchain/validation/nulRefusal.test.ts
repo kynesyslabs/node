@@ -147,10 +147,10 @@ beforeEach(() => {
 })
 
 describe("the probe transaction", () => {
-    it("is coherent, correctly signed and passes the `to` check", async () => {
+    it("is coherent and correctly signed; the `to` check takes no character after 64 hex digits", async () => {
         const tx = await transfer(NUL_RECIPIENT)
         expect(tx.content.to).toBe(NUL_RECIPIENT)
-        expect((NodeTransaction as any).validateToField(tx.content.to).valid).toBe(true)
+        expect((NodeTransaction as any).validateToField(tx.content.to).valid).toBe(false)
         expect(NodeTransaction.checkCoherence(tx as never, 100).coherent).toBe(true)
         expect((await NodeTransaction.validateSignature(tx as never, null)).success).toBe(true)
     })

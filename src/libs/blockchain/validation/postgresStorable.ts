@@ -55,6 +55,56 @@ export function isKeyStorable(value: unknown): value is string {
     return typeof value === "string" && isJsonbString(value)
 }
 
+/**
+ * The UTF-8 bytes a text key of a b-tree index may hold, as this node judges
+ * it. Postgres refuses an index entry over 2704 bytes ("index row size
+ * exceeds btree version 4 maximum 2704") after trying to compress it, so
+ * whether a longer key fails depends on its content and on the node's
+ * compression setting. Capped well below, on the length alone, every node
+ * judges a key alike, and an index over two such keys still fits.
+ */
+export const INDEX_KEY_MAX_BYTES = 1024
+
+/**
+ * Whether `value`, as the driver sends it, fits a b-tree index entry under
+ * `maxBytes`. A string is measured in UTF-8, an unpaired surrogate as the
+ * U+FFFD the driver sends; a number, boolean or null is short; anything else
+ * by its JSON text, which is what (or about what) the driver sends.
+ */
+export function fitsIndexKey(value: unknown, maxBytes: number = INDEX_KEY_MAX_BYTES): boolean {
+    if (typeof value === "string") return utf8Length(value) <= maxBytes
+    if (value === null || value === undefined) return true
+    if (typeof value === "number" || typeof value === "boolean") return true
+    if (typeof value === "bigint") return value.toString().length <= maxBytes
+    let text: string | undefined
+    try {
+        text = JSON.stringify(value)
+    } catch {
+        return false
+    }
+    return text === undefined || utf8Length(text) <= maxBytes
+}
+
+/** UTF-8 length of `value`, an unpaired surrogate counted as U+FFFD. */
+export function utf8Length(value: string): number {
+    let bytes = 0
+    for (let i = 0; i < value.length; i++) {
+        const unit = value.charCodeAt(i)
+        if (unit < 0x80) bytes += 1
+        else if (unit < 0x800) bytes += 2
+        else if (unit >= 0xd800 && unit <= 0xdbff && i + 1 < value.length) {
+            const next = value.charCodeAt(i + 1)
+            if (next >= 0xdc00 && next <= 0xdfff) {
+                bytes += 4
+                i++
+            } else {
+                bytes += 3
+            }
+        } else bytes += 3
+    }
+    return bytes
+}
+
 const INT8_MIN = -(2n ** 63n)
 const INT8_MAX = 2n ** 63n - 1n
 
@@ -179,17 +229,40 @@ export function l2psHashRowColumns(tx: TxLike): Record<string, unknown> | null {
     return { l2ps_uid: row.l2ps_uid, consolidated_hash: row.consolidated_hash }
 }
 
+/** Columns of the `transactions` row a b-tree index covers. */
+const INDEXED_TRANSACTION_COLUMNS = ["hash", "from_ed25519_address", "to"] as const
+
 /**
- * Block and sync verification: only U+0000 in a column of a row the block
- * insert writes for every transaction it lists, failed or not: the
+ * Block and sync verification: only what Postgres refuses in a row the block
+ * insert writes for every transaction it lists, failed or not: U+0000 in the
  * transaction's own row and, for an `l2ps_hash_update`, its `l2ps_hashes`
- * row. A block carrying one never committed. A NUL elsewhere in the body sits
- * in the `json` column and did commit; the edits it implies are judged when
- * they are applied (see storableRows).
+ * row, and an indexed value too long for its b-tree entry. A block carrying
+ * one never committed. A NUL elsewhere in the body sits in the `json` column
+ * and did commit; the edits it implies are judged when they are applied (see
+ * storableRows). The l2ps_hashes uid is not capped here: a row that does not
+ * fit is skipped, not written.
+ *
+ * The sender a transaction is assigned to, its ed25519 address or else its
+ * `from`, keys a row of `gcr_assigned_txs` and is capped too. Only a system
+ * relay transaction can lack the address; the one honest nodes write carries
+ * it.
+ *
+ * `to` is held to its format at admission, not here: the node admitted other
+ * spellings before, and blocks that carry them committed.
  */
 export function transactionRowRefusal(tx: TxLike): string | null {
-    for (const [column, value] of Object.entries(transactionRowColumns(tx))) {
+    const columns = transactionRowColumns(tx)
+    for (const [column, value] of Object.entries(columns)) {
         if (!isTextStorable(value)) return `Transaction ${column} ${NUL_NOT_STORABLE}`
+    }
+    for (const column of INDEXED_TRANSACTION_COLUMNS) {
+        if (!fitsIndexKey(columns[column])) {
+            return `Transaction ${column} is longer than ${INDEX_KEY_MAX_BYTES} bytes, more than its index holds`
+        }
+    }
+    const sender = tx?.content?.from_ed25519_address || tx?.content?.from
+    if (!fitsIndexKey(sender)) {
+        return `Transaction sender is longer than ${INDEX_KEY_MAX_BYTES} bytes, more than its index holds`
     }
     for (const [column, value] of Object.entries(l2psHashRowColumns(tx) ?? {})) {
         if (!isTextStorable(value)) return `Transaction l2ps_hash_update ${column} ${NUL_NOT_STORABLE}`

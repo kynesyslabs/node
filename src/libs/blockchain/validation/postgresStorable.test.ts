@@ -11,6 +11,7 @@ import Block from "@/libs/blockchain/block"
 import {
     admissionRefusal,
     blockRowRefusal,
+    fitsIndexKey,
     isBigintStorable,
     isJsonbStorable,
     isKeyStorable,
@@ -187,4 +188,77 @@ describe("storage program admission", () => {
         expect(Transaction.structured(tx({ data: { n: "x", "😀": 1 } })).valid).toBe(true)
         expect(admissionRefusal({ content: { data: "ok" } })).toBeNull()
     })
+})
+
+/** Text no compression shrinks: a b-tree entry keeps about its length. */
+const random = (length: number) =>
+    Array.from({ length }, (_, i) => String.fromCharCode(0x21 + ((i * 7919 + 13) % 89))).join("")
+
+const ACCOUNT = "0x" + "ab".repeat(32)
+
+describe("fitsIndexKey", () => {
+    it("measures a string in UTF-8, as the driver sends it", () => {
+        expect(fitsIndexKey("a".repeat(1024))).toBe(true)
+        expect(fitsIndexKey("a".repeat(1025))).toBe(false)
+        expect(fitsIndexKey("€".repeat(341))).toBe(true)
+        expect(fitsIndexKey("€".repeat(342))).toBe(false)
+        expect(fitsIndexKey("😀".repeat(256))).toBe(true)
+        expect(fitsIndexKey("😀".repeat(257))).toBe(false)
+        // An unpaired surrogate goes as U+FFFD, three bytes.
+        expect(fitsIndexKey("\ud800".repeat(341))).toBe(true)
+        expect(fitsIndexKey("\ud800".repeat(342))).toBe(false)
+        expect(fitsIndexKey("abc", 2)).toBe(false)
+    })
+
+    it("judges other values by their text", () => {
+        for (const short of [null, undefined, 5, true, 10n, ["a"], { a: 1 }]) expect(fitsIndexKey(short)).toBe(true)
+        expect(fitsIndexKey(["a".repeat(1100)])).toBe(false)
+        expect(fitsIndexKey({ k: "a".repeat(1100) })).toBe(false)
+    })
+})
+
+describe("the recipient at admission", () => {
+    const tx = (to: unknown): any => ({ content: { type: "native", to, data: ["native", {}] } })
+
+    it("takes 0x and 64 hex digits, as clients write an account", () => {
+        expect(Transaction.structured(tx(ACCOUNT)).valid).toBe(true)
+        expect(Transaction.structured(tx(ACCOUNT.toUpperCase().replace("0X", "0x"))).valid).toBe(true)
+    })
+
+    for (const [name, to] of [
+        ["64 hex digits followed by text an index cannot hold", ACCOUNT + "Z" + random(3000)],
+        ["64 hex digits followed by anything", ACCOUNT + "Z"],
+        ["64 hex digits without 0x", "ab".repeat(32)],
+        ["a Buffer as JSON", { type: "Buffer", data: Array(32).fill(1) }],
+        ["a Buffer as JSON whose bytes are long strings", { type: "Buffer", data: [random(3000), ...Array(31).fill(1)] }],
+        ["63 hex digits", ACCOUNT.slice(0, -1)],
+    ] as const) {
+        it(`refuses ${name}`, () => {
+            expect(Transaction.structured(tx(to)).valid).toBe(false)
+        })
+    }
+})
+
+describe("indexed columns of the transaction row", () => {
+    const tx = (content: Record<string, unknown>): any => ({
+        hash: "cd".repeat(32),
+        content: { type: "native", from: ACCOUNT, from_ed25519_address: ACCOUNT, to: ACCOUNT, ...content },
+    })
+
+    it("pass at the lengths clients and nodes write", () => {
+        expect(transactionRowRefusal(tx({}))).toBeNull()
+        // Spellings the node admitted before still pass: blocks carrying them committed.
+        expect(transactionRowRefusal(tx({ to: "ab".repeat(32) }))).toBeNull()
+        expect(transactionRowRefusal(tx({ to: "" }))).toBeNull()
+    })
+
+    for (const [name, content, column] of [
+        ["a recipient too long for its index", { to: ACCOUNT + "Z" + random(3000) }, "to"],
+        ["an ed25519 address too long for its index", { from_ed25519_address: random(3000) }, "from_ed25519_address"],
+        ["a relay sender too long for gcr_assigned_txs", { from_ed25519_address: "", from: random(3904) }, "sender"],
+    ] as const) {
+        it(`refuse ${name}`, () => {
+            expect(transactionRowRefusal(tx(content))).toContain(column)
+        })
+    }
 })
