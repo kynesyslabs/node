@@ -20,12 +20,23 @@ empty-snapshot/ into DIR, readable by any uid (see make_readable).
     drill_inputs.py readable --dir DIR
 sets every file under DIR to 644 and every directory to 755 (run.sh, once all
 its inputs are written).
+
+    drill_inputs.py tmpfs --uid UID --gid GID
+prints the node tmpfs entries, one per line, exactly as gen-inputs.py writes
+them into the compose file (run.sh passes the same strings to `docker run
+--tmpfs` in its preflight check).
 """
 import argparse
 import json
 import os
 
 EMPTY_SNAPSHOT = "empty-snapshot"
+
+# Every tmpfs a drill node writes to as the image user. /app/state holds the
+# identity copy, its lock, the signing record and the commit lock. The other
+# paths the node writes (/app, /app/data, /app/logs) are image directories the
+# Dockerfile already chowns to that user.
+NODE_TMPFS_PATHS = ["/app/state"]
 
 
 def with_genesis_timestamp(genesis, ts):
@@ -46,6 +57,18 @@ def make_empty_snapshot(inputs_dir):
     os.makedirs(path, exist_ok=True)
     os.chmod(path, 0o755)
     return path
+
+
+def node_tmpfs_specs(uid, gid):
+    """Compose `tmpfs:` entries (and `docker run --tmpfs` values) for a node.
+
+    Docker creates a tmpfs root-owned, mode 755, so a node running as the
+    image user could not write to it. uid, gid and mode are tmpfs mount
+    options; the compose long syntax (`type: tmpfs`) only has size and mode,
+    so the short string is the one that can set the owner. Mode 0700: the
+    directory holds the identity.
+    """
+    return [f"{p}:uid={uid},gid={gid},mode=0700" for p in NODE_TMPFS_PATHS]
 
 
 def write_json(path, body):
@@ -90,9 +113,15 @@ def main():
     st.add_argument("--out-dir", required=True)
     rd = sub.add_parser("readable")
     rd.add_argument("--dir", required=True)
+    tf = sub.add_parser("tmpfs")
+    tf.add_argument("--uid", type=int, required=True)
+    tf.add_argument("--gid", type=int, required=True)
     a = ap.parse_args()
     if a.cmd == "readable":
         make_readable(a.dir)
+        return
+    if a.cmd == "tmpfs":
+        print("\n".join(node_tmpfs_specs(a.uid, a.gid)))
         return
     with open(a.genesis) as f:
         genesis = json.load(f)

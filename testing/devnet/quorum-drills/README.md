@@ -208,6 +208,13 @@ drills also leave `drill-input.json` (what the run observed),
   no published ports (the harness uses `docker exec`), postgres and node
   state on tmpfs, no named volumes. Memory caps: `NODE_MEM` (1800m) per
   node, 1 GB postgres, 64 MB per partition sidecar.
+- The node runs as the image's user (`demos`, uid 1000 in the release image),
+  and Docker creates a tmpfs root-owned. `run.sh` reads the uid and gid from
+  `${IMAGE}` and mounts the node's `/app/state` as
+  `/app/state:uid=<uid>,gid=<gid>,mode=0700`; the preflight mounts a tmpfs with
+  the same string in a throwaway container and copies, restricts and reads the
+  identity there as that user. Everything else the node writes (`/app`,
+  `/app/data`, `/app/logs`) is an image directory the Dockerfile chowns to it.
 - A trap collects the logs, removes the sidecars and runs
   `docker compose down -v --remove-orphans` on any exit, including Ctrl-C.
 
