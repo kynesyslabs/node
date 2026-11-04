@@ -492,18 +492,30 @@ export async function broadcastBlockHash(
         proposeParams = [...proposeParams, block.validation_data.round]
     }
 
-    // Resolved once, and only when a reply needs it: a round of refusals
-    // reads no chain data. Unresolved means no reply can be judged, so
+    // Resolved only when a reply needs it: a round of refusals reads no
+    // chain data. The set is chain data, so a second lookup can only find
+    // the same set or fail again; a failed lookup is therefore retried once,
+    // by the next reply that needs it, so a passing read error does not cost
+    // every vote of the round. Unresolved means no reply can be judged, so
     // none is admitted.
     let signerSetLookup: Promise<Set<string> | null> | null = null
+    let lookupsLeft = 2
     const signerSet: SignerSetLookup = () => {
-        signerSetLookup ??= voteSignerSet(block.number).catch(e => {
-            log.error(
-                `[broadcastBlockHash] Could not resolve the vote signer set for block ${block.number}: ` +
-                    (e instanceof Error ? e.message : String(e)),
-            )
-            return null
-        })
+        if (signerSetLookup === null) {
+            lookupsLeft--
+            const attempt = voteSignerSet(block.number).catch(e => {
+                log.error(
+                    `[broadcastBlockHash] Could not resolve the vote signer set for block ${block.number}: ` +
+                        (e instanceof Error ? e.message : String(e)),
+                )
+                return null
+            })
+            signerSetLookup = attempt
+            void attempt.then(signers => {
+                if (signers === null && lookupsLeft > 0) signerSetLookup = null
+            })
+            return attempt
+        }
         return signerSetLookup
     }
 

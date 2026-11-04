@@ -78,6 +78,7 @@ const replying = (identity: string, signatures: () => Promise<Record<string, str
     }),
 })
 
+const later = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const merged = () => Object.keys(block.validation_data.signatures).sort()
 const ids = (...by: Signer[]) => by.map(s => s.identity).sort()
 
@@ -161,6 +162,57 @@ describe("broadcastBlockHash keeps only the vote signer set from a reply", () =>
         ]
         const [pro, con] = await broadcastBlockHash(block, shard as never)
         expect([pro, con]).toEqual([0, 2])
+        expect(merged()).toEqual(ids(members[0]))
+    })
+
+    it("counts a 200 from a non-member as con: its own signature is not in the set", async () => {
+        const shard = [
+            replying(throwaway[0].identity, () => signaturesOf(throwaway[0], members[1])),
+            replying(outsider.identity, () => signaturesOf(outsider, members[2])),
+        ]
+        const [pro, con] = await broadcastBlockHash(block, shard as never)
+        expect([pro, con]).toEqual([0, 2])
+        expect(merged()).toEqual(ids(members[0]))
+    })
+
+    it("accepts a reply carrying exactly as many signatures as the signer set holds", async () => {
+        const shard = [replying(members[1].identity, () => signaturesOf(...members))]
+        const [pro, con] = await broadcastBlockHash(block, shard as never)
+        expect([pro, con]).toEqual([1, 0])
+        expect(merged()).toEqual(ids(...members))
+    })
+
+    it("retries a failed signer-set lookup once for a later reply", async () => {
+        chain.tip = 8
+        const shard = [
+            replying(members[1].identity, () => signaturesOf(members[1])),
+            replying(members[2].identity, async () => {
+                await later(50)
+                chain.tip = 9
+                return signaturesOf(members[2])
+            }),
+        ]
+        const [pro, con] = await broadcastBlockHash(block, shard as never)
+        expect([pro, con]).toEqual([1, 1])
+        expect(merged()).toEqual(ids(members[0], members[2]))
+    })
+
+    it("admits nothing more once the retry has failed too", async () => {
+        chain.tip = 8
+        const shard = [
+            replying(members[1].identity, () => signaturesOf(members[1])),
+            replying(members[2].identity, async () => {
+                await later(50)
+                return signaturesOf(members[2])
+            }),
+            replying(members[3].identity, async () => {
+                await later(100)
+                chain.tip = 9
+                return signaturesOf(members[3])
+            }),
+        ]
+        const [pro, con] = await broadcastBlockHash(block, shard as never)
+        expect([pro, con]).toEqual([0, 3])
         expect(merged()).toEqual(ids(members[0]))
     })
 
