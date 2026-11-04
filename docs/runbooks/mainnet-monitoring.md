@@ -33,6 +33,11 @@ Restrict the port to the monitoring host's address in the firewall as well.
 Nothing else depends on the host-side port: the bundled Prometheus and the
 Caddy proxy reach the node as `node:9090` over the compose network.
 
+A bare-metal validator (`./run`) has no compose layer: the metrics server
+itself binds `METRICS_HOST`, which defaults to `127.0.0.1`. Set
+`METRICS_HOST` to the private interface's address in its `.env` so the
+monitoring host can scrape it; until then `NodeDown` fires for that node.
+
 ## Setup on the monitoring host
 
 1. In `monitoring/prometheus/prometheus.yml`, replace the `demos-node` target
