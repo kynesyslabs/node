@@ -9,7 +9,8 @@ SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
 # Single files outside SUITE_DIRS: the launch go/no-go tooling, the signing
 # guards, the consensus and sync routes the suites depend on, the peer
 # liveness checks that decide which committee members count, and the read
-# calls clients use to tell whether a transaction executed. A listed
+# calls clients use to tell whether a transaction executed, and the version
+# every report names. A listed
 # file that is gone fails its run instead of dropping out silently
 SUITE_FILES=(
     scripts/launch-go-no-go.committee.test.ts
@@ -31,6 +32,7 @@ SUITE_FILES=(
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts
+    src/utilities/nodeVersion.test.ts
     testing/forks/loadForkConfig.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
     testing/genesis/buildGenesisBlock.test.ts
