@@ -24,6 +24,7 @@ import {
     granularWriteFee,
     validateStorageProgramPayload,
 } from "./GCRStorageProgramRoutines"
+import { unstorableRow } from "../storableRows"
 
 const OWNER = "0x" + "aa".repeat(32)
 const WRITER = "0x" + "bb".repeat(32)
@@ -299,21 +300,6 @@ describe("granular storage operations", () => {
         }
     })
 
-    it("refuses U+0000 in a field name or value, which jsonb cannot store", async () => {
-        const cases: [string, Record<string, unknown>][] = [
-            ["SET_FIELD", { field: "a\u0000b", value: 1 }],
-            ["SET_FIELD", { field: "n", value: { k: "x\u0000" } }],
-            ["SET_FIELD", { field: "n", value: { ["k\u0000"]: 1 } }],
-            ["APPEND_ITEM", { field: "list", value: ["\u0000"] }],
-            ["SET_ITEM", { field: "list", index: 0, value: "\u0000" }],
-        ]
-        for (const [op, vars] of cases) {
-            const result = await apply(edit(op, vars), program())
-            expect(result.success).toBe(false)
-            expect(result.message).toContain("U+0000")
-        }
-    })
-
     it("refuses a value nested deeper than 64 levels", async () => {
         let deep: unknown = 1
         for (let i = 0; i < 64; i++) deep = { d: deep }
@@ -415,6 +401,8 @@ describe("granular storage operations", () => {
     })
 })
 
+// The routines store what they are given. The apply judges the row they leave
+// (storableRows) and fails the transaction only where Postgres would refuse it.
 describe("U+0000, which Postgres cannot store, in any storage operation", () => {
     const nul = "a\u0000b"
     const cases: [string, string, Record<string, unknown>][] = [
@@ -431,19 +419,15 @@ describe("U+0000, which Postgres cannot store, in any storage operation", () => 
         ["SET_FIELD", "the value", { field: "n", value: { k: nul } }],
         ["SET_ITEM", "the value", { field: "list", index: 0, value: nul }],
         ["APPEND_ITEM", "a key of the value", { field: "list", value: { [nul]: 1 } }],
-        ["DELETE_FIELD", "the field name", { field: nul }],
     ]
 
     for (const [op, where, vars] of cases) {
-        it(`${op} refuses it in ${where}, simulated or not`, async () => {
-            for (const simulate of [true, false]) {
-                const existing = op === "CREATE_STORAGE_PROGRAM" ? null : program()
-                const before = existing ? snapshot(existing) : null
-                const result = await apply(edit(op, vars), existing, simulate)
-                expect(result.success).toBe(false)
-                expect(result.message).toContain("U+0000")
-                if (existing) expect(snapshot(existing)).toEqual(before)
-            }
+        it(`${op} with it in ${where} leaves a row the apply refuses; admission refuses the payload`, async () => {
+            const existing = op === "CREATE_STORAGE_PROGRAM" ? null : program()
+            const result = await apply(edit(op, vars), existing)
+            expect(result.success).toBe(true)
+            expect(unstorableRow("storagePrograms", result.storageProgram)).toStartWith("storagePrograms.")
+
             const validated = validateStorageProgramPayload(
                 { operation: op, storageAddress: ADDRESS, ...vars } as any,
                 OWNER,
@@ -453,22 +437,20 @@ describe("U+0000, which Postgres cannot store, in any storage operation", () => 
         })
     }
 
-    it("refuses it in the edit's target or metadata, which become columns too", async () => {
-        const target = edit("WRITE_STORAGE", { data: { k: 1 } })
-        target.target = ADDRESS + "\u0000"
-        expect((await apply(target, program())).success).toBe(false)
-
-        const metadata = edit("WRITE_STORAGE", { data: { k: 1 } })
-        metadata.context.data.metadata = { note: nul }
-        expect((await apply(metadata, program())).success).toBe(false)
+    it("applies an operation whose U+0000 the row never stores", async () => {
+        const result = await apply(edit("CREATE_STORAGE_PROGRAM", { programName: "p", data: { k: 1 }, note: nul }), null)
+        expect(result.success).toBe(true)
+        expect(unstorableRow("storagePrograms", result.storageProgram)).toBeNull()
     })
 
-    it("still accepts the same payloads without it", async () => {
+    it("leaves clean rows for the same payloads without it", async () => {
         const created = await apply(
             edit("CREATE_STORAGE_PROGRAM", { programName: "p", salt: "s", data: { k: "ab" }, metadata: { name: "n" } }),
             null,
         )
         expect(created.success).toBe(true)
-        expect((await apply(edit("WRITE_STORAGE", { data: { k: ["ab"] } }), program())).success).toBe(true)
+        expect(unstorableRow("storagePrograms", created.storageProgram)).toBeNull()
+        const written = await apply(edit("WRITE_STORAGE", { data: { k: ["ab"] } }), program())
+        expect(unstorableRow("storagePrograms", written.storageProgram)).toBeNull()
     })
 })

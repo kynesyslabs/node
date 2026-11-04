@@ -7,7 +7,7 @@ import {
 import Hashing from "@/libs/crypto/hashing"
 import { BATCH_SIGNATURE_DOMAIN } from "@/libs/l2ps/constants"
 import type { TxValidationResult } from "./types"
-import { transactionNulRefusal } from "./postgresText"
+import { transactionRowRefusal } from "./postgresStorable"
 
 /**
  * Types of node-generated relay transactions that do not follow the standard
@@ -63,9 +63,9 @@ export async function verifySystemRelayTx(
     if (!isSystemRelayTx(tx)) {
         return invalid("not a system relay transaction")
     }
-    const nulRefusal = transactionNulRefusal(tx)
-    if (nulRefusal !== null) {
-        return invalid(nulRefusal)
+    const unstorable = transactionRowRefusal(tx)
+    if (unstorable !== null) {
+        return invalid(unstorable)
     }
     const content = tx.content as Record<string, any>
 

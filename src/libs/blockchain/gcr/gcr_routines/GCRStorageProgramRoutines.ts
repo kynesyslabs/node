@@ -13,9 +13,9 @@ import { types, storage } from "@kynesyslabs/demosdk"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import log from "@/utilities/logger"
 import {
-    containsNulCharacter,
-    NUL_CHARACTER_REFUSAL,
-} from "@/libs/blockchain/validation/postgresText"
+    isJsonbStorable,
+    NOT_STORABLE,
+} from "@/libs/blockchain/validation/postgresStorable"
 import type { GCRResult } from "../handleGCR"
 
 // Re-export SDK types for convenience
@@ -28,7 +28,7 @@ const STORAGE_PROGRAM_MAX_SIZE_BYTES = 1048576 // 1MB
 const STORAGE_PROGRAM_PRICING_CHUNK_BYTES = 10240 // 10KB
 const STORAGE_PROGRAM_FEE_PER_CHUNK = 1n // 1 DEM per chunk
 const MAX_INTERACTION_TXS = 1000
-const STORAGE_NUL_MESSAGE = `Storage program payload ${NUL_CHARACTER_REFUSAL}`
+const STORAGE_NOT_STORABLE = `Storage program payload ${NOT_STORABLE}`
 
 function deepMerge(
     target: Record<string, unknown>,
@@ -88,10 +88,10 @@ export function validateStorageProgramPayload(
 } {
     const encoding = payload.encoding || "json"
 
-    if (containsNulCharacter(payload)) {
+    if (!isJsonbStorable(payload)) {
         return {
             valid: false,
-            message: STORAGE_NUL_MESSAGE,
+            message: STORAGE_NOT_STORABLE,
         }
     }
 
@@ -497,17 +497,6 @@ export class GCRStorageProgramRoutines {
         // - context.data: { variables, metadata }
         const operation = spEdit.context.operation
         const storageAddress = spEdit.target
-
-        // Every string here lands in a text or jsonb column of the row.
-        if (
-            containsNulCharacter([
-                spEdit.target,
-                spEdit.context.sender,
-                spEdit.context.data ?? null,
-            ])
-        ) {
-            return { success: false, message: STORAGE_NUL_MESSAGE }
-        }
 
         log.info(
             `[StorageProgram] Processing ${operation} for ${storageAddress}`,

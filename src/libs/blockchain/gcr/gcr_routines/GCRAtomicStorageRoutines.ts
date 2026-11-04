@@ -7,7 +7,6 @@ import {
 } from "@/libs/atomic-work/storageWrite"
 import { jcsCanonicalize } from "@/libs/crypto/jcs"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
-import { containsNulCharacter, NUL_CHARACTER_REFUSAL } from "@/libs/blockchain/validation/postgresText"
 
 /** Same ceiling as an ordinary storage program. */
 const MAX_VALUE_BYTES = 1048576
@@ -75,11 +74,6 @@ export function applyAtomicStoragePut(
 
     if (edit.target !== deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, edit.writer, edit.name, edit.discriminator)) {
         return { success: false, message: `${edit.target} is not the address this writer derives` }
-    }
-
-    // The writer, name and discriminator become text columns of the row.
-    if (containsNulCharacter([edit.writer, edit.name, edit.discriminator, edit.value ?? null])) {
-        return { success: false, message: `storage write ${NUL_CHARACTER_REFUSAL}` }
     }
 
     let canonical: string

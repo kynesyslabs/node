@@ -37,9 +37,9 @@ import {
 } from "@/forks"
 import { Transactions } from "@/model/entities/Transactions"
 import {
-    transactionNulRefusal,
-    withoutNulCharacters,
-} from "./validation/postgresText"
+    admissionRefusal,
+    withStorableText,
+} from "./validation/postgresStorable"
 import type { TransactionStatus } from "@/utilities/constants"
 
 interface TransactionResponse {
@@ -453,9 +453,9 @@ export default class Transaction implements ITransaction {
         // commit of the block that would carry it. Checked first because
         // validateToField reads `to` through Buffer.from(hex), which stops at
         // the first non-hex character and would pass "<64 hex>\u0000".
-        const nulRefusal = transactionNulRefusal(tx)
-        if (nulRefusal !== null) {
-            return { valid: false, message: nulRefusal }
+        const unstorable = admissionRefusal(tx)
+        if (unstorable !== null) {
+            return { valid: false, message: unstorable }
         }
 
         // REVIEW: StorageProgram transactions use stor-{hash} format for 'to' field
@@ -535,7 +535,7 @@ export default class Transaction implements ITransaction {
             // runs (P6). The DB column is nullable.
             rpcAddress: tx.content.transaction_fee.rpc_address ?? null,
             id: 0, // ? What is this?
-            attrs: withoutNulCharacters(tx.attrs),
+            attrs: withStorableText(tx.attrs),
         }
 
         return rawTx

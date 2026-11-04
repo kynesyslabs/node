@@ -1,9 +1,11 @@
 /**
  * Postgres refuses U+0000 in `varchar` and `jsonb`, so a transaction carrying
- * one that reaches a block fails the block's commit on every node and stops
- * the chain. Every door a transaction can come through must refuse it: RPC
- * admission, gossip ingest, the consensus mempool merge, the mempool insert
- * itself, the re-check of a received block and the re-check of a synced one.
+ * one into a column that refuses it fails the block's commit on every node and
+ * stops the chain. Admission (RPC, gossip, the mempool insert) refuses any
+ * text jsonb would refuse anywhere in the transaction. The consensus mempool
+ * merge and the re-check of a received or synced block refuse only U+0000 in
+ * a column of the transaction's own row: anything else did commit, in the
+ * json body, and history holding it must still verify.
  *
  * The transactions are signed by the real SDK signer and the validators are
  * the real ones; only the chain, the database and the worker threads are
@@ -95,6 +97,17 @@ async function transfer(to: string): Promise<Transaction> {
     return tx
 }
 
+async function withMemo(key: string, value: string): Promise<Transaction> {
+    const tx = DemosTransactions.empty()
+    tx.content.type = "native"
+    tx.content.to = PEER
+    tx.content.nonce = 8
+    tx.content.amount = 5n * OS as never
+    tx.content.timestamp = Date.now()
+    tx.content.data = ["native", { nativeOperation: "send", args: [PEER, String(5n * OS)], [key]: value }] as never
+    return onTheWire(await demos.sign(tx))
+}
+
 async function withNulMemo(): Promise<Transaction> {
     const tx = DemosTransactions.empty()
     tx.content.type = "native"
@@ -155,6 +168,11 @@ describe("RPC admission", () => {
         expect(verdict).toMatchObject({ ok: false, code: "structure" })
     })
 
+    it("refuses an unpaired surrogate in the body", async () => {
+        const verdict = await checkTxAdmissible(atRpc(await withMemo("memo", "\ud800")), { head: 100, checkWindow: true, checkMempool: true })
+        expect(verdict).toMatchObject({ ok: false, code: "structure" })
+    })
+
     it("still admits the same transfer to a clean address", async () => {
         expect(await checkTxAdmissible(atRpc(await transfer(PEER)), { head: 100, checkWindow: true, checkMempool: true })).toEqual({ ok: true })
     })
@@ -188,6 +206,12 @@ describe("consensus mempool merge", () => {
         await Mempool.receive([pending(bad), pending(good)], false)
         expect(inserted.map(row => row.hash)).toEqual([good.hash])
     })
+
+    it("keeps one whose U+0000 sits only in the json body, which commits", async () => {
+        const memo = await withNulMemo()
+        await Mempool.receive([pending(memo)], false)
+        expect(inserted.map(row => row.hash)).toEqual([memo.hash])
+    })
 })
 
 describe("received block verification", () => {
@@ -201,6 +225,11 @@ describe("received block verification", () => {
     it("accepts the same block with a clean transfer", async () => {
         const good = await transfer(PEER)
         expect((await verifyBlockTxSignatures(blockOf([good]), [good])).valid).toBe(true)
+    })
+
+    it("accepts a block whose U+0000 or surrogate sits only in the json body", async () => {
+        const txs = [await withNulMemo(), await withMemo("note", "\ud800")]
+        expect(await verifyBlockTxSignatures(blockOf(txs), txs)).toEqual({ valid: true })
     })
 
     it("rejects a relay transaction carrying it", async () => {
@@ -217,9 +246,14 @@ describe("sync verification", () => {
         await expect(verifyBlockTransactions(blockOf([bad]), [bad])).rejects.toBeInstanceOf(SyncBlockRejectedError)
     })
 
-    it("rejects a clean body served with U+0000 in its attrs", async () => {
+    it("syncs a historical block whose U+0000 sits only in a body memo", async () => {
+        const memo = { ...(await withNulMemo()), status: "confirmed" } as Transaction
+        await verifyBlockTransactions(blockOf([memo]), [memo])
+    })
+
+    it("accepts attrs served with U+0000: they are cleaned before they are stored", async () => {
         const served = { ...(await transfer(PEER)), status: "confirmed", attrs: { message: "\u0000" } } as unknown as Transaction
-        await expect(verifyBlockTransactions(blockOf([served]), [served])).rejects.toThrow("U+0000")
+        await verifyBlockTransactions(blockOf([served]), [served])
     })
 
     it("accepts a served block with a clean transfer", async () => {
@@ -229,10 +263,10 @@ describe("sync verification", () => {
 })
 
 describe("stored attrs", () => {
-    it("never carry U+0000 into the jsonb column, and keep an escaped backslash as it was", async () => {
+    it("never carry U+0000 or an unpaired surrogate into the jsonb column", async () => {
         const tx = NodeTransaction.fromRawTransaction(NodeTransaction.toRawTransaction(Object.assign(new NodeTransaction(), await transfer(PEER))) as never)
-        tx.attrs = { message: "bad \u0000 \\u0000", ["k\u0000"]: 1 } as never
+        tx.attrs = { message: "bad \u0000 \\u0000 \ud800", ["k\u0000"]: 1 } as never
         const raw = NodeTransaction.toRawTransaction(tx) as unknown as { attrs: Record<string, unknown> }
-        expect(raw.attrs).toEqual({ message: "bad � \\u0000", ["k�"]: 1 })
+        expect(raw.attrs).toEqual({ message: "bad \ufffd \\u0000 \ufffd", ["k\ufffd"]: 1 })
     })
 })

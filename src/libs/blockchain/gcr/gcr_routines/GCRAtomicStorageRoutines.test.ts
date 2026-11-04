@@ -10,6 +10,7 @@ import {
     type StoragePutEdit,
 } from "@/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines"
 import type { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
+import { unstorableRow } from "@/libs/blockchain/gcr/storableRows"
 
 const WRITER = "0x" + "aa".repeat(32)
 const target = deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, WRITER, "result", "1")
@@ -95,13 +96,14 @@ describe("applyAtomicStoragePut", () => {
         expect(programs.get(target)).toBeNull()
     })
 
-    it("refuses U+0000, which Postgres cannot store, in the value or the row's text", () => {
+    // The apply judges the row this leaves and fails the Work on it.
+    it("leaves a U+0000 value or name in a row the storage check refuses", () => {
         const programs = new Map<string, GCRStorageProgram | null>()
-        const nulValue = put({ value: { note: "a\u0000b" } })
-        expect(applyAtomicStoragePut(nulValue, programs, false).message).toContain("U+0000")
+        applyAtomicStoragePut(put({ value: { note: "a\u0000b" } }), programs, false)
+        expect(unstorableRow("storagePrograms", programs.get(target))).toBe("storagePrograms.data")
         const name = "re\u0000sult"
-        const nulName = put({ name, target: deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, WRITER, name, "1") })
-        expect(applyAtomicStoragePut(nulName, programs, false).message).toContain("U+0000")
-        expect(programs.size).toBe(0)
+        const nulTarget = deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, WRITER, name, "1")
+        applyAtomicStoragePut(put({ name, target: nulTarget }), programs, false)
+        expect(unstorableRow("storagePrograms", programs.get(nulTarget))).toStartWith("storagePrograms.")
     })
 })

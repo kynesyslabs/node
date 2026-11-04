@@ -117,6 +117,8 @@ import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
 
 type AtomicWorkPayloadView = WorkEnvelope & { transfers?: { to?: unknown; amount?: unknown }[] }
 import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
+import { unstorableClaim, unstorableRow } from "./storableRows"
+import { NOT_STORABLE } from "@/libs/blockchain/validation/postgresStorable"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -486,6 +488,52 @@ export function isGCRMainEdit(
 ): edit is GCREditBalance | GCREditNonce | GCREditIdentity {
     const gcrMainEdits = new Set(["balance", "nonce", "identity"])
     return gcrMainEdits.has(edit.type)
+}
+
+function firstUnstorable(cache: string, rows: Map<string, unknown> | undefined): string | null {
+    for (const row of rows?.values() ?? []) {
+        const where = unstorableRow(cache, row)
+        if (where) return where
+    }
+    return null
+}
+
+/**
+ * Where a row `edit` has just written cannot be stored, as "cache.column",
+ * or null. Judged on the rows rather than the edit, so only what a routine
+ * really stores counts. Balance and nonce edits store numbers under a key
+ * that must already be 64 hex characters; an identity edit may also credit
+ * another account.
+ */
+function unstorableAfter(edit: GCREdit, entities: GCREntityCaches): string | null {
+    const fields = edit as unknown as Record<string, any>
+    switch (edit.type as string) {
+        case "identity":
+            return (
+                firstUnstorable("accounts", entities.accounts) ??
+                unstorableClaim("zkCommitments", entities.zkCommitments) ??
+                unstorableClaim("zkNullifiers", entities.zkNullifiers)
+            )
+        case "storageProgram":
+        case "storage-program-put":
+            return unstorableRow("storagePrograms", entities.storagePrograms.get(fields.target))
+        case "tlsnotary":
+            return unstorableRow("tlsNotaries", entities.tlsNotaries.get(fields.data?.tokenId))
+        case "work-attempt":
+            return unstorableRow("atomicWorks", entities.atomicWorks.get(fields.workId))
+        case "resource-slot-cas":
+            return unstorableRow("resourceSlots", entities.resourceSlots.get(fields.resourceKey))
+        case "validatorStake":
+            return firstUnstorable("validators", entities.validators)
+        case "networkUpgrade":
+        case "networkUpgradeVote":
+            return (
+                firstUnstorable("networkUpgrades", entities.networkUpgrades) ??
+                firstUnstorable("networkUpgradeVotes", entities.networkUpgradeVotes)
+            )
+        default:
+            return null
+    }
 }
 
 /**
@@ -1027,7 +1075,7 @@ export default class HandleGCR {
                 }
             }
             const applyOne = (edit: GCREdit, caches: GCREntityCaches) =>
-                HandleGCR.applyGCREdit(
+                HandleGCR.applyStorableEdit(
                     HandleGCR.stampedEdit(edit, tx, simulate),
                     caches,
                     isRollback,
@@ -1076,7 +1124,18 @@ export default class HandleGCR {
                 entities,
                 settledEdits(parts, isReplay ? "replayed" : "committed", true),
                 applyOne,
-                seal,
+                seal && (async caches => {
+                    const sealed = await seal(caches)
+                    if (!sealed.success) return sealed
+                    // The receipt quotes the Work's payload into jsonb.
+                    const where = unstorableRow(
+                        "atomicWorks",
+                        attempt ? caches.atomicWorks.get(attempt.workId) : null,
+                    )
+                    return where === null
+                        ? sealed
+                        : { success: false, message: `${where} ${NOT_STORABLE}` }
+                }),
             )
             if (result.success || simulate || isReplay) {
                 if (!result.success) {
@@ -1138,7 +1197,7 @@ export default class HandleGCR {
             let result: GCRResult
 
             try {
-                result = await HandleGCR.applyGCREdit(
+                result = await HandleGCR.applyStorableEdit(
                     edit,
                     entities,
                     isRollback,
@@ -2168,6 +2227,26 @@ export default class HandleGCR {
      *
      * @throws database errors during repository operations
      */
+    /**
+     * `applyGCREdit`, then a failure if a row it wrote holds what Postgres
+     * refuses: the transaction fails and is rolled back instead of the block
+     * failing to commit. A rollback writes back rows that were stored, so it
+     * is not checked.
+     */
+    static async applyStorableEdit(
+        edit: GCREdit,
+        entities: GCREntityCaches,
+        isRollback = false,
+        simulate = false,
+    ): Promise<GCRResult> {
+        const result = await HandleGCR.applyGCREdit(edit, entities, isRollback, simulate)
+        if (!result.success || isRollback) return result
+        const where = unstorableAfter(edit, entities)
+        return where === null
+            ? result
+            : { success: false, message: `${where} ${NOT_STORABLE}` }
+    }
+
     static async applyGCREdit(
         editOperation: GCREdit,
         entities: GCREntityCaches,

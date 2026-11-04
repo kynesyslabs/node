@@ -15,7 +15,7 @@ import Hashing from "../../crypto/hashing"
 import { txSignaturePreimage } from "../../crypto/txSignaturePreimage"
 import { serializeTxContent } from "../../crypto/txContentSerializer"
 import type { PqcIdentityHint, TxValidationResult } from "./types"
-import { transactionNulRefusal } from "./postgresText"
+import { transactionRowRefusal } from "./postgresStorable"
 
 /**
  * Signature-preimage context, resolved on the main thread (fork config and
@@ -172,11 +172,9 @@ export async function validateTxSignature(
  * received or synced block: U+0000 first, then coherence, then signature.
  * Short-circuits on the first failure.
  *
- * U+0000 in `to`, `from`, `type` or a value the edits store fails the commit
- * of the block on every node, so refusing it here only turns a halt into a
- * rejected block. A NUL that lands only in the `json` body column did commit
- * before this check; a chain already holding such a transaction must not be
- * replayed through it.
+ * The U+0000 check covers only the columns of the transaction's own row: a
+ * block carrying one there never committed, so rejecting it cannot reject
+ * history. The rest of the body is refused at admission, not here.
  */
 export async function validateTx(
     tx: Transaction,
@@ -184,9 +182,9 @@ export async function validateTx(
     isPostFork: boolean,
     domain: TxSignatureDomain = LEGACY_DOMAIN,
 ): Promise<TxValidationResult> {
-    const nulRefusal = transactionNulRefusal(tx)
-    if (nulRefusal !== null) {
-        return { hash: tx?.hash, valid: false, reason: nulRefusal }
+    const unstorable = transactionRowRefusal(tx)
+    if (unstorable !== null) {
+        return { hash: tx?.hash, valid: false, reason: unstorable }
     }
     const coherence = validateTxCoherence(tx, isPostFork)
     if (!coherence.valid) return coherence
