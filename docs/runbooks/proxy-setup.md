@@ -47,6 +47,10 @@ survive proxy termination.
 ```bash
 # Activate the proxy profile
 COMPOSE_PROFILES=monitoring,tlsnotary,proxy
+# Use the proxy override too. It is what makes the node refuse to start
+# while a basic-auth hash is empty or still the placeholder; without it
+# an empty METRICS_BASIC_AUTH_HASH fails silently (401 on /metrics).
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
 
 # Public DNS name + ACME contact
 PROXY_DOMAIN=node.example.com
@@ -165,7 +169,10 @@ support is required, run Prometheus on a dedicated subdomain
 ### `/mcp/` returns 401 even with credentials
 
 Default `MCP_BASIC_AUTH_HASH` is a sentinel that rejects all callers
-(Caddyfile comment explains). Generate a real hash:
+(Caddyfile comment explains). With `docker-compose.proxy.yml` and
+`MCP_ENABLED=true`, the node refuses to start until a real hash is set;
+`PROXY_ALLOW_PLACEHOLDER_AUTH=true` keeps the route closed on purpose.
+The same applies to an empty `METRICS_BASIC_AUTH_HASH`. Generate a real hash:
 
 ```bash
 docker run --rm caddy:2 caddy hash-password --plaintext 'mcp-password-here'
