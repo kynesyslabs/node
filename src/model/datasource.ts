@@ -13,6 +13,8 @@ import { dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { DataSource } from "typeorm"
 import { Config } from "src/config"
+import log from "@/utilities/logger"
+import { describeDbConnectionFailure } from "./dbPreflight"
 
 import { Blocks } from "./entities/Blocks.js"
 import { Consensus } from "./entities/Consensus.js"
@@ -119,7 +121,14 @@ class Datasource {
     public static async getInstance(): Promise<Datasource> {
         if (!Datasource.instance) {
             Datasource.instance = new Datasource()
-            await Datasource.instance.dataSource.initialize()
+            try {
+                await Datasource.instance.dataSource.initialize()
+            } catch (error) {
+                const db = Config.getInstance().database
+                log.error(describeDbConnectionFailure(db, error))
+                // Same error as before, so the caller exits the way it did
+                throw error
+            }
         }
         return Datasource.instance
     }
