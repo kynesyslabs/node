@@ -24,7 +24,11 @@ const { default: HandleGCR } = await import("./handleGCR")
 const { default: Chain } = await import("../chain")
 const { GCRStorageProgram } = await import("@/model/entities/GCRv2/GCR_StorageProgram")
 const { getSharedState } = await import("@/utilities/sharedState")
-const { unstorableRow } = await import("./storableRows")
+const { unstorableRow, indexedColumns, ROW_ENTITIES } = await import("./storableRows")
+
+/** Text no compression shrinks: a b-tree entry keeps about its length. */
+const random = (length: number) =>
+    Array.from({ length }, (_, i) => String.fromCharCode(0x21 + ((i * 7919 + 13) % 89))).join("")
 
 const SENDER = "0x" + "ab".repeat(32)
 const ADDRESS = "stor-" + "ef".repeat(20)
@@ -105,6 +109,7 @@ describe("a storage program row Postgres would refuse", () => {
         ["an unpaired surrogate in the acl", { acl: { mode: "restricted", allowed: ["\ud800"] } }],
         ["an unpaired surrogate in the metadata", { metadata: { title: "\ud800" } }],
         ["U+0000 in the program name, a text column", { programName: "p\u0000" }],
+        ["a program name too long for its index entry", { programName: random(3000) }],
     ] as const) {
         it(`fails the create, leaving no row and the fee unpaid: ${name}`, async () => {
             const entities = await caches()
@@ -147,5 +152,39 @@ describe("unstorableRow", () => {
         expect(unstorableRow("storagePrograms", { ...row, owner: "a\u0000" })).toBe("storagePrograms.owner")
         expect(unstorableRow("storagePrograms", { ...row, data: { k: "\ud800" } })).toBe("storagePrograms.data")
         expect(unstorableRow("resourceSlots", { state: "\ud800" })).toBe("resourceSlots")
+    })
+})
+
+describe("indexed text columns", () => {
+    it("refuse a value too long for a b-tree entry, other text does not", () => {
+        const row = stored()
+        expect(unstorableRow("storagePrograms", { ...row, programName: random(1024) })).toBeNull()
+        expect(unstorableRow("storagePrograms", { ...row, programName: random(1025) })).toBe(
+            "storagePrograms.programName",
+        )
+        // Three bytes each in UTF-8.
+        expect(unstorableRow("storagePrograms", { ...row, owner: "€".repeat(342) })).toBe("storagePrograms.owner")
+        expect(unstorableRow("storagePrograms", { ...row, ipfsCid: random(5000) })).toBeNull()
+        // Any sender may propose; the id is unique and indexed.
+        expect(unstorableRow("networkUpgrades", { proposalId: random(3000) })).toBe("networkUpgrades.proposalId")
+        expect(unstorableRow("tlsNotaries", { tokenId: "tlsn_x", domain: random(3000) })).toBe("tlsNotaries.domain")
+    })
+
+    it("are the ones the schema indexes", () => {
+        const indexed = Object.fromEntries(
+            Object.entries(ROW_ENTITIES)
+                .filter(([, entity]) => entity !== "jsonb")
+                .map(([cache, entity]) => [cache, [...indexedColumns(entity as Function)].sort()]),
+        )
+        // From the migrations: primary keys, unique constraints and indexes.
+        expect(indexed).toEqual({
+            accounts: ["pubkey"],
+            storagePrograms: ["encoding", "owner", "programName", "storageAddress", "storageLocation"],
+            tlsNotaries: ["domain", "owner", "tokenId", "txhash"],
+            atomicWorks: ["txHash", "workId"],
+            validators: ["address", "unstake_available_at", "unstake_requested_at"],
+            networkUpgrades: ["effectiveAtBlock", "id", "proposalId", "status"],
+            networkUpgradeVotes: ["id", "proposalId", "voterAddress"],
+        })
     })
 })

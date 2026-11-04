@@ -169,6 +169,27 @@ describe("an account the node cannot load", () => {
         expect(out.successfulTxs).toEqual([good.hash])
     })
 
+    // A key past what a b-tree entry holds fails the insert of its row in
+    // the block's commit, on every node.
+    for (const [name, edit] of [
+        ["a storage address", { type: "storageProgram", target: "stor-" + "a".repeat(3000) }],
+        ["a storage put target", { type: "storage-program-put", target: "stor-" + "a".repeat(60) }],
+        ["a tlsnotary token", { type: "tlsnotary", operation: "add", data: { tokenId: "tlsn_" + "a".repeat(60) } }],
+        ["a Work id", { type: "work-attempt", workId: "a".repeat(129) }],
+        ["a resource key", { type: "resource-slot-cas", resourceKey: "a".repeat(257) }],
+    ] as const) {
+        it(`${name} longer than its cap fails its transaction before it is loaded`, async () => {
+            const tx = await sendTo(PEER)
+            ;(tx.content.gcr_edits as unknown[]).push(edit)
+            const good = await sendTo(PEER)
+            const out = await apply([tx, good])
+            expect(out.failedTxs).toEqual([tx.hash])
+            expect(out.successfulTxs).toEqual([good.hash])
+            const key = "target" in edit ? edit.target : "workId" in edit ? edit.workId : "resourceKey" in edit ? edit.resourceKey : edit.data.tokenId
+            expect(queried).not.toContain(key)
+        })
+    }
+
     it("is judged by the rule createAccount applies", async () => {
         for (const key of [PEER, PEER.slice(2), "0x1234", "   ", "", " ".repeat(64), "z".repeat(64), withLast("\u0000")]) {
             const refused = uncreatableAccountKey(key) !== null

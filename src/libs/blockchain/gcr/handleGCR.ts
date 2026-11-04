@@ -1170,7 +1170,7 @@ export default class HandleGCR {
                     )
                     return where === null
                         ? sealed
-                        : { success: false, message: `${where} ${NOT_STORABLE}` }
+                        : { success: false, message: `${where} holds a value Postgres cannot store` }
                 }),
             )
             if (result.success || simulate || isReplay) {
@@ -2310,7 +2310,7 @@ export default class HandleGCR {
         const where = unstorableAfter(edit, entities)
         return where === null
             ? result
-            : { success: false, message: `${where} ${NOT_STORABLE}` }
+            : { success: false, message: `${where} holds a value Postgres cannot store` }
     }
 
     static async applyGCREdit(

@@ -9,6 +9,7 @@ import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
 import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
 import {
     NOT_STORABLE,
+    fitsIndexKey,
     isJsonbStorable,
     isKeyStorable,
     isTextStorable,
@@ -25,35 +26,60 @@ import {
  * column, was committed before and still is.
  */
 
-type ColumnKind = "text" | "jsonb" | "other"
+type ColumnKind = "text" | "indexedText" | "jsonb" | "other"
 
 const TEXT_TYPES = new Set(["text", "varchar", "character varying", "char", "character", "citext", "uuid", "enum"])
 
 const kindsByEntity = new Map<Function, Map<string, ColumnKind>>()
 
+/** Properties of `entity` that a primary key, unique constraint or index covers. */
+export function indexedColumns(entity: Function): Set<string> {
+    const storage = getMetadataArgsStorage()
+    const indexed = new Set<string>()
+    for (const column of storage.columns) {
+        if (column.target !== entity) continue
+        if (column.options.primary || column.options.unique) indexed.add(column.propertyName)
+    }
+    for (const index of [...storage.indices, ...storage.uniques]) {
+        if (index.target !== entity || !Array.isArray(index.columns)) continue
+        for (const property of index.columns) indexed.add(property)
+    }
+    return indexed
+}
+
 function columnKinds(entity: Function): Map<string, ColumnKind> {
     let kinds = kindsByEntity.get(entity)
     if (kinds) return kinds
     kinds = new Map()
+    const indexed = indexedColumns(entity)
     for (const column of getMetadataArgsStorage().columns) {
         if (column.target !== entity) continue
         const type = column.options.type
         const name = typeof type === "string" ? type.toLowerCase() : type === String ? "varchar" : ""
         kinds.set(
             column.propertyName,
-            name === "jsonb" ? "jsonb" : TEXT_TYPES.has(name) ? "text" : "other",
+            name === "jsonb"
+                ? "jsonb"
+                : TEXT_TYPES.has(name)
+                  ? indexed.has(column.propertyName) ? "indexedText" : "text"
+                  : "other",
         )
     }
     kindsByEntity.set(entity, kinds)
     return kinds
 }
 
-/** The first column of `row`, stored as `entity`, that Postgres would refuse. */
+/**
+ * The first column of `row`, stored as `entity`, that Postgres would refuse:
+ * U+0000 in text, what jsonb refuses, or an indexed text value too long for
+ * its b-tree entry.
+ */
 export function unstorableColumn(entity: Function, row: unknown): string | null {
     if (typeof row !== "object" || row === null) return null
     for (const [property, kind] of columnKinds(entity)) {
         const value = (row as Record<string, unknown>)[property]
-        if (kind === "text" && !isTextStorable(value)) return property
+        if ((kind === "text" || kind === "indexedText") && !isTextStorable(value)) return property
+        if (kind === "indexedText" && !fitsIndexKey(value)) return property
         if (kind === "jsonb" && !isJsonbStorable(value)) return property
     }
     return null
@@ -82,12 +108,12 @@ export function unstorableRow(cache: string, row: unknown): string | null {
 
 /**
  * Claims (ZK commitments, nullifiers) are stored by their key, in a text
- * column.
+ * primary key column.
  */
 export function unstorableClaim(cache: string, claims: Map<string, unknown> | undefined): string | null {
     if (!claims) return null
     for (const key of claims.keys()) {
-        if (!isTextStorable(key)) return cache
+        if (!isTextStorable(key) || !fitsIndexKey(key)) return cache
     }
     return null
 }
@@ -101,6 +127,20 @@ type EditView = {
     resourceKey?: unknown
     data?: unknown
 }
+
+/**
+ * Byte caps for the keys edits name rows by, each a text primary key. Set
+ * above the longest key the node or SDK derives, and far below what a b-tree
+ * entry holds: a storage address is "stor-" and 40 hex digits, a tlsnotary
+ * token "tlsn_" and a UUID, a Work id 64 hex digits. A resource key is
+ * derived by the Work's profile, so it gets more room.
+ */
+export const EDIT_KEY_MAX_BYTES = {
+    storageAddress: 64,
+    tokenId: 64,
+    workId: 128,
+    resourceKey: 256,
+} as const
 
 const ACCOUNT_EDITS = new Set(["balance", "nonce", "identity"])
 const TARGET_EDITS = new Set(["storageProgram", "storage-program-put"])
@@ -128,12 +168,14 @@ export function unloadableEditKey(
         const problem = accountProblem(value, loaded)
         return problem === null ? null : `${where}: ${problem}`
     }
-    const text = (where: string, value: unknown) =>
+    const text = (where: string, value: unknown, maxBytes: number) =>
         typeof value !== "string"
             ? `${where}: not a string`
-            : isKeyStorable(value)
-              ? null
-              : `${where}: ${NOT_STORABLE}`
+            : !isKeyStorable(value)
+              ? `${where}: ${NOT_STORABLE}`
+              : !fitsIndexKey(value, maxBytes)
+                ? `${where}: longer than ${maxBytes} bytes`
+                : null
 
     for (const [i, item] of edits.entries()) {
         if (typeof item !== "object" || item === null) return `gcr_edits[${i}]: not an edit`
@@ -147,16 +189,16 @@ export function unloadableEditKey(
         const refusal = ACCOUNT_EDITS.has(type)
             ? account(`${where} account`, edit.account)
             : TARGET_EDITS.has(type)
-              ? text(`${where} target`, edit.target)
+              ? text(`${where} target`, edit.target, EDIT_KEY_MAX_BYTES.storageAddress)
               : type === "tlsnotary"
                 ? typeof edit.data === "object" && edit.data !== null
-                    ? text(`${where} tokenId`, (edit.data as { tokenId?: unknown }).tokenId) ??
+                    ? text(`${where} tokenId`, (edit.data as { tokenId?: unknown }).tokenId, EDIT_KEY_MAX_BYTES.tokenId) ??
                       (edit.account ? account(`${where} account`, edit.account, false) : null)
                     : `${where}: no data`
                 : WORK_EDITS.has(type)
-                  ? text(`${where} workId`, edit.workId)
+                  ? text(`${where} workId`, edit.workId, EDIT_KEY_MAX_BYTES.workId)
                   : type === "resource-slot-cas"
-                    ? text(`${where} resourceKey`, edit.resourceKey)
+                    ? text(`${where} resourceKey`, edit.resourceKey, EDIT_KEY_MAX_BYTES.resourceKey)
                     : null
         if (refusal !== null) return refusal
     }
