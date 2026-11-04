@@ -12,6 +12,7 @@ import type {
     QuorumParityConfig,
     CommitteeBindingConfig,
     CommitLockConfig,
+    FinalityProofsConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -336,6 +337,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "commitLock":
             getSharedState.forkConfig.commitLock = config as CommitLockConfig
             return
+        case "finalityProofs":
+            getSharedState.forkConfig.finalityProofs =
+                config as FinalityProofsConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -467,6 +472,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as CommitteeBindingConfig
         case "commitLock":
             return base as CommitLockConfig
+        case "finalityProofs":
+            return base as FinalityProofsConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
