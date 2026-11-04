@@ -15,13 +15,15 @@
 
 import { In, type EntityManager } from "typeorm"
 import { Config } from "@/config"
-import { SparseMerkleTree } from "@/libs/crypto/merkle/sparse"
+import { SparseMerkleTree, type SparseTerminal } from "@/libs/crypto/merkle/sparse"
 import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import log from "src/utilities/logger"
 import {
     storageProgramKey,
     storageProgramLeafHex,
+    storageProgramRecord,
+    type StorageProgramRecord,
     type StorageProgramRow,
 } from "./storageRecord"
 
@@ -67,13 +69,15 @@ async function leavesFromRows(
     return out
 }
 
-function rootOf(leaves: Iterable<[string, string]>): string {
+function treeOf(leaves: Iterable<[string, string]>): SparseMerkleTree {
     const entries = []
     for (const [storageAddress, leaf] of leaves) {
         entries.push({ key: storageProgramKey(storageAddress), valueHash: leaf })
     }
-    return SparseMerkleTree.build(entries).rootHex
+    return SparseMerkleTree.build(entries)
 }
+
+const rootOf = (leaves: Iterable<[string, string]>): string => treeOf(leaves).rootHex
 
 interface Computed {
     root: string
@@ -83,10 +87,10 @@ interface Computed {
     scratch?: { root: string; differing: string[] }
 }
 
-async function compute(
+/** Every leaf of the snapshot: stored ones, and computed ones for rows without. */
+async function currentLeaves(
     snapshot: StorageRootSnapshot,
-    fromScratch: boolean,
-): Promise<Computed> {
+): Promise<{ stored: StoredLeaf[]; leaves: Map<string, string>; filled: StoredLeaf[] }> {
     const stored = await snapshot.leaves()
     const missing = stored.filter(row => !isStoredLeaf(row.smtLeaf))
     const computed = await leavesFromRows(
@@ -104,6 +108,14 @@ async function compute(
         leaves.set(row.storageAddress, leaf)
         filled.push({ ...row, smtLeaf: leaf })
     }
+    return { stored, leaves, filled }
+}
+
+async function compute(
+    snapshot: StorageRootSnapshot,
+    fromScratch: boolean,
+): Promise<Computed> {
+    const { stored, leaves, filled } = await currentLeaves(snapshot)
     const result: Computed = { root: rootOf(leaves), filled }
     if (fromScratch) {
         const all = await leavesFromRows(snapshot, stored.map(row => row.storageAddress))
@@ -115,6 +127,52 @@ async function compute(
         }
     }
     return result
+}
+
+/** One program's place in the tree: its record when present, and the path to it. */
+export interface StorageProgramProof {
+    storageAddress: string
+    record: StorageProgramRecord | null
+    siblings: string[]
+    terminal: SparseTerminal
+}
+
+export interface StorageProofSet {
+    root: string
+    proofs: StorageProgramProof[]
+}
+
+/**
+ * Proofs for `addresses` from one snapshot of the table, against the root of
+ * that same snapshot. A client rebuilds each leaf from the record served, so
+ * a stored leaf that no longer matches its row is refused here instead of
+ * being served as a proof that cannot verify.
+ */
+async function proveIn(
+    snapshot: StorageRootSnapshot,
+    addresses: string[],
+): Promise<StorageProofSet> {
+    const { leaves } = await currentLeaves(snapshot)
+    const tree = treeOf(leaves)
+    const rows = new Map<string, StorageProgramRow>()
+    for (const row of await snapshot.rows(addresses)) rows.set(row.storageAddress, row)
+
+    const proofs = addresses.map(storageAddress => {
+        const row = rows.get(storageAddress) ?? null
+        const { siblings, terminal } = tree.prove(storageProgramKey(storageAddress))
+        if (row !== null && storageProgramLeafHex(row) !== leaves.get(storageAddress)) {
+            throw new Error(
+                `storage proof: stored leaf of ${storageAddress} does not match its row`,
+            )
+        }
+        return {
+            storageAddress,
+            record: row === null ? null : storageProgramRecord(row),
+            siblings,
+            terminal,
+        }
+    })
+    return { root: tree.rootHex, proofs }
 }
 
 /**
@@ -174,6 +232,11 @@ export class StorageProgramsRoot {
         this.cached = { epoch, root: result.root }
         return root
     }
+
+    /** Proofs for `addresses` and the root they verify against, from one snapshot. */
+    async prove(addresses: string[]): Promise<StorageProofSet> {
+        return await this.reader.read(snapshot => proveIn(snapshot, addresses))
+    }
 }
 
 const databaseReader: StorageRootReader = {
@@ -222,6 +285,15 @@ const storageRoot = new StorageProgramsRoot(
 /** Root of the committed storage-program table, lowercase hex. */
 export function storageProgramsRoot(): Promise<string> {
     return storageRoot.root()
+}
+
+/**
+ * Proofs for `addresses` against the root of the committed table. The caller
+ * holds the sync lock, so no block lands between the read and the anchor it
+ * is checked against.
+ */
+export function proveStoragePrograms(addresses: string[]): Promise<StorageProofSet> {
+    return storageRoot.prove(addresses)
 }
 
 /** Call when a write to `gcr_storageprogram` is issued and once it commits. */

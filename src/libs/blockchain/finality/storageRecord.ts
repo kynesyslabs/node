@@ -108,8 +108,13 @@ export function storageProgramRecord(row: StorageProgramRow): StorageProgramReco
 
 /** Value hash of the program's leaf, as stored in `smtLeaf`. */
 export function storageProgramLeafHex(row: StorageProgramRow): string {
-    const record = canonicalJson(storageProgramRecord(row))
-    return toHex(sha256.create().update(LEAF_VALUE_PREFIX).update(utf8.encode(record)).digest())
+    return storageRecordLeafHex(storageProgramRecord(row))
+}
+
+/** Value hash of a record as served in a storage proof. */
+export function storageRecordLeafHex(record: StorageProgramRecord): string {
+    const text = canonicalJson(record)
+    return toHex(sha256.create().update(LEAF_VALUE_PREFIX).update(utf8.encode(text)).digest())
 }
 
 /** Position of the program in the sparse tree. */

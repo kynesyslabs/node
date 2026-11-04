@@ -118,7 +118,18 @@ export async function resultsRoot(
     parentNumber: number,
 ): Promise<string> {
     if (orderedHashes.length === 0) return EMPTY_RESULTS_ROOT
-    const leaves = orderedHashes.map(hash => {
+    const leaves = resultLeaves(orderedHashes, rows, parentNumber)
+    const { root, toHex } = await loadTree()
+    return toHex(root(leaves))
+}
+
+/** The leaf data of `orderedHashes`, in that order; see `resultsRoot`. */
+export function resultLeaves(
+    orderedHashes: string[],
+    rows: Map<string, ResultRow>,
+    parentNumber: number,
+): Uint8Array[] {
+    return orderedHashes.map(hash => {
         const row = rows.get(hash)
         if (!row) {
             throw new FinalityCommitmentError(
@@ -127,8 +138,6 @@ export async function resultsRoot(
         }
         return resultLeaf(row, parentNumber)
     })
-    const { root, toHex } = await loadTree()
-    return toHex(root(leaves))
 }
 
 async function readResultRows(hashes: string[]): Promise<Map<string, ResultRow>> {
@@ -178,6 +187,17 @@ export async function parentResultsRoot(parent: ParentBlock): Promise<string> {
         rootCache.delete(rootCache.keys().next().value)
     }
     return root
+}
+
+/**
+ * The result leaves of an inserted block, read from its stored rows: the
+ * exact data block `block.number + 1` commits to in `parent_results_root`.
+ * Genesis commits none.
+ */
+export async function blockResultLeaves(block: ParentBlock): Promise<Uint8Array[]> {
+    const hashes = block.content?.ordered_transactions ?? []
+    if (block.number < 1 || hashes.length === 0) return []
+    return resultLeaves(hashes, await readResultRows(hashes), block.number)
 }
 
 /**

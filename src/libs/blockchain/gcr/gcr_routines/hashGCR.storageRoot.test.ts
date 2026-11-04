@@ -41,6 +41,7 @@ mock.module("@/libs/blockchain/finality/storageRoot", () => ({
     __esModule: true,
     storageProgramsRoot,
     markStorageProgramsDirty: () => {},
+    proveStoragePrograms: async () => ({ root: STORAGE_ROOT, proofs: [] }),
 }))
 
 const { getSharedState } = await import("@/utilities/sharedState")
