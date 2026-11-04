@@ -13,6 +13,7 @@ import {
 import { applyForksAtGenesis } from "src/libs/blockchain/genesis/applyForksAtGenesis"
 import { mergeGenesisBalances } from "src/libs/blockchain/genesis/mergeGenesisBalances"
 import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
+import { markStorageProgramsDirty } from "./finality/storageRoot"
 
 /**
  * `checkHash` sees block 0's hash before anything is written and may throw to
@@ -77,6 +78,9 @@ export async function generateGenesisBlock(
         // would refuse to retry).
         const snapshotHasValidators =
             snapshot.manifest.files["validators.jsonl"] !== undefined
+        // The restore writes gcr_storageprogram; a rolled-back restore
+        // changes nothing, so only a commit needs the second mark.
+        markStorageProgramsDirty()
         await dataSource.transaction(async em => {
             await restoreSnapshot(em, snapshot)
             // Overlay genesisData.balances on top of the snapshot rows.
@@ -117,6 +121,7 @@ export async function generateGenesisBlock(
                 )
             }
         })
+        markStorageProgramsDirty()
     } else {
         log.info(
             "[GENESIS] no snapshot at data/snapshot/; falling back to genesisData.balances + genesisData.users",
