@@ -12,12 +12,10 @@ import log from "src/utilities/logger"
 const MILLISECONDS_FLOOR = 1e12
 
 function toSeconds(value: unknown): number | null {
-    const n =
-        typeof value === "bigint"
-            ? Number(value)
-            : typeof value === "string" && /^\d+$/.test(value)
-              ? Number(value)
-              : value
+    const numeric =
+        typeof value === "bigint" ||
+        (typeof value === "string" && /^\d+$/.test(value))
+    const n = numeric ? Number(value) : value
     if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return null
     return Math.floor(n >= MILLISECONDS_FLOOR ? n / 1000 : n)
 }
