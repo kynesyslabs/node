@@ -34,6 +34,9 @@ export const CHALLENGE_PREFIX = "demos-launch-proof"
 const HASH_RE = /^(0x)?[0-9a-f]{64}$/i
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
+/** Hashes and identities compare without case or a 0x prefix: tools and operators write both. */
+const normHex = (hex: string) => hex.trim().toLowerCase().replace(/^0x/, "")
+
 export interface SigningProof {
     identity: string
     algorithm?: string
@@ -48,7 +51,7 @@ export function buildChallenge(genesisHash: string, date: string): string {
     if (!DATE_RE.test(date)) {
         throw new Error(`date must be YYYY-MM-DD, got ${JSON.stringify(date)}`)
     }
-    return `${CHALLENGE_PREFIX}:${genesisHash.toLowerCase()}:${date}`
+    return `${CHALLENGE_PREFIX}:${normHex(genesisHash)}:${date}`
 }
 
 export function parseChallenge(challenge: string): { genesisHash: string; date: string } | null {
@@ -56,7 +59,7 @@ export function parseChallenge(challenge: string): { genesisHash: string; date: 
     if (parts.length !== 3 || parts[0] !== CHALLENGE_PREFIX) return null
     const [, genesisHash, date] = parts
     if (!HASH_RE.test(genesisHash) || !DATE_RE.test(date)) return null
-    return { genesisHash: genesisHash.toLowerCase(), date }
+    return { genesisHash: normHex(genesisHash), date }
 }
 
 export type SignatureCheck = (message: Uint8Array, signatureHex: string, publicKeyHex: string) => Promise<boolean>
@@ -98,8 +101,8 @@ export async function verifyProofs(
     opts: { genesisHash?: string | null; date?: string | null; requireAll?: boolean } = {},
     check: SignatureCheck = verifyEd25519,
 ): Promise<VerifyResult> {
-    const listed = new Set(validators.map(v => v.toLowerCase()))
-    let genesisHash = opts.genesisHash ? opts.genesisHash.toLowerCase() : null
+    const listed = new Map(validators.map(v => [normHex(v), v.toLowerCase()]))
+    let genesisHash = opts.genesisHash ? normHex(opts.genesisHash) : null
     const reports: ProofReport[] = []
     const proven = new Set<string>()
 
@@ -114,7 +117,8 @@ export async function verifyProofs(
             fail(`algorithm ${proof.algorithm}; block signatures are ed25519`)
             continue
         }
-        if (!listed.has(identity)) {
+        const key = normHex(identity)
+        if (!listed.has(key)) {
             fail("not a launch validator")
             continue
         }
@@ -132,19 +136,20 @@ export async function verifyProofs(
             fail(`challenge is dated ${parsed.date}, expected ${opts.date}`)
             continue
         }
-        if (proven.has(identity)) {
+        if (proven.has(key)) {
             fail("duplicate proof for this identity")
             continue
         }
-        if (!(await check(new TextEncoder().encode(proof.challenge), proof.signature, identity))) {
+        // The signature covers the challenge exactly as it was signed
+        if (!(await check(new TextEncoder().encode(proof.challenge), proof.signature, `0x${key}`))) {
             fail("signature does not verify for this identity")
             continue
         }
-        proven.add(identity)
+        proven.add(key)
         reports.push({ identity, ok: true, reason: null })
     }
 
-    const missing = [...listed].filter(v => !proven.has(v))
+    const missing = [...listed].filter(([key]) => !proven.has(key)).map(([, v]) => v)
     const ok = reports.every(r => r.ok) && (!opts.requireAll || missing.length === 0) && proven.size > 0
     return { ok, genesisHash, reports, missing }
 }

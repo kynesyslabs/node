@@ -46,10 +46,15 @@ beforeAll(async () => {
 })
 
 describe("challenge format", () => {
-    it("round-trips and lowercases the genesis hash", () => {
+    it("round-trips the genesis hash without case or a 0x prefix", () => {
         const c = buildChallenge("0x" + "AB".repeat(32), DATE)
-        expect(c).toBe(`demos-launch-proof:0x${"ab".repeat(32)}:${DATE}`)
-        expect(parseChallenge(c)).toEqual({ genesisHash: "0x" + "ab".repeat(32), date: DATE })
+        expect(c).toBe(`demos-launch-proof:${"ab".repeat(32)}:${DATE}`)
+        expect(buildChallenge("ab".repeat(32), DATE)).toBe(c)
+        expect(parseChallenge(c)).toEqual({ genesisHash: "ab".repeat(32), date: DATE })
+        expect(parseChallenge(`demos-launch-proof:0x${"AB".repeat(32)}:${DATE}`)).toEqual({
+            genesisHash: "ab".repeat(32),
+            date: DATE,
+        })
     })
 
     it("refuses anything that is not a genesis hash and a date", () => {
@@ -68,6 +73,34 @@ describe("verifyProofs with real ed25519 signatures", () => {
         expect(r.ok).toBe(true)
         expect(r.missing).toEqual([])
         expect(r.genesisHash).toBe(GENESIS)
+    })
+
+    it("accepts proofs whatever 0x prefix the hash and identities were written with", async () => {
+        // An older proof signed a challenge that kept the 0x; it still names the agreed genesis
+        const legacy = `demos-launch-proof:0x${GENESIS}:${DATE}`
+        const proofs = [
+            await proofBy(keys[0]),
+            await proofBy(keys[1], legacy),
+            { ...(await proofBy(keys[2])), identity: keys[2].identity.replace(/^0x/, "").toUpperCase() },
+        ]
+        for (const [genesisHash, listed] of [
+            ["0x" + GENESIS, validators],
+            [GENESIS.toUpperCase(), validators.map(v => v.replace(/^0x/, ""))],
+        ] as const) {
+            const r = await verifyProofs(proofs, [...listed], { genesisHash, date: DATE, requireAll: true })
+            expect(r.reports.filter(x => !x.ok)).toEqual([])
+            expect(r.ok).toBe(true)
+            expect(r.genesisHash).toBe(GENESIS)
+        }
+    })
+
+    it("still refuses a proof whose challenge was edited to drop the 0x", async () => {
+        const signed = await proofBy(keys[0], `demos-launch-proof:0x${GENESIS}:${DATE}`)
+        const r = await verifyProofs([{ ...signed, challenge: buildChallenge(GENESIS, DATE) }], validators, {
+            genesisHash: GENESIS,
+        })
+        expect(r.ok).toBe(false)
+        expect(r.reports[0].reason).toContain("does not verify")
     })
 
     it("reports missing validators, and fails on them only with requireAll", async () => {
