@@ -18,7 +18,9 @@ SUITE_FILES=(
     scripts/launch-go-no-go.snapshot.test.ts
     scripts/validator-prove-signing.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
+    src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/finality/commitments.test.ts
+    src/libs/blockchain/finality/validatorSet.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
     src/libs/blockchain/routines/syncVerification.test.ts

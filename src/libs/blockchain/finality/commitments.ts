@@ -2,15 +2,17 @@
  * Finality commitments (`finalityProofs` fork).
  *
  * A block is forged and voted on before its transactions execute, so block N
- * can only commit to what block N - 1 left behind: its height, and the
- * RFC 6962 root of block N - 1's transaction results. A client holding a
- * signed block N then proves the outcome of a transaction in block N - 1 with
- * log2(n) hashes.
+ * can only commit to what block N - 1 left behind: its height, the RFC 6962
+ * root of block N - 1's transaction results, and the hash of the validator
+ * set after block N - 1, which the committee for block N + 1 is drawn from. A
+ * client holding a signed block N then proves the outcome of a transaction in
+ * block N - 1 with log2(n) hashes, and follows the committee forward.
  *
  * Every member forges the block on its own and votes only on an identical
  * hash, so the commitments are a pure function of committed database state:
- * the parent block and its transaction rows, which commit in the parent's own
- * insert transaction before the next height is forged or verified.
+ * the parent block, its transaction rows and the validator set snapshot,
+ * which all commit in the parent's own insert transaction before the next
+ * height is forged or verified.
  */
 
 import Chain from "src/libs/blockchain/chain"
@@ -25,11 +27,16 @@ export const FINALITY_FORK = "finalityProofs" as const
  * Content keys this fork appends after `native_tables_hashes`, in the order
  * they are hashed.
  */
-export const COMMITMENT_KEYS = ["number", "parent_results_root"] as const
+export const COMMITMENT_KEYS = [
+    "number",
+    "parent_results_root",
+    "validator_set_hash",
+] as const
 
 export interface FinalityCommitments {
     number: number
     parent_results_root: string
+    validator_set_hash: string
 }
 
 /** What the result leaf of a transaction is built from: its stored row. */
@@ -174,6 +181,23 @@ export async function parentResultsRoot(parent: ParentBlock): Promise<string> {
 }
 
 /**
+ * Hash of the validator set after block `height`, from its snapshot.
+ *
+ * @throws FinalityCommitmentError when this node holds no snapshot that old
+ */
+export async function committedValidatorSetHash(height: number): Promise<string> {
+    // Loaded on first use: the snapshot reader opens the database.
+    const { validatorSetAt } = await import("./validatorSet")
+    const snapshot = await validatorSetAt(height)
+    if (!snapshot) {
+        throw new FinalityCommitmentError(
+            `no validator set snapshot at or below block ${height}`,
+        )
+    }
+    return snapshot.setHash
+}
+
+/**
  * The commitments block `blockNumber` carries, or null before the fork.
  *
  * @throws FinalityCommitmentError when the parent or one of its results is
@@ -194,6 +218,7 @@ export async function buildCommitments(
     return {
         number: blockNumber,
         parent_results_root: await parentResultsRoot(parent),
+        validator_set_hash: await committedValidatorSetHash(blockNumber - 1),
     }
 }
 
@@ -257,6 +282,28 @@ export async function verifyCommitments(
         return {
             valid: false,
             reason: `parent_results_root mismatch: block ${block.number} commits ${content.parent_results_root}, local results of block ${prevBlock.number} give ${expected}`,
+        }
+    }
+
+    if (!isCommitmentHash(content.validator_set_hash)) {
+        return {
+            valid: false,
+            reason: `block ${block.number} has a malformed validator_set_hash`,
+        }
+    }
+    let localSet: string
+    try {
+        localSet = await committedValidatorSetHash(prevBlock.number)
+    } catch (e) {
+        return {
+            valid: false,
+            reason: `cannot derive the validator set after block ${prevBlock.number}: ${e instanceof Error ? e.message : String(e)}`,
+        }
+    }
+    if (content.validator_set_hash !== localSet) {
+        return {
+            valid: false,
+            reason: `validator_set_hash mismatch: block ${block.number} commits ${content.validator_set_hash}, local set after block ${prevBlock.number} gives ${localSet}`,
         }
     }
     return { valid: true }

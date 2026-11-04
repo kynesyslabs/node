@@ -44,6 +44,7 @@ import { NetworkUpgradeVote } from "./entities/NetworkUpgradeVote.js"
 // Hard-fork bookkeeping (P3b — DEM→OS denomination migration)
 import { ForkState } from "./entities/ForkState.js"
 import { Validators } from "./entities/Validators.js"
+import { ValidatorSetSnapshots } from "./entities/ValidatorSetSnapshots.js"
 // L2PS Messaging
 import { L2PSMessage } from "@/features/l2ps-messaging/entities/L2PSMessage"
 
@@ -81,6 +82,7 @@ export const dataSource = new DataSource({
         GCRAtomicWork,
         GCRResourceSlot,
         Validators,
+        ValidatorSetSnapshots,
         // ZK Identity entities
         IdentityCommitment,
         UsedNullifier,

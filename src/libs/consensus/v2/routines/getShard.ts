@@ -69,6 +69,38 @@ export async function readActiveValidatorAddresses(
 }
 
 /**
+ * Staked identities the pool for block `parentNumber + 1` is filtered by.
+ *
+ * Under `finalityProofs` they come from the validator set snapshot after
+ * block `parentNumber - 1`: the newest set block `parentNumber` could commit
+ * to, since it was forged before its own transactions applied. The live
+ * table read cannot be used there, as it holds only the present and a node
+ * syncing the block later would draw another committee. Joins and exits
+ * therefore reach the pool one block later than before the fork.
+ *
+ * @throws Error when this node holds no snapshot that old
+ */
+async function poolValidatorAddresses(
+    parentNumber: number,
+): Promise<Set<string>> {
+    if (!isForkActive("finalityProofs", parentNumber + 1)) {
+        return await readActiveValidatorAddresses(parentNumber)
+    }
+    const height = Math.max(parentNumber - 1, 0)
+    // Loaded on first use: the snapshot reader opens the database.
+    const { activeIdentities, validatorSetAt } = await import(
+        "src/libs/blockchain/finality/validatorSet"
+    )
+    const snapshot = await validatorSetAt(height)
+    if (!snapshot) {
+        throw new Error(
+            `[getShard] no validator set snapshot at or below block ${height}`,
+        )
+    }
+    return activeIdentities(snapshot.validators, height)
+}
+
+/**
  * Last-resort pool for bare development networks: peers synced to our tip,
  * plus ourselves. View-dependent, so it is never memoised.
  */
@@ -138,8 +170,7 @@ async function chainEligiblePool(
     }
 
     const committed = await readCommittedPeerlist(lastBlockNumber)
-    const validatorAddresses =
-        await readActiveValidatorAddresses(lastBlockNumber)
+    const validatorAddresses = await poolValidatorAddresses(lastBlockNumber)
 
     let pool: string[]
     if (committed.length > 0 && validatorAddresses.size > 0) {
@@ -256,7 +287,7 @@ export async function getBoundPool(parentNumber: number): Promise<string[]> {
         return pool
     }
 
-    const staked = await readActiveValidatorAddresses(parentNumber)
+    const staked = await poolValidatorAddresses(parentNumber)
     if (staked.size <= pool.length) {
         return pool
     }

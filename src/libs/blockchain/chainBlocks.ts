@@ -33,6 +33,10 @@ import { gcrWriteMutex } from "./gcr/gcrWriteMutex"
 import type { PendingGCRWrite } from "./gcr/handleGCR"
 import type { FindManyOptions } from "typeorm"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import {
+    pruneValidatorSetSnapshots,
+    recordValidatorSetSnapshot,
+} from "./finality/validatorSet"
 
 export function isGenesis(block: Block): boolean {
     if (block.number === 0) {
@@ -506,6 +510,15 @@ export async function insertBlock(
                 )
                 await applyNetworkUpgrade(block.number, govProposalRepo)
 
+                // After every hook that can move a stake. Block 0's set is
+                // recorded at boot, once the validator seed is in place.
+                if (block.number > 0) {
+                    await recordValidatorSetSnapshot(
+                        transactionalEntityManager,
+                        block.number,
+                    )
+                }
+
                 return savedBlock
             },
         )
@@ -580,6 +593,7 @@ export async function insertBlock(
 
 export async function pruneBlocksToGenesisBlock(): Promise<void> {
     await getBlocksRepo().delete({ number: MoreThan(0) })
+    await pruneValidatorSetSnapshots(0)
     log.info("Pruned all blocks except the genesis block.")
 }
 

@@ -59,6 +59,14 @@ jest.mock("src/libs/blockchain/chain", () => ({
             storedRows.filter(row => hashes.includes(row.hash)),
     },
 }))
+const SET_HASH = "5e".repeat(32)
+jest.mock("src/libs/blockchain/finality/validatorSet", () => ({
+    validatorSetAt: async (height: number) => ({
+        block: height,
+        setHash: SET_HASH,
+        validators: [],
+    }),
+}))
 jest.mock("src/libs/utils/calibrateTime", () => ({
     getNetworkTimestamp: () => 1000,
 }))
@@ -111,7 +119,7 @@ describe("forged block content under finalityProofs", () => {
         expect(block.hash).toBe(sha256(PRE_FORK_CONTENT))
     })
 
-    it("appends number and the parent's result root after native_tables_hashes", async () => {
+    it("appends the commitments after native_tables_hashes, in their fixed order", async () => {
         sharedState.forkConfig.finalityProofs.activationHeight = 0
         parentBlock = {
             number: 4,
@@ -130,7 +138,7 @@ describe("forged block content under finalityProofs", () => {
 
         const expected =
             PRE_FORK_CONTENT.slice(0, -1) +
-            `,"number":5,"parent_results_root":"${root}"}`
+            `,"number":5,"parent_results_root":"${root}","validator_set_hash":"${SET_HASH}"}`
         expect(JSON.stringify(block.content)).toBe(expected)
         expect(block.hash).toBe(sha256(expected))
     })

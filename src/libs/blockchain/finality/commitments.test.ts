@@ -1,8 +1,9 @@
 /**
- * Block N commits its height and the result root of block N - 1. Every
- * member derives both from its own committed rows and votes only on an
- * identical hash, so the leaf encoding, the order and every edge (genesis
- * parent, empty block, a transaction already on chain) must be fixed.
+ * Block N commits its height, the result root of block N - 1 and the hash of
+ * the validator set after it. Every member derives them from its own
+ * committed rows and votes only on an identical hash, so the leaf encoding,
+ * the order and every edge (genesis parent, empty block, a transaction
+ * already on chain, a missing snapshot) must be fixed.
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test"
@@ -29,6 +30,17 @@ mock.module("src/libs/blockchain/chain", () => ({
     },
 }))
 
+/** Snapshot hash per height a set was recorded at. */
+let setHashes = new Map<number, string>()
+const validatorSetAt = jest.fn(async (height: number) => {
+    const at = [...setHashes.keys()].filter(b => b <= height).sort((x, y) => y - x)[0]
+    return at === undefined
+        ? null
+        : { block: at, setHash: setHashes.get(at), validators: [] }
+})
+const realValidatorSet = await import("./validatorSet")
+mock.module("./validatorSet", () => ({ ...realValidatorSet, validatorSetAt }))
+
 const { getSharedState } = await import("@/utilities/sharedState")
 const { cloneDefaultForkConfig } = await import("@/forks/forkConfig")
 const { EMPTY_ROOT, leafHash, nodeHash, root, toHex } = await import(
@@ -49,6 +61,8 @@ const {
 } = await import("./commitments")
 
 const H = (n: number) => n.toString(16).padStart(64, "0")
+const SET_0 = "5e".repeat(32)
+const SET_3 = "3e".repeat(32)
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
 
 const confirmed = (hash: string, blockNumber: number): Row => ({
@@ -96,6 +110,8 @@ beforeEach(() => {
     blocks = new Map()
     rows = new Map()
     getTransactionsFromHashes.mockClear()
+    setHashes = new Map([[0, SET_0]])
+    validatorSetAt.mockClear()
     resetCommitmentCache()
 })
 
@@ -211,6 +227,7 @@ describe("buildCommitments", () => {
         expect(await buildCommitments(1)).toEqual({
             number: 1,
             parent_results_root: EMPTY_RESULTS_ROOT,
+            validator_set_hash: SET_0,
         })
     })
 
@@ -229,8 +246,31 @@ describe("buildCommitments", () => {
         expect(got).toEqual({
             number: 5,
             parent_results_root: toHex(root([resultLeaf(b, 4), resultLeaf(a, 4)])),
+            validator_set_hash: SET_0,
         })
-        expect(Object.keys(got ?? {})).toEqual(["number", "parent_results_root"])
+        expect(Object.keys(got ?? {})).toEqual([
+            "number",
+            "parent_results_root",
+            "validator_set_hash",
+        ])
+    })
+
+    it("commits the set after the parent: the newest snapshot at or below it", async () => {
+        storeParent(4, [], [])
+        setHashes.set(3, SET_3)
+        expect((await buildCommitments(5))?.validator_set_hash).toBe(SET_3)
+        expect(validatorSetAt).toHaveBeenLastCalledWith(4)
+
+        // A set recorded after block 4 belongs to block 6's commitment
+        setHashes.set(5, H(55))
+        storeParent(3, [], [])
+        expect((await buildCommitments(4))?.validator_set_hash).toBe(SET_3)
+    })
+
+    it("refuses to forge without a snapshot of the parent's set", async () => {
+        storeParent(4, [], [])
+        setHashes = new Map()
+        await expect(buildCommitments(5)).rejects.toBeInstanceOf(commitmentError)
     })
 
     it("refuses to forge without the parent block or one of its rows", async () => {
@@ -288,10 +328,45 @@ describe("verifyCommitments", () => {
 
     it("rejects the fields out of their fixed order", async () => {
         const { block, prev } = await forged()
-        const { number, parent_results_root: committedRoot, ...rest } = block.content as any
-        const swapped = { ...rest, parent_results_root: committedRoot, number }
+        const {
+            number,
+            parent_results_root: committedRoot,
+            validator_set_hash: committedSet,
+            ...rest
+        } = block.content as any
+        const swapped = {
+            ...rest,
+            number,
+            validator_set_hash: committedSet,
+            parent_results_root: committedRoot,
+        }
         const verdict = await verifyCommitments({ number: 5, content: swapped }, prev)
         expect(verdict.valid).toBe(false)
+        expect(verdict.reason).toContain("does not end with")
+    })
+
+    it("rejects a validator set hash this node does not hold", async () => {
+        const { block, prev } = await forged()
+        ;(block.content as any).validator_set_hash = H(9)
+        const verdict = await verifyCommitments(block, prev)
+        expect(verdict.valid).toBe(false)
+        expect(verdict.reason).toContain("validator_set_hash mismatch")
+    })
+
+    it("rejects a malformed validator set hash", async () => {
+        const { block, prev } = await forged()
+        ;(block.content as any).validator_set_hash = SET_0.toUpperCase()
+        expect((await verifyCommitments(block, prev)).reason).toContain(
+            "malformed validator_set_hash",
+        )
+    })
+
+    it("rejects a block when no snapshot backs the parent's set", async () => {
+        const { block, prev } = await forged()
+        setHashes = new Map()
+        const verdict = await verifyCommitments(block, prev)
+        expect(verdict.valid).toBe(false)
+        expect(verdict.reason).toContain("cannot derive the validator set")
     })
 
     it("rejects a root the local rows cannot back", async () => {
