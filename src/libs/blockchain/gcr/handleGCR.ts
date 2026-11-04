@@ -537,6 +537,20 @@ export default class HandleGCR {
      * @param txs Transactions to load entities for
      * @returns Caches for accounts, storage programs, and TLS notaries
      */
+    /**
+     * The edit to apply, carrying the transaction hash. The edits are part of
+     * the signed content, which is stored and served to syncing peers as is:
+     * stamping them, or letting a routine keep a reference into them, changes
+     * the content so that it no longer hashes to tx.hash, and every peer
+     * syncing that block rejects it.
+     */
+    static stampedEdit(edit: GCREdit, tx: Transaction, simulate: boolean): GCREdit {
+        if (simulate || !tx.hash) return edit
+        const copy = structuredClone(edit)
+        copy.txhash = tx.hash
+        return copy
+    }
+
     static async prepareEntities(txs: Transaction[]): Promise<GCREntityCaches> {
         const affectedPubkeys = new Set<string>()
         const affectedStorageAddresses = new Set<string>()
@@ -975,12 +989,13 @@ export default class HandleGCR {
                     }
                 }
             }
-            const applyOne = (edit: GCREdit, caches: GCREntityCaches) => {
-                if (!simulate && tx.hash) {
-                    edit.txhash = tx.hash
-                }
-                return HandleGCR.applyGCREdit(edit, caches, isRollback, simulate)
-            }
+            const applyOne = (edit: GCREdit, caches: GCREntityCaches) =>
+                HandleGCR.applyGCREdit(
+                    HandleGCR.stampedEdit(edit, tx, simulate),
+                    caches,
+                    isRollback,
+                    simulate,
+                )
             const inOrder = (edits: GCREdit[]) =>
                 isRollback ? [...edits].reverse() : edits
             const done = (
@@ -1076,10 +1091,8 @@ export default class HandleGCR {
         const appliedEdits: GCREdit[] = []
 
         // Apply all edits for this tx
-        for (const edit of gcrEdits) {
-            if (!simulate && tx.hash) {
-                edit.txhash = tx.hash
-            }
+        for (const signedEdit of gcrEdits) {
+            const edit = HandleGCR.stampedEdit(signedEdit, tx, simulate)
 
             let result: GCRResult
 
