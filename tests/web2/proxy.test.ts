@@ -94,7 +94,6 @@ describe("Proxy outbound Authorization header", () => {
     })
 })
 
-
 describe("headersForReplay (broadcast-time replay of a web2Request tx)", () => {
     it("drops credential headers, keeps the rest", () => {
         const out = headersForReplay({
