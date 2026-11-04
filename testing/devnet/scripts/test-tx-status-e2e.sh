@@ -6,7 +6,9 @@
 # Boots the devnet fixture stack, signs two transfers with the same nonce
 # from node-1's funded identity and lets one block execute one and keep the
 # other as failed. tx_status_failed.mjs then checks the SDK wait, the status
-# answer on two nodes, the receiver balance and the other read calls.
+# answer on two nodes, the receiver balance and the other read calls. With
+# finalityProofs active, storage_root.mjs then writes a Storage Program and
+# checks that all four nodes commit the same storage root after each step.
 #
 # Flags:
 #   --keep        Leave the devnet running on exit (for manual poking)
@@ -199,4 +201,16 @@ AMOUNT_OS="${AMOUNT_OS}" \
     bun "${STATUS_SCRIPT}"
 
 echo "[tx-status-e2e] failed transaction reported as failed on both nodes"
+
+# -----------------------------------------------------------------------------
+# 6. Storage Program state root (only when the fork commits it)
+# -----------------------------------------------------------------------------
+if [[ "$(jq -r '.forks.finalityProofs.activationHeight // empty' "${RUN_TMP}/genesis.json")" == "0" ]]; then
+    NODE3_URL="http://localhost:${NODE3_PORT:-53555}"
+    NODE4_URL="http://localhost:${NODE4_PORT:-53557}"
+    NODE_URLS="${NODE1_URL},${NODE2_URL},${NODE3_URL},${NODE4_URL}" \
+    IDENTITY_PATH="${DEVNET_DIR}/identities/node1.identity" \
+        bun "${SCRIPT_DIR}/storage_root.mjs"
+    echo "[tx-status-e2e] storage root agrees on every node after each write"
+fi
 exit 0
