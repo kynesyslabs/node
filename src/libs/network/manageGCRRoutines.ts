@@ -3,7 +3,7 @@ import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import { emptyResponse } from "./server_rpc"
 import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
-import readGCRForUser from "../blockchain/gcr/gcr_routines/readGCRForUser"
+import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
 import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityProvider"
@@ -73,7 +73,9 @@ export default async function manageGCRRoutines(
             break
 
         case "getReferralInfo": {
-            const account = await readGCRForUser(params[0])
+            // Stored on purpose: validateReferralCode looks the code up in
+            // the table, so a code shown before the owner's first tx must exist.
+            const account = await ensureGCRForUser(params[0])
             response.response = account.referralInfo
             break
         }
