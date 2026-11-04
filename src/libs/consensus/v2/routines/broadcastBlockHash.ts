@@ -13,6 +13,8 @@ import {
     readCommittedRefusal,
 } from "./committedBlock"
 import { commitLockActive, voteMessageOf } from "../commitLock/domain"
+import { getBoundCommittee, getEligiblePool } from "./getShard"
+import { isForkActive } from "@/forks/forkGates"
 import { getMempoolLimits } from "@/libs/blockchain/mempoolLimits"
 
 /**
@@ -96,6 +98,26 @@ async function verifyIncomingSignatures(
     }
     return verified
 }
+
+/**
+ * The identities whose vote signatures count at `height`: the set sync and
+ * the inbound proposal merge count against, so a reply cannot place in our
+ * candidate a signature no verifier would count.
+ */
+async function voteSignerSet(height: number): Promise<Set<string>> {
+    const bound = isForkActive("committeeBinding", height)
+    const signers = bound
+        ? await getBoundCommittee(height - 1)
+        : await getEligiblePool(height - 1)
+    if (signers.length === 0) {
+        throw new Error(
+            `${bound ? "bound committee" : "eligible signer pool"} is empty`,
+        )
+    }
+    return new Set(signers)
+}
+
+type SignerSetLookup = () => Promise<Set<string> | null>
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -206,6 +228,7 @@ async function proposeAndCollect(
     peer: Peer,
     block: Block,
     proposeParams: ProposeParams,
+    signerSet: SignerSetLookup,
 ): Promise<PeerVoteOutcome> {
     const peerId = peer.identity
     let response: RPCResponse
@@ -315,8 +338,46 @@ async function proposeAndCollect(
         }
     }
 
+    // Throwaway keys can sign anything, so a valid signature proves nothing
+    // about membership. Only signers that count are kept: padding would
+    // otherwise be stored in the block and, under commitLock, push the
+    // prevote map past what a proof of lock accepts.
+    const signers = await signerSet()
+    if (signers === null) {
+        return {
+            peerId,
+            vote: "con",
+            signaturesToMerge: {},
+            rejectionReason: "vote signer set could not be resolved",
+        }
+    }
+    // Every signer must be a distinct member, so an honest map never
+    // outgrows the set; refusing a larger one bounds the work before any
+    // verification, as the inbound proposal does.
+    if (Object.keys(incomingSignatures).length > signers.size) {
+        log.error(
+            `[broadcastBlockHash] ${peerId} attached more signatures than the vote signer set holds; treating as con`,
+        )
+        return {
+            peerId,
+            vote: "con",
+            signaturesToMerge: {},
+            rejectionReason: "signature map larger than the vote signer set",
+        }
+    }
+    const fromSigners: Record<string, string> = {}
+    for (const [identity, signature] of Object.entries(incomingSignatures)) {
+        if (signers.has(identity)) {
+            fromSigners[identity] = signature
+        } else {
+            log.error(
+                `[broadcastBlockHash] Dropping signature by ${identity} relayed by ${peerId}: not in the vote signer set`,
+            )
+        }
+    }
+
     const verified = await verifyIncomingSignatures(
-        incomingSignatures,
+        fromSigners,
         block.hash,
         peerId,
         voteMessageOf(block) ?? block.hash,
@@ -431,8 +492,25 @@ export async function broadcastBlockHash(
         proposeParams = [...proposeParams, block.validation_data.round]
     }
 
+    // Resolved once, and only when a reply needs it: a round of refusals
+    // reads no chain data. Unresolved means no reply can be judged, so
+    // none is admitted.
+    let signerSetLookup: Promise<Set<string> | null> | null = null
+    const signerSet: SignerSetLookup = () => {
+        signerSetLookup ??= voteSignerSet(block.number).catch(e => {
+            log.error(
+                `[broadcastBlockHash] Could not resolve the vote signer set for block ${block.number}: ` +
+                    (e instanceof Error ? e.message : String(e)),
+            )
+            return null
+        })
+        return signerSetLookup
+    }
+
     const outcomes = await Promise.all(
-        shard.map(peer => proposeAndCollect(peer, block, proposeParams)),
+        shard.map(peer =>
+            proposeAndCollect(peer, block, proposeParams, signerSet),
+        ),
     )
 
     let pro = 0
