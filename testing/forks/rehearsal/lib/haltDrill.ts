@@ -58,10 +58,24 @@ export interface Verdict {
 }
 
 /**
+ * Returns the height every listed node reports, or null when a node did
+ * not answer or the nodes disagree.
+ */
+export function agreedHeight(
+    nodes: number[],
+    heads: Record<number, number>,
+): number | null {
+    const hs = nodes.map(id => heads[id])
+    if (hs.some(h => h === undefined || h < 0)) return null
+    return hs.every(h => h === hs[0]) ? hs[0] : null
+}
+
+/**
  * Halt criteria, evaluated over the samples taken after the settle
- * period: every survivor answers every sample, and no survivor's head
- * moves above `haltHeight` (the highest head seen once the settle period
- * ended).
+ * period: every survivor answers every sample, and every survivor's head
+ * stays exactly at `haltHeight` (the height the survivors agreed on once
+ * the settle period ended). A head above it means a block was produced
+ * without quorum; a head below it means a survivor lost blocks.
  */
 export function evaluateHalt(
     survivors: number[],
@@ -83,6 +97,10 @@ export function evaluateHalt(
                     `node-${id} advanced to ${h} > halt height ${haltHeight} at +${s.atMs}ms ` +
                         "(a block was produced without quorum)",
                 )
+            } else if (h < haltHeight) {
+                reasons.push(
+                    `node-${id} went back to ${h} < halt height ${haltHeight} at +${s.atMs}ms`,
+                )
             }
         }
     }
@@ -97,13 +115,59 @@ export interface BlockRow {
 }
 
 /**
+ * Settle criteria. Blocks that land between the stop and the halt height
+ * (`preStopHeight` < number <= `haltHeight`) are legitimate only if they
+ * were already in flight with enough signatures: every such block must
+ * be stored by every survivor with one hash and carry at least `quorum`
+ * signatures. A block committed by the survivors alone fails here.
+ */
+export function evaluateSettle(
+    survivors: number[],
+    preStopHeight: number,
+    haltHeight: number,
+    rows: BlockRow[],
+    quorum: number,
+): Verdict {
+    const reasons: string[] = []
+    if (haltHeight < preStopHeight) {
+        reasons.push(`halt height ${haltHeight} is below the pre-stop height ${preStopHeight}`)
+    }
+    for (let n = preStopHeight + 1; n <= haltHeight; n++) {
+        const atHeight = rows.filter(r => r.number === n && survivors.includes(r.node))
+        if (atHeight.length !== survivors.length) {
+            reasons.push(
+                `settle block ${n}: stored on ${atHeight.length}/${survivors.length} survivors`,
+            )
+            continue
+        }
+        if (new Set(atHeight.map(r => r.hash)).size !== 1) {
+            reasons.push(
+                `settle block ${n}: hash divergence ` +
+                    atHeight.map(r => `node-${r.node}=${r.hash}`).join(", "),
+            )
+        }
+        for (const r of atHeight) {
+            if (r.signatures < quorum) {
+                reasons.push(
+                    `settle block ${n} on node-${r.node}: ${r.signatures} signatures < quorum ${quorum} ` +
+                        "(committed after the stop without quorum)",
+                )
+            }
+        }
+    }
+    return { pass: reasons.length === 0, reasons }
+}
+
+/**
  * Recovery criteria: every node reached `targetHeight`, all nodes store
- * the same hash at each checked height, and every block above the halt
- * height carries at least `quorum` signatures.
+ * the same hash at each height from `preStopHeight` to `targetHeight`,
+ * and every block above `preStopHeight` carries at least `quorum`
+ * signatures. Checking from the pre-stop height, not the halt height,
+ * covers blocks committed during the settle period as well.
  */
 export function evaluateRecovery(
     nodes: number[],
-    haltHeight: number,
+    preStopHeight: number,
     targetHeight: number,
     heads: Record<number, number>,
     rows: BlockRow[],
@@ -116,7 +180,7 @@ export function evaluateRecovery(
             reasons.push(`node-${id} head ${h ?? "none"} < target ${targetHeight}`)
         }
     }
-    for (let n = haltHeight; n <= targetHeight; n++) {
+    for (let n = preStopHeight; n <= targetHeight; n++) {
         const atHeight = rows.filter(r => r.number === n)
         const hashes = new Set(atHeight.map(r => r.hash))
         if (atHeight.length !== nodes.length) {
@@ -127,7 +191,7 @@ export function evaluateRecovery(
                     atHeight.map(r => `node-${r.node}=${r.hash}`).join(", "),
             )
         }
-        if (n > haltHeight) {
+        if (n > preStopHeight) {
             for (const r of atHeight) {
                 if (r.signatures < quorum) {
                     reasons.push(
