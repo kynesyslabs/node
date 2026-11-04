@@ -8,15 +8,12 @@ cd "$(dirname "$0")/.."
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
 # Single files outside SUITE_DIRS: the launch go/no-go tooling, the signing
 # guards, the consensus and sync routes the suites depend on, the peer
-# calls clients use to tell whether a transaction executed and which head
-# calls clients use to tell whether a transaction executed, the hashing
-# file that is gone fails its run instead of dropping out silently
-# is final. A listed file that is gone fails its run instead of dropping
-# liveness checks that decide which committee members count, and the read
-# liveness checks that decide which committee members count, the read
-# out silently
+# liveness checks that decide which committee members count, the read calls
+# clients use to tell whether a transaction executed and which head is
+# final, the finality proof calls and their offline verifier, the hashing
 # primitives finality commitments are built on, and the storage state root
-# with the writes and sync checks that feed it. A listed
+# with the writes and sync checks that feed it. A listed file that is gone
+# fails its run instead of dropping out silently.
 SUITE_FILES=(
     scripts/launch-go-no-go.committee.test.ts
     scripts/launch-go-no-go.test.ts
@@ -28,6 +25,7 @@ SUITE_FILES=(
     src/libs/blockchain/finality/storageRecord.test.ts
     src/libs/blockchain/finality/storageRoot.test.ts
     src/libs/blockchain/finality/validatorSet.test.ts
+    src/libs/blockchain/finality/verify.test.ts
     src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
