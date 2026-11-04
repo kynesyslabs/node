@@ -98,6 +98,7 @@ describe("RateLimiter trusted internal requests", () => {
         mockGetAuthContext.mockClear()
         mockGetPeer.mockClear()
         refreshStakedSet.mockClear()
+        refreshStakedSet.mockImplementation(async () => stakedKeys as ReadonlySet<string>)
         getGCRValidatorsAtBlock.mockClear()
         getGCRValidatorsAtBlockOrThrow.mockClear()
     })
@@ -117,6 +118,30 @@ describe("RateLimiter trusted internal requests", () => {
         await rateLimiter.refreshValidatorKeys()
         expect(refreshStakedSet).toHaveBeenCalledTimes(3)
         expect(getGCRValidatorsAtBlockOrThrow).toHaveBeenCalledTimes(1)
+    })
+
+    it("shares one validator read between concurrent signed requests", async () => {
+        setSystemTime(new Date(1_000_000))
+        let release!: () => void
+        const gate = new Promise<void>(resolve => {
+            release = resolve
+        })
+        refreshStakedSet.mockImplementation(async () => {
+            await gate
+            return stakedKeys as ReadonlySet<string>
+        })
+
+        const burst = Array.from({ length: 20 }, () => rateLimiter.refreshValidatorKeys())
+        release()
+        await Promise.all(burst)
+
+        expect(refreshStakedSet).toHaveBeenCalledTimes(1)
+        expect(getGCRValidatorsAtBlockOrThrow).toHaveBeenCalledTimes(1)
+
+        // Past the back-off the next request reads again.
+        setSystemTime(new Date(1_005_000))
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(2)
     })
 
     it("backs off after a failed validator read too", async () => {

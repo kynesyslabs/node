@@ -285,6 +285,7 @@ export class RateLimiter {
     /** The set is empty because the network has no validator rows, not because they could not be read. */
     private noValidatorRows = false
     private validatorSetRetryAt = 0
+    private validatorRefresh: Promise<void> | null = null
 
     constructor(config: RateLimitConfig) {
         this.config = config
@@ -609,11 +610,23 @@ export class RateLimiter {
      * Brings the validator keys to the current head; the set is cached per
      * height. Kept here because the trust check below cannot await.
      */
-    public async refreshValidatorKeys(): Promise<void> {
-        const now = Date.now()
-        if (this.validatorKeys.size === 0 && now < this.validatorSetRetryAt) {
-            return
+    public refreshValidatorKeys(): Promise<void> {
+        if (
+            this.validatorKeys.size === 0 &&
+            Date.now() < this.validatorSetRetryAt
+        ) {
+            return Promise.resolve()
         }
+        // Every signed request lands here before it is verified, so a burst
+        // must share one read rather than start one each.
+        this.validatorRefresh ??= this.loadValidatorKeys().finally(() => {
+            this.validatorRefresh = null
+        })
+        return this.validatorRefresh
+    }
+
+    private async loadValidatorKeys(): Promise<void> {
+        const now = Date.now()
         const staked = await getStakedSet()
         this.validatorKeys = staked
         if (staked.size > 0) {
