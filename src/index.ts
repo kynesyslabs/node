@@ -38,7 +38,9 @@ import {
     fastSync,
     waitForInFlightBlockApply,
 } from "./libs/blockchain/routines/Sync"
-import peerBootstrap from "./libs/peer/routines/peerBootstrap"
+import peerBootstrap, {
+    stopDeferredAnchorChecks,
+} from "./libs/peer/routines/peerBootstrap"
 import {
     getBootTimestampCorrection,
     getNetworkTimestamp,
@@ -622,7 +624,11 @@ async function preMainLoop() {
 
     await startInboundServers()
 
-    await peerBootstrap(indexState.PeerList)
+    await peerBootstrap(indexState.PeerList, {
+        onLateRefusal: (_peer, _refusal, fatal) => {
+            if (fatal) void gracefulShutdown("anchor_refused", 1)
+        },
+    })
 
     try {
         await assertIdentityNotLive()
@@ -1381,6 +1387,7 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
     }
     getSharedState.isShuttingDown = true
     getSharedState.runMainLoop = false
+    stopDeferredAnchorChecks()
 
     log.info(`[CORE] Received ${signal}, shutting down gracefully...`)
 
