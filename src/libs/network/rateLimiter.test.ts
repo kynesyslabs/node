@@ -21,6 +21,12 @@ mock.module("@/libs/peer", () => ({
     },
 }))
 
+let stakedKeys = new Set<string>()
+const refreshStakedSet = mock(async () => stakedKeys as ReadonlySet<string>)
+mock.module("@/libs/consensus/stakedSet", () => ({
+    getStakedSet: () => refreshStakedSet(),
+}))
+
 mock.module("@kynesyslabs/demosdk/encryption", () => ({
     uint8ArrayToHex: (value: Uint8Array) => Buffer.from(value).toString("hex"),
     hexToUint8Array: (value: string) =>
@@ -51,6 +57,7 @@ describe("RateLimiter trusted internal requests", () => {
             algorithm: null,
         }))
         mockGetPeer.mockImplementation(() => undefined)
+        stakedKeys = new Set()
 
         rateLimiter = new rateLimiterModule.RateLimiter({
             enabled: true,
@@ -72,14 +79,15 @@ describe("RateLimiter trusted internal requests", () => {
         mockGetPeer.mockClear()
     })
 
-    it("trusts authenticated known peers", () => {
+    it("trusts an authenticated staked validator", async () => {
+        stakedKeys = new Set(["0xbeef"])
+        await rateLimiter.refreshValidatorKeys()
         mockGetAuthContext.mockImplementation(() => ({
             verified: true,
-            identity: "ed25519:peer-key",
-            publicKey: "peer-key",
+            identity: "ed25519:0xBEEF",
+            publicKey: "0xBEEF",
             algorithm: "ed25519",
         }))
-        mockGetPeer.mockImplementation(() => ({ identity: "peer-key" }))
 
         const trusted = rateLimiter.isTrustedInternalRequest(
             new Request("http://localhost/"),
@@ -87,7 +95,49 @@ describe("RateLimiter trusted internal requests", () => {
         )
 
         expect(trusted).toBe(true)
-        expect(mockGetPeer).toHaveBeenCalledWith("peer-key")
+    })
+
+    it("does not trust a key only because it is in the peer table", async () => {
+        // hello_peer puts any node that asks into the peer table.
+        stakedKeys = new Set(["0xbeef"])
+        await rateLimiter.refreshValidatorKeys()
+        mockGetAuthContext.mockImplementation(() => ({
+            verified: true,
+            identity: "ed25519:0xpeer",
+            publicKey: "0xpeer",
+            algorithm: "ed25519",
+        }))
+        mockGetPeer.mockImplementation(() => ({ identity: "0xpeer" }))
+
+        const trusted = rateLimiter.isTrustedInternalRequest(
+            new Request("http://localhost/"),
+            "172.25.0.4",
+        )
+
+        expect(trusted).toBe(false)
+    })
+
+    it("trusts known peers on a network with no validators, unless validators are required", () => {
+        mockGetAuthContext.mockImplementation(() => ({
+            verified: true,
+            identity: "ed25519:0xpeer",
+            publicKey: "0xpeer",
+            algorithm: "ed25519",
+        }))
+        mockGetPeer.mockImplementation(() => ({ identity: "0xpeer" }))
+        const req = new Request("http://localhost/")
+
+        expect(rateLimiter.isTrustedInternalRequest(req, "172.25.0.4")).toBe(true)
+        expect(mockGetPeer).toHaveBeenCalledWith("0xpeer")
+
+        const previous = process.env.DEMOS_REQUIRE_VALIDATORS
+        process.env.DEMOS_REQUIRE_VALIDATORS = "true"
+        try {
+            expect(rateLimiter.isTrustedInternalRequest(req, "172.25.0.4")).toBe(false)
+        } finally {
+            if (previous === undefined) delete process.env.DEMOS_REQUIRE_VALIDATORS
+            else process.env.DEMOS_REQUIRE_VALIDATORS = previous
+        }
     })
 
     it("trusts the local node identity", () => {
@@ -107,7 +157,9 @@ describe("RateLimiter trusted internal requests", () => {
         expect(mockGetPeer).not.toHaveBeenCalled()
     })
 
-    it("does not trust unknown authenticated callers", () => {
+    it("does not trust unknown authenticated callers", async () => {
+        stakedKeys = new Set(["0xbeef"])
+        await rateLimiter.refreshValidatorKeys()
         mockGetAuthContext.mockImplementation(() => ({
             verified: true,
             identity: "ed25519:unknown-key",
@@ -121,7 +173,7 @@ describe("RateLimiter trusted internal requests", () => {
         )
 
         expect(trusted).toBe(false)
-        expect(mockGetPeer).toHaveBeenCalledWith("unknown-key")
+        expect(mockGetPeer).not.toHaveBeenCalled()
     })
 })
 

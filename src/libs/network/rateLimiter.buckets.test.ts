@@ -1,24 +1,41 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
 
+const authContexts = new WeakMap<Request, unknown>()
 mock.module("./authContext", () => ({
-    getAuthContext: () => ({
-        verified: false,
-        identity: null,
-        publicKey: null,
-        algorithm: null,
-    }),
-    setAuthContext: () => undefined,
+    getAuthContext: (req: Request) =>
+        authContexts.get(req) ?? {
+            verified: false,
+            identity: null,
+            publicKey: null,
+            algorithm: null,
+        },
+    setAuthContext: (req: Request, ctx: unknown) => {
+        authContexts.set(req, ctx)
+    },
 }))
 
+let peerTable = new Set<string>()
 mock.module("@/libs/peer", () => ({
-    PeerManager: { getInstance: () => ({ getPeer: () => undefined }) },
+    PeerManager: {
+        getInstance: () => ({
+            getPeer: (id: string) => (peerTable.has(id) ? { identity: id } : undefined),
+        }),
+    },
+}))
+
+let stakedKeys = new Set<string>()
+mock.module("@/libs/consensus/stakedSet", () => ({
+    getStakedSet: async () => stakedKeys as ReadonlySet<string>,
 }))
 
 let verifyCalls = 0
+let signer: string | null = null
 mock.module("./verifySignature", () => ({
     verifySignature: async () => {
         verifyCalls++
-        return { valid: false, error: "bad signature" }
+        return signer
+            ? { valid: true, identity: `ed25519:${signer}`, publicKey: signer, algorithm: "ed25519" }
+            : { valid: false, error: "bad signature" }
     },
     isKeyWhitelisted: () => false,
 }))
@@ -411,5 +428,43 @@ describe("RateLimiter failed signature checks", () => {
         limiter.destroy()
         limiter = makeLimiter({ blockDurationMs: 60_000, whitelistedIPs: [IP] })
         for (let i = 0; i < 5; i++) expect((await signed()).status).toBe(401)
+    })
+})
+
+describe("RateLimiter signed requests", () => {
+    let limiter: InstanceType<typeof RateLimiter>
+
+    const signedBy = (key: string) => {
+        signer = key
+        const req = new Request("http://node/info", {
+            headers: { identity: `ed25519:${key}`, signature: "0xsig", timestamp: "1" },
+        })
+        return limiter.createMiddleware()(req, ok, server)
+    }
+
+    beforeEach(() => {
+        now = 1_000_000
+        spyOn(Date, "now").mockImplementation(() => now)
+        limiter = makeLimiter({ blockDurationMs: 60_000 })
+        stakedKeys = new Set(["0xbeef"])
+        peerTable = new Set(["0xpeer"])
+    })
+
+    afterEach(() => {
+        signer = null
+        stakedKeys = new Set()
+        peerTable = new Set()
+        limiter.destroy()
+        mock.restore()
+    })
+
+    it("limits a key that is only in the peer table", async () => {
+        expect((await signedBy("0xpeer")).status).toBe(200)
+        expect((await signedBy("0xpeer")).status).toBe(200)
+        expect((await signedBy("0xpeer")).status).toBe(429)
+    })
+
+    it("lets a staked validator through", async () => {
+        for (let i = 0; i < 5; i++) expect((await signedBy("0xbeef")).status).toBe(200)
     })
 })

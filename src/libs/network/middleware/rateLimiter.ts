@@ -12,6 +12,7 @@ import {
     VerificationResult,
 } from "../verifySignature"
 import { PeerManager } from "@/libs/peer"
+import { getStakedSet } from "@/libs/consensus/stakedSet"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import {
     RATE_LIMIT_DEFAULT_BLOCK_DURATION_MS,
@@ -276,6 +277,8 @@ export class RateLimiter {
      * client cannot flood logs. Cleared by `destroy()`.
      */
     private xffRejectLastLog = new Map<string, number>()
+    /** Staked validator keys as of the last signed request; lowercase. */
+    private validatorKeys: ReadonlySet<string> = new Set()
 
     constructor(config: RateLimitConfig) {
         this.config = config
@@ -596,6 +599,14 @@ export class RateLimiter {
         return socketIp
     }
 
+    /**
+     * Brings the validator keys to the current head; the set is cached per
+     * height. Kept here because the trust check below cannot await.
+     */
+    public async refreshValidatorKeys(): Promise<void> {
+        this.validatorKeys = await getStakedSet()
+    }
+
     public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
         if (
             clientIP &&
@@ -622,7 +633,22 @@ export class RateLimiter {
             return true
         }
 
-        return !!PeerManager.getInstance().getPeer(authCtx.publicKey)
+        // Any node that sends hello_peer lands in the peer table, so being
+        // there earns no exemption; a staked validator's does.
+        const key = authCtx.publicKey.toLowerCase()
+        const staked = this.validatorKeys
+        if (staked.has(key.startsWith("0x") ? key : `0x${key}`)) {
+            return true
+        }
+        // A bare development network has no validator rows, and its nodes
+        // know each other only from the peer table.
+        if (
+            staked.size === 0 &&
+            process.env.DEMOS_REQUIRE_VALIDATORS !== "true"
+        ) {
+            return !!PeerManager.getInstance().getPeer(authCtx.publicKey)
+        }
+        return false
     }
 
     private getMethodFromRequest(req: Request): string | null {
@@ -765,6 +791,7 @@ export class RateLimiter {
                     publicKey: verifyResult.publicKey,
                     algorithm: verifyResult.algorithm,
                 })
+                await this.refreshValidatorKeys()
             }
 
             // Check if key is whitelisted
