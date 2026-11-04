@@ -129,7 +129,11 @@ export function unloadableEditKey(
         return problem === null ? null : `${where}: ${problem}`
     }
     const text = (where: string, value: unknown) =>
-        isKeyStorable(value) ? null : `${where}: ${NOT_STORABLE}`
+        typeof value !== "string"
+            ? `${where}: not a string`
+            : isKeyStorable(value)
+              ? null
+              : `${where}: ${NOT_STORABLE}`
 
     for (const [i, item] of edits.entries()) {
         if (typeof item !== "object" || item === null) return `gcr_edits[${i}]: not an edit`

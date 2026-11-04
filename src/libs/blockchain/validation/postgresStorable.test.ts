@@ -7,6 +7,7 @@ mock.module("src/utilities/logger", () => ({
 
 import { getMetadataArgsStorage } from "typeorm"
 import { Transactions } from "@/model/entities/Transactions"
+import Block from "@/libs/blockchain/block"
 import {
     admissionRefusal,
     blockRowRefusal,
@@ -44,6 +45,13 @@ describe("isTextStorable", () => {
         expect(isTextStorable("a\u0000")).toBe(false)
         expect(isTextStorable("a\ud800")).toBe(true)
         expect(isTextStorable(5)).toBe(true)
+    })
+
+    it("refuses U+0000 in an array at any depth: the driver sends an array literal as is", () => {
+        expect(isTextStorable(["a", ["b\u0000"]])).toBe(false)
+        expect(isTextStorable(["a", ["b"]])).toBe(true)
+        // An object goes as JSON.stringify output, which escapes it.
+        expect(isTextStorable({ a: "\u0000" })).toBe(true)
     })
 })
 
@@ -95,7 +103,8 @@ describe("isKeyStorable", () => {
         expect(isKeyStorable("a\u0000")).toBe(false)
         expect(isKeyStorable("a\ud800")).toBe(false)
         expect(isKeyStorable("a😀")).toBe(true)
-        expect(isKeyStorable(5)).toBe(true)
+        expect(isKeyStorable(5)).toBe(false)
+        expect(isKeyStorable(["a"])).toBe(false)
     })
 })
 
@@ -117,6 +126,25 @@ describe("blockRowRefusal", () => {
         expect(blockRowRefusal({ ...block, proposer: "a\u0000" })).toContain("proposer")
         expect(blockRowRefusal({ ...block, next_proposer: "\udfff" })).toContain("next_proposer")
         expect(blockRowRefusal({ ...block, status: "\u0000" })).toContain("status")
+    })
+
+    it("refuses what is not a string: the driver would send null or an array literal", () => {
+        const block = { proposer: "ab".repeat(32), next_proposer: "", status: "confirmed" }
+        expect(blockRowRefusal(block)).toBeNull()
+        expect(blockRowRefusal({ ...block, proposer: ["\u0000"] })).toContain("proposer")
+        expect(blockRowRefusal({ ...block, proposer: null })).toContain("proposer")
+        expect(blockRowRefusal({ ...block, next_proposer: undefined })).toContain("next_proposer")
+        expect(blockRowRefusal({ ...block, status: { s: 1 } })).toContain("status")
+    })
+
+    it("accepts a block as the node makes it: no status yet, the insert writes one", () => {
+        const block = new Block()
+        block.proposer = "ab".repeat(32)
+        block.next_proposer = "cd".repeat(32)
+
+        expect(block.status).toBeNull()
+        expect(blockRowRefusal(block)).toBeNull()
+        expect(blockRowRefusal({ ...block, status: undefined })).toBeNull()
     })
 })
 

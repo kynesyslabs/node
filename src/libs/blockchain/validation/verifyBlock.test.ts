@@ -112,6 +112,9 @@ function makeBlock(overrides: Record<string, any> = {}) {
     return {
         number: 10,
         hash: "valid-hash",
+        proposer: A,
+        next_proposer: B,
+        status: "confirmed",
         content: {
             previousHash: "hash-9",
             timestamp: 1500,
@@ -243,9 +246,11 @@ describe("verifyBlock", () => {
         ["next_proposer", "\u0000"],
         ["proposer", A + "\ud800"],
         ["status", "confirmed\u0000"],
+        ["proposer", [A + "\u0000"]],
+        ["next_proposer", null],
     ] as const) {
-        it(`rejects a served block whose ${column} Postgres cannot store`, async () => {
-            const result = await verifyBlock(makeBlock({ proposer: A, next_proposer: B, [column]: value }))
+        it(`rejects a served block whose ${column} Postgres cannot store: ${JSON.stringify(value)}`, async () => {
+            const result = await verifyBlock(makeBlock({ [column]: value }))
             expect(result.valid).toBe(false)
             expect(result.reason).toContain(`Block ${column}`)
         })

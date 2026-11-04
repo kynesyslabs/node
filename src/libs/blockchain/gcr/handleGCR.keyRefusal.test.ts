@@ -11,12 +11,18 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
 
 const queried: unknown[] = []
 
-/** Postgres refuses U+0000 in a text parameter: SQLSTATE 22021. */
+/**
+ * Postgres refuses U+0000 in a text parameter: SQLSTATE 22021. The driver
+ * sends an array as an array literal, its strings unescaped.
+ */
+const holdsNul = (value: unknown): boolean =>
+    typeof value === "string" ? value.includes("\u0000") : Array.isArray(value) && value.some(holdsNul)
+
 function find({ where }: { where: Record<string, { value?: unknown }> }) {
     for (const operator of Object.values(where)) {
         const values = Array.isArray(operator?.value) ? operator.value : [operator]
         queried.push(...values)
-        if (values.some(v => typeof v === "string" && v.includes("\u0000"))) {
+        if (values.some(holdsNul)) {
             throw Object.assign(new Error('invalid byte sequence for encoding "UTF8": 0x00'), { code: "22021" })
         }
     }
@@ -152,6 +158,15 @@ describe("an account the node cannot load", () => {
         ;(tx.content.gcr_edits as unknown[]).push({ type: "tlsnotary", operation: "add", account: PEER })
         const out = await apply([tx])
         expect(out.failedTxs).toEqual([tx.hash])
+    })
+
+    it("a key that is not a string fails its transaction, not the load", async () => {
+        const tx = await sendTo(PEER)
+        ;(tx.content.gcr_edits as unknown[]).push({ type: "tlsnotary", operation: "add", data: { tokenId: ["\u0000"] } })
+        const good = await sendTo(PEER)
+        const out = await apply([tx, good])
+        expect(out.failedTxs).toEqual([tx.hash])
+        expect(out.successfulTxs).toEqual([good.hash])
     })
 
     it("is judged by the rule createAccount applies", async () => {
