@@ -185,9 +185,18 @@ services:
       DEMOS_ALLOW_UNPINNED_GENESIS: ${DEMOS_ALLOW_UNPINNED_GENESIS:-}
       DEMOS_SNAPSHOT_DIR: ${DEMOS_SNAPSHOT_DIR:-}
       DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST: ${DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST:-}
+      # Mainnet validators set this to true: with no active validators in the
+      # database the node refuses to run consensus instead of falling back to
+      # every online peer. Only variables listed here reach the container.
+      DEMOS_REQUIRE_VALIDATORS: ${DEMOS_REQUIRE_VALIDATORS:-}
       # Identity & peers — entrypoint symlinks these into /app/state on boot
       IDENTITY_FILE: ${IDENTITY_FILE:-.demos_identity}
       PEER_LIST_FILE: ${PEER_LIST_FILE:-demos_peerlist.json}
+      # One-off recovery switches from docs/runbooks/validator-key.md; unset
+      # them once the node runs.
+      DEMOS_GENERATE_IDENTITY: ${DEMOS_GENERATE_IDENTITY:-}
+      DEMOS_IDENTITY_TAKEOVER: ${DEMOS_IDENTITY_TAKEOVER:-}
+      DEMOS_SIGNING_RECORD_REBIND: ${DEMOS_SIGNING_RECORD_REBIND:-}
       # Monitoring
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       # METRICS_PORT is pinned to 9090 inside the container so the
@@ -195,6 +204,13 @@ services:
       # METRICS_HOST_PORT in the ports stanza to remap on the host.
       METRICS_PORT: 9090
       METRICS_HOST: ${METRICS_HOST:-0.0.0.0}
+      BLOCK_WATCHDOG_ENABLED: ${BLOCK_WATCHDOG_ENABLED:-}
+      BLOCK_WATCHDOG_TIMEOUT_SECONDS: ${BLOCK_WATCHDOG_TIMEOUT_SECONDS:-}
+      DEBUG_ASSERTIONS_ENABLED: ${DEBUG_ASSERTIONS_ENABLED:-}
+      # The node warns at start when it runs behind this domain with a
+      # wildcard CORS policy
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      PROXY_DOMAIN: ${PROXY_DOMAIN:-}
       # TLSNotary — service name from this compose. The port matches the
       # notary's NS_PORT (and its 1:1 host mapping), so the value the node
       # advertises on the tlsn endpoints is dialable from outside.
@@ -223,6 +239,11 @@ services:
       L2PS_HISTORY_REQUIRE_V2: ${L2PS_HISTORY_REQUIRE_V2:-false}
       L2PS_MESSAGING_ENABLED: ${L2PS_MESSAGING_ENABLED:-false}
       L2PS_MESSAGING_PORT: ${L2PS_MESSAGING_PORT:-3006}
+      L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET: ${L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET:-}
+      L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE: ${L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE:-}
+      L2PS_MESSAGING_SEND_RATE: ${L2PS_MESSAGING_SEND_RATE:-}
+      L2PS_MESSAGING_SEND_BURST: ${L2PS_MESSAGING_SEND_BURST:-}
+      L2PS_MESSAGING_BACKLOG_SHARE: ${L2PS_MESSAGING_BACKLOG_SHARE:-}
       # Gossip sidecar (libp2p). The node advertises EXPOSED_URL's host with
       # this port, so it must be published 1:1 below.
       GOSSIP_ENABLED: ${GOSSIP_ENABLED:-true}
