@@ -2,16 +2,18 @@ import { describe, expect, it } from "bun:test"
 import { existsSync, readFileSync } from "fs"
 import { resolve } from "path"
 import {
+    agreedHeight,
     committeeFloor,
     drillPreconditionError,
     evaluateHalt,
     evaluateNoCrash,
     evaluateRecovery,
+    evaluateSettle,
     signatureQuorum,
 } from "./lib/haltDrill"
 
 const REHEARSAL_DIR = resolve(import.meta.dir)
-const SCENARIO = "scenarios/11-quorum-loss-halt-recovery.ts"
+const SCENARIO = "scenarios/12-quorum-loss-halt-recovery.ts"
 
 describe("G3-6: quorum-loss drill is shipped and registered", () => {
     // Fails at 6b4867dc: no scenario stops 2 of 4 validators.
@@ -27,6 +29,13 @@ describe("G3-6: quorum-loss drill is shipped and registered", () => {
         expect(src).toMatch(/STOPPED\s*=\s*\[\s*3\s*,\s*4\s*\]/)
         expect(src).toContain("stopService(")
         expect(src).toContain("startService(")
+    })
+    it("drill genesis activates the launch safety forks at height 0", () => {
+        const src = readFileSync(resolve(REHEARSAL_DIR, SCENARIO), "utf8")
+        expect(src).toMatch(
+            /LAUNCH_FORKS\s*=\s*\[\s*"quorumParity"\s*,\s*"committeeBinding"\s*,\s*"commitLock"\s*\]/,
+        )
+        expect(src).toContain("activationHeight: 0")
     })
 })
 
@@ -66,6 +75,54 @@ describe("halt verdict", () => {
     it("fails with too few samples", () => {
         expect(evaluateHalt([1, 2], 12, [s(0, 12, 12)], 2).pass).toBe(false)
     })
+    it("fails when a survivor's head moves back below the halt height", () => {
+        const v = evaluateHalt([1, 2], 12, [s(0, 12, 12), s(10_000, 11, 12)], 2)
+        expect(v.pass).toBe(false)
+        expect(v.reasons[0]).toContain("went back")
+    })
+})
+
+describe("survivor agreement", () => {
+    it("returns the shared head only when every node answers the same", () => {
+        expect(agreedHeight([1, 2], { 1: 12, 2: 12 })).toBe(12)
+        expect(agreedHeight([1, 2], { 1: 12, 2: 11 })).toBeNull()
+        expect(agreedHeight([1, 2], { 1: 12, 2: -1 })).toBeNull()
+        expect(agreedHeight([1, 2], { 1: 12 })).toBeNull()
+    })
+})
+
+describe("settle verdict", () => {
+    const row = (node: number, n: number, sigs: number, hash = `h${n}`) => ({
+        node,
+        number: n,
+        hash,
+        signatures: sigs,
+    })
+    it("passes when nothing landed after the stop", () => {
+        expect(evaluateSettle([1, 2], 12, 12, [], 3).pass).toBe(true)
+    })
+    it("passes when an in-flight block landed with quorum", () => {
+        const rows = [row(1, 13, 4), row(2, 13, 3)]
+        expect(evaluateSettle([1, 2], 12, 13, rows, 3).pass).toBe(true)
+    })
+    it("fails when the survivors committed a 2-signature block during settle", () => {
+        // The gap the review found: before this check, haltHeight was taken
+        // after settle and only blocks above it were signature-checked.
+        const rows = [row(1, 13, 2), row(2, 13, 2)]
+        const v = evaluateSettle([1, 2], 12, 13, rows, 3)
+        expect(v.pass).toBe(false)
+        expect(v.reasons.join(" ")).toContain("without quorum")
+    })
+    it("fails when a settle block is missing on a survivor", () => {
+        expect(evaluateSettle([1, 2], 12, 13, [row(1, 13, 3)], 3).pass).toBe(false)
+    })
+    it("fails when the survivors store different settle blocks", () => {
+        const rows = [row(1, 13, 3, "a"), row(2, 13, 3, "b")]
+        expect(evaluateSettle([1, 2], 12, 13, rows, 3).pass).toBe(false)
+    })
+    it("fails when the halt height is below the pre-stop height", () => {
+        expect(evaluateSettle([1, 2], 12, 11, [], 3).pass).toBe(false)
+    })
 })
 
 describe("recovery verdict", () => {
@@ -86,6 +143,11 @@ describe("recovery verdict", () => {
     it("fails when a post-halt block lacks quorum signatures", () => {
         const all = [12, 13, 14, 15].flatMap(n => rows(n, n === 13 ? 2 : 3))
         expect(evaluateRecovery(nodes, 12, 15, heads, all, 3).pass).toBe(false)
+    })
+    it("checks signatures from the pre-stop height, covering settle blocks", () => {
+        // pre-stop 11, a 2-signature block 12 committed during settle.
+        const all = [11, 12, 13, 14, 15].flatMap(n => rows(n, n === 12 ? 2 : 3))
+        expect(evaluateRecovery(nodes, 11, 15, heads, all, 3).pass).toBe(false)
     })
     it("fails when a restarted node never catches up", () => {
         const all = [12, 13, 14, 15].flatMap(n => rows(n, 3))

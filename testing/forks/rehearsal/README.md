@@ -101,7 +101,7 @@ state chained across scenarios.
 | 6 | `06-mid-flight-tx.ts` | Medium | Boundary-block tx handling |
 | 2 | `02-validator-desync-recovery.ts` | High | Wipe + re-sync; loud failure on stale binary |
 | 3 | `03-fresh-node-post-fork.ts` | **HIGHEST** | Migration runs during historical replay |
-| 11 | `11-quorum-loss-halt-recovery.ts` | High | 2 of 4 validators stopped: chain halts with no minority block, survivors stay up; restart: all 4 resume and converge (G3-6) |
+| 12 | `12-quorum-loss-halt-recovery.ts` | High | At `shardSize` 4 with quorumParity, committeeBinding and commitLock active from 0: 2 of 4 validators stopped, chain halts with no minority block (including during the settle window), survivors stay up; restart: chain resumes and all 4 converge (G3-6). Mainnet's `shardSize` 10 is not exercised |
 
 `run-all.sh` runs them in this exact order (per REHEARSAL_PLAN §4).
 
@@ -130,7 +130,7 @@ testing/forks/rehearsal/
     06-mid-flight-tx.ts
     07-sum-invariant-audit.ts
     08-idempotent-restart.ts
-    11-quorum-loss-halt-recovery.ts
+    12-quorum-loss-halt-recovery.ts
 ```
 
 ## Adapters used
@@ -170,5 +170,9 @@ its sole purpose is rehearsal.
   P6 sustained testnet.
 - Network partitions / Byzantine peers — accepted risk, see
   REHEARSAL_PLAN §5.
-- Scenario 11 stops validators cleanly (`docker compose stop`); it does
-  not cut the network between running nodes, so it is not a partition test.
+- Scenario 12 stops validators with `docker compose stop`. The devnet
+  entrypoint (`run-devnet`) runs as PID 1 and does not exit on SIGTERM,
+  so each stop ends in a SIGKILL after Docker's 10-second grace period:
+  the drill exercises an abrupt stop, not a graceful shutdown. It does
+  not cut the network between running nodes, so it is not a partition
+  test.
