@@ -21,6 +21,7 @@ SUITE_FILES=(
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
+    src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
     src/libs/network/helloGenesisGate.test.ts

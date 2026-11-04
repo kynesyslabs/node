@@ -111,7 +111,7 @@ jest.mock("src/libs/blockchain/chain", () => ({
         getTxByHash: jest.fn(),
     },
 }))
-jest.mock("src/libs/blockchain/gcr/gcr_routines/ensureGCRForUser", () => ({
+jest.mock("src/libs/blockchain/gcr/gcr_routines/readGCRForUser", () => ({
     __esModule: true,
     default: jest.fn(),
 }))
@@ -207,7 +207,7 @@ beforeAll(async () => {
             getBlockByHash: jest.Mock
             getTxByHash: jest.Mock
         }
-    mockedEnsureGCRForUser = (await import("src/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"))
+    mockedEnsureGCRForUser = (await import("src/libs/blockchain/gcr/gcr_routines/readGCRForUser"))
         .default as jest.Mock
     mockedManageNodeCall = (await import("src/libs/network/manageNodeCall"))
         .default as jest.Mock
