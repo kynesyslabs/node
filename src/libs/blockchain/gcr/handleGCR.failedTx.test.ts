@@ -154,6 +154,50 @@ describe("a transaction that fails part-way", () => {
         expect(entities.storagePrograms.has(ADDRESS)).toBe(false)
     })
 
+    it("keeps no TLSNotary proof when a later edit fails", async () => {
+        const entities = await caches()
+        const store = {
+            type: "tlsnotary",
+            operation: "store",
+            account: SENDER,
+            isRollback: false,
+            txhash: "",
+            data: {
+                tokenId: "token-1",
+                domain: "example.com",
+                proof: "proof",
+                storageType: "onchain",
+                timestamp: 1,
+            },
+        }
+        const result = await HandleGCR.applyTransaction(
+            entities,
+            tx([burn(1), store, burn(1000)]),
+            false,
+            false,
+        )
+        expect(result.success).toBe(false)
+        expect(entities.tlsNotaries.has("token-1")).toBe(false)
+        expect(entities.accounts.get(SENDER).balance).toBe(START)
+    })
+
+    it("keeps a proof row that was there before the failed transaction", async () => {
+        const entities = await caches()
+        const before = { tokenId: "token-2", owner: SENDER, domain: "a.example", proof: "p" }
+        entities.tlsNotaries.set("token-2", before)
+        const store = {
+            type: "tlsnotary",
+            operation: "store",
+            account: SENDER,
+            isRollback: false,
+            txhash: "",
+            data: { tokenId: "token-2", domain: "b.example", proof: "q", storageType: "onchain", timestamp: 1 },
+        }
+        const result = await HandleGCR.applyTransaction(entities, tx([burn(1), store]), false, false)
+        expect(result.success).toBe(false)
+        expect(entities.tlsNotaries.get("token-2")).toEqual(before)
+    })
+
     it("applies all of a transaction that succeeds", async () => {
         const entities = await caches()
         const result = await HandleGCR.applyTransaction(

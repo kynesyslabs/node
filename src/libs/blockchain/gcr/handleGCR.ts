@@ -250,6 +250,45 @@ function snapshotStaged(
     return snapshot as Partial<StagedSnapshot>
 }
 
+interface RowSnapshot {
+    cache: Map<string, unknown>
+    key: string
+    present: boolean
+    row: unknown
+}
+
+/** Copies of the storage program and proof rows a transaction's edits target. */
+function snapshotRows(entities: GCREntityCaches, edits: GCREdit[]): RowSnapshot[] {
+    const snapshots: RowSnapshot[] = []
+    const seen = new Set<string>()
+    const take = (cache: Map<string, unknown>, key: string, tag: string) => {
+        if (seen.has(tag + key)) return
+        seen.add(tag + key)
+        const row = cache.get(key)
+        snapshots.push({
+            cache,
+            key,
+            present: cache.has(key),
+            row: row && typeof row === "object" ? structuredClone(row) : row,
+        })
+    }
+    for (const edit of edits) {
+        if (edit.type === "storageProgram") {
+            take(entities.storagePrograms, (edit as GCREditStorageProgram).target, "sp:")
+        } else if (edit.type === "tlsnotary") {
+            take(entities.tlsNotaries, (edit as GCREditTLSNotary).data.tokenId, "tls:")
+        }
+    }
+    return snapshots
+}
+
+function restoreRows(snapshots: RowSnapshot[]) {
+    for (const { cache, key, present, row } of snapshots) {
+        if (present) cache.set(key, row)
+        else cache.delete(key)
+    }
+}
+
 function restoreStaged(entities: GCREntityCaches, snapshot: Partial<StagedSnapshot>) {
     const caches = entities as unknown as Record<string, unknown>
     for (const [name, copy] of Object.entries(snapshot)) caches[name] = copy
@@ -1069,23 +1108,10 @@ export default class HandleGCR {
                 }
             }
         }
-        // A storage edit that applied must not outlive a later edit of the
-        // same transaction that fails: the fee and nonce are put back, so the
-        // write would be free.
-        const programSnapshots = new Map<
-            string,
-            { present: boolean; entity: GCRStorageProgram | null }
-        >()
-        for (const edit of gcrEdits) {
-            if (edit.type !== "storageProgram") continue
-            const target = (edit as GCREditStorageProgram).target
-            if (programSnapshots.has(target)) continue
-            const entity = entities.storagePrograms.get(target)
-            programSnapshots.set(target, {
-                present: entities.storagePrograms.has(target),
-                entity: entity ? structuredClone(entity) : null,
-            })
-        }
+        // A storage or proof row an edit wrote must not outlive a later edit
+        // of the same transaction that fails: the fee and nonce are put
+        // back, so the write would be free.
+        const rowSnapshots = snapshotRows(entities, gcrEdits)
         const sideEffects: (() => Promise<void>)[] = []
         const deferredWrites: DeferredWrite[] = []
         const appliedEdits: GCREdit[] = []
@@ -1133,13 +1159,7 @@ export default class HandleGCR {
                         entities.accounts.set(snap.pubkey, snap.entity)
                     }
                 }
-                for (const [target, snap] of programSnapshots) {
-                    if (snap.present) {
-                        entities.storagePrograms.set(target, snap.entity)
-                    } else {
-                        entities.storagePrograms.delete(target)
-                    }
-                }
+                restoreRows(rowSnapshots)
                 // After the rollback, which may have edited the staged rows
                 restoreStaged(entities, staged)
 
