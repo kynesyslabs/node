@@ -101,7 +101,7 @@ state chained across scenarios.
 | 6 | `06-mid-flight-tx.ts` | Medium | Boundary-block tx handling |
 | 2 | `02-validator-desync-recovery.ts` | High | Wipe + re-sync; loud failure on stale binary |
 | 3 | `03-fresh-node-post-fork.ts` | **HIGHEST** | Migration runs during historical replay |
-| 12 | `12-quorum-loss-halt-recovery.ts` | High | At `shardSize` 4 with quorumParity, committeeBinding and commitLock active from 0: 2 of 4 validators stopped, chain halts with no minority block (including during the settle window), survivors stay up; restart: chain resumes and all 4 converge (G3-6). Mainnet's `shardSize` 10 is not exercised |
+| 12 | `12-quorum-loss-halt-recovery.ts` | High | At `shardSize` 4 with quorumParity, committeeBinding and commitLock active from 0: 2 of 4 validators stopped, chain halts with no minority block (including during the settle window), survivors stay up; restart: chain resumes and all 4 converge (G3-6). This is the 4-validator version; the mainnet-shape halt cases (10 and 13 validators, `shardSize` 10) are in `testing/devnet/quorum-drills/` (`halt-n10s10`, `halt-n13s10`, `ride-n13s10`) |
 
 `run-all.sh` runs them in this exact order (per REHEARSAL_PLAN §4).
 

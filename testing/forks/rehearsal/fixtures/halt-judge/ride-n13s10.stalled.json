@@ -1,0 +1,63 @@
+{
+  "scenario": "ride-n13s10",
+  "mode": "ride",
+  "validators": 13,
+  "shardSize": 10,
+  "stopped": [
+    11,
+    12,
+    13
+  ],
+  "consensusTimeS": 10,
+  "forks": {
+    "quorumParity": 0,
+    "committeeBinding": 0
+  },
+  "baselineMinHeight": 6,
+  "holdRounds": 0,
+  "marks": {"t_up":1793793600000,"t_baseline":1793793695000,"t_stop":1793793725000,"t_halt_confirmed":null,"t_hold_end":null,"t_restart":null,"t_first_new_block":1793793740000,"t_converged":1793793775000},
+  "baseline": {
+    "height": 6,
+    "heads": {"1":6,"2":6,"3":6,"4":6,"5":6,"6":6,"7":6,"8":6,"9":6,"10":6,"11":6,"12":6,"13":6},
+    "rows": [
+      {"node":1,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":2,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":3,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":4,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":5,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":6,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":7,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":8,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":9,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":10,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":11,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":12,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":13,"number":6,"hash":"0xabc006","signatures":13}
+    ]
+  },
+  "preStopHeight": 8,
+  "preStopPeerlist": 13,
+  "restartCounts": {
+    "before": {"1":0,"2":0,"3":0,"4":0,"5":0,"6":0,"7":0,"8":0,"9":0,"10":0},
+    "after": {"1":0,"2":0,"3":0,"4":0,"5":0,"6":0,"7":0,"8":0,"9":0,"10":0}
+  },
+  "settle": null,
+  "hold": null,
+  "recovery": null,
+  "ride": {
+    "blocks": 3,
+    "heads": {"1":8,"2":8,"3":8,"4":8,"5":8,"6":8,"7":8,"8":8,"9":8,"10":8},
+    "rows": [
+      {"node":1,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":2,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":3,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":4,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":5,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":6,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":7,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":8,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":9,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":10,"number":8,"hash":"0xabc008","signatures":13}
+    ]
+  }
+}

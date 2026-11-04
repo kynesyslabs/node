@@ -8,6 +8,9 @@
 #   drop-n7s7       7 validators, shardSize 7: stop 1, 2, 3 in turn
 #   drop-n7s10      7 validators, shardSize 10: stop 1
 #   drop-n10s10     10 validators, shardSize 10: stop 1, 2, 3, 4 in turn
+#   halt-n10s10     10 validators, shardSize 10: stop 4 at once (6 live < q), hold, restart
+#   halt-n13s10     13 validators, shardSize 10: stop 7 at once (6 live < q), hold, restart
+#   ride-n13s10     13 validators, shardSize 10: stop 3 at once, the chain must keep forging
 #   listed-stall    10 staked, 7 running: stop 1 listed, start the 3 others
 #   fallback        10 validators: the last block lists 6 (< 7) of them
 #   partition       6 validators, shardSize 4: split 3 + 3, then heal
@@ -39,11 +42,21 @@ PROGRESS_TIMEOUT="${PROGRESS_TIMEOUT:-180}"
 STALL_WINDOW="${STALL_WINDOW:-120}"
 PARTITION_TIME="${PARTITION_TIME:-120}"
 SETTLE_TIMEOUT="${SETTLE_TIMEOUT:-300}"
+# halt-* and ride-* drills; the defaults are scenario 12's
+BASELINE_HEIGHT="${BASELINE_HEIGHT:-6}"
+SETTLE_ROUNDS="${SETTLE_ROUNDS:-2}"
+HALT_ROUNDS="${HALT_ROUNDS:-12}"
+RECOVERY_BLOCKS="${RECOVERY_BLOCKS:-3}"
+RECOVERY_TIMEOUT="${RECOVERY_TIMEOUT:-300}"
+RIDE_BLOCKS="${RIDE_BLOCKS:-5}"
+RIDE_TIMEOUT="${RIDE_TIMEOUT:-300}"
 
 usage() {
-    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: IMAGE SRC_TREE BINDING CONSENSUS_TIME NODE_MEM NODE_EST_MB HEADROOM_MB"
     echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME (README.md)"
+    echo "             BASELINE_HEIGHT SETTLE_ROUNDS HALT_ROUNDS RECOVERY_BLOCKS RECOVERY_TIMEOUT"
+    echo "             RIDE_BLOCKS RIDE_TIMEOUT (halt-* and ride-* drills)"
 }
 
 while [ $# -gt 0 ]; do
@@ -65,6 +78,9 @@ case "${SCENARIO}" in
     drop-n7s7) N=7; SHARD=7; START=7; STOPS=3 ;;
     drop-n7s10) N=7; SHARD=10; START=7; STOPS=1 ;;
     drop-n10s10) N=10; SHARD=10; START=10; STOPS=4 ;;
+    halt-n10s10) N=10; SHARD=10; START=10; STOPS=4 ;;
+    halt-n13s10) N=13; SHARD=10; START=13; STOPS=7 ;;
+    ride-n13s10) N=13; SHARD=10; START=13; STOPS=3 ;;
     listed-stall) N=10; SHARD=10; START=7 ;;
     fallback) N=10; SHARD=10; START=10 ;;
     partition) N=6; SHARD=4; START=6 ;;
@@ -355,11 +371,15 @@ write_verdict() {
     step 05-verdict
     column -t -s $'\t' "${PHASES}" | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     sed 's/^/    /' "${EVENTS}" 2>/dev/null | tee -a "${LOG_DIR}/run.log" >/dev/null
+    # halt-* and ride-* drills: the judge's per-phase verdict and timings
+    local drill=null
+    [ -s "${RUN_DIR}/drill-verdict.json" ] && drill=$(jq -c . "${RUN_DIR}/drill-verdict.json")
     jq -n --arg run "${RUN_ID}" --arg scenario "${SCENARIO}" --arg binding "${BINDING}" \
         --argjson n "${N}" --argjson shardSize "${SHARD}" --argjson q "${Q}" --arg code "${CODE}" \
-        --arg image "${IMAGE}" --arg detail "${DETAIL}" --arg result "${RESULT}" \
+        --arg image "${IMAGE}" --arg detail "${DETAIL}" --arg result "${RESULT}" --argjson drill "${drill}" \
         '{run: $run, scenario: $scenario, binding: $binding, validators: $n, shardSize: $shardSize,
-          q: $q, code: $code, image: $image, detail: $detail, result: $result}' > "${LOG_DIR}/verdict.json"
+          q: $q, code: $code, image: $image, detail: $detail, result: $result}
+         + (if $drill == null then {} else {drill: $drill} end)' > "${LOG_DIR}/verdict.json"
     local results="${RUNS_DIR}/results.tsv"
     [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${RUN_ID}" "${SCENARIO}" "${BINDING}" "${N}" "${SHARD}" "${Q}" \
@@ -613,9 +633,249 @@ scenario_partition() {
     fi
 }
 
+# ── halt-* and ride-* drills ────────────────────────────────────────────
+# The run records what it observed (heads, block rows, restart counts,
+# wall-clock marks) in ${RUN_DIR}/drill-input.json, and the verdict comes from
+# testing/forks/rehearsal/lib/judgeHaltDrill.ts, which applies scenario 12's
+# pass criteria (lib/haltDrill.ts). Nothing is judged in bash.
+now_ms() { date -u +%s%3N; }
+
+# {"<node>": <number>, ...} from "node number" lines on stdin
+kv_json() { jq -Rn '[inputs | split(" ") | {key: .[0], value: (.[1] | tonumber)}] | from_entries'; }
+
+# Heads of the given nodes, one try each; -1 for a node that does not answer
+heads_once() {
+    local i h
+    for i in "$@"; do
+        h=$(head_of "${i}")
+        [[ "${h}" =~ ^[0-9]+$ ]] || h=-1
+        printf '%s %s\n' "${i}" "${h}"
+    done | kv_json
+}
+
+# As heads_once, with read_head's retries: one slow answer is not a dead node
+heads_read() {
+    local i h
+    for i in "$@"; do
+        h=$(read_head "${i}") || h=-1
+        printf '%s %s\n' "${i}" "${h}"
+    done | kv_json
+}
+
+# Restart counts of the given containers; fails when one cannot be read
+restart_counts() {
+    local i c
+    for i in "$@"; do
+        c=$(docker inspect -f '{{.RestartCount}}' "$(cid_of "${i}")" 2>/dev/null) || return 1
+        [[ "${c}" =~ ^[0-9]+$ ]] || return 1
+        printf '%s %s\n' "${i}" "${c}"
+    done | kv_json
+}
+
+# Rows {node, number, hash, signatures} for heights $1..$2 on nodes $3.., read
+# from each node's database as scenario 12 does (signatures are the keys of
+# validation_data->'signatures'). Fails when a database cannot be read.
+block_rows() {
+    local from="$1" to="$2" i out all=""
+    shift 2
+    for i in "$@"; do
+        out=$(psql_node "${i}" "SELECT number, hash, (SELECT count(*) FROM json_object_keys(validation_data->'signatures')) FROM blocks WHERE number BETWEEN ${from} AND ${to} ORDER BY number" |
+            jq -Rn --argjson node "${i}" '[inputs | split("|") | {node: $node, number: (.[0] | tonumber), hash: .[1], signatures: (.[2] | tonumber)}]') || return 1
+        all+="${out}"$'\n'
+    done
+    printf '%s' "${all}" | jq -cs 'add // []'
+}
+
+phase_row() { # $1 phase, $2 down, $3 live, $4 from, $5 to, $6 outcome
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t-\t-\t%s\n' "$1" "$2" "$3" "$4" "$5" $(($5 - $4)) "$6" >> "${PHASES}"
+}
+
+# P1 baseline, the pre-stop head, then the stop. The last STOPS validators are
+# stopped by one `docker compose stop -t 0`, so node-1 (the peerlist's anchor)
+# stays up. Sets VICTIMS, SURVIVORS, VICTIM_SERVICES and the T_* and *_HEIGHT values.
+drill_stop() {
+    local i v
+    VICTIMS=(); SURVIVORS=(); VICTIM_SERVICES=()
+    for i in $(seq 1 "${N}"); do
+        if [ "${i}" -gt $((N - STOPS)) ]; then VICTIMS+=("${i}"); VICTIM_SERVICES+=("node-${i}"); else SURVIVORS+=("${i}"); fi
+    done
+    T_BASELINE=""; T_STOP=""; T_HALT=""; T_HOLD_END=""; T_RESTART=""; T_FIRST=""; T_CONV=""
+    SETTLE_JSON=null; HOLD_JSON=null; RECOVERY_JSON=null; RIDE_JSON=null
+    # Marks the end of bring-up: every validator serves, genesis may still be ahead
+    T_UP=$(now_ms)
+    say "${SCENARIO}: stopping ${VICTIMS[*]} at once leaves ${#SURVIVORS[@]} live (${SURVIVORS[*]}), q=${Q}"
+
+    # P1 baseline: every node on one head >= BASELINE_HEIGHT with one hash
+    lockstep_or_abort "${BASELINE_HEIGHT}"
+    BASE_HEIGHT="${LOCK_HEIGHT}"
+    BASE_HEADS=$(heads_read $(running))
+    BASE_ROWS=$(block_rows "${BASE_HEIGHT}" "${BASE_HEIGHT}" $(running)) || { say "ABORT: could not read the baseline blocks"; exit 2; }
+    T_BASELINE=$(now_ms)
+    say "P1 baseline: ${N}/${N} at ${BASE_HEIGHT}"
+    phase_row baseline 0 "${N}" 0 "${BASE_HEIGHT}" progress
+
+    # A fresh block with every node on it, so the stop lands on a settled chain
+    wait_lockstep "$((BASE_HEIGHT + 1))" 120 || { say "ABORT: no fresh lockstep before the stop"; exit 2; }
+    PRE_HEIGHT="${LOCK_HEIGHT}"
+    PRE_PEERLIST=$(block_at "${SURVIVORS[0]}" "${PRE_HEIGHT}" | jq -r '.content.peerlist | length')
+    [[ "${PRE_PEERLIST}" =~ ^[0-9]+$ ]] || { say "ABORT: cannot read the peerlist of block ${PRE_HEIGHT}"; exit 2; }
+    COUNTS_BEFORE=$(restart_counts "${SURVIVORS[@]}") || { say "ABORT: cannot read the survivors' restart counts"; exit 2; }
+    # The ride bound holds only for a pool as large as the committee
+    if [ "${SCENARIO%%-*}" = ride ] && [ "${PRE_PEERLIST}" -lt $((N < SHARD ? N : SHARD)) ]; then
+        say "ABORT: block ${PRE_HEIGHT} lists ${PRE_PEERLIST} validators, fewer than the committee of $((N < SHARD ? N : SHARD)): the ride bound does not apply"
+        exit 2
+    fi
+
+    dc stop -t 0 "${VICTIM_SERVICES[@]}" >> "${STEP_LOG}" 2>&1 || { say "ABORT: stopping ${VICTIM_SERVICES[*]} failed"; exit 2; }
+    for v in "${VICTIMS[@]}"; do UP[v]=0; event "node-${v} stopped"; done
+    T_STOP=$(now_ms)
+    say "stopped ${VICTIM_SERVICES[*]} at once after block ${PRE_HEIGHT} (it lists ${PRE_PEERLIST} validators)"
+}
+
+# P3: survivor heads sampled every round for HALT_ROUNDS rounds. $1 halt height.
+drill_hold() {
+    local k hs samples="" t0
+    t0=$(now_ms)
+    for k in $(seq 1 "${HALT_ROUNDS}"); do
+        sleep "${CONSENSUS_TIME}"
+        hs=$(heads_read "${SURVIVORS[@]}")
+        samples+=$(jq -nc --argjson at "$(($(now_ms) - t0))" --argjson h "${hs}" '{atMs: $at, heights: $h}')$'\n'
+        [ $((k % 3)) = 0 ] && say "hold ${k}/${HALT_ROUNDS}: $(jq -c . <<< "${hs}")"
+    done
+    T_HOLD_END=$(now_ms)
+    HOLD_JSON=$(printf '%s' "${samples}" | jq -cs '{samples: .}')
+    local top; top=$(printf '%s' "${samples}" | jq -s '[.[].heights[]] | max')
+    phase_row halt-hold "${STOPS}" "${#SURVIVORS[@]}" "$1" "${top}" "$([ "${top}" -gt "$1" ] && echo progress || echo stall)"
+}
+
+# P5: start the victims together and wait for all N to reach halt + RECOVERY_BLOCKS.
+# $1 halt height. A node that does not get there is left to the judge.
+drill_recover() {
+    local target=$(($1 + RECOVERY_BLOCKS)) deadline hs mx v rows converged=0
+    dc up -d "${VICTIM_SERVICES[@]}" >> "${STEP_LOG}" 2>&1 || dc start "${VICTIM_SERVICES[@]}" >> "${STEP_LOG}" 2>&1 ||
+        { say "ABORT: could not start ${VICTIM_SERVICES[*]}"; exit 2; }
+    for v in "${VICTIMS[@]}"; do UP[v]=1; event "node-${v} started"; done
+    T_RESTART=$(now_ms)
+    say "restarted ${VICTIM_SERVICES[*]}; waiting for all ${N} to reach ${target}"
+    deadline=$((SECONDS + RECOVERY_TIMEOUT))
+    while [ ${SECONDS} -lt ${deadline} ]; do
+        hs=$(heads_once $(running))
+        mx=$(jq '[.[]] | max' <<< "${hs}")
+        # Any block above the halt height, from any node: the first new block
+        if [ -z "${T_FIRST}" ] && [ "${mx}" -gt "$1" ]; then T_FIRST=$(now_ms); fi
+        if jq -e --argjson t "${target}" 'all(.[]; . >= $t)' <<< "${hs}" > /dev/null; then
+            T_CONV=$(now_ms); converged=1; break
+        fi
+        say "heads: $(jq -c . <<< "${hs}")"
+        sleep 2
+    done
+    hs=$(heads_once $(running))
+    rows=$(block_rows "${PRE_HEIGHT}" "${target}" $(running)) || { say "ABORT: could not read the recovery blocks"; exit 2; }
+    RECOVERY_JSON=$(jq -nc --argjson b "${RECOVERY_BLOCKS}" --argjson heads "${hs}" --argjson rows "${rows}" \
+        '{blocks: $b, heads: $heads, rows: $rows}')
+    phase_row restarted 0 "${N}" "$1" "$(jq '[.[]] | min' <<< "${hs}")" "$([ "${converged}" = 1 ] && echo progress || echo stall)"
+}
+
+# Writes drill-input.json, runs the judge on it and sets RESULT and DETAIL
+drill_judge() { # $1 mode: halt or ride
+    local input="${RUN_DIR}/drill-input.json" rc hold_rounds=0
+    [ "$1" = halt ] && hold_rounds="${HALT_ROUNDS}"
+    local forks; forks=$(jq -c '.forks | with_entries(select(.key | IN("quorumParity", "committeeBinding", "commitLock")) | .value |= .activationHeight)' \
+        "${RUN_DIR}/inputs/genesis.json")
+    local marks; marks=$(jq -nc \
+        --argjson up "${T_UP:-null}" --argjson baseline "${T_BASELINE:-null}" --argjson stop "${T_STOP:-null}" \
+        --argjson halt "${T_HALT:-null}" --argjson holdEnd "${T_HOLD_END:-null}" --argjson restart "${T_RESTART:-null}" \
+        --argjson first "${T_FIRST:-null}" --argjson conv "${T_CONV:-null}" \
+        '{t_up: $up, t_baseline: $baseline, t_stop: $stop, t_halt_confirmed: $halt, t_hold_end: $holdEnd,
+          t_restart: $restart, t_first_new_block: $first, t_converged: $conv}')
+    local counts_after; counts_after=$(restart_counts "${SURVIVORS[@]}") || { say "ABORT: cannot read the survivors' restart counts"; exit 2; }
+    jq -n --arg scenario "${SCENARIO}" --arg mode "$1" --argjson validators "${N}" --argjson shardSize "${SHARD}" \
+        --argjson stopped "$(printf '%s\n' "${VICTIMS[@]}" | jq -sc .)" --argjson consensusTimeS "${CONSENSUS_TIME}" \
+        --argjson forks "${forks}" --argjson baselineMinHeight "${BASELINE_HEIGHT}" --argjson holdRounds "${hold_rounds}" \
+        --argjson marks "${marks}" --argjson baseHeight "${BASE_HEIGHT}" --argjson baseHeads "${BASE_HEADS}" \
+        --argjson baseRows "${BASE_ROWS}" --argjson pre "${PRE_HEIGHT}" --argjson peerlist "${PRE_PEERLIST}" \
+        --argjson before "${COUNTS_BEFORE}" --argjson after "${counts_after}" \
+        --argjson settle "${SETTLE_JSON}" --argjson hold "${HOLD_JSON}" --argjson recovery "${RECOVERY_JSON}" --argjson ride "${RIDE_JSON}" \
+        '{scenario: $scenario, mode: $mode, validators: $validators, shardSize: $shardSize, stopped: $stopped,
+          consensusTimeS: $consensusTimeS, forks: $forks, baselineMinHeight: $baselineMinHeight, holdRounds: $holdRounds,
+          marks: $marks, baseline: {height: $baseHeight, heads: $baseHeads, rows: $baseRows},
+          preStopHeight: $pre, preStopPeerlist: $peerlist, restartCounts: {before: $before, after: $after},
+          settle: $settle, hold: $hold, recovery: $recovery, ride: $ride}' > "${input}"
+    ( cd "${REPO_ROOT}" && bun testing/forks/rehearsal/lib/judgeHaltDrill.ts "${input}" --out "${RUN_DIR}/drill-verdict.json" ) \
+        > "${LOG_DIR}/judge.out" 2>&1
+    rc=$?
+    tee -a "${LOG_DIR}/run.log" < "${LOG_DIR}/judge.out"
+    case "${rc}" in
+        0) RESULT=PASS ;;
+        1) RESULT=FAIL ;;
+        *) RESULT=ERROR; DETAIL="the judge could not read ${input} (exit ${rc})"; write_verdict; exit 2 ;;
+    esac
+    DETAIL=$(jq -r .summary "${RUN_DIR}/drill-verdict.json")
+}
+
+# Stop STOPS validators at once, hold, restart. Pass criteria P1..P6 of
+# scenario 12, judged by judgeHaltDrill.ts.
+scenario_halt() {
+    drill_stop
+    local H settle_heads settle_rows deadline
+    # P2 settle: a block already in flight may still land. The judge derives the
+    # halt height again from these heads with agreedHeight.
+    sleep $((SETTLE_ROUNDS * CONSENSUS_TIME))
+    deadline=$((SECONDS + 3 * CONSENSUS_TIME))
+    while :; do
+        settle_heads=$(heads_read "${SURVIVORS[@]}")
+        H=$(jq -r '[.[]] | if all(. >= 0) and (unique | length) == 1 then .[0] else empty end' <<< "${settle_heads}")
+        if [ -n "${H}" ] || [ ${SECONDS} -ge ${deadline} ]; then break; fi
+        sleep 1
+    done
+    if [ -z "${H}" ]; then
+        say "P2: the survivors do not agree on a head: $(jq -c . <<< "${settle_heads}")"
+        SETTLE_JSON=$(jq -nc --argjson heads "${settle_heads}" '{heads: $heads, rows: []}')
+    else
+        settle_rows=$(block_rows "${PRE_HEIGHT}" "${H}" "${SURVIVORS[@]}") || { say "ABORT: could not read the settle blocks"; exit 2; }
+        SETTLE_JSON=$(jq -nc --argjson heads "${settle_heads}" --argjson rows "${settle_rows}" '{heads: $heads, rows: $rows}')
+        T_HALT=$(now_ms)
+        say "survivors agree at ${H}: $((H - PRE_HEIGHT)) block(s) landed after the stop"
+        phase_row settle "${STOPS}" "${#SURVIVORS[@]}" "${PRE_HEIGHT}" "${H}" "$([ "${H}" -gt "${PRE_HEIGHT}" ] && echo progress || echo stall)"
+        drill_hold "${H}"
+        drill_recover "${H}"
+    fi
+    drill_judge halt
+}
+
+# Stop STOPS validators at once, which the committee code guarantees the chain
+# tolerates: the survivors must keep forging.
+scenario_ride() {
+    drill_stop
+    local target=$((PRE_HEIGHT + RIDE_BLOCKS)) deadline hs mx=0 rows times converged=0
+    say "ride: waiting for the ${#SURVIVORS[@]} live validators to reach ${target}"
+    deadline=$((SECONDS + RIDE_TIMEOUT))
+    while [ ${SECONDS} -lt ${deadline} ]; do
+        hs=$(heads_once "${SURVIVORS[@]}")
+        mx=$(jq '[.[]] | max' <<< "${hs}")
+        if [ -z "${T_FIRST}" ] && [ "${mx}" -gt "${PRE_HEIGHT}" ]; then T_FIRST=$(now_ms); fi
+        if jq -e --argjson t "${target}" 'all(.[]; . >= $t)' <<< "${hs}" > /dev/null; then
+            T_CONV=$(now_ms); converged=1; break
+        fi
+        say "heads: $(jq -c . <<< "${hs}")"
+        sleep 2
+    done
+    hs=$(heads_once "${SURVIVORS[@]}")
+    rows=$(block_rows "${PRE_HEIGHT}" "${target}" "${SURVIVORS[@]}") || { say "ABORT: could not read the ride blocks"; exit 2; }
+    RIDE_JSON=$(jq -nc --argjson b "${RIDE_BLOCKS}" --argjson heads "${hs}" --argjson rows "${rows}" \
+        '{blocks: $b, heads: $heads, rows: $rows}')
+    mx=$(jq '[.[]] | max' <<< "${hs}")
+    times=$(round_times "${SURVIVORS[0]}" "${PRE_HEIGHT}" "${mx}")
+    printf 'ride\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${STOPS}" "${#SURVIVORS[@]}" "${PRE_HEIGHT}" "${mx}" \
+        $((mx - PRE_HEIGHT)) ${times} "$([ "${converged}" = 1 ] && echo progress || echo stall)" >> "${PHASES}"
+    drill_judge ride
+}
+
 case "${SCENARIO}" in
     floor) scenario_floor ;;
     drop-*) scenario_drop ;;
+    halt-*) scenario_halt ;;
+    ride-*) scenario_ride ;;
     listed-stall) scenario_listed_stall ;;
     fallback) scenario_fallback ;;
     partition) scenario_partition ;;
