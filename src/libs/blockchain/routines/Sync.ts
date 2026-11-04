@@ -1049,9 +1049,10 @@ export async function assertNoUnreconciledGcrState(): Promise<void> {
 
 /**
  * Undo GCR edits stamped above `tip` using the tx bodies still in the
- * mempool. False when any body is missing; nothing is changed in that case.
+ * mempool. False when any body is missing or any rollback fails; nothing is
+ * changed in either case.
  */
-async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
+export async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
     const db = await Datasource.getInstance()
     const repo = db.getDataSource().getRepository(GCRAssignedTx)
     const rows = await repo
@@ -1074,21 +1075,32 @@ async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
     }
 
     // Undo in reverse apply order so a credit is never undone before the
-    // spend that depended on it, and keep the assignments unless every
-    // rollback succeeded: a partial undo must not look like a clean slate.
+    // spend that depended on it. All or nothing: the assignments are what
+    // finds this orphan again after a restart, so writing the undos that
+    // succeeded while keeping them would undo those same txs a second time
+    // on the next attempt.
     const rollback = await HandleGCR.applyTransactions(
         orderDeterministically(txs as unknown as Transaction[]).reverse(),
         true,
+        undefined,
+        { defer: true },
     )
-    if (rollback.failedTxs.length > 0) {
+    if (rollback.failedTxs.length > 0 || !rollback.pending) {
         log.error(
             `[applySyncedBlock] cannot roll back orphaned GCR state: ${rollback.failedTxs.length}/${txs.length} rollback(s) failed: ${rollback.failedTxs.join(", ")}`,
         )
         return false
     }
-    for (const block of blocks) {
-        await HandleGCR.deleteAssignedTxsForBlock(block)
-    }
+    const pending = rollback.pending
+    await HandleGCR.gcrWriteMutex.runExclusive(() =>
+        db.getDataSource().transaction(async em => {
+            await pending.write(em)
+            for (const block of blocks) {
+                await HandleGCR.deleteAssignedTxsForBlock(block, em)
+            }
+        }),
+    )
+    await pending.afterCommit()
     log.info(
         `[applySyncedBlock] rolled back ${txs.length} tx(s) stamped for block(s) ${blocks.join(", ")}; resuming sync at tip ${tip}`,
     )

@@ -1496,10 +1496,10 @@ export default class HandleGCR {
     /** Delete gcr_assigned_txs rows stamped with `blockNumber`. */
     static async deleteAssignedTxsForBlock(
         blockNumber: number,
+        manager?: EntityManager,
     ): Promise<number> {
-        const db = await Datasource.getInstance()
-        const res = await db
-            .getDataSource()
+        const source = manager ?? (await Datasource.getInstance()).getDataSource()
+        const res = await source
             .getRepository(GCRAssignedTx)
             .delete({ blockNumber })
         return res.affected ?? 0
