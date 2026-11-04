@@ -25,8 +25,12 @@ export function describeDbConnectionFailure(
     target: DbTarget,
     error: unknown,
 ): string {
-    const reason = error instanceof Error ? error.message : String(error)
     const code = (error as { code?: unknown } | null)?.code
+    // Some driver errors (an AggregateError from a dual-stack connect) have an
+    // empty message; fall back to the error code so the line is never ": .".
+    const reason =
+        (error instanceof Error && error.message) ||
+        (code ? String(code) : String(error))
     const unreachable = UNREACHABLE_CODES.some(
         c => code === c || reason.includes(c),
     )

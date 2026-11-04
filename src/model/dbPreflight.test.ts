@@ -34,4 +34,13 @@ describe("describeDbConnectionFailure", () => {
         expect(message).toContain("postgres.internal:5432")
         expect(message).not.toContain("unreachable")
     })
+
+    it("never prints an empty reason when the driver error has no message", () => {
+        const error = Object.assign(new Error(""), { code: "ECONNREFUSED" })
+        const message = describeDbConnectionFailure(target, error)
+
+        expect(message).toContain("ECONNREFUSED")
+        expect(message).not.toContain(": .")
+        expect(message).toContain("postgres.internal:5432")
+    })
 })
