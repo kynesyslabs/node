@@ -256,7 +256,22 @@ Leave `PG_HOST=postgres` and `TLSNOTARY_HOST=tlsnotary` exactly as shipped — t
 
 ### Joining the network — required steps before real-world use
 
-A fresh node will run as an isolated single-validator chain by default. To participate in the actual Demos testnet/mainnet, you must do **three things** before the node's first start:
+A fresh node does **not** run as an isolated single-validator chain, and the code has no solo or single-validator mode. On an empty database the node builds block 0 from `data/genesis.json` and `data/snapshot/`. The bundled snapshot carries 35 validators and wins over the 4 listed in `genesis.json`; your node's own identity is in neither list. `properties.shardSize` in the bundled genesis is 10.
+
+A node forges a block only when the committee it draws has at least `floor(2 × shardSize / 3) + 1` members online (7 for a shard size of 10) and includes the node's own identity. A fresh stack started from the Track 1 steps therefore stays at block 0: each consensus round ends with `NotInShardError` in the log ("Committee below minimum size: refusing to forge" or "We are not in the shard") and no block is produced.
+
+Genesis rejects a `shardSize` below 3, so the smallest committee that can forge is 3 validators. The code has no setting that lets one node forge alone. There is also no documented step that adds your node's identity to the validator set of the bundled genesis. A local chain needs at least that many validators whose identities are in the genesis you start from. The repository's local devnet does this for four nodes: `testing/devnet/scripts/setup.sh` runs `generate-genesis.sh`, which rewrites the validators in `genesis.devnet.json` to the newly generated node identities (see [testing/devnet/README.md](testing/devnet/README.md)).
+
+Sources for the paragraphs above:
+
+- `data/genesis.json` (`properties.shardSize`, `validators`), `data/snapshot/manifest.json` and `data/snapshot/validators.jsonl` (35 rows), `Dockerfile:49` (`COPY data/ ./data/`)
+- `src/libs/blockchain/chainGenesis.ts:103-118` (snapshot validators take precedence over the genesis list)
+- `src/libs/consensus/genesisShardSize.ts:20-21,50-54` (shard size must be 3 to 100)
+- `src/libs/consensus/v2/quorum.ts:10-12` and `src/libs/consensus/v2/routines/getShard.ts:32-34` (committee floor)
+- `src/libs/consensus/v2/types/secretaryManager.ts:263-277` (the two `NotInShardError` cases)
+- `testing/devnet/scripts/generate-genesis.sh:1-10`, `testing/devnet/scripts/setup.sh:24`
+
+To participate in the actual Demos testnet/mainnet, you must do **three things** before the node's first start:
 
 **1. Set `EXPOSED_URL` to your reachable address.**
 
