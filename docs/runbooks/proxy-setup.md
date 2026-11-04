@@ -35,8 +35,10 @@ survive proxy termination.
    counts every rate limit per proxy address, so all clients share each
    bucket: one client's flood blocks everyone, and failed request
    signatures from anyone (60 a minute) block signed requests from every
-   non-validator behind the proxy. Requests signed by a staked validator
-   are exempt from these limits.
+   other key behind the proxy. Requests signed by a staked validator, a
+   whitelisted key or the node's own key are exempt from these limits, and
+   failed checks claiming one of those keys are counted for that key alone,
+   so only forged claims of that very key from the same address block it.
 
 ## Step-by-step
 

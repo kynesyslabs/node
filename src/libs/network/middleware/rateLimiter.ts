@@ -25,6 +25,8 @@ const BUCKET_SEPARATOR = "|"
 const DEFAULT_BUCKET = "default"
 /** Failed request-signature checks, counted apart from the request quotas. */
 const AUTH_FAILURE_BUCKET = "auth-failure"
+/** Joins a key to a bucket name: one failure counter per exempt key. */
+const BUCKET_KEY_SEPARATOR = "@"
 // While the staked set is empty, getStakedSet caches nothing and every
 // signed request would hit the database again.
 const EMPTY_VALIDATOR_SET_RETRY_MS = 5_000
@@ -403,9 +405,11 @@ export class RateLimiter {
     }
 
     private getLimitForBucket(bucket: string): MethodLimitConfig {
-        return bucket === DEFAULT_BUCKET
+        const at = bucket.indexOf(BUCKET_KEY_SEPARATOR)
+        const name = at > 0 ? bucket.slice(0, at) : bucket
+        return name === DEFAULT_BUCKET
             ? this.config.defaultLimit
-            : this.config.methodLimits[bucket] || this.config.defaultLimit
+            : this.config.methodLimits[name] || this.config.defaultLimit
     }
 
     /** The counter a method keeps for an IP, if it has one. */
@@ -661,6 +665,32 @@ export class RateLimiter {
         return this.validatorKeys.has(key.startsWith("0x") ? key : `0x${key}`)
     }
 
+    /**
+     * Where a failed signature check claiming `identity` is counted. The
+     * per-address bucket is shared by every client behind one proxy or NAT,
+     * so a key that skips the limits once verified gets a counter of its
+     * own: others' failures cannot lock it out, and forged claims of it are
+     * still refused before verification once over the limit. Only a forger
+     * behind the same address claiming that very key can block it.
+     */
+    private authFailureBucketFor(identity: string): string {
+        const claimed = identity.slice(identity.indexOf(":") + 1)
+        const key = claimed.trim().toLowerCase().replace(/^0x/, "")
+        if (!/^[0-9a-f]+$/.test(key)) return AUTH_FAILURE_BUCKET
+        const localKey = getSharedState.keypair?.publicKey
+            ? uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
+                  .toLowerCase()
+                  .replace(/^0x/, "")
+            : null
+        const exempt =
+            key === localKey ||
+            this.isValidatorKey(key) ||
+            isKeyWhitelisted(key, this.config.whitelistedKeys)
+        return exempt
+            ? `${AUTH_FAILURE_BUCKET}${BUCKET_KEY_SEPARATOR}${key}`
+            : AUTH_FAILURE_BUCKET
+    }
+
     public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
         if (
             clientIP &&
@@ -781,25 +811,16 @@ export class RateLimiter {
 
             if (identity && signature) {
                 await this.refreshValidatorKeys()
-                // The failure bucket is per address, and a proxy or NAT puts
-                // many clients behind one: a request claiming a staked key
-                // is kept out of it, so failures from others there cannot
-                // lock a validator out. Its signature is still verified.
-                const claimsValidator = this.isValidatorKey(
-                    identity.slice(identity.indexOf(":") + 1),
-                )
-                const countFailures = !whitelistedIP && !claimsValidator
+                const failureBucket = whitelistedIP
+                    ? null
+                    : this.authFailureBucketFor(identity)
 
                 // A source past the failure limit is refused before another
                 // verification is spent on it.
-                const failures = this.ipRequests.get(
-                    bucketKey(AUTH_FAILURE_BUCKET, clientIP),
-                )
-                if (
-                    countFailures &&
-                    failures?.blocked &&
-                    failures.blockExpiry > Date.now()
-                ) {
+                const failures = failureBucket
+                    ? this.ipRequests.get(bucketKey(failureBucket, clientIP))
+                    : undefined
+                if (failures?.blocked && failures.blockExpiry > Date.now()) {
                     return this.blockedResponse(
                         Math.ceil((failures.blockExpiry - Date.now()) / 1000),
                         "IP blocked due to rate limiting",
@@ -826,14 +847,10 @@ export class RateLimiter {
                         `[Rate Limiter] Invalid signature: ${verifyResult.error}`,
                     )
                     // Verification is the costly part of a request, so a
-                    // failed one is counted rather than answered for free. A
-                    // forged validator claim draws on the ordinary request
-                    // quota instead, which a real validator never spends.
-                    if (!whitelistedIP) {
+                    // failed one is counted rather than answered for free.
+                    if (failureBucket) {
                         const limited = this.consume(
-                            countFailures
-                                ? AUTH_FAILURE_BUCKET
-                                : this.bucketFor(this.getMethodFromRequest(req)),
+                            failureBucket,
                             clientIP,
                             Date.now(),
                         )

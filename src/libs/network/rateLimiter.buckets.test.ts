@@ -42,7 +42,8 @@ mock.module("./verifySignature", () => ({
             ? { valid: true, identity: `ed25519:${signer}`, publicKey: signer, algorithm: "ed25519" }
             : { valid: false, error: "bad signature" }
     },
-    isKeyWhitelisted: () => false,
+    isKeyWhitelisted: (key: string | null, list: string[]) =>
+        !!key && list.some(k => k.toLowerCase().replace(/^0x/, "") === key.toLowerCase().replace(/^0x/, "")),
 }))
 
 mock.module("@/forks", () => ({ isForkActive: () => false }))
@@ -51,9 +52,11 @@ mock.module("@kynesyslabs/demosdk/encryption", () => ({
     uint8ArrayToHex: (value: Uint8Array) => Buffer.from(value).toString("hex"),
 }))
 
-mock.module("@/utilities/sharedState", () => ({
-    getSharedState: { keypair: null, lastBlockNumber: 7 },
-}))
+const sharedState: { keypair: { publicKey: Uint8Array } | null; lastBlockNumber: number } = {
+    keypair: null,
+    lastBlockNumber: 7,
+}
+mock.module("@/utilities/sharedState", () => ({ getSharedState: sharedState }))
 
 const { RateLimiter } = await import("./middleware/rateLimiter")
 const { handleIdentityTxRateLimit } = await import("./rpcRateLimit")
@@ -496,12 +499,55 @@ describe("RateLimiter signed requests", () => {
         expect(verifyCalls).toBe(0)
     })
 
-    it("counts a forged validator claim on the request quota, not the failure bucket", async () => {
-        for (let i = 0; i < 3; i++) expect((await forged("0xBEEF")).status).toBe(401)
+    it("bounds forged validator claims before verification, on a counter of that key", async () => {
+        for (let i = 0; i < 2; i++) expect((await forged("0xBEEF")).status).toBe(401)
         expect((await forged("0xbeef")).status).toBe(429)
-        expect([...limiter.ipRequests.keys()]).toEqual([`POST|${IP}`])
 
-        // The real validator never draws on that quota.
-        expect((await signedBy("0xbeef")).status).toBe(200)
+        verifyCalls = 0
+        expect((await forged("0xbeef")).status).toBe(429)
+        expect(verifyCalls).toBe(0)
+        expect([...limiter.ipRequests.keys()]).toEqual([`auth-failure@beef|${IP}`])
+    })
+
+    it("keeps forged claims of one validator from locking out others or the same key elsewhere", async () => {
+        stakedKeys = new Set(["0xbeef", "0xcafe"])
+        for (let i = 0; i < 3; i++) await forged("0xbeef")
+
+        expect((await signedBy("0xcafe")).status).toBe(200)
+        expect((await forged("0xabc")).status).toBe(401)
+
+        signer = "0xbeef"
+        const elsewhere = new Request("http://node/info", {
+            headers: { identity: "ed25519:0xbeef", signature: "0xsig", timestamp: "1" },
+        })
+        const other = { requestIP: () => ({ address: "198.51.100.20" }) } as never
+        expect((await limiter.createMiddleware()(elsewhere, ok, other)).status).toBe(200)
+    })
+
+    it("lets a whitelisted key through from an address whose failure bucket is exhausted", async () => {
+        limiter.destroy()
+        limiter = makeLimiter({ blockDurationMs: 60_000, whitelistedKeys: ["0xf00d"] })
+        for (let i = 0; i < 3; i++) await forged("0xabc")
+        expect((await forged("0xabc")).status).toBe(429)
+
+        for (let i = 0; i < 5; i++) expect((await signedBy("0xF00D")).status).toBe(200)
+    })
+
+    it("lets the local node key through from an address whose failure bucket is exhausted", async () => {
+        sharedState.keypair = { publicKey: Uint8Array.from([0xd0, 0x0d]) }
+        try {
+            for (let i = 0; i < 3; i++) await forged("0xabc")
+            expect((await forged("0xabc")).status).toBe(429)
+
+            expect((await signedBy("d00d")).status).toBe(200)
+        } finally {
+            sharedState.keypair = null
+        }
+    })
+
+    it("does not give an unknown claimed key a counter of its own", async () => {
+        for (let i = 0; i < 2; i++) expect((await forged("0x1234")).status).toBe(401)
+        expect((await forged("0x5678")).status).toBe(429)
+        expect([...limiter.ipRequests.keys()]).toEqual([`auth-failure|${IP}`])
     })
 })
