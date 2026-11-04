@@ -142,18 +142,29 @@ export interface StorageProofSet {
     proofs: StorageProgramProof[]
 }
 
+/** A built tree with the leaves it holds, by storage address. */
+interface BuiltTree {
+    leaves: Map<string, string>
+    tree: SparseMerkleTree
+}
+
 /**
  * Proofs for `addresses` from one snapshot of the table, against the root of
- * that same snapshot. A client rebuilds each leaf from the record served, so
- * a stored leaf that no longer matches its row is refused here instead of
- * being served as a proof that cannot verify.
+ * that same snapshot, or of `built` when it is the tree of the same state. A
+ * client rebuilds each leaf from the record served, so a stored leaf that no
+ * longer matches its row is refused here instead of being served as a proof
+ * that cannot verify.
  */
 async function proveIn(
     snapshot: StorageRootSnapshot,
     addresses: string[],
-): Promise<StorageProofSet> {
-    const { leaves } = await currentLeaves(snapshot)
-    const tree = treeOf(leaves)
+    built: BuiltTree | null,
+): Promise<{ set: StorageProofSet; built: BuiltTree }> {
+    if (built === null) {
+        const { leaves } = await currentLeaves(snapshot)
+        built = { leaves, tree: treeOf(leaves) }
+    }
+    const { leaves, tree } = built
     const rows = new Map<string, StorageProgramRow>()
     for (const row of await snapshot.rows(addresses)) rows.set(row.storageAddress, row)
 
@@ -172,7 +183,7 @@ async function proveIn(
             terminal,
         }
     })
-    return { root: tree.rootHex, proofs }
+    return { set: { root: tree.rootHex, proofs }, built }
 }
 
 /**
@@ -184,8 +195,12 @@ async function proveIn(
 export class StorageProgramsRoot {
     private epoch = 0
     private cached: { epoch: number; root: string } | null = null
+    // Kept for proofs only: a node that serves none never holds the tree.
+    private proofTree: { epoch: number; built: BuiltTree } | null = null
     /** Times the root was rebuilt from the table. */
     builds = 0
+    /** Times a proof read every leaf and built the tree. */
+    proofTreeBuilds = 0
 
     constructor(
         private readonly reader: StorageRootReader,
@@ -235,9 +250,20 @@ export class StorageProgramsRoot {
         return root
     }
 
-    /** Proofs for `addresses` and the root they verify against, from one snapshot. */
+    /**
+     * Proofs for `addresses` and the root they verify against, from one
+     * snapshot. The tree is reused until a write marks the table dirty, by
+     * the same epoch rule as the root.
+     */
     async prove(addresses: string[]): Promise<StorageProofSet> {
-        return await this.reader.read(snapshot => proveIn(snapshot, addresses))
+        const epoch = this.epoch
+        const reuse = this.proofTree?.epoch === epoch ? this.proofTree.built : null
+        if (reuse === null) this.proofTreeBuilds++
+        const { set, built } = await this.reader.read(snapshot =>
+            proveIn(snapshot, addresses, reuse),
+        )
+        if (reuse === null) this.proofTree = { epoch, built }
+        return set
     }
 }
 
