@@ -246,6 +246,78 @@ describe("halt drill verdict", () => {
     })
 })
 
+// run.sh's lockstep wait accepts heads one apart and returns the lower one, so
+// the pre-stop height can be one below the head of some nodes at the stop.
+// Everything after it is a settle block, whatever the nodes held at the stop.
+describe("pre-stop height one below some nodes' head", () => {
+    const N = 13
+    const SURVIVORS = [1, 2, 3, 4, 5, 6]
+    const STRADDLE_BLOCK = 9
+
+    /**
+     * halt-n13s10.pass with pre = 8: nodes 1..3 (half the survivors) and 7..9
+     * already hold block 9 when the stop lands, the others get it from the
+     * settle. Every node's baseline head is split the same way. Block 9
+     * carries `signatures` on every node that stores it.
+     */
+    function straddled(signatures: number): any {
+        const raw = loadRaw("halt-n13s10.pass")
+        expect(raw.preStopHeight).toBe(STRADDLE_BLOCK - 1)
+        for (const id of [7, 8, 9, 10, 11, 12, 13]) raw.baseline.heads[id] = raw.baseline.height + 1
+        for (const rows of [raw.settle.rows, raw.recovery.rows]) {
+            for (const r of rows) if (r.number === STRADDLE_BLOCK) r.signatures = signatures
+        }
+        return raw
+    }
+
+    it("passes when the block above pre has a quorum of signatures on every survivor", () => {
+        const verdict = judgeDrill(parseDrillInput(straddled(signatureQuorum(10, N))))
+        expect(verdict.phases.filter(p => !p.pass)).toEqual([])
+        expect(verdict.pass).toBe(true)
+        expect(verdict.preStopHeight).toBe(8)
+        expect(verdict.haltHeight).toBe(STRADDLE_BLOCK)
+        expect(verdict.settleBlocks).toBe(1)
+    })
+    it("fails when that block is below quorum, in the settle and recovery checks", () => {
+        const input = parseDrillInput(straddled(signatureQuorum(10, N) - 1))
+        expect(failedPhases(input)).toEqual(["P2", "P5"])
+        for (const id of SURVIVORS) {
+            expect(reasonsOf(input, "P2").join("\n")).toContain(
+                `settle block ${STRADDLE_BLOCK} on node-${id}: 6 signatures < quorum 7`,
+            )
+        }
+        expect(judgeDrill(input).pass).toBe(false)
+    })
+    it("a lower pre-stop height only widens the check: the same sub-quorum block passes unseen when pre is 9", () => {
+        const raw = straddled(signatureQuorum(10, N) - 1)
+        raw.preStopHeight = STRADDLE_BLOCK
+        const lax = parseDrillInput(raw)
+        expect(reasonsOf(lax, "P2")).toEqual([])
+        expect(reasonsOf(lax, "P5")).toEqual([])
+        raw.preStopHeight = STRADDLE_BLOCK - 1
+        expect(reasonsOf(parseDrillInput(raw), "P2")).not.toEqual([])
+    })
+    it("fails when only some survivors store the block above pre", () => {
+        const raw = straddled(signatureQuorum(10, N))
+        raw.settle.rows = raw.settle.rows.filter((r: any) => !(r.number === STRADDLE_BLOCK && [4, 5, 6].includes(r.node)))
+        expect(reasonsOf(parseDrillInput(raw), "P2").join("\n")).toContain(
+            `settle block ${STRADDLE_BLOCK}: stored on 3/6 survivors`,
+        )
+    })
+    it("fails when the nodes hold two hashes at the block above pre", () => {
+        const raw = straddled(signatureQuorum(10, N))
+        for (const r of raw.settle.rows) if (r.number === STRADDLE_BLOCK && r.node === 2) r.hash = "0xother"
+        expect(reasonsOf(parseDrillInput(raw), "P2").join("\n")).toContain(`settle block ${STRADDLE_BLOCK}: hash divergence`)
+    })
+    it("accepts a baseline whose heads are one above its height, and still checks the hash at that height", () => {
+        const input = parseDrillInput(straddled(signatureQuorum(10, N)))
+        expect(reasonsOf(input, "P1")).toEqual([])
+        const raw = straddled(signatureQuorum(10, N))
+        raw.baseline.rows[3].hash = "0xother"
+        expect(reasonsOf(parseDrillInput(raw), "P1")[0]).toContain("hash divergence")
+    })
+})
+
 describe("ride drill verdict", () => {
     it("passes when the 10 survivors keep forging with >= 7 signatures", () => {
         const verdict = judgeDrill(load("ride-n13s10.pass"))
