@@ -160,6 +160,31 @@ describe("RateLimiter per-bucket counters", () => {
         expect((await hit(limiter, "/peerlist")).status).toBe(429)
     })
 
+    it("counts a GET route outside the path map per minute, not on the daily POST quota", async () => {
+        expect((await hit(limiter, "/storage-program/search?q=a")).status).toBe(200)
+        expect((await hit(limiter, "/zk/merkle-root")).status).toBe(200)
+        expect((await hit(limiter, "/storage-program/search?q=b")).status).toBe(429)
+
+        expect(limiter.getCurrentLimits(IP)).toBeNull()
+        expect((await hit(limiter, "/", "POST")).status).toBe(200)
+    })
+
+    it("gives unmapped GET routes their own bucket when one is configured", async () => {
+        limiter.destroy()
+        limiter = makeLimiter({
+            blockDurationMs: 60_000,
+            methodLimits: {
+                POST: { maxRequests: 3, windowMs: DAY },
+                GET: { maxRequests: 1, windowMs: 60_000 },
+            },
+        })
+        expect((await hit(limiter, "/zk/merkle-root")).status).toBe(200)
+        expect((await hit(limiter, "/zk/merkle-root")).status).toBe(429)
+        // The mapped routes keep the default bucket.
+        expect((await hit(limiter, "/info")).status).toBe(200)
+        expect([...limiter.ipRequests.keys()].sort()).toEqual([`GET|${IP}`, `default|${IP}`])
+    })
+
     it("cleanup drops an entry only once its own window has passed", async () => {
         await hit(limiter, "/info")
         await hit(limiter, "/", "POST")

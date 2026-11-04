@@ -69,6 +69,9 @@ export const RATE_LIMIT_DEFAULT_MAX_REQUESTS = 2000
 export const RATE_LIMIT_DEFAULT_WINDOW_MS = 60_000
 export const RATE_LIMIT_POST_MAX_REQUESTS = 200_000
 export const RATE_LIMIT_POST_WINDOW_MS = 86_400_000
+/** GET routes outside the rate limiter's path map: storage-program and zk reads. */
+export const RATE_LIMIT_GET_MAX_REQUESTS = 600
+export const RATE_LIMIT_GET_WINDOW_MS = 60_000
 export const RATE_LIMIT_TX_PER_BLOCK = 4
 /** How long an IP stays blocked after it exceeds a rate limit. */
 export const RATE_LIMIT_DEFAULT_BLOCK_DURATION_MS = 60_000

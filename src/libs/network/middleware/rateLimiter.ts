@@ -647,6 +647,13 @@ export class RateLimiter {
                 return pathMethodMap[path]
             }
 
+            // The daily POST quota has no per-minute cap, so a read route
+            // left out of the map above (storage-program search, zk reads)
+            // must not land in it.
+            if (req.method !== "POST") {
+                return "GET"
+            }
+
             // For POST requests to root, we can't easily peek at the body
             // without consuming it, so we'll use default limits
             return "POST"
