@@ -99,6 +99,7 @@ jest.mock("src/libs/blockchain/mempool", () => ({
     __esModule: true,
     default: {
         getMempool: jest.fn(),
+        getMempoolPage: jest.fn(),
         receive: jest.fn(),
     },
 }))
@@ -134,7 +135,11 @@ jest.mock("src/utilities/sharedState", () => {
 
 let mockedGetPeerlist: jest.Mock
 let mockedGetBlockByNumber: jest.Mock
-let mockedMempool: { getMempool: jest.Mock; receive: jest.Mock }
+let mockedMempool: {
+    getMempool: jest.Mock
+    getMempoolPage: jest.Mock
+    receive: jest.Mock
+}
 let mockedChain: {
     getBlocks: jest.Mock
     getBlockByHash: jest.Mock
@@ -195,7 +200,7 @@ beforeAll(async () => {
     mockedGetBlockByNumber = (await import("src/libs/network/routines/nodecalls/getBlockByNumber"))
         .default as jest.Mock
     mockedMempool = (await import("src/libs/blockchain/mempool"))
-        .default as { getMempool: jest.Mock; receive: jest.Mock }
+        .default as typeof mockedMempool
     mockedChain = (await import("src/libs/blockchain/chain"))
         .default as {
             getBlocks: jest.Mock
@@ -594,9 +599,11 @@ describe("OmniProtocol handlers", () => {
             response: unknown
         }>("mempool")
 
-        mockedMempool.getMempool.mockResolvedValue(
-            mempoolFixture.response,
-        )
+        // An unauthenticated caller is served the public page.
+        mockedMempool.getMempoolPage.mockResolvedValue({
+            txs: mempoolFixture.response,
+            total: (mempoolFixture.response as unknown[]).length,
+        })
 
         const buffer = await dispatchOmniMessage({
             ...baseContext,

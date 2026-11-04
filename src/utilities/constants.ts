@@ -35,6 +35,8 @@ export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
 // purpose: a validator running looser limits would admit txs its peers evict.
 /** Most txs the pool holds. */
 export const MEMPOOL_MAX_TXS = 10_000
+/** Most txs one public mempool read returns; validators read the pool whole. */
+export const MEMPOOL_PUBLIC_PAGE_MAX = 100
 /** Most bytes of stored tx data the pool holds (peer request ceiling is twice this). */
 export const MEMPOOL_MAX_BYTES = 32 * 1024 * 1024
 /** Most pending txs one sender may hold. */
