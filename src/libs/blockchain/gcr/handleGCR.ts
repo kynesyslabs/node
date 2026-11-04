@@ -1069,6 +1069,23 @@ export default class HandleGCR {
                 }
             }
         }
+        // A storage edit that applied must not outlive a later edit of the
+        // same transaction that fails: the fee and nonce are put back, so the
+        // write would be free.
+        const programSnapshots = new Map<
+            string,
+            { present: boolean; entity: GCRStorageProgram | null }
+        >()
+        for (const edit of gcrEdits) {
+            if (edit.type !== "storageProgram") continue
+            const target = (edit as GCREditStorageProgram).target
+            if (programSnapshots.has(target)) continue
+            const entity = entities.storagePrograms.get(target)
+            programSnapshots.set(target, {
+                present: entities.storagePrograms.has(target),
+                entity: entity ? structuredClone(entity) : null,
+            })
+        }
         const sideEffects: (() => Promise<void>)[] = []
         const deferredWrites: DeferredWrite[] = []
         const appliedEdits: GCREdit[] = []
@@ -1097,7 +1114,12 @@ export default class HandleGCR {
             }
 
             if (!result.success) {
-                // Rollback all snapshots for this tx
+                // INFO: If on a serious run, rollback hard edits
+                if (!simulate && !this.GCRTxTypes.has(edit.type)) {
+                    await this.rollback(tx, entities, appliedEdits)
+                }
+                // After the rollback, which also reverses the balance edits:
+                // reversing them on the restored accounts would refund them twice.
                 for (const snap of snapshots) {
                     if (snap.entity === null) {
                         // Entity was newly created - restore to fresh state
@@ -1111,9 +1133,12 @@ export default class HandleGCR {
                         entities.accounts.set(snap.pubkey, snap.entity)
                     }
                 }
-                // INFO: If on a serious run, rollback hard edits
-                if (!simulate && !this.GCRTxTypes.has(edit.type)) {
-                    await this.rollback(tx, entities, appliedEdits)
+                for (const [target, snap] of programSnapshots) {
+                    if (snap.present) {
+                        entities.storagePrograms.set(target, snap.entity)
+                    } else {
+                        entities.storagePrograms.delete(target)
+                    }
                 }
                 // After the rollback, which may have edited the staged rows
                 restoreStaged(entities, staged)
