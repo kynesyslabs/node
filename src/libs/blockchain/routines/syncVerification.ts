@@ -22,6 +22,7 @@ import { ErrorCode } from "@/errors"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "src/utilities/logger"
+import { countStorageRootSyncMismatch } from "@/features/metrics/consensusMetrics"
 
 type FinalStatus = typeof TRANSACTION_STATUS.CONFIRMED | typeof TRANSACTION_STATUS.FAILED
 
@@ -158,6 +159,16 @@ export async function verifyBlockTransactions(
 const NODE_LOCAL_TABLE_HASHES = new Set(["native_tlsnotary"])
 
 /**
+ * Compared, but a difference is logged and counted instead of rejecting the
+ * block. The storage root is new; until it has run on a live network, a
+ * difference stopping every syncing node is the larger risk. Validators still
+ * enforce it, since a forger with another root forges another block hash.
+ * Present on one side only is still a rejection: that is a fork-schedule
+ * disagreement, not diverged state.
+ */
+const WARN_ONLY_TABLE_HASHES = new Set(["native_storage_programs"])
+
+/**
  * `native_tables_hashes` is taken by the forger before it applies the block,
  * so it commits to the state this node holds right before applying the same
  * block. Call it at that point; a divergence left by the previous block
@@ -177,6 +188,15 @@ export async function verifyNativeTablesHashes(block: Block): Promise<void> {
         key =>
             !NODE_LOCAL_TABLE_HASHES.has(key) && committed?.[key] !== local[key],
     )
+    for (const key of WARN_ONLY_TABLE_HASHES) {
+        const index = differing.indexOf(key)
+        if (index === -1 || !committed || !(key in committed) || !(key in local)) continue
+        differing.splice(index, 1)
+        countStorageRootSyncMismatch()
+        log.error(
+            `[syncVerify] storage root of block ${block.number} differs from local state: block ${committed[key]}, local ${local[key]}; applying it anyway`,
+        )
+    }
     if (!committed || differing.length > 0) {
         throw new SyncBlockRejectedError(
             `native table hashes of block ${block.number} differ from local state: ${committed ? differing.join(", ") : "block carries none"}`,

@@ -325,6 +325,11 @@ export class MetricsService {
             "Blocks where this node was drawn into the shard but its signature is missing",
             [],
         )
+        this.createCounter(
+            "storage_root_sync_mismatch_total",
+            "Synced blocks whose storage state root differs from the one this node computes before applying them",
+            [],
+        )
         this.createGauge(
             "fork_schedule_mismatch",
             "1 while the last fork-schedule comparison found a peer with a different schedule, else 0",

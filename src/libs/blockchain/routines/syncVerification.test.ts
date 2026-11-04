@@ -33,6 +33,11 @@ mock.module("../gcr/gcr_routines/hashGCR", () => ({
     __esModule: true,
     default: hashGCRTables,
 }))
+const countStorageRootSyncMismatch = jest.fn()
+mock.module("@/features/metrics/consensusMetrics", () => ({
+    __esModule: true,
+    countStorageRootSyncMismatch,
+}))
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
     default: {
@@ -222,6 +227,54 @@ describe("verifyNativeTablesHashes", () => {
         await expect(verifyNativeTablesHashes(makeBlock([], null))).rejects.toBeInstanceOf(
             SyncBlockRejectedError,
         )
+    })
+
+    describe("storage state root", () => {
+        beforeEach(() => {
+            countStorageRootSyncMismatch.mockReset()
+            hashGCRTables.mockResolvedValue({
+                native_subnets_txs: "a",
+                native_storage_programs: "local-root",
+            })
+        })
+
+        it("applies a block whose storage root differs, counting and logging the difference", async () => {
+            await verifyNativeTablesHashes(
+                makeBlock([], { native_subnets_txs: "a", native_storage_programs: "peer-root" }),
+            )
+            expect(countStorageRootSyncMismatch).toHaveBeenCalledTimes(1)
+        })
+
+        it("counts nothing when the roots agree", async () => {
+            await verifyNativeTablesHashes(
+                makeBlock([], { native_subnets_txs: "a", native_storage_programs: "local-root" }),
+            )
+            expect(countStorageRootSyncMismatch).not.toHaveBeenCalled()
+        })
+
+        it("still rejects another table that differs, naming only that table", async () => {
+            const rejection = await verifyNativeTablesHashes(
+                makeBlock([], { native_subnets_txs: "b", native_storage_programs: "peer-root" }),
+            ).catch(e => e)
+            expect(rejection).toBeInstanceOf(SyncBlockRejectedError)
+            expect(rejection.message).toContain("native_subnets_txs")
+            expect(rejection.message).not.toContain("native_storage_programs")
+        })
+
+        it("rejects a storage root present on one side only: the fork schedules disagree", async () => {
+            const missing = await verifyNativeTablesHashes(
+                makeBlock([], { native_subnets_txs: "a" }),
+            ).catch(e => e)
+            expect(missing).toBeInstanceOf(SyncBlockRejectedError)
+            expect(missing.message).toContain("native_storage_programs")
+
+            hashGCRTables.mockResolvedValue({ native_subnets_txs: "a" })
+            const extra = await verifyNativeTablesHashes(
+                makeBlock([], { native_subnets_txs: "a", native_storage_programs: "peer-root" }),
+            ).catch(e => e)
+            expect(extra).toBeInstanceOf(SyncBlockRejectedError)
+            expect(countStorageRootSyncMismatch).not.toHaveBeenCalled()
+        })
     })
 })
 
