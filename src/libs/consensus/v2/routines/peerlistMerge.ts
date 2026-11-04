@@ -6,6 +6,7 @@ import log from "src/utilities/logger"
 import type { Validators } from "src/model/entities/Validators"
 import { isForkActive } from "@/forks/forkGates"
 import { quorumThreshold } from "../quorum"
+import { compareIdentities } from "./poolRules"
 
 export const MERGE_PEERLIST_MAX_ENTRIES_PER_PEER = 1000
 
@@ -27,16 +28,7 @@ export interface SyncObservation {
     block_hash: string
 }
 
-/**
- * Explicit lexicographic comparator for identity strings. Behaviourally
- * identical to a bare `.sort()` on strings, but stated outright because
- * peerlist ordering is consensus-relevant and the default comparator's
- * implicit stringification is a Sonar CI gate failure.
- */
-export function compareIdentities(a: string, b: string): number {
-    if (a === b) return 0
-    return a < b ? -1 : 1
-}
+export { compareIdentities }
 
 let contributionsBlockRef: number | null = null
 let contributions = new Map<string, SyncObservation[]>()
