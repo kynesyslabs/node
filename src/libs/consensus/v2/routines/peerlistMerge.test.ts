@@ -1,5 +1,6 @@
 import { getSharedState } from "src/utilities/sharedState"
 import Chain from "src/libs/blockchain/chain"
+import type { Blocks } from "src/model/entities/Blocks"
 import {
     __resetPeerlistMerge,
     computeMergedPeerlist,
@@ -29,6 +30,9 @@ const obs = (
     block: number = TIP_BLOCK,
     block_hash: string = TIP_HASH,
 ): SyncObservation => ({ identity, block, block_hash })
+
+// The merge reads only a stored block's number and hash.
+const storedBlock = (number: number, hash: string) => ({ number, hash }) as Blocks
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -481,7 +485,7 @@ describe("contributePeerlist", () => {
         beforeEach(() => {
             jest.mocked(Chain.getBlockByNumber).mockImplementation(
                 async (n: number) =>
-                    ({ 100: { number: 100, hash: "tiphash" }, 101: { number: 101, hash: "hash-101" } })[n] ??
+                    ({ 100: storedBlock(100, TIP_HASH), 101: storedBlock(101, "hash-101") })[n] ??
                     null,
             )
             freezeLocalSyncObservations(ROUND)
@@ -489,7 +493,7 @@ describe("contributePeerlist", () => {
 
         afterEach(() => {
             jest.mocked(Chain.getBlockByNumber).mockImplementation(async (n: number) =>
-                n === 100 ? { number: 100, hash: "tiphash" } : null,
+                n === TIP_BLOCK ? storedBlock(TIP_BLOCK, TIP_HASH) : null,
             )
         })
 
