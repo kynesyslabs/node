@@ -1,4 +1,5 @@
 import { getSharedState } from "src/utilities/sharedState"
+import Chain from "src/libs/blockchain/chain"
 import {
     __resetPeerlistMerge,
     computeMergedPeerlist,
@@ -469,6 +470,43 @@ describe("contributePeerlist", () => {
             contributePeerlist(101, c, [obs(REPORTED_PEER)])
         }
         expect(await merge()).toEqual([REPORTED_PEER])
+    })
+
+    describe("a round opened before the shared tip caught up with the chain", () => {
+        // The round's blockRef comes from the stored chain; the shared tip
+        // moves only after the insert's commit, so for a moment it trails.
+        const ROUND = 102
+        const atRoundParent = (identity: string) => obs(identity, 101, "hash-101")
+
+        beforeEach(() => {
+            jest.mocked(Chain.getBlockByNumber).mockImplementation(
+                async (n: number) =>
+                    ({ 100: { number: 100, hash: "tiphash" }, 101: { number: 101, hash: "hash-101" } })[n] ??
+                    null,
+            )
+            freezeLocalSyncObservations(ROUND)
+        })
+
+        afterEach(() => {
+            jest.mocked(Chain.getBlockByNumber).mockImplementation(async (n: number) =>
+                n === 100 ? { number: 100, hash: "tiphash" } : null,
+            )
+        })
+
+        it("records contributions for the round it opened", async () => {
+            for (const c of ["c1", "c2", "c3"]) {
+                contributePeerlist(ROUND, c, [atRoundParent(REPORTED_PEER)])
+            }
+            expect(await merge(SHARD, ROUND)).toEqual([REPORTED_PEER])
+        })
+
+        it("still refuses a height past that round", async () => {
+            for (const c of ["c1", "c2", "c3"]) {
+                contributePeerlist(ROUND, c, [atRoundParent(REPORTED_PEER)])
+            }
+            contributePeerlist(ROUND + 1, "c1", [obs(STALE_PEER, 102, "hash-102")])
+            expect(await merge(SHARD, ROUND)).toEqual([REPORTED_PEER])
+        })
     })
 
     it("refuses every height while our tip is unknown", async () => {

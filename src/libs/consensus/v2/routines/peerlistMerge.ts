@@ -126,11 +126,14 @@ export function contributePeerlist(
 
     // A higher blockRef replaces the round's contributions and drops every
     // later one for it, so a peer naming a far height would empty the merge
-    // until the chain got there. No round opens past our tip + 1.
+    // until the chain got there. No round opens past our tip + 1. The round
+    // we opened counts too: its blockRef comes from the stored chain, and
+    // the shared tip trails a fresh insert until its commit completes.
     const tip = getSharedState.lastBlockNumber
-    if (!Number.isInteger(tip) || blockRef > tip + 1) {
+    const ceiling = Math.max(tip + 1, snapshotBlockRef ?? -Infinity)
+    if (!Number.isInteger(tip) || blockRef > ceiling) {
         log.warning(
-            `[peerlistMerge] Ignoring ${contributor}'s peerlist for block ${blockRef}: past the next block after our tip ${tip}`,
+            `[peerlistMerge] Ignoring ${contributor}'s peerlist for block ${blockRef}: past the round we can open (${ceiling})`,
         )
         return
     }
