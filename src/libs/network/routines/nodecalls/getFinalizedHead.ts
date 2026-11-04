@@ -40,10 +40,12 @@ async function isNodeSynced(): Promise<boolean> {
 }
 
 /**
- * The latest block this node has inserted, which is its finalized head: a
- * block is final once it carries a quorum of precommits from the committee
- * bound to its height, and nothing enters the chain without passing that
- * check.
+ * The latest block this node has inserted, which is its finalized head:
+ * nothing past genesis enters the chain without a signer quorum. Which
+ * signers count and what they sign follow the forks active at the head's
+ * height: the committee bound to it under committeeBinding, the eligible
+ * signer pool before it; the round's precommits under commitLock, the bare
+ * hash before it.
  *
  * A node that is behind still answers 200 with `nodeSynced: false`: the head
  * it reports is final, and the age tells a client how far behind it may be.
@@ -52,8 +54,7 @@ async function isNodeSynced(): Promise<boolean> {
  * because SDK clients read only the body.
  *
  * `signatures` are the block's stored validator signatures and
- * `signedMessage` is the exact text each of them signs (the round's
- * precommit under commitLock, the bare hash before it), so a client can
+ * `signedMessage` is the exact text each of them signs, so a client can
  * verify them, not just count them. `timestamp` is in seconds, the unit
  * `ageSeconds` is derived in. Genesis is final by configuration and carries
  * a single placeholder entry.
