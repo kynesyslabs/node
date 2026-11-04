@@ -45,6 +45,12 @@ export class Proxy {
 
     /**
      * Sends an HTTP/HTTPS request through the proxy.
+     *
+     * `params.targetAuthorization` is the RAW token: the node adds the
+     * `Bearer ` prefix itself, so pass `abc123`, not `Bearer abc123` (that
+     * would be sent as `Bearer Bearer abc123`). To send a different scheme,
+     * put the full value in `targetHeaders.Authorization` and leave
+     * `targetAuthorization` empty.
      * @returns Promise resolving to the response data
      * @throws Error if the proxy server fails to start or if the request fails
      */

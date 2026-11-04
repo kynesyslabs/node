@@ -33,10 +33,11 @@ function makeProxy(requireAuthForAll: boolean) {
 function headersFor(
     proxy: Proxy,
     targetAuthorization: string,
+    targetHeaders: Record<string, string> = {},
 ): Record<string, string> {
     return (proxy as any).createHeaders(
         "GET",
-        {},
+        targetHeaders,
         targetAuthorization,
     ) as Record<string, string>
 }
@@ -66,6 +67,22 @@ describe("Proxy outbound Authorization header", () => {
         const headers = headersFor(makeProxy(false), "ghp_realtoken")
 
         expect(headers["Authorization"]).toBe("Bearer ghp_realtoken")
+    })
+
+    it("keeps a caller-supplied Authorization header when no token is given", () => {
+        const headers = headersFor(makeProxy(true), "", {
+            Authorization: "Bearer x",
+        })
+
+        expect(headers["Authorization"]).toBe("Bearer x")
+    })
+
+    it("lets the raw token win over a caller-supplied Authorization header", () => {
+        const headers = headersFor(makeProxy(true), "raw", {
+            Authorization: "Bearer x",
+        })
+
+        expect(headers["Authorization"]).toBe("Bearer raw")
     })
 
     it("still stamps the session id that gates inbound proxy access", () => {
