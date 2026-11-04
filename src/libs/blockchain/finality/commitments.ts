@@ -236,7 +236,7 @@ export async function verifyCommitments(
 
     if (!isForkActive(FINALITY_FORK, block.number)) {
         const present = keys.filter(key =>
-            Object.prototype.hasOwnProperty.call(content, key),
+            Object.hasOwn(content, key),
         )
         if (present.length > 0) {
             return {
