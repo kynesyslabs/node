@@ -62,6 +62,7 @@ import {
     waitFor,
 } from "../lib/devnetControl"
 import { allReachedHeight, assertBlockHashConvergence } from "../lib/assertions"
+import { withCurrentDevnetValidators } from "../lib/drillGenesis"
 import { getLastBlockNumber, query } from "../lib/nodeQueries"
 import {
     type BlockRow,
@@ -94,11 +95,19 @@ const AGREE_TIMEOUT_MS = 3 * ROUND_MS
 /** Forks a chain launched from genesis with this build activates at 0. */
 const LAUNCH_FORKS = ["quorumParity", "committeeBinding", "commitLock"]
 
+/**
+ * Must run after `regenerateIdentities`: the genesis validators are the keys
+ * that call just wrote. With any other set, the bound committee holds no
+ * running node and the chain never leaves block 0.
+ */
 function stageDrillGenesis(): void {
     if (!existsSync(PROD_GENESIS_BACKUP_PATH) && existsSync(PROD_GENESIS_PATH)) {
         copyFileSync(PROD_GENESIS_PATH, PROD_GENESIS_BACKUP_PATH)
     }
-    const genesis = JSON.parse(readFileSync(GENESIS_FORK_LOW, "utf8"))
+    const genesis = withCurrentDevnetValidators(
+        JSON.parse(readFileSync(GENESIS_FORK_LOW, "utf8")),
+        NODE_IDS.length,
+    )
     genesis.properties.shardSize = DRILL_SHARD_SIZE
     genesis.forks = genesis.forks ?? {}
     for (const name of LAUNCH_FORKS) {
@@ -165,7 +174,8 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     if (pre) fail("precondition", [pre])
     const quorum = signatureQuorum(DRILL_SHARD_SIZE, NODE_IDS.length)
 
-    regenerateIdentities(4)
+    // Identities first: the genesis is built from the keys this writes.
+    regenerateIdentities(NODE_IDS.length)
     stageDrillGenesis()
     up({ build: true })
 
