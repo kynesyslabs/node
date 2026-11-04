@@ -18,7 +18,10 @@ SUITE_FILES=(
     scripts/launch-go-no-go.snapshot.test.ts
     scripts/validator-prove-signing.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
+    src/libs/blockchain/finality/commitments.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
+    src/libs/blockchain/routines/Sync.verification.test.ts
+    src/libs/blockchain/routines/syncVerification.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/crypto/canonicalJson.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts

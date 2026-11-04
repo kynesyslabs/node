@@ -6,6 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
+import { createHash } from "node:crypto"
 import {
     makeSignedTx,
     newAccount,
@@ -346,6 +347,100 @@ describe("fast sync after a rejected block", () => {
         expect(insertBlock).toHaveBeenCalledTimes(1)
         expect(applyTransactions).toHaveBeenCalledTimes(1)
         expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
+    })
+})
+
+describe("fast sync under finalityProofs", () => {
+    const sha256 = (s: string) => createHash("sha256").update(s).digest("hex")
+
+    /** Block HEIGHT + 1 on top of `block`, hashing to its own hash. */
+    function childOf(block: any, parentResultsRoot: string) {
+        const content = {
+            ordered_transactions: [],
+            peerlist: [],
+            previousHash: block.hash,
+            timestamp: 1_700_000_200,
+            native_tables_hashes: NATIVE_HASHES,
+            number: HEIGHT + 1,
+            parent_results_root: parentResultsRoot,
+        }
+        return {
+            number: HEIGHT + 1,
+            hash: sha256(JSON.stringify(content)),
+            proposer: "forger",
+            content,
+            validation_data: { signatures: {} },
+        } as any
+    }
+
+    const peerWith = (blocks: any[], txs: any[]) =>
+        ({
+            identity: "peer-1",
+            connection: { string: "http://peer-1" },
+            status: { online: true },
+            sync: { block: HEIGHT + 1 },
+            longCall: jest.fn(async () => ({ result: 200, response: clone(blocks) })),
+            call: jest.fn(async () => {
+                // Every round serves the same pair; one round shows the outcome
+                getSharedState.fastSyncAborted = true
+                return { result: 200, response: clone(txs) }
+            }),
+        }) as any
+
+    async function syncPair(parentResultsRoot: (tx: any) => Promise<string>) {
+        getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+        const tx = makeTx(alice)
+        const block = makeBlock([tx])
+        const child = childOf(block, await parentResultsRoot(tx))
+        spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([
+            peerWith([child, block], [tx]),
+        ])
+        spyOn(Math, "random").mockReturnValue(0)
+        spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+        spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([])
+        applyResult({ successfulTxs: [tx.hash] })
+        insertBlock.mockImplementation((async (inserted: any) => {
+            getSharedState.lastBlockNumber = inserted.number
+            return {}
+        }) as any)
+        getSharedState.fastSyncCount = 1
+        getSharedState.syncStatus = true
+
+        await fastSync([], "test")
+    }
+
+    async function confirmedRoot(tx: any): Promise<string> {
+        const { leafHash, toHex } = await import("src/libs/crypto/merkle/rfc6962")
+        const { jcsCanonicalize } = await import("src/libs/crypto/jcs")
+        const leaf = jcsCanonicalize({ code: null, hash: tx.hash, status: "confirmed" })
+        return toHex(leafHash(new TextEncoder().encode(leaf)))
+    }
+
+    it("stores a block whose results give the root the next block commits to", async () => {
+        await syncPair(confirmedRoot)
+
+        expect(insertBlock).toHaveBeenCalledTimes(2)
+        expect((insertBlock.mock.calls[0][0] as any).number).toBe(HEIGHT)
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT + 1)
+    })
+
+    it("stores nothing and cools the peer down when the next block's root contradicts the results", async () => {
+        const warning = log.warning as any
+        warning.mockClear()
+        await syncPair(async () => "ab".repeat(32))
+
+        expect(applyTransactions).toHaveBeenCalledTimes(1)
+        expect(insertBlock).not.toHaveBeenCalled()
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+        // An unsigned next block is the peer's word only: the peer is set
+        // aside and the block is synced from another one
+        const cooled = (log.warning as any).mock.calls.map((c: unknown[]) => String(c[0]))
+        expect(
+            cooled.some(
+                (line: string) =>
+                    line.includes("peer peer-1") && line.includes(`block ${HEIGHT + 1} commits`),
+            ),
+        ).toBe(true)
     })
 })
 

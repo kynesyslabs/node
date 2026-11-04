@@ -12,7 +12,12 @@ import {
 import { filterMempoolByNonce } from "src/libs/consensus/v2/routines/mempoolFilters"
 import type { MempoolTransaction } from "src/libs/consensus/v2/routines/mempoolFilters"
 import { orderDeterministically } from "src/libs/consensus/v2/routines/deterministicOrder"
-import { isForkActive, txSignatureContext } from "@/forks"
+import { isForkActive, serializeBlockContent, txSignatureContext } from "@/forks"
+import Hashing from "@/libs/crypto/hashing"
+import {
+    FINALITY_FORK,
+    projectedResultsRoot,
+} from "../finality/commitments"
 import { ErrorCode } from "@/errors"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { getSharedState } from "@/utilities/sharedState"
@@ -344,6 +349,44 @@ export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): voi
     }
 }
 
+/**
+ * Under `finalityProofs` the code is part of the result the next block
+ * commits to, so the stored code must be what this node derives, never what
+ * the peer served: a wrong row cannot be corrected once stored. A transaction
+ * that failed inside apply was given TX_EXECUTE_FAILED by the forger, and a
+ * confirmed one carries no code. The served statuses already agree with the
+ * local outcome.
+ */
+export function pinResultCodes(
+    txs: Transaction[],
+    plan: BlockOutcomePlan,
+    height: number,
+): void {
+    if (!isForkActive(FINALITY_FORK, height)) return
+    for (const tx of txs) {
+        if (tx.status === TRANSACTION_STATUS.CONFIRMED) {
+            if (tx.attrs && "code" in tx.attrs) {
+                log.warn(`[sync] tx ${tx.hash}: served code on a confirmed transaction dropped`)
+                const { code: _served, ...rest } = tx.attrs
+                tx.attrs = rest as typeof tx.attrs
+            }
+            continue
+        }
+        if (
+            tx.status !== TRANSACTION_STATUS.FAILED ||
+            plan.failedBeforeApply.has(tx.hash) ||
+            tx.attrs?.code === ErrorCode.TX_EXECUTE_FAILED
+        ) {
+            continue
+        }
+        log.warn(`[sync] tx ${tx.hash}: served failure code replaced by ${ErrorCode.TX_EXECUTE_FAILED}`)
+        tx.attrs = {
+            ...(tx.attrs ?? {}),
+            code: ErrorCode.TX_EXECUTE_FAILED,
+        } as typeof tx.attrs
+    }
+}
+
 /** Hashes whose served status differs from the locally derived one. */
 export function statusDisagreements(
     txs: Transaction[],
@@ -352,4 +395,54 @@ export function statusDisagreements(
     return txs
         .filter(tx => local.get(tx.hash) !== tx.status)
         .map(tx => tx.hash)
+}
+
+/**
+ * Before block N is applied with `txs`, the results it will store must give
+ * the `parent_results_root` that block N + 1 commits to, when N + 1 is in
+ * hand. Statuses and codes are already derived locally; this catches any
+ * remaining disagreement before the rows are stored, since once N is stored
+ * they can no longer be corrected and N + 1 would fail verification here for
+ * good.
+ *
+ * Only a next block that hashes to its own hash and builds on `block` is
+ * compared; anything else is judged as a block on its own turn. It is not
+ * signature-checked yet (its committee depends on `block`), so a mismatch
+ * rejects what this peer served, and nothing about this node's state.
+ */
+export async function checkResultsAgainstNextBlock(
+    block: Block,
+    txs: Transaction[],
+    next: Block | undefined,
+): Promise<void> {
+    if (
+        !next ||
+        next.number !== block.number + 1 ||
+        !isForkActive(FINALITY_FORK, next.number) ||
+        next.content?.previousHash !== block.hash
+    ) {
+        return
+    }
+    if (
+        Hashing.sha256(serializeBlockContent(next.content, next.number)) !==
+        next.hash
+    ) {
+        return
+    }
+
+    const committed = (next.content as unknown as Record<string, unknown>)
+        .parent_results_root
+    let local: string
+    try {
+        local = await projectedResultsRoot(block, txs)
+    } catch (e) {
+        throw new SyncBlockRejectedError(
+            `cannot derive the results of block ${block.number}: ${e instanceof Error ? e.message : String(e)}`,
+        )
+    }
+    if (committed !== local) {
+        throw new SyncBlockRejectedError(
+            `results of block ${block.number} give ${local}, block ${next.number} commits ${String(committed)}`,
+        )
+    }
 }

@@ -21,7 +21,9 @@ import log from "src/utilities/logger"
 import { verifyBlock } from "../validation/verifyBlock"
 import {
     SyncBlockRejectedError,
+    checkResultsAgainstNextBlock,
     localStatuses,
+    pinResultCodes,
     pinFailureCodes,
     planBlockOutcome,
     statusDisagreements,
@@ -961,6 +963,8 @@ async function resolveForkedBlock(
  * Verify attrs, apply GCR edits and insert a synced block. Shared by
  * the batch loop and the fork-recovery path.
  *
+ * @param next The block after it, when the batch holds it: its result
+ *   root is checked against this block's results before they are stored
  * @returns False if the block was already inserted concurrently
  * @throws SyncBlockRejectedError when the served block disagrees with what
  *   the quorum signed or with the outcome of applying it here
@@ -968,6 +972,7 @@ async function resolveForkedBlock(
 async function applySyncedBlock(
     block: Block,
     blockTxs: Transaction[],
+    next?: Block,
 ): Promise<boolean> {
     await assertNoUnreconciledGcrState()
 
@@ -981,7 +986,7 @@ async function applySyncedBlock(
     await mergePeerlist(block)
     await verifyBlockAttrs(block, blockTxs)
 
-    await applyVerifiedBlock(block, blockTxs)
+    await applyVerifiedBlock(block, blockTxs, next)
 
     log.info(
         `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
@@ -1137,12 +1142,15 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
  * transaction does on this node. The apply is held in memory until every
  * status agrees, then committed in the block's own database transaction, so
  * a rejected block and a failed insert both leave the state untouched.
+ * With the next block in hand, its result root must match the results about
+ * to be stored, which cannot be corrected once they are.
  *
  * @throws SyncBlockRejectedError when the block must not be applied
  */
 async function applyVerifiedBlock(
     block: Block,
     txs: Transaction[],
+    next?: Block,
 ): Promise<void> {
     await verifyBlockTransactions(block, txs)
     await verifyNativeTablesHashes(block)
@@ -1162,6 +1170,10 @@ async function applyVerifiedBlock(
         }
 
         pinFailureCodes(txs, plan)
+        pinResultCodes(txs, plan, block.number)
+        // Rejects only what this peer served: the caller cools it down and
+        // syncs the block from another one.
+        await checkResultsAgainstNextBlock(block, txs, next)
         await insertBlockOrHalt(block, txs, outcome.pending)
     })
 }
@@ -1271,7 +1283,8 @@ async function batchDownloadBlocks(
     // Process each block in order. Order matters for the height-stable
     // verify: each block's validator set (valid_at <= number-1) is already
     // persisted by the time the next block is checked.
-    for (const block of blocks.sort((a, b) => a.number - b.number)) {
+    const ordered = blocks.sort((a, b) => a.number - b.number)
+    for (const [index, block] of ordered.entries()) {
         if (getSharedState.isShuttingDown) {
             log.info(
                 `[batchDownloadBlocks] Shutdown in progress, stopping before block ${block.number}`,
@@ -1328,7 +1341,11 @@ async function batchDownloadBlocks(
 
         let inserted: boolean
         try {
-            inserted = await applySyncedBlock(block, blockTxs)
+            inserted = await applySyncedBlock(
+                block,
+                blockTxs,
+                ordered[index + 1],
+            )
         } catch (error) {
             if (!(error instanceof SyncBlockRejectedError)) throw error
             log.error(

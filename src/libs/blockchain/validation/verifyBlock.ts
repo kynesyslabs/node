@@ -32,6 +32,7 @@ import {
     certificateMessageOf,
     commitLockActive,
 } from "src/libs/consensus/v2/commitLock/domain"
+import { verifyCommitments } from "src/libs/blockchain/finality/commitments"
 
 export interface BlockVerification {
     valid: boolean
@@ -256,6 +257,11 @@ export async function verifyBlock(
             valid: false,
             reason: `last block hash mismatch: last block hash ${lastBlockHash}, block ${block.number}'s previous hash ${block.content.previousHash}`,
         }
+    }
+
+    const commitments = await verifyCommitments(block, prevBlock)
+    if (!commitments.valid) {
+        return commitments
     }
 
     const blockTimestamp = block.content.timestamp

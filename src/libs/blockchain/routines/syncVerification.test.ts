@@ -19,10 +19,11 @@ const getAccountNonces = jest.fn(
     async (_accounts: string[]) => ({}) as Record<string, number>,
 )
 const hashGCRTables = jest.fn(async (_height: number) => ({}) as any)
+const getTransactionsFromHashes = jest.fn(async (_hashes: string[]) => [] as any[])
 
 mock.module("../chain", () => ({
     __esModule: true,
-    default: { getExistingTransactionHashes },
+    default: { getExistingTransactionHashes, getTransactionsFromHashes },
 }))
 mock.module("../gcr/gcr", () => ({
     __esModule: true,
@@ -64,7 +65,9 @@ mock.module("../validation/txValidatorPool", () => ({
 const { getSharedState } = await import("@/utilities/sharedState")
 const {
     SyncBlockRejectedError,
+    checkResultsAgainstNextBlock,
     localStatuses,
+    pinResultCodes,
     pinFailureCodes,
     planBlockOutcome,
     statusDisagreements,
@@ -120,6 +123,8 @@ beforeEach(() => {
     )
     hashGCRTables.mockReset()
     hashGCRTables.mockResolvedValue({ native_subnets_txs: "a" })
+    getTransactionsFromHashes.mockReset()
+    getTransactionsFromHashes.mockResolvedValue([])
     getSharedState.referenceBlockRoom = 1
 })
 
@@ -378,6 +383,171 @@ describe("failure codes", () => {
 
         expect(() => pinFailureCodes([stale], plan)).not.toThrow()
         expect(stale.attrs).toMatchObject({ code: "TX_NONCE_INVALID_LOW" })
+    })
+})
+
+describe("result codes under finalityProofs", () => {
+    it("pins a failure from apply to TX_EXECUTE_FAILED once the fork is active", async () => {
+        getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT
+        const applied = makeTx(bob, {
+            nonce: 1,
+            status: "failed",
+            attrs: { reference_block: HEIGHT - 1, code: "PEER_CHOSEN", message: "served" },
+        })
+        const plan = await planBlockOutcome(makeBlock([applied]), [applied])
+
+        pinResultCodes([applied], plan, HEIGHT)
+
+        expect(applied.attrs).toMatchObject({ code: "TX_EXECUTE_FAILED", message: "served" })
+    })
+
+    it("leaves served apply-failure codes alone before the fork", async () => {
+        getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+        const applied = makeTx(bob, {
+            nonce: 1,
+            status: "failed",
+            attrs: { reference_block: HEIGHT - 1, code: "PEER_CHOSEN" },
+        })
+        const plan = await planBlockOutcome(makeBlock([applied]), [applied])
+
+        pinResultCodes([applied], plan, HEIGHT)
+
+        expect(applied.attrs).toMatchObject({ code: "PEER_CHOSEN" })
+    })
+
+    it("keeps the locally derived code of a failure before apply", async () => {
+        getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT
+        getAccountNonces.mockResolvedValue({ [alice.address]: 5 })
+        const stale = makeTx(alice, {
+            nonce: 1,
+            status: "failed",
+            attrs: { reference_block: HEIGHT - 1, code: "SOMETHING_ELSE" },
+        })
+        const plan = await planBlockOutcome(makeBlock([stale]), [stale])
+
+        pinFailureCodes([stale], plan)
+        pinResultCodes([stale], plan, HEIGHT)
+
+        expect(stale.attrs).toMatchObject({ code: "TX_NONCE_INVALID_LOW" })
+    })
+})
+
+describe("a confirmed transaction relayed with a code", () => {
+    it("is stored without it, so its root matches the honest one", async () => {
+        getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT
+        const honest = makeTx(bob, { nonce: 1, status: "confirmed" })
+        const relayed = makeTx(bob, {
+            nonce: 1,
+            status: "confirmed",
+            attrs: { reference_block: HEIGHT - 1, code: "X" },
+        })
+        const block = makeBlock([relayed])
+        const plan = await planBlockOutcome(block, [relayed])
+
+        pinResultCodes([relayed], plan, HEIGHT)
+
+        expect(relayed.attrs).not.toHaveProperty("code")
+        const { projectedResultsRoot } = await import("../finality/commitments")
+        expect(await projectedResultsRoot(block, [relayed])).toBe(
+            await projectedResultsRoot(block, [honest]),
+        )
+    })
+})
+
+describe("results checked against the next block", () => {
+    const sha256 = (s: string) => createHash("sha256").update(s).digest("hex")
+
+    async function rootOf(leaves: object[]): Promise<string> {
+        const { root, toHex } = await import("src/libs/crypto/merkle/rfc6962")
+        const { jcsCanonicalize } = await import("src/libs/crypto/jcs")
+        return toHex(
+            root(leaves.map(leaf => new TextEncoder().encode(jcsCanonicalize(leaf)))),
+        )
+    }
+
+    function nextBlock(block: any, parentResultsRoot: string, extra: object = {}) {
+        const content = {
+            ordered_transactions: [],
+            previousHash: block.hash,
+            native_tables_hashes: { native_subnets_txs: "a" },
+            number: block.number + 1,
+            parent_results_root: parentResultsRoot,
+            ...extra,
+        }
+        return {
+            number: block.number + 1,
+            hash: sha256(JSON.stringify(content)),
+            content,
+        } as any
+    }
+
+    beforeEach(() => {
+        getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+    })
+
+    it("accepts results that give the root the next block commits to", async () => {
+        const ok = makeTx(alice, { status: "confirmed" })
+        const failed = makeTx(bob, {
+            status: "failed",
+            attrs: { code: "TX_EXECUTE_FAILED" },
+        })
+        const block = makeBlock([ok, failed])
+        const root = await rootOf([
+            { code: null, hash: ok.hash, status: "confirmed" },
+            { code: "TX_EXECUTE_FAILED", hash: failed.hash, status: "failed" },
+        ])
+
+        await checkResultsAgainstNextBlock(block, [ok, failed], nextBlock(block, root))
+    })
+
+    it("rejects results whose failure code differs from the committed one", async () => {
+        const failed = makeTx(bob, { status: "failed", attrs: { code: "OTHER" } })
+        const block = makeBlock([failed])
+        const root = await rootOf([
+            { code: "TX_EXECUTE_FAILED", hash: failed.hash, status: "failed" },
+        ])
+
+        const error = await checkResultsAgainstNextBlock(
+            block,
+            [failed],
+            nextBlock(block, root),
+        ).catch(e => e)
+
+        expect(error).toBeInstanceOf(SyncBlockRejectedError)
+        expect(error.message).toContain(`block ${HEIGHT + 1} commits ${root}`)
+    })
+
+    it("uses the stored row of a transaction already on chain", async () => {
+        const dup = makeTx(alice, { status: "confirmed" })
+        getTransactionsFromHashes.mockResolvedValue([
+            { hash: dup.hash, status: "confirmed", attrs: {}, blockNumber: HEIGHT - 3 },
+        ])
+        const block = makeBlock([dup])
+        const root = await rootOf([
+            { code: "TX_EXISTS", hash: dup.hash, status: "failed" },
+        ])
+
+        await checkResultsAgainstNextBlock(block, [dup], nextBlock(block, root))
+    })
+
+    it("does not judge a next block that is not the one built on this block", async () => {
+        const ok = makeTx(alice, { status: "confirmed" })
+        const block = makeBlock([ok])
+        const wrong = "0".repeat(64)
+
+        // Absent, before the fork, on another parent, or not hashing to itself
+        await checkResultsAgainstNextBlock(block, [ok], undefined)
+        await checkResultsAgainstNextBlock(block, [ok], {
+            ...nextBlock(block, wrong),
+            hash: "forged",
+        })
+        await checkResultsAgainstNextBlock(
+            block,
+            [ok],
+            nextBlock(block, wrong, { previousHash: "elsewhere" }),
+        )
+        getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 2
+        await checkResultsAgainstNextBlock(block, [ok], nextBlock(block, wrong))
     })
 })
 
