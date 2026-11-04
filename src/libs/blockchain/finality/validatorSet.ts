@@ -17,6 +17,7 @@ import type { EntityManager } from "typeorm"
 import Hashing from "@/libs/crypto/hashing"
 import { isForkActive } from "@/forks/forkGates"
 import { jcsCanonicalize } from "src/libs/crypto/jcs"
+import { compareCodeUnits } from "src/libs/crypto/canonicalJson"
 import { VALIDATOR_STATUS_ACTIVE } from "@/features/staking/constants"
 import { Validators } from "src/model/entities/Validators"
 import {
@@ -44,8 +45,6 @@ type ValidatorRow = Pick<
     "address" | "staked_amount" | "status" | "valid_at"
 >
 
-const byCodeUnits = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
-
 /**
  * The set record of validators rows: every row, whatever its status, as
  * `{identity, stake, status, validAt}` sorted by identity. Only fields that
@@ -64,8 +63,8 @@ export function validatorSetRecord(rows: ValidatorRow[]): ValidatorSetEntry[] {
         .map(entry => ({ entry, key: jcsCanonicalize(entry) }))
         .sort(
             (a, b) =>
-                byCodeUnits(a.entry.identity, b.entry.identity) ||
-                byCodeUnits(a.key, b.key),
+                compareCodeUnits(a.entry.identity, b.entry.identity) ||
+                compareCodeUnits(a.key, b.key),
         )
         .map(({ entry }) => entry)
 }
@@ -130,7 +129,7 @@ export async function recordValidatorSetSnapshot(
     const validators = await liveRecord(em)
     const setHash = validatorSetHash(validators)
     const previous = block > 0 ? await latestAtOrBelow(em, block - 1) : null
-    if (previous && previous.setHash === setHash) {
+    if (previous?.setHash === setHash) {
         return false
     }
     await repo.insert({ block, setHash, validators })
@@ -194,7 +193,17 @@ export async function ensureValidatorSetSnapshot(
         const validators = await liveRecord(em)
         const setHash = validatorSetHash(validators)
         const latest = await latestAtOrBelow(em, tip)
-        if (latest && latest.setHash === setHash) {
+        if (latest?.setHash === setHash) {
+            return null
+        }
+        // A snapshot at the tip was committed with the tip block: the next
+        // block commits to its hash, so the drifted table must not replace it.
+        if (latest?.block === tip && tip > 0) {
+            log.error(
+                `[finality] validators table differs from the set committed with block ${tip} ` +
+                    `(${latest.setHash}, table gives ${setHash}); keeping the committed set. ` +
+                    "The table has drifted from the chain.",
+            )
             return null
         }
         if (latest && tip > 0) {

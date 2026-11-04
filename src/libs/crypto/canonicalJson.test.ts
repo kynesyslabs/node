@@ -72,6 +72,14 @@ describe("canonicalJson", () => {
         expect(canonicalJson([undefined, () => 1, Symbol("s")])).toBe("[null,null,null]")
     })
 
+    it("spells array holes as null, like JSON.stringify", () => {
+        // eslint-disable-next-line no-sparse-arrays
+        const sparse = [1, , 3]
+        expect(canonicalJson(sparse)).toBe("[1,null,3]")
+        expect(canonicalJson(new Array(2))).toBe("[null,null]")
+        expect(canonicalJson({ a: new Array(1) })).toBe(JSON.stringify({ a: new Array(1) }))
+    })
+
     it("honours toJSON and unwraps boxed primitives, like JSON.stringify", () => {
         const date = new Date(Date.UTC(2026, 10, 4, 12, 0, 0))
         expect(canonicalJson({ at: date })).toBe("{\"at\":\"2026-11-04T12:00:00.000Z\"}")
