@@ -11,7 +11,7 @@ describe("describeDbConnectionFailure", () => {
         )
         const message = describeDbConnectionFailure(target, error)
         expect(message).toContain("postgres.internal:5432")
-        expect(message).toContain('database "demos"')
+        expect(message).toContain("database \"demos\"")
         expect(message).toContain("absent or unreachable")
     })
 
@@ -29,7 +29,7 @@ describe("describeDbConnectionFailure", () => {
     it("does not call a migration failure unreachable", () => {
         const message = describeDbConnectionFailure(
             target,
-            new Error('relation "blocks" already exists'),
+            new Error("relation \"blocks\" already exists"),
         )
         expect(message).toContain("postgres.internal:5432")
         expect(message).not.toContain("unreachable")
