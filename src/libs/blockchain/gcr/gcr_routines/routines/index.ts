@@ -1,5 +1,15 @@
-export { applyXmIdentityAdd, applyXmIdentityRemove } from "./xmRoutines"
-export { applyWeb2IdentityAdd, applyWeb2IdentityRemove } from "./web2Routines"
+export {
+    applyXmIdentityAdd,
+    applyXmIdentityRemove,
+    rollbackXmIdentityAdd,
+    rollbackXmIdentityRemove,
+} from "./xmRoutines"
+export {
+    applyWeb2IdentityAdd,
+    applyWeb2IdentityRemove,
+    rollbackWeb2IdentityAdd,
+    rollbackWeb2IdentityRemove,
+} from "./web2Routines"
 export { applyPqcIdentityAdd, applyPqcIdentityRemove } from "./pqcRoutines"
 export { applyUdIdentityAdd, applyUdIdentityRemove } from "./udRoutines"
 export { applyAwardPoints, applyAwardPointsRollback } from "./rewardsRoutines"

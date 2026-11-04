@@ -5,6 +5,13 @@ import ensureGCRForUser from "../ensureGCRForUser"
 import { SavedXmIdentity } from "@/model/entities/types/IdentityTypes"
 import { IncentiveManager } from "../IncentiveManager"
 import { safeGCRSave, isFirstConnection } from "./utils"
+import {
+    type RemovedEntry,
+    recordRemovedIdentities,
+    reinsert,
+    removedIdentities,
+    removedIdentityKey,
+} from "./removedIdentities"
 
 export async function applyXmIdentityAdd(
     editOperation: any,
@@ -128,23 +135,34 @@ export async function applyXmIdentityRemove(
         }
     }
 
-    const addressExists = accountGCR.identities.xm[chain][subchain].some(
-        (addr: SavedXmIdentity) =>
-            isEVM
-                ? addr.address.toLowerCase() === normalizedAddress
-                : addr.address === normalizedAddress,
-    )
+    const matches = (id: SavedXmIdentity) =>
+        isEVM
+            ? id.address.toLowerCase() === normalizedAddress
+            : id.address === normalizedAddress
+    const linked: SavedXmIdentity[] = accountGCR.identities.xm[chain][subchain]
+    const removed: RemovedEntry<SavedXmIdentity>[] = []
+    linked.forEach((id, index) => {
+        if (matches(id)) removed.push({ index, value: id })
+    })
 
-    if (!addressExists) {
+    if (removed.length === 0) {
         return { success: false, message: "Identity not found" }
     }
 
-    accountGCR.identities.xm[chain][subchain] = accountGCR.identities.xm[chain][
-        subchain
-    ].filter((id: SavedXmIdentity) =>
-        isEVM
-            ? id.address.toLowerCase() !== normalizedAddress
-            : id.address !== normalizedAddress,
+    recordRemovedIdentities(
+        removedIdentityKey(
+            editOperation.txhash,
+            editOperation.account,
+            "xm",
+            chain,
+            subchain,
+            normalizedAddress,
+        ),
+        removed,
+    )
+
+    accountGCR.identities.xm[chain][subchain] = linked.filter(
+        id => !matches(id),
     )
 
     async function deductPoints() {
@@ -163,5 +181,114 @@ export async function applyXmIdentityRemove(
         message: "Identity removed",
         entity: accountGCR,
         sideEffect: deductPoints,
+    }
+}
+
+/**
+ * Undo of an add: takes out the one entry the add appended, found by the
+ * address the add stored (the display form when one was given).
+ */
+export async function rollbackXmIdentityAdd(
+    editOperation: any,
+    accountGCR: GCRMain,
+): Promise<GCRResult> {
+    const { chain, isEVM, subchain, targetAddress, displayAddress, signature } =
+        editOperation.data ?? {}
+    const stored = displayAddress || targetAddress
+    if (!chain || !subchain || !stored) {
+        return { success: false, message: "Invalid edit operation data" }
+    }
+    const address = isEVM ? stored.toLowerCase() : stored
+
+    const linked: SavedXmIdentity[] | undefined =
+        accountGCR.identities?.xm?.[chain]?.[subchain]
+    const index = Array.isArray(linked)
+        ? linked.findLastIndex(
+              id => id.address === address && id.signature === signature,
+          )
+        : -1
+    if (index === -1) {
+        return { success: false, message: "Identity not found" }
+    }
+
+    linked.splice(index, 1)
+
+    return {
+        success: true,
+        message: "Identity add rolled back",
+        entity: accountGCR,
+        sideEffect: async () => {
+            await IncentiveManager.walletUnlinked(
+                accountGCR.pubkey,
+                address,
+                chain,
+            )
+        },
+    }
+}
+
+/** Undo of a remove: puts back what this node recorded the remove taking. */
+export async function rollbackXmIdentityRemove(
+    editOperation: any,
+    accountGCR: GCRMain,
+): Promise<GCRResult> {
+    const { chain, isEVM, subchain, targetAddress } = editOperation.data ?? {}
+    if (!chain || !subchain || !targetAddress) {
+        return { success: false, message: "Invalid edit operation data" }
+    }
+    const normalizedAddress = isEVM
+        ? targetAddress.toLowerCase()
+        : targetAddress
+
+    const removed = removedIdentities<SavedXmIdentity>(
+        removedIdentityKey(
+            editOperation.txhash,
+            editOperation.account,
+            "xm",
+            chain,
+            subchain,
+            normalizedAddress,
+        ),
+    )
+    if (!removed) {
+        return {
+            success: false,
+            message: "No record of the removed cross-chain identity on this node",
+        }
+    }
+
+    accountGCR.identities.xm = accountGCR.identities.xm || {}
+    accountGCR.identities.xm[chain] = accountGCR.identities.xm[chain] || {}
+    const linked: SavedXmIdentity[] =
+        accountGCR.identities.xm[chain][subchain] || []
+    const present = linked.some(id =>
+        isEVM
+            ? id.address.toLowerCase() === normalizedAddress
+            : id.address === normalizedAddress,
+    )
+    if (present) {
+        return { success: false, message: "Identity already exists" }
+    }
+
+    accountGCR.identities.xm[chain][subchain] = reinsert(linked, removed)
+
+    return {
+        success: true,
+        message: "Identity remove rolled back",
+        entity: accountGCR,
+        sideEffect: async () => {
+            const isFirst = await isFirstConnection(
+                "web3",
+                { chain, subchain, address: normalizedAddress },
+                editOperation.account,
+            )
+            if (isFirst) {
+                await IncentiveManager.walletLinked(
+                    accountGCR.pubkey,
+                    normalizedAddress,
+                    chain,
+                )
+            }
+        },
     }
 }

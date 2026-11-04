@@ -7,8 +7,12 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import {
     applyXmIdentityAdd,
     applyXmIdentityRemove,
+    rollbackXmIdentityAdd,
+    rollbackXmIdentityRemove,
     applyWeb2IdentityAdd,
     applyWeb2IdentityRemove,
+    rollbackWeb2IdentityAdd,
+    rollbackWeb2IdentityRemove,
     applyPqcIdentityAdd,
     applyPqcIdentityRemove,
     applyUdIdentityAdd,
@@ -47,6 +51,27 @@ export default class GCRIdentityRoutines {
 
         const identityEdit = structuredClone(editOperation)
 
+        // CONVERT operation.account to hex
+        identityEdit.account =
+            typeof identityEdit.account === "string"
+                ? identityEdit.account
+                : forgeToHex(identityEdit.account)
+
+        // The opposite routine cannot undo these: a remove edit carries
+        // only the name of the link and an add edit is shaped differently.
+        if (identityEdit.isRollback) {
+            switch (identityEdit.context + identityEdit.operation) {
+                case "web2add":
+                    return rollbackWeb2IdentityAdd(identityEdit, accountGCR)
+                case "web2remove":
+                    return rollbackWeb2IdentityRemove(identityEdit, accountGCR)
+                case "xmadd":
+                    return rollbackXmIdentityAdd(identityEdit, accountGCR)
+                case "xmremove":
+                    return rollbackXmIdentityRemove(identityEdit, accountGCR)
+            }
+        }
+
         let operation = identityEdit.operation
         if (identityEdit.isRollback) {
             if (operation === "add") {
@@ -57,12 +82,6 @@ export default class GCRIdentityRoutines {
         }
 
         let result: GCRResult
-
-        // CONVERT operation.account to hex
-        identityEdit.account =
-            typeof identityEdit.account === "string"
-                ? identityEdit.account
-                : forgeToHex(identityEdit.account)
 
         switch (operation) {
             case "zk_commitmentadd":
