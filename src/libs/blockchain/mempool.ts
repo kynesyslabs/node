@@ -13,6 +13,7 @@ import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
 import { verifyAdmissionEdits } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
+import { transactionNulRefusal } from "./validation/postgresText"
 import { checkIdentityAdmission } from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
@@ -453,6 +454,13 @@ export default class Mempool {
         blockRef?: number,
         options: AddTransactionOptions = {},
     ) {
+        // The node builds some transactions itself from user input (instant
+        // messages, L2PS batches); they enter here without passing admission.
+        const nulRefusal = transactionNulRefusal(transaction)
+        if (nulRefusal !== null) {
+            return { confirmationBlock: null, error: nulRefusal }
+        }
+
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
             return {

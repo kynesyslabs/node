@@ -15,6 +15,7 @@ import Hashing from "../../crypto/hashing"
 import { txSignaturePreimage } from "../../crypto/txSignaturePreimage"
 import { serializeTxContent } from "../../crypto/txContentSerializer"
 import type { PqcIdentityHint, TxValidationResult } from "./types"
+import { transactionNulRefusal } from "./postgresText"
 
 /**
  * Signature-preimage context, resolved on the main thread (fork config and
@@ -167,8 +168,15 @@ export async function validateTxSignature(
 }
 
 /**
- * Full validation pipeline used by `Mempool.receive`: coherence first, then
- * signature. Short-circuits on the first failure.
+ * Full validation pipeline used by `Mempool.receive` and by the re-check of a
+ * received or synced block: U+0000 first, then coherence, then signature.
+ * Short-circuits on the first failure.
+ *
+ * U+0000 in `to`, `from`, `type` or a value the edits store fails the commit
+ * of the block on every node, so refusing it here only turns a halt into a
+ * rejected block. A NUL that lands only in the `json` body column did commit
+ * before this check; a chain already holding such a transaction must not be
+ * replayed through it.
  */
 export async function validateTx(
     tx: Transaction,
@@ -176,6 +184,10 @@ export async function validateTx(
     isPostFork: boolean,
     domain: TxSignatureDomain = LEGACY_DOMAIN,
 ): Promise<TxValidationResult> {
+    const nulRefusal = transactionNulRefusal(tx)
+    if (nulRefusal !== null) {
+        return { hash: tx?.hash, valid: false, reason: nulRefusal }
+    }
     const coherence = validateTxCoherence(tx, isPostFork)
     if (!coherence.valid) return coherence
     return await validateTxSignature(tx, hint, domain)

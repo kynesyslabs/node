@@ -36,7 +36,10 @@ import {
     pendingTxSignatureContext,
 } from "@/forks"
 import { Transactions } from "@/model/entities/Transactions"
-import { containsNulCharacter, NUL_CHARACTER_REFUSAL } from "./validation/postgresText"
+import {
+    transactionNulRefusal,
+    withoutNulCharacters,
+} from "./validation/postgresText"
 import type { TransactionStatus } from "@/utilities/constants"
 
 interface TransactionResponse {
@@ -446,6 +449,15 @@ export default class Transaction implements ITransaction {
         valid: boolean
         message: string
     } {
+        // Refused here, where every node admits, instead of failing the
+        // commit of the block that would carry it. Checked first because
+        // validateToField reads `to` through Buffer.from(hex), which stops at
+        // the first non-hex character and would pass "<64 hex>\u0000".
+        const nulRefusal = transactionNulRefusal(tx)
+        if (nulRefusal !== null) {
+            return { valid: false, message: nulRefusal }
+        }
+
         // REVIEW: StorageProgram transactions use stor-{hash} format for 'to' field
         // instead of Ed25519 public key, so we use different validation
         if (tx.content.type === "storageProgram") {
@@ -456,14 +468,6 @@ export default class Transaction implements ITransaction {
                 return {
                     valid: false,
                     message: storageValidation.message,
-                }
-            }
-            // Refused here, where every node admits, instead of failing the
-            // commit of the block that would carry it.
-            if (containsNulCharacter(tx.content.data)) {
-                return {
-                    valid: false,
-                    message: `Storage program payload ${NUL_CHARACTER_REFUSAL}`,
                 }
             }
         } else {
@@ -531,7 +535,7 @@ export default class Transaction implements ITransaction {
             // runs (P6). The DB column is nullable.
             rpcAddress: tx.content.transaction_fee.rpc_address ?? null,
             id: 0, // ? What is this?
-            attrs: tx.attrs,
+            attrs: withoutNulCharacters(tx.attrs),
         }
 
         return rawTx
