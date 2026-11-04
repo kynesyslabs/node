@@ -30,6 +30,8 @@ import {
     verifyBlockTransactions,
     verifyNativeTablesHashes,
 } from "./syncVerification"
+import { isForkActive } from "@/forks"
+import { FINALITY_FORK } from "../finality/commitments"
 import { recordSyncedBlock } from "src/libs/consensus/v2/routines/stallDetection"
 import {
     RPCRequest,
@@ -1203,6 +1205,45 @@ async function insertBlockOrHalt(
 }
 
 /**
+ * Block `parent.number + 1` as `peer` serves it, for checking the results
+ * `parent` is about to store. They depend on transaction attrs the peer
+ * serves unsigned, and a stored result cannot be corrected later, so while
+ * the network is known to be past `parent` it is not stored without its
+ * child in hand.
+ *
+ * @returns the child; undefined when none is needed or none exists yet; null
+ *   when one exists but `peer` did not serve it
+ */
+async function fetchChildBlock(
+    peer: Peer,
+    parent: Block,
+): Promise<Block | null | undefined> {
+    const number = parent.number + 1
+    if (!isForkActive(FINALITY_FORK, number)) return undefined
+
+    const response = await peer.longCall(
+        {
+            method: "nodeCall",
+            params: [
+                {
+                    message: "getBlocks",
+                    data: { start: number, limit: 1 },
+                    muid: null,
+                },
+            ],
+        },
+        true,
+        { protocol: "http", sleepTime: 1000, retries: 3, allowedCodes: [404] },
+    )
+    const served =
+        response.result === 200 && Array.isArray(response.response)
+            ? (response.response as Block[]).find(b => b?.number === number)
+            : undefined
+    if (served) return served
+    return latestBlock() > parent.number ? null : undefined
+}
+
+/**
  * Download and process a batch of blocks from a peer
  *
  * @param peer - The peer to download blocks from
@@ -1283,7 +1324,15 @@ async function batchDownloadBlocks(
     // Process each block in order. Order matters for the height-stable
     // verify: each block's validator set (valid_at <= number-1) is already
     // persisted by the time the next block is checked.
-    const ordered = blocks.sort((a, b) => a.number - b.number)
+    const ordered = blocks.toSorted((a, b) => a.number - b.number)
+    const tailChild = await fetchChildBlock(peer, ordered.at(-1))
+    if (tailChild === null) {
+        log.warning(
+            `[batchDownloadBlocks] ${peer.identity} did not serve block ${ordered.at(-1).number + 1}; ` +
+                `leaving block ${ordered.at(-1).number} to a peer that can`,
+        )
+        ordered.pop()
+    }
     for (const [index, block] of ordered.entries()) {
         if (getSharedState.isShuttingDown) {
             log.info(
@@ -1318,7 +1367,19 @@ async function batchDownloadBlocks(
             }
 
             try {
-                await applySyncedBlock(recovered.block, recovered.txs)
+                const child = await fetchChildBlock(
+                    recovered.peer,
+                    recovered.block,
+                )
+                // Without its child the block is synced on the next round
+                // from the recovery source, together with the child
+                if (child !== null) {
+                    await applySyncedBlock(
+                        recovered.block,
+                        recovered.txs,
+                        child,
+                    )
+                }
             } catch (error) {
                 if (!(error instanceof SyncBlockRejectedError)) throw error
                 log.error(
@@ -1344,7 +1405,7 @@ async function batchDownloadBlocks(
             inserted = await applySyncedBlock(
                 block,
                 blockTxs,
-                ordered[index + 1],
+                ordered[index + 1] ?? tailChild,
             )
         } catch (error) {
             if (!(error instanceof SyncBlockRejectedError)) throw error
@@ -1359,6 +1420,9 @@ async function batchDownloadBlocks(
             return false
         }
     }
+
+    // The caller moves on to a peer that can serve the child
+    if (tailChild === null) return false
 
     log.debug(
         `[batchDownloadBlocks] Successfully processed batch of ${blocks.length} blocks`,

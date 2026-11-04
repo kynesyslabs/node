@@ -442,6 +442,63 @@ describe("fast sync under finalityProofs", () => {
             ),
         ).toBe(true)
     })
+
+    describe("when the batch ends at the block", () => {
+        const batchSizeAtStart = getSharedState.batchSyncBlockSize
+        afterEach(() => {
+            getSharedState.batchSyncBlockSize = batchSizeAtStart
+        })
+
+        /** Serves `block` as a one-block batch and `child` when asked for the block after it. */
+        async function syncLastOfBatch(childResponse: (tx: any, block: any) => Promise<any[]>) {
+            getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+            getSharedState.batchSyncBlockSize = 1
+            const tx = makeTx(alice)
+            const block = makeBlock([tx])
+            const served = await childResponse(tx, block)
+            const peer = peerWith([block], [tx])
+            peer.longCall = jest.fn(async (request: any) => {
+                const { start, limit } = request.params[0].data
+                const asksForChild = start === HEIGHT + 1 && limit === 1
+                return { result: 200, response: clone(asksForChild ? served : [block]) }
+            })
+            spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([peer])
+            spyOn(Math, "random").mockReturnValue(0)
+            spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+            spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([])
+            applyResult({ successfulTxs: [tx.hash] })
+            insertBlock.mockImplementation((async (inserted: any) => {
+                getSharedState.lastBlockNumber = inserted.number
+                return {}
+            }) as any)
+            getSharedState.fastSyncCount = 1
+            getSharedState.syncStatus = true
+
+            await fastSync([], "test")
+        }
+
+        it("checks it against the next block fetched from the peer", async () => {
+            await syncLastOfBatch(async (tx, block) => [childOf(block, await confirmedRoot(tx))])
+
+            expect((insertBlock.mock.calls[0][0] as any).number).toBe(HEIGHT)
+        })
+
+        it("stores nothing when the fetched next block contradicts its results", async () => {
+            await syncLastOfBatch(async (_tx, block) => [childOf(block, "ab".repeat(32))])
+
+            expect(insertBlock).not.toHaveBeenCalled()
+            expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+        })
+
+        it("stores nothing when the peer withholds a next block the network has", async () => {
+            // A peer asked for HEIGHT + 1 answers with its highest block at or below it
+            await syncLastOfBatch(async (_tx, block) => [block])
+
+            expect(applyTransactions).not.toHaveBeenCalled()
+            expect(insertBlock).not.toHaveBeenCalled()
+            expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+        })
+    })
 })
 
 describe("rejection handling", () => {
