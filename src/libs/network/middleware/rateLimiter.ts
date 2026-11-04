@@ -22,6 +22,8 @@ import {
 const BUCKET_SEPARATOR = "|"
 /** Bucket shared by every route that has no limit of its own. */
 const DEFAULT_BUCKET = "default"
+/** Failed request-signature checks, counted apart from the request quotas. */
+const AUTH_FAILURE_BUCKET = "auth-failure"
 
 interface RateLimitData {
     count: number
@@ -689,6 +691,9 @@ export class RateLimiter {
                 return await next()
             }
 
+            const clientIP = this.getClientIP(req, server)
+            const whitelistedIP = this.config.whitelistedIPs.includes(clientIP)
+
             // Check for identity/signature headers for key-based whitelisting
             const identity = req.headers.get("identity")
             const signature = req.headers.get("signature")
@@ -696,6 +701,22 @@ export class RateLimiter {
             let verifyResult: VerificationResult | null = null
 
             if (identity && signature) {
+                // A source past the failure limit is refused before another
+                // verification is spent on it.
+                const failures = this.ipRequests.get(
+                    bucketKey(AUTH_FAILURE_BUCKET, clientIP),
+                )
+                if (
+                    !whitelistedIP &&
+                    failures?.blocked &&
+                    failures.blockExpiry > Date.now()
+                ) {
+                    return this.blockedResponse(
+                        Math.ceil((failures.blockExpiry - Date.now()) / 1000),
+                        "IP blocked due to rate limiting",
+                    )
+                }
+
                 // AUDIT C3b — once nonceEnforcement is active, require the
                 // timestamp-bound auth signature (kills the static replayable
                 // token). Pre-fork keeps the legacy bare-pubkey verification so
@@ -712,10 +733,19 @@ export class RateLimiter {
                 )
 
                 if (!verifyResult.valid) {
-                    // Invalid signature - return 401
                     log.error(
                         `[Rate Limiter] Invalid signature: ${verifyResult.error}`,
                     )
+                    // Verification is the costly part of a request, so a
+                    // failed one is counted rather than answered for free.
+                    if (!whitelistedIP) {
+                        const limited = this.consume(
+                            AUTH_FAILURE_BUCKET,
+                            clientIP,
+                            Date.now(),
+                        )
+                        if (limited) return limited
+                    }
                     return new Response(
                         JSON.stringify({
                             error: "Invalid signature",
@@ -752,113 +782,123 @@ export class RateLimiter {
                 return await next()
             }
 
-            const clientIP = this.getClientIP(req, server)
-
             // Skip rate limiting for whitelisted IPs
             if (this.isTrustedInternalRequest(req, clientIP)) {
                 return await next()
             }
 
-            const now = Date.now()
             const method = this.getMethodFromRequest(req)
-            const limit = this.getLimitForMethod(method)
-
-            const counterKey = bucketKey(this.bucketFor(method), clientIP)
-            if (!this.ipRequests.has(counterKey)) {
-                this.makeRoomForCounter(now)
-            }
-            const ipData = this.ipRequests.get(counterKey) || {
-                count: 0,
-                firstRequest: now,
-                blocked: false,
-                lastSeenBlockNumber: 0,
-                lastSeenWithinBlockCount: 0,
-            }
-
-            // The block ending does not forgive the count: a long-window cap
-            // (the daily POST quota) must hold through the block, and the
-            // window reset below is what clears it once the window is over.
-            if (ipData.blocked && !(ipData.blockExpiry > now)) {
-                ipData.blocked = false
-                delete ipData.blockExpiry
-            }
-
-            const isBlocked = ipData.blocked
-
-            // Check if IP is currently blocked
-            if (isBlocked) {
-                const remainingTime = Math.ceil(
-                    (ipData.blockExpiry - now) / 1000,
-                )
-                log.warning(
-                    `[Rate Limiter] Blocked request from IP ${clientIP}, ${remainingTime}s remaining`,
-                )
-
-                return new Response(
-                    JSON.stringify({
-                        error: "IP blocked due to rate limiting",
-                        retryAfter: remainingTime,
-                    }),
-                    {
-                        status: 429,
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Retry-After": remainingTime.toString(),
-                        },
-                    },
-                )
-            }
-
-            // Reset window if expired
-            if (now - ipData.firstRequest > limit.windowMs) {
-                ipData.count = 0
-                ipData.firstRequest = now
-                ipData.blocked = false
-                delete ipData.blockExpiry
-            }
-
-            ipData.count++
-
-            // Block if limit exceeded
-            if (ipData.count > limit.maxRequests) {
-                const blockMs = this.blockDurationMs()
-                ipData.blocked = true
-                ipData.blockExpiry = now + blockMs
-
-                log.warning(
-                    `[Rate Limiter] IP ${clientIP} exceeded limit (${ipData.count}/${limit.maxRequests}) and blocked for ${blockMs}ms`,
-                )
-
-                this.ipRequests.set(counterKey, ipData)
-
-                return new Response(
-                    JSON.stringify({
-                        error: "Rate limit exceeded",
-                        // limit: limit.maxRequests,
-                        // windowMs: limit.windowMs,
-                        retryAfter: Math.ceil(blockMs / 1000),
-                    }),
-                    {
-                        status: 429,
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Retry-After": Math.ceil(blockMs / 1000).toString(),
-                        },
-                    },
-                )
-            }
-
-            this.ipRequests.set(counterKey, ipData)
-
-            // Log high usage (above 80% of limit)
-            if (ipData.count > limit.maxRequests * 0.8) {
-                log.warning(
-                    `[Rate Limiter] High usage from IP ${clientIP}: ${ipData.count}/${limit.maxRequests}`,
-                )
-            }
+            const limited = this.consume(
+                this.bucketFor(method),
+                clientIP,
+                Date.now(),
+            )
+            if (limited) return limited
 
             return await next()
         }
+    }
+
+    private blockedResponse(retryAfterSeconds: number, error: string): Response {
+        return new Response(
+            JSON.stringify({ error, retryAfter: retryAfterSeconds }),
+            {
+                status: 429,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Retry-After": retryAfterSeconds.toString(),
+                },
+            },
+        )
+    }
+
+    /**
+     * Counts one request against a bucket for the client. Returns the 429
+     * to send when the client is blocked or has just gone over the limit,
+     * otherwise null.
+     */
+    private consume(
+        bucket: string,
+        clientIP: string,
+        now: number,
+    ): Response | null {
+        const limit = this.getLimitForBucket(bucket)
+
+        const counterKey = bucketKey(bucket, clientIP)
+        if (!this.ipRequests.has(counterKey)) {
+            this.makeRoomForCounter(now)
+        }
+        const ipData = this.ipRequests.get(counterKey) || {
+            count: 0,
+            firstRequest: now,
+            blocked: false,
+            lastSeenBlockNumber: 0,
+            lastSeenWithinBlockCount: 0,
+        }
+
+        // The block ending does not forgive the count: a long-window cap
+        // (the daily POST quota) must hold through the block, and the
+        // window reset below is what clears it once the window is over.
+        if (ipData.blocked && !(ipData.blockExpiry > now)) {
+            ipData.blocked = false
+            delete ipData.blockExpiry
+        }
+
+        const isBlocked = ipData.blocked
+
+        // Check if IP is currently blocked
+        if (isBlocked) {
+            const remainingTime = Math.ceil(
+                (ipData.blockExpiry - now) / 1000,
+            )
+            log.warning(
+                `[Rate Limiter] Blocked request from IP ${clientIP}, ${remainingTime}s remaining`,
+            )
+
+            return this.blockedResponse(
+                remainingTime,
+                "IP blocked due to rate limiting",
+            )
+        }
+
+        // Reset window if expired
+        if (now - ipData.firstRequest > limit.windowMs) {
+            ipData.count = 0
+            ipData.firstRequest = now
+            ipData.blocked = false
+            delete ipData.blockExpiry
+        }
+
+        ipData.count++
+
+        // Block if limit exceeded
+        if (ipData.count > limit.maxRequests) {
+            const blockMs = this.blockDurationMs()
+            ipData.blocked = true
+            ipData.blockExpiry = now + blockMs
+
+            log.warning(
+                `[Rate Limiter] IP ${clientIP} exceeded limit (${ipData.count}/${limit.maxRequests}) and blocked for ${blockMs}ms`,
+            )
+
+            this.ipRequests.set(counterKey, ipData)
+
+            return this.blockedResponse(
+                Math.ceil(blockMs / 1000),
+                "Rate limit exceeded",
+            )
+        }
+
+        this.ipRequests.set(counterKey, ipData)
+
+        // Log high usage (above 80% of limit)
+        if (ipData.count > limit.maxRequests * 0.8) {
+            log.warning(
+                `[Rate Limiter] High usage from IP ${clientIP}: ${ipData.count}/${limit.maxRequests}`,
+            )
+        }
+
+        return null
     }
 
     /**

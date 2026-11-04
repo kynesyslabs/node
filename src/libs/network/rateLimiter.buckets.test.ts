@@ -14,8 +14,12 @@ mock.module("@/libs/peer", () => ({
     PeerManager: { getInstance: () => ({ getPeer: () => undefined }) },
 }))
 
+let verifyCalls = 0
 mock.module("./verifySignature", () => ({
-    verifySignature: async () => ({ valid: false, error: "unused" }),
+    verifySignature: async () => {
+        verifyCalls++
+        return { valid: false, error: "bad signature" }
+    },
     isKeyWhitelisted: () => false,
 }))
 
@@ -352,5 +356,60 @@ describe("RateLimiter tracked counter cap", () => {
         }
         expect(limiter.ipRequests.size).toBeLessThanOrEqual(10)
         expect((await hit(limiter, "/info", "GET", blocked)).status).toBe(429)
+    })
+})
+
+describe("RateLimiter failed signature checks", () => {
+    let limiter: InstanceType<typeof RateLimiter>
+
+    const signed = (from = IP) => {
+        const peer = { requestIP: () => ({ address: from }) } as never
+        const req = new Request("http://node/", {
+            method: "POST",
+            headers: { identity: "ed25519:0xabc", signature: "0xdead", timestamp: "1" },
+        })
+        return limiter.createMiddleware()(req, ok, peer)
+    }
+
+    beforeEach(() => {
+        now = 1_000_000
+        verifyCalls = 0
+        spyOn(Date, "now").mockImplementation(() => now)
+        limiter = makeLimiter({ blockDurationMs: 60_000 })
+    })
+
+    afterEach(() => {
+        limiter.destroy()
+        mock.restore()
+    })
+
+    it("counts each failed check and blocks the source past the limit", async () => {
+        expect((await signed()).status).toBe(401)
+        expect((await signed()).status).toBe(401)
+        expect((await signed()).status).toBe(429)
+        expect(verifyCalls).toBe(3)
+    })
+
+    it("refuses a blocked source before verifying again", async () => {
+        await signed()
+        await signed()
+        await signed()
+        const blocked = await signed()
+        expect(blocked.status).toBe(429)
+        expect(blocked.headers.get("Retry-After")).toBe("60")
+        expect(verifyCalls).toBe(3)
+    })
+
+    it("keeps failed checks off the request quotas of the same source", async () => {
+        await signed()
+        await signed()
+        expect((await hit(limiter, "/info")).status).toBe(200)
+        expect(limiter.getCurrentLimits(IP)).toBeNull()
+    })
+
+    it("does not count failed checks from a whitelisted address", async () => {
+        limiter.destroy()
+        limiter = makeLimiter({ blockDurationMs: 60_000, whitelistedIPs: [IP] })
+        for (let i = 0; i < 5; i++) expect((await signed()).status).toBe(401)
     })
 })
