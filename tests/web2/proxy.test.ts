@@ -92,3 +92,22 @@ describe("Proxy outbound Authorization header", () => {
         )
     })
 })
+
+import { headersForReplay } from "@/features/web2/sanitizeWeb2Request"
+
+describe("headersForReplay (broadcast-time replay of a web2Request tx)", () => {
+    it("drops credential headers, keeps the rest", () => {
+        const out = headersForReplay({
+            Authorization: "Bearer tok",
+            "X-Api-Key": "k",
+            "content-type": "application/json",
+        } as any)
+
+        expect(out).toEqual({ "content-type": "application/json" })
+    })
+
+    it("returns an object, not undefined, when nothing is left", () => {
+        expect(headersForReplay({ Authorization: "Bearer tok" } as any)).toEqual({})
+        expect(headersForReplay(undefined)).toEqual({})
+    })
+})
