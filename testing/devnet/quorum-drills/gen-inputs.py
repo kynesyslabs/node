@@ -28,7 +28,18 @@ ap.add_argument("--gid", type=int, required=True)
 ap.add_argument("--src", default="")
 ap.add_argument("--node-mem", required=True)
 ap.add_argument("--consensus-time", required=True)
+# How a node starts, chosen by run.sh from the image: "run-devnet" execs
+# testing/devnet/run-devnet (a devnet-style image carries it); "image" runs the
+# image's own ENTRYPOINT and CMD, which a release image needs because it has no
+# testing/. The two JSON lists are the image's Config.Entrypoint and Config.Cmd.
+ap.add_argument("--start", choices=["run-devnet", "image"], default="run-devnet")
+ap.add_argument("--image-entrypoint", default="[]")
+ap.add_argument("--image-cmd", default="[]")
 a = ap.parse_args()
+image_entrypoint = json.loads(a.image_entrypoint) or []
+image_cmd = json.loads(a.image_cmd) or []
+if a.start == "image" and not (image_entrypoint or image_cmd):
+    ap.error("--start image needs the image's entrypoint or cmd")
 
 inputs = os.path.join(a.run_dir, "inputs")
 n = a.nodes
@@ -89,8 +100,9 @@ node_env = {
     "OMNI_MODE": "HTTP_ONLY",
     "TLSNOTARY_ENABLED": "false",
     # Off by default, as in the race harness: the sidecar's node runtime in
-    # the image is Bun's fallback wrapper. GOSSIP_ENABLED=true runs the
-    # production default, where heights ahead of ours arrive as gossip.
+    # a devnet-style image is Bun's fallback wrapper. GOSSIP_ENABLED=true runs
+    # the production default, where heights ahead of ours arrive as gossip;
+    # run.sh forces it on for the halt and ride drills.
     "GOSSIP_ENABLED": "true" if os.environ.get("GOSSIP_ENABLED") == "true" else "false",
     "IDENTITY_FILE": "/app/state/node.identity",
 }
@@ -117,10 +129,22 @@ services = {
         "networks": ["drillnet"],
     }
 }
+# The image's own entrypoint (scripts/docker-entrypoint.sh:37-40) moves a real
+# file it finds at /app/demos_peerlist.json into /app/state; a bind mount there
+# cannot be moved, and `set -e` ends the container. So on the image path the
+# peerlist is mounted elsewhere and copied into /app/state, where the
+# entrypoint's own symlink at /app/demos_peerlist.json (the default
+# PEER_LIST_FILE) finds it, as an operator's state volume would hold it.
+peerlist_mount = "/app/demos_peerlist.json" if a.start == "run-devnet" else "/app/keys/demos_peerlist.json"
+# The node's identity lock and signing record sit next to IDENTITY_FILE
+# (identityLock.ts:68, signingRecord.ts:205), so the key is copied into the
+# uid-owned tmpfs state dir; /app/keys is read-only. The copy runs at every
+# container start: a stopped container's tmpfs is empty when it starts again.
+copy_identity = "mkdir -p /app/state && cp /app/keys/node.identity /app/state/node.identity"
 for i in range(1, n + 1):
     volumes = [
         f"{inputs}/node{i}.identity:/app/keys/node.identity:ro",
-        f"{inputs}/peerlist.json:/app/demos_peerlist.json:ro",
+        f"{inputs}/peerlist.json:{peerlist_mount}:ro",
         f"{inputs}/genesis.json:/app/data/genesis.json:ro",
         f"{inputs}/empty-snapshot:/app/data/snapshot:ro",
         f"{devnet}/l2ps:/app/data/l2ps:ro",
@@ -128,18 +152,43 @@ for i in range(1, n + 1):
     if a.src:
         # Same overlay as consensus-race's docker-compose.src.yml
         volumes += [f"{a.src}/src:/app/src:ro", f"{a.src}/bunfig.toml:/app/bunfig.toml:ro"]
-    services[f"node-{i}"] = {
-        "image": a.image,
+    if a.start == "image":
+        # The image's ENTRYPOINT and CMD, unchanged, after the copies the
+        # drill needs. Setting `entrypoint` in compose drops the image's CMD,
+        # so both are written out; `exec "$@"` runs them as `docker run`
+        # would: ENTRYPOINT first, CMD as its arguments. The tmpfs is owned
+        # by the image user (see node_tmpfs_specs). No stdin redirect: a
+        # container started without -i has /dev/null as stdin already.
+        start = {
+            "entrypoint": [
+                "/bin/sh",
+                "-c",
+                f"{copy_identity} && cp /app/keys/demos_peerlist.json /app/state/demos_peerlist.json "
+                '&& exec "$@"',
+                "sh",
+                *image_entrypoint,
+            ],
+            "command": image_cmd,
+        }
+        # run-devnet maps its PORT variable to the node's RPC_PORT; the image
+        # reads RPC_PORT (and its HEALTHCHECK probes it)
+        port_env = {"RPC_PORT": str(port(i))}
+    else:
         # The identity is copied into a tmpfs state dir (owned by the image
         # user, see node_tmpfs_specs) so the identity lock and signing record
         # stay inside the container. A readable stdin keeps the node from
         # exiting at boot.
-        "entrypoint": [
-            "bash",
-            "-lc",
-            "mkdir -p /app/state && cp /app/keys/node.identity /app/state/node.identity "
-            "&& exec ./testing/devnet/run-devnet < /dev/null",
-        ],
+        start = {
+            "entrypoint": [
+                "bash",
+                "-lc",
+                f"{copy_identity} && exec ./testing/devnet/run-devnet < /dev/null",
+            ],
+        }
+        port_env = {"PORT": str(port(i))}
+    services[f"node-{i}"] = {
+        "image": a.image,
+        **start,
         "mem_limit": a.node_mem,
         "memswap_limit": a.node_mem,
         # A node that cannot pair with the anchor at a cold boot exits with
@@ -152,7 +201,7 @@ for i in range(1, n + 1):
         "environment": {
             **node_env,
             "PG_DATABASE": f"node{i}_db",
-            "PORT": str(port(i)),
+            **port_env,
             "OMNI_PORT": str(port(i) + 1),
             "EXPOSED_URL": f"http://node-{i}:{port(i)}",
         },

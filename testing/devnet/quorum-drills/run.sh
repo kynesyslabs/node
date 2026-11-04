@@ -86,6 +86,13 @@ case "${SCENARIO}" in
     partition) N=6; SHARD=4; START=6 ;;
     *) usage >&2; exit 2 ;;
 esac
+# The halt and ride drills always run with gossip on, whatever the environment
+# says. With it off a restarted node never learns that the network is ahead:
+# a height claim above its own chain is refused unless it comes as a gossip
+# claim (Sync.ts:129-136, networkAheadVeto.ts:59), so the recovery result
+# would measure that and not the halt. The other scenarios keep the harness
+# default (off; GOSSIP_ENABLED=true in the environment turns it on).
+case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) export GOSSIP_ENABLED=true ;; esac
 case "${BINDING}" in on|off) ;; *) echo "--binding must be on or off" >&2; exit 2 ;; esac
 if [[ ! "${LABEL}" =~ ^[A-Za-z0-9_-]+$ ]]; then
     echo "label must match [A-Za-z0-9_-]+" >&2; exit 2
@@ -177,9 +184,54 @@ IMAGE_UID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE
 IMAGE_GID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE}" -g 2>/dev/null)
 [[ "${IMAGE_UID}" =~ ^[0-9]+$ && "${IMAGE_GID}" =~ ^[0-9]+$ ]] ||
     abort_pre "could not read the user of ${IMAGE} (id -u '${IMAGE_UID}', id -g '${IMAGE_GID}')"
+
+# How a node starts, decided by looking in the image. A devnet-style image
+# (testing/devnet/Dockerfile) carries testing/devnet/run-devnet and the nodes
+# exec it. A release image (root Dockerfile) copies only src/ scripts/ data/
+# sdk/ libs/ sidecar/ (Dockerfile:47-53), so it has no run-devnet and the nodes
+# run its own ENTRYPOINT and CMD, as mainnet does.
+docker run --rm --network none --memory 64m --entrypoint sh "${IMAGE}" -c '[ -e ./testing/devnet/run-devnet ]' >/dev/null 2>&1
+case $? in
+    0) START_PATH=run-devnet ;;
+    1) START_PATH=image ;;
+    *) abort_pre "could not look for ./testing/devnet/run-devnet in ${IMAGE}: docker run failed (no sh in the image?)" ;;
+esac
+IMAGE_ENTRYPOINT=$(docker image inspect "${IMAGE}" --format '{{json .Config.Entrypoint}}')
+IMAGE_CMD=$(docker image inspect "${IMAGE}" --format '{{json .Config.Cmd}}')
+# What the node service execs, each of which must exist and be executable for
+# the image's user (the one `docker run` uses by default, as the node does).
+# run-devnet path: bash -lc ... exec run-devnet, which starts bun. Image path:
+# /bin/sh -c 'cp ... && exec "$@"' with the image's entrypoint then its CMD.
+if [ "${START_PATH}" = image ]; then
+    EXEC_NEEDED=(sh cp)
+    while IFS= read -r p; do [ -n "${p}" ] && EXEC_NEEDED+=("${p}"); done < <(
+        { jq -r '.[0] // empty' <<< "${IMAGE_ENTRYPOINT}"; jq -r '.[0] // empty' <<< "${IMAGE_CMD}"; } 2>/dev/null)
+else
+    EXEC_NEEDED=(bash cp ./testing/devnet/run-devnet bun)
+fi
+exec_fail=$(docker run --rm --network none --memory 64m --entrypoint sh "${IMAGE}" -c '
+    for p in "$@"; do
+        case "${p}" in
+            */*) [ -f "${p}" ] && [ -x "${p}" ] || { echo "${p} is missing or not executable for uid $(id -u) in $(pwd)"; exit 1; } ;;
+            *) command -v "${p}" >/dev/null 2>&1 || { echo "${p} is not on PATH (${PATH})"; exit 1; } ;;
+        esac
+    done' sh "${EXEC_NEEDED[@]}" 2>&1) ||
+    abort_pre "the ${START_PATH} start path of ${IMAGE} cannot run: ${exec_fail:-docker run failed} (needs: ${EXEC_NEEDED[*]})"
+# Gossip starts the sidecar with `node sidecar/dist/gossip-sidecar.mjs` from
+# the node's working directory (GossipManager.ts:129-136, 187). The node
+# process starts it itself, so the start path does not matter; what does is a
+# real Node.js in the image (a devnet-style image has Bun's wrapper) and the
+# bundle (Dockerfile:57, 203-218).
+if [ "${GOSSIP_ENABLED:-false}" = true ]; then
+    gossip_fail=$(docker run --rm --network none --memory 64m --entrypoint sh "${IMAGE}" -c '
+        [ -f sidecar/dist/gossip-sidecar.mjs ] || { echo "sidecar/dist/gossip-sidecar.mjs is not in the image"; exit 1; }
+        node -e "process.exit(process.versions.bun || parseInt(process.versions.node) < 20 ? 1 : 0)" ||
+            { echo "node on PATH is not a real Node.js >= 20 ($(node --version 2>&1))"; exit 1; }' 2>&1) ||
+        abort_pre "gossip is on for ${SCENARIO} but the sidecar cannot start in ${IMAGE}: ${gossip_fail:-docker run failed}"
+fi
 CODE="image"
 [ -n "${SRC_TREE}" ] && CODE="src:$(basename "${SRC_TREE}")@$(git -C "${SRC_TREE}" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "${SRC_TREE}" diff --quiet HEAD -- src 2>/dev/null || echo '+dirty')"
-say "scenario=${SCENARIO} N=${N} shardSize=${SHARD} q=${Q} binding=${BINDING} image=${IMAGE} (${IMAGE_ID:7:12}) code=${CODE}"
+say "scenario=${SCENARIO} N=${N} shardSize=${SHARD} q=${Q} binding=${BINDING} image=${IMAGE} (${IMAGE_ID:7:12}) code=${CODE} start=${START_PATH} gossip=${GOSSIP_ENABLED:-false}"
 
 # ── 2. inputs ───────────────────────────────────────────────────────────
 step 02-inputs
@@ -192,7 +244,8 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
     done
     python3 "${HERE}/gen-inputs.py" --run-dir "${RUN_DIR}" --repo "${REPO_ROOT}" \
         --nodes "${N}" --shard-size "${SHARD}" --binding "${BINDING}" --genesis-ts "${GENESIS_TS}" \
-        --image "${IMAGE}" --uid "${IMAGE_UID}" --gid "${IMAGE_GID}" --src "${SRC_TREE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}"
+        --image "${IMAGE}" --uid "${IMAGE_UID}" --gid "${IMAGE_GID}" --src "${SRC_TREE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}" \
+        --start "${START_PATH}" --image-entrypoint "${IMAGE_ENTRYPOINT}" --image-cmd "${IMAGE_CMD}"
     # Once, after everything is written, so the modes do not depend on the umask.
     # 644 files in a 755 inputs/ under the 0700 ${RUN_DIR}: the node runs as the
     # image's user (uid 1000), not the host user, and these are throwaway devnet
@@ -224,6 +277,25 @@ probe_fail=$(docker run --rm --network none --memory 64m --entrypoint sh \
             { echo "cannot write and read ${d}/probe: ${err} (dir is $(stat -c "%u:%g mode %a" "${d}" 2>&1))"; exit 1; }
     done' sh "${tmpfs_paths[@]}" 2>&1) ||
     abort_pre "image user (uid ${IMAGE_UID} gid ${IMAGE_GID}) of ${IMAGE}: ${probe_fail:-docker run failed}; node tmpfs options: ${NODE_TMPFS[*]}; inputs in ${RUN_DIR}/inputs, host uid $(id -u), mode $(stat -c %a "${RUN_DIR}/inputs/node1.identity")"
+# Image path: run node-1's generated entrypoint (the copies, then the image's
+# own entrypoint script) once with the node's mounts and tmpfs, with a check
+# in place of the CMD. It fails here, in seconds, if the image's entrypoint
+# would abort before the node starts (its bridging of /app/demos_peerlist.json
+# and the identity record runs under `set -e`) or leaves the node without its
+# identity or peerlist.
+if [ "${START_PATH}" = image ]; then
+    mapfile -t NODE1_ENTRYPOINT < <(jq -r '.services["node-1"].entrypoint[]' "${RUN_DIR}/compose.yml")
+    dry_fail=$(docker run --rm --network none --memory 256m --entrypoint "${NODE1_ENTRYPOINT[0]}" \
+        -e IDENTITY_FILE=/app/state/node.identity \
+        -v "${RUN_DIR}/inputs/node1.identity:/app/keys/node.identity:ro" \
+        -v "${RUN_DIR}/inputs/peerlist.json:/app/keys/demos_peerlist.json:ro" \
+        "${tmpfs_args[@]}" "${IMAGE}" "${NODE1_ENTRYPOINT[@]:1}" sh -c '
+        [ -s /app/state/node.identity ] || { echo "no identity in /app/state"; exit 1; }
+        [ -s /app/demos_peerlist.json ] || { echo "/app/demos_peerlist.json does not reach the copied peerlist"; exit 1; }
+        echo "entrypoint ok as uid $(id -u) in $(pwd)"' 2>&1) ||
+        abort_pre "the image's entrypoint does not reach the node with the drill's mounts: ${dry_fail:-docker run failed} (entrypoint: ${NODE1_ENTRYPOINT[*]})"
+    say "start path: ${dry_fail}"
+fi
 declare -a PUB UP
 for i in $(seq 1 "${N}"); do PUB[i]=$(tr 'A-Z' 'a-z' < "${RUN_DIR}/inputs/pub${i}"); UP[i]=0; done
 say "inputs ready (genesis in ${GENESIS_DELAY}s)"
