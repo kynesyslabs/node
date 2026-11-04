@@ -18,13 +18,21 @@ const refuses = (value: unknown, jsonb: boolean): boolean => {
 
 /** What Postgres would refuse in a row of `name`, by column type. */
 function postgresRefusal(name: string, row: Record<string, unknown>): string | null {
-    const columns: Record<string, Record<string, "text" | "jsonb" | "int4">> = {
-        Blocks: { proposer: "text", next_proposer: "text", status: "text", hash: "text", attrs: "jsonb" },
-        L2PSHash: { l2ps_uid: "text", hash: "text", transaction_count: "int4" },
+    // "key": indexed text, whose b-tree entry Postgres caps at 2704 bytes
+    // (text that does not compress, as here, keeps about its length).
+    const columns: Record<string, Record<string, "text" | "key" | "jsonb" | "int4">> = {
+        Blocks: { proposer: "text", next_proposer: "text", status: "text", hash: "key", attrs: "jsonb" },
+        L2PSHash: { l2ps_uid: "key", hash: "text", transaction_count: "int4" },
+        Transactions: { hash: "key", from_ed25519_address: "key", to: "key" },
     }
+    const tooLong = (value: unknown) => typeof value === "string" && Buffer.byteLength(value) > 2704
     for (const [column, type] of Object.entries(columns[name] ?? {})) {
         const value = row[column]
-        if (type === "int4" ? !Number.isInteger(Number(value)) : refuses(value, type === "jsonb")) {
+        if (
+            type === "int4"
+                ? !Number.isInteger(Number(value))
+                : refuses(value, type === "jsonb") || (type === "key" && tooLong(value))
+        ) {
             return `${name}.${column}`
         }
     }
@@ -200,6 +208,7 @@ describe("the l2ps_hashes row of a failed l2ps_hash_update", () => {
         ["U+0000 in the uid", { l2ps_uid: "net\u0000" }],
         ["U+0000 in the hash", { consolidated_hash: "0x\u0000" }],
         ["a count that is not an integer", { transaction_count: 1.5 }],
+        ["a uid too long for its primary key", { l2ps_uid: Array.from({ length: 3000 }, (_, i) => String.fromCharCode(0x21 + ((i * 7919) % 89))).join("") }],
     ] as const) {
         it(`is skipped, not failing the block: ${name}`, async () => {
             await insertBlock(block(), [hashUpdate(payload)])

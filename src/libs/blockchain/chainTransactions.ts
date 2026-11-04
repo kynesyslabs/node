@@ -13,7 +13,9 @@ import { txMap as consensusTxMap } from "../consensus/v2/PoRBFT"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import {
+    INDEX_KEY_MAX_BYTES,
     NUL_NOT_STORABLE,
+    fitsIndexKey,
     isTextStorable,
 } from "./validation/postgresStorable"
 
@@ -58,6 +60,10 @@ export function l2psHashRowRefusal(payload: L2PSHashUpdatePayload): string | nul
         const value: unknown = payload[column]
         if (typeof value !== "string") return `${column} is not a string`
         if (!isTextStorable(value)) return `${column} ${NUL_NOT_STORABLE}`
+    }
+    // The primary key of the row: a b-tree entry.
+    if (!fitsIndexKey(payload.l2ps_uid)) {
+        return `l2ps_uid is longer than ${INDEX_KEY_MAX_BYTES} bytes`
     }
     if (!isInt4(payload.transaction_count)) {
         return "transaction_count is not a 32-bit integer"
