@@ -37,7 +37,7 @@ function writeGenesis(data: unknown): string {
 }
 
 function launchGenesis(): Record<string, any> {
-    return { ...JSON.parse(readFileSync("data/genesis.json", "utf8")), timestamp: 1793318400 }
+    return JSON.parse(readFileSync("testing/genesis/fixtures/block0-genesis.json", "utf8"))
 }
 
 describe("genesis-hash tool", () => {
@@ -55,6 +55,15 @@ describe("genesis-hash tool", () => {
         const values = genesisValues(readGenesisFile(file))
         expect(values.genesisBlockHash).toBe(await nodeBlockZeroHash(file))
         expect(values.genesisBlockHash).not.toBe(genesisValues(launchGenesis()).genesisBlockHash)
+    })
+
+    it("reads a genesis file holding its JSON as a string, as the node does", () => {
+        const plain = writeGenesis(launchGenesis())
+        const encoded = writeGenesis(JSON.stringify(launchGenesis()))
+        expect(readGenesisFile(encoded)).toEqual(readGenesisFile(plain))
+        expect(genesisValues(readGenesisFile(encoded)).genesisBlockHash).toBe(
+            genesisValues(readGenesisFile(plain)).genesisBlockHash,
+        )
     })
 
     it("prints no block hash for a genesis without a fixed timestamp", () => {
