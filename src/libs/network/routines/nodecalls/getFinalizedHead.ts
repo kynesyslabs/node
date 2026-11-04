@@ -1,5 +1,6 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
+import { certificateMessageOf } from "src/libs/consensus/v2/commitLock/domain"
 import { getAheadValidatorPeers } from "src/libs/consensus/v2/routines/networkAheadVeto"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getSharedState } from "src/utilities/sharedState"
@@ -50,14 +51,16 @@ async function isNodeSynced(): Promise<boolean> {
  * node could not read its head. The body keeps `nodeSynced` in every case,
  * because SDK clients read only the body.
  *
- * `signatures` are the block's stored validator signatures, so a client can
- * count them against the committee; genesis is final by configuration and
- * carries a single placeholder entry.
+ * `signatures` are the block's stored validator signatures and
+ * `signedMessage` is the exact text each of them signs (the round's
+ * precommit under commitLock, the bare hash before it), so a client can
+ * verify them, not just count them. `timestamp` is in seconds, the unit
+ * `ageSeconds` is derived in. Genesis is final by configuration and carries
+ * a single placeholder entry.
  */
 export default async function getFinalizedHead(): Promise<RPCResponse> {
     try {
         const block = await Chain.getLastBlock()
-        const nodeSynced = await isNodeSynced()
         if (!block) {
             return {
                 result: 503,
@@ -70,21 +73,24 @@ export default async function getFinalizedHead(): Promise<RPCResponse> {
                     checkedThroughBlock: null,
                     signatureCount: 0,
                     signatures: {},
+                    round: null,
+                    signedMessage: null,
                 },
                 extra: { reason: "node_not_synced" },
                 require_reply: false,
             }
         }
 
-        const stored = block.content?.timestamp as unknown
-        const seconds = toSeconds(stored)
+        const nodeSynced = await isNodeSynced()
+        const seconds = toSeconds(block.content?.timestamp as unknown)
         const signatures = block.validation_data?.signatures ?? {}
+        const round = block.validation_data?.round
         return {
             result: 200,
             response: {
                 number: block.number,
                 hash: block.hash,
-                timestamp: typeof stored === "bigint" ? stored.toString() : (stored ?? null),
+                timestamp: seconds,
                 ageSeconds:
                     seconds === null
                         ? null
@@ -93,6 +99,8 @@ export default async function getFinalizedHead(): Promise<RPCResponse> {
                 checkedThroughBlock: block.number,
                 signatureCount: Object.keys(signatures).length,
                 signatures,
+                round: typeof round === "number" ? round : null,
+                signedMessage: certificateMessageOf(block),
             },
             extra: "",
             require_reply: false,

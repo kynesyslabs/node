@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, jest } from "bun:test"
 const getLastBlock = jest.fn(async () => null as any)
 const getAheadValidatorPeers = jest.fn(async () => [] as unknown[])
 const getNetworkTimestamp = jest.fn(() => 1_800_000_100)
-const sharedState = { syncStatus: true, inSyncLoop: false }
+const sharedState: Record<string, unknown> = { syncStatus: true, inSyncLoop: false }
 
 jest.mock("src/libs/blockchain/chain", () => ({ __esModule: true, default: { getLastBlock } }))
 jest.mock("src/libs/consensus/v2/routines/networkAheadVeto", () => ({ __esModule: true, getAheadValidatorPeers }))
@@ -43,6 +43,7 @@ beforeEach(() => {
     getNetworkTimestamp.mockReturnValue(1_800_000_100)
     sharedState.syncStatus = true
     sharedState.inSyncLoop = false
+    sharedState.forkConfig = undefined
 })
 
 describe("getFinalizedHead", () => {
@@ -58,6 +59,8 @@ describe("getFinalizedHead", () => {
             checkedThroughBlock: 4242,
             signatureCount: 3,
             signatures: SIGNATURES,
+            round: null,
+            signedMessage: "e3b0c442",
         })
     })
 
@@ -104,6 +107,8 @@ describe("getFinalizedHead", () => {
             checkedThroughBlock: null,
             signatureCount: 0,
             signatures: {},
+            round: null,
+            signedMessage: null,
         })
     })
 
@@ -128,7 +133,7 @@ describe("getFinalizedHead", () => {
         expect(reply.result).toBe(200)
         expect(reply.response.number).toBe(0)
         expect(reply.response.checkedThroughBlock).toBe(0)
-        expect(reply.response.timestamp).toBe(1_800_000_040_123)
+        expect(reply.response.timestamp).toBe(1_800_000_040)
         expect(reply.response.ageSeconds).toBe(60)
         expect(reply.response.signatureCount).toBe(1)
     })
@@ -154,12 +159,39 @@ describe("getFinalizedHead", () => {
         expect(reply.response.signatures).toEqual({})
     })
 
-    it("serialises when the stored timestamp is a bigint", async () => {
+    it("reports the timestamp in seconds when the stored value is a bigint", async () => {
         getLastBlock.mockResolvedValue(block({ content: { timestamp: 1_800_000_000n } }))
         const reply = await getFinalizedHead()
-        expect(reply.response.timestamp).toBe("1800000000")
+        expect(reply.response.timestamp).toBe(1_800_000_000)
         expect(reply.response.ageSeconds).toBe(100)
         expect(() => JSON.stringify(reply)).not.toThrow()
         expect(JSON.parse(JSON.stringify(reply)).response.number).toBe(4242)
+    })
+    it("gives the precommit message the certificate signs under commitLock", async () => {
+        sharedState.forkConfig = {
+            commitLock: { activationHeight: 0 },
+            committeeBinding: { activationHeight: 0 },
+        }
+        getLastBlock.mockResolvedValue(block({ validation_data: { signatures: SIGNATURES, round: 2 } }))
+        const reply = await getFinalizedHead()
+        expect(reply.response.round).toBe(2)
+        expect(reply.response.signedMessage).toMatch(/:4242:2:e3b0c442$/)
+        expect(reply.response.signedMessage).not.toBe("e3b0c442")
+    })
+
+    it("gives no signed message under commitLock when the block carries no round", async () => {
+        sharedState.forkConfig = {
+            commitLock: { activationHeight: 0 },
+            committeeBinding: { activationHeight: 0 },
+        }
+        const reply = await getFinalizedHead()
+        expect(reply.response.round).toBeNull()
+        expect(reply.response.signedMessage).toBeNull()
+    })
+
+    it("does not run the network-ahead check when the node holds no block", async () => {
+        getLastBlock.mockResolvedValue(null)
+        await getFinalizedHead()
+        expect(getAheadValidatorPeers).not.toHaveBeenCalled()
     })
 })
