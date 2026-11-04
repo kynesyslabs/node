@@ -204,6 +204,71 @@ export function evaluateRecovery(
     return { pass: reasons.length === 0, reasons }
 }
 
+/**
+ * Wall-clock marks (`Date.now()` values) taken by the drill, null until the
+ * drill reaches that point.
+ */
+export interface DrillMarks {
+    t_up: number | null
+    t_baseline: number | null
+    t_stop: number | null
+    t_halt_confirmed: number | null
+    t_hold_end: number | null
+    t_restart: number | null
+    t_first_new_block: number | null
+    t_converged: number | null
+}
+
+/** Phase durations in ms; null when a mark either side of the phase is missing. */
+export interface PhaseDurations {
+    coldStartToBaselineMs: number | null
+    stopToHaltConfirmedMs: number | null
+    haltHoldMs: number | null
+    restartToFirstNewBlockMs: number | null
+    restartToConvergedMs: number | null
+    /** `t_converged - t_up`. */
+    totalMs: number | null
+}
+
+export function emptyMarks(): DrillMarks {
+    return {
+        t_up: null,
+        t_baseline: null,
+        t_stop: null,
+        t_halt_confirmed: null,
+        t_hold_end: null,
+        t_restart: null,
+        t_first_new_block: null,
+        t_converged: null,
+    }
+}
+
+function between(from: number | null, to: number | null): number | null {
+    if (from === null || to === null) return null
+    return Number.isFinite(from) && Number.isFinite(to) ? to - from : null
+}
+
+/**
+ * Differences between marks. A missing mark gives null for the phases that
+ * use it. Marks are not reordered or clamped: a mark out of order shows up
+ * as a negative duration.
+ */
+export function phaseDurations(marks: DrillMarks): PhaseDurations {
+    return {
+        coldStartToBaselineMs: between(marks.t_up, marks.t_baseline),
+        stopToHaltConfirmedMs: between(marks.t_stop, marks.t_halt_confirmed),
+        haltHoldMs: between(marks.t_halt_confirmed, marks.t_hold_end),
+        restartToFirstNewBlockMs: between(marks.t_restart, marks.t_first_new_block),
+        restartToConvergedMs: between(marks.t_restart, marks.t_converged),
+        totalMs: between(marks.t_up, marks.t_converged),
+    }
+}
+
+/** Milliseconds as seconds with one decimal, "n/a" when missing. */
+export function formatSeconds(ms: number | null): string {
+    return ms === null || !Number.isFinite(ms) ? "n/a" : `${(ms / 1000).toFixed(1)}s`
+}
+
 /** Restart counts must not change while a container is meant to stay up. */
 export function evaluateNoCrash(
     before: Record<number, number>,
