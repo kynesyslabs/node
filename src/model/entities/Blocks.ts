@@ -27,8 +27,13 @@ export class Blocks {
     @Column("varchar", { name: "next_proposer" })
     next_proposer: string
 
+    // round is the commitLock round the signatures were cast in; blocks
+    // stored before the fork carry none.
     @Column("json", { name: "validation_data" })
-    validation_data: NonNullable<{ signatures: { [signer: string]: string } }>
+    validation_data: NonNullable<{
+        signatures: { [signer: string]: string }
+        round?: number
+    }>
 
     @Column("jsonb", { name: "attrs", nullable: true })
     attrs: Record<string, any> | null
