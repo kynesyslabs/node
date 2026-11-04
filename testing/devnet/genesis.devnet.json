@@ -24,6 +24,15 @@
     },
     "editBinding": {
       "activationHeight": 0
+    },
+    "quorumParity": {
+      "activationHeight": 0
+    },
+    "committeeBinding": {
+      "activationHeight": 0
+    },
+    "commitLock": {
+      "activationHeight": 0
     }
   },
   "balances": [

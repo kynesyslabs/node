@@ -7,6 +7,12 @@ import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Mempool from "@/libs/blockchain/mempool"
 import { countBlockHashMismatch } from "@/features/metrics/consensusMetrics"
+import {
+    COMMITTED_HEIGHT_RESULT,
+    type CommittedReport,
+    readCommittedRefusal,
+} from "./committedBlock"
+import { commitLockActive, voteMessageOf } from "../commitLock/domain"
 
 /**
  * Per-peer vote outcome. The `signaturesToMerge` map carries every
@@ -20,6 +26,8 @@ interface PeerVoteOutcome {
     vote: "pro" | "con"
     signaturesToMerge: Record<string, string>
     rejectionReason?: string
+    /** Hash the peer reports it already committed at our height. */
+    committedHash?: string
 }
 
 /**
@@ -36,6 +44,7 @@ async function verifyIncomingSignatures(
     incoming: Record<string, string>,
     candidateBlockHash: string,
     peerId: string,
+    signedMessage: string = candidateBlockHash,
 ): Promise<Record<string, string>> {
     const entries = Object.entries(incoming)
     const checks = await Promise.all(
@@ -43,7 +52,7 @@ async function verifyIncomingSignatures(
             try {
                 const isValid = await TxValidatorPool.getInstance().verify({
                     algorithm: getSharedState.signingAlgorithm,
-                    message: new TextEncoder().encode(candidateBlockHash),
+                    message: new TextEncoder().encode(signedMessage),
                     signature: hexToUint8Array(signature),
                     publicKey: hexToUint8Array(identity),
                 })
@@ -88,6 +97,16 @@ async function verifyIncomingSignatures(
 }
 
 /**
+ * The block number travels after the first three params so receivers that
+ * predate it read those unchanged; a receiver that has the height answers
+ * with its committed block instead of a vote. Under commitLock the round of
+ * the prevotes follows it.
+ */
+type ProposeParams =
+    | [string, Block["validation_data"], string, number]
+    | [string, Block["validation_data"], string, number, number]
+
+/**
  * Per-peer flow: call the peer's `proposeBlockHash`, classify the
  * response as pro/con, and (on pro) collect the signatures the peer
  * attached. Never throws — a network failure becomes a `con` vote
@@ -96,7 +115,7 @@ async function verifyIncomingSignatures(
 async function proposeAndCollect(
     peer: Peer,
     block: Block,
-    proposeParams: [string, Block["validation_data"], string],
+    proposeParams: ProposeParams,
 ): Promise<PeerVoteOutcome> {
     const peerId = peer.identity
     let response: RPCResponse
@@ -113,7 +132,7 @@ async function proposeAndCollect(
             },
             true,
             {
-                allowedCodes: [401, 409],
+                allowedCodes: [401, 409, COMMITTED_HEIGHT_RESULT],
             },
         )
     } catch (e) {
@@ -126,6 +145,20 @@ async function proposeAndCollect(
             vote: "con",
             signaturesToMerge: {},
             rejectionReason: `longCall threw: ${msg}`,
+        }
+    }
+
+    const committedHash = readCommittedRefusal(response, block.number)
+    if (committedHash !== null) {
+        log.warning(
+            `[broadcastBlockHash] ${peerId} already committed block ${block.number} as ${committedHash}`,
+        )
+        return {
+            peerId,
+            vote: "con",
+            signaturesToMerge: {},
+            rejectionReason: "height already committed",
+            committedHash,
         }
     }
 
@@ -281,6 +314,7 @@ async function proposeAndCollect(
         incomingSignatures,
         block.hash,
         peerId,
+        voteMessageOf(block) ?? block.hash,
     )
 
     // PR #888 Greptile P1 (continued): a peer's signature on our
@@ -352,7 +386,7 @@ async function proposeAndCollect(
 export async function broadcastBlockHash(
     block: Block,
     shard: Peer[],
-): Promise<[number, number]> {
+): Promise<[number, number, CommittedReport[]]> {
     const ourId = getSharedState.publicKeyHex
 
     log.debug(
@@ -374,11 +408,23 @@ export async function broadcastBlockHash(
     // same `validation_data` snapshot. Receivers still verify and
     // merge what they get; the freeze only affects what we ship.
     const validationDataSnapshot = structuredClone(block.validation_data)
-    const proposeParams: [string, Block["validation_data"], string] = [
+    let proposeParams: ProposeParams = [
         block.hash,
         validationDataSnapshot,
         ourId,
+        block.number,
     ]
+    if (commitLockActive(block.number)) {
+        // A candidate under the fork without a round has no prevote anyone
+        // could verify: nothing to propose.
+        if (voteMessageOf(block) === null) {
+            log.error(
+                `[broadcastBlockHash] Candidate ${block.hash} carries no round; not proposing it`,
+            )
+            return [0, shard.length, []]
+        }
+        proposeParams = [...proposeParams, block.validation_data.round]
+    }
 
     const outcomes = await Promise.all(
         shard.map(peer => proposeAndCollect(peer, block, proposeParams)),
@@ -386,6 +432,7 @@ export async function broadcastBlockHash(
 
     let pro = 0
     let con = 0
+    const committed: CommittedReport[] = []
 
     // Serial merge: each `Object.assign` operation against the
     // shared `signatures` map is atomic, but we want a single
@@ -409,6 +456,11 @@ export async function broadcastBlockHash(
         }
     }
 
+    shard.forEach((peer, i) => {
+        const hash = outcomes[i].committedHash
+        if (hash) committed.push({ peer, hash })
+    })
+
     log.info(
         `[broadcastBlockHash] Vote tally for block ${block.hash}: ` +
             `pro=${pro}, con=${con} (shard size=${shard.length})`,
@@ -418,5 +470,5 @@ export async function broadcastBlockHash(
     // failures (pre-existing follow-up, unrelated to the vote-race
     // fix).
 
-    return [pro, con]
+    return [pro, con, committed]
 }

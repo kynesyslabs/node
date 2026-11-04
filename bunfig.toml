@@ -1,6 +1,11 @@
 # Bun configuration for Demos Network Node
 # Docs: https://bun.sh/docs/runtime/bunfig
 
+preload = ["./src/preload/protobufGlobal.ts"]
+
 [install]
 # Faster installs, consistent lockfile
 exact = true
+
+[test]
+preload = ["./src/preload/protobufGlobal.ts"]

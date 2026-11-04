@@ -24,6 +24,7 @@ import * as blockOps from "./chainBlocks"
 import * as txOps from "./chainTransactions"
 import * as genesisOps from "./chainGenesis"
 import type { TxStatus } from "./chainTypes"
+import type { PendingGCRWrite } from "./gcr/handleGCR"
 
 export type { TxStatus } from "./chainTypes"
 
@@ -150,8 +151,9 @@ export default class Chain {
         block: Block,
         blockTxs: Transaction[],
         position?: number,
+        pendingGCR?: PendingGCRWrite,
     ): Promise<Blocks> {
-        return blockOps.insertBlock(block, blockTxs, position)
+        return blockOps.insertBlock(block, blockTxs, position, pendingGCR)
     }
 
     static async insertTransaction(transaction: Transaction): Promise<boolean> {
@@ -163,7 +165,10 @@ export default class Chain {
     }
 
     // ── Genesis ───────────────────────────────────────────────
-    static async generateGenesisBlock(genesisData: any): Promise<Block> {
-        return genesisOps.generateGenesisBlock(genesisData)
+    static async generateGenesisBlock(
+        genesisData: any,
+        checkHash?: (hash: string) => void,
+    ): Promise<Block> {
+        return genesisOps.generateGenesisBlock(genesisData, checkHash)
     }
 }

@@ -30,7 +30,7 @@
 node_modules
 
 # Runtime state — must NOT enter the image
-.demos_identity
+.demos_identity*
 demos_peerlist.json
 demos_peerlist.json.example
 # data/ contains bundled bootstrap (genesis.json, evmChains, l2ps) that the

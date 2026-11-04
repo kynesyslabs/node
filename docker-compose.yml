@@ -46,7 +46,9 @@ services:
   # Internal-only by default. Uncomment the ports stanza below to expose to host.
   # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:16-alpine
+    # Tag plus multi-arch index digest: the tag moves with every 16.x and
+    # Alpine rebuild, so two hosts could otherwise run different servers.
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     container_name: demos-postgres${INSTANCE_SUFFIX:-}
     restart: unless-stopped
     environment:
@@ -118,11 +120,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # Build-time provenance. Compose interpolates these from the
-      # host's git + shell at `docker compose build` time. The wrapper
-      # script `./scripts/docker-run` (and CI) export them; manual
-      # invocations also work because every variable has a sensible
-      # `:-` default so an unset host falls back gracefully.
+      # Build-time provenance, interpolated from the host shell. The
+      # image refuses to build without the real commit, so a local build
+      # goes through `./run --docker` (which exports these from git) or
+      # `GIT_COMMIT=$(git rev-parse HEAD) docker compose build node`.
+      # GIT_COMMIT keeps an empty default instead of `:?`: a required
+      # variable would make compose refuse every command, including
+      # `pull`, `logs` and `down` on hosts that run a released image.
       args:
         GIT_COMMIT: ${GIT_COMMIT:-}
         GIT_BRANCH: ${GIT_BRANCH:-}
@@ -172,6 +176,15 @@ services:
       PG_USER: ${PG_USER:-demosuser}
       PG_PASSWORD: ${PG_PASSWORD:-demospassword}
       PG_DATABASE: ${PG_DATABASE:-demos}
+      # Genesis pin. A production node refuses to start without it unless
+      # DEMOS_ALLOW_UNPINNED_GENESIS=true. Mainnet mounts its genesis file and
+      # snapshot read-only and points DEMOS_SNAPSHOT_DIR at the snapshot; see
+      # docs/design/genesis-enforcement.md.
+      EXPECTED_GENESIS_HASH: ${EXPECTED_GENESIS_HASH:-}
+      EXPECTED_GENESIS_BLOCK_HASH: ${EXPECTED_GENESIS_BLOCK_HASH:-}
+      DEMOS_ALLOW_UNPINNED_GENESIS: ${DEMOS_ALLOW_UNPINNED_GENESIS:-}
+      DEMOS_SNAPSHOT_DIR: ${DEMOS_SNAPSHOT_DIR:-}
+      DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST: ${DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST:-}
       # Identity & peers — entrypoint symlinks these into /app/state on boot
       IDENTITY_FILE: ${IDENTITY_FILE:-.demos_identity}
       PEER_LIST_FILE: ${PEER_LIST_FILE:-demos_peerlist.json}

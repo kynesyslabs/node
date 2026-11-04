@@ -93,6 +93,39 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(problems).toEqual([])
     })
 
+    it("package.json packageManager, when set, names the Bun in .bun-version", () => {
+        const pkg = JSON.parse(read("package.json"))
+        if (pkg.packageManager === undefined) return
+        const wanted = read(".bun-version").trim()
+        expect(pkg.packageManager).toBe(`bun@${wanted}`)
+    })
+
+    it("bunfig preloads the protobuf global for the node and for bun test", () => {
+        // Without it a start-up that loads tronweb can exit on
+        // "proto is not defined", depending on Bun's module evaluation order.
+        const preload = /preload\s*=\s*\[[^\]]*"\.\/src\/preload\/protobufGlobal\.ts"/
+        const [runtime, ...sections] = read("bunfig.toml").split(/^\[/m)
+        const test = sections.find(s => s.startsWith("test]")) ?? ""
+        expect({ runtime: preload.test(runtime), test: preload.test(test) }).toEqual({
+            runtime: true,
+            test: true,
+        })
+    })
+
+    it("the bun npm package is not a dependency", () => {
+        // It ships its own Bun binary into node_modules/.bin, a second
+        // version next to the pinned runtime; `import ... from "bun"` is the
+        // runtime's built-in module and its types come from @types/bun.
+        const pkg = JSON.parse(read("package.json"))
+        const declaredIn = [
+            "dependencies",
+            "devDependencies",
+            "optionalDependencies",
+            "peerDependencies",
+        ].filter(field => pkg[field]?.bun !== undefined)
+        expect(declaredIn).toEqual([])
+    })
+
     it("every CI setup-bun step pins bun-version or bun-version-file", () => {
         const unpinned: string[] = []
         for (const file of tracked(".github/workflows/*.yml")) {
@@ -147,6 +180,27 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(undigested).toEqual([]) // tags like :1.3-debian or :1-slim are mutable
     })
 
+    it("the compose Postgres image is pinned by tag and @sha256 digest", () => {
+        const files = [
+            "docker-compose.yml",
+            "testing/devnet/docker-compose.yml",
+            "testing/multinode/docker-compose.companion.yml",
+            "postgres/docker-compose.yml",
+        ]
+        const images = files.flatMap(file =>
+            [...read(file).matchAll(/^\s*image:\s*(postgres\S*)/gm)].map(
+                m => `${file}: ${m[1]}`,
+            ),
+        )
+        expect(images).toHaveLength(files.length)
+        const undigested = images.filter(
+            i => !/postgres:16-alpine@sha256:[0-9a-f]{64}$/.test(i),
+        )
+        expect(undigested).toEqual([])
+        // one digest everywhere, so devnet tests the server validators run
+        expect(new Set(images.map(i => i.split("@")[1])).size).toBe(1)
+    })
+
     it("no install path runs a blanket `bun pm trust --all`", () => {
         const scripts = tracked("scripts/**").concat(tracked("run"))
         const blanket = offendingLines(
@@ -176,11 +230,92 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
         expect(code).not.toMatch(/allowedSignersFile\s+\.github\/allowed_signers/)
     })
 
+    it("the release workflow refuses a tag that is not v + package.json version", () => {
+        const workflow = read(".github/workflows/release.yml")
+            .split("\n")
+            .filter(line => !line.trim().startsWith("#"))
+            .join("\n")
+        expect(workflow).toMatch(/git show "\$sha:package\.json" \| jq -r \.version/)
+        expect(workflow).toMatch(/\[ "v\$version" = "\$GITHUB_REF_NAME" \]/)
+    })
+
+    it("the release workflow's version check passes a matching tag and fails a mismatched one", () => {
+        const lines = read(".github/workflows/release.yml").split("\n")
+        const start = lines.findIndex(l => /^\s*version=\$\(git show "\$sha:package\.json"/.test(l))
+        const end = lines.findIndex((l, i) => i > start && /exit 1; }\s*$/.test(l))
+        expect(start).toBeGreaterThan(-1)
+        expect(end).toBeGreaterThan(start)
+        // The snippet runs the real jq, as the workflow does; without it every
+        // tag would read as a mismatch, so say so instead.
+        try {
+            execFileSync("jq", ["--version"], { stdio: "pipe" })
+        } catch {
+            throw new Error("jq is required to run the release workflow's version check")
+        }
+        // git is stubbed: the snippet only reads package.json at the tagged commit
+        const script = [
+            "git() { printf '{\"version\":\"1.0.0-rc.5\"}'; }",
+            "sha=abc",
+            ...lines.slice(start, end + 1),
+        ].join("\n")
+        const run = (tag: string) => {
+            try {
+                execFileSync("bash", ["-c", script], {
+                    env: { ...process.env, GITHUB_REF_NAME: tag },
+                    stdio: "pipe",
+                })
+                return "pass"
+            } catch {
+                return "fail"
+            }
+        }
+        expect({ matching: run("v1.0.0-rc.5"), mismatched: run("v1.0.0-rc.4") }).toEqual({
+            matching: "pass",
+            mismatched: "fail",
+        })
+    })
+
+    it("package.json carries a release version, not the pre-release 0.9.x line", () => {
+        const { version } = JSON.parse(read("package.json"))
+        expect(version).toMatch(/^\d+\.\d+\.\d+(-rc\.\d+)?$/)
+        expect(version).not.toMatch(/^0\./)
+    })
+
     it("the launcher answers -h before checking Bun or installing anything", () => {
         const run = read("scripts/run")
         const help = run.indexOf("-h | --help)")
         expect(help).toBeGreaterThan(-1)
         expect(help).toBeLessThan(run.indexOf("\ncheck_bun_version\n"))
         expect(help).toBeLessThan(run.indexOf("bun install --frozen-lockfile"))
+    })
+
+    it("every wstcp install names the same --version", () => {
+        const files = [
+            "Dockerfile",
+            "scripts/install-deps.sh",
+            "src/features/tlsnotary/proxyManager.ts",
+        ]
+        const sites: string[] = []
+        const versions = new Set<string>()
+        for (const file of files) {
+            read(file)
+                .split("\n")
+                .forEach((line, i) => {
+                    const code = line.trim()
+                    if (code.startsWith("#") || code.startsWith("//")) return
+                    if (/cargo\S*\s+install\s+wstcp\b/.test(code)) {
+                        sites.push(`${file}:${i + 1}: ${code}`)
+                    }
+                })
+            for (const m of read(file).matchAll(
+                /WSTCP_VERSION\s*=\s*"?(\d+\.\d+\.\d+)|wstcp --version (\d+\.\d+\.\d+)/g,
+            )) {
+                versions.add(m[1] ?? m[2])
+            }
+        }
+        expect(sites).toHaveLength(files.length)
+        const unpinned = sites.filter(s => !/--version\b/.test(s))
+        expect(unpinned).toEqual([]) // each entry installs whatever crates.io serves today
+        expect([...versions]).toHaveLength(1)
     })
 })

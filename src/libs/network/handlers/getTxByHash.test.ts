@@ -8,8 +8,9 @@ import { beforeEach, describe, expect, it, jest } from "bun:test"
 
 const getTxByHash = jest.fn(async (..._args: unknown[]) => null as any)
 const getLastBlockNumber = jest.fn(async () => 4242)
+const getTransactionHistory = jest.fn(async (..._args: unknown[]) => [] as any[])
 
-jest.mock("../../blockchain/chain", () => ({ __esModule: true, default: { getTxByHash, getLastBlockNumber } }))
+jest.mock("../../blockchain/chain", () => ({ __esModule: true, default: { getTxByHash, getLastBlockNumber, getTransactionHistory } }))
 jest.mock("../routines/nodecalls/getTransactions", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("../routines/nodecalls/getTransactionStatus", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("../routines/nodecalls/getTxsByHashes", () => ({ __esModule: true, default: jest.fn() }))
@@ -82,5 +83,45 @@ describe("getTxByHash", () => {
 
         expect(reply.result).toBe(400)
         expect(reply.response).toBe("No hash specified")
+    })
+})
+
+describe("getTransactionHistory", () => {
+    async function history(data: Record<string, unknown>) {
+        const response: any = { result: 200, response: null, require_reply: false, extra: null }
+        return transactionHandlers.getTransactionHistory(data as any, response)
+    }
+
+    beforeEach(() => getTransactionHistory.mockReset())
+
+    it("caps the page at 100 and defaults to it", async () => {
+        await history({ address: "0xa", type: "all", limit: 1_000_000 })
+        await history({ address: "0xa", type: "all" })
+        expect(getTransactionHistory.mock.calls).toEqual([
+            ["0xa", "all", 0, 100],
+            ["0xa", "all", 0, 100],
+        ])
+    })
+
+    it("passes a smaller page and an offset through", async () => {
+        await history({ address: "0xa", type: "native", start: 20, limit: 10 })
+        expect(getTransactionHistory).toHaveBeenCalledWith("0xa", "native", 20, 10)
+    })
+
+    it("keeps the old meaning of 0 and numeric strings", async () => {
+        await history({ address: "0xa", type: "all", start: "5", limit: "10" })
+        await history({ address: "0xa", type: "all", limit: 0 })
+        expect(getTransactionHistory.mock.calls).toEqual([
+            ["0xa", "all", 5, 10],
+            ["0xa", "all", 0, 100],
+        ])
+    })
+
+    it("refuses a negative, fractional or non-numeric start or limit", async () => {
+        for (const bad of [{ start: -1 }, { limit: -1 }, { limit: 2.5 }, { start: "-5" }, { limit: "all" }]) {
+            const reply = await history({ address: "0xa", type: "all", ...bad })
+            expect(reply.result).toBe(400)
+        }
+        expect(getTransactionHistory).not.toHaveBeenCalled()
     })
 })

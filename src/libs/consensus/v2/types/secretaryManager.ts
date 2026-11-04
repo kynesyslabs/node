@@ -2,7 +2,10 @@ import { ValidationPhase, emptyValidationPhase } from "./validationStatusTypes"
 import { Shard } from "./shardTypes"
 import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
-import getShard from "../routines/getShard"
+import getShard, {
+    getBoundCommittee,
+    getCommitteeFloor,
+} from "../routines/getShard"
 import Chain from "src/libs/blockchain/chain"
 import _ from "lodash"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
@@ -13,7 +16,9 @@ import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import { getCommitteeFloor } from "../routines/getShard"
+import { checkCosignTimestamp } from "../routines/cosignTimestamp"
+import { isForkActive } from "@/forks/forkGates"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import { debugAssertionsEnabled } from "@/libs/debug/nonceTrace"
 import {
     computeMergedPeerlist,
@@ -23,6 +28,10 @@ import {
 
 /** The phase whose greenlight carries the secretary's merged peerlist. */
 export const PEERLIST_PHASE = 3
+// How long a round waits for the head of the draw to report our tip before
+// passing it over: long enough for a status report in flight, short against
+// the block time.
+export const HEAD_ALIGN_WAIT_MS = 2000
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
@@ -66,6 +75,9 @@ export default class SecretaryManager {
 
     // Internal variables
     public shard: Shard
+    // The committeeBinding committee for this round, drawn once so the vote
+    // tally and the pre-commit check cannot see a later redraw. Null pre-fork.
+    public boundCommittee: string[] | null = null
     public get secretary() {
         return (
             this.shard.members.find(
@@ -79,6 +91,10 @@ export default class SecretaryManager {
     public runSecretaryRoutine = false
     public blockTimestamp: number = null
     public unresponsiveMembers = new Set<string>()
+    // Members behind our tip at the start of the round. Only the secretary's
+    // wait reads it; the vote still goes to them, in case their report was
+    // only in flight.
+    public behindMembers = new Set<string>()
     public ended = false
     /** The peerlist committed in this round's block, dictated by the secretary. */
     public mergedPeerlist: string[] | null = null
@@ -90,7 +106,7 @@ export default class SecretaryManager {
         if (!this.mergedPeerlist) {
             this.mergedPeerlist = await computeMergedPeerlist(
                 this.shard.blockRef,
-                this.shard.members.map(m => m.identity),
+                this.peerlistVoters(),
             )
             log.only(
                 `[SECRETARY ROUTINE] Merged peerlist for block ${this.shard.blockRef}: ${this.mergedPeerlist.length} validators`,
@@ -99,12 +115,22 @@ export default class SecretaryManager {
         return this.mergedPeerlist
     }
 
+    /**
+     * Whose observations count towards the merged peerlist. Under
+     * committeeBinding the bound committee, the same list on every node; the
+     * live shard is each node's own view and would give each a different
+     * quorum.
+     */
+    private peerlistVoters(): string[] {
+        return this.boundCommittee ?? this.shard.members.map(m => m.identity)
+    }
+
     /** Member only: adopts the secretary's merged peerlist after checking it. */
     public async receiveMergedPeerlist(peerlist: unknown): Promise<void> {
         const valid = await validateMergedPeerlist(
             this.shard.blockRef,
             peerlist,
-            this.shard.members.map(m => m.identity),
+            this.peerlistVoters(),
         )
         if (!valid) {
             log.error(
@@ -199,13 +225,38 @@ export default class SecretaryManager {
             blockRef: lastBlockNumber + 1,
         }
         this.unresponsiveMembers = new Set<string>()
+        this.behindMembers = new Set<string>()
         this.blockTimestamp = null
         this.mergedPeerlist = null
         this.registerUnderShardBlockRef()
         freezeLocalSyncObservations(this.shard.blockRef)
 
-        // Reusing the method to create the members
-        this.shard.members = await getShard(cVSA)
+        this.boundCommittee = null
+        if (isForkActive("committeeBinding", this.shard.blockRef)) {
+            try {
+                this.boundCommittee = await getBoundCommittee(
+                    lastBlockNumber,
+                    cVSA,
+                )
+            } catch (e) {
+                throw new AbortConsensusError(
+                    `Could not resolve the bound committee for block ${this.shard.blockRef}: ${getErrorMessage(e)}`,
+                )
+            }
+            if (this.boundCommittee.length === 0) {
+                throw new AbortConsensusError(
+                    `No bound committee for block ${this.shard.blockRef}: the chain defines no validator pool at block ${lastBlockNumber}`,
+                )
+            }
+        }
+
+        // The seed's own block, not the shared tip: the two can differ
+        // when a block lands while the round starts.
+        this.shard.members = await getShard(
+            cVSA,
+            lastBlockNumber,
+            this.boundCommittee ?? undefined,
+        )
         // this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
         this.ourKey = getSharedState.publicKeyHex
 
@@ -227,9 +278,7 @@ export default class SecretaryManager {
 
         const validMembers = this.shard.members.filter(
             member =>
-                Boolean(member.connection.string) &&
-                member.sync.block === getSharedState.lastBlockNumber &&
-                member.sync.block_hash === getSharedState.lastBlockHash,
+                Boolean(member.connection.string) && this.holdsOurTip(member),
         )
         if (
             validMembers.length <
@@ -240,9 +289,27 @@ export default class SecretaryManager {
             )
         }
 
-        // The secretary is the first member: the first online pinned
-        // identity, or the head of the deterministic draw when no pin is online
-        this.shard.secretaryKey = this.shard.members[0].identity
+        // The secretary is the first member that holds our tip: the first
+        // online pinned identity, or the head of the deterministic draw. A
+        // member behind the tip has no manager for this block and refuses
+        // every phase, and with the seed unchanged on each retry it would be
+        // drawn again, so the chain would stand until it caught up. The head
+        // gets a short wait first, so a report still in flight does not make
+        // nodes pick different secretaries.
+        const head = this.shard.members[0]
+        const deadline = Date.now() + HEAD_ALIGN_WAIT_MS
+        while (!this.canLead(head) && Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 100))
+        }
+        this.shard.secretaryKey = (
+            this.shard.members.find(m => this.canLead(m)) ?? head
+        ).identity
+        // A member behind our tip cannot reach any phase of this round; the
+        // secretary would otherwise wait out a timeout for it on every block.
+        // One that reports a phase leaves the set again.
+        for (const member of this.shard.members) {
+            if (!this.canLead(member)) this.behindMembers.add(member.identity)
+        }
 
         log.only("\n\n\n")
         log.only("INITIALIZED SHARD:")
@@ -287,6 +354,21 @@ export default class SecretaryManager {
 
         this.ourValidatorPhase = _.cloneDeep(emptyValidationPhase)
         return this.shard.members
+    }
+
+    private holdsOurTip(member: Peer): boolean {
+        return (
+            member.sync?.block === getSharedState.lastBlockNumber &&
+            member.sync?.block_hash === getSharedState.lastBlockHash
+        )
+    }
+
+    /** Ourselves, or a reachable member on our tip. */
+    private canLead(member: Peer): boolean {
+        return (
+            member.identity === this.ourKey ||
+            (Boolean(member.connection.string) && this.holdsOurTip(member))
+        )
     }
 
     // SECTION Methods called by the Secretary only
@@ -500,9 +582,9 @@ export default class SecretaryManager {
         )
 
         const exSecretary = this.secretary.identity
-        this.shard.secretaryKey = this.shard.members.find(
-            m => m.identity !== exSecretary,
-        ).identity
+        const rest = this.shard.members.filter(m => m.identity !== exSecretary)
+        this.shard.secretaryKey = (rest.find(m => this.canLead(m)) ?? rest[0])
+            .identity
         // remove secretary from the list of members
         this.shard.members = this.shard.members.filter(
             m => m.identity !== exSecretary,
@@ -637,6 +719,7 @@ export default class SecretaryManager {
         this.shard.validationPhases[memberKey].phases[theirPhase][1] = true
         this.shard.validationPhases[memberKey].waitStatus = true
         this.unresponsiveMembers.delete(memberKey)
+        this.behindMembers.delete(memberKey)
 
         if (!this.checkIfWeAreSecretary()) {
             log.debug(
@@ -722,7 +805,7 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
-            if (this.unresponsiveMembers.has(pubKey)) {
+            if (this.unresponsiveMembers.has(pubKey) || this.behindMembers.has(pubKey)) {
                 continue
             }
             if (phase.currentPhase !== ourPhase || !phase.waitStatus) {
@@ -875,6 +958,14 @@ export default class SecretaryManager {
         log.debug(`Secretary: ${this.secretary.identity}`)
         log.debug("---- END DIAGNOSTICS ----")
 
+        if (
+            secretaryBlockTimestamp !== undefined &&
+            secretaryBlockTimestamp !== null &&
+            !this.acceptSecretaryTimestamp(secretaryBlockTimestamp, "greenlight")
+        ) {
+            return false
+        }
+
         if (secretaryBlockTimestamp < this.blockTimestamp) {
             log.debug(
                 "Greenlight received for an older block,returning false ...",
@@ -935,6 +1026,23 @@ export default class SecretaryManager {
     }
 
     /**
+     * Whether the secretary's block timestamp is one we would sign. A value we
+     * would refuse at signing is refused here already, so it never becomes the
+     * round's timestamp.
+     */
+    private acceptSecretaryTimestamp(
+        timestamp: unknown,
+        source: "greenlight" | "getBlockTimestamp",
+    ): boolean {
+        const verdict = checkCosignTimestamp(timestamp, getNetworkTimestamp())
+        if (verdict.valid) return true
+        log.error(
+            `[SECRETARY] Refusing the ${source} timestamp from ${this.secretary?.identity} for block ${this.shard?.blockRef}: ${verdict.reason}`,
+        )
+        return false
+    }
+
+    /**
      * Gets the members that are waiting for the green light
      *
      * @returns The list of members that are waiting for the green light
@@ -946,7 +1054,7 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
-            if (this.unresponsiveMembers.has(pubKey)) {
+            if (this.unresponsiveMembers.has(pubKey) || this.behindMembers.has(pubKey)) {
                 continue
             }
             if (phase.currentPhase === ourPhase && phase.waitStatus) {
@@ -1339,7 +1447,11 @@ export default class SecretaryManager {
         const res = await this.secretary.call(request)
 
         if (res.result === 200) {
-            this.blockTimestamp = res.response[0] as number
+            const timestamp = res.response[0]
+            if (!this.acceptSecretaryTimestamp(timestamp, "getBlockTimestamp")) {
+                return null
+            }
+            this.blockTimestamp = timestamp as number
             return this.blockTimestamp
         }
 

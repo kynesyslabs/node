@@ -6,7 +6,13 @@
 #
 # UPGRADE_PATH=1     start the chain with no fork schedule, then add it to the running
 #                    chain's genesis files and restart every node (the real upgrade)
-# UPGRADE_LEAD       blocks between the genesis edit and the height in that mode (default 30)
+# UPGRADE_LEAD       blocks between the genesis edit and the height in that mode (default 60;
+#                    a node refuses a schedule edit at or below its tip + 50)
+# MISMATCH=1|2       instead of the activation scenario, the chain starts with both forks
+#                    at ACTIVATION_HEIGHT and the last 1 or 2 validators then move
+#                    web2ProofBinding to MINORITY_HEIGHT; the scenario is scheduleMismatch.ts
+#                    (default ACTIVATION_HEIGHT 70, so the edit still lies beyond tip + 50)
+# MINORITY_HEIGHT    where the odd validators move web2ProofBinding (default ACTIVATION_HEIGHT + 5)
 # ACTIVATION_HEIGHT  block height both forks are scheduled at from block 0 (default 30)
 # CHAIN_ID           genesis properties.id; the signature preimage binds to it (default 31337)
 # CONSENSUS_TIME     seconds per block (default 10)
@@ -17,6 +23,8 @@
 # NODE_MODULES_FROM  an installed node_modules to layer onto the bun image instead of
 #                    running testing/devnet/Dockerfile (apt + bun install need the network)
 # NODE_MEM / PG_MEM  per-container memory caps (default 4g / 1g)
+# GOSSIP_ENABLED     passed to every node when set; false for an image without the gossip
+#                    sidecar (the NODE_MODULES_FROM image has no Node runtime for it)
 # IMAGE_ONLY=1       build the image and stop
 # KEEP=1             leave the network running afterwards, for debugging
 # RUN_DIR            where genesis copies, logs and raw responses are kept
@@ -34,7 +42,10 @@ PROJECT="forkrehearsal"
 # there is no TLS between containers; TLS terminates at the reverse proxy in front of a real node.
 DEVNET_RPC_SCHEME="${DEVNET_RPC_SCHEME:-http}"
 UPGRADE_PATH="${UPGRADE_PATH:-0}"
-UPGRADE_LEAD="${UPGRADE_LEAD:-30}"
+UPGRADE_LEAD="${UPGRADE_LEAD:-60}"
+MISMATCH="${MISMATCH:-0}"
+[[ "$MISMATCH" =~ ^[012]$ ]] || { echo "MISMATCH must be 0, 1 or 2" >&2; exit 2; }
+[[ "$MISMATCH" == 0 || "$UPGRADE_PATH" != 1 ]] || { echo "MISMATCH and UPGRADE_PATH do not combine" >&2; exit 2; }
 # The tag names the tree the image holds, so a stale image is never reused.
 sha="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo nogit)"
 image_paths=(src package.json bun.lock testing/devnet)
@@ -50,7 +61,9 @@ if [[ -n "$(git -C "$ROOT" status --porcelain -- "${image_paths[@]}" 2>/dev/null
     sha="$sha-dirty-$dirty_hash"
 fi
 IMAGE="${IMAGE:-forkrehearsal-node:$sha}"
-ACTIVATION_HEIGHT="${ACTIVATION_HEIGHT:-30}"
+if [[ "$MISMATCH" != 0 ]]; then ACTIVATION_HEIGHT="${ACTIVATION_HEIGHT:-70}"; else ACTIVATION_HEIGHT="${ACTIVATION_HEIGHT:-30}"; fi
+MINORITY_HEIGHT="${MINORITY_HEIGHT:-$((ACTIVATION_HEIGHT + 5))}"
+[[ "$MISMATCH" == 0 || "$MINORITY_HEIGHT" -gt "$ACTIVATION_HEIGHT" ]] || { echo "MINORITY_HEIGHT must lie above ACTIVATION_HEIGHT, so both sides share the nearest height" >&2; exit 2; }
 CHAIN_ID="${CHAIN_ID:-31337}"
 CONSENSUS_TIME="${CONSENSUS_TIME:-10}"
 PG_PORT="${PG_PORT:-55433}"
@@ -60,8 +73,10 @@ RUN_DIR="${RUN_DIR:-$ROOT/testing/runs/fork-rehearsal-$(date +%Y%m%dT%H%M%S)}"
 DATA="$RUN_DIR/data"
 LOGS="$RUN_DIR/logs"
 # Checks the scenario has in each mode; fewer means it stopped early.
-EXPECTED_CHECKS_FRESH=58
+EXPECTED_CHECKS_FRESH=59
 EXPECTED_CHECKS_UPGRADE=48
+EXPECTED_CHECKS_MISMATCH_1=29
+EXPECTED_CHECKS_MISMATCH_2=27
 mkdir -p "$DATA/identities" "$LOGS" "$RUN_DIR/steps"
 MAIN_LOG="$LOGS/rehearsal.log"
 
@@ -194,19 +209,22 @@ for i in 1 2 3 4; do
     validators=$(jq --arg a "$(pub node$i)" --arg u "$node_url" \
         '. + [{address: $a, status: "2", connection_url: $u, staked_amount: "1000000000000000000", first_seen: 0, valid_at: 0}]' <<<"$validators")
     balances=$(jq --arg a "$(pub node$i)" '. + [[$a, "1000000000000000000"]]' <<<"$balances")
-    peerlist=$(jq --arg a "$(pub node$i)" --arg u "$node_url" '. + {($a): $u}' <<<"$peerlist")
+    # Node 1 is the only anchor, as in the quorum drills: a node exits when a listed
+    # peer does not answer, so a list naming all four could never start cold.
+    [[ "$i" != 1 ]] || peerlist=$(jq --arg a "$(pub node$i)" --arg u "$node_url" '. + {($a): $u}' <<<"$peerlist")
 done
 for who in alice carol; do
     balances=$(jq --arg a "$(pub $who)" '. + [[$a, "1000000000000000000"]]' <<<"$balances")
 done
 if [[ "$UPGRADE_PATH" == 1 ]]; then
     jq --argjson v "$validators" --argjson b "$balances" '
-        del(.properties.id) | .validators = $v | .balances = $b
+        del(.properties.id) | .properties.shardSize = 4 | .validators = $v | .balances = $b
         | .forks |= del(.signatureDomain, .web2ProofBinding)' \
         "$DEVNET/genesis.devnet.json" >"$DATA/genesis.json"
 else
     jq --argjson h "$ACTIVATION_HEIGHT" --argjson cid "$CHAIN_ID" --argjson v "$validators" --argjson b "$balances" '
         .properties.id = $cid
+        | .properties.shardSize = 4
         | .validators = $v
         | .balances = $b
         | .forks.signatureDomain = {activationHeight: $h}
@@ -216,6 +234,35 @@ fi
 printf '%s\n' "$peerlist" >"$DATA/demos_peerlist.json"
 # One genesis file per node, so the mixed-version step can change a single one.
 for i in 1 2 3 4; do cp "$DATA/genesis.json" "$DATA/genesis.node$i.json"; done
+# The odd validators of the mismatch mode: the last MISMATCH of the four. They boot
+# on the same file as the rest; a schedule that differs from block 0 on a fresh
+# chain is another block 0, which the anchor refuses as another chain.
+minority() { [[ "$MISMATCH" != 0 && "$1" -gt $((4 - MISMATCH)) ]]; }
+# Node 4 later restarts with both forks taken out of its file, below its tip; in
+# the mismatch mode the odd validators are later put back on the agreed schedule.
+# A node refuses such an edit unless the operator names the exact schedule, so
+# those nodes carry that name from the start; it is consulted only on a refusal.
+schedule_digest() {
+    (cd "$ROOT" && GENESIS="$DATA/genesis.json" STRIP="$1" bun -e '
+const { readFileSync } = require("node:fs")
+const { loadForkConfigFromGenesis } = require("./src/forks")
+const { getSharedState } = require("./src/utilities/sharedState")
+const { forkScheduleDigest } = require("./src/libs/peer/routines/forkScheduleAgreement")
+const g = JSON.parse(readFileSync(process.env.GENESIS, "utf8"))
+if (process.env.STRIP) {
+    delete g.forks.signatureDomain
+    delete g.forks.web2ProofBinding
+}
+loadForkConfigFromGenesis(g)
+console.log(forkScheduleDigest(getSharedState.forkConfig, getSharedState.chainId))
+' 2>/dev/null | tail -1)
+}
+ACCEPT_DIGEST="$(schedule_digest "$([[ "$MISMATCH" == 0 ]] && echo 1)")"
+# Node 4's recovery puts the agreed schedule back below its tip, which it refuses
+# until the operator names that schedule too.
+AGREED_DIGEST="$(schedule_digest "")"
+[[ "$ACCEPT_DIGEST" =~ ^[0-9a-f]{64}$ && "$AGREED_DIGEST" =~ ^[0-9a-f]{64}$ ]] ||
+    die "could not compute the schedule digest node 4 or the odd validators accept"
 cp -r "$DEVNET/postgres-init" "$DEVNET/l2ps" "$DATA/"
 mkdir -p "$DATA/empty-snapshot"
 
@@ -248,16 +295,21 @@ step "compose override: unique names, memory caps, no notary container"
         [[ "$i" == 1 ]] || printf '      node-1:\n        condition: service_started\n'
         echo "    environment:"
         echo "      - TLSNOTARY_ENABLED=false"
+        [[ -z "${GOSSIP_ENABLED:-}" ]] || echo "      - GOSSIP_ENABLED=$GOSSIP_ENABLED"
+        [[ "$i" == 4 && "$UPGRADE_PATH" != 1 && "$MISMATCH" == 0 ]] && echo "      - DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=$ACCEPT_DIGEST"
+        # The odd validators are later put back on the agreed schedule inside the window.
+        minority "$i" && echo "      - DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=$ACCEPT_DIGEST"
         echo "    volumes:"
         echo "      - ./identities/node$i.identity:/app/.demos_identity:ro"
         echo "      - ./demos_peerlist.json:/app/demos_peerlist.json:ro"
         echo "      - ./l2ps:/app/data/l2ps:ro"
         # A node may rewrite its genesis from a peer on a hash mismatch, so the files the
         # scenario edits are writable; the others stay read-only.
-        if [[ "$i" == 4 ]] || [[ "$UPGRADE_PATH" == 1 ]]; then echo "      - ./genesis.node$i.json:/app/data/genesis.json"; else echo "      - ./genesis.node$i.json:/app/data/genesis.json:ro"; fi
+        if [[ "$i" == 4 ]] || [[ "$UPGRADE_PATH" == 1 ]] || minority "$i"; then echo "      - ./genesis.node$i.json:/app/data/genesis.json"; else echo "      - ./genesis.node$i.json:/app/data/genesis.json:ro"; fi
         echo "      - ./empty-snapshot:/app/data/snapshot:ro"
     done
 } >"$DATA/compose.rehearsal.yml"
+printf 'services:\n  node-4:\n    environment:\n      - DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=%s\n' "$AGREED_DIGEST" >"$DATA/compose.node4-agreed.yml"
 
 rpc_height() {
     local port=$1
@@ -278,7 +330,7 @@ step "network up (staggered: node 1 initialises genesis before the others pair w
 # Engine-level record of every start, die (with exit code) and oom of these containers.
 docker events --filter "container=$PROJECT-node-1" --filter "container=$PROJECT-node-2" \
     --filter "container=$PROJECT-node-3" --filter "container=$PROJECT-node-4" --filter "container=$PROJECT-postgres" \
-    --format '{{.Time}} {{.Action}} {{.Actor.Attributes.name}} exit={{.Actor.Attributes.exitCode}}' \
+    --format '{{.TimeNano}} {{.Action}} {{.Actor.Attributes.name}} exit={{.Actor.Attributes.exitCode}}' \
     >"$LOGS/docker-events.log" 2>&1 &
 EVENTS_PID=$!
 compose up -d --no-build postgres node-1 >>"$LOGS/compose-up.log" 2>&1 ||
@@ -299,7 +351,8 @@ trap - ERR
 set +e
 ROOT="$ROOT" RUN_DIR="$RUN_DIR" PROJECT="$PROJECT" ACTIVATION_HEIGHT="$ACTIVATION_HEIGHT" CHAIN_ID="$CHAIN_ID" \
     CONSENSUS_TIME="$CONSENSUS_TIME" PG_PORT="$PG_PORT" UPGRADE_PATH="$UPGRADE_PATH" UPGRADE_LEAD="$UPGRADE_LEAD" \
-    bun "$ROOT/testing/forks/rehearsal.ts" 2>&1 | grep --line-buffered -vE '^\[config\]|^bigint:' | tee "$LOGS/scenario.log"
+    MISMATCH="$MISMATCH" MINORITY_HEIGHT="$MINORITY_HEIGHT" DEVNET="$DEVNET" AGREED_DIGEST="$AGREED_DIGEST" \
+    bun "$ROOT/testing/forks/$([[ "$MISMATCH" == 0 ]] && echo rehearsal.ts || echo scheduleMismatch.ts)" 2>&1 | grep --line-buffered -vE '^\[config\]|^bigint:' | tee "$LOGS/scenario.log"
 scenario_status=${PIPESTATUS[0]}
 set -e
 
@@ -307,6 +360,8 @@ pass=$(grep -c '^PASS ' "$LOGS/scenario.log" || true)
 fail=$(grep -c '^FAIL ' "$LOGS/scenario.log" || true)
 expected=$EXPECTED_CHECKS_FRESH
 [[ "$UPGRADE_PATH" != 1 ]] || expected=$EXPECTED_CHECKS_UPGRADE
+[[ "$MISMATCH" != 1 ]] || expected=$EXPECTED_CHECKS_MISMATCH_1
+[[ "$MISMATCH" != 2 ]] || expected=$EXPECTED_CHECKS_MISMATCH_2
 step "summary: $pass checks passed, $fail failed, $expected expected (scenario exit $scenario_status)"
 echo "run directory: $RUN_DIR" | tee -a "$MAIN_LOG"
 [[ "$fail" -eq 0 ]] || exit 1

@@ -8,11 +8,19 @@ import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "@/libs/peer/PeerManager"
 import getRoundCommittee from "./roundCommittee"
-import { getEligiblePool } from "./getShard"
+import { getBoundCommittee, getEligiblePool } from "./getShard"
 import { isNetworkAhead } from "./networkAheadVeto"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
+import { isForkActive } from "@/forks/forkGates"
+import {
+    commitLockActive,
+    roundAheadRefusal,
+    voteMessageOf,
+} from "../commitLock/domain"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import { checkCosignTimestamp } from "./cosignTimestamp"
 
 function getIncomingSignatures(
     validationData: ValidationData,
@@ -31,14 +39,17 @@ function getIncomingSignatures(
 async function mergeIncomingSignatures(
     incomingSignatures: Record<string, string>,
     poolIdentities: Set<string>,
+    signerSet: string,
 ): Promise<void> {
     const candidateBlock = getSharedState.candidateBlock
+    // Under commitLock the signatures are prevotes of the candidate's round
+    const signedMessage = voteMessageOf(candidateBlock) ?? candidateBlock.hash
     for (const [identity, signature] of Object.entries(incomingSignatures)) {
         // verifyBlock ignores signers outside the pool, so keeping them
         // would only bloat the block and cost a verification.
         if (!poolIdentities.has(identity)) {
             log.error(
-                `[manageProposeBlockHash] Dropping signature by ${identity}: not in the eligible pool`,
+                `[manageProposeBlockHash] Dropping signature by ${identity}: not in the ${signerSet}`,
             )
             continue
         }
@@ -47,7 +58,7 @@ async function mergeIncomingSignatures(
         try {
             isValid = await TxValidatorPool.getInstance().verify({
                 algorithm: getSharedState.signingAlgorithm,
-                message: new TextEncoder().encode(candidateBlock.hash),
+                message: new TextEncoder().encode(signedMessage),
                 signature: hexToUint8Array(signature),
                 publicKey: hexToUint8Array(identity),
             })
@@ -77,10 +88,80 @@ function errorMessage(e: unknown): string {
     return e instanceof Error ? e.message : String(e)
 }
 
+/**
+ * The proposer's hash matches our candidate: admit its signatures into the
+ * candidate and answer with the merged validation data, or refuse.
+ */
+async function mergeSignaturesForCandidate(
+    response: RPCResponse,
+    validationData: ValidationData,
+    peerId: string,
+    candidate: typeof getSharedState.candidateBlock,
+): Promise<RPCResponse> {
+    // Signatures are judged the way verifyBlock judges them: against the
+    // eligible pool of the parent height, not against our own view of the
+    // shard, which may differ from the proposer's. Under committeeBinding,
+    // against the bound committee of the parent height.
+    const incomingSignatures = getIncomingSignatures(validationData)
+    const bound = isForkActive("committeeBinding", candidate.number)
+    let pool: string[]
+    try {
+        pool = bound
+            ? await getBoundCommittee(candidate.number - 1)
+            : await getEligiblePool(candidate.number - 1)
+    } catch (e) {
+        log.error(
+            `[manageProposeBlockHash] Could not resolve the ${bound ? "bound committee" : "eligible pool"}: ${errorMessage(e)}`,
+        )
+        response.result = 500
+        response.response = getSharedState.publicKeyHex
+        response.extra = bound
+            ? "Could not resolve the bound committee"
+            : "Could not resolve the eligible signer pool"
+        return response
+    }
+
+    if (bound && !pool.includes(peerId)) {
+        log.error(
+            `[manageProposeBlockHash] Proposer ${peerId} is not in the bound committee: refusing the block hash`,
+        )
+        response.result = 401
+        response.response = getSharedState.publicKeyHex
+        response.extra = "Validator is not in the bound committee"
+        return response
+    }
+
+    // Honest nodes draw different committees, so the map accumulated over
+    // several relays can hold more signers than shardSize. Every signer
+    // must be a distinct pool member, which makes the pool the ceiling.
+    // Under committeeBinding every honest selection is a subset of one
+    // committee, which makes the committee the ceiling.
+    if (Object.keys(incomingSignatures).length > pool.length) {
+        const scope = bound ? "bound committee" : "eligible pool"
+        log.error(
+            `[manageProposeBlockHash] Signature map larger than the ${scope}: refusing the block hash`,
+        )
+        response.result = 400
+        response.response = getSharedState.publicKeyHex
+        response.extra = `Signature map is larger than the ${scope}`
+        return response
+    }
+
+    await mergeIncomingSignatures(
+        incomingSignatures,
+        new Set(pool),
+        bound ? "bound committee" : "eligible pool",
+    )
+
+    response.extra = getSharedState.candidateBlock.validation_data
+    return response
+}
+
 export default async function manageProposeBlockHash(
     blockHash: string,
     validationData: ValidationData,
     peerId: string,
+    round?: unknown,
 ): Promise<RPCResponse> {
     log.debug("Received manageProposeBlockHash, block hash: " + blockHash)
     const response = _.cloneDeep(emptyResponse)
@@ -130,10 +211,17 @@ export default async function manageProposeBlockHash(
 
     const candidate = getSharedState.candidateBlock
     const parentBlock = await Chain.getBlockByNumber(candidate.number - 1)
-    const timestampVerdict = checkTimestampAgainstParent(
+    let timestampVerdict = checkTimestampAgainstParent(
         candidate.content.timestamp,
         parentBlock?.content?.timestamp,
+        candidate.number,
     )
+    if (timestampVerdict.valid) {
+        timestampVerdict = checkCosignTimestamp(
+            candidate.content.timestamp,
+            getNetworkTimestamp(),
+        )
+    }
     if (!timestampVerdict.valid) {
         log.error(
             `[manageProposeBlockHash] Refusing to sign block ${candidate.number}: ${timestampVerdict.reason}`,
@@ -147,6 +235,43 @@ export default async function manageProposeBlockHash(
         return response
     }
 
+    // Prevotes of another round cannot verify against ours, and agreeing
+    // on the hash alone would answer with prevotes the proposer cannot use.
+    if (commitLockActive(candidate.number)) {
+        const ourRound = candidate.validation_data?.round
+        if (voteMessageOf(candidate) === null) {
+            response.result = 500
+            response.response = getSharedState.publicKeyHex
+            response.extra = "Candidate block carries no round"
+            return response
+        }
+        // Our candidate was refused at creation if its round led our clock
+        // too far; checked again so no path hands out such a prevote.
+        const ahead = roundAheadRefusal(
+            ourRound as number,
+            getNetworkTimestamp(),
+        )
+        if (ahead) {
+            log.warning(`[manageProposeBlockHash] Not handing out our prevote: ${ahead}`)
+            response.result = 409
+            response.response = getSharedState.publicKeyHex
+            response.extra = { message: "Round is ahead of our clock", reason: ahead }
+            return response
+        }
+        if (round !== undefined && round !== ourRound) {
+            log.warning(
+                `[manageProposeBlockHash] Proposal from ${peerId} is for round ${String(round)}, ours is ${ourRound}`,
+            )
+            response.result = 409
+            response.response = getSharedState.publicKeyHex
+            response.extra = {
+                message: "Proposal is for another round",
+                round: ourRound,
+            }
+            return response
+        }
+    }
+
     const ourCandidateHash = candidate.hash
     if (ourCandidateHash === blockHash) {
         log.info(
@@ -155,40 +280,12 @@ export default async function manageProposeBlockHash(
         response.result = 200
         response.response = getSharedState.publicKeyHex
 
-        // Signatures are judged the way verifyBlock judges them: against the
-        // eligible pool of the parent height, not against our own view of the
-        // shard, which may differ from the proposer's.
-        const incomingSignatures = getIncomingSignatures(validationData)
-        let pool: string[]
-        try {
-            pool = await getEligiblePool(candidate.number - 1)
-        } catch (e) {
-            log.error(
-                `[manageProposeBlockHash] Could not resolve the eligible pool: ${errorMessage(e)}`,
-            )
-            response.result = 500
-            response.response = getSharedState.publicKeyHex
-            response.extra = "Could not resolve the eligible signer pool"
-            return response
-        }
-
-        // Honest nodes draw different committees, so the map accumulated over
-        // several relays can hold more signers than shardSize. Every signer
-        // must be a distinct pool member, which makes the pool the ceiling.
-        if (Object.keys(incomingSignatures).length > pool.length) {
-            log.error(
-                "[manageProposeBlockHash] Signature map larger than the eligible pool: refusing the block hash",
-            )
-            response.result = 400
-            response.response = getSharedState.publicKeyHex
-            response.extra = "Signature map is larger than the eligible pool"
-            return response
-        }
-
-        await mergeIncomingSignatures(incomingSignatures, new Set(pool))
-
-        response.extra = getSharedState.candidateBlock.validation_data
-        return response
+        return await mergeSignaturesForCandidate(
+            response,
+            validationData,
+            peerId,
+            candidate,
+        )
     }
 
     response.result = 401

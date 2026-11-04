@@ -18,12 +18,15 @@ import { Waiter } from "src/utilities/waiter"
 import { PeerManager } from "../peer"
 import { fastSync } from "../blockchain/routines/Sync"
 import { handleError } from "src/errors/handleError"
+import { committedHeightRefusal } from "../consensus/v2/routines/committedBlock"
 
 export interface ConsensusMethod {
     method:
         | "vote"
         | "voteRequest"
         | "proposeBlockHash"
+        | "precommitBlockHash"
+        | "getLock"
         | "broadcastBlock"
         | "getCommonValidatorSeed"
         | "getValidatorTimestamp"
@@ -120,6 +123,35 @@ export default async function manageConsensusRoutines(
     log.debug("Payload: " + JSON.stringify(payload))
     log.debug("-----------------------------")
     const response = _.cloneDeep(emptyResponse)
+
+    // Answered before every gate below: right after our commit the consensus
+    // window for the next height is closed, and a proposer still on the
+    // height we committed must learn of the block rather than get a plain
+    // refusal and retry it.
+    if (payload.method === "proposeBlockHash") {
+        const refusal = await committedHeightRefusal(payload.params?.[3])
+        if (refusal) return refusal
+    }
+
+    // The commit lock exchange is answered outside the consensus window
+    // and never starts a round: a member's late precommit request or a
+    // retry's lock query must not make us forge, and each handler checks
+    // the sender against the bound committee itself. They are loaded on use,
+    // so the dispatcher's own module graph stays what it was without them.
+    if (payload.method === "precommitBlockHash") {
+        const refusal = await committedHeightRefusal(payload.params?.[2])
+        if (refusal) return refusal
+        const { managePrecommitBlockHash } = await import(
+            "../consensus/v2/commitLock/precommit"
+        )
+        return await managePrecommitBlockHash(sender, payload.params)
+    }
+    if (payload.method === "getLock") {
+        const { manageGetLock } = await import(
+            "../consensus/v2/commitLock/getLock"
+        )
+        return await manageGetLock(sender, payload.params)
+    }
 
     /* REVIEW
     We allow incoming requests when we are within the consensus time window.
@@ -300,6 +332,7 @@ export default async function manageConsensusRoutines(
                     payload.params[0],
                     payload.params[1] as ValidationData,
                     sender,
+                    payload.params[4],
                 )
             } catch (error) {
                 log.error(

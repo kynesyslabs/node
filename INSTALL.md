@@ -81,8 +81,10 @@ docker info --format '{{.Driver}} {{json .DriverStatus}}'
 ```bash
 git clone https://github.com/kynesyslabs/node.git && cd node
 cp .env.example .env  # defaults are fine; edit only if you want to override
-docker compose up
+./run --docker        # docker compose up, with the commit the image is built from
 ```
+
+The image refuses to build without the git commit it is built from. `./run --docker` exports it; to call compose directly, export it first: `export GIT_COMMIT=$(git rev-parse HEAD)`, then `docker compose up`.
 
 The first run pulls images and builds the node container, so expect a few minutes. Subsequent starts are near-instant.
 
@@ -102,6 +104,8 @@ When the stack is healthy:
 | `TLSNOTARY_SIGNING_KEY` | _(empty)_ | **Leave empty in docker mode (the default).** The TLSNotary sidecar manages its own key. Only set this if you've switched `TLSNOTARY_MODE` to `ffi` (in-process Rust binding). |
 | `RPC_PORT` | `53550` | Host-mapped port for the node RPC. Change if 53550 is taken. |
 | `EXPOSED_URL` | `http://localhost:53550` | Public URL advertised to peers. Set to your public IP/domain when running on a VPS. |
+| `EXPECTED_GENESIS_HASH` | _(empty)_ | The network's published genesis hash. Required in the image (`NODE_ENV=production`) unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; see "Pin the network's genesis" below. |
+| `EXPECTED_GENESIS_BLOCK_HASH` | _(empty)_ | The network's published block 0 hash. Optional; when set, the node refuses any other block 0. |
 | `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | `demosuser` / `demospassword` / `demos` | Postgres credentials. Change `PG_PASSWORD` if you're paranoid; it never leaves the compose network. |
 | `METRICS_ENABLED` / `METRICS_PORT` | `true` / `9090` | Prometheus scrape endpoint on the node. |
 | `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password. Change this. |
@@ -116,7 +120,7 @@ Leave `PG_HOST=postgres` and `TLSNOTARY_HOST=tlsnotary` exactly as shipped — t
 
 ### Joining the network — required steps before real-world use
 
-A fresh node will run as an isolated single-validator chain by default. To participate in the actual Demos testnet/mainnet, you must do **two things**:
+A fresh node will run as an isolated single-validator chain by default. To participate in the actual Demos testnet/mainnet, you must do **three things**:
 
 **1. Set `EXPOSED_URL` to your reachable address.**
 
@@ -155,6 +159,35 @@ docker compose up
 ```
 
 Replace `bootstrap1.demos.network` etc. with current bootstrap nodes from the team. The node will merge any peers it learns from these into the file as it runs.
+
+**3. Pin the network's genesis.**
+
+The image runs with `NODE_ENV=production`, and a production node refuses to start (exit code 1) unless it knows which genesis it joins. Set the hash the network publishes:
+
+```env
+# In .env
+EXPECTED_GENESIS_HASH=<published genesis hash>
+EXPECTED_GENESIS_BLOCK_HASH=<published block 0 hash>
+```
+
+At every start the node checks it before it signs anything: on an empty database against `data/genesis.json` (and the snapshot that genesis declares), before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; mainnet validators never set it. A node started without a pin and without that opt-out (a bare-metal `./run` install runs as development, so nothing refuses it) logs a `[GENESIS] EXPECTED_GENESIS_HASH is not set` warning at every boot.
+
+The genesis hash leaves out the validators' `connection_url` and the order of the keys in the file, and block 0 does not, so two files with the same genesis hash can still build different blocks 0. `EXPECTED_GENESIS_BLOCK_HASH` closes that: an empty database refuses to write any other block 0, and an existing one refuses to boot on it.
+
+On mainnet, mount the published genesis file and snapshot read-only instead of using the files bundled in the image, which belong to the testnet:
+
+```yaml
+# docker-compose.override.yml
+services:
+  node:
+    volumes:
+      - ./mainnet/genesis.json:/app/data/genesis.json:ro
+      - ./mainnet/snapshot:/app/mainnet-snapshot:ro
+    environment:
+      DEMOS_SNAPSHOT_DIR: /app/mainnet-snapshot
+```
+
+The node also remembers the fork schedule it last ran with. A restart whose `data/genesis.json` adds, moves or removes a fork at or below the current height plus 50 blocks is refused, and the refusal names the change. If every operator agreed to that exact schedule, restart once with `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST` set to the digest the refusal prints. See `docs/design/genesis-enforcement.md`.
 
 ### Network Exposure
 
@@ -278,7 +311,7 @@ docker compose up -d
 
 Volumes (and therefore your identity, chain data, peerlist cache) are preserved.
 
-A development host that builds from source instead: `git pull && docker compose up -d --build`. Each such update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
+A development host that builds from source instead: `git pull && ./run --docker -d --build`. Each such update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
 
 ### Stop the node
 
@@ -378,7 +411,7 @@ docker compose version
 curl https://mise.run | sh
 
 # Install Bun
-mise use -g bun@1.3.14   # the version in .bun-version
+mise use -g bun@1.4.4    # the version in .bun-version
 
 # Verify Bun
 bun -v
@@ -396,10 +429,36 @@ bun -v
 
 ### 4. Clone Repository
 
+#### Mainnet validators: a signed release tag
+
+A validator runs a signed release tag, never a branch head (see [docs/runbooks/release.md](docs/runbooks/release.md)). Set `TAG` to the release announced for your network, then verify it before checking it out:
+
+```bash
+cd ~
+git clone https://github.com/kynesyslabs/node.git
+cd node
+TAG=v1.0.0-rc.1   # the announced release tag
+
+git fetch --tags origin stabilisation
+# Signers come from the protected branch, not from the tag itself
+git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers
+git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers
+# The tag must be on stabilisation and signed by a listed key;
+# the checkout runs only when both checks pass
+git merge-base --is-ancestor "$TAG" origin/stabilisation && echo "on stabilisation" &&
+git verify-tag "$TAG" &&
+git checkout "$TAG"
+```
+
+`git verify-tag` must print `Good "git" signature` for a key in `allowed_signers`. If the block stops before the checkout, or `on stabilisation` is not printed, stop and ask on the release thread. The checkout leaves a detached `HEAD`, which is expected. To upgrade, repeat these steps with the next tag; do not use `./run -U`, which pulls a branch head.
+
+#### Testnet and development: the `testnet` branch
+
+Testnet nodes and contributors follow the `testnet` branch instead. It is unsigned and moves with every merge, so do not run it on mainnet.
+
 ```bash
 cd ~
 git clone -b testnet https://github.com/kynesyslabs/node.git
-# switch to your node directory
 cd node
 # Double check that you are on testnet
 git branch

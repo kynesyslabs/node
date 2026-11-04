@@ -20,7 +20,7 @@
  * @module L2PSProofManager
  */
 
-import { Repository } from "typeorm"
+import { EntityManager, Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 import { L2PSProof, L2PSProofStatus } from "@/model/entities/L2PSProofs"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
@@ -263,9 +263,15 @@ export default class L2PSProofManager {
      * @param proofId - Proof ID
      * @param blockNumber - Block number where proof was applied
      */
-    static async markProofApplied(proofId: number, blockNumber: number): Promise<void> {
-        const repo = await this.getRepo()
-        
+    static async markProofApplied(
+        proofId: number,
+        blockNumber: number,
+        manager?: EntityManager,
+    ): Promise<void> {
+        const repo = manager
+            ? manager.getRepository(L2PSProof)
+            : await this.getRepo()
+
         await repo.update(proofId, {
             status: "applied" as L2PSProofStatus,
             applied_block_number: blockNumber,

@@ -1,0 +1,142 @@
+# Same-height race stack: postgres + 4 validators, driven only by run.sh,
+# which sets every ${VAR} below through a per-run env file.
+#
+# Built for a shared host:
+#   - no container_name and a per-run compose project, so two runs never
+#     collide and teardown (`down -v`) touches only this stack;
+#   - postgres data and each node's state dir on tmpfs, no named volumes;
+#   - memory caps on every container;
+#   - no published ports: the harness talks to nodes through `docker exec`.
+#
+# Proposals travel as plain JSON over HTTP (OMNI_MODE=HTTP_ONLY) so the fault
+# sidecars can match them by string. The log level stays at "info", the
+# setting that prints every level: the round start and secretary lines that
+# time the fault are debug lines, the vote tally an info line.
+
+x-node-env: &node-env
+  NODE_ENV: development
+  LOG_LEVEL: info
+  L2PS_HASH_RELAY_NON_PROD: "true"
+  PG_HOST: postgres
+  PG_PORT: "5432"
+  PG_USER: demosuser
+  PG_PASSWORD: demospass
+  CONSENSUS_TIME: "${CONSENSUS_TIME}"
+  OMNI_MODE: HTTP_ONLY
+  TLSNOTARY_ENABLED: "false"
+  # The gossip sidecar needs a node runtime the Bun-only image lacks; the
+  # 4-validator committee merges mempools directly every round.
+  GOSSIP_ENABLED: "false"
+  IDENTITY_FILE: /app/state/node.identity
+
+x-node: &node
+  image: ${RACE_IMAGE}
+  # The identity is copied into a tmpfs state dir so the node's identity lock
+  # and signing record stay inside the container and nothing root-owned is
+  # left in the run dir. A readable stdin keeps the node from exiting at boot.
+  entrypoint:
+    - bash
+    - -lc
+    - mkdir -p /app/state && cp /app/keys/node.identity /app/state/node.identity && exec ./testing/devnet/run-devnet < /dev/null
+  mem_limit: ${NODE_MEM}
+  memswap_limit: ${NODE_MEM}
+  # A node that cannot pair with the anchor at a cold boot exits with code 0;
+  # it is restarted until the mesh forms. `down -v` stops it regardless.
+  restart: unless-stopped
+  tmpfs:
+    - /app/state
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks:
+    - racenet
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    mem_limit: 1g
+    memswap_limit: 1g
+    restart: "no"
+    environment:
+      POSTGRES_USER: demosuser
+      POSTGRES_PASSWORD: demospass
+      POSTGRES_DB: postgres
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ../postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demosuser -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks:
+      - racenet
+
+  node-1:
+    <<: *node
+    hostname: node1-host
+    environment:
+      <<: *node-env
+      PG_DATABASE: node1_db
+      PORT: "53551"
+      OMNI_PORT: "53552"
+      EXPOSED_URL: http://node-1:53551
+    volumes:
+      - ${RUN_DIR}/inputs/node1.identity:/app/keys/node.identity:ro
+      - ${RUN_DIR}/inputs/peerlist.json:/app/demos_peerlist.json:ro
+      - ${RUN_DIR}/inputs/genesis.json:/app/data/genesis.json:ro
+      - ${RUN_DIR}/inputs/empty-snapshot:/app/data/snapshot:ro
+      - ../l2ps:/app/data/l2ps:ro
+
+  node-2:
+    <<: *node
+    hostname: node2-host
+    environment:
+      <<: *node-env
+      PG_DATABASE: node2_db
+      PORT: "53553"
+      OMNI_PORT: "53554"
+      EXPOSED_URL: http://node-2:53553
+    volumes:
+      - ${RUN_DIR}/inputs/node2.identity:/app/keys/node.identity:ro
+      - ${RUN_DIR}/inputs/peerlist.json:/app/demos_peerlist.json:ro
+      - ${RUN_DIR}/inputs/genesis.json:/app/data/genesis.json:ro
+      - ${RUN_DIR}/inputs/empty-snapshot:/app/data/snapshot:ro
+      - ../l2ps:/app/data/l2ps:ro
+
+  node-3:
+    <<: *node
+    hostname: node3-host
+    environment:
+      <<: *node-env
+      PG_DATABASE: node3_db
+      PORT: "53555"
+      OMNI_PORT: "53556"
+      EXPOSED_URL: http://node-3:53555
+    volumes:
+      - ${RUN_DIR}/inputs/node3.identity:/app/keys/node.identity:ro
+      - ${RUN_DIR}/inputs/peerlist.json:/app/demos_peerlist.json:ro
+      - ${RUN_DIR}/inputs/genesis.json:/app/data/genesis.json:ro
+      - ${RUN_DIR}/inputs/empty-snapshot:/app/data/snapshot:ro
+      - ../l2ps:/app/data/l2ps:ro
+
+  node-4:
+    <<: *node
+    hostname: node4-host
+    environment:
+      <<: *node-env
+      PG_DATABASE: node4_db
+      PORT: "53557"
+      OMNI_PORT: "53558"
+      EXPOSED_URL: http://node-4:53557
+    volumes:
+      - ${RUN_DIR}/inputs/node4.identity:/app/keys/node.identity:ro
+      - ${RUN_DIR}/inputs/peerlist.json:/app/demos_peerlist.json:ro
+      - ${RUN_DIR}/inputs/genesis.json:/app/data/genesis.json:ro
+      - ${RUN_DIR}/inputs/empty-snapshot:/app/data/snapshot:ro
+      - ../l2ps:/app/data/l2ps:ro
+
+networks:
+  racenet:
+    driver: bridge

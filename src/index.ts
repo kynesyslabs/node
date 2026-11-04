@@ -40,14 +40,20 @@ import {
 } from "./libs/blockchain/routines/Sync"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import {
+    getBootTimestampCorrection,
     getNetworkTimestamp,
     startTimestampRecalibration,
 } from "./libs/utils/calibrateTime"
-import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
+import {
+    haltSigning,
+    holdSigningUntilRestartFloor,
+    reportSigningHaltMarker,
+} from "./libs/identity/signingRecord"
+import { armRestartSigningFloor } from "./libs/consensus/v2/commitLock/restartFloor"
 import {
     assertIdentityNotLive,
     IdentityLiveError,
@@ -236,7 +242,7 @@ function parseL2PSMessagingPort(raw: string | undefined): number {
 
 // ANCHOR Calibrating the time
 async function calibrateTime() {
-    await getTimestampCorrection()
+    await getBootTimestampCorrection()
     startTimestampRecalibration()
     log.info(
         "[SYNC] Timestamp correction: " + getSharedState.timestampCorrection,
@@ -668,6 +674,10 @@ async function preMainLoop() {
  */
 async function main() {
     getSharedState.isInitialized = false
+    // The RPC server can start a consensus round before the clock is
+    // calibrated, and without the floor that round could be one an earlier
+    // run of this key already signed
+    holdSigningUntilRestartFloor()
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
@@ -681,13 +691,23 @@ async function main() {
 
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
     try {
-        acquireIdentityLock(getSharedState.identityFile)
+        await acquireIdentityLock(getSharedState.identityFile, {
+            onLost: reason => {
+                log.error(`[IDENTITY] ${reason}`)
+                // Shutdown waits for an in-flight block apply; no round may
+                // sign meanwhile.
+                haltSigning(reason)
+                void gracefulShutdown("identity_lock_lost", 1)
+            },
+        })
     } catch (error) {
         log.error(
             `[IDENTITY] ${error instanceof Error ? error.message : String(error)}`,
         )
         process.exit(1)
     }
+    // The node still syncs and serves; only block signing stays refused.
+    reportSigningHaltMarker(getSharedState.identityFile)
     try {
         await TxValidatorPool.getInstance().start()
     } catch (error) {
@@ -777,6 +797,9 @@ async function main() {
 
     // INFO Calibrating the time at the start of the node
     await calibrateTime()
+    // Releases the hold taken at the top of main(); a throw here stops the
+    // boot, so signing never opens without a floor
+    armRestartSigningFloor(getSharedState.identityFile, getNetworkTimestamp())
 
     // INFO Preparing the main loop
     bootTracker.start("pre_main_loop")
@@ -1323,7 +1346,7 @@ async function main() {
 main().catch((error: Error) => {
     console.error(error)
     handleError(error, "CORE", { source: ErrorSource.MAIN, fatal: true })
-    gracefulShutdown("main_error").catch(() => {
+    gracefulShutdown("main_error", 1).catch(() => {
         process.exit(1)
     })
 })

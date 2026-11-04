@@ -72,3 +72,65 @@ describe.skipIf(!posix)("Identity.loadIdentity file permissions", () => {
         expect(fs.statSync(sharedState.identityFile).mode & 0o777).toBe(0o600)
     })
 })
+
+describe("Identity.loadIdentity in production", () => {
+    let dir: string
+    const savedEnv = process.env.DEMOS_GENERATE_IDENTITY
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "demos-identity-"))
+        sharedState.identityFile = path.join(dir, ".demos_identity")
+        sharedState.PROD = true
+        delete process.env.DEMOS_GENERATE_IDENTITY
+        jest.spyOn(ucrypto, "generateAllIdentities").mockResolvedValue(
+            undefined as never,
+        )
+        jest.spyOn(ucrypto, "getIdentity").mockResolvedValue({} as never)
+    })
+    afterEach(() => {
+        sharedState.PROD = undefined
+        if (savedEnv === undefined) {
+            delete process.env.DEMOS_GENERATE_IDENTITY
+        } else {
+            process.env.DEMOS_GENERATE_IDENTITY = savedEnv
+        }
+        jest.restoreAllMocks()
+        fs.rmSync(dir, { recursive: true, force: true })
+    })
+
+    it("refuses to create a missing identity and names the file", async () => {
+        let message = ""
+        try {
+            await Identity.getInstance().loadIdentity()
+        } catch (e) {
+            message = (e as Error).message
+        }
+        expect(message).toContain(sharedState.identityFile)
+        expect(message).toContain("state volume is not mounted")
+        expect(message).toContain("DEMOS_GENERATE_IDENTITY")
+        expect(fs.existsSync(sharedState.identityFile)).toBe(false)
+    })
+
+    it("creates one when DEMOS_GENERATE_IDENTITY=true", async () => {
+        process.env.DEMOS_GENERATE_IDENTITY = "true"
+        await Identity.getInstance().loadIdentity()
+        expect(fs.existsSync(sharedState.identityFile)).toBe(true)
+    })
+
+    it("does not treat other values as consent", async () => {
+        process.env.DEMOS_GENERATE_IDENTITY = "yes"
+        await expect(
+            Identity.getInstance().loadIdentity(),
+        ).rejects.toThrow("refusing to generate")
+    })
+
+    it("loads an existing identity as before", async () => {
+        sharedState.PROD = false
+        await Identity.getInstance().loadIdentity()
+        const mnemonic = fs.readFileSync(sharedState.identityFile, "utf8")
+        sharedState.PROD = true
+        await Identity.getInstance().loadIdentity()
+        expect(fs.readFileSync(sharedState.identityFile, "utf8")).toBe(
+            mnemonic,
+        )
+    })
+})

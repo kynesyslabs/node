@@ -157,9 +157,11 @@ export default async function handleIdentityRequest(
                 }
             }
 
+            // Checked only: the nullifier is marked when the block that
+            // carries the transaction commits
             const db = await Datasource.getInstance()
             const verifier = new ProofVerifier(db.getDataSource())
-            const result = await verifier.verifyIdentityAttestation({
+            const result = await verifier.checkIdentityAttestation({
                 proof: attestation.proof,
                 publicSignals: attestation.public_signals,
             })

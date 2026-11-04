@@ -55,6 +55,9 @@ services:
   node:
     container_name: demos-node-devnet
     environment:
+      # A devnet has no published genesis hash; the production image would
+      # otherwise refuse to start without one.
+      DEMOS_ALLOW_UNPINNED_GENESIS: ${DEMOS_ALLOW_UNPINNED_GENESIS:-true}
       TLSNOTARY_PORT: 7147
       # wstcp proxy window, offset +100 from mainnet (55000-55063) so the
       # two stacks don't fight over the same host ports. The allocation

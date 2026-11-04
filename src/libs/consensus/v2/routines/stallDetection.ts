@@ -10,7 +10,12 @@ import log from "src/utilities/logger"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { SECRETARY_ROTATION_GRACE_SECONDS } from "../../routines/consensusTime"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
-import { getEligiblePool, pinShardIdentities } from "./getShard"
+import {
+    getBoundCommittee,
+    getEligiblePool,
+    pinShardIdentities,
+} from "./getShard"
+import { isForkActive } from "@/forks/forkGates"
 import { countMissedSignature } from "@/features/metrics/consensusMetrics"
 
 const FRESHNESS_WINDOWS = 2
@@ -83,6 +88,12 @@ async function wasSelectedForBlock(
     const prevBlock = await Chain.getBlockByNumber(block.number - 1)
     if (!prevBlock) {
         return false
+    }
+
+    // Under committeeBinding the forging committee is chain data, so no
+    // reconstruction is needed: membership is exact.
+    if (isForkActive("committeeBinding", block.number)) {
+        return (await getBoundCommittee(block.number - 1)).includes(ourKey)
     }
 
     const committed = new Set<string>()

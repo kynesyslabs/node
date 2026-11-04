@@ -46,6 +46,7 @@ mock.module("@/libs/consensus/v2/routines/getShard", () => ({
     default: async () => [],
     getCommitteeFloor: () => 0,
     getEligiblePool: async () => [],
+    getBoundCommittee: async () => [],
     pinShardIdentities: () => "",
     rankPool: (_seed: string, pool: string[]) => pool,
     __resetValidatorCache: () => undefined,

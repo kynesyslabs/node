@@ -134,6 +134,11 @@ export class MetricsService {
             [],
             [0.1, 0.5, 1, 2, 5, 10, 30],
         )
+        this.createCounter(
+            "foreign_signature_total",
+            "Peer blocks carrying a signature by this node's key that this node never recorded",
+            [],
+        )
         this.createGauge("block_height", "Current block height", [])
         this.createGauge("mempool_size", "Number of pending transactions", [])
 
@@ -296,6 +301,26 @@ export class MetricsService {
             [],
         )
         this.createCounter(
+            "conflicting_block_total",
+            "Distinct blocks a peer holds at a height where this node holds a different block, both with a verified quorum",
+            [],
+        )
+        this.createCounter(
+            "commit_lock_total",
+            "Commit locks this validator wrote: a first lock at a height, or the same block in a later round",
+            [],
+        )
+        this.createCounter(
+            "lock_moved_total",
+            "Commit locks this validator moved to another block on a proof of lock from a later round",
+            [],
+        )
+        this.createCounter(
+            "precommit_equivocation_total",
+            "Committee members seen precommitting two different blocks at one height and round",
+            [],
+        )
+        this.createCounter(
             "consensus_missed_signatures_total",
             "Blocks where this node was drawn into the shard but its signature is missing",
             [],
@@ -303,6 +328,16 @@ export class MetricsService {
         this.createGauge(
             "fork_schedule_mismatch",
             "1 while the last fork-schedule comparison found a peer with a different schedule, else 0",
+            [],
+        )
+        this.createGauge(
+            "signing_halted",
+            "1 while block signing is stopped (foreign signature, lost identity lock or a stop marker on disk), else 0",
+            [],
+        )
+        this.createGauge(
+            "signing_halt_marker_present",
+            "1 while the signing stop marker exists on disk, so the stop also holds after a restart, else 0",
             [],
         )
         this.createGauge(

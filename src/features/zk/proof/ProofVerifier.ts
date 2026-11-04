@@ -328,6 +328,60 @@ export class ProofVerifier {
     }
 
     /**
+     * The checks of `verifyIdentityAttestation` without marking the
+     * nullifier: unused nullifier, cryptographic validity and a current
+     * Merkle root. For a dry run, or before the marking happens in the
+     * transaction that commits the attestation.
+     */
+    async checkIdentityAttestation(
+        attestation: IdentityAttestationProof,
+    ): Promise<ProofVerificationResult> {
+        const { proof, publicSignals } = attestation
+        const parsed = parseIdentityPublicSignals(publicSignals)
+        if (!parsed.signals) {
+            return { valid: false, reason: parsed.reason ?? "Invalid public signals" }
+        }
+        const { nullifier, context, merkleRoot } = parsed.signals
+
+        const existing = await this.nullifierRepo.findOne({
+            where: { nullifierHash: nullifier },
+        })
+        if (existing) {
+            return {
+                valid: false,
+                reason: "Nullifier already used (double-attestation attempt)",
+                nullifier,
+                merkleRoot,
+                context,
+            }
+        }
+
+        const cryptoValid = await ProofVerifier.verifyCryptographically(proof, publicSignals)
+        if (!cryptoValid) {
+            return {
+                valid: false,
+                reason: "Proof failed cryptographic verification",
+                nullifier,
+                merkleRoot,
+                context,
+            }
+        }
+
+        const rootIsCurrent = await this.isMerkleRootCurrent(merkleRoot)
+        if (!rootIsCurrent) {
+            return {
+                valid: false,
+                reason: "Merkle root does not match current tree state",
+                nullifier,
+                merkleRoot,
+                context,
+            }
+        }
+
+        return { valid: true, nullifier, merkleRoot, context }
+    }
+
+    /**
      * Mark a nullifier as used after successful verification
      *
      * @param nullifierHash - The nullifier to mark as used

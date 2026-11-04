@@ -27,7 +27,8 @@
  */
 
 import { createReadStream } from "node:fs"
-import { stat } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
+import { createHash } from "node:crypto"
 import { createInterface } from "node:readline"
 import { resolve } from "node:path"
 
@@ -166,7 +167,7 @@ export type SnapshotLoader = SnapshotLoaderUnavailable | SnapshotLoaderAvailable
 // Internals
 // ----------------------------------------------------------------------------
 
-function resolveSnapshotDir(): string {
+export function resolveSnapshotDir(): string {
     const fromEnv = process.env.DEMOS_SNAPSHOT_DIR
     if (fromEnv && fromEnv.length > 0) {
         return resolve(fromEnv)
@@ -498,4 +499,16 @@ export async function loadSnapshot(): Promise<SnapshotLoader> {
         streamValidators,
         getSnapshotManifest: () => manifest,
     }
+}
+
+/**
+ * sha256 of the raw manifest.json bytes, or null when no manifest is present.
+ * The manifest lists a sha256 per snapshot file, which `verifySnapshot` checks,
+ * so this one value binds the whole snapshot to the genesis that declares it.
+ */
+export async function snapshotManifestHash(): Promise<string | null> {
+    const manifestPath = resolve(resolveSnapshotDir(), "manifest.json")
+    const manifestStat = await stat(manifestPath).catch(() => null)
+    if (!manifestStat || !manifestStat.isFile()) return null
+    return createHash("sha256").update(await readFile(manifestPath)).digest("hex")
 }

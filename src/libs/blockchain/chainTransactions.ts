@@ -85,25 +85,37 @@ export async function getTxByHash(hash: string): Promise<Transaction | null> {
     }
 }
 
+// Attrs of a synced block come from a peer; bound what is echoed to clients.
+const MAX_CODE_LENGTH = 64
+const MAX_MESSAGE_LENGTH = 512
+
 /**
  * Lifecycle status of a transaction by hash.
  *
- * Cheap: 1 mempool lookup, then 1 transactions lookup if not in mempool.
- *
- * "failed" is reserved — currently the node does not record execution
- * failures, so failed txs surface as "unknown".
+ * The chain is read before the mempool: a transaction leaving the mempool
+ * for a block between the two reads is then reported unknown, which the
+ * caller's height bound (read before both) still makes true, rather than
+ * pending after it is in a block.
  */
 export async function getTransactionStatus(hash: string): Promise<TxStatus> {
-    const inMempool = await Mempool.findByHash(hash)
-    if (inMempool) return { state: "pending" }
-
     const tx = await getTxByHash(hash)
     if (tx) {
-        return {
-            state: "included",
-            blockNumber: tx.blockNumber ?? undefined,
+        const blockNumber = tx.blockNumber ?? undefined
+        if (tx.status === TRANSACTION_STATUS.FAILED) {
+            const code = tx.attrs?.code
+            const message = tx.attrs?.message
+            return {
+                state: "failed",
+                blockNumber,
+                ...(typeof code === "string" ? { code: code.slice(0, MAX_CODE_LENGTH) } : {}),
+                ...(typeof message === "string" ? { message: message.slice(0, MAX_MESSAGE_LENGTH) } : {}),
+            }
         }
+        return { state: "included", blockNumber }
     }
+
+    const inMempool = await Mempool.findByHash(hash)
+    if (inMempool) return { state: "pending" }
 
     return { state: "unknown" }
 }

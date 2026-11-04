@@ -325,6 +325,25 @@ export function localStatuses(
     return statuses
 }
 
+/**
+ * The block does not commit to transaction attrs, so the failure code of a
+ * transaction this node also saw fail before apply is taken from the local
+ * derivation, not from the peer. Failures inside apply keep the served code:
+ * the local apply does not report one. TX_EXISTS is left alone: the forger
+ * checks nonce and reference block first, so an honest code can differ.
+ */
+export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): void {
+    for (const tx of txs) {
+        const code = plan.failedBeforeApply.get(tx.hash)
+        if (code === undefined || code === ErrorCode.TX_EXISTS || tx.attrs?.code === code) continue
+        // The served code is unsigned peer data; never convert it to text.
+        const served = tx.attrs?.code
+        const shown = typeof served === "string" ? JSON.stringify(served.slice(0, 64)) : typeof served
+        log.warn(`[sync] tx ${tx.hash}: served failure code ${shown} replaced by local ${code}`)
+        tx.attrs = { ...(tx.attrs ?? {}), code }
+    }
+}
+
 /** Hashes whose served status differs from the locally derived one. */
 export function statusDisagreements(
     txs: Transaction[],
