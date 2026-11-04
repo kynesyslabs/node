@@ -43,4 +43,14 @@ describe("describeDbConnectionFailure", () => {
         expect(message).not.toContain(": .")
         expect(message).toContain("postgres.internal:5432")
     })
+
+    it("treats pg's own connect timeout (no error code) as unreachable", () => {
+        for (const text of [
+            "Connection terminated due to connection timeout",
+            "timeout exceeded when trying to connect",
+        ]) {
+            const message = describeDbConnectionFailure(target, new Error(text))
+            expect(message).toContain("absent or unreachable")
+        }
+    })
 })

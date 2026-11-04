@@ -21,6 +21,13 @@ const UNREACHABLE_CODES = [
     "ENETUNREACH",
 ]
 
+// pg and pg-pool raise their own connect timeouts with no `code`.
+const UNREACHABLE_MESSAGES = [
+    "connection timeout",
+    "timeout exceeded when trying to connect",
+    "timeout expired",
+]
+
 export function describeDbConnectionFailure(
     target: DbTarget,
     error: unknown,
@@ -33,7 +40,7 @@ export function describeDbConnectionFailure(
         (code ? String(code) : String(error))
     const unreachable = UNREACHABLE_CODES.some(
         c => code === c || reason.includes(c),
-    )
+    ) || UNREACHABLE_MESSAGES.some(m => reason.toLowerCase().includes(m))
     const hint = unreachable
         ? " The Postgres service is absent or unreachable: check that it is running and that PG_HOST / PG_PORT point at it."
         : ""
