@@ -176,3 +176,9 @@ its sole purpose is rehearsal.
   the drill exercises an abrupt stop, not a graceful shutdown. It does
   not cut the network between running nodes, so it is not a partition
   test.
+- Scenario 12 alone layers a compose override (`lib/drillInputs.ts`):
+  genesis, node-1-only peerlist and an empty `/app/data/snapshot` are
+  mounted from a temp dir, and nodes 2-4 are restarted once after `up`.
+  The staging is `testing/devnet/quorum-drills/drill_inputs.py`, shared
+  with that directory's `gen-inputs.py`, so it needs `python3`. With
+  `--keep-state` the temp dir and the override file are left in place.
