@@ -447,6 +447,41 @@ describe("contributePeerlist", () => {
         expect(merged).toContain(STALE_PEER)
     })
 
+    it("keeps the round's contributions when a peer names a far-future height", async () => {
+        for (const c of ["c1", "c2", "c3"]) {
+            contributePeerlist(101, c, [obs(REPORTED_PEER)])
+        }
+        contributePeerlist(1100, "c1", [obs(STALE_PEER)])
+        expect(await merge()).toEqual([REPORTED_PEER])
+    })
+
+    it("records the round's contributions that arrive after a far-future one", async () => {
+        contributePeerlist(1100, "c1", [obs(STALE_PEER)])
+        for (const c of ["c1", "c2", "c3"]) {
+            contributePeerlist(101, c, [obs(REPORTED_PEER)])
+        }
+        expect(await merge()).toEqual([REPORTED_PEER])
+    })
+
+    it("refuses a height two past our tip, the nearest one that would reset the round", async () => {
+        contributePeerlist(102, "c1", [obs(STALE_PEER, 101, "hash-101")])
+        for (const c of ["c1", "c2", "c3"]) {
+            contributePeerlist(101, c, [obs(REPORTED_PEER)])
+        }
+        expect(await merge()).toEqual([REPORTED_PEER])
+    })
+
+    it("refuses every height while our tip is unknown", async () => {
+        const tip = getSharedState.lastBlockNumber
+        getSharedState.lastBlockNumber = undefined as unknown as number
+        try {
+            contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
+        } finally {
+            getSharedState.lastBlockNumber = tip
+        }
+        expect(await merge(SOLO)).toEqual([])
+    })
+
     it("rejects non-integer blockRefs", async () => {
         contributePeerlist("101" as unknown as number, "c1", [
             obs(REPORTED_PEER),
