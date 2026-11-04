@@ -5,9 +5,10 @@
  * burns.
  *
  * Regeneration runs through the SDK the node is built with. Until the node
- * ships an SDK that emits the granular edits, point GRANULAR_SDK_BUILD at a
- * built SDK (its `build/` directory) to run these cases against it; with an
- * SDK that emits none they are skipped.
+ * pins an SDK that emits the granular edits, point GRANULAR_SDK_BUILD at a
+ * built SDK (its `build/` directory) to run these cases against it. With an
+ * SDK that emits none this file fails: the node would refuse every granular
+ * write such an SDK builds, so it must not ship with one.
  */
 
 import { describe, it, expect, mock, beforeEach } from "bun:test"
@@ -122,6 +123,16 @@ const emitsGranular = (
 
 const storageEdit = (tx: Transaction) =>
     tx.content.gcr_edits.find(e => e.type === "storageProgram") as any
+
+const REQUIRED_SDK =
+    "the resolved @kynesyslabs/demosdk emits no GCR edits for granular storage operations: " +
+    "the node needs an SDK release newer than 4.0.18 that contains sdks commit 501fe22 " +
+    "(fix(storage): emit GCR edits for granular storage operations), pinned in package.json, " +
+    "or GRANULAR_SDK_BUILD pointing at a build of it"
+
+it("runs against an SDK that emits granular storage edits", () => {
+    if (!emitsGranular) throw new Error(REQUIRED_SDK)
+})
 
 describe.skipIf(!emitsGranular)("granular storage writes on the wire", () => {
     for (const postFork of [false, true]) {
