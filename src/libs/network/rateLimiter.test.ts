@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test"
 
 const mockGetAuthContext = mock(() => ({
     verified: false,
@@ -85,9 +85,38 @@ describe("RateLimiter trusted internal requests", () => {
     })
 
     afterEach(() => {
+        setSystemTime()
         rateLimiter.destroy()
         mockGetAuthContext.mockClear()
         mockGetPeer.mockClear()
+        refreshStakedSet.mockClear()
+        getGCRValidatorsAtBlock.mockClear()
+    })
+
+    it("re-reads an empty validator set at most every few seconds", async () => {
+        setSystemTime(new Date(1_000_000))
+        await rateLimiter.refreshValidatorKeys()
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(1)
+        expect(getGCRValidatorsAtBlock).toHaveBeenCalledTimes(1)
+
+        stakedKeys = new Set(["0xbeef"])
+        setSystemTime(new Date(1_005_000))
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(2)
+
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(3)
+        expect(getGCRValidatorsAtBlock).toHaveBeenCalledTimes(1)
+    })
+
+    it("backs off after a failed validator read too", async () => {
+        setSystemTime(new Date(1_000_000))
+        validatorRows = new Error("connection terminated")
+        await rateLimiter.refreshValidatorKeys()
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(1)
+        expect(getGCRValidatorsAtBlock).toHaveBeenCalledTimes(1)
     })
 
     it("trusts an authenticated staked validator", async () => {

@@ -25,6 +25,9 @@ const BUCKET_SEPARATOR = "|"
 const DEFAULT_BUCKET = "default"
 /** Failed request-signature checks, counted apart from the request quotas. */
 const AUTH_FAILURE_BUCKET = "auth-failure"
+// While the staked set is empty, getStakedSet caches nothing and every
+// signed request would hit the database again.
+const EMPTY_VALIDATOR_SET_RETRY_MS = 5_000
 
 interface RateLimitData {
     count: number
@@ -281,6 +284,7 @@ export class RateLimiter {
     private validatorKeys: ReadonlySet<string> = new Set()
     /** The set is empty because the network has no validator rows, not because they could not be read. */
     private noValidatorRows = false
+    private validatorSetRetryAt = 0
 
     constructor(config: RateLimitConfig) {
         this.config = config
@@ -606,12 +610,19 @@ export class RateLimiter {
      * height. Kept here because the trust check below cannot await.
      */
     public async refreshValidatorKeys(): Promise<void> {
+        const now = Date.now()
+        if (this.validatorKeys.size === 0 && now < this.validatorSetRetryAt) {
+            return
+        }
         const staked = await getStakedSet()
         this.validatorKeys = staked
         if (staked.size > 0) {
             this.noValidatorRows = false
             return
         }
+        // Local to the limiter: consensus callers of getStakedSet still
+        // see the first validator rows at once.
+        this.validatorSetRetryAt = now + EMPTY_VALIDATOR_SET_RETRY_MS
         // The cached set is also empty after a failed refresh. Only a
         // network that really has no validators gets the peer-table
         // fallback; a read failure must not open it.
