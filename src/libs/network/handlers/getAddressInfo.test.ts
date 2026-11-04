@@ -3,21 +3,29 @@
  * never seen must answer a fresh account without storing one.
  */
 
-import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
 
 const KNOWN = "0x" + "ab".repeat(32)
 const UNKNOWN = "0x" + "cd".repeat(32)
 
+const KNOWN_REFERRAL = { totalReferrals: 2, referralCode: "KNOWNCODE", referrals: [], referredBy: null }
 const findOne = jest.fn(async ({ where }: { where: { pubkey: string } }) =>
-    where.pubkey === KNOWN ? ({ pubkey: KNOWN, balance: 5n, nonce: 3 } as any) : null,
+    where.pubkey === KNOWN
+        ? ({ pubkey: KNOWN, balance: 5n, nonce: 3, referralInfo: KNOWN_REFERRAL } as any)
+        : null,
 )
 const save = jest.fn(async (row: unknown) => row)
 const createAccount = jest.fn(async (pubkey: string, _fill: unknown = {}, skipSave = false) => {
-    const row = { pubkey, balance: 0n, nonce: 0 }
+    const row = {
+        pubkey,
+        balance: 0n,
+        nonce: 0,
+        referralInfo: { totalReferrals: 0, referralCode: "GENERATED", referrals: [], referredBy: null },
+    }
     return skipSave ? row : await save(row)
 })
 
-jest.mock("src/model/datasource", () => ({
+mock.module("src/model/datasource", () => ({
     __esModule: true,
     default: {
         getInstance: async () => ({
@@ -25,13 +33,13 @@ jest.mock("src/model/datasource", () => ({
         }),
     },
 }))
-jest.mock("../../blockchain/gcr/handleGCR", () => ({ __esModule: true, default: { createAccount } }))
-jest.mock("../../identity/tools/twitter", () => ({ Twitter: {} }))
-jest.mock("../../identity/tools/discord", () => ({ Discord: {} }))
-jest.mock("../../abstraction/web2/domain", () => ({ fetchDomainProof: jest.fn(), DOMAIN_PROOF_PATH: "" }))
-jest.mock("../../blockchain/gcr/gcr_routines/udIdentityManager", () => ({ UDIdentityManager: {} }))
-jest.mock("@/libs/blockchain/gcr/gcr", () => ({ __esModule: true, default: {} }))
-jest.mock("src/utilities/logger", () => ({
+mock.module("../../blockchain/gcr/handleGCR", () => ({ __esModule: true, default: { createAccount } }))
+mock.module("../../identity/tools/twitter", () => ({ Twitter: {} }))
+mock.module("../../identity/tools/discord", () => ({ Discord: {} }))
+mock.module("../../abstraction/web2/domain", () => ({ fetchDomainProof: jest.fn(), DOMAIN_PROOF_PATH: "" }))
+mock.module("../../blockchain/gcr/gcr_routines/udIdentityManager", () => ({ UDIdentityManager: {} }))
+mock.module("@/libs/blockchain/gcr/gcr", () => ({ __esModule: true, default: {} }))
+mock.module("src/utilities/logger", () => ({
     __esModule: true,
     default: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), warning: jest.fn(), error: jest.fn(), only: jest.fn() },
 }))
@@ -57,9 +65,19 @@ describe("getAddressInfo", () => {
         expect(save).not.toHaveBeenCalled()
     })
 
+    it("gives an unknown address no referral code, since an unstored code is refused", async () => {
+        const reply = await addressInfo({ address: UNKNOWN })
+        expect(reply.response.referralInfo).toEqual({
+            totalReferrals: 0,
+            referralCode: null,
+            referrals: [],
+            referredBy: null,
+        })
+    })
+
     it("answers a known address with its stored row", async () => {
         const reply = await addressInfo({ address: KNOWN })
-        expect(reply.response).toEqual({ pubkey: KNOWN, balance: 5n, nonce: 3 })
+        expect(reply.response).toEqual({ pubkey: KNOWN, balance: 5n, nonce: 3, referralInfo: KNOWN_REFERRAL })
         expect(createAccount).not.toHaveBeenCalled()
     })
 
