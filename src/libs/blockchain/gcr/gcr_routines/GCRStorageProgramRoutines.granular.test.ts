@@ -22,6 +22,7 @@ import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import {
     GCRStorageProgramRoutines,
     granularWriteFee,
+    validateStorageProgramPayload,
 } from "./GCRStorageProgramRoutines"
 
 const OWNER = "0x" + "aa".repeat(32)
@@ -411,5 +412,63 @@ describe("granular storage operations", () => {
             return JSON.stringify(snapshot(fresh), (_, v) => (typeof v === "bigint" ? v.toString() : v))
         }
         expect(await run()).toBe(await run())
+    })
+})
+
+describe("U+0000, which Postgres cannot store, in any storage operation", () => {
+    const nul = "a\u0000b"
+    const cases: [string, string, Record<string, unknown>][] = [
+        ["CREATE_STORAGE_PROGRAM", "a data value", { programName: "p", data: { k: nul } }],
+        ["CREATE_STORAGE_PROGRAM", "a nested data key", { programName: "p", data: { k: [{ [nul]: 1 }] } }],
+        ["CREATE_STORAGE_PROGRAM", "the program name", { programName: nul, data: { k: 1 } }],
+        ["CREATE_STORAGE_PROGRAM", "the salt", { programName: "p", salt: nul }],
+        ["CREATE_STORAGE_PROGRAM", "the metadata", { programName: "p", metadata: { name: nul } }],
+        ["CREATE_STORAGE_PROGRAM", "the ACL", { programName: "p", acl: { mode: "restricted", allowed: [nul] } }],
+        ["WRITE_STORAGE", "a data value", { data: { deep: { deeper: [nul] } } }],
+        ["WRITE_STORAGE", "the metadata", { data: { k: 1 }, metadata: { [nul]: 1 } }],
+        ["UPDATE_ACCESS_CONTROL", "a group name", { acl: { mode: "restricted", groups: { [nul]: { members: [], permissions: [] } } } }],
+        ["SET_FIELD", "the field name", { field: nul, value: 1 }],
+        ["SET_FIELD", "the value", { field: "n", value: { k: nul } }],
+        ["SET_ITEM", "the value", { field: "list", index: 0, value: nul }],
+        ["APPEND_ITEM", "a key of the value", { field: "list", value: { [nul]: 1 } }],
+        ["DELETE_FIELD", "the field name", { field: nul }],
+    ]
+
+    for (const [op, where, vars] of cases) {
+        it(`${op} refuses it in ${where}, simulated or not`, async () => {
+            for (const simulate of [true, false]) {
+                const existing = op === "CREATE_STORAGE_PROGRAM" ? null : program()
+                const before = existing ? snapshot(existing) : null
+                const result = await apply(edit(op, vars), existing, simulate)
+                expect(result.success).toBe(false)
+                expect(result.message).toContain("U+0000")
+                if (existing) expect(snapshot(existing)).toEqual(before)
+            }
+            const validated = validateStorageProgramPayload(
+                { operation: op, storageAddress: ADDRESS, ...vars } as any,
+                OWNER,
+            )
+            expect(validated.valid).toBe(false)
+            expect(validated.message).toContain("U+0000")
+        })
+    }
+
+    it("refuses it in the edit's target or metadata, which become columns too", async () => {
+        const target = edit("WRITE_STORAGE", { data: { k: 1 } })
+        target.target = ADDRESS + "\u0000"
+        expect((await apply(target, program())).success).toBe(false)
+
+        const metadata = edit("WRITE_STORAGE", { data: { k: 1 } })
+        metadata.context.data.metadata = { note: nul }
+        expect((await apply(metadata, program())).success).toBe(false)
+    })
+
+    it("still accepts the same payloads without it", async () => {
+        const created = await apply(
+            edit("CREATE_STORAGE_PROGRAM", { programName: "p", salt: "s", data: { k: "ab" }, metadata: { name: "n" } }),
+            null,
+        )
+        expect(created.success).toBe(true)
+        expect((await apply(edit("WRITE_STORAGE", { data: { k: ["ab"] } }), program())).success).toBe(true)
     })
 })

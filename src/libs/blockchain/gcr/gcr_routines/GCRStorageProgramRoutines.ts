@@ -12,6 +12,10 @@ import { types, storage } from "@kynesyslabs/demosdk"
 
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import log from "@/utilities/logger"
+import {
+    containsNulCharacter,
+    NUL_CHARACTER_REFUSAL,
+} from "@/libs/blockchain/validation/postgresText"
 import type { GCRResult } from "../handleGCR"
 
 // Re-export SDK types for convenience
@@ -24,6 +28,7 @@ const STORAGE_PROGRAM_MAX_SIZE_BYTES = 1048576 // 1MB
 const STORAGE_PROGRAM_PRICING_CHUNK_BYTES = 10240 // 10KB
 const STORAGE_PROGRAM_FEE_PER_CHUNK = 1n // 1 DEM per chunk
 const MAX_INTERACTION_TXS = 1000
+const STORAGE_NUL_MESSAGE = `Storage program payload ${NUL_CHARACTER_REFUSAL}`
 
 function deepMerge(
     target: Record<string, unknown>,
@@ -82,6 +87,13 @@ export function validateStorageProgramPayload(
     totalFee?: bigint
 } {
     const encoding = payload.encoding || "json"
+
+    if (containsNulCharacter(payload)) {
+        return {
+            valid: false,
+            message: STORAGE_NUL_MESSAGE,
+        }
+    }
 
     // Validate operation type
     // Note: READ_STORAGE is not a transaction operation - reads are handled via RPC endpoints
@@ -316,15 +328,6 @@ function resolveIndex(index: unknown, length: number): number | null {
     return resolved >= 0 && resolved < length ? resolved : null
 }
 
-function containsNul(value: unknown): boolean {
-    if (typeof value === "string") return value.includes("\u0000")
-    if (typeof value !== "object" || value === null) return false
-    if (Array.isArray(value)) return value.some(containsNul)
-    return Object.entries(value).some(
-        ([key, v]) => key.includes("\u0000") || containsNul(v),
-    )
-}
-
 /**
  * Calculate JSON nesting depth recursively
  */
@@ -494,6 +497,17 @@ export class GCRStorageProgramRoutines {
         // - context.data: { variables, metadata }
         const operation = spEdit.context.operation
         const storageAddress = spEdit.target
+
+        // Every string here lands in a text or jsonb column of the row.
+        if (
+            containsNulCharacter([
+                spEdit.target,
+                spEdit.context.sender,
+                spEdit.context.data ?? null,
+            ])
+        ) {
+            return { success: false, message: STORAGE_NUL_MESSAGE }
+        }
 
         log.info(
             `[StorageProgram] Processing ${operation} for ${storageAddress}`,
@@ -1323,11 +1337,6 @@ export class GCRStorageProgramRoutines {
             return fail(`Value is required for ${operation} operation`)
         }
         const footprint = granularWriteFootprint(variables)
-        // Postgres jsonb cannot hold U+0000; such a row would fail the
-        // block's commit instead of this transaction.
-        if (containsNul(footprint)) {
-            return fail("Field names and values cannot contain U+0000")
-        }
         const depth = calculateJsonNestingDepth(footprint)
         if (depth > 64) {
             return fail(`JSON nesting depth ${depth} exceeds maximum 64 levels`)
