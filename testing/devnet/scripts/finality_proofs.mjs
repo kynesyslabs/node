@@ -15,12 +15,21 @@
  *   - getStorageProof for the storage program and for an address never
  *     created: the sparse Merkle path of each verifies against the anchor's
  *     native_storage_programs, and the anchor carries a quorum;
+ *   - the head proofs storage_root.mjs took right after each storage step
+ *     answered 200 and verify, including while the head was the block that
+ *     wrote the program;
+ *   - getStorageProof at past blocks: before and after each step's block,
+ *     each verifies against that block's own root and serves the record the
+ *     step left (absent before the create, the written data after the write,
+ *     a new ACL, then deleted), every block of the last few verifies, and a
+ *     block past the 64-block window is refused with 410;
  *   - getBlockSegment over the last blocks: every header hashes, chains and
  *     carries a quorum.
  *
  * Env: NODE_URLS (comma-separated, node-1 first), PROOF_INPUTS_DIR (holds
  * tx-hashes.json from tx_status_failed.mjs and storage.json from
- * storage_root.mjs), SHARD_SIZE (default 4).
+ * storage_root.mjs: the address, each step's block and the head answers),
+ * SHARD_SIZE (default 4).
  * Prints "OK" and exits 0, or "FAIL: ..." and exits 1.
  */
 import { createHash, createPublicKey, verify as verifySignature } from "node:crypto"
@@ -301,6 +310,94 @@ if (storageAnswer.result === 200) {
         check(storageEntryProblem(forged, root) !== null, "tamper: a changed record is rejected")
     }
 }
+
+/** Null when a served storage proof holds offline (anchored at `blockNumber` when given), else what is wrong. */
+async function storageProofProblem(response, blockNumber) {
+    const { anchor, anchorParent, asOfBlock, proofs } = response ?? {}
+    if (blockNumber !== undefined && anchor?.number !== blockNumber) return `anchored at ${anchor?.number}, asked for ${blockNumber}`
+    const content = readBlock(anchor, anchor?.number)
+    if (typeof content === "string") return content
+    const root = content.native_tables_hashes?.native_storage_programs
+    if (!HEX32.test(root ?? "")) return `block ${anchor.number} commits no storage root`
+    if (asOfBlock !== anchor.number - 1) return `asOfBlock ${asOfBlock} for anchor ${anchor.number}`
+    const certificate = await certificateProblem(anchor, anchorParent)
+    if (certificate) return certificate
+    if (!Array.isArray(proofs) || proofs.length === 0) return "no entries"
+    for (const entry of proofs) {
+        const problem = storageEntryProblem(entry, root)
+        if (problem) return `${entry.storageAddress}: ${problem}`
+    }
+    return null
+}
+
+const answerProblem = answer => `result ${answer.result} ${JSON.stringify(answer.extra)}`
+
+// Taken by storage_root.mjs right after each step's block landed.
+const headAnswers = storage.headAnswers ?? []
+check(headAnswers.length === (storage.steps ?? []).length && headAnswers.length > 0, "a head proof was recorded after each storage step", `${headAnswers.length} answer(s)`)
+let headWrote = 0
+for (const { label, block, answer } of headAnswers) {
+    const problem = answer.result === 200 ? await storageProofProblem(answer.response) : answerProblem(answer)
+    check(problem === null, `${label}: head proof right after block ${block} answers 200 and verifies offline`, problem ?? `anchor ${answer.response.anchor.number}`)
+    if (answer.result === 200 && answer.response.anchor.number === block) headWrote++
+}
+check(headWrote > 0, "a head proof was served while the head block itself wrote the program", `${headWrote} of ${headAnswers.length}`)
+
+const limits = await nodeCall(urls[0], "getStorageProgramLimits", {})
+const HISTORY_BLOCKS = limits.response?.historyBlocks
+check(limits.result === 200 && HISTORY_BLOCKS === 64 && limits.response.maxAddressesPerProof === 16, "getStorageProgramLimits names the 64-block history and 16 addresses per proof", JSON.stringify(limits.response))
+
+async function storageProofAt(blockNumber, addresses = [storage.storageAddress]) {
+    return await nodeCallUntil(urls[0], "getStorageProof", { storageAddresses: addresses, blockNumber }, [503], 30_000)
+}
+
+// What each step leaves in the program's record, as of the block after it.
+const after = new Map()
+const expectAfter = {
+    create: r => r?.dataHash === sha256Hex(canonical({ hello: "world" })) && r.isDeleted === false,
+    write: r => r?.dataHash === sha256Hex(canonical({ hello: "again", n: 1 })) && r.isDeleted === false,
+    // Compared with the write's record when that one was still in the window.
+    "access control": (r, w = after.get("write")) =>
+        r !== null && (!w || (r.dataHash === w.dataHash && r.aclHash !== w.aclHash && r.lastModifiedByTx !== w.lastModifiedByTx)),
+    delete: r => r === null || r.isDeleted === true,
+}
+for (const { label, block } of storage.steps ?? []) {
+    for (const [blockNumber, side] of [[block, "before"], [block + 1, "after"]]) {
+        const answer = await storageProofAt(blockNumber)
+        if (answer.result === 410 && answer.response?.oldestBlock > blockNumber) {
+            check(true, `${label}: block ${blockNumber} is already past the history window (410)`, `oldest ${answer.response.oldestBlock}`)
+            continue
+        }
+        const problem = answer.result === 200 ? await storageProofProblem(answer.response, blockNumber) : answerProblem(answer)
+        check(problem === null, `${label}: proof at block ${blockNumber} (the state ${side} the step) verifies against that block's root`, problem ?? "")
+        if (problem !== null) continue
+        const record = answer.response.proofs[0].record
+        if (side === "after") {
+            after.set(label, record)
+            check(expectAfter[label]?.(record) === true, `${label}: record as of block ${blockNumber} is what the step left`, JSON.stringify(record))
+        } else if (label === "create") {
+            check(record === null, "create: the program is absent before its block", JSON.stringify(record))
+        }
+    }
+}
+
+const storageHead = Number((await nodeCall(urls[0], "getLastBlockNumber", {})).response)
+const walkProblems = []
+for (let blockNumber = Math.max(1, storageHead - 7); blockNumber <= storageHead; blockNumber++) {
+    const answer = await storageProofAt(blockNumber, [storage.storageAddress, absent])
+    const problem = answer.result === 200 ? await storageProofProblem(answer.response, blockNumber) : answerProblem(answer)
+    if (problem) walkProblems.push(`block ${blockNumber}: ${problem}`)
+}
+check(walkProblems.length === 0, `storage proofs at each of blocks ${Math.max(1, storageHead - 7)}..${storageHead} verify offline`, walkProblems.slice(0, 3).join("; "))
+
+if (Number.isInteger(HISTORY_BLOCKS) && storageHead > HISTORY_BLOCKS + 1) {
+    const stale = await storageProofAt(storageHead - HISTORY_BLOCKS - 1)
+    check(stale.result === 410 && stale.extra?.reason === "history_unavailable", "a proof past the history window is refused with 410", answerProblem(stale))
+} else {
+    console.log(`[proofs] SKIP 410 check: head ${storageHead} is still inside the ${HISTORY_BLOCKS}-block window`)
+}
+const ahead = await storageProofAt(storageHead + 1000)
+check(ahead.result === 404 && ahead.extra?.reason === "not_found", "a proof above the head is refused with 404", answerProblem(ahead))
 
 // ---------------------------------------------------------------------------
 // Block segment
