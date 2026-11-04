@@ -329,6 +329,7 @@ describe("getStorageProof", () => {
             history.push({ block: number, storageAddress: address, record: before ? storageProgramRecord(before) : null })
             if (next === null) table.delete(address)
             else table.set(address, { ...next, smtLeaf: storageProgramLeafHex(next) })
+            root.markDirty()
         }
         stateAfter.set(number, snapshotRecords())
     }
@@ -343,6 +344,7 @@ describe("getStorageProof", () => {
     beforeEach(() => {
         table = new Map()
         history = []
+        root.markDirty()
         stateAfter = new Map([[3, new Map()]])
         countStorageProofRootMismatch.mockReset()
         proveStoragePrograms.mockImplementation((addresses, undo) => root.prove(addresses, undo))
@@ -417,6 +419,19 @@ describe("getStorageProof", () => {
         expectServedState(await getStorageProof({ storageAddresses: ["stor-1"] }), 7, ["stor-1"])
     })
 
+    it("answers 503 busy, uncounted, when a block lands while the proof is built", async () => {
+        withStorage()
+        // A block applied outside the sync lock writes storage after the head read.
+        proveStoragePrograms.mockImplementation(async (addresses, undo) => {
+            storeBlock(7, [["stor-1", row(1, { data: { i: 1, v: 3 } })]])
+            return await root.prove(addresses, undo)
+        })
+        const reply = await getStorageProof({ storageAddresses: ["stor-1"] })
+        expect(reply.result).toBe(503)
+        expect(reply.extra).toEqual({ reason: "busy" })
+        expect(countStorageProofRootMismatch).not.toHaveBeenCalled()
+    })
+
     it("builds the proof while holding the sync lock", async () => {
         withStorage()
         let lockedDuringProof = false
@@ -447,7 +462,7 @@ describe("getStorageProof", () => {
 
 describe("getStorageProgramLimits", () => {
     it("names the proof batch, the history window and the program pricing", async () => {
-        const reply = await getStorageProgramLimits()
+        const reply = getStorageProgramLimits()
         expect(reply.result).toBe(200)
         expect(reply.response).toEqual({
             maxAddressesPerProof: 16,

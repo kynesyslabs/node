@@ -64,7 +64,7 @@ const storageRootOf = (block: { content?: unknown }): unknown =>
  * no_storage_commitment when B commits no storage root; 410
  * history_unavailable below the window; 500 root_mismatch when the rebuilt
  * root is not B's (a gap in the undo log); 503 busy when the sync lock is
- * not free in time.
+ * not free in time or the head moved while the proof was built.
  */
 export default async function getStorageProof(data: {
     storageAddresses?: unknown
@@ -119,6 +119,13 @@ export default async function getStorageProof(data: {
                 toBlock: head.number,
             })
             if (proved.root !== anchorRoot) {
+                // The first fast sync applies blocks without the sync lock, so
+                // a block landing between the head read and the snapshot leaves
+                // the table one block ahead of the undo range: not a log gap.
+                const now = await Chain.getLastBlock()
+                if (now && now.number !== head.number) {
+                    return refusal(503, "busy", { retryAfterSeconds: RETRY_AFTER_SECONDS })
+                }
                 countStorageProofRootMismatch()
                 log.error(
                     `[getStorageProof] the table with blocks ${number}..${head.number} undone gives ${proved.root}, ` +
