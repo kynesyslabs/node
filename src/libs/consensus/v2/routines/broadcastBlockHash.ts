@@ -119,6 +119,8 @@ async function voteSignerSet(height: number): Promise<Set<string>> {
 
 type SignerSetLookup = () => Promise<Set<string> | null>
 
+const MAX_REFUSAL_MESSAGE_LOG_CHARS = 200
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -276,9 +278,15 @@ async function proposeAndCollect(
     }
 
     if (response?.result !== 200) {
-        const extraMessage = isPlainObject(response?.extra)
+        // Peer input: a non-string can throw when interpolated (an own
+        // non-callable toString), which would reject the whole broadcast.
+        const rawMessage = isPlainObject(response?.extra)
             ? response.extra.message
             : undefined
+        const extraMessage =
+            typeof rawMessage === "string"
+                ? rawMessage.slice(0, MAX_REFUSAL_MESSAGE_LOG_CHARS)
+                : undefined
         log.error(
             "[broadcastBlockHash] Block hash not confirmed by validator " +
                 `${peerId}: result=${response?.result} message=${extraMessage}`,

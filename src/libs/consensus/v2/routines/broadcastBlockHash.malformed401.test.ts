@@ -8,6 +8,7 @@
 import { describe, expect, it, spyOn } from "bun:test"
 import { broadcastBlockHash } from "./broadcastBlockHash"
 import Mempool from "@/libs/blockchain/mempool"
+import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 
 const block = {
@@ -17,12 +18,16 @@ const block = {
     validation_data: { signatures: {} },
 }
 
-const refusing = (identity: string, ourBlock: unknown) => ({
+const refusing = (
+    identity: string,
+    ourBlock: unknown,
+    message: unknown = "Hash does not correspond to our candidate block",
+) => ({
     identity,
     longCall: async () => ({
         result: 401,
         response: identity,
-        extra: { message: "Hash does not correspond to our candidate block", ourBlock },
+        extra: { message, ourBlock },
     }),
 })
 
@@ -101,5 +106,51 @@ describe("broadcastBlockHash and malformed 401 replies", () => {
         const [pro, con] = await broadcastBlockHash(block as never, [silent] as never)
         expect(pro).toBe(0)
         expect(con).toBe(1)
+    })
+
+    // JSON.parse yields these shapes from a peer's wire bytes.
+    const messages: [string, unknown][] = [
+        ["an object with a non-callable toString", JSON.parse('{"toString":1}')],
+        ["an object with a null toString", JSON.parse('{"toString":null}')],
+        ["an object with a non-callable valueOf", JSON.parse('{"valueOf":1,"toString":1}')],
+        ["an array", [1, 2]],
+        ["a number", 7],
+    ]
+    for (const [label, message] of messages) {
+        it(`counts a 401 whose message is ${label} as con`, async () => {
+            getSharedState.candidateBlock = block as never
+            const [pro, con] = await withMempool(
+                async () => [],
+                () =>
+                    broadcastBlockHash(
+                        block as never,
+                        [refusing("bad", mismatch(["tx-b"]), message)] as never,
+                    ),
+            )
+            expect(pro).toBe(0)
+            expect(con).toBe(1)
+        })
+    }
+
+    it("logs a bounded prefix of an oversized refusal message", async () => {
+        getSharedState.candidateBlock = block as never
+        const spy = spyOn(log, "error")
+        try {
+            await withMempool(
+                async () => [],
+                () =>
+                    broadcastBlockHash(
+                        block as never,
+                        [refusing("bad", undefined, "x".repeat(100_000))] as never,
+                    ),
+            )
+            const refusalLine = spy.mock.calls
+                .map(args => String(args[0]))
+                .find(line => line.includes("not confirmed by validator bad"))
+            expect(refusalLine).toBeDefined()
+            expect(refusalLine!.length).toBeLessThan(400)
+        } finally {
+            spy.mockRestore()
+        }
     })
 })
