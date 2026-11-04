@@ -268,6 +268,8 @@ drills also leave `drill-input.json` (what the run observed),
 `CONSENSUS_TIME` (10), `GENESIS_DELAY` (60 + 25 s per node),
 `LOCKSTEP_TIMEOUT` (420), `PROGRESS_BLOCKS` (3), `PROGRESS_TIMEOUT` (180),
 `STALL_WINDOW` (120), `PARTITION_TIME` (120), `SETTLE_TIMEOUT` (300),
+`READ_TIMEOUT` (8, the curl timeout in seconds of the one retry after an
+empty or timed-out read of a node's head or hash during the lockstep waits),
 `NETSHOOT_IMAGE`, `RUNS_DIR`. For the `halt-*` and `ride-*` drills:
 `BASELINE_HEIGHT` (6), `SETTLE_ROUNDS` (2), `HALT_ROUNDS` (12),
 `RECOVERY_BLOCKS` (3), `RECOVERY_TIMEOUT` (300), `RIDE_BLOCKS` (5),
