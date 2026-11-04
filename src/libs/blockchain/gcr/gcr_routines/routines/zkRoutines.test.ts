@@ -30,8 +30,10 @@ const edit = (payload: Record<string, unknown>) => ({
     type: "identity",
     operation: "zk_commitmentadd",
     txhash: "aa".repeat(32),
-    data: { commitment_hash: "c".repeat(64), provider: "github", timestamp: 1_760_000_000_000, ...payload },
+    data: { commitment_hash: "1" + "c".repeat(63), provider: "github", timestamp: 1_760_000_000_000, ...payload },
 })
+
+const BN254 = "21888242871839275222246405745257275088548364400416034343698204186575808495617"
 
 const caches = (): any => ({ accounts: new Map(), zkCommitments: new Map() })
 
@@ -42,10 +44,23 @@ describe("applyZkCommitmentAdd", () => {
         expect(result.deferredWrite).toBeDefined()
     })
 
+    it("takes a field element as the SDK writes it, in canonical decimal", async () => {
+        for (const commitment_hash of ["0", "42", (BigInt(BN254) - 1n).toString(), "0x" + "0".repeat(63) + "1"]) {
+            const result = await applyZkCommitmentAdd(edit({ commitment_hash }), false, caches())
+            expect(`${commitment_hash} ${result.success}`).toBe(`${commitment_hash} true`)
+        }
+    })
+
     for (const [name, payload] of [
         ["U+0000 in the provider, a text column", { provider: "git\u0000hub" }],
         ["a fractional timestamp, which bigint refuses", { timestamp: 1.5 }],
         ["a timestamp beyond bigint", { timestamp: 1e20 }],
+        // A primary key and an index: a b-tree entry over 2704 bytes fails the insert.
+        ["a commitment of 3000 digits", { commitment_hash: "1" + "7".repeat(2999) }],
+        ["a commitment with leading zeros, a second key for one leaf", { commitment_hash: "0042" }],
+        ["a commitment at the field order", { commitment_hash: BN254 }],
+        ["64 hex digits beyond the field order", { commitment_hash: "f".repeat(64) }],
+        ["a provider too long for its index", { provider: "p".repeat(65) }],
     ] as const) {
         it(`fails the transaction, staging nothing: ${name}`, async () => {
             const entities = caches()
