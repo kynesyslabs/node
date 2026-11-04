@@ -13,6 +13,7 @@ import {
     readCommittedRefusal,
 } from "./committedBlock"
 import { commitLockActive, voteMessageOf } from "../commitLock/domain"
+import { getMempoolLimits } from "@/libs/blockchain/mempoolLimits"
 
 /**
  * Per-peer vote outcome. The `signaturesToMerge` map carries every
@@ -96,6 +97,95 @@ async function verifyIncomingSignatures(
     return verified
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** The string entries of a peer-supplied tx hash list, bounded like a mempool. */
+function txHashList(value: unknown): string[] {
+    if (!Array.isArray(value)) return []
+    return value
+        .slice(0, getMempoolLimits().maxTxs)
+        .filter((h): h is string => typeof h === "string")
+}
+
+/**
+ * Diagnostic dump for a refusal: helps operators see why two shard members
+ * disagreed on the candidate content. `ourBlock` is the refusing peer's
+ * candidate, as it reported it.
+ */
+async function logCandidateMismatch(
+    peerId: string,
+    block: Block,
+    ourBlock: Record<string, unknown>,
+): Promise<void> {
+    // This is the one place a peer's candidate for our height is seen
+    // once per peer per round, so it is where disagreement is counted.
+    if (
+        ourBlock.hash !== block.hash &&
+        (ourBlock.number === undefined || ourBlock.number === block.number)
+    ) {
+        countBlockHashMismatch()
+    }
+    const theirTxHashes = txHashList(
+        Array.isArray(ourBlock.txHashes)
+            ? ourBlock.txHashes
+            : ourBlock.ordered_transactions,
+    )
+    const ourTxHashes = txHashList(block.content?.ordered_transactions)
+    const theirSet = new Set(theirTxHashes)
+    const ourSet = new Set(ourTxHashes)
+    const missingFromUs = theirTxHashes.filter(h => !ourSet.has(h))
+    const missingFromThem = ourTxHashes.filter(h => !theirSet.has(h))
+    log.error(
+        `[broadcastBlockHash] tx-set diff with ${peerId}: ` +
+            `missingFromUs=${missingFromUs.length}, ` +
+            `missingFromThem=${missingFromThem.length}`,
+    )
+    log.error("Missing from us: " + JSON.stringify(missingFromUs, null, 2))
+
+    if (missingFromThem.length > 0) {
+        // check if the missing transactions are in the mempool
+        const missing = await Mempool.getTransactionsByHashes(missingFromThem)
+        log.error("Missing from them, found in mempool: " + missing.length)
+        log.error(
+            "Missing from them, found in mempool: " +
+                JSON.stringify(
+                    missing.map(tx => ({
+                        hash: tx.hash,
+                        blockNumber: tx.blockNumber,
+                        referenceBlock: tx.reference_block,
+                    })),
+                    null,
+                    2,
+                ),
+        )
+    }
+
+    if (missingFromUs.length > 0) {
+        // check if the missing transactions are in the mempool
+        const missing = await Mempool.getTransactionsByHashes(missingFromUs)
+        log.error("Missing from us, found in mempool: " + missing.length)
+        log.error(
+            "Missing from us, found in mempool: " +
+                JSON.stringify(
+                    missing.map(tx => ({
+                        hash: tx.hash,
+                        blockNumber: tx.blockNumber,
+                        referenceBlock: tx.reference_block,
+                    })),
+                    null,
+                    2,
+                ),
+        )
+    }
+
+    log.error("Missing from them: " + JSON.stringify(missingFromThem, null, 2))
+    log.debug(
+        `[broadcastBlockHash] Their block: ${JSON.stringify(ourBlock, null, 2)}`,
+    )
+}
+
 /**
  * The block number travels after the first three params so receivers that
  * predate it read those unchanged; a receiver that has the height answers
@@ -162,120 +252,35 @@ async function proposeAndCollect(
         }
     }
 
-    if (response.result !== 200) {
-        const extraMessage =
-            typeof response.extra === "object" && response.extra !== null
-                ? (response.extra as { message?: string }).message
-                : undefined
+    if (response?.result !== 200) {
+        const extraMessage = isPlainObject(response?.extra)
+            ? response.extra.message
+            : undefined
         log.error(
             "[broadcastBlockHash] Block hash not confirmed by validator " +
-                `${peerId}: result=${response.result} message=${extraMessage}`,
+                `${peerId}: result=${response?.result} message=${extraMessage}`,
         )
 
-        // Diagnostic dump preserved from prior implementation — helps
-        // operators investigate why two shard members disagreed on
-        // the candidate block content. The mismatched-block payload
-        // is only present on the 401 branch from
-        // `manageProposeBlockHash`; guard accordingly.
-        const extra = response.extra as
-            | {
-                  ourBlock?: {
-                      hash?: string
-                      number?: number
-                      txHashes?: string[]
-                      ordered_transactions?: string[]
-                  }
-              }
-            | undefined
-        if (extra?.ourBlock) {
-            // This is the one place a peer's candidate for our height is seen
-            // once per peer per round, so it is where disagreement is counted.
-            if (
-                extra.ourBlock.hash !== block.hash &&
-                (extra.ourBlock.number === undefined ||
-                    extra.ourBlock.number === block.number)
-            ) {
-                countBlockHashMismatch()
-            }
-            const theirTxHashes: string[] =
-                extra.ourBlock.txHashes ??
-                extra.ourBlock.ordered_transactions ??
-                []
-            const ourTxHashes: string[] =
-                getSharedState.candidateBlock.content.ordered_transactions
-            const theirSet = new Set(theirTxHashes)
-            const ourSet = new Set(ourTxHashes)
-            const missingFromUs = theirTxHashes.filter(h => !ourSet.has(h))
-            const missingFromThem = ourTxHashes.filter(h => !theirSet.has(h))
-            log.error(
-                `[broadcastBlockHash] tx-set diff with ${peerId}: ` +
-                    `missingFromUs=${missingFromUs.length}, ` +
-                    `missingFromThem=${missingFromThem.length}`,
-            )
-            log.error(
-                "Missing from us: " + JSON.stringify(missingFromUs, null, 2),
-            )
-
-            if (missingFromThem.length > 0) {
-                // check if the missing transactions are in the mempool
-                const missing =
-                    await Mempool.getTransactionsByHashes(missingFromThem)
+        // The payload is the refusing peer's own candidate: diagnostics
+        // only, so nothing in it may turn this con vote into a thrown round.
+        const ourBlock = isPlainObject(response?.extra)
+            ? response.extra.ourBlock
+            : undefined
+        if (isPlainObject(ourBlock)) {
+            try {
+                await logCandidateMismatch(peerId, block, ourBlock)
+            } catch (e) {
                 log.error(
-                    "Missing from them, found in mempool: " + missing.length,
-                )
-                log.error(
-                    "Missing from them, found in mempool: " +
-                        JSON.stringify(
-                            missing.map(tx => ({
-                                hash: tx.hash,
-                                blockNumber: tx.blockNumber,
-                                referenceBlock: tx.reference_block,
-                            })),
-                            null,
-                            2,
-                        ),
+                    `[broadcastBlockHash] tx-set diff with ${peerId} failed: ${e instanceof Error ? e.message : String(e)}`,
                 )
             }
-
-            if (missingFromUs.length > 0) {
-                // check if the missing transactions are in the mempool
-                const missing =
-                    await Mempool.getTransactionsByHashes(missingFromUs)
-                log.error(
-                    "Missing from us, found in mempool: " + missing.length,
-                )
-                log.error(
-                    "Missing from us, found in mempool: " +
-                        JSON.stringify(
-                            missing.map(tx => ({
-                                hash: tx.hash,
-                                blockNumber: tx.blockNumber,
-                                referenceBlock: tx.reference_block,
-                            })),
-                            null,
-                            2,
-                        ),
-                )
-            }
-
-            log.error(
-                "Missing from them: " +
-                    JSON.stringify(missingFromThem, null, 2),
-            )
-            log.debug(
-                `[broadcastBlockHash] Their block: ${JSON.stringify(
-                    extra.ourBlock,
-                    null,
-                    2,
-                )}`,
-            )
         }
 
         return {
             peerId,
             vote: "con",
             signaturesToMerge: {},
-            rejectionReason: `HTTP ${response.result}`,
+            rejectionReason: `HTTP ${response?.result}`,
         }
     }
 
@@ -284,10 +289,10 @@ async function proposeAndCollect(
     // `manageProposeBlockHash.ts` line 104). `response.response` is
     // the receiver's pubkey hex; `extra.signatures[response.response]`
     // is its signature over our block hash.
-    const extra = response.extra as
-        | { signatures?: Record<string, string> }
-        | undefined
-    const incomingSignatures = extra?.signatures ?? {}
+    const extra = isPlainObject(response.extra) ? response.extra : {}
+    const incomingSignatures = isPlainObject(extra.signatures)
+        ? (extra.signatures as Record<string, string>)
+        : {}
 
     // PR #888 Greptile P1: a `pro` vote must carry cryptographic
     // proof of agreement, not just an HTTP 200. A peer returning
