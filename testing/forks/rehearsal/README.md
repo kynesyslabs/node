@@ -14,6 +14,19 @@ the unit tests use.
    `bun install` is enough.
 4. Postgres host port 5432 must be free (override with
    `POSTGRES_HOST_PORT=5532` in `testing/devnet/.env` if it conflicts).
+5. `testing/devnet/.env` must exist (scenario 12 uses the stock devnet
+   compose; a fresh checkout has only `.env.example`):
+
+   ```bash
+   cp testing/devnet/.env.example testing/devnet/.env
+   ```
+
+   Without it `docker compose` fails with `invalid empty volume spec`:
+   `testing/devnet/docker-compose.yml:13` mounts
+   `${PERSISTENT:+postgres-data:/var/lib/postgresql/data}`, which is empty
+   while `PERSISTENT` is unset, and `.env.example` sets it. This is the same
+   copy `testing/devnet/scripts/setup.sh` makes. The quorum drills' own
+   `run.sh` writes its own compose file and does not need it.
 
 The harness queries Postgres directly from the host. The host port is
 exposed by the devnet docker-compose (added together with the rehearsal

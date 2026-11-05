@@ -73,7 +73,8 @@ that guess.
 Exit code 0 means pass, 1 fail, 2 the run could not be carried out
 (preflight, boot, timing). A running node whose head cannot be read during
 an observation window (three tries) ends the run as `ERROR`, exit 2: a
-crashed node must not pass for a stalled one. Each run with a verdict
+crashed node must not pass for a stalled one, and neither may a run in which
+Postgres ran out of connections (see "Postgres connections"). Each run with a verdict
 appends a row to `runs/results.tsv`. Log-line counts (floor refusals,
 fallback lines) only take lines logged in the window being judged.
 
@@ -310,6 +311,73 @@ in `run.sh`. These are estimates from the constants, not measurements.
 Disk: the preflight needs 10 GB free on `/` (`MIN_DISK_GB`). Node and
 postgres state are on tmpfs, so they count as RAM; the run's own disk use is
 the 13 container logs and the run dir, which has not been measured.
+
+### Postgres connections
+
+Every node's database is on one shared `postgres:16-alpine`; real validators
+have a database each. With the default `max_connections` of 100 the 13-node
+cases ran out: `FATAL: sorry, too many clients already` in the node logs and in
+`run.sh`'s own `psql` read (`ride-n13s10` aborted at its baseline read; the
+passing `halt-n13s10` logged it on 11 nodes, so that pass cannot be trusted).
+
+What opens a Postgres connection while a node runs:
+
+| Where | Connections |
+|---|---|
+| `src/model/datasource.ts:52-68`, the one TypeORM `DataSource` (`Datasource.getInstance`, `:119-125`, is the only caller of `initialize()`; about 40 files go through it, migrations included, `migrationsRun: true` at `:70`) | one pool of up to **10**: no `max` or `poolSize` is set, so TypeORM passes `max: undefined` (`typeorm/driver/postgres/PostgresDriver.js:1205`) and pg-pool uses 10 (`pg-pool/index.js:89`, pg-pool 3.10.1 under pg 8.16.3, typeorm 0.3.31) |
+| `src/utilities/backupAndRestore.ts:35`, `new Client` from `pg` | 1, but it is the `bun run restore` tool (`package.json:46`), not started by the node or the image entrypoint |
+| a second `DataSource`, `new Pool`, LISTEN/NOTIFY | none in `src/`; the other `new DataSource` calls are in `*Pg.test.ts` files |
+| the sidecar (`sidecar/`), `scripts/docker-entrypoint.sh` | none |
+
+So a node holds at most 10. The drill adds its own: `psql_node` (`run.sh`, one
+`docker exec psql` at a time) and the healthcheck's `pg_isready` every 2 s
+(`gen-inputs.py`), plus 3 slots Postgres keeps for superusers
+(`superuser_reserved_connections`, counted inside `max_connections`).
+
+`gen-inputs.py` therefore starts the shared postgres with
+`command: ["postgres", "-c", "max_connections=M"]`, **M = 2 x 10 x N + 20**
+(`drill_inputs.py pg_max_connections`): N=4 gives 100, N=10 220, N=13 280.
+Twice the pools because a node stopped with `docker compose stop -t 0` is
+killed and the server drops its backends only when it sees the sockets close,
+while the restarted node (`restart: unless-stopped`) is already opening 10
+more. The fewest M a run can work with is 10 x N + 20 (N=13: 150).
+
+Memory: `max_connections` reserves nothing by itself. `shared_buffers` stays at
+its default 128MB (Postgres needs at least 16kB x M, 4.4MB at M=280) and the
+extra shared structures for 280 slots are a few MB. A backend costs memory only
+while its connection is open (a node's pool also closes idle connections after
+10 s), so the postgres 1g limit and the preflight RAM formula (`START x 1100 +
+256 + 3072` MB) are unchanged. Not measured: this has not been run.
+
+Every scenario gets the setting, so the older scenarios' generated compose
+differs from before only in the postgres service's `command` (checked by
+generating both for N=4, 10 and 13 and diffing them). For 4 nodes, which is
+also what the default was:
+
+```diff
+     "postgres": {
+       "image": "postgres:16-alpine",
++      "command": ["postgres", "-c", "max_connections=100"],
+       "mem_limit": "1g",
+```
+
+and for `halt-n13s10` (the same line with `max_connections=280`).
+
+A connection-limit hit can no longer pass:
+
+- **Preflight**: after `postgres` is up and before any node starts, `run.sh`
+  reads `SHOW max_connections` and ends the run as exit 2, `could not run:
+  postgres max_connections is X, N nodes need Y`, if X < 10 x N + 20.
+- **Verdict**: before the verdict is written, `run.sh` greps every node's log
+  and the log of its own `psql_node` reads (`logs/psql-errors.log`) for `too
+  many clients`. Any hit turns a PASS or a FAIL into `ERROR`, exit 2, `could
+  not run: postgres connection limit hit (n lines in node-.. node-..); the
+  result was PASS`, in `verdict.json` and `results.tsv`.
+- **Backstop**: when the logs are collected at teardown, a hit also replaces
+  exit 0 or 1 by 2, for the exits that skip the verdict (an early FAIL).
+
+`lockstep-stub.test.sh` covers the preflight and the check against a fake
+`docker`; `drillInputs.test.ts` the generated compose for N=4, 10 and 13.
 
 ## Runs and logs
 
