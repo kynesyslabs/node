@@ -490,7 +490,7 @@ export default class SecretaryManager {
      * next phase is not left waiting for yet another timeout.
      */
     private startTimeoutRelease() {
-        if (this.timeoutRelease) {
+        if (this.timeoutRelease !== null) {
             log.debug(
                 "[SECRETARY ROUTINE] A timeout release is already running, queuing this one",
             )
@@ -960,7 +960,19 @@ export default class SecretaryManager {
         }
 
         const results = await Promise.all(promises)
+        this.handleGreenlightResults(contactedMembers, results)
 
+        return true
+    }
+
+    /**
+     * Logs each member's answer to its greenlight; a 401 means the member
+     * follows another secretary.
+     */
+    private handleGreenlightResults(
+        contactedMembers: string[],
+        results: RPCResponse[],
+    ): void {
         for (const [index, result] of results.entries()) {
             const pubKey = contactedMembers[index]
 
@@ -998,10 +1010,7 @@ export default class SecretaryManager {
             // boundary, which will fire and trigger the standard
             // timeout-recovery path instead of taking the node down
             // with partial round state.
-            continue
         }
-
-        return true
     }
 
     /**
