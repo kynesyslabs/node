@@ -100,12 +100,12 @@ IMAGE_TAG=v1.0.0-rc.1@sha256:<digest from checksums.txt>
 ```
 
 ```bash
-./scripts/node-doctor --production
-docker compose pull node && docker compose up -d --no-build
+./scripts/node-doctor --production && docker compose pull node && docker compose up -d --no-build
 docker image inspect --format '{{index .RepoDigests 0}}' \
   "$(docker inspect --format '{{.Image}}' "$(docker compose ps -q node)")"
 ```
 
+The `&&` keeps a host that fails a node-doctor check from starting.
 `--no-build` keeps compose from building a local image when the pull
 fails, which would run code nobody signed. The last line prints the digest
 the container runs; it must match
