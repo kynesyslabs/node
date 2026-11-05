@@ -33,6 +33,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/gcr_routines/routines/zkRoutines.test.ts
     src/libs/blockchain/gcr/handleGCR.atomic.test.ts
     src/libs/blockchain/gcr/handleGCR.failedTx.test.ts
+    src/libs/blockchain/gcr/handleGCR.identityRollback.test.ts
     src/libs/blockchain/gcr/handleGCR.keyRefusal.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
@@ -57,6 +58,7 @@ SUITE_FILES=(
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
     src/libs/identity/web2Unlink.test.ts
+    src/libs/network/broadcastDisposition.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
@@ -78,7 +80,9 @@ SUITE_FILES=(
     src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts
+    src/libs/utils/keyMaker.test.ts
     src/utilities/nodeVersion.test.ts
+    src/utilities/tui/CategorizedLogger.level.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/loadForkConfig.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
@@ -91,6 +95,7 @@ SUITE_FILES=(
     testing/genesis/genesisPin.test.ts
     testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
+    tests/web2/proxy.test.ts
 )
 
 runner_for() {

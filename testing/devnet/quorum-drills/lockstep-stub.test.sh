@@ -151,6 +151,7 @@ fn_src() { # $1 function name: its definition, from `name() {` to the first line
     awk -v a="$1() {" 'index($0, a) == 1 { on = 1 } on { print } on && /^}/ { exit }' "${RUN_SH}"
 }
 for f in psql_node pg_limit_preflight pg_limit_gate; do source <(fn_src "${f}"); done
+source <(grep -E '^(DB_TIMEOUT_S|PG_LIMITS)=' "${RUN_SH}")
 source <(region 'block_rows() {' 'phase_row() {')
 dc() { echo fakepg; }
 mkdir -p "${WORK}/bin"
@@ -171,22 +172,23 @@ FAKEDOCKER
 chmod +x "${WORK}/bin/docker"
 export FAKE_DOCKER_LOG="${WORK}/docker.log"
 PATH="${WORK}/bin:${PATH}"
-new_case dbread 25; DB_READ_TIMEOUT=1
+check "run.sh bounds its database calls at 30 s" test "${DB_TIMEOUT_S}" = 30
+new_case dbread 25; DB_TIMEOUT_S=1
 
 : > "${FAKE_DOCKER_LOG}"
 OUT=$(FAKE_DB=rows block_rows 5 6 1 2 2>&1; echo "rc=$?"); echo "${OUT}" | tail -2 | cut -c1-300
 check "an answered read gives the rows of both nodes" has '"node":2,"number":6,"hash":"0xb6","signatures":8'
 check "and rc=0" has "rc=0"
-check "the query runs with statement_timeout = DB_READ_TIMEOUT" grep -q "PGOPTIONS=-c statement_timeout=1000" "${FAKE_DOCKER_LOG}"
+check "the query runs with a server-side statement_timeout" grep -q "PGOPTIONS=-c statement_timeout=20000" "${FAKE_DOCKER_LOG}"
 check "and a connect timeout" grep -q "PGCONNECT_TIMEOUT=10" "${FAKE_DOCKER_LOG}"
 
 t0=$(date +%s%N)
 OUT=$(FAKE_DB=hang block_rows 5 6 1 2>&1; echo "rc=$?")
 ms=$(( ($(date +%s%N) - t0) / 1000000 )); echo "${OUT}" | tail -3 | cut -c1-200; echo "  elapsed ${ms} ms (the fake docker sleeps 30 s)"
 check "a read that hangs fails (rc=1)" has "rc=1"
-check "and says which node, and that it got no answer" has "psql node1_db: no answer within 6s"
+check "and says which node, and that it got no answer" has "psql node1_db: no answer within 1s"
 check "and the block rows message names node-1" has "of node-1 could not be read"
-check "within DB_READ_TIMEOUT + 5 s, not 30" test "${ms}" -lt 9000
+check "within DB_TIMEOUT_S, not 30" test "${ms}" -lt 4000
 
 OUT=$(FAKE_DB=stmt block_rows 5 6 1 2>&1; echo "rc=$?")
 check "a query the server cancels fails too (rc=1), with the server's reason shown" has "canceling statement due to statement timeout"
@@ -196,7 +198,8 @@ check "(rc=1 for the cancelled query)" has "rc=1"
 calls=$(grep -c '\$(block_rows ' "${RUN_SH}")
 guarded=$(grep '\$(block_rows ' "${RUN_SH}" | grep -c '|| { say "ABORT: .*; exit 2; }')
 check "all ${calls} block_rows calls end the run with ABORT and exit 2 when the read fails" test "${calls}" -ge 4 -a "${calls}" = "${guarded}"
-check "run.sh refuses a DB_READ_TIMEOUT that is not a positive number" grep -q 'DB_READ_TIMEOUT must be a positive number' "${RUN_SH}"
+unbounded=$(grep -n 'docker exec .*psql ' "${RUN_SH}" | grep -v 'timeout "${DB_TIMEOUT_S}" docker exec ' || true)
+check "every psql that run.sh execs is bounded by DB_TIMEOUT_S${unbounded:+ (not: ${unbounded})}" test -z "${unbounded}"
 
 echo "== postgres connection limit: the preflight refuses a server below what N nodes need"
 # need = 10 x N + 20 (drill_inputs.py pgconn); the compose sets 2 x 10 x N + 20
@@ -234,7 +237,7 @@ for verdict in PASS FAIL; do
     check "node logs hit, ${verdict}: the verdict is ERROR and keeps what the result was" has "VERDICT ERROR: could not run: postgres connection limit hit (2 lines in node-11 node-7); the result was ${verdict}"
 done
 
-new_case gate_psql 25; DB_READ_TIMEOUT=2; RESULT=PASS; DETAIL="phases fine"
+new_case gate_psql 25; DB_TIMEOUT_S=2; RESULT=PASS; DETAIL="phases fine"
 OUT=$(FAKE_DB=toomany psql_node 3 "SELECT 1" 2>&1; echo "rc=$?")
 check "a psql_node read refused for connections still fails (rc=2) and shows the server's words" has "too many clients already"
 check "(psql's own exit code is passed on)" has "rc=2"
@@ -242,7 +245,7 @@ check "and is recorded in psql-errors.log, with the database" grep -q "psql node
 OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "a harness read that hit the limit, node logs clean: the gate exits 2" has "rc=2"
 check "and says so" has "postgres connection limit hit (1 'too many clients' lines; harness psql reads only)"
-new_case gate_psql_ok 25; DB_READ_TIMEOUT=2; RESULT=PASS; DETAIL="phases fine"
+new_case gate_psql_ok 25; DB_TIMEOUT_S=2; RESULT=PASS; DETAIL="phases fine"
 FAKE_DB=stmt psql_node 3 "SELECT 1" > /dev/null 2>&1
 OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "another psql error is not a connection-limit hit" has "rc=0"
@@ -255,6 +258,9 @@ pg_pre=$(grep -n '^pg_limit_preflight || exit 2$' "${RUN_SH}" | head -1 | cut -d
 first_node=$(grep -n '^    start_node "${i}" || ' "${RUN_SH}" | head -1 | cut -d: -f1)
 check "pg_limit_preflight runs after postgres starts and before the first node (lines ${pg_up:-?} < ${pg_pre:-?} < ${first_node:-?})" \
     test -n "${pg_up}" -a -n "${pg_pre}" -a -n "${first_node}" -a "${pg_up:-0}" -lt "${pg_pre:-0}" -a "${pg_pre:-0}" -lt "${first_node:-0}"
+migrate=$(grep -n 'migration:run -d ' "${RUN_SH}" | head -1 | cut -d: -f1)
+check "the image path's migration runs after the preflight and before the first node (lines ${pg_pre:-?} < ${migrate:-?} < ${first_node:-?})" \
+    test -n "${migrate}" -a "${pg_pre:-0}" -lt "${migrate:-0}" -a "${migrate:-0}" -lt "${first_node:-0}"
 check "the teardown replaces exit 0/1 by 2 when the collected logs hold the error" grep -q 'exit ${rc} replaced by 2' "${RUN_SH}"
 
 # Run order: bash reads run.sh top down, so a function must be defined above the
@@ -266,6 +272,10 @@ check "the teardown replaces exit 0/1 by 2 when the collected logs hold the erro
 # postgres`, `compose ps -q postgres` and SHOW max_connections (STUB_MAXCONN);
 # at `compose up -d node-1` it records the start and stops run.sh with SIGTERM
 # (exit 130 via run.sh's trap), so nothing waits for a node that is not there.
+# STUB_START=image makes the image look like a release image (no run-devnet, an
+# ENTRYPOINT and a CMD), so run.sh takes the image path and its migration step:
+# `compose exec postgres pg_isready` and one `compose run ... migration:run` per
+# node, which fails for node STUB_MIGRATE_FAIL.
 mkdir -p "${WORK}/runbin"
 cat > "${WORK}/runbin/docker" <<'STUBDOCKER'
 #!/usr/bin/env bash
@@ -274,11 +284,14 @@ case "$1" in
     image)
         case "$*" in
             *"{{.Id}}"*) echo sha256:0123456789abcdef0123456789abcdef ;;
-            *Entrypoint* | *Cmd*) echo null ;;
+            *Entrypoint*) [ "${STUB_START}" = image ] && echo '["/usr/local/bin/docker-entrypoint.sh"]' || echo null ;;
+            *Cmd*) [ "${STUB_START}" = image ] && echo '["bun","run","start"]' || echo null ;;
         esac ;;
     run)
-        # the image's user, read with `--entrypoint id IMAGE -u|-g`; every other
-        # throwaway container (run-devnet probe, exec and gossip checks) succeeds
+        # the image's user, read with `--entrypoint id IMAGE -u|-g`; the
+        # run-devnet probe finds it unless STUB_START=image; every other
+        # throwaway container (exec and gossip checks) succeeds
+        case "$*" in *"testing/devnet/run-devnet ]"*) [ "${STUB_START}" = image ] && exit 1 ;; esac
         case "${@: -1}" in -u | -g) echo 1000 ;; esac ;;
     exec)
         case "$*" in *"SHOW max_connections"*) echo "${STUB_MAXCONN}" ;; esac ;;
@@ -286,6 +299,7 @@ case "$1" in
         case "$*" in
             *"ps -q postgres"*) echo fakepg ;;
             *"up -d node-"*) kill -TERM "${PPID}"; exit 1 ;;
+            *" node-${STUB_MIGRATE_FAIL:-none} "*migration:run*) echo "QueryFailedError: stub" >&2; exit 1 ;;
         esac ;;
 esac
 exit 0
@@ -365,9 +379,10 @@ check "a log with neither gives nothing, and rc 0" \
     bash -c '[ -z "$1" ]' _ "$(boot_failure_of $'[INFO] up\n[INFO] bye')"
 
 echo "== run.sh executed from the top (stub docker and bun): the preflight is defined where the call runs"
-run_from_top() { # $1 what max_connections the stub postgres reports
+run_from_top() { # $1 what max_connections the stub postgres reports, $2 start path (run-devnet), $3 node whose migration fails
     STUB_LOG="${WORK}/run-top.docker.log"; : > "${STUB_LOG}"
-    STUB_LOG="${STUB_LOG}" STUB_MAXCONN="$1" PATH="${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/runs" \
+    STUB_LOG="${STUB_LOG}" STUB_MAXCONN="$1" STUB_START="${2:-run-devnet}" STUB_MIGRATE_FAIL="${3:-none}" \
+        PATH="${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/runs" \
         NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 \
         timeout 120 bash "${RUN_SH}" halt-n13s10 stubtop > "${WORK}/run-top.out" 2>&1
     echo "rc=$?" >> "${WORK}/run-top.out"
@@ -391,6 +406,30 @@ check "max_connections 100: no 'command not found'" bash -c '! grep -q "command 
 check "max_connections 100: exit 2 with the could-not-run message" out_has 'ABORT: could not run: postgres max_connections is 100, 13 nodes need 150'
 check "max_connections 100: rc=2" out_has '^rc=2$'
 check "max_connections 100: no node was started" bash -c '! grep -q "compose .* up -d node-" "$1"' _ "${WORK}/run-top.docker.log"
+
+echo "== run.sh executed from the top on the image path: preflight, then one migration per node database, then node-1"
+migrations() { grep -c 'compose .* run --rm --no-deps -T --entrypoint bun node-[0-9]* -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run' "${WORK}/run-top.docker.log"; }
+first_line() { grep -n -- "$1" "${WORK}/run-top.docker.log" | head -1 | cut -d: -f1; }
+run_from_top 280 image
+sed 's/^/    | /' "${WORK}/run-top.out" | tail -4 | cut -c1-200
+check "image path: no 'command not found'" bash -c '! grep -q "command not found" "$1"' _ "${WORK}/run-top.out"
+check "image path: run.sh took the image start path" out_has 'start=image'
+check "image path: the preflight passed" out_has 'postgres max_connections 280 (13 nodes need 150)'
+check "image path: one migration per node database (13)" test "$(migrations)" = 13
+check "image path: and says so" out_has 'schema migrated on the 13 node databases'
+order="$(first_line 'SHOW max_connections') $(first_line 'pg_isready') $(first_line 'migration:run') $(first_line 'up -d node-1')"
+check "image path: SHOW max_connections < pg_isready < migrations < up -d node-1 (docker log lines ${order})" \
+    bash -c 'set -- $1; [ $# = 4 ] && [ "$1" -lt "$2" ] && [ "$2" -lt "$3" ] && [ "$3" -lt "$4" ]' _ "${order}"
+check "image path: stopped at node-1 by the stub's SIGTERM (rc=130)" out_has '^rc=130$'
+
+run_from_top 280 image 3
+sed 's/^/    | /' "${WORK}/run-top.out" | tail -3 | cut -c1-200
+check "image path, node3_db migration fails: ABORT names it" out_has 'ABORT: migration:run failed on node3_db'
+check "image path, node3_db migration fails: rc=2, after 3 migrations" bash -c 'grep -q "^rc=2$" "$1" && [ "$2" = 3 ]' _ "${WORK}/run-top.out" "$(migrations)"
+check "image path, node3_db migration fails: no node was started" bash -c '! grep -q "compose .* up -d node-" "$1"' _ "${WORK}/run-top.docker.log"
+
+run_from_top 100 image
+check "image path, max_connections 100: exit 2 before any migration" bash -c 'grep -q "^rc=2$" "$1" && [ "$2" = 0 ]' _ "${WORK}/run-top.out" "$(migrations)"
 
 echo
 if [ "${fails}" = 0 ]; then echo "lockstep stub tests: all passed"; else echo "lockstep stub tests: ${fails} FAILED"; exit 1; fi

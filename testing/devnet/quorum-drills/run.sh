@@ -44,8 +44,6 @@ PARTITION_TIME="${PARTITION_TIME:-120}"
 SETTLE_TIMEOUT="${SETTLE_TIMEOUT:-300}"
 # Curl timeout (s) of the retry after an empty or timed-out read of a node's head or hash
 READ_TIMEOUT="${READ_TIMEOUT:-8}"
-# Seconds a read of a node's database may take (scenario 12's DB_READ_TIMEOUT_MS)
-DB_READ_TIMEOUT="${DB_READ_TIMEOUT:-30}"
 # halt-* and ride-* drills; the defaults are scenario 12's
 BASELINE_HEIGHT="${BASELINE_HEIGHT:-6}"
 SETTLE_ROUNDS="${SETTLE_ROUNDS:-2}"
@@ -58,7 +56,7 @@ RIDE_TIMEOUT="${RIDE_TIMEOUT:-300}"
 usage() {
     sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: IMAGE SRC_TREE BINDING CONSENSUS_TIME NODE_MEM NODE_EST_MB HEADROOM_MB"
-    echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME READ_TIMEOUT DB_READ_TIMEOUT (README.md)"
+    echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME READ_TIMEOUT (README.md)"
     echo "             BASELINE_HEIGHT SETTLE_ROUNDS HALT_ROUNDS RECOVERY_BLOCKS RECOVERY_TIMEOUT"
     echo "             RIDE_BLOCKS RIDE_TIMEOUT (halt-* and ride-* drills)"
 }
@@ -107,7 +105,6 @@ FORK_SET=devnet
 EXCLUDED_FORKS='{}'
 case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) FORK_SET=launch ;; esac
 case "${BINDING}" in on|off) ;; *) echo "--binding must be on or off" >&2; exit 2 ;; esac
-[[ "${DB_READ_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || { echo "DB_READ_TIMEOUT must be a positive number of seconds" >&2; exit 2; }
 if [ "${FORK_SET}" = launch ] && [ "${BINDING}" != on ]; then
     echo "${SCENARIO} runs the launch fork set, which activates committeeBinding: --binding off does not apply" >&2; exit 2
 fi
@@ -651,21 +648,21 @@ read_error() { # $1 phase name
     exit 2
 }
 
-# A read of a node's database, bounded as scenario 12's DB_READ_TIMEOUT_MS bounds
-# its own: the server cancels a query after DB_READ_TIMEOUT s (statement_timeout)
-# and an outer timeout stops what the server cannot cancel (a stalled connect or
-# exec). Either way the read fails; callers treat that as "could not run".
+# Every database call is bounded: a table lock or a Postgres that accepts and
+# then stops answering must fail the read (and the drill gives no verdict), not
+# hang it past every scenario timeout. statement_timeout ends the query on the
+# server; the outer timeout ends a client stuck before or after it.
+DB_TIMEOUT_S=30
+PG_LIMITS=(-e PGCONNECT_TIMEOUT=10 -e "PGOPTIONS=-c statement_timeout=20000")
 psql_node() { # $1 node, $2 SQL
     local rc errf="${LOG_DIR}/psql-err.$$.tmp"
     # stderr goes to the caller as before and, when there is any, to
     # psql-errors.log, which pg_limit_gate reads
-    timeout -k 5 "$((DB_READ_TIMEOUT + 5))" docker exec -e PGCONNECT_TIMEOUT=10 \
-        -e "PGOPTIONS=-c statement_timeout=$((DB_READ_TIMEOUT * 1000))" \
-        "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
+    timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
     rc=$?
     [ -s "${errf}" ] && { cat "${errf}" >&2; sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log"; }
     rm -f "${errf}"
-    [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within $((DB_READ_TIMEOUT + 5))s (DB_READ_TIMEOUT=${DB_READ_TIMEOUT})" >&2
+    [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within ${DB_TIMEOUT_S}s" >&2
     return "${rc}"
 }
 
@@ -677,7 +674,7 @@ pg_limit_preflight() {
     need=$(python3 -I "${HERE}/drill_inputs.py" pgconn --nodes "${N}" | cut -d' ' -f1)
     [[ "${need}" =~ ^[0-9]+$ ]] || { say "ABORT: could not work out the connections ${N} nodes need"; return 1; }
     while :; do
-        have=$(docker exec "$(dc ps -q postgres)" psql -U demosuser -d postgres -tAc 'SHOW max_connections' 2>/dev/null)
+        have=$(timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d postgres -tAc 'SHOW max_connections' 2>/dev/null)
         [[ "${have}" =~ ^[0-9]+$ ]] && break
         tries=$((tries + 1))
         [ "${tries}" -ge 45 ] && { say "ABORT: could not read max_connections from postgres"; return 1; }
@@ -711,6 +708,29 @@ step 03-bringup
 STARTED_STACK=1
 dc up -d postgres >> "${STEP_LOG}" 2>&1 || { say "ABORT: postgres did not start"; exit 2; }
 pg_limit_preflight || exit 2
+# A node that does not migrate at boot needs its schema before it starts, and a
+# release image has no run-devnet to create it. So on the image path each node
+# database gets the one-off migration an operator runs before a first start, in
+# a container of the image under test with the node's own environment and
+# mounts. Bun runs the TypeORM CLI directly: `bun run migration:run` needs tsx
+# and a node binary on newer trees and a ts-node loader on older ones. On a tree
+# that still migrates at boot, the node then finds nothing pending.
+if [ "${START_PATH}" = image ]; then
+    # Over TCP: during the first init Postgres answers only on its socket, and
+    # the node databases exist only once the init scripts have run
+    for _ in $(seq 1 60); do
+        dc exec -T postgres pg_isready -q -h 127.0.0.1 -U demosuser -d postgres >/dev/null 2>&1 && break
+        sleep 1
+    done
+    dc exec -T postgres pg_isready -q -h 127.0.0.1 -U demosuser -d postgres >/dev/null 2>&1 ||
+        { say "ABORT: postgres did not accept TCP connections within 60s"; exit 2; }
+    for i in $(seq 1 "${N}"); do
+        timeout 300 docker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" run --rm --no-deps -T --entrypoint bun "node-${i}" \
+            -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts \
+            >> "${STEP_LOG}" 2>&1 || { say "ABORT: migration:run failed on node${i}_db (see 03-bringup.log)"; exit 2; }
+    done
+    say "schema migrated on the ${N} node databases"
+fi
 for i in $(seq 1 "${START}"); do
     start_node "${i}" || { say "ABORT: node-${i} did not serve within 180s"; why=$(boot_failure_line "${i}"); [ -n "${why}" ] && say "node-${i} log: ${why}"; exit 2; }
     say "node-${i} serving"
@@ -838,6 +858,7 @@ scenario_fallback() {
         say "ABORT: the nodes stopped on different heads: $(echo ${heads_db})"; exit 2
     fi
     h="${heads_db}"
+    [[ "${h}" =~ ^[0-9]+$ ]] || { say "ABORT: could not read the stopped heads from the databases (got '${h}')"; exit 2; }
     # Six listed validators (< q = 7) out of ten staked. The stored text is
     # rewritten with key order kept, every node identically; the block hash
     # is not recomputed, nothing re-hashes a stored block.
@@ -855,7 +876,7 @@ text = json.dumps(c, separators=(",", ":"))
 assert "$qdrill$" not in text
 print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = {int(sys.argv[2])};")
 ' "${pl_json}" "${h}" > "${RUN_DIR}/inputs/content-${i}.sql" || { say "ABORT: rewriting block ${h} failed"; exit 2; }
-        docker exec -i "$(dc ps -q postgres)" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q -f - \
+        timeout "${DB_TIMEOUT_S}" docker exec -i "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q -f - \
             < "${RUN_DIR}/inputs/content-${i}.sql" >> "${STEP_LOG}" 2>&1 || { say "ABORT: update failed on node${i}_db"; exit 2; }
         [ "$(psql_node "${i}" "SELECT json_array_length(content->'peerlist') FROM blocks WHERE number = ${h}")" = 6 ] ||
             { say "ABORT: node${i}_db does not list 6 at ${h}"; exit 2; }
@@ -996,14 +1017,14 @@ restart_counts() {
 # Rows {node, number, hash, signatures} for heights $1..$2 on nodes $3.., read
 # from each node's database as scenario 12 does (signatures are the keys of
 # validation_data->'signatures'). Fails when a database cannot be read or does
-# not answer within DB_READ_TIMEOUT: the caller ends the run as exit 2.
+# not answer within DB_TIMEOUT_S: the caller ends the run as exit 2.
 block_rows() {
     local from="$1" to="$2" i out all=""
     shift 2
     for i in "$@"; do
         out=$(psql_node "${i}" "SELECT number, hash, (SELECT count(*) FROM json_object_keys(validation_data->'signatures')) FROM blocks WHERE number BETWEEN ${from} AND ${to} ORDER BY number" |
             jq -Rn --argjson node "${i}" '[inputs | split("|") | {node: $node, number: (.[0] | tonumber), hash: .[1], signatures: (.[2] | tonumber)}]') ||
-            { say "block rows ${from}..${to} of node-${i} could not be read from its database (failed or no answer within ${DB_READ_TIMEOUT}s)"; return 1; }
+            { say "block rows ${from}..${to} of node-${i} could not be read from its database (failed or no answer within ${DB_TIMEOUT_S}s)"; return 1; }
         all+="${out}"$'\n'
     done
     printf '%s' "${all}" | jq -cs 'add // []'

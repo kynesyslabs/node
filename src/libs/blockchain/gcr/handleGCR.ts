@@ -66,6 +66,10 @@ import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
 import { gcrWriteMutex } from "./gcrWriteMutex"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
+import type {
+    EditPlace,
+    RemovedIdentities,
+} from "./gcr_routines/routines/removedIdentities"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
 import { GCRStorageProgramRoutines } from "./gcr_routines/GCRStorageProgramRoutines"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
@@ -186,6 +190,8 @@ export interface GCREntityCaches {
     zkCommitments?: Map<string, true>
     /** ZK nullifiers claimed by this set. */
     zkNullifiers?: Map<string, true>
+    /** What this set's identity unlinks removed, for their undo. */
+    removedIdentities?: RemovedIdentities
 }
 
 /** The caches a set stages outside the entity maps, as one transaction saw them. */
@@ -743,6 +749,26 @@ export default class HandleGCR {
      * the content so that it no longer hashes to tx.hash, and every peer
      * syncing that block rejects it.
      */
+    /**
+     * The place of each of the transaction's edits on a block apply; none on
+     * a simulation, whose admission must not write undo records.
+     */
+    static editPlaces(
+        entities: GCREntityCaches,
+        tx: Transaction,
+        simulate: boolean,
+    ): (edit: GCREdit) => EditPlace | undefined {
+        if (simulate || !tx.hash) return () => undefined
+        const removed = (entities.removedIdentities ??= new Map())
+        const signed = tx.content.gcr_edits ?? []
+        return edit => {
+            const position = signed.indexOf(edit)
+            return position === -1
+                ? undefined
+                : { txhash: tx.hash, position, removed }
+        }
+    }
+
     static stampedEdit(edit: GCREdit, tx: Transaction, simulate: boolean): GCREdit {
         if (simulate || !tx.hash) return edit
         const copy = structuredClone(edit)
@@ -1483,10 +1509,13 @@ export default class HandleGCR {
         const sideEffects: (() => Promise<void>)[] = []
         const deferredWrites: DeferredWrite[] = []
         const appliedEdits: GCREdit[] = []
+        const appliedPlaces: (EditPlace | undefined)[] = []
+        const placeOf = HandleGCR.editPlaces(entities, tx, simulate)
 
         // Apply all edits for this tx
         for (const signedEdit of gcrEdits) {
             const edit = HandleGCR.stampedEdit(signedEdit, tx, simulate)
+            const place = placeOf(signedEdit)
 
             let result: GCRResult
 
@@ -1496,6 +1525,7 @@ export default class HandleGCR {
                     entities,
                     isRollback,
                     simulate,
+                    place,
                 )
             } catch (error) {
                 log.error(`[applyTransaction] Error applying GCREdit: ${error}`)
@@ -1508,7 +1538,7 @@ export default class HandleGCR {
             if (!result.success) {
                 // INFO: If on a serious run, rollback hard edits
                 if (!simulate && !this.GCRTxTypes.has(edit.type)) {
-                    await this.rollback(tx, entities, appliedEdits)
+                    await this.rollback(tx, entities, appliedEdits, appliedPlaces)
                 }
                 // After the rollback, which also reverses the balance edits:
                 // reversing them on the restored accounts would refund them twice.
@@ -1547,6 +1577,7 @@ export default class HandleGCR {
             }
 
             appliedEdits.push(edit)
+            appliedPlaces.push(place)
         }
 
         // INFO: Process native side-effects
@@ -2692,9 +2723,16 @@ export default class HandleGCR {
         entities: GCREntityCaches,
         isRollback = false,
         simulate = false,
+        place?: EditPlace,
     ): Promise<GCRResult> {
         const stored = isRollback ? new Map() : storedIndexes(edit, entities)
-        const result = await HandleGCR.applyGCREdit(edit, entities, isRollback, simulate)
+        const result = await HandleGCR.applyGCREdit(
+            edit,
+            entities,
+            isRollback,
+            simulate,
+            place,
+        )
         if (!result.success || isRollback) return result
         const where = unstorableAfter(edit, entities, stored)
         return where === null
@@ -2707,6 +2745,7 @@ export default class HandleGCR {
         entities: GCREntityCaches,
         isRollback = false,
         simulate = false,
+        place?: EditPlace,
     ): Promise<GCRResult> {
         // NOTE The rollbacks are applied within the single routines based on the isRollback flag
         if (isRollback) {
@@ -2772,6 +2811,7 @@ export default class HandleGCR {
                     account,
                     undefined,
                     entities,
+                    place,
                 )
                 break
             case "assign":
@@ -3068,9 +3108,11 @@ export default class HandleGCR {
         tx: Transaction,
         entities: GCREntityCaches,
         appliedEditsOriginal: GCREdit[],
+        appliedPlaces: (EditPlace | undefined)[] = [],
     ): Promise<void> {
         // We need to reverse the order of the applied edits
         const appliedEdits = appliedEditsOriginal.reverse()
+        const places = [...appliedPlaces].reverse()
         log.info(
             "[rollback] Rolling back " +
                 appliedEdits.length +
@@ -3081,7 +3123,7 @@ export default class HandleGCR {
         const counter = 0
         const results: GCRResult[] = []
 
-        for (const edit of appliedEdits) {
+        for (const [i, edit] of appliedEdits.entries()) {
             log.debug(
                 "[rollback] (" +
                     counter +
@@ -3094,7 +3136,13 @@ export default class HandleGCR {
             let result: GCRResult
 
             try {
-                result = await this.applyGCREdit(edit, entities, true)
+                result = await this.applyGCREdit(
+                    edit,
+                    entities,
+                    true,
+                    false,
+                    places[i],
+                )
             } catch (error) {
                 log.error(`[rollback] Error applying GCREdit: ${error}`)
                 result = {

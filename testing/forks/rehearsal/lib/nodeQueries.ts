@@ -404,11 +404,13 @@ export async function getGenesisHashFromDb(
 export async function getBlockHashFromDb(
     nodeId: number,
     height: number,
+    opts: { timeoutMs?: number } = {},
 ): Promise<string | null> {
     const rows = await query<{ hash: string }>(
         nodeId,
         "SELECT hash FROM blocks WHERE number = $1",
         [height],
+        opts,
     )
     return rows[0]?.hash ?? null
 }

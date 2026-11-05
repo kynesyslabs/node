@@ -16,6 +16,7 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
+import { headersForReplay } from "@/features/web2/sanitizeWeb2Request"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import {
     ucrypto,
@@ -234,6 +235,14 @@ export async function handleExecuteTransaction(
             const handleWeb2RequestStart = Date.now()
             payload = tx.content.data[1] as IWeb2Payload
             const params = parseWeb2ProxyRequest(payload)
+            // This re-runs the request when the tx is broadcast. Drop the
+            // credential headers on the sensitive-key list and the tx's own
+            // authorization so the replay does not carry them; other
+            // credentials are not covered.
+            params.web2Request.raw.headers = headersForReplay(
+                params.web2Request.raw.headers,
+            )
+            params.authorization = undefined
             const web2Result = await handleWeb2ProxyRequest(params)
             result.response = web2Result
             const handleWeb2RequestEnd = Date.now()

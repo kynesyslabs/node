@@ -52,14 +52,16 @@ export async function allReachedHeight(
 
 /**
  * Asserts every node returns the same hash for `height`. Reads from
- * Postgres directly to bypass any RPC caching.
+ * Postgres directly to bypass any RPC caching. `timeoutMs` bounds each
+ * read (see `query`).
  */
 export async function assertBlockHashConvergence(
     nodeIds: number[],
     height: number,
+    opts: { timeoutMs?: number } = {},
 ): Promise<string> {
     const hashes = await Promise.all(
-        nodeIds.map(async id => [id, await getBlockHashFromDb(id, height)] as const),
+        nodeIds.map(async id => [id, await getBlockHashFromDb(id, height, opts)] as const),
     )
     const unique = new Set(hashes.map(([, h]) => h ?? "<null>"))
     if (unique.size !== 1) {

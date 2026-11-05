@@ -13,6 +13,7 @@ import { spawnSync } from "child_process"
 import { writeFileSync } from "fs"
 import { resolve } from "path"
 import { DEVNET_DIR, REPO_ROOT } from "./devnetControl"
+import { systemBinary } from "./systemBinary"
 
 type Genesis = Record<string, any>
 
@@ -34,7 +35,7 @@ export const LAUNCH_GENESIS_TEMPLATE = resolve(REPO_ROOT, "docs", "mainnet", "ge
  * the same drills).
  */
 export function withLaunchForks(genesis: Genesis, template = LAUNCH_GENESIS_TEMPLATE): Genesis {
-    const r = spawnSync("python3", ["-I", DRILL_INPUTS_SCRIPT, "launch-forks", "--template", template], {
+    const r = spawnSync(systemBinary("python3"), ["-I", DRILL_INPUTS_SCRIPT, "launch-forks", "--template", template], {
         encoding: "utf8",
         input: JSON.stringify(genesis),
     })
@@ -50,7 +51,7 @@ export function withLaunchForks(genesis: Genesis, template = LAUNCH_GENESIS_TEMP
  * (`drill_inputs.py launch-excluded`).
  */
 export function launchExcluded(template = LAUNCH_GENESIS_TEMPLATE): Record<string, string> {
-    const r = spawnSync("python3", ["-I", DRILL_INPUTS_SCRIPT, "launch-excluded", "--template", template], {
+    const r = spawnSync(systemBinary("python3"), ["-I", DRILL_INPUTS_SCRIPT, "launch-excluded", "--template", template], {
         encoding: "utf8",
     })
     if (r.status !== 0) {
@@ -113,7 +114,7 @@ export function stageDrillInputs(opts: {
     const input = resolve(opts.dir, GENESIS_IN)
     writeFileSync(input, JSON.stringify(opts.genesis, null, 4) + "\n")
     const r = spawnSync(
-        "python3",
+        systemBinary("python3"),
         [
             "-I",
             DRILL_INPUTS_SCRIPT,
@@ -146,8 +147,19 @@ export function stageDrillInputs(opts: {
  * the genesis and the node-1-only peerlist (replacing the base file's peerlist
  * mount, which has the same container path) and the empty directory over
  * `/app/data/snapshot`, which hides the image's testnet snapshot.
+ *
+ * It also pins each node's CONSENSUS_TIME to `consensusTimeS`. Compose would
+ * otherwise also take it from testing/devnet/.env, which the drill does not
+ * read, and the drill's hold and settle windows are counted in its rounds.
  */
-export function drillOverrideYaml(staged: StagedInputs, nodeIds: number[]): string {
+export function drillOverrideYaml(
+    staged: StagedInputs,
+    nodeIds: number[],
+    opts: { consensusTimeS: number },
+): string {
+    if (!Number.isInteger(opts.consensusTimeS) || opts.consensusTimeS <= 0) {
+        throw new Error(`consensus time must be a positive whole number of seconds: ${opts.consensusTimeS}`)
+    }
     for (const p of [staged.genesis, staged.peerlist, staged.emptySnapshot]) {
         if (/[:\n"]/.test(p)) throw new Error(`path not usable in a compose volume: ${p}`)
     }
@@ -160,6 +172,7 @@ export function drillOverrideYaml(staged: StagedInputs, nodeIds: number[]): stri
     for (const id of nodeIds) {
         lines.push(`  node-${id}:`, "    volumes:")
         for (const m of mounts) lines.push(`      - "${m}"`)
+        lines.push("    environment:", `      - CONSENSUS_TIME=${opts.consensusTimeS}`)
     }
     return lines.join("\n") + "\n"
 }

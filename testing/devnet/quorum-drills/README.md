@@ -48,6 +48,12 @@ start path from the result (`start=` in the preflight line of `run.sh`'s log):
   mounts; the peerlist is mounted at `/app/keys/demos_peerlist.json`, not at
   `/app/demos_peerlist.json`, because the entrypoint `mv`s a real file it finds
   there into `/app/state` and a bind mount cannot be moved.
+  Before any node starts, `run.sh` migrates each node database once, as an
+  operator does before a first start: a one-off `docker compose run` of that
+  node's service (its environment and mounts) with
+  `bun -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run`,
+  after Postgres accepts TCP connections. A node that no longer migrates at
+  boot needs it; on a tree that still does, the node then finds nothing pending.
 
 What still differs from mainnet on the image path: `NODE_ENV=development` (a
 production node needs `EXPECTED_GENESIS_HASH` for a genesis that is new each
@@ -388,7 +394,9 @@ What opens a Postgres connection while a node runs:
 So a node holds at most 10. The drill adds its own: `psql_node` (`run.sh`, one
 `docker exec psql` at a time) and the healthcheck's `pg_isready` every 2 s
 (`gen-inputs.py`), plus 3 slots Postgres keeps for superusers
-(`superuser_reserved_connections`, counted inside `max_connections`).
+(`superuser_reserved_connections`, counted inside `max_connections`). The
+image path's one-off migrations open the same `DataSource`, one node database
+at a time and before any node starts, so they do not add to the peak.
 
 `gen-inputs.py` therefore starts the shared postgres with
 `command: ["postgres", "-c", "max_connections=M"]`, **M = 2 x 10 x N + 20**
@@ -421,7 +429,8 @@ and for `halt-n13s10` (the same line with `max_connections=280`).
 
 A connection-limit hit can no longer pass:
 
-- **Preflight**: after `postgres` is up and before any node starts, `run.sh`
+- **Preflight**: after `postgres` is up and before the image path's
+  migrations and any node start, `run.sh`
   reads `SHOW max_connections` and ends the run as exit 2, `could not run:
   postgres max_connections is X, N nodes need Y`, if X < 10 x N + 20.
 - **Verdict**: before the verdict is written, `run.sh` greps every node's log
@@ -433,7 +442,9 @@ A connection-limit hit can no longer pass:
   exit 0 or 1 by 2, for the exits that skip the verdict (an early FAIL).
 
 `lockstep-stub.test.sh` covers the preflight and the check against a fake
-`docker`; `drillInputs.test.ts` the generated compose for N=4, 10 and 13.
+`docker`, and runs `run.sh` from the top on both start paths (on the image
+path: preflight, then the 13 migrations, then node-1);
+`drillInputs.test.ts` the generated compose for N=4, 10 and 13.
 
 ## Runs and logs
 
@@ -478,11 +489,10 @@ drills also leave `drill-input.json` (what the run observed),
 `STALL_WINDOW` (120), `PARTITION_TIME` (120), `SETTLE_TIMEOUT` (300),
 `READ_TIMEOUT` (8, the curl timeout in seconds of the one retry after an
 empty or timed-out read of a node's head or hash during the lockstep waits),
-`DB_READ_TIMEOUT` (30, seconds a read of a node's database may take: the
-server cancels the query after that and an outer `timeout` stops a stalled
-exec 5 s later; a read that fails or times out ends the `halt-*` and `ride-*`
-runs as `ABORT`, exit 2),
-`NETSHOOT_IMAGE`, `RUNS_DIR`. For the `halt-*` and `ride-*` drills:
+`NETSHOOT_IMAGE`, `RUNS_DIR`. Database reads and writes are not tunable: each
+has a 10 s connect timeout, a 20 s `statement_timeout` and a 30 s outer
+`timeout` (`DB_TIMEOUT_S`); a read that fails or times out ends the `halt-*`
+and `ride-*` runs as `ABORT`, exit 2. For the `halt-*` and `ride-*` drills:
 `BASELINE_HEIGHT` (6), `SETTLE_ROUNDS` (2), `HALT_ROUNDS` (12),
 `RECOVERY_BLOCKS` (3), `RECOVERY_TIMEOUT` (300), `RIDE_BLOCKS` (5),
 `RIDE_TIMEOUT` (300); the first five are scenario 12's values. The judge

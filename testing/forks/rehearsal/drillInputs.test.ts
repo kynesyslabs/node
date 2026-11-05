@@ -17,6 +17,7 @@ import {
     stageDrillInputs,
     withLaunchForks,
 } from "./lib/drillInputs"
+import { systemBinary } from "./lib/systemBinary"
 
 const REASON = "needs a genesis snapshot; the drills use the legacy genesis path"
 
@@ -127,7 +128,7 @@ describe("bootRefusalLine", () => {
 
 describe("node tmpfs options (drill_inputs.py tmpfs)", () => {
     const script = resolve(import.meta.dir, "../../devnet/quorum-drills/drill_inputs.py")
-    const run = (...args: string[]) => spawnSync("python3", ["-I", script, "tmpfs", ...args], { encoding: "utf8" })
+    const run = (...args: string[]) => spawnSync(systemBinary("python3"), ["-I", script, "tmpfs", ...args], { encoding: "utf8" })
 
     it("mounts /app/state owned by the given uid and gid, owner-only", () => {
         const r = run("--uid", "1000", "--gid", "1001")
@@ -147,7 +148,7 @@ describe("drillOverrideYaml", () => {
         peerlist: "/stage/peerlist.json",
         emptySnapshot: "/stage/empty-snapshot",
     }
-    const yaml = drillOverrideYaml(staged, [1, 2, 3, 4])
+    const yaml = drillOverrideYaml(staged, [1, 2, 3, 4], { consensusTimeS: 7 })
 
     it("mounts the empty snapshot over /app/data/snapshot on every node", () => {
         const mounts = yaml.split("\n").filter(l => l.includes(":/app/data/snapshot:ro"))
@@ -173,9 +174,19 @@ describe("drillOverrideYaml", () => {
         expect(yaml.startsWith("services:\n")).toBe(true)
     })
     it("refuses a path that would break the volume string", () => {
-        expect(() => drillOverrideYaml({ ...staged, genesis: "/a:b/genesis.json" }, [1])).toThrow(
-            /not usable/,
+        expect(() =>
+            drillOverrideYaml({ ...staged, genesis: "/a:b/genesis.json" }, [1], { consensusTimeS: 10 }),
+        ).toThrow(/not usable/)
+    })
+    it("sets every node's CONSENSUS_TIME to the drill's value, not the devnet .env", () => {
+        expect(yaml.split("\n").filter(l => l.includes("CONSENSUS_TIME"))).toEqual(
+            Array(4).fill("      - CONSENSUS_TIME=7"),
         )
+    })
+    it("refuses a consensus time compose would not take as whole seconds", () => {
+        for (const bad of [0, -1, 2.5, Number.NaN]) {
+            expect(() => drillOverrideYaml(staged, [1], { consensusTimeS: bad })).toThrow(/positive whole/)
+        }
     })
 })
 
@@ -312,7 +323,7 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
             mkdirSync(join(run, "inputs"), { recursive: true })
             for (let i = 0; i < nodes; i++) writeFileSync(join(run, "inputs", `pub${i + 1}`), key(0xa1 + i))
             const r = spawnSync(
-                "python3",
+                systemBinary("python3"),
                 [
                     // no -I, as run.sh: the script imports drill_inputs from its own directory
                     resolve(repo, "testing/devnet/quorum-drills/gen-inputs.py"),
@@ -354,7 +365,9 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         it("drill_inputs.py pgconn prints the needed and the configured value the compose uses", () => {
             const script = resolve(repo, "testing/devnet/quorum-drills/drill_inputs.py")
             for (const [nodes, need, configured] of [[4, 60, 100], [10, 120, 220], [13, 150, 280]] as const) {
-                const r = spawnSync("python3", ["-I", script, "pgconn", "--nodes", String(nodes)], { encoding: "utf8" })
+                const r = spawnSync(systemBinary("python3"), ["-I", script, "pgconn", "--nodes", String(nodes)], {
+                    encoding: "utf8",
+                })
                 expect(r.stdout.trim()).toBe(`${need} ${configured}`)
             }
         })

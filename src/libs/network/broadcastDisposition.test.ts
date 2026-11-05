@@ -44,8 +44,10 @@ jest.mock("./txSubmission", () => ({ submitValidatedTx }))
 jest.mock("src/libs/consensus/stakedSet", () => ({ isSelfStaked }))
 jest.mock("./routines/transactions/demosWork/handleDemosWorkRequest", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("src/features/multichain/XMDispatcher", () => ({ __esModule: true, default: {} }))
-jest.mock("./routines/transactions/handleWeb2ProxyRequest", () => ({ handleWeb2ProxyRequest: jest.fn() }))
-jest.mock("../utils/web2RequestUtils", () => ({ parseWeb2ProxyRequest: jest.fn() }))
+const handleWeb2ProxyRequest = jest.fn(async (..._args: unknown[]) => ({ ok: true }))
+const parseWeb2ProxyRequest = jest.fn((..._args: unknown[]): any => ({}))
+jest.mock("./routines/transactions/handleWeb2ProxyRequest", () => ({ handleWeb2ProxyRequest }))
+jest.mock("../utils/web2RequestUtils", () => ({ parseWeb2ProxyRequest }))
 jest.mock("./routines/transactions/handleIdentityRequest", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("./routines/transactions/handleNativeBridgeTx", () => ({ __esModule: true, default: jest.fn() }))
 const handleL2PS = jest.fn(async (..._args: unknown[]) => ({ result: 200, response: "ok" }))
@@ -73,6 +75,8 @@ beforeEach(() => {
     isSelfStaked.mockClear()
     isSelfStaked.mockImplementation(async () => true)
     handleL2PS.mockClear()
+    handleWeb2ProxyRequest.mockClear()
+    parseWeb2ProxyRequest.mockClear()
 })
 
 describe("broadcastTx disposition", () => {
@@ -123,5 +127,25 @@ describe("broadcastTx disposition", () => {
 
         expect(reply.success).toBe(false)
         expect(reply.extra.disposition).toBeUndefined()
+    })
+
+    it("web2Request: the broadcast-time replay carries no credential headers", async () => {
+        parseWeb2ProxyRequest.mockImplementationOnce(() => ({
+            web2Request: {
+                raw: {
+                    headers: { Authorization: "Bearer tok", "X-Api-Key": "k", "content-type": "application/json" },
+                },
+            },
+            authorization: "Bearer tx-token",
+        }))
+        const data = validityData()
+        data.data.transaction.content = { type: "web2Request", from: "0xaa", data: ["web2Request", { message: {} }] }
+
+        await handleExecuteTransaction(data, "sender")
+
+        expect(handleWeb2ProxyRequest).toHaveBeenCalledTimes(1)
+        const replayed = handleWeb2ProxyRequest.mock.calls[0][0] as any
+        expect(replayed.web2Request.raw.headers).toEqual({ "content-type": "application/json" })
+        expect(replayed.authorization).toBeUndefined()
     })
 })

@@ -196,7 +196,9 @@ for i in range(1, n + 1):
         # so both are written out; `exec "$@"` runs them as `docker run`
         # would: ENTRYPOINT first, CMD as its arguments. The tmpfs is owned
         # by the image user (see node_tmpfs_specs). No stdin redirect: a
-        # container started without -i has /dev/null as stdin already.
+        # container started without -i has /dev/null as stdin already. The
+        # image starts the node directly, with no schema step: run.sh migrates
+        # each node database in a one-off container before any node starts.
         start = {
             "entrypoint": [
                 "/bin/sh",

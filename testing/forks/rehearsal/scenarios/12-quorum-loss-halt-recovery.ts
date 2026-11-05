@@ -102,6 +102,7 @@ import {
     signatureQuorum,
 } from "../lib/haltDrill"
 import { runScenarioCli, type ScenarioContext } from "../lib/scenario"
+import { systemBinary } from "../lib/systemBinary"
 
 const SCENARIO_ID = "12-quorum-loss"
 const NODE_IDS = [1, 2, 3, 4]
@@ -139,7 +140,7 @@ function buildDrillGenesis(): Record<string, any> {
 
 function restartCount(id: number): number {
     const r = spawnSync(
-        "docker",
+        systemBinary("docker"),
         ["inspect", "-f", "{{.RestartCount}}", `demos-devnet-node-${id}`],
         { encoding: "utf8" },
     )
@@ -279,7 +280,10 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
             genesisTs: genesisTimestamp(Date.now()),
             dir: stagingDir,
         })
-        writeOverride(SCENARIO_ID, drillOverrideYaml(staged, NODE_IDS))
+        writeOverride(
+            SCENARIO_ID,
+            drillOverrideYaml(staged, NODE_IDS, { consensusTimeS: CONSENSUS_TIME_S }),
+        )
         up({ overrideFiles: [overridePath(SCENARIO_ID)] })
         marks.t_up = Date.now()
         await restartForColdStart()
@@ -343,7 +347,7 @@ async function drill(
         timeoutMs: 240_000,
         intervalMs: 2_000,
     })
-    await assertBlockHashConvergence(NODE_IDS, BASELINE_HEIGHT)
+    await assertBlockHashConvergence(NODE_IDS, BASELINE_HEIGHT, { timeoutMs: DB_READ_TIMEOUT_MS })
     marks.t_baseline = Date.now()
     ctx.notes.push(`P1 baseline: 4/4 at >= ${BASELINE_HEIGHT}, hashes agree`)
 
@@ -399,7 +403,7 @@ async function drill(
     ctx.notes.push(`P3 halt: survivors held at ${haltHeight} for ${HALT_ROUNDS} rounds`)
 
     // P4 halt agreement
-    await assertBlockHashConvergence(SURVIVORS, haltHeight)
+    await assertBlockHashConvergence(SURVIVORS, haltHeight, { timeoutMs: DB_READ_TIMEOUT_MS })
     ctx.notes.push(`P4 survivors agree on block ${haltHeight}`)
 
     // P5 recovery
