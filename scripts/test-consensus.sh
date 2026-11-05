@@ -54,6 +54,7 @@ SUITE_FILES=(
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
     src/libs/crypto/canonicalJson.test.ts
+    src/libs/debug/nonceTrace.test.ts
     src/libs/gossip/GossipManager.lifecycle.test.ts
     src/libs/gossip/sidecarHealth.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts

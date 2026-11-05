@@ -114,7 +114,7 @@ interface Mismatch {
     actual: number
 }
 
-function crash(context: string, blockNumber: number, mismatches: Mismatch[]) {
+function report(context: string, blockNumber: number, mismatches: Mismatch[]) {
     log.error(
         `[DEBUG_ASSERT] ${context}: nonce trace mismatch on block ${blockNumber} for ${mismatches.length} account(s)`,
     )
@@ -126,6 +126,10 @@ function crash(context: string, blockNumber: number, mismatches: Mismatch[]) {
     log.error(
         "[DEBUG_ASSERT] Mismatches: " + JSON.stringify(mismatches, null, 2),
     )
+}
+
+function crash(context: string, blockNumber: number, mismatches: Mismatch[]) {
+    report(context, blockNumber, mismatches)
     // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
     process.exit(1)
 }
@@ -194,7 +198,9 @@ export function assertForgedNonceTrace(
 
 /**
  * Sync-side check: our local nonces before and after applying the block must
- * match the values the forger recorded.
+ * match the values the forger recorded. Log only: the trace sits in the
+ * block's attrs, which the block hash does not cover, so any peer serving the
+ * block can write it and must not be able to stop this node.
  */
 export function assertSyncedNonceTrace(
     blockNumber: number,
@@ -208,26 +214,26 @@ export function assertSyncedNonceTrace(
         const before = localBefore[account] ?? 0
         const after = localAfter[account] ?? 0
 
-        if (before !== entry.startApply) {
+        if (before !== entry?.startApply) {
             mismatches.push({
                 account,
                 field: "startApply",
-                expected: entry.startApply,
+                expected: entry?.startApply,
                 actual: before,
             })
         }
 
-        if (after !== entry.endApply) {
+        if (after !== entry?.endApply) {
             mismatches.push({
                 account,
                 field: "endApply",
-                expected: entry.endApply,
+                expected: entry?.endApply,
                 actual: after,
             })
         }
     }
 
     if (mismatches.length > 0) {
-        crash("sync", blockNumber, mismatches)
+        report("sync", blockNumber, mismatches)
     }
 }
