@@ -107,6 +107,14 @@ describe("pairWithAnchor at boot", () => {
         )
     })
 
+    it("keeps a signed answer that could not join the table even when later attempts time out", async () => {
+        const net = network({ "0xanchor1": ["verified", "unreachable"] })
+        net.deps.isPaired = () => false
+        await expect(pairWithAnchor(anchor(1), net.deps, CHAIN)).rejects.toThrow(
+            "Failed to pair with anchor peer",
+        )
+    })
+
     it("refuses when an anchor that did not answer later answers with a refusal", async () => {
         const net = network({ "0xanchor1": ["unreachable", "other-genesis"] })
         await expect(pairWithAnchor(anchor(1), net.deps, CHAIN)).rejects.toBeInstanceOf(

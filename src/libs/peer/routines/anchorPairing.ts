@@ -89,7 +89,7 @@ export async function pairWithAnchor(
         if (verdict === "verified" && deps.isPaired(peer.identity)) return "paired"
         // A signed answer that still left it out of the table (no genesis hash
         // in the reply, URL bound to another key) will not change by waiting.
-        answered = verdict === "verified"
+        answered ||= verdict === "verified"
         if (attempt >= delays.length) break
         log.warn(
             `[BOOTSTRAP] Anchor ${anchorLabel(peer)} not paired yet (${verdict}), retrying in ${delays[attempt]} ms`,
