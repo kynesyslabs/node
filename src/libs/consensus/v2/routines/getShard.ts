@@ -6,7 +6,7 @@ import log from "src/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Validators } from "src/model/entities/Validators"
-import { compareIdentities } from "./peerlistMerge"
+import { boundPoolFrom, compareIdentities, eligiblePoolFrom } from "./poolRules"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import { quorumThreshold } from "../quorum"
 import { isForkActive } from "@/forks/forkGates"
@@ -172,10 +172,11 @@ async function chainEligiblePool(
     const committed = await readCommittedPeerlist(lastBlockNumber)
     const validatorAddresses = await poolValidatorAddresses(lastBlockNumber)
 
-    let pool: string[]
-    if (committed.length > 0 && validatorAddresses.size > 0) {
-        pool = committed.filter(id => validatorAddresses.has(id))
-    } else if (committed.length > 0) {
+    const eligible = eligiblePoolFrom(committed, validatorAddresses)
+    if (eligible === null) {
+        return null
+    }
+    if (eligible.source === "unfiltered") {
         assertValidatorsNotRequired(
             "committed peerlist but no active validators",
         )
@@ -183,17 +184,13 @@ async function chainEligiblePool(
             "[getShard] SECURITY: no active validators in DB; using committed peerlist unfiltered. " +
                 "This is only acceptable on development networks.",
         )
-        pool = committed
-    } else if (validatorAddresses.size > 0) {
+    } else if (eligible.source === "validators") {
         log.info(
             `[getShard] Block ${lastBlockNumber} has no committed peerlist; bootstrapping pool from ${validatorAddresses.size} active validators`,
         )
-        pool = [...validatorAddresses]
-    } else {
-        return null
     }
 
-    const result = [...new Set(pool)].sort(compareIdentities)
+    const result = eligible.pool
 
     poolCache.set(lastBlockNumber, result)
     if (poolCache.size > POOL_CACHE_MAX_ENTRIES) {
@@ -288,14 +285,14 @@ export async function getBoundPool(parentNumber: number): Promise<string[]> {
     }
 
     const staked = await poolValidatorAddresses(parentNumber)
-    if (staked.size <= pool.length) {
-        return pool
+    const bound = boundPoolFrom(pool, staked, getCommitteeFloor())
+    if (bound !== pool) {
+        log.warning(
+            `[getShard] Eligible pool at block ${parentNumber} holds ${pool.length}, below the quorum of ` +
+                `${getCommitteeFloor()}: drawing the committee from all ${staked.size} staked validators`,
+        )
     }
-    log.warning(
-        `[getShard] Eligible pool at block ${parentNumber} holds ${pool.length}, below the quorum of ` +
-            `${getCommitteeFloor()}: drawing the committee from all ${staked.size} staked validators`,
-    )
-    return [...staked].sort(compareIdentities)
+    return bound
 }
 
 /**

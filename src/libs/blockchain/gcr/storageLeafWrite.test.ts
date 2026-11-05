@@ -51,6 +51,7 @@ mock.module("@/libs/blockchain/finality/storageRoot", () => ({
         marks++
     },
     storageProgramsRoot: async () => "0".repeat(64),
+    proveStoragePrograms: async () => ({ root: "0".repeat(64), proofs: [] }),
 }))
 
 // Imported once the database is mocked: handleGCR reads it at load.

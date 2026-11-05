@@ -84,6 +84,10 @@ export default class Chain {
         return blockOps.getBlocks(start, limit)
     }
 
+    static async getBlockRange(from: number, to: number): Promise<Blocks[]> {
+        return blockOps.getBlockRange(from, to)
+    }
+
     static async getBlockByNumber(number: number): Promise<Blocks> {
         return blockOps.getBlockByNumber(number)
     }

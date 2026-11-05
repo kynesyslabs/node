@@ -12,7 +12,7 @@ const getGenesisBlockHash = jest.fn(async () => "83082fbb")
 const getBlockByNumber = jest.fn(async (..._args: unknown[]) => null as any)
 const getTransactions = jest.fn(async (..._args: unknown[]) => [] as any[])
 const getTransactionHistory = jest.fn(async (..._args: unknown[]) => [] as any[])
-const sharedState = { syncStatus: true, inSyncLoop: false }
+const sharedState: { syncStatus: boolean; inSyncLoop: boolean; forkConfig?: unknown } = { syncStatus: true, inSyncLoop: false }
 
 jest.mock("src/libs/blockchain/chain", () => ({
     __esModule: true,
@@ -38,6 +38,7 @@ beforeEach(() => {
     getTransactionHistory.mockResolvedValue([])
     sharedState.syncStatus = true
     sharedState.inSyncLoop = false
+    sharedState.forkConfig = undefined
 })
 
 describe("getTransactionStatus", () => {
@@ -111,6 +112,41 @@ describe("getTransactionStatus", () => {
     it("refuses a malformed hash", async () => {
         expect((await getTransactionStatusCall({ hash: "0x12" })).result).toBe(400)
         expect(getTransactionStatus).not.toHaveBeenCalled()
+    })
+
+    describe("under finalityProofs", () => {
+        beforeEach(() => {
+            sharedState.forkConfig = { finalityProofs: { activationHeight: 0 } }
+        })
+
+        it("names the block that commits the result once it is within the height searched", async () => {
+            getTransactionStatus.mockResolvedValue({ state: "failed", blockNumber: 4200, code: "TX_NONCE_INVALID_LOW" })
+            const reply = await getTransactionStatusCall({ hash: HASH })
+            expect(reply.response).toEqual({
+                state: "failed",
+                blockNumber: 4200,
+                code: "TX_NONCE_INVALID_LOW",
+                resultCommittedInBlock: 4201,
+                checkedThroughBlock: 4242,
+            })
+        })
+
+        it("answers null until the next block exists", async () => {
+            getTransactionStatus.mockResolvedValue({ state: "included", blockNumber: 4242 })
+            expect((await getTransactionStatusCall({ hash: HASH })).response.resultCommittedInBlock).toBeNull()
+        })
+
+        it("leaves it out where no block commits the result: genesis, pending and before the fork", async () => {
+            getTransactionStatus.mockResolvedValue({ state: "included", blockNumber: 0 })
+            expect((await getTransactionStatusCall({ hash: HASH })).response).not.toHaveProperty("resultCommittedInBlock")
+            getTransactionStatus.mockResolvedValue({ state: "pending" })
+            expect((await getTransactionStatusCall({ hash: HASH })).response).not.toHaveProperty("resultCommittedInBlock")
+            sharedState.forkConfig = { finalityProofs: { activationHeight: 4201 } }
+            getTransactionStatus.mockResolvedValue({ state: "included", blockNumber: 4199 })
+            expect((await getTransactionStatusCall({ hash: HASH })).response).not.toHaveProperty("resultCommittedInBlock")
+            getTransactionStatus.mockResolvedValue({ state: "included", blockNumber: 4200 })
+            expect((await getTransactionStatusCall({ hash: HASH })).response.resultCommittedInBlock).toBe(4201)
+        })
     })
 })
 

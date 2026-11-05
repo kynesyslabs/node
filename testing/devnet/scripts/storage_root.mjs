@@ -10,10 +10,12 @@
  * step's. At the end every node must agree on every block hash from 1 to the
  * shared head.
  *
- * Env: NODE_URLS (comma-separated, node-1 first), IDENTITY_PATH.
+ * Env: NODE_URLS (comma-separated, node-1 first), IDENTITY_PATH; optional
+ * STORAGE_ADDRESS_OUT, a file the program's address is written to for
+ * finality_proofs.mjs.
  * Prints "OK" and exits 0, or "FAIL: ..." and exits 1.
  */
-import { readFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import { StorageProgram } from "@kynesyslabs/demosdk/storage"
 
@@ -125,6 +127,9 @@ check(baseline === EMPTY_ROOT, "no storage program yet: empty root", baseline)
 const nonce = await demos.getNextNonce(owner)
 const create = StorageProgram.createStorageProgram(owner, `root-probe-${Date.now()}`, { hello: "world" }, "json", undefined, { nonce })
 const address = create.storageAddress
+if (process.env.STORAGE_ADDRESS_OUT) {
+    writeFileSync(process.env.STORAGE_ADDRESS_OUT, JSON.stringify({ storageAddress: address }))
+}
 
 const steps = [
     ["create", create],

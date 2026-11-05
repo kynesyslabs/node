@@ -4,6 +4,7 @@ import getStorageProgramFieldType from "../routines/nodecalls/getStorageProgramF
 import getStorageProgramFields from "../routines/nodecalls/getStorageProgramFields"
 import getStorageProgramItem from "../routines/nodecalls/getStorageProgramItem"
 import getStorageProgramValue from "../routines/nodecalls/getStorageProgramValue"
+import getStorageProof from "../routines/nodecalls/getStorageProof"
 import getStorageProgramsByOwner from "../routines/nodecalls/getStorageProgramsByOwner"
 import hasStorageProgramField from "../routines/nodecalls/hasStorageProgramField"
 import searchStoragePrograms from "../routines/nodecalls/searchStoragePrograms"
@@ -19,6 +20,11 @@ import type { NodeCallHandler } from "./types"
  * limited to public programs.
  */
 export const storageProgramHandlers: Record<string, NodeCallHandler> = {
+    // No read check: a proof serves a program's record, which carries the
+    // hash of its data and never the data, so every program is provable.
+    getStorageProof: async data => {
+        return await getStorageProof(data)
+    },
     getStorageProgram: async data => {
         return await getStorageProgram(data)
     },
