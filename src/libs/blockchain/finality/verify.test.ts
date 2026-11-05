@@ -3,8 +3,9 @@
  * principles (real ed25519 keys, RFC 6962 and sparse trees, the content
  * hash rule), and against each way a prover could lie: a changed leaf, a
  * tree size the signed block does not give, a forged or repeated signer, a
- * signature from another round, a block from another chain, and a validator
- * set the client does not hold.
+ * signature from another round, a block from another chain, a parent whose
+ * peerlist names only its signers, and a validator set the client does not
+ * hold.
  */
 
 import { describe, expect, it } from "bun:test"
@@ -278,9 +279,8 @@ describe("verifyTransactionProof", () => {
         ).toBe("final-executed")
     })
 
-    it("is indeterminate without a committee when the pool is larger than the shard", () => {
-        // Seven eligible validators, a shard of four: three signers outside
-        // the drawn committee would reach the quorum of three by themselves.
+    /** Seven staked validators: members plus three more, with their set. */
+    function widerSet() {
         const extra = Array.from({ length: 3 }, newKey)
         const wide = {
             validators: [...members, ...extra].map(k => ({
@@ -290,16 +290,59 @@ describe("verifyTransactionProof", () => {
                 validAt: 0,
             })),
         }
+        return { extra, wide, setHash: validatorSetHash(wide.validators) }
+    }
+
+    it("is indeterminate without a committee when the pool is larger than the shard", () => {
+        // Seven eligible validators, a shard of four: three signers outside
+        // the drawn committee would reach the quorum of three by themselves.
+        const { extra, wide, setHash } = widerSet()
         const proof = txProof(0, {
             peerlist: [...members, ...extra].map(k => k.identity),
-            setHash: validatorSetHash(wide.validators),
+            setHash,
             signers: extra,
         })
-        const verdict = verifyTransactionProof(proof, wide, rules)
+        const trustedBlockHash = (height: number) => (height === M ? proof.inclusionBlock.hash : undefined)
+        const verdict = verifyTransactionProof(proof, wide, { ...rules, trustedBlockHash })
         expect(verdict.verdict).toBe("indeterminate")
         expect(verdict.reason).toMatch(/drawn from 7 identities/)
         const committee = members.map(k => k.identity)
         expect(verifyTransactionProof(proof, wide, { ...rules, committee }).verdict).toBe("invalid")
+    })
+
+    it("does not let a quorum of the shard pick its own parent peerlist", () => {
+        // Three of seven staked validators fabricate block M naming only
+        // themselves, then sign M + 1 on top of it.
+        const { extra, wide, setHash } = widerSet()
+        const forged = txProof(0, { peerlist: extra.map(k => k.identity), setHash, signers: extra })
+
+        const unbound = verifyTransactionProof(forged, wide, rules)
+        expect(unbound.verdict).toBe("indeterminate")
+        expect(unbound.reason).toMatch(/not on a chain the client holds and 7 validators are staked/)
+
+        const honest = txProof(0, { setHash })
+        const trustedBlockHash = (height: number) => (height === M ? honest.inclusionBlock.hash : undefined)
+        const bound = verifyTransactionProof(forged, wide, { ...rules, trustedBlockHash })
+        expect(bound.verdict).toBe("invalid")
+        expect(bound.reason).toMatch(/not the trusted chain's block 41/)
+
+        const committee = members.map(k => k.identity)
+        expect(verifyTransactionProof(forged, wide, { ...rules, committee }).reason).toMatch(/0 verified/)
+    })
+
+    it("accepts a parent the client vouches for, in hex with or without 0x", () => {
+        const proof = txProof(0)
+        for (const spelled of [proof.inclusionBlock.hash, `0x${proof.inclusionBlock.hash.toUpperCase()}`]) {
+            const trustedBlockHash = (height: number) => (height === M ? spelled : undefined)
+            expect(verifyTransactionProof(proof, trusted, { ...rules, trustedBlockHash }).verdict).toBe("final-executed")
+        }
+        const elsewhere = () => sha256("another block 41")
+        expect(verifyTransactionProof(proof, trusted, { ...rules, trustedBlockHash: elsewhere }).verdict).toBe("invalid")
+    })
+
+    it("matches a committee named without 0x against the staked set", () => {
+        const committee = members.slice(0, 3).map(k => k.identity.slice(2).toUpperCase())
+        expect(verifyTransactionProof(txProof(0), trusted, { ...rules, committee }).verdict).toBe("final-executed")
     })
 
     it("answers invalid, never throws, on malformed input", () => {
