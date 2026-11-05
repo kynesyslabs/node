@@ -512,12 +512,17 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.gossip.heightsIntervalMs,
             ),
             keyFile: envStr(EnvKey.GOSSIP_KEY_FILE, d.gossip.keyFile),
+            ipcConnectTimeoutMs: envInt(
+                EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS,
+                d.gossip.ipcConnectTimeoutMs,
+            ),
         },
     }
 
     assertConsensusTimingSane(config)
     assertL2psLimitsSane(config)
     assertRpcLimitsSane(config)
+    assertGossipSane(config)
 
     return deepFreeze(config)
 }
@@ -594,6 +599,20 @@ function assertConsensusTimingSane(config: AppConfig): void {
     if (problems.length > 0) {
         throw new Error(
             `[config] invalid consensus timing configuration:\n  - ${problems.join("\n  - ")}`,
+        )
+    }
+}
+
+/**
+ * A non-positive IPC connect timeout fails every sidecar launch before the
+ * child can bind its socket, so gossip would stay degraded forever with a log
+ * that blames IPC instead of the setting.
+ */
+function assertGossipSane(config: AppConfig): void {
+    const { ipcConnectTimeoutMs } = config.gossip
+    if (!Number.isInteger(ipcConnectTimeoutMs) || ipcConnectTimeoutMs <= 0) {
+        throw new Error(
+            `[config] GOSSIP_IPC_CONNECT_TIMEOUT_MS must be an integer > 0 (got ${ipcConnectTimeoutMs})`,
         )
     }
 }

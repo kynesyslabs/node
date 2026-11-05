@@ -4,6 +4,13 @@ import log from "@/utilities/logger"
 import { dataSource } from "@/model/datasource"
 import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
 import { web2CanonicalIdsActiveAtApply } from "@/forks/web2ProofBindingGate"
+import { identityCarryoverActiveAtApply } from "@/forks/identityCarryoverGate"
+import { GenesisImportedIdentity } from "@/model/entities/GenesisImportedIdentity"
+import {
+    firstConnectionKey,
+    type FirstConnectionData,
+    type FirstConnectionType,
+} from "@/libs/blockchain/genesis/carryover"
 
 /**
  * Safe wrapper for GCR repository saves.
@@ -27,26 +34,31 @@ export async function safeGCRSave(
     }
 }
 
+/**
+ * Whether the genesis import carried this identity over. Its first link was
+ * rewarded on the source network and those points came over with the account,
+ * so under identityCarryover no later link of it is a first connection.
+ */
+async function carriedOverAtGenesis(
+    type: FirstConnectionType,
+    data: FirstConnectionData,
+): Promise<boolean> {
+    if (!identityCarryoverActiveAtApply()) return false
+    const key = firstConnectionKey(type, data)
+    if (key === null) return false
+    const row = await dataSource
+        .getRepository(GenesisImportedIdentity)
+        .findOneBy({ identityKey: key })
+    return row !== null
+}
+
 export async function isFirstConnection(
-    type:
-        | "twitter"
-        | "github"
-        | "web3"
-        | "telegram"
-        | "discord"
-        | "ud"
-        | "nomis"
-        | "humanpassport"
-        | "ethos",
-    data: {
-        userId?: string // for twitter/github/discord
-        chain?: string // for web3
-        subchain?: string // for web3
-        address?: string // for web3/humanpassport
-        domain?: string // for ud
-    },
+    type: FirstConnectionType,
+    data: FirstConnectionData,
     currentAccount?: string,
 ): Promise<boolean> {
+    if (await carriedOverAtGenesis(type, data)) return false
+
     const gcrMainRepository = dataSource.getRepository(GCRMain)
     if (type === "humanpassport") {
         const result = await gcrMainRepository

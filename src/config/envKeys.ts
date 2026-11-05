@@ -179,6 +179,7 @@ export const EnvKey = {
     GOSSIP_PORT: "GOSSIP_PORT",
     GOSSIP_HEIGHTS_INTERVAL: "GOSSIP_HEIGHTS_INTERVAL",
     GOSSIP_KEY_FILE: "GOSSIP_KEY_FILE",
+    GOSSIP_IPC_CONNECT_TIMEOUT_MS: "GOSSIP_IPC_CONNECT_TIMEOUT_MS",
 
     // --- External service credentials (compose-scoped; node may not see these) ---
     GRAFANA_ADMIN_PASSWORD: "GRAFANA_ADMIN_PASSWORD",
