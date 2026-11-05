@@ -17,8 +17,8 @@
 #
 # Everything lives in a per-run dir under runs/ (gitignored: it holds the
 # devnet keys) and is torn down on exit, failure or Ctrl-C.
-# Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR:
-# a running node stopped answering mid-window, so no verdict is given).
+# Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR: a node
+# stopped answering mid-window, or postgres hit its connection limit: no verdict).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -147,6 +147,12 @@ teardown() {
             cid=$(dc ps -aq "node-${i}" 2>/dev/null)
             [ -n "${cid}" ] && docker logs "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > "${LOG_DIR}/node-${i}.log"
         done
+        # Backstop for the exits that skip pg_limit_gate (an early exit 0 or 1):
+        # a connection-limit hit in the collected logs is never a result
+        if [ "${rc}" -le 1 ] && grep -aq "too many clients" "${LOG_DIR}"/node-*.log "${LOG_DIR}/psql-errors.log" 2>/dev/null; then
+            say "ABORT: could not run: postgres connection limit hit (exit ${rc} replaced by 2; see ${LOG_DIR}/node-*.log)"
+            rc=2
+        fi
         say "tearing down ${PROJECT}"
         for s in "${SIDECARS[@]}"; do docker rm -f "${s}" >/dev/null 2>&1 || true; done
         dc down -v --remove-orphans >"${LOG_DIR}/teardown.log" 2>&1 || true
@@ -627,6 +633,7 @@ read_error() { # $1 phase name
 step 03-bringup
 STARTED_STACK=1
 dc up -d postgres >> "${STEP_LOG}" 2>&1 || { say "ABORT: postgres did not start"; exit 2; }
+pg_limit_preflight || exit 2
 for i in $(seq 1 "${START}"); do
     start_node "${i}" || { say "ABORT: node-${i} did not serve within 180s"; exit 2; }
     say "node-${i} serving"
@@ -744,13 +751,54 @@ scenario_listed_stall() {
 # and an outer timeout stops what the server cannot cancel (a stalled connect or
 # exec). Either way the read fails; callers treat that as "could not run".
 psql_node() { # $1 node, $2 SQL
-    local rc
+    local rc errf="${LOG_DIR}/psql-err.$$.tmp"
+    # stderr goes to the caller as before and, when there is any, to
+    # psql-errors.log, which pg_limit_gate reads
     timeout -k 5 "$((DB_READ_TIMEOUT + 5))" docker exec -e PGCONNECT_TIMEOUT=10 \
         -e "PGOPTIONS=-c statement_timeout=$((DB_READ_TIMEOUT * 1000))" \
-        "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2"
+        "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
     rc=$?
+    [ -s "${errf}" ] && { cat "${errf}" >&2; sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log"; }
+    rm -f "${errf}"
     [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within $((DB_READ_TIMEOUT + 5))s (DB_READ_TIMEOUT=${DB_READ_TIMEOUT})" >&2
     return "${rc}"
+}
+
+# The shared postgres must allow every connection N nodes can open. The compose
+# sets max_connections (gen-inputs.py), so this fails only if that setting did
+# not reach the server. Waits for the server: `up -d` does not.
+pg_limit_preflight() {
+    local need have tries=0
+    need=$(python3 -I "${HERE}/drill_inputs.py" pgconn --nodes "${N}" | cut -d' ' -f1)
+    [[ "${need}" =~ ^[0-9]+$ ]] || { say "ABORT: could not work out the connections ${N} nodes need"; return 1; }
+    while :; do
+        have=$(docker exec "$(dc ps -q postgres)" psql -U demosuser -d postgres -tAc 'SHOW max_connections' 2>/dev/null)
+        [[ "${have}" =~ ^[0-9]+$ ]] && break
+        tries=$((tries + 1))
+        [ "${tries}" -ge 45 ] && { say "ABORT: could not read max_connections from postgres"; return 1; }
+        sleep 2
+    done
+    if [ "${have}" -lt "${need}" ]; then
+        say "ABORT: could not run: postgres max_connections is ${have}, ${N} nodes need ${need} (10 each + 20)"
+        return 1
+    fi
+    say "postgres max_connections ${have} (${N} nodes need ${need})"
+}
+
+# "sorry, too many clients already" in a node's log or in one of the harness'
+# own psql reads means something ran without a connection it needed: the run
+# proves nothing, whatever the verdict says. Called before the verdict is
+# written, so a PASS or a FAIL becomes exit 2 and says why.
+pg_limit_gate() {
+    local hits nodes
+    hits=$({ grep_logs "too many clients"; grep -a "too many clients" "${LOG_DIR}/psql-errors.log" 2>/dev/null; } | wc -l)
+    [ "${hits}" = 0 ] && return 0
+    nodes=$(grep_logs "too many clients" | cut -d: -f1 | sort -u | tr '\n' ' ')
+    say "ABORT: could not run: postgres connection limit hit (${hits} 'too many clients' lines; ${nodes:-harness psql reads only})"
+    DETAIL="could not run: postgres connection limit hit (${hits} lines${nodes:+ in ${nodes% }}); the result was ${RESULT}"
+    RESULT=ERROR
+    write_verdict
+    exit 2
 }
 
 scenario_fallback() {
@@ -1139,6 +1187,7 @@ case "${SCENARIO}" in
     partition) scenario_partition ;;
 esac
 
+pg_limit_gate
 write_verdict
 [ "${RESULT}" = PASS ] && exit 0
 exit 1

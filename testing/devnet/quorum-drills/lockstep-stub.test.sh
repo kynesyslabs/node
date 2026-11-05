@@ -151,13 +151,17 @@ source <(region 'psql_node() {' 'scenario_fallback() {')
 source <(region 'block_rows() {' 'phase_row() {')
 dc() { echo fakepg; }
 mkdir -p "${WORK}/bin"
-# docker exec ... psql: FAKE_DB is rows (default), hang, or stmt (the server cancels the query)
+# docker exec ... psql: FAKE_DB is rows (default), hang, stmt (the server cancels the
+# query) or toomany (the server is out of connections); SHOW max_connections
+# answers FAKE_MAXCONN (default 100, the postgres default)
 cat > "${WORK}/bin/docker" <<'FAKEDOCKER'
 #!/usr/bin/env bash
 echo "$*" >> "${FAKE_DOCKER_LOG}"
+case "$*" in *"SHOW max_connections"*) echo "${FAKE_MAXCONN:-100}"; exit 0 ;; esac
 case "${FAKE_DB:-rows}" in
     hang) sleep 30 ;;
     stmt) echo "ERROR:  canceling statement due to statement timeout" >&2; exit 1 ;;
+    toomany) echo 'psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  sorry, too many clients already' >&2; exit 2 ;;
     *) printf '5|0xb5|7\n6|0xb6|8\n' ;;
 esac
 FAKEDOCKER
@@ -190,6 +194,65 @@ calls=$(grep -c '\$(block_rows ' "${RUN_SH}")
 guarded=$(grep '\$(block_rows ' "${RUN_SH}" | grep -c '|| { say "ABORT: .*; exit 2; }')
 check "all ${calls} block_rows calls end the run with ABORT and exit 2 when the read fails" test "${calls}" -ge 4 -a "${calls}" = "${guarded}"
 check "run.sh refuses a DB_READ_TIMEOUT that is not a positive number" grep -q 'DB_READ_TIMEOUT must be a positive number' "${RUN_SH}"
+
+echo "== postgres connection limit: the preflight refuses a server below what N nodes need"
+# need = 10 x N + 20 (drill_inputs.py pgconn); the compose sets 2 x 10 x N + 20
+for spec in "4 100 ok" "10 220 ok" "13 280 ok" "13 100 refused" "10 100 refused" "13 149 refused" "13 150 ok"; do
+    set -- ${spec}
+    N=$1
+    OUT=$(FAKE_MAXCONN=$2 pg_limit_preflight 2>&1; echo "rc=$?")
+    if [ "$3" = ok ]; then
+        check "N=$1, max_connections $2: accepted" has "rc=0"
+    else
+        check "N=$1, max_connections $2: refused (rc=1) with the numbers" has "could not run: postgres max_connections is $2, $1 nodes need $((10 * $1 + 20))"
+        check "N=$1, max_connections $2: exits non-zero" has "rc=1"
+    fi
+done
+
+echo "== postgres connection limit: 'too many clients' never ends in a pass or a fail"
+grep_logs() { # the node logs of the fake: nodelog.<node>
+    local f
+    for f in "${FAKE}"/nodelog.*; do [ -e "${f}" ] || continue; grep -a "$1" "${f}" | sed "s/^/node-${f##*.}: /"; done
+}
+write_verdict() { echo "VERDICT ${RESULT}: ${DETAIL}"; }
+for verdict in PASS FAIL; do
+    new_case gate_clean 25; RESULT=${verdict}; DETAIL="phases fine"
+    echo "FATAL: nothing wrong" > "${FAKE}/nodelog.1"
+    OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
+    check "no hit, ${verdict}: the gate lets it through" has "rc=0"
+    check "no hit, ${verdict}: and writes nothing" test "$(grep -c VERDICT <<< "${OUT}")" = 0
+
+    new_case gate_nodes 25; RESULT=${verdict}; DETAIL="phases fine"
+    printf 'ok line\nerror: sorry, too many clients already\n' > "${FAKE}/nodelog.7"
+    printf 'FATAL:  sorry, too many clients already\n' > "${FAKE}/nodelog.11"
+    OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
+    check "node logs hit, ${verdict}: exit 2" has "rc=2"
+    check "node logs hit, ${verdict}: says could not run: postgres connection limit hit" has "ABORT: could not run: postgres connection limit hit (2 'too many clients' lines; node-11 node-7 )"
+    check "node logs hit, ${verdict}: the verdict is ERROR and keeps what the result was" has "VERDICT ERROR: could not run: postgres connection limit hit (2 lines in node-11 node-7); the result was ${verdict}"
+done
+
+new_case gate_psql 25; DB_READ_TIMEOUT=2; RESULT=PASS; DETAIL="phases fine"
+OUT=$(FAKE_DB=toomany psql_node 3 "SELECT 1" 2>&1; echo "rc=$?")
+check "a psql_node read refused for connections still fails (rc=2) and shows the server's words" has "too many clients already"
+check "(psql's own exit code is passed on)" has "rc=2"
+check "and is recorded in psql-errors.log, with the database" grep -q "psql node3_db: .*too many clients already" "${LOG_DIR}/psql-errors.log"
+OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
+check "a harness read that hit the limit, node logs clean: the gate exits 2" has "rc=2"
+check "and says so" has "postgres connection limit hit (1 'too many clients' lines; harness psql reads only)"
+new_case gate_psql_ok 25; DB_READ_TIMEOUT=2; RESULT=PASS; DETAIL="phases fine"
+FAKE_DB=stmt psql_node 3 "SELECT 1" > /dev/null 2>&1
+OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
+check "another psql error is not a connection-limit hit" has "rc=0"
+
+# The wiring: the gate sits before the verdict is written, the preflight before the first node starts,
+# and a teardown backstop covers the exits that skip the gate
+check "pg_limit_gate runs right before the final write_verdict" test "$(grep -B1 '^write_verdict$' "${RUN_SH}" | head -1)" = pg_limit_gate
+pg_up=$(grep -n '^dc up -d postgres' "${RUN_SH}" | head -1 | cut -d: -f1)
+pg_pre=$(grep -n '^pg_limit_preflight || exit 2$' "${RUN_SH}" | head -1 | cut -d: -f1)
+first_node=$(grep -n '^    start_node "${i}" || ' "${RUN_SH}" | head -1 | cut -d: -f1)
+check "pg_limit_preflight runs after postgres starts and before the first node (lines ${pg_up:-?} < ${pg_pre:-?} < ${first_node:-?})" \
+    test -n "${pg_up}" -a -n "${pg_pre}" -a -n "${first_node}" -a "${pg_up:-0}" -lt "${pg_pre:-0}" -a "${pg_pre:-0}" -lt "${first_node:-0}"
+check "the teardown replaces exit 0/1 by 2 when the collected logs hold the error" grep -q 'exit ${rc} replaced by 2' "${RUN_SH}"
 
 echo
 if [ "${fails}" = 0 ]; then echo "lockstep stub tests: all passed"; else echo "lockstep stub tests: ${fails} FAILED"; exit 1; fi
