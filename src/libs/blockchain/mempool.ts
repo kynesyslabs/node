@@ -559,10 +559,12 @@ export default class Mempool {
             isForkActive("nonceIntegrity", blockHeight) &&
             expectsNonceEdit(transaction)
         const ed25519Raw = transaction.content?.from_ed25519_address
-        const nonceAccount =
+        const byEd25519 =
             nonceRule && typeof ed25519Raw === "string" && ed25519Raw !== ""
-                ? ed25519Raw.toLowerCase()
-                : senderFrom
+        // Locking and the pending-duplicate check ignore case; the account
+        // is read under the key apply and confirmation use, as signed.
+        const nonceAccount = byEd25519 ? ed25519Raw.toLowerCase() : senderFrom
+        const nonceAccountKey = byEd25519 ? ed25519Raw : senderFrom
 
         // System relay transactions (SYSTEM_RELAY_TX_TYPES, e.g.
         // `l2psBatch`) carry a node-generated monotonic-for-uniqueness
@@ -658,7 +660,7 @@ export default class Mempool {
 
                         const gcrRepo = em.getRepository(GCRMain)
                         const account = await gcrRepo.findOne({
-                            where: { pubkey: nonceAccount },
+                            where: { pubkey: nonceAccountKey },
                         })
 
                         const accountNonce = account?.nonce ?? 0

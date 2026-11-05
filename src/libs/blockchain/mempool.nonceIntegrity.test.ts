@@ -186,6 +186,15 @@ describe("nonce admission under nonceIntegrity", () => {
         expect(accountLookups).toEqual([{ where: { pubkey: SENDER.toLowerCase() } }])
     })
 
+    it("reads the confirmed nonce under the sender key as signed, and locks case-insensitively", async () => {
+        const tx = await signed(8)
+        const mixed = "0x" + SENDER.slice(2, 10).toUpperCase() + SENDER.slice(10)
+        tx.content.from_ed25519_address = mixed
+        expect((await rpc(tx)).error).toBe("")
+        expect(accountLookups).toEqual([{ where: { pubkey: mixed } }])
+        expect(lockedOn).toEqual([`nonce:${SENDER.toLowerCase()}`])
+    })
+
     it("admits a gap inside the window, out of order", async () => {
         expect((await rpc(await signed(10))).error).toBe("")
         expect((await gossip(await signed(9))).error).toBe("")
