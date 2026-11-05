@@ -4,9 +4,12 @@
 # node #1059 section 2).
 #
 # Boots the devnet fixture stack, signs two transfers with the same nonce
-# from node-1's funded identity and lets one block execute one and keep the
-# other as failed. tx_status_failed.mjs then checks the SDK wait, the status
-# answer on two nodes, the receiver balance and the other read calls.
+# from node-1's funded identity, submits them to two nodes and lets one block
+# execute one and keep the other as failed. tx_status_failed.mjs then checks
+# the SDK wait, the status answer on two nodes, the receiver balance and the
+# other read calls. tx_nonce_failed.mjs then checks that a transaction which
+# fails in a block spends its nonce for good (nonceIntegrity) and the
+# admission window and duplicate refusal.
 #
 # Flags:
 #   --keep        Leave the devnet running on exit (for manual poking)
@@ -199,4 +202,13 @@ AMOUNT_OS="${AMOUNT_OS}" \
     bun "${STATUS_SCRIPT}"
 
 echo "[tx-status-e2e] failed transaction reported as failed on both nodes"
+
+NODE1_URL="${NODE1_URL}" \
+NODE2_URL="${NODE2_URL}" \
+IDENTITY_PATH="${DEVNET_DIR}/identities/node1.identity" \
+RECEIVER_PUBKEY="${RECEIVER_PUBKEY}" \
+AMOUNT_OS="${AMOUNT_OS}" \
+    bun "${SCRIPT_DIR}/tx_nonce_failed.mjs"
+
+echo "[tx-status-e2e] a transaction that failed in a block spent its nonce on both nodes"
 exit 0

@@ -2,9 +2,10 @@
  * Client read calls against a live devnet: a transaction a block keeps but
  * does not execute must read as failed, never included.
  *
- * Two transfers signed with the same nonce are both admitted (admission only
- * needs a nonce above the account's), so the block executes one and keeps
- * the other as failed with TX_NONCE_INVALID_LOW. Then:
+ * Two transfers signed with the same nonce are submitted to two different
+ * nodes (a node refuses a second pending tx for a nonce it already holds),
+ * so the merged block executes one and keeps the other as failed with
+ * TX_NONCE_INVALID_LOW. Then:
  *   - SDK broadcastAndWait resolves both, one included and one failed;
  *   - getTransactionStatus answers the same on two nodes, with the code and
  *     the height searched; the receiver gained only the executed amount;
@@ -50,6 +51,9 @@ const demos = new Demos()
 await demos.connect(NODE1_URL)
 await demos.connectWallet(readFileSync(IDENTITY_PATH, "utf8").trim())
 const sender = demos.getAddress()
+const demos2 = new Demos()
+await demos2.connect(NODE2_URL)
+await demos2.connectWallet(readFileSync(IDENTITY_PATH, "utf8").trim())
 
 const amount = BigInt(AMOUNT_OS)
 const receiverBefore = BigInt((await demos.getAddressInfo(RECEIVER_PUBKEY))?.balance ?? 0)
@@ -59,10 +63,10 @@ const txA = await demos.pay(RECEIVER_PUBKEY, amount)
 const txB = await demos.pay(RECEIVER_PUBKEY, amount * 2n)
 check(txA.content.nonce === txB.content.nonce, "both transfers carry the same nonce", `${txA.content.nonce} / ${txB.content.nonce}`)
 
-const [validA, validB] = await Promise.all([DemosTransactions.confirm(txA, demos), DemosTransactions.confirm(txB, demos)])
+const [validA, validB] = await Promise.all([DemosTransactions.confirm(txA, demos), DemosTransactions.confirm(txB, demos2)])
 const waited = await Promise.allSettled([
     DemosTransactions.broadcastAndWait(validA, demos, { timeoutMs: 120_000 }),
-    DemosTransactions.broadcastAndWait(validB, demos, { timeoutMs: 120_000 }),
+    DemosTransactions.broadcastAndWait(validB, demos2, { timeoutMs: 120_000 }),
 ])
 const states = waited.map(r => (r.status === "fulfilled" ? r.value.status.state : `rejected: ${String(r.reason).slice(0, 200)}`))
 check(
