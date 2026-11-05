@@ -200,10 +200,9 @@ async function proveIn(
             return { storageAddress, record: undone.get(storageAddress), siblings, terminal }
         }
         const row = rows.get(storageAddress) ?? null
-        if (row !== null && storageProgramLeafHex(row) !== leaves.get(storageAddress)) {
-            throw new Error(
-                `storage proof: stored leaf of ${storageAddress} does not match its row`,
-            )
+        const leaf = row === null ? undefined : storageProgramLeafHex(row)
+        if (leaf !== leaves.get(storageAddress)) {
+            throw new LeafMismatchError(storageAddress)
         }
         return {
             storageAddress,
@@ -213,6 +212,14 @@ async function proveIn(
         }
     })
     return { set: { root: tree.rootHex, proofs }, built }
+}
+
+/** A row read for a proof does not give the leaf its tree holds. */
+class LeafMismatchError extends Error {
+    constructor(storageAddress: string) {
+        super(`storage proof: stored leaf of ${storageAddress} does not match its row`)
+        this.name = "LeafMismatchError"
+    }
 }
 
 /** A proof needs a tree rebuild that the work cap does not allow yet. */
@@ -329,10 +336,20 @@ export class StorageProgramsRoot {
             reuse = await pending.built
         }
         if (reuse !== null) {
-            const { set } = await this.reader.read(snapshot =>
-                proveIn(snapshot, addresses, undo, reuse),
-            )
-            return set
+            try {
+                const { set } = await this.reader.read(snapshot =>
+                    proveIn(snapshot, addresses, undo, reuse),
+                )
+                return set
+            } catch (error) {
+                if (!(error instanceof LeafMismatchError)) throw error
+                // A write committed after the tree was picked and before the
+                // snapshot opened, possibly before it marked the table dirty.
+                // A rebuild reads tree and rows from one snapshot, so a
+                // mismatch there is real.
+                this.dropTree(key, reuse)
+                return await this.buildAndProve(addresses, undo, key, this.epoch, expectedRoot)
+            }
         }
         return await this.buildAndProve(addresses, undo, key, epoch, expectedRoot)
     }
@@ -375,6 +392,10 @@ export class StorageProgramsRoot {
             throw new StorageProofBusyError(this.treeBuildTimes[0] + this.limits.windowMs - now)
         }
         this.treeBuildTimes.push(now)
+    }
+
+    private dropTree(key: string, built: BuiltTree): void {
+        if (this.proofTrees.get(key)?.built === built) this.proofTrees.delete(key)
     }
 
     private heldTree(key: string, epoch: number): BuiltTree | null {

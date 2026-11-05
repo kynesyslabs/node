@@ -497,6 +497,26 @@ describe("getStorageProof", () => {
         expect(countStorageProofRootMismatch).not.toHaveBeenCalled()
     })
 
+    it("answers 503 busy, uncounted, when a block lands between picking a kept tree and reading it", async () => {
+        withStorage()
+        expect((await getStorageProof({ storageAddresses: ["stor-1"] })).result).toBe(200)
+        proveStoragePrograms.mockImplementation(async (addresses, undo, expectedRoot) => {
+            // Committed before the write marks the table dirty.
+            const markDirty = root.markDirty
+            root.markDirty = () => {}
+            try {
+                storeBlock(7, [["stor-1", row(1, { data: { i: 1, v: 3 } })]])
+            } finally {
+                root.markDirty = markDirty
+            }
+            return await root.prove(addresses, undo, expectedRoot)
+        })
+        const reply = await getStorageProof({ storageAddresses: ["stor-1"] })
+        expect(reply.result).toBe(503)
+        expect(reply.extra).toEqual({ reason: "busy" })
+        expect(countStorageProofRootMismatch).not.toHaveBeenCalled()
+    })
+
     it("answers while a block apply holds the sync lock", async () => {
         withStorage()
         const release = await syncLock.acquire()

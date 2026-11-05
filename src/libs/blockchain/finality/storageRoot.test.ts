@@ -514,5 +514,27 @@ describe("proof trees under load", () => {
         expect(proofs.proofTreeBuilds).toBe(3)
     })
 
+    it("rebuilds once when a write lands between picking a kept tree and reading the rows", async () => {
+        const proofs = capped(4, 100)
+        await proofs.prove([program(1).storageAddress])
+        // Committed, not yet marked dirty: the kept tree still looks current.
+        const changed = program(1, { data: { changed: true }, lastModifiedByTx: "0xm1b" })
+        table.write(changed)
+        table.delete(program(2).storageAddress)
+        const { root: after, proofs: served } = await proofs.prove([changed.storageAddress, program(2).storageAddress])
+        expect(proofs.proofTreeBuilds).toBe(2)
+        expect(after).toBe(expectedRoot(state()))
+        expect(storageRecordLeafHex(served[0].record!)).toBe(storageProgramLeafHex(changed))
+        expect(served[1].record).toBeNull()
+        expect(verifyNonMembership(storageProgramKey(program(2).storageAddress), served[1], after)).toBe(true)
+    })
+
+    it("answers busy when that rebuild is past the cap", async () => {
+        const proofs = capped(4, 1)
+        await proofs.prove([program(1).storageAddress])
+        table.write(program(1, { data: { changed: true }, lastModifiedByTx: "0xm1b" }))
+        expect(await proofs.prove([program(1).storageAddress]).catch(error => error)).toBeInstanceOf(StorageProofBusyError)
+    })
+
     const state = () => [...table.rows.values()]
 })
