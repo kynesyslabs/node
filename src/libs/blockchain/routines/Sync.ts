@@ -2154,8 +2154,9 @@ export async function waitForPeerStatus(
         await sleep(POLL_MS)
     }
 
-    log.only(
-        `[waitForPeerStatus] Timeout after ${TIMEOUT_MS}ms, proceeding best-effort 🙊`,
+    // A degraded path an operator should see at the default level
+    log.warning(
+        `[waitForPeerStatus] Timeout after ${TIMEOUT_MS}ms, proceeding best-effort`,
     )
     return true
 }
