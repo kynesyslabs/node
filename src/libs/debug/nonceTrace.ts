@@ -99,11 +99,22 @@ export function buildNonceTrace(
     return trace
 }
 
+const isTraceEntry = (entry: unknown): entry is NonceTraceEntry =>
+    typeof entry === "object" &&
+    entry !== null &&
+    Number.isFinite((entry as NonceTraceEntry).startApply) &&
+    Number.isFinite((entry as NonceTraceEntry).endApply)
+
+/**
+ * The trace a block carries, or null when it is absent or malformed. A peer
+ * writes it, so only numbers reach the comparison and its log lines.
+ */
 export function readNonceTrace(
     attrs: Record<string, any> | null | undefined,
 ): NonceTrace | null {
     const trace = attrs?.[NONCE_TRACE_ATTR_KEY]
-    if (!trace || typeof trace !== "object") return null
+    if (!trace || typeof trace !== "object" || Array.isArray(trace)) return null
+    if (!Object.values(trace).every(isTraceEntry)) return null
     return trace as NonceTrace
 }
 
@@ -236,4 +247,35 @@ export function assertSyncedNonceTrace(
     if (mismatches.length > 0) {
         report("sync", blockNumber, mismatches)
     }
+}
+
+/**
+ * Runs a synced block's apply with the trace check around it. The trace and
+ * its account keys come from a peer, so a read or check that fails on them is
+ * logged and the apply goes on.
+ */
+export async function applyWithSyncedNonceTrace<
+    R extends { pending?: PendingGCRWrite },
+>(
+    blockNumber: number,
+    trace: NonceTrace,
+    deferred: boolean,
+    apply: () => Promise<R>,
+): Promise<R> {
+    const accounts = Object.keys(trace)
+    const before = await readNonces(accounts).catch(error => {
+        log.warn(`[DEBUG_ASSERT] sync: nonce trace of block ${blockNumber} not checked: ${error}`)
+        return null
+    })
+    const result = await apply()
+    if (!before) return result
+    try {
+        const after = deferred
+            ? noncesAfterApply(result.pending, accounts, before)
+            : await readNonces(accounts)
+        assertSyncedNonceTrace(blockNumber, trace, before, after)
+    } catch (error) {
+        log.warn(`[DEBUG_ASSERT] sync: nonce trace of block ${blockNumber} not checked: ${error}`)
+    }
+    return result
 }
