@@ -1027,7 +1027,8 @@ drill_recover() {
         mx=$(jq '[.[]] | max' <<< "${hs}")
         # Any block above the halt height, from any node: the first new block
         if [ -z "${T_FIRST}" ] && [ "${mx}" -gt "$1" ]; then T_FIRST=$(now_ms); fi
-        if jq -e --argjson t "${target}" 'all(.[]; . >= $t)' <<< "${hs}" > /dev/null; then
+        # A read that finished after the deadline does not count as inside the window
+        if [ ${SECONDS} -lt ${deadline} ] && jq -e --argjson t "${target}" 'all(.[]; . >= $t)' <<< "${hs}" > /dev/null; then
             T_CONV=$(now_ms); converged=1; break
         fi
         say "heads: $(jq -c . <<< "${hs}")"
@@ -1119,7 +1120,8 @@ scenario_ride() {
         hs=$(heads_once "${SURVIVORS[@]}")
         mx=$(jq '[.[]] | max' <<< "${hs}")
         if [ -z "${T_FIRST}" ] && [ "${mx}" -gt "${PRE_HEIGHT}" ]; then T_FIRST=$(now_ms); fi
-        if jq -e --argjson t "${target}" 'all(.[]; . >= $t)' <<< "${hs}" > /dev/null; then
+        # A read that finished after the deadline does not count as inside the window
+        if [ ${SECONDS} -lt ${deadline} ] && jq -e --argjson t "${target}" 'all(.[]; . >= $t)' <<< "${hs}" > /dev/null; then
             T_CONV=$(now_ms); converged=1; break
         fi
         say "heads: $(jq -c . <<< "${hs}")"
