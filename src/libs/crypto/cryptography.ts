@@ -48,7 +48,6 @@ export default class Cryptography {
 
     // TODO Eliminate the old legacy compatibility
     static async save(keypair: Ed25519KeyPair, path: string, mode = "hex") {
-        log.debug(keypair.privateKey)
         if (mode === "hex") {
             const hexPrivKey = Cryptography.saveToHex(keypair.privateKey)
             await fs.writeFile(path, hexPrivKey, { mode: 0o600 })
