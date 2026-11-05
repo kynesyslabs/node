@@ -19,6 +19,7 @@ SUITE_FILES=(
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
+    src/libs/blockchain/blockRowStorable.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts
     src/libs/blockchain/finality/storageHistory.test.ts
@@ -26,12 +27,21 @@ SUITE_FILES=(
     src/libs/blockchain/finality/storageRoot.test.ts
     src/libs/blockchain/finality/validatorSet.test.ts
     src/libs/blockchain/finality/verify.test.ts
+    src/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines.test.ts
+    src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines.granular.test.ts
     src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
+    src/libs/blockchain/gcr/gcr_routines/routines/zkRoutines.test.ts
+    src/libs/blockchain/gcr/handleGCR.atomic.test.ts
+    src/libs/blockchain/gcr/handleGCR.failedTx.test.ts
+    src/libs/blockchain/gcr/handleGCR.keyRefusal.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
+    src/libs/blockchain/gcr/storableRows.test.ts
     src/libs/blockchain/mempool.nonceIntegrity.test.ts
+    src/libs/blockchain/mempool.editBinding.test.ts
+    src/libs/blockchain/mempool.receive.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts

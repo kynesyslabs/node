@@ -10,6 +10,7 @@ import {
     type StoragePutEdit,
 } from "@/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines"
 import type { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
+import { unstorableRow } from "@/libs/blockchain/gcr/storableRows"
 
 const WRITER = "0x" + "aa".repeat(32)
 const target = deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, WRITER, "result", "1")
@@ -93,6 +94,17 @@ describe("applyAtomicStoragePut", () => {
 
         expect(applyAtomicStoragePut(put(), programs, true).success).toBe(true)
         expect(programs.get(target)).toBeNull()
+    })
+
+    // The apply judges the row this leaves and fails the Work on it.
+    it("leaves a U+0000 value or name in a row the storage check refuses", () => {
+        const programs = new Map<string, GCRStorageProgram | null>()
+        applyAtomicStoragePut(put({ value: { note: "a\u0000b" } }), programs, false)
+        expect(unstorableRow("storagePrograms", programs.get(target))).toBe("storagePrograms.data")
+        const name = "re\u0000sult"
+        const nulTarget = deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, WRITER, name, "1")
+        applyAtomicStoragePut(put({ name, target: nulTarget }), programs, false)
+        expect(unstorableRow("storagePrograms", programs.get(nulTarget))).toStartWith("storagePrograms.")
     })
 
     it("snapshots a replaced entry without node-local columns, in a form jsonb can hold", () => {
