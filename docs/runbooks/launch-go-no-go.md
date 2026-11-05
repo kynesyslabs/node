@@ -39,7 +39,11 @@ chain still makes blocks; a 4th stops it until one comes back.
    cap holds. Online validators outside that committee do not count toward
    it. Otherwise NO-GO, and retry at the next agreed slot.
 4. A validator counts only after it has made a signed block on the
-   rehearsal network from its production host, key and image.
+   rehearsal network from its production host, key and image. Its first
+   start there and at launch follows `INSTALL.md` step 5, which runs
+   `bun run migration:run` with the released image before `up`: the node
+   does not create its schema at boot and refuses to start while a
+   migration is pending.
 5. Mainnet validators run with `DEMOS_REQUIRE_VALIDATORS=true`. Under
    docker compose it goes in `.env`; the shipped `docker-compose.yml`
    passes it to the node container.

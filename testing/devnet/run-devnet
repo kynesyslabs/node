@@ -153,6 +153,14 @@ FINAL_COMMAND="${START_COMMAND} --no-tui"
 log_verbose "Starting node with: RPC_PORT=${PORT}"
 log_verbose "Command: ${FINAL_COMMAND}"
 
+# The devnet image is oven/bun with no Node: the TypeORM CLI runs through bun,
+# the command behind `bun run migration:run`. Idempotent: it applies only what
+# is pending.
+if ! bun -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts; then
+    echo "❌ Error: migration:run failed on the devnet database"
+    exit 1
+fi
+
 if ! RPC_PORT=${PORT} IDENTITY_FILE=${IDENTITY_FILE} ${FINAL_COMMAND}; then
     if [[ "${HAS_BEEN_INTERRUPTED}" == "true" ]]; then
         echo ""

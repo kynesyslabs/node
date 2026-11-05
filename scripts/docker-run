@@ -376,6 +376,21 @@ if [[ ${#PASSTHROUGH[@]} -gt 0 ]]; then
     esac
 fi
 
+# --clean creates the schema with `compose run` on the image that already
+# exists locally, so --build / --pull (which only reach the final `up`) would
+# create it with the OLD image. Refuse before anything is wiped; --rebuild
+# builds before that step.
+if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" && ${#SUBCOMMAND_ARGS[@]} -gt 0 ]]; then
+    for arg in "${SUBCOMMAND_ARGS[@]}"; do
+        case "$arg" in
+            --build|--pull|--pull=*)
+                echo "scripts/docker-run: --clean cannot be combined with $arg: the schema is created with the existing local image before 'up', so $arg would not apply to it. Use --rebuild (builds the image first) instead. Nothing was wiped." >&2
+                exit 2
+                ;;
+        esac
+    done
+fi
+
 # --clean: bring everything down + drop the named volumes before `up`.
 # Only fires when SUBCOMMAND ends up as `up`; for explicit `down`/`logs`/etc
 # the wipe would be confusing.
@@ -386,15 +401,15 @@ fi
 # parallel volume that compose never mounts.
 if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
     echo "+ --clean: tearing down stack + wiping volumes (${CLEAN_VOLUMES[*]})"
-    # Down with --volumes so anonymous volumes go too; named volumes
-    # still need explicit removal below because compose only drops them
-    # when `--volumes` is paired with full project teardown AND no other
+    # Down WITHOUT --volumes: it would also drop the logs/prometheus/grafana
+    # volumes, which --clean keeps. Only the CLEAN_VOLUMES are removed, below,
+    # and docker refuses to remove one while other
     # containers reference them.
-    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --volumes --remove-orphans || true
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --remove-orphans || { echo "ERROR: --clean could not stop the stack; nothing was wiped or migrated." >&2; exit 1; }
     for vol in "${CLEAN_VOLUMES[@]}"; do
         if docker volume inspect "$vol" >/dev/null 2>&1; then
             echo "+ --clean: removing volume $vol"
-            docker volume rm "$vol" || true
+            docker volume rm "$vol" || { echo "ERROR: --clean could not remove volume $vol; nothing was migrated. Stop whatever uses it and retry." >&2; exit 1; }
         fi
     done
 fi
@@ -532,6 +547,34 @@ if [[ "$USE_DEVNET" == "true" && "$SUBCOMMAND" == "up" && -d "$HOST_SNAPSHOT_DIR
             chmod 644 /data/snapshot/* &&
             chown -R 1000:1000 /data/snapshot
         '
+fi
+
+# The node no longer applies migrations at boot (migrationsRun: false), so a
+# database wiped by --clean has no tables until they are created. Only here,
+# where the database was just emptied and there is nothing to lose, is the
+# schema created for you. Any other `up` leaves migrations to the operator:
+# docs/runbooks/database-migrations.md
+if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
+    echo "+ --clean: creating the schema on the empty database (migration:run)"
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} up -d --wait --wait-timeout 120 postgres || {
+        echo "ERROR: --clean: Postgres was not ready within 120s (or this Docker Compose has no 'up --wait-timeout'); not running migration:run." >&2
+        exit 1
+    }
+    # Only an EMPTY database gets migrated. If the wipe above did not take
+    # effect, this would apply pending migrations to live data with no backup.
+    # The probe is bounded (connect, query, and `timeout` for a server that
+    # accepts and then stops answering): a hang must not stall the launcher.
+    TABLE_COUNT="$(docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} exec -T postgres sh -c 'PGCONNECT_TIMEOUT=10 PGOPTIONS="-c statement_timeout=20000" timeout 30 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"')" || TABLE_COUNT=""
+    if [[ ! "$TABLE_COUNT" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: --clean could not check that the database is empty (or the check timed out after 30s); not running migration:run." >&2
+        exit 1
+    fi
+    if [[ "$TABLE_COUNT" -ne 0 ]]; then
+        echo "ERROR: --clean: the database still has $TABLE_COUNT table(s) in the public schema, so the wipe did not take effect." >&2
+        echo "       Not running migration:run. Back up and migrate by hand: docs/runbooks/database-migrations.md" >&2
+        exit 1
+    fi
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} run --rm --no-deps node bun run migration:run
 fi
 
 # Use ${arr[@]+"${arr[@]}"} guards because `set -u` treats expansion
