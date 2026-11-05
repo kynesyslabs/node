@@ -215,6 +215,28 @@ async function proveIn(
     return { set: { root: tree.rootHex, proofs }, built }
 }
 
+/** A proof needs a tree rebuild that the work cap does not allow yet. */
+export class StorageProofBusyError extends Error {
+    constructor(readonly retryAfterMs: number) {
+        super("storage proof trees are being rebuilt; retry later")
+        this.name = "StorageProofBusyError"
+    }
+}
+
+/**
+ * How much tree work proofs may cause. Proofs are anonymous reads and each
+ * rebuild reads every leaf, so rebuilds are capped per window and run one
+ * at a time; requests for a tree being built wait for it instead.
+ */
+export interface ProofTreeLimits {
+    /** Trees kept by undo range; each holds every leaf. */
+    trees: number
+    buildsPerWindow: number
+    windowMs: number
+}
+
+export const PROOF_TREE_LIMITS: ProofTreeLimits = { trees: 4, buildsPerWindow: 8, windowMs: 10_000 }
+
 /**
  * Cached root over one reader. The epoch is bumped when a write to the table
  * is issued and again once it commits: a root computed while a write was in
@@ -224,8 +246,11 @@ async function proveIn(
 export class StorageProgramsRoot {
     private epoch = 0
     private cached: { epoch: number; root: string } | null = null
-    // Kept for proofs only: a node that serves none never holds the tree.
-    private proofTree: { epoch: number; key: string; built: BuiltTree } | null = null
+    // Kept for proofs only: a node that serves none never holds a tree.
+    // Insertion order is recency order.
+    private proofTrees = new Map<string, { epoch: number; built: BuiltTree }>()
+    private pendingTree: { key: string; epoch: number; built: Promise<BuiltTree | null> } | null = null
+    private treeBuildTimes: number[] = []
     /** Times the root was rebuilt from the table. */
     builds = 0
     /** Times a proof read every leaf and built the tree. */
@@ -234,6 +259,8 @@ export class StorageProgramsRoot {
     constructor(
         private readonly reader: StorageRootReader,
         private readonly recomputeFromScratch: () => boolean = () => false,
+        private readonly limits: ProofTreeLimits = PROOF_TREE_LIMITS,
+        private readonly now: () => number = Date.now,
     ) {}
 
     markDirty(): void {
@@ -281,20 +308,96 @@ export class StorageProgramsRoot {
 
     /**
      * Proofs for `addresses` and the root they verify against, from one
-     * snapshot. The tree for one undo range is reused until a write marks
-     * the table dirty, by the same epoch rule as the root.
+     * snapshot. The tree for an undo range is reused until a write marks the
+     * table dirty, by the same epoch rule as the root. With `expectedRoot`, a
+     * tree giving another root is not kept: it came from a snapshot that does
+     * not match the range.
+     *
+     * @throws StorageProofBusyError when a rebuild is needed and the work cap
+     *   does not allow one now
      */
-    async prove(addresses: string[], undo?: StorageUndo): Promise<StorageProofSet> {
+    async prove(
+        addresses: string[],
+        undo?: StorageUndo,
+        expectedRoot?: string,
+    ): Promise<StorageProofSet> {
         const epoch = this.epoch
         const key = undo ? `${undo.fromBlock}..${undo.toBlock}` : "live"
-        const held = this.proofTree
-        const reuse = held?.epoch === epoch && held.key === key ? held.built : null
-        if (reuse === null) this.proofTreeBuilds++
-        const { set, built } = await this.reader.read(snapshot =>
-            proveIn(snapshot, addresses, undo, reuse),
-        )
-        if (reuse === null) this.proofTree = { epoch, key, built }
-        return set
+        let reuse = this.heldTree(key, epoch)
+        const pending = this.pendingTree
+        if (reuse === null && pending?.key === key && pending.epoch === epoch) {
+            reuse = await pending.built
+        }
+        if (reuse !== null) {
+            const { set } = await this.reader.read(snapshot =>
+                proveIn(snapshot, addresses, undo, reuse),
+            )
+            return set
+        }
+        return await this.buildAndProve(addresses, undo, key, epoch, expectedRoot)
+    }
+
+    private async buildAndProve(
+        addresses: string[],
+        undo: StorageUndo | undefined,
+        key: string,
+        epoch: number,
+        expectedRoot: string | undefined,
+    ): Promise<StorageProofSet> {
+        this.claimTreeBuild()
+        this.proofTreeBuilds++
+        let settle: (built: BuiltTree | null) => void = () => {}
+        this.pendingTree = { key, epoch, built: new Promise(resolve => (settle = resolve)) }
+        let kept: BuiltTree | null = null
+        try {
+            const { set, built } = await this.reader.read(snapshot =>
+                proveIn(snapshot, addresses, undo, null),
+            )
+            if (expectedRoot === undefined || set.root === expectedRoot) {
+                this.keepTree(key, epoch, built)
+                kept = built
+            }
+            return set
+        } finally {
+            this.pendingTree = null
+            settle(kept)
+        }
+    }
+
+    private claimTreeBuild(): void {
+        const now = this.now()
+        if (this.pendingTree !== null) {
+            throw new StorageProofBusyError(1_000)
+        }
+        const since = now - this.limits.windowMs
+        this.treeBuildTimes = this.treeBuildTimes.filter(at => at > since)
+        if (this.treeBuildTimes.length >= this.limits.buildsPerWindow) {
+            throw new StorageProofBusyError(this.treeBuildTimes[0] + this.limits.windowMs - now)
+        }
+        this.treeBuildTimes.push(now)
+    }
+
+    private heldTree(key: string, epoch: number): BuiltTree | null {
+        const held = this.proofTrees.get(key)
+        if (!held) return null
+        this.proofTrees.delete(key)
+        if (held.epoch !== epoch) return null
+        this.proofTrees.set(key, held)
+        return held.built
+    }
+
+    private keepTree(key: string, epoch: number, built: BuiltTree): void {
+        // A tree of an older epoch is never served again.
+        for (const [heldKey, held] of this.proofTrees) {
+            if (held.epoch !== this.epoch) this.proofTrees.delete(heldKey)
+        }
+        if (epoch !== this.epoch) return
+        this.proofTrees.delete(key)
+        this.proofTrees.set(key, { epoch, built })
+        while (this.proofTrees.size > this.limits.trees) {
+            const oldest = this.proofTrees.keys().next().value as string
+            this.proofTrees.delete(oldest)
+        }
     }
 }
 
@@ -353,16 +456,18 @@ export function storageProgramsRoot(): Promise<string> {
  * Proofs for `addresses` against the root of the committed table, or with
  * `undo`, against the root of the table before `undo.fromBlock`, rebuilt by
  * undoing the logged writes of blocks `fromBlock`..`toBlock` (the head).
- * The tree of the last range asked for is kept until a storage write; a
- * rebuild reads every leaf, about 60 ms for 10^4 programs. The caller holds
- * the sync lock, so no block lands between the read and the anchor it is
- * checked against.
+ * The trees of the last few ranges asked for are kept until a storage
+ * write; a rebuild reads every leaf, about 60 ms for 10^4 programs, and is
+ * capped by PROOF_TREE_LIMITS. The read is one snapshot and takes no lock,
+ * so a block may land before it: the caller checks the root against
+ * `expectedRoot`, the anchor's, and a tree that misses it is not kept.
  */
 export function proveStoragePrograms(
     addresses: string[],
     undo?: StorageUndo,
+    expectedRoot?: string,
 ): Promise<StorageProofSet> {
-    return storageRoot.prove(addresses, undo)
+    return storageRoot.prove(addresses, undo, expectedRoot)
 }
 
 /** Call when a write to `gcr_storageprogram` is issued and once it commits. */

@@ -17,6 +17,7 @@ import {
 import type { StorageHistoryRow } from "./storageHistory"
 import {
     StorageProgramsRoot,
+    StorageProofBusyError,
     type StorageRootReader,
     type StorageRootSnapshot,
     type StoredLeaf,
@@ -435,4 +436,83 @@ describe("storage proofs at a past block", () => {
         expect(proofs[0].record).toEqual(storageProgramRecord(untouched))
         expect(table.rowReads).toBe(1)
     })
+})
+
+describe("proof trees under load", () => {
+    let clock = 0
+    const capped = (trees: number, buildsPerWindow: number) =>
+        new StorageProgramsRoot(table, () => false, { trees, buildsPerWindow, windowMs: 10_000 }, () => clock)
+    const range = (fromBlock: number): { fromBlock: number; toBlock: number } => ({ fromBlock, toBlock: 9 })
+
+    beforeEach(() => {
+        clock = 0
+        for (let i = 0; i < 5; i++) table.write(program(i))
+    })
+
+    it("keeps a tree per range, so alternating ranges build each once", async () => {
+        const proofs = capped(4, 100)
+        for (let i = 0; i < 6; i++) await proofs.prove([program(1).storageAddress], range(i % 2 ? 8 : 9))
+        expect(proofs.proofTreeBuilds).toBe(2)
+    })
+
+    it("drops the least recently used tree past the limit", async () => {
+        const proofs = capped(2, 100)
+        await proofs.prove(["stor-x"], range(7))
+        await proofs.prove(["stor-x"], range(8))
+        await proofs.prove(["stor-x"], range(7))
+        await proofs.prove(["stor-x"], range(9))
+        expect(proofs.proofTreeBuilds).toBe(3)
+        await proofs.prove(["stor-x"], range(7))
+        expect(proofs.proofTreeBuilds).toBe(3)
+        await proofs.prove(["stor-x"], range(8))
+        expect(proofs.proofTreeBuilds).toBe(4)
+    })
+
+    it("refuses rebuilds past the cap for the rest of the window, still serving kept trees", async () => {
+        const proofs = capped(4, 2)
+        await proofs.prove(["stor-x"], range(7))
+        clock = 4_000
+        await proofs.prove(["stor-x"], range(8))
+        const refused = await proofs.prove(["stor-x"], range(9)).catch(error => error)
+        expect(refused).toBeInstanceOf(StorageProofBusyError)
+        expect(refused.retryAfterMs).toBe(6_000)
+        expect((await proofs.prove(["stor-x"], range(7))).root).toBe(expectedRoot(state()))
+        clock = 10_001
+        await proofs.prove(["stor-x"], range(9))
+        expect(proofs.proofTreeBuilds).toBe(3)
+    })
+
+    it("shares a tree being built with requests for it and refuses one for another range meanwhile", async () => {
+        const proofs = capped(4, 100)
+        let release: () => void = () => {}
+        const gate = new Promise<void>(resolve => (release = resolve))
+        const read = table.read.bind(table)
+        let reads = 0
+        table.read = async work => {
+            if (reads++ === 0) await gate
+            return await read(work)
+        }
+        const first = proofs.prove([program(1).storageAddress], range(9))
+        const same = proofs.prove([program(2).storageAddress], range(9))
+        const other = proofs.prove(["stor-x"], range(8)).catch(error => error)
+        expect(await other).toBeInstanceOf(StorageProofBusyError)
+        release()
+        const [a, b] = await Promise.all([first, same])
+        expect(a.root).toBe(b.root)
+        expect(b.proofs[0].storageAddress).toBe(program(2).storageAddress)
+        expect(proofs.proofTreeBuilds).toBe(1)
+    })
+
+    it("does not keep a tree whose root is not the one expected", async () => {
+        const proofs = capped(4, 100)
+        await proofs.prove(["stor-x"], range(9), "ab".repeat(32))
+        await proofs.prove(["stor-x"], range(9), "ab".repeat(32))
+        expect(proofs.proofTreeBuilds).toBe(2)
+        const right = expectedRoot(state())
+        await proofs.prove(["stor-x"], range(9), right)
+        await proofs.prove(["stor-x"], range(9), right)
+        expect(proofs.proofTreeBuilds).toBe(3)
+    })
+
+    const state = () => [...table.rows.values()]
 })

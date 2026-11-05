@@ -56,12 +56,19 @@ mock.module("src/libs/blockchain/finality/validatorSet", () => ({
         structuredClone(snapshots.filter(s => s.block <= height).sort((a, b) => b.block - a.block)[0] ?? null),
 }))
 
-const proveStoragePrograms = jest.fn(async (_addresses: string[], _undo?: { fromBlock: number; toBlock: number }) => ({
+const proveStoragePrograms = jest.fn(async (_addresses: string[], _undo?: { fromBlock: number; toBlock: number }, _expectedRoot?: string) => ({
     root: "",
     proofs: [] as any[],
 }))
 const realStorageRoot = await import("src/libs/blockchain/finality/storageRoot")
 mock.module("src/libs/blockchain/finality/storageRoot", () => ({ ...realStorageRoot, proveStoragePrograms }))
+
+let historyStart = 1
+const realStorageHistory = await import("src/libs/blockchain/finality/storageHistory")
+mock.module("src/libs/blockchain/finality/storageHistory", () => ({
+    ...realStorageHistory,
+    storageHistoryStart: async () => historyStart,
+}))
 
 const countStorageProofRootMismatch = jest.fn()
 const realMetrics = await import("@/features/metrics/consensusMetrics")
@@ -307,8 +314,8 @@ describe("getStorageProof", () => {
         SparseMerkleTree.build([...table.values()].map(r => ({ key: storageProgramKey(r.storageAddress), valueHash: r.smtLeaf }))).rootHex
     const snapshotRecords = () => new Map([...table.values()].map(r => [r.storageAddress, storageProgramRecord(r)]))
 
-    const root = new realStorageRoot.StorageProgramsRoot({
-        read: async work =>
+    const reader = {
+        read: async <T,>(work: (snapshot: any) => Promise<T>) =>
             await work({
                 leaves: async () => [...table.values()].map(r => ({ storageAddress: r.storageAddress, smtLeaf: r.smtLeaf, version: "1" })),
                 rows: async addresses => addresses.flatMap(a => (table.has(a) ? [structuredClone(table.get(a)!)] : [])),
@@ -316,7 +323,9 @@ describe("getStorageProof", () => {
                     structuredClone(history.filter(h => h.block >= from && h.block <= to).sort((a, b) => b.block - a.block)),
             }),
         fillLeaves: async () => {},
-    })
+    }
+    // Uncapped here: the cap has its own tests.
+    const root = new realStorageRoot.StorageProgramsRoot(reader, () => false, { trees: 4, buildsPerWindow: 1_000, windowMs: 1 })
 
     /**
      * Stores block `number`, committing the root of the state after the
@@ -346,8 +355,9 @@ describe("getStorageProof", () => {
         history = []
         root.markDirty()
         stateAfter = new Map([[3, new Map()]])
+        historyStart = 1
         countStorageProofRootMismatch.mockReset()
-        proveStoragePrograms.mockImplementation((addresses, undo) => root.prove(addresses, undo))
+        proveStoragePrograms.mockImplementation((addresses, undo, expectedRoot) => root.prove(addresses, undo, expectedRoot))
     })
 
     function expectServedState(reply: any, blockNumber: number, addresses: string[]) {
@@ -367,7 +377,11 @@ describe("getStorageProof", () => {
         expect(tableRoot()).not.toBe(blocks.get(6)!.content.native_tables_hashes.native_storage_programs)
         const reply = await getStorageProof({ storageAddresses: ["stor-1", "stor-2", "stor-9", "stor-1"] })
         expectServedState(reply, 6, ["stor-1", "stor-2", "stor-9", "stor-1"])
-        expect(proveStoragePrograms).toHaveBeenCalledWith(["stor-1", "stor-2", "stor-9"], { fromBlock: 6, toBlock: 6 })
+        expect(proveStoragePrograms).toHaveBeenCalledWith(
+            ["stor-1", "stor-2", "stor-9"],
+            { fromBlock: 6, toBlock: 6 },
+            blocks.get(6)!.content.native_tables_hashes.native_storage_programs,
+        )
         // Deleted by the head itself: served as it stood before the head.
         expect(reply.response.proofs[1].record).toEqual(storageProgramRecord(row(2)))
     })
@@ -432,16 +446,66 @@ describe("getStorageProof", () => {
         expect(countStorageProofRootMismatch).not.toHaveBeenCalled()
     })
 
-    it("builds the proof while holding the sync lock", async () => {
+    it("answers while a block apply holds the sync lock", async () => {
         withStorage()
-        let lockedDuringProof = false
-        proveStoragePrograms.mockImplementation(async (addresses, undo) => {
-            lockedDuringProof = syncLock.isLocked()
-            return await root.prove(addresses, undo)
-        })
-        expect((await getStorageProof({ storageAddresses: ["stor-2"] })).result).toBe(200)
-        expect(lockedDuringProof).toBe(true)
-        expect(syncLock.isLocked()).toBe(false)
+        const release = await syncLock.acquire()
+        try {
+            expectServedState(await getStorageProof({ storageAddresses: ["stor-2"] }), 6, ["stor-2"])
+        } finally {
+            release()
+        }
+    })
+
+    it("answers 410 history_unavailable below the first block the undo log holds", async () => {
+        withStorage()
+        storeBlock(7)
+        // The log was created when the head was block 5.
+        historyStart = 6
+        const gone = await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: 5 })
+        expect(gone.result).toBe(410)
+        expect(gone.extra).toEqual({ reason: "history_unavailable" })
+        expect(gone.response).toMatchObject({ blockNumber: 5, head: 7, oldestBlock: 6 })
+        expect(proveStoragePrograms).not.toHaveBeenCalled()
+        expectServedState(await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: 6 }), 6, ["stor-1"])
+    })
+
+    it("answers 503 busy when the tree rebuild cap is spent", async () => {
+        withStorage()
+        storeBlock(7)
+        const capped = new realStorageRoot.StorageProgramsRoot(reader, () => false, { trees: 4, buildsPerWindow: 1, windowMs: 60_000 })
+        proveStoragePrograms.mockImplementation((addresses, undo, expectedRoot) => capped.prove(addresses, undo, expectedRoot))
+        expect((await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: 6 })).result).toBe(200)
+        // The tree of 6..7 is kept; another range needs a rebuild.
+        expect((await getStorageProof({ storageAddresses: ["stor-2"], blockNumber: 6 })).result).toBe(200)
+        const refused = await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: 5 })
+        expect(refused.result).toBe(503)
+        expect(refused.extra).toEqual({ reason: "busy" })
+        expect(refused.response.retryAfterSeconds).toBeGreaterThanOrEqual(1)
+        expect(countStorageProofRootMismatch).not.toHaveBeenCalled()
+    })
+
+    it("answers 503 busy when the chain below the head changes under the reads", async () => {
+        withStorage()
+        storeBlock(7)
+        let reads = 0
+        const chain = (await import("src/libs/blockchain/chain")).default as any
+        const realByNumber = chain.getBlockByNumber
+        chain.getBlockByNumber = async (n: number) => {
+            // Block 5 is replaced, and the head with it, after the head read.
+            if (n === 5 && reads++ === 0) {
+                store(5, header(5, blocks.get(4)!.hash, { note: "another branch" }))
+                store(7, header(7, blocks.get(6)!.hash, { note: "another head" }))
+            }
+            return await realByNumber(n)
+        }
+        try {
+            const reply = await getStorageProof({ storageAddresses: ["stor-1"], blockNumber: 6 })
+            expect(reply.result).toBe(503)
+            expect(reply.extra).toEqual({ reason: "busy" })
+            expect(proveStoragePrograms).not.toHaveBeenCalled()
+        } finally {
+            chain.getBlockByNumber = realByNumber
+        }
     })
 
     it("answers 404 no_storage_commitment when the block commits no storage root", async () => {

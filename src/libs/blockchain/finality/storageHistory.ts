@@ -42,6 +42,23 @@ export function oldestProvableBlock(tip: number): number {
     return Math.max(1, tip - STORAGE_HISTORY_BLOCKS + 1)
 }
 
+let historyStart: number | null = null
+
+/**
+ * The first block whose storage writes the log holds, recorded when the log
+ * was created: a block applied before then has no undo rows, so no proof
+ * can reach below it.
+ */
+export async function storageHistoryStart(): Promise<number> {
+    if (historyStart !== null) return historyStart
+    const { default: datasource } = await import("src/model/datasource")
+    const rows: { block: number | string }[] = await (await datasource.getInstance())
+        .getDataSource()
+        .query(`SELECT "block" FROM "storage_program_history_start" WHERE "id" = 1`)
+    historyStart = rows.length > 0 ? Number(rows[0].block) : 1
+    return historyStart
+}
+
 /**
  * Logs the record each of `addresses` has before `block` changes it. Must
  * run inside the block's transaction before its storage rows are written.
