@@ -146,5 +146,50 @@ check "returns 0" has "rc=0 h=25"
 check "finishes in under 5 s" test "${ms}" -lt 5000
 check "takes at least 2 s (one head round, one hash round)" test "${ms}" -ge 2000
 
+echo "== database reads (psql_node, block_rows) are bounded; a timed-out read is a failure, not an empty result"
+source <(region 'psql_node() {' 'scenario_fallback() {')
+source <(region 'block_rows() {' 'phase_row() {')
+dc() { echo fakepg; }
+mkdir -p "${WORK}/bin"
+# docker exec ... psql: FAKE_DB is rows (default), hang, or stmt (the server cancels the query)
+cat > "${WORK}/bin/docker" <<'FAKEDOCKER'
+#!/usr/bin/env bash
+echo "$*" >> "${FAKE_DOCKER_LOG}"
+case "${FAKE_DB:-rows}" in
+    hang) sleep 30 ;;
+    stmt) echo "ERROR:  canceling statement due to statement timeout" >&2; exit 1 ;;
+    *) printf '5|0xb5|7\n6|0xb6|8\n' ;;
+esac
+FAKEDOCKER
+chmod +x "${WORK}/bin/docker"
+export FAKE_DOCKER_LOG="${WORK}/docker.log"
+PATH="${WORK}/bin:${PATH}"
+new_case dbread 25; DB_READ_TIMEOUT=1
+
+: > "${FAKE_DOCKER_LOG}"
+OUT=$(FAKE_DB=rows block_rows 5 6 1 2 2>&1; echo "rc=$?"); echo "${OUT}" | tail -2 | cut -c1-300
+check "an answered read gives the rows of both nodes" has '"node":2,"number":6,"hash":"0xb6","signatures":8'
+check "and rc=0" has "rc=0"
+check "the query runs with statement_timeout = DB_READ_TIMEOUT" grep -q "PGOPTIONS=-c statement_timeout=1000" "${FAKE_DOCKER_LOG}"
+check "and a connect timeout" grep -q "PGCONNECT_TIMEOUT=10" "${FAKE_DOCKER_LOG}"
+
+t0=$(date +%s%N)
+OUT=$(FAKE_DB=hang block_rows 5 6 1 2>&1; echo "rc=$?")
+ms=$(( ($(date +%s%N) - t0) / 1000000 )); echo "${OUT}" | tail -3 | cut -c1-200; echo "  elapsed ${ms} ms (the fake docker sleeps 30 s)"
+check "a read that hangs fails (rc=1)" has "rc=1"
+check "and says which node, and that it got no answer" has "psql node1_db: no answer within 6s"
+check "and the block rows message names node-1" has "of node-1 could not be read"
+check "within DB_READ_TIMEOUT + 5 s, not 30" test "${ms}" -lt 9000
+
+OUT=$(FAKE_DB=stmt block_rows 5 6 1 2>&1; echo "rc=$?")
+check "a query the server cancels fails too (rc=1), with the server's reason shown" has "canceling statement due to statement timeout"
+check "(rc=1 for the cancelled query)" has "rc=1"
+
+# What the run does with that failure: every block_rows call ends the run as exit 2
+calls=$(grep -c '\$(block_rows ' "${RUN_SH}")
+guarded=$(grep '\$(block_rows ' "${RUN_SH}" | grep -c '|| { say "ABORT: .*; exit 2; }')
+check "all ${calls} block_rows calls end the run with ABORT and exit 2 when the read fails" test "${calls}" -ge 4 -a "${calls}" = "${guarded}"
+check "run.sh refuses a DB_READ_TIMEOUT that is not a positive number" grep -q 'DB_READ_TIMEOUT must be a positive number' "${RUN_SH}"
+
 echo
 if [ "${fails}" = 0 ]; then echo "lockstep stub tests: all passed"; else echo "lockstep stub tests: ${fails} FAILED"; exit 1; fi

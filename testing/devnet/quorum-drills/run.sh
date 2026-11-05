@@ -44,6 +44,8 @@ PARTITION_TIME="${PARTITION_TIME:-120}"
 SETTLE_TIMEOUT="${SETTLE_TIMEOUT:-300}"
 # Curl timeout (s) of the retry after an empty or timed-out read of a node's head or hash
 READ_TIMEOUT="${READ_TIMEOUT:-8}"
+# Seconds a read of a node's database may take (scenario 12's DB_READ_TIMEOUT_MS)
+DB_READ_TIMEOUT="${DB_READ_TIMEOUT:-30}"
 # halt-* and ride-* drills; the defaults are scenario 12's
 BASELINE_HEIGHT="${BASELINE_HEIGHT:-6}"
 SETTLE_ROUNDS="${SETTLE_ROUNDS:-2}"
@@ -56,7 +58,7 @@ RIDE_TIMEOUT="${RIDE_TIMEOUT:-300}"
 usage() {
     sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: IMAGE SRC_TREE BINDING CONSENSUS_TIME NODE_MEM NODE_EST_MB HEADROOM_MB"
-    echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME READ_TIMEOUT (README.md)"
+    echo "             RUNS_DIR MIN_DISK_GB STALL_WINDOW PROGRESS_TIMEOUT PARTITION_TIME READ_TIMEOUT DB_READ_TIMEOUT (README.md)"
     echo "             BASELINE_HEIGHT SETTLE_ROUNDS HALT_ROUNDS RECOVERY_BLOCKS RECOVERY_TIMEOUT"
     echo "             RIDE_BLOCKS RIDE_TIMEOUT (halt-* and ride-* drills)"
 }
@@ -101,6 +103,7 @@ case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) export GOSSIP_ENABLED
 FORK_SET=devnet
 case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) FORK_SET=launch ;; esac
 case "${BINDING}" in on|off) ;; *) echo "--binding must be on or off" >&2; exit 2 ;; esac
+[[ "${DB_READ_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || { echo "DB_READ_TIMEOUT must be a positive number of seconds" >&2; exit 2; }
 if [ "${FORK_SET}" = launch ] && [ "${BINDING}" != on ]; then
     echo "${SCENARIO} runs the launch fork set, which activates committeeBinding: --binding off does not apply" >&2; exit 2
 fi
@@ -736,8 +739,18 @@ scenario_listed_stall() {
     [ "${ok}" = 1 ] && RESULT=PASS
 }
 
+# A read of a node's database, bounded as scenario 12's DB_READ_TIMEOUT_MS bounds
+# its own: the server cancels a query after DB_READ_TIMEOUT s (statement_timeout)
+# and an outer timeout stops what the server cannot cancel (a stalled connect or
+# exec). Either way the read fails; callers treat that as "could not run".
 psql_node() { # $1 node, $2 SQL
-    docker exec "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2"
+    local rc
+    timeout -k 5 "$((DB_READ_TIMEOUT + 5))" docker exec -e PGCONNECT_TIMEOUT=10 \
+        -e "PGOPTIONS=-c statement_timeout=$((DB_READ_TIMEOUT * 1000))" \
+        "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2"
+    rc=$?
+    [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within $((DB_READ_TIMEOUT + 5))s (DB_READ_TIMEOUT=${DB_READ_TIMEOUT})" >&2
+    return "${rc}"
 }
 
 scenario_fallback() {
@@ -912,13 +925,15 @@ restart_counts() {
 
 # Rows {node, number, hash, signatures} for heights $1..$2 on nodes $3.., read
 # from each node's database as scenario 12 does (signatures are the keys of
-# validation_data->'signatures'). Fails when a database cannot be read.
+# validation_data->'signatures'). Fails when a database cannot be read or does
+# not answer within DB_READ_TIMEOUT: the caller ends the run as exit 2.
 block_rows() {
     local from="$1" to="$2" i out all=""
     shift 2
     for i in "$@"; do
         out=$(psql_node "${i}" "SELECT number, hash, (SELECT count(*) FROM json_object_keys(validation_data->'signatures')) FROM blocks WHERE number BETWEEN ${from} AND ${to} ORDER BY number" |
-            jq -Rn --argjson node "${i}" '[inputs | split("|") | {node: $node, number: (.[0] | tonumber), hash: .[1], signatures: (.[2] | tonumber)}]') || return 1
+            jq -Rn --argjson node "${i}" '[inputs | split("|") | {node: $node, number: (.[0] | tonumber), hash: .[1], signatures: (.[2] | tonumber)}]') ||
+            { say "block rows ${from}..${to} of node-${i} could not be read from its database (failed or no answer within ${DB_READ_TIMEOUT}s)"; return 1; }
         all+="${out}"$'\n'
     done
     printf '%s' "${all}" | jq -cs 'add // []'
