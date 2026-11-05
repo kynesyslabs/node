@@ -11,6 +11,15 @@ const doctor = path.join(repo, "scripts/node-doctor")
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-"))
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }))
 
+// The doctor's own list, so optional sheet lines (the genesis pins, once
+// filled in) are not mistaken for required ones.
+function requiredKeys(): string[] {
+    const script = fs.readFileSync(path.join(repo, "scripts/node-doctor"), "utf8")
+    const m = /^SHEET_REQUIRED_KEYS=\(([^)]*)\)/m.exec(script)
+    if (!m) throw new Error("SHEET_REQUIRED_KEYS not found in scripts/node-doctor")
+    return m[1].split(/\s+/).filter(Boolean)
+}
+
 function readSheet(file: string): Record<string, string> {
     const values: Record<string, string> = {}
     for (const line of fs.readFileSync(file, "utf8").split("\n")) {
@@ -93,13 +102,33 @@ describe("node-doctor --production against the parameter sheet", () => {
 
     it("requires every published key and nothing beyond them", () => {
         const published = readSheet(path.join(repo, "docs/mainnet/parameters.env"))
+        const required = requiredKeys()
+        expect(required.filter(k => !(k in published))).toEqual([])
         const full = run(published)
         expect(full.lines.filter(l => l.startsWith("FAIL parameter sheet:"))).toEqual([])
         const partial = run({ PROD: "true" }, "--parameters", writeSheet("partial.env", "PROD=true\n"))
         expect(partial.status).toBe(1)
-        for (const key of Object.keys(published).filter(k => k !== "PROD")) {
+        for (const key of required.filter(k => k !== "PROD")) {
             expect(partial.lines).toContain(`FAIL parameter sheet: ${path.join(tmp, "partial.env")} has no ${key}= line`)
         }
+    }, 60_000)
+
+    it("accepts the genesis pins once they are filled in", () => {
+        const text = fs.readFileSync(path.join(repo, "docs/mainnet/parameters.env"), "utf8")
+        const pinned = text.replace(/^# (EXPECTED_GENESIS(?:_BLOCK)?_HASH)=$/gm, "$1=0xabc")
+        expect(pinned).not.toBe(text)
+        const sheet = writeSheet("pinned.env", pinned)
+        const { lines } = run(readSheet(sheet), "--parameters", sheet)
+        expect(lines.filter(l => l.startsWith("FAIL parameter sheet:"))).toEqual([])
+    }, 60_000)
+
+    it("fails a sheet line with no value", () => {
+        const text = fs.readFileSync(path.join(repo, "docs/mainnet/parameters.env"), "utf8")
+        const sheet = writeSheet("empty.env", text.replace(/^PROD=true$/m, "PROD="))
+        const n = text.split("\n").findIndex(l => l === "PROD=true") + 1
+        const { status, lines } = run(readSheet(path.join(repo, "docs/mainnet/parameters.env")), "--parameters", sheet)
+        expect(status).toBe(1)
+        expect(lines).toContain(`FAIL parameter sheet: ${sheet} line ${n} gives PROD no value`)
     }, 60_000)
 
     it("fails when the sheet is missing", () => {

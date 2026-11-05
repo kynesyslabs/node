@@ -455,6 +455,8 @@ load_parameter_sheet() {
 		fi
 		SHEET_KEYS+=("${key}")
 		SHEET_VALUES["${key}"]="${BASH_REMATCH[2]%"${BASH_REMATCH[2]##*[![:space:]]}"}"
+		# PROD= would match a node that leaves it unset and runs the default.
+		[[ -n "${SHEET_VALUES[${key}]}" ]] || SHEET_ERRORS+=("line ${n} gives ${key} no value")
 	done <"${PARAMETER_SHEET}"
 	for key in "${SHEET_REQUIRED_KEYS[@]}"; do
 		[[ -n "${SHEET_VALUES[${key}]+set}" ]] || SHEET_ERRORS+=("has no ${key}= line")
