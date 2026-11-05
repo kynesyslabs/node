@@ -65,15 +65,19 @@ Do it on **one** validator first, then the rest. Never on all at once.
    ```bash
    mkdir -p ~/demos-backups && chmod 700 ~/demos-backups
    umask 077
-   docker compose exec -T postgres pg_dump -U "${PG_USER:-demosuser}" -Fc "${PG_DATABASE:-demos}" > ~/demos-backups/demos-$(date +%Y%m%d-%H%M).dump
+   docker compose exec -T postgres sh -c 'exec pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > ~/demos-backups/demos-$(date +%Y%m%d-%H%M).dump
    ```
 
    That form is for the `postgres` service of the Docker stack
-   (`docker-compose.yml` in the checkout root). `-T` is required: without it
-   Compose allocates a terminal, which corrupts the redirected binary dump. For
-   the Postgres the launcher starts by itself (container
-   `postgres_<PG_PORT>`, 5332 by default), use
-   `docker exec postgres_<PG_PORT> pg_dump -U demosuser -Fc demos > <file>`
+   (`docker-compose.yml` in the checkout root). The single quotes matter: the
+   user and database names are read by the shell **inside** the container, from
+   the `POSTGRES_USER` / `POSTGRES_DB` it was started with. That is right even
+   when `PG_USER` / `PG_DATABASE` are set only in Compose's `.env` and not
+   exported in your shell. `-T` is required: without it Compose allocates a
+   terminal, which corrupts the redirected binary dump. For the Postgres the
+   launcher starts by itself (container `postgres_<PG_PORT>`, 5332 by default),
+   use
+   `docker exec postgres_<PG_PORT> sh -c 'exec pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > <file>`
    (no `-t` either, for the same reason).
    For a bare-metal or external database, dump from the host with the `PG_HOST`,
    `PG_PORT`, `PG_USER` and `PG_DATABASE` of the node config. Keep the password
@@ -117,8 +121,8 @@ Do it on **one** validator first, then the rest. Never on all at once.
       `test -s` fails on a zero-byte file; `pg_restore --file=/dev/null` fails
       on a file that is not a complete custom-format archive. With no
       `pg_restore` on the host, run it in the container, same form as the dump:
-      `docker compose exec -T postgres pg_restore --file=/dev/null < <file>`
-      (or `docker exec -i postgres_<PG_PORT> pg_restore --file=/dev/null < <file>`;
+      `docker compose exec -T postgres sh -c 'exec pg_restore --file=/dev/null' < <file>`
+      (or `docker exec -i postgres_<PG_PORT> sh -c 'exec pg_restore --file=/dev/null' < <file>`;
       `-i` passes the file in, still no `-t`).
 
    3. **Where you can, restore it into a scratch database** and look at it. This
@@ -131,10 +135,19 @@ Do it on **one** validator first, then the rest. Never on all at once.
       ```
 
       Use a scratch name, never the live database name. On the Docker stack,
-      run the same three commands through `docker compose exec -T postgres`
-      (feed the dump to `pg_restore` with `< <file>`). Skip this only if there
-      is no room or no second database to restore into, and say so in your
-      change record.
+      run the three commands inside the container, with the user name read
+      there (`docker exec -i postgres_<PG_PORT>` instead of
+      `docker compose exec -T postgres` for the launcher's Postgres). The
+      container's own socket is used, so no `-h` / `-p`:
+
+      ```bash
+      docker compose exec -T postgres sh -c 'exec createdb -U "$POSTGRES_USER" demos_restore_check'
+      docker compose exec -T postgres sh -c 'exec pg_restore --exit-on-error --no-owner -U "$POSTGRES_USER" -d demos_restore_check' < ~/demos-backups/<file>.dump
+      docker compose exec -T postgres sh -c 'exec dropdb -U "$POSTGRES_USER" demos_restore_check'
+      ```
+
+      Skip this only if there is no room or no second database to restore
+      into, and say so in your change record.
 
    If any check fails, take the dump again and do not go on to step 2.
 

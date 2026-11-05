@@ -336,12 +336,12 @@ cd ..
 # the wiped database has no schema and ./run does not create it; wait until this
 # answers "accepting connections" (Postgres restarts once on first init, so it can
 # answer once and then go away: wait a few seconds and run it a second time), then migrate
-docker exec postgres_<PG_PORT> pg_isready -h 127.0.0.1 -U demosuser -d demos
+docker exec postgres_<PG_PORT> sh -c 'exec pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 sleep 5
-docker exec postgres_<PG_PORT> pg_isready -h 127.0.0.1 -U demosuser -d demos
+docker exec postgres_<PG_PORT> sh -c 'exec pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 # the database must be empty before you migrate: this prints 0. If any command above
 # failed (rm, down) or this prints another number, the wipe did not work: stop here
-docker exec postgres_<PG_PORT> psql -U demosuser -d demos -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"
+docker exec postgres_<PG_PORT> sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"'
 # migration:run reads PG_PORT from the environment or .env; on a port other than
 # the default (5332), set it to this directory's <PG_PORT> or it migrates the wrong database
 PG_PORT=<PG_PORT> bun run migration:run
