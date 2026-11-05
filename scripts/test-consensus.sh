@@ -6,16 +6,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
-# Single files outside SUITE_DIRS: the launch go/no-go tooling, the signing
-# guards, the consensus and sync routes the suites depend on, the peer
-# liveness checks that decide which committee members count, the read calls
-# clients use to tell whether a transaction executed and which head is
-# final, the version every report names, the fork-schedule agreement and
-# abstain rules, the Omni pre-auth limits, atomic block apply (its database
-# is faked, so no Postgres), the finality proof calls and their offline
-# verifier, the hashing primitives finality commitments are built on, and
-# the storage state root with the writes, sync checks and undo log that
-# feed it. A listed file that is gone fails its run instead of dropping out
+# Single files outside SUITE_DIRS that guard consensus, boot and launch
+# safety. A listed file that is gone fails its run instead of dropping out
 # silently
 SUITE_FILES=(
     scripts/launch-go-no-go.committee.test.ts
@@ -54,9 +46,11 @@ SUITE_FILES=(
     src/libs/network/routines/nodecalls/readApi.test.ts
     src/libs/omniprotocol/peerAuthBinding.test.ts
     src/libs/omniprotocol/peerLiveness.test.ts
+    src/libs/peer/routines/anchorPairing.test.ts
     src/libs/omniprotocol/server/preauthLimits.test.ts
     src/libs/omniprotocol/transport/preauthBuffering.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
+    src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts
     src/utilities/nodeVersion.test.ts
