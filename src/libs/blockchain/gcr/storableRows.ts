@@ -69,20 +69,48 @@ function columnKinds(entity: Function): Map<string, ColumnKind> {
     return kinds
 }
 
+/** Indexed text values a row holds, by property, as `unstorableColumn` takes them back. */
+export type IndexedValues = Record<string, unknown>
+
 /**
  * The first column of `row`, stored as `entity`, that Postgres would refuse:
  * U+0000 in text, what jsonb refuses, or an indexed text value too long for
  * its b-tree entry.
+ *
+ * The index cap is this node's rule, stricter than Postgres, and older nodes
+ * stored longer values (a snapshot import copies them as they are). Such a
+ * value, passed in `stored` as the row held it before the edit, is not
+ * judged again while the edit leaves it unchanged: the edit writes nothing
+ * new to that index, and refusing it would leave the row with no edit, ACL
+ * change or delete that applies. The cap still holds for every value an edit
+ * writes.
  */
-export function unstorableColumn(entity: Function, row: unknown): string | null {
+export function unstorableColumn(entity: Function, row: unknown, stored?: IndexedValues): string | null {
     if (typeof row !== "object" || row === null) return null
     for (const [property, kind] of columnKinds(entity)) {
         const value = (row as Record<string, unknown>)[property]
         if ((kind === "text" || kind === "indexedText") && !isTextStorable(value)) return property
-        if (kind === "indexedText" && !fitsIndexKey(value)) return property
+        if (kind === "indexedText" && !fitsIndexKey(value) && !keptAsStored(stored, property, value)) {
+            return property
+        }
         if (kind === "jsonb" && !isJsonbStorable(value)) return property
     }
     return null
+}
+
+function keptAsStored(stored: IndexedValues | undefined, property: string, value: unknown): boolean {
+    return stored !== undefined && Object.hasOwn(stored, property) && stored[property] === value
+}
+
+/** The indexed text values of `row` of `cache`, or undefined for a row it has none of. */
+export function indexedValues(cache: string, row: unknown): IndexedValues | undefined {
+    const entity = ROW_ENTITIES[cache]
+    if (entity === undefined || entity === "jsonb" || typeof row !== "object" || row === null) return undefined
+    const values: IndexedValues = {}
+    for (const [property, kind] of columnKinds(entity)) {
+        if (kind === "indexedText") values[property] = (row as Record<string, unknown>)[property]
+    }
+    return values
 }
 
 /** Entity each row cache is stored as. A slot row is stored whole in jsonb. */
@@ -97,12 +125,15 @@ export const ROW_ENTITIES: Record<string, Function | "jsonb"> = {
     networkUpgradeVotes: NetworkUpgradeVote,
 }
 
-/** Where `row` of `cache` cannot be stored, as "cache.column", or null. */
-export function unstorableRow(cache: string, row: unknown): string | null {
+/**
+ * Where `row` of `cache` cannot be stored, as "cache.column", or null.
+ * `stored` is what `indexedValues` read from the row before the edit.
+ */
+export function unstorableRow(cache: string, row: unknown, stored?: IndexedValues): string | null {
     const entity = ROW_ENTITIES[cache]
     if (entity === undefined || row === null || row === undefined) return null
     if (entity === "jsonb") return isJsonbStorable(row) ? null : cache
-    const column = unstorableColumn(entity, row)
+    const column = unstorableColumn(entity, row, stored)
     return column === null ? null : `${cache}.${column}`
 }
 

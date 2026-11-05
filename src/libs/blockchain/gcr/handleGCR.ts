@@ -122,7 +122,13 @@ import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
 
 type AtomicWorkPayloadView = WorkEnvelope & { transfers?: { to?: unknown; amount?: unknown }[] }
 import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
-import { unloadableEditKey, unstorableClaim, unstorableRow } from "./storableRows"
+import {
+    type IndexedValues,
+    indexedValues,
+    unloadableEditKey,
+    unstorableClaim,
+    unstorableRow,
+} from "./storableRows"
 import { NOT_STORABLE, isKeyStorable } from "@/libs/blockchain/validation/postgresStorable"
 
 export type GetNativeStatusOptions = {
@@ -520,12 +526,62 @@ export function isGCRMainEdit(
     return gcrMainEdits.has(edit.type)
 }
 
-function firstUnstorable(cache: string, rows: Map<string, unknown> | undefined): string | null {
-    for (const row of rows?.values() ?? []) {
-        const where = unstorableRow(cache, row)
-        if (where) return where
+/** Rows of one cache an edit can write: those under `keys`, or all of them. */
+type WrittenRows = { cache: string; rows: Map<unknown, unknown> | undefined; keys: unknown[] | "all" }
+
+/** Rows each written row held before the edit, by cache and then by key. */
+type StoredIndexes = Map<string, Map<unknown, IndexedValues | undefined>>
+
+/**
+ * The rows `edit` can write, which are the rows it is judged on. Only rows
+ * the edit's own group can write are named: groups apply concurrently over
+ * the same caches, so another group's row may hold a value it has not yet
+ * put back, and reading it would make the verdict depend on scheduling. An
+ * identity edit writes its account's cached row alone (other accounts it
+ * credits are not in the caches).
+ */
+function rowsEditWrites(edit: GCREdit, entities: GCREntityCaches): WrittenRows[] {
+    const fields = edit as unknown as Record<string, any>
+    const caches = entities as unknown as Record<string, Map<unknown, unknown> | undefined>
+    const one = (cache: string, key: unknown): WrittenRows[] => [{ cache, rows: caches[cache], keys: [key] }]
+    const all = (cache: string): WrittenRows => ({ cache, rows: caches[cache], keys: "all" })
+    switch (edit.type as string) {
+        case "identity":
+            return one("accounts", normalizePubkey(fields.account))
+        case "storageProgram":
+        case "storage-program-put":
+            return one("storagePrograms", fields.target)
+        case "tlsnotary":
+            return one("tlsNotaries", fields.data?.tokenId)
+        case "work-attempt":
+            return one("atomicWorks", fields.workId)
+        case "resource-slot-cas":
+            return one("resourceSlots", fields.resourceKey)
+        case "validatorStake":
+            return [all("validators")]
+        case "networkUpgrade":
+        case "networkUpgradeVote":
+            return [all("networkUpgrades"), all("networkUpgradeVotes")]
+        default:
+            return []
     }
-    return null
+}
+
+function writtenEntries(written: WrittenRows): [unknown, unknown][] {
+    if (!written.rows) return []
+    if (written.keys === "all") return [...written.rows.entries()]
+    return written.keys.map(key => [key, written.rows!.get(key)])
+}
+
+/** The indexed values of the rows `edit` can write, as they are before it applies. */
+function storedIndexes(edit: GCREdit, entities: GCREntityCaches): StoredIndexes {
+    const stored: StoredIndexes = new Map()
+    for (const written of rowsEditWrites(edit, entities)) {
+        const byKey = new Map<unknown, IndexedValues | undefined>()
+        for (const [key, row] of writtenEntries(written)) byKey.set(key, indexedValues(written.cache, row))
+        stored.set(written.cache, byKey)
+    }
+    return stored
 }
 
 /**
@@ -533,48 +589,29 @@ function firstUnstorable(cache: string, rows: Map<string, unknown> | undefined):
  * or null. Judged on the rows rather than the edit, so only what a routine
  * really stores counts. Balance and nonce edits store numbers, under a key
  * nothing checks for shape: a native send credits whatever its body names.
- *
- * Only rows the edit's own group can write are read: groups apply
- * concurrently over the same caches, so another group's row may hold a value
- * it has not yet put back, and reading it would make the verdict depend on
- * scheduling. An identity edit writes its account's cached row alone (other
- * accounts it credits are not in the caches), and the ZK claims are written
- * only by zk edits, which all apply in one group.
+ * The ZK claims are written only by zk edits, which all apply in one group.
+ * `stored` is what `storedIndexes` read before the edit applied.
  */
-function unstorableAfter(edit: GCREdit, entities: GCREntityCaches): string | null {
+function unstorableAfter(edit: GCREdit, entities: GCREntityCaches, stored: StoredIndexes): string | null {
     const fields = edit as unknown as Record<string, any>
     switch (edit.type as string) {
         case "balance":
         case "nonce":
             return isKeyStorable(normalizePubkey(fields.account)) ? null : "accounts.pubkey"
-        case "identity":
-            return (
-                unstorableRow("accounts", entities.accounts.get(normalizePubkey(fields.account))) ??
-                (stagedKeyOf(edit) === "zk"
-                    ? unstorableClaim("zkCommitments", entities.zkCommitments) ??
-                      unstorableClaim("zkNullifiers", entities.zkNullifiers)
-                    : null)
-            )
-        case "storageProgram":
-        case "storage-program-put":
-            return unstorableRow("storagePrograms", entities.storagePrograms.get(fields.target))
-        case "tlsnotary":
-            return unstorableRow("tlsNotaries", entities.tlsNotaries.get(fields.data?.tokenId))
-        case "work-attempt":
-            return unstorableRow("atomicWorks", entities.atomicWorks.get(fields.workId))
-        case "resource-slot-cas":
-            return unstorableRow("resourceSlots", entities.resourceSlots.get(fields.resourceKey))
-        case "validatorStake":
-            return firstUnstorable("validators", entities.validators)
-        case "networkUpgrade":
-        case "networkUpgradeVote":
-            return (
-                firstUnstorable("networkUpgrades", entities.networkUpgrades) ??
-                firstUnstorable("networkUpgradeVotes", entities.networkUpgradeVotes)
-            )
-        default:
-            return null
     }
+    for (const written of rowsEditWrites(edit, entities)) {
+        for (const [key, row] of writtenEntries(written)) {
+            const where = unstorableRow(written.cache, row, stored.get(written.cache)?.get(key))
+            if (where) return where
+        }
+    }
+    if (edit.type === "identity" && stagedKeyOf(edit) === "zk") {
+        return (
+            unstorableClaim("zkCommitments", entities.zkCommitments) ??
+            unstorableClaim("zkNullifiers", entities.zkNullifiers)
+        )
+    }
+    return null
 }
 
 /**
@@ -2656,9 +2693,10 @@ export default class HandleGCR {
         isRollback = false,
         simulate = false,
     ): Promise<GCRResult> {
+        const stored = isRollback ? new Map() : storedIndexes(edit, entities)
         const result = await HandleGCR.applyGCREdit(edit, entities, isRollback, simulate)
         if (!result.success || isRollback) return result
-        const where = unstorableAfter(edit, entities)
+        const where = unstorableAfter(edit, entities, stored)
         return where === null
             ? result
             : { success: false, message: `${where} holds a value Postgres cannot store` }
