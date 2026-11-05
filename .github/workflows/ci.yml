@@ -34,8 +34,8 @@ jobs:
       - run: bun run test:consensus
 
   rehearsal-drill:
-    # Unit tests for the quorum-loss drill's pass criteria, plus a bundle
-    # of the drill itself so a broken import fails here. The drill needs
+    # Unit tests for the quorum-loss drills' pass criteria and inputs, plus
+    # a bundle of the drill itself so a broken import fails here. The drill needs
     # Docker and a 4-node devnet, so it is not run in CI.
     name: Rehearsal Drill Checks
     runs-on: ubuntu-latest
@@ -45,5 +45,10 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun test testing/forks/rehearsal/haltDrill.test.ts
-      - run: bun build testing/forks/rehearsal/scenarios/12-quorum-loss-halt-recovery.ts --target=bun --no-emit
+      # Every rehearsal unit test: the halt/ride judge and its fixtures, the
+      # drill genesis and the input staging
+      - run: bun test testing/forks/rehearsal/
+      # bun build has no --no-emit (it is ignored and the whole bundle lands
+      # in the log); write it to a scratch dir instead. A broken import still
+      # fails the step.
+      - run: bun build testing/forks/rehearsal/scenarios/12-quorum-loss-halt-recovery.ts --target=bun --outdir "$RUNNER_TEMP/rehearsal-drill-bundle"
