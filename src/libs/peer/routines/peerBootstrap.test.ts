@@ -128,6 +128,7 @@ function jumpPastBackoff() {
 beforeEach(() => {
     process.chdir(workDir)
     for (const key of Object.keys(online())) delete online()[key]
+    ;(peerman as any).refusedAnchors.clear()
     online()["0xself"] = new Peer("http://self:53550", "0xself")
     hello = {}
     wireHello = { result: 503 }
@@ -306,5 +307,34 @@ describe("anchors that come up after boot", () => {
         expect(refusals).toEqual([false])
         expect(online()["0xanchor2"]).toBeUndefined()
         expect(online()["0xanchor1"]).toBeDefined()
+    })
+
+    it("keep a dropped anchor out when it hellos this node again", async () => {
+        hello = { "0xanchor1": "verified" }
+        const refusals: boolean[] = []
+        await peerBootstrap([anchor(1), anchor(2)], {
+            onLateRefusal: (_peer, _refusal, fatal) => refusals.push(fatal),
+        })
+        hello = { "0xanchor1": "verified", "0xanchor2": "verified" }
+        advertised = { "0xanchor2": "not-a-hash" }
+        jumpPastBackoff()
+        await waitFor(() => refusals.length > 0, "the refusal")
+        expect(refusals).toEqual([false])
+
+        // Its inbound hello is answered as a stranger, which needs canAddPeer
+        // before any hello back; a verified hello back ends in addPeer.
+        const again = anchor(2)
+        expect(peerman.canAddPeer(again)[0]).toBe(false)
+        expect(peerman.addPeer(again, true)[0]).toBe(false)
+        expect(online()["0xanchor2"]).toBeUndefined()
+
+        const helloCalls = () =>
+            (Peer.prototype.call as any).mock.calls.filter(([r]: any[]) => r.method === "hello_peer").length
+        const before = helloCalls()
+        expect(await realSayHello(again)).toBe("skipped")
+        expect(helloCalls()).toBe(before)
+
+        // Other peers are unaffected.
+        expect(peerman.canAddPeer(anchor(3))[0]).toBe(true)
     })
 })

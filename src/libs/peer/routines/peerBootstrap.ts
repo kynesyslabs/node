@@ -392,10 +392,9 @@ function startDeferredAnchorChecks(
                             `${peer.identity} @ ${peer.connection.string} refused it: ${refusal.message}`,
                     )
                 } else {
-                    peerman.removeOnlinePeer(peer.identity)
-                    peerman.removeOfflinePeer(peer.identity)
+                    peerman.refuseAnchor(peer.identity)
                     log.error(
-                        `[BOOTSTRAP] Dropping anchor ${peer.identity} @ ${peer.connection.string}: ${refusal.message}`,
+                        `[BOOTSTRAP] Dropping anchor ${peer.identity} @ ${peer.connection.string} until this node restarts: ${refusal.message}`,
                     )
                 }
                 options.onLateRefusal?.(peer, refusal, fatal)
