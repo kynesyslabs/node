@@ -1,0 +1,189 @@
+{
+  "scenario": "halt-n13s10",
+  "mode": "halt",
+  "validators": 13,
+  "shardSize": 10,
+  "stopped": [
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
+  "consensusTimeS": 10,
+  "forks": {
+    "quorumParity": 0,
+    "committeeBinding": 0
+  },
+  "baselineMinHeight": 6,
+  "holdRounds": 12,
+  "marks": {"t_up":1793793600000,"t_baseline":1793793695000,"t_stop":1793793725000,"t_halt_confirmed":1793793750000,"t_hold_end":1793793872000,"t_restart":1793793875000,"t_first_new_block":1793793901000,"t_converged":1793793930000},
+  "baseline": {
+    "height": 6,
+    "heads": {"1":6,"2":6,"3":6,"4":6,"5":6,"6":6,"7":6,"8":6,"9":6,"10":6,"11":6,"12":6,"13":6},
+    "rows": [
+      {"node":1,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":2,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":3,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":4,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":5,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":6,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":7,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":8,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":9,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":10,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":11,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":12,"number":6,"hash":"0xabc006","signatures":13},
+      {"node":13,"number":6,"hash":"0xabc006","signatures":13}
+    ]
+  },
+  "preStopHeight": 8,
+  "preStopPeerlist": 13,
+  "restartCounts": {
+    "before": {"1":0,"2":0,"3":0,"4":0,"5":0,"6":0},
+    "after": {"1":0,"2":0,"3":0,"4":0,"5":0,"6":0}
+  },
+  "settle": {
+    "heads": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9},
+    "rows": [
+      {"node":1,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":1,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":2,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":2,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":3,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":3,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":4,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":4,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":5,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":5,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":6,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":6,"number":9,"hash":"0xabc009","signatures":7}
+    ]
+  },
+  "hold": {
+    "samples": [
+      {
+        "atMs": 10000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 20000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 30000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 40000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 50000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 60000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 70000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 80000,
+        "heights": {"1":9,"2":9,"3":10,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 90000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 100000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 110000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      },
+      {
+        "atMs": 120000,
+        "heights": {"1":9,"2":9,"3":9,"4":9,"5":9,"6":9}
+      }
+    ]
+  },
+  "recovery": {
+    "blocks": 3,
+    "heads": {"1":12,"2":12,"3":12,"4":12,"5":12,"6":12,"7":12,"8":12,"9":12,"10":12,"11":12,"12":12,"13":12},
+    "rows": [
+      {"node":1,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":1,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":1,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":1,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":1,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":2,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":2,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":2,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":2,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":2,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":3,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":3,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":3,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":3,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":3,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":4,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":4,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":4,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":4,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":4,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":5,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":5,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":5,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":5,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":5,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":6,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":6,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":6,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":6,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":6,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":7,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":7,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":7,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":7,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":7,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":8,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":8,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":8,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":8,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":8,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":9,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":9,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":9,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":9,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":9,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":10,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":10,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":10,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":10,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":10,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":11,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":11,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":11,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":11,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":11,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":12,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":12,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":12,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":12,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":12,"number":12,"hash":"0xabc00c","signatures":10},
+      {"node":13,"number":8,"hash":"0xabc008","signatures":13},
+      {"node":13,"number":9,"hash":"0xabc009","signatures":7},
+      {"node":13,"number":10,"hash":"0xabc00a","signatures":8},
+      {"node":13,"number":11,"hash":"0xabc00b","signatures":9},
+      {"node":13,"number":12,"hash":"0xabc00c","signatures":10}
+    ]
+  },
+  "ride": null
+}

@@ -101,6 +101,7 @@ state chained across scenarios.
 | 6 | `06-mid-flight-tx.ts` | Medium | Boundary-block tx handling |
 | 2 | `02-validator-desync-recovery.ts` | High | Wipe + re-sync; loud failure on stale binary |
 | 3 | `03-fresh-node-post-fork.ts` | **HIGHEST** | Migration runs during historical replay |
+| 12 | `12-quorum-loss-halt-recovery.ts` | High | At `shardSize` 4 with quorumParity, committeeBinding and commitLock active from 0: 2 of 4 validators stopped, chain halts with no minority block (including during the settle window), survivors stay up; restart: chain resumes and all 4 converge (G3-6). This is the 4-validator version; the mainnet-shape halt cases (10 and 13 validators, `shardSize` 10) are in `testing/devnet/quorum-drills/` (`halt-n10s10`, `halt-n13s10`, `ride-n13s10`) |
 
 `run-all.sh` runs them in this exact order (per REHEARSAL_PLAN §4).
 
@@ -129,6 +130,7 @@ testing/forks/rehearsal/
     06-mid-flight-tx.ts
     07-sum-invariant-audit.ts
     08-idempotent-restart.ts
+    12-quorum-loss-halt-recovery.ts
 ```
 
 ## Adapters used
@@ -168,3 +170,15 @@ its sole purpose is rehearsal.
   P6 sustained testnet.
 - Network partitions / Byzantine peers — accepted risk, see
   REHEARSAL_PLAN §5.
+- Scenario 12 stops validators with `docker compose stop`. The devnet
+  entrypoint (`run-devnet`) runs as PID 1 and does not exit on SIGTERM,
+  so each stop ends in a SIGKILL after Docker's 10-second grace period:
+  the drill exercises an abrupt stop, not a graceful shutdown. It does
+  not cut the network between running nodes, so it is not a partition
+  test.
+- Scenario 12 alone layers a compose override (`lib/drillInputs.ts`):
+  genesis, node-1-only peerlist and an empty `/app/data/snapshot` are
+  mounted from a temp dir, and nodes 2-4 are restarted once after `up`.
+  The staging is `testing/devnet/quorum-drills/drill_inputs.py`, shared
+  with that directory's `gen-inputs.py`, so it needs `python3`. With
+  `--keep-state` the temp dir and the override file are left in place.

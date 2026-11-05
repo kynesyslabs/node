@@ -35,3 +35,23 @@ jobs:
       # database they did not just empty
       - run: bash scripts/launcher-wipe-guard.test.sh
       - run: bun run test:consensus
+
+  rehearsal-drill:
+    # Unit tests for the quorum-loss drills' pass criteria and inputs, plus
+    # a bundle of the drill itself so a broken import fails here. The drill needs
+    # Docker and a 4-node devnet, so it is not run in CI.
+    name: Rehearsal Drill Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile --ignore-scripts
+      # Every rehearsal unit test: the halt/ride judge and its fixtures, the
+      # drill genesis and the input staging
+      - run: bun test testing/forks/rehearsal/
+      # bun build has no --no-emit (it is ignored and the whole bundle lands
+      # in the log); write it to a scratch dir instead. A broken import still
+      # fails the step.
+      - run: bun build testing/forks/rehearsal/scenarios/12-quorum-loss-halt-recovery.ts --target=bun --outdir "$RUNNER_TEMP/rehearsal-drill-bundle"
