@@ -1737,6 +1737,11 @@ export default class HandleGCR {
                     }
                     const stagedKey = stagedKeyOf(edit)
                     if (stagedKey) keys.push(stagedKey)
+                    // A proposal reads the proposer's validator row as
+                    // the stake edits before it in the block left it.
+                    if ((edit.type as string) === "networkUpgrade") {
+                        keys.push("validators")
+                    }
                 }
             }
 
@@ -2931,6 +2936,8 @@ export default class HandleGCR {
                     result = await GCRNetworkUpgradeRoutines.applyProposal(
                         editOperation,
                         repos.proposals,
+                        undefined,
+                        entities.validators,
                     )
                     result.deferredWrite = deferredWriteOf(staged)
                 }

@@ -32,6 +32,7 @@ export default class GCRNetworkUpgradeRoutines {
         edit: GCREdit,
         repo?: Repository<NetworkUpgrade>,
         currentBlock?: number,
+        stagedValidators?: Map<string, Validators | null>,
     ): Promise<GCRResult> {
         const e = edit as unknown as GCREditNetworkUpgrade
         if (e.type !== "networkUpgrade") {
@@ -55,7 +56,7 @@ export default class GCRNetworkUpgradeRoutines {
             }
         }
 
-        const refusal = await proposalRefusal(e, proposerKey)
+        const refusal = await proposalRefusal(e, proposerKey, stagedValidators)
         if (refusal) {
             log.warning(
                 "GOVERNANCE",
@@ -226,6 +227,7 @@ export default class GCRNetworkUpgradeRoutines {
 async function proposalRefusal(
     e: GCREditNetworkUpgrade,
     proposerKey: string,
+    stagedValidators?: Map<string, Validators | null>,
 ): Promise<string | null> {
     if (typeof e.proposalId !== "string" || e.proposalId === "") {
         return "Invalid proposalId"
@@ -265,7 +267,10 @@ async function proposalRefusal(
         return `Safety bounds violated [${bounds.key}]: ${bounds.reason}`
     }
 
-    const validator = await GCR.getGCRValidatorStatus(proposerKey)
+    // A stake edit earlier in the block (an unstake, say) wins over the saved row.
+    const validator = stagedValidators?.has(proposerKey)
+        ? stagedValidators.get(proposerKey)
+        : await GCR.getGCRValidatorStatus(proposerKey)
     if (!validator || validator.status !== VALIDATOR_STATUS_ACTIVE) {
         return "Proposer is not an active validator"
     }

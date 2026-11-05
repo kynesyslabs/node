@@ -288,6 +288,25 @@ describe("governance edits", () => {
         expect(entities.networkUpgrades.has("p1")).toBe(false)
     })
 
+    it("judges the proposer by the validator row earlier edits of the block staged", async () => {
+        seeded = {
+            Validators: [{ address: "0xabc", status: "2", staked_amount: "10" }],
+        }
+        const entities = caches()
+        const unstake = await HandleGCR.applyGCREdit(
+            { ...stake("0"), operation: "unstake" },
+            entities,
+            false,
+            false,
+        )
+        const result = await HandleGCR.applyGCREdit(proposal("p1"), entities, false, false)
+
+        expect(unstake.message).toBe("Unstake requested")
+        expect(result.success).toBe(false)
+        expect(result.message).toBe("Proposer is not an active validator")
+        expect(entities.networkUpgrades.has("p1")).toBe(false)
+    })
+
     it("numbers a staged proposal after the ones on disk", async () => {
         seeded = {
             NetworkUpgrade: [{ proposalId: "old", version: 4, status: "activated", proposedParameters: {} }],
@@ -346,8 +365,8 @@ describe("transactions on one staged cache share a group", () => {
 
         const senders = groups.map(g => g.map(tx => tx.content.from_ed25519_address))
         expect(senders).toContainEqual(["0x01", "0x02"])
-        expect(senders).toContainEqual(["0x03", "0x04"])
-        expect(senders).toContainEqual(["0x05", "0x06"])
+        // A proposal reads the staged validator rows, so it joins the stakes
+        expect(senders).toContainEqual(["0x03", "0x04", "0x05", "0x06"])
         expect(senders).toContainEqual(["0x07"])
     })
 })
