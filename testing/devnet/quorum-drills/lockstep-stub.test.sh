@@ -150,7 +150,7 @@ echo "== database reads (psql_node, block_rows) are bounded; a timed-out read is
 fn_src() { # $1 function name: its definition, from `name() {` to the first line that is `}`
     awk -v a="$1() {" 'index($0, a) == 1 { on = 1 } on { print } on && /^}/ { exit }' "${RUN_SH}"
 }
-for f in psql_node pg_limit_preflight pg_limit_gate; do source <(fn_src "${f}"); done
+for f in pg_cid psql_node pg_limit_preflight pg_limit_gate; do source <(fn_src "${f}"); done
 source <(grep -E '^(DB_TIMEOUT_S|PG_LIMITS)=' "${RUN_SH}")
 source <(region 'block_rows() {' 'phase_row() {')
 # run.sh's own dc: every compose call goes to the fake docker
@@ -352,6 +352,62 @@ check "and node-7.log holds the collected log" grep -q "too many clients" "${LOG
 gate_case td_clean PASS; echo "clean" > "${FAKE}/nodelog.1"
 teardown_rc 0
 check "exit 0, every log collected and clean: exit 0" has "rc=0"
+
+echo "== the postgres container lookup is bounded: one that stalls, fails or finds nothing fails the read, or the preflight's try, and says why"
+# A function of this shell in a fresh bash under an outside guard of $1 s, so a
+# lookup that is not bounded ends the case (rc=124, the guard's) and not the
+# suite. OUT: its output, then rc=; ms: what it took. The bound is
+# LOG_READ_TIMEOUT_S: 1 s, as set above, unless a case sets it.
+guarded() { # $1 the guard in s, $2.. the command
+    local g="$1" t0; shift
+    { declare -f; declare -p DB_TIMEOUT_S PG_LIMITS LOG_READ_TIMEOUT_S N HERE RUN_DIR PROJECT LOG_DIR STEP_LOG; } > "${WORK}/guarded.sh"
+    t0=$(date +%s%N)
+    OUT=$(timeout -k 1 "${g}" bash -c 'set -uo pipefail; source "$1"; shift; "$@"' _ "${WORK}/guarded.sh" "$@" 2>&1; echo "rc=$?")
+    ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+}
+pg_case() { new_case "$1" 25 25 25 25; : > "${FAKE_DOCKER_LOG}"; } # N=4
+lookups() { grep -c ' ps -q postgres$' "${FAKE_DOCKER_LOG}"; }
+psql_runs() { grep -c '^exec ' "${FAKE_DOCKER_LOG}"; }
+pg_case pgps_hang
+FAKE_PGPS=hang guarded 20 psql_node 3 "SELECT 1"
+echo "${OUT}" | tail -2 | cut -c1-220 | sed 's/^/    | /'
+check "psql_node, the lookup stalls: rc=1, within the bound (${ms} ms; the stub sleeps 60 s)" bash -c 'grep -q "^rc=1$" <<< "$1" && [ "$2" -lt 4000 ]' _ "${OUT}" "${ms}"
+check "psql_node, the lookup stalls: says so" has "psql node3_db: docker compose ps -q postgres did not answer within 1s"
+check "psql_node, the lookup stalls: no psql is run" test "$(psql_runs)" = 0
+pg_case pgps_fail
+FAKE_PGPS=fail guarded 20 psql_node 3 "SELECT 1"
+check "psql_node, the lookup fails: rc=1, and says so" bash -c 'grep -q "^rc=1$" <<< "$1" && grep -q "psql node3_db: docker compose ps -q postgres failed (exit 1)" <<< "$1"' _ "${OUT}"
+check "psql_node, the lookup fails: no psql is run" test "$(psql_runs)" = 0
+pg_case pgps_empty
+FAKE_PGPS=empty guarded 20 psql_node 3 "SELECT 1"
+check "psql_node, no running postgres: rc=1, and says so" bash -c 'grep -q "^rc=1$" <<< "$1" && grep -q "psql node3_db: no running postgres container" <<< "$1"' _ "${OUT}"
+check "psql_node, no running postgres: no psql is run with an empty container" test "$(psql_runs)" = 0
+
+# The preflight as run.sh runs it (its top-level line), N=4 (need 60). Its 2 s
+# pause between tries is a no-op here: the cases are about each try's bound.
+eval "preflight_line() { sleep() { :; }; $(grep -m1 '^pg_limit_preflight || exit 2$' "${RUN_SH}"); }"
+pg_case pre_hang
+FAKE_PGPS=hang LOG_READ_TIMEOUT_S=0.2 guarded 20 preflight_line
+echo "${OUT}" | tail -2 | cut -c1-220 | sed 's/^/    | /'
+check "preflight, the lookup stalls on every try: exit 2" has "^rc=2$"
+check "preflight, the lookup stalls on every try: says why" \
+    has "ABORT: could not read max_connections from postgres (45 tries; last: docker compose ps -q postgres did not answer within 0.2s)"
+check "preflight, the lookup stalls on every try: 45 lookups, each ended at the bound ($(lookups); ${ms} ms, 45 x 0.2 s = 9 s; the stub sleeps 60 s each)" \
+    bash -c '[ "$1" = 45 ] && [ "$2" -lt 15000 ]' _ "$(lookups)" "${ms}"
+check "preflight, the lookup stalls on every try: no psql is run" test "$(psql_runs)" = 0
+pg_case pre_empty
+FAKE_PGPS=empty guarded 20 preflight_line
+check "preflight, no running postgres on any try: exit 2, and says why" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "could not read max_connections from postgres (45 tries; last: no running postgres container)" <<< "$1"' _ "${OUT}"
+check "preflight, no running postgres on any try: no psql is run with an empty container" test "$(psql_runs)" = 0
+pg_case pre_once
+FAKE_PGPS=hang-once guarded 20 preflight_line
+check "preflight, the first lookup stalls: the next try reads max_connections (rc=0)" \
+    bash -c 'grep -q "^rc=0$" <<< "$1" && grep -q "postgres max_connections 100 (4 nodes need 60)" <<< "$1"' _ "${OUT}"
+check "preflight, the first lookup stalls: two lookups, the first ended at the bound ($(lookups); ${ms} ms)" \
+    bash -c '[ "$1" = 2 ] && [ "$2" -lt 4000 ]' _ "$(lookups)" "${ms}"
+check "preflight, the first lookup stalls: psql runs in the container the lookup gave" \
+    grep -q '^exec .* fakepg psql -U demosuser -d postgres -tAc SHOW max_connections$' "${FAKE_DOCKER_LOG}"
 
 # The wiring: the gate sits before the verdict is written, the preflight before the first node starts,
 # and a teardown backstop covers the exits that skip the gate

@@ -417,8 +417,8 @@ stop_node() {
 # Node-log reads that an abort message or a result depends on (boot_failure_line,
 # pg_limit_gate, the teardown's collection) are bounded: every docker call by
 # LOG_READ_TIMEOUT_S, so a stalled daemon ends the read and not the run, and the
-# log by LOG_READ_MAX_BYTES (stripped). QDRILL_TEST_LOG_READ_TIMEOUT_S is for
-# lockstep-stub.test.sh only.
+# log by LOG_READ_MAX_BYTES (stripped). pg_cid bounds the postgres lookup by it
+# too. QDRILL_TEST_LOG_READ_TIMEOUT_S is for lockstep-stub.test.sh only.
 LOG_READ_TIMEOUT_S="${QDRILL_TEST_LOG_READ_TIMEOUT_S:-60}"
 LOG_READ_MAX_BYTES=$((256 * 1024 * 1024))
 # Node $1's container log, colour codes stripped, into file $2: the whole log,
@@ -702,11 +702,28 @@ read_error() { # $1 phase name
 # server; the outer timeout ends a client stuck before or after it.
 DB_TIMEOUT_S=30
 PG_LIMITS=(-e PGCONNECT_TIMEOUT=10 -e "PGOPTIONS=-c statement_timeout=20000")
+# The running postgres container's ID, looked up within LOG_READ_TIMEOUT_S as
+# read_node_log looks up a node's: the lookup runs before the timeout of the
+# psql call that needs it starts. Fails, printing why, when there is no running
+# postgres container, or docker compose ps fails or does not answer in time.
+pg_cid() {
+    local cid rc
+    # dc ps, spelled out: timeout runs a command, not a shell function
+    cid=$(timeout -k 5 "${LOG_READ_TIMEOUT_S}" docker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" ps -q postgres 2>/dev/null)
+    rc=$?
+    case "${rc}" in
+        0) [ -n "${cid}" ] || { echo "no running postgres container"; return 1; } ;;
+        124 | 137) echo "docker compose ps -q postgres did not answer within ${LOG_READ_TIMEOUT_S}s"; return 1 ;;
+        *) echo "docker compose ps -q postgres failed (exit ${rc})"; return 1 ;;
+    esac
+    echo "${cid}"
+}
 psql_node() { # $1 node, $2 SQL
-    local rc errf="${LOG_DIR}/psql-err.$$.tmp"
+    local rc pg errf="${LOG_DIR}/psql-err.$$.tmp"
+    pg=$(pg_cid) || { echo "psql node$1_db: ${pg}" >&2; return 1; }
     # stderr goes to the caller as before and, when there is any, to
     # psql-errors.log, which pg_limit_gate reads
-    timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
+    timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "${pg}" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
     rc=$?
     [ -s "${errf}" ] && { cat "${errf}" >&2; sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log"; }
     rm -f "${errf}"
@@ -718,14 +735,21 @@ psql_node() { # $1 node, $2 SQL
 # sets max_connections (gen-inputs.py), so this fails only if that setting did
 # not reach the server. Waits for the server: `up -d` does not.
 pg_limit_preflight() {
-    local need have tries=0
+    local need have pg rc why tries=0
     need=$(python3 -I "${HERE}/drill_inputs.py" pgconn --nodes "${N}" | cut -d' ' -f1)
     [[ "${need}" =~ ^[0-9]+$ ]] || { say "ABORT: could not work out the connections ${N} nodes need"; return 1; }
     while :; do
-        have=$(timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d postgres -tAc 'SHOW max_connections' 2>/dev/null)
-        [[ "${have}" =~ ^[0-9]+$ ]] && break
+        # A failed container lookup is a failed try, like a psql with no answer
+        if pg=$(pg_cid); then
+            have=$(timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "${pg}" psql -U demosuser -d postgres -tAc 'SHOW max_connections' 2>/dev/null)
+            rc=$?
+            [[ "${have}" =~ ^[0-9]+$ ]] && break
+            why="SHOW max_connections gave no number (exit ${rc})"
+        else
+            why="${pg}"
+        fi
         tries=$((tries + 1))
-        [ "${tries}" -ge 45 ] && { say "ABORT: could not read max_connections from postgres"; return 1; }
+        [ "${tries}" -ge 45 ] && { say "ABORT: could not read max_connections from postgres (${tries} tries; last: ${why})"; return 1; }
         sleep 2
     done
     if [ "${have}" -lt "${need}" ]; then
