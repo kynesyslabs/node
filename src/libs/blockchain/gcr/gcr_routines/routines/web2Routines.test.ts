@@ -8,7 +8,12 @@ import {
     sameWeb2UserId,
     web2UserIdLookupKey,
 } from "@/libs/identity/web2UserId"
-import { applyWeb2IdentityAdd } from "./web2Routines"
+import {
+    applyWeb2IdentityAdd,
+    applyWeb2IdentityRemove,
+    rollbackWeb2IdentityRemove,
+} from "./web2Routines"
+import type { EditPlace } from "./removedIdentities"
 import { isFirstConnection } from "./utils"
 import { sameLinkedUserId } from "@/features/incentive/PointSystem"
 
@@ -184,5 +189,76 @@ describe("points ownership check during apply", () => {
         forkAt(null)
         expect(sameLinkedUserId(42, "42")).toBe(false)
         expect(sameLinkedUserId("42", "42")).toBe(true)
+    })
+})
+
+describe("undoing a web2 unlink, identityCarryover active", () => {
+    const link = (username: string, userId: unknown) => ({
+        username,
+        userId,
+        proof: PROOF,
+        proofHash: "h",
+        timestamp: 1,
+    })
+    const place = (): EditPlace => ({
+        txhash: "ab".repeat(32),
+        position: 1,
+        removed: new Map(),
+    })
+    const removeEdit = (data: Record<string, unknown>) => ({
+        account: ACCOUNT,
+        data: { context: "github", ...data },
+    })
+
+    beforeEach(() => {
+        getSharedState.forkConfig.identityCarryover.activationHeight = 0
+    })
+
+    it("puts back every link of the account a userId unlink removed, in order, while another account keeps the username", async () => {
+        const account = accountWith("github", [
+            link("bob", "7"),
+            link("bob", "9"),
+            link("bob2", 7),
+        ])
+        const before = structuredClone(account.identities)
+        const at = place()
+        const edit = removeEdit({ username: "bob", userId: "7" })
+
+        expect((await applyWeb2IdentityRemove(edit, account, at)).success).toBe(true)
+        expect(account.identities.web2.github).toEqual([link("bob", "9")])
+
+        const undone = await rollbackWeb2IdentityRemove(edit, account, at)
+
+        expect(undone.success).toBe(true)
+        expect(account.identities).toEqual(before)
+    })
+
+    it("refuses the undo once a link of the removed account is back", async () => {
+        const account = accountWith("github", [link("bob", "7")])
+        const at = place()
+        const edit = removeEdit({ username: "bob" })
+        await applyWeb2IdentityRemove(edit, account, at)
+        account.identities.web2.github = [link("bobby", 7)]
+
+        const undone = await rollbackWeb2IdentityRemove(edit, account, at)
+
+        expect(undone).toMatchObject({
+            success: false,
+            message: "Identity already exists",
+        })
+    })
+
+    it("records nothing for an unlink the selection refuses", async () => {
+        const account = accountWith("github", [link("bob", "7"), link("bob", "9")])
+        const at = place()
+
+        const result = await applyWeb2IdentityRemove(
+            removeEdit({ username: "bob" }),
+            account,
+            at,
+        )
+
+        expect(result.success).toBe(false)
+        expect(at.removed.size).toBe(0)
     })
 })

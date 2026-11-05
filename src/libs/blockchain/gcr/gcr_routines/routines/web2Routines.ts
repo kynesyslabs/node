@@ -129,15 +129,29 @@ export async function applyWeb2IdentityRemove(
     accountGCR.identities.web2[context] =
         accountGCR.identities.web2[context] || []
 
-<<<<<<< HEAD
     const linked: Web2GCRData["data"][] = accountGCR.identities.web2[context]
-    const removed: RemovedEntry<Web2GCRData["data"]>[] = []
-    linked.forEach((id, index) => {
-        if (id.username === username) removed.push({ index, value: id })
-    })
-
-    if (removed.length === 0) {
-        return { success: false, message: "Identity not found" }
+    let removed: RemovedEntry<Web2GCRData["data"]>[]
+    // The first entry is the link whose points the unlink deducts.
+    if (identityCarryoverActiveAtApply()) {
+        const pick = selectWeb2Unlink(
+            linked,
+            { username, userId },
+            "Identity not found",
+        )
+        if ("message" in pick) {
+            return { success: false, message: pick.message }
+        }
+        removed = pick.indexes.map(index => ({ index, value: linked[index] }))
+        const first = removed.findIndex(({ value }) => value === pick.removed)
+        if (first > 0) removed.unshift(...removed.splice(first, 1))
+    } else {
+        removed = []
+        linked.forEach((id, index) => {
+            if (id.username === username) removed.push({ index, value: id })
+        })
+        if (removed.length === 0) {
+            return { success: false, message: "Identity not found" }
+        }
     }
 
     // A simulation leaves nothing to undo, and must not grow the records.
@@ -152,75 +166,8 @@ export async function applyWeb2IdentityRemove(
         removed,
     )
 
-    accountGCR.identities.web2[context] = linked.filter(
-        id => id.username !== username,
-    )
-=======
-    // Store the identity being removed for GitHub and Telegram unlinking (need userId)
-    let removedIdentity: Web2GCRData["data"] | null = null
-
-    if (identityCarryoverActiveAtApply()) {
-        const links: Web2GCRData["data"][] = accountGCR.identities.web2[context]
-        const pick = selectWeb2Unlink(
-            links,
-            { username, userId },
-            "Identity not found",
-        )
-        if ("message" in pick) {
-            return { success: false, message: pick.message }
-        }
-        removedIdentity = pick.removed
-        const drop = new Set(pick.indexes)
-        accountGCR.identities.web2[context] = links.filter(
-            (_, i) => !drop.has(i),
-        )
-    } else {
-        const exists = accountGCR.identities.web2[context].some(
-            (id: Web2GCRData["data"]) => id.username === username,
-        )
-
-        if (!exists) {
-            return { success: false, message: "Identity not found" }
-        }
-
-        if (context === "github" || context === "telegram") {
-            removedIdentity =
-                accountGCR.identities.web2[context].find(
-                    (id: Web2GCRData["data"]) => id.username === username,
-                ) || null
-        }
-
-        accountGCR.identities.web2[context] = accountGCR.identities.web2[
-            context
-        ].filter((id: Web2GCRData["data"]) => id.username !== username)
-    }
-
-    async function deductPoints() {
-        /**
-         * Deduct incentive points for Twitter unlinking
-         */
-        if (context === "twitter") {
-            await IncentiveManager.twitterUnlinked(editOperation.account)
-        } else if (
-            context === "github" &&
-            removedIdentity &&
-            removedIdentity.userId
-        ) {
-            await IncentiveManager.githubUnlinked(
-                editOperation.account,
-                removedIdentity.userId,
-            )
-        } else if (
-            context === "telegram" &&
-            removedIdentity &&
-            removedIdentity.userId
-        ) {
-            await IncentiveManager.telegramUnlinked(editOperation.account)
-        } else if (context === "discord") {
-            await IncentiveManager.discordUnlinked(editOperation.account)
-        }
-    }
->>>>>>> origin/fix/storage-granular-ops
+    const drop = new Set(removed.map(({ index }) => index))
+    accountGCR.identities.web2[context] = linked.filter((_, i) => !drop.has(i))
 
     return {
         success: true,
@@ -296,7 +243,16 @@ export async function rollbackWeb2IdentityRemove(
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     const linked: Web2GCRData["data"][] =
         accountGCR.identities.web2[context] || []
-    if (linked.some(id => id.username === username)) {
+    // Another account may carry the same username once unlinks pick by
+    // account, so only a link of a removed account blocks the undo.
+    const back = (id: Web2GCRData["data"]) =>
+        removed.some(({ value }) =>
+            value.userId === undefined || value.userId === null || value.userId === ""
+                ? id.username === value.username
+                : id.userId === value.userId ||
+                  sameWeb2UserId(id.userId, value.userId),
+        )
+    if (linked.some(back)) {
         return { success: false, message: "Identity already exists" }
     }
 
