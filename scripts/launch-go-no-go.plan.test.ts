@@ -106,6 +106,26 @@ describe("mainnet genesis template", () => {
         expect(e.genesisFileBlockHash).toMatch(/^[0-9a-f]{64}$/)
     })
 
+    it("refuses a placeholder treasury that block 0 would migrate, unless the snapshot carries the fork", async () => {
+        const g = filledTemplate()
+        g.forks.gasFeeSeparation = { activationHeight: null, treasuryAddress: "0x" + "0".repeat(64) }
+        // The loader accepts the zero address on a null height
+        expect((await launchGenesisExpectations(g)).genesisFileProblems).toEqual([])
+
+        const fresh = await launchGenesisExpectations(g, null, [])
+        expect(fresh.genesisFileProblems.join("\n")).toContain("treasuryAddress equals BURN_ADDRESS")
+
+        const carried = await launchGenesisExpectations(g, null, [{ fork_name: "gasFeeSeparation", applied: true }])
+        expect(carried.genesisFileProblems).toEqual([])
+    })
+
+    it("refuses an OS-unit snapshot under a genesis that activates osDenomination later", async () => {
+        const g = filledTemplate()
+        g.forks.osDenomination = { activationHeight: 100 }
+        const e = await launchGenesisExpectations(g, null, [{ fork_name: "osDenomination", applied: true }])
+        expect(e.genesisFileProblems.join("\n")).toContain("the snapshot is already in OS units")
+    })
+
     it("lists the same mainnet forks as the genesis acceptance harness", () => {
         const sh = readFileSync(join(ROOT, "testing/genesis-acceptance/run.sh"), "utf8")
         const py = readFileSync(join(ROOT, "testing/genesis-acceptance/fixtures.py"), "utf8")

@@ -40,6 +40,7 @@ import { compareIdentities } from "src/libs/consensus/v2/routines/peerlistMerge"
 import Hashing from "src/libs/crypto/hashing"
 import { DEFAULT_FORK_CONFIG, type ForkName } from "src/forks/forkConfig"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
+import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
     type BlockZeroValidators,
     type ValidatorRow,
@@ -635,6 +636,7 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
 export async function launchGenesisExpectations(
     genesis: unknown,
     snapshotManifestSha256: string | null = null,
+    snapshotForkState: ForkStateEntry[] | null = null,
 ): Promise<{
     expectedGenesisDataHash: string
     expectedScheduleDigest: string
@@ -646,7 +648,7 @@ export async function launchGenesisExpectations(
     const { genesisValues } = await import("./genesis-hash")
     // An invalid schedule is bad input, not a verdict
     loadForkConfigFromGenesis(genesis)
-    const values = genesisValues(genesis, snapshotManifestSha256)
+    const values = genesisValues(genesis, snapshotManifestSha256, snapshotForkState)
     return {
         expectedGenesisDataHash: values.genesisDataHash,
         expectedScheduleDigest: values.forkScheduleDigest,
@@ -1024,6 +1026,7 @@ async function runPlan(
     shardSize: number,
     operators: Record<string, unknown> | null,
     manifestSha256: string | null,
+    snapshotForkState: ForkStateEntry[] | null,
 ): Promise<number> {
     if (!args.genesis || !args.snapshot || !args.operators) {
         console.error(`--plan needs --genesis, --snapshot and --operators\n${usage()}`)
@@ -1031,7 +1034,7 @@ async function runPlan(
     }
     let genesisFileProblems: string[]
     try {
-        genesisFileProblems = (await launchGenesisExpectations(genesis, manifestSha256)).genesisFileProblems
+        genesisFileProblems = (await launchGenesisExpectations(genesis, manifestSha256, snapshotForkState)).genesisFileProblems
     } catch (e) {
         // A schedule the node refuses to load is a failed check here, not bad input
         genesisFileProblems = [(e as Error).message]
@@ -1085,8 +1088,9 @@ async function main(): Promise<number> {
     let genesis: any = null
     let blockZero: BlockZeroValidators | null = null
     let manifestSha256: string | null = null
+    let snapshotForkState: ForkStateEntry[] | null = null
     if (args.genesis) {
-        const { readGenesisFile, snapshotManifestSha256 } = await import("./genesis-hash")
+        const { readGenesisFile, snapshotManifestSha256, snapshotManifestForkState } = await import("./genesis-hash")
         genesis = readGenesisFile(args.genesis)
         // The node takes shardSize from block 0 and nowhere else; a flag
         // that moved q here would judge a quorum the chain does not use
@@ -1104,7 +1108,15 @@ async function main(): Promise<number> {
             )
             return 2
         }
-        if (args.snapshot) manifestSha256 = snapshotManifestSha256(args.snapshot)
+        if (args.snapshot) {
+            manifestSha256 = snapshotManifestSha256(args.snapshot)
+            try {
+                snapshotForkState = snapshotManifestForkState(args.snapshot)
+            } catch (e) {
+                console.error(`snapshot: ${(e as Error).message}`)
+                return 2
+            }
+        }
         try {
             blockZero = await readBlockZeroValidators(genesis, args.snapshot)
         } catch (e) {
@@ -1134,12 +1146,12 @@ async function main(): Promise<number> {
     }
     const operators = operatorsRaw as Record<string, unknown> | null
 
-    if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256)
+    if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState)
 
     let expectations = {}
     if (genesis) {
         try {
-            expectations = await launchGenesisExpectations(genesis, manifestSha256)
+            expectations = await launchGenesisExpectations(genesis, manifestSha256, snapshotForkState)
         } catch (e) {
             console.error(`genesis: ${(e as Error).message}`)
             return 2

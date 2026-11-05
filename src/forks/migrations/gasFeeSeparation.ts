@@ -110,6 +110,25 @@ export async function isGasFeeSeparationMigrationApplied(
 }
 
 /**
+ * Why the migration would refuse this treasury address, or null when it
+ * accepts it. Exported so launch tooling can report it before block 0.
+ */
+export function treasuryAddressProblem(treasuryAddress: unknown): string | null {
+    if (
+        typeof treasuryAddress !== "string" ||
+        !/^0x[0-9a-f]{64}$/.test(treasuryAddress)
+    ) {
+        return `[forks][gasFeeSeparation] treasuryAddress must match /^0x[0-9a-f]{64}$/, got: ${JSON.stringify(
+            treasuryAddress,
+        )}`
+    }
+    if (treasuryAddress === BURN_ADDRESS) {
+        return "[forks][gasFeeSeparation] treasuryAddress equals BURN_ADDRESS — refusing to route fees into the burn account (placeholder must be replaced before sealing genesis)."
+    }
+    return null
+}
+
+/**
  * Build the JSONB-serialised payload for a zero-balance account.
  *
  * Stays in plain-object territory so callers can `JSON.stringify` it for
@@ -276,21 +295,8 @@ export async function runGasFeeSeparationMigration(
     // 2. Defence-in-depth address validation. The loader already enforced
     //    the format; we re-check here so a future code path that bypasses
     //    the loader (e.g. direct test invocation) still fails closed.
-    if (
-        typeof treasuryAddress !== "string" ||
-        !/^0x[0-9a-f]{64}$/.test(treasuryAddress)
-    ) {
-        throw new Error(
-            `[forks][gasFeeSeparation] treasuryAddress must match /^0x[0-9a-f]{64}$/, got: ${JSON.stringify(
-                treasuryAddress,
-            )}`,
-        )
-    }
-    if (treasuryAddress === BURN_ADDRESS) {
-        throw new Error(
-            "[forks][gasFeeSeparation] treasuryAddress equals BURN_ADDRESS — refusing to route fees into the burn account (placeholder must be replaced before sealing genesis).",
-        )
-    }
+    const addressProblem = treasuryAddressProblem(treasuryAddress)
+    if (addressProblem !== null) throw new Error(addressProblem)
 
     // 3. Create burn account (balance 0).
     const burnAccountCreated = await ensureZeroAccount(

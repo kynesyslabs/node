@@ -35,6 +35,7 @@ import {
 } from "src/forks/migrations/osDenomination"
 import {
     runGasFeeSeparationMigration,
+    treasuryAddressProblem,
     FORK_NAME as GAS_FORK_NAME,
 } from "src/forks/migrations/gasFeeSeparation"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
@@ -114,11 +115,7 @@ export async function applyForksAtGenesis(
     } else if (osPre?.applied) {
         // OS-unit balances on a chain that is in DEM units until the height
         // (or for good): the hook would scale them again at that height
-        throw new Error(
-            `[GENESIS][FORKS] the snapshot is already in OS units (osDenomination applied) but the genesis ` +
-                `activates osDenomination at ${JSON.stringify(osHeight)}, not at block 0; set ` +
-                "forks.osDenomination.activationHeight to 0",
-        )
+        throw new Error(migratedSnapshotProblem(osHeight))
     } else {
         log.info(
             `[GENESIS][FORKS] osDenomination activates at ${JSON.stringify(osHeight)}; not applied at block 0`,
@@ -168,6 +165,44 @@ export async function applyForksAtGenesis(
     )
 
     return { osDenominationApplied, gasFeeSeparationApplied, elapsed_ms }
+}
+
+/**
+ * What applyForksAtGenesis would refuse for this genesis over a snapshot
+ * carrying these fork_state rows, without a database. Every validator hits
+ * the same refusal at block 0, so launch tooling reports it beforehand.
+ */
+export function genesisForkProblems(
+    forks: unknown,
+    snapshotForkState: ForkStateEntry[] | undefined,
+): string[] {
+    const forkBlock =
+        forks && typeof forks === "object" ? (forks as GenesisForkConfig) : undefined
+    const problems: string[] = []
+    const osHeight = osDenominationHeight(forkBlock)
+    if (osHeight !== 0 && findForkState(snapshotForkState, OS_FORK_NAME)?.applied) {
+        problems.push(migratedSnapshotProblem(osHeight))
+    }
+    const gas = forkBlock?.gasFeeSeparation
+    if (gas && !findForkState(snapshotForkState, GAS_FORK_NAME)?.applied) {
+        // The loader lets a null-height entry keep the zero placeholder, but
+        // block 0 still runs this migration for any entry the snapshot lacks
+        const problem = treasuryAddressProblem(gas.treasuryAddress)
+        if (problem !== null) {
+            problems.push(
+                `${problem} (block 0 runs the gasFeeSeparation migration because the snapshot does not carry it)`,
+            )
+        }
+    }
+    return problems
+}
+
+function migratedSnapshotProblem(osHeight: number | null): string {
+    return (
+        `[GENESIS][FORKS] the snapshot is already in OS units (osDenomination applied) but the genesis ` +
+        `activates osDenomination at ${JSON.stringify(osHeight)}, not at block 0; set ` +
+        "forks.osDenomination.activationHeight to 0"
+    )
 }
 
 /**
