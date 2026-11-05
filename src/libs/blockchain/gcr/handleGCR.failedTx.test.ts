@@ -143,6 +143,39 @@ describe("a transaction that fails part-way", () => {
         expect(entities.accounts.get(SENDER).balance).toBe(START - 2n)
         expect(entities.storagePrograms.get(ADDRESS).data).toEqual({ n: 2 })
     })
+
+    // A failing storage edit replays the earlier edits as undos first; a
+    // granular write cannot be undone from its edit, so it must not be
+    // applied a second time or touch another item on the way.
+    for (const [operation, variables] of [
+        ["SET_FIELD", { field: "n", value: 2 }],
+        ["SET_ITEM", { field: "list", index: 0, value: "b" }],
+        ["APPEND_ITEM", { field: "list", value: "b" }],
+        ["DELETE_FIELD", { field: "n" }],
+        ["DELETE_ITEM", { field: "list", index: 0 }],
+    ] as const) {
+        it(`keeps no ${operation} when a later storage edit fails`, async () => {
+            const program = storedProgram()
+            program.data = { n: 1, list: ["a", "z"] }
+            const entities = await caches(program)
+            const before = structuredClone({ ...entities.storagePrograms.get(ADDRESS) })
+
+            const result = await HandleGCR.applyTransaction(
+                entities,
+                tx([
+                    burn(1),
+                    storage(operation, variables),
+                    storage("SET_ITEM", { field: "n", index: 0, value: 1 }),
+                ]),
+                false,
+                false,
+            )
+
+            expect(result.success).toBe(false)
+            expect({ ...entities.storagePrograms.get(ADDRESS) }).toEqual(before)
+            expect(entities.accounts.get(SENDER).balance).toBe(START)
+        })
+    }
 })
 
 // The stored body must still hash to tx.hash: an apply that writes into the

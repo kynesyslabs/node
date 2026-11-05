@@ -11,11 +11,14 @@
  * write such an SDK builds, so it must not ship with one.
  */
 
-import { describe, it, expect, mock, beforeEach } from "bun:test"
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test"
 
 mock.module("src/libs/blockchain/chain", () => ({
     __esModule: true,
-    default: { getLastBlockNumber: async () => 100 },
+    default: {
+        getLastBlockNumber: async () => 100,
+        getExistingTransactionHashes: async () => new Set<string>(),
+    },
 }))
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
@@ -216,6 +219,103 @@ describe.skipIf(!emitsGranular)("granular storage writes on the wire", () => {
             const result = await HandleGCR.applyTransaction(entities, tx, false, true)
             expect(result.success).toBe(true)
             expect({ ...entities.storagePrograms.get(ADDRESS) }).toEqual(before)
+        })
+
+        /**
+         * The client ships the storage edit ahead of the gas and nonce edits,
+         * so a gas edit that fails comes after the write: the write must not
+         * outlive it, on the path a block takes, in a simulation, or undone.
+         */
+        describe("when the gas edit after the write fails", () => {
+            const prod = getSharedState.PROD
+            const original = {
+                prepareEntities: HandleGCR.prepareEntities,
+                saveGCREditChanges: HandleGCR.saveGCREditChanges,
+                bulkUpdateAssignedTxs: HandleGCR.bulkUpdateAssignedTxs,
+            }
+            beforeEach(() => {
+                getSharedState.PROD = true
+            })
+            afterEach(() => {
+                getSharedState.PROD = prod
+                Object.assign(HandleGCR, original)
+            })
+
+            /** Enough for any storage fee ahead of the write, short of the gas after it. */
+            async function shortOfGas(tx: Transaction) {
+                const entities = await caches()
+                const account = entities.accounts.get(normalizePubkey(SENDER))
+                const edits = tx.content.gcr_edits
+                const write = edits.indexOf(storageEdit(tx))
+                expect(edits.slice(write + 1).map(e => e.type)).toEqual(["balance", "nonce"])
+                account.balance = edits
+                    .slice(0, write)
+                    .reduce((sum, e) => sum + BigInt((e as any).amount), 0n)
+                account.nonce = 7
+                return entities
+            }
+            const stateOf = (entities: any) =>
+                structuredClone({
+                    program: { ...entities.storagePrograms.get(ADDRESS) },
+                    account: { ...entities.accounts.get(normalizePubkey(SENDER)) },
+                })
+            function inBlock(entities: unknown) {
+                Object.assign(HandleGCR, {
+                    prepareEntities: async () => entities,
+                    saveGCREditChanges: async () => {},
+                    bulkUpdateAssignedTxs: async () => {},
+                })
+            }
+
+            for (const [operation, payload] of Object.entries(payloads)) {
+                it(`${operation}: a block applying it keeps neither the write nor the fee`, async () => {
+                    const tx = await authored(payload, true)
+                    const entities = await shortOfGas(tx)
+                    const before = stateOf(entities)
+                    inBlock(entities)
+
+                    const out = await HandleGCR.applyTransactions([tx], false, undefined, { defer: true })
+
+                    expect(out.failedTxs).toEqual([tx.hash])
+                    expect(stateOf(entities)).toEqual(before)
+                })
+
+                it(`${operation}: with the gas paid, the same block applies the write`, async () => {
+                    const tx = await authored(payload, true)
+                    const entities = await shortOfGas(tx)
+                    entities.accounts.get(normalizePubkey(SENDER)).balance += burned(tx)
+                    const before = stateOf(entities)
+                    inBlock(entities)
+
+                    const out = await HandleGCR.applyTransactions([tx], false, undefined, { defer: true })
+
+                    expect(out.successfulTxs).toEqual([tx.hash])
+                    expect(stateOf(entities).program.data).not.toEqual(before.program.data)
+                })
+
+                it(`${operation}: a simulation fails it and leaves the state as it was`, async () => {
+                    const tx = await authored(payload, true)
+                    const entities = await shortOfGas(tx)
+                    const before = stateOf(entities)
+
+                    const result = await HandleGCR.applyTransaction(entities, tx, false, true)
+
+                    expect(result.success).toBe(false)
+                    expect(stateOf(entities)).toEqual(before)
+                })
+
+                it(`${operation}: undoing it fails, changing nothing`, async () => {
+                    const tx = await authored(payload, true)
+                    const entities = await caches()
+                    const before = stateOf(entities)
+                    inBlock(entities)
+
+                    const out = await HandleGCR.applyTransactions([tx], true, undefined, { defer: true })
+
+                    expect(out.failedTxs).toEqual([tx.hash])
+                    expect(stateOf(entities)).toEqual(before)
+                })
+            }
         })
 
         it("a refused write charges nothing and leaves the data as it was", async () => {
