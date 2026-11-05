@@ -114,8 +114,10 @@ services:
   # ---------------------------------------------------------------------------
   node:
     # IMAGE_NAME / IMAGE_TAG let you pull a pre-built image from a registry
-    # instead of building locally. See README → "Publishing the image" for
-    # the push/pull workflow. Defaults to a local build tagged demos-node:local.
+    # instead of building locally. Validators set IMAGE_TAG to tag@sha256:digest
+    # from the release's checksums.txt and start with `up --no-build`, so a
+    # failed pull can never fall back to a local build (INSTALL.md, "Run a
+    # released image"). Defaults to a local build tagged demos-node:local.
     image: ${IMAGE_NAME:-demos-node}:${IMAGE_TAG:-local}
     build:
       context: .
@@ -225,6 +227,9 @@ services:
       # so the SAME range must be host-published in `ports:` below — kept
       # narrow to avoid a 2000-port mapping. Both stanzas read these vars so
       # the allocation range and the published range can never drift.
+      # The proxy port the node advertises must be the one published below;
+      # without this line a changed value moved only the host mapping.
+      TLSNOTARY_PROXY_PORT: ${TLSNOTARY_PROXY_PORT:-55688}
       TLSNOTARY_PROXY_PORT_MIN: ${TLSNOTARY_PROXY_PORT_MIN:-55000}
       TLSNOTARY_PROXY_PORT_MAX: ${TLSNOTARY_PROXY_PORT_MAX:-55063}
       # Consensus: sit out rounds while a peer's fork schedule differs
