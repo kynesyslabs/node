@@ -17,6 +17,7 @@ SUITE_FILES=(
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts
+    src/libs/blockchain/finality/storageHistory.test.ts
     src/libs/blockchain/finality/storageRecord.test.ts
     src/libs/blockchain/finality/storageRoot.test.ts
     src/libs/blockchain/finality/validatorSet.test.ts
