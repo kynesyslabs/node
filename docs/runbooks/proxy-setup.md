@@ -190,9 +190,12 @@ when re-enabling the server.
 ## Rolling back
 
 ```bash
-docker compose stop caddy
-# Drop the proxy profile AND the proxy override from .env
-sed -i -e 's/,proxy//' -e 's/:docker-compose.proxy.yml//' .env
+# The reaper stops the whole stack when the node container exits, and the
+# node is recreated below; stop it first (a no-op without the reaper profile)
+docker compose stop reaper caddy
+# Drop the proxy profile AND the proxy override from .env, touching only
+# those two settings
+sed -i -e '/^COMPOSE_PROFILES=/s/,proxy//' -e '/^COMPOSE_FILE=/s/:docker-compose.proxy.yml//' .env
 # Serve Grafana from its own port again
 sed -i -e '/^GRAFANA_ROOT_URL=/d' -e '/^GRAFANA_SERVE_FROM_SUB_PATH=/d' .env
 # Recreate the services so their host ports are published again
