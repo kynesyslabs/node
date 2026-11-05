@@ -16,6 +16,8 @@ import {
 } from "./removedIdentities"
 import { sameWeb2UserId } from "@/libs/identity/web2UserId"
 import { web2CanonicalIdsActiveAtApply } from "@/forks/web2ProofBindingGate"
+import { identityCarryoverActiveAtApply } from "@/forks/identityCarryoverGate"
+import { selectWeb2Unlink } from "@/libs/identity/web2Unlink"
 
 export async function applyWeb2IdentityAdd(
     editOperation: any,
@@ -117,15 +119,17 @@ export async function applyWeb2IdentityRemove(
     accountGCR: GCRMain,
     place?: EditPlace,
 ): Promise<GCRResult> {
-    const { context, username } = editOperation.data as {
+    const { context, username, userId } = editOperation.data as {
         context: string
         username: string
+        userId?: unknown
     }
 
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     accountGCR.identities.web2[context] =
         accountGCR.identities.web2[context] || []
 
+<<<<<<< HEAD
     const linked: Web2GCRData["data"][] = accountGCR.identities.web2[context]
     const removed: RemovedEntry<Web2GCRData["data"]>[] = []
     linked.forEach((id, index) => {
@@ -151,6 +155,72 @@ export async function applyWeb2IdentityRemove(
     accountGCR.identities.web2[context] = linked.filter(
         id => id.username !== username,
     )
+=======
+    // Store the identity being removed for GitHub and Telegram unlinking (need userId)
+    let removedIdentity: Web2GCRData["data"] | null = null
+
+    if (identityCarryoverActiveAtApply()) {
+        const links: Web2GCRData["data"][] = accountGCR.identities.web2[context]
+        const pick = selectWeb2Unlink(
+            links,
+            { username, userId },
+            "Identity not found",
+        )
+        if ("message" in pick) {
+            return { success: false, message: pick.message }
+        }
+        removedIdentity = pick.removed
+        const drop = new Set(pick.indexes)
+        accountGCR.identities.web2[context] = links.filter(
+            (_, i) => !drop.has(i),
+        )
+    } else {
+        const exists = accountGCR.identities.web2[context].some(
+            (id: Web2GCRData["data"]) => id.username === username,
+        )
+
+        if (!exists) {
+            return { success: false, message: "Identity not found" }
+        }
+
+        if (context === "github" || context === "telegram") {
+            removedIdentity =
+                accountGCR.identities.web2[context].find(
+                    (id: Web2GCRData["data"]) => id.username === username,
+                ) || null
+        }
+
+        accountGCR.identities.web2[context] = accountGCR.identities.web2[
+            context
+        ].filter((id: Web2GCRData["data"]) => id.username !== username)
+    }
+
+    async function deductPoints() {
+        /**
+         * Deduct incentive points for Twitter unlinking
+         */
+        if (context === "twitter") {
+            await IncentiveManager.twitterUnlinked(editOperation.account)
+        } else if (
+            context === "github" &&
+            removedIdentity &&
+            removedIdentity.userId
+        ) {
+            await IncentiveManager.githubUnlinked(
+                editOperation.account,
+                removedIdentity.userId,
+            )
+        } else if (
+            context === "telegram" &&
+            removedIdentity &&
+            removedIdentity.userId
+        ) {
+            await IncentiveManager.telegramUnlinked(editOperation.account)
+        } else if (context === "discord") {
+            await IncentiveManager.discordUnlinked(editOperation.account)
+        }
+    }
+>>>>>>> origin/fix/storage-granular-ops
 
     return {
         success: true,

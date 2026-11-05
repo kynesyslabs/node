@@ -22,7 +22,6 @@ import {
 } from "@/forks/forkConfig"
 import { Config } from "src/config"
 import {
-    APP_VERSION,
     APP_VERSION_NAME,
     DEFAULT_SIGNING_ALGORITHM,
     DEFAULT_BLOCK_TIME,
@@ -85,7 +84,8 @@ export default class SharedState {
 
     // !SECTION Constants
     prod = Config.getInstance().core.prod
-    version = APP_VERSION
+    // package.json is the one version source, so a release bump is one edit
+    version = NODE_VERSION.version
     version_name = APP_VERSION_NAME
 
     // Git commit hash of the running binary, resolved once at boot from

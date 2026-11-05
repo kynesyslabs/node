@@ -24,9 +24,9 @@ type GCREditStorageProgram = types.GCREditStorageProgram
 type StorageProgramPayload = storage.StorageProgramPayload
 
 // REVIEW: StorageProgram fee constants matching SDK
-const STORAGE_PROGRAM_MAX_SIZE_BYTES = 1048576 // 1MB
-const STORAGE_PROGRAM_PRICING_CHUNK_BYTES = 10240 // 10KB
-const STORAGE_PROGRAM_FEE_PER_CHUNK = 1n // 1 DEM per chunk
+export const STORAGE_PROGRAM_MAX_SIZE_BYTES = 1048576 // 1MB
+export const STORAGE_PROGRAM_PRICING_CHUNK_BYTES = 10240 // 10KB
+export const STORAGE_PROGRAM_FEE_PER_CHUNK = 1n // 1 DEM per chunk
 const MAX_INTERACTION_TXS = 1000
 const STORAGE_NOT_STORABLE = `Storage program payload ${NOT_STORABLE}`
 

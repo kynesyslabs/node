@@ -6,7 +6,6 @@
  */
 
 // --- Application metadata ---
-export const APP_VERSION = "0.9.9 RC"
 export const APP_VERSION_NAME = "Oxlong Michael"
 export const DEFAULT_SIGNING_ALGORITHM = "ed25519" as const
 
@@ -41,6 +40,14 @@ export const MEMPOOL_PUBLIC_PAGE_MAX = 100
 export const MEMPOOL_MAX_BYTES = 32 * 1024 * 1024
 /** Most pending txs one sender may hold. */
 export const MEMPOOL_MAX_PENDING_PER_SENDER = 64
+/**
+ * How far past the sender's confirmed nonce an admitted tx may be
+ * (`nonceIntegrity`). A gap is allowed so a client can send a batch through
+ * several RPCs, but a tx that cannot apply until earlier nonces land must not
+ * sit in the pool without bound. Kept well under the per-sender cap, so a
+ * sender's own future nonces never lock out the tx that fills the gap.
+ */
+export const MEMPOOL_MAX_NONCE_AHEAD = 16
 /** A tx stays valid for this long after its signed timestamp. */
 export const MEMPOOL_TX_TTL_MS = 10 * 60 * 1000
 /** How far ahead of the node's clock a signed timestamp may be. */

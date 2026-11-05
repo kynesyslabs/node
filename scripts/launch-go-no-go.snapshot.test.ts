@@ -8,7 +8,7 @@ import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { MAINNET_FORKS, type ValidatorProbe, checkLaunch } from "./launch-go-no-go"
+import { KNOWN_FORKS, MAINNET_FORKS, type ValidatorProbe, checkLaunch } from "./launch-go-no-go"
 import { NO_SNAPSHOT_REASON, activeAtBlockZero, readBlockZeroValidators } from "./launch-validator-set"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
@@ -34,14 +34,37 @@ function row(i: number, status = "2") {
 }
 
 /** A snapshot directory the node's loader accepts, with optional validators.jsonl. */
-function snapshotDir(validators: object[] | null, { manifest = true } = {}): string {
+function snapshotDir(
+    validators: object[] | null,
+    { manifest = true, balances = [] as string[], osApplied = true } = {},
+): string {
     const dir = mkdtempSync(join(tmpdir(), "go-no-go-snapshot-"))
     dirs.push(dir)
-    for (const f of ["gcr_main.jsonl", "gcr_storageprogram.jsonl", "identity_commitments.jsonl"]) {
+    for (const f of ["gcr_storageprogram.jsonl", "identity_commitments.jsonl"]) {
         writeFileSync(join(dir, f), "")
     }
+    const gcr = balances
+        .map((balance, i) =>
+            JSON.stringify({
+                pubkey: id(100 + i),
+                assignedTxs: [],
+                nonce: 0,
+                balance,
+                identities: {},
+                points: {},
+                referralInfo: {},
+                flagged: false,
+                flaggedReason: "",
+                reviewed: false,
+                createdAt: "2026-01-01 00:00:00",
+                updatedAt: "2026-01-01 00:00:00",
+            }) + "\n",
+        )
+        .join("")
+    writeFileSync(join(dir, "gcr_main.jsonl"), gcr)
+    const balanceSum = balances.reduce((a, b) => a + BigInt(b), 0n).toString()
     const files: Record<string, object> = {
-        "gcr_main.jsonl": { sha256: sha256(""), rows: 0, balance_sum: "0" },
+        "gcr_main.jsonl": { sha256: sha256(gcr), rows: balances.length, balance_sum: balanceSum },
         "gcr_storageprogram.jsonl": { sha256: sha256(""), rows: 0, size_bytes_sum: 0 },
         "identity_commitments.jsonl": { sha256: sha256(""), rows: 0 },
     }
@@ -64,7 +87,9 @@ function snapshotDir(validators: object[] | null, { manifest = true } = {}): str
                     dumped_at: "2026-10-29T00:00:00Z",
                 },
                 files,
-                ...(validators ? { fork_state: [] } : {}),
+                ...(validators
+                    ? { fork_state: osApplied ? [{ fork_name: "osDenomination", applied: true }] : [] }
+                    : {}),
                 transforms_applied: {
                     nonces_reset_to_zero: true,
                     assigned_txs_emptied: true,
@@ -78,8 +103,8 @@ function snapshotDir(validators: object[] | null, { manifest = true } = {}): str
 
 const genesisRows = Array.from({ length: 10 }, (_, i) => row(i))
 const genesis = {
-    properties: { id: 1, shardSize: 10 },
-    forks: Object.fromEntries(MAINNET_FORKS.map(name => [name, { activationHeight: 0 }])),
+    properties: { id: 7, shardSize: 10 },
+    forks: Object.fromEntries(KNOWN_FORKS.map(name => [name, { activationHeight: MAINNET_FORKS.includes(name) ? 0 : null }])),
     validators: genesisRows,
 }
 
@@ -114,7 +139,8 @@ describe("block 0 validator set", () => {
     })
 
     it("uses genesis.validators when the snapshot has no validators.jsonl", async () => {
-        const set = await readBlockZeroValidators(genesis, snapshotDir(null))
+        const legacy = { ...genesis, forks: { ...genesis.forks, identityCarryover: { activationHeight: null } } }
+        const set = await readBlockZeroValidators(legacy, snapshotDir(null))
         expect(set.source).toBe("genesis")
         expect(set.rows).toBe(genesisRows)
         expect(set.warnings).toEqual([])
@@ -221,5 +247,33 @@ describe("block 0 validator set", () => {
         const before = process.env.DEMOS_SNAPSHOT_DIR
         await readBlockZeroValidators(genesis, snapshotDir(null))
         expect(process.env.DEMOS_SNAPSHOT_DIR).toBe(before)
+    })
+})
+
+describe("block 0 under identityCarryover", () => {
+    it("passes a zero-balance snapshot whose validators.jsonl is the genesis list", async () => {
+        const set = await readBlockZeroValidators(genesis, snapshotDir(genesisRows, { balances: ["0", "0"] }))
+        expect(set.reasons).toEqual([])
+    })
+
+    it("is NO-GO for a snapshot the node would refuse at block 0", async () => {
+        const funded = await readBlockZeroValidators(genesis, snapshotDir(genesisRows, { balances: ["0", "5"] }))
+        expect(funded.reasons.join("\n")).toContain("balance_sum is \"5\"")
+        expect(funded.reasons.join("\n")).toContain(`row 2 (${id(101)}) holds balance 5`)
+
+        const other = await readBlockZeroValidators(genesis, snapshotDir(genesisRows.slice(0, 9)))
+        expect(other.reasons.join("\n")).toContain(`genesis validator ${id(9)} is not in the snapshot's validators.jsonl`)
+
+        const none = await readBlockZeroValidators(genesis, snapshotDir(null))
+        expect(none.reasons.join("\n")).toContain("carries no validators.jsonl")
+
+        const dem = await readBlockZeroValidators(genesis, snapshotDir(genesisRows, { balances: ["0"], osApplied: false }))
+        expect(dem.reasons.join("\n")).toContain("does not record osDenomination as applied")
+    })
+
+    it("does not check balances when the genesis does not schedule the fork at 0", async () => {
+        const later = { ...genesis, forks: { ...genesis.forks, identityCarryover: { activationHeight: 10 } } }
+        const set = await readBlockZeroValidators(later, snapshotDir(genesisRows, { balances: ["5"] }))
+        expect(set.reasons).toEqual([])
     })
 })

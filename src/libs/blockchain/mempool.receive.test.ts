@@ -95,7 +95,7 @@ const tx = (hash: string, referenceBlock: number, status = "pending") =>
         status,
         reference_block: referenceBlock,
         blockNumber: 100,
-        content: { type: "demoswork", gcr_edits: [] },
+        content: { type: "demoswork", gcr_edits: [], timestamp: 1_700_000_000_000, nonce: 7 },
     }) as any
 
 describe("Mempool.receive admission", () => {
@@ -152,6 +152,26 @@ describe("Mempool.receive admission", () => {
         await Mempool.receive([tx("0xpoisoned", 100, "failed")])
         expect(insertedRows).toHaveLength(1)
         expect(insertedRows[0].status).toBe(TRANSACTION_STATUS.PENDING)
+    })
+
+    it("stores the signed timestamp and nonce, not the ones the peer put beside them", async () => {
+        const relayed = { ...tx("0xa", 100), timestamp: "bad", nonce: "bad" }
+        await Mempool.receive([relayed])
+        expect(insertedRows).toHaveLength(1)
+        expect(insertedRows[0].timestamp).toBe(1_700_000_000_000)
+        expect(insertedRows[0].nonce).toBe(7)
+    })
+
+    it("drops a tx whose unsigned integer columns Postgres cannot store and keeps the rest", async () => {
+        // One such row would fail the insert of every tx merged with it.
+        await Mempool.receive([
+            { ...tx("0xblock", 100), blockNumber: "bad" },
+            { ...tx("0xnull", 100), blockNumber: null },
+            tx("0xfraction", 99.5),
+            { ...tx("0xhuge", 100), blockNumber: 2 ** 31 },
+            tx("0xa", 100),
+        ])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xa"])
     })
 
     it("skips txs already in the mempool without querying the chain for them", async () => {

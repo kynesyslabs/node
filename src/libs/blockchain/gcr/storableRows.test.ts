@@ -24,7 +24,7 @@ installStorageEditMocks()
 const { default: HandleGCR } = await import("./handleGCR")
 const { default: Chain } = await import("../chain")
 const { getSharedState } = await import("@/utilities/sharedState")
-const { unstorableRow, indexedColumns, ROW_ENTITIES } = await import("./storableRows")
+const { unstorableRow, indexedColumns, indexedValues, ROW_ENTITIES } = await import("./storableRows")
 
 /** Text no compression shrinks: a b-tree entry keeps about its length. */
 const random = (length: number) =>
@@ -75,6 +75,45 @@ describe("a storage program row Postgres would refuse", () => {
         expect(result.success).toBe(false)
         expect(entities.storagePrograms.get(ADDRESS).data).toEqual({ n: 1 })
         expect(entities.accounts.get(SENDER).balance).toBe(START)
+    })
+})
+
+describe("a program stored with an indexed value over the cap", () => {
+    // Older nodes stored names up to what the b-tree took, and a snapshot
+    // import copies them as they are.
+    const longName = random(1100)
+    const stored = () => Object.assign(storedProgram(), { programName: longName })
+
+    for (const [operation, variables] of [
+        ["SET_FIELD", { field: "n", value: 2 }],
+        ["WRITE_STORAGE", { data: { n: 2 } }],
+        ["UPDATE_ACCESS_CONTROL", { acl: { mode: "public" } }],
+        ["DELETE_STORAGE_PROGRAM", {}],
+    ] as const) {
+        it(`still takes an edit that leaves the value as it was: ${operation}`, async () => {
+            const entities = await caches(stored())
+            const result = await HandleGCR.applyTransaction(
+                entities,
+                tx([burn(1), storage(operation, variables)]),
+                false,
+                false,
+            )
+            expect(result.success).toBe(true)
+            expect(entities.storagePrograms.get(ADDRESS).programName).toBe(longName)
+            expect(entities.accounts.get(SENDER).balance).toBe(START - 1n)
+        })
+    }
+
+    it("is not a value a new program may take", async () => {
+        const entities = await caches()
+        const result = await HandleGCR.applyTransaction(
+            entities,
+            tx([burn(1), create({ programName: longName })]),
+            false,
+            false,
+        )
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("storagePrograms.programName")
     })
 })
 
@@ -142,6 +181,22 @@ describe("indexed text columns", () => {
         // Any sender may propose; the id is unique and indexed.
         expect(unstorableRow("networkUpgrades", { proposalId: random(3000) })).toBe("networkUpgrades.proposalId")
         expect(unstorableRow("tlsNotaries", { tokenId: "tlsn_x", domain: random(3000) })).toBe("tlsNotaries.domain")
+    })
+
+    it("judge a value the row already held only when the edit changed it", () => {
+        const long = random(1100)
+        const row = { ...storedProgram(), programName: long }
+        const stored = indexedValues("storagePrograms", row)
+        expect(stored?.programName).toBe(long)
+        expect(unstorableRow("storagePrograms", row, stored)).toBeNull()
+        expect(unstorableRow("storagePrograms", { ...row, programName: random(1101) }, stored)).toBe(
+            "storagePrograms.programName",
+        )
+        // U+0000 is refused by Postgres itself, whatever the row held.
+        expect(unstorableRow("storagePrograms", { ...row, owner: "a\u0000" }, { ...stored, owner: "a\u0000" })).toBe(
+            "storagePrograms.owner",
+        )
+        expect(unstorableRow("storagePrograms", row)).toBe("storagePrograms.programName")
     })
 
     it("are the ones the schema indexes", () => {

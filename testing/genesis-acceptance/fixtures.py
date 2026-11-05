@@ -4,7 +4,7 @@ data/genesis.json. Python keeps integer literals exact, which a JSON.parse
 round trip would not for 18-digit stakes.
 
 Writes into --out:
-  launch.json       the launch genesis: fixed timestamp, chain id, the five
+  launch.json       the launch genesis: fixed timestamp, chain id, the
                     mainnet forks at height 0, snapshot bound by its manifest
   onebyte.json      launch with the timestamp one second later
   forkpast.json     launch with commitLock moved to height 1 (inside tip + 50)
@@ -17,7 +17,8 @@ import hashlib
 import json
 import os
 
-MAINNET_FORKS = ["signatureDomain", "editBinding", "quorumParity", "committeeBinding", "commitLock"]
+# Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
+MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover"]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--base", required=True, help="the image's data/genesis.json")

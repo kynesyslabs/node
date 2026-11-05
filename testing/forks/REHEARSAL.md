@@ -446,8 +446,9 @@ The first two can ship long before the rest: a client that follows
 | Devnet start-up | nodes exit when a peer is not answering yet and the engine restarts them; they settle within a minute. The script starts node 1 first | none on a real network, where nodes start in their own time |
 
 **What happens to a wrong-schedule validator on testnet.** The root
-`docker-compose.yml` runs the node with `restart: "no"` and a reaper service
-that stops the rest of the stack when the node exits, so that an intentional
+`docker-compose.yml` runs the node with `restart: "no"` (and, with the `reaper`
+profile, a reaper service that stops the rest of the stack when the node
+exits), so that an intentional
 exit stays down with its logs intact. The stall watchdog's `process.exit(0)`
 (`stallDetection.ts`) therefore leaves that validator DOWN, not restarted. The
 devnet compose this rehearsal uses has `restart: unless-stopped`, so there the

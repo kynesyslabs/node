@@ -13,6 +13,7 @@ const getTransactionHistory = jest.fn(async (..._args: unknown[]) => [] as any[]
 jest.mock("../../blockchain/chain", () => ({ __esModule: true, default: { getTxByHash, getLastBlockNumber, getTransactionHistory } }))
 jest.mock("../routines/nodecalls/getTransactions", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("../routines/nodecalls/getTransactionStatus", () => ({ __esModule: true, default: jest.fn() }))
+jest.mock("../routines/nodecalls/getTransactionProof", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("../routines/nodecalls/getTxsByHashes", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("../../blockchain/mempool", () => ({ __esModule: true, default: {} }))
 jest.mock("src/utilities/logger", () => ({

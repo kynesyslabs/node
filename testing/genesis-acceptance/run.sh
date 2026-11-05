@@ -7,7 +7,7 @@
 # One node and one throwaway Postgres on a private bridge network with no
 # published ports. The node needs a route out only for NTP (it exits at boot
 # when no NTP server answers); with an empty peer list it dials no peer, and
-# the testnet URLs in the bundled snapshot's validator list are only stored.
+# the testnet URLs in the genesis validator list are only stored.
 # Twelve scenarios run in order; 6-11 restart on the database that
 # scenario 1 created, restored to its state after scenario 6 before each one.
 #
@@ -44,7 +44,8 @@ UNKNOWN_FORK=genesisAcceptanceUnknownFork
 RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
-MAINNET_FORKS="signatureDomain editBinding quorumParity committeeBinding commitLock"
+# Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
+MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs identityCarryover"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -148,7 +149,14 @@ docker cp -q "${CP}:/app/data/genesis.json" "${FIX}/image/genesis.json" &&
     docker cp -q "${CP}:/app/data/snapshot" "${FIX}/image/snapshot" ||
     die2 "the image has no /app/data/genesis.json or /app/data/snapshot"
 docker rm -v "${CP}" >/dev/null
-cp "${FIX}/image/snapshot/manifest.json" "${FIX}/manifest/manifest.json"
+
+# identityCarryover refuses a snapshot that carries balances or validators of
+# its own, so every scenario boots on the carry-over build of the bundled
+# snapshot, its validators taken from the image's genesis.
+(cd "${REPO_ROOT}" && bun scripts/state-snapshot/carryover.ts --in "${FIX}/image/snapshot" \
+    --validators "${FIX}/image/genesis.json" --out "${FIX}/snapshot") >> "${RUNLOG}" 2>&1 ||
+    die2 "carry-over snapshot build failed (run.log)"
+cp "${FIX}/snapshot/manifest.json" "${FIX}/manifest/manifest.json"
 
 python3 "${HERE}/fixtures.py" --base "${FIX}/image/genesis.json" --manifest "${FIX}/manifest/manifest.json" \
     --out "${FIX}" --chain-id "${CHAIN_ID}" --timestamp "${GENESIS_TS}" \
@@ -156,12 +164,12 @@ python3 "${HERE}/fixtures.py" --base "${FIX}/image/genesis.json" --manifest "${F
     die2 "fixture generation failed (run.log)"
 
 # A snapshot whose manifest differs by one trailing newline; the files it lists are untouched
-cp -a "${FIX}/image/snapshot" "${FIX}/snapshot-ws"
+cp -a "${FIX}/snapshot" "${FIX}/snapshot-ws"
 printf '\n' >> "${FIX}/snapshot-ws/manifest.json"
 
 genesis_hash() { # $1 genesis file -> JSON from scripts/genesis-hash.ts (log lines dropped)
     local out
-    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/manifest" --json 2>>"${RUNLOG}")
+    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/snapshot" --json 2>>"${RUNLOG}")
     local rc=$?
     echo "${out}" | sed -n '/^{/,$p'
     return ${rc}
@@ -209,6 +217,7 @@ state_volume() { # $1 name: identity readable only by the node user
     new_volume "$1" "cp /in/keys/node.identity /v/node.identity && chmod 600 /v/node.identity"
 }
 new_volume "${RID}-snap-ws" "cp -a /in/fixtures/snapshot-ws/. /v/" || die2 "snapshot volume failed"
+new_volume "${RID}-snap" "cp -a /in/fixtures/snapshot/. /v/" || die2 "snapshot volume failed"
 
 docker run -d --name "${PG}" --network "${NET}" --memory "${PG_MEM}" --memory-swap "${PG_MEM}" \
     -e POSTGRES_USER="${PG_USER}" -e POSTGRES_PASSWORD="${PG_PASSWORD}" -e POSTGRES_DB=postgres \
@@ -254,6 +263,8 @@ start_node() { # $1 scenario id, $2 db, $3 state volume, $4 genesis file, $5 pin
     NODE="${RID}-${sid}"
     local pin_env=()
     [ "${pin}" != "-" ] && pin_env=(-e "EXPECTED_GENESIS_HASH=${pin}")
+    local snap_env=(-v "${RID}-snap:/app/snapshot-carry:ro" -e DEMOS_SNAPSHOT_DIR=/app/snapshot-carry)
+    [[ " $* " == *" DEMOS_SNAPSHOT_DIR="* ]] && snap_env=()
     docker run -d --name "${NODE}" --network "${NET}" \
         --memory "${NODE_MEM}" --memory-swap "${NODE_MEM}" --cpus "${NODE_CPUS}" \
         -e PG_HOST="${PG}" -e PG_PORT=5432 -e PG_USER="${PG_USER}" -e PG_PASSWORD="${PG_PASSWORD}" \
@@ -263,7 +274,7 @@ start_node() { # $1 scenario id, $2 db, $3 state volume, $4 genesis file, $5 pin
         -e GOSSIP_ENABLED=false -e OMNI_ENABLED=false -e OMNI_MODE=HTTP_ONLY \
         -e L2PS_MESSAGING_ENABLED=false -e L2PS_ZK_ENABLED=false \
         -e DEMOS_SKIP_SETUP_CHECK=true -e LOG_LEVEL=info \
-        "${pin_env[@]}" "$@" \
+        "${pin_env[@]}" "${snap_env[@]}" "$@" \
         -v "${vol}:/app/state" \
         -v "${gen}:/app/data/genesis.json:ro" \
         "${IMAGE}" >> "${RUNLOG}" 2>&1 || return 1
@@ -331,7 +342,7 @@ refusal_line() { # the refusal the node raised, else the fatal error that stoppe
 REFUSAL_RE='^(GenesisRefusal|ForkConfigValidationError): |\[ERROR\] .*[Rr]efusing to boot'
 genesis_refusal() { grep -qE "${REFUSAL_RE}" "${EVID}/$1.node.log"; }
 
-# Checks on a running node: the pin it reports and the five forks active.
+# Checks on a running node: the pin it reports and the mainnet forks active.
 BOOT_NOTES=""
 boot_checks() { # $1 expected pin; sets BOOT_NOTES, returns 0 when all hold
     local ok=0 gh ni f bad=""
@@ -343,7 +354,7 @@ boot_checks() { # $1 expected pin; sets BOOT_NOTES, returns 0 when all hold
         [ "$(echo "${ni}" | jq -r ".response.forks.${f}.activated" 2>/dev/null)" = true ] &&
             [ "$(echo "${ni}" | jq -r ".response.forks.${f}.activationHeight" 2>/dev/null)" = 0 ] || bad="${bad} ${f}"
     done
-    if [ -z "${bad}" ]; then BOOT_NOTES="${BOOT_NOTES}; 5 forks active at 0"; else BOOT_NOTES="${BOOT_NOTES}; not active at 0:${bad}"; ok=1; fi
+    if [ -z "${bad}" ]; then BOOT_NOTES="${BOOT_NOTES}; mainnet forks active at 0"; else BOOT_NOTES="${BOOT_NOTES}; not active at 0:${bad}"; ok=1; fi
     local cid tip
     cid=$(echo "${ni}" | jq -r '.response.chainId' 2>/dev/null)
     tip=$(echo "${ni}" | jq -r '.response.forks.signatureDomain.currentHeight' 2>/dev/null)
@@ -463,7 +474,7 @@ else VERDICT=FAIL; NOTES="${NOTES}; block 0 ${H0:-none} != genesis-hash.ts ${BLO
 [ "${OBS}" = exit ] && NOTES="$(refusal_line "${CUR}")"
 ACC1=$(accepted_row chain)
 NOTES="${NOTES}; block 0 ${H0:0:16}…; accepted schedule: $(echo "${ACC1}" | jq -r '.digest // .' 2>/dev/null || echo "${ACC1}")"
-record s01 fresh-correct "boots, both pins + 5 forks active" "${OBSERVED}" "${VERDICT}" "${CODE}" "${ROWS}" "${NOTES}"
+record s01 fresh-correct "boots, both pins + mainnet forks active" "${OBSERVED}" "${VERDICT}" "${CODE}" "${ROWS}" "${NOTES}"
 S01_PASS=${VERDICT}
 
 # ── 2-5. fresh refusals ─────────────────────────────────────────────────
@@ -569,7 +580,7 @@ TOTAL=$(($(wc -l < "${EVID}/results.tsv") - 1))
     echo "- Resolved: \`${IMAGE_DIGEST:-no registry digest (local build)}\`, image id \`${IMAGE_ID}\`"
     echo "- Image commit (GIT_COMMIT): \`${IMAGE_COMMIT:-unknown}\`; entrypoint and user as published: \`${IMAGE_ENTRY}\`"
     echo "- Run: $(date -u +%FT%TZ), harness \`testing/genesis-acceptance/run.sh\` at $(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null)$([ -n "$(git -C "${REPO_ROOT}" status --porcelain -- testing/genesis-acceptance 2>/dev/null)" ] && echo ' (harness not committed there)')"
-    echo "- Launch genesis: chain id ${CHAIN_ID}, timestamp ${GENESIS_TS}, forks ${MAINNET_FORKS// /, } at 0, image's bundled snapshot bound by manifest sha256 \`${MANIFEST_SHA}\`"
+    echo "- Launch genesis: chain id ${CHAIN_ID}, timestamp ${GENESIS_TS}, forks ${MAINNET_FORKS// /, } at 0, carry-over build of the image's snapshot bound by manifest sha256 \`${MANIFEST_SHA}\`"
     echo "- EXPECTED_GENESIS_HASH (launch): \`${PIN}\`; EXPECTED_GENESIS_BLOCK_HASH \`${BLOCK_PIN}\`; fork schedule digest \`${LAUNCH_DIGEST}\`"
     echo "- Other pins: one-byte genesis \`${OTHER_PIN}\`; malformed \`${BAD_PIN}\` (63 hex)"
     echo "- Containers: node \`--memory ${NODE_MEM} --cpus ${NODE_CPUS}\`, postgres \`--memory ${PG_MEM}\`, private bridge network, no published ports, empty peer list"

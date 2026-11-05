@@ -19,7 +19,7 @@
 
 import { describe, it, expect } from "bun:test"
 
-import { mergeGenesisBalances } from "src/libs/blockchain/genesis/mergeGenesisBalances"
+import { genesisBalancesProblems, mergeGenesisBalances } from "src/libs/blockchain/genesis/mergeGenesisBalances"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 
 // =============================================================================
@@ -106,31 +106,44 @@ describe("mergeGenesisBalances", () => {
         ).rejects.toThrow(/pubkey is not a non-empty string/)
     })
 
+    it.each([
+        ["a placeholder", "FILL"],
+        ["a short hex string", "0xabc"],
+        ["an upper-case address", "0xAA00000000000000000000000000000000000000000000000000000000000001"],
+        ["an address without 0x", "aa00000000000000000000000000000000000000000000000000000000000001"],
+    ])("rejects %s as the pubkey", async (_label, pubkey) => {
+        const { em } = makeMockEm()
+        await expect(
+            mergeGenesisBalances(em, [[pubkey, "100"]]),
+        ).rejects.toThrow(/not a 0x-prefixed lowercase 64-hex address/)
+        expect(genesisBalancesProblems([[pubkey, "100"]])).toHaveLength(1)
+    })
+
     it("rejects negative balance", async () => {
         const { em } = makeMockEm()
         await expect(
-            mergeGenesisBalances(em, [["0xabc", "-1"]]),
+            mergeGenesisBalances(em, [["0xaa00000000000000000000000000000000000000000000000000000000000001", "-1"]]),
         ).rejects.toThrow(/negative balance/)
     })
 
     it("rejects fractional number balance", async () => {
         const { em } = makeMockEm()
         await expect(
-            mergeGenesisBalances(em, [["0xabc", 1.5]]),
+            mergeGenesisBalances(em, [["0xaa00000000000000000000000000000000000000000000000000000000000001", 1.5]]),
         ).rejects.toThrow(/must be a finite integer/)
     })
 
     it("rejects NaN balance", async () => {
         const { em } = makeMockEm()
         await expect(
-            mergeGenesisBalances(em, [["0xabc", NaN]]),
+            mergeGenesisBalances(em, [["0xaa00000000000000000000000000000000000000000000000000000000000001", NaN]]),
         ).rejects.toThrow(/must be a finite integer/)
     })
 
     it("rejects unsupported balance type", async () => {
         const { em } = makeMockEm()
         await expect(
-            mergeGenesisBalances(em, [["0xabc", { v: 1 } as any]]),
+            mergeGenesisBalances(em, [["0xaa00000000000000000000000000000000000000000000000000000000000001", { v: 1 } as any]]),
         ).rejects.toThrow(/unsupported balance type/)
     })
 

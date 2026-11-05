@@ -234,6 +234,7 @@ export interface DiagnosticsConfig {
 
 export interface DebugConfig {
     assertionsEnabled: boolean
+    storageRootRecompute: boolean
 }
 
 // --- Identity & Web2 Services ---
@@ -280,6 +281,8 @@ export interface GossipConfig {
     port: number
     heightsIntervalMs: number
     keyFile: string
+    /** How long one sidecar launch may take to open its IPC socket. */
+    ipcConnectTimeoutMs: number
 }
 
 // --- Full Application Config ---
