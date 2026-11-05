@@ -202,4 +202,6 @@ its sole purpose is rehearsal.
   place (`data/snapshot` or `DEMOS_SNAPSHOT_DIR`, matching block 0's
   `snapshot.manifestSha256`), which mainnet needs every time. If a node
   refuses its genesis the drill ends as a timeout on the baseline height, with
-  the node's `Refusing to boot` line appended to the error.
+  the node's `Refusing to boot` line appended to the error (read from the
+  last 400 lines of its log within 30 s; a log that cannot be read is named
+  as unreadable).

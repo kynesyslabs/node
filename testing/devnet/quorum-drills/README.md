@@ -195,9 +195,12 @@ If the template ever sets another fork to 0 that needs a snapshot, add it to
 that list. Until then a drill with it active does not run: no node serves, and
 `run.sh` ends the bring-up as `ABORT: node-N did not serve within 180s` (exit
 2) followed by `node-N log: ...`, the node's last `Refusing to boot` line
-(`boot_failure_line`; the full log is kept in `node-N.log`). Scenario 12 times
-out on its baseline height (exit 1, `scenario.ts`) and appends the same line to
-the error. Neither run produces a verdict. Neither has been run against a real
+(`boot_failure_line`, from the log's last 2000 lines, each docker call within
+60 s; the full log is kept in `node-N.log`). A log that cannot be read gives
+`node-N log: unreadable (why)`, still exit 2. Scenario 12 times out on its
+baseline height (exit 1, `scenario.ts`) and appends the same line to the error
+(`withBootRefusals`: the last 400 lines, read within 30 s; a log it cannot read
+is named `log unreadable (why)`). Neither run produces a verdict. Neither has been run against a real
 refusal here; the line extraction is tested against stubs.
 
 `run.sh` logs the set (`forks (launch): ...; excluded: identityCarryover
@@ -484,11 +487,22 @@ A connection-limit hit can no longer pass:
   many clients`. Any hit turns a PASS or a FAIL into `ERROR`, exit 2, `could
   not run: postgres connection limit hit (n lines in node-.. node-..); the
   result was PASS`, in `verdict.json` and `results.tsv`.
-- **Backstop**: when the logs are collected at teardown, a hit also replaces
-  exit 0 or 1 by 2, for the exits that skip the verdict (an early FAIL).
+- **Unreadable logs**: the check reads the whole log of every node that was
+  started (`read_node_log`). Each docker call it makes is bounded by
+  `LOG_READ_TIMEOUT_S` (60 s), and the log by `LOG_READ_MAX_BYTES` (256 MiB,
+  after colour codes are stripped). A log it cannot read whole, or a
+  `psql-errors.log` it cannot read, is also `ERROR`, exit 2: `could not
+  run: could not read the log of node-N to check for the postgres connection
+  limit (why); the result was PASS`. The reason can be a docker error, no
+  answer in time, no container, or a log over the bound.
+- **Backstop**: when the logs are collected at teardown (with the same
+  bounds), a hit also replaces exit 0 or 1 by 2, for the exits that skip the
+  verdict (an early FAIL). So does a started node's log that could not be
+  collected, unless the check above already read every log.
 
-`lockstep-stub.test.sh` covers the preflight and the check against a fake
-`docker`, and runs `run.sh` from the top on both start paths (on the image
+`lockstep-stub.test.sh` covers the preflight, the check and the backstop
+against a fake `docker` (a `docker logs` that fails, stalls past a 1 s bound
+set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log), and runs `run.sh` from the top on both start paths (on the image
 path: preflight, then the 13 migrations, then node-1);
 `drillInputs.test.ts` the generated compose for N=4, 10 and 13.
 
@@ -499,7 +513,8 @@ Everything goes to `runs/<UTC time>-<scenario>-<binding>-<label>/`
 file: devnet keys, never commit them), `logs/01-preflight.log` ..
 `05-verdict.log` per step, `events.log` with a timestamped line per stop,
 start and partition change, `node-N.log` (full container logs, collected at
-teardown), `phases.tsv` (per phase: validators down and live, height range,
+teardown, each within the bounds of the connection-limit check below),
+`phases.tsv` (per phase: validators down and live, height range,
 blocks, mean and longest gap between block timestamps, outcome),
 `verdict.json` and `run.log` with the whole run. The `halt-*` and `ride-*`
 drills also leave `drill-input.json` (what the run observed),
