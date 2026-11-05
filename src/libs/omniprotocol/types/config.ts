@@ -9,6 +9,7 @@ import {
     DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
     DEFAULT_CIRCUIT_BREAKER_TIMEOUT_MS,
     DEFAULT_MIGRATION_FALLBACK_TIMEOUT_MS,
+    DEFAULT_HTTP_FALLBACK_COOLDOWN_MS,
     OMNI_PROTOCOL_VERSION,
     DEFAULT_PROTOCOL_TIMEOUT_MS,
     DEFAULT_PROTOCOL_LONG_CALL_TIMEOUT_MS,
@@ -41,6 +42,8 @@ export interface MigrationConfig {
     omniPeers: Set<string>
     autoDetect: boolean
     fallbackTimeout: number
+    /** How long a peer stays HTTP-only after an OmniProtocol failure */
+    httpFallbackCooldown: number
 }
 
 export interface OmniProtocolConfig {
@@ -66,6 +69,7 @@ export const DEFAULT_OMNIPROTOCOL_CONFIG: OmniProtocolConfig = {
         omniPeers: new Set<string>(),
         autoDetect: true,
         fallbackTimeout: DEFAULT_MIGRATION_FALLBACK_TIMEOUT_MS,
+        httpFallbackCooldown: DEFAULT_HTTP_FALLBACK_COOLDOWN_MS,
     },
     protocol: {
         version: OMNI_PROTOCOL_VERSION,

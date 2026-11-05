@@ -509,14 +509,19 @@ async function startInboundServers() {
         bootTracker.skip("omni.server", "disabled")
     }
     // Gossip layer (libp2p gossipsub), up before the hello phase so hello
-    // responses can carry our multiaddr. Failure inside start() is fatal
-    // by design.
+    // responses can carry our multiaddr. start() exits only on a missing
+    // sidecar entry or Node runtime; a sidecar that fails to come up is
+    // retried in the background while the node runs on HTTP.
     if (GossipManager.isEnabled()) {
         bootTracker.start("gossip")
         await GossipManager.getInstance().start()
         bootTracker.ready("gossip")
     } else {
         bootTracker.skip("gossip", "disabled")
+        markSubsystem(getSharedState.subsystems, "gossip", "skipped", {
+            reason: "GOSSIP_ENABLED=false",
+            enabled: false,
+        })
     }
 }
 
