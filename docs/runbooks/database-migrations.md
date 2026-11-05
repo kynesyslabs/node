@@ -14,27 +14,28 @@ applies it. `synchronize` is `false` as well, so entity changes never alter the
 schema on their own.
 
 Why: all pending migrations run in one transaction, and a bad one cannot be
-undone. There are 16 migration files, each with a `down()`. 8 of the `down()`
-methods drop data:
+undone. Every file under `src/migrations/` has a `down()`, but do not trust it.
+Before you run a release's migrations, read the `down()` of each file that
+`migration:show` lists as pending, and assume it cannot be undone. Examples of
+what a `down()` can do (the list is not complete, and new files keep landing):
 
-| Migration | `down()` |
-|---|---|
-| `BaselineSchema` | drops every table |
-| `CreateL2PSMessagesTable`, `CreateAtomicWorkTables`, `CreateL2PSExecutedHashes`, `CreateAcceptedForkSchedule` | drops the table and its rows |
-| `AddAttrsToTransactions`, `AddAttrsToBlocks` | drops the `attrs` column |
-| `EncryptL2PSTransactionHistory` | drops `encrypted_payload`, overwrites empty `content` with `{}` |
-
-The other 8 do not drop data, but four of them cannot be reverted cleanly:
-
-| Migration | `down()` |
-|---|---|
-| `WidenTransactionsMoneyColsToNumeric`, `WidenL2PSTransactionsAmountToNumeric` | narrows `numeric` back to `bigint`; errors on large values |
-| `CanonicalizeL2PSMessageKeys` | no-op: its `up()` is irreversible, the original keys are gone |
-| `ScopeL2PSMessageHashUnique` | re-adds a unique constraint; fails on duplicates |
-| `UniqueBlockNumber`, `IndexL2PSHistoryReads`, `IndexL2PSEncryptedHash`, `IndexL2PSMessageTxHash` | index-only |
+- `BaselineSchema` drops every table.
+- Migrations that create a table (for example `CreateL2PSMessagesTable`,
+  `CreateAtomicWorkTables`, `CreateAcceptedForkSchedule`) drop the table and its rows.
+- Migrations that add a column (for example `AddAttrsToTransactions`) drop the column.
+- `EncryptL2PSTransactionHistory` drops `encrypted_payload` and overwrites empty
+  `content` with `{}`.
+- The `Widen...ToNumeric` migrations narrow `numeric` back to `bigint` and error
+  on large values.
+- `CanonicalizeL2PSMessageKeys` has a no-op `down()`: its `up()` is irreversible.
+- `ScopeL2PSMessageHashUnique` re-adds a unique constraint and fails on duplicates.
 
 So the backup in step 1 is the only way back. Do not rely on
 `migration:revert`.
+
+A release can need its migration before a feature works. For example, the
+storage-proof calls added in #1111 read the `storage_program_history` table
+created by its migrations, so run `migration:run` before using them.
 
 ## Commands
 
