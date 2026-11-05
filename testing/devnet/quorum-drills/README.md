@@ -179,9 +179,17 @@ active at 0 and no snapshot refuses to boot (see
 [What differs from mainnet](#what-differs-from-mainnet-identitycarryover)). It
 is written into the drill genesis as `activationHeight: null`, also when the
 template does not list it. `gasFeeSeparation`, `web2ProofBinding`,
-`tlsnProofEnforcement`, `xmProofBinding` and `atomicWork` are off
-(`gasFeeSeparation` keeps a treasury address, which the loader wants even when
-the fork is off). The genesis has all 15 forks of the template.
+`tlsnProofEnforcement`, `xmProofBinding`, `atomicWork` and `networkGovernance`
+are off (`gasFeeSeparation` keeps a treasury address, which the loader wants
+even when the fork is off). `networkGovernance` is off because the template
+has it `null`, which `scripts/launch-go-no-go.ts` requires of a mainnet genesis
+(`LAUNCH_DORMANT_FORKS`, `scripts/launch-go-no-go.ts:179`); it is not excluded
+by name, and the drills have it off although `genesis.devnet.json` has it at
+0. Off, its gate refuses only `networkUpgrade` and `networkUpgradeVote`
+transactions and transactions carrying their edits, at RPC intake, pool
+admission and apply (`governanceGateRefusal`,
+`src/forks/governanceGate.ts:64-85`), and the drills send no transactions
+(see `nonceEnforcement` below). The genesis has all 16 forks of the template.
 
 If the template ever sets another fork to 0 that needs a snapshot, add it to
 that list. Until then a drill with it active does not run: no node serves, and
@@ -199,15 +207,18 @@ scenario 12 the same in its fork-set line), and `drill-input.json`,
 the genesis the nodes ran. The excluded forks are in `DRILL_TIMINGS` and
 `drill.timings.excludedForks` too, and `run.sh` writes them to `verdict.json`
 as `excludedForks`. The other scenarios keep the forks of
-`genesis.devnet.json` (nine launch forks and `gasFeeSeparation`, all at 0, plus
-the two `gen-inputs.py` sets); their generated compose, genesis and output are
-byte-identical to before.
+`genesis.devnet.json` (nine launch forks, `gasFeeSeparation` and
+`networkGovernance`, all at 0, plus the two `gen-inputs.py` sets); their
+generated genesis and output are byte-identical to before, and their compose
+differs only in the postgres `command` (see
+[Postgres connections](#postgres-connections)).
 
 What the drill genesis has to provide for the forks that were not all on
 before (scenario 12 had `osDenomination` at 5 and none of `signatureDomain`,
 `editBinding`, `nonceIntegrity`, `finalityProofs`; the quorum cases already
 inherited all nine from `genesis.devnet.json`, so there only `gasFeeSeparation`
-is new, and off):
+is new, and off; `networkGovernance`, at 0 in `genesis.devnet.json`, is off
+there and needs nothing):
 
 - **`finalityProofs`** draws the pool from the validator set snapshot after
   block B-2 and throws `no validator set snapshot at or below block N` without
@@ -256,8 +267,8 @@ is new, and off):
 
 Loading the generated genesis of all three launch cases and of scenario 12 with
 `loadForkConfigFromGenesis` accepts it and activates exactly the nine, with
-`identityCarryover` loaded as null (checked again after the merge of
-stabilisation 891c1e7b38, on the `genesis-fork-low.json` and
+`identityCarryover` and `networkGovernance` loaded as null (checked again
+after the merge of stabilisation 6013cd3b44, on the `genesis-fork-low.json` and
 `genesis.devnet.json` bases; it is a unit test now,
 `drillInputs.test.ts`).
 
