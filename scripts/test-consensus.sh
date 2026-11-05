@@ -68,6 +68,7 @@ SUITE_FILES=(
     src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts
+    src/libs/utils/keyMaker.test.ts
     src/utilities/nodeVersion.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/loadForkConfig.test.ts
