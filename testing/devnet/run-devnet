@@ -153,6 +153,11 @@ FINAL_COMMAND="${START_COMMAND} --no-tui"
 log_verbose "Starting node with: RPC_PORT=${PORT}"
 log_verbose "Command: ${FINAL_COMMAND}"
 
+if ! bun run migration:run; then
+    echo "❌ Error: migration:run failed on the devnet database"
+    exit 1
+fi
+
 if ! RPC_PORT=${PORT} IDENTITY_FILE=${IDENTITY_FILE} ${FINAL_COMMAND}; then
     if [[ "${HAS_BEEN_INTERRUPTED}" == "true" ]]; then
         echo ""

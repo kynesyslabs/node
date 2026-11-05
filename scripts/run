@@ -785,7 +785,9 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 	cd ..
 
 	function is_db_ready() {
-		docker exec postgres_"${PG_PORT}" pg_isready -U demosuser -d demos >/dev/null 2>&1
+		# Over TCP, not the unix socket: during Postgres first-init the temporary
+		# server answers on the socket only, then restarts before it listens on TCP
+		docker exec postgres_"${PG_PORT}" pg_isready -h 127.0.0.1 -U demosuser -d demos >/dev/null 2>&1
 		return $?
 	}
 

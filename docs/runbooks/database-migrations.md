@@ -63,6 +63,16 @@ Do it on **one** validator first, then the rest. Never on all at once.
    docker compose exec postgres pg_dump -U "${PG_USER:-demosuser}" -Fc "${PG_DATABASE:-demos}" > demos-$(date +%Y%m%d-%H%M).dump
    ```
 
+   That form is for the Postgres the launcher runs in Docker Compose. For a
+   bare-metal or external database, dump from the host with the `PG_HOST`,
+   `PG_PORT`, `PG_USER` and `PG_DATABASE` of the node config. Keep the password
+   off the command line: put it in `~/.pgpass` (mode 600) or point `PGPASSFILE`
+   at a file:
+
+   ```bash
+   pg_dump -h <PG_HOST> -p <PG_PORT> -U <PG_USER> -Fc <PG_DATABASE> > demos-$(date +%Y%m%d-%H%M).dump
+   ```
+
    Keep the file off the host. Check it is not empty (`pg_restore -l <file>`).
 
 2. **Apply on one validator.** With the new release deployed and the node
@@ -90,6 +100,41 @@ Do it on **one** validator first, then the rest. Never on all at once.
 
 4. **Apply to the rest**, one validator at a time, repeating steps 1 to 3 on
    each. Keep enough validators online to hold consensus.
+
+## Pending migrations at start
+
+The node does not check for pending migrations when it starts. If you deploy a
+release that adds a migration (for example `./run -U`, which pulls a release and
+boots it at once) and do not run step 2 first, the node boots onto the old
+schema and fails with a database error: `relation "..." does not exist` or
+`column "..." does not exist`. The first one usually shows at genesis
+(missing `accepted_fork_schedule`), but other missing columns can fail later,
+while the node is already in consensus.
+
+If you see that, stop the node and run `bun run migration:show`. Any `[ ]` line
+is pending: do the procedure above (backup first) and start the node again.
+Before `./run -U` or any update, run `bun run migration:show` after the pull and
+apply what is pending.
+
+## External database
+
+An external database (`EXTERNAL_DB` true: `./run -e` or `./run --external-db`)
+is **never** migrated by any launcher, including with `-c true`. The launchers
+only create the schema on the Postgres they start themselves. On an external database, run
+`bun run migration:run` yourself, for a first install and for every release
+that adds a migration.
+
+## Test harnesses
+
+`testing/devnet/run-devnet` (used by the devnet, `consensus-race` and
+`quorum-drills`) and `testing/l2ps-messaging/e2e.sh` run `bun run migration:run`
+before they start the node, because their databases are created empty. Known
+gap: `testing/genesis-acceptance/run.sh` starts the published image on empty
+databases (`CREATE DATABASE`) and does not migrate them. Run `bun run
+migration:run` against each of them first, or the node stops with a missing
+table error before the scenario's own refusal. Also, `consensus-race` runs a
+prebuilt `RACE_IMAGE`: only an image built from this commit has the migrate
+step.
 
 ## Roll back
 

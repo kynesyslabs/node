@@ -333,6 +333,10 @@ rm -rf data_*
 mkdir data_<PG_PORT>
 docker compose up -d
 cd ..
+# the wiped database has no schema and ./run does not create it; wait until this
+# answers "accepting connections" (Postgres restarts once on first init), then migrate
+docker exec postgres_<PG_PORT> pg_isready -h 127.0.0.1 -U demosuser -d demos
+bun run migration:run
 ./run
 ```
 
