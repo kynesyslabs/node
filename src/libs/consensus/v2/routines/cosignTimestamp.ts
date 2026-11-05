@@ -12,12 +12,12 @@
  */
 
 /**
- * How far a block timestamp may lead our network clock and still be signed.
- * An honest secretary stamps the block with its own network time when the
- * round opens, so the stamp reaches a member already in the member's past.
- * Only disagreement between NTP-calibrated clocks can put it ahead, and the
- * calibration works in whole seconds, so a few seconds cover it. A larger
- * lead is a value chosen for its effect on the block hash.
+ * How far a block timestamp may lead our clock and still be signed. An
+ * honest secretary stamps the block with its own clock when the round opens,
+ * so the stamp reaches a member already in the member's past. Only
+ * disagreement between NTP-synchronised host clocks, plus the rounding to
+ * whole seconds, can put it ahead, so a few seconds cover it. A larger lead
+ * is a value chosen for its effect on the block hash.
  */
 export const COSIGN_TIMESTAMP_MAX_LEAD_SECONDS = 5
 

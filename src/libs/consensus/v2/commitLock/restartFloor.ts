@@ -30,11 +30,11 @@ function highestRecordedRound(identityFile: string): number | null {
 }
 
 /**
- * Called once at boot with the calibrated network time, before any round
- * may be signed. An earlier run signed rounds no later than its clock plus
- * the lead, so every round up to `now` plus the lead stays refused. The
- * files lift the floor further when they hold a later round: the clock may
- * have stepped back since they were written.
+ * Called once at boot with the host clock, before any round may be signed.
+ * An earlier run signed rounds no later than its clock plus the lead, so
+ * every round up to `now` plus the lead stays refused. The files lift the
+ * floor further when they hold a later round: the clock may have stepped
+ * back since they were written.
  */
 export function armRestartSigningFloor(
     identityFile: string,

@@ -41,11 +41,8 @@ import {
 import peerBootstrap, {
     stopDeferredAnchorChecks,
 } from "./libs/peer/routines/peerBootstrap"
-import {
-    getBootTimestampCorrection,
-    getNetworkTimestamp,
-    startTimestampRecalibration,
-} from "./libs/utils/calibrateTime"
+import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
+import { checkClockAtBoot, startClockProbe } from "./libs/utils/clockProbe"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
@@ -249,13 +246,13 @@ function parseL2PSMessagingPort(raw: string | undefined): number {
 
 // SECTION Preparation methods
 
-// ANCHOR Calibrating the time
-async function calibrateTime() {
-    await getBootTimestampCorrection()
-    startTimestampRecalibration()
-    log.info(
-        "[SYNC] Timestamp correction: " + getSharedState.timestampCorrection,
-    )
+// ANCHOR Checking the host clock
+async function checkClock() {
+    await checkClockAtBoot({
+        production: getSharedState.PROD,
+        toleranceSeconds: getSharedState.getBlockTimestampTolerance(),
+    })
+    startClockProbe()
     log.info("[SYNC] Network timestamp: " + getNetworkTimestamp())
 }
 // ANCHOR Routine to handle parameters in advanced mode
@@ -831,8 +828,8 @@ async function main() {
         })
     }
 
-    // INFO Calibrating the time at the start of the node
-    await calibrateTime()
+    // INFO Checking the host clock at the start of the node
+    await checkClock()
     // Releases the hold taken at the top of main(); a throw here stops the
     // boot, so signing never opens without a floor
     armRestartSigningFloor(getSharedState.identityFile, getNetworkTimestamp())

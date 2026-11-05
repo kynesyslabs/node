@@ -18,7 +18,6 @@ const sharedState: any = {
     publicKeyHex: "pub",
     signingAlgorithm: "ed25519",
     getConsensusTime: () => 10,
-    timestampCorrection: 0,
     forkConfig: {
         committeeBinding: { activationHeight: 0 },
         commitLock: { activationHeight: 0 },
