@@ -190,14 +190,20 @@ when re-enabling the server.
 ## Rolling back
 
 ```bash
-# Just stop caddy — other services keep running unchanged
 docker compose stop caddy
-# Or remove from active profiles
-sed -i 's/,proxy//' .env
+# Drop the proxy profile AND the proxy override from .env
+sed -i -e 's/,proxy//' -e 's/:docker-compose.proxy.yml//' .env
+# Recreate the services so their host ports are published again
 docker compose up -d
 ```
 
-Host ports `53550 53551 3005 9090 3000 9091 7047` keep working direct.
+Stopping caddy alone is not a rollback. While `docker-compose.proxy.yml`
+stays in `COMPOSE_FILE`, its `ports: !override` lists keep the RPC,
+signaling, metrics, Grafana and Prometheus host ports unpublished, so RPC
+stays unreachable from outside. Removing it from `COMPOSE_FILE` and running
+`docker compose up -d` recreates every service whose ports changed.
+
+After that, host ports `53550 53551 3005 9090 3000 9091 7047` work direct again.
 
 ## Related
 
