@@ -145,16 +145,26 @@ teardown() {
     trap - EXIT INT TERM
     if [ "${STARTED_STACK}" = 1 ]; then
         say "collecting container logs"
-        local i cid
+        local i why unread="" f hit=0
         for i in $(seq 1 "${N}"); do
-            cid=$(dc ps -aq "node-${i}" 2>/dev/null)
-            [ -n "${cid}" ] && docker logs "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > "${LOG_DIR}/node-${i}.log"
+            why=$(read_node_log "${i}" "${LOG_DIR}/node-${i}.log") || { [ "${STARTED[i]:-0}" = 1 ] && unread+=" node-${i} (${why})"; }
         done
         # Backstop for the exits that skip pg_limit_gate (an early exit 0 or 1):
-        # a connection-limit hit in the collected logs is never a result
-        if [ "${rc}" -le 1 ] && grep -aq "too many clients" "${LOG_DIR}"/node-*.log "${LOG_DIR}/psql-errors.log" 2>/dev/null; then
-            say "ABORT: could not run: postgres connection limit hit (exit ${rc} replaced by 2; see ${LOG_DIR}/node-*.log)"
-            rc=2
+        # a connection-limit hit in the collected logs is never a result, and
+        # neither is an exit the gate did not clear while a log is unreadable
+        if [ "${rc}" -le 1 ]; then
+            for f in "${LOG_DIR}"/node-*.log "${LOG_DIR}/psql-errors.log"; do
+                [ -e "${f}" ] || continue
+                grep -aq "too many clients" "${f}"
+                case $? in 0) hit=1 ;; 1) ;; *) unread+=" ${f##*/} (grep failed)" ;; esac
+            done
+            if [ "${hit}" = 1 ]; then
+                say "ABORT: could not run: postgres connection limit hit (exit ${rc} replaced by 2; see ${LOG_DIR}/node-*.log)"
+                rc=2
+            elif [ -n "${unread}" ] && [ "${PG_GATE_PASSED:-0}" != 1 ]; then
+                say "ABORT: could not run: could not read${unread} to check for the postgres connection limit (exit ${rc} replaced by 2)"
+                rc=2
+            fi
         fi
         say "tearing down ${PROJECT}"
         for s in "${SIDECARS[@]}"; do docker rm -f "${s}" >/dev/null 2>&1 || true; done

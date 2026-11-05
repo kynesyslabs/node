@@ -234,7 +234,7 @@ done
 echo "== postgres connection limit: 'too many clients' never ends in a pass or a fail"
 # The gate's real log reads (and grep_logs, the reader it used up to ef47fe4c19)
 # against the fake docker: a case has 13 started nodes whose logs are FAKE/nodelog.<n>
-for f in pg_gate_unreadable grep_logs; do source <(fn_src "${f}"); done
+for f in pg_gate_unreadable grep_logs teardown; do source <(fn_src "${f}"); done
 RUN_DIR="${WORK}/run"; PROJECT=qdrill-stub
 write_verdict() { echo "VERDICT ${RESULT}: ${DETAIL}"; }
 gate_case() { # $1 name, $2 the result before the gate
@@ -308,6 +308,34 @@ check "a node that was never started is not read: rc=0" has "rc=0"
 gate_case gate_hit_unread PASS; echo "FATAL:  sorry, too many clients already" > "${FAKE}/nodelog.2"; touch "${FAKE}/nodelog.9.fail"
 gate
 check "a hit in one log and another log unreadable: exit 2" has "rc=2"
+
+echo "== teardown backstop: an exit 0 or 1 the gate did not clear is exit 2 when a node log cannot be collected"
+teardown_rc() { # $1 the status run.sh exits with: OUT, the status after teardown, and ms it took
+    local t0; t0=$(date +%s%N)
+    OUT=$( ( STARTED_STACK=1; SIDECARS=(); (exit "$1"); teardown ) 2>&1; echo "rc=$?" )
+    ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+}
+for st in 0 1; do
+    gate_case td_unread PASS; touch "${FAKE}/nodelog.2.fail"
+    teardown_rc "${st}"
+    echo "${OUT}" | grep -E 'ABORT|^rc=' | cut -c1-220 | sed 's/^/    | /'
+    check "exit ${st}, node-2's log cannot be collected: exit 2" has "rc=2"
+    check "exit ${st}, node-2's log cannot be collected: says why" \
+        has "ABORT: could not run: could not read node-2 (docker logs failed (exit 1): Error response from daemon: stub: cannot read the log of cid2) to check for the postgres connection limit (exit ${st} replaced by 2)"
+done
+gate_case td_hang PASS; echo 6 > "${FAKE}/nodelog.4.hang"
+teardown_rc 0
+check "exit 0, node-4's log read stalls: exit 2, within the bound (${ms} ms; the stub sleeps 6 s)" bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "node-4 (docker logs did not finish within 1s)" <<< "$1" && [ "$2" -lt 4000 ]' _ "${OUT}" "${ms}"
+gate_case td_cleared PASS; PG_GATE_PASSED=1; touch "${FAKE}/nodelog.2.fail"
+teardown_rc 0
+check "exit 0 after the gate cleared every log: a failed collection leaves it 0" has "rc=0"
+gate_case td_hit FAIL; printf 'FATAL:  sorry, too many clients already\n' > "${FAKE}/nodelog.7"
+teardown_rc 1
+check "exit 1 with a hit in the collected node-7 log: exit 2, as before" has "postgres connection limit hit (exit 1 replaced by 2"
+check "and node-7.log holds the collected log" grep -q "too many clients" "${LOG_DIR}/node-7.log"
+gate_case td_clean PASS; echo "clean" > "${FAKE}/nodelog.1"
+teardown_rc 0
+check "exit 0, every log collected and clean: exit 0" has "rc=0"
 
 # The wiring: the gate sits before the verdict is written, the preflight before the first node starts,
 # and a teardown backstop covers the exits that skip the gate
