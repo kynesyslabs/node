@@ -154,7 +154,7 @@ exposed by the node, so it comes from the T-24h posts). Then:
   file builds that block 0; at least `q` members of the first committee
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
-  entry with no group above `shardSize − q` and none holding more than a
+  entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
   third of the first committee's votes; the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
   `quorumParity`, `committeeBinding`, `commitLock` and `finalityProofs` at
