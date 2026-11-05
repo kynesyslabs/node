@@ -158,7 +158,9 @@ fi
 # -----------------------------------------------------------------------------
 echo "[5/6] booting stack..."
 if [[ -x ./scripts/docker-run ]]; then
-    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" up -d
+    # --clean re-wipes the already-empty volumes (harmless) and makes docker-run
+    # create the schema on the empty database: the node no longer migrates at boot.
+    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --clean up -d
 else
     docker compose up -d
 fi

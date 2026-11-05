@@ -534,6 +534,17 @@ if [[ "$USE_DEVNET" == "true" && "$SUBCOMMAND" == "up" && -d "$HOST_SNAPSHOT_DIR
         '
 fi
 
+# The node no longer applies migrations at boot (migrationsRun: false), so a
+# database wiped by --clean has no tables until they are created. Only here,
+# where the database was just emptied and there is nothing to lose, is the
+# schema created for you. Any other `up` leaves migrations to the operator:
+# docs/runbooks/database-migrations.md
+if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
+    echo "+ --clean: creating the schema on the empty database (migration:run)"
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} up -d --wait postgres
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} run --rm --no-deps node bun run migration:run
+fi
+
 # Use ${arr[@]+"${arr[@]}"} guards because `set -u` treats expansion
 # of an empty array as unset. Without these guards the default (no
 # --proxy, no extra args) invocation aborts with "PROFILES[@]: unbound

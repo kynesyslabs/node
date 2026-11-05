@@ -44,7 +44,7 @@ x-default-logging: &default-logging
 
 services:
   # ---------------------------------------------------------------------------
-  # PostgreSQL — primary datastore for the node (TypeORM with synchronize=true)
+  # PostgreSQL — primary datastore for the node (TypeORM; migrations applied by hand, see docs/runbooks/database-migrations.md)
   # Internal-only by default. Uncomment the ports stanza below to expose to host.
   # ---------------------------------------------------------------------------
   postgres:

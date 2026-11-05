@@ -67,7 +67,9 @@ export const dataSource = new DataSource({
         //     Config.getInstance().database.idleTransactionTimeoutMs,
     },
     migrations: ["src/migrations/*.{ts,js}"],
-    migrationsRun: true,
+    // Migrations are applied by hand (`bun run migration:run`), never at
+    // boot: a bad one cannot be undone. See docs/runbooks/database-migrations.md
+    migrationsRun: false,
     entities: [
         Blocks,
         MempoolTx,

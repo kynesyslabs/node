@@ -843,6 +843,21 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 		exit 1
 	fi
 
+	# The node no longer migrates at boot, so the database we just emptied
+	# with --clean gets its schema here. Nothing is created on any other run;
+	# see docs/runbooks/database-migrations.md
+	if [[ "${CLEAN}" == "true" ]] && [[ "${RESTORE}" != "true" ]]; then
+		if ! wait_for_database_ready "$PG_PORT"; then
+			echo "❌ Failed to connect to PostgreSQL database"
+			exit 1
+		fi
+		echo "🗄️  Creating the schema on the clean database (migration:run)"
+		if ! bun run migration:run; then
+			echo "❌ Error: migration:run failed on the clean database"
+			exit 1
+		fi
+	fi
+
 	if [[ "${RESTORE}" == "true" ]]; then
 		if ! wait_for_database_ready "$PG_PORT"; then
 			echo "❌ Failed to connect to PostgreSQL database"
