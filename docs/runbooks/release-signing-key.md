@@ -5,7 +5,8 @@ A validator installs only a release tag signed by a key listed in
 hold those keys: how to make one, how it gets listed, how a tag is signed and
 checked, and how a key is removed.
 
-A final release (a tag such as `v1.0.0`, with no pre-release suffix) needs
+A final release (any tag not of the form `vX.Y.Z-rc.N`, `-alpha.N` or
+`-beta.N`, so `v1.0.0` and also `v1.0.0-final`) needs
 **three holders** in that file: Hov, Jeff and one more person
 (kynesyslabs/mainnet-launch#4). Each holder has their own key; nobody holds
 another person's key. Release candidates (`v1.0.0-rc.N`) still pass with the
@@ -73,12 +74,14 @@ git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/demos_release_<name>.pub
 ```
 
-Then tag the agreed commit on `stabilisation` (its `package.json` version must
-already equal the tag without the `v`):
+Then tag the agreed commit on `stabilisation` by its full SHA, not the branch
+tip, which may have moved since the commit was agreed (its `package.json`
+version must already equal the tag without the `v`):
 
 ```bash
-git checkout stabilisation && git pull --ff-only
-git tag -s v1.0.0 -m "v1.0.0"
+git fetch origin stabilisation
+git merge-base --is-ancestor <agreed-sha> origin/stabilisation && echo "on stabilisation"
+git tag -s v1.0.0 <agreed-sha> -m "v1.0.0"
 git push origin v1.0.0
 ```
 
@@ -94,9 +97,8 @@ Anyone can check a tag the way the release workflow does:
 ```bash
 git fetch --tags origin stabilisation
 git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers
-git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers
 git merge-base --is-ancestor v1.0.0 origin/stabilisation && echo "on stabilisation"
-git verify-tag v1.0.0
+git -c gpg.ssh.allowedSignersFile=$HOME/demos-allowed-signers verify-tag v1.0.0
 ```
 
 `git verify-tag` prints `Good "git" signature for <email> with ED25519 key

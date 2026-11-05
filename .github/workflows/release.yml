@@ -4,8 +4,8 @@ name: Release
 # only when both builds produce the same manifest digest. The tag must carry
 # a signature from a key listed in .github/allowed_signers as it stands on
 # the protected release branch, and the tagged commit must be reachable from
-# that branch. A final release (no pre-release suffix, or the FINAL_RELEASE
-# repository variable) also needs REQUIRED_RELEASE_SIGNERS holders in that
+# that branch. A final release (any tag not of the form vX.Y.Z-rc.N,
+# -alpha.N or -beta.N, or the FINAL_RELEASE repository variable) also needs REQUIRED_RELEASE_SIGNERS holders in that
 # list. The signer list is never read from the tag itself, so pushing
 # a tag cannot grant signing rights. Every job checks out the exact commit
 # the signature was verified on, so a tag moved while the workflow runs
@@ -55,8 +55,9 @@ jobs:
           signers="$RUNNER_TEMP/allowed_signers"
           git show "origin/$RELEASE_BRANCH:.github/allowed_signers" > "$signers" || {
             echo "::error::.github/allowed_signers is missing on $RELEASE_BRANCH"; exit 1; }
-          # a tag without a pre-release suffix is what mainnet validators run
-          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ "$FINAL_RELEASE" = true ]; then
+          # only the known pre-release form is exempt: any other tag name
+          # (v1.0.0-final, v1.0.0+build) may be what validators run
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(rc|alpha|beta)\.[0-9]+$ ]] || [ "$FINAL_RELEASE" = true ]; then
             # one key listed twice, or two keys under one name, is still one holder
             keys=$(awk '!/^[[:space:]]*(#|$)/ { for (i = 2; i < NF; i++) if ($i ~ /^(ssh-|ecdsa-|sk-)/) { print $(i + 1); break } }' "$signers" | sort -u | wc -l)
             principals=$(awk '!/^[[:space:]]*(#|$)/ { n = split($1, p, ","); for (i = 1; i <= n; i++) print p[i] }' "$signers" | sort -u | wc -l)
