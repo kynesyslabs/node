@@ -611,7 +611,16 @@ export async function observeNode(
         obs.balances = Object.fromEntries(answers)
 
         // A block that landed while the state was read may have changed it
-        const lastHead = Number(await nodeCall(base, "getLastBlockNumber", {}, timeoutMs))
+        let lastHead: number
+        try {
+            lastHead = Number(await nodeCall(base, "getLastBlockNumber", {}, timeoutMs))
+        } catch (e) {
+            // Whether one landed is unknown: an unread next block keeps the
+            // state out of the comparison
+            obs.head = firstHead + 1
+            obs.error = `head after the state read: ${(e as Error).message}`
+            return obs
+        }
         if (lastHead > firstHead) {
             obs.head = lastHead
             obs.blocks.push(...(await readBlocks(base, firstHead + 1, Math.min(lastHead, maxScan), timeoutMs)))

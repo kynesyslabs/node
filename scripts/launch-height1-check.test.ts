@@ -7,6 +7,7 @@ import {
     buildExpectation,
     decideHeight1,
     denominationScales,
+    observeNode,
     parseAmount,
     parseReplyAmount,
 } from "./launch-height1-check"
@@ -253,5 +254,40 @@ describe("blockZeroTargets", () => {
             [id(2), "fail"],
             [id(3), "fail"],
         ])
+    })
+})
+
+describe("observeNode", () => {
+    it("leaves the state out when the head cannot be read after it", async () => {
+        let headReads = 0
+        const server = Bun.serve({
+            port: 0,
+            hostname: "127.0.0.1",
+            async fetch(req) {
+                if (req.method === "GET") return Response.json({ hash: BLOCK0 })
+                const { message } = (await req.json()).params[0]
+                const ok = (response: unknown) => Response.json({ result: 200, response })
+                switch (message) {
+                    case "getLastBlockNumber":
+                        headReads++
+                        return headReads === 1 ? ok(1) : Response.json({ result: 500, response: "down" })
+                    case "getBlockByNumber":
+                        return ok({ hash: BLOCK1, content: { previousHash: BLOCK0, ordered_transactions: [] } })
+                    case "getValidators":
+                        return ok([])
+                    default:
+                        return ok({ balance: "5000" })
+                }
+            },
+        })
+        try {
+            const obs = await observeNode(`http://127.0.0.1:${server.port}`, [id(100)], 50, 2000)
+            expect(obs.head).toBe(2)
+            expect(obs.error).toContain("head after the state read")
+            const decision = decideHeight1(expectation(), [obs], { maxScan: 50 })
+            expect(decision.verdict).not.toBe("pass")
+        } finally {
+            server.stop(true)
+        }
     })
 })
