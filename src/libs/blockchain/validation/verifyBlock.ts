@@ -266,7 +266,11 @@ async function tallySigners(block: SignedBlock): Promise<SignerTally> {
 
 /** Whether `block` carries a verified signer quorum from the signers its height admits. */
 async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
-    const tally = await tallySigners(block)
+    return tallyQuorum(await tallySigners(block))
+}
+
+/** Whether a tally of a block's signers reaches its quorum. */
+function tallyQuorum(tally: SignerTally): BlockVerification {
     if (tally.valid === false) {
         return { valid: false, reason: tally.reason }
     }
@@ -315,15 +319,19 @@ export async function verifyBlockCertificate(
  * not cover the signatures, so the copy is the same block; the caller's
  * block and its maps are left as they are.
  *
- * @throws when the signer set or the signed message cannot be resolved
+ * @throws when the signer set or the signed message cannot be resolved, or
+ * when the counted signatures fall short of the quorum verifyBlock requires
+ * (this tally verifies again, and a verify that fails now must not store a
+ * certificate the block's own check would reject)
  */
 export async function withCountedSignatures<T extends SignedBlock>(
     block: T,
 ): Promise<T> {
     const tally = await tallySigners(block)
-    if (tally.valid === false) {
+    const quorum = tallyQuorum(tally)
+    if (quorum.valid === false || tally.valid === false) {
         throw new Error(
-            `cannot rebuild the signatures of block ${block.number}: ${tally.reason}`,
+            `cannot rebuild the signatures of block ${block.number}: ${quorum.reason}`,
         )
     }
     const validationData = {

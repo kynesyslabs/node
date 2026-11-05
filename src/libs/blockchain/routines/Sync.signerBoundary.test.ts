@@ -402,3 +402,34 @@ describe("withCountedSignatures", () => {
         await expect(verification.withCountedSignatures(block)).rejects.toThrow()
     })
 })
+
+describe("a second tally that falls below quorum", () => {
+    it("does not store the block, so sync retries it", async () => {
+        const block = await signedBy(makeBlock(), members.slice(0, 3))
+        const pool = txValidatorPool.getInstance()
+        const real = pool.verify.bind(pool)
+        // The first quorum's worth of verifies (verifyBlock) succeed; the
+        // next ones (the tally sync stores) fail as a validator worker timeout does
+        let calls = 0
+        const verify = spyOn(pool, "verify").mockImplementation((async (request: any) => {
+            if (++calls > members.length - 1) throw new Error("validator request timed out")
+            return real(request)
+        }) as any)
+
+        try {
+            expect(await syncBlock(block, servingPeer())).toBe(false)
+            expect(calls).toBeGreaterThan(members.length - 1)
+            // Nothing was stored, so no block with fewer signatures than the quorum exists
+            for (const [stored] of insertBlock.mock.calls) {
+                expect(Object.keys(stored.validation_data.signatures).length).toBeGreaterThanOrEqual(3)
+            }
+            expect(insertBlock).not.toHaveBeenCalled()
+        } finally {
+            verify.mockRestore()
+        }
+
+        // With the validators answering again, the retry stores the full quorum
+        expect(await syncBlock(clone(block), servingPeer())).toBe(true)
+        expect(storedSigners()).toEqual(members.slice(0, 3).map(m => m.identity).sort())
+    })
+})
