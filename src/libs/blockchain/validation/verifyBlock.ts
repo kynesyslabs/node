@@ -19,7 +19,7 @@ import TxValidatorPool from "./txValidatorPool"
 import { verifyBlockTxSignatures } from "./verifyBlockTxSignatures"
 import { blockRowRefusal } from "./postgresStorable"
 import { getSharedState } from "@/utilities/sharedState"
-import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import { checkTimestampNotAhead } from "./timestampBound"
 import {
     getBoundCommittee,
     getEligiblePool,
@@ -79,6 +79,8 @@ export function checkTimestampAgainstParent(
 
     return { valid: true }
 }
+
+export { checkTimestampNotAhead } from "./timestampBound"
 
 // Verified separately from the quorum tally, so a garbage entry under our key
 // can never read as our signature, however the tally is computed. Under
@@ -286,13 +288,9 @@ export async function verifyBlock(
     if (!parentVerdict.valid) {
         return parentVerdict
     }
-    const tolerance = getSharedState.getBlockTimestampTolerance()
-    const verifierNow = getNetworkTimestamp()
-    if (blockTimestamp > verifierNow + tolerance) {
-        return {
-            valid: false,
-            reason: `block timestamp ${blockTimestamp} is ${blockTimestamp - verifierNow}s in the verifier's future (tolerance ${tolerance}s)`,
-        }
+    const aheadVerdict = checkTimestampNotAhead(blockTimestamp)
+    if (!aheadVerdict.valid) {
+        return aheadVerdict
     }
 
     const quorum = await checkSignerQuorum(block)

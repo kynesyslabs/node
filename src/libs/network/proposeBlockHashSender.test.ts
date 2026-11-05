@@ -99,6 +99,7 @@ jest.mock("src/libs/blockchain/chain", () => ({
 }))
 jest.mock("src/libs/blockchain/validation/verifyBlock", () => ({
     checkTimestampAgainstParent: () => ({ valid: true }),
+    checkTimestampNotAhead: () => ({ valid: true }),
 }))
 jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
     __esModule: true,

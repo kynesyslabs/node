@@ -43,8 +43,17 @@ jest.mock("src/libs/consensus/v2/routines/ensureCandidateBlockFormed", () => ({
     __esModule: true,
     default: async () => true,
 }))
+// verifyBlock's own upper bound, with the tolerance the test sets
+let syncTolerance = 60
+const notAheadCalls: Array<[number, number]> = []
 jest.mock("src/libs/blockchain/validation/verifyBlock", () => ({
     checkTimestampAgainstParent: () => ({ valid: true }),
+    checkTimestampNotAhead: (timestamp: number, now: number) => {
+        notAheadCalls.push([timestamp, now])
+        return timestamp > now + syncTolerance
+            ? { valid: false, reason: "in the verifier's future" }
+            : { valid: true }
+    },
 }))
 const NETWORK_NOW = 2000
 jest.mock("src/libs/utils/calibrateTime", () => ({
@@ -77,6 +86,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
     resetPoolCache()
+    syncTolerance = 60
+    notAheadCalls.length = 0
     sharedState.forkConfig.committeeBinding.activationHeight = 0
     chain.peerlist = signers.map(s => s.identity)
     const committee = await getBoundCommittee(100)
@@ -176,6 +187,22 @@ describe("proposeBlockHash with real ed25519 signatures", () => {
 
         expect(res.result).toBe(409)
         expect(res.extra.reason).toContain("not a whole number")
+        expect(merged()).toEqual([])
+    })
+
+    it("refuses to vote on a candidate that sync would reject as ahead of our clock", async () => {
+        // Below the 5 s signing lead, so only the sync bound can refuse it
+        syncTolerance = 2
+        sharedState.candidateBlock.content.timestamp = NETWORK_NOW + 3
+        const res = await manageProposeBlockHash(
+            CANDIDATE_HASH,
+            { signatures: { [proposer.identity]: await proposer.sign(CANDIDATE_HASH) } } as any,
+            proposer.identity,
+        )
+
+        expect(notAheadCalls).toEqual([[NETWORK_NOW + 3, NETWORK_NOW]])
+        expect(res.result).toBe(409)
+        expect(res.extra.reason).toContain("in the verifier's future")
         expect(merged()).toEqual([])
     })
 

@@ -87,6 +87,16 @@ groups:
           summary: Validator is sitting out consensus because of a fork schedule mismatch
           description: "{{ $labels.instance }} skips forging and voting because most validators report a different fork schedule than its own. It keeps syncing and resumes once no majority differs. Confirm its genesis.json against the published hash first: if the majority is the one with the wrong schedule, this node is on the right side. See docs/runbooks/fork-schedule-policy.md."
 
+      - alert: ClockOffset
+        # Measured every 10 minutes, so 15m means two readings in a row
+        expr: abs(demos_clock_offset_seconds) > 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Validator host clock is off from NTP
+          description: "The host clock of {{ $labels.instance }} is {{ $value }}s off from the median of public NTP servers. Members refuse blocks stamped more than 5s ahead of their clock, so fix the host's NTP service (chronyc tracking or timedatectl) before it reaches that. demos_clock_probe_agreeing_servers below 2 means the reading is stale; see docs/runbooks/mainnet-monitoring.md."
+
       - alert: MempoolBacklog
         # Plain number, not derived from config: keep it below the mempool hard cap
         # so the alert fires before the pool starts rejecting transactions.

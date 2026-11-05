@@ -5,8 +5,8 @@
 #   run.sh --image <ref[@digest]> --label <name> [--out DIR]
 #
 # One node and one throwaway Postgres on a private bridge network with no
-# published ports. The node needs a route out only for NTP (it exits at boot
-# when no NTP server answers); with an empty peer list it dials no peer, and
+# published ports. A route out serves only NTP, for the node's clock offset
+# check (it starts without one); with an empty peer list it dials no peer, and
 # the testnet URLs in the genesis validator list are only stored.
 # Twelve scenarios run in order; 6-11 restart on the database that
 # scenario 1 created, restored to its state after scenario 6 before each one.
