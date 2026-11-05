@@ -224,12 +224,14 @@ docker run -d --name "${PG}" --network "${NET}" --memory "${PG_MEM}" --memory-sw
     "${PG_IMAGE}" -c fsync=off -c synchronous_commit=off -c full_page_writes=off >/dev/null ||
     die2 "postgres did not start"
 CONTAINERS+=("${PG}")
+# Over TCP, as migrate_db and the nodes connect: on first init the image runs a
+# socket-only temporary server, so a socket check can pass before the restart.
 for _ in $(seq 1 60); do
-    docker exec "${PG}" pg_isready -q -U "${PG_USER}" -d postgres 2>/dev/null &&
-        docker exec "${PG}" psql -U "${PG_USER}" -d postgres -tAc 'SELECT 1' >/dev/null 2>&1 && break
+    docker exec "${PG}" pg_isready -q -h 127.0.0.1 -U "${PG_USER}" -d postgres 2>/dev/null &&
+        docker exec -e PGPASSWORD="${PG_PASSWORD}" "${PG}" psql -h 127.0.0.1 -U "${PG_USER}" -d postgres -tAc 'SELECT 1' >/dev/null 2>&1 && break
     sleep 1
 done
-docker exec "${PG}" psql -U "${PG_USER}" -d postgres -tAc 'SELECT 1' >/dev/null 2>&1 || die2 "postgres not ready"
+docker exec -e PGPASSWORD="${PG_PASSWORD}" "${PG}" psql -h 127.0.0.1 -U "${PG_USER}" -d postgres -tAc 'SELECT 1' >/dev/null 2>&1 || die2 "postgres not ready"
 
 psql_db() { docker exec "${PG}" psql -v ON_ERROR_STOP=1 -U "${PG_USER}" -d "$1" -tAc "$2" 2>&1; }
 admin() { psql_db postgres "$1" >> "${RUNLOG}" || die2 "postgres: $1"; }
