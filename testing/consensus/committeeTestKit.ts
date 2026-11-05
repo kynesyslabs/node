@@ -111,6 +111,8 @@ export function makeBlock(nonce: string) {
         number: 10,
         hash: Hashing.sha256(JSON.stringify(content)),
         content,
+        proposer: "ab".repeat(32),
+        next_proposer: "cd".repeat(32),
         validation_data: { signatures: {} as Record<string, string> },
     } as any
 }
