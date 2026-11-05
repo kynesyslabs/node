@@ -100,7 +100,7 @@ groups:
   #   2. Clear: once the fork is resolved and at least 10 m after the last event, delete
   #      the recorded series for that instance. This needs the Prometheus admin API,
   #      which is NOT enabled by default: add --web.enable-admin-api to the prometheus
-  #      command: list and run `docker compose up -d prometheus`. Prometheus is published
+  #      command: list and run `docker compose -f monitoring/docker-compose.yml up -d prometheus` (from the repo root). Prometheus is published
   #      on all interfaces without authentication, so BEFORE enabling the flag change the
   #      port mapping in monitoring/docker-compose.yml from "${PROMETHEUS_PORT:-9091}:9090"
   #      to "127.0.0.1:${PROMETHEUS_PORT:-9091}:9090". A ufw/INPUT rule does not filter

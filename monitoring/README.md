@@ -156,6 +156,8 @@ Detailed system metrics:
 
 ## Commands
 
+Run these from `monitoring/` (the `cd monitoring` from Quick Start).
+
 ```bash
 # Start the stack
 docker compose up -d
@@ -202,7 +204,7 @@ dead-man heartbeat to its own receiver only. `BlockHashMismatch`, `ConflictingBl
 `ForeignSignature` and `PrecommitEquivocation` are latched for 7 days and do not resolve by
 themselves; the clear procedure is in the runbook ("Clearing a latched alert").
 Unit tests for the rules are in `prometheus/tests/`. Check rules, config and routing with
-`scripts/check-monitoring.sh` (needs `promtool` and `amtool` on PATH).
+`./scripts/check-monitoring.sh` from the repository root (needs `promtool` and `amtool` on PATH).
 
 ### Creating Custom Dashboards
 

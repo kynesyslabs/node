@@ -47,6 +47,10 @@ monitoring host can scrape it; until then `NodeDown` fires for that node.
 
 ## Setup on the monitoring host
 
+Run every command in this runbook from the repository root (the directory that
+contains `monitoring/` and `scripts/`), except the `docker exec` commands, which
+do not depend on the working directory.
+
 1. In `monitoring/prometheus/prometheus.yml`, replace the `demos-node` target
    (`node:9090`, which only resolves inside the validators' compose network)
    with one `static_configs` entry per validator, each with its own `instance`
@@ -62,7 +66,7 @@ monitoring host can scrape it; until then `NodeDown` fires for that node.
    (gitignored; see `monitoring/secrets/README.md`). `chmod 644` them so the
    container user can read them. Compose mounts them at `/run/secrets/` and
    Alertmanager reads them through `api_url_file` / `url_file`.
-3. `cd monitoring && docker compose up -d`. Alertmanager listens on
+3. `docker compose -f monitoring/docker-compose.yml up -d`. Alertmanager listens on
    `127.0.0.1:9093` only. Then send a test alert to each receiver and confirm
    that a person sees it (the Slack message, the page, and the heartbeat at the
    dead-man service): the heartbeat does not test the `slack` or `paging`
@@ -72,7 +76,7 @@ monitoring host can scrape it; until then `NodeDown` fires for that node.
    `docker exec demos-alertmanager amtool alert add RoutingTest severity=critical instance=test --alertmanager.url=http://localhost:9093`
    (critical reaches Slack and paging) and the same with `severity=warning`
    (Slack only). Silence `RoutingTest` afterwards.
-4. `scripts/check-monitoring.sh` (needs `promtool` and `amtool`) checks the
+4. `./scripts/check-monitoring.sh` (needs `promtool` and `amtool`) checks the
    config, runs the rule unit tests in `monitoring/prometheus/tests/` and
    checks that each severity reaches the right receiver.
 
@@ -129,6 +133,8 @@ keeps the 10 minute burst size as its own series
 `demos:conflicting_block:increase10m`, `demos:foreign_signature:increase10m`,
 `demos:precommit_equivocation:increase10m`) and the alert is its 7 day maximum.
 Only metrics the node exports today are used.
+
+Run the `docker compose` commands below from the repository root, as in setup.
 
 1. Investigate and resolve the fork, mismatch or double-sign first (for
    `ForeignSignature` and `PrecommitEquivocation`: every copy of the key found
