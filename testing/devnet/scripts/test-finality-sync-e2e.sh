@@ -112,7 +112,10 @@ for n in $(seq 1 "${TARGET}"); do
     same_hash_at "${NODE5}" "$n" || fail "block $n differs on node-5"
 done
 echo "[finality-sync] PASS node-5 synced blocks 1..${TARGET} with identical hashes"
-if docker compose "${COMPOSE_FILES[@]}" logs node-5 2>&1 | grep -qE "parent_results_root|validator_set_hash|SyncBlockRejected|ValidatorSetHistoryError"; then
+# Read whole, not piped: grep -q stops at the first match and, under
+# pipefail, the SIGPIPE of docker compose would hide that match.
+NODE5_LOGS="$(docker compose "${COMPOSE_FILES[@]}" logs node-5 2>&1 || true)"
+if grep -qE "parent_results_root|validator_set_hash|SyncBlockRejected|ValidatorSetHistoryError" <<< "${NODE5_LOGS}"; then
     fail "node-5 logged a commitment rejection"
 fi
 echo "[finality-sync] PASS node-5 logged no commitment rejection"
