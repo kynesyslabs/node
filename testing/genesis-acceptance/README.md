@@ -23,8 +23,8 @@ could not be carried out.
    (`docker create` + `docker cp`, the image is not run) and writes the
    fixtures with `fixtures.py`: a launch genesis (timestamp 1793318400, chain
    id 4242, `signatureDomain`, `editBinding`, `quorumParity`,
-   `committeeBinding`, `commitLock` at height 0, the bundled snapshot bound by
-   `snapshot.manifestSha256`) and its variants.
+   `committeeBinding`, `commitLock`, `finalityProofs` at height 0, the bundled
+   snapshot bound by `snapshot.manifestSha256`) and its variants.
 3. Computes the pin with `bun scripts/genesis-hash.ts --json` on the host.
 4. Starts a throwaway Postgres (the image pinned in `docker-compose.yml`) and
    one node at a time on a private bridge network with no published ports. The
