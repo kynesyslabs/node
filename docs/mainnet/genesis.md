@@ -39,10 +39,10 @@ them equal.
 | `properties.id` | the mainnet chain id, an integer. go/no-go and the plan check refuse testnet `1` and devnet `1337`: every signature binds to the chain id, so a reused id lets a testnet transaction replay on mainnet |
 | `properties.name`, `properties.currency` | network name and currency symbol |
 | `properties.sudoPubkey` | the lowercase `0x` + 64 hex key that may sign award transactions, or delete the field to accept none |
-| `forks.gasFeeSeparation` | `activationHeight` `0` or `null`, and `treasuryAddress`, the mainnet treasury account, in both cases: the node refuses the entry without it, and block 0 creates the burn and treasury accounts whenever the entry is present. The zero address is refused once the fork is scheduled |
+| `forks.gasFeeSeparation` | `activationHeight` `0` or `null`, and `treasuryAddress`, the mainnet treasury account, in both cases: the node refuses the entry without it, and block 0 creates the burn and treasury accounts whenever the entry is present. The zero address is refused once the fork is scheduled, and with a `null` height too when the snapshot's `fork_state` does not carry the fork, since block 0 then runs its migration |
 | `forks.web2ProofBinding`, `forks.tlsnProofEnforcement` | `activationHeight` `0` or `null` |
 | `snapshot.manifestSha256` | `sha256sum` of the launch snapshot's `manifest.json`. Keep the field: the launch tools model block 0 on the snapshot path, and the plan check and the height-1 check both require the snapshot |
-| `balances` | the agreed allocations, `[["0x<64 hex address>", "<amount>"], ...]` |
+| `balances` | the agreed allocations, `[["0x<64 hex address>", "<amount>"], ...]`, each address lowercase. The amount is in the snapshot's unit: these balances are written over the snapshot before block 0 applies `osDenomination`. Over a DEM snapshot (its manifest's `fork_state` has no applied `osDenomination`) enter DEM, and block 0 multiplies it by 10^9 with every other balance; over a snapshot already in OS units enter OS (1 DEM = 10^9 OS) |
 | `timestamp` | the launch time in seconds as a positive integer string. Block 0 is built from it, so the block 0 hash is known only once it is fixed |
 | `validators` | the launch validators, one object each: `address`, `status` `"2"`, `connection_url`, `staked_amount`, `first_seen` `0`, `valid_at` `0`. When the snapshot carries `validators.jsonl`, the node seeds from that file instead and ignores this list |
 

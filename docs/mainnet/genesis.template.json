@@ -54,7 +54,7 @@
   "snapshot": {
     "manifestSha256": "FILL: sha256 of the launch snapshot's manifest.json bytes (keep this field: the launch checks require the snapshot)"
   },
-  "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations",
+  "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations, in the snapshot's unit (DEM over a DEM snapshot, OS over a migrated one; see genesis.md)",
   "timestamp": "FILL: launch time in seconds, a positive integer string (testnet: \"1692734616\")",
   "status": "confirmed",
   "validators": "FILL: launch validators, one object each: {\"address\", \"status\": \"2\", \"connection_url\", \"staked_amount\", \"first_seen\": 0, \"valid_at\": 0}"
