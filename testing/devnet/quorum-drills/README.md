@@ -20,7 +20,7 @@ testing/devnet/quorum-drills/run.sh [--image IMAGE] [--src TREE] [--binding on|o
   the same code. `quorumParity` is active from block 0 in both. **`off` does
   not currently work:** `genesis.devnet.json` also activates `commitLock` at
   0, and the node's fork loader refuses a genesis that has `commitLock`
-  without `committeeBinding` (`src/forks/loadForkConfig.ts:276-287`). Loading
+  without `committeeBinding` (`src/forks/loadForkConfig.ts:277-288`). Loading
   the generated `--binding off` genesis with `loadForkConfigFromGenesis` gives
   that error; a node boot was not run. The three mainnet-shape cases take
   `--binding on` only.
@@ -54,6 +54,36 @@ production node needs `EXPECTED_GENESIS_HASH` for a genesis that is new each
 run, `genesisPin.ts:56-68`), postgres and `/app/state` on tmpfs, the generated
 genesis and the empty snapshot, `OMNI_MODE=HTTP_ONLY`, TLSNotary off, and no
 published ports.
+
+### What differs from mainnet: identityCarryover
+
+`identityCarryover` is **off in the drills** and is at 0 in the mainnet genesis
+template (`docs/mainnet/genesis.template.json`). On mainnet every validator
+needs the genesis snapshot (a manifest and files matching the
+`snapshot.manifestSha256` in block 0's genesis, in `data/snapshot` or
+`DEMOS_SNAPSHOT_DIR`) on **every** boot, every restart and every rebuild of its
+database:
+
+- **Fresh database or rebuild.** No snapshot is a refusal
+  (`src/libs/blockchain/genesis/restoreGenesisState.ts:58-66`), and so is a
+  genesis without `snapshot.manifestSha256`, a missing manifest or a manifest
+  that hashes differently (`routines/findGenesisBlock.ts:212-220`,
+  `genesis/genesisPin.ts:165-184`). The snapshot is loaded and verified file by
+  file (`genesis/loadSnapshot.ts:431`) and `assertCarryoverSnapshot` checks it
+  before the database transaction opens (`restoreGenesisState.ts:71-73`).
+- **Every restart.** The node reads the stored block 0, and if it schedules
+  `identityCarryover` at 0 it opens the snapshot again: no manifest, a manifest
+  that does not hash to block 0's value, or a `gcr_main.jsonl` that does not
+  match the manifest stops the boot, as does an imported-identity registry that
+  differs from the snapshot (`routines/findGenesisBlock.ts:181-192`,
+  `genesis/verifyImportedIdentities.ts:40-77`, `genesis/loadSnapshot.ts:528-562`).
+  A restart does not re-hash the other snapshot files.
+
+The drills **do not cover any of this**: they run the legacy genesis path with
+an empty snapshot directory, so the snapshot check, the carried-over identities
+and the apply-time rules of the fork (no first-link award for an imported
+identity, web2 unlink by `userId`) are not exercised. A launch rehearsal that
+needs them has to build a snapshot and mount it, which these drills do not do.
 
 The preflight checks that everything the node service execs exists and is
 executable for the image's user (`docker run` as its default user): `sh cp`, the
@@ -124,20 +154,40 @@ launches with, read from that file when the drill starts: a fork is active at
 0 if its `activationHeight` there is the number `0`; `null` and `"FILL: ..."`
 stay off. The genesis `forks` object is replaced as a whole, so no fork is left
 to a default (`osDenomination`, `nonceEnforcement` and `gasFeeSeparation`
-default to 0, `src/forks/forkConfig.ts:380-398`, `441-452`), and a template
+default to 0, `src/forks/forkConfig.ts:405-423`, `466-477`), and a template
 that stops activating `quorumParity`, `committeeBinding` or `commitLock` is an
 error. The code is `launch_fork_heights` and `with_launch_forks` in
 `drill_inputs.py` (`run.sh` through `gen-inputs.py --fork-set launch`; scenario
-12 through `withLaunchForks`). With the template as it is now, 9 are active:
-`osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity
-quorumParity committeeBinding commitLock finalityProofs`; `gasFeeSeparation`,
-`web2ProofBinding`, `tlsnProofEnforcement`, `xmProofBinding` and `atomicWork`
-are off (`gasFeeSeparation` keeps a treasury address, which the loader wants
-even when the fork is off).
+12 through `withLaunchForks`). The template has 10 forks at 0 now; the drills
+run 9: `osDenomination nonceEnforcement signatureDomain editBinding
+nonceIntegrity quorumParity committeeBinding commitLock finalityProofs`.
+`identityCarryover` is at 0 in the template and **excluded by name** (the
+`LAUNCH_EXCLUDED_FORKS` list in `drill_inputs.py`, one reason per fork): the
+drills mount an empty `data/snapshot`, and a node with `identityCarryover`
+active at 0 and no snapshot refuses to boot (see
+[What differs from mainnet](#what-differs-from-mainnet-identitycarryover)). It
+is written into the drill genesis as `activationHeight: null`, also when the
+template does not list it. `gasFeeSeparation`, `web2ProofBinding`,
+`tlsnProofEnforcement`, `xmProofBinding` and `atomicWork` are off
+(`gasFeeSeparation` keeps a treasury address, which the loader wants even when
+the fork is off). The genesis has all 15 forks of the template.
 
-`run.sh` logs the set (`forks (launch): ...`), and `drill-input.json`,
+If the template ever sets another fork to 0 that needs a snapshot, add it to
+that list. Until then a drill with it active does not run: no node serves, and
+`run.sh` ends the bring-up as `ABORT: node-N did not serve within 180s` (exit
+2) followed by `node-N log: ...`, the node's last `Refusing to boot` line
+(`boot_failure_line`; the full log is kept in `node-N.log`). Scenario 12 times
+out on its baseline height (exit 1, `scenario.ts`) and appends the same line to
+the error. Neither run produces a verdict. Neither has been run against a real
+refusal here; the line extraction is tested against stubs.
+
+`run.sh` logs the set (`forks (launch): ...; excluded: identityCarryover
+(needs a genesis snapshot; the drills use the legacy genesis path)`, and
+scenario 12 the same in its fork-set line), and `drill-input.json`,
 `DRILL_TIMINGS` and `drill.timings.forks` in `verdict.json` carry every fork of
-the genesis the nodes ran. The other scenarios keep the forks of
+the genesis the nodes ran. The excluded forks are in `DRILL_TIMINGS` and
+`drill.timings.excludedForks` too, and `run.sh` writes them to `verdict.json`
+as `excludedForks`. The other scenarios keep the forks of
 `genesis.devnet.json` (nine launch forks and `gasFeeSeparation`, all at 0, plus
 the two `gen-inputs.py` sets); their generated compose, genesis and output are
 byte-identical to before.
@@ -155,32 +205,38 @@ is new, and off):
   Postgres' `validator_set_snapshots`, not a file, so the empty
   `data/snapshot` mount does not matter. Block 0's row is written at boot:
   with no snapshot manifest `loadSnapshot` is unavailable
-  (`genesis/loadSnapshot.ts:445-451`), `generateGenesisBlock` takes the legacy
-  path and seeds no validators (`chainGenesis.ts:125-132`),
+  (`genesis/loadSnapshot.ts:445-451`), `restoreGenesisState` returns false
+  (`genesis/restoreGenesisState.ts:58-66`; with `identityCarryover` off, as in
+  the drills, it neither refuses nor restores), `generateGenesisBlock` takes
+  the legacy path and seeds no validators (`chainGenesis.ts:71-85`),
   `ensureValidatorSeed` then seeds them from `genesis.json` at block 0
-  (`index.ts:600`, `routines/ensureValidatorSeed.ts:119-151`) and
-  `ensureValidatorSetSnapshot(0)` records the set (`index.ts:602`,
+  (`index.ts:605`, `routines/ensureValidatorSeed.ts:119-151`) and
+  `ensureValidatorSetSnapshot(0)` records the set (`index.ts:607`,
   `finality/validatorSet.ts:142-164`). Every later block adds a row only when
-  the set changed (`chainBlocks.ts:539-546`, `validatorSet.ts:71-89`), so the
+  the set changed (`chainBlocks.ts:553-560`, `validatorSet.ts:71-89`), so the
   one row at block 0 answers every height here. A restarted node keeps its
   database; its boot check wants a row at or below tip-1
   (`validatorSet.ts:128-140`), which is that row.
 - **`osDenomination`** runs its migration when block 0 is inserted
-  (`chainBlocks.ts:400-414`), as on every fresh chain (its default is 0).
+  (`chainBlocks.ts:414-428`), as on every fresh chain (its default is 0).
 - **`signatureDomain`** needs `properties.id` to be an integer
-  (`loadForkConfig.ts:200-208`, `254-262`; `signatureDomainGate.ts:36-52`);
+  (`loadForkConfig.ts:201-209`, `255-263`; `signatureDomainGate.ts:36-52`);
   `genesis.devnet.json` has 1337 and `genesis-fork-low.json` has 1. Nothing in
   the node refuses those ids (only `scripts/launch-go-no-go.ts:185` does, for a
   real launch).
 - **`nonceEnforcement`, `editBinding`, `nonceIntegrity`** act on transactions
-  (`handleGCR.ts:984-992`, `1790-1794`, `mempool.ts:566`, `627`,
-  `validateTransaction.ts:112`, `editBinding.ts:135-146`). The drills send none:
+  (`handleGCR.ts:1155-1163`, `2026-2030`, `mempool.ts:582`, `643`,
+  `validateTransaction.ts:111`, `editBinding.ts:135-146`). The drills send none:
   `run.sh` makes only `getLastBlockNumber` and `getBlockByNumber` calls
   (`run.sh` `head_of`, `block_req`) and reads the databases, and scenario 12
   reads heads and `blocks` rows.
 
 Loading the generated genesis of all three launch cases and of scenario 12 with
-`loadForkConfigFromGenesis` accepts it and activates exactly the nine.
+`loadForkConfigFromGenesis` accepts it and activates exactly the nine, with
+`identityCarryover` loaded as null (checked again after the merge of
+stabilisation 891c1e7b38, on the `genesis-fork-low.json` and
+`genesis.devnet.json` bases; it is a unit test now,
+`drillInputs.test.ts`).
 
 ### Which validators are stopped
 
@@ -213,7 +269,7 @@ and `finalityProofs` active as well (both are in the launch fork set, see
   see the note under `--binding`).
 - **What a block needs.** 2/3 + 1 of shardSize = 7 signatures
   (`quorum.ts:10-12`, `19-27`), counted only from committee members
-  (`src/libs/blockchain/validation/verifyBlock.ts:138-150`, `164-208`). A
+  (`src/libs/blockchain/validation/verifyBlock.ts:139-151`, `165-209`). A
   producer commits on the same bar (`PoRBFT.ts:1424-1431`).
 - **What the next pool is.** The committed peerlist lists the identities that
   at least 7 committee voters saw at the parent block
@@ -228,7 +284,7 @@ and `finalityProofs` active as well (both are in the launch fork set, see
 - **Secretary and floor.** Only live committee members form the shard; fewer
   than q refuse to forge, and the secretary is the first live member that
   holds our tip, replaced when it goes offline
-  (`types/secretaryManager.ts:255-270`, `299-306`, `548-592`).
+  (`types/secretaryManager.ts:259-274`, `303-310`, `605-649`).
 
 What follows for 13 validators and a committee of 10:
 
