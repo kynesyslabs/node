@@ -124,7 +124,12 @@ fi
 # 3. Stop the stack
 # -----------------------------------------------------------------------------
 echo "[2/6] stopping docker stack (${STACK_LABEL})..."
-./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" down >/dev/null 2>&1 || true
+# A failed teardown may leave the volumes unreferenced but the stack in an
+# unknown state; wiping then would lose the database for nothing.
+if ! ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" down >/dev/null 2>&1; then
+    echo "  ERROR: could not stop the stack; nothing was wiped." >&2
+    exit 1
+fi
 
 # -----------------------------------------------------------------------------
 # 4. Wipe volumes
