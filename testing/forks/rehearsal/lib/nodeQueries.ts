@@ -224,26 +224,48 @@ export async function getBlockHash(
     return block?.hash ?? null
 }
 
-/** Connects to Postgres for the named DB. Caller must call `.end()`. */
-export async function connectPg(dbName: string): Promise<PgClient> {
+/**
+ * Connects to Postgres for the named DB. Caller must call `.end()`.
+ *
+ * With `timeoutMs`, the connection attempt, the server-side statement and
+ * the client-side wait for each query are all bounded by it, so a stalled
+ * database fails the caller instead of hanging it.
+ */
+export async function connectPg(
+    dbName: string,
+    opts: { timeoutMs?: number } = {},
+): Promise<PgClient> {
+    const bounds =
+        opts.timeoutMs === undefined
+            ? {}
+            : {
+                  connectionTimeoutMillis: opts.timeoutMs,
+                  statement_timeout: opts.timeoutMs,
+                  query_timeout: opts.timeoutMs,
+              }
     const client = new PgClient({
         host: "localhost",
         port: POSTGRES_HOST_PORT,
         user: PG_USER,
         password: PG_PASSWORD,
         database: dbName,
+        ...bounds,
     })
     await client.connect()
     return client
 }
 
-/** Convenience: runs a single SQL query against `nodeN_db`. */
+/**
+ * Convenience: runs a single SQL query against `nodeN_db`. Pass
+ * `timeoutMs` to bound the connect and the query (see `connectPg`).
+ */
 export async function query<T = Record<string, unknown>>(
     nodeId: number,
     sql: string,
     params: unknown[] = [],
+    opts: { timeoutMs?: number } = {},
 ): Promise<T[]> {
-    const client = await connectPg(dbForNode(nodeId))
+    const client = await connectPg(dbForNode(nodeId), opts)
     try {
         const r = await client.query(sql, params)
         return r.rows as T[]
@@ -382,11 +404,13 @@ export async function getGenesisHashFromDb(
 export async function getBlockHashFromDb(
     nodeId: number,
     height: number,
+    opts: { timeoutMs?: number } = {},
 ): Promise<string | null> {
     const rows = await query<{ hash: string }>(
         nodeId,
         "SELECT hash FROM blocks WHERE number = $1",
         [height],
+        opts,
     )
     return rows[0]?.hash ?? null
 }
