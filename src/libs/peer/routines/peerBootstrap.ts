@@ -34,6 +34,12 @@ import {
 import { Config } from "src/config"
 import { replaceFileAtomically } from "./replaceFileAtomically"
 import {
+    AnchorRefusal,
+    DeferredAnchorChecks,
+    pairAnchorsAtBoot,
+    type AnchorPairingDeps,
+} from "./anchorPairing"
+import {
     clearRefusalMarker,
     pendingRefusal,
     writeRefusalMarker,
@@ -81,6 +87,9 @@ async function fetchPeerGenesisHash(verifiedPeer: Peer) {
     return res as NonNullable<typeof res>
 }
 
+/** The genesis check could not be completed; says nothing about the peer's genesis. */
+class GenesisCheckUnavailable extends Error {}
+
 async function downloadPeerGenesis(
     verifiedPeer: Peer,
     peerGenesisDataHash: string,
@@ -98,12 +107,27 @@ async function downloadPeerGenesis(
         "[BOOTSTRAP] Fetching new genesis data from peer: " +
             verifiedPeer.connection.string,
     )
-    const served = await axios.get(verifiedPeer.connection.string + "/genesis", {
-        timeout: GENESIS_DOWNLOAD_TIMEOUT_MS,
-        maxContentLength: MAX_GENESIS_BYTES,
-        maxBodyLength: MAX_GENESIS_BYTES,
-    })
-    return served.status === 200 ? served.data : null
+    let served: { status: number; data: unknown }
+    try {
+        served = await axios.get(verifiedPeer.connection.string + "/genesis", {
+            timeout: GENESIS_DOWNLOAD_TIMEOUT_MS,
+            maxContentLength: MAX_GENESIS_BYTES,
+            maxBodyLength: MAX_GENESIS_BYTES,
+        })
+    } catch (error) {
+        throw new GenesisCheckUnavailable(
+            "Could not download genesis data from " +
+                verifiedPeer.connection.string +
+                ": " +
+                (error instanceof Error ? error.message : String(error)),
+        )
+    }
+    if (served.status !== 200) {
+        throw new GenesisCheckUnavailable(
+            `Could not download genesis data from ${verifiedPeer.connection.string}: HTTP ${served.status}`,
+        )
+    }
+    return served.data
 }
 
 function logGenesisVerdict(
@@ -237,8 +261,8 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
             }
         }
     } else {
-        log.error(
-            "[BOOTSTRAP] Failed to get genesis data hash from peer: " +
+        throw new GenesisCheckUnavailable(
+            "Failed to get genesis data hash from peer: " +
                 verifiedPeer.connection.string +
                 " response=" +
                 showPeerValue(JSON.stringify(res)),
@@ -300,87 +324,103 @@ async function warnOnForkScheduleMismatch(peer: Peer) {
     }
 }
 
-async function tryConnectPeer(peer: Peer) {
-    if (peer.identity === getSharedState.publicKeyHex) {
-        return
+/**
+ * Runs the genesis checks on a paired anchor. Throws AnchorRefusal when they
+ * fail, and GenesisCheckUnavailable when they could not be completed.
+ */
+async function confirmAnchorGenesis(verifiedPeer: Peer) {
+    log.info("[BOOTSTRAP] OK: Valid peer " + verifiedPeer.connection.string)
+    try {
+        await ensureGenesisDataMatch(verifiedPeer)
+    } catch (error) {
+        if (error instanceof GenesisCheckUnavailable) {
+            log.warning(`[BOOTSTRAP] Genesis check of ${verifiedPeer.connection.string} not done yet: ${error.message}`)
+            throw error
+        }
+        peerman.removeOnlinePeer(verifiedPeer.identity)
+        log.error("[BOOTSTRAP] Error ensuring genesis data match: " + error)
+        throw new AnchorRefusal(
+            `Genesis data match failed for peer ${verifiedPeer.connection.string}: ${error instanceof Error ? error.message : String(error)}`,
+        )
     }
+}
 
-    log.debug("[BOOTSTRAP] Attempting connection to: " + peer.connection.string)
-    // ANCHOR Extract peer info from the string
-    // If there is a : in the url, we assume it's a address + port
-    const currentPeerUrl: string = peer.connection.string
-    const currentPublicKey: string = peer.identity
-    log.debug(
-        "[BOOTSTRAP] Testing " +
-            currentPeerUrl +
-            " with id " +
-            currentPublicKey,
+const pairingDeps: AnchorPairingDeps = {
+    sayHello: peer => PeerManager.sayHelloToPeer(peer, true),
+    isPaired: identity => peerman.getPeers().some(p => p.identity === identity),
+    sleep,
+}
+
+export interface PeerBootstrapOptions {
+    /**
+     * Called when an anchor that did not answer at boot later refuses this
+     * node. `fatal` is true while no anchor has confirmed this node yet: the
+     * caller must then stop it, as bootstrap would have.
+     */
+    onLateRefusal?: (peer: Peer, refusal: Error, fatal: boolean) => void
+}
+
+let deferredChecks: DeferredAnchorChecks | null = null
+
+/** Anchors that did not answer at boot and have not been checked yet. */
+export function pendingAnchorIdentities(): string[] {
+    return deferredChecks?.pendingIdentities ?? []
+}
+
+export function stopDeferredAnchorChecks() {
+    deferredChecks?.stop()
+    deferredChecks = null
+}
+
+function startDeferredAnchorChecks(
+    anchors: Peer[],
+    confirmed: boolean,
+    options: PeerBootstrapOptions,
+): DeferredAnchorChecks {
+    stopDeferredAnchorChecks()
+    const checks = new DeferredAnchorChecks(
+        anchors,
+        {
+            ...pairingDeps,
+            sayHello: peer => PeerManager.sayHelloToPeer(peer),
+            confirm: confirmAnchorGenesis,
+            now: () => Date.now(),
+            onRefusal: (peer, refusal, fatal) => {
+                if (fatal) {
+                    log.error(
+                        "[BOOTSTRAP] Refusing to continue: no anchor has confirmed this node and " +
+                            `${peer.identity} @ ${peer.connection.string} refused it: ${refusal.message}`,
+                    )
+                } else {
+                    peerman.refuseAnchor(peer.identity)
+                    log.error(
+                        `[BOOTSTRAP] Dropping anchor ${peer.identity} @ ${peer.connection.string} until this node restarts: ${refusal.message}`,
+                    )
+                }
+                options.onLateRefusal?.(peer, refusal, fatal)
+            },
+        },
+        getSharedState.genesisBlockHash,
+        confirmed,
     )
-    // ANCHOR Connection test and hello_peer routine
-    // The signed hello reply proves the key answers at this URL; the reply
-    // verification in helloPeerCallback adds the peer only when it does.
-    const verifiedPeer = new Peer(currentPeerUrl, currentPublicKey)
-
-    let maxRetries = 3
-    while (maxRetries > 0) {
-        const verdict = await PeerManager.sayHelloToPeer(verifiedPeer, true)
-
-        if (verdict === "unsigned") {
-            throw new Error(
-                `Anchor ${verifiedPeer.identity} @ ${currentPeerUrl} answered without a signed hello: it runs pre-signature code. Pick an up-to-date anchor.`,
-            )
-        }
-        if (verdict === "invalid") {
-            throw new Error(
-                `Anchor ${verifiedPeer.identity} @ ${currentPeerUrl} failed identity verification: the URL is not served by that key.`,
-            )
-        }
-        if (verdict === "other-genesis") {
-            throw new Error(
-                `Anchor ${verifiedPeer.identity} @ ${currentPeerUrl} runs another chain: its genesis block hash differs from this node's ` +
-                    `(${getSharedState.genesisBlockHash}). Check data/genesis.json and EXPECTED_GENESIS_HASH, or pick an anchor on this network.`,
-            )
-        }
-
-        // INFO: Confirmed we paired with anchor node
-        if (
-            verdict === "verified" &&
-            peerman.getPeers().find(p => p.identity === verifiedPeer.identity)
-        ) {
-            log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)
-            try {
-                await ensureGenesisDataMatch(verifiedPeer)
-            } catch (error) {
-                peerman.removeOnlinePeer(verifiedPeer.identity)
-                log.error("[BOOTSTRAP] Error ensuring genesis data match: " + error)
-                log.error("[PEER] Bootstrap error: " + error)
-                throw new Error(`Genesis data match failed for peer ${verifiedPeer.connection.string}: ${error instanceof Error ? error.message : String(error)}`)
-            }
-            return
-        }
-
-        log.warn("[BOOTSTRAP] Failed to pair with anchor node, retrying...")
-        maxRetries--
-        await sleep(1000)
-    }
-
-    log.error(
-        "[BOOTSTRAP] Failed to pair with anchor peer: " +
-            verifiedPeer.identity +
-            " @ " +
-            verifiedPeer.connection.string,
+    deferredChecks = checks
+    void checks.run().catch(error =>
+        log.error(
+            "[BOOTSTRAP] Deferred anchor checks stopped: " +
+                (error instanceof Error ? error.message : String(error)),
+        ),
     )
-    throw new Error(`Failed to pair with anchor peer: ${verifiedPeer.identity} @ ${verifiedPeer.connection.string}`)
+    return checks
 }
 
 // ANCHOR Main function
 export default async function peerBootstrap(
     localList: Peer[],
+    options: PeerBootstrapOptions = {},
 ): Promise<Peer[]> {
     log.info("[BOOTSTRAP] Loading peers...")
 
     // INFO: Get our genesis data hash
-    const genesisFile = "data/genesis.json"
     let genesisData: unknown
     try {
         genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
@@ -399,17 +439,42 @@ export default async function peerBootstrap(
         log.error("[BOOTSTRAP] Refusing to continue: " + refusal)
         throw new Error(refusal)
     }
+    // Kept after boot: anchors that come up later are checked against the same baseline.
+    discoveredGenesisDataHashes.clear()
     ourGenesisDataHash = hashGenesisData(genesisData)
     ourGenesisCoreHash = hashGenesisCore(genesisData)
 
-    // Validity check
-    for (const peer of localList) {
-        await tryConnectPeer(peer)
+    const anchors = localList
+        .filter(peer => peer.identity !== getSharedState.publicKeyHex)
+        .map(peer => new Peer(peer.connection.string, peer.identity))
+    for (const peer of anchors) {
+        log.debug("[BOOTSTRAP] Attempting connection to: " + peer.connection.string)
     }
 
-    ourGenesisDataHash = null
-    ourGenesisCoreHash = null
-    discoveredGenesisDataHashes.clear()
+    const { paired, unreachable } = await pairAnchorsAtBoot(
+        anchors,
+        pairingDeps,
+        getSharedState.genesisBlockHash,
+    )
+    const confirmed: Peer[] = []
+    for (const peer of paired) {
+        try {
+            await confirmAnchorGenesis(peer)
+            confirmed.push(peer)
+        } catch (error) {
+            if (!(error instanceof GenesisCheckUnavailable)) throw error
+            unreachable.push(peer)
+        }
+    }
+
+    if (unreachable.length > 0) {
+        log.warning(
+            `[BOOTSTRAP] ${unreachable.length} of ${anchors.length} anchors did not answer or could not be checked; ` +
+                "continuing and running the bootstrap checks on each once it answers: " +
+                unreachable.map(p => `${p.identity} @ ${p.connection.string}`).join(", "),
+        )
+        startDeferredAnchorChecks(unreachable, confirmed.length > 0, options)
+    }
 
     log.info("[BOOTSTRAP] Valid peers found: " + peerman.getPeers().length)
     return peerman.getPeers()

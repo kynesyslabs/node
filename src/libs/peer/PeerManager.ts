@@ -43,6 +43,9 @@ export default class PeerManager {
     private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
     private offlinePeers: Record<string, Peer> // Storing all the offline peers to be retried later
     private seedPeers: Peer[] = [] // Bootstrap hints from the peer list file; join the table only via a verified hello
+    // Anchors that refused this node after boot. The inbound hello only checks
+    // the block hash, so without this they would rejoin past the genesis checks.
+    private refusedAnchors = new Set<string>()
 
     private constructor() {
         this.peerList = {}
@@ -283,6 +286,9 @@ export default class PeerManager {
     }
 
     addPeer(peer: Peer, urlSignedByOwner = false): [boolean, string] {
+        if (this.isRefusedAnchor(peer.identity)) {
+            return [false, "Anchor refused this node; kept out until restart"]
+        }
         if (peer.identity === "placeholder") {
             log.warning(
                 "[PEERMANAGER] No identity detected: refusing to add peer",
@@ -478,6 +484,17 @@ export default class PeerManager {
         log.info("[PEERMANAGER] Offline peers: " + this.offlinePeers, false)
     }
 
+    /** Drops an anchor from the local peer list that refused this node, and keeps it out until restart. */
+    refuseAnchor(identity: string) {
+        this.refusedAnchors.add(identity.toLowerCase())
+        this.removeOnlinePeer(identity)
+        this.removeOfflinePeer(identity)
+    }
+
+    isRefusedAnchor(identity: string | undefined): boolean {
+        return !!identity && this.refusedAnchors.has(identity.toLowerCase())
+    }
+
     removeOnlinePeer(identity: string) {
         delete this.peerList[identity]
     }
@@ -525,6 +542,9 @@ export default class PeerManager {
      * valid URL, not pointing at us, not colliding with a verified binding.
      */
     canAddPeer(peer: Peer): [boolean, string] {
+        if (this.isRefusedAnchor(peer.identity)) {
+            return [false, "Anchor refused this node; kept out until restart"]
+        }
         const parsedUrl = parseNodeUrl(peer.connection.string)
         if (!parsedUrl) {
             return [false, "Invalid connection string: " + peer.connection.string]
@@ -574,7 +594,10 @@ export default class PeerManager {
         peer: Peer,
         waitForDiscovery = false,
     ): Promise<HelloVerdict> {
-        if (PeerManager.verifying.has(peer.identity)) {
+        if (
+            PeerManager.verifying.has(peer.identity) ||
+            PeerManager.getInstance().isRefusedAnchor(peer.identity)
+        ) {
             return "skipped"
         }
 
@@ -636,7 +659,8 @@ export default class PeerManager {
             {
                 sleepTime: 250,
                 retries: 1,
-                allowedCodes: [500, 504],
+                // 409 must reach the callback: it is the peer saying we are on another network
+                allowedCodes: [409, 500, 504],
             },
         )
 
