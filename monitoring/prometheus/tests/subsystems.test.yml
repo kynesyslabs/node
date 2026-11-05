@@ -1,0 +1,35 @@
+# promtool unit tests for alerts/subsystems.yml: SubsystemDown. Run: scripts/check-monitoring.sh
+rule_files:
+  - ../alerts/subsystems.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # mcp is down and not skipped: fires.
+      - series: 'demos_subsystem_up{subsystem="mcp",instance="validator-1"}'
+        values: '0x10'
+      - series: 'demos_subsystem_skipped{subsystem="mcp",instance="validator-1"}'
+        values: '0x10'
+      # tlsnotary is down but intentionally skipped: silent.
+      - series: 'demos_subsystem_up{subsystem="tlsnotary",instance="validator-1"}'
+        values: '0x10'
+      - series: 'demos_subsystem_skipped{subsystem="tlsnotary",instance="validator-1"}'
+        values: '1x10'
+      # dtr is never marked by the node (stays pending, up=0, skipped=0): silent.
+      - series: 'demos_subsystem_up{subsystem="dtr",instance="validator-1"}'
+        values: '0x10'
+      - series: 'demos_subsystem_skipped{subsystem="dtr",instance="validator-1"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: SubsystemDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              subsystem: mcp
+              instance: validator-1
+            exp_annotations:
+              summary: Subsystem mcp is down
+              description: 'demos_subsystem_up{subsystem="mcp"} has been 0 for >2m on validator-1 without being intentionally skipped. Check /health/subsystems for last_error.'

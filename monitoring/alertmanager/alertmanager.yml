@@ -39,11 +39,16 @@ route:
       receiver: paging
       continue: true
       group_wait: 10s
+      # Without this the route inherits group_interval: 5m, and an alert (or its resolve)
+      # that joins a group that already notified waits for the next 5-minute flush; seen
+      # live as 3-4 minute delivery delays. 30s keeps delivery well inside the stall budget.
+      group_interval: 30s
       repeat_interval: 1h
     - matchers:
         - severity=~"critical|page"
       receiver: slack
       group_wait: 10s
+      group_interval: 30s
       repeat_interval: 1h
     - matchers:
         - severity="warning"
