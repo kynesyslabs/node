@@ -650,7 +650,8 @@ The node no longer migrates the database at boot, and a plain `./run` does not c
 ```bash
 (cd postgres_<PG_PORT> && PG_PORT=<PG_PORT> docker compose up -d)
 until docker exec postgres_<PG_PORT> pg_isready -q -h 127.0.0.1 -U demosuser -d demos; do sleep 1; done
-bun run migration:run      # from the node checkout
+# the launcher passes its port only to the node it starts; .env may name another
+PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run      # from the node checkout
 ```
 
 See [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md). For an upgrade: back up, then `bun run migration:show` / `bun run migration:run` before `./run`, per the same runbook.

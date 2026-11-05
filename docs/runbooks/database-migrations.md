@@ -190,7 +190,9 @@ Do it on **one** validator first, then the rest. Never on all at once.
 
    On the Docker stack, run each as
    `docker compose run --rm --no-deps --name demos-migrate node bun run migration:show` (see
-   Commands).
+   Commands). On bare metal, run each as
+   `PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:show`: the launcher
+   passes its port only to the node it starts, and `.env` may name another.
 
    If it fails, the transaction rolls back and nothing changed. Do not start
    the node on the new release; fix the cause or restore the dump.

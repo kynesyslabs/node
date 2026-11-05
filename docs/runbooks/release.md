@@ -160,9 +160,10 @@ there ([database-migrations.md](database-migrations.md), bare-metal track):
 ```bash
 (cd postgres_<PG_PORT> && PG_PORT=<PG_PORT> docker compose up -d)
 until docker exec postgres_<PG_PORT> pg_isready -q -h 127.0.0.1 -U demosuser -d demos; do sleep 1; done
-bun run migration:show   # from the node checkout; [ ] = pending
+# the launcher passes its port only to the node it starts; .env may name another
+PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:show   # from the node checkout; [ ] = pending
 # back up (database-migrations.md step 1), then:
-bun run migration:run && ./run
+PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run
 ```
 
 ## Known limits
