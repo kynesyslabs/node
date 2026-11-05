@@ -99,8 +99,19 @@ export function stageDrillInputs(opts: {
  * the genesis and the node-1-only peerlist (replacing the base file's peerlist
  * mount, which has the same container path) and the empty directory over
  * `/app/data/snapshot`, which hides the image's testnet snapshot.
+ *
+ * It also pins each node's CONSENSUS_TIME to `consensusTimeS`. Compose would
+ * otherwise also take it from testing/devnet/.env, which the drill does not
+ * read, and the drill's hold and settle windows are counted in its rounds.
  */
-export function drillOverrideYaml(staged: StagedInputs, nodeIds: number[]): string {
+export function drillOverrideYaml(
+    staged: StagedInputs,
+    nodeIds: number[],
+    opts: { consensusTimeS: number },
+): string {
+    if (!Number.isInteger(opts.consensusTimeS) || opts.consensusTimeS <= 0) {
+        throw new Error(`consensus time must be a positive whole number of seconds: ${opts.consensusTimeS}`)
+    }
     for (const p of [staged.genesis, staged.peerlist, staged.emptySnapshot]) {
         if (/[:\n"]/.test(p)) throw new Error(`path not usable in a compose volume: ${p}`)
     }
@@ -113,6 +124,7 @@ export function drillOverrideYaml(staged: StagedInputs, nodeIds: number[]): stri
     for (const id of nodeIds) {
         lines.push(`  node-${id}:`, "    volumes:")
         for (const m of mounts) lines.push(`      - "${m}"`)
+        lines.push("    environment:", `      - CONSENSUS_TIME=${opts.consensusTimeS}`)
     }
     return lines.join("\n") + "\n"
 }

@@ -265,7 +265,10 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
             genesisTs: genesisTimestamp(Date.now()),
             dir: stagingDir,
         })
-        writeOverride(SCENARIO_ID, drillOverrideYaml(staged, NODE_IDS))
+        writeOverride(
+            SCENARIO_ID,
+            drillOverrideYaml(staged, NODE_IDS, { consensusTimeS: CONSENSUS_TIME_S }),
+        )
         up({ overrideFiles: [overridePath(SCENARIO_ID)] })
         marks.t_up = Date.now()
         await restartForColdStart()

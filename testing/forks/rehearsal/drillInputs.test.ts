@@ -125,7 +125,7 @@ describe("drillOverrideYaml", () => {
         peerlist: "/stage/peerlist.json",
         emptySnapshot: "/stage/empty-snapshot",
     }
-    const yaml = drillOverrideYaml(staged, [1, 2, 3, 4])
+    const yaml = drillOverrideYaml(staged, [1, 2, 3, 4], { consensusTimeS: 7 })
 
     it("mounts the empty snapshot over /app/data/snapshot on every node", () => {
         const mounts = yaml.split("\n").filter(l => l.includes(":/app/data/snapshot:ro"))
@@ -151,9 +151,19 @@ describe("drillOverrideYaml", () => {
         expect(yaml.startsWith("services:\n")).toBe(true)
     })
     it("refuses a path that would break the volume string", () => {
-        expect(() => drillOverrideYaml({ ...staged, genesis: "/a:b/genesis.json" }, [1])).toThrow(
-            /not usable/,
+        expect(() =>
+            drillOverrideYaml({ ...staged, genesis: "/a:b/genesis.json" }, [1], { consensusTimeS: 10 }),
+        ).toThrow(/not usable/)
+    })
+    it("sets every node's CONSENSUS_TIME to the drill's value, not the devnet .env", () => {
+        expect(yaml.split("\n").filter(l => l.includes("CONSENSUS_TIME"))).toEqual(
+            Array(4).fill("      - CONSENSUS_TIME=7"),
         )
+    })
+    it("refuses a consensus time compose would not take as whole seconds", () => {
+        for (const bad of [0, -1, 2.5, Number.NaN]) {
+            expect(() => drillOverrideYaml(staged, [1], { consensusTimeS: bad })).toThrow(/positive whole/)
+        }
     })
 })
 
