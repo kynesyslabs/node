@@ -268,6 +268,7 @@ services:
       # this port, so it must be published 1:1 below.
       GOSSIP_ENABLED: ${GOSSIP_ENABLED:-true}
       GOSSIP_PORT: ${GOSSIP_PORT:-9095}
+      GOSSIP_IPC_CONNECT_TIMEOUT_MS: ${GOSSIP_IPC_CONNECT_TIMEOUT_MS:-15000}
       # Setup check at start and the `bun run setup` answers (empty = unset).
       # The subnet key and IV variables are not listed on purpose: values here
       # show up in `docker inspect`. Use DEMOS_SETUP_L2PS_KEY_FILE / _IV_FILE.
