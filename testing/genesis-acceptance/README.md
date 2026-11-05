@@ -20,16 +20,20 @@ could not be carried out.
    RAM, a 1-minute load above the core count, less than 10 GB of free disk or
    sustained swap-out.
 2. Copies `data/genesis.json` and `data/snapshot/` out of the image
-   (`docker create` + `docker cp`, the image is not run) and writes the
-   fixtures with `fixtures.py`: a launch genesis (timestamp 1793318400, chain
-   id 4242, the mainnet forks (`MAINNET_FORKS`) at height 0, the bundled
-   snapshot bound by `snapshot.manifestSha256`) and its variants.
+   (`docker create` + `docker cp`, the image is not run), builds the
+   carry-over snapshot from them with `scripts/state-snapshot/carryover.ts`
+   (balances zeroed, validators from the image's genesis; `identityCarryover`
+   refuses anything else) and writes the fixtures with `fixtures.py`: a
+   launch genesis (timestamp 1793318400, chain id 4242, the mainnet forks
+   (`MAINNET_FORKS`) at height 0, the carry-over snapshot bound by
+   `snapshot.manifestSha256`) and its variants. Every node boots on that
+   snapshot through `DEMOS_SNAPSHOT_DIR`.
 3. Computes the pin with `bun scripts/genesis-hash.ts --json` on the host.
 4. Starts a throwaway Postgres (the image pinned in `docker-compose.yml`) and
    one node at a time on a private bridge network with no published ports. The
    node needs a route out for NTP (it exits at boot when no NTP server
    answers); its peer list is empty, so it dials no peer, and the testnet URLs
-   in the bundled snapshot's validator list are only stored. The node gets a fresh
+   in the genesis validator list are only stored. The node gets a fresh
    identity in a docker volume owned by uid 1000, the genesis read-only over
    `/app/data/genesis.json`, and TLSNotary, metrics, MCP, gossip, OmniProtocol
    and L2PS messaging switched off.
