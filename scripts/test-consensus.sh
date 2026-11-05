@@ -17,6 +17,7 @@ SUITE_FILES=(
     scripts/launch-height1-check.test.ts
     scripts/validator-prove-signing.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
+    src/config/loader.gossip.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts
@@ -37,6 +38,8 @@ SUITE_FILES=(
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/crypto/canonicalJson.test.ts
+    src/libs/gossip/GossipManager.lifecycle.test.ts
+    src/libs/gossip/sidecarHealth.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts
     src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
