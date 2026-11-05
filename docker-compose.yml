@@ -15,6 +15,8 @@
 #   monitoring             + prometheus + grafana        -> dashboards
 #   full                   + node-exporter               -> host metrics
 #   neo4j                  + neo4j                       -> CGC/KYC only
+#   reaper                 + reaper                      -> stop the stack
+#                            when the node exits (mounts the docker socket)
 #
 # Persistent state lives in named volumes (prefixed `demos_`):
 #   demos_pgdata, demos_node_data, demos_node_logs, demos_node_state,
@@ -137,8 +139,8 @@ services:
         BUILT_AT: ${BUILT_AT:-}
     container_name: demos-node${INSTANCE_SUFFIX:-}
     # Deliberately not restarted: a stall-detector or watchdog exit must keep
-    # the node down with its logs intact for investigation. The reaper service
-    # below stops the rest of the stack when this container exits.
+    # the node down with its logs intact for investigation. With the reaper
+    # profile on, the reaper service below also stops the rest of the stack.
     restart: "no"
     depends_on:
       postgres:
@@ -374,13 +376,14 @@ services:
   # node runs with restart "no" so an intentional exit stays down; the support
   # services have no purpose without it. Sibling containers are resolved via
   # compose project labels so this works unchanged under the devnet overlay.
-  # Mounting docker.sock is root-equivalent on the host — acceptable for our
-  # own deployments, do not ship this service in third-party operator setups.
+  # The node does not need it, and the docker socket it mounts gives this
+  # container root on the host, so it only runs with the reaper profile.
   # ---------------------------------------------------------------------------
   reaper:
     image: docker:27-cli
     container_name: demos-reaper${INSTANCE_SUFFIX:-}
     restart: on-failure
+    profiles: [reaper]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:

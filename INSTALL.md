@@ -397,7 +397,7 @@ docker volume inspect demos_node_state
 Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up the whole `demos_node_state` volume, encrypted, and keep the backup off this host:
 
 ```bash
-docker compose stop node    # the reaper stops the rest of the stack with it
+docker compose stop node
 docker run --rm -v demos_node_state:/src:ro alpine tar czf - -C /src . \
   | gpg --symmetric --cipher-algo AES256 -o "node-state-$(date +%F).tar.gz.gpg"
 docker compose up -d --no-build    # a source build: ./run --docker -d
