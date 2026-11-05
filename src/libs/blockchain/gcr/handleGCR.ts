@@ -42,8 +42,8 @@ import { isForkActive } from "@/forks"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import {
+    derivedGasEdit,
     editBindingState,
-    nonceIntegrityActive,
     verifyEditsAtApply,
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
@@ -334,6 +334,8 @@ export interface ApplyTransactionOptions {
      * next one, and a failure still spends it. Set by the block apply only.
      */
     nonceRule?: boolean
+    /** Amounts are OS units (`osDenomination`), for the gas a failure pays. */
+    osAmounts?: boolean
 }
 
 /**
@@ -802,7 +804,7 @@ export default class HandleGCR {
         // and its snapshot restore followed by that reversal can leave a
         // balance edit undone twice.
         const before = HandleGCR.snapshotAccounts(entities, tx)
-        const fee = HandleGCR.failureFee(tx, nonceEdit)
+        const fee = await HandleGCR.failureFee(tx, nonceEdit, !!options.osAmounts)
         const nonceCharge = structuredClone(nonceEdit)
 
         const result = await this.applyTransactionEdits(
@@ -860,18 +862,20 @@ export default class HandleGCR {
 
     /**
      * What a transaction that fails in a block pays: the fee edits derived
-     * for it at apply, then the gas edit its builder puts right before the
-     * nonce edit. Identity and d402 transactions carry no gas, and a Work
-     * replay pays nothing because the Work it reads back already paid. Only
-     * edits the sender signed or the node derived from the signed fee are
-     * charged; a type's own debits (a storage burn, a stake) never are.
+     * for it at apply, then the gas every SDK builder charges, derived here
+     * rather than read from the shipped edits, which a sender could leave
+     * the gas out of while editBinding is dormant. Identity and d402
+     * transactions pay no gas, and a Work replay pays nothing because the
+     * Work it reads back already paid. A type's own debits (a storage burn,
+     * a stake) are never charged.
      *
      * Copied, because a failed apply reverses the edits it ran in place.
      */
-    private static failureFee(
+    private static async failureFee(
         tx: Transaction,
         nonceEdit: GCREditNonce,
-    ): GCREdit[] {
+        osAmounts: boolean,
+    ): Promise<GCREdit[]> {
         const edits = tx.content.gcr_edits ?? []
         const isReplay = edits.some(
             e =>
@@ -888,19 +892,12 @@ export default class HandleGCR {
             derived.every((d, i) => sameFeeEdit(d, edits[i]))
         if (carriesDerived) fee.push(...edits.slice(0, derived.length))
 
-        const type = tx.content.type as string
-        const at = edits.indexOf(nonceEdit)
-        const gas = at > 0 ? edits[at - 1] : undefined
-        if (
-            type !== "identity" &&
-            type !== "d402_payment" &&
-            gas?.type === "balance" &&
-            gas.operation === "remove" &&
-            normalizePubkey(gas.account) === normalizePubkey(nonceEdit.account) &&
-            at - 1 >= (carriesDerived ? derived.length : 0)
-        ) {
-            fee.push(gas)
-        }
+        const gas = await derivedGasEdit(
+            tx.content.type as string,
+            normalizePubkey(nonceEdit.account),
+            osAmounts,
+        )
+        if (gas) fee.push(gas)
         return fee.map(e => structuredClone(e))
     }
 
@@ -1538,6 +1535,7 @@ export default class HandleGCR {
         txIndex: Map<string, number>,
         clock?: BlockClock,
         nonceRule = false,
+        osAmounts = false,
     ) {
         const successful: string[] = []
         const failed: string[] = []
@@ -1558,7 +1556,7 @@ export default class HandleGCR {
                 isRollback,
                 false,
                 clock,
-                nonceRule ? { nonceRule } : undefined,
+                nonceRule ? { nonceRule, osAmounts } : undefined,
             )
             const assign = () => {
                 const sender = normalizePubkey(
@@ -1713,8 +1711,10 @@ export default class HandleGCR {
         const assignedTxsUpdates = new Map<string, AssignedTxRecord[]>()
 
         const refused = await this.refuseUnboundEdits(txs, isRollback, clock?.height)
-        const nonceRule =
-            !isRollback && txs.length > 0 && (await nonceIntegrityActive())
+        const binding =
+            !isRollback && txs.length > 0 ? await editBindingState() : null
+        const nonceRule = binding?.nonceBound ?? false
+        const osAmounts = binding?.postFork ?? false
         if (nonceRule) {
             this.refuseUnboundNonceEdits(txs, refused, clock?.height)
         }
@@ -1884,6 +1884,7 @@ export default class HandleGCR {
                         txIndex,
                         clock,
                         nonceRule,
+                        osAmounts,
                     ),
                 ),
             )

@@ -39,6 +39,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 import { denomination } from "@kynesyslabs/demosdk"
+import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
@@ -96,6 +97,22 @@ function toWireShape(edits: GCREdit[], postFork: boolean): GCREdit[] {
     )
     const parsed = JSON.parse(serialised) as { gcr_edits?: GCREdit[] }
     return parsed.gcr_edits ?? []
+}
+
+/**
+ * The gas edit every SDK builder ships for a transaction of `type` sent by
+ * `account`, in the chain's wire shape; null for the types that pay none.
+ * Derived, not read from the shipped edits: without editBinding a sender
+ * could leave it out.
+ */
+export async function derivedGasEdit(
+    type: string,
+    account: string,
+    postFork: boolean,
+): Promise<GCREdit | null> {
+    if (type === "identity" || type === "d402_payment") return null
+    const gas = (await GCRGeneration.createGasEdit(account, "", false)) as GCREdit
+    return toWireShape([gas], postFork)[0] ?? null
 }
 
 async function osDenominationActive(): Promise<boolean> {

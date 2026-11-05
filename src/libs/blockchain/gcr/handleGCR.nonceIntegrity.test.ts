@@ -340,6 +340,19 @@ describe("the fee of a transaction that fails in a block", () => {
         expect(balanceOf(SENDER)).toBe(100n * OS - gasOf(write))
     })
 
+    it("charges the gas a failed transaction left out of its edits", async () => {
+        const write = await storageWrite()
+        const gas = gasOf(write)
+        const all = edits(write)
+        all.splice(all.indexOf(nonceEdit(write)) - 1, 1)
+
+        const out = await HandleGCR.applyTransactions([write], false)
+
+        expect(out.nonceChargedTxs).toEqual([write.hash])
+        expect(nonceOf(SENDER)).toBe(8)
+        expect(balanceOf(SENDER)).toBe(100n * OS - gas)
+    })
+
     it("charges a failed identity transaction, which carries no gas, its nonce only", async () => {
         const remove = onTheWire(
             await viaConfirm(() =>

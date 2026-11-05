@@ -87,9 +87,10 @@ What is charged, all or nothing, in this order:
 1. The fee edits the node derives at apply from the signed
    `transaction_fee` (native transactions under `gasFeeSeparation`): the
    sender's debit and the burn, treasury and RPC credits.
-2. The gas edit: the balance `remove` on the sender that every SDK builder
-   puts right before the nonce edit. Identity and `d402_payment`
-   transactions carry none.
+2. The gas: the balance `remove` on the sender that every SDK builder puts
+   right before the nonce edit, derived by the node rather than read from
+   the shipped edits, so a sender cannot leave it out while `editBinding` is
+   dormant. Identity and `d402_payment` transactions pay none.
 3. The nonce edit.
 
 Never charged: anything the type itself debits (a storage program's burn, a
