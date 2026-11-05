@@ -170,7 +170,7 @@ With `PROD=true` the node never creates a key by itself: a missing key stops it,
 ./scripts/node-doctor --production
 ```
 
-It prints one PASS or FAIL line per item (`PROD`, `DEMOS_REQUIRE_VALIDATORS`, clock sync, fork-schedule policy, genesis pins, one-start switches left set) and exits 1 on any FAIL. Fix every FAIL before the next step.
+It prints one PASS or FAIL line per item (`PROD`, `DEMOS_REQUIRE_VALIDATORS`, clock sync, outbound NTP, fork-schedule policy, genesis pins, the fees, stake floor and block time every validator must share, one-start switches left set) and exits 1 on any FAIL. It reads the values the node container will get from `docker compose config`, so run it from the checkout with `.env` in place. Fix every FAIL before the next step.
 
 **5. Pull and start without building.**
 
