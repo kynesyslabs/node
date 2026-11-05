@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 
+# Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
 MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs"]
 
 ap = argparse.ArgumentParser()

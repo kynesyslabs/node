@@ -27,6 +27,18 @@ Pick one. Both tracks produce a working node; they differ only in where the bina
 
 Linux is the supported and tested target. Ubuntu 22.04 LTS or newer is recommended. Any modern distro that runs Docker works for Track 1.
 
+### Clock
+
+The node refuses to start without a trusted clock: at boot it needs two NTP readings in a row that agree within 2 seconds. Both come from `pool.ntp.org`; `time.google.com`, `time.windows.com` and `time.apple.com` are asked only when it does not answer. The second reading catches a bad answer, it is not a second independent source, so the host's NTP path must be one nobody can tamper with. The host must allow **outbound UDP 123**. Keep the host clock synchronised as well. On Ubuntu `systemd-timesyncd` does this by default; check it:
+
+```bash
+timedatectl            # "System clock synchronized: yes" and "NTP service: active"
+# or, with chrony installed:
+chronyc tracking       # "Leap status : Normal"
+```
+
+If NTP is off: `sudo timedatectl set-ntp true`.
+
 ---
 
 ## Track 1: Docker Compose (recommended)
@@ -37,6 +49,7 @@ That's the whole list:
 
 - **Docker** 20.10 or newer
 - **Docker Compose** v2 (the `docker compose` plugin, not the legacy `docker-compose` Python script)
+- **git** 2.34 or newer with `ssh-keygen` (Ubuntu 22.04 ships both), to verify the signed release tag
 
 No Bun, no Postgres, no Rust toolchain on the host. Everything else runs inside containers.
 
@@ -45,6 +58,7 @@ Verify:
 ```bash
 docker --version
 docker compose version
+git --version
 ```
 
 If you don't have Docker installed, follow the official guide: [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/) and add yourself to the `docker` group so you don't need `sudo`:
@@ -78,6 +92,8 @@ docker info --format '{{.Driver}} {{json .DriverStatus}}'
 
 ### Quickstart (3 steps)
 
+The Quickstart builds the image from the `testnet` branch on your host. It is for development and testnet nodes. A mainnet or launch validator never builds its own image: follow [Run a released image](#run-a-released-image-validators) instead.
+
 ```bash
 git clone https://github.com/kynesyslabs/node.git && cd node
 cp .env.example .env  # defaults are fine; edit only if you want to override
@@ -94,6 +110,86 @@ When the stack is healthy:
 - Grafana: http://localhost:3000 (default `admin` / `demos`)
 - Prometheus: http://localhost:9091
 
+### Run a released image (validators)
+
+A validator runs the image the release workflow published, pinned by tag and digest, and starts it without building. Every value below comes from the release announcement and its `checksums.txt`; nothing is copied from an older release.
+
+**1. Check out the signed release tag.** The compose file and scripts must come from the same commit as the image.
+
+```bash
+git clone https://github.com/kynesyslabs/node.git && cd node
+TAG=vX.Y.Z   # replace with the tag announced on the release thread
+
+git fetch --tags origin stabilisation
+# Signers come from the protected branch, not from the tag itself
+git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers
+git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers
+# The tag must be on stabilisation and signed by a listed key;
+# the checkout runs only when both checks pass
+git merge-base --is-ancestor "$TAG" origin/stabilisation && echo "on stabilisation" &&
+git verify-tag "$TAG" &&
+git checkout "$TAG"
+```
+
+`git verify-tag` must print `Good "git" signature for <signer> with ED25519 key SHA256:<fingerprint>`. Check that the signer and fingerprint are one of the release signers published outside GitHub (see [docs/runbooks/release-signing-key.md](docs/runbooks/release-signing-key.md)); a good signature from a key you do not recognise is a failure. If the block stops before the checkout, or `on stabilisation` is not printed, stop and ask on the release thread. The checkout leaves a detached `HEAD`, which is expected.
+
+**2. Configure.** `cp .env.example .env`, then set at least:
+
+```env
+IMAGE_NAME=ghcr.io/kynesyslabs/node
+IMAGE_TAG=vX.Y.Z@sha256:<digest from checksums.txt>
+EXPOSED_URL=http://YOUR_PUBLIC_IP:53550
+```
+
+plus the genesis pin and the validator settings from [Joining the network](#joining-the-network--required-steps-before-real-world-use) below (steps 2 and 3). With a digest in `IMAGE_TAG`, Docker refuses any image whose content differs from the release, whatever the tag points to.
+
+**3. Put the key in place.** A validator key is generated on a trusted machine, not on the validator host, and backed up encrypted with a second person ([docs/runbooks/validator-key.md](docs/runbooks/validator-key.md)). On that machine, from a checkout of the same tag with dependencies installed (`bun install --frozen-lockfile`):
+
+```bash
+bun scripts/gen-test-identity.ts --name validator
+# prints the public key; the mnemonic is in .test-identity/validator.mnemonic (mode 600)
+```
+
+Copy only the mnemonic file to the validator host over a secure channel, then seed it into the state volume and delete the copy:
+
+```bash
+docker run --rm \
+  -v demos_node_state:/state \
+  -v "$PWD/validator.mnemonic":/seed/key:ro \
+  alpine sh -c 'cp /seed/key /state/.demos_identity && chown 1000:1000 /state /state/.demos_identity && chmod 700 /state && chmod 600 /state/.demos_identity'
+shred -u validator.mnemonic
+```
+
+The `chown` of `/state` itself matters: a volume first created by this one-off container belongs to root, and the node (uid 1000) must write its signing state files next to the key.
+
+With `PROD=true` the node never creates a key by itself: a missing key stops it, which is what you want when the volume did not mount.
+
+**4. Check the host.**
+
+```bash
+./scripts/node-doctor --production
+```
+
+It prints one PASS or FAIL line per item (`PROD`, `DEMOS_REQUIRE_VALIDATORS`, clock sync, outbound NTP, fork-schedule policy, genesis pins, the fees, stake floor and block time every validator must share, one-start switches left set) and exits 1 on any FAIL. It reads the values the node container will get from `docker compose config`, so run it from the checkout with `.env` in place. Fix every FAIL before the next step.
+
+**5. Pull and start without building.**
+
+```bash
+docker compose pull node
+docker compose up -d --no-build
+```
+
+If the pull is refused with `denied` or `unauthorized`, the image is not public yet: log in once with a GitHub token that has only the `read:packages` scope (`docker login ghcr.io -u <github user>`, paste the token at the prompt) and pull again. `--no-build` matters: without it, compose falls back to building the image locally when the pull failed, and you would run your own build instead of the release.
+
+**6. Confirm the digest you run** and post it on the release thread:
+
+```bash
+docker image inspect --format '{{index .RepoDigests 0}}' \
+  "$(docker inspect --format '{{.Image}}' "$(docker compose ps -q node)")"
+```
+
+It must print `ghcr.io/kynesyslabs/node@sha256:<the digest in checksums.txt>`.
+
 ### Environment file
 
 `.env.example` is the canonical template. Copy it to `.env` and edit. The variables you actually care about:
@@ -107,6 +203,9 @@ When the stack is healthy:
 | `EXPECTED_GENESIS_HASH` | _(empty)_ | The network's published genesis hash. Required in the image (`NODE_ENV=production`) unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; see "Pin the network's genesis" below. |
 | `EXPECTED_GENESIS_BLOCK_HASH` | _(empty)_ | The network's published block 0 hash. Optional; when set, the node refuses any other block 0. |
 | `DEMOS_REQUIRE_VALIDATORS` | _(empty)_ | `true` on mainnet validators: with no active validators in the database the node refuses to run consensus instead of using every online peer as the committee. |
+| `PROD` | `false` | `true` on validators. The node then refuses to start with a loopback or missing `EXPOSED_URL`, without the commit it was built from, or without its identity file (it never creates a new key on its own; see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Production refusals"). |
+| `FORK_SCHEDULE_MISMATCH_POLICY` | `abstain` | What a validator does when its fork schedule differs from most validators' before a fork. Mainnet runs `abstain` only; `warn` is for devnets and testnets, and the node refuses it together with `DEMOS_REQUIRE_VALIDATORS=true`. See [docs/runbooks/fork-schedule-policy.md](docs/runbooks/fork-schedule-policy.md). |
+| `IMAGE_NAME` / `IMAGE_TAG` | `demos-node` / `local` | The node image. Validators set the released image and `tag@sha256:digest`; the defaults name a local build. |
 | `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | `demosuser` / `demospassword` / `demos` | Postgres credentials. Change `PG_PASSWORD` if you're paranoid; it never leaves the compose network. |
 | `METRICS_ENABLED` / `METRICS_PORT` | `true` / `9090` | Prometheus scrape endpoint on the node. |
 | `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password. Change this. |
@@ -123,7 +222,7 @@ Leave `PG_HOST=postgres` and `TLSNOTARY_HOST=tlsnotary` exactly as shipped — t
 
 ### Joining the network — required steps before real-world use
 
-A fresh node will run as an isolated single-validator chain by default. To participate in the actual Demos testnet/mainnet, you must do **three things**:
+A fresh node will run as an isolated single-validator chain by default. To participate in the actual Demos testnet/mainnet, you must do **three things** before the node's first start:
 
 **1. Set `EXPOSED_URL` to your reachable address.**
 
@@ -136,17 +235,17 @@ EXPOSED_URL=http://YOUR_PUBLIC_IP:53550
 EXPOSED_URL=http://node.example.com:53550
 ```
 
-If running behind NAT, port-forward `53550` (RPC) and `53551` (OmniProtocol TCP) to this host. The firewall section below has the exact rules.
+If running behind NAT, port-forward `53550` (RPC), `53551` (OmniProtocol TCP) and `9095` (gossip) to this host. The firewall section below has the exact rules.
 
 **2. Provide a bootstrap peerlist.**
 
-The node persists its peerlist in the `demos_node_state` volume at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write one or more known peer URLs into that volume before first start:
+The node persists its peerlist in the `demos_node_state` volume at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write one or more known peers into that volume before first start. Each entry maps the peer's public key (its identity, which the peer must prove by signing) to its URL; an entry with `null` as the URL is skipped with `Invalid peer data format`:
 
 ```bash
 # Create a bootstrap peerlist on your host
 cat > /tmp/demos_peerlist.json <<EOF
-{"http://bootstrap1.demos.network:53550": null,
- "http://bootstrap2.demos.network:53550": null}
+{"0x<bootstrap1 public key>": "http://bootstrap1.demos.network:53550",
+ "0x<bootstrap2 public key>": "http://bootstrap2.demos.network:53550"}
 EOF
 
 # Seed it into the volume (one-shot). The volume is named demos_node_state
@@ -155,13 +254,12 @@ EOF
 docker run --rm \
   -v demos_node_state:/state \
   -v /tmp/demos_peerlist.json:/seed/demos_peerlist.json:ro \
-  alpine sh -c 'cp /seed/demos_peerlist.json /state/ && chown 1000:1000 /state/demos_peerlist.json'
-
-# Now start the stack
-docker compose up
+  alpine sh -c 'cp /seed/demos_peerlist.json /state/ && chown 1000:1000 /state /state/demos_peerlist.json'
 ```
 
-Replace `bootstrap1.demos.network` etc. with current bootstrap nodes from the team. The node will merge any peers it learns from these into the file as it runs.
+Do not start the node yet: it needs the genesis pins of step 3 first.
+
+Replace the public keys and `bootstrap1.demos.network` etc. with the current bootstrap nodes from the team. The node will merge any peers it learns from these into the file as it runs.
 
 **3. Pin the network's genesis.**
 
@@ -171,17 +269,21 @@ The image runs with `NODE_ENV=production`, and a production node refuses to star
 # In .env
 EXPECTED_GENESIS_HASH=<published genesis hash>
 EXPECTED_GENESIS_BLOCK_HASH=<published block 0 hash>
-# Mainnet validators only
+# Validators
+PROD=true
 DEMOS_REQUIRE_VALIDATORS=true
+FORK_SCHEDULE_MISMATCH_POLICY=abstain
 ```
 
-`scripts/genesis-hash.ts --genesis <file>` prints both values for a genesis file; the block 0 hash is the one labelled "genesis block hash".
+`scripts/genesis-hash.ts --genesis <file>` prints both values for a genesis file; the block 0 hash is the one labelled "genesis block hash". What each hash covers, and where mainnet's are published, is in [docs/mainnet/genesis-hash.md](docs/mainnet/genesis-hash.md).
 
-At every start the node checks it before it signs anything: on an empty database against `data/genesis.json` (and the snapshot that genesis declares), before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; mainnet validators never set it. A node started without a pin and without that opt-out (a bare-metal `./run` install runs as development, so nothing refuses it) logs a `[GENESIS] EXPECTED_GENESIS_HASH is not set` warning at every boot.
+A validator never leaves these set in `.env`: `DEMOS_ALLOW_UNPINNED_GENESIS`, and the one-start switches `DEMOS_GENERATE_IDENTITY`, `DEMOS_IDENTITY_TAKEOVER`, `DEMOS_SIGNING_RECORD_REBIND` and `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST`. Each of the last four is for the single start that needs it (see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) and below); remove it once the node runs. `./scripts/node-doctor --production` fails while any of them is set.
+
+At every start the node checks it before it signs anything: on an empty database against the genesis file (`data/genesis.json`, or `DEMOS_GENESIS_FILE`) and the snapshot that genesis declares, before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; mainnet validators never set it. A node started without a pin and without that opt-out (a bare-metal `./run` install runs as development, so nothing refuses it) logs a `[GENESIS] EXPECTED_GENESIS_HASH is not set` warning at every boot.
 
 The genesis hash leaves out the validators' `connection_url` and the order of the keys in the file, and block 0 does not, so two files with the same genesis hash can still build different blocks 0. `EXPECTED_GENESIS_BLOCK_HASH` closes that: an empty database refuses to write any other block 0, and an existing one refuses to boot on it.
 
-On mainnet, mount the published genesis file and snapshot read-only instead of using the files bundled in the image, which belong to the testnet:
+On mainnet, mount the published genesis file and snapshot read-only instead of using the files bundled in the image, which belong to the testnet. Use the files exactly as published and check the genesis file's checksum against the announcement; never edit them: even a changed validator URL or a different order of keys builds a different block 0, and that node cannot join ([docs/mainnet/genesis.md](docs/mainnet/genesis.md)):
 
 ```yaml
 # docker-compose.override.yml
@@ -196,6 +298,8 @@ services:
 
 The node also remembers the fork schedule it last ran with. A restart whose `data/genesis.json` adds, moves or removes a fork at or below the current height plus 50 blocks is refused, and the refusal names the change. If every operator agreed to that exact schedule, restart once with `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST` set to the digest the refusal prints. See `docs/design/genesis-enforcement.md`.
 
+With all three in place, start the node. A validator runs `./scripts/node-doctor --production` first and starts only when it passes (steps 4 and 5 of the release-image install above); a source build starts with `./run --docker -d`.
+
 ### Network Exposure
 
 When running on a VPS or any machine you want peers to connect to, you must allow inbound connections on these ports:
@@ -204,7 +308,10 @@ When running on a VPS or any machine you want peers to connect to, you must allo
 |------|----------|-----------|---------|
 | 53550 | TCP | inbound | Node RPC (HTTP) |
 | 53551 | TCP | inbound | OmniProtocol (peer-to-peer binary RPC) |
+| 9095 | TCP | inbound | Gossip (`GOSSIP_PORT`); peers dial `EXPOSED_URL`'s host on this port |
 | 7047 | TCP | inbound | TLSNotary attestation server (only if you want others to attest against your notary) |
+| 55688 | TCP | inbound | TLSNotary WebSocket proxy port the node advertises (`TLSNOTARY_PROXY_PORT`; only with TLSNotary on) |
+| 123 | UDP | outbound | NTP; the node does not start without it (see [Clock](#clock)) |
 
 These ports should NOT be exposed publicly:
 
@@ -214,17 +321,23 @@ These ports should NOT be exposed publicly:
 | 9090 | Node metrics — published on loopback only (`METRICS_BIND`); a monitoring host off this machine needs a private interface or a tunnel |
 | 9091 | Prometheus — keep behind your firewall or VPN |
 | 3000 | Grafana — only public if you want a public dashboard |
+| 55000-55063 | TLSNotary per-session proxies — published on loopback only, for a reverse proxy on this host (`/tlsn/<port>/`) |
 
-`ufw` example for an Ubuntu VPS:
+`ufw` example for an Ubuntu VPS. Allow SSH first, or `ufw enable` locks you out of a remote host:
 
 ```bash
+sudo ufw allow OpenSSH
 sudo ufw allow 53550/tcp comment "Demos RPC"
 sudo ufw allow 53551/tcp comment "Demos OmniProtocol"
+sudo ufw allow 9095/tcp  comment "Demos gossip"
 sudo ufw allow 7047/tcp  comment "Demos TLSNotary"
+sudo ufw allow 55688/tcp comment "Demos TLSNotary proxy"
 sudo ufw enable
 ```
 
-If you're behind NAT (home server, dev box, etc.), forward 53550 and 53551 from your router to this host. TLSNotary forwarding is optional — only needed if you want peers to use *your* notary container.
+`ufw` allows outbound traffic by default, so NTP needs no rule unless your provider's firewall blocks it. Docker publishes container ports through its own iptables rules, ahead of `ufw`; the rules above matter for what the host itself exposes, and the loopback bindings in `docker-compose.yml` are what keep the internal ports private.
+
+If you're behind NAT (home server, dev box, etc.), forward 53550, 53551 and 9095 from your router to this host. TLSNotary forwarding is optional — only needed if you want peers to use *your* notary container.
 
 Don't forget to set `EXPOSED_URL` in `.env` to the address peers will reach you at (public IP, DNS name, or NAT-mapped hostname).
 
@@ -282,14 +395,26 @@ docker volume inspect demos_node_state
 
 ### Backup the node identity
 
-Your `.demos_identity` is the private key — losing it means losing your node's network identity. Back up the entire `demos_node_state` volume:
+Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up the whole `demos_node_state` volume, encrypted, and keep the backup off this host:
 
 ```bash
-docker run --rm -v demos_node_state:/src -v "$PWD":/dst alpine \
-  tar czf /dst/node-state-backup.tar.gz -C /src .
+out="node-state-$(date +%F-%H%M%S).tar.gz.gpg"
+if docker compose stop node; then
+  ( set -o pipefail
+    docker run --rm -v demos_node_state:/src:ro alpine tar czf - -C /src . \
+      | gpg --symmetric --cipher-algo AES256 -o "$out"
+  ) || { echo "backup FAILED; removing $out" >&2; rm -f "$out"; }
+  docker compose up -d --no-build    # a source build: ./run --docker -d
+else
+  echo "the node did not stop; no backup taken" >&2
+fi
 ```
 
-That writes `node-state-backup.tar.gz` into your current directory. To restore, do the reverse: stop the stack, recreate an empty `demos_node_state` volume, and `tar xzf` the backup back into it.
+A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup.
+
+`gpg` asks for a passphrase; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
+
+Restoring is not the reverse of this: an old copy can make the key vote against a vote it already cast. Follow the restore rules in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) (newest complete copy, network head above the key's last possible vote, never two hosts running the key).
 
 ### View logs
 
@@ -309,12 +434,14 @@ curl http://localhost:53550/info    # node info (version, identity, etc.)
 
 ### Update the node
 
-A validator moves to a released image by tag and digest, never by building its own; see [docs/runbooks/release.md](docs/runbooks/release.md). Set `IMAGE_NAME` and `IMAGE_TAG` in `.env` from the release's `checksums.txt`, then:
+A validator moves to a released image by tag and digest, never by building its own; see [docs/runbooks/release.md](docs/runbooks/release.md). Verify and check out the new tag (step 1 of [Run a released image](#run-a-released-image-validators)), set `IMAGE_TAG` in `.env` from the release's `checksums.txt`, then:
 
 ```bash
 docker compose pull node
-docker compose up -d
+docker compose up -d --no-build
 ```
+
+Then confirm the running digest as in step 6 there.
 
 Volumes (and therefore your identity, chain data, peerlist cache) are preserved.
 
@@ -378,8 +505,10 @@ sudo apt install -y curl git wget build-essential ca-certificates gnupg lsb-rele
 The `./run` script still uses Docker for the Postgres sidecar.
 
 ```bash
-# Remove old Docker versions
-sudo apt remove docker docker-engine docker.io containerd runc
+# Remove old Docker versions (on a clean host there is nothing to remove)
+for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
+  sudo apt-get remove -y "$pkg" 2>/dev/null || true
+done
 
 # Install prerequisites
 sudo apt update
@@ -398,8 +527,9 @@ sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
 # Add user to docker group
 sudo usermod -aG docker $USER
-newgrp docker
 ```
+
+Log out and back in (or run `newgrp docker`, which opens a new shell) so the group applies, then:
 
 ```bash
 # Start and enable Docker
@@ -427,8 +557,9 @@ bun -v
 ### 3b. Install Bun without Mise
 
 ```bash
-# If method 3a does not work, use this alternate method to install Bun
-curl -fsSL https://bun.sh/install | bash
+# If method 3a does not work, install the same pinned version directly
+# (./run refuses any other Bun version)
+curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4"   # the version in .bun-version
 
 # Verify Bun
 bun -v
@@ -444,7 +575,7 @@ A validator runs a signed release tag, never a branch head (see [docs/runbooks/r
 cd ~
 git clone https://github.com/kynesyslabs/node.git
 cd node
-TAG=v1.0.0-rc.1   # the announced release tag
+TAG=vX.Y.Z   # replace with the tag announced on the release thread
 
 git fetch --tags origin stabilisation
 # Signers come from the protected branch, not from the tag itself
@@ -457,7 +588,7 @@ git verify-tag "$TAG" &&
 git checkout "$TAG"
 ```
 
-`git verify-tag` must print `Good "git" signature` for a key in `allowed_signers`. If the block stops before the checkout, or `on stabilisation` is not printed, stop and ask on the release thread. The checkout leaves a detached `HEAD`, which is expected. To upgrade, repeat these steps with the next tag; do not use `./run -U`, which pulls a branch head.
+`git verify-tag` must print `Good "git" signature for <signer> with ED25519 key SHA256:<fingerprint>`, and the signer and fingerprint must be one of the release signers published outside GitHub (see [docs/runbooks/release-signing-key.md](docs/runbooks/release-signing-key.md)). If the block stops before the checkout, or `on stabilisation` is not printed, stop and ask on the release thread. The checkout leaves a detached `HEAD`, which is expected. To upgrade, repeat these steps with the next tag; do not use `./run -U`, which pulls a branch head.
 
 #### Testnet and development: the `testnet` branch
 
@@ -492,6 +623,8 @@ git branch
 ```
 
 Running the node the first time will generate a private key for your node and store it in the `.demos_identity` file by default. The public key is printed on the terminal and saved in a `publickey_*` file in the same directory.
+
+A mainnet validator does not do this: its key is generated on a trusted machine and copied in as `.demos_identity` (mode 600) before the first start, as in step 3 of [Run a released image](#run-a-released-image-validators). With `PROD=true` in `.env` the node stops instead of creating a key, so a missing file is never silently replaced.
 
 Press `Ctrl+C` (or `Q` in the TUI) to stop the node so you can edit the configuration files.
 
@@ -554,6 +687,8 @@ Set `EXPOSED_URL` based on your setup:
 - Local testing: `http://localhost:53550`
 - Remote machine: `http://YOUR_PUBLIC_IP:53550`
 - Behind proxy: `https://demos.example.com`
+
+Mainnet validators run Track 1 with the released image. A bare-metal node keeps the published genesis file and snapshot outside the checkout and points `DEMOS_GENESIS_FILE` and `DEMOS_SNAPSHOT_DIR` in `.env` at them (absolute paths). Never copy them over `data/genesis.json` or `data/snapshot/`: those are tracked files, the node would then report its build as dirty, and the launch go/no-go check does not count a dirty build as the release. A named genesis file that is missing stops the node at boot. Run with the release tag checked out and nothing else changed (`git status` shows no modified tracked files). Also set the genesis pins and validator settings from [Pin the network's genesis](#joining-the-network--required-steps-before-real-world-use) (`EXPECTED_GENESIS_HASH`, `EXPECTED_GENESIS_BLOCK_HASH`, `PROD=true`, `DEMOS_REQUIRE_VALIDATORS=true`, `FORK_SCHEDULE_MISMATCH_POLICY=abstain`) and run `./scripts/node-doctor --production --env-from env` before starting: without `--env-from env` the doctor reads the Docker settings whenever `docker-compose.yml` and Docker are present, not the `.env` and environment a bare-metal node uses. `./run` does not set `NODE_ENV=production`, so a missing pin only shows as a warning at boot.
 
 If you're using FFI mode (`TLSNOTARY_MODE=ffi`), set `TLSNOTARY_SIGNING_KEY` in `.env` to a 64-char hex secp256k1 key — or leave it empty and the node auto-generates one into `.tlsnotary-key` on first boot. To skip TLSNotary entirely, set `TLSNOTARY_ENABLED=false`.
 
@@ -634,8 +769,9 @@ cd postgres_5332
 **Missing dependencies**
 
 ```bash
-rm -rf node_modules bun.lockb
-bun install
+# Reinstall exactly what bun.lock pins; never delete or regenerate bun.lock
+rm -rf node_modules
+bun install --frozen-lockfile
 ```
 
 ---
@@ -702,7 +838,7 @@ The variable replaces the pinned digest (it does not turn the check off), so a n
     - `.demos_identity` (private key — KEEP SECRET)
     - `publickey_*` (public identifier)
 
-   Track 1 users: see the volume backup snippet above. Track 2 users: copy the files out of the node directory.
+   Track 1 users: see the volume backup snippet above. Track 2 users: stop the node and copy the identity file together with its signing state files (`.demos_identity.*`, see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md)). Encrypt every backup (for example `gpg --symmetric` or `age`) and keep it off the host.
 
 2. **Set proper permissions on bare metal:**
 
@@ -721,9 +857,12 @@ The variable replaces the pinned digest (it does not turn the check off), so a n
 | Port        | Service      | Description                             |
 | ----------- | ------------ | --------------------------------------- |
 | 53550       | Node RPC     | Main node API endpoint                  |
-| 53551       | OmniProtocol | P2P communication (TCP+UDP)             |
+| 53551       | OmniProtocol | P2P communication (TCP)                 |
+| 9095        | Gossip       | Gossip sidecar (TCP)                    |
 | 7047        | TLSNotary    | TLSNotary server                        |
-| 55000-60000 | WS Proxy     | WebSocket proxy for TLSNotary (TCP+UDP) |
+| 55688       | WS Proxy     | TLSNotary WebSocket proxy the node advertises (TCP) |
+| 55000-57000 | WS Proxy     | Per-session TLSNotary proxies on bare metal (TCP); under Docker 55000-55063 on loopback, for a host reverse proxy |
+| 123 (out)   | NTP          | Outbound UDP; the node does not start without a trusted clock |
 
 ### Optional Ports
 
