@@ -54,9 +54,11 @@ export interface ExpectedBalance {
 export interface DenominationInputs {
     /** A snapshot manifest was present, so block 0 took the snapshot path. */
     snapshotPath: boolean
-    /** genesis.forks.osDenomination is present: on the snapshot path it runs (or is marked) at block 0. */
-    osEntryPresent: boolean
-    /** The effective activation height after loading the genesis (code default when absent). */
+    /**
+     * The effective activation height after loading the genesis (code
+     * default when the entry is absent). On the snapshot path 0 means block
+     * 0 migrates (or marks) before genesis validators are seeded.
+     */
     osEffectiveHeight: number | null
     /** The snapshot manifest records osDenomination as applied: its values are already scaled. */
     snapshotOsApplied: boolean
@@ -119,7 +121,17 @@ const SHOWN = 5
 
 const norm = (id: string) => id.trim().toLowerCase()
 
-/** A reply value as an exact integer: bigints may arrive as "123", "123n" or a safe number. */
+/**
+ * An amount from a node reply. getAddressInfo sends the balance and
+ * getValidators the stake as a decimal string of digits
+ * (accountForWire, serializeValidator); anything else is not the node's
+ * reply format and is reported as unreadable rather than guessed at.
+ */
+export function parseReplyAmount(value: unknown): bigint | null {
+    return typeof value === "string" && /^\d+$/.test(value) ? BigInt(value) : null
+}
+
+/** An amount from the genesis file or snapshot, in the shapes those files hold. */
 export function parseAmount(value: unknown): bigint | null {
     if (typeof value === "bigint") return value
     if (typeof value === "number") return Number.isSafeInteger(value) ? BigInt(value) : null
@@ -132,17 +144,17 @@ export function parseAmount(value: unknown): bigint | null {
 
 /**
  * The factors that turn raw genesis values into what the node stores at a
- * height. On the snapshot path the migration runs inside block 0 when the
- * genesis lists osDenomination (unless the snapshot is already migrated),
+ * height. On the snapshot path the migration runs inside block 0 when
+ * osDenomination is active there (unless the snapshot is already migrated),
  * before genesis validators are seeded; otherwise the block hook runs it
- * at its effective height, over every row, unless block 0 left a marker.
+ * at its effective height, over every row.
  */
 export function denominationScales(
     d: DenominationInputs,
     head: number,
 ): { balance: bigint; snapshotStake: bigint; genesisStake: bigint } {
-    const atBlockZero = d.snapshotPath && d.osEntryPresent && !d.snapshotOsApplied
-    const markerAtBlockZero = d.snapshotPath && d.osEntryPresent
+    const markerAtBlockZero = d.snapshotPath && d.osEffectiveHeight === 0
+    const atBlockZero = markerAtBlockZero && !d.snapshotOsApplied
     const byHook = !markerAtBlockZero && d.osEffectiveHeight !== null && d.osEffectiveHeight <= head
     const scaled = atBlockZero || byHook ? OS_PER_DEM : 1n
     return {
@@ -198,9 +210,9 @@ function compareValidators(
         if (v.stakedAmount !== null) {
             const scale = v.source === "snapshot" ? scales.snapshotStake : scales.genesisStake
             const want = v.stakedAmount * scale
-            const have = parseAmount(o.stakedAmount)
+            const have = parseReplyAmount(o.stakedAmount)
             if (have === null) {
-                differ.push(`${address} stake ${JSON.stringify(o.stakedAmount)} is not an integer`)
+                differ.push(`${address} stake ${JSON.stringify(o.stakedAmount)} is not a decimal string`)
             } else if (have !== want) {
                 differ.push(
                     `${address} stake ${have}, expected ${want}` +
@@ -223,7 +235,7 @@ function compareBalances(
     const answers = new Map(Object.entries(observed).map(([a, v]) => [norm(a), v]))
     for (const b of expected) {
         const raw = answers.get(norm(b.address))
-        const have = parseAmount(raw)
+        const have = parseReplyAmount(raw)
         if (have === null) {
             unreadable.push(b.address)
             continue
@@ -657,7 +669,6 @@ async function main(): Promise<number> {
         snapshotBalances,
         denomination: {
             snapshotPath,
-            osEntryPresent: Boolean(genesis?.forks?.osDenomination),
             osEffectiveHeight: getSharedState.forkConfig.osDenomination.activationHeight,
             snapshotOsApplied,
         },

@@ -7,6 +7,7 @@ import {
     decideHeight1,
     denominationScales,
     parseAmount,
+    parseReplyAmount,
 } from "./launch-height1-check"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
@@ -17,7 +18,6 @@ const STAKE = 1_000_000_000_000n
 /** A post-fork snapshot: values are already in OS, nothing is scaled. */
 const MIGRATED: DenominationInputs = {
     snapshotPath: true,
-    osEntryPresent: true,
     osEffectiveHeight: 0,
     snapshotOsApplied: true,
 }
@@ -57,7 +57,7 @@ function node(i: number, overrides: Partial<NodeObservation> = {}): NodeObservat
             stakedAmount: STAKE.toString(),
             validAt: 0,
         })),
-        balances: { [id(50)]: "700", [id(100)]: "5000n" },
+        balances: { [id(50)]: "700", [id(100)]: "5000" },
         ...overrides,
     }
 }
@@ -164,8 +164,20 @@ describe("denominationScales", () => {
         expect(s).toEqual({ balance: 1_000_000_000n, snapshotStake: 1_000_000_000n, genesisStake: 1n })
     })
 
-    it("migrates everything through the block hook when the genesis leaves osDenomination out", () => {
-        const s = denominationScales({ ...MIGRATED, osEntryPresent: false }, 1)
+    it("scales nothing while osDenomination is inactive", () => {
+        const pre = { ...MIGRATED, snapshotOsApplied: false }
+        const none = { balance: 1n, snapshotStake: 1n, genesisStake: 1n }
+        expect(denominationScales({ ...pre, osEffectiveHeight: null }, 1)).toEqual(none)
+        expect(denominationScales({ ...pre, osEffectiveHeight: 5 }, 1)).toEqual(none)
+    })
+
+    it("migrates everything through the block hook once a later height is reached", () => {
+        const s = denominationScales({ ...MIGRATED, snapshotOsApplied: false, osEffectiveHeight: 5 }, 5)
+        expect(s).toEqual({ balance: 1_000_000_000n, snapshotStake: 1_000_000_000n, genesisStake: 1_000_000_000n })
+    })
+
+    it("on the legacy path the block hook migrates block 0 too", () => {
+        const s = denominationScales({ snapshotPath: false, osEffectiveHeight: 0, snapshotOsApplied: false }, 1)
         expect(s).toEqual({ balance: 1_000_000_000n, snapshotStake: 1_000_000_000n, genesisStake: 1_000_000_000n })
     })
 
@@ -180,12 +192,31 @@ describe("denominationScales", () => {
 })
 
 describe("parseAmount", () => {
-    it("reads the shapes a balance arrives in", () => {
+    it("reads the shapes a genesis or snapshot amount is written in", () => {
         expect(parseAmount("12")).toBe(12n)
         expect(parseAmount("12n")).toBe(12n)
         expect(parseAmount(12)).toBe(12n)
         expect(parseAmount(2 ** 60)).toBeNull()
         expect(parseAmount("1.5")).toBeNull()
         expect(parseAmount(null)).toBeNull()
+    })
+})
+
+describe("parseReplyAmount", () => {
+    it("accepts only the decimal string the node sends", () => {
+        expect(parseReplyAmount("12")).toBe(12n)
+        expect(parseReplyAmount("0")).toBe(0n)
+        expect(parseReplyAmount("12n")).toBeNull()
+        expect(parseReplyAmount(12)).toBeNull()
+        expect(parseReplyAmount("-1")).toBeNull()
+        expect(parseReplyAmount("1e3")).toBeNull()
+        expect(parseReplyAmount(" 12")).toBeNull()
+        expect(parseReplyAmount(undefined)).toBeNull()
+    })
+
+    it("reports a balance in another shape as unreadable", () => {
+        const d = decideHeight1(expectation(), [node(0, { balances: { [id(50)]: "700", [id(100)]: 5000 } })])
+        expect(d.verdict).toBe("fail")
+        expect(failed(d).map(c => c.detail).join("\n")).toContain("could not be read")
     })
 })
