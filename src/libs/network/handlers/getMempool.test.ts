@@ -13,6 +13,7 @@ const getMempoolPage = jest.fn(async (..._args: unknown[]) => ({ txs: [] as any[
 jest.mock("../../blockchain/chain", () => ({ __esModule: true, default: {} }))
 jest.mock("../routines/nodecalls/getTransactions", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("../routines/nodecalls/getTransactionStatus", () => ({ __esModule: true, default: jest.fn() }))
+jest.mock("../routines/nodecalls/getTransactionProof", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("../routines/nodecalls/getTxsByHashes", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("../../blockchain/mempool", () => ({ __esModule: true, default: { getMempool, getMempoolPage } }))
 jest.mock("src/utilities/logger", () => ({
