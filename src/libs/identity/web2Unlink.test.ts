@@ -45,6 +45,28 @@ describe("which links one web2 unlink removes", () => {
         })
     })
 
+    it("treats a username repeated on one account as that account, not as ambiguous", () => {
+        const links = [
+            { username: "alice", userId: 7 },
+            { username: "bob", userId: "8" },
+            { username: "alice", userId: "7" },
+        ]
+        expect(selectWeb2Unlink(links, { username: "alice" }, NF)).toEqual({
+            ok: true,
+            indexes: [0, 2],
+            removed: links[0],
+        })
+    })
+
+    it("still refuses a username shared by a link without a userId and another link", () => {
+        const links = [
+            { username: "alice" },
+            { username: "alice", userId: "7" },
+        ]
+        expect(selectWeb2Unlink(links, { username: "alice" }, NF).ok).toBe(false)
+        expect(selectWeb2Unlink([{ username: "alice" }, { username: "alice" }], { username: "alice" }, NF).ok).toBe(false)
+    })
+
     it("removes a link stored without a userId by its username, and only that link", () => {
         const links = [
             { username: "legacy" },

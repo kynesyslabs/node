@@ -9,7 +9,7 @@ import { web2UserIdLookupKey } from "./web2UserId"
  * time, not unique on an account and free to go stale. An unlink therefore
  * removes exactly one platform account: every stored link with the userId
  * named, or, when the request names only a username (today's SDK), every
- * link with the userId of the single link carrying that username.
+ * link of the single account whose links carry that username.
  *
  * A link stored without a userId cannot be named by one. A request whose
  * username finds such a link alone removes that link only; the genesis
@@ -64,7 +64,18 @@ export function selectWeb2Unlink<T extends StoredLink>(
         )
         .filter(i => i >= 0)
     if (named.length === 0) return { ok: false, message: notFound }
-    if (named.length > 1) {
+    // One account can sit under one username twice: before the canonical-id
+    // fork a gist link stored 42 and a later TLSN link stored "42". Only a
+    // username shared by different accounts is ambiguous; links without a
+    // userId cannot be told apart, so each counts as its own account.
+    const accounts = new Set(
+        named.map(i =>
+            hasUserId(links[i].userId)
+                ? `id:${web2UserIdLookupKey(links[i].userId)}`
+                : `idx:${i}`,
+        ),
+    )
+    if (accounts.size > 1) {
         return {
             ok: false,
             message:
