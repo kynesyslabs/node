@@ -164,6 +164,10 @@ end it holding the same pool, and apply decides.
 
 ## Wallets and explorers
 
-After the fork a failed transaction moves the sender's nonce and costs its
-fee. A wallet signs its next transaction with the next nonce either way. A
-balance shown after a failure is lower by the fee, not unchanged.
+After the fork a transaction that fails inside a block usually moves the
+sender's nonce and costs its fee, but not always: a failure refused before
+apply spends neither, and a charged failure spends only the nonce when the
+account cannot pay the fee. Failure status alone does not tell these apart.
+A wallet therefore reads the sender's confirmed nonce and balance after a
+failure and signs its next transaction from them, rather than inferring
+either from the status.
