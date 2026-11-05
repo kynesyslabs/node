@@ -20,6 +20,11 @@
 #     CLEAN_VOLUMES (PG data, node data), not the logs/prometheus/grafana ones
 #   - run -c true wipes the data dir only after the container stopped (a failed
 #     stop leaves the data in place), in the order stop, wipe, start, migrate
+#   - run -c true / -b true migrate over the connection that was probed (the
+#     launcher's container), whatever PG_* the shell or .env carry, and with
+#     bun only (no node binary on the host)
+#   - wipe-and-reboot.sh refuses before any wipe when scripts/docker-run is not
+#     executable
 #
 # Usage:
 #   scripts/launcher-wipe-guard.test.sh                 # the scripts next to this file
@@ -133,15 +138,27 @@ EOF
     cat >"$bin/bun" <<'EOF'
 #!/usr/bin/env bash
 echo "bun $*" >>"$STUB_ST/calls.log"
+# migration:run, in either form. `bun run migration:run` goes through the
+# package.json script (tsx), which needs a node binary: STUB_NO_NODE=1 is a host
+# with Bun but no Node. The bun-direct form (typeorm's cli.js run by bun) does
+# not. The connection the migration would use is logged with the MIGRATE line.
+migrate() {
+    echo "MIGRATE host=${PG_HOST-} port=${PG_PORT-} user=${PG_USER-} password=${PG_PASSWORD-} db=${PG_DATABASE-}" >>"$STUB_ST/migrate.log"
+    d="$STUB_WORK/postgres_${PG_PORT:-5332}/data_${PG_PORT:-5332}/postgres/tables"
+    mkdir -p "$d"
+    touch "$d/migrations"
+}
 case "${1:-}" in
 --version) echo 1.0.0 ;;
 run)
     case "${2:-}" in
     migration:run)
-        echo MIGRATE >>"$STUB_ST/migrate.log"
-        d="$STUB_WORK/postgres_${PG_PORT:-5332}/data_${PG_PORT:-5332}/postgres/tables"
-        mkdir -p "$d"
-        touch "$d/migrations" ;;
+        if [[ "${STUB_NO_NODE:-0}" == 1 ]]; then echo "tsx: node: command not found" >&2; exit 127; fi
+        migrate ;;
+    esac ;;
+*)
+    case " $* " in
+    *" ./node_modules/typeorm/cli.js migration:run "*) migrate ;;
     esac ;;
 esac
 exit 0
@@ -227,7 +244,13 @@ check() {
     LAST_OUT="$out"
 }
 
-start_case() { N=$((N + 1)); unset STUB_FAIL_DOWN STUB_FAIL_VOLRM STUB_FAIL_RM STUB_FAIL_PSQL STUB_PSQL_TABLES STUB_HANG_PSQL STUB_HANG_UP CHECK_TIMEOUT; new_world; }
+start_case() { N=$((N + 1)); unset STUB_FAIL_DOWN STUB_FAIL_VOLRM STUB_FAIL_RM STUB_FAIL_PSQL STUB_PSQL_TABLES STUB_HANG_PSQL STUB_HANG_UP STUB_NO_NODE PG_HOST PG_USER PG_PASSWORD PG_DATABASE CHECK_TIMEOUT; new_world; }
+
+# the migration must have been given the launcher's own container as its database
+expect_pinned_connection() {
+    grep -qx 'MIGRATE host=localhost port=5332 user=demosuser password=demospassword db=demos' "$ST/migrate.log" 2>/dev/null \
+        || { FAIL=$((FAIL + 1)); echo "FAIL - the migration did not connect to the probed container (got: $(cat "$ST/migrate.log" 2>/dev/null | tr '\n' ';'))"; }
+}
 
 # the hung stub must have been run under a bounded `timeout N psql`
 expect_bounded_probe() {
@@ -327,7 +350,7 @@ check "run -c true: empty database -> migrates once" ok 1 "$W/scripts/run" -c tr
 # order: stop, then wipe, then start, then migrate; the old rows are gone
 [[ -f "$W/postgres_5332/data_5332/postgres/tables/users" ]] && { FAIL=$((FAIL + 1)); echo "FAIL - run -c true left the old data in the data dir"; }
 [[ -f "$W/postgres_5332/data_5332/postgres/tables/migrations" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - run -c true did not migrate the wiped data dir"; }
-grep -nE 'docker compose .* (down|up)( |$)|bun run migration:run' "$ST/calls.log" | sed -E 's/^[0-9]+:docker compose .* (down|up)( .*|$)/\1/; s/^[0-9]+:bun run migration:run/migrate/' | tr '\n' ' ' \
+grep -nE 'docker compose .* (down|up)( |$)|bun .*migration:run' "$ST/calls.log" | sed -E 's/^[0-9]+:docker compose .* (down|up)( .*|$)/\1/; s/^[0-9]+:bun .*migration:run.*/migrate/' | tr '\n' ' ' \
     | grep -qE '^down up migrate ' || { FAIL=$((FAIL + 1)); echo "FAIL - run -c true: wrong order of stop / start / migrate (got: $(grep -oE 'compose .* (down|up)|migration:run' "$ST/calls.log" | tr '\n' ';'))"; }
 
 start_case; seed_datadir
@@ -340,6 +363,24 @@ start_case; seed_datadir
 check "run -b true (restore): wipe works -> migrates once" ok 1 "$W/scripts/run" -b true -t -m
 [[ -f "$W/postgres_5332/data_5332/postgres/tables/users" ]] && { FAIL=$((FAIL + 1)); echo "FAIL - run -b true left the old data in the data dir"; }
 
+# The migration must hit the database that was probed, whatever PG_* the shell
+# or .env carry (dotenv never overrides a variable that is already set)
+start_case; seed_datadir; export PG_HOST=db.example.org PG_USER=other PG_PASSWORD=secret PG_DATABASE=otherdb
+check "run -c true: PG_* pointing elsewhere -> migration still uses the probed container" ok 1 "$W/scripts/run" -c true -t -m
+expect_pinned_connection
+
+start_case; seed_datadir; export PG_HOST=db.example.org PG_USER=other PG_PASSWORD=secret PG_DATABASE=otherdb
+check "run -b true (restore): PG_* pointing elsewhere -> migration still uses the probed container" ok 1 "$W/scripts/run" -b true -t -m
+expect_pinned_connection
+
+# A host with Bun but no Node (GOSSIP_ENABLED=false) passes the launcher's
+# checks: the schema must still be created after the wipe
+start_case; seed_datadir; export STUB_NO_NODE=1
+check "run -c true: no node binary -> migrates once (bun runs typeorm directly)" ok 1 "$W/scripts/run" -c true -t -m
+
+start_case; seed_datadir; export STUB_NO_NODE=1
+check "run -b true (restore): no node binary -> migrates once" ok 1 "$W/scripts/run" -b true -t -m
+
 # -----------------------------------------------------------------------------
 # wipe-and-reboot.sh
 # -----------------------------------------------------------------------------
@@ -351,6 +392,13 @@ case "$LAST_OUT" in *"booting stack"*) FAIL=$((FAIL + 1)); echo "FAIL - wipe-and
 
 start_case; seed_volumes
 check "wipe-and-reboot: volumes removed -> migrates once" ok 1 "$W/scripts/wipe-and-reboot.sh" --yes --no-rebuild
+
+# Without an executable scripts/docker-run nothing creates the schema, so the
+# script must refuse before it deletes anything, and never boot with raw compose
+start_case; seed_volumes; chmod -x "$W/scripts/docker-run"
+check "wipe-and-reboot: scripts/docker-run not executable -> refuses before the wipe" fail 0 "$W/scripts/wipe-and-reboot.sh" --yes --no-rebuild
+[[ -d "$ST/vol/demos_pgdata" && -f "$ST/vol/demos_pgdata/tables/users" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - wipe-and-reboot removed the PG volume although scripts/docker-run is not executable"; }
+grep -qE 'docker compose .*up' "$ST/calls.log" 2>/dev/null && { FAIL=$((FAIL + 1)); echo "FAIL - wipe-and-reboot ran a raw 'docker compose up' without scripts/docker-run"; }
 
 echo
 echo "passed: $PASS  failed: $FAIL"

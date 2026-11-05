@@ -97,12 +97,16 @@ The Quickstart builds the image from the `testnet` branch on your host. It is fo
 ```bash
 git clone https://github.com/kynesyslabs/node.git && cd node
 cp .env.example .env  # defaults are fine; edit only if you want to override
+export GIT_COMMIT=$(git rev-parse HEAD)  # the image refuses to build without it
+docker compose build node                # the image the migration runs on
+docker compose up -d --wait postgres     # the migration needs Postgres up
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:run
 ./run --docker        # docker compose up, with the commit the image is built from
 ```
 
-The node no longer migrates the database at boot. On a new host, create the schema once before that first start: `export GIT_COMMIT=$(git rev-parse HEAD)`, `docker compose up -d --wait postgres`, then `docker compose run --rm --no-deps --name demos-migrate node bun run migration:run` (it needs Postgres up). See [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md).
+The node no longer migrates the database at boot, so on a new host the schema is created once, by the three commands before `./run --docker`; later starts skip them. See [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md).
 
-The image refuses to build without the git commit it is built from. `./run --docker` exports it; to call compose directly, export it first: `export GIT_COMMIT=$(git rev-parse HEAD)`, then `docker compose up`.
+The image refuses to build without the git commit it is built from. `./run --docker` exports it itself; to call compose directly, export it first (the `export` line above), then `docker compose up`.
 
 The first run pulls images and builds the node container, so expect a few minutes. Subsequent starts are near-instant.
 
@@ -440,12 +444,18 @@ A validator moves to a released image by tag and digest, never by building its o
 
 ```bash
 docker compose pull node
+docker compose up -d postgres   # the one-off migration command needs it; no-op if already up
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:show   # read-only; [ ] = pending
+# Pending migrations (or a first install): back up the database, then stop the
+# node and its reaper (Postgres stays up) and apply them:
+docker compose stop reaper node
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:run
 docker compose up -d --no-build
 ```
 
 Then confirm the running digest as in step 6 there.
 
-The node does not migrate the database at boot. If the release adds a migration, back up first, then run `docker compose run --rm --no-deps --name demos-migrate node bun run migration:show` and `... migration:run` before `up -d` (stop only the node and its reaper while you do: `docker compose stop reaper node`, so Postgres stays up). Procedure: [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md).
+The node does not migrate the database at boot, so the migration step sits between `pull` and `up -d`: the new image is already local and the old node is not yet replaced. Skip the backup, `stop` and `migration:run` lines when `migration:show` lists nothing pending (and this is not a first install). Procedure, including the backup: [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md).
 
 Volumes (and therefore your identity, chain data, peerlist cache) are preserved.
 
@@ -623,10 +633,10 @@ git branch
 ### 6. First Run — Generate Keys
 
 ```bash
-./run
+./run -c true
 ```
 
-The node no longer migrates the database at boot. On a new host, make the first start `./run -c true`, which creates the schema on the empty database (the launcher's `postgres_<PG_PORT>` folder does not exist until the first `./run`, so there is no Postgres to start by hand yet). On later runs, when the folder exists, you can instead start the launcher's Postgres with `cd postgres_<PG_PORT>` and run `bun run migration:run` against it (see [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md)). For an upgrade: back up, then `bun run migration:show` / `bun run migration:run` before `./run`, per the same runbook.
+The node no longer migrates the database at boot, and a plain `./run` does not create the schema on an empty database. `-c true` deletes the launcher's Postgres data (`postgres_<PG_PORT>/data_<PG_PORT>`) and then creates the schema on the empty database; nothing else is touched, and on a brand-new host there is no data to lose. The launcher's `postgres_<PG_PORT>` folder does not exist until the first `./run`, so there is no Postgres to start by hand yet. Run later starts as plain `./run`: never repeat `-c true` on a host with data. On later runs, when the folder exists, you can instead start the launcher's Postgres with `cd postgres_<PG_PORT>` and run `bun run migration:run` against it (see [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md)). For an upgrade: back up, then `bun run migration:show` / `bun run migration:run` before `./run`, per the same runbook.
 
 Running the node the first time will generate a private key for your node and store it in the `.demos_identity` file by default. The public key is printed on the terminal and saved in a `publickey_*` file in the same directory.
 

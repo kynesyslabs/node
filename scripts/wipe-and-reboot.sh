@@ -96,6 +96,13 @@ if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
     echo "        bake those into the image. Press Ctrl-C if not intended."
     git status --short | head -10 | sed 's/^/    /'
 fi
+# Stop, rebuild and boot all go through scripts/docker-run: only it creates the
+# schema on the wiped database, and a raw `docker compose up` would start the
+# node with none. Refuse before anything is wiped.
+if [[ ! -x ./scripts/docker-run ]]; then
+    echo "  ERROR: ./scripts/docker-run is missing or not executable (chmod +x scripts/docker-run); nothing was wiped."
+    exit 1
+fi
 
 # -----------------------------------------------------------------------------
 # 2. Confirm wipe
@@ -117,11 +124,7 @@ fi
 # 3. Stop the stack
 # -----------------------------------------------------------------------------
 echo "[2/6] stopping docker stack (${STACK_LABEL})..."
-if [[ -x ./scripts/docker-run ]]; then
-    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" down >/dev/null 2>&1 || true
-else
-    docker compose down >/dev/null 2>&1 || true
-fi
+./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" down >/dev/null 2>&1 || true
 
 # -----------------------------------------------------------------------------
 # 4. Wipe volumes
@@ -150,12 +153,7 @@ fi
 # -----------------------------------------------------------------------------
 if [[ "$DO_REBUILD" -eq 1 ]]; then
     echo "[4/6] rebuilding node image (--no-cache)..."
-    if [[ -x ./scripts/docker-run ]]; then
-        ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --rebuild build
-    else
-        docker compose build --no-cache node
-        docker builder prune -f --filter until=24h || true
-    fi
+    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --rebuild build
 else
     echo "[4/6] skipping image rebuild (--no-rebuild)."
 fi
@@ -164,14 +162,10 @@ fi
 # 6. Boot
 # -----------------------------------------------------------------------------
 echo "[5/6] booting stack..."
-if [[ -x ./scripts/docker-run ]]; then
-    # --clean removes only the PG-data and node-data volumes, which step 3 already
-    # removed, and makes docker-run create the schema on the empty database: the
-    # node no longer migrates at boot.
-    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --clean up -d
-else
-    docker compose up -d
-fi
+# --clean removes only the PG-data and node-data volumes, which step 3 already
+# removed, and makes docker-run create the schema on the empty database: the
+# node no longer migrates at boot.
+./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --clean up -d
 
 # -----------------------------------------------------------------------------
 # 7. Tail genesis log lines

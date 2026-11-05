@@ -868,7 +868,13 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 			exit 1
 		fi
 		echo "🗄️  Creating the schema on the empty database (migration:run)"
-		if ! bun run migration:run; then
+		# Same database as the probe above: the connection is pinned to the launcher's
+		# container (values of postgres/docker-compose.yml), so a PG_* in .env or the
+		# shell that points elsewhere cannot send the migration to another database.
+		# bun runs typeorm directly: `bun run migration:run` goes through tsx, which
+		# needs a node binary, and a host with Bun only (GOSSIP_ENABLED=false) would
+		# fail here after the wipe.
+		if ! PG_HOST=localhost PG_PORT="${PG_PORT}" PG_USER=demosuser PG_PASSWORD=demospassword PG_DATABASE=demos bun -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts; then
 			echo "❌ Error: migration:run failed on the empty database"
 			exit 1
 		fi

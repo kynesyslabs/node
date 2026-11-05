@@ -100,23 +100,29 @@ IMAGE_TAG=v1.0.0-rc.1@sha256:<digest from checksums.txt>
 ```
 
 ```bash
-./scripts/node-doctor --production && docker compose pull node && docker compose up -d --no-build
+./scripts/node-doctor --production && docker compose pull node
+docker compose up -d postgres   # the one-off migration command needs it; no-op if already up
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:show   # read-only; [ ] = pending
+# Pending migrations (or a first install): back up the database, then stop the
+# node and its reaper (Postgres stays up) and apply them:
+docker compose stop reaper node
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:run
+docker compose up -d --no-build
 docker image inspect --format '{{index .RepoDigests 0}}' \
   "$(docker inspect --format '{{.Image}}' "$(docker compose ps -q node)")"
 ```
 
-The `&&` keeps a host that fails a node-doctor check from starting.
-`--no-build` keeps compose from building a local image when the pull
-fails, which would run code nobody signed. The last line prints the digest
-the container runs; it must match
+The `&&` keeps a host that fails a node-doctor check from pulling or
+starting. `--no-build` keeps compose from building a local image when the
+pull fails, which would run code nobody signed. The last line prints the
+digest the container runs; it must match
 `checksums.txt`. Post it on the release thread.
 
-The node does not migrate the database at boot. If the release adds a
-migration, back up and run `migration:show` / `migration:run` before the
-`up -d` above, per [database-migrations.md](database-migrations.md), as
-`docker compose run --rm --no-deps --name demos-migrate node bun run migration:show`
-(and `... migration:run`); on a first install, run `migration:run` once before
-the first start.
+The node does not migrate the database at boot, so the migration step sits
+between `pull` and `up -d`: the new image is already local and the old node
+is not yet replaced. Skip the backup, `stop` and `migration:run` lines when
+`migration:show` lists nothing pending and this is not a first install.
+Procedure, including the backup: [database-migrations.md](database-migrations.md).
 
 A bare-metal validator (`./run`) checks out the tag instead and verifies it
 locally before starting:
