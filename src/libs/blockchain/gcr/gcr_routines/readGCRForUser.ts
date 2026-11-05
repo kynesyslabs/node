@@ -41,3 +41,15 @@ export default async function readGCRForUser(
         referralInfo: { ...fresh.referralInfo, referralCode: null },
     }
 }
+
+/** An account as a read reply carries it: JSON has no bigint, so the balance is a decimal string. */
+export type WireAccount = Omit<ReadAccount, "balance"> & { balance: string }
+
+/**
+ * The account in the shape a reply can serialise. The RPC encoder is plain
+ * JSON.stringify, which throws on a bigint, so a reply holding the raw row
+ * never reached the client at all.
+ */
+export function accountForWire(account: ReadAccount): WireAccount {
+    return { ...account, balance: BigInt(account.balance ?? 0n).toString() }
+}

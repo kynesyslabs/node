@@ -44,10 +44,10 @@ import {
     pendingRefusal,
     writeRefusalMarker,
 } from "./genesisRefusalMarker"
+import { genesisFilePath } from "@/libs/blockchain/genesis/genesisFile"
 
 let ourGenesisDataHash = ""
 let ourGenesisCoreHash = ""
-const genesisFile = "data/genesis.json"
 const refusalMarkerFile = "data/genesis.bootstrap-refused.json"
 /** A genesis file is a few KB; this only bounds what a peer can make this node buffer. */
 const MAX_GENESIS_BYTES = 2 * 1024 * 1024
@@ -139,7 +139,7 @@ function logGenesisVerdict(
             "[BOOTSTRAP] Peer " +
                 verifiedPeer.connection.string +
                 " serves genesis data that differs from ours only in the fork schedule or chain id; " +
-                "keeping our data/genesis.json as it is",
+                "keeping our " + genesisFilePath() + " as it is",
         )
         return
     }
@@ -150,14 +150,14 @@ function logGenesisVerdict(
                 " advertises genesis hash " +
                 verdict.peerAdvertisedHash +
                 ", which is not the one this node's genesis is anchored to; ignoring it and keeping " +
-                "our data/genesis.json",
+                "our " + genesisFilePath(),
         )
         return
     }
     if (verdict.outcome !== "replaced") return
 
     log.warn(
-        "[BOOTSTRAP] Replaced data/genesis.json with the data served by " +
+        "[BOOTSTRAP] Replaced " + genesisFilePath() + " with the data served by " +
             verifiedPeer.connection.string +
             (verdict.carriedOver.length > 0
                 ? ", keeping our " + verdict.carriedOver.join(" and ")
@@ -187,7 +187,7 @@ async function storedGenesisHash(): Promise<string | null> {
 
 function writeGenesisAtomically(data: unknown, expectedCoreHash: string) {
     const method = replaceFileAtomically(
-        genesisFile,
+        genesisFilePath(),
         JSON.stringify(data, null, 2),
         written => {
             if (hashGenesisCore(JSON.parse(written)) !== expectedCoreHash) {
@@ -197,7 +197,7 @@ function writeGenesisAtomically(data: unknown, expectedCoreHash: string) {
             }
         },
     )
-    log.debug(`[BOOTSTRAP] Replaced ${genesisFile} (${method})`)
+    log.debug(`[BOOTSTRAP] Replaced ${genesisFilePath()} (${method})`)
 }
 
 async function ensureGenesisDataMatch(verifiedPeer: Peer) {
@@ -218,7 +218,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                 fetchPeerGenesis: () =>
                     downloadPeerGenesis(verifiedPeer, peerGenesisDataHash),
                 readLocalGenesis: () =>
-                    JSON.parse(fs.readFileSync(genesisFile, "utf8")),
+                    JSON.parse(fs.readFileSync(genesisFilePath(), "utf8")),
                 writeGenesis: writeGenesisAtomically,
                 hashFull: hashGenesisData,
                 hashCore: hashGenesisCore,
@@ -294,7 +294,7 @@ async function warnOnForkScheduleMismatch(peer: Peer) {
                     ": " +
                     result.lines.join("; ") +
                     ". This node will split from its peers at the first activation height that differs. " +
-                    "Fix the forks entries and properties.id in data/genesis.json and restart.",
+                    `Fix the forks entries and properties.id in ${genesisFilePath()} and restart.`,
             )
             break
         case "skipped":
@@ -423,14 +423,14 @@ export default async function peerBootstrap(
     // INFO: Get our genesis data hash
     let genesisData: unknown
     try {
-        genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
+        genesisData = JSON.parse(fs.readFileSync(genesisFilePath(), "utf8"))
     } catch (error) {
         const msg = error instanceof Error ? error.message : String(error)
         const label =
             (error as NodeJS.ErrnoException).code === "ENOENT"
                 ? "Missing genesis file"
                 : "Corrupt genesis file"
-        throw new Error(`${label} at data/genesis.json: ${msg}`)
+        throw new Error(`${label} at ${genesisFilePath()}: ${msg}`)
     }
     // Before anything is judged against the stored block 0: a refusal from an
     // earlier boot means that block is the one that was refused.

@@ -100,12 +100,9 @@ export function canonicalGenesisForHashing(
                 continue
             }
         }
-        // Shallow copy; nested objects/arrays inside genesis are
-        // already content-addressed (balances, forks, properties,
-        // mutables) — their authoring order is fixed by the genesis
-        // file and stable across all peers using the same file. We
-        // do NOT need to recursively sort their keys; we only sort
-        // the OUTER stringify pass below.
+        // A shallow copy is enough: stableStringify sorts keys at every
+        // depth, so nested key order cannot change the hash. Array order
+        // inside balances and other entries is still significant.
         out[key] = src[key]
     }
 

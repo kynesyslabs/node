@@ -52,6 +52,13 @@ not vote. It keeps syncing blocks from its peers, so it can rejoin.
 `warn`, which keeps the old log-only behaviour. Any other value stops the node
 at startup.
 
+**On mainnet the policy is `abstain`, and only `abstain`:** a validator stops
+voting inside the 50-block pre-activation window while its schedule is the odd
+one out. `warn` is allowed on devnets and testnets only. A node started with
+`DEMOS_REQUIRE_VALIDATORS=true` (the mainnet validator setting) and
+`FORK_SCHEDULE_MISMATCH_POLICY=warn` refuses to start, and
+`./scripts/node-doctor --production` fails on it before the node is started.
+
 ## Limits
 
 - A node on the right schedule abstains if most validators carry the wrong one.

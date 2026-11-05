@@ -1,0 +1,12 @@
+{
+  "0x<validator 1 identity>": { "operator": "operator-a", "provider": "provider-1", "region": "eu-central" },
+  "0x<validator 2 identity>": { "operator": "operator-a", "provider": "provider-2", "region": "us-east" },
+  "0x<validator 3 identity>": { "operator": "operator-b", "provider": "provider-3", "region": "eu-west" },
+  "0x<validator 4 identity>": { "operator": "operator-b", "provider": "provider-1", "region": "ap-southeast" },
+  "0x<validator 5 identity>": { "operator": "operator-c", "provider": "provider-2", "region": "eu-north" },
+  "0x<validator 6 identity>": { "operator": "operator-c", "provider": "provider-3", "region": "us-west" },
+  "0x<validator 7 identity>": { "operator": "operator-d", "provider": "provider-4", "region": "eu-central" },
+  "0x<validator 8 identity>": { "operator": "operator-d", "provider": "provider-4", "region": "ap-northeast" },
+  "0x<validator 9 identity>": { "operator": "operator-e", "provider": "provider-1", "region": "us-central" },
+  "0x<validator 10 identity>": { "operator": "operator-e", "provider": "provider-2", "region": "sa-east" }
+}

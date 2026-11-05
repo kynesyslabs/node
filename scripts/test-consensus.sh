@@ -13,7 +13,10 @@ SUITE_FILES=(
     scripts/launch-go-no-go.committee.test.ts
     scripts/launch-go-no-go.test.ts
     scripts/launch-go-no-go.snapshot.test.ts
+    scripts/launch-go-no-go.plan.test.ts
+    scripts/launch-height1-check.test.ts
     scripts/validator-prove-signing.test.ts
+    src/config/loader.forkSchedulePolicy.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts

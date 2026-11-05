@@ -288,7 +288,9 @@ async function main(argv: string[]): Promise<number> {
             console.error(`--verify needs --snapshot: ${NO_SNAPSHOT_REASON}\n${usage()}`)
             return 2
         }
-        const { readGenesisFile, genesisValues, snapshotManifestSha256 } = await import("./genesis-hash")
+        const { readGenesisFile, genesisValues, snapshotManifestSha256, snapshotManifestForkState } = await import(
+            "./genesis-hash"
+        )
         const genesis = readGenesisFile(opts.genesis)
         const { loadForkConfigFromGenesis } = await import("src/forks")
         // A fork schedule this build cannot load stops the node's boot, so there is nothing to verify against
@@ -299,7 +301,11 @@ async function main(argv: string[]): Promise<number> {
             return 2
         }
         // The node checks the genesis against the snapshot it boots with
-        const values = genesisValues(genesis, snapshotManifestSha256(opts.snapshot))
+        const values = genesisValues(
+            genesis,
+            snapshotManifestSha256(opts.snapshot),
+            snapshotManifestForkState(opts.snapshot),
+        )
         const { readBlockZeroValidators, launchIdentities } = await import("./launch-validator-set")
         let blockZero: Awaited<ReturnType<typeof readBlockZeroValidators>>
         try {

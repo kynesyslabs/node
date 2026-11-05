@@ -46,7 +46,9 @@ git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/<key>.pub
 ```
 
-Keep the private key off the validators and out of CI.
+Keep the private key off the validators and out of CI. How a holder
+generates the key offline and gets it listed, and why a final release needs
+three holders: [release-signing-key.md](release-signing-key.md).
 
 The release workflow does not trust the tag to name its own signers. It
 reads `.github/allowed_signers` from the head of `stabilisation`, and it
@@ -98,12 +100,15 @@ IMAGE_TAG=v1.0.0-rc.1@sha256:<digest from checksums.txt>
 ```
 
 ```bash
-docker compose pull node && docker compose up -d
+./scripts/node-doctor --production && docker compose pull node && docker compose up -d --no-build
 docker image inspect --format '{{index .RepoDigests 0}}' \
   "$(docker inspect --format '{{.Image}}' "$(docker compose ps -q node)")"
 ```
 
-The last line prints the digest the container runs; it must match
+The `&&` keeps a host that fails a node-doctor check from starting.
+`--no-build` keeps compose from building a local image when the pull
+fails, which would run code nobody signed. The last line prints the digest
+the container runs; it must match
 `checksums.txt`. Post it on the release thread.
 
 A bare-metal validator (`./run`) checks out the tag instead and verifies it

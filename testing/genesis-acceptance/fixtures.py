@@ -17,7 +17,8 @@ import hashlib
 import json
 import os
 
-MAINNET_FORKS = ["signatureDomain", "editBinding", "quorumParity", "committeeBinding", "commitLock", "finalityProofs"]
+# Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
+MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "quorumParity", "committeeBinding", "commitLock", "finalityProofs"]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--base", required=True, help="the image's data/genesis.json")

@@ -66,6 +66,7 @@ import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkPar
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
+import { genesisFilePath } from "./libs/blockchain/genesis/genesisFile"
 // DTR and L2PS imports
 import Mempool from "./libs/blockchain/mempool"
 import TxValidatorPool from "./libs/blockchain/validation/txValidatorPool"
@@ -575,7 +576,7 @@ async function preMainLoop() {
     {
         let genesisData: unknown = null
         try {
-            const raw = fs.readFileSync("data/genesis.json", "utf8")
+            const raw = fs.readFileSync(genesisFilePath(), "utf8")
             genesisData = JSON.parse(raw)
             if (typeof genesisData === "string") {
                 genesisData = JSON.parse(genesisData)
@@ -591,7 +592,7 @@ async function preMainLoop() {
             // points them at a misleading "carries no validator set"
             // message.
             log.error(
-                `[BOOT] failed to read data/genesis.json for validator seed reconcile: ${
+                `[BOOT] failed to read ${genesisFilePath()} for validator seed reconcile: ${
                     e instanceof Error ? e.message : String(e)
                 }`,
             )
