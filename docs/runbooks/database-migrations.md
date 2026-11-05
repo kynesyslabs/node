@@ -158,20 +158,25 @@ Do it on **one** validator first, then the rest. Never on all at once.
       is the only check that proves the dump can be restored:
 
       ```bash
-      createdb -h <PG_HOST> -p <PG_PORT> -U <PG_USER> demos_restore_check
-      pg_restore --exit-on-error --no-owner -h <PG_HOST> -p <PG_PORT> -U <PG_USER> -d demos_restore_check ~/demos-backups/<file>.dump
+      createdb -h <PG_HOST> -p <PG_PORT> -U <PG_USER> demos_restore_check &&
+      pg_restore --exit-on-error --no-owner -h <PG_HOST> -p <PG_PORT> -U <PG_USER> -d demos_restore_check ~/demos-backups/<file>.dump &&
       dropdb -h <PG_HOST> -p <PG_PORT> -U <PG_USER> demos_restore_check
       ```
 
-      Use a scratch name, never the live database name. On the Docker stack,
-      run the three commands inside the container, with the user name read
-      there (`docker exec -i postgres_<PG_PORT>` instead of
+      The chain stops at the first failure: if `createdb` fails (for example
+      because `demos_restore_check` already exists), nothing is restored into
+      or dropped from that database. If the restore fails, the scratch
+      database stays for you to inspect; drop it by hand afterwards. Use a
+      scratch name, never the live database name.
+
+      On the Docker stack, run the same chain inside the container, with the
+      user name read there (`docker exec -i postgres_<PG_PORT>` instead of
       `docker compose exec -T postgres` for the launcher's Postgres). The
       container's own socket is used, so no `-h` / `-p`:
 
       ```bash
-      docker compose exec -T postgres sh -c 'exec createdb -U "$POSTGRES_USER" demos_restore_check'
-      docker compose exec -T postgres sh -c 'exec pg_restore --exit-on-error --no-owner -U "$POSTGRES_USER" -d demos_restore_check' < ~/demos-backups/<file>.dump
+      docker compose exec -T postgres sh -c 'exec createdb -U "$POSTGRES_USER" demos_restore_check' &&
+      docker compose exec -T postgres sh -c 'exec pg_restore --exit-on-error --no-owner -U "$POSTGRES_USER" -d demos_restore_check' < ~/demos-backups/<file>.dump &&
       docker compose exec -T postgres sh -c 'exec dropdb -U "$POSTGRES_USER" demos_restore_check'
       ```
 
@@ -193,6 +198,11 @@ Do it on **one** validator first, then the rest. Never on all at once.
    Commands). On bare metal, run each as
    `PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:show`: the launcher
    passes its port only to the node it starts, and `.env` may name another.
+   There, "deployed" means the release is checked out and its dependencies
+   are installed (`bun install --frozen-lockfile`), so the migrations run with
+   the new release's packages. The `migration:*` scripts run the TypeORM CLI
+   through Bun, so a host with Bun and no Node (`GOSSIP_ENABLED=false`) runs
+   them as they are.
 
    If it fails, the transaction rolls back and nothing changed. Do not start
    the node on the new release; fix the cause or restore the dump.
@@ -246,15 +256,21 @@ that adds a migration.
 `testing/devnet/run-devnet` (used by the devnet, `consensus-race` and
 `quorum-drills` on a devnet-style image) and `testing/l2ps-messaging/e2e.sh`
 run `migration:run` before they start the node, because their databases are
-created empty. On a release image `quorum-drills` has no `run-devnet`: the
-nodes run the image's own entrypoint, so `quorum-drills/run.sh` must migrate
-each node database itself, in a one-off container of the image, before any
-node starts. The
-devnet image is `oven/bun` with no Node, so `run-devnet` runs the TypeORM CLI
-through bun directly (`bun -r tsconfig-paths/register
-./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts`)
-instead of `bun run migration:run`, which needs `tsx` and so a `node` binary.
-`run-devnet` does this on every start, not only the first (idempotent).
+created empty. `run-devnet` runs the TypeORM CLI through Bun directly
+(`bun -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run
+-d ./src/model/datasource.ts`, the command behind `bun run migration:run`), on
+every start, not only the first (idempotent).
+
+A release image has no `run-devnet` (no `testing/`), so `quorum-drills`
+starts its nodes with the image's own entrypoint. Their databases are then
+migrated by `quorum-drills/run.sh` itself: once Postgres accepts TCP
+connections and before any node starts, it runs that same Bun command once per
+node database, in a one-off container of the image under test (the node's
+service, with its environment and mounts). A failed migration aborts the
+drill. This release-image path comes with PR #1122; without it,
+`quorum-drills` runs only devnet-style images, whose nodes start through
+`run-devnet`.
+
 `testing/genesis-acceptance/run.sh` starts the published image on empty
 databases (`CREATE DATABASE`); after each one it runs `bun run migration:run`
 once in a one-off container of the image under test, the operator's first-start
