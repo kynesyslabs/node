@@ -34,6 +34,8 @@ export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
 // purpose: a validator running looser limits would admit txs its peers evict.
 /** Most txs the pool holds. */
 export const MEMPOOL_MAX_TXS = 10_000
+/** Most txs one public mempool read returns; validators read the pool whole. */
+export const MEMPOOL_PUBLIC_PAGE_MAX = 100
 /** Most bytes of stored tx data the pool holds (peer request ceiling is twice this). */
 export const MEMPOOL_MAX_BYTES = 32 * 1024 * 1024
 /** Most pending txs one sender may hold. */
@@ -66,6 +68,12 @@ export const RATE_LIMIT_DEFAULT_MAX_REQUESTS = 2000
 export const RATE_LIMIT_DEFAULT_WINDOW_MS = 60_000
 export const RATE_LIMIT_POST_MAX_REQUESTS = 200_000
 export const RATE_LIMIT_POST_WINDOW_MS = 86_400_000
+/** GET routes outside the rate limiter's path map: storage-program and zk reads. */
+export const RATE_LIMIT_GET_MAX_REQUESTS = 600
+export const RATE_LIMIT_GET_WINDOW_MS = 60_000
+/** Failed request-signature checks a source may make before it is blocked. */
+export const RATE_LIMIT_AUTH_FAILURE_MAX_REQUESTS = 60
+export const RATE_LIMIT_AUTH_FAILURE_WINDOW_MS = 60_000
 export const RATE_LIMIT_TX_PER_BLOCK = 4
 /** How long an IP stays blocked after it exceeds a rate limit. */
 export const RATE_LIMIT_DEFAULT_BLOCK_DURATION_MS = 60_000

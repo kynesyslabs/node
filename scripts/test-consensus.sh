@@ -27,6 +27,8 @@ SUITE_FILES=(
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
+    src/libs/network/handlers/getAddressInfo.test.ts
+    src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
     src/libs/network/helloGenesisGate.test.ts
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
@@ -49,6 +51,7 @@ SUITE_FILES=(
     testing/genesis/forkScheduleAbstain.test.ts
     testing/genesis/forkScheduleAgreement.test.ts
     testing/genesis/forkScheduleWatch.test.ts
+    testing/genesis/genesisHashTool.test.ts
     testing/genesis/genesisMismatch.test.ts
     testing/genesis/genesisPin.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts

@@ -1,22 +1,49 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
 
+const authContexts = new WeakMap<Request, unknown>()
 mock.module("./authContext", () => ({
-    getAuthContext: () => ({
-        verified: false,
-        identity: null,
-        publicKey: null,
-        algorithm: null,
-    }),
-    setAuthContext: () => undefined,
+    getAuthContext: (req: Request) =>
+        authContexts.get(req) ?? {
+            verified: false,
+            identity: null,
+            publicKey: null,
+            algorithm: null,
+        },
+    setAuthContext: (req: Request, ctx: unknown) => {
+        authContexts.set(req, ctx)
+    },
 }))
 
+let peerTable = new Set<string>()
 mock.module("@/libs/peer", () => ({
-    PeerManager: { getInstance: () => ({ getPeer: () => undefined }) },
+    PeerManager: {
+        getInstance: () => ({
+            getPeer: (id: string) => (peerTable.has(id) ? { identity: id } : undefined),
+        }),
+    },
 }))
 
+let stakedKeys = new Set<string>()
+mock.module("@/libs/consensus/stakedSet", () => ({
+    getStakedSet: async () => stakedKeys as ReadonlySet<string>,
+}))
+
+mock.module("@/libs/blockchain/gcr/gcr", () => ({
+    __esModule: true,
+    default: { getGCRValidatorsAtBlockOrThrow: async (_height: number) => [] },
+}))
+
+let verifyCalls = 0
+let signer: string | null = null
 mock.module("./verifySignature", () => ({
-    verifySignature: async () => ({ valid: false, error: "unused" }),
-    isKeyWhitelisted: () => false,
+    verifySignature: async () => {
+        verifyCalls++
+        return signer
+            ? { valid: true, identity: `ed25519:${signer}`, publicKey: signer, algorithm: "ed25519" }
+            : { valid: false, error: "bad signature" }
+    },
+    isKeyWhitelisted: (key: string | null, list: string[]) =>
+        !!key && list.some(k => k.toLowerCase().replace(/^0x/, "") === key.toLowerCase().replace(/^0x/, "")),
 }))
 
 mock.module("@/forks", () => ({ isForkActive: () => false }))
@@ -25,9 +52,11 @@ mock.module("@kynesyslabs/demosdk/encryption", () => ({
     uint8ArrayToHex: (value: Uint8Array) => Buffer.from(value).toString("hex"),
 }))
 
-mock.module("@/utilities/sharedState", () => ({
-    getSharedState: { keypair: null, lastBlockNumber: 7 },
-}))
+const sharedState: { keypair: { publicKey: Uint8Array } | null; lastBlockNumber: number } = {
+    keypair: null,
+    lastBlockNumber: 7,
+}
+mock.module("@/utilities/sharedState", () => ({ getSharedState: sharedState }))
 
 const { RateLimiter } = await import("./middleware/rateLimiter")
 const { handleIdentityTxRateLimit } = await import("./rpcRateLimit")
@@ -158,6 +187,31 @@ describe("RateLimiter per-bucket counters", () => {
         await hit(limiter, "/info")
         await hit(limiter, "/genesis")
         expect((await hit(limiter, "/peerlist")).status).toBe(429)
+    })
+
+    it("counts a GET route outside the path map per minute, not on the daily POST quota", async () => {
+        expect((await hit(limiter, "/storage-program/search?q=a")).status).toBe(200)
+        expect((await hit(limiter, "/zk/merkle-root")).status).toBe(200)
+        expect((await hit(limiter, "/storage-program/search?q=b")).status).toBe(429)
+
+        expect(limiter.getCurrentLimits(IP)).toBeNull()
+        expect((await hit(limiter, "/", "POST")).status).toBe(200)
+    })
+
+    it("gives unmapped GET routes their own bucket when one is configured", async () => {
+        limiter.destroy()
+        limiter = makeLimiter({
+            blockDurationMs: 60_000,
+            methodLimits: {
+                POST: { maxRequests: 3, windowMs: DAY },
+                GET: { maxRequests: 1, windowMs: 60_000 },
+            },
+        })
+        expect((await hit(limiter, "/zk/merkle-root")).status).toBe(200)
+        expect((await hit(limiter, "/zk/merkle-root")).status).toBe(429)
+        // The mapped routes keep the default bucket.
+        expect((await hit(limiter, "/info")).status).toBe(200)
+        expect([...limiter.ipRequests.keys()].sort()).toEqual([`GET|${IP}`, `default|${IP}`])
     })
 
     it("cleanup drops an entry only once its own window has passed", async () => {
@@ -327,5 +381,173 @@ describe("RateLimiter tracked counter cap", () => {
         }
         expect(limiter.ipRequests.size).toBeLessThanOrEqual(10)
         expect((await hit(limiter, "/info", "GET", blocked)).status).toBe(429)
+    })
+})
+
+describe("RateLimiter failed signature checks", () => {
+    let limiter: InstanceType<typeof RateLimiter>
+
+    const signed = (from = IP) => {
+        const peer = { requestIP: () => ({ address: from }) } as never
+        const req = new Request("http://node/", {
+            method: "POST",
+            headers: { identity: "ed25519:0xabc", signature: "0xdead", timestamp: "1" },
+        })
+        return limiter.createMiddleware()(req, ok, peer)
+    }
+
+    beforeEach(() => {
+        now = 1_000_000
+        verifyCalls = 0
+        spyOn(Date, "now").mockImplementation(() => now)
+        limiter = makeLimiter({ blockDurationMs: 60_000 })
+    })
+
+    afterEach(() => {
+        limiter.destroy()
+        mock.restore()
+    })
+
+    it("counts each failed check and blocks the source past the limit", async () => {
+        expect((await signed()).status).toBe(401)
+        expect((await signed()).status).toBe(401)
+        expect((await signed()).status).toBe(429)
+        expect(verifyCalls).toBe(3)
+    })
+
+    it("refuses a blocked source before verifying again", async () => {
+        await signed()
+        await signed()
+        await signed()
+        const blocked = await signed()
+        expect(blocked.status).toBe(429)
+        expect(blocked.headers.get("Retry-After")).toBe("60")
+        expect(verifyCalls).toBe(3)
+    })
+
+    it("keeps failed checks off the request quotas of the same source", async () => {
+        await signed()
+        await signed()
+        expect((await hit(limiter, "/info")).status).toBe(200)
+        expect(limiter.getCurrentLimits(IP)).toBeNull()
+    })
+
+    it("does not count failed checks from a whitelisted address", async () => {
+        limiter.destroy()
+        limiter = makeLimiter({ blockDurationMs: 60_000, whitelistedIPs: [IP] })
+        for (let i = 0; i < 5; i++) expect((await signed()).status).toBe(401)
+    })
+})
+
+describe("RateLimiter signed requests", () => {
+    let limiter: InstanceType<typeof RateLimiter>
+
+    const signedBy = (key: string) => {
+        signer = key
+        const req = new Request("http://node/info", {
+            headers: { identity: `ed25519:${key}`, signature: "0xsig", timestamp: "1" },
+        })
+        return limiter.createMiddleware()(req, ok, server)
+    }
+
+    beforeEach(() => {
+        now = 1_000_000
+        spyOn(Date, "now").mockImplementation(() => now)
+        limiter = makeLimiter({ blockDurationMs: 60_000 })
+        stakedKeys = new Set(["0xbeef"])
+        peerTable = new Set(["0xpeer"])
+    })
+
+    afterEach(() => {
+        signer = null
+        stakedKeys = new Set()
+        peerTable = new Set()
+        limiter.destroy()
+        mock.restore()
+    })
+
+    it("limits a key that is only in the peer table", async () => {
+        expect((await signedBy("0xpeer")).status).toBe(200)
+        expect((await signedBy("0xpeer")).status).toBe(200)
+        expect((await signedBy("0xpeer")).status).toBe(429)
+    })
+
+    it("lets a staked validator through", async () => {
+        for (let i = 0; i < 5; i++) expect((await signedBy("0xbeef")).status).toBe(200)
+    })
+
+    // A bad signature claiming `key`, as a POST to the RPC root.
+    const forged = (key: string) => {
+        signer = null
+        const req = new Request("http://node/", {
+            method: "POST",
+            headers: { identity: `ed25519:${key}`, signature: "0xforged", timestamp: "1" },
+        })
+        return limiter.createMiddleware()(req, ok, server)
+    }
+
+    it("lets a staked validator through from an address whose failure bucket is exhausted", async () => {
+        // Proxy or NAT: other clients share the validator's address.
+        expect((await forged("0xabc")).status).toBe(401)
+        expect((await forged("0xabc")).status).toBe(401)
+        expect((await forged("0xabc")).status).toBe(429)
+
+        expect((await signedBy("0xbeef")).status).toBe(200)
+
+        verifyCalls = 0
+        expect((await forged("0xabc")).status).toBe(429)
+        expect(verifyCalls).toBe(0)
+    })
+
+    it("bounds forged validator claims before verification, on a counter of that key", async () => {
+        for (let i = 0; i < 2; i++) expect((await forged("0xBEEF")).status).toBe(401)
+        expect((await forged("0xbeef")).status).toBe(429)
+
+        verifyCalls = 0
+        expect((await forged("0xbeef")).status).toBe(429)
+        expect(verifyCalls).toBe(0)
+        expect([...limiter.ipRequests.keys()]).toEqual([`auth-failure@beef|${IP}`])
+    })
+
+    it("keeps forged claims of one validator from locking out others or the same key elsewhere", async () => {
+        stakedKeys = new Set(["0xbeef", "0xcafe"])
+        for (let i = 0; i < 3; i++) await forged("0xbeef")
+
+        expect((await signedBy("0xcafe")).status).toBe(200)
+        expect((await forged("0xabc")).status).toBe(401)
+
+        signer = "0xbeef"
+        const elsewhere = new Request("http://node/info", {
+            headers: { identity: "ed25519:0xbeef", signature: "0xsig", timestamp: "1" },
+        })
+        const other = { requestIP: () => ({ address: "198.51.100.20" }) } as never
+        expect((await limiter.createMiddleware()(elsewhere, ok, other)).status).toBe(200)
+    })
+
+    it("lets a whitelisted key through from an address whose failure bucket is exhausted", async () => {
+        limiter.destroy()
+        limiter = makeLimiter({ blockDurationMs: 60_000, whitelistedKeys: ["0xf00d"] })
+        for (let i = 0; i < 3; i++) await forged("0xabc")
+        expect((await forged("0xabc")).status).toBe(429)
+
+        for (let i = 0; i < 5; i++) expect((await signedBy("0xF00D")).status).toBe(200)
+    })
+
+    it("lets the local node key through from an address whose failure bucket is exhausted", async () => {
+        sharedState.keypair = { publicKey: Uint8Array.from([0xd0, 0x0d]) }
+        try {
+            for (let i = 0; i < 3; i++) await forged("0xabc")
+            expect((await forged("0xabc")).status).toBe(429)
+
+            expect((await signedBy("d00d")).status).toBe(200)
+        } finally {
+            sharedState.keypair = null
+        }
+    })
+
+    it("does not give an unknown claimed key a counter of its own", async () => {
+        for (let i = 0; i < 2; i++) expect((await forged("0x1234")).status).toBe(401)
+        expect((await forged("0x5678")).status).toBe(429)
+        expect([...limiter.ipRequests.keys()]).toEqual([`auth-failure|${IP}`])
     })
 })
