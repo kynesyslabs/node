@@ -58,7 +58,7 @@ report_problem() {
 	local hint="${3-}"
 	PROBLEM_MESSAGES+=("[${check_name}] ${message}")
 	if [[ -n "${hint}" ]]; then
-		HINT_MESSAGES+=("[${check_name}] �${� $h}int")
+		HINT_MESSAGES+=("[${check_name}] 💡 ${hint}")
 	fi
 	CHECKS_FAILED=$((CHECKS_FAILED + 1))
 }
@@ -70,7 +70,7 @@ report_warning() {
 	local hint="${3-}"
 	WARNING_MESSAGES+=("[${check_name}] ${message}")
 	if [[ -n "${hint}" ]]; then
-		HINT_MESSAGES+=("[${check_name}] �${� $h}int")
+		HINT_MESSAGES+=("[${check_name}] 💡 ${hint}")
 	fi
 	CHECKS_WARNED=$((CHECKS_WARNED + 1))
 }
@@ -301,16 +301,16 @@ print_report() {
 	# Summary line
 	echo ""
 	echo -e "  ${BOLD}Summary:${NC} ${CHECKS_RUN} checks run"
-	echo -e "    ${GREEN}✓ Passed:${NC} ${ $CHECKS_PASS}ED"
-	echo -e "    ${RED}✗ Failed:${NC} ${ $CHECKS_FAIL}ED"
-	echo -e "    ${YELLOW}⚠ Warnings:${NC${ $CHECKS_WARN}ED"
+	echo -e "    ${GREEN}✓ Passed:${NC} ${CHECKS_PASSED}"
+	echo -e "    ${RED}✗ Failed:${NC} ${CHECKS_FAILED}"
+	echo -e "    ${YELLOW}⚠ Warnings:${NC} ${CHECKS_WARNED}"
 
 	# Problems section
 	if [[ ${#PROBLEM_MESSAGES[@]} -gt 0 ]]; then
 		echo ""
 		echo -e "  ${RED}${BOLD}Problems Found:${NC}"
 		for msg in "${PROBLEM_MESSAGES[@]}"; do
-			echo -e "    ${RED}✗${NC${ $m}sg"
+			echo -e "    ${RED}✗${NC} ${msg}"
 		done
 	fi
 
@@ -319,7 +319,7 @@ print_report() {
 		echo ""
 		echo -e "  ${YELLOW}${BOLD}Warnings:${NC}"
 		for msg in "${WARNING_MESSAGES[@]}"; do
-			echo -e "    ${YELLOW}⚠${NC${ $m}sg"
+			echo -e "    ${YELLOW}⚠${NC} ${msg}"
 		done
 	fi
 
@@ -337,7 +337,7 @@ print_report() {
 		echo ""
 		echo -e "  ${GREEN}${BOLD}All Checks Passed:${NC}"
 		for msg in "${OK_MESSAGES[@]}"; do
-			echo -e "    ${GREEN}✓${NC${ $m}sg"
+			echo -e "    ${GREEN}✓${NC} ${msg}"
 		done
 	fi
 
@@ -351,6 +351,224 @@ print_report() {
 	fi
 	echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 	echo ""
+}
+
+# ============================================================================
+# Production checks (--production): a mainnet validator host
+# ============================================================================
+# One PASS/FAIL line per item and exit 1 on any FAIL, so the result can be
+# pasted as evidence and used as a gate before `docker compose up`.
+
+PROD_FAILS=0
+PROD_CHECKS=0
+ENV_SOURCE="auto"
+NODE_ENV_SOURCE=""
+declare -A NODE_ENV_VALUES=()
+
+prod_line() { # $1 PASS|FAIL, $2 item, $3 detail
+	PROD_CHECKS=$((PROD_CHECKS + 1))
+	printf '%s %s: %s\n' "$1" "$2" "$3"
+	[[ "$1" = PASS ]] || PROD_FAILS=$((PROD_FAILS + 1))
+}
+
+# The values the node will actually get. Under Docker only what the compose
+# file passes reaches the container, so read compose's resolved environment
+# for the node service (it already merges .env and any override file); a
+# bare-metal node reads the process environment, then .env for the rest.
+load_node_env() {
+	if [[ "${ENV_SOURCE}" != "env" ]] && [[ -f docker-compose.yml ]] && command -v docker &>/dev/null; then
+		local json
+		if json=$(docker compose config --format json 2>/dev/null) && command -v python3 &>/dev/null; then
+			local line
+			while IFS= read -r -d '' line; do
+				NODE_ENV_VALUES["${line%%=*}"]="${line#*=}"
+			done < <(printf '%s' "${json}" | python3 -c '
+import json, sys
+env = json.load(sys.stdin).get("services", {}).get("node", {}).get("environment") or {}
+if isinstance(env, list):
+    env = dict(e.split("=", 1) if "=" in e else (e, "") for e in env)
+for k, v in env.items():
+    sys.stdout.write(k + "=" + ("" if v is None else str(v)) + "\0")
+')
+			NODE_ENV_SOURCE="docker compose config, service node"
+			return 0
+		fi
+		if [[ "${ENV_SOURCE}" = "compose" ]]; then
+			echo "docker compose config failed (or python3 is missing); run from the node checkout" >&2
+			return 1
+		fi
+	elif [[ "${ENV_SOURCE}" = "compose" ]]; then
+		# Falling back to .env would check values the container may never get
+		echo "--env-from compose needs docker and a docker-compose.yml in the node checkout" >&2
+		return 1
+	fi
+	if [[ -f .env ]]; then
+		local key value
+		while IFS='=' read -r key value; do
+			key="${key#export }"
+			[[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+			# Unquoted values end at " #", as the node's and compose's .env readers have it.
+			if [[ "${value}" != [\"\']* ]]; then
+				value="${value%%[[:space:]]#*}"
+				value="${value%"${value##*[![:space:]]}"}"
+			fi
+			value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
+			NODE_ENV_VALUES["${key}"]="${value}"
+		done < <(grep -E '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' .env | sed -E 's/^[[:space:]]+//')
+	fi
+	local k
+	for k in $(compgen -e); do NODE_ENV_VALUES["${k}"]="${!k}"; done
+	NODE_ENV_SOURCE="process environment over .env"
+}
+
+node_env() { printf '%s' "${NODE_ENV_VALUES[$1]-}"; }
+
+check_prod_flag() { # $1 key, $2 why, $3 extra accepted value (as the node parses it)
+	local v
+	v=$(node_env "$1")
+	if [[ "${v}" = "true" ]] || [[ -n "${3-}" && "${v}" = "$3" ]]; then
+		prod_line PASS "$1" "${v}"
+	else
+		prod_line FAIL "$1" "is '${v}', must be true: $2"
+	fi
+}
+
+# Fees, the stake floor and the block time come from each node's own
+# environment, not from the genesis, so a validator with a different value
+# accepts or rejects transactions the others do not. Mainnet runs the built-in
+# values; the effective value is what the node computes when the variable is
+# unset or empty.
+check_chain_param() { # $1 key, $2 built-in value, $3 value that also means the built-in one
+	local v effective
+	v=$(node_env "$1")
+	if [[ -z "${v}" ]]; then
+		prod_line PASS "$1" "unset (${2})"
+		return
+	fi
+	if [[ ! "${v}" =~ ^[0-9]+$ ]]; then
+		prod_line FAIL "$1" "is '${v}', not a whole number: unset it so the node uses ${2}"
+		return
+	fi
+	effective="${v#"${v%%[!0]*}"}"
+	effective="${effective:-0}"
+	[[ -n "${3-}" && "${effective}" = "$3" ]] && effective="$2"
+	if [[ "${effective}" = "$2" ]]; then
+		prod_line PASS "$1" "${2}"
+	else
+		prod_line FAIL "$1" "is ${v}, mainnet runs ${2}: every validator must use the same value, so unset it"
+	fi
+}
+
+check_clock_sync() {
+	local synced
+	if command -v timedatectl &>/dev/null; then
+		synced=$(timedatectl show -p NTPSynchronized --value 2>/dev/null)
+		if [[ "${synced}" = "yes" ]]; then
+			prod_line PASS "clock sync" "timedatectl NTPSynchronized=yes"
+			return
+		fi
+	fi
+	if command -v chronyc &>/dev/null && chronyc tracking 2>/dev/null | grep -qE '^Leap status[[:space:]]*:[[:space:]]*Normal'; then
+		prod_line PASS "clock sync" "chronyc tracking: Leap status Normal"
+		return
+	fi
+	prod_line FAIL "clock sync" "no synchronised clock (timedatectl NTPSynchronized=${synced:-unknown}, no chrony in sync): enable one with 'sudo timedatectl set-ntp true' or install chrony"
+}
+
+# The node itself asks public NTP servers at boot and refuses to start without
+# two agreeing answers, so the host's own sync is not enough: outbound UDP 123
+# must reach them too.
+check_ntp_egress() {
+	if ! command -v python3 &>/dev/null; then
+		prod_line FAIL "NTP egress" "python3 is needed to query pool.ntp.org on UDP 123"
+		return
+	fi
+	local out
+	if out=$(python3 - <<'PY' 2>&1
+import socket, struct, time
+for host in ("pool.ntp.org", "time.google.com"):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(3)
+        s.sendto(b"\x1b" + 47 * b"\0", (host, 123))
+        data, _ = s.recvfrom(48)
+        secs = struct.unpack("!I", data[40:44])[0] - 2208988800
+        print(f"{host} answered, offset {secs - time.time():+.1f} s")
+        raise SystemExit(0)
+    except (OSError, struct.error):
+        continue
+print("no answer from pool.ntp.org or time.google.com on UDP 123")
+raise SystemExit(1)
+PY
+	); then
+		prod_line PASS "NTP egress" "${out}"
+	else
+		prod_line FAIL "NTP egress" "${out}: allow outbound UDP 123"
+	fi
+}
+
+check_mismatch_policy() {
+	local v
+	v=$(node_env FORK_SCHEDULE_MISMATCH_POLICY)
+	if [[ -z "${v}" ]] || [[ "${v,,}" = "abstain" ]]; then
+		prod_line PASS "FORK_SCHEDULE_MISMATCH_POLICY" "${v:-unset (abstain)}"
+	else
+		prod_line FAIL "FORK_SCHEDULE_MISMATCH_POLICY" "is '${v}', must be abstain on mainnet (warn is for devnets and testnets)"
+	fi
+}
+
+check_genesis_pin() { # $1 key
+	local v
+	v=$(node_env "$1")
+	v="${v#0x}"
+	if [[ "${v,,}" =~ ^[0-9a-f]{64}$ ]]; then
+		prod_line PASS "$1" "set"
+	else
+		prod_line FAIL "$1" "not a 64-hex hash ('${v}'): set the value published with the mainnet genesis"
+	fi
+}
+
+# Switches meant for one start (recovery, takeover, a rehearsal) that must not
+# stay in the environment: left set, each one weakens a safety check on every
+# later restart.
+check_unset() { # $1 key, $2 why
+	local v
+	v=$(node_env "$1")
+	if [[ -z "${v}" ]] || [[ "${v}" = "false" ]] || [[ "${v}" = "0" ]]; then
+		prod_line PASS "$1" "unset"
+	else
+		prod_line FAIL "$1" "is set ('${v}'): $2"
+	fi
+}
+
+run_production_checks() {
+	load_node_env || return 1
+	echo "Mainnet validator host checks (node settings from ${NODE_ENV_SOURCE}):"
+	check_prod_flag PROD "a node without it creates a new identity when the key file is missing" 1
+	check_prod_flag DEMOS_REQUIRE_VALIDATORS "without it a node that cannot read the validator set uses every online peer as the committee"
+	check_clock_sync
+	check_ntp_egress
+	check_mismatch_policy
+	check_genesis_pin EXPECTED_GENESIS_HASH
+	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
+	check_chain_param CONSENSUS_TIME 10 0
+	check_chain_param RPC_FEE 1
+	check_chain_param NETWORK_FEE 1
+	check_chain_param BURN_FEE 1
+	check_chain_param RPC_FEE_PERCENT 10
+	check_chain_param MIN_VALIDATOR_STAKE 1000000000000
+	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
+	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
+	check_unset DEMOS_IDENTITY_TAKEOVER "set it for the one takeover start only (docs/runbooks/validator-key.md)"
+	check_unset DEMOS_GENERATE_IDENTITY "keys are generated off-host"
+	check_unset DEMOS_SIGNING_RECORD_REBIND "set it for the one rebind start only (docs/runbooks/validator-key.md)"
+	check_unset DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST "set it for the one start that accepts an agreed schedule change only"
+	if [[ ${PROD_FAILS} -eq 0 ]]; then
+		echo "PASS all ${PROD_CHECKS} checks"
+	else
+		echo "FAIL ${PROD_FAILS} of ${PROD_CHECKS} checks"
+	fi
+	[[ ${PROD_FAILS} -eq 0 ]]
 }
 
 # ============================================================================
@@ -368,6 +586,13 @@ OPTIONS:
     -h, --help      Show this help message
     -v, --verbose   Show all check results (including passed)
     -q, --quiet     Only show problems (no progress output)
+    --production    Mainnet validator host checks only: PROD, DEMOS_REQUIRE_VALIDATORS,
+                    clock sync, outbound NTP, mismatch policy, genesis pins,
+                    fees, stake floor and block time, and one-start switches left set; one PASS/FAIL line each, exit 1 on any FAIL
+    --env-from compose|env
+                    With --production: where the node's settings are read from
+                    (default: docker compose config when docker-compose.yml is here,
+                    else the process environment over .env)
 
 DESCRIPTION:
     Node Doctor runs a series of health checks on your Demos Network node
@@ -382,6 +607,7 @@ DESCRIPTION:
 EXAMPLES:
     ./node-doctor           # Run all checks with standard output
     ./node-doctor --verbose # Show detailed results for all checks
+    ./scripts/node-doctor --production   # before starting a mainnet validator
 
 For more information: https://demos.network
 EOF
@@ -407,6 +633,20 @@ main() {
 			QUIET=true
 			shift
 			;;
+		--production)
+			PRODUCTION=true
+			shift
+			;;
+		--env-from)
+			case "${2-}" in
+			compose | env) ENV_SOURCE="$2" ;;
+			*)
+				echo "--env-from takes compose or env"
+				exit 2
+				;;
+			esac
+			shift 2
+			;;
 		*)
 			echo "Unknown option: $1"
 			echo "Use --help for usage information"
@@ -414,6 +654,12 @@ main() {
 			;;
 		esac
 	done
+
+	if [[ "${PRODUCTION-}" = true ]]; then
+		# The checks read files relative to the checkout, wherever this is called from
+		cd "$(dirname "$0")/.." || exit 2
+		if run_production_checks; then exit 0; else exit 1; fi
+	fi
 
 	echo ""
 	echo -e "${BOLD}🩺 Node Doctor - Demos Network Diagnostic Tool${NC}"

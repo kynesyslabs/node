@@ -10,7 +10,10 @@ mock.module("ntp-client", () => ({
     },
 }))
 
-const { getBootTimestampCorrection } = await import("./calibrateTime")
+const { BOOT_AGREEMENT_S, getBootTimestampCorrection } = await import("./calibrateTime")
+const { COSIGN_TIMESTAMP_MAX_LEAD_SECONDS } = await import(
+    "src/libs/consensus/v2/routines/cosignTimestamp"
+)
 const { getSharedState } = await import("src/utilities/sharedState")
 
 const at = (offsetSeconds: number) => new Date(Date.now() + offsetSeconds * 1000)
@@ -40,6 +43,16 @@ describe("getBootTimestampCorrection", () => {
         answers = [at(0), at(86_400), at(5), at(6)]
         const correction = await getBootTimestampCorrection()
         expect(Math.abs(correction - 6)).toBeLessThanOrEqual(1)
+    })
+
+    it("retries when the readings differ by more than the agreement window", async () => {
+        answers = [at(0), at(10), at(3), at(3)]
+        const correction = await getBootTimestampCorrection()
+        expect(Math.abs(correction - 3)).toBeLessThanOrEqual(1)
+    })
+
+    it("keeps the agreement window below the restart floor's lead", () => {
+        expect(BOOT_AGREEMENT_S).toBeLessThan(COSIGN_TIMESTAMP_MAX_LEAD_SECONDS)
     })
 
     it("refuses to start when no two readings ever agree", async () => {

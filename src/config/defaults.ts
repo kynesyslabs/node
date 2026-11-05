@@ -83,6 +83,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         mcpEnabled: false,
         restore: false,
         expectedGenesisHash: "",
+        expectedGenesisBlockHash: "",
         blockWatchdogEnabled: false,
         blockWatchdogTimeoutSeconds: 600,
         stallDetectionBlocks: 3,
@@ -166,6 +167,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 
     debug: {
         assertionsEnabled: false,
+        storageRootRecompute: false,
     },
 
     identity: {

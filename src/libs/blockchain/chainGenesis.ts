@@ -1,12 +1,8 @@
 import log from "src/utilities/logger"
 import Block from "./block"
-import Transaction from "./transaction"
-import Hashing from "../crypto/hashing"
-import { getSharedState } from "src/utilities/sharedState"
 import HandleGCR from "./gcr/handleGCR"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import { insertBlock } from "./chainBlocks"
-import { serializeTransactionContent, serializeBlockContent } from "@/forks"
 import Datasource from "src/model/datasource"
 import { loadSnapshot } from "src/libs/blockchain/genesis/loadSnapshot"
 import { restoreSnapshot } from "src/libs/blockchain/genesis/restoreSnapshot"
@@ -16,66 +12,19 @@ import {
 } from "src/libs/blockchain/genesis/seedValidators"
 import { applyForksAtGenesis } from "src/libs/blockchain/genesis/applyForksAtGenesis"
 import { mergeGenesisBalances } from "src/libs/blockchain/genesis/mergeGenesisBalances"
+import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
+import { markStorageProgramsDirty } from "./finality/storageRoot"
 
-const GENESIS_BLOCK_HEIGHT = 0
-
-export async function generateGenesisBlock(genesisData: any): Promise<Block> {
-    const genesisBlock = new Block()
-    genesisBlock.number = 0
-
-    const genesisTx = new Transaction()
-    genesisTx.content.type = "genesis"
-    genesisTx.blockNumber = 0
-    genesisTx.content.to = {
-        type: getSharedState.signingAlgorithm,
-        data: new Uint8Array(Buffer.from("0x0", "hex")),
-    }.data.toString()
-    genesisTx.content.from = {
-        type: getSharedState.signingAlgorithm,
-        data: new Uint8Array(Buffer.from("0x0", "hex")),
-    }.data.toString()
-    genesisTx.content.from_ed25519_address = ""
-    genesisTx.signature = {
-        type: getSharedState.signingAlgorithm,
-        data: "0x0",
-    }
-    genesisTx.status = "confirmed"
-
-    if (!genesisData.timestamp) {
-        genesisTx.content.timestamp = Date.now()
-    } else {
-        genesisTx.content.timestamp = parseInt(genesisData.timestamp)
-    }
-    genesisTx.content.amount = 0
-    genesisTx.content.nonce = 0
-    genesisTx.content.transaction_fee.network_fee = 0
-    genesisTx.content.transaction_fee.rpc_fee = 0
-    genesisTx.content.transaction_fee.additional_fee = 0
-
-    genesisTx.hash = Hashing.sha256(
-        serializeTransactionContent(genesisTx.content, GENESIS_BLOCK_HEIGHT),
-    )
-    // The genesis transaction has no reference block; it keeps the empty
-    // attrs it has always been stored with.
-    genesisTx.attrs = {} as typeof genesisTx.attrs
-
-    genesisBlock.content.timestamp = genesisTx.content.timestamp
-    genesisBlock.content.ordered_transactions.push(genesisTx.hash)
-    genesisBlock.content.previousHash = "0x0"
-    genesisBlock.content["extra"] = {
-        genesisData: JSON.stringify(genesisData),
-    }
-    genesisBlock.status = "confirmed"
-    genesisBlock.proposer = "0x000000000000000000000000"
-    genesisBlock.content.encrypted_transactions_hashes = new Map()
-    genesisBlock.validation_data = {
-        signatures: {
-            "0x000000000000000000000000": "0x0",
-        },
-    }
-    genesisBlock.hash = Hashing.sha256(
-        serializeBlockContent(genesisBlock.content, GENESIS_BLOCK_HEIGHT),
-    )
+/**
+ * `checkHash` sees block 0's hash before anything is written and may throw to
+ * stop the boot with the database left empty.
+ */
+export async function generateGenesisBlock(
+    genesisData: any,
+    checkHash?: (hash: string) => void,
+): Promise<Block> {
+    const { genesisBlock, genesisTx } = buildGenesisBlock(genesisData)
+    checkHash?.(genesisBlock.hash)
 
     const { commonValidatorSeed } = await getCommonValidatorSeed(
         genesisBlock as any,
@@ -129,6 +78,9 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
         // would refuse to retry).
         const snapshotHasValidators =
             snapshot.manifest.files["validators.jsonl"] !== undefined
+        // The restore writes gcr_storageprogram; a rolled-back restore
+        // changes nothing, so only a commit needs the second mark.
+        markStorageProgramsDirty()
         await dataSource.transaction(async em => {
             await restoreSnapshot(em, snapshot)
             // Overlay genesisData.balances on top of the snapshot rows.
@@ -169,6 +121,7 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
                 )
             }
         })
+        markStorageProgramsDirty()
     } else {
         log.info(
             "[GENESIS] no snapshot at data/snapshot/; falling back to genesisData.balances + genesisData.users",

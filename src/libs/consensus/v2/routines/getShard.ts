@@ -6,7 +6,7 @@ import log from "src/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Validators } from "src/model/entities/Validators"
-import { compareIdentities } from "./peerlistMerge"
+import { boundPoolFrom, compareIdentities, eligiblePoolFrom } from "./poolRules"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import { quorumThreshold } from "../quorum"
 import { isForkActive } from "@/forks/forkGates"
@@ -66,6 +66,38 @@ export async function readActiveValidatorAddresses(
             .map(v => v.address)
             .filter((a): a is string => a !== null),
     )
+}
+
+/**
+ * Staked identities the pool for block `parentNumber + 1` is filtered by.
+ *
+ * Under `finalityProofs` they come from the validator set snapshot after
+ * block `parentNumber - 1`: the newest set block `parentNumber` could commit
+ * to, since it was forged before its own transactions applied. The live
+ * table read cannot be used there, as it holds only the present and a node
+ * syncing the block later would draw another committee. Joins and exits
+ * therefore reach the pool one block later than before the fork.
+ *
+ * @throws Error when this node holds no snapshot that old
+ */
+async function poolValidatorAddresses(
+    parentNumber: number,
+): Promise<Set<string>> {
+    if (!isForkActive("finalityProofs", parentNumber + 1)) {
+        return await readActiveValidatorAddresses(parentNumber)
+    }
+    const height = Math.max(parentNumber - 1, 0)
+    // Loaded on first use: the snapshot reader opens the database.
+    const { activeIdentities, validatorSetAt } = await import(
+        "src/libs/blockchain/finality/validatorSet"
+    )
+    const snapshot = await validatorSetAt(height)
+    if (!snapshot) {
+        throw new Error(
+            `[getShard] no validator set snapshot at or below block ${height}`,
+        )
+    }
+    return activeIdentities(snapshot.validators, height)
 }
 
 /**
@@ -138,13 +170,13 @@ async function chainEligiblePool(
     }
 
     const committed = await readCommittedPeerlist(lastBlockNumber)
-    const validatorAddresses =
-        await readActiveValidatorAddresses(lastBlockNumber)
+    const validatorAddresses = await poolValidatorAddresses(lastBlockNumber)
 
-    let pool: string[]
-    if (committed.length > 0 && validatorAddresses.size > 0) {
-        pool = committed.filter(id => validatorAddresses.has(id))
-    } else if (committed.length > 0) {
+    const eligible = eligiblePoolFrom(committed, validatorAddresses)
+    if (eligible === null) {
+        return null
+    }
+    if (eligible.source === "unfiltered") {
         assertValidatorsNotRequired(
             "committed peerlist but no active validators",
         )
@@ -152,17 +184,13 @@ async function chainEligiblePool(
             "[getShard] SECURITY: no active validators in DB; using committed peerlist unfiltered. " +
                 "This is only acceptable on development networks.",
         )
-        pool = committed
-    } else if (validatorAddresses.size > 0) {
+    } else if (eligible.source === "validators") {
         log.info(
             `[getShard] Block ${lastBlockNumber} has no committed peerlist; bootstrapping pool from ${validatorAddresses.size} active validators`,
         )
-        pool = [...validatorAddresses]
-    } else {
-        return null
     }
 
-    const result = [...new Set(pool)].sort(compareIdentities)
+    const result = eligible.pool
 
     poolCache.set(lastBlockNumber, result)
     if (poolCache.size > POOL_CACHE_MAX_ENTRIES) {
@@ -256,15 +284,15 @@ export async function getBoundPool(parentNumber: number): Promise<string[]> {
         return pool
     }
 
-    const staked = await readActiveValidatorAddresses(parentNumber)
-    if (staked.size <= pool.length) {
-        return pool
+    const staked = await poolValidatorAddresses(parentNumber)
+    const bound = boundPoolFrom(pool, staked, getCommitteeFloor())
+    if (bound !== pool) {
+        log.warning(
+            `[getShard] Eligible pool at block ${parentNumber} holds ${pool.length}, below the quorum of ` +
+                `${getCommitteeFloor()}: drawing the committee from all ${staked.size} staked validators`,
+        )
     }
-    log.warning(
-        `[getShard] Eligible pool at block ${parentNumber} holds ${pool.length}, below the quorum of ` +
-            `${getCommitteeFloor()}: drawing the committee from all ${staked.size} staked validators`,
-    )
-    return [...staked].sort(compareIdentities)
+    return bound
 }
 
 /**
@@ -366,6 +394,8 @@ export default async function getShard(
         }
         const online = onlineByIdentity.get(identity)
         if (!online) continue
+        // Abstaining on a differing fork schedule: as good as offline.
+        if (getSharedState.forkScheduleDifferingPeers?.has(identity.toLowerCase())) continue
         // A peer more than one block behind the tip cannot validate the
         // next block. One block behind is usually a status report in flight.
         const knownHeight = Math.max(

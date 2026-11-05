@@ -38,7 +38,9 @@ import {
     fastSync,
     waitForInFlightBlockApply,
 } from "./libs/blockchain/routines/Sync"
-import peerBootstrap from "./libs/peer/routines/peerBootstrap"
+import peerBootstrap, {
+    stopDeferredAnchorChecks,
+} from "./libs/peer/routines/peerBootstrap"
 import {
     getBootTimestampCorrection,
     getNetworkTimestamp,
@@ -47,6 +49,8 @@ import {
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
+import { ensureValidatorSetSnapshot } from "./libs/blockchain/finality/validatorSet"
+import { pruneStorageHistory } from "./libs/blockchain/finality/storageHistory"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
 import {
     haltSigning,
@@ -62,6 +66,7 @@ import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkPar
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
+import { genesisFilePath } from "./libs/blockchain/genesis/genesisFile"
 // DTR and L2PS imports
 import Mempool from "./libs/blockchain/mempool"
 import TxValidatorPool from "./libs/blockchain/validation/txValidatorPool"
@@ -571,7 +576,7 @@ async function preMainLoop() {
     {
         let genesisData: unknown = null
         try {
-            const raw = fs.readFileSync("data/genesis.json", "utf8")
+            const raw = fs.readFileSync(genesisFilePath(), "utf8")
             genesisData = JSON.parse(raw)
             if (typeof genesisData === "string") {
                 genesisData = JSON.parse(genesisData)
@@ -587,12 +592,15 @@ async function preMainLoop() {
             // points them at a misleading "carries no validator set"
             // message.
             log.error(
-                `[BOOT] failed to read data/genesis.json for validator seed reconcile: ${
+                `[BOOT] failed to read ${genesisFilePath()} for validator seed reconcile: ${
                     e instanceof Error ? e.message : String(e)
                 }`,
             )
         }
         await ensureValidatorSeed(genesisData)
+        // Committee selection under finalityProofs reads the set from here
+        await ensureValidatorSetSnapshot(await Chain.getLastBlockNumber())
+        await pruneStorageHistory(await Chain.getLastBlockNumber())
     }
     log.info("[CHAIN] 🖥️ Found the genesis block")
     getSharedState.genesisBlockHash = await Chain.getGenesisBlockHash()
@@ -622,7 +630,11 @@ async function preMainLoop() {
 
     await startInboundServers()
 
-    await peerBootstrap(indexState.PeerList)
+    await peerBootstrap(indexState.PeerList, {
+        onLateRefusal: (_peer, _refusal, fatal) => {
+            if (fatal) void gracefulShutdown("anchor_refused", 1)
+        },
+    })
 
     try {
         await assertIdentityNotLive()
@@ -1381,6 +1393,7 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
     }
     getSharedState.isShuttingDown = true
     getSharedState.runMainLoop = false
+    stopDeferredAnchorChecks()
 
     log.info(`[CORE] Received ${signal}, shutting down gracefully...`)
 

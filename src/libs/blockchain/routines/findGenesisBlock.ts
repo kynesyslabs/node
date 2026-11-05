@@ -19,11 +19,13 @@ import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import {
     GenesisRefusal,
+    blockPinProblem,
     freshGenesisProblems,
     parseGenesisPin,
     parseStoredGenesisData,
     pinRequirementProblem,
     restartGenesisProblems,
+    unpinnedWarning,
 } from "@/libs/blockchain/genesis/genesisPin"
 import {
     acceptSchedule,
@@ -36,6 +38,8 @@ import {
     writeAcceptedSchedule,
 } from "@/libs/blockchain/genesis/acceptedForkScheduleStore"
 import { snapshotManifestHash } from "@/libs/blockchain/genesis/loadSnapshot"
+import { genesisFileExists, genesisFilePath } from "@/libs/blockchain/genesis/genesisFile"
+import { readGenesisSudoPubkey } from "@/libs/consensus/genesisSudoPubkey"
 import type { ForkConfigLike } from "@/libs/peer/routines/forkScheduleAgreement"
 import { WINDOW_BLOCKS } from "@/libs/peer/routines/forkScheduleWatch"
 import {
@@ -66,7 +70,7 @@ function getLatestGCRRecoveryData() {
 }
 
 function readGenesisFile() {
-    let genesisData = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
+    let genesisData = JSON.parse(fs.readFileSync(genesisFilePath(), "utf8"))
     if (typeof genesisData === "string") {
         genesisData = JSON.parse(genesisData)
     }
@@ -88,12 +92,12 @@ function loadForkConfigFromGenesisFile() {
     } catch (e) {
         if (e instanceof ForkConfigValidationError) {
             log.error(
-                `[FORKS] Refusing to boot — invalid fork config in data/genesis.json: ${e.message}`,
+                `[FORKS] Refusing to boot — invalid fork config in ${genesisFilePath()}: ${e.message}`,
             )
             throw e
         }
         log.error(
-            `[FORKS] Refusing to boot — failed to read fork config from data/genesis.json: ${
+            `[FORKS] Refusing to boot — failed to read fork config from ${genesisFilePath()}: ${
                 e instanceof Error ? e.message : String(e)
             }`,
         )
@@ -132,7 +136,7 @@ export default async function findGenesisBlock() {
     // heights at every boot. Absent `forks` field leaves
     // SharedState.forkConfig at its inactive default, matching pre-P2
     // behavior bit-for-bit.
-    const hasGenesisFile = fs.existsSync("data/genesis.json")
+    const hasGenesisFile = genesisFileExists()
     if (hasGenesisFile) {
         loadForkConfigFromGenesisFile()
     } else {
@@ -142,8 +146,14 @@ export default async function findGenesisBlock() {
     }
 
     const pin = parseGenesisPin(Config.getInstance().core.expectedGenesisHash)
+    const blockPin = parseGenesisPin(
+        Config.getInstance().core.expectedGenesisBlockHash,
+        "EXPECTED_GENESIS_BLOCK_HASH",
+    )
     const pinProblem = pinRequirementProblem(pin, process.env)
     if (pinProblem) refuse([pinProblem])
+    const unpinned = unpinnedWarning(pin, process.env, blockPin)
+    if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
     log.info("[GENESIS] Looking for the genesis block...")
     const genesisBlockHash = await Chain.getGenesisBlockHash()
@@ -162,6 +172,8 @@ export default async function findGenesisBlock() {
                 pin,
             }),
         )
+        const storedBlockProblem = blockPinProblem(genesisBlockHash, blockPin, false)
+        if (storedBlockProblem) refuse([storedBlockProblem])
         await acceptLoadedForkSchedule(await Chain.getLastBlockNumber())
         await loadShardSizeFromGenesisBlock()
         return
@@ -190,7 +202,7 @@ export default async function findGenesisBlock() {
         }),
     )
     if (pin !== "") {
-        log.info(`[GENESIS] data/genesis.json matches EXPECTED_GENESIS_HASH ${pin}`)
+        log.info(`[GENESIS] ${genesisFilePath()} matches EXPECTED_GENESIS_HASH ${pin}`)
     }
 
     const recoveryGenesis = getLatestGCRRecoveryData()
@@ -201,9 +213,16 @@ export default async function findGenesisBlock() {
     // Fail before block 0 is generated: a genesis without a valid shard
     // size would be committed, hashed, and impossible to fix in place.
     readGenesisShardSize(genesisData)
+    readGenesisSudoPubkey(genesisData)
 
     // Adding the genesis block to the chain
-    const genesisBlock = await Chain.generateGenesisBlock(genesisData)
+    const genesisBlock = await Chain.generateGenesisBlock(genesisData, hash => {
+        const problem = blockPinProblem(hash, blockPin, true)
+        if (problem) refuse([problem])
+    })
+    if (blockPin !== "") {
+        log.info(`[GENESIS] Block 0 matches EXPECTED_GENESIS_BLOCK_HASH ${blockPin}`)
+    }
     getSharedState.genesisCreatedThisBoot = true
     // Block 0 was just created from this schedule; a row left by an earlier
     // chain in a partly wiped database says nothing about this one.
@@ -252,7 +271,7 @@ async function acceptLoadedForkSchedule(tip: number): Promise<void> {
     if (verdict.status === "unchanged") return
     if (verdict.status === "refused") {
         refuse([
-            `fork schedule in data/genesis.json differs from the one this node ran with: ` +
+            `fork schedule in ${genesisFilePath()} differs from the one this node ran with: ` +
                 verdict.problems.join("; ") +
                 `. If every operator agreed to this exact schedule, restart with ` +
                 `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=${verdict.digest}`,

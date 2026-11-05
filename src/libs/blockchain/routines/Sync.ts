@@ -18,15 +18,20 @@ import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
 import log from "src/utilities/logger"
-import { verifyBlock } from "../validation/verifyBlock"
+import { type BlockVerification, verifyBlock } from "../validation/verifyBlock"
 import {
     SyncBlockRejectedError,
+    checkResultsAgainstNextBlock,
     localStatuses,
+    pinResultCodes,
+    pinFailureCodes,
     planBlockOutcome,
     statusDisagreements,
     verifyBlockTransactions,
     verifyNativeTablesHashes,
 } from "./syncVerification"
+import { isForkActive } from "@/forks"
+import { FINALITY_FORK, repairParentResultCodes } from "../finality/commitments"
 import { recordSyncedBlock } from "src/libs/consensus/v2/routines/stallDetection"
 import {
     RPCRequest,
@@ -40,7 +45,10 @@ import {
     TimeoutError,
     handleError,
 } from "@/errors"
-import HandleGCR from "../gcr/handleGCR"
+import HandleGCR, {
+    type ApplyTransactionsOptions,
+    type PendingGCRWrite,
+} from "../gcr/handleGCR"
 import {
     discoverL2PSParticipants,
     syncL2PSWithPeer,
@@ -58,6 +66,7 @@ import Hashing from "@/libs/crypto/hashing"
 import {
     assertSyncedNonceTrace,
     debugAssertionsEnabled,
+    noncesAfterApply,
     readNonceTrace,
     readNonces,
 } from "@/libs/debug/nonceTrace"
@@ -650,7 +659,7 @@ export async function syncBlock(
         return true
     }
 
-    const verdict = await verifyBlock(block as never)
+    const verdict = await verifySyncedBlock(block, peer, fetchDeadline)
     if (!verdict.valid) {
         log.error(
             `[syncBlock] Rejecting synced block ${block.number} (${block.hash}): ${verdict.reason}`,
@@ -956,6 +965,8 @@ async function resolveForkedBlock(
  * Verify attrs, apply GCR edits and insert a synced block. Shared by
  * the batch loop and the fork-recovery path.
  *
+ * @param next The block after it, when the batch holds it: its result
+ *   root is checked against this block's results before they are stored
  * @returns False if the block was already inserted concurrently
  * @throws SyncBlockRejectedError when the served block disagrees with what
  *   the quorum signed or with the outcome of applying it here
@@ -963,6 +974,7 @@ async function resolveForkedBlock(
 async function applySyncedBlock(
     block: Block,
     blockTxs: Transaction[],
+    next?: Block,
 ): Promise<boolean> {
     await assertNoUnreconciledGcrState()
 
@@ -976,7 +988,7 @@ async function applySyncedBlock(
     await mergePeerlist(block)
     await verifyBlockAttrs(block, blockTxs)
 
-    await applyVerifiedBlock(block, blockTxs)
+    await applyVerifiedBlock(block, blockTxs, next)
 
     log.info(
         `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
@@ -985,9 +997,10 @@ async function applySyncedBlock(
 }
 
 /**
- * Set once GCR edits have been persisted for a block that then failed to
- * insert. Local state is ahead of the chain from that moment on and nothing
- * in this process can reconcile it.
+ * Set once GCR edits are found persisted for a block that never landed.
+ * A block's edits commit with the block, so this can only be state left by
+ * an older binary. Local state is ahead of the chain from that moment on and
+ * nothing in this process can reconcile it.
  */
 let unreconciledGcrBlock: number | null = null
 
@@ -1057,6 +1070,18 @@ async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
     const hashes = [...new Set(rows.map(r => r.hash))]
     const blocks = [...new Set(rows.map(r => Number(r.block)))]
 
+    // Under nonceIntegrity a failed transaction also changed state (its fee
+    // and nonce) and is stamped too, but a rollback replays every edit of a
+    // stamped body as if it had applied. Undoing it from bodies alone would
+    // corrupt state, so such a block needs a resync instead.
+    const charging = blocks.find(block => isForkActive("nonceIntegrity", block - 1))
+    if (charging !== undefined) {
+        log.error(
+            `[applySyncedBlock] cannot roll back orphaned GCR state: block ${charging} was applied under nonceIntegrity, where the bodies do not say which transactions failed`,
+        )
+        return false
+    }
+
     const txs = await Mempool.getTransactionsByHashes(hashes)
     const found = new Set(txs.map(tx => tx.hash))
     const missing = hashes.filter(h => !found.has(h))
@@ -1091,7 +1116,8 @@ async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
 
 /**
  * Highest block stamped on a GCR assignment that sits above the chain tip,
- * or null when GCR state and chain history agree.
+ * or null when GCR state and chain history agree. Stamps commit with their
+ * block, so a stamp above the tip was left by an older binary.
  */
 async function findOrphanedGcrBlock(): Promise<number | null> {
     try {
@@ -1121,155 +1147,157 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
 }
 
 /**
- * Undo the GCR edits of `applied` (the transactions that took effect) and the
- * assignments stamped for the block. Throws when any rollback fails: state is
- * then neither the old nor the new one and the caller must latch the drift.
- */
-async function undoBlockApply(
-    block: Block,
-    applied: Transaction[],
-): Promise<void> {
-    const rollback = await HandleGCR.applyTransactions(
-        orderDeterministically(applied).reverse(),
-        true,
-    )
-    if (rollback.failedTxs.length > 0) {
-        throw new Error(
-            `${rollback.failedTxs.length}/${applied.length} rollback(s) failed: ${rollback.failedTxs.join(", ")}`,
-        )
-    }
-    await HandleGCR.deleteAssignedTxsForBlock(block.number)
-}
-
-/**
- * Undo what a failed apply left behind. The edits of one apply and the
- * per-account assignments are saved in a single database transaction, so a
- * throw leaves either nothing or edits that carry all their assignments.
- * The assignments name exactly the transactions that took effect; undoing
- * anything else would subtract what was never added.
- */
-async function undoAssignedEffects(
-    block: Block,
-    candidates: Transaction[],
-): Promise<void> {
-    try {
-        const db = await Datasource.getInstance()
-        const rows = await db
-            .getDataSource()
-            .getRepository(GCRAssignedTx)
-            .find({ where: { blockNumber: block.number } })
-        const assigned = new Set(rows.map(row => row.txHash))
-        const applied = candidates.filter(tx => assigned.has(tx.hash))
-        if (applied.length === 0) return
-        await undoBlockApply(block, applied)
-    } catch (rollbackError) {
-        getSharedState.syncStatus = false
-        unreconciledGcrBlock = block.number
-        log.error(
-            `[applySyncedBlock] FATAL: could not undo a failed apply of block ${block.number}; local state may have drifted from the chain and the node must be resynced from scratch: ` +
-                `${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-        )
-    }
-}
-
-/**
  * Check a served block against local state, apply it and insert it.
  *
  * The block hash commits to transaction hashes only, so bodies, statuses and
  * the state they produce are verified here instead: bodies hash and verify
  * against the committed hashes, the forger's native table hashes match the
  * state before the block, and each status equals what applying the
- * transaction does on this node. A status that disagrees undoes what was
- * applied and rejects the block.
+ * transaction does on this node. The apply is held in memory until every
+ * status agrees, then committed in the block's own database transaction, so
+ * a rejected block and a failed insert both leave the state untouched.
+ * With the next block in hand, its result root must match the results about
+ * to be stored: once stored, a status is final and a failure code changes
+ * only by repair against a later verified block.
  *
  * @throws SyncBlockRejectedError when the block must not be applied
  */
 async function applyVerifiedBlock(
     block: Block,
     txs: Transaction[],
+    next?: Block,
 ): Promise<void> {
     await verifyBlockTransactions(block, txs)
     await verifyNativeTablesHashes(block)
     const plan = await planBlockOutcome(block, txs)
 
     await trackBlockApply(async () => {
-        let outcome: Awaited<ReturnType<typeof applyBlockEdits>>
-        try {
-            outcome = await applyBlockEdits(plan.toApply, block)
-        } catch (applyError) {
-            await undoAssignedEffects(block, plan.toApply)
-            throw applyError
-        }
+        const outcome = await applyBlockEdits(plan.toApply, block, {
+            defer: true,
+        })
         const local = localStatuses(plan, outcome)
         const disagreeing = statusDisagreements(txs, local)
 
         if (disagreeing.length > 0) {
-            try {
-                await undoBlockApply(
-                    block,
-                    txs.filter(
-                        tx => local.get(tx.hash) === TRANSACTION_STATUS.CONFIRMED,
-                    ),
-                )
-            } catch (rollbackError) {
-                getSharedState.syncStatus = false
-                unreconciledGcrBlock = block.number
-                log.error(
-                    `[applySyncedBlock] FATAL: rollback of block ${block.number} failed; local state has drifted from the chain and the node must be resynced from scratch: ` +
-                        `${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-                )
-                throw rollbackError
-            }
             throw new SyncBlockRejectedError(
                 `statuses of block ${block.number} disagree with the local outcome for ${disagreeing.length} tx(s), first ${disagreeing[0]}`,
             )
         }
 
-        await insertBlockOrHalt(block, txs)
+        pinFailureCodes(txs, plan)
+        pinResultCodes(txs, plan, block.number)
+        // Rejects only what this peer served: the caller cools it down and
+        // syncs the block from another one.
+        await checkResultsAgainstNextBlock(block, txs, next)
+        await insertBlockOrHalt(block, txs, outcome.pending)
     })
 }
 
 /**
- * Insert a block whose GCR edits have ALREADY been applied.
- *
- * syncGCRTables persists GCR edits and neither it nor insertBlock accepts a
- * shared transaction manager, so an insert failure here leaves nonce/balance/
- * validator state ahead of the chain with no block authorizing it. Rethrowing
- * alone is not enough on either axis: callers up the fastSync chain swallow
- * errors, and the block-exists guard does not stop a retry from re-applying
- * the same edits. So mark the node unsynced AND latch the drift, which stops
- * it participating and blocks any further apply until an operator resyncs.
+ * Insert a block together with the state its transactions produced. The
+ * insert is one database transaction, so a failure leaves neither the block
+ * nor its edits, and a retry starts from the state before the block.
  */
 async function insertBlockOrHalt(
     block: Block,
     blockTxs: Transaction[],
+    pending?: PendingGCRWrite,
 ): Promise<void> {
     try {
-        await Chain.insertBlock(block, blockTxs)
+        await Chain.insertBlock(block, blockTxs, undefined, pending)
     } catch (e) {
         getSharedState.syncStatus = false
         log.error(
-            `[applySyncedBlock] block ${block.number} failed to insert after its GCR edits were applied; rolling them back: ` +
+            `[applySyncedBlock] block ${block.number} failed to insert; its GCR edits were not committed: ` +
                 `${e instanceof Error ? e.message : String(e)}`,
         )
-        try {
-            await undoBlockApply(
-                block,
-                blockTxs.filter(
-                    tx => tx.status === TRANSACTION_STATUS.CONFIRMED,
-                ),
-            )
-        } catch (rollbackError) {
-            unreconciledGcrBlock = block.number
-            log.error(
-                `[applySyncedBlock] FATAL: rollback of block ${block.number} failed; local state has drifted from the chain and the node must be resynced from scratch: ` +
-                    `${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-            )
-        }
         throw e
     }
 
     await recordSyncedBlock(block)
+}
+
+/**
+ * verifyBlock, repairing the stored failure codes of the parent when they
+ * are all `block` disagrees with. The parent may have been stored at the
+ * head with no child to check its codes against; `block`, once its quorum
+ * and everything else verify, says which codes the network committed, and
+ * the codes `peer` serves are kept only if they give exactly that root.
+ */
+async function verifySyncedBlock(
+    block: Block,
+    peer: Peer | undefined,
+    fetchDeadline?: number,
+): Promise<BlockVerification> {
+    const verdict = await verifyBlock(block as never)
+    if (verdict.valid || !verdict.parentResultsMismatch || !peer) return verdict
+
+    const rest = await verifyBlock(block as never, undefined, {
+        skipParentResults: true,
+    })
+    const parent = rest.valid
+        ? await Chain.getBlockByNumber(block.number - 1)
+        : null
+    const committed = (block.content as unknown as Record<string, unknown>)
+        ?.parent_results_root
+    if (!parent || typeof committed !== "string") return verdict
+
+    let repaired: number | null
+    try {
+        const served = await askTxsForBlock(parent as never, peer, fetchDeadline)
+        repaired = await repairParentResultCodes(parent, committed, served)
+    } catch (e) {
+        log.warning(
+            `[sync] could not repair the results of block ${parent.number} from ${peer.identity}: ${e instanceof Error ? e.message : String(e)}`,
+        )
+        return verdict
+    }
+    if (repaired === null) return verdict
+    log.warning(
+        `[sync] rewrote ${repaired} failure code(s) of block ${parent.number} to the results block ${block.number} commits to`,
+    )
+    return await verifyBlock(block as never)
+}
+
+/**
+ * Block `parent.number + 1` as `peer` serves it, for checking the results
+ * `parent` is about to store. They depend on transaction attrs the peer
+ * serves unsigned, so while `peer` claims to be past `parent` it is not
+ * stored without its child in hand; a block stored at the head has its
+ * failure codes repaired when its child arrives. Only the asked peer's own
+ * claim counts: another peer's self-attested height would leave an honest
+ * peer at `parent` unable to sync it, and discredit it for the miss.
+ *
+ * @returns the child; undefined when none is needed or `peer` has none yet;
+ *   null when `peer` claims one but did not serve it
+ */
+async function fetchChildBlock(
+    peer: Peer,
+    parent: Block,
+): Promise<Block | null | undefined> {
+    const number = parent.number + 1
+    if (!isForkActive(FINALITY_FORK, number)) return undefined
+
+    const response = await peer.longCall(
+        {
+            method: "nodeCall",
+            params: [
+                {
+                    message: "getBlocks",
+                    data: { start: number, limit: 1 },
+                    muid: null,
+                },
+            ],
+        },
+        true,
+        { protocol: "http", sleepTime: 1000, retries: 3, allowedCodes: [404] },
+    )
+    const served =
+        response.result === 200 && Array.isArray(response.response)
+            ? (response.response as Block[]).find(b => b?.number === number)
+            : undefined
+    if (served) return served
+    return peerHeight(peer) > parent.number ? null : undefined
 }
 
 /**
@@ -1353,7 +1381,17 @@ async function batchDownloadBlocks(
     // Process each block in order. Order matters for the height-stable
     // verify: each block's validator set (valid_at <= number-1) is already
     // persisted by the time the next block is checked.
-    for (const block of blocks.sort((a, b) => a.number - b.number)) {
+    const sorted = blocks.toSorted((a, b) => a.number - b.number)
+    const tailChild = await fetchChildBlock(peer, sorted.at(-1))
+    // A tail left out still serves as the child of the block before it.
+    const ordered = tailChild === null ? sorted.slice(0, -1) : sorted
+    if (tailChild === null) {
+        log.warning(
+            `[batchDownloadBlocks] ${peer.identity} did not serve block ${sorted.at(-1).number + 1}; ` +
+                `leaving block ${sorted.at(-1).number} to a peer that can`,
+        )
+    }
+    for (const [index, block] of ordered.entries()) {
         if (getSharedState.isShuttingDown) {
             log.info(
                 `[batchDownloadBlocks] Shutdown in progress, stopping before block ${block.number}`,
@@ -1367,7 +1405,7 @@ async function batchDownloadBlocks(
 
         // Hash + signature quorum on EACH historical block before insert
         // (height-stable signer set).
-        const verdict = await verifyBlock(block as never)
+        const verdict = await verifySyncedBlock(block, peer)
         if (!verdict.valid) {
             log.error(
                 `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}): ${verdict.reason}`,
@@ -1387,7 +1425,19 @@ async function batchDownloadBlocks(
             }
 
             try {
-                await applySyncedBlock(recovered.block, recovered.txs)
+                const child = await fetchChildBlock(
+                    recovered.peer,
+                    recovered.block,
+                )
+                // Without its child the block is synced on the next round
+                // from the recovery source, together with the child
+                if (child !== null) {
+                    await applySyncedBlock(
+                        recovered.block,
+                        recovered.txs,
+                        child,
+                    )
+                }
             } catch (error) {
                 if (!(error instanceof SyncBlockRejectedError)) throw error
                 log.error(
@@ -1410,7 +1460,11 @@ async function batchDownloadBlocks(
 
         let inserted: boolean
         try {
-            inserted = await applySyncedBlock(block, blockTxs)
+            inserted = await applySyncedBlock(
+                block,
+                blockTxs,
+                sorted[index + 1] ?? tailChild,
+            )
         } catch (error) {
             if (!(error instanceof SyncBlockRejectedError)) throw error
             log.error(
@@ -1424,6 +1478,9 @@ async function batchDownloadBlocks(
             return false
         }
     }
+
+    // The caller moves on to a peer that can serve the child
+    if (tailChild === null) return false
 
     log.debug(
         `[batchDownloadBlocks] Successfully processed batch of ${blocks.length} blocks`,
@@ -1632,9 +1689,14 @@ export async function syncGCRTables(txs: Transaction[], block?: Block) {
 
 /**
  * Apply the given transactions in canonical order and report which took
- * effect, which mutate nothing and which failed.
+ * effect, which mutate nothing and which failed. With `defer`, the state is
+ * returned as `pending` for the caller to commit with the block.
  */
-async function applyBlockEdits(txs: Transaction[], block?: Block) {
+async function applyBlockEdits(
+    txs: Transaction[],
+    block?: Block,
+    options: ApplyTransactionsOptions = {},
+) {
     // sort transactions deterministic
     const sortedTxs = orderDeterministically(txs)
     const clock = block
@@ -1646,13 +1708,25 @@ async function applyBlockEdits(txs: Transaction[], block?: Block) {
         : null
 
     if (!nonceTrace) {
-        return await HandleGCR.applyTransactions(sortedTxs, false, clock)
+        return await HandleGCR.applyTransactions(
+            sortedTxs,
+            false,
+            clock,
+            options,
+        )
     }
 
     const traceAccounts = Object.keys(nonceTrace)
     const localBefore = await readNonces(traceAccounts)
-    const result = await HandleGCR.applyTransactions(sortedTxs, false, clock)
-    const localAfter = await readNonces(traceAccounts)
+    const result = await HandleGCR.applyTransactions(
+        sortedTxs,
+        false,
+        clock,
+        options,
+    )
+    const localAfter = options.defer
+        ? noncesAfterApply(result.pending, traceAccounts, localBefore)
+        : await readNonces(traceAccounts)
 
     assertSyncedNonceTrace(block.number, nonceTrace, localBefore, localAfter)
     return result
@@ -1764,8 +1838,8 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
             continue
         }
 
-        const success = peerManager.addPeer(peerObject)
-        if (success) {
+        const [added] = peerManager.addPeer(peerObject)
+        if (added) {
             mergedPeers.push(peerObject.identity)
         }
     }

@@ -1,0 +1,64 @@
+{
+  "properties": {
+    "id": "FILL: mainnet chain id, an integer no other Demos network uses (testnet 1 and devnet 1337 are refused)",
+    "name": "FILL: network name (testnet: DEMOS)",
+    "currency": "FILL: currency symbol (testnet: DEM)",
+    "shardSize": 10,
+    "sudoPubkey": "FILL: lowercase 0x + 64 hex key allowed to sign award transactions, or delete this field to accept none"
+  },
+  "mutables": {
+    "minBlocksForValidationOnlineStatus": 4
+  },
+  "forks": {
+    "osDenomination": {
+      "activationHeight": 0
+    },
+    "nonceEnforcement": {
+      "activationHeight": 0
+    },
+    "signatureDomain": {
+      "activationHeight": 0
+    },
+    "editBinding": {
+      "activationHeight": 0
+    },
+    "nonceIntegrity": {
+      "activationHeight": 0
+    },
+    "quorumParity": {
+      "activationHeight": 0
+    },
+    "committeeBinding": {
+      "activationHeight": 0
+    },
+    "commitLock": {
+      "activationHeight": 0
+    },
+    "finalityProofs": {
+      "activationHeight": 0
+    },
+    "gasFeeSeparation": {
+      "activationHeight": "FILL: 0 or null",
+      "treasuryAddress": "FILL: lowercase 0x + 64 hex treasury account, required whether the height is 0 or null"
+    },
+    "web2ProofBinding": {
+      "activationHeight": "FILL: 0 or null"
+    },
+    "tlsnProofEnforcement": {
+      "activationHeight": "FILL: 0 or null"
+    },
+    "xmProofBinding": {
+      "activationHeight": null
+    },
+    "atomicWork": {
+      "activationHeight": null
+    }
+  },
+  "snapshot": {
+    "manifestSha256": "FILL: sha256 of the launch snapshot's manifest.json bytes (keep this field: the launch checks require the snapshot)"
+  },
+  "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations, in the snapshot's unit (DEM over a DEM snapshot, OS over a migrated one; see genesis.md)",
+  "timestamp": "FILL: launch time in seconds, a positive integer string (testnet: \"1692734616\")",
+  "status": "confirmed",
+  "validators": "FILL: launch validators, one object each: {\"address\", \"status\": \"2\", \"connection_url\", \"staked_amount\", \"first_seen\": 0, \"valid_at\": 0}"
+}

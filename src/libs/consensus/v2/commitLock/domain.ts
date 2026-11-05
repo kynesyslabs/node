@@ -1,6 +1,7 @@
 import { isForkActive } from "@/forks/forkGates"
 import log from "src/utilities/logger"
 import { COSIGN_TIMESTAMP_MAX_LEAD_SECONDS } from "../routines/cosignTimestamp"
+import { isRound, precommitMessage, prevoteMessage } from "./messages"
 
 /**
  * What a committee member signs under `commitLock`. The height and the round
@@ -9,8 +10,13 @@ import { COSIGN_TIMESTAMP_MAX_LEAD_SECONDS } from "../routines/cosignTimestamp"
  * another. Before the fork a member signs the raw block hash.
  */
 
-export const PREVOTE_DOMAIN = "demos-prevote"
-export const PRECOMMIT_DOMAIN = "demos-precommit"
+export {
+    PRECOMMIT_DOMAIN,
+    PREVOTE_DOMAIN,
+    isRound,
+    precommitMessage,
+    prevoteMessage,
+} from "./messages"
 
 let misconfiguredReported = false
 
@@ -47,13 +53,6 @@ export function isBlockHash(value: unknown): value is string {
     )
 }
 
-/** A round is the secretary timestamp of an attempt: a positive integer. */
-export function isRound(value: unknown): value is number {
-    return (
-        typeof value === "number" && Number.isSafeInteger(value) && value > 0
-    )
-}
-
 /**
  * Why a vote in `round` must be neither signed nor accepted when our network
  * clock reads `now`, or null when it may. An honest secretary stamps the
@@ -66,22 +65,6 @@ export function roundAheadRefusal(round: number, now: number): string | null {
     const ceiling = now + COSIGN_TIMESTAMP_MAX_LEAD_SECONDS
     if (round <= ceiling) return null
     return `round ${round} is ${round - now}s ahead of our clock (at most ${COSIGN_TIMESTAMP_MAX_LEAD_SECONDS}s accepted)`
-}
-
-export function prevoteMessage(
-    height: number,
-    round: number,
-    hash: string,
-): string {
-    return `${PREVOTE_DOMAIN}:${height}:${round}:${hash}`
-}
-
-export function precommitMessage(
-    height: number,
-    round: number,
-    hash: string,
-): string {
-    return `${PRECOMMIT_DOMAIN}:${height}:${round}:${hash}`
 }
 
 interface RoundedBlock {

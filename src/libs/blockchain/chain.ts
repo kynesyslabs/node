@@ -24,6 +24,7 @@ import * as blockOps from "./chainBlocks"
 import * as txOps from "./chainTransactions"
 import * as genesisOps from "./chainGenesis"
 import type { TxStatus } from "./chainTypes"
+import type { PendingGCRWrite } from "./gcr/handleGCR"
 
 export type { TxStatus } from "./chainTypes"
 
@@ -63,6 +64,10 @@ export default class Chain {
         return blockOps.getLastBlock()
     }
 
+    static async getLastStoredBlock(): Promise<Blocks | null> {
+        return blockOps.getLastStoredBlock()
+    }
+
     static async getLastBlockNumber(): Promise<number> {
         return blockOps.getLastBlockNumber()
     }
@@ -81,6 +86,10 @@ export default class Chain {
 
     static async getBlocks(start: "latest" | number, limit: number): Promise<Blocks[]> {
         return blockOps.getBlocks(start, limit)
+    }
+
+    static async getBlockRange(from: number, to: number): Promise<Blocks[]> {
+        return blockOps.getBlockRange(from, to)
     }
 
     static async getBlockByNumber(number: number): Promise<Blocks> {
@@ -150,8 +159,9 @@ export default class Chain {
         block: Block,
         blockTxs: Transaction[],
         position?: number,
+        pendingGCR?: PendingGCRWrite,
     ): Promise<Blocks> {
-        return blockOps.insertBlock(block, blockTxs, position)
+        return blockOps.insertBlock(block, blockTxs, position, pendingGCR)
     }
 
     static async insertTransaction(transaction: Transaction): Promise<boolean> {
@@ -162,8 +172,18 @@ export default class Chain {
         return txOps.insertTransactionsFromSync(transactions)
     }
 
+    static async setFailureCodes(
+        blockNumber: number,
+        codes: Map<string, string | null>,
+    ): Promise<void> {
+        return txOps.setFailureCodes(blockNumber, codes)
+    }
+
     // ── Genesis ───────────────────────────────────────────────
-    static async generateGenesisBlock(genesisData: any): Promise<Block> {
-        return genesisOps.generateGenesisBlock(genesisData)
+    static async generateGenesisBlock(
+        genesisData: any,
+        checkHash?: (hash: string) => void,
+    ): Promise<Block> {
+        return genesisOps.generateGenesisBlock(genesisData, checkHash)
     }
 }

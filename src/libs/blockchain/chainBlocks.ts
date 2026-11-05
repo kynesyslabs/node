@@ -1,4 +1,4 @@
-import { LessThan, MoreThan } from "typeorm"
+import { Between, LessThan, MoreThan } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
@@ -29,8 +29,15 @@ import { isForkActive } from "@/forks/forkGates"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import { BlockInvalidError } from "@/errors"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
+import { gcrWriteMutex } from "./gcr/gcrWriteMutex"
+import type { PendingGCRWrite } from "./gcr/handleGCR"
 import type { FindManyOptions } from "typeorm"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import {
+    pruneValidatorSetSnapshots,
+    recordValidatorSetSnapshot,
+} from "./finality/validatorSet"
+import { pruneStorageHistory, resetStorageHistory } from "./finality/storageHistory"
 
 export function isGenesis(block: Block): boolean {
     if (block.number === 0) {
@@ -50,6 +57,19 @@ export async function getLastBlock(): Promise<Blocks> {
     }
 
     return await getBlockByNumber(getSharedState.lastBlockNumber)
+}
+
+/**
+ * The highest block row in the database. A block's row and state commit
+ * together, but the head this node publishes moves only after the commit's
+ * side effects; a reader of committed state compares against this.
+ */
+export async function getLastStoredBlock(): Promise<Blocks | null> {
+    return await getBlocksRepo()
+        .createQueryBuilder("block")
+        .orderBy("block.number", "DESC")
+        .limit(1)
+        .getOne()
 }
 
 export async function getLastBlockNumber(): Promise<number> {
@@ -136,6 +156,14 @@ export async function getBlocks(
     return await blocks.find(options)
 }
 
+/** Blocks `from..to` inclusive, ascending; the caller bounds the range. */
+export async function getBlockRange(from: number, to: number): Promise<Blocks[]> {
+    return await getBlocksRepo().find({
+        where: { number: Between(from, to) },
+        order: { number: "ASC" },
+    })
+}
+
 export async function getBlockByNumber(number: number): Promise<Blocks> {
     return await getBlocksRepo().findOneBy({ number })
 }
@@ -203,10 +231,17 @@ export async function getOnlinePeersForLastThreeBlocks(): Promise<any[]> {
     }
 }
 
+/**
+ * Inserts a block and, when given, the state its transactions produced.
+ * `pendingGCR` is written in the block's own database transaction: the
+ * balances, nonces, assignment stamps and the block that authorises them
+ * commit together or not at all.
+ */
 export async function insertBlock(
     block: Block,
     blockTxs: Transaction[],
     position?: number,
+    pendingGCR?: PendingGCRWrite,
 ): Promise<Blocks> {
     const blocksRepo = getBlocksRepo()
     const orderedTransactionsHashes = block.content.ordered_transactions
@@ -228,6 +263,15 @@ export async function insertBlock(
     existingBlock = await blocksRepo.findOneBy({
         hash: block.hash,
     })
+
+    if (existingBlock && pendingGCR) {
+        // The state of a block commits with the block, so a block already on
+        // disk already carries it.
+        log.warning(
+            `[ChainDB] block ${block.number} (${block.hash}) already exists; its state was committed with it, dropping the pending edits`,
+        )
+        return existingBlock
+    }
 
     if (existingBlock && position) {
         log.info(
@@ -329,8 +373,18 @@ export async function insertBlock(
     const dataSource = db.getDataSource()
 
     try {
-        const result = await dataSource.transaction(
+        const commit = () => dataSource.transaction(
             async transactionalEntityManager => {
+                // Before the block's state, which logs into this block's
+                // rows of the storage undo log.
+                await resetStorageHistory(transactionalEntityManager, block.number)
+
+                // The block's state goes first, before the fork hooks that
+                // migrate it and before the block that authorises it.
+                if (pendingGCR) {
+                    await pendingGCR.write(transactionalEntityManager, block.number)
+                }
+
                 const saveBlockStart = Date.now()
                 // REVIEW: P3b — fork-activation hook. Runs *before* the
                 // block is persisted so balances are migrated atomically
@@ -482,9 +536,26 @@ export async function insertBlock(
                 )
                 await applyNetworkUpgrade(block.number, govProposalRepo)
 
+                // After every hook that can move a stake. Block 0's set is
+                // recorded at boot, once the validator seed is in place.
+                if (block.number > 0) {
+                    await recordValidatorSetSnapshot(
+                        transactionalEntityManager,
+                        block.number,
+                    )
+                }
+
                 return savedBlock
             },
         )
+        // State writers are serialised; a block carrying state is one.
+        const result = pendingGCR
+            ? await gcrWriteMutex.runExclusive(commit)
+            : await commit()
+
+        if (pendingGCR) {
+            await pendingGCR.afterCommit()
+        }
 
         if (block.number > getSharedState.lastBlockNumber) {
             getSharedState.lastBlockNumber = block.number
@@ -548,6 +619,8 @@ export async function insertBlock(
 
 export async function pruneBlocksToGenesisBlock(): Promise<void> {
     await getBlocksRepo().delete({ number: MoreThan(0) })
+    await pruneValidatorSetSnapshots(0)
+    await pruneStorageHistory(0)
     log.info("Pruned all blocks except the genesis block.")
 }
 

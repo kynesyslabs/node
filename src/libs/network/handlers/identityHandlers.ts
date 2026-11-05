@@ -5,7 +5,9 @@ import {
     DOMAIN_PROOF_PATH,
 } from "../../abstraction/web2/domain"
 import { UDIdentityManager } from "../../blockchain/gcr/gcr_routines/udIdentityManager"
-import ensureGCRForUser from "../../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import readGCRForUser, {
+    accountForWire,
+} from "../../blockchain/gcr/gcr_routines/readGCRForUser"
 import type { Tweet } from "@kynesyslabs/demosdk/types"
 import type { DiscordMessage } from "../../identity/tools/discord"
 import log from "src/utilities/logger"
@@ -20,8 +22,9 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
             return response
         }
         try {
-            const nStat = await ensureGCRForUser(data.address)
-            response.response = nStat
+            response.response = accountForWire(
+                await readGCRForUser(data.address),
+            )
         } catch (error) {
             response.result = 400
             response.response = "error"

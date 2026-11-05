@@ -4,9 +4,15 @@ import HandleGCR from "../handleGCR"
 import Datasource from "src/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { validateEd25519Address } from "@kynesyslabs/demosdk/utils"
+import type { EntityManager } from "typeorm"
 
+/**
+ * The account for `pubkey`, created when missing. With `manager`, read and
+ * created inside that transaction.
+ */
 export default async function ensureGCRForUser(
     pubkey: string,
+    manager?: EntityManager,
 ): Promise<GCRMain> {
     if (!pubkey.startsWith("0x")) {
         pubkey = `0x${pubkey}`
@@ -20,12 +26,18 @@ export default async function ensureGCRForUser(
     // TODO Create the GCR for the user if it doesn't exist
     // TODO Create the GCR extended for the user if it doesn't exist
     const db = await Datasource.getInstance()
-    const gcrRepository = db.getDataSource().getRepository(GCRMain)
+    const gcrRepository = manager
+        ? manager.getRepository(GCRMain)
+        : db.getDataSource().getRepository(GCRMain)
 
     const gcr = await gcrRepository.findOne({ where: { pubkey } })
 
     if (!gcr) {
         // Create the GCR for the user
+        if (manager) {
+            const account = await HandleGCR.createAccount(pubkey, {}, true)
+            return await gcrRepository.save(account)
+        }
         return await HandleGCR.createAccount(pubkey)
     }
 

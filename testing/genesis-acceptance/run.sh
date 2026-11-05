@@ -8,7 +8,7 @@
 # published ports. The node needs a route out only for NTP (it exits at boot
 # when no NTP server answers); with an empty peer list it dials no peer, and
 # the testnet URLs in the bundled snapshot's validator list are only stored.
-# Ten scenarios run in order; 6-10 restart on the database that
+# Twelve scenarios run in order; 6-11 restart on the database that
 # scenario 1 created, restored to its state after scenario 6 before each one.
 #
 # Evidence (summary.md, per-scenario node logs, fixture genesis files) goes to
@@ -44,7 +44,8 @@ UNKNOWN_FORK=genesisAcceptanceUnknownFork
 RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
-MAINNET_FORKS="signatureDomain editBinding quorumParity committeeBinding commitLock"
+# Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
+MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -161,21 +162,23 @@ printf '\n' >> "${FIX}/snapshot-ws/manifest.json"
 
 genesis_hash() { # $1 genesis file -> JSON from scripts/genesis-hash.ts (log lines dropped)
     local out
-    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/manifest" --json 2>>"${RUNLOG}")
+    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/image/snapshot" --json 2>>"${RUNLOG}")
     local rc=$?
     echo "${out}" | sed -n '/^{/,$p'
     return ${rc}
 }
 LAUNCH_JSON=$(genesis_hash "${FIX}/launch.json") || { echo "${LAUNCH_JSON}" >> "${RUNLOG}"; die2 "genesis-hash reports problems with the launch genesis"; }
 PIN=$(echo "${LAUNCH_JSON}" | jq -r .genesisDataHash)
+BLOCK_PIN=$(echo "${LAUNCH_JSON}" | jq -r .genesisBlockHash)
 LAUNCH_DIGEST=$(echo "${LAUNCH_JSON}" | jq -r .forkScheduleDigest)
 MANIFEST_SHA=$(echo "${LAUNCH_JSON}" | jq -r .snapshotManifestSha256)
 OTHER_PIN=$(genesis_hash "${FIX}/onebyte.json" | jq -r .genesisDataHash)
 FAR_DIGEST=$(genesis_hash "${FIX}/forkfar.json" | jq -r .forkScheduleDigest)
 [[ "${PIN}" =~ ^[0-9a-f]{64}$ && "${OTHER_PIN}" =~ ^[0-9a-f]{64}$ && "${PIN}" != "${OTHER_PIN}" ]] ||
     die2 "could not compute the launch and one-byte hashes"
+[[ "${BLOCK_PIN}" =~ ^[0-9a-f]{64}$ ]] || die2 "could not compute the launch block 0 hash"
 BAD_PIN="${PIN:0:63}"
-say "launch genesis hash ${PIN}, fork schedule digest ${LAUNCH_DIGEST}, manifest ${MANIFEST_SHA}"
+say "launch genesis hash ${PIN}, block 0 ${BLOCK_PIN}, fork schedule digest ${LAUNCH_DIGEST}, manifest ${MANIFEST_SHA}"
 say "one-byte genesis hash ${OTHER_PIN}; far-fork schedule digest ${FAR_DIGEST}"
 mkdir -p "${EVID}/fixtures"
 cp "${FIX}"/*.json "${EVID}/fixtures/"
@@ -329,7 +332,7 @@ refusal_line() { # the refusal the node raised, else the fatal error that stoppe
 REFUSAL_RE='^(GenesisRefusal|ForkConfigValidationError): |\[ERROR\] .*[Rr]efusing to boot'
 genesis_refusal() { grep -qE "${REFUSAL_RE}" "${EVID}/$1.node.log"; }
 
-# Checks on a running node: the pin it reports and the five forks active.
+# Checks on a running node: the pin it reports and the mainnet forks active.
 BOOT_NOTES=""
 boot_checks() { # $1 expected pin; sets BOOT_NOTES, returns 0 when all hold
     local ok=0 gh ni f bad=""
@@ -341,7 +344,7 @@ boot_checks() { # $1 expected pin; sets BOOT_NOTES, returns 0 when all hold
         [ "$(echo "${ni}" | jq -r ".response.forks.${f}.activated" 2>/dev/null)" = true ] &&
             [ "$(echo "${ni}" | jq -r ".response.forks.${f}.activationHeight" 2>/dev/null)" = 0 ] || bad="${bad} ${f}"
     done
-    if [ -z "${bad}" ]; then BOOT_NOTES="${BOOT_NOTES}; 5 forks active at 0"; else BOOT_NOTES="${BOOT_NOTES}; not active at 0:${bad}"; ok=1; fi
+    if [ -z "${bad}" ]; then BOOT_NOTES="${BOOT_NOTES}; mainnet forks active at 0"; else BOOT_NOTES="${BOOT_NOTES}; not active at 0:${bad}"; ok=1; fi
     local cid tip
     cid=$(echo "${ni}" | jq -r '.response.chainId' 2>/dev/null)
     tip=$(echo "${ni}" | jq -r '.response.forks.signatureDomain.currentHeight' 2>/dev/null)
@@ -366,7 +369,7 @@ observed_text() {
 }
 
 # A fresh database, a node that must be refused before block 0 is written
-fresh_refused() { # id name genesis pin [extra docker args]
+fresh_refused() { # id name genesis pin [extra docker args]; NEEDLE= a regex the refusal must contain
     local sid="$1" name="$2" gen="$3" pin="$4"
     shift 4
     CUR="${sid}-${name}"
@@ -385,6 +388,10 @@ fresh_refused() { # id name genesis pin [extra docker args]
     notes=$(refusal_line "${CUR}")
     [ -z "${notes}" ] && notes="no refusal line in the log"
     if [ "${OBS}" = exit ] && [ "${code}" = 1 ] && [ "${rows}" = 0 ] && genesis_refusal "${CUR}"; then verdict=PASS; else verdict=FAIL; fi
+    if [ -n "${NEEDLE:-}" ]; then
+        if grep -E "${REFUSAL_RE}" "${EVID}/${CUR}.node.log" | grep -qE -- "${NEEDLE}"; then notes="${notes} [refusal names ${NEEDLE}]"
+        else verdict=FAIL; notes="${notes} [refusal does not name ${NEEDLE}]"; fi
+    fi
     [ "${OBS}" = up ] && notes="block 0 written, node served RPC; stopped by the harness (exit ${code}). ${notes}"
     record "${sid}" "${name}" "refused (exit 1, no block 0)" "${observed}" "${verdict}" "${code}" "${rows}" "${notes}"
     admin "DROP DATABASE IF EXISTS ${sid} WITH (FORCE)"
@@ -396,14 +403,15 @@ restore_chain() {
     admin "DROP DATABASE IF EXISTS chain WITH (FORCE)"
     admin "CREATE DATABASE chain TEMPLATE chain_base"
 }
-restart_refused() { # id name genesis pin [regex the refusal must contain]
+restart_refused() { # id name genesis pin [regex the refusal must contain, or ""] [extra docker args]
     local sid="$1" name="$2" gen="$3" pin="$4" needle="${5:-}"
+    shift $(($# < 5 ? $# : 5))
     CUR="${sid}-${name}"
     say "── ${CUR}"
     restore_chain
     local before after observed code rows verdict notes
     before=$(fingerprint chain)
-    start_node "${sid}" chain "${CHAIN_STATE}" "${gen}" "${pin}" || die2 "docker run failed (${CUR})"
+    start_node "${sid}" chain "${CHAIN_STATE}" "${gen}" "${pin}" "$@" || die2 "docker run failed (${CUR})"
     wait_node "${REFUSE_TIMEOUT}"
     observed=$(observed_text)
     [ "${OBS}" != exit ] && stop_node >/dev/null
@@ -430,7 +438,8 @@ CUR="s01-fresh-correct"
 say "── ${CUR}"
 admin "CREATE DATABASE chain"
 state_volume "${CHAIN_STATE}" || die2 "state volume failed"
-start_node s01 chain "${CHAIN_STATE}" "${FIX}/launch.json" "${PIN}" || die2 "docker run failed (${CUR})"
+start_node s01 chain "${CHAIN_STATE}" "${FIX}/launch.json" "${PIN}" -e "EXPECTED_GENESIS_BLOCK_HASH=${BLOCK_PIN}" ||
+    die2 "docker run failed (${CUR})"
 wait_node "${BOOT_TIMEOUT}"
 OBSERVED=$(observed_text)
 VERDICT=FAIL
@@ -450,10 +459,12 @@ remove_node
 H0=$(block0_hash chain)
 ROWS=$(block0_rows chain)
 [ "${ROWS}" = 1 ] || VERDICT=FAIL
+if [ "${H0}" = "${BLOCK_PIN}" ]; then NOTES="${NOTES}; block 0 = genesis-hash.ts block hash"
+else VERDICT=FAIL; NOTES="${NOTES}; block 0 ${H0:-none} != genesis-hash.ts ${BLOCK_PIN}"; fi
 [ "${OBS}" = exit ] && NOTES="$(refusal_line "${CUR}")"
 ACC1=$(accepted_row chain)
 NOTES="${NOTES}; block 0 ${H0:0:16}…; accepted schedule: $(echo "${ACC1}" | jq -r '.digest // .' 2>/dev/null || echo "${ACC1}")"
-record s01 fresh-correct "boots, pin + 5 forks active" "${OBSERVED}" "${VERDICT}" "${CODE}" "${ROWS}" "${NOTES}"
+record s01 fresh-correct "boots, both pins + mainnet forks active" "${OBSERVED}" "${VERDICT}" "${CODE}" "${ROWS}" "${NOTES}"
 S01_PASS=${VERDICT}
 
 # ── 2-5. fresh refusals ─────────────────────────────────────────────────
@@ -472,6 +483,7 @@ if [ "${S01_PASS}" != PASS ] && [ "$(block0_rows chain)" != 1 ]; then
     record s08 restart-fork-moved-past "refused (exit 1, DB unchanged)" "not run" FAIL - - "scenario 1 left no chain"
     record s09 restart-fork-scheduled-far "boots, new schedule stored" "not run" FAIL - - "scenario 1 left no chain"
     record s10 restart-unknown-fork "refused (exit 1, DB unchanged)" "not run" FAIL - - "scenario 1 left no chain"
+    record s11 restart-block-pin-wrong "refused (exit 1, DB unchanged)" "not run" FAIL - - "scenario 1 left no chain"
 else
     start_node s06 chain "${CHAIN_STATE}" "${FIX}/launch.json" "${PIN}" || die2 "docker run failed (${CUR})"
     wait_node "${BOOT_TIMEOUT}"
@@ -540,7 +552,14 @@ else
 
     # ── 10. restart-unknown-fork ────────────────────────────────────────
     restart_refused s10 restart-unknown-fork "${FIX}/unknownfork.json" "${PIN}"
+
+    # ── 11. restart-block-pin-wrong ─────────────────────────────────────
+    restart_refused s11 restart-block-pin-wrong "${FIX}/launch.json" "${PIN}" 'EXPECTED_GENESIS_BLOCK_HASH is' \
+        -e "EXPECTED_GENESIS_BLOCK_HASH=${OTHER_PIN}"
 fi
+
+# ── 12. fresh-block-pin-wrong ───────────────────────────────────────────
+NEEDLE='EXPECTED_GENESIS_BLOCK_HASH is' fresh_refused s12 fresh-block-pin-wrong "${FIX}/launch.json" "${PIN}" -e "EXPECTED_GENESIS_BLOCK_HASH=${OTHER_PIN}"
 
 # ── summary ─────────────────────────────────────────────────────────────
 TOTAL=$(($(wc -l < "${EVID}/results.tsv") - 1))
@@ -552,7 +571,7 @@ TOTAL=$(($(wc -l < "${EVID}/results.tsv") - 1))
     echo "- Image commit (GIT_COMMIT): \`${IMAGE_COMMIT:-unknown}\`; entrypoint and user as published: \`${IMAGE_ENTRY}\`"
     echo "- Run: $(date -u +%FT%TZ), harness \`testing/genesis-acceptance/run.sh\` at $(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null)$([ -n "$(git -C "${REPO_ROOT}" status --porcelain -- testing/genesis-acceptance 2>/dev/null)" ] && echo ' (harness not committed there)')"
     echo "- Launch genesis: chain id ${CHAIN_ID}, timestamp ${GENESIS_TS}, forks ${MAINNET_FORKS// /, } at 0, image's bundled snapshot bound by manifest sha256 \`${MANIFEST_SHA}\`"
-    echo "- EXPECTED_GENESIS_HASH (launch): \`${PIN}\`; fork schedule digest \`${LAUNCH_DIGEST}\`"
+    echo "- EXPECTED_GENESIS_HASH (launch): \`${PIN}\`; EXPECTED_GENESIS_BLOCK_HASH \`${BLOCK_PIN}\`; fork schedule digest \`${LAUNCH_DIGEST}\`"
     echo "- Other pins: one-byte genesis \`${OTHER_PIN}\`; malformed \`${BAD_PIN}\` (63 hex)"
     echo "- Containers: node \`--memory ${NODE_MEM} --cpus ${NODE_CPUS}\`, postgres \`--memory ${PG_MEM}\`, private bridge network, no published ports, empty peer list"
     echo

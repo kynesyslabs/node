@@ -25,6 +25,9 @@
     "editBinding": {
       "activationHeight": 0
     },
+    "nonceIntegrity": {
+      "activationHeight": 0
+    },
     "quorumParity": {
       "activationHeight": 0
     },
@@ -32,6 +35,9 @@
       "activationHeight": 0
     },
     "commitLock": {
+      "activationHeight": 0
+    },
+    "finalityProofs": {
       "activationHeight": 0
     }
   },

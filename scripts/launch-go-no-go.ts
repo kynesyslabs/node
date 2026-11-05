@@ -3,23 +3,32 @@
  *
  * Probes every launch validator and decides GO only when at least q
  * members of the first block's bound committee (q = 2/3 + 1 of shardSize,
- * the block quorum) are online on one genesis hash, no operator or cloud
- * provider holds more launch validators than the committee can lose
- * (shardSize - q), the genesis schedules the mainnet forks at block 0, and
- * no launch validator is a pinned committee identity. With a genesis file,
- * every validator must also report that file's genesis data hash and fork
- * schedule digest, and the mainnet forks as active. A validator counts
- * only after its endpoint signs a fresh nonce with the validator's key (the
- * node's own hello handshake); what /info claims is never enough. See
- * docs/runbooks/launch-go-no-go.md.
+ * the block quorum) are online on the agreed genesis block and release
+ * commit, no operator or cloud provider holds more launch validators than
+ * the committee can lose (shardSize - q) or more than a third of the votes,
+ * the genesis schedules the mainnet forks at block 0 and declares every fork
+ * this build knows, its chain id is no other network's, its shardSize is
+ * the launch one, and no launch validator is a pinned committee identity.
+ * With a genesis file, every validator must also report that file's genesis
+ * data hash and fork schedule digest, and the mainnet forks as active, and
+ * the agreed block hash must be the block 0 that file builds. A validator
+ * counts only after its endpoint signs a fresh nonce with the validator's
+ * key (the node's own hello handshake); what /info claims is never enough.
+ * See docs/runbooks/launch-go-no-go.md.
  *
  *   bun scripts/launch-go-no-go.ts --genesis data/genesis.json \
  *       --operators operators.json --snapshot data/snapshot \
- *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] \
- *       [--genesis-hash HASH] [--commit SHA] [--json]
+ *       --genesis-hash BLOCK_HASH --commit SHA \
+ *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] [--json]
  *
- * operators.json maps each validator identity to { operator, provider }.
- * Exit codes: 0 GO, 1 NO-GO, 2 bad input.
+ * operators.json maps each validator identity to { operator, provider,
+ * region }. Before any validator is up, --plan checks the genesis file and
+ * that table alone, with no network:
+ *
+ *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
+ *       --snapshot mainnet/snapshot --operators operators.json
+ *
+ * Exit codes: 0 GO (or every --plan check passed), 1 NO-GO, 2 bad input.
  */
 
 import * as fs from "fs"
@@ -29,8 +38,9 @@ import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import { drawBoundCommittee } from "src/libs/consensus/v2/routines/getShard"
 import { compareIdentities } from "src/libs/consensus/v2/routines/peerlistMerge"
 import Hashing from "src/libs/crypto/hashing"
-import type { ForkName } from "src/forks/forkConfig"
+import { DEFAULT_FORK_CONFIG, type ForkName } from "src/forks/forkConfig"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
+import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
     type BlockZeroValidators,
     type ValidatorRow,
@@ -42,6 +52,8 @@ import {
 export interface OperatorEntry {
     operator: string
     provider: string
+    /** Cloud region or data centre; required by the launch table check (--plan). */
+    region?: string
 }
 
 export interface ValidatorProbe {
@@ -60,6 +72,8 @@ export interface ValidatorProbe {
     activeForks?: string[] | null
     head?: number | null
     commit?: string | null
+    /** getNetworkInfo nodeVersion.dirty: the build had uncommitted changes. */
+    dirty?: boolean | null
     version?: string | null
     /**
      * Outcome of the signed-nonce challenge: "verified" only when the
@@ -76,6 +90,7 @@ export interface GoNoGoInput {
     launchValidators: string[]
     probes: ValidatorProbe[]
     operators: Record<string, unknown> | null
+    /** The agreed block 0 hash (what /genesisBlock serves); GO needs it. */
     expectedGenesisHash?: string | null
     /** The launch genesis data hash; a validator that reports another one does not count. */
     expectedGenesisDataHash?: string | null
@@ -83,6 +98,7 @@ export interface GoNoGoInput {
     expectedScheduleDigest?: string | null
     /** Forks every counted validator must report as activated. */
     requiredForks?: readonly string[] | null
+    /** The agreed release commit, a full or short SHA; GO needs it. */
     expectedCommit?: string | null
     /**
      * Bound committee of block 1 (see firstCommittee). Without it only a
@@ -132,20 +148,72 @@ export interface GoNoGoDecision {
     groupCap: number
 }
 
-/** Forks a mainnet genesis must switch on at block 0. */
+/**
+ * Forks a mainnet genesis must switch on at block 0. osDenomination and
+ * nonceEnforcement are on by default, but a default can change between
+ * releases while the genesis cannot, so they are written out.
+ * docs/mainnet/genesis.template.json, testing/genesis-acceptance/run.sh and
+ * fixtures.py carry the same list; a test keeps them equal.
+ */
 export const MAINNET_FORKS: readonly ForkName[] = [
+    "osDenomination",
+    "nonceEnforcement",
     "signatureDomain",
     "editBinding",
+    "nonceIntegrity",
     "quorumParity",
     "committeeBinding",
     "commitLock",
+    "finalityProofs",
 ]
+
+/**
+ * Every fork this build knows. A mainnet genesis declares each one, with a
+ * height or null: a missing entry takes the code default, which a later
+ * build may change, and which nobody agreed to at launch.
+ */
+export const KNOWN_FORKS = Object.keys(DEFAULT_FORK_CONFIG) as ForkName[]
+
+/** The committee size the launch was rehearsed and drilled with (mainnet-launch#3). */
+export const LAUNCH_SHARD_SIZE = 10
+
+/**
+ * Chain ids of the testnet (data/genesis.json) and the devnets. Signatures
+ * bind to the chain id once signatureDomain is on, so a mainnet that shares
+ * one would accept transactions signed for that network.
+ */
+export const NON_MAINNET_CHAIN_IDS: readonly number[] = [1, 1337]
 
 const norm = (id: string) => id.trim().toLowerCase()
 /** Operator and provider names are free text typed by people. */
 const groupName = (name: string) => name.trim().toLowerCase()
 /** Genesis hashes compare without case or a 0x prefix. */
 export const normHash = (hash: string) => hash.trim().toLowerCase().replace(/^0x/, "")
+
+/**
+ * The SHA in a commit as given or as a node reports it, without case, a 0x
+ * or a branch prefix. A node reports `<GIT_BRANCH>sha` (a release image
+ * carries the tag there: "<v1.0.0-rc.4>e30ee46..."); "stabilisation@e30ee46"
+ * is accepted too. What is left after the prefix must be the SHA alone, or
+ * the result is null.
+ */
+export function commitSha(commit: string | null | undefined): string | null {
+    if (typeof commit !== "string") return null
+    const rest = commit
+        .trim()
+        .toLowerCase()
+        .replace(/^<[^>]*>/, "")
+        .replace(/^[^@]*@/, "")
+    const match = /^(?:0x)?([0-9a-f]{7,40})$/.exec(rest)
+    return match ? match[1] : null
+}
+
+/** A short SHA matches the full one it abbreviates, in either direction. */
+export function sameCommit(reported: string | null | undefined, expected: string | null | undefined): boolean {
+    const a = commitSha(reported)
+    const b = commitSha(expected)
+    return a !== null && b !== null && (a.startsWith(b) || b.startsWith(a))
+}
 
 function isOperatorEntry(entry: unknown): entry is OperatorEntry {
     if (entry === null || typeof entry !== "object") return false
@@ -156,6 +224,98 @@ function isOperatorEntry(entry: unknown): entry is OperatorEntry {
         typeof provider === "string" &&
         provider.trim().length > 0
     )
+}
+
+export interface ValidatorTable {
+    /** Normalised entries of the launch validators that have a complete one. */
+    entries: Map<string, OperatorEntry>
+    reasons: string[]
+    /** Launch validators whose entry has no region: a NO-GO only for the --plan check. */
+    missingRegion: string[]
+    warnings: string[]
+    operatorCounts: Record<string, number>
+    providerCounts: Record<string, number>
+    /** Most validators any single operator or provider may hold: the committee seats q can spare. */
+    groupCap: number
+    /** Seats of the first committee: min(launch validators, shardSize). */
+    committeeSeats: number
+}
+
+/**
+ * The launch validator table rules: every launch validator has an operator
+ * and a provider, no operator or provider runs more than the committee can
+ * lose with q still signing, and none holds more than a third of the votes.
+ */
+export function validatorTable(
+    launchIds: string[],
+    operatorsMap: Record<string, unknown> | null,
+    shardSize: number,
+): ValidatorTable {
+    const launch = [...new Set(launchIds.map(norm))]
+    const quorum = quorumThreshold(shardSize)
+    const reasons: string[] = []
+    const warnings: string[] = []
+    const entries = new Map<string, OperatorEntry>()
+    const incomplete = new Set<string>()
+    for (const [id, entry] of Object.entries(operatorsMap ?? {})) {
+        if (isOperatorEntry(entry)) {
+            const region = typeof entry.region === "string" && entry.region.trim() ? entry.region.trim() : undefined
+            entries.set(norm(id), { operator: groupName(entry.operator), provider: groupName(entry.provider), region })
+        } else {
+            incomplete.add(norm(id))
+        }
+    }
+
+    // The committee seats that can go dark with q still signing. The cap is
+    // on the launch set: which of a group's validators the draw seats is
+    // unknown until the genesis hash is, so all of them may be
+    const committeeSeats = Math.min(launch.length, shardSize)
+    const groupCap = Math.max(0, committeeSeats - quorum)
+    const unmapped = launch.filter(id => !entries.has(id) && !incomplete.has(id))
+    const badEntries = launch.filter(id => incomplete.has(id))
+    if (operatorsMap === null) {
+        reasons.push("no operator/provider map given; the operator cap cannot be checked")
+    } else {
+        if (unmapped.length > 0) {
+            reasons.push(`${unmapped.length} launch validators have no operator/provider entry: ${unmapped.join(", ")}`)
+        }
+        if (badEntries.length > 0) {
+            reasons.push(
+                `${badEntries.length} launch validators have an incomplete entry (operator and provider must be ` +
+                    `non-empty strings): ${badEntries.join(", ")}`,
+            )
+        }
+    }
+    const missingRegion = launch.filter(id => entries.has(id) && entries.get(id).region === undefined)
+    if (operatorsMap !== null && missingRegion.length > 0) {
+        warnings.push(`${missingRegion.length} launch validators have no region in the operator map: ${missingRegion.join(", ")}`)
+    }
+    const operatorCounts = countBy(launch, id => entries.get(id)?.operator ?? null)
+    const providerCounts = countBy(launch, id => entries.get(id)?.provider ?? null)
+    for (const [kind, counts] of [
+        ["operator", operatorCounts],
+        ["provider", providerCounts],
+    ] as const) {
+        for (const [name, n] of Object.entries(counts)) {
+            if (n > groupCap) {
+                reasons.push(
+                    `${kind} ${name} runs ${n} of ${launch.length} launch validators; the cap is ${groupCap} ` +
+                        `(shardSize ${shardSize} - quorum ${quorum})`,
+                )
+            }
+            // One validator, one vote (quorumThreshold counts signatures). The
+            // cap above already implies this; it is checked on its own so a
+            // change to either rule cannot loosen the other
+            const seats = Math.min(n, committeeSeats)
+            if (committeeSeats > 0 && seats * 3 > committeeSeats) {
+                reasons.push(
+                    `${kind} ${name} can hold ${seats} of the ${committeeSeats} first-committee votes, ` +
+                        "more than a third of the voting power",
+                )
+            }
+        }
+    }
+    return { entries, reasons, missingRegion, warnings, operatorCounts, providerCounts, groupCap, committeeSeats }
 }
 
 /**
@@ -201,15 +361,8 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
     const reasons: string[] = []
     const warnings: string[] = []
 
-    const operators = new Map<string, OperatorEntry>()
-    const incomplete = new Set<string>()
-    for (const [id, entry] of Object.entries(input.operators ?? {})) {
-        if (isOperatorEntry(entry)) {
-            operators.set(norm(id), { operator: groupName(entry.operator), provider: groupName(entry.provider) })
-        } else {
-            incomplete.add(norm(id))
-        }
-    }
+    const table = validatorTable(launch, input.operators, input.shardSize)
+    const operators = table.entries
     const probeOf = new Map<string, ValidatorProbe>()
     for (const probe of input.probes) {
         probeOf.set(norm(probe.identity), probe)
@@ -228,6 +381,12 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
     const byGenesis = countBy(online, id => normHash(probeOf.get(id).genesisHash))
     let genesisHash: string | null = input.expectedGenesisHash ? normHash(input.expectedGenesisHash) : null
     if (genesisHash === null) {
+        // A majority is not agreement: validators that all booted the wrong
+        // file agree with each other
+        reasons.push(
+            "no --genesis-hash given: pass the agreed block 0 hash (the genesis block hash scripts/genesis-hash.ts " +
+                "prints); the hash most validators report is shown below for diagnosis only",
+        )
         // Without an expected hash, the one most validators report; a tie
         // has no answer, so nothing is counted
         const ranked = Object.entries(byGenesis).sort((a, b) => b[1] - a[1])
@@ -274,7 +433,10 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         if (input.requiredForks?.some(name => !(p.activeForks ?? []).includes(name))) {
             return "forks-inactive"
         }
-        if (input.expectedCommit && p.commit !== input.expectedCommit) return "other-commit"
+        // A dirty build is not the release commit, whatever SHA it names
+        if (input.expectedCommit && (!sameCommit(p.commit, input.expectedCommit) || p.dirty === true)) {
+            return "other-commit"
+        }
         return "counted"
     }
 
@@ -321,7 +483,26 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         } else if (v.status === "forks-inactive") {
             const missing = (input.requiredForks ?? []).filter(f => !(p?.activeForks ?? []).includes(f))
             reasons.push(`${v.identity} does not report these forks as active: ${missing.join(", ")}`)
+        } else if (v.status === "other-commit") {
+            reasons.push(
+                p?.dirty === true && sameCommit(p.commit, input.expectedCommit)
+                    ? `${v.identity} runs a dirty build of ${p.commit} (uncommitted changes), ` +
+                          `not the launch commit ${input.expectedCommit}; a bare-metal node points ` +
+                          `DEMOS_GENESIS_FILE and DEMOS_SNAPSHOT_DIR at the published files instead of copying them into data/`
+                    : `${v.identity} runs commit ${p?.commit ?? "(not reported)"}, ` +
+                          `the launch commit is ${input.expectedCommit}`,
+            )
         }
+    }
+    if (
+        genesisHash !== null &&
+        input.expectedGenesisDataHash &&
+        genesisHash === normHash(input.expectedGenesisDataHash)
+    ) {
+        reasons.push(
+            `--genesis-hash ${genesisHash} is the genesis data hash; validators serve the block 0 hash, ` +
+                "which scripts/genesis-hash.ts prints as the genesis block hash",
+        )
     }
     const countedInCommittee = counted.filter(id => inCommittee.has(id))
 
@@ -349,47 +530,19 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
         }
     }
 
-    const commits = new Set(
-        validators.filter(v => v.status === "counted" && v.commit).map(v => v.commit),
-    )
-    if (!input.expectedCommit && commits.size > 1) {
-        warnings.push(`counted validators run ${commits.size} different commits: ${[...commits].join(", ")}`)
+    if (!input.expectedCommit) {
+        reasons.push("no --commit given: pass the agreed release commit (a full or short SHA)")
+        const commits = new Set(
+            validators.filter(v => v.status === "counted").map(v => commitSha(v.commit) ?? String(v.commit)),
+        )
+        if (commits.size > 1) {
+            reasons.push(`counted validators run ${commits.size} different commits: ${[...commits].join(", ")}`)
+        }
     }
 
-    // The committee seats that can go dark with q still signing. The cap is
-    // on the launch set: which of a group's validators the draw seats is
-    // unknown until the genesis hash is, so all of them may be
-    const groupCap = Math.max(0, Math.min(launch.length, input.shardSize) - quorum)
-    const unmapped = launch.filter(id => !operators.has(id) && !incomplete.has(id))
-    const badEntries = launch.filter(id => incomplete.has(id))
-    if (input.operators === null) {
-        reasons.push("no operator/provider map given; the operator cap cannot be checked")
-    } else {
-        if (unmapped.length > 0) {
-            reasons.push(`${unmapped.length} launch validators have no operator/provider entry: ${unmapped.join(", ")}`)
-        }
-        if (badEntries.length > 0) {
-            reasons.push(
-                `${badEntries.length} launch validators have an incomplete entry (operator and provider must be ` +
-                    `non-empty strings): ${badEntries.join(", ")}`,
-            )
-        }
-    }
-    const operatorCounts = countBy(launch, id => operators.get(id)?.operator ?? null)
-    const providerCounts = countBy(launch, id => operators.get(id)?.provider ?? null)
-    for (const [kind, counts] of [
-        ["operator", operatorCounts],
-        ["provider", providerCounts],
-    ] as const) {
-        for (const [name, n] of Object.entries(counts)) {
-            if (n > groupCap) {
-                reasons.push(
-                    `${kind} ${name} runs ${n} of ${launch.length} launch validators; the cap is ${groupCap} ` +
-                        `(shardSize ${input.shardSize} - quorum ${quorum})`,
-                )
-            }
-        }
-    }
+    reasons.push(...table.reasons)
+    warnings.push(...table.warnings)
+    const { operatorCounts, providerCounts, groupCap } = table
 
     // A pinned identity takes a committee seat on any network whose pool
     // holds it, ahead of the draw
@@ -415,41 +568,109 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
     }
 }
 
-/** NO-GO reasons for a genesis that does not switch the mainnet forks on at block 0. */
+/**
+ * NO-GO reasons for a genesis whose fork block is not mainnet's: a mainnet
+ * fork not at block 0, a fork this build knows left undeclared, or a
+ * scheduled gasFeeSeparation without its own treasury.
+ */
 export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[] {
     if (!genesis) {
         return ["no genesis file: its fork schedule and block 0's validator set cannot be checked"]
     }
-    const forks = (genesis.forks ?? {}) as Record<string, { activationHeight?: unknown } | undefined>
-    return MAINNET_FORKS.filter(name => forks[name]?.activationHeight !== 0).map(
+    const forks = (genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>
+    const reasons = MAINNET_FORKS.filter(name => forks[name]?.activationHeight !== 0).map(
         name =>
             `fork ${name} is not scheduled at activationHeight 0 in the genesis ` +
             `(found ${JSON.stringify(forks[name]?.activationHeight ?? null)})`,
     )
+    const undeclared = KNOWN_FORKS.filter(
+        name => !Object.hasOwn(forks, name) || forks[name] === null || typeof forks[name] !== "object" ||
+            !Object.hasOwn(forks[name], "activationHeight"),
+    )
+    if (undeclared.length > 0) {
+        reasons.push(
+            `the genesis does not declare ${undeclared.join(", ")}: give each fork this build knows a height ` +
+                "or null, or it takes the code default (see docs/mainnet/genesis.md)",
+        )
+    }
+    const gas = forks.gasFeeSeparation
+    if (gas && gas.activationHeight !== null && gas.activationHeight !== undefined && typeof gas.treasuryAddress !== "string") {
+        reasons.push("fork gasFeeSeparation is scheduled without a treasuryAddress; the code default would receive the fees")
+    }
+    return reasons
+}
+
+/**
+ * NO-GO reasons for a genesis that is not a mainnet launch genesis: its
+ * fork block (mainnetForkReasons), a chain id another Demos network uses,
+ * or a committee size other than the one the launch was drilled with.
+ */
+export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: unknown } | null): string[] {
+    const reasons = mainnetForkReasons(genesis)
+    if (!genesis) return reasons
+    const properties = (genesis.properties ?? {}) as Record<string, unknown>
+    const chainId = properties.id
+    if (typeof chainId !== "number" || !Number.isInteger(chainId)) {
+        reasons.push(`genesis properties.id must be the agreed mainnet chain id, an integer (found ${JSON.stringify(chainId ?? null)})`)
+    } else if (NON_MAINNET_CHAIN_IDS.includes(chainId)) {
+        reasons.push(
+            `genesis properties.id ${chainId} is the chain id of the testnet or a devnet; ` +
+                "transactions signed there would be valid on this chain",
+        )
+    }
+    if (properties.shardSize !== LAUNCH_SHARD_SIZE) {
+        reasons.push(
+            `genesis properties.shardSize is ${JSON.stringify(properties.shardSize ?? null)}, ` +
+                `the launch committee size is ${LAUNCH_SHARD_SIZE}`,
+        )
+    }
+    // Fields like name and currency pass every other check as any string, and
+    // block 0 would publish the template text for good
+    const markers = templateMarkers(genesis)
+    if (markers.length > 0) {
+        reasons.push(`genesis still holds template FILL values at ${markers.join(", ")}`)
+    }
+    return reasons
+}
+
+function templateMarkers(value: unknown, at = "genesis"): string[] {
+    if (typeof value === "string") return value.startsWith("FILL") ? [at] : []
+    if (Array.isArray(value)) return value.flatMap((v, i) => templateMarkers(v, `${at}[${i}]`))
+    if (value && typeof value === "object") {
+        return Object.entries(value).flatMap(([k, v]) => templateMarkers(v, `${at}.${k}`))
+    }
+    return []
 }
 
 /**
  * What every launch validator must report for the launch genesis file: its
  * genesis data hash, its fork schedule digest as the node computes it after
- * loading the file, and the mainnet forks as activated.
+ * loading the file, and the mainnet forks as activated. Also block 0 as a
+ * node builds it from the file (scripts/genesis-hash.ts), and what a node
+ * would refuse in the file at its first boot.
  */
-export async function launchGenesisExpectations(genesis: unknown): Promise<{
+export async function launchGenesisExpectations(
+    genesis: unknown,
+    snapshotManifestSha256: string | null = null,
+    snapshotForkState: ForkStateEntry[] | null = null,
+): Promise<{
     expectedGenesisDataHash: string
     expectedScheduleDigest: string
     requiredForks: readonly string[]
+    genesisFileBlockHash: string | null
+    genesisFileProblems: string[]
 }> {
-    const { hashGenesisData } = await import("src/libs/blockchain/genesis/normalizeGenesisForHash")
     const { loadForkConfigFromGenesis } = await import("src/forks")
-    const { getSharedState } = await import("src/utilities/sharedState")
-    const { forkScheduleDigest } = await import("src/libs/peer/routines/forkScheduleAgreement")
+    const { genesisValues } = await import("./genesis-hash")
+    // An invalid schedule is bad input, not a verdict
     loadForkConfigFromGenesis(genesis)
+    const values = genesisValues(genesis, snapshotManifestSha256, snapshotForkState)
     return {
-        expectedGenesisDataHash: hashGenesisData(genesis),
-        expectedScheduleDigest: forkScheduleDigest(
-            getSharedState.forkConfig as unknown as Parameters<typeof forkScheduleDigest>[0],
-            getSharedState.chainId,
-        ),
+        expectedGenesisDataHash: values.genesisDataHash,
+        expectedScheduleDigest: values.forkScheduleDigest,
         requiredForks: MAINNET_FORKS,
+        genesisFileBlockHash: values.genesisBlockHash,
+        genesisFileProblems: values.problems,
     }
 }
 
@@ -460,6 +681,10 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
     blockZero: BlockZeroValidators | null
     /** The launch set when there is no genesis (peerlist or --rpc). */
     launchValidators?: string[]
+    /** Block 0's hash as a node builds it from the genesis file; null when it cannot be known. */
+    genesisFileBlockHash?: string | null
+    /** What a node would refuse in the genesis file at its first boot. */
+    genesisFileProblems?: string[]
 }
 
 /**
@@ -468,7 +693,7 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
  * the genesis hash the probes agree on (or the expected one).
  */
 export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
-    const { genesis, blockZero, launchValidators, ...rest } = input
+    const { genesis, blockZero, launchValidators, genesisFileBlockHash, genesisFileProblems, ...rest } = input
     const rows = genesis && blockZero ? blockZero.rows : null
     const base: GoNoGoInput = {
         ...rest,
@@ -477,10 +702,94 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
     const agreedHash = decideGoNoGo(base).genesisHash
     const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize) : null
     const decision = decideGoNoGo({ ...base, committee })
-    decision.reasons.push(...(blockZero?.reasons ?? []), ...mainnetForkReasons(genesis))
+    decision.reasons.push(...(blockZero?.reasons ?? []), ...mainnetGenesisReasons(genesis))
+    for (const problem of genesisFileProblems ?? []) {
+        decision.reasons.push(`a node would refuse this genesis at its first boot: ${problem}`)
+    }
+    const agreed = input.expectedGenesisHash ? normHash(input.expectedGenesisHash) : null
+    const isDataHash = agreed !== null && input.expectedGenesisDataHash && agreed === normHash(input.expectedGenesisDataHash)
+    // The agreed hash and the file must describe one block 0, or the probes
+    // are checked against a chain this file does not start
+    if (genesis && genesisFileBlockHash === null) {
+        decision.reasons.push("block 0 of this genesis file cannot be known before launch, so no hash can be agreed on")
+    } else if (genesisFileBlockHash && agreed !== null && !isDataHash && agreed !== normHash(genesisFileBlockHash)) {
+        decision.reasons.push(
+            `--genesis-hash ${agreed} is not block 0 of the genesis file given, which builds ${normHash(genesisFileBlockHash)}`,
+        )
+    }
     decision.warnings.push(...(blockZero?.warnings ?? []))
     decision.go = decision.reasons.length === 0
     return decision
+}
+
+export interface PlanCheck {
+    name: string
+    ok: boolean
+    details: string[]
+}
+
+export interface LaunchPlanInput {
+    genesis: { forks?: unknown; properties?: unknown } | null
+    blockZero: BlockZeroValidators | null
+    shardSize: number
+    operators: Record<string, unknown> | null
+    /** What a node would refuse in the genesis file at its first boot. */
+    genesisFileProblems?: string[]
+}
+
+/**
+ * The launch checks that need no network, one line each, for the genesis
+ * file and the launch validator table before any validator is up:
+ * bun scripts/launch-go-no-go.ts --plan.
+ */
+export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
+    const check = (name: string, details: string[]): PlanCheck => ({ name, ok: details.length === 0, details })
+    const launch = input.blockZero ? launchIdentities(input.blockZero.rows) : []
+    const table = validatorTable(launch, input.operators, input.shardSize)
+    const quorum = quorumThreshold(input.shardSize)
+    const genesisReasons = mainnetGenesisReasons(input.genesis)
+    const forkReasons = mainnetForkReasons(input.genesis)
+    const capReasons = table.reasons.filter(r => / runs \d+ of \d+ launch validators; the cap is /.test(r))
+    const powerReasons = table.reasons.filter(r => r.includes("of the voting power"))
+    const entryReasons = table.reasons.filter(r => !capReasons.includes(r) && !powerReasons.includes(r))
+    if (table.missingRegion.length > 0) {
+        entryReasons.push(`${table.missingRegion.length} launch validators have no region: ${table.missingRegion.join(", ")}`)
+    }
+    const pinned = new Set(PINNED_SHARD_IDENTITIES.map(norm))
+    return [
+        check("genesis forks", forkReasons),
+        check("chain id", genesisReasons.filter(r => r.startsWith("genesis properties.id"))),
+        check("shard size", genesisReasons.filter(r => r.startsWith("genesis properties.shardSize"))),
+        // Whatever mainnetGenesisReasons adds beyond the checks above, so a
+        // new genesis rule cannot pass --plan unseen
+        check(
+            "genesis values",
+            genesisReasons.filter(
+                r =>
+                    !forkReasons.includes(r) &&
+                    !r.startsWith("genesis properties.id") &&
+                    !r.startsWith("genesis properties.shardSize"),
+            ),
+        ),
+        check(
+            "genesis file",
+            (input.genesisFileProblems ?? []).map(p => `a node would refuse this genesis at its first boot: ${p}`),
+        ),
+        check("block 0 validator set", input.blockZero ? input.blockZero.reasons : ["no block 0 validator set"]),
+        check(
+            "launch validators",
+            launch.length < quorum
+                ? [`${launch.length} launch validators, fewer than the quorum ${quorum} of shardSize ${input.shardSize}`]
+                : [],
+        ),
+        check("validator table", entryReasons),
+        check("operator and provider cap", capReasons),
+        check("voting power per operator and provider", powerReasons),
+        check(
+            "pinned identities",
+            launch.filter(v => pinned.has(v)).map(v => `launch validator is a pinned committee identity: ${v}`),
+        ),
+    ]
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────
@@ -495,29 +804,44 @@ interface CliArgs {
     genesisHash: string | null
     commit: string | null
     json: boolean
+    plan: boolean
     timeoutMs: number
 }
 
 function usage(): string {
     return [
         "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE [options]",
+        "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE",
+        "  --plan               check the genesis file and the launch validator table only, with no",
+        "                       network: one PASS/FAIL line per check, exit 0 when all pass",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
+        "                       (default with neither --genesis nor --snapshot: DEMOS_GENESIS_FILE and DEMOS_SNAPSHOT_DIR)",
         "  --snapshot DIR       the snapshot directory the validators boot with; its validators.jsonl,",
         "                       when present, is block 0's validator set instead of the genesis list;",
         "                       without it the result is NO-GO",
         "  --peerlist FILE      identity -> URL map (demos_peerlist.json) overriding genesis URLs",
         "  --rpc URL[,URL...]   probe these URLs; each counts for the identity it proves by signing",
         "                       a fresh nonce; without --genesis they define the launch set",
-        "  --shard-size N       shardSize when no genesis file is given",
-        "  --operators FILE     identity -> { operator, provider }",
-        "  --genesis-hash HASH  the agreed genesis block hash",
-        "  --commit SHA         the agreed release commit (as /info reports it)",
+        "  --shard-size N       shardSize when no genesis file is given; with --genesis it must",
+        "                       equal the genesis properties.shardSize or the run is refused",
+        "  --operators FILE     identity -> { operator, provider, region }",
+        "  --genesis-hash HASH  required for GO: the agreed block 0 hash, the genesis block hash",
+        "                       scripts/genesis-hash.ts prints (not the genesis data hash)",
+        "  --commit SHA         required for GO: the agreed release commit, a full or short SHA;",
+        "                       a branch prefix in what a node reports is ignored",
         "  --timeout MS         per-request timeout (default 5000)",
         "  --json               machine-readable output",
     ].join("\n")
 }
 
-function parseArgs(argv: string[]): CliArgs {
+/**
+ * Without --genesis and --snapshot the files come from DEMOS_GENESIS_FILE and
+ * DEMOS_SNAPSHOT_DIR, the ones a bare-metal validator boots with, so the
+ * check reads the same files that node does. Both come from the same place,
+ * so a file named on the command line is never paired with one from the
+ * environment.
+ */
+export function parseArgs(argv: string[], env: Record<string, string | undefined> = process.env): CliArgs {
     const args: CliArgs = {
         genesis: null,
         snapshot: null,
@@ -528,6 +852,7 @@ function parseArgs(argv: string[]): CliArgs {
         genesisHash: null,
         commit: null,
         json: false,
+        plan: false,
         timeoutMs: 5000,
     }
     for (let i = 0; i < argv.length; i++) {
@@ -548,6 +873,7 @@ function parseArgs(argv: string[]): CliArgs {
             case "--commit": args.commit = value(); break
             case "--timeout": args.timeoutMs = Number(value()); break
             case "--json": args.json = true; break
+            case "--plan": args.plan = true; break
             case "-h":
             case "--help":
                 console.log(usage())
@@ -555,6 +881,11 @@ function parseArgs(argv: string[]): CliArgs {
             default:
                 throw new Error(`unknown argument ${flag}`)
         }
+    }
+    const fromEnv = (key: string) => (env[key]?.trim() ? env[key]!.trim() : null)
+    if (args.genesis === null && args.snapshot === null) {
+        args.genesis = fromEnv("DEMOS_GENESIS_FILE")
+        if (args.genesis !== null) args.snapshot = fromEnv("DEMOS_SNAPSHOT_DIR")
     }
     return args
 }
@@ -685,6 +1016,7 @@ export async function probeValidator(
             info?.forks && typeof info.forks === "object"
                 ? Object.keys(info.forks).filter(name => info.forks[name]?.activated === true)
                 : null
+        probe.dirty = typeof info?.nodeVersion?.dirty === "boolean" ? info.nodeVersion.dirty : null
     } catch (e) {
         probe.error = `${probe.error ? probe.error + "; " : ""}network info: ${(e as Error).message}`
     }
@@ -714,6 +1046,42 @@ function readJson(file: string): any {
     return JSON.parse(fs.readFileSync(file, "utf8"))
 }
 
+async function runPlan(
+    args: CliArgs,
+    genesis: any,
+    blockZero: BlockZeroValidators | null,
+    shardSize: number,
+    operators: Record<string, unknown> | null,
+    manifestSha256: string | null,
+    snapshotForkState: ForkStateEntry[] | null,
+): Promise<number> {
+    if (!args.genesis || !args.snapshot || !args.operators) {
+        console.error(`--plan needs --genesis, --snapshot and --operators\n${usage()}`)
+        return 2
+    }
+    let genesisFileProblems: string[]
+    try {
+        genesisFileProblems = (await launchGenesisExpectations(genesis, manifestSha256, snapshotForkState)).genesisFileProblems
+    } catch (e) {
+        // A schedule the node refuses to load is a failed check here, not bad input
+        genesisFileProblems = [(e as Error).message]
+    }
+    const checks = launchPlanChecks({ genesis, blockZero, shardSize, operators, genesisFileProblems })
+    const table = validatorTable(blockZero ? launchIdentities(blockZero.rows) : [], operators, shardSize)
+    if (args.json) {
+        console.log(JSON.stringify({ pass: checks.every(c => c.ok), checks, operatorCounts: table.operatorCounts, providerCounts: table.providerCounts, groupCap: table.groupCap }, null, 2))
+    } else {
+        for (const c of checks) {
+            console.log(`${c.ok ? "PASS" : "FAIL"} ${c.name}${c.ok ? "" : `: ${c.details.join("; ")}`}`)
+        }
+        console.log(
+            `operators: ${JSON.stringify(table.operatorCounts)} providers: ${JSON.stringify(table.providerCounts)} ` +
+                `cap ${table.groupCap} of ${table.committeeSeats} first-committee seats`,
+        )
+    }
+    return checks.every(c => c.ok) ? 0 : 1
+}
+
 async function main(): Promise<number> {
     let args: CliArgs
     try {
@@ -731,15 +1099,51 @@ async function main(): Promise<number> {
         return 2
     }
 
+    if (args.genesisHash !== null && !/^[0-9a-f]{64}$/.test(normHash(args.genesisHash))) {
+        console.error(`--genesis-hash must be 64 hex characters, got ${JSON.stringify(args.genesisHash)}`)
+        return 2
+    }
+    if (args.commit !== null && commitSha(args.commit) === null) {
+        console.error(`--commit must be a 7 to 40 character hex SHA, got ${JSON.stringify(args.commit)}`)
+        return 2
+    }
+
     let shardSize = args.shardSize
     // identity -> URL to probe; "" identity means "learn it from /info"
     const targets = new Map<string, string>()
     let launch: string[] = []
     let genesis: any = null
     let blockZero: BlockZeroValidators | null = null
+    let manifestSha256: string | null = null
+    let snapshotForkState: ForkStateEntry[] | null = null
     if (args.genesis) {
-        genesis = readJson(args.genesis)
-        shardSize ??= Number(genesis?.properties?.shardSize)
+        const { readGenesisFile, snapshotManifestSha256, snapshotManifestForkState } = await import("./genesis-hash")
+        genesis = readGenesisFile(args.genesis)
+        // The node takes shardSize from block 0 and nowhere else; a flag
+        // that moved q here would judge a quorum the chain does not use
+        const { readGenesisShardSize } = await import("src/libs/consensus/genesisShardSize")
+        try {
+            shardSize = readGenesisShardSize(genesis)
+        } catch (e) {
+            console.error(`genesis: ${(e as Error).message}`)
+            return 2
+        }
+        if (args.shardSize !== null && args.shardSize !== shardSize) {
+            console.error(
+                `--shard-size ${args.shardSize} differs from the genesis properties.shardSize ${shardSize}, ` +
+                    "which is the one the node uses; drop the flag",
+            )
+            return 2
+        }
+        if (args.snapshot) {
+            manifestSha256 = snapshotManifestSha256(args.snapshot)
+            try {
+                snapshotForkState = snapshotManifestForkState(args.snapshot)
+            } catch (e) {
+                console.error(`snapshot: ${(e as Error).message}`)
+                return 2
+            }
+        }
         try {
             blockZero = await readBlockZeroValidators(genesis, args.snapshot)
         } catch (e) {
@@ -769,10 +1173,12 @@ async function main(): Promise<number> {
     }
     const operators = operatorsRaw as Record<string, unknown> | null
 
+    if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState)
+
     let expectations = {}
     if (genesis) {
         try {
-            expectations = await launchGenesisExpectations(genesis)
+            expectations = await launchGenesisExpectations(genesis, manifestSha256, snapshotForkState)
         } catch (e) {
             console.error(`genesis: ${(e as Error).message}`)
             return 2
@@ -825,7 +1231,7 @@ async function main(): Promise<number> {
     } else {
         const short = (s: string | null, n = 12) => (s ? (s.length > n ? s.slice(0, n) + "…" : s) : "-")
         console.log(`launch validators: ${decision.launchCount}, shardSize ${shardSize}, quorum ${decision.quorum}`)
-        console.log(`genesis hash: ${decision.genesisHash ?? "-"}`)
+        console.log(`genesis block hash: ${decision.genesisHash ?? "-"}${args.genesisHash ? "" : " (not agreed: no --genesis-hash)"}`)
         console.log(`first committee: ${decision.committee ? decision.committee.length : "unknown"}`)
         for (const v of decision.validators) {
             const p = merged.get(v.identity)
@@ -842,7 +1248,8 @@ async function main(): Promise<number> {
         if (decision.go) {
             console.log(
                 `GO: ${decision.countedInCommittee.length} of the ${decision.committee.length} first-committee members ` +
-                    `online with proven identities on one genesis (need ${decision.quorum})`,
+                    `online with proven identities on genesis block ${decision.genesisHash} at commit ${args.commit} ` +
+                    `(need ${decision.quorum})`,
             )
         } else {
             console.log("NO-GO:")

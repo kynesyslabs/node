@@ -42,6 +42,8 @@ import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import type { SavedUdIdentity } from "src/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
 
+const GENESIS_ADDRESS_RE = /^0x[0-9a-f]{64}$/
+
 /**
  * Parse a `genesisData.balances` entry into `[pubkey, bigint]`.
  *
@@ -64,6 +66,14 @@ function parseGenesisBalanceEntry(
     if (typeof pubkey !== "string" || pubkey.trim().length === 0) {
         throw new Error(
             `[GENESIS][BALANCES] entry ${idx} pubkey is not a non-empty string`,
+        )
+    }
+    // Accounts are keyed by the exact lowercase hex form; any other spelling
+    // (a placeholder, a checksum-cased copy) would credit an account nobody
+    // can sign for
+    if (!GENESIS_ADDRESS_RE.test(pubkey)) {
+        throw new Error(
+            `[GENESIS][BALANCES] entry ${idx} pubkey ${JSON.stringify(pubkey)} is not a 0x-prefixed lowercase 64-hex address`,
         )
     }
     let balance: bigint
@@ -97,6 +107,23 @@ function parseGenesisBalanceEntry(
         )
     }
     return [pubkey, balance]
+}
+
+/** What mergeGenesisBalances would refuse in `genesisData.balances`, without a database. */
+export function genesisBalancesProblems(balances: unknown): string[] {
+    if (balances === undefined || balances === null) return []
+    if (!Array.isArray(balances)) {
+        return ["[GENESIS][BALANCES] genesisData.balances is present but not an array"]
+    }
+    const problems: string[] = []
+    balances.forEach((entry, i) => {
+        try {
+            parseGenesisBalanceEntry(entry, i)
+        } catch (e) {
+            problems.push((e as Error).message)
+        }
+    })
+    return problems
 }
 
 /**

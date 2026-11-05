@@ -15,6 +15,8 @@
 #   monitoring             + prometheus + grafana        -> dashboards
 #   full                   + node-exporter               -> host metrics
 #   neo4j                  + neo4j                       -> CGC/KYC only
+#   reaper                 + reaper                      -> stop the stack
+#                            when the node exits (mounts the docker socket)
 #
 # Persistent state lives in named volumes (prefixed `demos_`):
 #   demos_pgdata, demos_node_data, demos_node_logs, demos_node_state,
@@ -114,8 +116,10 @@ services:
   # ---------------------------------------------------------------------------
   node:
     # IMAGE_NAME / IMAGE_TAG let you pull a pre-built image from a registry
-    # instead of building locally. See README → "Publishing the image" for
-    # the push/pull workflow. Defaults to a local build tagged demos-node:local.
+    # instead of building locally. Validators set IMAGE_TAG to tag@sha256:digest
+    # from the release's checksums.txt and start with `up --no-build`, so a
+    # failed pull can never fall back to a local build (INSTALL.md, "Run a
+    # released image"). Defaults to a local build tagged demos-node:local.
     image: ${IMAGE_NAME:-demos-node}:${IMAGE_TAG:-local}
     build:
       context: .
@@ -135,8 +139,8 @@ services:
         BUILT_AT: ${BUILT_AT:-}
     container_name: demos-node${INSTANCE_SUFFIX:-}
     # Deliberately not restarted: a stall-detector or watchdog exit must keep
-    # the node down with its logs intact for investigation. The reaper service
-    # below stops the rest of the stack when this container exits.
+    # the node down with its logs intact for investigation. With the reaper
+    # profile on, the reaper service below also stops the rest of the stack.
     restart: "no"
     depends_on:
       postgres:
@@ -181,12 +185,24 @@ services:
       # snapshot read-only and points DEMOS_SNAPSHOT_DIR at the snapshot; see
       # docs/design/genesis-enforcement.md.
       EXPECTED_GENESIS_HASH: ${EXPECTED_GENESIS_HASH:-}
+      EXPECTED_GENESIS_BLOCK_HASH: ${EXPECTED_GENESIS_BLOCK_HASH:-}
       DEMOS_ALLOW_UNPINNED_GENESIS: ${DEMOS_ALLOW_UNPINNED_GENESIS:-}
       DEMOS_SNAPSHOT_DIR: ${DEMOS_SNAPSHOT_DIR:-}
+      # A path inside the container; empty means data/genesis.json.
+      DEMOS_GENESIS_FILE: ${DEMOS_GENESIS_FILE:-}
       DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST: ${DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST:-}
+      # Mainnet validators set this to true: with no active validators in the
+      # database the node refuses to run consensus instead of falling back to
+      # every online peer. Only variables listed here reach the container.
+      DEMOS_REQUIRE_VALIDATORS: ${DEMOS_REQUIRE_VALIDATORS:-}
       # Identity & peers — entrypoint symlinks these into /app/state on boot
       IDENTITY_FILE: ${IDENTITY_FILE:-.demos_identity}
       PEER_LIST_FILE: ${PEER_LIST_FILE:-demos_peerlist.json}
+      # One-off recovery switches from docs/runbooks/validator-key.md; unset
+      # them once the node runs.
+      DEMOS_GENERATE_IDENTITY: ${DEMOS_GENERATE_IDENTITY:-}
+      DEMOS_IDENTITY_TAKEOVER: ${DEMOS_IDENTITY_TAKEOVER:-}
+      DEMOS_SIGNING_RECORD_REBIND: ${DEMOS_SIGNING_RECORD_REBIND:-}
       # Monitoring
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       # METRICS_PORT is pinned to 9090 inside the container so the
@@ -194,6 +210,13 @@ services:
       # METRICS_HOST_PORT in the ports stanza to remap on the host.
       METRICS_PORT: 9090
       METRICS_HOST: ${METRICS_HOST:-0.0.0.0}
+      BLOCK_WATCHDOG_ENABLED: ${BLOCK_WATCHDOG_ENABLED:-}
+      BLOCK_WATCHDOG_TIMEOUT_SECONDS: ${BLOCK_WATCHDOG_TIMEOUT_SECONDS:-}
+      DEBUG_ASSERTIONS_ENABLED: ${DEBUG_ASSERTIONS_ENABLED:-}
+      # The node warns at start when it runs behind this domain with a
+      # wildcard CORS policy
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      PROXY_DOMAIN: ${PROXY_DOMAIN:-}
       # TLSNotary — service name from this compose. The port matches the
       # notary's NS_PORT (and its 1:1 host mapping), so the value the node
       # advertises on the tlsn endpoints is dialable from outside.
@@ -208,8 +231,22 @@ services:
       # so the SAME range must be host-published in `ports:` below — kept
       # narrow to avoid a 2000-port mapping. Both stanzas read these vars so
       # the allocation range and the published range can never drift.
+      # The proxy port the node advertises must be the one published below;
+      # without this line a changed value moved only the host mapping.
+      TLSNOTARY_PROXY_PORT: ${TLSNOTARY_PROXY_PORT:-55688}
       TLSNOTARY_PROXY_PORT_MIN: ${TLSNOTARY_PROXY_PORT_MIN:-55000}
       TLSNOTARY_PROXY_PORT_MAX: ${TLSNOTARY_PROXY_PORT_MAX:-55063}
+      # Chain-wide values: every validator must run the same ones, so leave
+      # them unset (the node's built-in values) unless the whole network
+      # changes them together. They were not passed before, so a value in an
+      # existing .env takes effect from this release on; node-doctor
+      # --production flags any that differ from the built-in value.
+      CONSENSUS_TIME: ${CONSENSUS_TIME:-}
+      RPC_FEE: ${RPC_FEE:-}
+      NETWORK_FEE: ${NETWORK_FEE:-}
+      BURN_FEE: ${BURN_FEE:-}
+      RPC_FEE_PERCENT: ${RPC_FEE_PERCENT:-}
+      MIN_VALIDATOR_STAKE: ${MIN_VALIDATOR_STAKE:-}
       # Consensus: sit out rounds while a peer's fork schedule differs
       FORK_SCHEDULE_MISMATCH_POLICY: ${FORK_SCHEDULE_MISMATCH_POLICY:-abstain}
       # Logging & misc
@@ -222,6 +259,11 @@ services:
       L2PS_HISTORY_REQUIRE_V2: ${L2PS_HISTORY_REQUIRE_V2:-false}
       L2PS_MESSAGING_ENABLED: ${L2PS_MESSAGING_ENABLED:-false}
       L2PS_MESSAGING_PORT: ${L2PS_MESSAGING_PORT:-3006}
+      L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET: ${L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET:-}
+      L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE: ${L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE:-}
+      L2PS_MESSAGING_SEND_RATE: ${L2PS_MESSAGING_SEND_RATE:-}
+      L2PS_MESSAGING_SEND_BURST: ${L2PS_MESSAGING_SEND_BURST:-}
+      L2PS_MESSAGING_BACKLOG_SHARE: ${L2PS_MESSAGING_BACKLOG_SHARE:-}
       # Gossip sidecar (libp2p). The node advertises EXPOSED_URL's host with
       # this port, so it must be published 1:1 below.
       GOSSIP_ENABLED: ${GOSSIP_ENABLED:-true}
@@ -334,13 +376,14 @@ services:
   # node runs with restart "no" so an intentional exit stays down; the support
   # services have no purpose without it. Sibling containers are resolved via
   # compose project labels so this works unchanged under the devnet overlay.
-  # Mounting docker.sock is root-equivalent on the host — acceptable for our
-  # own deployments, do not ship this service in third-party operator setups.
+  # The node does not need it, and the docker socket it mounts gives this
+  # container root on the host, so it only runs with the reaper profile.
   # ---------------------------------------------------------------------------
   reaper:
     image: docker:27-cli
     container_name: demos-reaper${INSTANCE_SUFFIX:-}
     restart: on-failure
+    profiles: [reaper]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:

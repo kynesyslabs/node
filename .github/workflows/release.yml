@@ -4,7 +4,9 @@ name: Release
 # only when both builds produce the same manifest digest. The tag must carry
 # a signature from a key listed in .github/allowed_signers as it stands on
 # the protected release branch, and the tagged commit must be reachable from
-# that branch. The signer list is never read from the tag itself, so pushing
+# that branch. A final release (any tag not of the form vX.Y.Z-rc.N,
+# -alpha.N or -beta.N, or the FINAL_RELEASE repository variable) also needs REQUIRED_RELEASE_SIGNERS holders in that
+# list. The signer list is never read from the tag itself, so pushing
 # a tag cannot grant signing rights. Every job checks out the exact commit
 # the signature was verified on, so a tag moved while the workflow runs
 # cannot change what gets built or published.
@@ -21,6 +23,11 @@ env:
   # Branch protection on this branch is what the release trust rests on:
   # it supplies the signer list and bounds which commits may be released.
   RELEASE_BRANCH: stabilisation
+  # A final release must not hinge on one person's key: losing it stops
+  # releases, and one stolen key ships anything. Release candidates are exempt
+  # so they keep moving while the other holders are onboarded.
+  REQUIRED_RELEASE_SIGNERS: 3
+  FINAL_RELEASE: ${{ vars.FINAL_RELEASE }}
 
 jobs:
   verify-tag:
@@ -48,8 +55,23 @@ jobs:
           signers="$RUNNER_TEMP/allowed_signers"
           git show "origin/$RELEASE_BRANCH:.github/allowed_signers" > "$signers" || {
             echo "::error::.github/allowed_signers is missing on $RELEASE_BRANCH"; exit 1; }
+          # only the known pre-release form is exempt: any other tag name
+          # (v1.0.0-final, v1.0.0+build) may be what validators run
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(rc|alpha|beta)\.[0-9]+$ ]] || [ "$FINAL_RELEASE" = true ]; then
+            # one key listed twice, or two keys under one name, is still one holder
+            keys=$(awk '!/^[[:space:]]*(#|$)/ { for (i = 2; i < NF; i++) if ($i ~ /^(ssh-|ecdsa-|sk-)/) { print $(i + 1); break } }' "$signers" | sort -u | wc -l)
+            principals=$(awk '!/^[[:space:]]*(#|$)/ { n = split($1, p, ","); for (i = 1; i <= n; i++) print p[i] }' "$signers" | sort -u | wc -l)
+            holders=$(( keys < principals ? keys : principals ))
+            echo "final release: $keys distinct keys, $principals distinct principals in allowed_signers on $RELEASE_BRANCH"
+            [ "$holders" -ge "$REQUIRED_RELEASE_SIGNERS" ] || {
+              echo "::error::a final release needs $REQUIRED_RELEASE_SIGNERS release signers in .github/allowed_signers on $RELEASE_BRANCH, found $holders; see docs/runbooks/release-signing-key.md"; exit 1; }
+          fi
           git config gpg.ssh.allowedSignersFile "$signers"
           git verify-tag "$GITHUB_REF_NAME"
+          # the node reports package.json's version, so a release must carry its own
+          version=$(git show "$sha:package.json" | jq -r .version)
+          [ "v$version" = "$GITHUB_REF_NAME" ] || {
+            echo "::error::package.json version is $version at $sha; tag v$version, or set the version to ${GITHUB_REF_NAME#v} and merge that first"; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   build:

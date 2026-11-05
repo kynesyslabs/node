@@ -27,6 +27,12 @@ peers already advertise through `getGenesisDataHash` and the value
 `EXPECTED_GENESIS_HASH` holds. It covers every field of the genesis data except
 the validators' `connection_url`, including `forks` and `properties.id`.
 
+Block 0 also commits to the validators' `connection_url` and to the order of the
+keys in the file, which the data hash leaves out, so two files with the same
+data hash can build different blocks 0. The block 0 hash is published next to it
+(`scripts/genesis-hash.ts` builds block 0 without a database and prints both)
+and pinned with the optional `EXPECTED_GENESIS_BLOCK_HASH`.
+
 The snapshot is bound through a new genesis field:
 
 ```json
@@ -43,6 +49,10 @@ sits in the genesis data, the genesis data hash covers it, and so does the block
 A node is in pinned mode when `EXPECTED_GENESIS_HASH` is set. The value is
 trimmed, a leading `0x` is removed, and it is lowercased; anything that is then
 not 64 hex characters stops the boot.
+
+A node with no pin that did not opt out logs a warning at every boot, whatever
+its `NODE_ENV`: a bare-metal `./run` install runs as development and nothing
+else would tell its operator.
 
 With `NODE_ENV=production`, a node without a pin refuses to start unless
 `DEMOS_ALLOW_UNPINNED_GENESIS=true` is set. The release image sets
@@ -62,13 +72,16 @@ All checks run before anything is written to the database.
 4. If the file declares `snapshot.manifestSha256`, the snapshot directory exists
    and the raw manifest hashes to it. If the file declares none, no snapshot may
    be present: it would be loaded without being bound by the pin.
+5. With `EXPECTED_GENESIS_BLOCK_HASH` set, block 0 is built and its hash
+   compared before anything is written.
 
 ### Restart (block 0 exists)
 
 1. The genesis data stored in block 0 hashes to the pin.
 2. The file and the stored data agree on everything except the fork schedule
    (`hashGenesisCore`), and on `properties.id`.
-3. The fork schedule rules below.
+3. With `EXPECTED_GENESIS_BLOCK_HASH` set, the stored block 0 has that hash.
+4. The fork schedule rules below.
 
 ### Both modes
 
@@ -118,8 +131,8 @@ schedule disagrees with the network's.
 
 - The genesis file is mounted read-only over `/app/data/genesis.json`. The
   image's bundled `data/genesis.json` is the testnet one and must never be used.
-- `EXPECTED_GENESIS_HASH` comes from the environment; the compose file passes it
-  through.
+- `EXPECTED_GENESIS_HASH` and `EXPECTED_GENESIS_BLOCK_HASH` come from the
+  environment; the compose file passes both through.
 - The snapshot is mounted read-only and pointed to with `DEMOS_SNAPSHOT_DIR`.
 - The go/no-go check probes every validator for its genesis data hash and fork
   schedule digest and refuses when any of them differs from the launch genesis.
@@ -131,7 +144,7 @@ as it is (its own entrypoint and user) and checks:
 
 | Scenario | Expected |
 | --- | --- |
-| Fresh database, correct genesis and pin | Boots; the five mainnet forks report activation height 0. |
+| Fresh database, correct genesis and pin | Boots; the mainnet forks report activation height 0. |
 | Fresh database, genesis one byte off | Exit 1; block 0 not written. |
 | Fresh database, no pin, production | Exit 1. |
 | Fresh database, malformed pin | Exit 1. |

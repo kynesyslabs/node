@@ -36,9 +36,10 @@ export async function isMergePeerEligible(sender: string): Promise<boolean> {
     if (staked.size === 0) {
         // The cached set is also empty after a failed refresh, so ask the
         // database directly to tell "no validators" from "could not read".
+        // getGCRValidatorsAtBlock answers a failed read with [].
         let activeCount: number
         try {
-            activeCount = (await GCR.getGCRValidatorsAtBlock(head)).length
+            activeCount = (await GCR.getGCRValidatorsAtBlockOrThrow(head)).length
         } catch (e) {
             log.error(
                 `[mergeEligibility] cannot read the validator set at block ${head} (${describe(e)}); ` +

@@ -7,6 +7,9 @@ import getBlockHeaderByHash from "../routines/nodecalls/getBlockHeaderByHash"
 import getBlockByNumber from "../routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "../routines/nodecalls/getBlockByHash"
 import getBlocks from "../routines/nodecalls/getBlocks"
+import getFinalizedHead from "../routines/nodecalls/getFinalizedHead"
+import getBlockSegment from "../routines/nodecalls/getBlockSegment"
+import getValidatorSet from "../routines/nodecalls/getValidatorSet"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 
@@ -105,6 +108,18 @@ export const blockHandlers: Record<string, NodeCallHandler> = {
             response.extra = { message: e instanceof Error ? e.message : String(e) }
         }
         return response
+    },
+
+    getFinalizedHead: async (_data, _response) => {
+        return await getFinalizedHead()
+    },
+
+    getBlockSegment: async (data, _response) => {
+        return await getBlockSegment(data)
+    },
+
+    getValidatorSet: async (data, _response) => {
+        return await getValidatorSet(data)
     },
 
     getBlockByNumber: async (data, _response) => {

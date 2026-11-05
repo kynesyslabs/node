@@ -13,6 +13,17 @@ import { AuthBlockParser } from "../auth/parser"
 import type { AuthBlock } from "../auth/types"
 import { InvalidAuthBlockFormatError } from "../types/errors"
 
+/** A frame announced a payload larger than the framer currently accepts. */
+export class FrameTooLargeError extends Error {
+    constructor(
+        public readonly payloadLength: number,
+        public readonly limit: number,
+    ) {
+        super(`Payload size ${payloadLength} exceeds maximum ${limit}`)
+        this.name = "FrameTooLargeError"
+    }
+}
+
 /**
  * MessageFramer handles parsing of TCP byte streams into complete OmniProtocol messages
  *
@@ -40,7 +51,20 @@ export class MessageFramer {
     private static readonly MIN_MESSAGE_SIZE =
         MessageFramer.HEADER_SIZE + MessageFramer.CHECKSUM_SIZE
     /** Maximum payload size (16MB) to prevent DoS attacks */
-    private static readonly MAX_PAYLOAD_SIZE = 16 * 1024 * 1024
+    static readonly MAX_PAYLOAD_SIZE = 16 * 1024 * 1024
+    /** Bytes of the buffer shown when an auth block fails to parse */
+    private static readonly AUTH_ERROR_LOG_PREFIX_BYTES = 32
+
+    private maxPayloadSize = MessageFramer.MAX_PAYLOAD_SIZE
+
+    /**
+     * Lower (or restore) the largest payload a frame may announce, e.g.
+     * while the connection has not authenticated yet. Never above
+     * MAX_PAYLOAD_SIZE.
+     */
+    setMaxPayloadSize(bytes: number): void {
+        this.maxPayloadSize = Math.min(bytes, MessageFramer.MAX_PAYLOAD_SIZE)
+    }
 
     /**
      * Add data received from TCP socket
@@ -82,11 +106,16 @@ export class MessageFramer {
                 offset += authResult.bytesRead
             } catch (error) {
                 handleError(error, "NETWORK", { source: "OmniProtocol MessageFramer.extractMessage" })
-                log.error("================================================")
-                log.error("BUFFER: " + JSON.stringify(this.buffer, null, 2))
-                log.error("OFFSET: " + offset)
-                log.error("HEADER: " + JSON.stringify(header, null, 2))
-                log.error("Failed to parse auth block: " + error)
+                // Bounded: this runs on every chunk until the frame parses,
+                // and the buffer can hold a whole partial frame.
+                const head = this.buffer
+                    .subarray(0, MessageFramer.AUTH_ERROR_LOG_PREFIX_BYTES)
+                    .toString("hex")
+                log.error(
+                    `Failed to parse auth block: ${error} (buffered ${this.buffer.length} bytes, ` +
+                        `offset ${offset}, opcode 0x${header.opcode.toString(16)}, ` +
+                        `payloadLength ${header.payloadLength}, head ${head})`,
+                )
                 throw new InvalidAuthBlockFormatError(
                     "Failed to parse auth block",
                 )
@@ -214,12 +243,10 @@ export class MessageFramer {
         offset += lengthBytes
 
         // Validate payload size to prevent DoS attacks
-        if (payloadLength > MessageFramer.MAX_PAYLOAD_SIZE) {
+        if (payloadLength > this.maxPayloadSize) {
             // Drop buffered data so we don't retain attacker-controlled bytes in memory
             this.buffer = Buffer.alloc(0)
-            throw new Error(
-                `Payload size ${payloadLength} exceeds maximum ${MessageFramer.MAX_PAYLOAD_SIZE}`,
-            )
+            throw new FrameTooLargeError(payloadLength, this.maxPayloadSize)
         }
 
         // Sequence/Message ID (4 bytes)

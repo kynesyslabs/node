@@ -8,10 +8,12 @@ import type {
     NonceEnforcementConfig,
     AtomicWorkConfig,
     EditBindingConfig,
+    NonceIntegrityConfig,
     OsDenominationConfig,
     QuorumParityConfig,
     CommitteeBindingConfig,
     CommitLockConfig,
+    FinalityProofsConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -326,6 +328,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "editBinding":
             getSharedState.forkConfig.editBinding = config as EditBindingConfig
             return
+        case "nonceIntegrity":
+            getSharedState.forkConfig.nonceIntegrity =
+                config as NonceIntegrityConfig
+            return
         case "quorumParity":
             getSharedState.forkConfig.quorumParity = config as QuorumParityConfig
             return
@@ -335,6 +341,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             return
         case "commitLock":
             getSharedState.forkConfig.commitLock = config as CommitLockConfig
+            return
+        case "finalityProofs":
+            getSharedState.forkConfig.finalityProofs =
+                config as FinalityProofsConfig
             return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
@@ -461,12 +471,16 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as AtomicWorkConfig
         case "editBinding":
             return base as EditBindingConfig
+        case "nonceIntegrity":
+            return base as NonceIntegrityConfig
         case "quorumParity":
             return base as QuorumParityConfig
         case "committeeBinding":
             return base as CommitteeBindingConfig
         case "commitLock":
             return base as CommitLockConfig
+        case "finalityProofs":
+            return base as FinalityProofsConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

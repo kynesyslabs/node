@@ -31,12 +31,15 @@ export class GenesisRefusal extends Error {
  * value that is set but cannot be a sha256: a pin that never matches would
  * only refuse later, with a less useful message.
  */
-export function parseGenesisPin(raw: string | undefined | null): string {
+export function parseGenesisPin(
+    raw: string | undefined | null,
+    name = "EXPECTED_GENESIS_HASH",
+): string {
     const value = (raw ?? "").trim().replace(/^0x/i, "").toLowerCase()
     if (value === "") return ""
     if (!SHA256_HEX.test(value)) {
         throw new GenesisRefusal(
-            `EXPECTED_GENESIS_HASH must be 64 hex characters (sha256), got ${JSON.stringify(
+            `${name} must be 64 hex characters (sha256), got ${JSON.stringify(
                 (raw ?? "").slice(0, 80),
             )}`,
         )
@@ -64,6 +67,41 @@ export function pinRequirementProblem(
     )
 }
 
+/**
+ * The warning for a node that runs without a pin and was not told that is
+ * intended. Outside production nothing refuses such a node (a bare-metal
+ * install runs as development), so the operator must at least see it.
+ */
+export function unpinnedWarning(
+    pin: string,
+    env: Record<string, string | undefined>,
+    blockPin = "",
+): string | null {
+    // A pinned block 0 already refuses any other genesis.
+    if (pin !== "" || blockPin !== "") return null
+    if (isTrue(env.DEMOS_ALLOW_UNPINNED_GENESIS)) return null
+    return (
+        "EXPECTED_GENESIS_HASH is not set: this node accepts whatever genesis data/genesis.json " +
+        "holds and could start a chain of its own. Set it to the published genesis hash to join " +
+        "a network, or set DEMOS_ALLOW_UNPINNED_GENESIS=true to silence this on a local network"
+    )
+}
+
+/**
+ * The problem with a block 0 whose hash is not the pinned one, or null. Run on
+ * the block a fresh node is about to write and on the block a restarted node
+ * already holds.
+ */
+export function blockPinProblem(blockHash: string, blockPin: string, fresh: boolean): string | null {
+    if (blockPin === "") return null
+    const hash = blockHash.trim().replace(/^0x/i, "").toLowerCase()
+    if (hash === blockPin) return null
+    return fresh
+        ? `block 0 built from data/genesis.json hashes to ${hash}, EXPECTED_GENESIS_BLOCK_HASH is ${blockPin}`
+        : `block 0 in this database hashes to ${hash}, EXPECTED_GENESIS_BLOCK_HASH is ${blockPin}; ` +
+              "this database belongs to another chain"
+}
+
 /** The manifest hash a genesis declares, or null when it declares no snapshot. */
 export function declaredManifestHash(genesisData: unknown): string | null {
     if (genesisData === null || typeof genesisData !== "object") return null
@@ -79,6 +117,27 @@ export function declaredManifestHash(genesisData: unknown): string | null {
         )
     }
     return value
+}
+
+/**
+ * Why block 0 built from `genesisData` would not be the same on every node,
+ * or null when its timestamp fixes it.
+ */
+export function genesisTimestampProblem(genesisData: unknown): string | null {
+    const timestamp = (genesisData as Record<string, unknown> | null)?.timestamp
+    // generateGenesisBlock takes the host clock for any falsy value (0 included)
+    // and parseInt for the rest, so only a positive integer gives every node
+    // the same block 0
+    if (timestamp === undefined || timestamp === null || timestamp === "") {
+        return "genesis has no timestamp: block 0 would take this host's clock and differ from every other node's"
+    }
+    if (!/^[1-9][0-9]*$/.test(String(timestamp)) || !Number.isSafeInteger(Number(timestamp))) {
+        return (
+            `genesis timestamp ${JSON.stringify(timestamp)} is not a positive integer: ` +
+            "block 0 would take this host's clock or an invalid time"
+        )
+    }
+    return null
 }
 
 export interface FreshGenesisInput {
@@ -125,20 +184,8 @@ export function freshGenesisProblems(input: FreshGenesisInput): string[] {
     if (input.restore) {
         problems.push("RESTORE is on: a recovery overlay would change the pinned genesis")
     }
-    const timestamp = (input.genesisData as Record<string, unknown> | null)?.timestamp
-    // generateGenesisBlock takes the host clock for any falsy value (0 included)
-    // and parseInt for the rest, so only a positive integer gives every node
-    // the same block 0
-    if (timestamp === undefined || timestamp === null || timestamp === "") {
-        problems.push(
-            "genesis has no timestamp: block 0 would take this host's clock and differ from every other node's",
-        )
-    } else if (!/^[1-9][0-9]*$/.test(String(timestamp)) || !Number.isSafeInteger(Number(timestamp))) {
-        problems.push(
-            `genesis timestamp ${JSON.stringify(timestamp)} is not a positive integer: ` +
-                "block 0 would take this host's clock or an invalid time",
-        )
-    }
+    const timestampProblem = genesisTimestampProblem(input.genesisData)
+    if (timestampProblem) problems.push(timestampProblem)
     if (declared === null && input.snapshotManifestHash !== null) {
         problems.push(
             "a snapshot is present but the pinned genesis does not declare snapshot.manifestSha256, " +

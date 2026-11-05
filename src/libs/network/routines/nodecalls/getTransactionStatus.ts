@@ -1,5 +1,8 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
+import { isForkActive } from "@/forks/forkGates"
+import { FINALITY_FORK } from "src/libs/blockchain/finality/commitments"
+import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
 const TX_HASH_REGEX = /^[0-9a-fA-F]{64}$/
@@ -9,12 +12,35 @@ interface InterfaceGetTransactionStatusData {
 }
 
 /**
- * Returns the lifecycle state of a transaction by hash:
- *   - "pending"  — present in mempool
- *   - "included" — present in transactions table (with blockNumber)
- *   - "failed"   — reserved (not currently produced — see Chain.getTransactionStatus)
- *   - "unknown"  — not found anywhere
+ * Returns the lifecycle state of a transaction by hash (see TxStatus), with
+ * `checkedThroughBlock`: the height this node had searched through.
+ *
+ * A hash not found is answered 404, or 503 while this node is not synced
+ * (before its first sync, two or more blocks behind, or with drifted state),
+ * so "not in this chain through H" is never confused with "this node is
+ * behind"; a failed lookup is 500. `inSyncLoop` is not used: every consensus
+ * round starts with a sync pass, so a node at the tip would flap to 503. The
+ * state stays in the body in every case, because SDK clients read only the
+ * body and keep polling on "unknown".
+ *
+ * Under finalityProofs a transaction in block m has its result committed by
+ * block m + 1, so `resultCommittedInBlock` is m + 1 once that block is within
+ * the height searched (getTransactionProof then answers), and null until
+ * then. It is absent where no block commits the result: before the fork and
+ * for genesis.
  */
+function resultCommitment(
+    blockNumber: number | undefined,
+    checkedThroughBlock: number,
+): { resultCommittedInBlock?: number | null } {
+    if (!Number.isSafeInteger(blockNumber) || blockNumber < 1) return {}
+    const committedIn = blockNumber + 1
+    if (!isForkActive(FINALITY_FORK, committedIn)) return {}
+    return {
+        resultCommittedInBlock: committedIn <= checkedThroughBlock ? committedIn : null,
+    }
+}
+
 export default async function getTransactionStatus(
     data: InterfaceGetTransactionStatusData,
 ): Promise<RPCResponse> {
@@ -30,24 +56,37 @@ export default async function getTransactionStatus(
     const normalizedHash = hash.toLowerCase()
 
     try {
+        // Read before the lookup, so everything at or below it was searched.
+        const checkedThroughBlock = await Chain.getLastBlockNumber()
         const status = await Chain.getTransactionStatus(normalizedHash)
+        if (status.state !== "unknown") {
+            return {
+                result: 200,
+                response: {
+                    ...status,
+                    ...resultCommitment(status.blockNumber, checkedThroughBlock),
+                    checkedThroughBlock,
+                },
+                extra: "",
+                require_reply: false,
+            }
+        }
+        const synced = getSharedState.syncStatus
         return {
-            result: 200,
-            response: status,
-            extra: "",
+            result: synced ? 404 : 503,
+            response: { state: "unknown", checkedThroughBlock },
+            extra: { reason: synced ? "not_found" : "node_not_synced" },
             require_reply: false,
         }
     } catch (error) {
-        log.error(
-            "[getTransactionStatus] Error fetching tx status:",
-            error,
-        )
+        log.error("[getTransactionStatus] Error fetching tx status:", error)
         return {
             result: 500,
             response: { error: "INTERNAL_ERROR" },
-            extra: `Error: ${
-                error instanceof Error ? error.message : "Unknown error"
-            }`,
+            extra: {
+                reason: "lookup_failed",
+                error: error instanceof Error ? error.message : String(error),
+            },
             require_reply: false,
         }
     }

@@ -213,6 +213,21 @@ describe("getShard", () => {
             .slice(0, 4)
         expect(shard).toEqual(expected)
     })
+
+    it("treats a validator left out for a differing fork schedule as offline", async () => {
+        const { getSharedState } = await import("src/utilities/sharedState")
+        getSharedState.forkScheduleDifferingPeers = new Set([V(3)])
+        try {
+            const shard = (await getShard("seed", 100)).map(p => p.identity)
+            expect(shard).not.toContain(V(3))
+            const expected = rankPool("seed", await getEligiblePool(100))
+                .filter(id => id !== V(3))
+                .slice(0, 4)
+            expect(shard).toEqual(expected)
+        } finally {
+            getSharedState.forkScheduleDifferingPeers = undefined
+        }
+    })
 })
 
 describe("getCommitteeFloor", () => {

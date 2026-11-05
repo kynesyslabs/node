@@ -114,6 +114,26 @@ describe.skipIf(!hasCompose)("compose files", () => {
         expect(names).not.toContain("DEMOS_SETUP_L2PS_IV")
     })
 
+    it("passes the operator safety switches from .env to the node", () => {
+        // A variable missing from the node's environment list is silently
+        // dropped on a Docker host, however the operator sets it
+        const given = {
+            DEMOS_REQUIRE_VALIDATORS: "true",
+            DEMOS_GENERATE_IDENTITY: "false",
+            DEMOS_IDENTITY_TAKEOVER: "true",
+            DEMOS_SIGNING_RECORD_REBIND: "true",
+            BLOCK_WATCHDOG_ENABLED: "false",
+            BLOCK_WATCHDOG_TIMEOUT_SECONDS: "240",
+            DEBUG_ASSERTIONS_ENABLED: "false",
+            CORS_ALLOWED_ORIGINS: "https://app.example.org",
+            L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET: "50000",
+        }
+        const dotenv = Object.entries(given).map(([k, v]) => `${k}=${v}`).join("\n") + "\n"
+        for (const files of [BASE, DEVNET]) {
+            expect(compose(files, {}, dotenv).json?.services.node.environment).toMatchObject(given)
+        }
+    })
+
     it("passes the other setup variables through as given", () => {
         const c = compose(BASE, { DEMOS_SETUP_STRICT: "true", DEMOS_SETUP_L2PS_UID: "my_subnet" }).json
         expect(c?.services.node.environment).toMatchObject({ DEMOS_SETUP_STRICT: "true", DEMOS_SETUP_L2PS_UID: "my_subnet" })

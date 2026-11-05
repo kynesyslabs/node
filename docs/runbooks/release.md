@@ -27,7 +27,8 @@ docker buildx imagetools inspect oven/bun:1.4.4-debian | grep Digest
 ```
 
 The repo policy is enforced by `tests/release/reproducibleRelease.test.ts`
-(`bun run test:release`, which uses the jest pinned in the lockfile).
+(`bun run test:release`, which uses the jest pinned in the lockfile and needs
+`jq` installed, as the release workflow does).
 
 ## Signing keys
 
@@ -45,7 +46,9 @@ git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/<key>.pub
 ```
 
-Keep the private key off the validators and out of CI.
+Keep the private key off the validators and out of CI. How a holder
+generates the key offline and gets it listed, and why a final release needs
+three holders: [release-signing-key.md](release-signing-key.md).
 
 The release workflow does not trust the tag to name its own signers. It
 reads `.github/allowed_signers` from the head of `stabilisation`, and it
@@ -57,6 +60,12 @@ commit has no effect.
 
 ## Cutting a release candidate
 
+First merge a change that sets `version` in `package.json` to the tag
+without its `v` (for example `1.0.0-rc.1`). The node reports that version in
+`/version`, `/info`, `/health`, the Omni version call and `getNetworkInfo`, and
+the workflow refuses a tag that does not match it, so every release names
+itself.
+
 ```bash
 git checkout stabilisation && git pull --ff-only
 git tag -s v1.0.0-rc.1 -m "v1.0.0-rc.1"
@@ -66,8 +75,9 @@ git push origin v1.0.0-rc.1
 
 The `Release` workflow then:
 
-1. checks the tagged commit is on `stabilisation` and verifies the tag
-   signature against the `.github/allowed_signers` of that branch's head;
+1. checks the tagged commit is on `stabilisation`, verifies the tag
+   signature against the `.github/allowed_signers` of that branch's head,
+   and checks that the tag is `v` plus `package.json`'s version;
 2. builds the image twice, in two independent jobs, from clean checkouts,
    with no cache, `SOURCE_DATE_EPOCH` and `BUILT_AT` taken from the commit,
    and file timestamps rewritten to the commit date;
@@ -90,12 +100,15 @@ IMAGE_TAG=v1.0.0-rc.1@sha256:<digest from checksums.txt>
 ```
 
 ```bash
-docker compose pull node && docker compose up -d
+./scripts/node-doctor --production && docker compose pull node && docker compose up -d --no-build
 docker image inspect --format '{{index .RepoDigests 0}}' \
   "$(docker inspect --format '{{.Image}}' "$(docker compose ps -q node)")"
 ```
 
-The last line prints the digest the container runs; it must match
+The `&&` keeps a host that fails a node-doctor check from starting.
+`--no-build` keeps compose from building a local image when the pull
+fails, which would run code nobody signed. The last line prints the digest
+the container runs; it must match
 `checksums.txt`. Post it on the release thread.
 
 A bare-metal validator (`./run`) checks out the tag instead and verifies it

@@ -11,12 +11,12 @@ import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
-import { verifyAdmissionEdits } from "./validation/editBinding"
+import { expectsNonceEdit, verifyAdmissionEdits } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
 import { checkIdentityAdmission } from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
-import { TRANSACTION_STATUS } from "@/utilities/constants"
+import { MEMPOOL_MAX_NONCE_AHEAD, TRANSACTION_STATUS } from "@/utilities/constants"
 import {
     EvictionCandidate,
     MempoolRejectReason,
@@ -127,6 +127,25 @@ export default class Mempool {
     }
 
     /**
+     * One page of the whole pool in getMempool's order, with the pool size.
+     */
+    public static async getMempoolPage(start: number, limit: number) {
+        const [txs, total] = await this.repo.findAndCount({
+            order: {
+                timestamp: "ASC",
+                reference_block: "ASC",
+                hash: "ASC",
+            },
+            skip: start,
+            take: limit,
+        })
+        return {
+            txs: txs as (Transaction & { reference_block: number })[],
+            total,
+        }
+    }
+
+    /**
      * Returns a map of mempool hashes (for lookup only)
      */
     public static async getMempoolHashMap(blockNumber: number) {
@@ -159,12 +178,6 @@ export default class Mempool {
     /**
      * Audit-sweep batch C PR 2 — count pending txs from a given sender.
      *
-     * Used by `assignNonce` to compute the next expected nonce when a
-     * sender has prior txs already queued in mempool but not yet
-     * included in a block. The pattern is:
-     *
-     *   expected_nonce = account.nonce + 1 + countPendingByAddress(sender)
-     *
      * Counts every tx whose `content.from` matches the supplied
      * lowercase hex address AND whose `reference_block` is still
      * inside the allowed window
@@ -172,14 +185,11 @@ export default class Mempool {
      * cut-off that `cleanMempool` uses to mark a tx stale and that
      * `isReferenceBlockAllowed` enforces on inbound RPC. Without the
      * window filter, expired-but-not-yet-swept rows would inflate
-     * the count and block every subsequent legitimate submission
-     * until the next mempool sweep ran (PR #885 Greptile P1).
+     * the count.
      *
-     * Cross-node correctness is not the goal here — the mempool is
-     * the single-writer source of truth for queue depth on this node.
-     * Another node may have a different pending set. The
-     * consensus-time `expectedPrior` check shipped in PR 3 is the
-     * cross-node safety net.
+     * Cross-node correctness is not the goal here: another node may hold
+     * a different pending set. The block-time nonce check
+     * (`nonceIntegrity`) is the cross-node safety net.
      *
      * Case sensitivity: the SDK and the rest of the codebase emit
      * addresses as lowercase hex (`0x` + 64 hex chars). Stored
@@ -380,6 +390,51 @@ export default class Mempool {
     }
 
     /**
+     * Why a tx that spends a nonce is not admitted under `nonceIntegrity`,
+     * or null. Run inside the sender's advisory lock, after the check that
+     * the nonce is above the confirmed one.
+     *
+     * - More than MEMPOOL_MAX_NONCE_AHEAD past the confirmed nonce: it cannot
+     *   apply until every nonce before it lands, so it would hold a slot.
+     * - A second pending tx for the same nonce: at most one of them can take
+     *   effect, and the other would only reach a block as a failed tx. A
+     *   pending tx whose reference block has left the window does not count:
+     *   it can only be included as failed, which spends no nonce, so a retry
+     *   of that nonce is not held back until it is.
+     *
+     * The consensus merge does not come through here: every committee member
+     * must end it holding the same pool.
+     */
+    public static async nonceAdmissionRefusal(
+        repo: Repository<MempoolTx>,
+        account: string,
+        nonce: number,
+        confirmedNonce: number,
+        head: number,
+    ): Promise<string | null> {
+        if (nonce > confirmedNonce + MEMPOOL_MAX_NONCE_AHEAD) {
+            return (
+                `Nonce ${nonce} is too far ahead: at most ${MEMPOOL_MAX_NONCE_AHEAD} ` +
+                `past the confirmed nonce ${confirmedNonce}`
+            )
+        }
+        const taken = await repo
+            .createQueryBuilder("tx")
+            .where(
+                "LOWER(COALESCE(NULLIF(tx.content->>'from_ed25519_address', ''), tx.content->>'from')) = :account",
+                { account },
+            )
+            .andWhere("tx.nonce = :nonce", { nonce })
+            .andWhere("tx.reference_block >= :cutoff", {
+                cutoff: head - getSharedState.referenceBlockRoom,
+            })
+            .getCount()
+        return taken > 0
+            ? `A transaction with nonce ${nonce} from this sender is already pending`
+            : null
+    }
+
+    /**
      * Add a transaction to the mempool with exclusive lock
      *
      * @param transaction - The transaction to add to the mempool
@@ -477,19 +532,15 @@ export default class Mempool {
             }
         }
 
-        // Audit-sweep batch C PR 4 — close the validate→addTransaction
-        // TOCTOU window for `nonceEnforcement`.
+        // Audit-sweep batch C PR 4 — re-check the nonce at the insert
+        // point for `nonceEnforcement`.
         //
-        // `assignNonce` ran during the earlier `confirmTransaction`
-        // call, but that's a separate RPC round-trip from this
-        // execute-side insert. Between the two, two concurrent
-        // ingress paths for the same sender can both pass validation
-        // (each sees stale `account.nonce + pendingCount`) and reach
-        // here with duplicate nonces. The consensus-side
-        // `expectedPrior` check in `GCRNonceRoutines` (PR 3) catches
-        // them at block-apply time, but only after they both occupy
-        // mempool slots. Closing the gap at the insert point keeps
-        // the mempool clean and rejects the duplicate immediately.
+        // `confirmTransaction` checked the nonce in a separate RPC
+        // round-trip, so two concurrent ingress paths for the same
+        // sender can both pass validation and reach here. Apply only
+        // compares the nonce under `nonceIntegrity`, which also refuses
+        // a second pending tx for the same nonce and a nonce more than
+        // MEMPOOL_MAX_NONCE_AHEAD past the confirmed one.
         //
         // Design: wrap re-check + insert in a Postgres txn with a
         // per-sender `pg_advisory_xact_lock`. Lock released at
@@ -509,6 +560,18 @@ export default class Mempool {
                 : null
         const txNonce = transaction.content?.nonce
         const blockHeight = getSharedState.lastBlockNumber ?? 0
+        // Under nonceIntegrity the nonce is read where the nonce edit acts,
+        // the ed25519 sender, which a PQC-signed tx does not carry in `from`.
+        const nonceRule =
+            isForkActive("nonceIntegrity", blockHeight) &&
+            expectsNonceEdit(transaction)
+        const ed25519Raw = transaction.content?.from_ed25519_address
+        const byEd25519 =
+            nonceRule && typeof ed25519Raw === "string" && ed25519Raw !== ""
+        // Locking and the pending-duplicate check ignore case; the account
+        // is read under the key apply and confirmation use, as signed.
+        const nonceAccount = byEd25519 ? ed25519Raw.toLowerCase() : senderFrom
+        const nonceAccountKey = byEd25519 ? ed25519Raw : senderFrom
 
         // System relay transactions (SYSTEM_RELAY_TX_TYPES, e.g.
         // `l2psBatch`) carry a node-generated monotonic-for-uniqueness
@@ -561,7 +624,7 @@ export default class Mempool {
             senderFrom &&
             typeof txNonce === "number" &&
             !isOwnSystemRelayTx &&
-            isForkActive("nonceEnforcement", blockHeight)
+            (nonceRule || isForkActive("nonceEnforcement", blockHeight))
         ) {
             try {
                 return await this.repo.manager.transaction(
@@ -575,7 +638,7 @@ export default class Mempool {
                         // the project (none exist yet).
                         await em.query(
                             "SELECT pg_advisory_xact_lock(hashtext($1))",
-                            [`nonce:${senderFrom}`],
+                            [`nonce:${nonceAccount}`],
                         )
 
                         // Check transaction hash in transaction table
@@ -604,13 +667,13 @@ export default class Mempool {
 
                         const gcrRepo = em.getRepository(GCRMain)
                         const account = await gcrRepo.findOne({
-                            where: { pubkey: senderFrom },
+                            where: { pubkey: nonceAccountKey },
                         })
 
                         const accountNonce = account?.nonce ?? 0
                         if (txNonce <= accountNonce) {
                             log.error(
-                                `[Mempool.addTransaction] Invalid nonce for ${senderFrom}: ` +
+                                `[Mempool.addTransaction] Invalid nonce for ${nonceAccount}: ` +
                                     `tx.content.nonce=${txNonce}, expected >=${accountNonce + 1} `,
                             )
 
@@ -622,6 +685,22 @@ export default class Mempool {
                                     " (expected >= " +
                                     (accountNonce + 1) +
                                     ")",
+                            }
+                        }
+
+                        if (nonceRule) {
+                            const refusal = await this.nonceAdmissionRefusal(
+                                mempoolRepo,
+                                nonceAccount,
+                                txNonce,
+                                accountNonce,
+                                blockHeight,
+                            )
+                            if (refusal) {
+                                log.error(
+                                    `[Mempool.addTransaction] Refusing ${transaction.hash}: ${refusal}`,
+                                )
+                                return { confirmationBlock: null, error: refusal }
                             }
                         }
 

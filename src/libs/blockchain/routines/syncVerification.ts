@@ -12,11 +12,17 @@ import {
 import { filterMempoolByNonce } from "src/libs/consensus/v2/routines/mempoolFilters"
 import type { MempoolTransaction } from "src/libs/consensus/v2/routines/mempoolFilters"
 import { orderDeterministically } from "src/libs/consensus/v2/routines/deterministicOrder"
-import { isForkActive, txSignatureContext } from "@/forks"
+import { isForkActive, serializeBlockContent, txSignatureContext } from "@/forks"
+import Hashing from "@/libs/crypto/hashing"
+import {
+    FINALITY_FORK,
+    projectedResultsRoot,
+} from "../finality/commitments"
 import { ErrorCode } from "@/errors"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "src/utilities/logger"
+import { countStorageRootSyncMismatch } from "@/features/metrics/consensusMetrics"
 
 type FinalStatus = typeof TRANSACTION_STATUS.CONFIRMED | typeof TRANSACTION_STATUS.FAILED
 
@@ -153,6 +159,16 @@ export async function verifyBlockTransactions(
 const NODE_LOCAL_TABLE_HASHES = new Set(["native_tlsnotary"])
 
 /**
+ * Compared, but a difference is logged and counted instead of rejecting the
+ * block. The storage root is new; until it has run on a live network, a
+ * difference stopping every syncing node is the larger risk. Validators still
+ * enforce it, since a forger with another root forges another block hash.
+ * Present on one side only is still a rejection: that is a fork-schedule
+ * disagreement, not diverged state.
+ */
+const WARN_ONLY_TABLE_HASHES = new Set(["native_storage_programs"])
+
+/**
  * `native_tables_hashes` is taken by the forger before it applies the block,
  * so it commits to the state this node holds right before applying the same
  * block. Call it at that point; a divergence left by the previous block
@@ -172,6 +188,15 @@ export async function verifyNativeTablesHashes(block: Block): Promise<void> {
         key =>
             !NODE_LOCAL_TABLE_HASHES.has(key) && committed?.[key] !== local[key],
     )
+    for (const key of WARN_ONLY_TABLE_HASHES) {
+        const index = differing.indexOf(key)
+        if (index === -1 || !committed || !(key in committed) || !(key in local)) continue
+        differing.splice(index, 1)
+        countStorageRootSyncMismatch()
+        log.error(
+            `[syncVerify] storage root of block ${block.number} differs from local state: block ${committed[key]}, local ${local[key]}; applying it anyway`,
+        )
+    }
     if (!committed || differing.length > 0) {
         throw new SyncBlockRejectedError(
             `native table hashes of block ${block.number} differ from local state: ${committed ? differing.join(", ") : "block carries none"}`,
@@ -325,6 +350,64 @@ export function localStatuses(
     return statuses
 }
 
+/**
+ * The block does not commit to transaction attrs, so the failure code of a
+ * transaction this node also saw fail before apply is taken from the local
+ * derivation, not from the peer. Failures inside apply keep the served code:
+ * the local apply does not report one. TX_EXISTS is left alone: the forger
+ * checks nonce and reference block first, so an honest code can differ.
+ */
+export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): void {
+    for (const tx of txs) {
+        const code = plan.failedBeforeApply.get(tx.hash)
+        if (code === undefined || code === ErrorCode.TX_EXISTS || tx.attrs?.code === code) continue
+        // The served code is unsigned peer data; never convert it to text.
+        const served = tx.attrs?.code
+        const shown = typeof served === "string" ? JSON.stringify(served.slice(0, 64)) : typeof served
+        log.warn(`[sync] tx ${tx.hash}: served failure code ${shown} replaced by local ${code}`)
+        tx.attrs = { ...(tx.attrs ?? {}), code }
+    }
+}
+
+/**
+ * Under `finalityProofs` the code is part of the result the next block
+ * commits to, so the stored code must be what this node derives, never what
+ * the peer served: a stored code changes only by repair against a later
+ * verified block. A transaction
+ * that failed inside apply was given TX_EXECUTE_FAILED by the forger, and a
+ * confirmed one carries no code. The served statuses already agree with the
+ * local outcome.
+ */
+export function pinResultCodes(
+    txs: Transaction[],
+    plan: BlockOutcomePlan,
+    height: number,
+): void {
+    if (!isForkActive(FINALITY_FORK, height)) return
+    for (const tx of txs) {
+        if (tx.status === TRANSACTION_STATUS.CONFIRMED) {
+            if (tx.attrs && "code" in tx.attrs) {
+                log.warn(`[sync] tx ${tx.hash}: served code on a confirmed transaction dropped`)
+                const { code: _served, ...rest } = tx.attrs
+                tx.attrs = rest as typeof tx.attrs
+            }
+            continue
+        }
+        if (
+            tx.status !== TRANSACTION_STATUS.FAILED ||
+            plan.failedBeforeApply.has(tx.hash) ||
+            tx.attrs?.code === ErrorCode.TX_EXECUTE_FAILED
+        ) {
+            continue
+        }
+        log.warn(`[sync] tx ${tx.hash}: served failure code replaced by ${ErrorCode.TX_EXECUTE_FAILED}`)
+        tx.attrs = {
+            ...(tx.attrs ?? {}),
+            code: ErrorCode.TX_EXECUTE_FAILED,
+        } as typeof tx.attrs
+    }
+}
+
 /** Hashes whose served status differs from the locally derived one. */
 export function statusDisagreements(
     txs: Transaction[],
@@ -333,4 +416,53 @@ export function statusDisagreements(
     return txs
         .filter(tx => local.get(tx.hash) !== tx.status)
         .map(tx => tx.hash)
+}
+
+/**
+ * Before block N is applied with `txs`, the results it will store must give
+ * the `parent_results_root` that block N + 1 commits to, when N + 1 is in
+ * hand. Statuses and codes are already derived locally; this catches any
+ * remaining disagreement before the rows are stored: once N is stored its
+ * statuses are final and its failure codes change only by repair.
+ *
+ * Only a next block that hashes to its own hash and builds on `block` is
+ * compared; anything else is judged as a block on its own turn. It is not
+ * signature-checked yet (its committee depends on `block`), so a mismatch
+ * rejects what this peer served, and nothing about this node's state.
+ */
+export async function checkResultsAgainstNextBlock(
+    block: Block,
+    txs: Transaction[],
+    next: Block | undefined,
+): Promise<void> {
+    if (
+        !next ||
+        next.number !== block.number + 1 ||
+        !isForkActive(FINALITY_FORK, next.number) ||
+        next.content?.previousHash !== block.hash
+    ) {
+        return
+    }
+    if (
+        Hashing.sha256(serializeBlockContent(next.content, next.number)) !==
+        next.hash
+    ) {
+        return
+    }
+
+    const committed = (next.content as unknown as Record<string, unknown>)
+        .parent_results_root
+    let local: string
+    try {
+        local = await projectedResultsRoot(block, txs)
+    } catch (e) {
+        throw new SyncBlockRejectedError(
+            `cannot derive the results of block ${block.number}: ${e instanceof Error ? e.message : String(e)}`,
+        )
+    }
+    if (committed !== local) {
+        throw new SyncBlockRejectedError(
+            `results of block ${block.number} give ${local}, block ${next.number} commits ${String(committed)}`,
+        )
+    }
 }
