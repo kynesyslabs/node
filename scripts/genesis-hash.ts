@@ -30,7 +30,7 @@ import { hashGenesisData } from "src/libs/blockchain/genesis/normalizeGenesisFor
 import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
 import { genesisBalancesProblems } from "src/libs/blockchain/genesis/mergeGenesisBalances"
 import { genesisForkProblems } from "src/libs/blockchain/genesis/applyForksAtGenesis"
-import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
+import { type ForkStateEntry, verifySnapshot } from "src/libs/blockchain/genesis/verifySnapshot"
 import { readGenesisSudoPubkey } from "src/libs/consensus/genesisSudoPubkey"
 import { forkScheduleDigest } from "src/libs/peer/routines/forkScheduleAgreement"
 import { loadForkConfigFromGenesis } from "src/forks"
@@ -76,13 +76,33 @@ export function snapshotManifestSha256(snapshotDir: string): string | null {
 
 /**
  * The fork_state rows the snapshot's manifest carries ([] for a manifest
- * without them), or null when the directory has no manifest.
+ * without them), or null when the directory has no manifest. It does not
+ * verify the snapshot; callers that do not verify it otherwise use
+ * verifiedSnapshot.
  */
 export function snapshotManifestForkState(snapshotDir: string): ForkStateEntry[] | null {
     const manifestFile = path.join(snapshotDir, "manifest.json")
     if (!fs.existsSync(manifestFile)) return null
     const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"))
     return Array.isArray(manifest?.fork_state) ? manifest.fork_state : []
+}
+
+/**
+ * The snapshot as the node checks it at boot (verifySnapshot): its
+ * fork_state rows when it passes, else the reason the node would refuse it.
+ */
+export async function verifiedSnapshot(
+    snapshotDir: string,
+): Promise<{ forkState: ForkStateEntry[] | null; problems: string[] }> {
+    try {
+        const manifest = await verifySnapshot(path.resolve(snapshotDir))
+        return { forkState: manifest.fork_state ?? [], problems: [] }
+    } catch (e) {
+        return {
+            forkState: null,
+            problems: [`a node would refuse the snapshot at boot: ${(e as Error).message}`],
+        }
+    }
 }
 
 /** The file as the node reads data/genesis.json: a JSON string holding JSON is parsed again. */
@@ -160,7 +180,7 @@ export function genesisValues(
     }
 }
 
-function main(): number {
+async function main(): Promise<number> {
     let args: ReturnType<typeof parseArgs>
     try {
         args = parseArgs(process.argv.slice(2))
@@ -176,7 +196,9 @@ function main(): number {
         return 2
     }
 
-    const result = genesisValues(genesis, manifestSha256, args.snapshot ? snapshotManifestForkState(args.snapshot) : null)
+    const snapshot = args.snapshot ? await verifiedSnapshot(args.snapshot) : null
+    const result = genesisValues(genesis, manifestSha256, snapshot?.forkState ?? null)
+    result.problems.push(...(snapshot?.problems ?? []))
     if (args.json) {
         console.log(JSON.stringify(result, null, 2))
     } else {
@@ -196,5 +218,10 @@ function main(): number {
 }
 
 if (import.meta.main) {
-    process.exit(main())
+    main()
+        .then(code => process.exit(code))
+        .catch(e => {
+            console.error((e as Error).stack ?? String(e))
+            process.exit(2)
+        })
 }

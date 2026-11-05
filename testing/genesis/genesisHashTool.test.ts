@@ -5,12 +5,13 @@
  */
 
 import { describe, it, expect } from "bun:test"
+import { createHash } from "node:crypto"
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadForkConfigFromGenesis } from "src/forks"
 import { generateGenesisBlock } from "src/libs/blockchain/chainGenesis"
-import { genesisValues, readGenesisFile } from "../../scripts/genesis-hash"
+import { genesisValues, readGenesisFile, verifiedSnapshot } from "../../scripts/genesis-hash"
 
 class Stop extends Error {}
 
@@ -112,5 +113,63 @@ describe("genesis-hash tool", () => {
         expect(genesisValues({ ...launchGenesis(), balances: "FILL: allocations" }).problems.join("\n")).toContain(
             "balances is present but not an array",
         )
+    })
+
+    describe("--snapshot", () => {
+        const sha256 = (b: string) => createHash("sha256").update(b).digest("hex")
+        /** A snapshot the node's verifySnapshot accepts; `tamper` changes gcr_main after the manifest is written. */
+        function snapshot(tamper = false): string {
+            const dir = mkdtempSync(join(tmpdir(), "genesis-hash-snapshot-"))
+            for (const f of ["gcr_main.jsonl", "gcr_storageprogram.jsonl", "identity_commitments.jsonl"]) {
+                writeFileSync(join(dir, f), "")
+            }
+            writeFileSync(
+                join(dir, "manifest.json"),
+                JSON.stringify({
+                    schemaVersion: 1,
+                    source: {
+                        host: "test",
+                        chain_block_height: 0,
+                        chain_block_hash: "0x0",
+                        node_version: "test",
+                        pg_version: "test",
+                        dumped_at: "2026-10-29T00:00:00Z",
+                    },
+                    files: {
+                        "gcr_main.jsonl": { sha256: sha256(""), rows: 0, balance_sum: "0" },
+                        "gcr_storageprogram.jsonl": { sha256: sha256(""), rows: 0, size_bytes_sum: 0 },
+                        "identity_commitments.jsonl": { sha256: sha256(""), rows: 0 },
+                    },
+                    transforms_applied: {
+                        nonces_reset_to_zero: true,
+                        assigned_txs_emptied: true,
+                        test_identity_commitments_dropped: true,
+                    },
+                }),
+            )
+            if (tamper) writeFileSync(join(dir, "gcr_main.jsonl"), '{"pubkey":"0x00","balance":"1"}\n')
+            return dir
+        }
+
+        it("verifies the snapshot as the node does at boot", async () => {
+            expect(await verifiedSnapshot(snapshot())).toEqual({ forkState: [], problems: [] })
+            const bad = await verifiedSnapshot(snapshot(true))
+            expect(bad.forkState).toBeNull()
+            expect(bad.problems.join("\n")).toContain("a node would refuse the snapshot at boot")
+            expect(bad.problems.join("\n")).toContain("gcr_main.jsonl: sha256 mismatch")
+        })
+
+        it("fails the command line on a snapshot the node refuses", () => {
+            const dir = snapshot(true)
+            const g = launchGenesis()
+            g.snapshot = { manifestSha256: sha256(readFileSync(join(dir, "manifest.json"), "utf8")) }
+            const file = writeGenesis(g)
+            const run = Bun.spawnSync(["bun", "scripts/genesis-hash.ts", "--genesis", file, "--snapshot", dir], {
+                stdout: "pipe",
+                stderr: "pipe",
+            })
+            expect(run.exitCode).toBe(1)
+            expect(run.stdout.toString()).toContain("problem: a node would refuse the snapshot at boot")
+        }, 60_000)
     })
 })
