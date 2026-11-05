@@ -71,6 +71,57 @@ export function bootRefusalLine(nodeLog: string): string | null {
     return lines.length > 0 ? lines[lines.length - 1].trim().slice(0, 600) : null
 }
 
+/** The bounds of a `readLogTail` read: its last lines, and how long it may take. */
+export const BOOT_LOG_TAIL_LINES = 400
+export const BOOT_LOG_TIMEOUT_MS = 30_000
+
+/**
+ * The last `BOOT_LOG_TAIL_LINES` lines of `service`'s log
+ * (`docker compose logs --tail`, as `logs()` reads it), within `timeoutMs`.
+ * Throws, saying why, when docker fails or does not finish in time: the read
+ * runs on a failure path, which must not hang on a stalled daemon. `docker`
+ * is for the tests.
+ */
+export function readLogTail(service: string, timeoutMs = BOOT_LOG_TIMEOUT_MS, docker = systemBinary("docker")): string {
+    const r = spawnSync(docker, ["compose", "logs", "--no-color", "--tail", String(BOOT_LOG_TAIL_LINES), service], {
+        cwd: DEVNET_DIR,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: timeoutMs,
+        // a child that ignores SIGTERM would keep spawnSync waiting
+        killSignal: "SIGKILL",
+        maxBuffer: 16 * 1024 * 1024,
+    })
+    if ((r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") {
+        throw new Error(`docker compose logs did not finish within ${timeoutMs} ms`)
+    }
+    if (r.error) throw new Error(`docker compose logs failed: ${r.error.message}`)
+    if (r.status !== 0) {
+        throw new Error(`docker compose logs failed (exit ${r.status}): ${(r.stderr ?? "").trim().slice(0, 300)}`)
+    }
+    return (r.stdout ?? "") + (r.stderr ?? "")
+}
+
+/**
+ * `e` with the "Refusing to boot" line of every service that logged one, so a
+ * refused genesis is not just a timeout, and with every log that could not be
+ * read named as unreadable, with why, not skipped. Only the message changes:
+ * the caller throws `e` either way.
+ */
+export function withBootRefusals(e: unknown, services: string[], readLog: (service: string) => string = s => readLogTail(s)): unknown {
+    if (!(e instanceof Error)) return e
+    const lines = services.flatMap(service => {
+        try {
+            const line = bootRefusalLine(readLog(service))
+            return line === null ? [] : [`${service}: ${line}`]
+        } catch (err) {
+            return [`${service}: log unreadable (${err instanceof Error ? err.message : String(err)})`]
+        }
+    })
+    if (lines.length > 0) e.message += `\nnode log:\n  ${lines.join("\n  ")}`
+    return e
+}
+
 /** Where the staged files are, as absolute host paths. */
 export interface StagedInputs {
     dir: string

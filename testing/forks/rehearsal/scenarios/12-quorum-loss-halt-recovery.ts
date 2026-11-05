@@ -64,7 +64,6 @@ import {
     GENESIS_FORK_LOW,
     compose,
     isServiceRunning,
-    logs,
     regenerateIdentities,
     restartService,
     sleep,
@@ -78,11 +77,11 @@ import { clearOverride, overridePath, writeOverride } from "../lib/composeOverri
 import { withCurrentDevnetValidators } from "../lib/drillGenesis"
 import {
     LAUNCH_GENESIS_TEMPLATE,
-    bootRefusalLine,
     drillOverrideYaml,
     genesisTimestamp,
     launchExcluded,
     stageDrillInputs,
+    withBootRefusals,
     withLaunchForks,
 } from "../lib/drillInputs"
 import { getLastBlockNumber, query } from "../lib/nodeQueries"
@@ -289,7 +288,7 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
         await restartForColdStart()
         await drill(ctx, quorum, marks, observed)
     } catch (e) {
-        throw withBootRefusals(e)
+        throw withBootRefusals(e, NODE_IDS.map(id => `node-${id}`))
     } finally {
         // Also on failure: print what was collected before the error propagates.
         try {
@@ -304,21 +303,6 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
             rmSync(stagingDir, { recursive: true, force: true })
         }
     }
-}
-
-/** The error with the "Refusing to boot" line of every node that logged one, so a refused genesis is not just a timeout. */
-function withBootRefusals(e: unknown): unknown {
-    if (!(e instanceof Error)) return e
-    const refusals = NODE_IDS.flatMap(id => {
-        try {
-            const line = bootRefusalLine(logs(`node-${id}`, 400))
-            return line === null ? [] : [`node-${id}: ${line}`]
-        } catch {
-            return []
-        }
-    })
-    if (refusals.length > 0) e.message += `\nnode log:\n  ${refusals.join("\n  ")}`
-    return e
 }
 
 /**

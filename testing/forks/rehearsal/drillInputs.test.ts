@@ -7,6 +7,8 @@ import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { loadForkConfigFromGenesis } from "@/forks/loadForkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import {
+    BOOT_LOG_TAIL_LINES,
+    BOOT_LOG_TIMEOUT_MS,
     GENESIS_DELAY_S,
     LAUNCH_GENESIS_TEMPLATE,
     bootRefusalLine,
@@ -14,7 +16,9 @@ import {
     genesisTimestamp,
     launchExcluded,
     peerSeedFromGenesis,
+    readLogTail,
     stageDrillInputs,
+    withBootRefusals,
     withLaunchForks,
 } from "./lib/drillInputs"
 import { systemBinary } from "./lib/systemBinary"
@@ -123,6 +127,52 @@ describe("bootRefusalLine", () => {
         expect(bootRefusalLine(log)).toBe("[ERROR] [GENESIS] Refusing to boot: second attempt")
         expect(bootRefusalLine("[INFO] [GENESIS] Genesis block found\n")).toBeNull()
         expect(bootRefusalLine("")).toBeNull()
+    })
+})
+
+describe("withBootRefusals (readLogTail): a log that cannot be read is named, within a time bound", () => {
+    /** A stand-in for docker in the test dir, running `body` as sh. */
+    function fakeDocker(body: string): string {
+        const path = join(dir, "docker")
+        writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+        return path
+    }
+    it("reads the last BOOT_LOG_TAIL_LINES (400) lines with docker compose logs", () => {
+        expect(BOOT_LOG_TAIL_LINES).toBe(400)
+        expect(readLogTail("node-2", 5_000, fakeDocker('echo "args: $*"'))).toBe("args: compose logs --no-color --tail 400 node-2\n")
+    })
+    it("fails with docker's words when docker compose logs fails", () => {
+        const docker = fakeDocker('echo "Error response from daemon: stub" >&2; exit 1')
+        expect(() => readLogTail("node-2", 5_000, docker)).toThrow("docker compose logs failed (exit 1): Error response from daemon: stub")
+    })
+    it("fails within its bound when docker compose logs stalls", () => {
+        expect(BOOT_LOG_TIMEOUT_MS).toBe(30_000)
+        const t0 = Date.now()
+        expect(() => readLogTail("node-2", 300, fakeDocker("sleep 10"))).toThrow("docker compose logs did not finish within 300 ms")
+        expect(Date.now() - t0).toBeLessThan(5_000)
+    })
+    it("appends each refusal line, names each unreadable log, and returns the same error", () => {
+        const logsOf: Record<string, string> = {
+            "node-1": "[INFO] up\n",
+            "node-2": "[INFO] up\n[ERROR] [GENESIS] Refusing to boot: no snapshot\n",
+        }
+        const read = (service: string) => {
+            if (service in logsOf) return logsOf[service]
+            throw new Error("docker compose logs did not finish within 30000 ms")
+        }
+        const e = new Error("timed out on the baseline height")
+        expect(withBootRefusals(e, ["node-1", "node-2", "node-3"], read)).toBe(e)
+        expect(e.message).toBe(
+            "timed out on the baseline height\nnode log:\n" +
+                "  node-2: [ERROR] [GENESIS] Refusing to boot: no snapshot\n" +
+                "  node-3: log unreadable (docker compose logs did not finish within 30000 ms)",
+        )
+    })
+    it("leaves the message alone when every log reads and none refused, and passes a non-Error through", () => {
+        const e = new Error("timed out")
+        withBootRefusals(e, ["node-1"], () => "[INFO] up\n")
+        expect(e.message).toBe("timed out")
+        expect(withBootRefusals("not an error", ["node-1"], () => { throw new Error("unused") })).toBe("not an error")
     })
 })
 
@@ -494,6 +544,11 @@ describe("scenario 12 wiring", () => {
         expect(restart).toBeGreaterThan(upCall)
         expect(baseline).toBeGreaterThan(restart)
         expect(src).toContain("NODE_IDS.slice(1)")
+    })
+    it("annotates a failure with the nodes' refusal lines through the bounded readLogTail", () => {
+        expect(src).toContain("throw withBootRefusals(e, NODE_IDS.map(id => `node-${id}`))")
+        // no unbounded logs() read of its own
+        expect(src).not.toMatch(/\blogs\(/)
     })
     it("removes what it staged in a finally block", () => {
         const fin = src.indexOf("} finally {")
