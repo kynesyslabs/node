@@ -109,8 +109,8 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
         if (connectionUrl !== null && (typeof connectionUrl !== "string" || connectionUrl === "")) {
             throw new Error(`${where} (${address}): connection_url must be null or a non-empty string`)
         }
-        if (typeof stakedAmount !== "string" || !/^(0|[1-9]\d*)$/.test(stakedAmount)) {
-            throw new Error(`${where} (${address}): staked_amount must be a decimal string`)
+        if (typeof stakedAmount !== "string" || !/^[1-9]\d*$/.test(stakedAmount)) {
+            throw new Error(`${where} (${address}): staked_amount must be a positive decimal string`)
         }
         for (const [name, value] of [["first_seen", firstSeen], ["valid_at", validAt]] as const) {
             if (!Number.isSafeInteger(value) || (value as number) < 0) {

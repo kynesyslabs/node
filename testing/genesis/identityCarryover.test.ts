@@ -326,6 +326,7 @@ describe("carry-over snapshot builder", () => {
         expect(() => launchValidatorRows({ validators: [{ ...LAUNCH[0], address: LAUNCH[0].address.toUpperCase() }] })).toThrow("lowercase")
         expect(() => launchValidatorRows([LAUNCH[0], LAUNCH[0]])).toThrow("twice")
         expect(() => launchValidatorRows([{ ...LAUNCH[0], staked_amount: 1000 }])).toThrow("staked_amount")
+        expect(() => launchValidatorRows([{ ...LAUNCH[0], staked_amount: "0" }])).toThrow("positive")
         expect(() => launchValidatorRows([{ ...LAUNCH[0], first_seen: undefined }])).toThrow("first_seen")
         expect(() => launchValidatorRows([{ ...LAUNCH[0], connection_url: "" }])).toThrow("connection_url")
         expect(launchValidatorRows(LAUNCH).map(v => v.address)).toEqual(LAUNCH.map(v => v.address).sort())
@@ -399,6 +400,13 @@ describe("genesis refusals under identityCarryover", () => {
             `genesis validator ${LAUNCH[0].address}: staked_amount must be a string or a number`,
         )
         expect(launchValidatorProblems(rows, [{ ...LAUNCH[0], status: true }, LAUNCH[1]]).join()).toContain("status must be")
+    })
+
+    it("refuses a zero stake in validators.jsonl, with or without a genesis list", () => {
+        const zero = [{ ...LAUNCH[0], staked_amount: "0" }, LAUNCH[1]] as any
+        const want = `validators.jsonl row ${LAUNCH[0].address} has staked_amount "0", which must be a positive integer`
+        expect(launchValidatorProblems(zero, undefined)).toContain(want)
+        expect(launchValidatorProblems(zero, zero)).toContain(want)
     })
 })
 
