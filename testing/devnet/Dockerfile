@@ -38,7 +38,9 @@ COPY package.json bun.lock ./
 # Install dependencies at build time (cached if package.json unchanged)
 RUN bun install --frozen-lockfile
 COPY sidecar/package.json sidecar/bun.lock ./sidecar/
-RUN cd sidecar && bun install --frozen-lockfile
+# No lifecycle scripts: esbuild's postinstall is the only one, and build.mjs
+# finds the binary in @esbuild/linux-<arch> without it (same bundle either way)
+RUN cd sidecar && bun install --frozen-lockfile --ignore-scripts
 
 # Now copy the rest of the repo
 COPY . .
