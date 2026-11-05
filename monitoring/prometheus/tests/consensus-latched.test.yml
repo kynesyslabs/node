@@ -65,6 +65,22 @@ tests:
             exp_annotations:
               summary: "Peers disagreed with this node's candidate block hash (latched)"
               description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # One hour short of 7 days: still firing. With 7d30m below this pins the window
+      # to 7 days within an hour, so a shorter latch (for example [6d]) is caught.
+      - eval_time: 6d23h
+        alertname: BlockHashMismatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Peers disagreed with this node's candidate block hash (latched)"
+              description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # One hour past 7 days: gone (catches a longer latch, for example [8d]).
+      - eval_time: 7d1h
+        alertname: BlockHashMismatch
+        exp_alerts: []
       # 7 days and 30 minutes after the burst: the latch has expired.
       - eval_time: 7d30m
         alertname: BlockHashMismatch
@@ -116,6 +132,20 @@ tests:
             exp_annotations:
               summary: "Two blocks with a verified quorum existed at one height (latched)"
               description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # One hour short of 7 days: still firing; one hour past: gone.
+      - eval_time: 6d23h
+        alertname: ConflictingBlock
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Two blocks with a verified quorum existed at one height (latched)"
+              description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 7d1h
+        alertname: ConflictingBlock
+        exp_alerts: []
       # Expired 7 days after the event.
       - eval_time: 7d30m
         alertname: ConflictingBlock
@@ -169,6 +199,20 @@ tests:
             exp_annotations:
               summary: "Another process is signing with this validator's key (latched)"
               description: "validator-1 saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # One hour short of 7 days: still firing; one hour past: gone.
+      - eval_time: 6d23h
+        alertname: ForeignSignature
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Another process is signing with this validator's key (latched)"
+              description: "validator-1 saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 7d1h
+        alertname: ForeignSignature
+        exp_alerts: []
       # Expired 7 days after the event.
       - eval_time: 7d30m
         alertname: ForeignSignature
@@ -219,6 +263,20 @@ tests:
             exp_annotations:
               summary: "A committee member precommitted two blocks in one round (latched)"
               description: "validator-1 received precommits from one member for two different blocks at the same height and round, within the last 7 days. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # One hour short of 7 days: still firing; one hour past: gone.
+      - eval_time: 6d23h
+        alertname: PrecommitEquivocation
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "A committee member precommitted two blocks in one round (latched)"
+              description: "validator-1 received precommits from one member for two different blocks at the same height and round, within the last 7 days. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 7d1h
+        alertname: PrecommitEquivocation
+        exp_alerts: []
       # Expired 7 days after the event.
       - eval_time: 7d30m
         alertname: PrecommitEquivocation

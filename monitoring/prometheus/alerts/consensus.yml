@@ -99,11 +99,17 @@ groups:
   #      stays visible in Prometheus as firing.
   #   2. Clear: once the fork is resolved and at least 10 m after the last event, delete
   #      the recorded series for that instance. This needs the Prometheus admin API,
-  #      which is NOT enabled by default: restart Prometheus with --web.enable-admin-api.
+  #      which is NOT enabled by default: add --web.enable-admin-api to the prometheus
+  #      command: list and run `docker compose up -d prometheus`. Prometheus is published
+  #      on all interfaces without authentication, so make port 9091 loopback-only or
+  #      firewalled BEFORE enabling the flag, and remove the flag afterwards.
   #      e.g. curl -g -X POST http://127.0.0.1:9091/api/v1/admin/tsdb/delete_series
   #      --data-urlencode 'match[]=demos:conflicting_block:increase10m{instance="validator-2"}'
   #      The counter itself is left alone, so the evidence stays in the TSDB.
-  #   3. Otherwise it expires by itself 7 d after the last event.
+  #   3. Expire the silence from step 1 after the series is deleted: `amtool silence query
+  #      alertname=<alert> instance=<instance>` gives the id, then `amtool silence expire <id>`.
+  #      Otherwise a repeat double-sign or fork on that validator is silent for up to 7 d.
+  #   4. If the series is not deleted, it expires by itself 7 d after the last event.
   # Only metrics the node exports today are used. ForeignSignature and
   # PrecommitEquivocation are double-sign signals and are latched the same way, with
   # the same 7 d window and the same clear procedure (their recorded series are

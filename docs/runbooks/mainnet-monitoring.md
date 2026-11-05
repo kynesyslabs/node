@@ -141,14 +141,39 @@ Only metrics the node exports today are used.
    visible in Prometheus.
 3. Clear: at least 10 minutes after the last event, delete the recorded series
    for that instance through the Prometheus admin API. The admin API is **not
-   enabled by default**, and `monitoring/docker-compose.yml` does not enable it:
-   clearing the series needs Prometheus restarted with `--web.enable-admin-api`
-   (remove the flag again afterwards). `curl` needs `-g` and `--data-urlencode`
-   because of the `{}` and `"` in the selector:
-   `curl -g -X POST http://127.0.0.1:9091/api/v1/admin/tsdb/delete_series --data-urlencode 'match[]=demos:conflicting_block:increase10m{instance="validator-2"}'`.
-   The series name is the one in the table below for the alert. The counter
-   itself is not touched, so the evidence stays in the TSDB.
-4. Otherwise the alert expires by itself 7 days after the last event.
+   enabled by default**, and `monitoring/docker-compose.yml` does not enable it.
+   **Security: Prometheus is published on all interfaces, without
+   authentication** (the `"${PROMETHEUS_PORT:-9091}:9090"` port line in
+   `monitoring/docker-compose.yml` has no `127.0.0.1:` prefix, unlike
+   Alertmanager). `--web.enable-admin-api` opens unauthenticated delete,
+   snapshot and tombstone-cleaning APIs to anyone who can reach that port. So
+   **before enabling the flag**, make port 9091 loopback-only or block it with
+   a firewall, and **remove the flag again as soon as the series is deleted**.
+   - Enable: add `- --web.enable-admin-api` to the `command:` list of the
+     `prometheus` service in `monitoring/docker-compose.yml` (next to
+     `--web.enable-lifecycle`), then run
+     `docker compose -f monitoring/docker-compose.yml up -d prometheus`. Use
+     `up -d`, not `restart`: `restart` keeps the old flags. The data volume
+     is kept, so the latch survives the recreate.
+   - Delete (`curl` needs `-g` and `--data-urlencode` because of the `{}` and
+     `"` in the selector):
+     `curl -g -X POST http://127.0.0.1:9091/api/v1/admin/tsdb/delete_series --data-urlencode 'match[]=demos:conflicting_block:increase10m{instance="validator-2"}'`.
+     The series name is the one in the table below for the alert. The counter
+     itself is not touched, so the evidence stays in the TSDB. The alert
+     clears within about a minute.
+   - Remove: delete the `- --web.enable-admin-api` line again and run
+     `docker compose -f monitoring/docker-compose.yml up -d prometheus`.
+4. Expire the silence from step 2 once the series is deleted. Otherwise the
+   7 day silence keeps running, and a repeat double-sign or fork on the same
+   validator (same alert name and instance) fires with no page and no Slack
+   message for days. Get the id with
+   `docker exec demos-alertmanager amtool silence query alertname=ConflictingBlock instance=validator-2 --alertmanager.url=http://localhost:9093`
+   (add `-q` to print only the id), then
+   `docker exec demos-alertmanager amtool silence expire <id> --alertmanager.url=http://localhost:9093`.
+   The id is also printed by `amtool silence add` in step 2. A silence is
+   expired, not deleted: it stays visible as expired.
+5. If the series is not deleted, the alert expires by itself 7 days after the
+   last event; leave the silence in place until then.
 
 The latch lives only in the Prometheus data. Retention must be at least 7 days
 (`PROMETHEUS_RETENTION`, 15 days by default) and the Prometheus data volume
