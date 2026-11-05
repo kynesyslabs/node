@@ -153,9 +153,9 @@ FINAL_COMMAND="${START_COMMAND} --no-tui"
 log_verbose "Starting node with: RPC_PORT=${PORT}"
 log_verbose "Command: ${FINAL_COMMAND}"
 
-# The devnet image is oven/bun with no Node, so the package.json
-# `migration:run` (tsx, which needs a node binary) cannot run here. Same
-# command, run by bun itself. Idempotent: it applies only what is pending.
+# The devnet image is oven/bun with no Node: the TypeORM CLI runs through bun,
+# the command behind `bun run migration:run`. Idempotent: it applies only what
+# is pending.
 if ! bun -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts; then
     echo "❌ Error: migration:run failed on the devnet database"
     exit 1

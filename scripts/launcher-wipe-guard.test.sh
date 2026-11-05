@@ -141,9 +141,10 @@ EOF
 #!/usr/bin/env bash
 echo "bun $*" >>"$STUB_ST/calls.log"
 # migration:run, in either form. `bun run migration:run` goes through the
-# package.json script (tsx), which needs a node binary: STUB_NO_NODE=1 is a host
-# with Bun but no Node. The bun-direct form (typeorm's cli.js run by bun) does
-# not. The connection the migration would use is logged with the MIGRATE line.
+# package.json script: STUB_NO_NODE=1 fails it the way a host with Bun but no
+# Node did while that script ran through tsx, so the launchers must spell out
+# the bun-direct form (typeorm's cli.js run by bun), whatever package.json
+# says. The connection the migration would use is logged with the MIGRATE line.
 migrate() {
     echo "MIGRATE host=${PG_HOST-} port=${PG_PORT-} user=${PG_USER-} password=${PG_PASSWORD-} db=${PG_DATABASE-}" >>"$STUB_ST/migrate.log"
     d="$STUB_WORK/postgres_${PG_PORT:-5332}/data_${PG_PORT:-5332}/postgres/tables"
