@@ -3,6 +3,7 @@ import {
     type DenominationInputs,
     type LaunchExpectation,
     type NodeObservation,
+    blockZeroTargets,
     buildExpectation,
     decideHeight1,
     denominationScales,
@@ -234,5 +235,23 @@ describe("parseReplyAmount", () => {
         const d = decideHeight1(expectation(), [node(0, { balances: { [id(50)]: "700", [id(100)]: 5000 } })])
         expect(d.verdict).toBe("fail")
         expect(failed(d).map(c => c.detail).join("\n")).toContain("could not be read")
+    })
+})
+
+describe("blockZeroTargets", () => {
+    it("reports an active validator without an http(s) connection_url as a failed check", () => {
+        const rows = [
+            { address: id(0), status: "2", valid_at: 0, connection_url: "http://v0.example:53550" },
+            { address: id(1), status: "2", valid_at: 0, connection_url: null },
+            { address: id(2), status: "2", valid_at: 0, connection_url: "v2.example:53550" },
+            { address: id(3), status: "2", valid_at: 0 },
+        ]
+        const { urls, unreachable } = blockZeroTargets(rows)
+        expect(urls).toEqual(["http://v0.example:53550"])
+        expect(unreachable.map(c => [c.node, c.status])).toEqual([
+            [id(1), "fail"],
+            [id(2), "fail"],
+            [id(3), "fail"],
+        ])
     })
 })

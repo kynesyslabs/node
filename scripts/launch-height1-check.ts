@@ -122,6 +122,30 @@ const SHOWN = 5
 const norm = (id: string) => id.trim().toLowerCase()
 
 /**
+ * The URLs to check when no --rpc is given: each active block-0 validator's
+ * connection_url. A validator whose URL cannot be asked is a failed check,
+ * not a smaller set: the verdict speaks for every launch validator.
+ */
+export function blockZeroTargets(rows: ValidatorRow[]): { urls: string[]; unreachable: Check[] } {
+    const urls: string[] = []
+    const unreachable: Check[] = []
+    for (const row of activeAtBlockZero(rows)) {
+        const url = row.connection_url
+        if (typeof url === "string" && /^https?:\/\//.test(url)) {
+            urls.push(url)
+        } else {
+            unreachable.push({
+                node: String(row.address),
+                name: "connection-url",
+                status: "fail",
+                detail: `block 0 gives no http(s) connection_url (${JSON.stringify(url ?? null)}), so the node cannot be checked; pass its RPC with --rpc`,
+            })
+        }
+    }
+    return { urls, unreachable }
+}
+
+/**
  * An amount from a node reply. getAddressInfo sends the balance and
  * getValidators the stake as a decimal string of digits
  * (accountForWire, serializeValidator); anything else is not the node's
@@ -679,12 +703,12 @@ async function main(): Promise<number> {
         },
     })
 
-    const urls =
-        args.rpc.length > 0
-            ? args.rpc
-            : activeAtBlockZero(blockZero.rows)
-                  .map(r => r.connection_url)
-                  .filter((u): u is string => typeof u === "string" && /^https?:\/\//.test(u))
+    let urls = args.rpc
+    if (urls.length === 0) {
+        const targets = blockZeroTargets(blockZero.rows)
+        urls = targets.urls
+        inputChecks.push(...targets.unreachable)
+    }
     const addresses = expectation.balances.map(b => b.address)
     const observations: NodeObservation[] = []
     for (const url of [...new Set(urls)]) {
