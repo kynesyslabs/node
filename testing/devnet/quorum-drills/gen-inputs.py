@@ -37,9 +37,10 @@ ap.add_argument("--image", required=True)
 # from the repo at run time.
 ap.add_argument("--fork-set", choices=["devnet", "launch"], default="devnet")
 # The image's user, read from the image by run.sh: the node tmpfs is mounted
-# owned by it
-ap.add_argument("--uid", type=int, required=True)
-ap.add_argument("--gid", type=int, required=True)
+# owned by it. Both or neither: without them the tmpfs is the root-owned
+# /app/state of the compose files before #1122 (see node_tmpfs_specs)
+ap.add_argument("--uid", type=int)
+ap.add_argument("--gid", type=int)
 ap.add_argument("--src", default="")
 ap.add_argument("--node-mem", required=True)
 ap.add_argument("--consensus-time", required=True)
@@ -57,6 +58,10 @@ if a.start == "image" and not (image_entrypoint or image_cmd):
     ap.error("--start image needs the image's entrypoint or cmd")
 if a.fork_set == "launch" and a.binding != "on":
     ap.error("--fork-set launch activates committeeBinding (and commitLock needs it): --binding must be on")
+try:
+    node_tmpfs = node_tmpfs_specs(a.uid, a.gid)
+except ValueError as e:
+    ap.error(str(e))
 
 inputs = os.path.join(a.run_dir, "inputs")
 n = a.nodes
@@ -235,7 +240,7 @@ for i in range(1, n + 1):
         # code 0; it is restarted until the mesh forms. A drill stops a
         # validator with `docker compose stop`, which this policy respects.
         "restart": "unless-stopped",
-        "tmpfs": node_tmpfs_specs(a.uid, a.gid),
+        "tmpfs": node_tmpfs,
         "hostname": f"node{i}-host",
         "depends_on": {"postgres": {"condition": "service_healthy"}},
         "environment": {

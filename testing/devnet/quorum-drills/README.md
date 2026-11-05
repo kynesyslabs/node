@@ -481,6 +481,9 @@ drills also leave `drill-input.json` (what the run observed),
   the same string in a throwaway container and copies, restricts and reads the
   identity there as that user. Everything else the node writes (`/app`,
   `/app/data`, `/app/logs`) is an image directory the Dockerfile chowns to it.
+  `gen-inputs.py` and `drill_inputs.py tmpfs` called without `--uid`/`--gid`
+  give the plain root-owned `/app/state` of before; one of the two alone is
+  refused.
 - A trap collects the logs, removes the sidecars and runs
   `docker compose down -v --remove-orphans` on any exit, including Ctrl-C.
 

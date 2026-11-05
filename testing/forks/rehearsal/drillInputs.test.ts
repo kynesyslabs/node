@@ -135,8 +135,18 @@ describe("node tmpfs options (drill_inputs.py tmpfs)", () => {
         expect(r.status).toBe(0)
         expect(r.stdout.trim().split("\n")).toEqual(["/app/state:uid=1000,gid=1001,mode=0700"])
     })
-    it("needs a numeric uid and gid", () => {
-        expect(run("--gid", "1000").status).not.toBe(0)
+    it("without --uid and --gid mounts the plain /app/state, root-owned, as before #1122", () => {
+        const r = run()
+        expect(r.status).toBe(0)
+        expect(r.stdout.trim().split("\n")).toEqual(["/app/state"])
+    })
+    it("refuses one of the two alone, and a uid or gid that is not a number", () => {
+        for (const args of [["--gid", "1000"], ["--uid", "1000"]]) {
+            const r = run(...args)
+            expect(r.status).toBe(2)
+            expect(r.stderr).toContain("--uid and --gid go together")
+            expect(r.stdout).toBe("")
+        }
         expect(run("--uid", "demos", "--gid", "1000").status).not.toBe(0)
     })
 })
@@ -318,8 +328,10 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
 
     describe("gen-inputs.py", () => {
         const repo = resolve(import.meta.dir, "../../..")
-        const gen = (forkSet: string | null, binding = "on", nodes = 4) => {
-            const run = join(dir, `run-${forkSet}-${binding}-${nodes}`)
+        // run.sh passes the image's uid and gid
+        const IMAGE_USER = ["--uid", "1000", "--gid", "1000"]
+        const gen = (forkSet: string | null, binding = "on", nodes = 4, owner = IMAGE_USER) => {
+            const run = join(dir, `run-${forkSet}-${binding}-${nodes}${owner === IMAGE_USER ? "" : `-${owner.join("")}`}`)
             mkdirSync(join(run, "inputs"), { recursive: true })
             for (let i = 0; i < nodes; i++) writeFileSync(join(run, "inputs", `pub${i + 1}`), key(0xa1 + i))
             const r = spawnSync(
@@ -328,7 +340,7 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
                     // no -I, as run.sh: the script imports drill_inputs from its own directory
                     resolve(repo, "testing/devnet/quorum-drills/gen-inputs.py"),
                     "--run-dir", run, "--repo", repo, "--nodes", String(nodes), "--shard-size", "10", "--binding", binding,
-                    "--genesis-ts", "1", "--image", "img", "--uid", "1000", "--gid", "1000",
+                    "--genesis-ts", "1", "--image", "img", ...owner,
                     "--node-mem", "1g", "--consensus-time", "10",
                     ...(forkSet ? ["--fork-set", forkSet] : []),
                 ],
@@ -336,10 +348,33 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
             )
             return {
                 r,
+                run,
                 genesis: r.status === 0 ? JSON.parse(readFileSync(join(run, "inputs/genesis.json"), "utf8")) : null,
                 compose: r.status === 0 ? JSON.parse(readFileSync(join(run, "compose.yml"), "utf8")) : null,
             }
         }
+        const nodeTmpfs = (compose: any) =>
+            Object.entries(compose.services).filter(([s]) => s.startsWith("node-")).map(([, svc]: [string, any]) => svc.tmpfs)
+        it("mounts every node's /app/state owned by --uid and --gid, owner-only", () => {
+            const { r, compose } = gen(null, "on", 4, ["--uid", "1000", "--gid", "1001"])
+            expect(r.status).toBe(0)
+            expect(nodeTmpfs(compose)).toEqual(Array(4).fill(["/app/state:uid=1000,gid=1001,mode=0700"]))
+        })
+        it("without --uid and --gid mounts the plain /app/state, root-owned, as before #1122", () => {
+            const { r, compose } = gen(null, "on", 4, [])
+            expect(r.status).toBe(0)
+            expect(nodeTmpfs(compose)).toEqual(Array(4).fill(["/app/state"]))
+            expect(compose.services.postgres.tmpfs).toEqual(["/var/lib/postgresql/data"])
+        })
+        it("refuses --uid or --gid alone, before it writes anything", () => {
+            for (const owner of [["--uid", "1000"], ["--gid", "1000"]]) {
+                const { r, run } = gen(null, "on", 4, owner)
+                expect(r.status).toBe(2)
+                expect(r.stderr).toContain("--uid and --gid go together")
+                expect(readdirSync(run)).toEqual(["inputs"])
+                expect(readdirSync(join(run, "inputs")).sort()).toEqual(["pub1", "pub2", "pub3", "pub4"])
+            }
+        })
         it("starts the shared postgres with max_connections of at least 10 per node + 20, for 4, 10 and 13 nodes", () => {
             // 10 = the TypeORM pool's default (src/model/datasource.ts sets no max); 20 = reserved
             // superuser slots, the harness' psql reads, the healthcheck. The compose has twice the pools.

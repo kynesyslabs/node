@@ -31,10 +31,11 @@ name -> reason ({} when there are none).
 sets every file under DIR to 644 and every directory to 755 (run.sh, once all
 its inputs are written).
 
-    drill_inputs.py tmpfs --uid UID --gid GID
+    drill_inputs.py tmpfs [--uid UID --gid GID]
 prints the node tmpfs entries, one per line, exactly as gen-inputs.py writes
 them into the compose file (run.sh passes the same strings to `docker run
---tmpfs` in its preflight check).
+--tmpfs` in its preflight check). Without the two: root-owned, see
+node_tmpfs_specs.
 
     drill_inputs.py pgconn --nodes N
 prints "NEEDED CONFIGURED": the fewest max_connections an N-node drill can run
@@ -195,7 +196,7 @@ def make_empty_snapshot(inputs_dir):
     return path
 
 
-def node_tmpfs_specs(uid, gid):
+def node_tmpfs_specs(uid=None, gid=None):
     """Compose `tmpfs:` entries (and `docker run --tmpfs` values) for a node.
 
     Docker creates a tmpfs root-owned, mode 755, so a node running as the
@@ -203,7 +204,17 @@ def node_tmpfs_specs(uid, gid):
     options; the compose long syntax (`type: tmpfs`) only has size and mode,
     so the short string is the one that can set the owner. Mode 0700: the
     directory holds the identity.
+
+    Without uid and gid: the plain paths, root-owned, as the drills mounted
+    them before the owner options (callers that predate --uid/--gid). There is
+    no default owner: the tmpfs must belong to the image's user, which only
+    the caller can read from the image, and the host user is not it. One of
+    the two alone is a ValueError.
     """
+    if (uid is None) != (gid is None):
+        raise ValueError("--uid and --gid go together: give both, or neither for a root-owned tmpfs")
+    if uid is None:
+        return list(NODE_TMPFS_PATHS)
     return [f"{p}:uid={uid},gid={gid},mode=0700" for p in NODE_TMPFS_PATHS]
 
 
@@ -254,8 +265,8 @@ def main():
     le = sub.add_parser("launch-excluded")
     le.add_argument("--template", required=True)
     tf = sub.add_parser("tmpfs")
-    tf.add_argument("--uid", type=int, required=True)
-    tf.add_argument("--gid", type=int, required=True)
+    tf.add_argument("--uid", type=int)
+    tf.add_argument("--gid", type=int)
     pc = sub.add_parser("pgconn")
     pc.add_argument("--nodes", type=int, required=True)
     a = ap.parse_args()
@@ -263,7 +274,10 @@ def main():
         make_readable(a.dir)
         return
     if a.cmd == "tmpfs":
-        print("\n".join(node_tmpfs_specs(a.uid, a.gid)))
+        try:
+            print("\n".join(node_tmpfs_specs(a.uid, a.gid)))
+        except ValueError as e:
+            tf.error(str(e))
         return
     if a.cmd == "pgconn":
         print(pg_connections_needed(a.nodes), pg_max_connections(a.nodes))
