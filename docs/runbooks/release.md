@@ -195,9 +195,13 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     `node-doctor --production` fails on any value that differs from it.
     `DEMOS_DISABLE_FORK_MACHINERY` is refused on any chain id other than
     1 and 1337.
-  - Governance transactions are refused until the genesis schedules the
-    `networkGovernance` fork. A network that used governance before must
-    schedule it in its genesis fork schedule to keep it.
+  - Governance transactions are refused until the chain reaches the
+    `activationHeight` the genesis gives the `networkGovernance` fork (0 turns
+    it on from the first block). A network that used governance before keeps
+    it only by scheduling the fork. On a live chain that follows
+    [Changing the schedule](fork-schedule-policy.md#changing-the-schedule): a
+    height more than 50 blocks ahead, with every validator on the new genesis
+    before the window opens.
 
 ## Known limits
 
