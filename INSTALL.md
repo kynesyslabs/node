@@ -185,10 +185,10 @@ With `PROD=true` the node never creates a key by itself: a missing key stops it,
 **4. Check the host.**
 
 ```bash
-./scripts/node-doctor --production
+./scripts/node-doctor --production --env-from compose
 ```
 
-It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, one-start switches left set) and exits 1 on any FAIL. It reads the values the node container will get from `docker compose config`, so run it from the checkout with `.env` in place. Fix every FAIL, and check every WARN by hand, before the next step.
+It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, one-start switches left set) and exits 1 on any FAIL. It reads the values the node container will get from `docker compose config`, so run it from the checkout with `.env` in place. `--env-from compose` makes it fail rather than fall back to `.env` when it cannot read the compose settings (it needs `docker` and `python3`), since an override file can give the container other values. Fix every FAIL, and check every WARN by hand, before the next step.
 
 **5. Pull, create the database schema, and start without building.**
 
@@ -215,11 +215,13 @@ It must print `ghcr.io/kynesyslabs/node@sha256:<the digest in checksums.txt>`.
 **7. Confirm the parameters the container got.** Compose passes a variable to the node only when `docker-compose.yml` lists it, so check inside the running container, not `.env`:
 
 ```bash
-docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -q node)" |
-  grep -E "^($(grep -oE '^[A-Z_0-9]+' docs/mainnet/parameters.env | paste -sd'|'))=" | sort
+diff <(grep -E '^[A-Z_0-9]+=' docs/mainnet/parameters.env | sort) \
+  <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -q node)" |
+    grep -E "^($(grep -oE '^[A-Z_0-9]+' docs/mainnet/parameters.env | paste -sd'|'))=" | sort) &&
+  echo "parameters match"
 ```
 
-Every line must equal the same line of `docs/mainnet/parameters.env`. Post the output with the digest.
+It must print `parameters match`. Any other output is a key the container lacks (`<`) or holds with another value (`>`). Post the output with the digest.
 
 ### Environment file
 
@@ -743,7 +745,7 @@ Set `EXPOSED_URL` based on your setup:
 - Remote machine: `http://YOUR_PUBLIC_IP:53550`
 - Behind proxy: `https://demos.example.com`
 
-Mainnet validators run Track 1 with the released image. A bare-metal node keeps the published genesis file and snapshot outside the checkout and points `DEMOS_GENESIS_FILE` and `DEMOS_SNAPSHOT_DIR` in `.env` at them (absolute paths). Never copy them over `data/genesis.json` or `data/snapshot/`: those are tracked files, the node would then report its build as dirty, and the launch go/no-go check does not count a dirty build as the release. A named genesis file that is missing stops the node at boot. Run with the release tag checked out and nothing else changed (`git status` shows no modified tracked files). Also set the genesis pins from [Pin the network's genesis](#joining-the-network--required-steps-before-real-world-use) (`EXPECTED_GENESIS_HASH`, `EXPECTED_GENESIS_BLOCK_HASH`), append the parameter sheet (`cat docs/mainnet/parameters.env >> .env`, which sets `PROD=true`, `DEMOS_REQUIRE_VALIDATORS=true`, `FORK_SCHEDULE_MISMATCH_POLICY=abstain` and the chain-wide values) and run `./scripts/node-doctor --production --env-from env` before starting: without `--env-from env` the doctor reads the Docker settings whenever `docker-compose.yml` and Docker are present, not the `.env` and environment a bare-metal node uses. `./run` does not set `NODE_ENV=production`, so a missing pin only shows as a warning at boot.
+Mainnet validators run Track 1 with the released image. A bare-metal node keeps the published genesis file and snapshot outside the checkout and points `DEMOS_GENESIS_FILE` and `DEMOS_SNAPSHOT_DIR` in `.env` at them (absolute paths). Never copy them over `data/genesis.json` or `data/snapshot/`: those are tracked files, the node would then report its build as dirty, and the launch go/no-go check does not count a dirty build as the release. A named genesis file that is missing stops the node at boot. Run with the release tag checked out and nothing else changed (`git status` shows no modified tracked files). Also set the genesis pins from [Pin the network's genesis](#joining-the-network--required-steps-before-real-world-use) (`EXPECTED_GENESIS_HASH`, `EXPECTED_GENESIS_BLOCK_HASH`), append the parameter sheet (`cat docs/mainnet/parameters.env >> .env`, which sets `PROD=true`, `DEMOS_REQUIRE_VALIDATORS=true`, `FORK_SCHEDULE_MISMATCH_POLICY=abstain` and the chain-wide values) and run `./scripts/node-doctor --production --env-from env` before starting: without `--env-from env` the doctor reads the Docker settings whenever `docker-compose.yml` and Docker are present, not the `.env` and environment a bare-metal node uses. Keep every setting in `.env`: Bun also loads `.env.local` and `.env.<NODE_ENV>` files over it, so the doctor fails while any of them exists. `./run` does not set `NODE_ENV=production`, so a missing pin only shows as a warning at boot.
 
 If you're using FFI mode (`TLSNOTARY_MODE=ffi`), set `TLSNOTARY_SIGNING_KEY` in `.env` to a 64-char hex secp256k1 key — or leave it empty and the node auto-generates one into `.tlsnotary-key` on first boot. To skip TLSNotary entirely, set `TLSNOTARY_ENABLED=false`.
 

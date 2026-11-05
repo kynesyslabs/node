@@ -594,10 +594,31 @@ check_unset() { # $1 key, $2 why
 	fi
 }
 
+# Bun also loads these over .env, and the doctor reads only .env, so a value
+# in one of them would reach the node unchecked. The image leaves them out.
+BUN_EXTRA_ENV_FILES=(
+	.env.local
+	.env.production .env.production.local
+	.env.development .env.development.local
+	.env.test .env.test.local
+)
+check_extra_env_files() {
+	local f found=()
+	for f in "${BUN_EXTRA_ENV_FILES[@]}"; do
+		[[ -e "${f}" ]] && found+=("${f}")
+	done
+	if [[ ${#found[@]} -eq 0 ]]; then
+		prod_line PASS "env files" "only .env"
+	else
+		prod_line FAIL "env files" "${found[*]} present: bun loads them over .env, so move their values into .env and remove them"
+	fi
+}
+
 run_production_checks() {
 	load_node_env || return 1
 	echo "Mainnet validator host checks (node settings from ${NODE_ENV_SOURCE}, parameter sheet ${PARAMETER_SHEET}):"
 	check_parameter_sheet
+	[[ "${NODE_ENV_SOURCE}" = "process environment over .env" ]] && check_extra_env_files
 	check_clock_sync
 	check_ntp_egress
 	check_genesis_pin EXPECTED_GENESIS_HASH

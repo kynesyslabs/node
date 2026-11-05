@@ -213,6 +213,25 @@ describe("node-doctor checks against fake commands", () => {
         })
     })
 
+    describe("node-doctor --production env files", () => {
+        it("passes a checkout with only .env", () => {
+            fs.writeFileSync(path.join(bin, ".env"), "PROD=true\n")
+            expect(runCheck(`cd "${bin}"; check_extra_env_files`)).toEqual({
+                line: "PASS env files: only .env",
+                fails: 0,
+                warns: 0,
+            })
+        })
+
+        it("fails when bun would load another env file over .env", () => {
+            fs.writeFileSync(path.join(bin, ".env.local"), "NETWORK_FEE=2\n")
+            fs.writeFileSync(path.join(bin, ".env.production"), "PROD=false\n")
+            const result = runCheck(`cd "${bin}"; check_extra_env_files`)
+            expect(result.line).toStartWith("FAIL env files: .env.local .env.production present")
+            expect(result.fails).toBe(1)
+        })
+    })
+
     describe("node-doctor sourcing", () => {
         it("defines the checks without running the doctor", () => {
             const run = Bun.spawnSync([BASH, "-c", `source "${doctor}"; type -t check_clock_sync`], {
