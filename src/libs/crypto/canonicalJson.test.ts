@@ -47,8 +47,8 @@ describe("canonicalJson", () => {
     })
 
     it("sorts keys by UTF-16 code units, not code points", () => {
-        // U+FF61 sorts after the surrogate pair of U+1F600 by code point, but
-        // before it by UTF-16 code unit (0xFF61 > 0xD83D).
+        // U+FF61 sorts before U+1F600 by code point, but after it by UTF-16
+        // code unit: the pair starts with 0xD83D, below 0xFF61.
         const value = { "｡": 1, "\u{1f600}": 2, "é": 3, z: 4 }
         expect(canonicalJson(value)).toBe("{\"z\":4,\"é\":3,\"\u{1f600}\":2,\"｡\":1}")
     })
