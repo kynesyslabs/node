@@ -31,4 +31,7 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile --ignore-scripts
+      # Stub-based (no Docker, no Postgres): the launchers never migrate a
+      # database they did not just empty
+      - run: bash scripts/launcher-wipe-guard.test.sh
       - run: bun run test:consensus

@@ -18,6 +18,8 @@
 #   - a plain start never migrates
 #   - docker-run --clean runs `down` without --volumes and deletes only the
 #     CLEAN_VOLUMES (PG data, node data), not the logs/prometheus/grafana ones
+#   - run -c true falls back to `sudo rm` for a data dir the host user cannot
+#     remove (files written by the Postgres container)
 #   - run -c true wipes the data dir only after the container stopped (a failed
 #     stop leaves the data in place), in the order stop, wipe, start, migrate
 #   - run -c true / -b true migrate over the connection that was probed (the
@@ -175,7 +177,14 @@ fi
 exec "$STUB_REAL_RM" "$@"
 EOF
 
-    printf '#!/usr/bin/env bash\nexit 1\n' >"$bin/sudo"
+    # sudo fails, unless STUB_SUDO_OK=1 lets `sudo rm` act as root (who can
+    # remove what the host user cannot)
+    cat >"$bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+[[ "${STUB_SUDO_OK:-0}" == 1 && "${1:-}" == rm ]] || exit 1
+shift
+exec "$STUB_REAL_RM" "$@"
+EOF
     printf '#!/usr/bin/env bash\nexit 1\n' >"$bin/lsof"
     printf '#!/usr/bin/env bash\nexit 1\n' >"$bin/ping"
     printf '#!/usr/bin/env bash\nexit 0\n' >"$bin/nc"
@@ -244,7 +253,7 @@ check() {
     LAST_OUT="$out"
 }
 
-start_case() { N=$((N + 1)); unset STUB_FAIL_DOWN STUB_FAIL_VOLRM STUB_FAIL_RM STUB_FAIL_PSQL STUB_PSQL_TABLES STUB_HANG_PSQL STUB_HANG_UP STUB_NO_NODE PG_HOST PG_USER PG_PASSWORD PG_DATABASE CHECK_TIMEOUT; new_world; }
+start_case() { N=$((N + 1)); unset STUB_FAIL_DOWN STUB_FAIL_VOLRM STUB_FAIL_RM STUB_SUDO_OK STUB_FAIL_PSQL STUB_PSQL_TABLES STUB_HANG_PSQL STUB_HANG_UP STUB_NO_NODE PG_HOST PG_USER PG_PASSWORD PG_DATABASE CHECK_TIMEOUT; new_world; }
 
 # the migration must have been given the launcher's own container as its database
 expect_pinned_connection() {
@@ -326,6 +335,10 @@ echo "# scripts/run (scripts from: $SRC)"
 
 start_case; seed_datadir; export STUB_FAIL_RM=1
 check "run -c true: data dir removal fails -> stops before migrate" fail 0 "$W/scripts/run" -c true -t -m
+
+start_case; seed_datadir; export STUB_FAIL_RM=1 STUB_SUDO_OK=1
+check "run -c true: data dir only root can remove -> sudo rm wipes it, migrates once" ok 1 "$W/scripts/run" -c true -t -m
+[[ -f "$W/postgres_5332/data_5332/postgres/tables/users" ]] && { FAIL=$((FAIL + 1)); echo "FAIL - run -c true left the old data after the sudo fallback"; }
 
 start_case; seed_datadir; export STUB_FAIL_DOWN=1
 check "run -c true: container stop fails -> stops before migrate" fail 0 "$W/scripts/run" -c true -t -m
