@@ -60,8 +60,9 @@ commit has no effect.
 
 First merge a change that sets `version` in `package.json` to the tag
 without its `v` (for example `1.0.0-rc.1`). The node reports that version in
-`getNetworkInfo` and the fork-status RPC, and the workflow refuses a tag that
-does not match it, so every release names itself.
+`/version`, `/info`, `/health`, the Omni version call and `getNetworkInfo`, and
+the workflow refuses a tag that does not match it, so every release names
+itself.
 
 ```bash
 git checkout stabilisation && git pull --ff-only

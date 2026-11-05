@@ -152,33 +152,44 @@ export interface StorageUndo {
     toBlock: number
 }
 
+/** A built tree with the leaves it holds and the records undo put back, by storage address. */
+interface BuiltTree {
+    leaves: Map<string, string>
+    undone: Map<string, StorageProgramRecord | null>
+    tree: SparseMerkleTree
+}
+
 /**
  * Proofs for `addresses` from one snapshot of the table, against the root of
  * that same snapshot, or with `undo`, of the table as it stood before
- * `undo.fromBlock`. A client rebuilds each leaf from the record served, so
- * a stored leaf that no longer matches its row is refused here instead of
- * being served as a proof that cannot verify.
+ * `undo.fromBlock`; `built` is that tree when it is already held. A client
+ * rebuilds each leaf from the record served, so a stored leaf that no longer
+ * matches its row is refused here instead of being served as a proof that
+ * cannot verify.
  */
 async function proveIn(
     snapshot: StorageRootSnapshot,
     addresses: string[],
-    undo?: StorageUndo,
-): Promise<StorageProofSet> {
-    const { leaves } = await currentLeaves(snapshot)
-    // Newest block first, so the record from before the oldest undone
-    // block is the one left for each address.
-    const undone = new Map<string, StorageProgramRecord | null>()
-    if (undo) {
-        for (const row of await snapshot.history(undo.fromBlock, undo.toBlock)) {
-            undone.set(row.storageAddress, row.record)
+    undo: StorageUndo | undefined,
+    built: BuiltTree | null,
+): Promise<{ set: StorageProofSet; built: BuiltTree }> {
+    if (built === null) {
+        const { leaves } = await currentLeaves(snapshot)
+        // Newest block first, so the record from before the oldest undone
+        // block is the one left for each address.
+        const undone = new Map<string, StorageProgramRecord | null>()
+        if (undo) {
+            for (const row of await snapshot.history(undo.fromBlock, undo.toBlock)) {
+                undone.set(row.storageAddress, row.record)
+            }
         }
+        for (const [storageAddress, record] of undone) {
+            if (record === null) leaves.delete(storageAddress)
+            else leaves.set(storageAddress, storageRecordLeafHex(record))
+        }
+        built = { leaves, undone, tree: treeOf(leaves) }
     }
-    for (const [storageAddress, record] of undone) {
-        if (record === null) leaves.delete(storageAddress)
-        else leaves.set(storageAddress, storageRecordLeafHex(record))
-    }
-
-    const tree = treeOf(leaves)
+    const { leaves, undone, tree } = built
     const rows = new Map<string, StorageProgramRow>()
     const live = addresses.filter(address => !undone.has(address))
     for (const row of await snapshot.rows(live)) rows.set(row.storageAddress, row)
@@ -201,7 +212,7 @@ async function proveIn(
             terminal,
         }
     })
-    return { root: tree.rootHex, proofs }
+    return { set: { root: tree.rootHex, proofs }, built }
 }
 
 /**
@@ -213,8 +224,12 @@ async function proveIn(
 export class StorageProgramsRoot {
     private epoch = 0
     private cached: { epoch: number; root: string } | null = null
+    // Kept for proofs only: a node that serves none never holds the tree.
+    private proofTree: { epoch: number; key: string; built: BuiltTree } | null = null
     /** Times the root was rebuilt from the table. */
     builds = 0
+    /** Times a proof read every leaf and built the tree. */
+    proofTreeBuilds = 0
 
     constructor(
         private readonly reader: StorageRootReader,
@@ -255,16 +270,31 @@ export class StorageProgramsRoot {
             } catch (error) {
                 // Only a cache of what the rows already determine: the next
                 // rebuild computes the same leaves again.
-                log.warning(`[storageRoot] could not store ${result.filled.length} computed leaf(s): ${error}`)
+                log.warning(
+                    `[storageRoot] could not store ${result.filled.length} computed leaf(s): ${error instanceof Error ? error.message : String(error)}`,
+                )
             }
         }
         this.cached = { epoch, root: result.root }
         return root
     }
 
-    /** Proofs for `addresses` and the root they verify against, from one snapshot. */
+    /**
+     * Proofs for `addresses` and the root they verify against, from one
+     * snapshot. The tree for one undo range is reused until a write marks
+     * the table dirty, by the same epoch rule as the root.
+     */
     async prove(addresses: string[], undo?: StorageUndo): Promise<StorageProofSet> {
-        return await this.reader.read(snapshot => proveIn(snapshot, addresses, undo))
+        const epoch = this.epoch
+        const key = undo ? `${undo.fromBlock}..${undo.toBlock}` : "live"
+        const held = this.proofTree
+        const reuse = held?.epoch === epoch && held.key === key ? held.built : null
+        if (reuse === null) this.proofTreeBuilds++
+        const { set, built } = await this.reader.read(snapshot =>
+            proveIn(snapshot, addresses, undo, reuse),
+        )
+        if (reuse === null) this.proofTree = { epoch, key, built }
+        return set
     }
 }
 
@@ -323,9 +353,10 @@ export function storageProgramsRoot(): Promise<string> {
  * Proofs for `addresses` against the root of the committed table, or with
  * `undo`, against the root of the table before `undo.fromBlock`, rebuilt by
  * undoing the logged writes of blocks `fromBlock`..`toBlock` (the head).
- * Nothing is cached: the rebuild reads every leaf, about 60 ms for 10^4
- * programs. The caller holds the sync lock, so no block lands between the
- * read and the anchor it is checked against.
+ * The tree of the last range asked for is kept until a storage write; a
+ * rebuild reads every leaf, about 60 ms for 10^4 programs. The caller holds
+ * the sync lock, so no block lands between the read and the anchor it is
+ * checked against.
  */
 export function proveStoragePrograms(
     addresses: string[],

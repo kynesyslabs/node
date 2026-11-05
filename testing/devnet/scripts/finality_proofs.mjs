@@ -73,12 +73,11 @@ async function nodeCall(url, message, data) {
 /** Polls while the node answers one of `retryOn`, e.g. 409 until block m+1 lands. */
 async function nodeCallUntil(url, message, data, retryOn, timeoutMs = 90_000) {
     const deadline = Date.now() + timeoutMs
-    let answer
-    do {
-        answer = await nodeCall(url, message, data)
-        if (!retryOn.includes(answer.result)) return answer
+    let answer = await nodeCall(url, message, data)
+    while (retryOn.includes(answer.result) && Date.now() < deadline) {
         await sleep(1000)
-    } while (Date.now() < deadline)
+        answer = await nodeCall(url, message, data)
+    }
     return answer
 }
 
@@ -91,11 +90,19 @@ const sha256Hex = text => sha256(Buffer.from(text, "utf8")).toString("hex")
 
 // Sorted keys, JSON.stringify for primitives: the JCS / canonicalJson
 // spelling of the ASCII strings, integers and booleans used here.
+// UTF-16 code unit order, as JCS sorts keys; never locale-dependent.
+const byCodeUnits = (a, b) => {
+    if (a < b) return -1
+    if (a > b) return 1
+    return 0
+}
+
 function canonical(value) {
     if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
     if (value && typeof value === "object") {
-        const keys = Object.keys(value).sort()
-        return `{${keys.map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`
+        const keys = Object.keys(value).sort(byCodeUnits)
+        const members = keys.map(k => JSON.stringify(k) + ":" + canonical(value[k]))
+        return `{${members.join(",")}}`
     }
     return JSON.stringify(value)
 }

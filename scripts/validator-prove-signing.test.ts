@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { createHash } from "node:crypto"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getUnifiedCryptoInstance, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
@@ -8,8 +8,10 @@ import {
     type SigningProof,
     buildChallenge,
     parseChallenge,
+    verifyLaunchProofs,
     verifyProofs,
 } from "./validator-prove-signing"
+import { genesisValues } from "./genesis-hash"
 
 const GENESIS = "ab".repeat(32)
 const DATE = "2026-11-08"
@@ -46,10 +48,15 @@ beforeAll(async () => {
 })
 
 describe("challenge format", () => {
-    it("round-trips and lowercases the genesis hash", () => {
+    it("round-trips the genesis hash without case or a 0x prefix", () => {
         const c = buildChallenge("0x" + "AB".repeat(32), DATE)
-        expect(c).toBe(`demos-launch-proof:0x${"ab".repeat(32)}:${DATE}`)
-        expect(parseChallenge(c)).toEqual({ genesisHash: "0x" + "ab".repeat(32), date: DATE })
+        expect(c).toBe(`demos-launch-proof:${"ab".repeat(32)}:${DATE}`)
+        expect(buildChallenge("ab".repeat(32), DATE)).toBe(c)
+        expect(parseChallenge(c)).toEqual({ genesisHash: "ab".repeat(32), date: DATE })
+        expect(parseChallenge(`demos-launch-proof:0x${"AB".repeat(32)}:${DATE}`)).toEqual({
+            genesisHash: "ab".repeat(32),
+            date: DATE,
+        })
     })
 
     it("refuses anything that is not a genesis hash and a date", () => {
@@ -68,6 +75,34 @@ describe("verifyProofs with real ed25519 signatures", () => {
         expect(r.ok).toBe(true)
         expect(r.missing).toEqual([])
         expect(r.genesisHash).toBe(GENESIS)
+    })
+
+    it("accepts proofs whatever 0x prefix the hash and identities were written with", async () => {
+        // An older proof signed a challenge that kept the 0x; it still names the agreed genesis
+        const legacy = `demos-launch-proof:0x${GENESIS}:${DATE}`
+        const proofs = [
+            await proofBy(keys[0]),
+            await proofBy(keys[1], legacy),
+            { ...(await proofBy(keys[2])), identity: keys[2].identity.replace(/^0x/, "").toUpperCase() },
+        ]
+        for (const [genesisHash, listed] of [
+            ["0x" + GENESIS, validators],
+            [GENESIS.toUpperCase(), validators.map(v => v.replace(/^0x/, ""))],
+        ] as const) {
+            const r = await verifyProofs(proofs, [...listed], { genesisHash, date: DATE, requireAll: true })
+            expect(r.reports.filter(x => !x.ok)).toEqual([])
+            expect(r.ok).toBe(true)
+            expect(r.genesisHash).toBe(GENESIS)
+        }
+    })
+
+    it("still refuses a proof whose challenge was edited to drop the 0x", async () => {
+        const signed = await proofBy(keys[0], `demos-launch-proof:0x${GENESIS}:${DATE}`)
+        const r = await verifyProofs([{ ...signed, challenge: buildChallenge(GENESIS, DATE) }], validators, {
+            genesisHash: GENESIS,
+        })
+        expect(r.ok).toBe(false)
+        expect(r.reports[0].reason).toContain("does not verify")
     })
 
     it("reports missing validators, and fails on them only with requireAll", async () => {
@@ -159,11 +194,23 @@ describe("verify CLI", () => {
         unstake_available_at: null,
     })
     let dir = ""
-    afterAll(() => rmSync(dir, { recursive: true, force: true }))
+    const dirs: string[] = []
+    afterAll(() => dirs.forEach(d => rmSync(d, { recursive: true, force: true })))
 
-    /** Genesis lists keys 0 and 3; the snapshot's validators.jsonl, which the node uses, keys 0-2. */
-    function fixture(): { genesis: string; snapshot: string; proofs: string } {
+    /**
+     * Genesis lists keys 0 and 3; the snapshot's validators.jsonl, which the
+     * node uses, keys 0-2. The genesis binds the snapshot's manifest, as a
+     * node requires; `edit` changes the genesis before it is written.
+     */
+    function fixture(edit: (data: Record<string, unknown>) => void = () => {}): {
+        genesis: string
+        snapshot: string
+        proofs: string
+        blockHash: string
+        dataHash: string
+    } {
         dir = mkdtempSync(join(tmpdir(), "prove-signing-"))
+        dirs.push(dir)
         const snapshot = join(dir, "snapshot")
         const empty = sha256("")
         const body = keys.slice(0, 3).map(k => JSON.stringify(row(k.identity))).join("\n") + "\n"
@@ -172,24 +219,36 @@ describe("verify CLI", () => {
             writeFileSync(join(snapshot, f), "")
         }
         writeFileSync(join(snapshot, "validators.jsonl"), body)
-        writeFileSync(
-            join(snapshot, "manifest.json"),
-            JSON.stringify({
-                schemaVersion: 2,
-                source: { host: "t", chain_block_height: 0, chain_block_hash: "0x0", node_version: "t", pg_version: "t", dumped_at: "t" },
-                files: {
-                    "gcr_main.jsonl": { sha256: empty, rows: 0, balance_sum: "0" },
-                    "gcr_storageprogram.jsonl": { sha256: empty, rows: 0, size_bytes_sum: 0 },
-                    "identity_commitments.jsonl": { sha256: empty, rows: 0 },
-                    "validators.jsonl": { sha256: sha256(body), rows: 3 },
-                },
-                fork_state: [],
-                transforms_applied: { nonces_reset_to_zero: true, assigned_txs_emptied: true, test_identity_commitments_dropped: true },
-            }),
-        )
+        const manifest = JSON.stringify({
+            schemaVersion: 2,
+            source: { host: "t", chain_block_height: 0, chain_block_hash: "0x0", node_version: "t", pg_version: "t", dumped_at: "t" },
+            files: {
+                "gcr_main.jsonl": { sha256: empty, rows: 0, balance_sum: "0" },
+                "gcr_storageprogram.jsonl": { sha256: empty, rows: 0, size_bytes_sum: 0 },
+                "identity_commitments.jsonl": { sha256: empty, rows: 0 },
+                "validators.jsonl": { sha256: sha256(body), rows: 3 },
+            },
+            fork_state: [],
+            transforms_applied: { nonces_reset_to_zero: true, assigned_txs_emptied: true, test_identity_commitments_dropped: true },
+        })
+        writeFileSync(join(snapshot, "manifest.json"), manifest)
         const genesis = join(dir, "genesis.json")
-        writeFileSync(genesis, JSON.stringify({ validators: [row(keys[0].identity), row(keys[3].identity)] }))
-        return { genesis, snapshot, proofs: join(dir, "proofs.json") }
+        const data: Record<string, unknown> = {
+            properties: { id: 1, shardSize: 10 },
+            validators: [row(keys[0].identity), row(keys[3].identity)],
+            timestamp: 1793318400,
+            snapshot: { manifestSha256: sha256(manifest) },
+        }
+        edit(data)
+        writeFileSync(genesis, JSON.stringify(data))
+        const values = genesisValues(data, sha256(manifest))
+        return {
+            genesis,
+            snapshot,
+            proofs: join(dir, "proofs.json"),
+            blockHash: values.genesisBlockHash as string,
+            dataHash: values.genesisDataHash,
+        }
     }
 
     function run(args: string[]) {
@@ -203,8 +262,9 @@ describe("verify CLI", () => {
 
     it("checks proofs against the snapshot's validator set when --snapshot has one", async () => {
         const f = fixture()
-        writeFileSync(f.proofs, JSON.stringify(await Promise.all(keys.slice(0, 3).map(k => proofBy(k)))))
-        const common = ["--verify", f.proofs, "--genesis", f.genesis, "--genesis-hash", GENESIS, "--require-all"]
+        const signed = (hash: string) => Promise.all(keys.slice(0, 3).map(k => proofBy(k, buildChallenge(hash, DATE))))
+        writeFileSync(f.proofs, JSON.stringify(await signed(f.blockHash)))
+        const common = ["--verify", f.proofs, "--genesis", f.genesis, "--genesis-hash", f.blockHash, "--require-all"]
 
         const withSnapshot = run([...common, "--snapshot", f.snapshot])
         expect(withSnapshot.out).toContain("3 of 3 launch validators proven")
@@ -216,4 +276,129 @@ describe("verify CLI", () => {
         expect(genesisOnly.out).toContain("--verify needs --snapshot")
         expect(genesisOnly.code).toBe(2)
     }, 30_000)
+
+    it("holds the proofs to the block 0 the --genesis file builds", async () => {
+        const f = fixture()
+        const signed = (hash: string) => Promise.all(keys.slice(0, 3).map(k => proofBy(k, buildChallenge(hash, DATE))))
+        const base = ["--verify", f.proofs, "--snapshot", f.snapshot, "--require-all"]
+
+        // Proofs of the data hash agree with each other, and still fail
+        writeFileSync(f.proofs, JSON.stringify(await signed(f.dataHash)))
+        const data = run([...base, "--genesis", f.genesis])
+        expect(data.out).toContain("that is the genesis data hash")
+        expect(data.out).toContain("NOT OK")
+        expect(data.code).toBe(1)
+
+        // A double-encoded genesis file is the same genesis to the node
+        writeFileSync(f.proofs, JSON.stringify(await signed(f.blockHash)))
+        const encoded = join(dir, "genesis.encoded.json")
+        writeFileSync(encoded, JSON.stringify(readFileSync(f.genesis, "utf8")))
+        const ok = run([...base, "--genesis", encoded])
+        expect(ok.out).toContain("3 of 3 launch validators proven")
+        expect(ok.code).toBe(0)
+
+        const wrongFlag = run([...base, "--genesis", f.genesis, "--genesis-hash", f.dataHash])
+        expect(wrongFlag.out).toContain(`--genesis-hash ${f.dataHash} is not block 0 of the genesis file`)
+        expect(wrongFlag.code).toBe(1)
+    }, 60_000)
+
+    it("fails a genesis a node would refuse, though block 0 can be built from it", async () => {
+        // Binds another snapshot than the one the node boots with
+        const f = fixture(data => {
+            data.snapshot = { manifestSha256: "00".repeat(32) }
+        })
+        writeFileSync(
+            f.proofs,
+            JSON.stringify(await Promise.all(keys.slice(0, 3).map(k => proofBy(k, buildChallenge(f.blockHash, DATE))))),
+        )
+        const r = run(["--verify", f.proofs, "--snapshot", f.snapshot, "--genesis", f.genesis, "--require-all"])
+        expect(r.out).toContain("a node would refuse this genesis at its first boot: snapshot manifest hashes to")
+        expect(r.out).toContain("NOT OK")
+        expect(r.code).toBe(1)
+    }, 30_000)
+
+    it("refuses a genesis whose fork schedule this build cannot load", async () => {
+        // Block 0 is still built from the forks that do load; proofs name that hash
+        const f = fixture(data => {
+            data.forks = { forkThisBuildDoesNotKnow: { activationHeight: 0 } }
+        })
+        expect(f.blockHash).toMatch(/^[0-9a-f]{64}$/)
+        writeFileSync(
+            f.proofs,
+            JSON.stringify(await Promise.all(keys.slice(0, 3).map(k => proofBy(k, buildChallenge(f.blockHash, DATE))))),
+        )
+        const r = run(["--verify", f.proofs, "--snapshot", f.snapshot, "--genesis", f.genesis, "--require-all"])
+        expect(r.out).toContain('a node would refuse its fork schedule: [FORKS] Genesis schedules fork "forkThisBuildDoesNotKnow"')
+        expect(r.out).not.toContain("launch validators proven")
+        expect(r.code).toBe(2)
+    }, 30_000)
+})
+
+describe("verifyLaunchProofs against the genesis file", () => {
+    const DATA = "cd".repeat(32)
+    const file = { blockHash: GENESIS, dataHash: DATA, problems: [] }
+
+    it("accepts proofs of the block 0 the file builds, with or without --genesis-hash", async () => {
+        const proofs = await Promise.all(keys.slice(0, 3).map(k => proofBy(k)))
+        for (const genesisHash of [null, GENESIS, "0x" + GENESIS.toUpperCase()]) {
+            const r = await verifyLaunchProofs(proofs, validators, file, { genesisHash, requireAll: true })
+            expect(r.problems).toEqual([])
+            expect(r.ok).toBe(true)
+        }
+    })
+
+    it("fails proofs of the data hash, without --genesis-hash too", async () => {
+        const proofs = await Promise.all(keys.slice(0, 3).map(k => proofBy(k, buildChallenge(DATA, DATE))))
+        // On their own they agree and verify
+        expect((await verifyProofs(proofs, validators, { requireAll: true })).ok).toBe(true)
+        for (const genesisHash of [null, DATA]) {
+            const r = await verifyLaunchProofs(proofs, validators, file, { genesisHash, requireAll: true })
+            expect(r.ok).toBe(false)
+            expect(r.problems.join("\n")).toContain("that is the genesis data hash")
+            expect(r.reports.every(x => !x.ok)).toBe(true)
+        }
+    })
+
+    it("fails proofs of another block 0, such as one built from a differently keyed copy", async () => {
+        const other = "ef".repeat(32)
+        const proofs = await Promise.all(keys.slice(0, 3).map(k => proofBy(k, buildChallenge(other, DATE))))
+        for (const genesisHash of [null, other]) {
+            const r = await verifyLaunchProofs(proofs, validators, file, { genesisHash, requireAll: true })
+            expect(r.ok).toBe(false)
+            expect(r.reports[0].reason).toContain(`challenge names genesis ${other}, expected ${GENESIS}`)
+        }
+        const flagged = await verifyLaunchProofs(proofs, validators, file, { genesisHash: other })
+        expect(flagged.problems.join("\n")).toContain(`--genesis-hash ${other} is not block 0 of the genesis file`)
+    })
+
+    it("fails when the file's block 0 cannot be known", async () => {
+        const proofs = await Promise.all(keys.slice(0, 3).map(k => proofBy(k)))
+        const r = await verifyLaunchProofs(
+            proofs,
+            validators,
+            { blockHash: null, dataHash: DATA, problems: ["genesis has no timestamp: x"] },
+            { genesisHash: GENESIS, requireAll: true },
+        )
+        expect(r.ok).toBe(false)
+        expect(r.problems).toEqual([
+            "a node would refuse this genesis at its first boot: genesis has no timestamp: x",
+            "block 0 of the genesis file cannot be known before launch",
+        ])
+    })
+
+    it("fails proofs of a block 0 built from a file a node would refuse", async () => {
+        const proofs = await Promise.all(keys.slice(0, 3).map(k => proofBy(k)))
+        // Every proof names the hash the file builds and verifies
+        const r = await verifyLaunchProofs(
+            proofs,
+            validators,
+            { ...file, problems: ["snapshot manifest hashes to aa, genesis declares bb"] },
+            { genesisHash: GENESIS, requireAll: true },
+        )
+        expect(r.reports.every(x => x.ok)).toBe(true)
+        expect(r.ok).toBe(false)
+        expect(r.problems).toEqual([
+            "a node would refuse this genesis at its first boot: snapshot manifest hashes to aa, genesis declares bb",
+        ])
+    })
 })

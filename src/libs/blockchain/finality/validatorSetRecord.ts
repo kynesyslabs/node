@@ -7,6 +7,7 @@
 
 import Hashing from "@/libs/crypto/hashing"
 import { jcsCanonicalize } from "src/libs/crypto/jcs"
+import { compareCodeUnits } from "src/libs/crypto/canonicalJson"
 import { VALIDATOR_STATUS_ACTIVE } from "@/features/staking/constants"
 import type { Validators } from "src/model/entities/Validators"
 import type { ValidatorSetEntry } from "src/model/entities/ValidatorSetSnapshots"
@@ -15,8 +16,6 @@ export type ValidatorRow = Pick<
     Validators,
     "address" | "staked_amount" | "status" | "valid_at"
 >
-
-const byCodeUnits = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 /**
  * The set record of validators rows: every row, whatever its status, as
@@ -36,8 +35,8 @@ export function validatorSetRecord(rows: ValidatorRow[]): ValidatorSetEntry[] {
         .map(entry => ({ entry, key: jcsCanonicalize(entry) }))
         .sort(
             (a, b) =>
-                byCodeUnits(a.entry.identity, b.entry.identity) ||
-                byCodeUnits(a.key, b.key),
+                compareCodeUnits(a.entry.identity, b.entry.identity) ||
+                compareCodeUnits(a.key, b.key),
         )
         .map(({ entry }) => entry)
 }

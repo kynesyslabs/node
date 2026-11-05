@@ -20,6 +20,7 @@ import {
     eligiblePoolFrom,
 } from "src/libs/consensus/v2/routines/poolRules"
 import { jcsCanonicalize } from "src/libs/crypto/jcs"
+import { compareCodeUnits } from "src/libs/crypto/canonicalJson"
 import { verifyAuditPath } from "src/libs/crypto/merkle/rfc6962"
 import {
     verifyMembership,
@@ -97,7 +98,10 @@ export interface CommitteeRules {
     commitLock?: boolean
     /**
      * The exact bound committee, for a client that drew it itself. Without
-     * it signatures count from the whole pool the committee is drawn from.
+     * it the pool the committee is drawn from must be no larger than
+     * `shardSize`, so the committee is the whole pool; a larger pool gives
+     * "indeterminate", since signers outside the drawn committee would
+     * otherwise count.
      */
     committee?: string[]
     /** Ed25519 check; node:crypto by default. */
@@ -245,11 +249,25 @@ function signerPool(
               .filter((id): id is string => typeof id === "string" && id.length > 0)
               .map(id => id.toLowerCase())
         : []
+    if (rules.committee) {
+        return new Set(
+            rules.committee
+                .filter(id => typeof id === "string" && staked.has(id.toLowerCase()))
+                .map(stripHex),
+        )
+    }
     const floor = quorumThreshold(rules.shardSize)
     const eligible = eligiblePoolFrom(peerlist, staked)
-    const pool = rules.committee
-        ? rules.committee.filter(id => typeof id === "string" && staked.has(id.toLowerCase()))
-        : boundPoolFrom(eligible?.pool ?? [], staked, floor)
+    const pool = boundPoolFrom(eligible?.pool ?? [], staked, floor)
+    // The committee is the first shardSize of a seeded ranking of the pool;
+    // the seed needs blocks this proof does not carry.
+    if (pool.length > rules.shardSize) {
+        throw new Rejection(
+            "indeterminate",
+            `the committee for block ${parent.number + 1} is drawn from ${pool.length} identities, ` +
+                `more than the shard size ${rules.shardSize}; supply the committee drawn for it`,
+        )
+    }
     return new Set(pool.map(stripHex))
 }
 
@@ -303,7 +321,7 @@ function readLeaf(proof: TransactionProof): { status: "confirmed" | "failed" } {
         throw invalid("the leaf is not an object")
     }
     const leaf = parsed as Record<string, unknown>
-    if (Object.keys(leaf).sort().join(",") !== "code,hash,status") {
+    if (Object.keys(leaf).sort(compareCodeUnits).join(",") !== "code,hash,status") {
         throw invalid("the leaf is not {code, hash, status}")
     }
     let canonical: string

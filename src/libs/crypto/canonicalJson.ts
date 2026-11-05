@@ -27,6 +27,17 @@
  * `Set` or binary buffer (serialized as `{}` by `JSON.stringify`), and cycles.
  * Shared, non-cyclic references are fine.
  */
+/**
+ * Orders strings by UTF-16 code units, the order of a comparator-less
+ * `Array.prototype.sort`. Never `localeCompare`: a locale-dependent order
+ * would give nodes in different locales different bytes.
+ */
+export function compareCodeUnits(a: string, b: string): number {
+    if (a < b) return -1
+    if (a > b) return 1
+    return 0
+}
+
 export function canonicalJson(value: unknown): string {
     const out = serialize(value, "", [])
     if (out === undefined) {
@@ -55,11 +66,11 @@ function serialize(raw: unknown, key: string, ancestors: object[]): string | und
             return JSON.stringify(value)
         case "number":
             if (!Number.isFinite(value)) {
-                throw new Error(`canonicalJson: non-finite number: ${value}`)
+                throw new TypeError(`canonicalJson: non-finite number: ${value}`)
             }
             return JSON.stringify(value)
         case "bigint":
-            throw new Error("canonicalJson: bigint has no JSON form; store it as a decimal string")
+            throw new TypeError("canonicalJson: bigint has no JSON form; store it as a decimal string")
         case "undefined":
         case "function":
         case "symbol":
@@ -68,18 +79,19 @@ function serialize(raw: unknown, key: string, ancestors: object[]): string | und
 
     const obj = value as object
     if (obj instanceof Map || obj instanceof Set || ArrayBuffer.isView(obj) || obj instanceof ArrayBuffer) {
-        throw new Error(`canonicalJson: ${obj.constructor.name} has no faithful JSON form`)
+        throw new TypeError(`canonicalJson: ${obj.constructor.name} has no faithful JSON form`)
     }
     if (ancestors.includes(obj)) throw new Error("canonicalJson: circular reference")
     ancestors.push(obj)
     try {
         if (Array.isArray(obj)) {
-            const items = obj.map((item, i) => serialize(item, String(i), ancestors) ?? "null")
+            // Array.from visits holes too, which map skips: JSON spells them null
+            const items = Array.from(obj, (item, i) => serialize(item, String(i), ancestors) ?? "null")
             return `[${items.join(",")}]`
         }
         const record = obj as Record<string, unknown>
         const members: string[] = []
-        for (const k of Object.keys(record).sort()) {
+        for (const k of Object.keys(record).sort(compareCodeUnits)) {
             const v = serialize(record[k], k, ancestors)
             if (v !== undefined) members.push(`${JSON.stringify(k)}:${v}`)
         }

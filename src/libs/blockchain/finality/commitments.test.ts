@@ -21,12 +21,21 @@ let rows = new Map<string, Row>()
 const getTransactionsFromHashes = jest.fn(async (hashes: string[]) =>
     hashes.filter(h => rows.has(h)).map(h => ({ ...rows.get(h) })),
 )
+const setFailureCodes = jest.fn(async (blockNumber: number, codes: Map<string, string | null>) => {
+    for (const [hash, code] of codes) {
+        const row = rows.get(hash)
+        if (row?.blockNumber === blockNumber && row.status === "failed") {
+            row.attrs = { ...(row.attrs ?? {}), code }
+        }
+    }
+})
 
 mock.module("src/libs/blockchain/chain", () => ({
     __esModule: true,
     default: {
         getBlockByNumber: async (n: number) => blocks.get(n) ?? null,
         getTransactionsFromHashes,
+        setFailureCodes,
     },
 }))
 
@@ -51,6 +60,7 @@ const {
     buildCommitments,
     parentResultsRoot,
     projectedResultsRoot,
+    repairParentResultCodes,
     resultLeaf,
     resultsRoot,
     verifyCommitments,
@@ -110,6 +120,7 @@ beforeEach(() => {
     blocks = new Map()
     rows = new Map()
     getTransactionsFromHashes.mockClear()
+    setFailureCodes.mockClear()
     setHashes = new Map([[0, SET_0]])
     validatorSetAt.mockClear()
     resetCommitmentCache()
@@ -317,6 +328,24 @@ describe("verifyCommitments", () => {
         const verdict = await verifyCommitments(block, prev)
         expect(verdict.valid).toBe(false)
         expect(verdict.reason).toContain("parent_results_root mismatch")
+        expect(verdict.parentResultsMismatch).toBe(true)
+    })
+
+    it("flags a root mismatch only when nothing else is wrong", async () => {
+        const { block, prev } = await forged()
+        ;(block.content as any).parent_results_root = H(77)
+        ;(block.content as any).validator_set_hash = H(78)
+        const verdict = await verifyCommitments(block, prev)
+        expect(verdict.reason).toContain("validator_set_hash mismatch")
+        expect(verdict.parentResultsMismatch).toBeUndefined()
+    })
+
+    it("leaves the root unchecked when asked, and checks the rest", async () => {
+        const { block, prev } = await forged()
+        ;(block.content as any).parent_results_root = H(77)
+        expect(await verifyCommitments(block, prev, { skipParentResults: true })).toEqual({ valid: true })
+        ;(block.content as any).validator_set_hash = H(78)
+        expect((await verifyCommitments(block, prev, { skipParentResults: true })).valid).toBe(false)
     })
 
     it("rejects a root that is not lowercase hex", async () => {
@@ -414,6 +443,56 @@ describe("projectedResultsRoot", () => {
         const projected = await projectedResultsRoot(block, [served])
 
         expect(projected).toBe(toHex(root([resultLeaf(confirmed(H(1), 2), 5)])))
+    })
+})
+
+describe("repairParentResultCodes", () => {
+    const a = confirmed(H(1), 4)
+    const honest = failed(H(2), 4, "TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE")
+    const old = confirmed(H(3), 2)
+
+    /** Block 4 as the network committed it, then stored here with `stored` in place of the honest row. */
+    async function setup(stored: Row) {
+        const p = storeParent(4, [a.hash, honest.hash, old.hash], [a, honest, old])
+        const committed = await parentResultsRoot(p)
+        resetCommitmentCache()
+        rows.set(stored.hash, stored)
+        expect(await parentResultsRoot(p)).not.toBe(committed)
+        resetCommitmentCache()
+        return { p, committed }
+    }
+
+    it("rewrites a failure code to the one the committed root holds", async () => {
+        const { p, committed } = await setup(failed(H(2), 4, "TX_NONCE_INVALID_LOW"))
+        const served = [a, honest, failed(H(3), 4, "anything")]
+
+        expect(await repairParentResultCodes(p, committed, served)).toBe(1)
+        expect(setFailureCodes).toHaveBeenCalledWith(4, new Map([[H(2), honest.attrs!.code]]))
+        expect(await parentResultsRoot(p)).toBe(committed)
+    })
+
+    it("writes nothing when the served codes do not give the committed root", async () => {
+        const { p, committed } = await setup(failed(H(2), 4, "TX_NONCE_INVALID_LOW"))
+
+        expect(await repairParentResultCodes(p, committed, [a, failed(H(2), 4, "TX_EXECUTE_FAILED")])).toBeNull()
+        expect(await repairParentResultCodes(p, H(99), [a, honest])).toBeNull()
+        expect(setFailureCodes).not.toHaveBeenCalled()
+    })
+
+    it("never changes a stored status", async () => {
+        // Stored confirmed where the network has it failed: no code can fix that
+        const { p, committed } = await setup(confirmed(H(2), 4))
+
+        expect(await repairParentResultCodes(p, committed, [a, honest])).toBeNull()
+        expect(setFailureCodes).not.toHaveBeenCalled()
+    })
+
+    it("writes nothing when the stored rows already give the root", async () => {
+        const p = storeParent(4, [a.hash, honest.hash], [a, honest])
+        const committed = await parentResultsRoot(p)
+
+        expect(await repairParentResultCodes(p, committed, [a, honest])).toBe(0)
+        expect(setFailureCodes).not.toHaveBeenCalled()
     })
 })
 

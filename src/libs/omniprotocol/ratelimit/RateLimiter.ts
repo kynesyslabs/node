@@ -70,6 +70,7 @@ export class RateLimiter {
             entry.blocked = true
             entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
             entry.rejectionReason = `(max ${this.config.maxConnectionsPerIP} connections per IP)`
+            entry.connectionLimitBlock = true
 
             return {
                 allowed: false,
@@ -108,6 +109,30 @@ export class RateLimiter {
         if (entry) {
             entry.connections = Math.max(0, entry.connections - 1)
             entry.lastAccess = Date.now()
+        }
+    }
+
+    /**
+     * Give back a slot held by a connection that proved it is a validator.
+     * Validators behind one NAT address can fill the IP's slots while their
+     * validator lookups are still running, and a socket arriving in that
+     * window blocks the IP; once their slots come back, that block would
+     * only lock out the validators themselves. A block for request floods
+     * stays.
+     */
+    releaseValidatorConnection(ipAddress: string): void {
+        if (!this.config.enabled) return
+        this.removeConnection(ipAddress)
+
+        const entry = this.ipLimits.get(ipAddress)
+        if (
+            entry?.blocked &&
+            entry.connectionLimitBlock &&
+            entry.connections < this.config.maxConnectionsPerIP
+        ) {
+            entry.blocked = false
+            entry.blockExpiry = undefined
+            entry.connectionLimitBlock = false
         }
     }
 
@@ -183,6 +208,7 @@ export class RateLimiter {
             entry.blocked = true
             entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
             entry.rejectionReason = `(max ${maxRequests} requests per second)`
+            entry.connectionLimitBlock = false
 
             return {
                 allowed: false,
