@@ -9,11 +9,14 @@
  *   - getTransactionStatus answers the same on two nodes, with the code and
  *     the height searched; the receiver gained only the executed amount;
  *   - an unknown hash is 404 not_found with the height, block 0 is served,
- *     a getTransactions page serialises, and a history page is capped.
+ *     a getTransactions page serialises, and a history page is capped;
+ *   - getFinalizedHead answers a head at or above the inclusion block, with
+ *     the hash that height is stored under and a non-negative age.
  *
  * Env: NODE1_URL, NODE2_URL, IDENTITY_PATH, RECEIVER_PUBKEY, AMOUNT_OS.
  * Prints "OK" and exits 0, or "FAIL: ..." and exits 1.
  */
+import { createPublicKey, verify as verifySignature } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 
@@ -131,6 +134,41 @@ const history = await nodeCall(NODE1_URL, "getTransactionHistory", { address: se
 check(history.result === 200 && Array.isArray(history.response) && history.response.length <= 100, "history page capped at 100", `result ${history.result}, rows ${history.response?.length}`)
 const badHistory = await nodeCall(NODE1_URL, "getTransactionHistory", { address: sender, type: "all", limit: -1 })
 check(badHistory.result === 400, "history refuses a negative limit", `result ${badHistory.result}`)
+
+const inclusionBlock = (await nodeCall(NODE1_URL, "getTransactionStatus", { hash: executedHash })).response?.blockNumber
+const head = await nodeCall(NODE1_URL, "getFinalizedHead", {})
+const headBlock = Number.isInteger(head.response?.number)
+    ? await nodeCall(NODE1_URL, "getBlockByNumber", { blockNumber: head.response.number })
+    : null
+check(
+    head.result === 200 && Number.isInteger(inclusionBlock) && head.response.number >= inclusionBlock && head.response.checkedThroughBlock === head.response.number &&
+        head.response.hash === headBlock?.response?.hash && Number.isInteger(head.response.ageSeconds) && head.response.ageSeconds >= 0 &&
+        typeof head.response.nodeSynced === "boolean" && head.response.signatureCount >= 1,
+    "finalized head covers the inclusion block, matches the stored hash, age non-negative",
+    JSON.stringify({ result: head.result, ...head.response, signatures: undefined }),
+)
+
+// A client must be able to verify the head's certificate from this answer
+// alone: ed25519 over the signed message, by the validator key in each entry.
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex")
+function signatureVerifies(identity, signature, message) {
+    try {
+        const raw = Buffer.from(String(identity).replace(/^0x/, ""), "hex")
+        const key = createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, raw]), format: "der", type: "spki" })
+        return verifySignature(null, Buffer.from(message, "utf8"), key, Buffer.from(String(signature).replace(/^0x/, ""), "hex"))
+    } catch {
+        return false
+    }
+}
+const headSigs = Object.entries(head.response?.signatures ?? {})
+const verifiedSigs = typeof head.response?.signedMessage === "string"
+    ? headSigs.filter(([id, sig]) => signatureVerifies(id, sig, head.response.signedMessage)).length
+    : 0
+check(
+    verifiedSigs >= 3 && head.response.signedMessage.endsWith(head.response.hash),
+    "finalized head signatures verify offline against signedMessage (quorum 3 of 4)",
+    `${verifiedSigs}/${headSigs.length} verified, round ${head.response?.round}, message ${head.response?.signedMessage}`,
+)
 
 if (failures > 0) {
     console.log(`FAIL: ${failures} check(s) failed`)

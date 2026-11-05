@@ -22,10 +22,30 @@ import {
 } from "../../serialization/transaction"
 import { errorResponse, encodeResponse } from "./utils"
 
-export const handleGetMempool: OmniHandler<Buffer> = async () => {
+export const handleGetMempool: OmniHandler<Buffer> = async ({ context }) => {
     const { default: mempoolModule } =
         await import("src/libs/blockchain/mempool")
-    const mempool = await mempoolModule.getMempool()
+
+    // The opcode needs no auth, so only a proven validator identity reads
+    // the whole pool; anyone else gets the public page.
+    let wholePool = false
+    if (context?.isAuthenticated && context.peerIdentity) {
+        const { isMergePeerEligible } = await import(
+            "src/libs/consensus/mergePeerEligibility"
+        )
+        wholePool = await isMergePeerEligible(context.peerIdentity)
+    }
+    let mempool: Awaited<ReturnType<typeof mempoolModule.getMempool>>
+    if (wholePool) {
+        mempool = await mempoolModule.getMempool()
+    } else {
+        const { MEMPOOL_PUBLIC_PAGE_MAX } = await import(
+            "src/utilities/constants"
+        )
+        mempool = (
+            await mempoolModule.getMempoolPage(0, MEMPOOL_PUBLIC_PAGE_MAX)
+        ).txs
+    }
 
     const serializedTransactions = mempool.map(tx => encodeTransaction(tx))
 

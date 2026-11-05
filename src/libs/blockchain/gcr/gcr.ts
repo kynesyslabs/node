@@ -46,7 +46,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 // TODO chain are both immutable and editable at the same time
 
 import _ from "lodash"
-import { In, LessThan, LessThanOrEqual, Not } from "typeorm"
+import { In, LessThan, LessThanOrEqual, Not, Repository } from "typeorm"
 
 import Hashing from "src/libs/crypto/hashing"
 import Datasource from "src/model/datasource"
@@ -237,19 +237,45 @@ export default class GCR {
         log.debug(`blockNumber: ${blockNumber}`)
 
         try {
-            const blockNodes = await validatorsRepository.find({
-                where: {
-                    valid_at: LessThanOrEqual(blockNumber),
-                    status: "2",
-                },
-                order: { valid_at: "DESC" },
-            })
+            const blockNodes = await GCR.findValidatorsAtBlock(
+                validatorsRepository,
+                blockNumber,
+            )
 
             return blockNodes || []
         } catch (e) {
             log.error(`Error fetching GCR validators at block: ${e}`)
             return [] // or handle the error as needed
         }
+    }
+
+    /**
+     * The validators at `blockNumber`, letting a failed read throw. The
+     * getter above answers a failed read with [], which reads the same as a
+     * network with no validators.
+     */
+    static async getGCRValidatorsAtBlockOrThrow(
+        blockNumber: number,
+    ): Promise<Validators[]> {
+        const db = await Datasource.getInstance()
+        const blockNodes = await GCR.findValidatorsAtBlock(
+            db.getDataSource().getRepository(Validators),
+            blockNumber,
+        )
+        return blockNodes || []
+    }
+
+    private static findValidatorsAtBlock(
+        validatorsRepository: Repository<Validators>,
+        blockNumber: number,
+    ): Promise<Validators[]> {
+        return validatorsRepository.find({
+            where: {
+                valid_at: LessThanOrEqual(blockNumber),
+                status: "2",
+            },
+            order: { valid_at: "DESC" },
+        })
     }
 
     // INFO Get a validator (or a public key anyway) status in the staking

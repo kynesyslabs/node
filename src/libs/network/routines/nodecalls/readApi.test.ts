@@ -156,8 +156,19 @@ describe("getTransactions", () => {
         expect(getTransactions).toHaveBeenCalledWith("latest", 100)
     })
 
+    it("caps the page at 100, like the history call", async () => {
+        await getTransactionsCall({ start: "latest", limit: 1_000_000 })
+        await getTransactionsCall({ start: 50, limit: 101 })
+        await getTransactionsCall({ start: 50, limit: 7 })
+        expect(getTransactions.mock.calls).toEqual([
+            ["latest", 100],
+            [50, 100],
+            [50, 7],
+        ])
+    })
+
     it("refuses a limit below 1 or a negative or fractional start", async () => {
-        for (const data of [{ start: "latest", limit: 0 }, { start: -1, limit: 5 }, { start: 1.5, limit: 5 }, { start: "latest", limit: 2.5 }]) {
+        for (const data of [{ start: "latest", limit: 0 }, { start: "latest", limit: -5 }, { start: -1, limit: 5 }, { start: 1.5, limit: 5 }, { start: "latest", limit: 2.5 }, { start: "latest", limit: "10" }, { start: "latest", limit: Number.POSITIVE_INFINITY }]) {
             expect((await getTransactionsCall(data as any)).result).toBe(400)
         }
         expect(getTransactions).not.toHaveBeenCalled()
