@@ -194,8 +194,11 @@ when re-enabling the server.
 # node is recreated below; stop it first (a no-op without the reaper profile)
 docker compose stop reaper caddy
 # Drop the proxy profile AND the proxy override from .env, touching only
-# those two settings
-sed -i -e '/^COMPOSE_PROFILES=/s/,proxy//' -e '/^COMPOSE_FILE=/s/:docker-compose.proxy.yml//' .env
+# those two settings. The profile list is padded with commas so `proxy` is
+# removed as a whole entry wherever it sits (first, middle, last or alone)
+sed -i \
+  -e '/^COMPOSE_PROFILES=/{s/=/=,/;s/$/,/;s/,proxy,/,/g;s/=,/=/;s/,$//}' \
+  -e '/^COMPOSE_FILE=/s/:docker-compose.proxy.yml//' .env
 # Serve Grafana from its own port again
 sed -i -e '/^GRAFANA_ROOT_URL=/d' -e '/^GRAFANA_SERVE_FROM_SUB_PATH=/d' .env
 # Recreate the services so their host ports are published again
