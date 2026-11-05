@@ -750,8 +750,14 @@ scenario_listed_stall() {
     [ "${ok}" = 1 ] && RESULT=PASS
 }
 
+# Every database call is bounded: a table lock or a Postgres that accepts and
+# then stops answering must fail the read (and the drill gives no verdict), not
+# hang it past every scenario timeout. statement_timeout ends the query on the
+# server; the outer timeout ends a client stuck before or after it.
+DB_TIMEOUT_S=30
+PG_LIMITS=(-e PGCONNECT_TIMEOUT=10 -e "PGOPTIONS=-c statement_timeout=20000")
 psql_node() { # $1 node, $2 SQL
-    docker exec "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2"
+    timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2"
 }
 
 scenario_fallback() {
@@ -769,6 +775,7 @@ scenario_fallback() {
         say "ABORT: the nodes stopped on different heads: $(echo ${heads_db})"; exit 2
     fi
     h="${heads_db}"
+    [[ "${h}" =~ ^[0-9]+$ ]] || { say "ABORT: could not read the stopped heads from the databases (got '${h}')"; exit 2; }
     # Six listed validators (< q = 7) out of ten staked. The stored text is
     # rewritten with key order kept, every node identically; the block hash
     # is not recomputed, nothing re-hashes a stored block.
@@ -786,7 +793,7 @@ text = json.dumps(c, separators=(",", ":"))
 assert "$qdrill$" not in text
 print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = {int(sys.argv[2])};")
 ' "${pl_json}" "${h}" > "${RUN_DIR}/inputs/content-${i}.sql" || { say "ABORT: rewriting block ${h} failed"; exit 2; }
-        docker exec -i "$(dc ps -q postgres)" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q -f - \
+        timeout "${DB_TIMEOUT_S}" docker exec -i "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q -f - \
             < "${RUN_DIR}/inputs/content-${i}.sql" >> "${STEP_LOG}" 2>&1 || { say "ABORT: update failed on node${i}_db"; exit 2; }
         [ "$(psql_node "${i}" "SELECT json_array_length(content->'peerlist') FROM blocks WHERE number = ${h}")" = 6 ] ||
             { say "ABORT: node${i}_db does not list 6 at ${h}"; exit 2; }
