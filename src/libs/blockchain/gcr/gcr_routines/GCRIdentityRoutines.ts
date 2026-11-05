@@ -7,8 +7,12 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import {
     applyXmIdentityAdd,
     applyXmIdentityRemove,
+    rollbackXmIdentityAdd,
+    rollbackXmIdentityRemove,
     applyWeb2IdentityAdd,
     applyWeb2IdentityRemove,
+    rollbackWeb2IdentityAdd,
+    rollbackWeb2IdentityRemove,
     applyPqcIdentityAdd,
     applyPqcIdentityRemove,
     applyUdIdentityAdd,
@@ -26,6 +30,7 @@ import {
     applyTLSNIdentityAdd,
     applyTLSNIdentityRemove,
 } from "./routines"
+import type { EditPlace } from "./routines/removedIdentities"
 
 export default class GCRIdentityRoutines {
     static async apply(
@@ -34,6 +39,8 @@ export default class GCRIdentityRoutines {
         simulate?: boolean, // NEEDED by zk transactions
         /** The set being applied, whose ZK claims a proof must not repeat. */
         entities?: GCREntityCaches,
+        /** Set on a block apply only: where an unlink's undo record goes. */
+        place?: EditPlace,
     ): Promise<GCRResult> {
         if (
             editOperation.type !== "identity" ||
@@ -47,6 +54,35 @@ export default class GCRIdentityRoutines {
 
         const identityEdit = structuredClone(editOperation)
 
+        // CONVERT operation.account to hex
+        identityEdit.account =
+            typeof identityEdit.account === "string"
+                ? identityEdit.account
+                : forgeToHex(identityEdit.account)
+
+        // The opposite routine cannot undo these: a remove edit carries
+        // only the name of the link and an add edit is shaped differently.
+        if (identityEdit.isRollback) {
+            switch (identityEdit.context + identityEdit.operation) {
+                case "web2add":
+                    return rollbackWeb2IdentityAdd(identityEdit, accountGCR)
+                case "web2remove":
+                    return rollbackWeb2IdentityRemove(
+                        identityEdit,
+                        accountGCR,
+                        place,
+                    )
+                case "xmadd":
+                    return rollbackXmIdentityAdd(identityEdit, accountGCR)
+                case "xmremove":
+                    return rollbackXmIdentityRemove(
+                        identityEdit,
+                        accountGCR,
+                        place,
+                    )
+            }
+        }
+
         let operation = identityEdit.operation
         if (identityEdit.isRollback) {
             if (operation === "add") {
@@ -57,12 +93,6 @@ export default class GCRIdentityRoutines {
         }
 
         let result: GCRResult
-
-        // CONVERT operation.account to hex
-        identityEdit.account =
-            typeof identityEdit.account === "string"
-                ? identityEdit.account
-                : forgeToHex(identityEdit.account)
 
         switch (operation) {
             case "zk_commitmentadd":
@@ -91,6 +121,7 @@ export default class GCRIdentityRoutines {
                         result = await applyXmIdentityRemove(
                             identityEdit,
                             accountGCR,
+                            place,
                         )
                         break
                     case "web2add":
@@ -103,6 +134,7 @@ export default class GCRIdentityRoutines {
                         result = await applyWeb2IdentityRemove(
                             identityEdit,
                             accountGCR,
+                            place,
                         )
                         break
                     case "pqcadd":
