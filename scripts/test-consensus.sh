@@ -27,6 +27,7 @@ SUITE_FILES=(
     src/libs/blockchain/finality/validatorSet.test.ts
     src/libs/blockchain/finality/verify.test.ts
     src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
+    src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
@@ -45,6 +46,7 @@ SUITE_FILES=(
     src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
+    src/libs/identity/web2Unlink.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
@@ -77,6 +79,7 @@ SUITE_FILES=(
     testing/genesis/genesisHashTool.test.ts
     testing/genesis/genesisMismatch.test.ts
     testing/genesis/genesisPin.test.ts
+    testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
 )
 
