@@ -151,7 +151,10 @@ git checkout v1.0.0-rc.1 &&
 ```
 
 The chain stops at the first failing check, so `./run` never starts an
-unverified tree. The full walk-through is in `INSTALL.md`. If the release
+unverified tree. The chain upgrades a host whose database already has its
+schema: a new host starts with the first-install steps in `INSTALL.md`
+(`./run -c true`), since a plain `./run` refuses to boot on an empty database.
+The full walk-through is in `INSTALL.md`. If the release
 adds a migration, leave `./run` off the chain and migrate first. The launcher
 stops its Postgres together with the node, so start it alone from its folder,
 wait until it is ready, back up, then go back to the node checkout and migrate
