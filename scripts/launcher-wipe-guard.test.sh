@@ -12,6 +12,8 @@
 #   - a failed stack teardown or a failed removal of the volume / data dir stops
 #     the launcher before migrate
 #   - a database that still has tables stops it before migrate
+#   - a probe or `up --wait` that hangs (Postgres up but silent) times out and
+#     stops it before migrate, instead of hanging forever
 #   - an empty database is migrated exactly once
 #   - a plain start never migrates
 #
@@ -26,6 +28,7 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="${SCRIPTS_DIR:-$HERE}"
 REAL_RM="$(command -v rm)"
+REAL_SLEEP="$(command -v sleep)"
 ROOT="$(mktemp -d)"
 trap '"$REAL_RM" -rf "$ROOT"' EXIT
 
@@ -44,6 +47,17 @@ make_stubs() {
 #!/usr/bin/env bash
 echo "docker $*" >>"$STUB_ST/calls.log"
 count() { local n; n="$(ls -1 "$1" 2>/dev/null | wc -l)"; echo $((n)); }
+# STUB_HANG_PSQL=1: psql accepts the connection and never answers. Inside a
+# `timeout N psql` it is killed (exit 124, at once: the stub does not wait N
+# seconds); with no `timeout` around it, it really hangs, as the launcher would.
+psql_hang() {
+    [[ "${STUB_HANG_PSQL:-0}" == 1 ]] || return 0
+    if [[ "$*" == *"timeout "[0-9]*" psql"* ]]; then
+        echo "stub: psql hung, killed by timeout" >>"$STUB_ST/calls.log"
+        exit 124
+    fi
+    "$STUB_REAL_SLEEP" 15   # longer than CHECK_TIMEOUT, short enough that an orphan ends soon
+}
 case "${1:-}" in
 compose)
     sub=""
@@ -53,6 +67,12 @@ compose)
     case "$sub" in
     down) [[ "${STUB_FAIL_DOWN:-0}" == 1 ]] && { echo "Error: cannot stop" >&2; exit 1; }; exit 0 ;;
     up)
+        # STUB_HANG_UP=1: Postgres never becomes healthy. `up --wait` gives up
+        # (non-zero) only when given --wait-timeout; otherwise it waits forever.
+        if [[ "${STUB_HANG_UP:-0}" == 1 && " $* " == *" --wait "* ]]; then
+            if [[ " $* " == *" --wait-timeout "* ]]; then echo "timed out waiting for postgres" >&2; exit 1; fi
+            "$STUB_REAL_SLEEP" 15
+        fi
         if [[ "$(basename "$PWD")" == postgres_* ]]; then
             mkdir -p "data_${PG_PORT:-5332}/postgres/tables"
         else
@@ -60,6 +80,7 @@ compose)
         fi
         exit 0 ;;
     exec)
+        psql_hang "$*"
         [[ "${STUB_FAIL_PSQL:-0}" == 1 ]] && exit 1
         if [[ -n "${STUB_PSQL_TABLES:-}" ]]; then echo "$STUB_PSQL_TABLES"; exit 0; fi
         count "$STUB_ST/vol/demos_pgdata/tables"
@@ -87,9 +108,14 @@ volume)
     esac
     exit 0 ;;
 exec)
-    case "${3:-}" in
+    # the command run in the container: the first psql / pg_isready among the
+    # arguments (skips `-e VAR=...` options and a `timeout N` wrapper)
+    cmd=""
+    for a in "$@"; do case "$a" in psql|pg_isready) cmd="$a"; break ;; esac; done
+    case "$cmd" in
     pg_isready) exit 0 ;;
     psql)
+        psql_hang "$*"
         [[ "${STUB_FAIL_PSQL:-0}" == 1 ]] && exit 1
         if [[ -n "${STUB_PSQL_TABLES:-}" ]]; then echo "$STUB_PSQL_TABLES"; exit 0; fi
         count "$STUB_WORK/postgres_5332/data_5332/postgres/tables"
@@ -178,11 +204,13 @@ check() {
     shift 3
     local out rc mig ok=1
     out="$(cd "$W" && env PATH="$W/bin:$PATH" STUB_ST="$ST" STUB_WORK="$W" STUB_REAL_RM="$REAL_RM" \
-        GOSSIP_ENABLED=false timeout 60 "$@" 2>&1)"
+        STUB_REAL_SLEEP="$REAL_SLEEP" GOSSIP_ENABLED=false timeout "${CHECK_TIMEOUT:-60}" "$@" 2>&1)"
     rc=$?
     mig="$(migrations)"
     [[ "$want_rc" == ok && "$rc" -ne 0 ]] && ok=0
     [[ "$want_rc" == fail && "$rc" -eq 0 ]] && ok=0
+    # 124: the launcher itself hung until the harness killed it
+    [[ "$rc" -eq 124 ]] && ok=0
     [[ "$mig" -ne "$want_mig" ]] && ok=0
     if [[ "$ok" -eq 1 ]]; then
         PASS=$((PASS + 1))
@@ -195,7 +223,12 @@ check() {
     LAST_OUT="$out"
 }
 
-start_case() { N=$((N + 1)); unset STUB_FAIL_DOWN STUB_FAIL_VOLRM STUB_FAIL_RM STUB_FAIL_PSQL STUB_PSQL_TABLES; new_world; }
+start_case() { N=$((N + 1)); unset STUB_FAIL_DOWN STUB_FAIL_VOLRM STUB_FAIL_RM STUB_FAIL_PSQL STUB_PSQL_TABLES STUB_HANG_PSQL STUB_HANG_UP CHECK_TIMEOUT; new_world; }
+
+# the hung stub must have been run under a bounded `timeout N psql`
+expect_bounded_probe() {
+    grep -qE 'timeout [0-9]+ psql' "$ST/calls.log" 2>/dev/null || { FAIL=$((FAIL + 1)); echo "FAIL - the psql probe has no timeout around it"; }
+}
 
 # -----------------------------------------------------------------------------
 # docker-run
@@ -215,6 +248,14 @@ case "$LAST_OUT" in *"still has 2 table"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL 
 
 start_case; seed_volumes; export STUB_FAIL_PSQL=1
 check "docker-run --clean: emptiness cannot be checked -> stops before migrate" fail 0 "$W/scripts/docker-run" --clean up -d
+
+start_case; seed_volumes; export STUB_HANG_PSQL=1 CHECK_TIMEOUT=8
+check "docker-run --clean: emptiness probe hangs -> times out, stops before migrate" fail 0 "$W/scripts/docker-run" --clean up -d
+case "$LAST_OUT" in *"could not check that the database is empty"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - no plain 'could not check' message"; esac
+expect_bounded_probe
+
+start_case; seed_volumes; export STUB_HANG_UP=1 CHECK_TIMEOUT=8
+check "docker-run --clean: postgres never becomes ready (up --wait) -> times out, stops before migrate" fail 0 "$W/scripts/docker-run" --clean up -d
 
 start_case; seed_volumes
 check "docker-run --clean: empty database -> migrates once" ok 1 "$W/scripts/docker-run" --clean up -d
@@ -239,6 +280,11 @@ case "$LAST_OUT" in *"still has 3 table"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL 
 
 start_case; seed_datadir; export STUB_FAIL_PSQL=1
 check "run -c true: emptiness cannot be checked -> stops before migrate" fail 0 "$W/scripts/run" -c true -t -m
+
+start_case; seed_datadir; export STUB_HANG_PSQL=1 CHECK_TIMEOUT=8
+check "run -c true: emptiness probe hangs -> times out, stops before migrate" fail 0 "$W/scripts/run" -c true -t -m
+case "$LAST_OUT" in *"Could not check that the database is empty"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - no plain 'could not check' message"; esac
+expect_bounded_probe
 
 start_case; seed_datadir
 check "run -c true: empty database -> migrates once" ok 1 "$W/scripts/run" -c true -t -m

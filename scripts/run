@@ -862,8 +862,10 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 		# Only an EMPTY database gets migrated: if a wipe did not take effect, this
 		# would apply pending migrations to live data with no backup.
 		local tables
-		if ! tables="$(docker exec postgres_"${PG_PORT}" psql -U demosuser -d demos -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()")" || [[ ! "${tables}" =~ ^[0-9]+$ ]]; then
-			echo "❌ Could not check that the database is empty; not running migration:run"
+		# Bounded (connect, query, and `timeout` inside the container for a server
+		# that accepts and then stops answering): a hang must not stall the launcher.
+		if ! tables="$(docker exec -e PGCONNECT_TIMEOUT=10 -e PGOPTIONS="-c statement_timeout=20000" postgres_"${PG_PORT}" timeout 30 psql -U demosuser -d demos -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()")" || [[ ! "${tables}" =~ ^[0-9]+$ ]]; then
+			echo "❌ Could not check that the database is empty (or the check timed out after 30s); not running migration:run"
 			exit 1
 		fi
 		if [[ "${tables}" -ne 0 ]]; then

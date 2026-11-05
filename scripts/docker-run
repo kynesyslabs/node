@@ -541,12 +541,17 @@ fi
 # docs/runbooks/database-migrations.md
 if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
     echo "+ --clean: creating the schema on the empty database (migration:run)"
-    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} up -d --wait postgres
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} up -d --wait --wait-timeout 120 postgres || {
+        echo "ERROR: --clean: Postgres was not ready within 120s (or this Docker Compose has no 'up --wait-timeout'); not running migration:run." >&2
+        exit 1
+    }
     # Only an EMPTY database gets migrated. If the wipe above did not take
     # effect, this would apply pending migrations to live data with no backup.
-    TABLE_COUNT="$(docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"')" || TABLE_COUNT=""
+    # The probe is bounded (connect, query, and `timeout` for a server that
+    # accepts and then stops answering): a hang must not stall the launcher.
+    TABLE_COUNT="$(docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} exec -T postgres sh -c 'PGCONNECT_TIMEOUT=10 PGOPTIONS="-c statement_timeout=20000" timeout 30 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"')" || TABLE_COUNT=""
     if [[ ! "$TABLE_COUNT" =~ ^[0-9]+$ ]]; then
-        echo "ERROR: --clean could not check that the database is empty; not running migration:run." >&2
+        echo "ERROR: --clean could not check that the database is empty (or the check timed out after 30s); not running migration:run." >&2
         exit 1
     fi
     if [[ "$TABLE_COUNT" -ne 0 ]]; then

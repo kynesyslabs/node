@@ -89,16 +89,54 @@ Do it on **one** validator first, then the rest. Never on all at once.
    dump. Keep a copy off the host.
 
    **Check the dump before you migrate.** A failed `pg_dump` still leaves the
-   redirect target behind, possibly empty or cut short. Both must pass:
+   redirect target behind, possibly empty or cut short. Do all three checks:
 
-   ```bash
-   test -s ~/demos-backups/<file>.dump && pg_restore --list ~/demos-backups/<file>.dump > /dev/null && echo dump OK
-   ```
+   1. **The dump's exit status.** Read it on the line right after the dump
+      command, before you run anything else (`$?` is overwritten by the next
+      command):
 
-   `test -s` fails on a zero-byte file; `pg_restore --list` fails on a file that
-   is not a complete custom-format archive. If either fails, take the dump again
-   and do not go on to step 2. With no `pg_restore` on the host, run it in the
-   container: `docker compose exec -T postgres pg_restore --list < <file>`.
+      ```bash
+      echo "pg_dump exit status: $?"
+      ```
+
+      With the `docker compose exec` / `docker exec` / host `pg_dump` forms
+      above, this is the status of `pg_dump` itself. If you pipe the dump into
+      anything (`gzip`, `tee`), run `set -o pipefail` first, or the status is
+      the last command's. If it is not `0`: delete the file
+      (`rm ~/demos-backups/<file>.dump`) and stop. Do not go on to step 2.
+
+   2. **Read the whole archive.** `pg_restore --list` reads only the table of
+      contents at the start of the file, so a dump cut off after it but before
+      all the data still passes. Read every data item instead; the output is
+      thrown away, only the exit status matters:
+
+      ```bash
+      test -s ~/demos-backups/<file>.dump && pg_restore --file=/dev/null ~/demos-backups/<file>.dump && echo dump read OK
+      ```
+
+      `test -s` fails on a zero-byte file; `pg_restore --file=/dev/null` fails
+      on a file that is not a complete custom-format archive. With no
+      `pg_restore` on the host, run it in the container, same form as the dump:
+      `docker compose exec -T postgres pg_restore --file=/dev/null < <file>`
+      (or `docker exec -i postgres_<PG_PORT> pg_restore --file=/dev/null < <file>`;
+      `-i` passes the file in, still no `-t`).
+
+   3. **Where you can, restore it into a scratch database** and look at it. This
+      is the only check that proves the dump can be restored:
+
+      ```bash
+      createdb -h <PG_HOST> -p <PG_PORT> -U <PG_USER> demos_restore_check
+      pg_restore --exit-on-error --no-owner -h <PG_HOST> -p <PG_PORT> -U <PG_USER> -d demos_restore_check ~/demos-backups/<file>.dump
+      dropdb -h <PG_HOST> -p <PG_PORT> -U <PG_USER> demos_restore_check
+      ```
+
+      Use a scratch name, never the live database name. On the Docker stack,
+      run the same three commands through `docker compose exec -T postgres`
+      (feed the dump to `pg_restore` with `< <file>`). Skip this only if there
+      is no room or no second database to restore into, and say so in your
+      change record.
+
+   If any check fails, take the dump again and do not go on to step 2.
 
 2. **Apply on one validator.** With the new release deployed and the node
    stopped:
