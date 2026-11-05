@@ -214,6 +214,8 @@ export function loadConfig(): Readonly<AppConfig> {
                     EnvKey.FORK_SCHEDULE_MISMATCH_POLICY,
                     d.core.forkScheduleMismatchPolicy,
                 ),
+                // Read as getShard reads it: only the exact string switches it on
+                process.env[EnvKey.DEMOS_REQUIRE_VALIDATORS] === "true",
             ),
         },
 
@@ -519,11 +521,23 @@ export function loadConfig(): Readonly<AppConfig> {
 /**
  * An unrecognised policy must stop the node: falling back to a default would
  * silently give an operator who typed "abstian" the opposite of what they meant.
+ *
+ * `warn` is for devnets and testnets. A mainnet validator (the one setting
+ * that marks it, DEMOS_REQUIRE_VALIDATORS=true) that kept voting on another
+ * fork schedule inside the pre-activation window would sign blocks its
+ * peers reject at the activation height, so the pair is refused.
  */
 function parseForkScheduleMismatchPolicy(
     raw: string,
+    requireValidators: boolean,
 ): ForkScheduleMismatchPolicy {
     const value = raw.trim().toLowerCase()
+    if (value === "warn" && requireValidators) {
+        throw new Error(
+            "[config] FORK_SCHEDULE_MISMATCH_POLICY=warn is for devnets and testnets; " +
+                "a mainnet validator (DEMOS_REQUIRE_VALIDATORS=true) runs abstain",
+        )
+    }
     if (value === "abstain" || value === "warn") return value
     throw new Error(
         `[config] FORK_SCHEDULE_MISMATCH_POLICY must be "abstain" or "warn" (got "${raw}")`,
