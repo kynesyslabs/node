@@ -149,6 +149,14 @@ EXPOSED_URL=http://YOUR_PUBLIC_IP:53550
 
 plus the genesis pin and the validator settings from [Joining the network](#joining-the-network--required-steps-before-real-world-use) below (steps 2 and 3). With a digest in `IMAGE_TAG`, Docker refuses any image whose content differs from the release, whatever the tag points to.
 
+Then add the mainnet parameter sheet, the block timing, fees, stake floor and validator mode every validator runs with the same values ([docs/mainnet/parameters.md](docs/mainnet/parameters.md) says what each one does):
+
+```bash
+cat docs/mainnet/parameters.env >> .env
+```
+
+Appended lines win over earlier lines of the same name (for example the `PROD=false` that `.env.example` ships with), both for Docker and for the node. Do not edit them: step 4 fails on any value that differs from the sheet.
+
 **3. Put the key in place.** A validator key is generated on a trusted machine, not on the validator host, and backed up encrypted with a second person ([docs/runbooks/validator-key.md](docs/runbooks/validator-key.md)). On that machine, from a checkout of the same tag with dependencies installed (`bun install --frozen-lockfile`):
 
 ```bash
@@ -176,7 +184,7 @@ With `PROD=true` the node never creates a key by itself: a missing key stops it,
 ./scripts/node-doctor --production
 ```
 
-It prints one PASS or FAIL line per item (`PROD`, `DEMOS_REQUIRE_VALIDATORS`, clock sync, outbound NTP, fork-schedule policy, genesis pins, the fees, stake floor and block time every validator must share, one-start switches left set) and exits 1 on any FAIL. It reads the values the node container will get from `docker compose config`, so run it from the checkout with `.env` in place. Fix every FAIL before the next step.
+It prints one PASS or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, one-start switches left set) and exits 1 on any FAIL. It reads the values the node container will get from `docker compose config`, so run it from the checkout with `.env` in place. Fix every FAIL before the next step.
 
 **5. Pull, create the database schema, and start without building.**
 
@@ -200,6 +208,15 @@ docker image inspect --format '{{index .RepoDigests 0}}' \
 
 It must print `ghcr.io/kynesyslabs/node@sha256:<the digest in checksums.txt>`.
 
+**7. Confirm the parameters the container got.** Compose passes a variable to the node only when `docker-compose.yml` lists it, so check inside the running container, not `.env`:
+
+```bash
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose ps -q node)" |
+  grep -E "^($(grep -oE '^[A-Z_0-9]+' docs/mainnet/parameters.env | paste -sd'|'))=" | sort
+```
+
+Every line must equal the same line of `docs/mainnet/parameters.env`. Post the output with the digest.
+
 ### Environment file
 
 `.env.example` is the canonical template. Copy it to `.env` and edit. The variables you actually care about:
@@ -214,6 +231,7 @@ It must print `ghcr.io/kynesyslabs/node@sha256:<the digest in checksums.txt>`.
 | `EXPECTED_GENESIS_BLOCK_HASH` | _(empty)_ | The network's published block 0 hash. Optional; when set, the node refuses any other block 0. |
 | `DEMOS_REQUIRE_VALIDATORS` | _(empty)_ | `true` on mainnet validators: with no active validators in the database the node refuses to run consensus instead of using every online peer as the committee. |
 | `PROD` | `false` | `true` on validators. The node then refuses to start with a loopback or missing `EXPOSED_URL`, without the commit it was built from, or without its identity file (it never creates a new key on its own; see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Production refusals"). |
+| `CONSENSUS_TIME`, `BLOCK_TIMESTAMP_MIN_DELTA`, `BLOCK_TIMESTAMP_TOLERANCE`, `NETWORK_FEE`, `RPC_FEE`, `BURN_FEE`, `RPC_FEE_PERCENT`, `MIN_VALIDATOR_STAKE`, `ZK_ATTESTATION_POINTS` | _(empty: built-in values)_ | Chain-wide: every validator runs the same values. Mainnet validators copy them from [docs/mainnet/parameters.env](docs/mainnet/parameters.env); `./scripts/node-doctor --production` fails on any other value. |
 | `FORK_SCHEDULE_MISMATCH_POLICY` | `abstain` | What a validator does when its fork schedule differs from most validators' before a fork. Mainnet runs `abstain` only; `warn` is for devnets and testnets, and the node refuses it together with `DEMOS_REQUIRE_VALIDATORS=true`. See [docs/runbooks/fork-schedule-policy.md](docs/runbooks/fork-schedule-policy.md). |
 | `IMAGE_NAME` / `IMAGE_TAG` | `demos-node` / `local` | The node image. Validators set the released image and `tag@sha256:digest`; the defaults name a local build. |
 | `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | `demosuser` / `demospassword` / `demos` | Postgres credentials. Change `PG_PASSWORD` if you're paranoid; it never leaves the compose network. |
@@ -279,10 +297,9 @@ The image runs with `NODE_ENV=production`, and a production node refuses to star
 # In .env
 EXPECTED_GENESIS_HASH=<published genesis hash>
 EXPECTED_GENESIS_BLOCK_HASH=<published block 0 hash>
-# Validators
-PROD=true
-DEMOS_REQUIRE_VALIDATORS=true
-FORK_SCHEDULE_MISMATCH_POLICY=abstain
+# Validators: PROD, DEMOS_REQUIRE_VALIDATORS, FORK_SCHEDULE_MISMATCH_POLICY
+# and the chain-wide values come from the parameter sheet
+# (cat docs/mainnet/parameters.env >> .env)
 ```
 
 `scripts/genesis-hash.ts --genesis <file>` prints both values for a genesis file; the block 0 hash is the one labelled "genesis block hash". What each hash covers, and where mainnet's are published, is in [docs/mainnet/genesis-hash.md](docs/mainnet/genesis-hash.md).
@@ -722,7 +739,7 @@ Set `EXPOSED_URL` based on your setup:
 - Remote machine: `http://YOUR_PUBLIC_IP:53550`
 - Behind proxy: `https://demos.example.com`
 
-Mainnet validators run Track 1 with the released image. A bare-metal node keeps the published genesis file and snapshot outside the checkout and points `DEMOS_GENESIS_FILE` and `DEMOS_SNAPSHOT_DIR` in `.env` at them (absolute paths). Never copy them over `data/genesis.json` or `data/snapshot/`: those are tracked files, the node would then report its build as dirty, and the launch go/no-go check does not count a dirty build as the release. A named genesis file that is missing stops the node at boot. Run with the release tag checked out and nothing else changed (`git status` shows no modified tracked files). Also set the genesis pins and validator settings from [Pin the network's genesis](#joining-the-network--required-steps-before-real-world-use) (`EXPECTED_GENESIS_HASH`, `EXPECTED_GENESIS_BLOCK_HASH`, `PROD=true`, `DEMOS_REQUIRE_VALIDATORS=true`, `FORK_SCHEDULE_MISMATCH_POLICY=abstain`) and run `./scripts/node-doctor --production --env-from env` before starting: without `--env-from env` the doctor reads the Docker settings whenever `docker-compose.yml` and Docker are present, not the `.env` and environment a bare-metal node uses. `./run` does not set `NODE_ENV=production`, so a missing pin only shows as a warning at boot.
+Mainnet validators run Track 1 with the released image. A bare-metal node keeps the published genesis file and snapshot outside the checkout and points `DEMOS_GENESIS_FILE` and `DEMOS_SNAPSHOT_DIR` in `.env` at them (absolute paths). Never copy them over `data/genesis.json` or `data/snapshot/`: those are tracked files, the node would then report its build as dirty, and the launch go/no-go check does not count a dirty build as the release. A named genesis file that is missing stops the node at boot. Run with the release tag checked out and nothing else changed (`git status` shows no modified tracked files). Also set the genesis pins from [Pin the network's genesis](#joining-the-network--required-steps-before-real-world-use) (`EXPECTED_GENESIS_HASH`, `EXPECTED_GENESIS_BLOCK_HASH`), append the parameter sheet (`cat docs/mainnet/parameters.env >> .env`, which sets `PROD=true`, `DEMOS_REQUIRE_VALIDATORS=true`, `FORK_SCHEDULE_MISMATCH_POLICY=abstain` and the chain-wide values) and run `./scripts/node-doctor --production --env-from env` before starting: without `--env-from env` the doctor reads the Docker settings whenever `docker-compose.yml` and Docker are present, not the `.env` and environment a bare-metal node uses. `./run` does not set `NODE_ENV=production`, so a missing pin only shows as a warning at boot.
 
 If you're using FFI mode (`TLSNOTARY_MODE=ffi`), set `TLSNOTARY_SIGNING_KEY` in `.env` to a 64-char hex secp256k1 key — or leave it empty and the node auto-generates one into `.tlsnotary-key` on first boot. To skip TLSNotary entirely, set `TLSNOTARY_ENABLED=false`.
 

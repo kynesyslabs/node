@@ -236,17 +236,19 @@ services:
       TLSNOTARY_PROXY_PORT: ${TLSNOTARY_PROXY_PORT:-55688}
       TLSNOTARY_PROXY_PORT_MIN: ${TLSNOTARY_PROXY_PORT_MIN:-55000}
       TLSNOTARY_PROXY_PORT_MAX: ${TLSNOTARY_PROXY_PORT_MAX:-55063}
-      # Chain-wide values: every validator must run the same ones, so leave
-      # them unset (the node's built-in values) unless the whole network
-      # changes them together. They were not passed before, so a value in an
-      # existing .env takes effect from this release on; node-doctor
-      # --production flags any that differ from the built-in value.
+      # Chain-wide values: every validator runs the ones in
+      # docs/mainnet/parameters.env, copied into .env, and node-doctor
+      # --production fails on any other value. Empty means the node's
+      # built-in value, which devnets and local runs use.
       CONSENSUS_TIME: ${CONSENSUS_TIME:-}
+      BLOCK_TIMESTAMP_MIN_DELTA: ${BLOCK_TIMESTAMP_MIN_DELTA:-}
+      BLOCK_TIMESTAMP_TOLERANCE: ${BLOCK_TIMESTAMP_TOLERANCE:-}
       RPC_FEE: ${RPC_FEE:-}
       NETWORK_FEE: ${NETWORK_FEE:-}
       BURN_FEE: ${BURN_FEE:-}
       RPC_FEE_PERCENT: ${RPC_FEE_PERCENT:-}
       MIN_VALIDATOR_STAKE: ${MIN_VALIDATOR_STAKE:-}
+      ZK_ATTESTATION_POINTS: ${ZK_ATTESTATION_POINTS:-}
       # Consensus: sit out rounds while a peer's fork schedule differs
       FORK_SCHEDULE_MISMATCH_POLICY: ${FORK_SCHEDULE_MISMATCH_POLICY:-abstain}
       # Logging & misc
