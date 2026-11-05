@@ -22,9 +22,13 @@
  *
  * proofs.json is an array of sign-mode outputs. Every proof must come from a
  * launch validator (staked at block 0: from the snapshot's validators.jsonl
- * when it has one, else from the genesis), carry the expected challenge and
- * verify; with --require-all every launch validator must have one.
- * Exit codes: 0 ok, 1 a proof failed or one is missing, 2 bad input or refused.
+ * when it has one, else from the genesis), name the block 0 hash the genesis
+ * file builds (as must --genesis-hash when given), carry the expected date
+ * and verify; with --require-all every launch validator must have one. A
+ * genesis file a node would refuse at its first boot fails the check, and
+ * one whose fork schedule this build cannot load is refused.
+ * Exit codes: 0 ok, 1 a proof failed, one is missing or a node would refuse
+ * the genesis, 2 bad input or refused.
  */
 
 import * as fs from "fs"
@@ -33,6 +37,9 @@ import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 export const CHALLENGE_PREFIX = "demos-launch-proof"
 const HASH_RE = /^(0x)?[0-9a-f]{64}$/i
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** Hashes and identities compare without case or a 0x prefix: tools and operators write both. */
+const normHex = (hex: string) => hex.trim().toLowerCase().replace(/^0x/, "")
 
 export interface SigningProof {
     identity: string
@@ -48,7 +55,7 @@ export function buildChallenge(genesisHash: string, date: string): string {
     if (!DATE_RE.test(date)) {
         throw new Error(`date must be YYYY-MM-DD, got ${JSON.stringify(date)}`)
     }
-    return `${CHALLENGE_PREFIX}:${genesisHash.toLowerCase()}:${date}`
+    return `${CHALLENGE_PREFIX}:${normHex(genesisHash)}:${date}`
 }
 
 export function parseChallenge(challenge: string): { genesisHash: string; date: string } | null {
@@ -56,7 +63,7 @@ export function parseChallenge(challenge: string): { genesisHash: string; date: 
     if (parts.length !== 3 || parts[0] !== CHALLENGE_PREFIX) return null
     const [, genesisHash, date] = parts
     if (!HASH_RE.test(genesisHash) || !DATE_RE.test(date)) return null
-    return { genesisHash: genesisHash.toLowerCase(), date }
+    return { genesisHash: normHex(genesisHash), date }
 }
 
 export type SignatureCheck = (message: Uint8Array, signatureHex: string, publicKeyHex: string) => Promise<boolean>
@@ -98,8 +105,8 @@ export async function verifyProofs(
     opts: { genesisHash?: string | null; date?: string | null; requireAll?: boolean } = {},
     check: SignatureCheck = verifyEd25519,
 ): Promise<VerifyResult> {
-    const listed = new Set(validators.map(v => v.toLowerCase()))
-    let genesisHash = opts.genesisHash ? opts.genesisHash.toLowerCase() : null
+    const listed = new Map(validators.map(v => [normHex(v), v.toLowerCase()]))
+    let genesisHash = opts.genesisHash ? normHex(opts.genesisHash) : null
     const reports: ProofReport[] = []
     const proven = new Set<string>()
 
@@ -114,7 +121,8 @@ export async function verifyProofs(
             fail(`algorithm ${proof.algorithm}; block signatures are ed25519`)
             continue
         }
-        if (!listed.has(identity)) {
+        const key = normHex(identity)
+        if (!listed.has(key)) {
             fail("not a launch validator")
             continue
         }
@@ -132,21 +140,67 @@ export async function verifyProofs(
             fail(`challenge is dated ${parsed.date}, expected ${opts.date}`)
             continue
         }
-        if (proven.has(identity)) {
+        if (proven.has(key)) {
             fail("duplicate proof for this identity")
             continue
         }
-        if (!(await check(new TextEncoder().encode(proof.challenge), proof.signature, identity))) {
+        // The signature covers the challenge exactly as it was signed
+        if (!(await check(new TextEncoder().encode(proof.challenge), proof.signature, `0x${key}`))) {
             fail("signature does not verify for this identity")
             continue
         }
-        proven.add(identity)
+        proven.add(key)
         reports.push({ identity, ok: true, reason: null })
     }
 
-    const missing = [...listed].filter(v => !proven.has(v))
+    const missing = [...listed].filter(([key]) => !proven.has(key)).map(([, v]) => v)
     const ok = reports.every(r => r.ok) && (!opts.requireAll || missing.length === 0) && proven.size > 0
     return { ok, genesisHash, reports, missing }
+}
+
+/** Block 0 of the --genesis file, as scripts/genesis-hash.ts computes it. */
+export interface GenesisBlock {
+    /** null when block 0 cannot be known before launch. */
+    blockHash: string | null
+    dataHash: string
+    /** What a node would refuse in the file at its first boot (genesisValues). */
+    problems: string[]
+}
+
+/**
+ * verifyProofs against the launch genesis file: every proof must name the
+ * block 0 that file builds, and so must --genesis-hash when given, and a
+ * node must accept the file. Proofs that agree only with each other prove
+ * nothing about the chain the file starts.
+ */
+export async function verifyLaunchProofs(
+    proofs: SigningProof[],
+    validators: string[],
+    genesis: GenesisBlock,
+    opts: { genesisHash?: string | null; date?: string | null; requireAll?: boolean } = {},
+    check: SignatureCheck = verifyEd25519,
+): Promise<VerifyResult & { problems: string[] }> {
+    const problems: string[] = []
+    const blockHash = genesis.blockHash === null ? null : normHex(genesis.blockHash)
+    const dataHash = normHex(genesis.dataHash)
+    const flag = opts.genesisHash ? normHex(opts.genesisHash) : null
+    const dataHashNote = "that is the genesis data hash; proofs sign the genesis block hash scripts/genesis-hash.ts prints"
+    // A hash computed from a file the node refuses is block 0 of no chain
+    for (const p of genesis.problems) problems.push(`a node would refuse this genesis at its first boot: ${p}`)
+    if (blockHash === null) problems.push("block 0 of the genesis file cannot be known before launch")
+    if (flag !== null && blockHash !== null && flag !== blockHash) {
+        problems.push(
+            `--genesis-hash ${flag} is not block 0 of the genesis file, which builds ${blockHash}` +
+                (flag === dataHash ? `: ${dataHashNote}` : ""),
+        )
+    }
+    // Each proof is held to the file's block 0, so one naming anything else fails by name
+    const result = await verifyProofs(proofs, validators, { ...opts, genesisHash: blockHash ?? flag }, check)
+    const named = new Set(
+        proofs.map(p => (typeof p?.challenge === "string" ? parseChallenge(p.challenge)?.genesisHash : null)),
+    )
+    if (named.has(dataHash)) problems.push(`some proofs name genesis ${dataHash}: ${dataHashNote}`)
+    return { ...result, ok: result.ok && problems.length === 0, problems }
 }
 
 // ── sign mode ────────────────────────────────────────────────────────────
@@ -234,7 +288,18 @@ async function main(argv: string[]): Promise<number> {
             console.error(`--verify needs --snapshot: ${NO_SNAPSHOT_REASON}\n${usage()}`)
             return 2
         }
-        const genesis = JSON.parse(fs.readFileSync(opts.genesis, "utf8"))
+        const { readGenesisFile, genesisValues, snapshotManifestSha256 } = await import("./genesis-hash")
+        const genesis = readGenesisFile(opts.genesis)
+        const { loadForkConfigFromGenesis } = await import("src/forks")
+        // A fork schedule this build cannot load stops the node's boot, so there is nothing to verify against
+        try {
+            loadForkConfigFromGenesis(genesis)
+        } catch (e) {
+            console.error(`genesis: a node would refuse its fork schedule: ${(e as Error).message}`)
+            return 2
+        }
+        // The node checks the genesis against the snapshot it boots with
+        const values = genesisValues(genesis, snapshotManifestSha256(opts.snapshot))
         const { readBlockZeroValidators, launchIdentities } = await import("./launch-validator-set")
         let blockZero: Awaited<ReturnType<typeof readBlockZeroValidators>>
         try {
@@ -248,11 +313,17 @@ async function main(argv: string[]): Promise<number> {
         const validators = launchIdentities(blockZero.rows)
         const raw = JSON.parse(fs.readFileSync(opts.verify, "utf8"))
         const proofs: SigningProof[] = Array.isArray(raw) ? raw : [raw]
-        const result = await verifyProofs(proofs, validators, {
-            genesisHash: (opts["genesis-hash"] as string) ?? null,
-            date: (opts.date as string) ?? null,
-            requireAll: opts.requireAll === true,
-        })
+        const result = await verifyLaunchProofs(
+            proofs,
+            validators,
+            { blockHash: values.genesisBlockHash, dataHash: values.genesisDataHash, problems: values.problems },
+            {
+                genesisHash: (opts["genesis-hash"] as string) ?? null,
+                date: (opts.date as string) ?? null,
+                requireAll: opts.requireAll === true,
+            },
+        )
+        for (const p of result.problems) console.log(`FAIL ${p}`)
         for (const r of result.reports) {
             console.log(`${r.ok ? "ok  " : "FAIL"} ${r.identity}${r.reason ? `: ${r.reason}` : ""}`)
         }

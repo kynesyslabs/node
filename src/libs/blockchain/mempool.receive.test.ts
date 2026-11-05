@@ -42,13 +42,20 @@ jest.mock("@/forks", () => ({
     isForkActive: jest.fn(() => true),
 }))
 
+let badSignatures = new Set<string>()
 jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
     __esModule: true,
     default: {
         getInstance: () => ({
-            validate: jest.fn(async (txs: Array<{ hash: string }>) =>
-                txs.map(t => ({ valid: true, hash: t.hash })),
-            ),
+            validate: jest.fn(async (txs: Array<{ hash: string }>) => {
+                // The verdict arrives after the call returns, as from a worker.
+                await new Promise(resolve => setTimeout(resolve, 1))
+                return txs.map(t =>
+                    badSignatures.has(t.hash)
+                        ? { valid: false, hash: t.hash, reason: "Invalid signature" }
+                        : { valid: true, hash: t.hash },
+                )
+            }),
         }),
     },
 }))
@@ -94,6 +101,7 @@ const tx = (hash: string, referenceBlock: number, status = "pending") =>
 describe("Mempool.receive admission", () => {
     beforeEach(() => {
         onChainHashes = new Set()
+        badSignatures = new Set()
         insertedRows = []
         mempoolRows = []
         logError.mockClear()
@@ -131,6 +139,13 @@ describe("Mempool.receive admission", () => {
                 String(c[0]).includes("outside the allowed window"),
             ),
         ).toHaveLength(2)
+    })
+
+    it("drops a tx whose signature fails and keeps the rest of the batch", async () => {
+        badSignatures = new Set(["0xforged"])
+        const res = await Mempool.receive([tx("0xa", 100), tx("0xforged", 100), tx("0xb", 100)])
+        expect(res.success).toBe(true)
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xa", "0xb"])
     })
 
     it("normalizes peer-supplied status to pending before insert", async () => {
