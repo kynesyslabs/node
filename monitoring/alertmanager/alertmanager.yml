@@ -1,4 +1,4 @@
-# Alertmanager for the Demos monitoring stack. Three receivers, none of them with a URL
+# Alertmanager for the Demos monitoring stack. Three receivers (plus `blackhole`, which sends nothing), none of them with a URL
 # in this repo: each URL is read from a file (compose secret, see monitoring/secrets/README.md):
 #   slack   - everything except the heartbeat: critical and page (copy of the page),
 #             warnings and info          <- /run/secrets/slack_webhook  (<SLACK_WEBHOOK_URL_PLACEHOLDER>)
@@ -31,6 +31,13 @@ route:
     # SEAM kynesyslabs/node#1084: routes for rules from that PR go here, below the
     # dead-man route and above the severity routes, matching on its own alertnames/labels.
 
+    # MissedSignatures is a trend signal (severity info), not an alarm: on the 4-node soak it
+    # counted higher when healthy than during real faults. It stays visible in Prometheus and
+    # Grafana but notifies nobody. Revisit with mainnet data after launch week.
+    - matchers:
+        - alertname="MissedSignatures"
+      receiver: blackhole
+
     # Critical (or an explicit `page`) wakes someone up AND is posted to Slack. The
     # paging route has `continue: true`, so matching goes on to the next route, which
     # sends the same alert to Slack. Keep the two routes adjacent and in this order.
@@ -56,6 +63,8 @@ route:
       repeat_interval: 4h
 
 receivers:
+  # No notifier: alerts routed here are kept (Prometheus, Alertmanager UI) but not sent anywhere.
+  - name: blackhole
   - name: slack
     slack_configs:
       - api_url_file: /run/secrets/slack_webhook

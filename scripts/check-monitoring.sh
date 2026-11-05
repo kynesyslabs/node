@@ -45,4 +45,5 @@ route paging,slack severity=critical alertname=PrecommitEquivocation
 route paging,slack severity=page alertname=Anything
 route slack        severity=warning alertname=DiskSpaceLow
 route slack        severity=info alertname=PortDriftDetected
+route blackhole     severity=info alertname=MissedSignatures
 route deadman      severity=none alertname=DeadMansSwitch

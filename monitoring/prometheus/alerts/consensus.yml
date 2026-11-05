@@ -30,10 +30,13 @@ groups:
           summary: Block signing is stopped on this validator
           description: "{{ $labels.instance }} refuses to sign blocks; its log has a [SIGNING] or [IDENTITY] line with the reason. The stop survives a restart only while the marker file exists (demos_signing_halt_marker_present = 1). If the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. Delete the marker only after confirming a single copy of the key runs; see docs/runbooks/validator-key.md."
 
+      # Trend signal, not an alarm: on a healthy 4-node soak the 15 m increase reached 9, higher
+      # than during real faults (4), so no threshold separated the two. No mainnet data yet.
+      # Alertmanager routes it to no receiver. Revisit after launch week.
       - alert: MissedSignatures
         expr: increase(demos_consensus_missed_signatures_total[15m]) >= 3
         labels:
-          severity: warning
+          severity: info
         annotations:
           summary: Validator was drawn into the shard but its signature is missing
           description: "{{ $value }} blocks in 15m where {{ $labels.instance }} was selected for the shard and did not sign. The node is online but not taking part in consensus: check sync state and peer connectivity."
