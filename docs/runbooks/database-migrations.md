@@ -14,19 +14,27 @@ applies it. `synchronize` is `false` as well, so entity changes never alter the
 schema on their own.
 
 Why: all pending migrations run in one transaction, and a bad one cannot be
-undone. `down()` loses data or cannot restore it for 10 of the 15 migrations
-after the baseline (the baseline's `down()` drops every table):
+undone. There are 16 migration files, each with a `down()`. 8 of the `down()`
+methods drop data:
 
 | Migration | `down()` |
 |---|---|
-| `WidenTransactionsMoneyColsToNumeric`, `WidenL2PSTransactionsAmountToNumeric` | narrows `numeric` back to `bigint`; fails on large values |
+| `BaselineSchema` | drops every table |
 | `CreateL2PSMessagesTable`, `CreateAtomicWorkTables`, `CreateL2PSExecutedHashes`, `CreateAcceptedForkSchedule` | drops the table and its rows |
 | `AddAttrsToTransactions`, `AddAttrsToBlocks` | drops the `attrs` column |
 | `EncryptL2PSTransactionHistory` | drops `encrypted_payload`, overwrites empty `content` with `{}` |
-| `CanonicalizeL2PSMessageKeys` | no-op: the original keys are gone |
 
-The other 5 only add or drop indexes or constraints. So the backup in step 1 is
-the only way back. Do not rely on `migration:revert`.
+The other 8 do not drop data, but four of them cannot be reverted cleanly:
+
+| Migration | `down()` |
+|---|---|
+| `WidenTransactionsMoneyColsToNumeric`, `WidenL2PSTransactionsAmountToNumeric` | narrows `numeric` back to `bigint`; errors on large values |
+| `CanonicalizeL2PSMessageKeys` | no-op: its `up()` is irreversible, the original keys are gone |
+| `ScopeL2PSMessageHashUnique` | re-adds a unique constraint; fails on duplicates |
+| `UniqueBlockNumber`, `IndexL2PSHistoryReads`, `IndexL2PSEncryptedHash`, `IndexL2PSMessageTxHash` | index-only |
+
+So the backup in step 1 is the only way back. Do not rely on
+`migration:revert`.
 
 ## Commands
 
