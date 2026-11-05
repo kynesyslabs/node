@@ -20,8 +20,12 @@ empty-snapshot/ into DIR, readable by any uid (see make_readable).
     drill_inputs.py launch-forks --template FILE   (genesis JSON on stdin)
 prints the genesis with its `forks` replaced by the launch set of the
 mainnet genesis template (docs/mainnet/genesis.template.json): active at 0
-where the template says the number 0, off for null and "FILL: ..." (see
-with_launch_forks).
+where the template says the number 0, off for null and "FILL: ...", and off
+for the forks in LAUNCH_EXCLUDED_FORKS (see with_launch_forks).
+
+    drill_inputs.py launch-excluded --template FILE
+prints the excluded forks the template activates at 0 as a JSON object of
+name -> reason ({} when there are none).
 
     drill_inputs.py readable --dir DIR
 sets every file under DIR to 644 and every directory to 755 (run.sh, once all
@@ -93,24 +97,54 @@ DRILL_REQUIRED_FORKS = ("quorumParity", "committeeBinding", "commitLock")
 # gasFeeSeparation validates a treasury even when it is off (loadForkConfig.ts)
 OFF_TREASURY = "0x" + "0" * 64
 
+# Forks the template activates at 0 that the drills keep off, by name, each with
+# the reason. The drills mount an empty data/snapshot, so genesis takes the legacy
+# path; a fork that needs a snapshot has to be listed here, or a node with it
+# active at 0 refuses to boot (restoreGenesisState.ts:58-66, findGenesisBlock.ts:181-192
+# and 212-220) and the drill ends as "node-N did not serve" (exit 2).
+LAUNCH_EXCLUDED_FORKS = {
+    "identityCarryover": "needs a genesis snapshot; the drills use the legacy genesis path",
+}
+
+
+def _active_at_zero(entry):
+    h = entry.get("activationHeight") if isinstance(entry, dict) else None
+    return type(h) is int and h == 0
+
 
 def launch_fork_heights(template):
     """Fork name -> 0 or None, from a mainnet genesis template's `forks`.
 
     A fork is active at 0 only where the template's activationHeight is the
-    number 0. null, a "FILL: ..." placeholder and anything else stay off.
+    number 0. null, a "FILL: ..." placeholder and anything else stay off, and
+    so does every fork in LAUNCH_EXCLUDED_FORKS, whatever the template says
+    (it is in the result as None even when the template does not list it).
     """
     forks = template.get("forks")
     if not isinstance(forks, dict) or not forks:
         raise ValueError("the genesis template has no forks object")
-    heights = {}
-    for name, entry in forks.items():
-        h = entry.get("activationHeight") if isinstance(entry, dict) else None
-        heights[name] = 0 if type(h) is int and h == 0 else None
+    heights = {name: 0 if _active_at_zero(entry) else None for name, entry in forks.items()}
+    for name in LAUNCH_EXCLUDED_FORKS:
+        heights[name] = None
     missing = [n for n in DRILL_REQUIRED_FORKS if heights.get(n) != 0]
     if missing:
         raise ValueError(f"the genesis template does not activate {', '.join(missing)} at 0, which the drill needs")
     return heights
+
+
+def launch_excluded(template):
+    """Name -> reason, for the excluded forks the template activates at 0.
+
+    Those are the forks the drills took out of the template's launch set.
+    """
+    launch_fork_heights(template)  # the same checks on the template
+    forks = template["forks"]
+    return {n: why for n, why in LAUNCH_EXCLUDED_FORKS.items() if _active_at_zero(forks.get(n))}
+
+
+def excluded_text(excluded):
+    """'a (why), b (why)', or 'none', for a launch_excluded result."""
+    return ", ".join(f"{n} ({why})" for n, why in excluded.items()) or "none"
 
 
 def with_launch_forks(genesis, template):
@@ -120,7 +154,8 @@ def with_launch_forks(genesis, template):
     template does not give it, and no fork is left to the node's own default
     (osDenomination, nonceEnforcement and gasFeeSeparation default to 0).
     Payload fields (gasFeeSeparation's treasuryAddress) are kept from the
-    genesis' own entry.
+    genesis' own entry. Excluded forks (LAUNCH_EXCLUDED_FORKS) get an explicit
+    `activationHeight: null`.
     """
     own = genesis.get("forks") or {}
     forks = {}
@@ -134,11 +169,17 @@ def with_launch_forks(genesis, template):
     return out
 
 
-def fork_set_text(forks):
-    """'a@0, b@0 | off: c, d' for a forks object of {name: {activationHeight}}."""
+def fork_set_text(forks, excluded=None):
+    """'a@0, b@0 | off: c, d' for a forks object of {name: {activationHeight}}.
+
+    With `excluded` (a launch_excluded result) it ends in ' | excluded: x (why)'.
+    """
     on = [n for n, f in forks.items() if f.get("activationHeight") == 0]
     off = [n for n, f in forks.items() if f.get("activationHeight") != 0]
-    return f"{', '.join(f'{n}@0' for n in on)} | off: {', '.join(off) or 'none'}"
+    text = f"{', '.join(f'{n}@0' for n in on)} | off: {', '.join(off) or 'none'}"
+    if excluded is not None:
+        text += f" | excluded: {excluded_text(excluded)}"
+    return text
 
 
 def seed_peerlist(pubs, node1_port):
@@ -210,6 +251,8 @@ def main():
     rd.add_argument("--dir", required=True)
     lf = sub.add_parser("launch-forks")
     lf.add_argument("--template", required=True)
+    le = sub.add_parser("launch-excluded")
+    le.add_argument("--template", required=True)
     tf = sub.add_parser("tmpfs")
     tf.add_argument("--uid", type=int, required=True)
     tf.add_argument("--gid", type=int, required=True)
@@ -228,6 +271,10 @@ def main():
     if a.cmd == "launch-forks":
         with open(a.template) as f:
             json.dump(with_launch_forks(json.load(sys.stdin), json.load(f)), sys.stdout)
+        return
+    if a.cmd == "launch-excluded":
+        with open(a.template) as f:
+            json.dump(launch_excluded(json.load(f)), sys.stdout)
         return
     with open(a.genesis) as f:
         genesis = json.load(f)

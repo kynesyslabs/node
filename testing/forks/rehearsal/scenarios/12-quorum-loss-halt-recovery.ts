@@ -11,8 +11,10 @@
  *    shardSize 10; this drill does not exercise that committee size.
  *  - The fork set mainnet launches with: every fork that
  *    `docs/mainnet/genesis.template.json` sets to 0 is active from height 0,
- *    every null or "FILL: ..." one is off. Read from the template at run
- *    time (`withLaunchForks`), logged, and reported in `DRILL_TIMINGS`.
+ *    every null or "FILL: ..." one is off, and so is identityCarryover: it
+ *    needs a genesis snapshot and this drill mounts an empty one (the legacy
+ *    genesis path). Read from the template at run time (`withLaunchForks`),
+ *    logged, and reported in `DRILL_TIMINGS` with the exclusions.
  *  - Inputs a 4-node devnet needs to forge, mounted through a compose
  *    override for this scenario only (lib/drillInputs.ts): genesis time 60 s
  *    ahead, a peerlist seeding node-1 only, an empty directory over
@@ -62,6 +64,7 @@ import {
     GENESIS_FORK_LOW,
     compose,
     isServiceRunning,
+    logs,
     regenerateIdentities,
     restartService,
     sleep,
@@ -75,8 +78,10 @@ import { clearOverride, overridePath, writeOverride } from "../lib/composeOverri
 import { withCurrentDevnetValidators } from "../lib/drillGenesis"
 import {
     LAUNCH_GENESIS_TEMPLATE,
+    bootRefusalLine,
     drillOverrideYaml,
     genesisTimestamp,
+    launchExcluded,
     stageDrillInputs,
     withLaunchForks,
 } from "../lib/drillInputs"
@@ -205,6 +210,7 @@ function reportTimings(
     marks: DrillMarks,
     observed: DrillHeights,
     forks: Record<string, number | null>,
+    excludedForks: Record<string, string>,
 ): void {
     const d = phaseDurations(marks)
     const forkText = Object.entries(forks)
@@ -228,6 +234,7 @@ function reportTimings(
         ...observed,
         consensusTimeS: CONSENSUS_TIME_S,
         shardSize: DRILL_SHARD_SIZE,
+        excludedForks,
         forks,
     }
     process.stdout.write(`DRILL_TIMINGS ${JSON.stringify(line)}\n`)
@@ -244,10 +251,16 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     const forks: Record<string, number | null> = Object.fromEntries(
         Object.entries<any>(genesis.forks).map(([name, f]) => [name, f?.activationHeight ?? null]),
     )
+    const excludedForks = launchExcluded()
+    const excludedText =
+        Object.entries(excludedForks)
+            .map(([name, why]) => `${name} (${why})`)
+            .join(", ") || "none"
     const active = Object.keys(forks).filter(name => forks[name] === 0)
     process.stdout.write(
         `[scenario 12] launch fork set from ${LAUNCH_GENESIS_TEMPLATE}: active at 0: ${active.join(", ")}; ` +
-            `off: ${Object.keys(forks).filter(name => forks[name] !== 0).join(", ") || "none"}\n`,
+            `off: ${Object.keys(forks).filter(name => forks[name] !== 0).join(", ") || "none"}; ` +
+            `excluded: ${excludedText}\n`,
     )
     const marks = emptyMarks()
     const observed: DrillHeights = {
@@ -271,10 +284,12 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
         marks.t_up = Date.now()
         await restartForColdStart()
         await drill(ctx, quorum, marks, observed)
+    } catch (e) {
+        throw withBootRefusals(e)
     } finally {
         // Also on failure: print what was collected before the error propagates.
         try {
-            reportTimings(ctx, marks, observed, forks)
+            reportTimings(ctx, marks, observed, forks, excludedForks)
         } catch (e) {
             process.stderr.write(`[WARN] could not report drill timings: ${String(e)}\n`)
         }
@@ -285,6 +300,21 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
             rmSync(stagingDir, { recursive: true, force: true })
         }
     }
+}
+
+/** The error with the "Refusing to boot" line of every node that logged one, so a refused genesis is not just a timeout. */
+function withBootRefusals(e: unknown): unknown {
+    if (!(e instanceof Error)) return e
+    const refusals = NODE_IDS.flatMap(id => {
+        try {
+            const line = bootRefusalLine(logs(`node-${id}`, 400))
+            return line === null ? [] : [`node-${id}: ${line}`]
+        } catch {
+            return []
+        }
+    })
+    if (refusals.length > 0) e.message += `\nnode log:\n  ${refusals.join("\n  ")}`
+    return e
 }
 
 /**

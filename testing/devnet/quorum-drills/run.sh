@@ -99,8 +99,12 @@ esac
 case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) export GOSSIP_ENABLED=true ;; esac
 # The mainnet-shape drills run the fork set docs/mainnet/genesis.template.json
 # launches with (every fork it sets to 0, the rest off), read at run time. The
-# other scenarios keep the forks of genesis.devnet.json.
+# other scenarios keep the forks of genesis.devnet.json. Forks the drills cannot
+# run (identityCarryover: it needs a genesis snapshot and the drills mount an
+# empty one) are left off by name, drill_inputs.py LAUNCH_EXCLUDED_FORKS;
+# EXCLUDED_FORKS is that list, name -> reason, read from the generated inputs.
 FORK_SET=devnet
+EXCLUDED_FORKS='{}'
 case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) FORK_SET=launch ;; esac
 case "${BINDING}" in on|off) ;; *) echo "--binding must be on or off" >&2; exit 2 ;; esac
 [[ "${DB_READ_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] || { echo "DB_READ_TIMEOUT must be a positive number of seconds" >&2; exit 2; }
@@ -317,7 +321,12 @@ if [ "${START_PATH}" = image ]; then
 fi
 declare -a PUB UP
 for i in $(seq 1 "${N}"); do PUB[i]=$(tr 'A-Z' 'a-z' < "${RUN_DIR}/inputs/pub${i}"); UP[i]=0; done
-say "forks (${FORK_SET}): $(jq -r '[.forks | to_entries[] | "\(.key)@\(.value.activationHeight)"] | join(", ")' "${RUN_DIR}/inputs/genesis.json")"
+excluded_note=""
+if [ "${FORK_SET}" = launch ]; then
+    EXCLUDED_FORKS=$(jq -c . "${RUN_DIR}/inputs/launch-excluded.json") || abort_pre "no excluded-forks list in ${RUN_DIR}/inputs/launch-excluded.json"
+    excluded_note="; excluded: $(jq -r 'to_entries | map("\(.key) (\(.value))") | join(", ") | if . == "" then "none" else . end' <<< "${EXCLUDED_FORKS}")"
+fi
+say "forks (${FORK_SET}): $(jq -r '[.forks | to_entries[] | "\(.key)@\(.value.activationHeight)"] | join(", ")' "${RUN_DIR}/inputs/genesis.json")${excluded_note}"
 say "inputs ready (genesis in ${GENESIS_DELAY}s)"
 
 # ── helpers ─────────────────────────────────────────────────────────────
@@ -393,6 +402,17 @@ stop_node() {
     dc stop -t 0 "node-$1" >> "${STEP_LOG}" 2>&1
     UP[$1]=0
     event "node-$1 stopped"
+}
+# The last line in node $1's log that says why it would not boot, for the abort
+# message of a node that never served: a genesis refusal ("[GENESIS] Refusing to
+# boot: ...", findGenesisBlock.ts refuse()), or the last error line if there is
+# none. The node is restarted by its policy, so the log holds every attempt.
+boot_failure_line() {
+    local cid out; cid=$(dc ps -aq "node-$1" 2>/dev/null); [ -z "${cid}" ] && return 0
+    out=$(docker logs "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+    grep -aiE 'refusing to boot' <<< "${out}" | tail -1 | cut -c1-600 | grep . && return 0
+    grep -aiE 'error' <<< "${out}" | tail -1 | cut -c1-600
+    return 0
 }
 
 # Window (s) for a fresh lockstep, 120 up to N=6, 160 at 10, 190 at 13. The reads
@@ -607,8 +627,10 @@ write_verdict() {
     jq -n --arg run "${RUN_ID}" --arg scenario "${SCENARIO}" --arg binding "${BINDING}" \
         --argjson n "${N}" --argjson shardSize "${SHARD}" --argjson q "${Q}" --arg code "${CODE}" \
         --arg image "${IMAGE}" --arg detail "${DETAIL}" --arg result "${RESULT}" --argjson drill "${drill}" \
+        --arg forkSet "${FORK_SET}" --argjson excluded "${EXCLUDED_FORKS}" \
         '{run: $run, scenario: $scenario, binding: $binding, validators: $n, shardSize: $shardSize,
           q: $q, code: $code, image: $image, detail: $detail, result: $result}
+         + (if $forkSet == "launch" then {excludedForks: $excluded} else {} end)
          + (if $drill == null then {} else {drill: $drill} end)' > "${LOG_DIR}/verdict.json"
     local results="${RUNS_DIR}/results.tsv"
     [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"
@@ -690,7 +712,7 @@ STARTED_STACK=1
 dc up -d postgres >> "${STEP_LOG}" 2>&1 || { say "ABORT: postgres did not start"; exit 2; }
 pg_limit_preflight || exit 2
 for i in $(seq 1 "${START}"); do
-    start_node "${i}" || { say "ABORT: node-${i} did not serve within 180s"; exit 2; }
+    start_node "${i}" || { say "ABORT: node-${i} did not serve within 180s"; why=$(boot_failure_line "${i}"); [ -n "${why}" ] && say "node-${i} log: ${why}"; exit 2; }
     say "node-${i} serving"
     # One node at a time: a simultaneous join races the committee freeze
     [ "${i}" -lt "${START}" ] && sleep 4
@@ -1097,13 +1119,15 @@ drill_judge() { # $1 mode: halt or ride
     local counts_after; counts_after=$(restart_counts "${SURVIVORS[@]}") || { say "ABORT: cannot read the survivors' restart counts"; exit 2; }
     jq -n --arg scenario "${SCENARIO}" --arg mode "$1" --argjson validators "${N}" --argjson shardSize "${SHARD}" \
         --argjson stopped "$(printf '%s\n' "${VICTIMS[@]}" | jq -sc .)" --argjson consensusTimeS "${CONSENSUS_TIME}" \
-        --argjson forks "${forks}" --argjson baselineMinHeight "${BASELINE_HEIGHT}" --argjson holdRounds "${hold_rounds}" \
+        --argjson forks "${forks}" --argjson excluded "${EXCLUDED_FORKS}" \
+        --argjson baselineMinHeight "${BASELINE_HEIGHT}" --argjson holdRounds "${hold_rounds}" \
         --argjson marks "${marks}" --argjson baseHeight "${BASE_HEIGHT}" --argjson baseHeads "${BASE_HEADS}" \
         --argjson baseRows "${BASE_ROWS}" --argjson pre "${PRE_HEIGHT}" --argjson peerlist "${PRE_PEERLIST}" \
         --argjson before "${COUNTS_BEFORE}" --argjson after "${counts_after}" \
         --argjson settle "${SETTLE_JSON}" --argjson hold "${HOLD_JSON}" --argjson recovery "${RECOVERY_JSON}" --argjson ride "${RIDE_JSON}" \
         '{scenario: $scenario, mode: $mode, validators: $validators, shardSize: $shardSize, stopped: $stopped,
-          consensusTimeS: $consensusTimeS, forks: $forks, baselineMinHeight: $baselineMinHeight, holdRounds: $holdRounds,
+          consensusTimeS: $consensusTimeS, forks: $forks, excludedForks: $excluded,
+          baselineMinHeight: $baselineMinHeight, holdRounds: $holdRounds,
           marks: $marks, baseline: {height: $baseHeight, heads: $baseHeads, rows: $baseRows},
           preStopHeight: $pre, preStopPeerlist: $peerlist, restartCounts: {before: $before, after: $after},
           settle: $settle, hold: $hold, recovery: $recovery, ride: $ride}' > "${input}"

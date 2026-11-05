@@ -13,6 +13,7 @@ import os
 
 from drill_inputs import (
     fork_set_text,
+    launch_excluded,
     make_empty_snapshot,
     node_tmpfs_specs,
     pg_max_connections,
@@ -70,9 +71,14 @@ pubs = [open(f"{inputs}/pub{i}").read().strip() for i in range(1, n + 1)]
 g = json.load(open(f"{a.repo}/testing/devnet/genesis.devnet.json"))
 g = with_genesis_timestamp(g, a.genesis_ts)
 g["properties"]["shardSize"] = a.shard_size
+excluded = None
 if a.fork_set == "launch":
     with open(f"{a.repo}/docs/mainnet/genesis.template.json") as f:
-        g = with_launch_forks(g, json.load(f))
+        template = json.load(f)
+    g = with_launch_forks(g, template)
+    # run.sh logs these and records them in the verdict
+    excluded = launch_excluded(template)
+    write_json(f"{inputs}/launch-excluded.json", excluded)
 else:
     forks = g.setdefault("forks", {})
     forks["quorumParity"] = {"activationHeight": 0}
@@ -248,4 +254,4 @@ print(
     f"compose with {n} nodes"
 )
 if a.fork_set == "launch":
-    print(f"launch fork set (docs/mainnet/genesis.template.json): {fork_set_text(g['forks'])}")
+    print(f"launch fork set (docs/mainnet/genesis.template.json): {fork_set_text(g['forks'], excluded)}")

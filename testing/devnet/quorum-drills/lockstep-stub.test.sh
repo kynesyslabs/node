@@ -352,6 +352,18 @@ echo "${ORDER}" | sed 's/^/    | /'
 check "no top-level call of run.sh reaches a function defined below it" bash -c '! grep -q "defined at line" <<< "$1"' _ "${ORDER}"
 check "the check saw the top-level calls (at least 10)" test "$(sed -n 's/^top-level calls checked: //p' <<< "${ORDER}")" -ge 10
 
+echo "== boot_failure_line: the node's own refusal line for the abort of a node that never served"
+boot_failure_of() { # $1 the node's log, as docker logs prints it
+    ( BOOT_LOG="$1"; dc() { echo cid1; }; docker() { printf '%s\n' "${BOOT_LOG}"; }; boot_failure_line 1 )
+}
+REFUSED=$'[INFO] [GENESIS] Looking for the genesis block...\n\e[31m[ERROR] [GENESIS] Refusing to boot: identityCarryover is active at genesis but no snapshot was found\e[0m\n[ERROR] unrelated error\n'
+check "a genesis refusal is found, without colour codes, even with a later error line" \
+    test "$(boot_failure_of "${REFUSED}")" = "[ERROR] [GENESIS] Refusing to boot: identityCarryover is active at genesis but no snapshot was found"
+check "with no refusal the last error line is given" \
+    test "$(boot_failure_of $'[INFO] up\n[ERROR] connect ECONNREFUSED\n[INFO] retrying')" = "[ERROR] connect ECONNREFUSED"
+check "a log with neither gives nothing, and rc 0" \
+    bash -c '[ -z "$1" ]' _ "$(boot_failure_of $'[INFO] up\n[INFO] bye')"
+
 echo "== run.sh executed from the top (stub docker and bun): the preflight is defined where the call runs"
 run_from_top() { # $1 what max_connections the stub postgres reports
     STUB_LOG="${WORK}/run-top.docker.log"; : > "${STUB_LOG}"
@@ -370,6 +382,8 @@ check "max_connections 280: run.sh reached the preflight and read max_connection
 check "max_connections 280: the preflight passed (13 nodes need 150)" out_has 'postgres max_connections 280 (13 nodes need 150)'
 check "max_connections 280: run.sh went on to start node-1" started_node
 check "max_connections 280: and stopped there by the stub's SIGTERM (rc=130)" out_has '^rc=130$'
+check "max_connections 280: the forks line has identityCarryover off and says why it is excluded" \
+    out_has 'forks (launch): .*identityCarryover@null.*; excluded: identityCarryover (needs a genesis snapshot; the drills use the legacy genesis path)$'
 
 run_from_top 100
 sed 's/^/    | /' "${WORK}/run-top.out" | tail -5 | cut -c1-200

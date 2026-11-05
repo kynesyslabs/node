@@ -1,17 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { spawnSync } from "child_process"
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join, resolve } from "path"
+import { cloneDefaultForkConfig } from "@/forks/forkConfig"
+import { loadForkConfigFromGenesis } from "@/forks/loadForkConfig"
+import { getSharedState } from "@/utilities/sharedState"
 import {
     GENESIS_DELAY_S,
     LAUNCH_GENESIS_TEMPLATE,
+    bootRefusalLine,
     drillOverrideYaml,
     genesisTimestamp,
+    launchExcluded,
     peerSeedFromGenesis,
     stageDrillInputs,
     withLaunchForks,
 } from "./lib/drillInputs"
+
+const REASON = "needs a genesis snapshot; the drills use the legacy genesis path"
 
 const key = (n: number) => `0x${n.toString(16).padStart(64, "0")}`
 const PUBKEYS = [key(0xa1), key(0xa2), key(0xa3), key(0xa4)]
@@ -104,6 +111,20 @@ describe("stageDrillInputs (drill_inputs.py)", () => {
     })
 })
 
+describe("bootRefusalLine", () => {
+    it("returns the last refusal line of a node log, and null when there is none", () => {
+        const log = [
+            "[INFO] [GENESIS] Looking for the genesis block...",
+            "[ERROR] [GENESIS] Refusing to boot: identityCarryover is active at genesis but no snapshot was found",
+            "[INFO] restarting",
+            "[ERROR] [GENESIS] Refusing to boot: second attempt  ",
+        ].join("\n")
+        expect(bootRefusalLine(log)).toBe("[ERROR] [GENESIS] Refusing to boot: second attempt")
+        expect(bootRefusalLine("[INFO] [GENESIS] Genesis block found\n")).toBeNull()
+        expect(bootRefusalLine("")).toBeNull()
+    })
+})
+
 describe("node tmpfs options (drill_inputs.py tmpfs)", () => {
     const script = resolve(import.meta.dir, "../../devnet/quorum-drills/drill_inputs.py")
     const run = (...args: string[]) => spawnSync("python3", ["-I", script, "tmpfs", ...args], { encoding: "utf8" })
@@ -172,12 +193,15 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
     const heights = (g: Record<string, any>) =>
         Object.fromEntries(Object.entries<any>(g.forks).map(([n, f]) => [n, f.activationHeight]))
 
-    it("activates at 0 only the forks the real template sets to the number 0", () => {
+    it("activates at 0 only the forks the real template sets to the number 0, except identityCarryover", () => {
         const real = JSON.parse(readFileSync(LAUNCH_GENESIS_TEMPLATE, "utf8")).forks
         const expected = Object.fromEntries(
-            Object.entries<any>(real).map(([n, f]) => [n, f.activationHeight === 0 ? 0 : null]),
+            Object.entries<any>(real).map(([n, f]) => [n, f.activationHeight === 0 && n !== "identityCarryover" ? 0 : null]),
         )
         expect(heights(withLaunchForks(genesis()))).toEqual(expected)
+        // 15 forks in the template, all of them in the genesis; identityCarryover is explicitly off
+        expect(Object.keys(expected)).toHaveLength(15)
+        expect(withLaunchForks(genesis()).forks.identityCarryover).toEqual({ activationHeight: null })
         // The launch set the PR names: nine forks at 0, none of the FILL or null ones
         for (const n of [
             "osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity",
@@ -188,6 +212,57 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         for (const n of ["gasFeeSeparation", "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "atomicWork"]) {
             expect(expected[n]).toBeNull()
         }
+    })
+    describe("excluded forks", () => {
+        it("sets identityCarryover to an explicit null when the template has it at 0, and the rest of the set is unchanged", () => {
+            const g = withLaunchForks(genesis(), template({ ...MIN, identityCarryover: { activationHeight: 0 }, osDenomination: { activationHeight: 0 } }))
+            expect(g.forks.identityCarryover).toEqual({ activationHeight: null })
+            expect("activationHeight" in g.forks.identityCarryover).toBe(true)
+            expect(heights(g)).toEqual({ ...Object.fromEntries(Object.keys(MIN).map(n => [n, 0])), identityCarryover: null, osDenomination: 0 })
+        })
+        it("still works with a template that does not list it, and still turns it off explicitly", () => {
+            const g = withLaunchForks(genesis(), template(MIN))
+            expect(heights(g)).toEqual({ ...Object.fromEntries(Object.keys(MIN).map(n => [n, 0])), identityCarryover: null })
+            expect(launchExcluded(template(MIN))).toEqual({})
+        })
+        it("turns it off whatever the template says, and a genesis of its own that has it at 0 does not keep it", () => {
+            for (const h of [0, null, 7, "FILL: 0 or null"]) {
+                const own = { ...genesis(), forks: { identityCarryover: { activationHeight: 0 } } }
+                expect(withLaunchForks(own, template({ ...MIN, identityCarryover: { activationHeight: h } })).forks.identityCarryover).toEqual({ activationHeight: null })
+            }
+        })
+        it("reports the exclusion, with its reason, only when the template activates the fork", () => {
+            expect(launchExcluded(template({ ...MIN, identityCarryover: { activationHeight: 0 } }))).toEqual({ identityCarryover: REASON })
+            expect(launchExcluded(template({ ...MIN, identityCarryover: { activationHeight: null } }))).toEqual({})
+            expect(launchExcluded(template({ ...MIN, identityCarryover: { activationHeight: "FILL: 0 or null" } }))).toEqual({})
+            expect(launchExcluded(LAUNCH_GENESIS_TEMPLATE)).toEqual(
+                JSON.parse(readFileSync(LAUNCH_GENESIS_TEMPLATE, "utf8")).forks.identityCarryover?.activationHeight === 0 ? { identityCarryover: REASON } : {},
+            )
+            expect(() => launchExcluded(template({}))).toThrow(/launch-excluded failed/)
+        })
+        it("only names forks the node knows, so a typo in the list cannot hide one", () => {
+            // every fork the node has, each at 0 in turn: the excluded ones are the ones that come back
+            const known = Object.keys(cloneDefaultForkConfig())
+            expect(known).toContain("identityCarryover")
+            const excluded = known.filter(n => Object.keys(launchExcluded(template({ ...MIN, [n]: { activationHeight: 0 } }))).includes(n))
+            expect(excluded).toEqual(["identityCarryover"])
+        })
+        it("a genesis the launch set built loads: 15 forks, identityCarryover off, the other nine at 0", () => {
+            const saved = getSharedState.forkConfig
+            try {
+                for (const base of [genesis(), JSON.parse(readFileSync(resolve(import.meta.dir, "../../devnet/genesis.devnet.json"), "utf8"))]) {
+                    const g = withLaunchForks(base)
+                    expect(Object.keys(g.forks)).toHaveLength(15)
+                    getSharedState.forkConfig = cloneDefaultForkConfig()
+                    loadForkConfigFromGenesis(g)
+                    const loaded = getSharedState.forkConfig as unknown as Record<string, { activationHeight: number | null }>
+                    expect(loaded.identityCarryover.activationHeight).toBeNull()
+                    expect(Object.keys(g.forks).filter(n => loaded[n].activationHeight === 0)).toHaveLength(9)
+                }
+            } finally {
+                getSharedState.forkConfig = saved
+            }
+        })
     })
     it("keeps a fork off for null, a FILL placeholder and any value that is not the number 0", () => {
         const g = withLaunchForks(
@@ -204,12 +279,12 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
                 h: null,
             }),
         )
-        expect(heights(g)).toEqual({ ...Object.fromEntries(Object.keys(MIN).map(n => [n, 0])), a: null, b: null, c: null, d: null, e: null, f: null, g: null, h: null })
+        expect(heights(g)).toEqual({ ...Object.fromEntries(Object.keys(MIN).map(n => [n, 0])), a: null, b: null, c: null, d: null, e: null, f: null, g: null, h: null, identityCarryover: null })
     })
     it("replaces the genesis' own heights and does not leave a fork to the node's default", () => {
         const own = { ...genesis(), forks: { osDenomination: { activationHeight: 5 }, gasFeeSeparation: { activationHeight: 0, treasuryAddress: key(0xee) }, stray: { activationHeight: 3 } } }
         const g = withLaunchForks(own, template({ ...MIN, osDenomination: { activationHeight: 0 }, gasFeeSeparation: { activationHeight: "FILL: 0 or null", treasuryAddress: "FILL" } }))
-        expect(heights(g)).toEqual({ ...Object.fromEntries(Object.keys(MIN).map(n => [n, 0])), osDenomination: 0, gasFeeSeparation: null })
+        expect(heights(g)).toEqual({ ...Object.fromEntries(Object.keys(MIN).map(n => [n, 0])), osDenomination: 0, gasFeeSeparation: null, identityCarryover: null })
         // an off gasFeeSeparation still carries a treasury, which the node validates
         expect(g.forks.gasFeeSeparation.treasuryAddress).toBe(key(0xee))
         expect(withLaunchForks(genesis(), template({ ...MIN, gasFeeSeparation: { activationHeight: null } })).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x0{64}$/)
@@ -286,7 +361,12 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         it("--fork-set launch writes the same forks scenario 12 gets", () => {
             const { r, genesis: g } = gen("launch")
             expect(r.status).toBe(0)
-            expect(r.stdout).toMatch(/launch fork set .*finalityProofs@0.* \| off: gasFeeSeparation/)
+            expect(r.stdout).toMatch(/launch fork set .*finalityProofs@0.* \| off: identityCarryover, gasFeeSeparation/)
+            expect(r.stdout).toContain(`| excluded: identityCarryover (${REASON})`)
+            // the list run.sh logs and records is the one scenario 12 reads
+            const written = JSON.parse(readFileSync(join(dir, "run-launch-on-4", "inputs", "launch-excluded.json"), "utf8"))
+            expect(written).toEqual(launchExcluded())
+            expect(g.forks.identityCarryover).toEqual({ activationHeight: null })
             const devnet = JSON.parse(readFileSync(resolve(repo, "testing/devnet/genesis.devnet.json"), "utf8"))
             expect(g.forks).toEqual(withLaunchForks(devnet).forks)
             expect(g.forks.gasFeeSeparation).toEqual({
@@ -300,6 +380,8 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
                 const { r, genesis: g } = gen(forkSet, binding)
                 expect(r.status).toBe(0)
                 expect(g.forks).toEqual({ ...devnet.forks, quorumParity: { activationHeight: 0 }, committeeBinding: { activationHeight: committee } })
+                // no exclusion list for the other scenarios
+                expect(existsSync(join(dir, `run-${forkSet}-${binding}-4`, "inputs", "launch-excluded.json"))).toBe(false)
             }
         })
         it("--fork-set launch refuses --binding off", () => {
@@ -321,6 +403,20 @@ describe("run.sh fork set", () => {
         expect(sh).toContain(".forks | with_entries(.value |= .activationHeight)")
         expect(sh).not.toContain("IN(\"quorumParity\"")
     })
+    it("logs the excluded forks on the forks line and records them in the judge input and verdict.json", () => {
+        // read from the generated inputs, so the list has one source (drill_inputs.py)
+        expect(sh).toContain("EXCLUDED_FORKS=$(jq -c . \"${RUN_DIR}/inputs/launch-excluded.json\")")
+        expect(sh).toMatch(/say "forks \(\$\{FORK_SET\}\): .*\$\{excluded_note\}"/)
+        expect(sh).toContain("excluded_note=\"; excluded: $(jq -r ")
+        expect(sh).toContain("--argjson excluded \"${EXCLUDED_FORKS}\"")
+        expect(sh).toContain("excludedForks: $excluded")
+        expect(sh).toContain("{excludedForks: $excluded}")
+    })
+    it("ends a node that never served with exit 2 and the node's own refusal line", () => {
+        expect(sh).toMatch(/start_node "\$\{i\}" \|\| \{ say "ABORT: node-\$\{i\} did not serve within 180s"; why=\$\(boot_failure_line "\$\{i\}"\); \[ -n "\$\{why\}" \] && say "node-\$\{i\} log: \$\{why\}"; exit 2; \}/)
+        expect(sh.indexOf("boot_failure_line() {")).toBeLessThan(sh.indexOf("# ── 3. bring-up"))
+        expect(sh).toContain("grep -aiE 'refusing to boot'")
+    })
 })
 
 describe("scenario 12 wiring", () => {
@@ -331,6 +427,10 @@ describe("scenario 12 wiring", () => {
     it("takes its forks from the launch template and not from a list of its own", () => {
         expect(src).toContain("withLaunchForks(genesis)")
         expect(src).not.toContain("LAUNCH_FORKS")
+        // the exclusions come from drill_inputs.py too, and are logged and reported
+        expect(src).toContain("launchExcluded()")
+        expect(src).toMatch(/`excluded: \$\{excludedText\}\\n`/)
+        expect(src).toMatch(/const line = \{[^}]*\n {8}excludedForks,\n {8}forks,\n {4}\}/)
         // reported in the DRILL_TIMINGS line, with every fork of the genesis
         expect(src).toMatch(/const line = \{[^}]*\n {8}forks,\n {4}\}\n {4}process\.stdout\.write\(`DRILL_TIMINGS/)
     })
