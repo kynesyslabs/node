@@ -90,6 +90,7 @@ import {
     signatureQuorum,
 } from "../lib/haltDrill"
 import { runScenarioCli, type ScenarioContext } from "../lib/scenario"
+import { systemBinary } from "../lib/systemBinary"
 
 const SCENARIO_ID = "12-quorum-loss"
 const NODE_IDS = [1, 2, 3, 4]
@@ -137,7 +138,7 @@ function buildDrillGenesis(): Record<string, any> {
 
 function restartCount(id: number): number {
     const r = spawnSync(
-        "docker",
+        systemBinary("docker"),
         ["inspect", "-f", "{{.RestartCount}}", `demos-devnet-node-${id}`],
         { encoding: "utf8" },
     )

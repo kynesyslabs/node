@@ -13,6 +13,7 @@ import { spawnSync } from "child_process"
 import { writeFileSync } from "fs"
 import { resolve } from "path"
 import { DEVNET_DIR } from "./devnetControl"
+import { systemBinary } from "./systemBinary"
 
 type Genesis = Record<string, any>
 
@@ -65,7 +66,7 @@ export function stageDrillInputs(opts: {
     const input = resolve(opts.dir, GENESIS_IN)
     writeFileSync(input, JSON.stringify(opts.genesis, null, 4) + "\n")
     const r = spawnSync(
-        "python3",
+        systemBinary("python3"),
         [
             "-I",
             DRILL_INPUTS_SCRIPT,

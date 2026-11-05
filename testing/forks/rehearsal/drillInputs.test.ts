@@ -10,6 +10,7 @@ import {
     peerSeedFromGenesis,
     stageDrillInputs,
 } from "./lib/drillInputs"
+import { systemBinary } from "./lib/systemBinary"
 
 const key = (n: number) => `0x${n.toString(16).padStart(64, "0")}`
 const PUBKEYS = [key(0xa1), key(0xa2), key(0xa3), key(0xa4)]
@@ -104,7 +105,7 @@ describe("stageDrillInputs (drill_inputs.py)", () => {
 
 describe("node tmpfs options (drill_inputs.py tmpfs)", () => {
     const script = resolve(import.meta.dir, "../../devnet/quorum-drills/drill_inputs.py")
-    const run = (...args: string[]) => spawnSync("python3", ["-I", script, "tmpfs", ...args], { encoding: "utf8" })
+    const run = (...args: string[]) => spawnSync(systemBinary("python3"), ["-I", script, "tmpfs", ...args], { encoding: "utf8" })
 
     it("mounts /app/state owned by the given uid and gid, owner-only", () => {
         const r = run("--uid", "1000", "--gid", "1001")
