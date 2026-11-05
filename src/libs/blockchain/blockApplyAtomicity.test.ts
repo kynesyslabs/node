@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test"
+import { beforeEach, describe, expect, it } from "bun:test"
+
+import { installFakeBlockDatabase, stubBlockInsertCollaborators } from "./blockInsert.fixtures"
 
 /**
  * A block and the state its transactions produced commit in one database
@@ -7,96 +9,13 @@ import { beforeEach, describe, expect, it, mock } from "bun:test"
  * apply the same block again from the state before it.
  */
 
-const durable = new Map<string, unknown[]>()
 let failOn: string | null = null
-
-function repoFor(staged: Map<string, unknown[]>, name: string) {
-    const stage = (rows: unknown[]) => {
-        if (failOn === name) throw new Error(`injected failure writing ${name}`)
-        staged.set(name, [...(staged.get(name) ?? []), ...rows])
-    }
-    const query: any = {
-        insert: () => query,
-        update: () => query,
-        set: () => query,
-        where: () => query,
-        andWhere: () => query,
-        values: (rows: unknown[]) => {
-            query.rows = rows
-            return query
-        },
-        orIgnore: () => query,
-        execute: async () => stage(query.rows ?? []),
-    }
-    return {
-        create: (row: unknown) => row,
-        save: async (rows: unknown) => stage(Array.isArray(rows) ? rows : [rows]),
-        delete: async () => {},
-        insert: async (row: unknown) => stage([row]),
-        findOneBy: async () => null,
-        find: async () => [],
-        findOne: async () => null,
-        manager: { connection: { getMetadata: () => ({ columns: [0, 1, 2] }) } },
-        createQueryBuilder: () => query,
-    }
-}
-
-const nameOf = (entity: any) => entity?.name ?? entity?.options?.name ?? String(entity)
-
-function managerFor(staged: Map<string, unknown[]>) {
-    const em: any = {
-        getRepository: (entity: any) => repoFor(staged, nameOf(entity)),
-        save: async (entity: any, rows?: unknown) =>
-            repoFor(staged, rows === undefined ? "entity" : nameOf(entity)).save(
-                rows === undefined ? entity : rows,
-            ),
-        createQueryBuilder: () => repoFor(staged, "IdentityCommitment").createQueryBuilder(),
-    }
-    return em
-}
-
-const fakeDataSource = {
-    // Writes are staged and become durable only when the callback returns.
-    transaction: async (work: (em: unknown) => Promise<unknown>) => {
-        const staged = new Map<string, unknown[]>()
-        const result = await work(managerFor(staged))
-        for (const [name, rows] of staged) {
-            durable.set(name, [...(durable.get(name) ?? []), ...rows])
-        }
-        return result
-    },
-    getRepository: (entity: any) => repoFor(durable, nameOf(entity)),
-}
-
-const datasourceModule = () => ({
-    __esModule: true,
-    dataSource: fakeDataSource,
-    default: { getInstance: async () => ({ getDataSource: () => fakeDataSource }) },
+const durable = installFakeBlockDatabase(name => {
+    if (failOn === name) throw new Error(`injected failure writing ${name}`)
 })
-mock.module("src/model/datasource", datasourceModule)
-mock.module("@/model/datasource", datasourceModule)
-
-// Only what the insert touches is replaced; every other export stays real.
-const partial = async (path: string, overrides: Record<string, unknown>) => {
-    const real = await import(path)
-    mock.module(path, () => ({ ...real, ...overrides }))
-}
-// The block row is saved through the blocks repository's target
-await partial("./chainDb", {
-    getBlocksRepo: () => ({ target: { name: "Blocks" }, findOneBy: async () => null }),
-    chunkedInsert: async (em: any, entity: any, rows: unknown[]) => {
-        await em.getRepository(entity).save(rows)
-        return { skipped: 0 }
-    },
+await stubBlockInsertCollaborators({
+    "src/libs/blockchain/chainTransactions": { persistConfirmedTransactionProjection: async () => {} },
 })
-await partial("@/features/zk/merkle/updateMerkleTreeAfterBlock", {
-    updateMerkleTreeAfterBlock: async () => 0,
-})
-await partial("./routines/tallyUpgradeVotes", { default: async () => {} })
-await partial("./routines/applyNetworkUpgrade", { default: async () => {} })
-await partial("./routines/loadNetworkParameters", { loadNetworkParameters: async () => {} })
-await partial("src/libs/consensus/stakedSet", { getStakedSet: async () => new Set() })
-await partial("./chainTransactions", { persistConfirmedTransactionProjection: async () => {} })
 const { insertBlock } = await import("./chainBlocks")
 const { default: HandleGCR } = await import("./gcr/handleGCR")
 const { getSharedState } = await import("src/utilities/sharedState")

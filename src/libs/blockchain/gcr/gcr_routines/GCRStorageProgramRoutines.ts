@@ -12,6 +12,10 @@ import { types, storage } from "@kynesyslabs/demosdk"
 
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import log from "@/utilities/logger"
+import {
+    isJsonbStorable,
+    NOT_STORABLE,
+} from "@/libs/blockchain/validation/postgresStorable"
 import type { GCRResult } from "../handleGCR"
 
 // Re-export SDK types for convenience
@@ -24,6 +28,7 @@ export const STORAGE_PROGRAM_MAX_SIZE_BYTES = 1048576 // 1MB
 export const STORAGE_PROGRAM_PRICING_CHUNK_BYTES = 10240 // 10KB
 export const STORAGE_PROGRAM_FEE_PER_CHUNK = 1n // 1 DEM per chunk
 const MAX_INTERACTION_TXS = 1000
+const STORAGE_NOT_STORABLE = `Storage program payload ${NOT_STORABLE}`
 
 function deepMerge(
     target: Record<string, unknown>,
@@ -82,6 +87,13 @@ export function validateStorageProgramPayload(
     totalFee?: bigint
 } {
     const encoding = payload.encoding || "json"
+
+    if (!isJsonbStorable(payload)) {
+        return {
+            valid: false,
+            message: STORAGE_NOT_STORABLE,
+        }
+    }
 
     // Validate operation type
     // Note: READ_STORAGE is not a transaction operation - reads are handled via RPC endpoints
@@ -267,6 +279,79 @@ function calculateDataSize(
 
     // JSON encoding - use string length
     return Buffer.byteLength(JSON.stringify(data), "utf8")
+}
+
+/**
+ * Field names a granular operation refuses: assigning one reaches the
+ * object's prototype instead of storing a field.
+ */
+const RESERVED_FIELD_NAMES = new Set(["__proto__"])
+
+type GranularVariables = StorageProgramPayload & {
+    field: string
+    index?: number
+    value?: unknown
+}
+
+/**
+ * The object whose JSON size prices a granular write: the field with the
+ * written value, as an array element for the array operations. It bounds the
+ * growth the write can cause. The SDK prices the transaction's burn edit
+ * with the same object, so the fee recorded here is the fee burned.
+ */
+export function granularWriteFootprint(
+    variables: Pick<GranularVariables, "operation" | "field" | "value">,
+): Record<string, unknown> {
+    const field = String(variables.field ?? "")
+    const value =
+        variables.operation === "SET_FIELD" ? variables.value : [variables.value]
+    return { [field]: value }
+}
+
+/** 1 DEM per started 10KB of the write's footprint, as the SDK burns it. */
+export function granularWriteFee(
+    variables: Pick<GranularVariables, "operation" | "field" | "value">,
+): bigint {
+    const sizeBytes = calculateDataSize(granularWriteFootprint(variables), "json")
+    const chunks = Math.ceil(sizeBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
+    return BigInt(Math.max(1, chunks)) * STORAGE_PROGRAM_FEE_PER_CHUNK
+}
+
+function ownField(data: Record<string, unknown>, field: string): unknown {
+    return Object.hasOwn(data, field) ? data[field] : undefined
+}
+
+/** The array field an item operation names and the position it resolves to. */
+function granularItem(
+    data: Record<string, unknown>,
+    variables: GranularVariables,
+): { error: GCRResult } | { items: unknown[]; index: number } {
+    const items = ownField(data, variables.field)
+    if (!Array.isArray(items)) {
+        return {
+            error: {
+                success: false,
+                message: `Field ${variables.field} is not an array`,
+            },
+        }
+    }
+    const index = resolveIndex(variables.index, items.length)
+    if (index === null) {
+        return {
+            error: {
+                success: false,
+                message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${items.length})`,
+            },
+        }
+    }
+    return { items, index }
+}
+
+/** A whole index into an array of `length`, negative counting from the end. */
+function resolveIndex(index: unknown, length: number): number | null {
+    if (typeof index !== "number" || !Number.isInteger(index)) return null
+    const resolved = index < 0 ? length + index : index
+    return resolved >= 0 && resolved < length ? resolved : null
 }
 
 /**
@@ -1181,70 +1266,118 @@ export class GCRStorageProgramRoutines {
     // =========================================================================
     // REVIEW: Granular Field Operations
     // =========================================================================
+    //
+    // Each operation builds the next data object and never changes the stored
+    // one: the cached entity is shared by the simulate path and by the block's
+    // later transactions, and stored values must not alias the payload of the
+    // transaction that carried them.
 
     /**
-     * Handle SET_FIELD operation - set a single field value
+     * The checks every granular operation shares, and the data it starts from.
      */
-    private static async handleSetField(
+    private static granularTarget(
         edit: GCREditStorageProgram,
         program: GCRStorageProgram | null,
-        simulate: boolean,
-    ): Promise<GCRResult> {
-        const storageAddress = edit.target
-        const sender = edit.context.sender
-        const variables = edit.context.data?.variables as
-            | (StorageProgramPayload & { field: string; value: unknown })
-            | undefined
+        operation: string,
+    ):
+        | { error: GCRResult }
+        | {
+              variables: GranularVariables
+              program: GCRStorageProgram
+              data: Record<string, unknown>
+          } {
+        const fail = (message: string) => ({
+            error: { success: false, message } as GCRResult,
+        })
 
-        if (!variables?.field) {
-            return {
-                success: false,
-                message: "Field name is required for SET_FIELD operation",
-            }
+        // The edit carries only the new value, so the old one cannot be put
+        // back. Re-applying it forward would append twice or keep the write.
+        // A failed transaction is undone from its row snapshot instead, and
+        // the orphan rollback in sync only meets state an older binary wrote,
+        // which never applied these edits and so recorded nothing to undo.
+        if (edit.isRollback) {
+            return fail(`${operation} cannot be rolled back`)
+        }
+
+        const variables = edit.context.data?.variables as
+            | GranularVariables
+            | undefined
+        if (
+            !variables ||
+            typeof variables.field !== "string" ||
+            variables.field === ""
+        ) {
+            return fail(`Field name is required for ${operation} operation`)
+        }
+        if (RESERVED_FIELD_NAMES.has(variables.field)) {
+            return fail(`Field name ${variables.field} is reserved`)
         }
 
         if (!program) {
-            return {
-                success: false,
-                message: `Storage program not found: ${storageAddress}`,
-            }
+            return fail(`Storage program not found: ${edit.target}`)
         }
         if (program.isDeleted) {
-            return {
-                success: false,
-                message: `Storage program has been deleted: ${storageAddress}`,
-            }
+            return fail(`Storage program has been deleted: ${edit.target}`)
         }
-
-        // Granular operations only work with JSON encoding
         if (program.encoding === "binary") {
-            return {
-                success: false,
-                message:
-                    "SET_FIELD operation not supported for binary encoding. Use WRITE_STORAGE instead.",
-            }
+            return fail(
+                `${operation} operation not supported for binary encoding. Use WRITE_STORAGE instead.`,
+            )
         }
-
-        // Check write permission
         if (
-            program.owner !== sender &&
-            !checkWritePermission(program.acl, sender)
+            program.owner !== edit.context.sender &&
+            !checkWritePermission(program.acl, edit.context.sender)
         ) {
-            return {
-                success: false,
-                message: "No permission to write to this storage program",
-            }
+            return fail("No permission to write to this storage program")
         }
 
-        // Get current data or initialize empty object
-        const currentData = (program.data as Record<string, unknown>) || {}
-        const oldSizeBytes = calculateDataSize(currentData, "json")
+        const data = program.data ?? {}
+        if (typeof data !== "object" || Array.isArray(data)) {
+            return fail(
+                `${operation} needs the stored data to be a JSON object`,
+            )
+        }
 
-        // Compute the new field value to validate size before simulate
-        const testData = { ...currentData, [variables.field]: variables.value }
-        const newSizeBytes = calculateDataSize(testData, "json")
+        return { variables, program, data }
+    }
 
-        // Check size limit
+    /**
+     * The value a write stores, refused when it cannot be stored as written.
+     */
+    private static granularValue(
+        variables: GranularVariables,
+        operation: string,
+    ): { error: GCRResult } | { value: unknown; fee: bigint } {
+        const fail = (message: string) => ({
+            error: { success: false, message } as GCRResult,
+        })
+        if (variables.value === undefined) {
+            return fail(`Value is required for ${operation} operation`)
+        }
+        const footprint = granularWriteFootprint(variables)
+        const depth = calculateJsonNestingDepth(footprint)
+        if (depth > 64) {
+            return fail(`JSON nesting depth ${depth} exceeds maximum 64 levels`)
+        }
+        return {
+            value: structuredClone(variables.value),
+            fee: granularWriteFee(variables),
+        }
+    }
+
+    /**
+     * Stores the next data with its size, fee and interaction record, or only
+     * checks it when simulating.
+     */
+    private static commitGranular(
+        edit: GCREditStorageProgram,
+        program: GCRStorageProgram,
+        operation: string,
+        next: Record<string, unknown>,
+        fee: bigint,
+        simulate: boolean,
+    ): GCRResult {
+        const newSizeBytes = calculateDataSize(next, "json")
         if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
             return {
                 success: false,
@@ -1254,26 +1387,12 @@ export class GCRStorageProgramRoutines {
 
         if (simulate) {
             log.debug(
-                `[StorageProgram] Simulated SET_FIELD: ${storageAddress}.${variables.field}`,
+                `[StorageProgram] Simulated ${operation}: ${edit.target}`,
             )
-            return { success: true, message: "Simulated SET_FIELD successful" }
+            return { success: true, message: `Simulated ${operation} successful` }
         }
 
-        // Set the field value
-        currentData[variables.field] = variables.value
-
-        // Calculate delta-based fee (only charge if size increased)
-        const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
-        const deltaChunks = Math.ceil(
-            deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
-        )
-        const fee =
-            deltaChunks > 0
-                ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK
-                : 0n
-
-        // Update entity in-place
-        program.data = currentData
+        program.data = next
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
         program.interactionTxs = [
@@ -1283,14 +1402,38 @@ export class GCRStorageProgramRoutines {
         program.totalFeesPaid = program.totalFeesPaid + fee
 
         log.info(
-            `[StorageProgram] SET_FIELD: ${storageAddress}.${variables.field} (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`,
+            `[StorageProgram] ${operation}: ${edit.target} (size: ${newSizeBytes} bytes, fee: ${fee} DEM)`,
         )
 
         return {
             success: true,
-            message: `Field ${variables.field} set successfully`,
+            message: `${operation} applied to ${edit.target}`,
             storageProgram: program,
         }
+    }
+
+    /**
+     * Handle SET_FIELD operation - set a single field value
+     */
+    private static async handleSetField(
+        edit: GCREditStorageProgram,
+        program: GCRStorageProgram | null,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const target = this.granularTarget(edit, program, "SET_FIELD")
+        if ("error" in target) return target.error
+        const written = this.granularValue(target.variables, "SET_FIELD")
+        if ("error" in written) return written.error
+
+        const next = { ...target.data, [target.variables.field]: written.value }
+        return this.commitGranular(
+            edit,
+            target.program,
+            "SET_FIELD",
+            next,
+            written.fee,
+            simulate,
+        )
     }
 
     /**
@@ -1301,449 +1444,124 @@ export class GCRStorageProgramRoutines {
         program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const storageAddress = edit.target
-        const sender = edit.context.sender
-        const variables = edit.context.data?.variables as
-            | (StorageProgramPayload & {
-                  field: string
-                  index: number
-                  value: unknown
-              })
-            | undefined
+        const target = this.granularTarget(edit, program, "SET_ITEM")
+        if ("error" in target) return target.error
+        const { variables, data } = target
 
-        if (!variables?.field || variables.index === undefined) {
-            return {
-                success: false,
-                message:
-                    "Field name and index are required for SET_ITEM operation",
-            }
-        }
+        const item = granularItem(data, variables)
+        if ("error" in item) return item.error
+        const { items, index } = item
+        const written = this.granularValue(variables, "SET_ITEM")
+        if ("error" in written) return written.error
 
-        if (!program) {
-            return {
-                success: false,
-                message: `Storage program not found: ${storageAddress}`,
-            }
-        }
-        if (program.isDeleted) {
-            return {
-                success: false,
-                message: `Storage program has been deleted: ${storageAddress}`,
-            }
-        }
-
-        if (program.encoding === "binary") {
-            return {
-                success: false,
-                message: "SET_ITEM operation not supported for binary encoding",
-            }
-        }
-
-        if (
-            program.owner !== sender &&
-            !checkWritePermission(program.acl, sender)
-        ) {
-            return {
-                success: false,
-                message: "No permission to write to this storage program",
-            }
-        }
-
-        const currentData = (program.data as Record<string, unknown>) || {}
-        const fieldValue = currentData[variables.field]
-
-        if (!Array.isArray(fieldValue)) {
-            return {
-                success: false,
-                message: `Field ${variables.field} is not an array`,
-            }
-        }
-
-        if (variables.index < 0 || variables.index >= fieldValue.length) {
-            return {
-                success: false,
-                message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${fieldValue.length})`,
-            }
-        }
-
-        // Validate size before simulate by computing with the new value
-        const oldSizeBytes = calculateDataSize(currentData, "json")
-        const savedValue = fieldValue[variables.index]
-        fieldValue[variables.index] = variables.value
-        const newSizeBytes = calculateDataSize(currentData, "json")
-
-        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
-            // Restore original value since we're rejecting
-            fieldValue[variables.index] = savedValue
-            return {
-                success: false,
-                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
-            }
-        }
-
-        if (simulate) {
-            // Restore original value since we're simulating
-            fieldValue[variables.index] = savedValue
-            log.debug(
-                `[StorageProgram] Simulated SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}]`,
-            )
-            return { success: true, message: "Simulated SET_ITEM successful" }
-        }
-
-        // Value is already set in-place from the size check above
-
-        const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
-        const deltaChunks = Math.ceil(
-            deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
+        const nextItems = items.slice()
+        nextItems[index] = written.value
+        return this.commitGranular(
+            edit,
+            target.program,
+            "SET_ITEM",
+            { ...data, [variables.field]: nextItems },
+            written.fee,
+            simulate,
         )
-        const fee =
-            deltaChunks > 0
-                ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK
-                : 0n
-
-        program.data = currentData
-        program.sizeBytes = newSizeBytes
-        program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [
-            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
-            edit.txhash,
-        ]
-        program.totalFeesPaid = program.totalFeesPaid + fee
-
-        log.info(
-            `[StorageProgram] SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`,
-        )
-
-        return {
-            success: true,
-            message: `Item at ${variables.field}[${variables.index}] set successfully`,
-            storageProgram: program,
-        }
     }
 
     /**
-     * Handle APPEND_ITEM operation - append an item to an array field
+     * Handle APPEND_ITEM operation - append an item to an array field,
+     * creating the array when the field does not exist
      */
     private static async handleAppendItem(
         edit: GCREditStorageProgram,
         program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const storageAddress = edit.target
-        const sender = edit.context.sender
-        const variables = edit.context.data?.variables as
-            | (StorageProgramPayload & { field: string; value: unknown })
-            | undefined
+        const target = this.granularTarget(edit, program, "APPEND_ITEM")
+        if ("error" in target) return target.error
+        const { variables, data } = target
 
-        if (!variables?.field) {
-            return {
-                success: false,
-                message: "Field name is required for APPEND_ITEM operation",
-            }
-        }
-
-        if (!program) {
-            return {
-                success: false,
-                message: `Storage program not found: ${storageAddress}`,
-            }
-        }
-        if (program.isDeleted) {
-            return {
-                success: false,
-                message: `Storage program has been deleted: ${storageAddress}`,
-            }
-        }
-
-        if (program.encoding === "binary") {
-            return {
-                success: false,
-                message:
-                    "APPEND_ITEM operation not supported for binary encoding",
-            }
-        }
-
-        if (
-            program.owner !== sender &&
-            !checkWritePermission(program.acl, sender)
-        ) {
-            return {
-                success: false,
-                message: "No permission to write to this storage program",
-            }
-        }
-
-        const currentData = (program.data as Record<string, unknown>) || {}
-        let fieldValue = currentData[variables.field]
-
-        // If field doesn't exist, create empty array
-        if (fieldValue === undefined) {
-            fieldValue = []
-            currentData[variables.field] = fieldValue
-        }
-
-        if (!Array.isArray(fieldValue)) {
+        // Only an absent field starts a new array: one holding null is a
+        // value that is not an array.
+        const items = Object.hasOwn(data, variables.field)
+            ? data[variables.field]
+            : []
+        if (!Array.isArray(items)) {
             return {
                 success: false,
                 message: `Field ${variables.field} is not an array`,
             }
         }
+        const written = this.granularValue(variables, "APPEND_ITEM")
+        if ("error" in written) return written.error
 
-        // Validate size with appended item before simulate
-        const oldSizeBytes = calculateDataSize(currentData, "json")
-        fieldValue.push(variables.value)
-        const newSizeBytes = calculateDataSize(currentData, "json")
-
-        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
-            // Restore original array since we're rejecting
-            fieldValue.pop()
-            return {
-                success: false,
-                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
-            }
-        }
-
-        if (simulate) {
-            // Restore original array since we're simulating
-            fieldValue.pop()
-            log.debug(
-                `[StorageProgram] Simulated APPEND_ITEM: ${storageAddress}.${variables.field}`,
-            )
-            return {
-                success: true,
-                message: "Simulated APPEND_ITEM successful",
-            }
-        }
-
-        // Value is already appended in-place from the size check above
-
-        const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
-        const deltaChunks = Math.ceil(
-            deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
+        return this.commitGranular(
+            edit,
+            target.program,
+            "APPEND_ITEM",
+            { ...data, [variables.field]: [...items, written.value] },
+            written.fee,
+            simulate,
         )
-        const fee =
-            deltaChunks > 0
-                ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK
-                : 0n
-
-        program.data = currentData
-        program.sizeBytes = newSizeBytes
-        program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [
-            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
-            edit.txhash,
-        ]
-        program.totalFeesPaid = program.totalFeesPaid + fee
-
-        log.info(
-            `[StorageProgram] APPEND_ITEM: ${storageAddress}.${variables.field} (new length: ${fieldValue.length}, delta: +${deltaBytes} bytes, fee: ${fee} DEM)`,
-        )
-
-        return {
-            success: true,
-            message: `Item appended to ${variables.field} successfully (new length: ${fieldValue.length})`,
-            storageProgram: program,
-        }
     }
 
     /**
-     * Handle DELETE_FIELD operation - delete a single field
+     * Handle DELETE_FIELD operation - delete a single field (no fee)
      */
     private static async handleDeleteField(
         edit: GCREditStorageProgram,
         program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const storageAddress = edit.target
-        const sender = edit.context.sender
-        const variables = edit.context.data?.variables as
-            | (StorageProgramPayload & { field: string })
-            | undefined
+        const target = this.granularTarget(edit, program, "DELETE_FIELD")
+        if ("error" in target) return target.error
+        const { variables, data } = target
 
-        if (!variables?.field) {
-            return {
-                success: false,
-                message: "Field name is required for DELETE_FIELD operation",
-            }
-        }
-
-        if (!program) {
-            return {
-                success: false,
-                message: `Storage program not found: ${storageAddress}`,
-            }
-        }
-        if (program.isDeleted) {
-            return {
-                success: false,
-                message: `Storage program has been deleted: ${storageAddress}`,
-            }
-        }
-
-        if (program.encoding === "binary") {
-            return {
-                success: false,
-                message:
-                    "DELETE_FIELD operation not supported for binary encoding",
-            }
-        }
-
-        // DELETE_FIELD requires write permission (same as write operations)
-        if (
-            program.owner !== sender &&
-            !checkWritePermission(program.acl, sender)
-        ) {
-            return {
-                success: false,
-                message: "No permission to write to this storage program",
-            }
-        }
-
-        const currentData = (program.data as Record<string, unknown>) || {}
-
-        if (!(variables.field in currentData)) {
+        if (!Object.hasOwn(data, variables.field)) {
             return {
                 success: false,
                 message: `Field ${variables.field} does not exist`,
             }
         }
 
-        if (simulate) {
-            log.debug(
-                `[StorageProgram] Simulated DELETE_FIELD: ${storageAddress}.${variables.field}`,
-            )
-            return {
-                success: true,
-                message: "Simulated DELETE_FIELD successful",
-            }
-        }
-
-        // Delete field (no fee for deletions - they reduce storage)
-        delete currentData[variables.field]
-        const newSizeBytes = calculateDataSize(currentData, "json")
-
-        program.data = currentData
-        program.sizeBytes = newSizeBytes
-        program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [
-            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
-            edit.txhash,
-        ]
-        // No fee added for deletions
-
-        log.info(
-            `[StorageProgram] DELETE_FIELD: ${storageAddress}.${variables.field} (new size: ${newSizeBytes} bytes)`,
+        const next = { ...data }
+        delete next[variables.field]
+        return this.commitGranular(
+            edit,
+            target.program,
+            "DELETE_FIELD",
+            next,
+            0n,
+            simulate,
         )
-
-        return {
-            success: true,
-            message: `Field ${variables.field} deleted successfully`,
-            storageProgram: program,
-        }
     }
 
     /**
-     * Handle DELETE_ITEM operation - delete an item at a specific array index
+     * Handle DELETE_ITEM operation - delete an item at a specific array
+     * index (no fee)
      */
     private static async handleDeleteItem(
         edit: GCREditStorageProgram,
         program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const storageAddress = edit.target
-        const sender = edit.context.sender
-        const variables = edit.context.data?.variables as
-            | (StorageProgramPayload & { field: string; index: number })
-            | undefined
+        const target = this.granularTarget(edit, program, "DELETE_ITEM")
+        if ("error" in target) return target.error
+        const { variables, data } = target
 
-        if (!variables?.field || variables.index === undefined) {
-            return {
-                success: false,
-                message:
-                    "Field name and index are required for DELETE_ITEM operation",
-            }
-        }
+        const item = granularItem(data, variables)
+        if ("error" in item) return item.error
+        const { items, index } = item
 
-        if (!program) {
-            return {
-                success: false,
-                message: `Storage program not found: ${storageAddress}`,
-            }
-        }
-        if (program.isDeleted) {
-            return {
-                success: false,
-                message: `Storage program has been deleted: ${storageAddress}`,
-            }
-        }
-
-        if (program.encoding === "binary") {
-            return {
-                success: false,
-                message:
-                    "DELETE_ITEM operation not supported for binary encoding",
-            }
-        }
-
-        if (
-            program.owner !== sender &&
-            !checkWritePermission(program.acl, sender)
-        ) {
-            return {
-                success: false,
-                message: "No permission to write to this storage program",
-            }
-        }
-
-        const currentData = (program.data as Record<string, unknown>) || {}
-        const fieldValue = currentData[variables.field]
-
-        if (!Array.isArray(fieldValue)) {
-            return {
-                success: false,
-                message: `Field ${variables.field} is not an array`,
-            }
-        }
-
-        if (variables.index < 0 || variables.index >= fieldValue.length) {
-            return {
-                success: false,
-                message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${fieldValue.length})`,
-            }
-        }
-
-        if (simulate) {
-            log.debug(
-                `[StorageProgram] Simulated DELETE_ITEM: ${storageAddress}.${variables.field}[${variables.index}]`,
-            )
-            return {
-                success: true,
-                message: "Simulated DELETE_ITEM successful",
-            }
-        }
-
-        // Remove item at index (splice modifies array in place)
-        fieldValue.splice(variables.index, 1)
-        const newSizeBytes = calculateDataSize(currentData, "json")
-
-        program.data = currentData
-        program.sizeBytes = newSizeBytes
-        program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [
-            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
-            edit.txhash,
-        ]
-        // No fee added for deletions
-
-        log.info(
-            `[StorageProgram] DELETE_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (new length: ${fieldValue.length})`,
+        return this.commitGranular(
+            edit,
+            target.program,
+            "DELETE_ITEM",
+            {
+                ...data,
+                [variables.field]: items.filter((_, i) => i !== index),
+            },
+            0n,
+            simulate,
         )
-
-        return {
-            success: true,
-            message: `Item at ${variables.field}[${variables.index}] deleted successfully (new length: ${fieldValue.length})`,
-            storageProgram: program,
-        }
     }
 }
 

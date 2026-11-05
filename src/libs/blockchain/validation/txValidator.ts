@@ -15,6 +15,7 @@ import Hashing from "../../crypto/hashing"
 import { txSignaturePreimage } from "../../crypto/txSignaturePreimage"
 import { serializeTxContent } from "../../crypto/txContentSerializer"
 import type { PqcIdentityHint, TxValidationResult } from "./types"
+import { transactionRowRefusal } from "./postgresStorable"
 
 /**
  * Signature-preimage context, resolved on the main thread (fork config and
@@ -167,8 +168,13 @@ export async function validateTxSignature(
 }
 
 /**
- * Full validation pipeline used by `Mempool.receive`: coherence first, then
- * signature. Short-circuits on the first failure.
+ * Full validation pipeline used by `Mempool.receive` and by the re-check of a
+ * received or synced block: U+0000 first, then coherence, then signature.
+ * Short-circuits on the first failure.
+ *
+ * The U+0000 check covers only the columns of the transaction's own row: a
+ * block carrying one there never committed, so rejecting it cannot reject
+ * history. The rest of the body is refused at admission, not here.
  */
 export async function validateTx(
     tx: Transaction,
@@ -176,6 +182,10 @@ export async function validateTx(
     isPostFork: boolean,
     domain: TxSignatureDomain = LEGACY_DOMAIN,
 ): Promise<TxValidationResult> {
+    const unstorable = transactionRowRefusal(tx)
+    if (unstorable !== null) {
+        return { hash: tx?.hash, valid: false, reason: unstorable }
+    }
     const coherence = validateTxCoherence(tx, isPostFork)
     if (!coherence.valid) return coherence
     return await validateTxSignature(tx, hint, domain)
