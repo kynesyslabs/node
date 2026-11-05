@@ -12,7 +12,10 @@ import { getBoundCommittee, getEligiblePool } from "./getShard"
 import { isNetworkAhead } from "./networkAheadVeto"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
-import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
+import {
+    checkTimestampAgainstParent,
+    checkTimestampNotAhead,
+} from "@/libs/blockchain/validation/verifyBlock"
 import { isForkActive } from "@/forks/forkGates"
 import {
     commitLockActive,
@@ -216,10 +219,17 @@ export default async function manageProposeBlockHash(
         parentBlock?.content?.timestamp,
         candidate.number,
     )
+    const now = getNetworkTimestamp()
+    if (timestampVerdict.valid) {
+        timestampVerdict = checkTimestampNotAhead(
+            candidate.content.timestamp,
+            now,
+        )
+    }
     if (timestampVerdict.valid) {
         timestampVerdict = checkCosignTimestamp(
             candidate.content.timestamp,
-            getNetworkTimestamp(),
+            now,
         )
     }
     if (!timestampVerdict.valid) {

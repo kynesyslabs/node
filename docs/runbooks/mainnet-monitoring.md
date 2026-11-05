@@ -62,6 +62,7 @@ validator (`instance` label).
 | ForkScheduleMismatch | at least one validator reports a different fork schedule, held 5 min | critical | Genesis fork schedules differ; see `fork-schedule-policy.md`. |
 | ConsensusAbstaining | the node is skipping rounds because most validators differ from it, held 1 min | critical | The node has taken itself out of consensus; see `fork-schedule-policy.md`. |
 | MempoolBacklog | mempool above 8000 transactions, held 5 min | warning | Blocks are not draining the pool. Keep the threshold below the mempool hard cap, so the alert fires before the pool rejects transactions. |
+| ClockOffset | the host clock more than 1 s from NTP, held 15 min | warning | The validator's host NTP is not keeping time; see [Validator clock](#validator-clock). |
 
 The existing alerts in `node-health.yml`, `errors.yml` and `subsystems.yml` are
 loaded from the same directory and use the same receiver.
@@ -69,6 +70,29 @@ loaded from the same directory and use the same receiver.
 Routing: critical and warning both go to the one Slack receiver. Critical
 alerts wait 10 s before the first message and repeat hourly; warnings repeat
 every 4 hours. Alerts are grouped per alert name and validator.
+
+## Validator clock
+
+Validators run host NTP (chrony or `systemd-timesyncd`), and the node uses the
+host clock as is: it never corrects its own time, so one bad time server
+cannot move every validator that trusted it. The node only measures the
+offset. At boot and every 10 minutes it asks four public NTP servers and takes
+the median of the answers within 2 s of each other, when at least two agree.
+
+- `demos_clock_offset_seconds`: host clock minus that median; positive means
+  the host is ahead. The node logs a warning above 1 s.
+- `demos_clock_probe_agreeing_servers`: servers that agreed in the last probe.
+  Below 2 the offset was not updated (no outbound UDP 123, or the servers
+  disagree), and the node keeps running on the host clock.
+
+Limits: members refuse to sign a block stamped more than 5 s ahead of their
+clock, and every node rejects a block more than `BLOCK_TIMESTAMP_TOLERANCE`
+(60 s) in its future. With `PROD=true` a node whose host is off by more than
+that tolerance, by two or more agreeing servers, refuses to start.
+
+When `ClockOffset` fires, on the validator: `chronyc tracking` (or
+`timedatectl timesync-status`) shows the source and the offset. Fix the time
+service; the node needs no restart, the next probe clears the alert.
 
 ## Block watchdog stays off
 

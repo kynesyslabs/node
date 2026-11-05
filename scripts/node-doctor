@@ -356,10 +356,11 @@ print_report() {
 # ============================================================================
 # Production checks (--production): a mainnet validator host
 # ============================================================================
-# One PASS/FAIL line per item and exit 1 on any FAIL, so the result can be
-# pasted as evidence and used as a gate before `docker compose up`.
+# One PASS/WARN/FAIL line per item and exit 1 on any FAIL, so the result can
+# be pasted as evidence and used as a gate before `docker compose up`.
 
 PROD_FAILS=0
+PROD_WARNS=0
 PROD_CHECKS=0
 ENV_SOURCE="auto"
 NODE_ENV_SOURCE=""
@@ -376,10 +377,14 @@ SHEET_REQUIRED_KEYS=(
 	PROD DEMOS_REQUIRE_VALIDATORS FORK_SCHEDULE_MISMATCH_POLICY
 )
 
-prod_line() { # $1 PASS|FAIL, $2 item, $3 detail
+prod_line() { # $1 PASS|WARN|FAIL, $2 item, $3 detail
 	PROD_CHECKS=$((PROD_CHECKS + 1))
 	printf '%s %s: %s\n' "$1" "$2" "$3"
-	[[ "$1" = PASS ]] || PROD_FAILS=$((PROD_FAILS + 1))
+	case "$1" in
+	PASS) ;;
+	WARN) PROD_WARNS=$((PROD_WARNS + 1)) ;;
+	*) PROD_FAILS=$((PROD_FAILS + 1)) ;;
+	esac
 }
 
 # The values the node will actually get. Under Docker only what the compose
@@ -506,6 +511,8 @@ check_parameter_sheet() {
 	done
 }
 
+# The node uses the host clock as is and never corrects it, so the host's own
+# NTP service is what keeps a validator's block timestamps acceptable.
 check_clock_sync() {
 	local synced
 	if command -v timedatectl &>/dev/null; then
@@ -519,15 +526,20 @@ check_clock_sync() {
 		prod_line PASS "clock sync" "chronyc tracking: Leap status Normal"
 		return
 	fi
+	if ! command -v timedatectl &>/dev/null && ! command -v chronyc &>/dev/null; then
+		prod_line WARN "clock sync" "skipped: neither timedatectl nor chronyc is installed; confirm by hand that the host's NTP service keeps the clock synchronised"
+		return
+	fi
 	prod_line FAIL "clock sync" "no synchronised clock (timedatectl NTPSynchronized=${synced:-unknown}, no chrony in sync): enable one with 'sudo timedatectl set-ntp true' or install chrony"
 }
 
-# The node itself asks public NTP servers at boot and refuses to start without
-# two agreeing answers, so the host's own sync is not enough: outbound UDP 123
-# must reach them too.
+# The node measures its host clock against public NTP servers and, in
+# production, refuses to start when they agree it is off by more than the
+# block timestamp tolerance. Without outbound UDP 123 it starts but cannot
+# measure, so no check guards the host clock but the host's own NTP.
 check_ntp_egress() {
 	if ! command -v python3 &>/dev/null; then
-		prod_line FAIL "NTP egress" "python3 is needed to query pool.ntp.org on UDP 123"
+		prod_line WARN "NTP egress" "skipped: python3 is needed to query pool.ntp.org on UDP 123"
 		return
 	fi
 	local out
@@ -550,7 +562,7 @@ PY
 	); then
 		prod_line PASS "NTP egress" "${out}"
 	else
-		prod_line FAIL "NTP egress" "${out}: allow outbound UDP 123"
+		prod_line WARN "NTP egress" "${out}: allow outbound UDP 123 so the node can measure its clock offset"
 	fi
 }
 
@@ -597,7 +609,7 @@ run_production_checks() {
 	check_unset DEMOS_SIGNING_RECORD_REBIND "set it for the one rebind start only (docs/runbooks/validator-key.md)"
 	check_unset DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST "set it for the one start that accepts an agreed schedule change only"
 	if [[ ${PROD_FAILS} -eq 0 ]]; then
-		echo "PASS all ${PROD_CHECKS} checks"
+		echo "PASS all ${PROD_CHECKS} checks (${PROD_WARNS} warnings)"
 	else
 		echo "FAIL ${PROD_FAILS} of ${PROD_CHECKS} checks"
 	fi
@@ -623,7 +635,7 @@ OPTIONS:
                     mainnet parameter sheet (PROD, DEMOS_REQUIRE_VALIDATORS,
                     mismatch policy, block timing, fees, stake floor, ZK points),
                     clock sync, outbound NTP, genesis pins, and one-start
-                    switches left set; one PASS/FAIL line each, exit 1 on any FAIL
+                    switches left set; one PASS/WARN/FAIL line each, exit 1 on any FAIL
     --parameters FILE
                     With --production: the parameter sheet to compare with
                     (default: docs/mainnet/parameters.env in this checkout)
@@ -726,5 +738,7 @@ main() {
 	fi
 }
 
-# Run main
-main "$@"
+# Sourcing the file only defines the checks, so tests can call one by itself
+if [[ "${BASH_SOURCE[0]}" = "$0" ]]; then
+	main "$@"
+fi

@@ -157,9 +157,6 @@ export default class SharedState {
     }
     mainLoopSleepTime = Config.getInstance().core.mainLoopSleepTime
 
-    // NOTE See calibrateTime.ts for this value
-    timestampCorrection = 0
-
     // SECTION shared state variables
     // Modes
     isShuttingDown = false
