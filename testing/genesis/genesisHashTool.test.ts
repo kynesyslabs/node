@@ -96,11 +96,17 @@ describe("genesis-hash tool", () => {
 
         const g = launchGenesis()
         g.properties = { ...g.properties, sudoPubkey: "FILL: a key" }
-        g.balances = [["0x" + "a".repeat(64), "12"], ["0x" + "b".repeat(64), "-1"], "FILL"]
+        g.balances = [
+            ["0x" + "a".repeat(64), "12"],
+            ["0x" + "b".repeat(64), "-1"],
+            "FILL",
+            ["FILL: an address", "5"],
+        ]
         const problems = genesisValues(g).problems.join("\n")
         expect(problems).toContain("properties.sudoPubkey")
         expect(problems).toContain("entry 1")
         expect(problems).toContain("entry 2")
+        expect(problems).toContain("entry 3")
         expect(problems).not.toContain("entry 0")
 
         expect(genesisValues({ ...launchGenesis(), balances: "FILL: allocations" }).problems.join("\n")).toContain(
