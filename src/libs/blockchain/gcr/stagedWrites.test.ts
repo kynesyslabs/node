@@ -180,11 +180,11 @@ describe("validator stake edits", () => {
     })
 })
 
-const proposal = (proposalId: string, key = "networkFee"): any => ({
+const proposal = (proposalId: string, key = "networkFee", account = "0xabc"): any => ({
     type: "networkUpgrade",
-    account: "0xabc",
+    account,
     proposalId,
-    proposedParameters: { [key]: "2" },
+    proposedParameters: { [key]: 1 },
     effectiveAtBlock: 100_000,
     rationale: "test",
 })
@@ -197,6 +197,11 @@ const vote = (proposalId: string, account = "0xabc"): any => ({
 })
 
 describe("governance edits", () => {
+    beforeEach(async () => {
+        const { default: GCR } = await import("./gcr")
+        spyOn(GCR, "getGCRValidatorStatus").mockResolvedValue({ status: "2" } as any)
+    })
+
     it("stages a proposal row for the block's transaction", async () => {
         const result = await HandleGCR.applyGCREdit(proposal("p1"), caches(), false, false)
 
@@ -214,9 +219,14 @@ describe("governance edits", () => {
         const entities = caches()
         const first = await HandleGCR.applyGCREdit(proposal("p1"), entities, false, false)
         const again = await HandleGCR.applyGCREdit(proposal("p1"), entities, false, false)
-        const sameKey = await HandleGCR.applyGCREdit(proposal("p2"), entities, false, false)
+        const sameKey = await HandleGCR.applyGCREdit(
+            proposal("p2", "networkFee", "0xdef"),
+            entities,
+            false,
+            false,
+        )
         const otherKey = await HandleGCR.applyGCREdit(
-            proposal("p3", "blockTime"),
+            proposal("p3", "rpcFee", "0x123"),
             entities,
             false,
             false,
@@ -230,6 +240,52 @@ describe("governance edits", () => {
         expect(otherKey.message).toBe("Proposal persisted")
         expect(entities.networkUpgrades.get("p1").version).toBe(1)
         expect(entities.networkUpgrades.get("p3").version).toBe(2)
+    })
+
+    it("re-runs the intake checks where the proposal is applied", async () => {
+        const entities = caches()
+        const outOfBounds = await HandleGCR.applyGCREdit(
+            { ...proposal("p1"), proposedParameters: { networkFee: 1_000_000 } },
+            entities,
+            false,
+            false,
+        )
+        const notGovernable = await HandleGCR.applyGCREdit(
+            proposal("p2", "blockTimeMs"),
+            entities,
+            false,
+            false,
+        )
+        const first = await HandleGCR.applyGCREdit(proposal("p3"), entities, false, false)
+        const second = await HandleGCR.applyGCREdit(
+            proposal("p4", "rpcFee"),
+            entities,
+            false,
+            false,
+        )
+
+        expect(outOfBounds.success).toBe(false)
+        expect(outOfBounds.message).toContain("Safety bounds violated [networkFee]")
+        expect(notGovernable.success).toBe(false)
+        expect(notGovernable.message).toContain("not governable")
+        expect(first.message).toBe("Proposal persisted")
+        expect(second.success).toBe(false)
+        expect(second.message).toBe("Proposer already has an open proposal")
+        expect(entities.networkUpgrades.has("p1")).toBe(false)
+        expect(entities.networkUpgrades.has("p4")).toBe(false)
+    })
+
+    it("refuses a proposal from a validator that is not active", async () => {
+        const { default: GCR } = await import("./gcr")
+        spyOn(GCR, "getGCRValidatorStatus").mockResolvedValue({ status: "1" } as any)
+
+        const entities = caches()
+        const result = await HandleGCR.applyGCREdit(proposal("p1"), entities, false, false)
+
+        expect(result.success).toBe(false)
+        expect(result.message).toBe("Proposer is not an active validator")
+        expect(result.deferredWrite).toBeUndefined()
+        expect(entities.networkUpgrades.has("p1")).toBe(false)
     })
 
     it("numbers a staged proposal after the ones on disk", async () => {

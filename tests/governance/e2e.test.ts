@@ -31,10 +31,12 @@ const sharedStateStub: {
     networkParameters: unknown
     rpcFee: number
     shardSize: number
+    forkConfig: unknown
 } = {
     networkParameters: null,
     rpcFee: 10,
     shardSize: 4,
+    forkConfig: { networkGovernance: { activationHeight: 0 } },
 }
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,

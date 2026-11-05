@@ -40,7 +40,10 @@ jest.mock("@/model/datasource", () => ({
 
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
-    getSharedState: { networkParameters: null },
+    getSharedState: {
+        networkParameters: null,
+        forkConfig: { networkGovernance: { activationHeight: 0 } },
+    },
 }))
 
 jest.mock("@/libs/blockchain/chain", () => ({

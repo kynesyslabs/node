@@ -58,12 +58,14 @@ export function onTheWire<T>(tx: T): T {
 
 /**
  * Puts the chain tip and the SDK on one side of the osDenomination fork, with
- * editBinding active from `editBinding` (null leaves it dormant).
+ * editBinding active from `editBinding` (null leaves it dormant). Governance
+ * is active, so its transactions are judged by the edit binding alone.
  */
 export function chainIs(postFork: boolean, editBinding: number | null = 0): void {
     getSharedState.forkConfig = cloneDefaultForkConfig()
     getSharedState.forkConfig.osDenomination.activationHeight = postFork ? 0 : null
     getSharedState.forkConfig.editBinding.activationHeight = editBinding
+    getSharedState.forkConfig.networkGovernance.activationHeight = 0
     getSharedState.lastBlockNumber = 100
     sdkPostFork = postFork
 }

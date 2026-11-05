@@ -152,7 +152,8 @@ describe("Mempool.ingestGossiped", () => {
             const tx = await forged(base, tamper)
             const out = await Mempool.ingestGossiped(validity(tx))
             expect(out.accepted).toBe(false)
-            expect(out.reason).toContain("gcr_edits")
+            // A governance edit is refused by the networkGovernance rule first.
+            expect(out.reason).toMatch(/gcr_edits|another account than the signer/)
         })
     }
 })
