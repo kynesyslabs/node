@@ -128,8 +128,12 @@ function installPool() {
                 where: (_sql: string, p: Record<string, unknown>) => (Object.assign(params, p), builder),
                 andWhere: (_sql: string, p: Record<string, unknown>) => (Object.assign(params, p), builder),
                 getCount: async () =>
-                    pool.filter(h => nonceAccountOf(h) === params.account && Number(h.tx.nonce) === params.nonce)
-                        .length,
+                    pool.filter(
+                        h =>
+                            nonceAccountOf(h) === params.account &&
+                            Number(h.tx.nonce) === params.nonce &&
+                            Number(h.tx.reference_block) >= Number(params.cutoff),
+                    ).length,
             }
             return builder
         },
@@ -218,6 +222,20 @@ describe("nonce admission under nonceIntegrity", () => {
         expect(viaRpc.error).toMatch(/nonce 8 from this sender is already pending/)
         expect(viaGossip.error).toMatch(/already pending/)
         expect(pool).toHaveLength(1)
+    })
+
+    it("lets a retry take a nonce held only by a pending tx whose reference block expired", async () => {
+        const expired = await signed(8, 3n)
+        expired.reference_block = 98
+        pool.push({ hash: expired.hash, tx: { ...expired, nonce: 8 } })
+        const retry = await rpc(await signed(8, 4n))
+        expect(retry.error).toBe("")
+        expect(pool).toHaveLength(2)
+
+        const inWindow = await signed(9, 3n)
+        inWindow.reference_block = 99
+        pool.push({ hash: inWindow.hash, tx: { ...inWindow, nonce: 9 } })
+        expect((await rpc(await signed(9, 4n))).error).toMatch(/already pending/)
     })
 
     it("keeps refusing a nonce at or below the confirmed one", async () => {

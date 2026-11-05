@@ -397,7 +397,10 @@ export default class Mempool {
      * - More than MEMPOOL_MAX_NONCE_AHEAD past the confirmed nonce: it cannot
      *   apply until every nonce before it lands, so it would hold a slot.
      * - A second pending tx for the same nonce: at most one of them can take
-     *   effect, and the other would only reach a block as a failed tx.
+     *   effect, and the other would only reach a block as a failed tx. A
+     *   pending tx whose reference block has left the window does not count:
+     *   it can only be included as failed, which spends no nonce, so a retry
+     *   of that nonce is not held back until it is.
      *
      * The consensus merge does not come through here: every committee member
      * must end it holding the same pool.
@@ -407,6 +410,7 @@ export default class Mempool {
         account: string,
         nonce: number,
         confirmedNonce: number,
+        head: number,
     ): Promise<string | null> {
         if (nonce > confirmedNonce + MEMPOOL_MAX_NONCE_AHEAD) {
             return (
@@ -421,6 +425,9 @@ export default class Mempool {
                 { account },
             )
             .andWhere("tx.nonce = :nonce", { nonce })
+            .andWhere("tx.reference_block >= :cutoff", {
+                cutoff: head - getSharedState.referenceBlockRoom,
+            })
             .getCount()
         return taken > 0
             ? `A transaction with nonce ${nonce} from this sender is already pending`
@@ -687,6 +694,7 @@ export default class Mempool {
                                 nonceAccount,
                                 txNonce,
                                 accountNonce,
+                                blockHeight,
                             )
                             if (refusal) {
                                 log.error(
