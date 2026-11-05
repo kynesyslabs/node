@@ -48,9 +48,11 @@ database by the same `PG_*` settings the node uses.
 | `bun run migration:revert` | undoes the last one. Lossy, see above |
 
 In the Docker stack, run them in a one-off container (the node can be stopped,
-Postgres must be up: `--no-deps` does not start it). Keep `--name demos-migrate`:
-the node service sets `container_name`, so without it `run` reuses that name and
-fails with a name conflict while the stopped node container still exists:
+Postgres must be up: `--no-deps` does not start it). `--name demos-migrate` gives
+the one-off container its own name, so it can never clash with the node service's
+`container_name` while the stopped node container still exists. (Checked on
+Compose 2.40.3: `run` without `--name` did not clash there either; the flag is kept
+for Compose versions that behave differently.)
 
 ```bash
 docker compose run --rm --no-deps --name demos-migrate node bun run migration:show
