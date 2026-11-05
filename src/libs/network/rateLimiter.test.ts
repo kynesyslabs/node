@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test"
 
 const mockGetAuthContext = mock(() => ({
     verified: false,
@@ -18,6 +18,30 @@ mock.module("@/libs/peer", () => ({
         getInstance: () => ({
             getPeer: (identity: string) => mockGetPeer(identity),
         }),
+    },
+}))
+
+let stakedKeys = new Set<string>()
+const refreshStakedSet = mock(async () => stakedKeys as ReadonlySet<string>)
+mock.module("@/libs/consensus/stakedSet", () => ({
+    getStakedSet: () => refreshStakedSet(),
+}))
+
+let validatorRows: unknown[] | Error = []
+// The real getter answers a failed read with [], exactly like an empty table.
+const getGCRValidatorsAtBlock = mock(async (_height: number) =>
+    validatorRows instanceof Error ? [] : validatorRows,
+)
+const getGCRValidatorsAtBlockOrThrow = mock(async (_height: number) => {
+    if (validatorRows instanceof Error) throw validatorRows
+    return validatorRows
+})
+mock.module("@/libs/blockchain/gcr/gcr", () => ({
+    __esModule: true,
+    default: {
+        getGCRValidatorsAtBlock: (height: number) => getGCRValidatorsAtBlock(height),
+        getGCRValidatorsAtBlockOrThrow: (height: number) =>
+            getGCRValidatorsAtBlockOrThrow(height),
     },
 }))
 
@@ -51,6 +75,8 @@ describe("RateLimiter trusted internal requests", () => {
             algorithm: null,
         }))
         mockGetPeer.mockImplementation(() => undefined)
+        stakedKeys = new Set()
+        validatorRows = []
 
         rateLimiter = new rateLimiterModule.RateLimiter({
             enabled: true,
@@ -67,19 +93,75 @@ describe("RateLimiter trusted internal requests", () => {
     })
 
     afterEach(() => {
+        setSystemTime()
         rateLimiter.destroy()
         mockGetAuthContext.mockClear()
         mockGetPeer.mockClear()
+        refreshStakedSet.mockClear()
+        refreshStakedSet.mockImplementation(async () => stakedKeys as ReadonlySet<string>)
+        getGCRValidatorsAtBlock.mockClear()
+        getGCRValidatorsAtBlockOrThrow.mockClear()
     })
 
-    it("trusts authenticated known peers", () => {
+    it("re-reads an empty validator set at most every few seconds", async () => {
+        setSystemTime(new Date(1_000_000))
+        await rateLimiter.refreshValidatorKeys()
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(1)
+        expect(getGCRValidatorsAtBlockOrThrow).toHaveBeenCalledTimes(1)
+
+        stakedKeys = new Set(["0xbeef"])
+        setSystemTime(new Date(1_005_000))
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(2)
+
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(3)
+        expect(getGCRValidatorsAtBlockOrThrow).toHaveBeenCalledTimes(1)
+    })
+
+    it("shares one validator read between concurrent signed requests", async () => {
+        setSystemTime(new Date(1_000_000))
+        let release!: () => void
+        const gate = new Promise<void>(resolve => {
+            release = resolve
+        })
+        refreshStakedSet.mockImplementation(async () => {
+            await gate
+            return stakedKeys as ReadonlySet<string>
+        })
+
+        const burst = Array.from({ length: 20 }, () => rateLimiter.refreshValidatorKeys())
+        release()
+        await Promise.all(burst)
+
+        expect(refreshStakedSet).toHaveBeenCalledTimes(1)
+        expect(getGCRValidatorsAtBlockOrThrow).toHaveBeenCalledTimes(1)
+
+        // Past the back-off the next request reads again.
+        setSystemTime(new Date(1_005_000))
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(2)
+    })
+
+    it("backs off after a failed validator read too", async () => {
+        setSystemTime(new Date(1_000_000))
+        validatorRows = new Error("connection terminated")
+        await rateLimiter.refreshValidatorKeys()
+        await rateLimiter.refreshValidatorKeys()
+        expect(refreshStakedSet).toHaveBeenCalledTimes(1)
+        expect(getGCRValidatorsAtBlockOrThrow).toHaveBeenCalledTimes(1)
+    })
+
+    it("trusts an authenticated staked validator", async () => {
+        stakedKeys = new Set(["0xbeef"])
+        await rateLimiter.refreshValidatorKeys()
         mockGetAuthContext.mockImplementation(() => ({
             verified: true,
-            identity: "ed25519:peer-key",
-            publicKey: "peer-key",
+            identity: "ed25519:0xBEEF",
+            publicKey: "0xBEEF",
             algorithm: "ed25519",
         }))
-        mockGetPeer.mockImplementation(() => ({ identity: "peer-key" }))
 
         const trusted = rateLimiter.isTrustedInternalRequest(
             new Request("http://localhost/"),
@@ -87,7 +169,50 @@ describe("RateLimiter trusted internal requests", () => {
         )
 
         expect(trusted).toBe(true)
-        expect(mockGetPeer).toHaveBeenCalledWith("peer-key")
+    })
+
+    it("does not trust a key only because it is in the peer table", async () => {
+        // hello_peer puts any node that asks into the peer table.
+        stakedKeys = new Set(["0xbeef"])
+        await rateLimiter.refreshValidatorKeys()
+        mockGetAuthContext.mockImplementation(() => ({
+            verified: true,
+            identity: "ed25519:0xpeer",
+            publicKey: "0xpeer",
+            algorithm: "ed25519",
+        }))
+        mockGetPeer.mockImplementation(() => ({ identity: "0xpeer" }))
+
+        const trusted = rateLimiter.isTrustedInternalRequest(
+            new Request("http://localhost/"),
+            "172.25.0.4",
+        )
+
+        expect(trusted).toBe(false)
+    })
+
+    it("trusts known peers on a network with no validators, unless validators are required", async () => {
+        mockGetAuthContext.mockImplementation(() => ({
+            verified: true,
+            identity: "ed25519:0xpeer",
+            publicKey: "0xpeer",
+            algorithm: "ed25519",
+        }))
+        mockGetPeer.mockImplementation(() => ({ identity: "0xpeer" }))
+        const req = new Request("http://localhost/")
+        await rateLimiter.refreshValidatorKeys()
+
+        expect(rateLimiter.isTrustedInternalRequest(req, "172.25.0.4")).toBe(true)
+        expect(mockGetPeer).toHaveBeenCalledWith("0xpeer")
+
+        const previous = process.env.DEMOS_REQUIRE_VALIDATORS
+        process.env.DEMOS_REQUIRE_VALIDATORS = "true"
+        try {
+            expect(rateLimiter.isTrustedInternalRequest(req, "172.25.0.4")).toBe(false)
+        } finally {
+            if (previous === undefined) delete process.env.DEMOS_REQUIRE_VALIDATORS
+            else process.env.DEMOS_REQUIRE_VALIDATORS = previous
+        }
     })
 
     it("trusts the local node identity", () => {
@@ -107,7 +232,30 @@ describe("RateLimiter trusted internal requests", () => {
         expect(mockGetPeer).not.toHaveBeenCalled()
     })
 
-    it("does not trust unknown authenticated callers", () => {
+    it("gives no peer-table exemption when the validator set cannot be read", async () => {
+        // The staked set is empty after a failed read too, and the plain
+        // getter answers one with []; neither is a network without validators.
+        validatorRows = new Error("connection terminated")
+        mockGetAuthContext.mockImplementation(() => ({
+            verified: true,
+            identity: "ed25519:0xpeer",
+            publicKey: "0xpeer",
+            algorithm: "ed25519",
+        }))
+        mockGetPeer.mockImplementation(() => ({ identity: "0xpeer" }))
+        await rateLimiter.refreshValidatorKeys()
+
+        expect(rateLimiter.isTrustedInternalRequest(new Request("http://localhost/"), "172.25.0.4")).toBe(false)
+        expect(getGCRValidatorsAtBlock).not.toHaveBeenCalled()
+
+        validatorRows = [{ address: "0xbeef" }]
+        await rateLimiter.refreshValidatorKeys()
+        expect(rateLimiter.isTrustedInternalRequest(new Request("http://localhost/"), "172.25.0.4")).toBe(false)
+    })
+
+    it("does not trust unknown authenticated callers", async () => {
+        stakedKeys = new Set(["0xbeef"])
+        await rateLimiter.refreshValidatorKeys()
         mockGetAuthContext.mockImplementation(() => ({
             verified: true,
             identity: "ed25519:unknown-key",
@@ -121,7 +269,7 @@ describe("RateLimiter trusted internal requests", () => {
         )
 
         expect(trusted).toBe(false)
-        expect(mockGetPeer).toHaveBeenCalledWith("unknown-key")
+        expect(mockGetPeer).not.toHaveBeenCalled()
     })
 })
 

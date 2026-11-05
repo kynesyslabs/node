@@ -4,6 +4,7 @@ import getTransactionStatus from "../routines/nodecalls/getTransactionStatus"
 import getTxsByHashes from "../routines/nodecalls/getTxsByHashes"
 import Mempool from "../../blockchain/mempool"
 import log from "src/utilities/logger"
+import { MEMPOOL_PUBLIC_PAGE_MAX } from "src/utilities/constants"
 import type { NodeCallHandler } from "./types"
 
 const HISTORY_MAX_LIMIT = 100
@@ -95,8 +96,20 @@ export const transactionHandlers: Record<string, NodeCallHandler> = {
         return response
     },
 
-    getMempool: async (_data, response) => {
-        response.response = await Mempool.getMempool()
+    // Validators exchange pools through the consensus routes, which read
+    // the pool whole; this public read pages it.
+    getMempool: async (data, response) => {
+        const start = toPageInt(data?.start) ?? 0
+        const limit = toPageInt(data?.limit) || MEMPOOL_PUBLIC_PAGE_MAX
+        if (start < 0 || limit < 0) {
+            response.result = 400
+            response.response = "start and limit must be non-negative integers"
+            return response
+        }
+        const pageLimit = Math.min(limit, MEMPOOL_PUBLIC_PAGE_MAX)
+        const { txs, total } = await Mempool.getMempoolPage(start, pageLimit)
+        response.response = txs
+        response.extra = { total, start, limit: pageLimit }
         return response
     },
 }

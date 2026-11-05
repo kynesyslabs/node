@@ -35,6 +35,10 @@ import {
     RATE_LIMIT_DEFAULT_WINDOW_MS,
     RATE_LIMIT_POST_MAX_REQUESTS,
     RATE_LIMIT_POST_WINDOW_MS,
+    RATE_LIMIT_GET_MAX_REQUESTS,
+    RATE_LIMIT_GET_WINDOW_MS,
+    RATE_LIMIT_AUTH_FAILURE_MAX_REQUESTS,
+    RATE_LIMIT_AUTH_FAILURE_WINDOW_MS,
     RATE_LIMIT_TX_PER_BLOCK,
     RATE_LIMIT_IDENTITIES_MAX_REQUESTS,
     RATE_LIMIT_IDENTITIES_WINDOW_MS,
@@ -554,6 +558,14 @@ export default class SharedState {
             identities: {
                 maxRequests: RATE_LIMIT_IDENTITIES_MAX_REQUESTS,
                 windowMs: RATE_LIMIT_IDENTITIES_WINDOW_MS,
+            },
+            GET: {
+                maxRequests: RATE_LIMIT_GET_MAX_REQUESTS,
+                windowMs: RATE_LIMIT_GET_WINDOW_MS,
+            },
+            "auth-failure": {
+                maxRequests: RATE_LIMIT_AUTH_FAILURE_MAX_REQUESTS,
+                windowMs: RATE_LIMIT_AUTH_FAILURE_WINDOW_MS,
             },
         },
         txPerBlock: RATE_LIMIT_TX_PER_BLOCK,

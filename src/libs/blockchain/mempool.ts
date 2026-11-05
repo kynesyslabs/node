@@ -128,6 +128,25 @@ export default class Mempool {
     }
 
     /**
+     * One page of the whole pool in getMempool's order, with the pool size.
+     */
+    public static async getMempoolPage(start: number, limit: number) {
+        const [txs, total] = await this.repo.findAndCount({
+            order: {
+                timestamp: "ASC",
+                reference_block: "ASC",
+                hash: "ASC",
+            },
+            skip: start,
+            take: limit,
+        })
+        return {
+            txs: txs as (Transaction & { reference_block: number })[],
+            total,
+        }
+    }
+
+    /**
      * Returns a map of mempool hashes (for lookup only)
      */
     public static async getMempoolHashMap(blockNumber: number) {
