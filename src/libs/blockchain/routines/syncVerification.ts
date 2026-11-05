@@ -372,7 +372,8 @@ export function pinFailureCodes(txs: Transaction[], plan: BlockOutcomePlan): voi
 /**
  * Under `finalityProofs` the code is part of the result the next block
  * commits to, so the stored code must be what this node derives, never what
- * the peer served: a wrong row cannot be corrected once stored. A transaction
+ * the peer served: a stored code changes only by repair against a later
+ * verified block. A transaction
  * that failed inside apply was given TX_EXECUTE_FAILED by the forger, and a
  * confirmed one carries no code. The served statuses already agree with the
  * local outcome.
@@ -421,9 +422,8 @@ export function statusDisagreements(
  * Before block N is applied with `txs`, the results it will store must give
  * the `parent_results_root` that block N + 1 commits to, when N + 1 is in
  * hand. Statuses and codes are already derived locally; this catches any
- * remaining disagreement before the rows are stored, since once N is stored
- * they can no longer be corrected and N + 1 would fail verification here for
- * good.
+ * remaining disagreement before the rows are stored: once N is stored its
+ * statuses are final and its failure codes change only by repair.
  *
  * Only a next block that hashes to its own hash and builds on `block` is
  * compared; anything else is judged as a block on its own turn. It is not

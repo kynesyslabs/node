@@ -18,7 +18,7 @@ import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
 import log from "src/utilities/logger"
-import { verifyBlock } from "../validation/verifyBlock"
+import { type BlockVerification, verifyBlock } from "../validation/verifyBlock"
 import {
     SyncBlockRejectedError,
     checkResultsAgainstNextBlock,
@@ -31,7 +31,7 @@ import {
     verifyNativeTablesHashes,
 } from "./syncVerification"
 import { isForkActive } from "@/forks"
-import { FINALITY_FORK } from "../finality/commitments"
+import { FINALITY_FORK, repairParentResultCodes } from "../finality/commitments"
 import { recordSyncedBlock } from "src/libs/consensus/v2/routines/stallDetection"
 import {
     RPCRequest,
@@ -659,7 +659,7 @@ export async function syncBlock(
         return true
     }
 
-    const verdict = await verifyBlock(block as never)
+    const verdict = await verifySyncedBlock(block, peer, fetchDeadline)
     if (!verdict.valid) {
         log.error(
             `[syncBlock] Rejecting synced block ${block.number} (${block.hash}): ${verdict.reason}`,
@@ -1145,7 +1145,8 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
  * status agrees, then committed in the block's own database transaction, so
  * a rejected block and a failed insert both leave the state untouched.
  * With the next block in hand, its result root must match the results about
- * to be stored, which cannot be corrected once they are.
+ * to be stored: once stored, a status is final and a failure code changes
+ * only by repair against a later verified block.
  *
  * @throws SyncBlockRejectedError when the block must not be applied
  */
@@ -1205,11 +1206,53 @@ async function insertBlockOrHalt(
 }
 
 /**
+ * verifyBlock, repairing the stored failure codes of the parent when they
+ * are all `block` disagrees with. The parent may have been stored at the
+ * head with no child to check its codes against; `block`, once its quorum
+ * and everything else verify, says which codes the network committed, and
+ * the codes `peer` serves are kept only if they give exactly that root.
+ */
+async function verifySyncedBlock(
+    block: Block,
+    peer: Peer | undefined,
+    fetchDeadline?: number,
+): Promise<BlockVerification> {
+    const verdict = await verifyBlock(block as never)
+    if (verdict.valid || !verdict.parentResultsMismatch || !peer) return verdict
+
+    const rest = await verifyBlock(block as never, undefined, {
+        skipParentResults: true,
+    })
+    const parent = rest.valid
+        ? await Chain.getBlockByNumber(block.number - 1)
+        : null
+    const committed = (block.content as unknown as Record<string, unknown>)
+        ?.parent_results_root
+    if (!parent || typeof committed !== "string") return verdict
+
+    let repaired: number | null
+    try {
+        const served = await askTxsForBlock(parent as never, peer, fetchDeadline)
+        repaired = await repairParentResultCodes(parent, committed, served)
+    } catch (e) {
+        log.warning(
+            `[sync] could not repair the results of block ${parent.number} from ${peer.identity}: ${e instanceof Error ? e.message : String(e)}`,
+        )
+        return verdict
+    }
+    if (repaired === null) return verdict
+    log.warning(
+        `[sync] rewrote ${repaired} failure code(s) of block ${parent.number} to the results block ${block.number} commits to`,
+    )
+    return await verifyBlock(block as never)
+}
+
+/**
  * Block `parent.number + 1` as `peer` serves it, for checking the results
  * `parent` is about to store. They depend on transaction attrs the peer
- * serves unsigned, and a stored result cannot be corrected later, so while
- * the network is known to be past `parent` it is not stored without its
- * child in hand.
+ * serves unsigned, so while the network is known to be past `parent` it is
+ * not stored without its child in hand; a block stored at the head has its
+ * failure codes repaired when its child arrives.
  *
  * @returns the child; undefined when none is needed or none exists yet; null
  *   when one exists but `peer` did not serve it
@@ -1348,7 +1391,7 @@ async function batchDownloadBlocks(
 
         // Hash + signature quorum on EACH historical block before insert
         // (height-stable signer set).
-        const verdict = await verifyBlock(block as never)
+        const verdict = await verifySyncedBlock(block, peer)
         if (!verdict.valid) {
             log.error(
                 `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}): ${verdict.reason}`,

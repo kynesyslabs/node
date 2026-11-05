@@ -50,6 +50,13 @@ export interface ResultRow {
 export interface CommitmentVerdict {
     valid: boolean
     reason?: string
+    /** Set when the parent's stored results are all the block disagrees with. */
+    parentResultsMismatch?: boolean
+}
+
+export interface CommitmentOptions {
+    /** Leave `parent_results_root` unchecked, for a block about to repair them. */
+    skipParentResults?: boolean
 }
 
 export class FinalityCommitmentError extends Error {
@@ -230,6 +237,7 @@ export async function buildCommitments(
 export async function verifyCommitments(
     block: { number: number; content: unknown },
     prevBlock: ParentBlock,
+    options: CommitmentOptions = {},
 ): Promise<CommitmentVerdict> {
     const content = (block.content ?? {}) as Record<string, unknown>
     const keys: readonly string[] = COMMITMENT_KEYS
@@ -269,21 +277,9 @@ export async function verifyCommitments(
         }
     }
 
-    let expected: string
-    try {
-        expected = await parentResultsRoot(prevBlock)
-    } catch (e) {
-        return {
-            valid: false,
-            reason: `cannot derive the result root of block ${prevBlock.number}: ${e instanceof Error ? e.message : String(e)}`,
-        }
-    }
-    if (content.parent_results_root !== expected) {
-        return {
-            valid: false,
-            reason: `parent_results_root mismatch: block ${block.number} commits ${content.parent_results_root}, local results of block ${prevBlock.number} give ${expected}`,
-        }
-    }
+    const results = options.skipParentResults
+        ? { valid: true }
+        : await checkParentResults(content.parent_results_root, block.number, prevBlock)
 
     if (!isCommitmentHash(content.validator_set_hash)) {
         return {
@@ -306,7 +302,96 @@ export async function verifyCommitments(
             reason: `validator_set_hash mismatch: block ${block.number} commits ${content.validator_set_hash}, local set after block ${prevBlock.number} gives ${localSet}`,
         }
     }
+    // Last, so the flag means nothing else about the block is wrong.
+    return results
+}
+
+async function checkParentResults(
+    committed: string,
+    blockNumber: number,
+    prevBlock: ParentBlock,
+): Promise<CommitmentVerdict> {
+    let expected: string
+    try {
+        expected = await parentResultsRoot(prevBlock)
+    } catch (e) {
+        return {
+            valid: false,
+            reason: `cannot derive the result root of block ${prevBlock.number}: ${e instanceof Error ? e.message : String(e)}`,
+        }
+    }
+    if (committed !== expected) {
+        return {
+            valid: false,
+            parentResultsMismatch: true,
+            reason: `parent_results_root mismatch: block ${blockNumber} commits ${committed}, local results of block ${prevBlock.number} give ${expected}`,
+        }
+    }
     return { valid: true }
+}
+
+const MAX_SERVED_CODE_LENGTH = 128
+
+/**
+ * Rewrites the failure codes stored for `parent` to the ones a verified
+ * child commits to in `committedRoot`. A block stored at the head of the
+ * chain had no child to check its codes against, and a failure code can
+ * depend on attrs the serving peer chose, so a wrong code could otherwise
+ * stop this node from accepting any later block. Only the codes of rows
+ * stored as failed with `parent` are taken from `served`; hashes, statuses
+ * and every other row stay as stored, and nothing is written unless the
+ * result is exactly `committedRoot`.
+ *
+ * @returns the number of rows rewritten, or null when `served` does not give
+ *   `committedRoot`
+ */
+export async function repairParentResultCodes(
+    parent: ParentBlock,
+    committedRoot: string,
+    served: ServedTx[],
+): Promise<number | null> {
+    const hashes = parent.content?.ordered_transactions ?? []
+    if (parent.number < 1 || hashes.length === 0) return null
+
+    const stored = await readResultRows(hashes)
+    const servedCodes = new Map<string, string | null>()
+    for (const tx of served) {
+        const code = tx.attrs?.code
+        servedCodes.set(
+            tx.hash,
+            typeof code === "string" && code.length <= MAX_SERVED_CODE_LENGTH ? code : null,
+        )
+    }
+
+    const candidate = new Map<string, ResultRow>()
+    const changed = new Map<string, string | null>()
+    for (const [hash, row] of stored) {
+        const repairable =
+            row.blockNumber === parent.number &&
+            row.status === TRANSACTION_STATUS.FAILED &&
+            servedCodes.has(hash)
+        if (!repairable) {
+            candidate.set(hash, row)
+            continue
+        }
+        const code = servedCodes.get(hash)
+        const storedCode = typeof row.attrs?.code === "string" ? row.attrs.code : null
+        if (code !== storedCode) changed.set(hash, code)
+        candidate.set(hash, { ...row, attrs: { ...(row.attrs ?? {}), code } })
+    }
+
+    let root: string
+    try {
+        root = await resultsRoot(hashes, candidate, parent.number)
+    } catch {
+        return null
+    }
+    if (root !== committedRoot) return null
+    if (changed.size === 0) return 0
+
+    await Chain.setFailureCodes(parent.number, changed)
+    rootCache.delete(parent.hash)
+    return changed.size
 }
 
 interface ServedTx {

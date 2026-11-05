@@ -530,6 +530,57 @@ describe("fast sync under finalityProofs", () => {
     })
 })
 
+describe("a block whose parent was stored with a wrong failure code", () => {
+    const TX = "ab".repeat(32)
+    const parent = { number: HEIGHT - 1, hash: "parent-hash", content: { ordered_transactions: [TX] } }
+    const storedRow = { hash: TX, status: "failed", attrs: { code: "TX_NONCE_INVALID_LOW" }, blockNumber: HEIGHT - 1 }
+    const HONEST = "TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE"
+
+    async function syncChild(servedCode: string) {
+        const { resultsRoot, __resetCommitmentCache } = await import("../finality/commitments")
+        __resetCommitmentCache()
+        const committed = await resultsRoot(
+            [TX],
+            new Map([[TX, { ...storedRow, attrs: { code: HONEST } }]]),
+            HEIGHT - 1,
+        )
+        const child = makeBlock([])
+        child.content.parent_results_root = committed
+        spyOn(Chain, "getBlockByNumber").mockImplementation((async (n: number) =>
+            n === HEIGHT - 1 ? parent : null) as any)
+        spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([clone(storedRow)] as any)
+        const setFailureCodes = spyOn(Chain, "setFailureCodes").mockResolvedValue(undefined)
+        setFailureCodes.mockClear()
+        // The block verifies on everything but the parent's stored results
+        verifyBlock
+            .mockResolvedValueOnce({ valid: false, parentResultsMismatch: true, reason: "parent_results_root mismatch" })
+            .mockResolvedValueOnce({ valid: true })
+            .mockResolvedValueOnce({ valid: true })
+        applyResult({})
+        const peer = servingPeer([{ hash: TX, status: "failed", attrs: { code: servedCode } }])
+
+        const synced = await syncBlock(child, peer)
+        return { synced, setFailureCodes }
+    }
+
+    it("rewrites the code to the one the verified block commits to, then stores the block", async () => {
+        const { synced, setFailureCodes } = await syncChild(HONEST)
+
+        expect(synced).toBe(true)
+        expect((verifyBlock.mock.calls[1] as any[])[2]).toEqual({ skipParentResults: true })
+        expect(setFailureCodes).toHaveBeenCalledWith(HEIGHT - 1, new Map([[TX, HONEST]]))
+        expect(insertBlock).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps the stored code and rejects the block when the served codes do not give its root", async () => {
+        const { synced, setFailureCodes } = await syncChild("TX_EXECUTE_FAILED")
+
+        expect(synced).toBe(false)
+        expect(setFailureCodes).not.toHaveBeenCalled()
+        expect(insertBlock).not.toHaveBeenCalled()
+    })
+})
+
 describe("rejection handling", () => {
     const coolingDown = () =>
         (log.warning as any).mock.calls

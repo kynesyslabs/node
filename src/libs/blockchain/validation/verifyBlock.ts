@@ -32,11 +32,16 @@ import {
     certificateMessageOf,
     commitLockActive,
 } from "src/libs/consensus/v2/commitLock/domain"
-import { verifyCommitments } from "src/libs/blockchain/finality/commitments"
+import {
+    type CommitmentOptions,
+    verifyCommitments,
+} from "src/libs/blockchain/finality/commitments"
 
 export interface BlockVerification {
     valid: boolean
     reason?: string
+    /** Set when the parent's stored results are all the block disagrees with. */
+    parentResultsMismatch?: boolean
 }
 
 export function checkTimestampAgainstParent(
@@ -217,6 +222,7 @@ async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
 export async function verifyBlock(
     block: Block,
     txs?: Transaction[],
+    options: CommitmentOptions = {},
 ): Promise<BlockVerification> {
     // Genesis has no shard or signatures
     if (block.number === 0) {
@@ -259,7 +265,7 @@ export async function verifyBlock(
         }
     }
 
-    const commitments = await verifyCommitments(block, prevBlock)
+    const commitments = await verifyCommitments(block, prevBlock, options)
     if (!commitments.valid) {
         return commitments
     }
