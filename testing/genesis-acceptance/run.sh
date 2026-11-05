@@ -44,7 +44,7 @@ UNKNOWN_FORK=genesisAcceptanceUnknownFork
 RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
-MAINNET_FORKS="signatureDomain editBinding quorumParity committeeBinding commitLock"
+MAINNET_FORKS="signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -331,7 +331,7 @@ refusal_line() { # the refusal the node raised, else the fatal error that stoppe
 REFUSAL_RE='^(GenesisRefusal|ForkConfigValidationError): |\[ERROR\] .*[Rr]efusing to boot'
 genesis_refusal() { grep -qE "${REFUSAL_RE}" "${EVID}/$1.node.log"; }
 
-# Checks on a running node: the pin it reports and the five forks active.
+# Checks on a running node: the pin it reports and the mainnet forks active.
 BOOT_NOTES=""
 boot_checks() { # $1 expected pin; sets BOOT_NOTES, returns 0 when all hold
     local ok=0 gh ni f bad=""

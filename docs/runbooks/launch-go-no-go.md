@@ -129,8 +129,8 @@ exposed by the node, so it comes from the T-24h posts). Then:
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
   entry with no group above `shardSize − q`; the genesis schedules
-  `signatureDomain`, `editBinding`, `quorumParity`, `committeeBinding` and
-  `commitLock` at `activationHeight` 0; and no launch validator is one of
+  `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`,
+  `committeeBinding` and `commitLock` at `activationHeight` 0; and no launch validator is one of
   the pinned committee identities (`PINNED_SHARD_IDENTITIES`), which take
   a seat on any network whose pool holds them; and a node would accept
   the genesis file at its first boot (fixed timestamp, snapshot bound by
@@ -141,7 +141,7 @@ exposed by the node, so it comes from the T-24h posts). Then:
   shown but not counted. A launch validator with a proven identity that
   runs other rules is NO-GO on its own, whatever the quorum: another genesis
   block, other genesis data (`getGenesisDataHash`), another fork schedule
-  digest, one of the five forks not active, or another commit. It would abstain or split at
+  digest, one of the mainnet forks not active, or another commit. It would abstain or split at
   launch, so its operator fixes it before the chain starts.
 - Exit 2: bad input, including a malformed `--genesis-hash` or `--commit`
   and a `--shard-size` that differs from the genesis.

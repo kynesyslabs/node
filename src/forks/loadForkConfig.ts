@@ -8,6 +8,7 @@ import type {
     NonceEnforcementConfig,
     AtomicWorkConfig,
     EditBindingConfig,
+    NonceIntegrityConfig,
     OsDenominationConfig,
     QuorumParityConfig,
     CommitteeBindingConfig,
@@ -326,6 +327,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "editBinding":
             getSharedState.forkConfig.editBinding = config as EditBindingConfig
             return
+        case "nonceIntegrity":
+            getSharedState.forkConfig.nonceIntegrity =
+                config as NonceIntegrityConfig
+            return
         case "quorumParity":
             getSharedState.forkConfig.quorumParity = config as QuorumParityConfig
             return
@@ -461,6 +466,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as AtomicWorkConfig
         case "editBinding":
             return base as EditBindingConfig
+        case "nonceIntegrity":
+            return base as NonceIntegrityConfig
         case "quorumParity":
             return base as QuorumParityConfig
         case "committeeBinding":

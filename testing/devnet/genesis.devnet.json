@@ -25,6 +25,9 @@
     "editBinding": {
       "activationHeight": 0
     },
+    "nonceIntegrity": {
+      "activationHeight": 0
+    },
     "quorumParity": {
       "activationHeight": 0
     },

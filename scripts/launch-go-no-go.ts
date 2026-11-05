@@ -141,6 +141,7 @@ export interface GoNoGoDecision {
 export const MAINNET_FORKS: readonly ForkName[] = [
     "signatureDomain",
     "editBinding",
+    "nonceIntegrity",
     "quorumParity",
     "committeeBinding",
     "commitLock",
