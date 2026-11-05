@@ -623,7 +623,22 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
                 `the launch committee size is ${LAUNCH_SHARD_SIZE}`,
         )
     }
+    // Fields like name and currency pass every other check as any string, and
+    // block 0 would publish the template text for good
+    const markers = templateMarkers(genesis)
+    if (markers.length > 0) {
+        reasons.push(`genesis still holds template FILL values at ${markers.join(", ")}`)
+    }
     return reasons
+}
+
+function templateMarkers(value: unknown, at = "genesis"): string[] {
+    if (typeof value === "string") return value.startsWith("FILL") ? [at] : []
+    if (Array.isArray(value)) return value.flatMap((v, i) => templateMarkers(v, `${at}[${i}]`))
+    if (value && typeof value === "object") {
+        return Object.entries(value).flatMap(([k, v]) => templateMarkers(v, `${at}.${k}`))
+    }
+    return []
 }
 
 /**

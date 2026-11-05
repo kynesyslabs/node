@@ -137,6 +137,16 @@ describe("mainnet genesis template", () => {
 })
 
 describe("mainnetGenesisReasons", () => {
+    it("refuses template FILL values left anywhere in the file", () => {
+        const g = filledTemplate()
+        g.properties.name = "FILL: network name (testnet: DEMOS)"
+        g.properties.currency = "FILL: currency symbol (testnet: DEM)"
+        const reasons = mainnetGenesisReasons(g).join("\n")
+        expect(reasons).toContain("genesis.properties.name")
+        expect(reasons).toContain("genesis.properties.currency")
+        expect(mainnetGenesisReasons(readTemplate()).join("\n")).toContain("template FILL values")
+    })
+
     it("refuses the testnet and devnet chain ids, and a missing one", () => {
         for (const chainId of NON_MAINNET_CHAIN_IDS) {
             const g = filledTemplate()
