@@ -37,9 +37,9 @@ missing committee members and stops at the 4th.
    columns.
 3. No operator and no provider runs more launch validators than the
    committee can lose: `min(launch validators, 10) - 7`. That is 3 with 10
-   or more launch validators, 2 with 9, 1 with 8 and 0 with 7, so a launch
-   with fewer than 10 validators needs every one at a different operator
-   and provider, and 7 cannot pass at all.
+   or more launch validators, 2 with 9, 1 with 8 and 0 with 7: with 9 no
+   operator or provider runs more than 2, with 8 every one is at a
+   different operator and provider, and 7 cannot pass at all.
 4. No operator and no provider holds more than a third of the first
    committee's votes (more than 3 of 10). One validator is one vote: stake
    does not weigh votes. Rule 3 implies it at 10 to 13 validators; the
