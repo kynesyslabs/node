@@ -2,12 +2,14 @@ import { describe, expect, it } from "bun:test"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import {
     type GoNoGoInput,
+    KNOWN_FORKS,
     MAINNET_FORKS,
     type ValidatorProbe,
     checkLaunch,
     commitSha,
     decideGoNoGo,
     sameCommit,
+    parseArgs,
 } from "./launch-go-no-go"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
@@ -519,10 +521,12 @@ describe("decideGoNoGo", () => {
     })
 })
 
-const mainnetForks = () => Object.fromEntries(MAINNET_FORKS.map(name => [name, { activationHeight: 0 }]))
+/** Every fork this build knows declared: the mainnet ones at 0, the rest off. */
+const mainnetForks = () =>
+    Object.fromEntries(KNOWN_FORKS.map(name => [name, { activationHeight: MAINNET_FORKS.includes(name) ? 0 : null }]))
 
 function genesisFile(rows: Array<{ address: string; status: string; valid_at: number | null }>, forks: Record<string, unknown> = mainnetForks()) {
-    return { properties: { id: 1, shardSize: 10 }, forks, validators: rows }
+    return { properties: { id: 7, shardSize: 10 }, forks, validators: rows }
 }
 
 describe("checkLaunch", () => {
@@ -719,4 +723,22 @@ describe("command line", () => {
         expect(b.code).toBe(2)
         expect(b.err).toContain("--commit must be a 7 to 40 character hex SHA")
     }, 60_000)
+})
+
+describe("parseArgs", () => {
+    it("takes the genesis file and snapshot the node boots with when none are given", () => {
+        const env = { DEMOS_GENESIS_FILE: "/srv/mainnet/genesis.json", DEMOS_SNAPSHOT_DIR: "/srv/mainnet/snapshot" }
+        const args = parseArgs(["--operators", "ops.json"], env)
+        expect(args.genesis).toBe("/srv/mainnet/genesis.json")
+        expect(args.snapshot).toBe("/srv/mainnet/snapshot")
+    })
+
+    it("never pairs a file from the command line with one from the environment", () => {
+        const env = { DEMOS_GENESIS_FILE: "/srv/g.json", DEMOS_SNAPSHOT_DIR: "/srv/snap" }
+        expect(parseArgs(["--genesis", "a.json", "--snapshot", "s"], env)).toMatchObject({ genesis: "a.json", snapshot: "s" })
+        expect(parseArgs(["--genesis", "a.json"], env)).toMatchObject({ genesis: "a.json", snapshot: null })
+        expect(parseArgs(["--snapshot", "s"], env)).toMatchObject({ genesis: null, snapshot: "s" })
+        expect(parseArgs(["--rpc", "http://v0:53550"], { DEMOS_SNAPSHOT_DIR: "/srv/snap" })).toMatchObject({ genesis: null, snapshot: null })
+        expect(parseArgs([], {})).toMatchObject({ genesis: null, snapshot: null })
+    })
 })

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test"
 
 import { getSharedState } from "@/utilities/sharedState"
 
-const { withDerivedFeeEdits } = await import("@/libs/blockchain/gcr/handleGCR")
+const { withDerivedFeeEdits, default: HandleGCR } = await import("@/libs/blockchain/gcr/handleGCR")
 
 const SENDER = "0x" + "6d".repeat(32)
 const TO = "0x" + "f8".repeat(32)
@@ -86,5 +86,40 @@ describe("withDerivedFeeEdits", () => {
         const tx = signedTransfer()
         tx.content.transaction_fee = { network_fee: "0", rpc_fee: "0", additional_fee: "0", rpc_address: null }
         expect(withDerivedFeeEdits(tx)).toBe(tx)
+    })
+})
+
+describe("HandleGCR.stampedEdit", () => {
+    function signedStorageEdit(): any {
+        return {
+            type: "storageProgram",
+            target: "stor-" + "e9".repeat(20),
+            isRollback: false,
+            txhash: "",
+            context: {
+                operation: "CREATE_STORAGE_PROGRAM",
+                sender: SENDER,
+                data: { variables: { operation: "CREATE_STORAGE_PROGRAM", data: { hello: "world" } }, metadata: null },
+            },
+        }
+    }
+
+    it("stamps a deep copy, so the signed content keeps hashing to tx.hash", () => {
+        const edit = signedStorageEdit()
+        const signed = structuredClone(edit)
+        const tx: any = { hash: "ab".repeat(32), content: { gcr_edits: [edit] } }
+
+        const stamped: any = HandleGCR.stampedEdit(edit, tx, false)
+        stamped.context.data.variables.data.hello = "changed by a routine"
+
+        expect(stamped.txhash).toBe(tx.hash)
+        expect(tx.content.gcr_edits[0]).toEqual(signed)
+    })
+
+    it("passes the edit through unchanged when simulating", () => {
+        const edit = signedStorageEdit()
+        const tx: any = { hash: "ab".repeat(32), content: { gcr_edits: [edit] } }
+        expect(HandleGCR.stampedEdit(edit, tx, true)).toBe(edit)
+        expect(edit.txhash).toBe("")
     })
 })

@@ -77,8 +77,19 @@ describe("getAddressInfo", () => {
 
     it("answers a known address with its stored row", async () => {
         const reply = await addressInfo({ address: KNOWN })
-        expect(reply.response).toEqual({ pubkey: KNOWN, balance: 5n, nonce: 3, referralInfo: KNOWN_REFERRAL })
+        expect(reply.response).toEqual({ pubkey: KNOWN, balance: "5", nonce: 3, referralInfo: KNOWN_REFERRAL })
         expect(createAccount).not.toHaveBeenCalled()
+    })
+
+    it("answers with a balance as a decimal string, a reply JSON can carry", async () => {
+        for (const address of [KNOWN, UNKNOWN]) {
+            const reply = await addressInfo({ address })
+            // the RPC server encodes every reply with plain JSON.stringify
+            const wire = JSON.parse(JSON.stringify(reply))
+            expect(wire.response.balance).toMatch(/^\d+$/)
+        }
+        const reply = await addressInfo({ address: KNOWN })
+        expect(JSON.parse(JSON.stringify(reply)).response.balance).toBe("5")
     })
 
     it("reads an address given without the 0x prefix", async () => {

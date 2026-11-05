@@ -236,6 +236,13 @@ describe("verifyBlock", () => {
         expect(result.reason).toContain("hash mismatch")
     })
 
+    it("rejects a block carrying finality commitments before the fork", async () => {
+        const block = makeBlock({ content: { number: 10 } })
+        const result = await verifyBlock(block)
+        expect(result.valid).toBe(false)
+        expect(result.reason).toContain("before finalityProofs")
+    })
+
     it("accepts genesis without signatures", async () => {
         const result = await verifyBlock(makeBlock({ number: 0 }))
         expect(result.valid).toBe(true)

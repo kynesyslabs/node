@@ -223,3 +223,7 @@ HANDOFF.md
 # ---- Monitoring secrets (Slack webhook for Alertmanager) ----
 monitoring/secrets/*
 !monitoring/secrets/README.md
+
+# Python bytecode from the test harnesses
+__pycache__/
+*.pyc

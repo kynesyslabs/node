@@ -15,6 +15,8 @@
 #   monitoring             + prometheus + grafana        -> dashboards
 #   full                   + node-exporter               -> host metrics
 #   neo4j                  + neo4j                       -> CGC/KYC only
+#   reaper                 + reaper                      -> stop the stack
+#                            when the node exits (mounts the docker socket)
 #
 # Persistent state lives in named volumes (prefixed `demos_`):
 #   demos_pgdata, demos_node_data, demos_node_logs, demos_node_state,
@@ -114,8 +116,10 @@ services:
   # ---------------------------------------------------------------------------
   node:
     # IMAGE_NAME / IMAGE_TAG let you pull a pre-built image from a registry
-    # instead of building locally. See README → "Publishing the image" for
-    # the push/pull workflow. Defaults to a local build tagged demos-node:local.
+    # instead of building locally. Validators set IMAGE_TAG to tag@sha256:digest
+    # from the release's checksums.txt and start with `up --no-build`, so a
+    # failed pull can never fall back to a local build (INSTALL.md, "Run a
+    # released image"). Defaults to a local build tagged demos-node:local.
     image: ${IMAGE_NAME:-demos-node}:${IMAGE_TAG:-local}
     build:
       context: .
@@ -135,8 +139,8 @@ services:
         BUILT_AT: ${BUILT_AT:-}
     container_name: demos-node${INSTANCE_SUFFIX:-}
     # Deliberately not restarted: a stall-detector or watchdog exit must keep
-    # the node down with its logs intact for investigation. The reaper service
-    # below stops the rest of the stack when this container exits.
+    # the node down with its logs intact for investigation. With the reaper
+    # profile on, the reaper service below also stops the rest of the stack.
     restart: "no"
     depends_on:
       postgres:
@@ -184,6 +188,8 @@ services:
       EXPECTED_GENESIS_BLOCK_HASH: ${EXPECTED_GENESIS_BLOCK_HASH:-}
       DEMOS_ALLOW_UNPINNED_GENESIS: ${DEMOS_ALLOW_UNPINNED_GENESIS:-}
       DEMOS_SNAPSHOT_DIR: ${DEMOS_SNAPSHOT_DIR:-}
+      # A path inside the container; empty means data/genesis.json.
+      DEMOS_GENESIS_FILE: ${DEMOS_GENESIS_FILE:-}
       DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST: ${DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST:-}
       # Mainnet validators set this to true: with no active validators in the
       # database the node refuses to run consensus instead of falling back to
@@ -225,8 +231,22 @@ services:
       # so the SAME range must be host-published in `ports:` below — kept
       # narrow to avoid a 2000-port mapping. Both stanzas read these vars so
       # the allocation range and the published range can never drift.
+      # The proxy port the node advertises must be the one published below;
+      # without this line a changed value moved only the host mapping.
+      TLSNOTARY_PROXY_PORT: ${TLSNOTARY_PROXY_PORT:-55688}
       TLSNOTARY_PROXY_PORT_MIN: ${TLSNOTARY_PROXY_PORT_MIN:-55000}
       TLSNOTARY_PROXY_PORT_MAX: ${TLSNOTARY_PROXY_PORT_MAX:-55063}
+      # Chain-wide values: every validator must run the same ones, so leave
+      # them unset (the node's built-in values) unless the whole network
+      # changes them together. They were not passed before, so a value in an
+      # existing .env takes effect from this release on; node-doctor
+      # --production flags any that differ from the built-in value.
+      CONSENSUS_TIME: ${CONSENSUS_TIME:-}
+      RPC_FEE: ${RPC_FEE:-}
+      NETWORK_FEE: ${NETWORK_FEE:-}
+      BURN_FEE: ${BURN_FEE:-}
+      RPC_FEE_PERCENT: ${RPC_FEE_PERCENT:-}
+      MIN_VALIDATOR_STAKE: ${MIN_VALIDATOR_STAKE:-}
       # Consensus: sit out rounds while a peer's fork schedule differs
       FORK_SCHEDULE_MISMATCH_POLICY: ${FORK_SCHEDULE_MISMATCH_POLICY:-abstain}
       # Logging & misc
@@ -356,13 +376,14 @@ services:
   # node runs with restart "no" so an intentional exit stays down; the support
   # services have no purpose without it. Sibling containers are resolved via
   # compose project labels so this works unchanged under the devnet overlay.
-  # Mounting docker.sock is root-equivalent on the host — acceptable for our
-  # own deployments, do not ship this service in third-party operator setups.
+  # The node does not need it, and the docker socket it mounts gives this
+  # container root on the host, so it only runs with the reaper profile.
   # ---------------------------------------------------------------------------
   reaper:
     image: docker:27-cli
     container_name: demos-reaper${INSTANCE_SUFFIX:-}
     restart: on-failure
+    profiles: [reaper]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:

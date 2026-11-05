@@ -167,6 +167,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 
     debug: {
         assertionsEnabled: false,
+        storageRootRecompute: false,
     },
 
     identity: {

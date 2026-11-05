@@ -234,6 +234,7 @@ export interface DiagnosticsConfig {
 
 export interface DebugConfig {
     assertionsEnabled: boolean
+    storageRootRecompute: boolean
 }
 
 // --- Identity & Web2 Services ---
