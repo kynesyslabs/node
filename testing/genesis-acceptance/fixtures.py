@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 
-MAINNET_FORKS = ["signatureDomain", "editBinding", "quorumParity", "committeeBinding", "commitLock"]
+MAINNET_FORKS = ["signatureDomain", "editBinding", "quorumParity", "committeeBinding", "commitLock", "finalityProofs"]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--base", required=True, help="the image's data/genesis.json")

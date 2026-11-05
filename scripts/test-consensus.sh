@@ -16,10 +16,20 @@ SUITE_FILES=(
     scripts/validator-prove-signing.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
+    src/libs/blockchain/finality/commitments.test.ts
+    src/libs/blockchain/finality/storageRecord.test.ts
+    src/libs/blockchain/finality/storageRoot.test.ts
+    src/libs/blockchain/finality/validatorSet.test.ts
+    src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
+    src/libs/blockchain/gcr/storageLeafWrite.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
+    src/libs/blockchain/routines/syncVerification.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
+    src/libs/crypto/canonicalJson.test.ts
+    src/libs/crypto/merkle/rfc6962.test.ts
+    src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts

@@ -144,6 +144,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "quorumParity",
     "committeeBinding",
     "commitLock",
+    "finalityProofs",
 ]
 
 const norm = (id: string) => id.trim().toLowerCase()

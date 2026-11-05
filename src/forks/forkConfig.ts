@@ -219,6 +219,20 @@ export type CommitteeBindingConfig = BaseForkConfig
 export type CommitLockConfig = BaseForkConfig
 
 /**
+ * `finalityProofs` fork: block N commits its own height, the Merkle root of
+ * block N - 1's transaction results and the hash of block N - 1's validator
+ * set, so a client holding a signed block can prove a transaction's outcome
+ * offline. The commitments lag one block because a block is voted on before
+ * its transactions execute.
+ *
+ * Activation at H applies to block H and later. Dormant by default
+ * (`activationHeight: null`): it adds fields to the hashed block content, and
+ * a missing genesis entry hydrates from here. A chain launched from genesis
+ * with this build sets 0. No payload beyond the base.
+ */
+export type FinalityProofsConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -256,6 +270,7 @@ export type ForkConfig =
     | QuorumParityConfig
     | CommitteeBindingConfig
     | CommitLockConfig
+    | FinalityProofsConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -275,6 +290,7 @@ export type ForkName =
     | "quorumParity"
     | "committeeBinding"
     | "commitLock"
+    | "finalityProofs"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -293,6 +309,7 @@ export interface ForkConfigByName {
     quorumParity: QuorumParityConfig
     committeeBinding: CommitteeBindingConfig
     commitLock: CommitLockConfig
+    finalityProofs: FinalityProofsConfig
 }
 
 /**
@@ -455,6 +472,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Members prevote and precommit with the height and round in the signed message, " +
             "lock on a block with a proof of lock, and a block carries one round's precommits.",
     },
+    finalityProofs: {
+        // Dormant by default: it changes the hashed block content, and a
+        // missing genesis entry hydrates from here. A chain launched from
+        // genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "A block commits its height, the result root of its parent's transactions and " +
+            "the hash of its parent's validator set, so finality can be proven offline.",
+    },
 }
 
 /**
@@ -477,5 +503,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         quorumParity: { ...DEFAULT_FORK_CONFIG.quorumParity },
         committeeBinding: { ...DEFAULT_FORK_CONFIG.committeeBinding },
         commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
+        finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
     }
 }

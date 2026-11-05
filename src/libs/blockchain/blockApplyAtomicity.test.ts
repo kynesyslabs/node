@@ -34,6 +34,8 @@ function repoFor(staged: Map<string, unknown[]>, name: string) {
         delete: async () => {},
         insert: async (row: unknown) => stage([row]),
         findOneBy: async () => null,
+        find: async () => [],
+        findOne: async () => null,
         manager: { connection: { getMetadata: () => ({ columns: [0, 1, 2] }) } },
         createQueryBuilder: () => query,
     }
@@ -179,11 +181,22 @@ describe("a block and its state commit together", () => {
         expect(durable.get("UsedNullifier")?.length).toBe(1)
         expect(durable.get("Blocks")?.length).toBe(1)
         expect(durable.get("Transactions")?.length).toBe(1)
+        // No set before this block in the fake: it records the first one
+        expect(durable.get("ValidatorSetSnapshots")).toEqual([
+            expect.objectContaining({ block: HEIGHT, validators: [] }),
+        ])
         expect(events).toEqual(["side effect"])
         expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
     })
 
-    for (const phase of ["GCRMain", "GCRAssignedTx", "UsedNullifier", "Blocks", "Transactions"]) {
+    for (const phase of [
+        "GCRMain",
+        "GCRAssignedTx",
+        "UsedNullifier",
+        "Blocks",
+        "Transactions",
+        "ValidatorSetSnapshots",
+    ]) {
         it(`leaves nothing on disk and runs no side effect when writing ${phase} fails`, async () => {
             failOn = phase
             const events: string[] = []

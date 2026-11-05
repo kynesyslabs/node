@@ -9,6 +9,7 @@ const HEIGHT = 10
 const LOCKED_HASH = "locked-hash"
 const NOW = 1_800_000_000
 const tried: number[] = []
+let forgeError: (() => Error) | null = null
 const gathered: { variants: { timestamp: number; peerlist: string[] }[] } = {
     variants: [],
 }
@@ -47,6 +48,7 @@ mock.module("src/libs/consensus/v2/routines/createBlock", () => ({
         timestamp: number,
     ) => {
         tried.push(timestamp)
+        if (forgeError) throw forgeError()
         // The real order: the timestamp policy runs before the rebuilt
         // hash is compared, so a refused stamp never reaches that check.
         const verdict = checkCosignTimestamp(timestamp, NOW)
@@ -69,6 +71,12 @@ const { default: SecretaryManager } = await import(
 )
 const { getSharedState } = await import("src/utilities/sharedState")
 const { forgeLockedCandidate } = await import("src/libs/consensus/v2/PoRBFT")
+const { FinalityCommitmentError: commitmentError } = await import(
+    "src/libs/blockchain/finality/commitments"
+)
+const { AbortConsensusError: abortError } = await import(
+    "src/libs/consensus/v2/types/secretaryManager"
+)
 
 spyOn(Chain, "getLastBlockHash").mockResolvedValue("hash-9")
 spyOn(SecretaryManager, "getInstance").mockReturnValue({
@@ -78,6 +86,7 @@ spyOn(SecretaryManager, "getInstance").mockReturnValue({
 getSharedState.lastBlockNumber = HEIGHT - 1
 
 afterEach(() => {
+    forgeError = null
     tried.length = 0
     gathered.variants = []
 })
@@ -98,5 +107,17 @@ describe("rebuilding a proof-of-lock block from reported inputs", () => {
         const candidate = await forgeLockedCandidate(HEIGHT, true, 2, ["a"])
         expect(tried).toEqual([NOW + 3600])
         expect(candidate).toBeNull()
+    })
+})
+
+describe("a rebuild this node cannot commit to", () => {
+    it("ends the round instead of reaching the process exit", async () => {
+        gathered.variants = [{ timestamp: NOW - 2, peerlist: ["a"] }]
+        forgeError = () => new commitmentError("no stored result for tx t of block 9")
+
+        const error = await forgeLockedCandidate(HEIGHT, true, 2, ["a"]).catch(e => e)
+
+        expect(error).toBeInstanceOf(abortError)
+        expect(error.message).toContain("no stored result")
     })
 })

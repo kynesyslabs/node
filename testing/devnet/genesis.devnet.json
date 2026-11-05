@@ -33,6 +33,9 @@
     },
     "commitLock": {
       "activationHeight": 0
+    },
+    "finalityProofs": {
+      "activationHeight": 0
     }
   },
   "balances": [

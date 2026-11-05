@@ -141,7 +141,7 @@ exposed by the node, so it comes from the T-24h posts). Then:
   shown but not counted. A launch validator with a proven identity that
   runs other rules is NO-GO on its own, whatever the quorum: another genesis
   block, other genesis data (`getGenesisDataHash`), another fork schedule
-  digest, one of the five forks not active, or another commit. It would abstain or split at
+  digest, one of the six forks not active, or another commit. It would abstain or split at
   launch, so its operator fixes it before the chain starts.
 - Exit 2: bad input, including a malformed `--genesis-hash` or `--commit`
   and a `--shard-size` that differs from the genesis.
