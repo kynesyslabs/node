@@ -74,6 +74,10 @@ import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
 import ParallelNetworks from "./libs/l2ps/parallelNetworks"
 import { enforceGuidedSetup } from "./cli/setup/startupGate"
+import Datasource, {
+    assertNoPendingMigrations,
+    PendingMigrationsError,
+} from "./model/datasource"
 import { parseMessagingEnabled, parseMessagingPort } from "./config/envFlags"
 
 dotenv.config()
@@ -705,6 +709,21 @@ async function main() {
     // only an optional L2PS or ZK feature is incomplete; it stops the process
     // only for the missing or altered identity verification key, or in strict mode.
     await enforceGuidedSetup()
+
+    // The node does not migrate at boot. Checked before anything else touches
+    // the database, so a skipped `migration:run` stops here with the remedy
+    // instead of a missing-table error halfway through genesis.
+    try {
+        await assertNoPendingMigrations(
+            (await Datasource.getInstance()).getDataSource(),
+        )
+    } catch (error) {
+        if (error instanceof PendingMigrationsError) {
+            log.error(`[BOOT] ${error.message}`)
+            process.exit(1)
+        }
+        throw error
+    }
 
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
     try {

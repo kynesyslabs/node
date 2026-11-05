@@ -212,19 +212,24 @@ Do it on **one** validator first, then the rest. Never on all at once.
 
 ## Pending migrations at start
 
-The node does not check for pending migrations when it starts. If you deploy a
-release that adds a migration (for example `./run -U`, which pulls a release and
-boots it at once) and do not run step 2 first, the node boots onto the old
-schema and fails with a database error: `relation "..." does not exist` or
-`column "..." does not exist`. The first one usually shows at genesis
-(missing `accepted_fork_schedule`), but other missing columns can fail later,
-while the node is already in consensus.
+The node does not apply migrations when it starts, but it checks for them:
+right after it connects to the database, before it loads its identity or
+touches the chain, it asks TypeORM whether any migration in `src/migrations/`
+is not yet recorded in the database. If one is, it logs
+`[BOOT] The database has migrations that are not applied ...` with the
+commands below and exits with code 1, without writing a block. That happens on
+a new, empty database (no `migration:run` before the first start) and after
+deploying a release that adds a migration without step 2 (for example
+`./run -U`, which pulls a release and boots it at once). The check itself
+creates the empty `migrations` bookkeeping table on a database that has none,
+as `migration:show` does; it changes nothing else.
 
-If you see that, stop the node as step 1 says (Postgres stays up) and run
-`bun run migration:show`. Any `[ ]` line
-is pending: do the procedure above (backup first) and start the node again.
-Before `./run -U` or any update, run `bun run migration:show` after the pull and
-apply what is pending.
+If you see that line, keep the node stopped (Postgres stays up, see step 1)
+and run `bun run migration:show`. Any `[ ]` line is pending: do the procedure
+above (backup first) and start the node again. On a new, empty database there
+is nothing to back up: run `bun run migration:run` once. Before `./run -U` or
+any update, run `bun run migration:show` after the pull and apply what is
+pending.
 
 ## External database
 
