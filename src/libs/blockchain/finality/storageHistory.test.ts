@@ -12,6 +12,7 @@ import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { StorageProgramHistory } from "@/model/entities/StorageProgramHistory"
 import { SparseMerkleTree } from "@/libs/crypto/merkle/sparse"
 import { CreateStorageProgramHistory1793923200000 } from "@/migrations/1793923200000-CreateStorageProgramHistory"
+import { RecordStorageHistoryStart1794009600000 } from "@/migrations/1794009600000-RecordStorageHistoryStart"
 
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
@@ -94,7 +95,13 @@ const em: any = {
         throw new Error(`unexpected repository ${String((target as { name?: string })?.name)}`)
     },
 }
+let startRows: { block: number | string }[] = []
+const startQueries: string[] = []
 const fakeDataSource = {
+    query: async (sql: string) => {
+        startQueries.push(sql)
+        return startRows
+    },
     transaction: async (work: (m: unknown) => Promise<unknown>) => await work(em),
     getRepository: (target: unknown) => em.getRepository(target),
 }
@@ -114,6 +121,7 @@ const {
     readStorageHistory,
     recordStorageHistory,
     resetStorageHistory,
+    storageHistoryStart,
 } = await import("./storageHistory")
 const { StorageProgramsRoot } = await import("./storageRoot")
 const { storageProgramKey, storageProgramLeafHex, storageProgramRecord } = await import("./storageRecord")
@@ -190,6 +198,21 @@ describe("storage undo log", () => {
         expect(queries[0]).toContain("\"storage_program_history\"")
         expect(queries[0]).toMatch(/"record" jsonb,/)
         expect(queries[0]).toContain("PRIMARY KEY (\"block\", \"storageAddress\")")
+    })
+
+    it("records the block after the head as the first one it holds, once", async () => {
+        const queries: string[] = []
+        await new RecordStorageHistoryStart1794009600000().up({ query: async (q: string) => void queries.push(q) } as any)
+        expect(queries[0]).toContain("\"storage_program_history_start\"")
+        expect(queries[1]).toMatch(/SELECT 1, COALESCE\(MAX\("number"\), 0\) \+ 1 FROM "blocks"/)
+        expect(queries[1]).toContain("ON CONFLICT (\"id\") DO NOTHING")
+
+        // Read once: the start never moves while the node runs.
+        startRows = [{ block: "1234" }]
+        expect(await storageHistoryStart()).toBe(1234)
+        startRows = [{ block: 1 }]
+        expect(await storageHistoryStart()).toBe(1234)
+        expect(startQueries).toHaveLength(1)
     })
 
     it("logs each touched program's record from before the block, null for a program it created", async () => {
