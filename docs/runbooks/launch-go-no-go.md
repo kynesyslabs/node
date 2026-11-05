@@ -162,7 +162,7 @@ exposed by the node, so it comes from the T-24h posts). Then:
   third of the first committee's votes; the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
   `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs` and `identityCarryover` at
-  `activationHeight` 0, declares every fork the build knows (an undeclared one would take the
+  `activationHeight` 0, leaves `networkGovernance` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
   code default), gives a scheduled `gasFeeSeparation` its `treasuryAddress`,
   uses a chain id other than testnet `1` and devnet `1337`, and sets
   `shardSize` 10; and no launch validator is one of

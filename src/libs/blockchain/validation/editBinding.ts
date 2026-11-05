@@ -44,6 +44,7 @@ import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import { isForkActive } from "@/forks/forkGates"
+import { governanceGateRefusal } from "@/forks/governanceGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
@@ -123,18 +124,21 @@ async function osDenominationActive(): Promise<boolean> {
  * Whether edits are bound, and the denomination shape expected, from one read
  * of the chain tip (the source the native edit check always used for the
  * shape). A fork activating at height H binds the block applied on tip H,
- * which is block H + 1.
+ * which is block H + 1. `governance` is the `networkGovernance` state, read
+ * from the same tip so admission and apply judge it alike.
  */
 export async function editBindingState(): Promise<{
     active: boolean
     postFork: boolean
     nonceBound: boolean
+    governance: boolean
 }> {
     const tip = await Chain.getLastBlockNumber()
     return {
         active: isForkActive("editBinding", tip),
         postFork: isForkActive("osDenomination", tip),
         nonceBound: isForkActive("nonceIntegrity", tip),
+        governance: isForkActive("networkGovernance", tip),
     }
 }
 
@@ -446,13 +450,16 @@ export function verifyNonceEditBinding(tx: Transaction): EditVerdict {
  * one applied), every other type the value-edit projection.
  *
  * Under `nonceIntegrity`, on either side of `editBinding`, the nonce edit is
- * bound as well: the value-edit projection does not look at it.
+ * bound as well: the value-edit projection does not look at it. The
+ * `networkGovernance` rule also holds on either side of `editBinding`.
  *
  * Fails closed: a transaction that cannot be checked is refused.
  */
 export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        const { active, postFork, nonceBound } = await editBindingState()
+        const { active, postFork, nonceBound, governance } = await editBindingState()
+        const governanceRefusal = governanceGateRefusal(tx, governance)
+        if (governanceRefusal) return refuse(governanceRefusal)
         const verdict = active
             ? await verifyEditsAtApply(tx, { postFork })
             : await verifyAdmissionEditsBeforeBinding(tx)
@@ -488,13 +495,15 @@ async function verifyAdmissionEditsBeforeBinding(tx: Transaction): Promise<EditV
  * it accepted or queues it, so the node never accepts what its peers and the
  * apply step refuse.
  *
- * Inactive: only the nonce edit (under `nonceIntegrity`), because RPC intake
- * keeps the comparison it always made. `tx` must carry the edits as the
- * sender signed them.
+ * Inactive: only the nonce edit (under `nonceIntegrity`) and the
+ * `networkGovernance` rule, because RPC intake keeps the comparison it always
+ * made. `tx` must carry the edits as the sender signed them.
  */
 export async function verifyRpcEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        const { active, nonceBound } = await editBindingState()
+        const { active, nonceBound, governance } = await editBindingState()
+        const governanceRefusal = governanceGateRefusal(tx, governance)
+        if (governanceRefusal) return refuse(governanceRefusal)
         if (active) return await verifyAdmissionEdits(tx)
         return nonceBound ? verifyNonceEditBinding(tx) : OK
     } catch (e) {

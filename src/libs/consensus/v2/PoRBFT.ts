@@ -27,6 +27,7 @@ import HandleGCR, {
     type BlockClock,
     type PendingGCRWrite,
 } from "src/libs/blockchain/gcr/handleGCR"
+import { StateReadError } from "src/libs/blockchain/gcr/stateReadError"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
@@ -652,9 +653,12 @@ export async function consensusRoutine(): Promise<void> {
             )
         }
     } catch (error) {
+        // A failed state read leaves this node unable to judge the block;
+        // it sits the round out rather than vote on a guess.
         const aborted =
             error instanceof NotInShardError ||
-            error instanceof ForgingEndedError
+            error instanceof ForgingEndedError ||
+            error instanceof StateReadError
         const invalid =
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError

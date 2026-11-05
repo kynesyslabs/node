@@ -36,6 +36,20 @@ jest.mock("@/model/datasource", () => ({
     default: { getInstance: jest.fn() },
 }))
 
+// applyProposal re-runs the intake checks: the bounds need a current
+// networkFee near the proposed 20, and the proposer must be an active validator.
+jest.mock("@/utilities/sharedState", () => ({
+    __esModule: true,
+    getSharedState: { networkParameters: { networkFee: 18 } },
+}))
+
+jest.mock("@/libs/blockchain/gcr/gcr", () => ({
+    __esModule: true,
+    default: {
+        getGCRValidatorStatus: jest.fn(async () => ({ status: "2" })),
+    },
+}))
+
 import {
     GRACE_PERIOD_BLOCKS,
     VOTING_WINDOW_BLOCKS,

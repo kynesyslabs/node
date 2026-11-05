@@ -25,6 +25,10 @@ import {
     requireSender,
 } from "@/libs/network/utils/txHelpers"
 import log from "@/utilities/logger"
+import {
+    governanceGateRefusal,
+    networkGovernanceActive,
+} from "@/forks/governanceGate"
 import { In } from "typeorm"
 
 interface GovernanceTxResult {
@@ -40,6 +44,12 @@ export async function handleGovernanceTx(
     const type = tx.content.type
     const sender = requireSender(tx)
     if (!sender) return { success: false, message: "Missing sender" }
+
+    const refusal = governanceGateRefusal(
+        tx,
+        networkGovernanceActive(await Chain.getLastBlockNumber()),
+    )
+    if (refusal) return { success: false, message: refusal }
 
     switch (type) {
         case "networkUpgrade":

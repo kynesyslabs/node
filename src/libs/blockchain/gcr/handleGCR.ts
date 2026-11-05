@@ -39,6 +39,10 @@ import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
 import { maxRowsPerInsert } from "src/libs/blockchain/chainDb"
 import Chain from "src/libs/blockchain/chain"
 import { isForkActive } from "@/forks"
+import {
+    carriesGovernance,
+    governanceGateRefusal,
+} from "@/forks/governanceGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import {
@@ -95,6 +99,7 @@ import {
     applyAtomicStoragePut,
     type StoragePutEdit,
 } from "@/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines"
+import { StateReadError } from "@/libs/blockchain/gcr/stateReadError"
 import {
     applySlotCas,
     applyWorkAttempt,
@@ -1160,6 +1165,27 @@ export default class HandleGCR {
             }
         }
 
+        // A block refuses these in its pre-pass; this also covers the callers
+        // that apply one transaction directly (simulation, L2PS proofs).
+        if (!isRollback && carriesGovernance(tx)) {
+            const refusal = governanceGateRefusal(
+                tx,
+                (await editBindingState()).governance,
+            )
+            if (refusal) {
+                log.error(`[applyTransaction] Refusing tx ${tx.hash}: ${refusal}`)
+                return {
+                    success: false,
+                    entities,
+                    message: refusal,
+                    sideEffects: [],
+                    deferredWrites: [],
+                    appliedEditsCount: 0,
+                    unproven: true,
+                }
+            }
+        }
+
         // AUDIT C1 (apply-side, defense in depth): re-derive the expected
         // gcr_edits from the signed body and refuse to APPLY a native tx whose
         // shipped edits don't match. The ingress guard (Mempool.receive) blocks
@@ -1528,6 +1554,7 @@ export default class HandleGCR {
                     place,
                 )
             } catch (error) {
+                if (error instanceof StateReadError) throw error
                 log.error(`[applyTransaction] Error applying GCREdit: ${error}`)
                 result = {
                     success: false,
@@ -1712,6 +1739,11 @@ export default class HandleGCR {
                     }
                     const stagedKey = stagedKeyOf(edit)
                     if (stagedKey) keys.push(stagedKey)
+                    // A proposal reads the proposer's validator row as
+                    // the stake edits before it in the block left it.
+                    if ((edit.type as string) === "networkUpgrade") {
+                        keys.push("validators")
+                    }
                 }
             }
 
@@ -1850,14 +1882,15 @@ export default class HandleGCR {
     }
 
     /**
-     * The transactions of a block whose shipped edits are not the ones their
-     * signed body implies (`editBinding` fork). Apply runs the shipped edits
-     * as they are, so a block must never reach it with edits nobody derived.
+     * The transactions of a block refused before apply: those the
+     * `networkGovernance` rule refuses, whether or not `editBinding` is
+     * active, and those whose shipped edits are not the ones their signed
+     * body implies (`editBinding` fork). Apply runs the shipped edits as they
+     * are, so a block must never reach it with edits nobody derived.
      *
      * Judged on the transactions as received, before the node derives fee
      * edits or drops the edits of types that do not mutate entities, and not
-     * on rollback, which replays edits a block already accepted. Inactive, it
-     * reads nothing and refuses nothing.
+     * on rollback, which replays edits a block already accepted.
      */
     private static async refuseUnboundEdits(
         txs: Transaction[],
@@ -1867,29 +1900,36 @@ export default class HandleGCR {
         const refused = new Set<string>()
         if (isRollback || txs.length === 0) return refused
 
-        // One read of the tip decides both whether edits are bound and the
-        // shape expected of an amount, once for the block: neither depends on
-        // the transaction.
-        const { active, postFork } = await editBindingState()
+        // For a block being synced a refusal means its forger shipped a
+        // transaction this node would not have accepted.
+        const refuse = (tx: Transaction, reason: string | undefined) => {
+            log.error(
+                `[applyTransactions] Refusing tx ${tx.hash}` +
+                    (blockNumber !== undefined ? ` of block ${blockNumber}` : "") +
+                    `: ${reason}`,
+            )
+            refused.add(tx.hash)
+        }
+
+        // One read of the tip decides whether edits are bound, the shape
+        // expected of an amount and the governance rule, once for the block:
+        // none of them depends on the transaction.
+        const { active, postFork, governance } = await editBindingState()
+        for (const tx of txs) {
+            const reason = governanceGateRefusal(tx, governance)
+            if (reason) refuse(tx, reason)
+        }
         if (!active) return refused
 
         for (const tx of txs) {
+            if (refused.has(tx.hash)) continue
             let verdict: Awaited<ReturnType<typeof verifyEditsAtApply>>
             try {
                 verdict = await verifyEditsAtApply(tx, { postFork })
             } catch (error) {
                 verdict = { ok: false, reason: `could not be verified: ${error}` }
             }
-            if (!verdict.ok) {
-                // For a block being synced this means its forger shipped edits
-                // this node would not have accepted.
-                log.error(
-                    `[applyTransactions] Refusing tx ${tx.hash}` +
-                        (blockNumber !== undefined ? ` of block ${blockNumber}` : "") +
-                        `: ${verdict.reason}`,
-                )
-                refused.add(tx.hash)
-            }
+            if (!verdict.ok) refuse(tx, verdict.reason)
         }
         return refused
     }
@@ -2898,6 +2938,8 @@ export default class HandleGCR {
                     result = await GCRNetworkUpgradeRoutines.applyProposal(
                         editOperation,
                         repos.proposals,
+                        undefined,
+                        entities.validators,
                     )
                     result.deferredWrite = deferredWriteOf(staged)
                 }

@@ -72,6 +72,7 @@ import TxValidatorPool from "../validation/txValidatorPool"
 import { GCRSubnetsTxs } from "@/model/entities/GCRv2/GCRSubnetsTxs"
 import { emptyResponse } from "@/libs/network"
 import { Validators } from "@/model/entities/Validators"
+import { readState } from "@/libs/blockchain/gcr/stateReadError"
 import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
 import {
     IDENTITIES_DEFAULT_LIMIT,
@@ -280,32 +281,54 @@ export default class GCR {
 
     // INFO Get a validator (or a public key anyway) status in the staking
     // NOTE While accepting a blockNumber, it defaults to the last one
+    /**
+     * @param strict - throw StateReadError when any read fails (the chain
+     *   tip included), instead of answering null as if the row were absent;
+     *   block apply needs this. Without it only a failed row query answers
+     *   null; a failed tip read throws, as callers that check a balance next
+     *   rely on.
+     */
     static async getGCRValidatorStatus(
         publicKeyHex: string,
         blockNumber: number = null,
-    ) {
-        const db = await Datasource.getInstance()
-        const validatorsRepository = db
-            .getDataSource()
-            .getRepository(Validators)
-
-        if (!blockNumber) {
-            blockNumber = await Chain.getLastBlockNumber() // Ensure this method is also ported to TypeORM
-        }
-
-        try {
-            const info = await validatorsRepository.findOne({
-                where: {
-                    first_seen: LessThanOrEqual(blockNumber),
-                    address: publicKeyHex,
-                },
+        strict = false,
+    ): Promise<Validators | null> {
+        if (strict) {
+            return readState("validator row", async () => {
+                const repository = await GCR.validatorsRepository()
+                const tip = blockNumber || (await Chain.getLastBlockNumber())
+                return GCR.findValidatorRow(repository, publicKeyHex, tip)
             })
-
-            return info || null
+        }
+        const repository = await GCR.validatorsRepository()
+        if (!blockNumber) {
+            blockNumber = await Chain.getLastBlockNumber()
+        }
+        try {
+            return await GCR.findValidatorRow(repository, publicKeyHex, blockNumber)
         } catch (e) {
             log.error(`Error fetching validator status: ${e}`)
-            return null // or handle the error as needed
+            return null
         }
+    }
+
+    private static async validatorsRepository(): Promise<Repository<Validators>> {
+        const db = await Datasource.getInstance()
+        return db.getDataSource().getRepository(Validators)
+    }
+
+    private static async findValidatorRow(
+        repository: Repository<Validators>,
+        publicKeyHex: string,
+        blockNumber: number,
+    ): Promise<Validators | null> {
+        const info = await repository.findOne({
+            where: {
+                first_seen: LessThanOrEqual(blockNumber),
+                address: publicKeyHex,
+            },
+        })
+        return info || null
     }
 
     static async getNativeSubnetsTxs(
