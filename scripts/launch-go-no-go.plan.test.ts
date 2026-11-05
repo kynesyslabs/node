@@ -195,6 +195,23 @@ describe("validator table", () => {
         expect(failing(checks)).toEqual([])
     })
 
+    it("fails a genesis whose name and currency are still template FILL values", () => {
+        const g = filledTemplate()
+        g.properties.name = "FILL: network name (testnet: DEMOS)"
+        g.properties.currency = "FILL: currency symbol (testnet: DEM)"
+        const checks = launchPlanChecks({
+            genesis: g,
+            blockZero: blockZero(10),
+            shardSize: 10,
+            operators: table(10),
+            genesisFileProblems: [],
+        })
+        expect(failing(checks)).toEqual(["genesis values"])
+        const details = checks.find(c => c.name === "genesis values").details.join("\n")
+        expect(details).toContain("genesis.properties.name")
+        expect(details).toContain("genesis.properties.currency")
+    })
+
     it("fails four validators of one operator: over the cap and over a third of the votes", () => {
         const checks = launchPlanChecks({
             genesis: filledTemplate(),

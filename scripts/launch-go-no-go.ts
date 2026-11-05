@@ -759,6 +759,17 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
         check("genesis forks", forkReasons),
         check("chain id", genesisReasons.filter(r => r.startsWith("genesis properties.id"))),
         check("shard size", genesisReasons.filter(r => r.startsWith("genesis properties.shardSize"))),
+        // Whatever mainnetGenesisReasons adds beyond the checks above, so a
+        // new genesis rule cannot pass --plan unseen
+        check(
+            "genesis values",
+            genesisReasons.filter(
+                r =>
+                    !forkReasons.includes(r) &&
+                    !r.startsWith("genesis properties.id") &&
+                    !r.startsWith("genesis properties.shardSize"),
+            ),
+        ),
         check(
             "genesis file",
             (input.genesisFileProblems ?? []).map(p => `a node would refuse this genesis at its first boot: ${p}`),

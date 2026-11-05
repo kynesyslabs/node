@@ -86,7 +86,7 @@ bun scripts/launch-go-no-go.ts --plan \
 ```
 
 One `PASS`/`FAIL` line per check: genesis forks, chain id, shard size,
-genesis file (a node would load it), block 0 validator set, launch
+genesis values (no template `FILL` left), genesis file (a node would load it), block 0 validator set, launch
 validators against the quorum, validator table (an entry with operator,
 provider and region for each), operator and provider cap, voting power per
 operator and provider, pinned identities. Exit 0 when all pass, 1
