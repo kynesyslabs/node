@@ -43,6 +43,10 @@ chain still makes blocks; a 4th stops it until one comes back.
    docker compose it goes in `.env`; the shipped `docker-compose.yml`
    passes it to the node container.
 
+6. Before T-0 no operator or provider holds more than a third of the first
+   committee's votes (one validator, one vote), and every launch validator's
+   region is recorded. `--plan` (below) checks this with the cap.
+
 Exit 0 from `scripts/launch-go-no-go.ts` is the T-0 check of rules 2 and 3
 only, plus the genesis checks below. It does not check rules 1, 4 and 5:
 people check those, with `scripts/validator-prove-signing.ts --verify
@@ -68,6 +72,26 @@ passing it would show every validator on another genesis. The tool prints
 no block hash for a genesis without a fixed positive integer `timestamp`,
 since each node would then stamp block 0 with its own clock.
 
+## Plan check (before any validator is up)
+
+The genesis rules and the validator table can be checked as soon as the
+genesis file, the snapshot and the table exist, with no node running:
+
+```bash
+bun scripts/launch-go-no-go.ts --plan \
+  --genesis mainnet/genesis.json --snapshot mainnet/snapshot \
+  --operators mainnet/launch-validators.json [--json]
+```
+
+One `PASS`/`FAIL` line per check: genesis forks, chain id, shard size,
+genesis file (a node would load it), block 0 validator set, launch
+validators against the quorum, validator table (an entry with operator,
+provider and region for each), operator and provider cap, voting power per
+operator and provider, pinned identities. Exit 0 when all pass, 1
+otherwise, 2 when any of the three inputs is missing. Filling the genesis
+is in `docs/mainnet/genesis.md`, the table in
+`docs/mainnet/launch-validators.md`.
+
 ## Go/no-go check
 
 Inputs: the mainnet genesis file (launch validators, their URLs,
@@ -77,8 +101,8 @@ and an operator map:
 
 ```json
 {
-  "0x<validator identity>": { "operator": "acme", "provider": "hetzner" },
-  "0x<validator identity>": { "operator": "beta", "provider": "aws" }
+  "0x<validator identity>": { "operator": "acme", "provider": "hetzner", "region": "eu-central" },
+  "0x<validator identity>": { "operator": "beta", "provider": "aws", "region": "us-east" }
 }
 ```
 
@@ -128,9 +152,14 @@ exposed by the node, so it comes from the T-24h posts). Then:
   file builds that block 0; at least `q` members of the first committee
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
-  entry with no group above `shardSize − q`; the genesis schedules
-  `signatureDomain`, `editBinding`, `quorumParity`, `committeeBinding` and
-  `commitLock` at `activationHeight` 0; and no launch validator is one of
+  entry with no group above `shardSize − q` and none holding more than a
+  third of the first committee's votes; the genesis schedules
+  `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
+  `quorumParity`, `committeeBinding` and `commitLock` at `activationHeight`
+  0, declares every fork the build knows (an undeclared one would take the
+  code default), gives a scheduled `gasFeeSeparation` its `treasuryAddress`,
+  uses a chain id other than testnet `1` and devnet `1337`, and sets
+  `shardSize` 10; and no launch validator is one of
   the pinned committee identities (`PINNED_SHARD_IDENTITIES`), which take
   a seat on any network whose pool holds them; and a node would accept
   the genesis file at its first boot (fixed timestamp, snapshot bound by
@@ -141,7 +170,7 @@ exposed by the node, so it comes from the T-24h posts). Then:
   shown but not counted. A launch validator with a proven identity that
   runs other rules is NO-GO on its own, whatever the quorum: another genesis
   block, other genesis data (`getGenesisDataHash`), another fork schedule
-  digest, one of the five forks not active, or another commit. It would abstain or split at
+  digest, one of the mainnet forks not active, or another commit. It would abstain or split at
   launch, so its operator fixes it before the chain starts.
 - Exit 2: bad input, including a malformed `--genesis-hash` or `--commit`
   and a `--shard-size` that differs from the genesis.
@@ -185,7 +214,8 @@ validators that might not be in the committee.
 **Operator entries.** Every launch validator needs an entry with a
 non-empty string `operator` and `provider`. A missing field, an empty
 string or a non-string value is NO-GO and names the validator, because a
-validator without a group would escape the cap.
+validator without a group would escape the cap. A missing `region` is a warning here and a failure under
+`--plan`.
 
 Without `--genesis-hash` the result is NO-GO. The hash most validators
 report is still used to draw the committee and show each validator's
