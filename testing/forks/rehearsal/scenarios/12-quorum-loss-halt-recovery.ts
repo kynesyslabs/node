@@ -312,7 +312,7 @@ async function drill(
         timeoutMs: 240_000,
         intervalMs: 2_000,
     })
-    await assertBlockHashConvergence(NODE_IDS, BASELINE_HEIGHT)
+    await assertBlockHashConvergence(NODE_IDS, BASELINE_HEIGHT, { timeoutMs: DB_READ_TIMEOUT_MS })
     marks.t_baseline = Date.now()
     ctx.notes.push(`P1 baseline: 4/4 at >= ${BASELINE_HEIGHT}, hashes agree`)
 
@@ -368,7 +368,7 @@ async function drill(
     ctx.notes.push(`P3 halt: survivors held at ${haltHeight} for ${HALT_ROUNDS} rounds`)
 
     // P4 halt agreement
-    await assertBlockHashConvergence(SURVIVORS, haltHeight)
+    await assertBlockHashConvergence(SURVIVORS, haltHeight, { timeoutMs: DB_READ_TIMEOUT_MS })
     ctx.notes.push(`P4 survivors agree on block ${haltHeight}`)
 
     // P5 recovery
