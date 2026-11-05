@@ -12,6 +12,7 @@ import * as path from "path"
 import type { EntityManager } from "typeorm"
 import { loadSnapshot } from "src/libs/blockchain/genesis/loadSnapshot"
 import { carryoverSnapshotProblems } from "src/libs/blockchain/genesis/carryover"
+import { identityCarryoverScheduledAtZero } from "src/forks/identityCarryoverGate"
 import { type GenesisValidatorSeed, seedValidators } from "src/libs/blockchain/genesis/seedValidators"
 import { CategorizedLogger } from "src/utilities/tui"
 
@@ -118,11 +119,6 @@ export function launchIdentities(rows: ValidatorRow[]): string[] {
  * A genesis that schedules identityCarryover at 0 makes block 0 refuse any
  * snapshot that carries balances or other validators than the genesis.
  */
-function carryoverAtGenesis(genesis: { forks?: unknown } | null): boolean {
-    const forks = genesis?.forks as Record<string, { activationHeight?: unknown }> | undefined
-    return forks?.identityCarryover?.activationHeight === 0
-}
-
 /**
  * Reads the set with the node's own snapshot loader (integrity checks
  * included, so a tampered snapshot throws here as it would at boot).
@@ -170,7 +166,7 @@ export async function readBlockZeroValidators(
             warnings: [],
         }
     }
-    const carryoverReasons = carryoverAtGenesis(genesis)
+    const carryoverReasons = identityCarryoverScheduledAtZero(genesis)
         ? await carryoverSnapshotProblems(snapshot, genesis?.validators)
         : []
     if (snapshot.manifest.files["validators.jsonl"] === undefined) {

@@ -33,6 +33,7 @@ import { loadForkConfigFromGenesis } from "@/forks/loadForkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import {
     loadSnapshot,
+    openBoundGcrMain,
     type SnapshotLoaderAvailable,
 } from "@/libs/blockchain/genesis/loadSnapshot"
 import { restoreSnapshot } from "@/libs/blockchain/genesis/restoreSnapshot"
@@ -669,28 +670,75 @@ describe("imported-identity registry", () => {
     it("refuses a boot whose registry does not match the snapshot block 0 declares", async () => {
         const out = await buildOut()
         const manifestHash = sha256(await readFile(join(out, "manifest.json")))
-        const stored = { snapshot: { manifestSha256: manifestHash } }
+        const forks = { identityCarryover: { activationHeight: 0 } }
+        const stored = { forks, snapshot: { manifestSha256: manifestHash } }
         const keys = await restoredKeys(out)
-        const readers = (storedKeys: string[], onDisk: string | null = manifestHash) => ({
-            manifestHash: async () => onDisk,
-            loadSnapshot: () => load(out),
+        const readers = (storedKeys: string[], dir = out) => ({
+            openGcrMain: (sha: string) => openBoundGcrMain(sha, dir),
             storedKeys: async () => storedKeys,
         })
 
-        expect(await importedIdentityProblems(stored, true, readers([...keys].reverse()))).toEqual([])
-        expect((await importedIdentityProblems(stored, true, readers(keys.slice(1)))).join()).toContain(
+        expect(await importedIdentityProblems(stored, readers([...keys].reverse()))).toEqual([])
+        expect((await importedIdentityProblems(stored, readers(keys.slice(1)))).join()).toContain(
             `holds ${keys.length - 1} keys`,
         )
         const swapped = [...keys.slice(1), "web2:twitter:999"]
-        expect((await importedIdentityProblems(stored, true, readers(swapped))).join()).toContain("digest")
-        expect((await importedIdentityProblems(stored, true, readers(keys, null))).join()).toContain("no snapshot manifest")
-        expect((await importedIdentityProblems(stored, true, readers(keys, "cd".repeat(32)))).join()).toContain(
-            "block 0 declares",
+        expect((await importedIdentityProblems(stored, readers(swapped))).join()).toContain("digest")
+        expect((await importedIdentityProblems(stored, readers(keys, join(work, "gone")))).join()).toContain(
+            "no snapshot manifest",
+        )
+        const otherManifest = { forks, snapshot: { manifestSha256: "cd".repeat(32) } }
+        expect((await importedIdentityProblems(otherManifest, readers(keys))).join()).toContain(
+            `block 0 declares ${"cd".repeat(32)}`,
         )
         // A block 0 without a snapshot restored nothing.
-        expect(await importedIdentityProblems({}, true, readers([]))).toEqual([])
-        expect((await importedIdentityProblems({}, true, readers(keys))).join()).toContain("declares no snapshot")
-        // Before the fork nothing is checked.
-        expect(await importedIdentityProblems(stored, false, readers([]))).toEqual([])
+        expect(await importedIdentityProblems({ forks }, readers([]))).toEqual([])
+        expect((await importedIdentityProblems({ forks }, readers(keys))).join()).toContain("declares no snapshot")
+    })
+
+    it("re-checks gcr_main.jsonl only, against the manifest block 0 bound", async () => {
+        const out = await buildOut()
+        const manifestHash = sha256(await readFile(join(out, "manifest.json")))
+        const stored = { forks: { identityCarryover: { activationHeight: 0 } }, snapshot: { manifestSha256: manifestHash } }
+        const keys = await restoredKeys(out)
+        const readers = { openGcrMain: (sha: string) => openBoundGcrMain(sha, out), storedKeys: async () => keys }
+
+        // The other files were checked when block 0 was built and are not re-read.
+        await writeFile(join(out, "gcr_storageprogram.jsonl"), "tampered\n")
+        await writeFile(join(out, "validators.jsonl"), "tampered\n")
+        expect(await importedIdentityProblems(stored, readers)).toEqual([])
+
+        await writeFile(join(out, "gcr_main.jsonl"), jsonl([gcrRow(ALICE, "0")]))
+        const problems = (await importedIdentityProblems(stored, readers)).join()
+        expect(problems).toContain("the snapshot manifest is present but the snapshot could not be loaded")
+        expect(problems).toContain("gcr_main.jsonl: sha256 mismatch")
+    })
+
+    it("takes the fork schedule from block 0, not from the genesis file", async () => {
+        const keys = ["web2:twitter:111"]
+        const readers = {
+            openGcrMain: async () => ({ status: "missing" }) as const,
+            storedKeys: async () => keys,
+        }
+        const carryoverBlock0 = {
+            forks: { identityCarryover: { activationHeight: 0 } },
+            snapshot: { manifestSha256: "ab".repeat(32) },
+        }
+        // data/genesis.json edited or gone: the node's loaded schedule has no
+        // carryover, and the check still runs.
+        getSharedState.forkConfig = cloneDefaultForkConfig()
+        expect((await importedIdentityProblems(carryoverBlock0, readers)).join()).toContain("no snapshot manifest")
+
+        // A testnet or devnet block 0 never scheduled the fork: untouched,
+        // whatever the genesis file now says.
+        carryoverAtZero()
+        for (const block0 of [
+            { snapshot: { manifestSha256: "ab".repeat(32) } },
+            { forks: { identityCarryover: { activationHeight: null } }, snapshot: { manifestSha256: "ab".repeat(32) } },
+            { forks: { identityCarryover: { activationHeight: 10 } } },
+            null,
+        ]) {
+            expect(await importedIdentityProblems(block0, readers)).toEqual([])
+        }
     })
 })

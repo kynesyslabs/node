@@ -512,3 +512,60 @@ export async function snapshotManifestHash(): Promise<string | null> {
     if (!manifestStat || !manifestStat.isFile()) return null
     return createHash("sha256").update(await readFile(manifestPath)).digest("hex")
 }
+
+export type BoundGcrMain =
+    | { status: "missing" }
+    | { status: "mismatch"; manifestSha256: string }
+    | { status: "unreadable"; reason: string }
+    | { status: "ok"; streamGcrMain: () => AsyncIterable<GCRMainSeed> }
+
+/**
+ * Opens gcr_main.jsonl of the snapshot whose manifest hashes to
+ * `manifestSha256`, checking that one file only. Block 0 already bound the
+ * manifest, and a restart that re-hashed every snapshot file would pay for
+ * it on each pass of a crash loop.
+ */
+export async function openBoundGcrMain(
+    manifestSha256: string,
+    snapshotDir: string = resolveSnapshotDir(),
+): Promise<BoundGcrMain> {
+    const manifestPath = resolve(snapshotDir, "manifest.json")
+    const manifestStat = await stat(manifestPath).catch(() => null)
+    if (!manifestStat || !manifestStat.isFile()) return { status: "missing" }
+    const manifestBytes = await readFile(manifestPath)
+    const actual = createHash("sha256").update(manifestBytes).digest("hex")
+    if (actual !== manifestSha256) return { status: "mismatch", manifestSha256: actual }
+
+    let expected: unknown
+    try {
+        expected = JSON.parse(manifestBytes.toString("utf8"))?.files?.["gcr_main.jsonl"]?.sha256
+    } catch (err) {
+        return { status: "unreadable", reason: `manifest.json: ${(err as Error).message}` }
+    }
+    if (typeof expected !== "string") {
+        return { status: "unreadable", reason: "manifest.json lists no gcr_main.jsonl sha256" }
+    }
+    const gcrMainPath = resolve(snapshotDir, "gcr_main.jsonl")
+    let fileSha: string
+    try {
+        const hash = createHash("sha256")
+        for await (const chunk of createReadStream(gcrMainPath)) hash.update(chunk)
+        fileSha = hash.digest("hex")
+    } catch (err) {
+        return { status: "unreadable", reason: `gcr_main.jsonl: ${(err as Error).message}` }
+    }
+    if (fileSha !== expected) {
+        return {
+            status: "unreadable",
+            reason: `gcr_main.jsonl: sha256 mismatch (got ${fileSha}, expected ${expected})`,
+        }
+    }
+    return {
+        status: "ok",
+        async *streamGcrMain() {
+            for await (const { line, lineNo } of streamLines(gcrMainPath)) {
+                yield parseGCRMainRow(line, lineNo)
+            }
+        },
+    }
+}

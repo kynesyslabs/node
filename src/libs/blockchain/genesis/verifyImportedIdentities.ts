@@ -9,14 +9,14 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import { identityCarryoverScheduledAtZero } from "@/forks/identityCarryoverGate"
 import { expectedImportedIdentities, importedIdentityDigest } from "./carryover"
 import { declaredManifestHash } from "./genesisPin"
-import type { SnapshotLoader } from "./loadSnapshot"
+import type { BoundGcrMain } from "./loadSnapshot"
 
 export type ImportedIdentityReaders = {
-    /** sha256 of the snapshot manifest on disk, null when there is none. */
-    manifestHash: () => Promise<string | null>
-    loadSnapshot: () => Promise<SnapshotLoader>
+    /** gcr_main.jsonl of the snapshot whose manifest hashes to the given sha256. */
+    openGcrMain: (manifestSha256: string) => Promise<BoundGcrMain>
     /** Every identity_key in genesis_imported_identities. */
     storedKeys: () => Promise<string[]>
 }
@@ -27,15 +27,17 @@ export type ImportedIdentityReaders = {
  * whose registry drifted would pay or withhold first-link awards differently
  * from its peers without any consensus check noticing.
  *
+ * Whether the check applies is read from block 0's stored genesis, not from
+ * data/genesis.json: a missing or edited file must not skip it.
+ *
  * Returns the reasons to refuse the boot; empty when the registry matches or
- * identityCarryover is not active at genesis.
+ * block 0 does not schedule identityCarryover at 0.
  */
 export async function importedIdentityProblems(
     storedGenesisData: unknown,
-    carryoverAtGenesis: boolean,
     readers: ImportedIdentityReaders,
 ): Promise<string[]> {
-    if (!carryoverAtGenesis) return []
+    if (!identityCarryoverScheduledAtZero(storedGenesisData)) return []
 
     const actual = importedIdentityDigest(await readers.storedKeys())
     const declared = declaredManifestHash(storedGenesisData)
@@ -49,22 +51,23 @@ export async function importedIdentityProblems(
               ]
     }
 
-    const onDisk = await readers.manifestHash()
-    if (onDisk === null) {
+    const gcrMain = await readers.openGcrMain(declared)
+    if (gcrMain.status === "missing") {
         return [
             "identityCarryover is active at genesis and the imported-identity registry " +
                 "is checked against the snapshot, but no snapshot manifest was found " +
                 "(data/snapshot, or DEMOS_SNAPSHOT_DIR)",
         ]
     }
-    if (onDisk !== declared) {
-        return [`snapshot manifest hashes to ${onDisk}, block 0 declares ${declared}`]
+    if (gcrMain.status === "mismatch") {
+        return [`snapshot manifest hashes to ${gcrMain.manifestSha256}, block 0 declares ${declared}`]
     }
-    const loader = await readers.loadSnapshot()
-    if (!loader.available) {
-        return ["the snapshot manifest is present but the snapshot could not be loaded"]
+    if (gcrMain.status === "unreadable") {
+        return [
+            `the snapshot manifest is present but the snapshot could not be loaded: ${gcrMain.reason}`,
+        ]
     }
-    const expected = await expectedImportedIdentities(loader)
+    const expected = await expectedImportedIdentities(gcrMain)
     if (expected.count !== actual.count || expected.digest !== actual.digest) {
         return [
             `genesis_imported_identities holds ${actual.count} keys (digest ${actual.digest}), ` +

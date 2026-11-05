@@ -79,10 +79,14 @@ not part of the state hash.
 
 Because neither the table nor points enter the state hash, a node whose
 table drifted would pay awards its peers withhold, unnoticed. At every
-restart a node with the fork at 0 recomputes the keys from the snapshot
-(after checking its manifest against the hash block 0 declares) and
-compares the row count and the sha256 of the sorted keys with the table.
-It refuses to boot on a mismatch, or when the snapshot is no longer on
+restart a node whose block 0 schedules the fork at 0 recomputes the keys
+from the snapshot and compares the row count and the sha256 of the sorted
+keys with the table. The schedule is read from the genesis stored in
+block 0, so a missing or edited `data/genesis.json` cannot skip the check.
+The restart checks the manifest against the hash block 0 declares and then
+re-hashes `gcr_main.jsonl` only; the other files were checked when block 0
+was built, and re-hashing them on every boot would slow a crash loop. It
+refuses to boot on a mismatch, or when the snapshot is no longer on
 disk, so the snapshot must stay in `data/snapshot` (or
 `DEMOS_SNAPSHOT_DIR`) for the life of the node.
 

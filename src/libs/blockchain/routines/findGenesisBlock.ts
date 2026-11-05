@@ -37,7 +37,7 @@ import {
     readAcceptedSchedule,
     writeAcceptedSchedule,
 } from "@/libs/blockchain/genesis/acceptedForkScheduleStore"
-import { loadSnapshot, snapshotManifestHash } from "@/libs/blockchain/genesis/loadSnapshot"
+import { openBoundGcrMain, snapshotManifestHash } from "@/libs/blockchain/genesis/loadSnapshot"
 import { importedIdentityProblems } from "@/libs/blockchain/genesis/verifyImportedIdentities"
 import { GenesisImportedIdentity } from "@/model/entities/GenesisImportedIdentity"
 import Datasource from "src/model/datasource"
@@ -179,9 +179,8 @@ export default async function findGenesisBlock() {
         const storedBlockProblem = blockPinProblem(genesisBlockHash, blockPin, false)
         if (storedBlockProblem) refuse([storedBlockProblem])
         refuse(
-            await importedIdentityProblems(stored, identityCarryoverActiveAtGenesis(), {
-                manifestHash: snapshotManifestHash,
-                loadSnapshot,
+            await importedIdentityProblems(stored, {
+                openGcrMain: openBoundGcrMain,
                 storedKeys: async () => {
                     const db = (await Datasource.getInstance()).getDataSource()
                     const rows = await db

@@ -337,7 +337,7 @@ export function importedIdentityDigest(keys: Iterable<string>): ImportedIdentity
 
 /** The identity keys block 0 must have recorded for this snapshot. */
 export async function expectedImportedIdentities(
-    loader: SnapshotLoaderAvailable,
+    loader: Pick<SnapshotLoaderAvailable, "streamGcrMain">,
 ): Promise<ImportedIdentitySummary> {
     const keys = new Set<string>()
     for await (const row of loader.streamGcrMain()) {
