@@ -193,6 +193,8 @@ when re-enabling the server.
 docker compose stop caddy
 # Drop the proxy profile AND the proxy override from .env
 sed -i -e 's/,proxy//' -e 's/:docker-compose.proxy.yml//' .env
+# Serve Grafana from its own port again
+sed -i -e '/^GRAFANA_ROOT_URL=/d' -e '/^GRAFANA_SERVE_FROM_SUB_PATH=/d' .env
 # Recreate the services so their host ports are published again
 docker compose up -d
 ```
@@ -202,6 +204,10 @@ stays in `COMPOSE_FILE`, its `ports: !override` lists keep the RPC,
 signaling, metrics, Grafana and Prometheus host ports unpublished, so RPC
 stays unreachable from outside. Removing it from `COMPOSE_FILE` and running
 `docker compose up -d` recreates every service whose ports changed.
+
+Grafana keeps redirecting to the stopped proxy while `GRAFANA_ROOT_URL`
+points there with `GRAFANA_SERVE_FROM_SUB_PATH=true`; with both removed it
+falls back to `http://localhost:3000` at the root path.
 
 After that, host ports `53550 53551 3005 9090 3000 9091 7047` work direct again.
 
