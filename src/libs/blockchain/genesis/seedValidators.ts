@@ -7,9 +7,10 @@
  * either rolls everything back atomically.
  *
  * Genesis-baked validators bypass the normal staking flow entirely —
- * they are inserted directly at status=ACTIVE with staked_amount=1 DEM
- * (1e18). At block 1 the `osDenomination` migration multiplies every
- * `staked_amount` by 10^9, so they end up with 1 OS (1e27).
+ * they are inserted directly at status=ACTIVE with the staked_amount the
+ * genesis gives. chainGenesis seeds them after the block-0 fork pre-apply,
+ * so an osDenomination active at block 0 does not scale them and the
+ * genesis states them in OS units; a later activation scales them then.
  */
 
 import type { EntityManager } from "typeorm"
