@@ -43,7 +43,9 @@ import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import {
     editBindingState,
+    nonceIntegrityActive,
     verifyEditsAtApply,
+    verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
@@ -312,6 +314,16 @@ export interface GCRApplyResult {
     sideEffects: (() => Promise<void>)[]
     deferredWrites: DeferredWrite[]
     appliedEditsCount: number
+    /** Failed in a block, and its nonce was spent anyway (`nonceIntegrity`). */
+    nonceCharged?: boolean
+}
+
+export interface ApplyTransactionOptions {
+    /**
+     * Apply under the `nonceIntegrity` rules: the nonce must be the sender's
+     * next one, and a failure still spends it. Set by the block apply only.
+     */
+    nonceRule?: boolean
 }
 
 /**
@@ -344,6 +356,11 @@ export interface ApplyTransactionsResult {
     skippedTxs: string[]
     /** Set only when applied with `defer`. */
     pending?: PendingGCRWrite
+    /**
+     * Failed transactions whose nonce was spent, in block order. Set only
+     * under `nonceIntegrity`.
+     */
+    nonceChargedTxs?: string[]
 }
 
 /** Per-assignment record for the gcr_assigned_txs relation. */
@@ -718,6 +735,93 @@ export default class HandleGCR {
      * @param clock - The block being applied, when there is one
      **/
     static async applyTransaction(
+        entities: GCREntityCaches,
+        tx: Transaction,
+        isRollback: boolean,
+        simulate: boolean,
+        clock?: BlockClock,
+        options: ApplyTransactionOptions = {},
+    ): Promise<GCRApplyResult> {
+        const nonceEdit =
+            options.nonceRule && !simulate && !isRollback
+                ? (tx.content.gcr_edits ?? []).find(
+                      (e): e is GCREditNonce => e.type === "nonce",
+                  )
+                : undefined
+        // A transaction without one was checked to spend no nonce before
+        // apply was reached.
+        if (!nonceEdit) {
+            return this.applyTransactionEdits(entities, tx, isRollback, simulate, clock)
+        }
+
+        // Read on the state the earlier transactions of the block left, the
+        // same on every node, unlike the pool's projection.
+        const account = entities.accounts.get(normalizePubkey(nonceEdit.account))
+        const expected = (account?.nonce ?? 0) + 1
+        if (!account || tx.content.nonce !== expected) {
+            const message = account
+                ? `Nonce mismatch: expected ${expected}, got ${tx.content.nonce}`
+                : "Missing account for nonce edit"
+            log.error(`[applyTransaction] Refusing tx ${tx.hash}: ${message}`)
+            return {
+                success: false,
+                entities,
+                message,
+                sideEffects: [],
+                deferredWrites: [],
+                appliedEditsCount: 0,
+            }
+        }
+
+        const result = await this.applyTransactionEdits(
+            entities,
+            tx,
+            isRollback,
+            simulate,
+            clock,
+        )
+        if (result.success) return result
+
+        // Executed in a block and failed: the nonce is spent all the same, or
+        // the sender could sign it again for another transaction, and a later
+        // nonce of this block that did apply would leave the account behind.
+        const nonceCharged = await HandleGCR.chargeNonce(
+            nonceEdit,
+            entities,
+            tx.hash,
+            expected,
+        )
+        if (!nonceCharged) {
+            log.error(
+                `[applyTransaction] Failed tx ${tx.hash} could not be charged its nonce`,
+            )
+        }
+        return { ...result, nonceCharged }
+    }
+
+    /**
+     * Applies only the nonce edit of a failed transaction, on the state its
+     * failure restored. A Work that rolled back has already been charged.
+     */
+    private static async chargeNonce(
+        nonceEdit: GCREditNonce,
+        entities: GCREntityCaches,
+        txhash: string,
+        expected: number,
+    ): Promise<boolean> {
+        // Read again: a failure puts snapshot copies in place of the entities.
+        const account = entities.accounts.get(normalizePubkey(nonceEdit.account))
+        if (!account) return false
+        if (account.nonce === expected) return true
+        if (account.nonce !== expected - 1) return false
+        const charged = await GCRNonceRoutines.apply(
+            { ...nonceEdit, isRollback: false, txhash },
+            account,
+        )
+        return charged.success
+    }
+
+    private static async applyTransactionEdits(
         entities: GCREntityCaches,
         tx: Transaction,
         isRollback: boolean,
@@ -1311,9 +1415,11 @@ export default class HandleGCR {
         isRollback: boolean,
         txIndex: Map<string, number>,
         clock?: BlockClock,
+        nonceRule = false,
     ) {
         const successful: string[] = []
         const failed: string[] = []
+        const nonceCharged: string[] = []
         const sideEffects: IndexedSideEffect[] = []
         const deferredWrites: IndexedDeferredWrite[] = []
         const assignedTxs = new Map<string, AssignedTxRecord[]>()
@@ -1330,9 +1436,11 @@ export default class HandleGCR {
                 isRollback,
                 false,
                 clock,
+                nonceRule ? { nonceRule } : undefined,
             )
             if (!applyResult.success) {
                 failed.push(tx.hash)
+                if (applyResult.nonceCharged) nonceCharged.push(tx.hash)
                 continue
             }
 
@@ -1362,7 +1470,14 @@ export default class HandleGCR {
             successful.push(tx.hash)
         }
 
-        return { successful, failed, sideEffects, deferredWrites, assignedTxs }
+        return {
+            successful,
+            failed,
+            nonceCharged,
+            sideEffects,
+            deferredWrites,
+            assignedTxs,
+        }
     }
 
     /**
@@ -1433,6 +1548,30 @@ export default class HandleGCR {
         return refused
     }
 
+    /**
+     * Adds to `refused` the transactions whose nonce edit is not the one
+     * `nonceIntegrity` binds: refused before apply, so they change nothing
+     * and spend no nonce, since the account they would charge is not proven.
+     */
+    private static refuseUnboundNonceEdits(
+        txs: Transaction[],
+        refused: Set<string>,
+        blockNumber?: number,
+    ) {
+        for (const tx of txs) {
+            if (refused.has(tx.hash)) continue
+            const verdict = verifyNonceEditBinding(tx)
+            if (!verdict.ok) {
+                log.error(
+                    `[applyTransactions] Refusing tx ${tx.hash}` +
+                        (blockNumber !== undefined ? ` of block ${blockNumber}` : "") +
+                        `: ${verdict.reason}`,
+                )
+                refused.add(tx.hash)
+            }
+        }
+    }
+
     static async applyTransactions(
         txs: Transaction[],
         isRollback: boolean,
@@ -1445,6 +1584,11 @@ export default class HandleGCR {
         const assignedTxsUpdates = new Map<string, AssignedTxRecord[]>()
 
         const refused = await this.refuseUnboundEdits(txs, isRollback, clock?.height)
+        const nonceRule =
+            !isRollback && txs.length > 0 && (await nonceIntegrityActive())
+        if (nonceRule) {
+            this.refuseUnboundNonceEdits(txs, refused, clock?.height)
+        }
         const candidates =
             refused.size > 0 ? txs.filter(tx => !refused.has(tx.hash)) : txs
 
@@ -1610,6 +1754,7 @@ export default class HandleGCR {
                         isRollback,
                         txIndex,
                         clock,
+                        nonceRule,
                     ),
                 ),
             )
@@ -1620,12 +1765,14 @@ export default class HandleGCR {
         // pubkey unions all their txs), so assignedTxs keys are disjoint.
         const successfulSet = new Set<string>()
         const failedSet = new Set<string>()
+        const chargedSet = new Set<string>()
         const allIndexedSideEffects: IndexedSideEffect[] = []
         const allIndexedDeferredWrites: IndexedDeferredWrite[] = []
 
         for (const r of groupResults) {
             for (const h of r.successful) successfulSet.add(h)
             for (const h of r.failed) failedSet.add(h)
+            for (const h of r.nonceCharged) chargedSet.add(h)
             allIndexedSideEffects.push(...r.sideEffects)
             allIndexedDeferredWrites.push(...r.deferredWrites)
             for (const [sender, records] of r.assignedTxs) {
@@ -1693,7 +1840,18 @@ export default class HandleGCR {
         )
         log.only(`[applyTransactions] Total txs: ${txs.length}`)
 
-        return { successfulTxs, failedTxs, skippedTxs, pending }
+        const result: ApplyTransactionsResult = {
+            successfulTxs,
+            failedTxs,
+            skippedTxs,
+            pending,
+        }
+        if (nonceRule) {
+            result.nonceChargedTxs = blockOrder
+                .filter(tx => chargedSet.has(tx.hash))
+                .map(tx => tx.hash)
+        }
+        return result
     }
 
     /**

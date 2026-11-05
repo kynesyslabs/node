@@ -495,7 +495,11 @@ export async function consensusRoutine(): Promise<void> {
                 )
                 blockAttrs[NONCE_TRACE_ATTR_KEY] = nonceTrace
 
-                const appliedHashes = new Set(applyRes.appliedTxs)
+                // A failed tx that spent its nonce moved it like an applied one.
+                const appliedHashes = new Set([
+                    ...applyRes.appliedTxs,
+                    ...(applyRes.nonceChargedTxs ?? []),
+                ])
                 assertForgedNonceTrace(
                     blockRef,
                     nonceTrace,
@@ -953,6 +957,7 @@ async function applyGCREditsFromMergedMempool(
     appliedTxs: string[]
     failedTxs: FailedTranscation[]
     pending?: PendingGCRWrite
+    nonceChargedTxs?: string[]
 }> {
     let failedTxs: FailedTranscation[] = []
 
@@ -1008,6 +1013,7 @@ async function applyGCREditsFromMergedMempool(
         appliedTxs: res.successfulTxs,
         failedTxs,
         pending: res.pending,
+        nonceChargedTxs: res.nonceChargedTxs,
     }
 }
 

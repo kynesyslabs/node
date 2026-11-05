@@ -16,7 +16,9 @@ SUITE_FILES=(
     scripts/validator-prove-signing.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
+    src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
+    src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts

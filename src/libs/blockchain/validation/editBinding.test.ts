@@ -605,9 +605,9 @@ describe("the editBinding fork gates admission as well as apply", () => {
         chainIs(true, 0)
         getSharedState.forkConfig.osDenomination.activationHeight = 120
         tip = 119
-        expect(await editBindingState()).toEqual({ active: true, postFork: false })
+        expect(await editBindingState()).toEqual({ active: true, postFork: false, nonceBound: false })
         tip = 120
-        expect(await editBindingState()).toEqual({ active: true, postFork: true })
+        expect(await editBindingState()).toEqual({ active: true, postFork: true, nonceBound: false })
     })
 })
 
