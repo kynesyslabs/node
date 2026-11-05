@@ -10,9 +10,13 @@
  * step's. At the end every node must agree on every block hash from 1 to the
  * shared head.
  *
+ * Right after each step is included, node-1's getStorageProof at its head is
+ * recorded as served: the head is then often the block that wrote, and the
+ * answer is checked offline by finality_proofs.mjs.
+ *
  * Env: NODE_URLS (comma-separated, node-1 first), IDENTITY_PATH; optional
- * STORAGE_ADDRESS_OUT, a file the program's address is written to for
- * finality_proofs.mjs.
+ * STORAGE_ADDRESS_OUT, a file finality_proofs.mjs reads: the program's
+ * address, the block each step was included in, and those head answers.
  * Prints "OK" and exits 0, or "FAIL: ..." and exits 1.
  */
 import { readFileSync, writeFileSync } from "node:fs"
@@ -120,6 +124,17 @@ async function send(label, payload) {
     return status?.blockNumber ?? null
 }
 
+// Retried only while a block insert holds the lock; any other refusal is kept.
+async function headProof() {
+    let answer
+    for (let i = 0; i < 5; i++) {
+        answer = await nodeCall(urls[0], "getStorageProof", { storageAddresses: [address] })
+        if (answer.result !== 503 || answer.extra?.reason !== "busy") break
+        await sleep(500)
+    }
+    return answer
+}
+
 const startHead = await head(urls[0])
 const baseline = checkAgreement(`before any write (block ${startHead})`, await rootsAt(startHead))
 check(baseline === EMPTY_ROOT, "no storage program yet: empty root", baseline)
@@ -127,9 +142,14 @@ check(baseline === EMPTY_ROOT, "no storage program yet: empty root", baseline)
 const nonce = await demos.getNextNonce(owner)
 const create = StorageProgram.createStorageProgram(owner, `root-probe-${Date.now()}`, { hello: "world" }, "json", undefined, { nonce })
 const address = create.storageAddress
-if (process.env.STORAGE_ADDRESS_OUT) {
-    writeFileSync(process.env.STORAGE_ADDRESS_OUT, JSON.stringify({ storageAddress: address }))
+const included = []
+const headAnswers = []
+function saveOut() {
+    if (process.env.STORAGE_ADDRESS_OUT) {
+        writeFileSync(process.env.STORAGE_ADDRESS_OUT, JSON.stringify({ storageAddress: address, steps: included, headAnswers }))
+    }
 }
+saveOut()
 
 const steps = [
     ["create", create],
@@ -140,9 +160,11 @@ const steps = [
 
 let previous = baseline
 for (const [label, payload] of steps) {
-    const included = await send(label, payload)
-    if (included === null) break
-    const root = checkAgreement(`${label} (in ${included}, root in ${included + 1})`, await rootsAt(included + 1))
+    const block = await send(label, payload)
+    if (block === null) break
+    included.push({ label, block })
+    headAnswers.push({ label, block, answer: await headProof() })
+    const root = checkAgreement(`${label} (in ${block}, root in ${block + 1})`, await rootsAt(block + 1))
     check(root !== null && root !== previous, `${label}: root changed`, `${previous} -> ${root}`)
     previous = root
     if (label === "write") {
@@ -159,6 +181,7 @@ for (let n = 1; n <= finalHead; n++) {
     if (blocks.includes(null) || new Set(blocks.map(b => b.hash)).size !== 1) mismatched.push(n)
 }
 check(mismatched.length === 0, `every node agrees on blocks 1..${finalHead}`, mismatched.join(","))
+saveOut()
 
 if (failures > 0) {
     console.log(`FAIL: ${failures} check(s) failed`)

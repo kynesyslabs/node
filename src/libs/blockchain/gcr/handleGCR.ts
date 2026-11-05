@@ -69,6 +69,7 @@ import { GCRStorageProgramRoutines } from "./gcr_routines/GCRStorageProgramRouti
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { storageProgramLeafHex } from "@/libs/blockchain/finality/storageRecord"
 import { markStorageProgramsDirty } from "@/libs/blockchain/finality/storageRoot"
+import { recordStorageHistory } from "@/libs/blockchain/finality/storageHistory"
 import { Referrals } from "@/features/incentive/referrals"
 // REVIEW: TLSNotary token management for native operations
 import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
@@ -328,7 +329,8 @@ export interface PendingGCRWrite {
     assignedTxs: Map<string, AssignedTxRecord[]>
     sideEffects: (() => Promise<void>)[]
     deferredWrites: DeferredWrite[]
-    write(em: EntityManager): Promise<void>
+    /** `block` is the block this state commits with; its storage undo log is written too. */
+    write(em: EntityManager, block?: number): Promise<void>
     afterCommit(): Promise<void>
 }
 
@@ -1920,12 +1922,13 @@ export default class HandleGCR {
             assignedTxs,
             sideEffects,
             deferredWrites,
-            write: em =>
+            write: (em, block) =>
                 HandleGCR.writeGCREditChanges(
                     em,
                     pending.entities,
                     pending.assignedTxs,
                     pending.deferredWrites,
+                    block,
                 ),
             afterCommit: async () => {
                 if (pending.entities.storagePrograms.size > 0) {
@@ -2005,13 +2008,16 @@ export default class HandleGCR {
 
     /**
      * Writes the entity caches, the assignment stamps and the deferred writes
-     * through one entity manager. The caller owns the transaction.
+     * through one entity manager. The caller owns the transaction. With
+     * `historyBlock`, the storage programs' records from before the write go
+     * to that block's undo log first.
      */
     static async writeGCREditChanges(
         em: EntityManager,
         entities: GCREntityCaches,
         assignedTxs?: Map<string, AssignedTxRecord[]>,
         deferredWrites: DeferredWrite[] = [],
+        historyBlock?: number,
     ) {
         // Save GCRMain entities
         const entitiesToSave = entities.accounts.values().toArray()
@@ -2041,6 +2047,11 @@ export default class HandleGCR {
             markStorageProgramsDirty()
             for (const program of spToSave) {
                 program.smtLeaf = HandleGCR.storageLeafOf(program)
+            }
+            if (historyBlock !== undefined) {
+                await recordStorageHistory(em, historyBlock, [
+                    ...entities.storagePrograms.keys(),
+                ])
             }
 
             const spRepo = em.getRepository(GCRStorageProgram)

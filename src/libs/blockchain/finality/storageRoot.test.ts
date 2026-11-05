@@ -14,8 +14,10 @@ import {
     storageRecordLeafHex,
     type StorageProgramRow,
 } from "./storageRecord"
+import type { StorageHistoryRow } from "./storageHistory"
 import {
     StorageProgramsRoot,
+    StorageProofBusyError,
     type StorageRootReader,
     type StorageRootSnapshot,
     type StoredLeaf,
@@ -40,6 +42,8 @@ class FakeTable implements StorageRootReader {
     rowReads = 0
     fills: StoredLeaf[][] = []
     failFill = false
+    /** The undo log, as storageHistory.ts writes it. */
+    history: StorageHistoryRow[] = []
     /** Runs between the leaf read and the row read, inside the snapshot. */
     duringRead: (() => void) | null = null
 
@@ -77,6 +81,12 @@ class FakeTable implements StorageRootReader {
                 this.rowReads += addresses.length
                 return addresses.flatMap(a => view.get(a) ?? [])
             },
+            history: async (from: number, to: number) =>
+                structuredClone(
+                    this.history
+                        .filter(h => h.block >= from && h.block <= to)
+                        .sort((a, b) => b.block - a.block),
+                ),
         })
     }
 
@@ -365,4 +375,166 @@ describe("storage proofs", () => {
         storedRow(program(5).storageAddress).sizeBytes = 9999
         await expect(root.prove([program(5).storageAddress])).rejects.toThrow(/does not match its row/)
     })
+})
+
+describe("storage proofs at a past block", () => {
+    /** Applies one block's writes as the write path does: the undo row first, then the row. */
+    function applyBlock(block: number, writes: [string, StorageProgramRow | null][]) {
+        for (const [address, next] of writes) {
+            if (!table.history.some(h => h.block === block && h.storageAddress === address)) {
+                const before = table.rows.get(address)
+                table.history.push({ block, storageAddress: address, record: before ? storageProgramRecord(before) : null })
+            }
+            if (next === null) table.delete(address)
+            else table.write(next)
+        }
+    }
+    const state = () => [...table.rows.values()]
+
+    it("rebuilds the root of the state before each undone block, and serves that state's records", async () => {
+        const a = program(1)
+        const b = program(2)
+        const after: StorageProgramRow[][] = [state()]
+        applyBlock(1, [[a.storageAddress, a], [b.storageAddress, b]])
+        after.push(state())
+        applyBlock(2, [[a.storageAddress, program(1, { data: { v: 2 } })]])
+        after.push(state())
+        applyBlock(3, [[b.storageAddress, null], [a.storageAddress, program(1, { isDeleted: true })]])
+        after.push(state())
+
+        for (let block = 1; block <= 3; block++) {
+            const { root: provedRoot, proofs } = await root.prove([a.storageAddress, b.storageAddress], { fromBlock: block, toBlock: 3 })
+            expect(provedRoot).toBe(expectedRoot(after[block - 1]))
+            for (const proof of proofs) {
+                const before = after[block - 1].find(r => r.storageAddress === proof.storageAddress)
+                expect(proof.record).toEqual(before ? storageProgramRecord(before) : null)
+                const key = storageProgramKey(proof.storageAddress)
+                const holds = proof.record
+                    ? verifyMembership(key, storageRecordLeafHex(proof.record), proof, provedRoot)
+                    : verifyNonMembership(key, proof, provedRoot)
+                expect(holds).toBe(true)
+            }
+        }
+        expect((await root.prove([a.storageAddress])).root).toBe(expectedRoot(after[3]))
+    })
+
+    it("keeps the record from before the oldest undone block when several blocks touched a program", async () => {
+        const a = program(4)
+        applyBlock(5, [[a.storageAddress, a]])
+        applyBlock(6, [[a.storageAddress, program(4, { data: "x" })]])
+        applyBlock(7, [[a.storageAddress, program(4, { data: "y" })]])
+        const { proofs } = await root.prove([a.storageAddress], { fromBlock: 6, toBlock: 7 })
+        expect(proofs[0].record).toEqual(storageProgramRecord(a))
+        expect((await root.prove([a.storageAddress], { fromBlock: 5, toBlock: 7 })).proofs[0].record).toBeNull()
+    })
+
+    it("leaves programs no undone block touched at their live rows", async () => {
+        const untouched = program(8)
+        table.write(untouched)
+        applyBlock(9, [[program(9).storageAddress, program(9)]])
+        const { proofs } = await root.prove([untouched.storageAddress], { fromBlock: 9, toBlock: 9 })
+        expect(proofs[0].record).toEqual(storageProgramRecord(untouched))
+        expect(table.rowReads).toBe(1)
+    })
+})
+
+describe("proof trees under load", () => {
+    let clock = 0
+    const capped = (trees: number, buildsPerWindow: number) =>
+        new StorageProgramsRoot(table, () => false, { trees, buildsPerWindow, windowMs: 10_000 }, () => clock)
+    const range = (fromBlock: number): { fromBlock: number; toBlock: number } => ({ fromBlock, toBlock: 9 })
+
+    beforeEach(() => {
+        clock = 0
+        for (let i = 0; i < 5; i++) table.write(program(i))
+    })
+
+    it("keeps a tree per range, so alternating ranges build each once", async () => {
+        const proofs = capped(4, 100)
+        for (let i = 0; i < 6; i++) await proofs.prove([program(1).storageAddress], range(i % 2 ? 8 : 9))
+        expect(proofs.proofTreeBuilds).toBe(2)
+    })
+
+    it("drops the least recently used tree past the limit", async () => {
+        const proofs = capped(2, 100)
+        await proofs.prove(["stor-x"], range(7))
+        await proofs.prove(["stor-x"], range(8))
+        await proofs.prove(["stor-x"], range(7))
+        await proofs.prove(["stor-x"], range(9))
+        expect(proofs.proofTreeBuilds).toBe(3)
+        await proofs.prove(["stor-x"], range(7))
+        expect(proofs.proofTreeBuilds).toBe(3)
+        await proofs.prove(["stor-x"], range(8))
+        expect(proofs.proofTreeBuilds).toBe(4)
+    })
+
+    it("refuses rebuilds past the cap for the rest of the window, still serving kept trees", async () => {
+        const proofs = capped(4, 2)
+        await proofs.prove(["stor-x"], range(7))
+        clock = 4_000
+        await proofs.prove(["stor-x"], range(8))
+        const refused = await proofs.prove(["stor-x"], range(9)).catch(error => error)
+        expect(refused).toBeInstanceOf(StorageProofBusyError)
+        expect(refused.retryAfterMs).toBe(6_000)
+        expect((await proofs.prove(["stor-x"], range(7))).root).toBe(expectedRoot(state()))
+        clock = 10_001
+        await proofs.prove(["stor-x"], range(9))
+        expect(proofs.proofTreeBuilds).toBe(3)
+    })
+
+    it("shares a tree being built with requests for it and refuses one for another range meanwhile", async () => {
+        const proofs = capped(4, 100)
+        let release: () => void = () => {}
+        const gate = new Promise<void>(resolve => (release = resolve))
+        const read = table.read.bind(table)
+        let reads = 0
+        table.read = async work => {
+            if (reads++ === 0) await gate
+            return await read(work)
+        }
+        const first = proofs.prove([program(1).storageAddress], range(9))
+        const same = proofs.prove([program(2).storageAddress], range(9))
+        const other = proofs.prove(["stor-x"], range(8)).catch(error => error)
+        expect(await other).toBeInstanceOf(StorageProofBusyError)
+        release()
+        const [a, b] = await Promise.all([first, same])
+        expect(a.root).toBe(b.root)
+        expect(b.proofs[0].storageAddress).toBe(program(2).storageAddress)
+        expect(proofs.proofTreeBuilds).toBe(1)
+    })
+
+    it("does not keep a tree whose root is not the one expected", async () => {
+        const proofs = capped(4, 100)
+        await proofs.prove(["stor-x"], range(9), "ab".repeat(32))
+        await proofs.prove(["stor-x"], range(9), "ab".repeat(32))
+        expect(proofs.proofTreeBuilds).toBe(2)
+        const right = expectedRoot(state())
+        await proofs.prove(["stor-x"], range(9), right)
+        await proofs.prove(["stor-x"], range(9), right)
+        expect(proofs.proofTreeBuilds).toBe(3)
+    })
+
+    it("rebuilds once when a write lands between picking a kept tree and reading the rows", async () => {
+        const proofs = capped(4, 100)
+        await proofs.prove([program(1).storageAddress])
+        // Committed, not yet marked dirty: the kept tree still looks current.
+        const changed = program(1, { data: { changed: true }, lastModifiedByTx: "0xm1b" })
+        table.write(changed)
+        table.delete(program(2).storageAddress)
+        const { root: after, proofs: served } = await proofs.prove([changed.storageAddress, program(2).storageAddress])
+        expect(proofs.proofTreeBuilds).toBe(2)
+        expect(after).toBe(expectedRoot(state()))
+        expect(storageRecordLeafHex(served[0].record!)).toBe(storageProgramLeafHex(changed))
+        expect(served[1].record).toBeNull()
+        expect(verifyNonMembership(storageProgramKey(program(2).storageAddress), served[1], after)).toBe(true)
+    })
+
+    it("answers busy when that rebuild is past the cap", async () => {
+        const proofs = capped(4, 1)
+        await proofs.prove([program(1).storageAddress])
+        table.write(program(1, { data: { changed: true }, lastModifiedByTx: "0xm1b" }))
+        expect(await proofs.prove([program(1).storageAddress]).catch(error => error)).toBeInstanceOf(StorageProofBusyError)
+    })
+
+    const state = () => [...table.rows.values()]
 })
