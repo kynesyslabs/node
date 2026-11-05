@@ -1,4 +1,4 @@
-# Nonce integrity: one nonce per sender step, spent even on failure
+# Nonce integrity: one nonce per sender step, spent and paid for even on failure
 
 Status: implemented behind the `nonceIntegrity` fork (dormant until a height
 is set; the devnet genesis sets 0, a mainnet genesis must too).
@@ -54,19 +54,89 @@ earlier transactions of the block left:
 
 - The nonce must be exactly `account.nonce + 1`. Otherwise the transaction
   is failed with no state change and no charge.
-- If the transaction then fails, its other edits are rolled back as before,
-  and the nonce edit is applied on the restored state: the nonce is spent.
-  A Work transaction that rolled back has already been charged its fee and
-  nonce by its own settlement and is not charged twice.
+- If the transaction then fails, every account its edits name is put back
+  as it was before the transaction, and the failure is charged on that state
+  (see "Failure charge"). The nonce is always spent.
+- A Work transaction that rolled back has already been charged its fee and
+  nonce by its own settlement, and counts as applied; it is not charged
+  again.
 - `applyTransactions` reports the charged failures in `nonceChargedTxs`, in
   block order. The forger's nonce trace counts them like applied ones.
 
 Every node reaches the same result: the forger and committee apply the same
 merged set, and a syncing node runs every transaction of the block that did
-not fail before apply through the same `applyTransactions`.
+not fail before apply through the same `applyTransactions`. The charge reads
+only the transaction, the fork schedule and the state the block left, so a
+forger, a validator and a syncing node charge alike.
 
-Not charged: transactions refused before apply (shape, `editBinding`,
-uniqueness, contended Work), and a nonce that is not the next one.
+Not charged at all: transactions refused before apply (shape, `editBinding`,
+uniqueness, contended Work), a nonce that is not the next one, and a
+transaction the apply-side forged-edit guard refuses (its edits are not the
+ones its signed body implies, so the fee it would pay is unproven). A
+refusal of this kind leaves the nonce free; the sender's later nonces of the
+block are then refused as not next, also uncharged.
+
+### Failure charge
+
+Decision: a transaction that fails inside a block pays its fee, like a
+successful one. A free failure is an unlimited retry, and spam built to
+fail would otherwise cost nothing but a nonce.
+
+What is charged, all or nothing, in this order:
+
+1. The fee edits the node derives at apply from the signed
+   `transaction_fee` (native transactions under `gasFeeSeparation`): the
+   sender's debit and the burn, treasury and RPC credits.
+2. The gas edit: the balance `remove` on the sender that every SDK builder
+   puts right before the nonce edit. Identity and `d402_payment`
+   transactions carry none.
+3. The nonce edit.
+
+Never charged: anything the type itself debits (a storage program's burn, a
+stake, a transfer). Those are effects, and the failure discarded them.
+
+If the account cannot pay the fee on the restored state, only the nonce is
+spent. The sender still moves on, and every node judges the same balance.
+
+Work:
+
+- Rolled back after executing: charged once by its settlement
+  (`settledEdits(..., "rolled-back")`), reported as applied.
+- Refused inside the block (an expired deadline, a malformed envelope): it
+  is charged like any failure, fee and nonce. This differs from the Work
+  settlement table's `expired` row, which describes a Work that never
+  reached a block: once included, the Work occupied the block.
+- A replay that fails: nonce only. A replay recovers the receipt of a Work
+  that already paid, and its settlement never charges the fee.
+
+The restore before charging also closes a double refund. Without the fork
+a failed transaction's account snapshot is restored and then its applied
+type edits are reversed on top of it, so a balance edit before the failing
+one (a storage burn) is refunded twice and the sender gains it. Under the
+fork the pre-transaction copy is put back after that reversal, so the
+reversal cannot leave a trace. Pre-fork apply is unchanged.
+
+### Account history (`gcr_assigned_txs`)
+
+A charged failure is recorded in `gcr_assigned_txs` for its sender, like a
+successful transaction: it changed the account (fee and nonce), and the
+table is the list of transactions that did. The table is not part of the
+native table hash, so the record changes no consensus value.
+
+Explorers: the rows do not say whether a transaction succeeded; the
+transaction's status in its block does (`TX_EXECUTE_FAILED` for a failure).
+An explorer counts the transactions that spent an account's nonces as its
+rows whose transaction ships a nonce edit, failures included (rows also list
+transactions that spend no nonce, such as the incentive award). Status alone
+does not separate a charged failure from a failure refused before apply;
+only the charged one has a row.
+
+The orphan recovery in sync (`rollbackOrphanedGcrState`) undoes stamped
+transactions by replaying every edit of their bodies in reverse. That is
+wrong for a charged failure, whose type edits never applied, so for a block
+applied under the fork it refuses and the node must resync. Stamps commit in
+the block's own database transaction, so only an older binary can leave an
+orphan stamp.
 
 ### Mempool admission
 
@@ -91,16 +161,8 @@ take effect, the other reaching a block only as a failure.
 The consensus merge does not apply these rules: every committee member must
 end it holding the same pool, and apply decides.
 
-## Open decisions
+## Wallets and explorers
 
-- Fee on failure. A failed non-Work transaction spends its nonce but pays no
-  fee; Work keeps its existing fee-and-nonce charge. Charging the fee too
-  would make spam that is built to fail cost something, but changes what a
-  failed transfer costs users. Not done here.
-- `gcr_assigned_txs` lists the transactions that changed an account. A
-  charged failure is not recorded there, although it moved the nonce. Block
-  apply is atomic, so state is unaffected; explorers that derive the nonce
-  history from that table need to count failed transactions of the block.
-- Explorers and wallets: after the fork a failed transaction moves the
-  sender's nonce. A wallet signs its next transaction with the next nonce
-  either way.
+After the fork a failed transaction moves the sender's nonce and costs its
+fee. A wallet signs its next transaction with the next nonce either way. A
+balance shown after a failure is lower by the fee, not unchanged.

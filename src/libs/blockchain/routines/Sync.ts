@@ -53,6 +53,7 @@ import {
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
+import { isForkActive } from "@/forks"
 import Datasource from "@/model/datasource"
 import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
 import { getLastBlockSigners } from "../chainBlocks"
@@ -1062,6 +1063,18 @@ async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
         .getRawMany<{ hash: string; block: number | string }>()
     const hashes = [...new Set(rows.map(r => r.hash))]
     const blocks = [...new Set(rows.map(r => Number(r.block)))]
+
+    // Under nonceIntegrity a failed transaction also changed state (its fee
+    // and nonce) and is stamped too, but a rollback replays every edit of a
+    // stamped body as if it had applied. Undoing it from bodies alone would
+    // corrupt state, so such a block needs a resync instead.
+    const charging = blocks.find(block => isForkActive("nonceIntegrity", block - 1))
+    if (charging !== undefined) {
+        log.error(
+            `[applySyncedBlock] cannot roll back orphaned GCR state: block ${charging} was applied under nonceIntegrity, where the bodies do not say which transactions failed`,
+        )
+        return false
+    }
 
     const txs = await Mempool.getTransactionsByHashes(hashes)
     const found = new Set(txs.map(tx => tx.hash))
