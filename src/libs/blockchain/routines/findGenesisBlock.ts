@@ -38,6 +38,7 @@ import {
     writeAcceptedSchedule,
 } from "@/libs/blockchain/genesis/acceptedForkScheduleStore"
 import { snapshotManifestHash } from "@/libs/blockchain/genesis/loadSnapshot"
+import { genesisFileExists, genesisFilePath } from "@/libs/blockchain/genesis/genesisFile"
 import type { ForkConfigLike } from "@/libs/peer/routines/forkScheduleAgreement"
 import { WINDOW_BLOCKS } from "@/libs/peer/routines/forkScheduleWatch"
 import {
@@ -68,7 +69,7 @@ function getLatestGCRRecoveryData() {
 }
 
 function readGenesisFile() {
-    let genesisData = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
+    let genesisData = JSON.parse(fs.readFileSync(genesisFilePath(), "utf8"))
     if (typeof genesisData === "string") {
         genesisData = JSON.parse(genesisData)
     }
@@ -90,12 +91,12 @@ function loadForkConfigFromGenesisFile() {
     } catch (e) {
         if (e instanceof ForkConfigValidationError) {
             log.error(
-                `[FORKS] Refusing to boot — invalid fork config in data/genesis.json: ${e.message}`,
+                `[FORKS] Refusing to boot — invalid fork config in ${genesisFilePath()}: ${e.message}`,
             )
             throw e
         }
         log.error(
-            `[FORKS] Refusing to boot — failed to read fork config from data/genesis.json: ${
+            `[FORKS] Refusing to boot — failed to read fork config from ${genesisFilePath()}: ${
                 e instanceof Error ? e.message : String(e)
             }`,
         )
@@ -134,7 +135,7 @@ export default async function findGenesisBlock() {
     // heights at every boot. Absent `forks` field leaves
     // SharedState.forkConfig at its inactive default, matching pre-P2
     // behavior bit-for-bit.
-    const hasGenesisFile = fs.existsSync("data/genesis.json")
+    const hasGenesisFile = genesisFileExists()
     if (hasGenesisFile) {
         loadForkConfigFromGenesisFile()
     } else {
@@ -200,7 +201,7 @@ export default async function findGenesisBlock() {
         }),
     )
     if (pin !== "") {
-        log.info(`[GENESIS] data/genesis.json matches EXPECTED_GENESIS_HASH ${pin}`)
+        log.info(`[GENESIS] ${genesisFilePath()} matches EXPECTED_GENESIS_HASH ${pin}`)
     }
 
     const recoveryGenesis = getLatestGCRRecoveryData()
@@ -268,7 +269,7 @@ async function acceptLoadedForkSchedule(tip: number): Promise<void> {
     if (verdict.status === "unchanged") return
     if (verdict.status === "refused") {
         refuse([
-            `fork schedule in data/genesis.json differs from the one this node ran with: ` +
+            `fork schedule in ${genesisFilePath()} differs from the one this node ran with: ` +
                 verdict.problems.join("; ") +
                 `. If every operator agreed to this exact schedule, restart with ` +
                 `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST=${verdict.digest}`,

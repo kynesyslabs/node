@@ -1,11 +1,12 @@
 import { getSharedState } from "@/utilities/sharedState"
 import fs from "fs"
 import log from "src/utilities/logger"
+import { genesisFilePath } from "@/libs/blockchain/genesis/genesisFile"
 
 const MIN_BALANCE = "1000000000000"
 
 export default async function loadGenesisIdentities() {
-    const genesisData = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
+    const genesisData = JSON.parse(fs.readFileSync(genesisFilePath(), "utf8"))
 
     const identities = new Set<string>()
     for (const balance of genesisData.balances) {

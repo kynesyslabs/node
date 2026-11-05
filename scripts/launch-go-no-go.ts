@@ -485,7 +485,8 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
             reasons.push(
                 p?.dirty === true && sameCommit(p.commit, input.expectedCommit)
                     ? `${v.identity} runs a dirty build of ${p.commit} (uncommitted changes), ` +
-                          `not the launch commit ${input.expectedCommit}`
+                          `not the launch commit ${input.expectedCommit}; a bare-metal node points ` +
+                          `DEMOS_GENESIS_FILE and DEMOS_SNAPSHOT_DIR at the published files instead of copying them into data/`
                     : `${v.identity} runs commit ${p?.commit ?? "(not reported)"}, ` +
                           `the launch commit is ${input.expectedCommit}`,
             )
@@ -785,6 +786,7 @@ function usage(): string {
         "  --plan               check the genesis file and the launch validator table only, with no",
         "                       network: one PASS/FAIL line per check, exit 0 when all pass",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
+        "                       (default with neither --genesis nor --snapshot: DEMOS_GENESIS_FILE and DEMOS_SNAPSHOT_DIR)",
         "  --snapshot DIR       the snapshot directory the validators boot with; its validators.jsonl,",
         "                       when present, is block 0's validator set instead of the genesis list;",
         "                       without it the result is NO-GO",
@@ -803,7 +805,14 @@ function usage(): string {
     ].join("\n")
 }
 
-function parseArgs(argv: string[]): CliArgs {
+/**
+ * Without --genesis and --snapshot the files come from DEMOS_GENESIS_FILE and
+ * DEMOS_SNAPSHOT_DIR, the ones a bare-metal validator boots with, so the
+ * check reads the same files that node does. Both come from the same place,
+ * so a file named on the command line is never paired with one from the
+ * environment.
+ */
+export function parseArgs(argv: string[], env: Record<string, string | undefined> = process.env): CliArgs {
     const args: CliArgs = {
         genesis: null,
         snapshot: null,
@@ -843,6 +852,11 @@ function parseArgs(argv: string[]): CliArgs {
             default:
                 throw new Error(`unknown argument ${flag}`)
         }
+    }
+    const fromEnv = (key: string) => (env[key]?.trim() ? env[key]!.trim() : null)
+    if (args.genesis === null && args.snapshot === null) {
+        args.genesis = fromEnv("DEMOS_GENESIS_FILE")
+        if (args.genesis !== null) args.snapshot = fromEnv("DEMOS_SNAPSHOT_DIR")
     }
     return args
 }

@@ -186,6 +186,8 @@ services:
       EXPECTED_GENESIS_BLOCK_HASH: ${EXPECTED_GENESIS_BLOCK_HASH:-}
       DEMOS_ALLOW_UNPINNED_GENESIS: ${DEMOS_ALLOW_UNPINNED_GENESIS:-}
       DEMOS_SNAPSHOT_DIR: ${DEMOS_SNAPSHOT_DIR:-}
+      # A path inside the container; empty means data/genesis.json.
+      DEMOS_GENESIS_FILE: ${DEMOS_GENESIS_FILE:-}
       DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST: ${DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST:-}
       # Mainnet validators set this to true: with no active validators in the
       # database the node refuses to run consensus instead of falling back to

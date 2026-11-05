@@ -9,6 +9,7 @@ import {
     commitSha,
     decideGoNoGo,
     sameCommit,
+    parseArgs,
 } from "./launch-go-no-go"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
@@ -722,4 +723,22 @@ describe("command line", () => {
         expect(b.code).toBe(2)
         expect(b.err).toContain("--commit must be a 7 to 40 character hex SHA")
     }, 60_000)
+})
+
+describe("parseArgs", () => {
+    it("takes the genesis file and snapshot the node boots with when none are given", () => {
+        const env = { DEMOS_GENESIS_FILE: "/srv/mainnet/genesis.json", DEMOS_SNAPSHOT_DIR: "/srv/mainnet/snapshot" }
+        const args = parseArgs(["--operators", "ops.json"], env)
+        expect(args.genesis).toBe("/srv/mainnet/genesis.json")
+        expect(args.snapshot).toBe("/srv/mainnet/snapshot")
+    })
+
+    it("never pairs a file from the command line with one from the environment", () => {
+        const env = { DEMOS_GENESIS_FILE: "/srv/g.json", DEMOS_SNAPSHOT_DIR: "/srv/snap" }
+        expect(parseArgs(["--genesis", "a.json", "--snapshot", "s"], env)).toMatchObject({ genesis: "a.json", snapshot: "s" })
+        expect(parseArgs(["--genesis", "a.json"], env)).toMatchObject({ genesis: "a.json", snapshot: null })
+        expect(parseArgs(["--snapshot", "s"], env)).toMatchObject({ genesis: null, snapshot: "s" })
+        expect(parseArgs(["--rpc", "http://v0:53550"], { DEMOS_SNAPSHOT_DIR: "/srv/snap" })).toMatchObject({ genesis: null, snapshot: null })
+        expect(parseArgs([], {})).toMatchObject({ genesis: null, snapshot: null })
+    })
 })
