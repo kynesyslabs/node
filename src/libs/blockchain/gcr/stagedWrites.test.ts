@@ -308,7 +308,7 @@ describe("ZK claims within a block", () => {
     it("refuses the second transaction that claims one commitment", async () => {
         const entities = caches()
         entities.accounts.set("0xabc", { pubkey: "0xabc", balance: 10n, nonce: 0 })
-        const hash = "b".repeat(64)
+        const hash = "1" + "b".repeat(63)
 
         const first = await HandleGCR.applyGCREdit(commitment(hash), entities, false, false)
         const second = await HandleGCR.applyGCREdit(commitment("0x" + hash), entities, false, false)
@@ -323,7 +323,7 @@ describe("ZK claims within a block", () => {
     it("frees the claim of a transaction that fails", async () => {
         const entities = caches()
         entities.accounts.set("0xabc", { pubkey: "0xabc", balance: 10n, nonce: 0 })
-        const hash = "c".repeat(64)
+        const hash = "1" + "c".repeat(63)
         const failing: any = {
             hash: "0xfail",
             content: {
@@ -345,7 +345,7 @@ describe("ZK claims within a block", () => {
     it("leaves the claims of other caches alone when a transaction fails", async () => {
         const entities = caches()
         entities.accounts.set("0xabc", { pubkey: "0xabc", balance: 10n, nonce: 0 })
-        const claimed = await HandleGCR.applyGCREdit(commitment("d".repeat(64)), entities, false, false)
+        const claimed = await HandleGCR.applyGCREdit(commitment("1" + "d".repeat(63)), entities, false, false)
         expect(claimed.success).toBe(true)
         const claims = entities.zkCommitments
 
@@ -360,7 +360,7 @@ describe("ZK claims within a block", () => {
         await HandleGCR.applyTransaction(entities, failing, false, false)
 
         expect(entities.zkCommitments).toBe(claims)
-        expect(entities.zkCommitments.has("d".repeat(64))).toBe(true)
+        expect(entities.zkCommitments.has("1" + "d".repeat(63))).toBe(true)
         expect(entities.validators).toBeUndefined()
     })
 })

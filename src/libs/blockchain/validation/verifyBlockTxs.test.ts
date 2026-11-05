@@ -51,6 +51,8 @@ function blockListing(hashes: string[]): Block {
         number,
         hash,
         content,
+        proposer: "ab".repeat(32),
+        next_proposer: "cd".repeat(32),
         validation_data: { signatures: { [SIGNER]: "0x00" } },
     } as unknown as Block
 }
