@@ -15,9 +15,11 @@ SUITE_FILES=(
     scripts/launch-go-no-go.snapshot.test.ts
     scripts/launch-go-no-go.plan.test.ts
     scripts/launch-height1-check.test.ts
+    scripts/node-doctor.test.ts
     scripts/validator-prove-signing.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
+    src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockRowStorable.test.ts

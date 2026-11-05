@@ -364,6 +364,9 @@ PROD_CHECKS=0
 ENV_SOURCE="auto"
 NODE_ENV_SOURCE=""
 declare -A NODE_ENV_VALUES=()
+PARAMETER_SHEET="docs/mainnet/parameters.env"
+declare -A SHEET_VALUES=()
+declare -a SHEET_KEYS=()
 
 prod_line() { # $1 PASS|FAIL, $2 item, $3 detail
 	PROD_CHECKS=$((PROD_CHECKS + 1))
@@ -423,40 +426,57 @@ for k, v in env.items():
 
 node_env() { printf '%s' "${NODE_ENV_VALUES[$1]-}"; }
 
-check_prod_flag() { # $1 key, $2 why, $3 extra accepted value (as the node parses it)
-	local v
+# The published must-match values (docs/mainnet/parameters.md). KEY=value
+# lines only; comments and blank lines are skipped.
+load_parameter_sheet() {
+	[[ -f "${PARAMETER_SHEET}" ]] || return 1
+	local line key
+	while IFS= read -r line || [[ -n "${line}" ]]; do
+		[[ "${line}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+		key="${BASH_REMATCH[1]}"
+		[[ -n "${SHEET_VALUES[${key}]+set}" ]] || SHEET_KEYS+=("${key}")
+		SHEET_VALUES["${key}"]="${BASH_REMATCH[2]%"${BASH_REMATCH[2]##*[![:space:]]}"}"
+	done <"${PARAMETER_SHEET}"
+	[[ ${#SHEET_KEYS[@]} -gt 0 ]]
+}
+
+sheet_why() {
+	case "$1" in
+	PROD) echo "a node without it creates a new identity when the key file is missing" ;;
+	DEMOS_REQUIRE_VALIDATORS) echo "without it a node that cannot read the validator set uses every online peer as the committee" ;;
+	FORK_SCHEDULE_MISMATCH_POLICY) echo "warn is for devnets and testnets" ;;
+	*) echo "every validator must run the same value" ;;
+	esac
+}
+
+# Exact match: an unset value would fall back to a built-in default that a
+# later release may change, and a spelling the node happens to accept today
+# (PROD=1) is not what the other validators confirmed.
+check_sheet_value() { # $1 key
+	local want v
+	want="${SHEET_VALUES[$1]}"
 	v=$(node_env "$1")
-	if [[ "${v}" = "true" ]] || [[ -n "${3-}" && "${v}" = "$3" ]]; then
+	if [[ "${v}" = "${want}" ]]; then
 		prod_line PASS "$1" "${v}"
+	elif [[ -z "${v}" ]]; then
+		prod_line FAIL "$1" "not set, the sheet says ${want}: copy it from ${PARAMETER_SHEET} ($(sheet_why "$1"))"
 	else
-		prod_line FAIL "$1" "is '${v}', must be true: $2"
+		prod_line FAIL "$1" "is '${v}', the sheet says ${want}: $(sheet_why "$1")"
 	fi
 }
 
-# Fees, the stake floor and the block time come from each node's own
-# environment, not from the genesis, so a validator with a different value
-# accepts or rejects transactions the others do not. Mainnet runs the built-in
-# values; the effective value is what the node computes when the variable is
-# unset or empty.
-check_chain_param() { # $1 key, $2 built-in value, $3 value that also means the built-in one
-	local v effective
-	v=$(node_env "$1")
-	if [[ -z "${v}" ]]; then
-		prod_line PASS "$1" "unset (${2})"
+check_parameter_sheet() {
+	if ! load_parameter_sheet; then
+		prod_line FAIL "parameter sheet" "${PARAMETER_SHEET} is missing or has no KEY=value line: run from a checkout of the release tag"
 		return
 	fi
-	if [[ ! "${v}" =~ ^[0-9]+$ ]]; then
-		prod_line FAIL "$1" "is '${v}', not a whole number: unset it so the node uses ${2}"
-		return
-	fi
-	effective="${v#"${v%%[!0]*}"}"
-	effective="${effective:-0}"
-	[[ -n "${3-}" && "${effective}" = "$3" ]] && effective="$2"
-	if [[ "${effective}" = "$2" ]]; then
-		prod_line PASS "$1" "${2}"
-	else
-		prod_line FAIL "$1" "is ${v}, mainnet runs ${2}: every validator must use the same value, so unset it"
-	fi
+	local key
+	for key in "${SHEET_KEYS[@]}"; do
+		case "${key}" in
+		EXPECTED_GENESIS_HASH | EXPECTED_GENESIS_BLOCK_HASH) ;; # check_genesis_pin
+		*) check_sheet_value "${key}" ;;
+		esac
+	done
 }
 
 check_clock_sync() {
@@ -507,24 +527,18 @@ PY
 	fi
 }
 
-check_mismatch_policy() {
-	local v
-	v=$(node_env FORK_SCHEDULE_MISMATCH_POLICY)
-	if [[ -z "${v}" ]] || [[ "${v,,}" = "abstain" ]]; then
-		prod_line PASS "FORK_SCHEDULE_MISMATCH_POLICY" "${v:-unset (abstain)}"
-	else
-		prod_line FAIL "FORK_SCHEDULE_MISMATCH_POLICY" "is '${v}', must be abstain on mainnet (warn is for devnets and testnets)"
-	fi
-}
-
 check_genesis_pin() { # $1 key
-	local v
+	local v want
 	v=$(node_env "$1")
 	v="${v#0x}"
-	if [[ "${v,,}" =~ ^[0-9a-f]{64}$ ]]; then
-		prod_line PASS "$1" "set"
-	else
+	want="${SHEET_VALUES[$1]-}"
+	want="${want#0x}"
+	if [[ ! "${v,,}" =~ ^[0-9a-f]{64}$ ]]; then
 		prod_line FAIL "$1" "not a 64-hex hash ('${v}'): set the value published with the mainnet genesis"
+	elif [[ -n "${want}" && "${v,,}" != "${want,,}" ]]; then
+		prod_line FAIL "$1" "is ${v}, the sheet says ${want}: this node would join another genesis"
+	else
+		prod_line PASS "$1" "set"
 	fi
 }
 
@@ -543,20 +557,12 @@ check_unset() { # $1 key, $2 why
 
 run_production_checks() {
 	load_node_env || return 1
-	echo "Mainnet validator host checks (node settings from ${NODE_ENV_SOURCE}):"
-	check_prod_flag PROD "a node without it creates a new identity when the key file is missing" 1
-	check_prod_flag DEMOS_REQUIRE_VALIDATORS "without it a node that cannot read the validator set uses every online peer as the committee"
+	echo "Mainnet validator host checks (node settings from ${NODE_ENV_SOURCE}, parameter sheet ${PARAMETER_SHEET}):"
+	check_parameter_sheet
 	check_clock_sync
 	check_ntp_egress
-	check_mismatch_policy
 	check_genesis_pin EXPECTED_GENESIS_HASH
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
-	check_chain_param CONSENSUS_TIME 10 0
-	check_chain_param RPC_FEE 1
-	check_chain_param NETWORK_FEE 1
-	check_chain_param BURN_FEE 1
-	check_chain_param RPC_FEE_PERCENT 10
-	check_chain_param MIN_VALIDATOR_STAKE 1000000000000
 	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
 	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
 	check_unset DEMOS_IDENTITY_TAKEOVER "set it for the one takeover start only (docs/runbooks/validator-key.md)"
@@ -586,9 +592,14 @@ OPTIONS:
     -h, --help      Show this help message
     -v, --verbose   Show all check results (including passed)
     -q, --quiet     Only show problems (no progress output)
-    --production    Mainnet validator host checks only: PROD, DEMOS_REQUIRE_VALIDATORS,
-                    clock sync, outbound NTP, mismatch policy, genesis pins,
-                    fees, stake floor and block time, and one-start switches left set; one PASS/FAIL line each, exit 1 on any FAIL
+    --production    Mainnet validator host checks only: every value in the
+                    mainnet parameter sheet (PROD, DEMOS_REQUIRE_VALIDATORS,
+                    mismatch policy, block timing, fees, stake floor, ZK points),
+                    clock sync, outbound NTP, genesis pins, and one-start
+                    switches left set; one PASS/FAIL line each, exit 1 on any FAIL
+    --parameters FILE
+                    With --production: the parameter sheet to compare with
+                    (default: docs/mainnet/parameters.env in this checkout)
     --env-from compose|env
                     With --production: where the node's settings are read from
                     (default: docker compose config when docker-compose.yml is here,
@@ -636,6 +647,15 @@ main() {
 		--production)
 			PRODUCTION=true
 			shift
+			;;
+		--parameters)
+			if [[ -z "${2-}" ]]; then
+				echo "--parameters takes a file"
+				exit 2
+			fi
+			# Resolved now: the production checks run from the checkout root
+			if [[ "$2" = /* ]]; then PARAMETER_SHEET="$2"; else PARAMETER_SHEET="${PWD}/$2"; fi
+			shift 2
 			;;
 		--env-from)
 			case "${2-}" in
