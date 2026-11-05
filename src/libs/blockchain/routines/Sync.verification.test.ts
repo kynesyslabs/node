@@ -527,6 +527,41 @@ describe("fast sync under finalityProofs", () => {
             expect(insertBlock).not.toHaveBeenCalled()
             expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
         })
+
+        it("stores the head of a peer that has no next block, whatever another peer claims", async () => {
+            getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+            getSharedState.batchSyncBlockSize = 1
+            const tx = makeTx(alice)
+            const block = makeBlock([tx])
+            const peer = peerWith([block], [tx])
+            peer.sync = { block: HEIGHT }
+            const claimant = {
+                identity: "peer-2",
+                connection: { string: "http://peer-2" },
+                status: { online: true },
+                sync: { block: HEIGHT - 1 },
+                gossip: { height: HEIGHT + 5 },
+                longCall: jest.fn(async () => ({ result: 404, response: [] })),
+                call: jest.fn(async () => ({ result: 404, response: [] })),
+            } as any
+            spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([peer, claimant])
+            spyOn(Math, "random").mockReturnValue(0)
+            spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+            spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([])
+            applyResult({ successfulTxs: [tx.hash] })
+            insertBlock.mockImplementation((async (inserted: any) => {
+                getSharedState.lastBlockNumber = inserted.number
+                return {}
+            }) as any)
+            getSharedState.fastSyncCount = 1
+            getSharedState.syncStatus = true
+
+            await fastSync([], "test")
+
+            // Asked for HEIGHT + 1, the peer answered with its head
+            expect(insertBlock).toHaveBeenCalledTimes(1)
+            expect((insertBlock.mock.calls[0][0] as any).number).toBe(HEIGHT)
+        })
     })
 })
 
