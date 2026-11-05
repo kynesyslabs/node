@@ -20,7 +20,7 @@ testing/devnet/quorum-drills/run.sh [--image IMAGE] [--src TREE] [--binding on|o
   the same code. `quorumParity` is active from block 0 in both. **`off` does
   not currently work:** `genesis.devnet.json` also activates `commitLock` at
   0, and the node's fork loader refuses a genesis that has `commitLock`
-  without `committeeBinding` (`src/forks/loadForkConfig.ts:277-288`). Loading
+  without `committeeBinding` (`src/forks/loadForkConfig.ts:296-307`). Loading
   the generated `--binding off` genesis with `loadForkConfigFromGenesis` gives
   that error; a node boot was not run. The three mainnet-shape cases take
   `--binding on` only.
@@ -74,7 +74,7 @@ database:
   (`src/libs/blockchain/genesis/restoreGenesisState.ts:58-66`), and so is a
   genesis without `snapshot.manifestSha256`, a missing manifest or a manifest
   that hashes differently
-  (`src/libs/blockchain/routines/findGenesisBlock.ts:212-220`,
+  (`src/libs/blockchain/routines/findGenesisBlock.ts:219-227`,
   `src/libs/blockchain/genesis/genesisPin.ts:165-184`). The snapshot is loaded
   and verified file by file
   (`src/libs/blockchain/genesis/loadSnapshot.ts:431`) and
@@ -85,7 +85,7 @@ database:
   that does not hash to block 0's value, or a `gcr_main.jsonl` that does not
   match the manifest stops the boot, as does an imported-identity registry that
   differs from the snapshot
-  (`src/libs/blockchain/routines/findGenesisBlock.ts:181-192`,
+  (`src/libs/blockchain/routines/findGenesisBlock.ts:188-199`,
   `src/libs/blockchain/genesis/verifyImportedIdentities.ts:40-77`,
   `src/libs/blockchain/genesis/loadSnapshot.ts:528-562`).
   A restart does not re-hash the other snapshot files.
@@ -165,7 +165,7 @@ launches with, read from that file when the drill starts: a fork is active at
 0 if its `activationHeight` there is the number `0`; `null` and `"FILL: ..."`
 stay off. The genesis `forks` object is replaced as a whole, so no fork is left
 to a default (`osDenomination`, `nonceEnforcement` and `gasFeeSeparation`
-default to 0, `src/forks/forkConfig.ts:405-423`, `src/forks/forkConfig.ts:466-477`), and a template
+default to 0, `src/forks/forkConfig.ts:432-450`, `src/forks/forkConfig.ts:493-504`), and a template
 that stops activating `quorumParity`, `committeeBinding` or `commitLock` is an
 error. The code is `launch_fork_heights` and `with_launch_forks` in
 `drill_inputs.py` (`run.sh` through `gen-inputs.py --fork-set launch`; scenario
@@ -250,17 +250,20 @@ there and needs nothing):
   (`src/libs/blockchain/chainBlocks.ts:414-428`), as on every fresh chain (its
   default is 0).
 - **`signatureDomain`** needs `properties.id` to be an integer
-  (`src/forks/loadForkConfig.ts:201-209`, `src/forks/loadForkConfig.ts:255-263`;
+  (`src/forks/loadForkConfig.ts:220-228`, `src/forks/loadForkConfig.ts:274-282`;
   `src/forks/signatureDomainGate.ts:36-52`);
   `genesis.devnet.json` has 1337 and `genesis-fork-low.json` has 1. Nothing in
-  the node refuses those ids (only `scripts/launch-go-no-go.ts:186` does, for a
-  real launch).
+  the node refuses those ids. Its list of them, `NON_MAINNET_CHAIN_IDS`
+  (`src/forks/forkConfig.ts:408`), only allows `DEMOS_DISABLE_FORK_MACHINERY`
+  on them (`src/forks/loadForkConfig.ts:192-200`), a flag the drills do not
+  set. Only `scripts/launch-go-no-go.ts:631-636` refuses them, for a real
+  launch.
 - **`nonceEnforcement`, `editBinding`, `nonceIntegrity`** act on transactions
-  (`src/libs/blockchain/gcr/handleGCR.ts:1181-1189`,
-  `src/libs/blockchain/gcr/handleGCR.ts:2057-2061`,
+  (`src/libs/blockchain/gcr/handleGCR.ts:1207-1215`,
+  `src/libs/blockchain/gcr/handleGCR.ts:2097-2101`,
   `src/libs/blockchain/mempool.ts:582`, `src/libs/blockchain/mempool.ts:643`,
   `src/libs/blockchain/routines/validateTransaction.ts:111`,
-  `src/libs/blockchain/validation/editBinding.ts:135-146`). The drills send none:
+  `src/libs/blockchain/validation/editBinding.ts:138-150`). The drills send none:
   `run.sh` makes only `getLastBlockNumber` and `getBlockByNumber` calls
   (`run.sh` `head_of`, `block_req`) and reads the databases, and scenario 12
   reads heads and `blocks` rows.
@@ -315,7 +318,7 @@ and `finalityProofs` active as well (both are in the launch fork set, see
   committee members
   (`src/libs/blockchain/validation/verifyBlock.ts:139-151`, `165-209`). A
   producer commits on the same bar
-  (`src/libs/consensus/v2/PoRBFT.ts:1424-1431`).
+  (`src/libs/consensus/v2/PoRBFT.ts:1428-1435`).
 - **What the next pool is.** The committed peerlist lists the identities that
   at least 7 committee voters saw at the parent block
   (`src/libs/consensus/v2/routines/peerlistMerge.ts:211-259`, `273-320`; the
@@ -562,7 +565,7 @@ needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
   scenarios other than `halt-n10s10`, `halt-n13s10` and `ride-n13s10`; those
   three always run with `GOSSIP_ENABLED=true`, whatever the environment says
   (`run.sh`), because with gossip off a restarted node never sees that the
-  network is ahead (`src/libs/blockchain/routines/Sync.ts:133-137`,
+  network is ahead (`src/libs/blockchain/routines/Sync.ts:131-135`,
   `src/libs/consensus/v2/routines/networkAheadVeto.ts:58-73`,
   `src/libs/communications/broadcastManager.ts:369-415`) and the
   recovery result would measure that, not the halt. Gossip needs the sidecar
