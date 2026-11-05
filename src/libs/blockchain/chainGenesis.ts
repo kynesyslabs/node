@@ -5,17 +5,9 @@ import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorS
 import { insertBlock } from "./chainBlocks"
 import Datasource from "src/model/datasource"
 import { loadSnapshot } from "src/libs/blockchain/genesis/loadSnapshot"
-import { restoreSnapshot } from "src/libs/blockchain/genesis/restoreSnapshot"
-import {
-    seedValidators,
-    type GenesisValidatorSeed,
-} from "src/libs/blockchain/genesis/seedValidators"
-import { applyForksAtGenesis } from "src/libs/blockchain/genesis/applyForksAtGenesis"
-import { mergeGenesisBalances } from "src/libs/blockchain/genesis/mergeGenesisBalances"
+import { restoreGenesisState } from "src/libs/blockchain/genesis/restoreGenesisState"
 import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
 import { markStorageProgramsDirty } from "./finality/storageRoot"
-import { assertCarryoverSnapshot } from "src/libs/blockchain/genesis/carryover"
-import { identityCarryoverActiveAtGenesis } from "@/forks/identityCarryoverGate"
 
 /**
  * `checkHash` sees block 0's hash before anything is written and may throw to
@@ -71,62 +63,17 @@ export async function generateGenesisBlock(
     // optional EntityManager through insertBlock — deferred to a future refactor.
     const snapshot = await loadSnapshot()
 
-    if (snapshot.available) {
-        const db = await Datasource.getInstance()
-        const dataSource = db.getDataSource()
-        // Wrap the entire restore in one transaction so partial failure
-        // leaves the DB empty (otherwise a crash mid-restore would yield
-        // corrupted half-restored state that the next boot's preflight
-        // would refuse to retry).
-        const snapshotHasValidators =
-            snapshot.manifest.files["validators.jsonl"] !== undefined
-        const carryover = identityCarryoverActiveAtGenesis()
-        if (carryover) {
-            await assertCarryoverSnapshot(snapshot, genesisData.validators)
-        }
-        // The restore writes gcr_storageprogram; a rolled-back restore
-        // changes nothing, so only a commit needs the second mark.
-        markStorageProgramsDirty()
-        await dataSource.transaction(async em => {
-            await restoreSnapshot(em, snapshot, { carryover })
-            // Overlay genesisData.balances on top of the snapshot rows.
-            // Historical behavior silently dropped balances when a
-            // snapshot was present — operator-written top-ups (e.g.
-            // founder/incentives wallets added in `data/genesis.json`)
-            // ended up at balance=0 once `ensureGCRForUser` later
-            // created the row. Block-0 hash already commits to
-            // `genesisData.balances` via `extra.genesisData`, so making
-            // the disk reflect it does not change consensus — it just
-            // closes the gap between hash and state.
-            await mergeGenesisBalances(em, genesisData.balances)
-            // Pre-apply forks deterministically at genesis. Migration output is
-            // a pure function of input state — no consensus block-1 hook needed.
-            // Pristine boot is fully post-fork; solo nodes don't sit at genesis.
-            // The manifest's fork_state tells us which forks are ALREADY baked
-            // into the snapshot data (post-fork snapshot) so we seed the marker
-            // and skip re-applying them; absent → run as before (pre-fork).
-            await applyForksAtGenesis(
-                em,
-                genesisData.forks,
-                snapshot.manifest.fork_state,
-            )
-            // Validator set precedence: the snapshot wins. A schemaVersion 2
-            // snapshot carries validators.jsonl (restored above by
-            // restoreSnapshot), so we DON'T also seed from data/genesis.json.
-            // Only when the snapshot has no validators do we fall back to the
-            // genesis-baked list, inside the same transaction so a partial
-            // restore never ships without the founding validator set.
-            if (
-                !snapshotHasValidators &&
-                Array.isArray(genesisData.validators) &&
-                (genesisData.validators as unknown[]).length > 0
-            ) {
-                await seedValidators(
-                    em,
-                    genesisData.validators as GenesisValidatorSeed[],
-                )
-            }
-        })
+    // The restore writes gcr_storageprogram; a rolled-back restore changes
+    // nothing, so only a commit needs the second mark.
+    if (snapshot.available) markStorageProgramsDirty()
+    const db = await Datasource.getInstance()
+    const dataSource = db.getDataSource()
+    const restored = await restoreGenesisState(
+        work => dataSource.transaction(work),
+        snapshot,
+        genesisData,
+    )
+    if (restored) {
         markStorageProgramsDirty()
     } else {
         log.info(

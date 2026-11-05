@@ -33,9 +33,19 @@ before anything is written) a snapshot that:
   zeroed silently: the operator rebuilt the wrong snapshot);
 - has a manifest whose `gcr_main.jsonl` `balance_sum` is not `"0"`;
 - has no `validators.jsonl`;
+- has a manifest whose `fork_state` does not record `osDenomination` as
+  applied (the launch stakes are in OS units; block 0 would multiply them
+  by 10^9 again);
+- has a `validators.jsonl` row with an unstake under way
+  (`unstake_requested_at` or `unstake_available_at` not null);
 - has a `validators.jsonl` that differs from the genesis `validators` list
-  in any entry, or lists a validator the genesis does not (and the other
-  way round). An empty genesis list leaves the file as the only source.
+  in any entry, including the unstake fields, or lists a validator the
+  genesis does not (and the other way round). An empty genesis list leaves
+  the file as the only source.
+
+The node also refuses a genesis that schedules the fork at 0 but declares
+no `snapshot.manifestSha256`, or whose snapshot is missing: the legacy
+balances path would build a chain without the user data.
 
 The usual snapshot checks still run first: each file's sha256, row count
 and sums must match the manifest, and the genesis must name the manifest's
@@ -52,13 +62,29 @@ first-link award a second time, to the same account or to another one.
 
 Block 0 records the key of every imported identity in
 `genesis_imported_identities`: `web2:<platform>:<userId>` for Twitter,
-GitHub, Telegram and Discord, `xm|nomis|ethos:<chain>:<subchain>:<address>`
-(EVM addresses lowercase), `ud:<domain>` and `humanpassport:<address>`.
-The snapshot at 563,541 yields 27,290 keys. Under the fork, the first-link
+GitHub, Telegram and Discord, `xm|nomis|ethos:<chain>:<subchain>:<address>`,
+`ud:<domain>` and `humanpassport:<address>`. Wallet keys are lowercase in
+every part, whatever the chain. Link time lowercases an address by rules
+the client can steer (the `isEVM` flag), so a case-sensitive key would let
+the same wallet, linked again under the other rule, miss its key and earn
+the award again. Folding case can only make two wallets share a key, which
+withholds an award and never pays one. In the snapshot no non-EVM address
+differs from another only by case.
+The snapshot at 563,541 yields 27,290 keys (sha256 of the sorted keys,
+joined by newlines: `c857bd36…287fa8`). Under the fork, the first-link
 check answers "not first" for any key in that table, so the award hooks
 (`twitterLinked`, `githubLinked` and the others) do not run for it. The
 table is derived from the snapshot that the genesis hash binds, so it is
 not part of the state hash.
+
+Because neither the table nor points enter the state hash, a node whose
+table drifted would pay awards its peers withhold, unnoticed. At every
+restart a node with the fork at 0 recomputes the keys from the snapshot
+(after checking its manifest against the hash block 0 declares) and
+compares the row count and the sha256 of the sorted keys with the table.
+It refuses to boot on a mismatch, or when the snapshot is no longer on
+disk, so the snapshot must stay in `data/snapshot` (or
+`DEMOS_SNAPSHOT_DIR`) for the life of the node.
 
 Consequence: unlinking an imported identity still deducts its points, as
 on testnet, and linking it again pays nothing. The points of an imported
@@ -90,6 +116,13 @@ Under the fork an unlink removes exactly one platform account:
   once.
 
 TLSN unlinks follow the same rules, restricted to links proven with TLSN.
+Under the fork a TLSN unlink, like a Web2 one, may name the link by
+`userId` alone; before the fork it still needs a username.
+
+The snapshot has no account holding two links with one username and
+different `userId`s, so no imported account is stuck behind the refusal
+above. New accounts in that state can unlink once the SDK sends `userId`
+(an optional field on the remove builder).
 
 ## Build the snapshot and reproduce its hash
 
@@ -109,11 +142,13 @@ bun scripts/genesis-hash.ts --genesis mainnet/genesis.json --snapshot mainnet/sn
 array of the same entries also works). Each entry needs a lowercase `0x` +
 64 hex `address`, `status`, `connection_url` (a URL or null),
 `staked_amount` in OS units as a decimal string, and integer `first_seen`
-and `valid_at`. The rows are written sorted by address.
+and `valid_at`; `unstake_requested_at` and `unstake_available_at` must be
+absent or null. The rows are written sorted by address.
 
 The script:
 
-1. verifies the input snapshot against its manifest;
+1. verifies the input snapshot against its manifest and refuses one whose
+   `fork_state` does not record `osDenomination` as applied;
 2. sets each `gcr_main.jsonl` row's `balance` to `"0"`. A row that does not
    survive a JSON parse and serialise unchanged is refused, so no other
    byte of a row can change;
@@ -122,7 +157,10 @@ The script:
 5. writes `manifest.json`: the source manifest with the new `gcr_main.jsonl`
    and `validators.jsonl` entries, `transforms_applied.balances_zeroed` and
    `validators_from_launch_list` set to `true`, and a `carryover` block with
-   the sha256 of the source manifest and of the launch list file;
+   the sha256 of the source manifest. The launch list is bound through the
+   `validators.jsonl` entry, not the bytes of the `--validators` file: the
+   genesis file gets `snapshot.manifestSha256` after the build, and a
+   rebuild from that final genesis must give the same manifest;
 6. verifies the output and refuses an output directory that is not empty.
 
 Two runs on the same inputs give the same bytes. For

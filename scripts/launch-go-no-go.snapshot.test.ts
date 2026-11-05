@@ -36,7 +36,7 @@ function row(i: number, status = "2") {
 /** A snapshot directory the node's loader accepts, with optional validators.jsonl. */
 function snapshotDir(
     validators: object[] | null,
-    { manifest = true, balances = [] as string[] } = {},
+    { manifest = true, balances = [] as string[], osApplied = true } = {},
 ): string {
     const dir = mkdtempSync(join(tmpdir(), "go-no-go-snapshot-"))
     dirs.push(dir)
@@ -87,7 +87,9 @@ function snapshotDir(
                     dumped_at: "2026-10-29T00:00:00Z",
                 },
                 files,
-                ...(validators ? { fork_state: [] } : {}),
+                ...(validators
+                    ? { fork_state: osApplied ? [{ fork_name: "osDenomination", applied: true }] : [] }
+                    : {}),
                 transforms_applied: {
                     nonces_reset_to_zero: true,
                     assigned_txs_emptied: true,
@@ -264,6 +266,9 @@ describe("block 0 under identityCarryover", () => {
 
         const none = await readBlockZeroValidators(genesis, snapshotDir(null))
         expect(none.reasons.join("\n")).toContain("carries no validators.jsonl")
+
+        const dem = await readBlockZeroValidators(genesis, snapshotDir(genesisRows, { balances: ["0"], osApplied: false }))
+        expect(dem.reasons.join("\n")).toContain("does not record osDenomination as applied")
     })
 
     it("does not check balances when the genesis does not schedule the fork at 0", async () => {

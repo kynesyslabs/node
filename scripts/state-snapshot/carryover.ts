@@ -11,7 +11,10 @@
  *     byte.
  *   - manifest.json: the source manifest with the new file entries, two
  *     transform flags and a `carryover` block naming the source manifest
- *     and launch list by sha256.
+ *     by sha256. The launch list is bound through the validators.jsonl
+ *     entry, not through the bytes of the file it was read from: that file
+ *     is usually the genesis, which only gets its snapshot.manifestSha256
+ *     after this runs.
  *
  * The output is a pure function of the two inputs, so anyone can rebuild it
  * and get the same manifest sha256, which is what the genesis binds.
@@ -29,6 +32,7 @@ import { createHash } from "node:crypto"
 import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 
+import { osDenominationApplied } from "../../src/libs/blockchain/genesis/carryover"
 import {
     readFileSinglePass,
     verifySnapshot,
@@ -51,7 +55,6 @@ export type CarryoverResult = {
     outDir: string
     manifestSha256: string
     sourceManifestSha256: string
-    launchListSha256: string
     accounts: number
     zeroedAccounts: number
     validators: number
@@ -89,6 +92,11 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
         const stakedAmount = v.staked_amount
         const firstSeen = v.first_seen
         const validAt = v.valid_at
+        for (const name of ["unstake_requested_at", "unstake_available_at"] as const) {
+            if (v[name] !== undefined && v[name] !== null) {
+                throw new Error(`${where} (${address}): ${name} must be null for a launch validator`)
+            }
+        }
         if (typeof address !== "string" || !/^0x[0-9a-f]{64}$/.test(address)) {
             throw new Error(`${where}: address must be lowercase 0x + 64 hex`)
         }
@@ -174,6 +182,12 @@ export async function buildCarryoverSnapshot(opts: {
     if (inDir === outDir) throw new Error("--in and --out must differ")
 
     const source = await verifySnapshot(inDir)
+    if (!osDenominationApplied(source)) {
+        throw new Error(
+            "source snapshot fork_state does not record osDenomination as applied: " +
+                "launch stakes are in OS units and block 0 would multiply them by 10^9",
+        )
+    }
     const sourceManifestBytes = await readFile(resolve(inDir, "manifest.json"))
     const launchListBytes = await readFile(resolve(opts.validatorsFile))
     const validators = launchValidatorRows(JSON.parse(launchListBytes.toString("utf8")))
@@ -216,7 +230,8 @@ export async function buildCarryoverSnapshot(opts: {
     files["gcr_main.jsonl"] = await fileEntry(resolve(outDir, "gcr_main.jsonl"), "balance")
     files["validators.jsonl"] = await fileEntry(resolve(outDir, "validators.jsonl"))
     for (const name of COPIED_FILES) {
-        if (files[name].sha256 !== source.files[name].sha256) {
+        const copied = await fileEntry(resolve(outDir, name), name === "gcr_storageprogram.jsonl" ? "sizeBytes" : undefined)
+        if (copied.sha256 !== source.files[name].sha256) {
             throw new Error(`${name}: copy does not match the source manifest`)
         }
     }
@@ -227,7 +242,6 @@ export async function buildCarryoverSnapshot(opts: {
     }
     manifest.carryover = {
         source_manifest_sha256: sha256(sourceManifestBytes),
-        launch_validators_sha256: sha256(launchListBytes),
     }
     const manifestText = JSON.stringify(manifest, null, 2) + "\n"
     await writeFile(resolve(outDir, "manifest.json"), manifestText)
@@ -241,7 +255,6 @@ export async function buildCarryoverSnapshot(opts: {
         outDir,
         manifestSha256: sha256(manifestText),
         sourceManifestSha256: sha256(sourceManifestBytes),
-        launchListSha256: sha256(launchListBytes),
         accounts,
         zeroedAccounts,
         validators: validators.length,
@@ -276,7 +289,6 @@ async function main(): Promise<void> {
         outDir: flags.out,
     })
     console.log(`source manifest sha256   ${r.sourceManifestSha256}`)
-    console.log(`launch list sha256       ${r.launchListSha256}`)
     console.log(`accounts                 ${r.accounts} (${r.zeroedAccounts} balances zeroed)`)
     console.log(`launch validators        ${r.validators}`)
     console.log(`carryover manifest sha256 ${r.manifestSha256}`)

@@ -18,11 +18,19 @@ import {
 } from "../../scripts/state-snapshot/carryover"
 import {
     assertCarryoverSnapshot,
+    carryoverManifestProblems,
+    expectedImportedIdentities,
     firstConnectionKey,
+    importedIdentityDigest,
     importedIdentityKeys,
     launchValidatorProblems,
 } from "@/libs/blockchain/genesis/carryover"
-import { GenesisRefusal } from "@/libs/blockchain/genesis/genesisPin"
+import { GenesisRefusal, freshGenesisProblems } from "@/libs/blockchain/genesis/genesisPin"
+import { restoreGenesisState, type GenesisStateSteps } from "@/libs/blockchain/genesis/restoreGenesisState"
+import { importedIdentityProblems } from "@/libs/blockchain/genesis/verifyImportedIdentities"
+import { cloneDefaultForkConfig, type ForkConfigByName } from "@/forks/forkConfig"
+import { loadForkConfigFromGenesis } from "@/forks/loadForkConfig"
+import { getSharedState } from "@/utilities/sharedState"
 import {
     loadSnapshot,
     type SnapshotLoaderAvailable,
@@ -132,7 +140,7 @@ const jsonl = (rows: unknown[]) => rows.map(r => JSON.stringify(r)).join("\n") +
 async function writeSnapshot(
     dir: string,
     rows: Array<ReturnType<typeof gcrRow>>,
-    opts: { balanceSum?: string; validators?: unknown[] } = {},
+    opts: { balanceSum?: string; validators?: unknown[]; forkState?: unknown[] } = {},
 ): Promise<void> {
     await mkdir(dir, { recursive: true })
     const gcr = jsonl(rows)
@@ -156,7 +164,7 @@ async function writeSnapshot(
             "identity_commitments.jsonl": { sha256: sha256(identity), rows: 0 },
             "validators.jsonl": { sha256: sha256(validators), rows: (opts.validators ?? [OLD_VALIDATOR]).length },
         },
-        fork_state: [{ fork_name: "osDenomination", applied: true }],
+        fork_state: opts.forkState ?? [{ fork_name: "osDenomination", applied: true }],
         transforms_applied: {
             nonces_reset_to_zero: true,
             assigned_txs_emptied: true,
@@ -216,6 +224,20 @@ function fakeEm() {
             return qb
         },
         connection: { getMetadata: () => ({ columns: [1, 2, 3] }) },
+        // The surface mergeGenesisBalances uses, over the restored accounts.
+        getRepository: () => ({
+            findOne: async (opts: { where: { pubkey: string } }) =>
+                (writes.get(GCRMain) ?? []).find(r => r.pubkey === opts.where.pubkey) ?? null,
+            save: async (row: Record<string, unknown>) => {
+                const list = writes.get(GCRMain) ?? []
+                const i = list.findIndex(r => r.pubkey === row.pubkey)
+                if (i >= 0) list[i] = { ...row }
+                else list.push({ ...row })
+                writes.set(GCRMain, list)
+                return row
+            },
+            create: (row: unknown) => row,
+        }),
     }
     em.manager = em
     return { em: em as never, writes, queries }
@@ -224,8 +246,11 @@ function fakeEm() {
 let work: string
 let source: string
 let launchFile: string
+let savedForks: ForkConfigByName
 
 beforeEach(async () => {
+    savedForks = getSharedState.forkConfig
+    getSharedState.forkConfig = cloneDefaultForkConfig()
     work = await mkdtemp(join(tmpdir(), "carryover-"))
     source = join(work, "source")
     await writeSnapshot(source, SOURCE_ROWS)
@@ -234,6 +259,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+    getSharedState.forkConfig = savedForks
     await rm(work, { recursive: true, force: true })
 })
 
@@ -270,7 +296,7 @@ describe("carry-over snapshot builder", () => {
         expect(manifest.transforms_applied.balances_zeroed).toBe(true)
         expect(manifest.transforms_applied.validators_from_launch_list).toBe(true)
         expect(manifest.carryover.source_manifest_sha256).toBe(sha256(await readFile(join(source, "manifest.json"))))
-        expect(manifest.carryover.launch_validators_sha256).toBe(sha256(await readFile(launchFile)))
+        expect(Object.keys(manifest.carryover)).toEqual(["source_manifest_sha256"])
         expect(manifest.source).toEqual(JSON.parse(await readFile(join(source, "manifest.json"), "utf8")).source)
     })
 
@@ -391,7 +417,7 @@ describe("restore under identityCarryover", () => {
             "web2:github:222",
             "web2:twitter:111",
             "xm:evm:mainnet:0xabcdef0000000000000000000000000000000001",
-            "xm:solana:mainnet:So1anaAddr",
+            "xm:solana:mainnet:so1anaaddr",
         ].sort())
         expect(report.importedIdentities).toBe(7)
         expect(queries.some(q => q.includes("genesis_imported_identities"))).toBe(true)
@@ -421,7 +447,7 @@ describe("identity keys", () => {
         expect(firstConnectionKey("github", { userId: 222 as never })).toBe(firstConnectionKey("github", { userId: "222" }))
         expect(firstConnectionKey("discord", {})).toBeNull()
         expect(firstConnectionKey("web3", { chain: "evm", subchain: "mainnet", address: " 0xAB " })).toBe("xm:evm:mainnet:0xab")
-        expect(firstConnectionKey("web3", { chain: "solana", subchain: "mainnet", address: "AbC" })).toBe("xm:solana:mainnet:AbC")
+        expect(firstConnectionKey("web3", { chain: "solana", subchain: "mainnet", address: "AbC" })).toBe("xm:solana:mainnet:abc")
         expect(firstConnectionKey("ethos", { chain: "evm", subchain: "mainnet", address: "0xAB" })).toBe("ethos:evm:mainnet:0xab")
         expect(firstConnectionKey("ud", { domain: "X.Crypto" })).toBe("ud:x.crypto")
         expect(firstConnectionKey("humanpassport", { address: "0xAB" })).toBe("humanpassport:0xab")
@@ -431,5 +457,240 @@ describe("identity keys", () => {
         expect(importedIdentityKeys(null)).toEqual([])
         expect(importedIdentityKeys({ web2: { reddit: [{ userId: "1" }] }, pqc: { x: [] } })).toEqual([])
         expect(importedIdentityKeys(SOURCE_ROWS[1].identities)).toEqual(["web2:twitter:111"])
+    })
+})
+
+const carryoverAtZero = () => loadForkConfigFromGenesis({ forks: { identityCarryover: { activationHeight: 0 } } })
+
+async function buildOut(name = "out"): Promise<string> {
+    const out = join(work, name)
+    await buildCarryoverSnapshot({ inDir: source, validatorsFile: launchFile, outDir: out })
+    return out
+}
+
+describe("carry-over manifest binding", () => {
+    it("rebuilding from the final genesis, which names the manifest hash, gives the same manifest", async () => {
+        const first = await buildCarryoverSnapshot({ inDir: source, validatorsFile: launchFile, outDir: join(work, "a") })
+        const genesis = JSON.parse(await readFile(launchFile, "utf8"))
+        const finalFile = join(work, "genesis.final.json")
+        // Different formatting too: only the validator entries may matter.
+        await writeFile(finalFile, JSON.stringify({ ...genesis, snapshot: { manifestSha256: first.manifestSha256 } }))
+        const again = await buildCarryoverSnapshot({ inDir: source, validatorsFile: finalFile, outDir: join(work, "b") })
+        expect(again.manifestSha256).toBe(first.manifestSha256)
+    })
+
+    it("refuses a source snapshot that does not record osDenomination as applied", async () => {
+        for (const forkState of [[], [{ fork_name: "osDenomination", applied: false }]]) {
+            const pre = join(work, `pre-${forkState.length}`)
+            await writeSnapshot(pre, SOURCE_ROWS, { forkState })
+            await expect(
+                buildCarryoverSnapshot({ inDir: pre, validatorsFile: launchFile, outDir: join(work, `o-${forkState.length}`) }),
+            ).rejects.toThrow("osDenomination")
+        }
+        const out = await buildOut()
+        const manifest = (await load(out)).manifest
+        expect(carryoverManifestProblems(manifest)).toEqual([])
+        expect(carryoverManifestProblems({ ...manifest, fork_state: [] }).join()).toContain("osDenomination")
+    })
+
+    it("refuses launch validators with an unstake under way", async () => {
+        const unstaking = { ...LAUNCH[0], unstake_requested_at: 5, unstake_available_at: null }
+        expect(() => launchValidatorRows([unstaking])).toThrow("unstake")
+        const rows = launchValidatorRows(LAUNCH)
+        const pending = [{ ...rows[0], unstake_available_at: 9 }, rows[1]]
+        expect(launchValidatorProblems(pending as never, []).join()).toContain("unstake under way")
+        expect(launchValidatorProblems(rows, [{ ...LAUNCH[0], unstake_requested_at: 1 }, LAUNCH[1]]).join()).toContain("differs")
+    })
+
+    it("refuses balances of mixed sign that sum to zero", async () => {
+        const mixed = join(work, "mixed")
+        await writeSnapshot(mixed, [gcrRow(ALICE, "5"), gcrRow(BOB, "-5")])
+        const err = await load(mixed).then(l => assertCarryoverSnapshot(l, [])).catch(e => e)
+        expect(err).toBeInstanceOf(Error)
+        expect(err.message).toContain("holds balance")
+    })
+})
+
+describe("genesis state wiring", () => {
+    function recordingSteps(calls: string[]): GenesisStateSteps {
+        return {
+            assertCarryover: async () => void calls.push("assert"),
+            restore: async (_em, _loader, options) => {
+                calls.push(`restore carryover=${options?.carryover === true}`)
+                return {} as never
+            },
+            mergeBalances: async () => {
+                calls.push("merge")
+                return {} as never
+            },
+            applyForks: async () => {
+                calls.push("forks")
+                return {} as never
+            },
+            seedValidators: async () => {
+                calls.push("seed")
+                return {} as never
+            },
+        }
+    }
+    const tx = (calls: string[]) => async <T>(work: (em: never) => Promise<T>): Promise<T> => {
+        calls.push("begin")
+        const r = await work({} as never)
+        calls.push("commit")
+        return r
+    }
+
+    it("checks the snapshot before the transaction and hands the carryover flag to the restore", async () => {
+        carryoverAtZero()
+        const calls: string[] = []
+        expect(await restoreGenesisState(tx(calls), await load(await buildOut()), { validators: LAUNCH }, recordingSteps(calls))).toBe(true)
+        expect(calls).toEqual(["assert", "begin", "restore carryover=true", "merge", "forks", "commit"])
+    })
+
+    it("skips the carry-over check before the fork, and seeds genesis validators only without validators.jsonl", async () => {
+        const calls: string[] = []
+        const v1 = join(work, "v1")
+        await writeSnapshot(v1, [gcrRow(ALICE, "0")])
+        const manifest = JSON.parse(await readFile(join(v1, "manifest.json"), "utf8"))
+        delete manifest.files["validators.jsonl"]
+        manifest.schemaVersion = 1
+        await writeFile(join(v1, "manifest.json"), JSON.stringify(manifest))
+        await restoreGenesisState(tx(calls), await load(v1), { validators: LAUNCH }, recordingSteps(calls))
+        expect(calls).toEqual(["begin", "restore carryover=false", "merge", "forks", "seed", "commit"])
+    })
+
+    it("refuses a carry-over genesis without a snapshot, and falls back to the legacy path otherwise", async () => {
+        const calls: string[] = []
+        expect(await restoreGenesisState(tx(calls), { available: false }, {}, recordingSteps(calls))).toBe(false)
+        carryoverAtZero()
+        const err = await restoreGenesisState(tx(calls), { available: false }, {}, recordingSteps(calls)).catch(e => e)
+        expect(err).toBeInstanceOf(GenesisRefusal)
+        expect(calls).toEqual([])
+    })
+
+    it("refuses a refused snapshot before the transaction opens", async () => {
+        carryoverAtZero()
+        const calls: string[] = []
+        const steps = { ...recordingSteps(calls), assertCarryover: assertCarryoverSnapshot }
+        const err = await restoreGenesisState(tx(calls), await load(source), {}, steps).catch(e => e)
+        expect(err).toBeInstanceOf(GenesisRefusal)
+        expect(calls).toEqual([])
+    })
+
+    it("applies genesis.balances after the zero-balance import", async () => {
+        carryoverAtZero()
+        const dave = hex64("dave")
+        const { em, writes } = fakeEm()
+        const steps: GenesisStateSteps = {
+            ...recordingSteps([]),
+            assertCarryover: assertCarryoverSnapshot,
+            restore: restoreSnapshot,
+            mergeBalances: (await import("@/libs/blockchain/genesis/mergeGenesisBalances")).mergeGenesisBalances,
+        }
+        await restoreGenesisState(
+            async work => work(em),
+            await load(await buildOut()),
+            { validators: LAUNCH, balances: [[ALICE, "1000"], [dave, 7]] },
+            steps,
+        )
+        const accounts = writes.get(GCRMain)!
+        const byKey = new Map(accounts.map(a => [a.pubkey, a]))
+        expect(byKey.get(ALICE)!.balance).toBe(1000n)
+        expect(byKey.get(ALICE)!.identities).toEqual(ALICE_IDENTITIES)
+        expect(byKey.get(ALICE)!.points).toEqual(ALICE_POINTS)
+        expect(byKey.get(BOB)!.balance).toBe(0n)
+        expect(byKey.get(CAROL)!.balance).toBe(0n)
+        expect(byKey.get(dave)!.balance).toBe(7n)
+    })
+
+    it("rolls back a restore that refuses a row part way through", async () => {
+        carryoverAtZero()
+        const late = join(work, "late")
+        // The funded row comes last, after rows the restore has already taken.
+        await writeSnapshot(late, [gcrRow(BOB, "0"), gcrRow(ALICE, "0"), gcrRow(CAROL, "17")])
+        const committed = new Map<unknown, unknown[]>()
+        let staged: ReturnType<typeof fakeEm> | null = null
+        const transaction = async <T>(work: (em: never) => Promise<T>): Promise<T> => {
+            staged = fakeEm()
+            const r = await work(staged.em)
+            for (const [k, v] of staged.writes) committed.set(k, v)
+            return r
+        }
+        // Skip the up-front check so the refusal comes from inside the transaction.
+        const steps: GenesisStateSteps = { ...recordingSteps([]), assertCarryover: async () => {}, restore: restoreSnapshot }
+        const err = await restoreGenesisState(transaction, await load(late), {}, steps).catch(e => e)
+        expect(err).toBeInstanceOf(GenesisRefusal)
+        expect(err.message).toContain(`row 3 (${CAROL}) holds balance 17`)
+        expect(staged).not.toBeNull()
+        expect(committed.size).toBe(0)
+    })
+})
+
+describe("fresh genesis refusals under identityCarryover", () => {
+    it("refuses a carry-over genesis that declares no snapshot", () => {
+        const problems = freshGenesisProblems({
+            genesisData: { balances: [] },
+            pin: "",
+            restore: false,
+            snapshotManifestHash: null,
+            carryoverAtGenesis: true,
+        })
+        expect(problems.join()).toContain("does not declare snapshot.manifestSha256")
+        expect(
+            freshGenesisProblems({ genesisData: { balances: [] }, pin: "", restore: false, snapshotManifestHash: null }),
+        ).toEqual([])
+        expect(
+            freshGenesisProblems({
+                genesisData: { snapshot: { manifestSha256: "ab".repeat(32) } },
+                pin: "",
+                restore: false,
+                snapshotManifestHash: "ab".repeat(32),
+                carryoverAtGenesis: true,
+            }),
+        ).toEqual([])
+    })
+})
+
+describe("imported-identity registry", () => {
+    async function restoredKeys(out: string): Promise<string[]> {
+        const { em, writes } = fakeEm()
+        await restoreSnapshot(em, await load(out), { carryover: true })
+        return writes.get(GenesisImportedIdentity)!.map(r => r.identityKey as string)
+    }
+
+    it("two restores of the same snapshot record the same keys", async () => {
+        const out = await buildOut()
+        const a = await restoredKeys(out)
+        const b = await restoredKeys(out)
+        expect(a).toEqual(b)
+        expect(importedIdentityDigest(a)).toEqual(await expectedImportedIdentities(await load(out)))
+    })
+
+    it("refuses a boot whose registry does not match the snapshot block 0 declares", async () => {
+        const out = await buildOut()
+        const manifestHash = sha256(await readFile(join(out, "manifest.json")))
+        const stored = { snapshot: { manifestSha256: manifestHash } }
+        const keys = await restoredKeys(out)
+        const readers = (storedKeys: string[], onDisk: string | null = manifestHash) => ({
+            manifestHash: async () => onDisk,
+            loadSnapshot: () => load(out),
+            storedKeys: async () => storedKeys,
+        })
+
+        expect(await importedIdentityProblems(stored, true, readers([...keys].reverse()))).toEqual([])
+        expect((await importedIdentityProblems(stored, true, readers(keys.slice(1)))).join()).toContain(
+            `holds ${keys.length - 1} keys`,
+        )
+        const swapped = [...keys.slice(1), "web2:twitter:999"]
+        expect((await importedIdentityProblems(stored, true, readers(swapped))).join()).toContain("digest")
+        expect((await importedIdentityProblems(stored, true, readers(keys, null))).join()).toContain("no snapshot manifest")
+        expect((await importedIdentityProblems(stored, true, readers(keys, "cd".repeat(32)))).join()).toContain(
+            "block 0 declares",
+        )
+        // A block 0 without a snapshot restored nothing.
+        expect(await importedIdentityProblems({}, true, readers([]))).toEqual([])
+        expect((await importedIdentityProblems({}, true, readers(keys))).join()).toContain("declares no snapshot")
+        // Before the fork nothing is checked.
+        expect(await importedIdentityProblems(stored, false, readers([]))).toEqual([])
     })
 })

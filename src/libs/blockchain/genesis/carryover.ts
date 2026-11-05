@@ -8,6 +8,8 @@
  * same key. See docs/mainnet/genesis-import.md.
  */
 
+import { createHash } from "node:crypto"
+
 import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
 import { GenesisRefusal } from "./genesisPin"
 import type {
@@ -41,9 +43,16 @@ function present(value: unknown): boolean {
     return value !== undefined && value !== null && value !== ""
 }
 
-/** Wallet addresses compare as the routines store them: EVM lowercase, all trimmed. */
-function walletAddress(chain: string, address: string): string {
-    return chain === "evm" ? address.trim().toLowerCase() : address.trim()
+/**
+ * Wallet keys ignore case. Link time lowercases by rules the client can
+ * steer (the isEVM flag for wallets, chain === "evm" for Nomis and Ethos),
+ * so a case-sensitive key would let the same wallet, linked again under the
+ * other rule, miss its imported key and earn the award twice. Folding case
+ * can only make two different wallets share a key, which withholds an
+ * award and never pays one.
+ */
+function walletKeyPart(value: string): string {
+    return value.trim().toLowerCase()
 }
 
 /**
@@ -79,7 +88,7 @@ export function firstConnectionKey(
         return null
     }
     const root = type === "web3" ? "xm" : type
-    return `${root}:${chain}:${subchain}:${walletAddress(chain, address)}`
+    return `${root}:${walletKeyPart(chain)}:${walletKeyPart(subchain)}:${walletKeyPart(address)}`
 }
 
 function isRecord(x: unknown): x is Record<string, unknown> {
@@ -180,7 +189,21 @@ export function carryoverManifestProblems(manifest: SnapshotManifest): string[] 
             "snapshot carries no validators.jsonl; identityCarryover takes the validator set from the launch list written into it",
         )
     }
+    // Launch stakes are written in OS units; on a snapshot that does not
+    // record osDenomination as applied, block 0 would multiply them by 10^9.
+    if (!osDenominationApplied(manifest)) {
+        problems.push(
+            "snapshot manifest fork_state does not record osDenomination as applied; " +
+                "identityCarryover needs a snapshot already in OS units",
+        )
+    }
     return problems
+}
+
+export function osDenominationApplied(manifest: Pick<SnapshotManifest, "fork_state">): boolean {
+    return (manifest.fork_state ?? []).some(
+        f => f.fork_name === "osDenomination" && f.applied === true,
+    )
 }
 
 type ComparableValidator = {
@@ -189,6 +212,8 @@ type ComparableValidator = {
     staked_amount: string
     first_seen: number | null
     valid_at: number | null
+    unstake_requested_at: number | null
+    unstake_available_at: number | null
 }
 
 function comparable(v: Record<string, unknown>): ComparableValidator {
@@ -202,22 +227,32 @@ function comparable(v: Record<string, unknown>): ComparableValidator {
         staked_amount: String(v.staked_amount),
         first_seen: num(v.first_seen),
         valid_at: num(v.valid_at),
+        unstake_requested_at: num(v.unstake_requested_at),
+        unstake_available_at: num(v.unstake_available_at),
     }
 }
 
 /**
- * Differences between the snapshot's validator rows and the genesis list.
- * The node seeds the snapshot's rows and ignores the genesis list, so a
- * genesis that also lists validators must list exactly those; an empty or
- * absent genesis list leaves the snapshot as the only source.
+ * Differences between the snapshot's validator rows and the genesis list,
+ * and rows that are already unstaking. The node seeds the snapshot's rows
+ * and ignores the genesis list, so a genesis that also lists validators must
+ * list exactly those; an empty or absent genesis list leaves the snapshot as
+ * the only source.
  */
 export function launchValidatorProblems(
     snapshotRows: ValidatorSeed[],
     genesisValidators: unknown,
 ): string[] {
-    if (!Array.isArray(genesisValidators) || genesisValidators.length === 0) return []
     const problems: string[] = []
     const fromSnapshot = new Map(snapshotRows.map(r => [r.address, comparable(r)]))
+    // A launch validator that is already unstaking would leave the set
+    // within its first blocks.
+    for (const [address, v] of fromSnapshot) {
+        if (v.unstake_requested_at !== null || v.unstake_available_at !== null) {
+            problems.push(`validators.jsonl row ${address} has an unstake under way`)
+        }
+    }
+    if (!Array.isArray(genesisValidators) || genesisValidators.length === 0) return problems
     const fromGenesis = new Map<string, ComparableValidator>()
     for (const v of genesisValidators) {
         if (!isRecord(v) || typeof v.address !== "string") {
@@ -287,4 +322,26 @@ export async function assertCarryoverSnapshot(
             `identityCarryover genesis import refused: ${problems.join("; ")}`,
         )
     }
+}
+
+export type ImportedIdentitySummary = { count: number; digest: string }
+
+/** Count and sha256 of the sorted keys, one per line. */
+export function importedIdentityDigest(keys: Iterable<string>): ImportedIdentitySummary {
+    const sorted = [...new Set(keys)].sort()
+    return {
+        count: sorted.length,
+        digest: createHash("sha256").update(sorted.join("\n")).digest("hex"),
+    }
+}
+
+/** The identity keys block 0 must have recorded for this snapshot. */
+export async function expectedImportedIdentities(
+    loader: SnapshotLoaderAvailable,
+): Promise<ImportedIdentitySummary> {
+    const keys = new Set<string>()
+    for await (const row of loader.streamGcrMain()) {
+        for (const key of importedIdentityKeys(row.identities)) keys.add(key)
+    }
+    return importedIdentityDigest(keys)
 }
