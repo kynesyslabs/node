@@ -25,8 +25,12 @@ jest.mock("@/utilities/logger", () => ({
     },
 }))
 
-const sharedStateStub: { networkParameters: unknown } = {
+const sharedStateStub: {
+    networkParameters: unknown
+    forkConfig: unknown
+} = {
     networkParameters: null,
+    forkConfig: { networkGovernance: { activationHeight: 0 } },
 }
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,

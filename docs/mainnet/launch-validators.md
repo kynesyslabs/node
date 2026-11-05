@@ -71,10 +71,18 @@ Before launch each operator also runs, on each host:
 ./scripts/node-doctor --production --env-from env   # bare-metal host
 ```
 
-which checks `PROD=true`, `DEMOS_REQUIRE_VALIDATORS=true`, a synchronised
-clock, outbound NTP, the `abstain` mismatch policy, both genesis pins, the
-built-in fees, stake floor and block time (every validator must run the
-same ones), and that no one-start switch is left set.
+which checks every value of the mainnet parameter sheet
+([parameters.env](parameters.env), explained in [parameters.md](parameters.md):
+`PROD`, `DEMOS_REQUIRE_VALIDATORS`, the `abstain` mismatch policy, block
+timing, fees, stake floor and ZK points, which every validator must run with
+the same values), a synchronised clock, outbound NTP, both genesis pins, and
+that no one-start switch is left set. Each operator then confirms on the
+launch thread that they run the published sheet: a Docker host posts the
+`docker inspect` output from INSTALL.md ("Run a released image", step 7); a
+bare-metal host has no container to inspect, so it posts the `node-doctor
+--production --env-from env` output, run from the node checkout in the shell
+that starts the node. That reads the process environment over `.env`, as the
+node does, and prints each sheet value it found on its `PASS` line.
 
 The node does not create its database schema at boot, so before its first
 start each validator creates it once, with the released image (Docker host):

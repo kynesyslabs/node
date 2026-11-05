@@ -15,11 +15,13 @@ import type {
     CommitLockConfig,
     FinalityProofsConfig,
     IdentityCarryoverConfig,
+    NetworkGovernanceConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
     XmProofBindingConfig,
 } from "./forkConfig"
+import { NON_MAINNET_CHAIN_IDS } from "./forkConfig"
 
 // REVIEW: P2 + DEM-665 — genesis loader for fork heights + per-fork payloads.
 
@@ -181,8 +183,25 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
     getSharedState.forkConfigLoaded = true
 }
 
+/**
+ * The rehearsal flag is only for the testnet and devnet chain ids. On any
+ * other chain, mainnet included, it splits the node from its peers at the
+ * first fork height, so it is refused whatever NODE_ENV and DEMOS_REHEARSAL
+ * say. A genesis without an id cannot be mainnet's: signatureDomain needs one.
+ */
+export function refuseDisabledForkMachineryOutsideTestChains(genesisData: any): void {
+    const chainId = genesisData?.properties?.id
+    if (chainId === undefined || NON_MAINNET_CHAIN_IDS.includes(chainId)) return
+    throw new ForkConfigValidationError(
+        `[FORKS] Refusing to boot: DEMOS_DISABLE_FORK_MACHINERY is set on chain id ${String(chainId)}; ` +
+            `it is allowed only on the testnet and devnets (${NON_MAINNET_CHAIN_IDS.join(", ")}). ` +
+            "Unset it before restarting.",
+    )
+}
+
 function loadForkConfigFromGenesisInner(genesisData: any): void {
     if (isForkMachineryDisabled()) {
+        refuseDisabledForkMachineryOutsideTestChains(genesisData)
         log.warning(
             "[FORKS] DEMOS_DISABLE_FORK_MACHINERY set — ignoring genesis " +
                 "`forks` field (rehearsal-only behaviour, do NOT use in prod)",
@@ -351,6 +370,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.identityCarryover =
                 config as IdentityCarryoverConfig
             return
+        case "networkGovernance":
+            getSharedState.forkConfig.networkGovernance =
+                config as NetworkGovernanceConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -488,6 +511,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as FinalityProofsConfig
         case "identityCarryover":
             return base as IdentityCarryoverConfig
+        case "networkGovernance":
+            return base as NetworkGovernanceConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

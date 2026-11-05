@@ -39,6 +39,9 @@
     },
     "finalityProofs": {
       "activationHeight": 0
+    },
+    "networkGovernance": {
+      "activationHeight": 0
     }
   },
   "balances": [

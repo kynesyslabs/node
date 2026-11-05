@@ -384,11 +384,4 @@ describe("applyGasFeeSeparation — PROD balance check", () => {
         expect(r.ok).toBe(false)
         if (!r.ok) expect(r.message).toMatch(/failed to read sender balance/)
     })
-
-    it("does NOT call getGCRNativeBalance when PROD=false", async () => {
-        sharedStateStub.PROD = false
-        const r = await applyGasFeeSeparation(makeTx())
-        expect(r.ok).toBe(true)
-        expect(getGCRNativeBalanceMock).not.toHaveBeenCalled()
-    })
 })

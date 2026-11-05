@@ -3,6 +3,7 @@ import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import {
     type GoNoGoInput,
     KNOWN_FORKS,
+    LAUNCH_DORMANT_FORKS,
     MAINNET_FORKS,
     type ValidatorProbe,
     checkLaunch,
@@ -582,6 +583,23 @@ describe("checkLaunch", () => {
             }
         })
     }
+
+    for (const fork of LAUNCH_DORMANT_FORKS) {
+        it(`is NO-GO when ${fork} is scheduled at launch`, () => {
+            for (const height of [0, 1000]) {
+                const forks = { ...mainnetForks(), [fork]: { activationHeight: height } }
+                const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+                expect(d.go).toBe(false)
+                expect(d.reasons.join("\n")).toContain(`fork ${fork} is scheduled at ${height}`)
+            }
+        })
+    }
+
+    it("keeps networkGovernance off at launch, not among the forks switched on at block 0", () => {
+        expect(LAUNCH_DORMANT_FORKS).toContain("networkGovernance")
+        expect(MAINNET_FORKS).not.toContain("networkGovernance")
+        expect(KNOWN_FORKS).toContain("networkGovernance")
+    })
 
     it("is NO-GO without a genesis file, whose forks and validators it cannot check", () => {
         const d = checkLaunch({ ...base, genesis: null, blockZero: null, launchValidators: launch })

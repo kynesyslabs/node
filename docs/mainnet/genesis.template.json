@@ -55,6 +55,9 @@
     },
     "atomicWork": {
       "activationHeight": null
+    },
+    "networkGovernance": {
+      "activationHeight": null
     }
   },
   "snapshot": {

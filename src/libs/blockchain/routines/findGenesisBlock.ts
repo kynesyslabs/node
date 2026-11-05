@@ -16,7 +16,10 @@ import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
 import { Config } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks"
-import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
+import {
+    isForkMachineryDisabled,
+    refuseDisabledForkMachineryOutsideTestChains,
+} from "@/forks/loadForkConfig"
 import {
     GenesisRefusal,
     blockPinProblem,
@@ -167,6 +170,10 @@ export default async function findGenesisBlock() {
             | { extra?: { genesisData?: unknown } }
             | undefined
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
+        // Without a file the fork loader never ran, so its chain id check did not either
+        if (!hasGenesisFile && isForkMachineryDisabled()) {
+            refuseDisabledForkMachineryOutsideTestChains(stored)
+        }
         refuse(
             restartGenesisProblems({
                 storedGenesisData: stored,

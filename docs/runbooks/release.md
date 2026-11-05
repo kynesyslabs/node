@@ -92,7 +92,10 @@ Publish the draft after the validators have confirmed the digest they run.
 ## What a validator runs
 
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
-and digest, copied from `checksums.txt`:
+and digest, copied from `checksums.txt`. If the release changes
+`docs/mainnet/parameters.env`, the announcement says so and every validator
+updates the same lines in `.env` before restarting; `node-doctor --production`
+fails until they match.
 
 ```
 IMAGE_NAME=ghcr.io/kynesyslabs/node

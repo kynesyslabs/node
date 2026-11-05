@@ -38,7 +38,11 @@ import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import { drawBoundCommittee } from "src/libs/consensus/v2/routines/getShard"
 import { compareIdentities } from "src/libs/consensus/v2/routines/peerlistMerge"
 import Hashing from "src/libs/crypto/hashing"
-import { DEFAULT_FORK_CONFIG, type ForkName } from "src/forks/forkConfig"
+import {
+    DEFAULT_FORK_CONFIG,
+    NON_MAINNET_CHAIN_IDS,
+    type ForkName,
+} from "src/forks/forkConfig"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
@@ -169,6 +173,12 @@ export const MAINNET_FORKS: readonly ForkName[] = [
 ]
 
 /**
+ * Forks a mainnet genesis must leave unscheduled: the launch decision is
+ * that they are switched on later, at a height agreed on the running chain.
+ */
+export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["networkGovernance"]
+
+/**
  * Every fork this build knows. A mainnet genesis declares each one, with a
  * height or null: a missing entry takes the code default, which a later
  * build may change, and which nobody agreed to at launch.
@@ -178,12 +188,7 @@ export const KNOWN_FORKS = Object.keys(DEFAULT_FORK_CONFIG) as ForkName[]
 /** The committee size the launch was rehearsed and drilled with (mainnet-launch#3). */
 export const LAUNCH_SHARD_SIZE = 10
 
-/**
- * Chain ids of the testnet (data/genesis.json) and the devnets. Signatures
- * bind to the chain id once signatureDomain is on, so a mainnet that shares
- * one would accept transactions signed for that network.
- */
-export const NON_MAINNET_CHAIN_IDS: readonly number[] = [1, 1337]
+export { NON_MAINNET_CHAIN_IDS }
 
 const norm = (id: string) => id.trim().toLowerCase()
 /** Operator and provider names are free text typed by people. */
@@ -571,8 +576,9 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
 
 /**
  * NO-GO reasons for a genesis whose fork block is not mainnet's: a mainnet
- * fork not at block 0, a fork this build knows left undeclared, or a
- * scheduled gasFeeSeparation without its own treasury.
+ * fork not at block 0, a launch-dormant fork scheduled, a fork this build
+ * knows left undeclared, or a scheduled gasFeeSeparation without its own
+ * treasury.
  */
 export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[] {
     if (!genesis) {
@@ -584,6 +590,15 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
             `fork ${name} is not scheduled at activationHeight 0 in the genesis ` +
             `(found ${JSON.stringify(forks[name]?.activationHeight ?? null)})`,
     )
+    for (const name of LAUNCH_DORMANT_FORKS) {
+        const height = forks[name]?.activationHeight
+        if (height !== null && height !== undefined) {
+            reasons.push(
+                `fork ${name} is scheduled at ${JSON.stringify(height)} in the genesis; ` +
+                    "it stays off at launch (activationHeight null) and is scheduled later on the running chain",
+            )
+        }
+    }
     const undeclared = KNOWN_FORKS.filter(
         name => !Object.hasOwn(forks, name) || forks[name] === null || typeof forks[name] !== "object" ||
             !Object.hasOwn(forks[name], "activationHeight"),
