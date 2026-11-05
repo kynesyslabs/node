@@ -339,6 +339,12 @@ function phase(id: string, name: string, reasons: string[]): PhaseResult {
 }
 
 const NOT_REACHED = "not reached: the run ended before this phase"
+const MISSED_DEADLINE = "the nodes did not reach the target inside the timeout (t_converged is null)"
+
+/** A late catch-up in the final reads still misses the drill's deadline. */
+function withinDeadline(reasons: string[], tConverged: number | null): string[] {
+    return tConverged === null ? [...reasons, MISSED_DEADLINE] : reasons
+}
 
 /**
  * Hashes agree at one height on `nodes`: scenario 12's recovery check with the
@@ -452,7 +458,7 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
                 ride.rows,
                 quorum,
             )
-            phases.push(phase("R2", "ride", r.reasons))
+            phases.push(phase("R2", "ride", withinDeadline(r.reasons, input.marks.t_converged)))
         }
         crash()
         return verdict()
@@ -523,7 +529,7 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
             input.recovery.rows,
             quorum,
         )
-        phases.push(phase("P5", "recovery", r.reasons))
+        phases.push(phase("P5", "recovery", withinDeadline(r.reasons, input.marks.t_converged)))
     }
 
     crash()

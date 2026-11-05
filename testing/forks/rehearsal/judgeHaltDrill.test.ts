@@ -208,6 +208,13 @@ describe("halt drill verdict", () => {
         expect(reasons).toContain("node-13 head 10 < target 12")
         expect(reasons).toContain("height 12: stored on 12/13 nodes")
     })
+    it("fails recovery reached only after the timeout", () => {
+        const raw = loadRaw("halt-n13s10.pass")
+        raw.marks.t_converged = null
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["P5"])
+        expect(reasonsOf(input, "P5")).toEqual([expect.stringContaining("inside the timeout")])
+    })
     it("fails when a survivor was restarted by docker", () => {
         const input = load("halt-n10s10.survivor-crash")
         expect(failedPhases(input)).toEqual(["P6"])
@@ -331,6 +338,13 @@ describe("ride drill verdict", () => {
         const input = load("ride-n13s10.stalled")
         expect(failedPhases(input)).toEqual(["R2"])
         expect(reasonsOf(input, "R2")[0]).toContain("node-1 head 8 < target 11")
+    })
+    it("fails a ride that reached the target only after the timeout", () => {
+        const raw = loadRaw("ride-n13s10.pass")
+        raw.marks.t_converged = null
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["R2"])
+        expect(reasonsOf(input, "R2")).toEqual([expect.stringContaining("inside the timeout")])
     })
     it("fails a block with fewer than 7 signatures", () => {
         const raw = loadRaw("ride-n13s10.pass")

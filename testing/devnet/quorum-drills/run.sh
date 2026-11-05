@@ -1033,7 +1033,8 @@ drill_recover() {
         say "heads: $(jq -c . <<< "${hs}")"
         sleep 2
     done
-    hs=$(heads_once $(running))
+    # The judge sees the last read inside the window: a node that catches up after the deadline missed it
+    [ -n "${hs:-}" ] || hs=$(heads_once $(running))
     rows=$(block_rows "${PRE_HEIGHT}" "${target}" $(running)) || { say "ABORT: could not read the recovery blocks"; exit 2; }
     RECOVERY_JSON=$(jq -nc --argjson b "${RECOVERY_BLOCKS}" --argjson heads "${hs}" --argjson rows "${rows}" \
         '{blocks: $b, heads: $heads, rows: $rows}')
@@ -1124,7 +1125,7 @@ scenario_ride() {
         say "heads: $(jq -c . <<< "${hs}")"
         sleep 2
     done
-    hs=$(heads_once "${SURVIVORS[@]}")
+    [ -n "${hs:-}" ] || hs=$(heads_once "${SURVIVORS[@]}")
     rows=$(block_rows "${PRE_HEIGHT}" "${target}" "${SURVIVORS[@]}") || { say "ABORT: could not read the ride blocks"; exit 2; }
     RIDE_JSON=$(jq -nc --argjson b "${RIDE_BLOCKS}" --argjson heads "${hs}" --argjson rows "${rows}" \
         '{blocks: $b, heads: $heads, rows: $rows}')
