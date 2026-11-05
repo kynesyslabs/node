@@ -1,8 +1,19 @@
 import { beforeEach, describe, expect, it, spyOn } from "bun:test"
 import log from "src/utilities/logger"
 import { toHex } from "@/libs/crypto/merkle/hex"
-import { EMPTY_SUBTREE, SparseMerkleTree } from "@/libs/crypto/merkle/sparse"
-import { storageProgramKey, storageProgramLeafHex, type StorageProgramRow } from "./storageRecord"
+import {
+    EMPTY_SUBTREE,
+    SparseMerkleTree,
+    verifyMembership,
+    verifyNonMembership,
+} from "@/libs/crypto/merkle/sparse"
+import {
+    storageProgramKey,
+    storageProgramLeafHex,
+    storageProgramRecord,
+    storageRecordLeafHex,
+    type StorageProgramRow,
+} from "./storageRecord"
 import {
     StorageProgramsRoot,
     type StorageRootReader,
@@ -25,6 +36,7 @@ class FakeTable implements StorageRootReader {
     rows = new Map<string, StoredRow>()
     private nextVersion = 1
     reads = 0
+    leafReads = 0
     rowReads = 0
     fills: StoredLeaf[][] = []
     failFill = false
@@ -54,6 +66,7 @@ class FakeTable implements StorageRootReader {
         const view = new Map([...this.rows].map(([k, v]) => [k, structuredClone(v)]))
         return await work({
             leaves: async () => {
+                this.leafReads++
                 const out = [...view.values()]
                     .sort((a, b) => (a.storageAddress < b.storageAddress ? -1 : 1))
                     .map(r => ({ storageAddress: r.storageAddress, smtLeaf: r.smtLeaf, version: String(r.version) }))
@@ -260,5 +273,96 @@ describe("storage state root", () => {
         // eslint-disable-next-line no-console
         console.log(`[perf] storage root over 10^4 programs: rebuild ${cold.toFixed(1)} ms, cached ${cached.toFixed(3)} ms`)
         expect(value).toMatch(/^[0-9a-f]{64}$/)
+    })
+})
+
+describe("storage proofs", () => {
+    it("proves present programs by their record and absent ones by the path", async () => {
+        const rows = Array.from({ length: 40 }, (_, i) => program(i))
+        rows.forEach(r => table.write(r))
+        const present = rows[7].storageAddress
+        const deleted = rows[11].storageAddress
+        const absent = "stor-never-created"
+
+        const { root: provedRoot, proofs } = await root.prove([present, absent, deleted])
+        expect(provedRoot).toBe(expectedRoot(rows))
+        expect(provedRoot).toBe(await root.root())
+        expect(proofs.map(p => p.storageAddress)).toEqual([present, absent, deleted])
+
+        const [p, a, d] = proofs
+        expect(p.record).toEqual(storageProgramRecord(rows[7]))
+        expect(storageRecordLeafHex(p.record!)).toBe(storageProgramLeafHex(rows[7]))
+        expect(
+            verifyMembership(storageProgramKey(present), storageRecordLeafHex(p.record!), p, provedRoot),
+        ).toBe(true)
+
+        expect(a.record).toBeNull()
+        expect(verifyNonMembership(storageProgramKey(absent), a, provedRoot)).toBe(true)
+
+        expect(d.record?.isDeleted).toBe(true)
+        expect(verifyMembership(storageProgramKey(deleted), storageRecordLeafHex(d.record!), d, provedRoot)).toBe(true)
+    })
+
+    it("serves the data hash of a restricted program, never its data", async () => {
+        table.write(program(1, { acl: { mode: "restricted", allowed: ["0xabc"] }, data: { secret: "s3cret" } }))
+        const [entry] = (await root.prove([program(1).storageAddress])).proofs
+        expect(JSON.stringify(entry)).not.toContain("s3cret")
+        expect(entry.record?.dataHash).toMatch(/^[0-9a-f]{64}$/)
+    })
+
+    it("proves against rows whose leaf was never stored", async () => {
+        table.insertBare(program(3))
+        table.write(program(4))
+        const { root: provedRoot, proofs } = await root.prove([program(3).storageAddress])
+        expect(provedRoot).toBe(expectedRoot([program(3), program(4)]))
+        expect(verifyMembership(storageProgramKey(program(3).storageAddress), storageRecordLeafHex(proofs[0].record!), proofs[0], provedRoot)).toBe(true)
+    })
+
+    it("proves absence in an empty table against the empty root", async () => {
+        const { root: provedRoot, proofs } = await root.prove(["stor-x"])
+        expect(provedRoot).toBe(toHex(EMPTY_SUBTREE))
+        expect(proofs[0]).toEqual({ storageAddress: "stor-x", record: null, siblings: [], terminal: { kind: "empty" } })
+    })
+
+    it("reuses the tree across proofs until a write marks the table dirty", async () => {
+        const rows = Array.from({ length: 20 }, (_, i) => program(i))
+        rows.forEach(r => table.write(r))
+        await root.prove([rows[1].storageAddress])
+        const { leafReads, rowReads } = table
+        const { root: again, proofs } = await root.prove([rows[2].storageAddress, "stor-none"])
+        expect(root.proofTreeBuilds).toBe(1)
+        // Only the rows asked for are read; the leaf column is not
+        expect(table.leafReads).toBe(leafReads)
+        expect(table.rowReads).toBe(rowReads + 2)
+        expect(again).toBe(expectedRoot(rows))
+        expect(
+            verifyMembership(storageProgramKey(rows[2].storageAddress), storageRecordLeafHex(proofs[0].record!), proofs[0], again),
+        ).toBe(true)
+
+        const changed = program(2, { data: { changed: true }, lastModifiedByTx: "0xm2b" })
+        table.write(changed)
+        root.markDirty()
+        const after = await root.prove([changed.storageAddress])
+        expect(root.proofTreeBuilds).toBe(2)
+        expect(after.root).toBe(expectedRoot(rows.map(r => (r.storageAddress === changed.storageAddress ? changed : r))))
+        expect(storageRecordLeafHex(after.proofs[0].record!)).toBe(storageProgramLeafHex(changed))
+    })
+
+    it("does not reuse a tree built while a write was in flight", async () => {
+        table.write(program(1))
+        table.duringRead = () => {
+            table.write(program(2))
+            root.markDirty()
+        }
+        await root.prove([program(1).storageAddress])
+        table.duringRead = null
+        const { root: after } = await root.prove([program(2).storageAddress])
+        expect(after).toBe(expectedRoot([program(1), program(2)]))
+    })
+
+    it("refuses to serve a stored leaf that no longer matches its row", async () => {
+        table.write(program(5))
+        storedRow(program(5).storageAddress).sizeBytes = 9999
+        await expect(root.prove([program(5).storageAddress])).rejects.toThrow(/does not match its row/)
     })
 })

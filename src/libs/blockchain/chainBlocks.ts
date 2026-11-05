@@ -1,4 +1,4 @@
-import { LessThan, MoreThan } from "typeorm"
+import { Between, LessThan, MoreThan } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
@@ -140,6 +140,14 @@ export async function getBlocks(
     }
 
     return await blocks.find(options)
+}
+
+/** Blocks `from..to` inclusive, ascending; the caller bounds the range. */
+export async function getBlockRange(from: number, to: number): Promise<Blocks[]> {
+    return await getBlocksRepo().find({
+        where: { number: Between(from, to) },
+        order: { number: "ASC" },
+    })
 }
 
 export async function getBlockByNumber(number: number): Promise<Blocks> {
