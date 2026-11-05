@@ -71,6 +71,17 @@ interface SidecarStats {
     lastInboundAt?: number
 }
 
+/** Fixed metric label per restart cause; the detail goes to the log. */
+type RestartKind =
+    | "process_exit"
+    | "process_error"
+    | "ipc_closed"
+    | "stats_stalled"
+    | "stats_stalled_hard"
+    | "mesh_silent"
+    | "process_gone"
+    | "first_launch_failed"
+
 /** Configuration no relaunch can fix; fatal at first boot only. */
 class SidecarConfigError extends Error {}
 
@@ -196,6 +207,7 @@ export class GossipManager {
             firstLaunchError = e
             await this.teardownSidecar()
         }
+        if (this.stopping) return
 
         this.lastTickAt = Date.now()
         this.heightsTimer = setInterval(() => {
@@ -222,7 +234,7 @@ export class GossipManager {
         if (firstLaunchError !== null) {
             void this.restartSidecar(
                 `first launch failed: ${errorText(firstLaunchError)}`,
-                { afterFailedLaunch: true },
+                { afterFailedLaunch: true, kind: "first_launch_failed" },
             )
             return
         }
@@ -267,7 +279,7 @@ export class GossipManager {
             }
             log.error(`[GOSSIP] sidecar process error: ${err.message}`)
             if (this.proc === proc) {
-                this.onSidecarGone(`process error: ${err.message}`)
+                this.onSidecarGone(`process error: ${err.message}`, "process_error")
             }
         })
         this.sidecarTail = []
@@ -289,7 +301,7 @@ export class GossipManager {
                 return
             }
             if (this.proc !== proc) return // a superseded process
-            this.onSidecarGone(why)
+            this.onSidecarGone(why, "process_exit")
         })
 
         const ready = this.awaitReady()
@@ -324,13 +336,24 @@ export class GossipManager {
             this.send({ type: "dial", addrs: [...addrs] })
             log.info(`[GOSSIP] re-dialing ${addrs.size} known multiaddr(s)`)
         }
+        // Its exit during the awaits above was ignored as part of the
+        // launch, so it must fail the launch here or nothing relaunches it.
+        if (
+            this.proc !== proc ||
+            proc.exitCode !== null ||
+            proc.signalCode !== null ||
+            !this.sock ||
+            this.sock.destroyed
+        ) {
+            throw new Error("sidecar went away right after reporting ready")
+        }
     }
 
     /** The sidecar died or its bridge closed on its own. */
-    private onSidecarGone(reason: string): void {
+    private onSidecarGone(reason: string, kind: RestartKind): void {
         // Before start() completes, a failed first launch is handled there.
         if (!this.started || this.stopping || this.restarting) return
-        void this.restartSidecar(reason)
+        void this.restartSidecar(reason, { kind })
     }
 
     /**
@@ -341,7 +364,7 @@ export class GossipManager {
      */
     private restartSidecar(
         reason: string,
-        opts: { afterFailedLaunch?: boolean } = {},
+        opts: { afterFailedLaunch?: boolean; kind: RestartKind },
     ): Promise<void> {
         if (this.restarting || this.stopping) {
             return this.recovery ?? Promise.resolve()
@@ -361,10 +384,10 @@ export class GossipManager {
 
     private async runRecovery(
         reason: string,
-        opts: { afterFailedLaunch?: boolean },
+        opts: { afterFailedLaunch?: boolean; kind: RestartKind },
     ): Promise<void> {
         const now = Date.now()
-        countSidecarRestart(reason)
+        countSidecarRestart(opts.kind)
         if (this.restartBudget.take(now)) {
             this.flapStreak = 0
         } else {
@@ -437,6 +460,7 @@ export class GossipManager {
     }
 
     private sleepUnlessStopping(ms: number): Promise<void> {
+        if (this.stopping) return Promise.resolve()
         return new Promise(resolve => {
             const t = setTimeout(() => {
                 this.wakeRetry = null
@@ -574,11 +598,16 @@ export class GossipManager {
                         reject(new Error("sidecar launch abandoned"))
                         return
                     }
+                    sock.removeAllListeners("error")
+                    sock.on("error", () => sock.destroy())
                     this.sock = sock
                     sock.on("data", (d: Buffer) => this.onIpcData(d))
                     sock.on("close", () => {
                         if (this.sock !== sock) return // superseded
-                        this.onSidecarGone("IPC connection to sidecar closed")
+                        this.onSidecarGone(
+                            "IPC connection to sidecar closed",
+                            "ipc_closed",
+                        )
                     })
                     this.send({ type: "hello" })
                     resolve()
@@ -611,9 +640,11 @@ export class GossipManager {
         cancel: () => void
     } {
         let timer: ReturnType<typeof setTimeout> | null = null
+        let done = false
         let settle: (e?: Error) => void = () => undefined
         const promise = new Promise<void>((resolve, reject) => {
             settle = e => {
+                done = true
                 if (timer) clearTimeout(timer)
                 timer = null
                 this.onReady = null
@@ -627,6 +658,7 @@ export class GossipManager {
         return {
             promise,
             arm: () => {
+                if (done) return promise
                 timer = setTimeout(
                     () =>
                         settle(
@@ -770,6 +802,13 @@ export class GossipManager {
         const tickLateMs = now - this.lastTickAt - intervalMs
         this.lastTickAt = now
         if (this.restarting || this.stopping) return
+        const proc = this.proc
+        if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
+            void this.restartSidecar("sidecar process is gone", {
+                kind: "process_gone",
+            })
+            return
+        }
 
         const verdict = judgeSidecarHealth({
             now,
@@ -793,6 +832,7 @@ export class GossipManager {
             case "fault":
                 void this.restartSidecar(
                     `${verdict.reason}: no stats for ${now - this.lastStatsAt}ms (threshold ${STATS_STALE_MS}ms)`,
+                    { kind: verdict.reason },
                 )
                 return
             case "silent":
@@ -840,6 +880,7 @@ export class GossipManager {
                 countSilenceProbe("peers_alive")
                 void this.restartSidecar(
                     `mesh silent for ${now - this.lastInboundAt}ms while ${verdicts.filter(v => v !== "unreachable" && v !== "skipped").length}/${candidates.length} probed peer(s) answer over HTTP`,
+                    { kind: "mesh_silent" },
                 )
                 return
             }

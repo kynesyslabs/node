@@ -56,8 +56,13 @@ mock.module("src/libs/peer", () => ({
     },
 }))
 mock.module("src/libs/peer/identityLiveness", () => ({ reportTwin: () => undefined }))
+// A slow stake lookup widens the window between "ready" and the end of a launch.
+let stakeLookupMs = 0
 mock.module("src/libs/consensus/stakedSet", () => ({
-    isSelfStaked: async () => false,
+    isSelfStaked: async () => {
+        if (stakeLookupMs > 0) await Bun.sleep(stakeLookupMs)
+        return false
+    },
     onSelfStakeChange: () => () => undefined,
     getStakedSet: async () => new Set<string>(),
 }))
@@ -109,7 +114,7 @@ let exitCalls: (number | undefined)[]
 let exitSpy: ReturnType<typeof spyOn>
 const managers: InstanceType<typeof gossipModule.GossipManager>[] = []
 
-function setMode(mode: "ok" | "hang" | "crash"): void {
+function setMode(mode: "ok" | "hang" | "crash" | "readyexit"): void {
     fs.writeFileSync(modeFile, mode)
 }
 
@@ -173,6 +178,7 @@ beforeEach(() => {
     logLines.length = 0
     degradedGauge.length = 0
     relaunchFailures = 0
+    stakeLookupMs = 0
     exitCalls = []
     exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
         exitCalls.push(code)
@@ -290,6 +296,46 @@ describe("GossipManager sidecar lifecycle", () => {
         } finally {
             gossipCfg.ipcConnectTimeoutMs = 300
         }
+    })
+
+    it("relaunches a sidecar that exits right after reporting ready", async () => {
+        const gm = manager()
+        await gm.start()
+        stakeLookupMs = 300
+        setMode("readyexit")
+        process.kill(lastSpawn().pid, "SIGKILL")
+        await waitFor(
+            () => spawns().filter(s => s.mode === "readyexit").length >= 2,
+            5_000,
+            "a second relaunch after a ready-then-exit sidecar",
+        )
+        expect(exitCalls).toEqual([])
+
+        setMode("ok")
+        await waitFor(
+            () => lastSpawn().mode === "ok" && gm.getDegradedState() === null,
+            5_000,
+            "recovery onto a healthy sidecar",
+        )
+        await waitFor(() => gm.isReady(), 2_000, "ready")
+        expect(alive(lastSpawn().pid)).toBe(true)
+        expect(gm.getPeerId()).toBe(`fake-${lastSpawn().pid}`)
+        expect(sharedState.subsystems.gossip?.status).toBe("ready")
+    })
+
+    it("does not stay down when the first launch's sidecar exits right after ready", async () => {
+        setMode("readyexit")
+        stakeLookupMs = 300
+        const gm = manager()
+        await gm.start()
+        expect(exitCalls).toEqual([])
+        setMode("ok")
+        await waitFor(
+            () => lastSpawn().mode === "ok" && gm.isReady(),
+            5_000,
+            "a healthy sidecar after a ready-then-exit first launch",
+        )
+        expect(alive(lastSpawn().pid)).toBe(true)
     })
 
     it("fails fast at first boot when the sidecar entry is missing", async () => {

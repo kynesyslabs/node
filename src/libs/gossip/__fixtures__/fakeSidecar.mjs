@@ -1,7 +1,7 @@
 // Stand-in for the gossip sidecar in lifecycle tests. Behaviour is read
 // from FAKE_SIDECAR_MODE_FILE at startup so a test can change what the
 // next launch does: "ok" serves the IPC protocol, "hang" never opens the
-// socket, "crash" exits at once.
+// socket, "crash" exits at once, "readyexit" reports ready and then exits.
 import fs from "node:fs"
 import net from "node:net"
 import readline from "node:readline"
@@ -14,7 +14,7 @@ process.stdin.on("end", () => process.exit(0))
 
 if (mode === "crash") process.exit(3)
 
-if (mode === "ok") {
+if (mode === "ok" || mode === "readyexit") {
     const ipc = process.env.GOSSIP_IPC_PATH
     try {
         fs.unlinkSync(ipc)
@@ -34,6 +34,10 @@ if (mode === "ok") {
             if (JSON.parse(line).type !== "hello") return
             send({ type: "hello", v: 1 })
             send({ type: "ready", v: 1, peerId: `fake-${process.pid}`, addrs: [] })
+            if (mode === "readyexit") {
+                sock.write(JSON.stringify(stats()) + "\n", () => process.exit(0))
+                return
+            }
             send(stats())
         })
         const t = setInterval(() => send(stats()), 50)
