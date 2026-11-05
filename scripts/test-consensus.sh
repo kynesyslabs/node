@@ -26,11 +26,15 @@ SUITE_FILES=(
     src/libs/blockchain/finality/validatorSet.test.ts
     src/libs/blockchain/finality/verify.test.ts
     src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
+    src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
+    src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
+    src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
     src/libs/blockchain/routines/syncVerification.test.ts
+    src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/crypto/canonicalJson.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts

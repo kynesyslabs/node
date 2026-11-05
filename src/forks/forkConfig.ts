@@ -48,23 +48,20 @@ export interface BaseForkConfig {
 export type OsDenominationConfig = BaseForkConfig
 
 /**
- * `nonceEnforcement` fork (audit-sweep batch C): activates strict
- * sequential per-sender nonce semantics.
+ * `nonceEnforcement` fork (audit-sweep batch C): activates per-sender nonce
+ * checks at admission and the native forged-edit guard at apply.
  *
- * Pre-fork: `assignNonce` accepts any value, `HandleNativeOperations`
- * does not emit a `nonce` GCREdit, `GCRNonceRoutines` ignores the
- * `expectedPrior` field. Bit-identical to legacy for re-sync.
+ * Pre-fork: admission accepts any nonce, apply runs the shipped edits as
+ * written. Bit-identical to legacy for re-sync.
  *
- * Post-fork: incoming txs must satisfy
- * `tx.content.nonce === account.nonce + 1 + pending_mempool_count`;
- * every native tx emits a `+1` nonce GCREdit with `expectedPrior =
- * account.nonce`; consensus-time apply rejects the edit when
- * `account.nonce !== expectedPrior`, blocking cross-RPC replays.
+ * Post-fork: admission refuses a nonce at or below the sender's confirmed
+ * nonce, apply refuses a native tx whose edits differ from the regenerated
+ * set, and a tx hash already in a confirmed block is not applied again.
+ * Apply does not compare the nonce itself: that rule, and a failed tx
+ * spending its nonce, come with `nonceIntegrity`.
  *
  * No payload beyond the base. Declared as a type alias (not an empty
  * interface) for the same reason as `OsDenominationConfig`.
- *
- * See `docs/specs/audit-sweep-batch-c-nonce.md` for the full design.
  */
 export type NonceEnforcementConfig = BaseForkConfig
 
@@ -164,6 +161,31 @@ export type AtomicWorkConfig = BaseForkConfig
  * this build sets it to 0. No payload beyond the base.
  */
 export type EditBindingConfig = BaseForkConfig
+
+/**
+ * `nonceIntegrity` fork: one confirmed or failed transaction per sender
+ * nonce, enforced where every node reads the same state.
+ *
+ * - A transaction must ship exactly one nonce edit: +1 on the sender's own
+ *   account, not a rollback. Edit-free node transactions ship none. Checked
+ *   at gossip, at the consensus merge and before a block applies it.
+ * - Apply refuses a transaction whose nonce is not the sender's nonce + 1 on
+ *   the state the earlier transactions of the block left.
+ * - A transaction that passes that check and then fails in the block still
+ *   spends its nonce, so it cannot be signed again for another transaction.
+ * - Admission refuses a nonce more than `MEMPOOL_MAX_NONCE_AHEAD` past the
+ *   confirmed one and a second pending transaction for the same nonce.
+ *
+ * Before it, a failed transaction restored its sender's nonce while a later
+ * one of the same block still applied, leaving the account one behind the
+ * chain and the failed nonce free to be signed again.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before; a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type NonceIntegrityConfig = BaseForkConfig
 
 /**
  * `quorumParity` fork: a synced block is accepted only with the signatures
@@ -267,6 +289,7 @@ export type ForkConfig =
     | TlsnProofEnforcementConfig
     | AtomicWorkConfig
     | EditBindingConfig
+    | NonceIntegrityConfig
     | QuorumParityConfig
     | CommitteeBindingConfig
     | CommitLockConfig
@@ -287,6 +310,7 @@ export type ForkName =
     | "tlsnProofEnforcement"
     | "atomicWork"
     | "editBinding"
+    | "nonceIntegrity"
     | "quorumParity"
     | "committeeBinding"
     | "commitLock"
@@ -306,6 +330,7 @@ export interface ForkConfigByName {
     tlsnProofEnforcement: TlsnProofEnforcementConfig
     atomicWork: AtomicWorkConfig
     editBinding: EditBindingConfig
+    nonceIntegrity: NonceIntegrityConfig
     quorumParity: QuorumParityConfig
     committeeBinding: CommitteeBindingConfig
     commitLock: CommitLockConfig
@@ -421,10 +446,9 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         // future height in their genesis instead.
         activationHeight: 0,
         description:
-            "Sequential per-sender nonce enforcement (audit-sweep batch C + C5). " +
-            "Validates tx.content.nonce at RPC ingress, emits +1 nonce GCREdit " +
-            "per native tx, rejects same-nonce replays at consensus apply-time. " +
-            "Paired with confirmed-tx-hash uniqueness at apply time.",
+            "Per-sender nonce checks at admission (audit-sweep batch C + C5): a nonce at or " +
+            "below the confirmed one is refused. Paired with the native forged-edit guard and " +
+            "confirmed-tx-hash uniqueness at apply time.",
     },
     atomicWork: {
         // Dormant everywhere, including fresh chains: the substrate is not
@@ -443,6 +467,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         description:
             "Apply refuses a transaction whose edits differ from the ones regenerated " +
             "from its signed body, and an edit that acts on an account other than the sender's.",
+    },
+    nonceIntegrity: {
+        // Dormant by default: it changes which transactions of a block apply
+        // and what a failed one leaves, and a missing genesis entry hydrates
+        // from here. A chain launched from genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "Apply refuses a nonce that is not the sender's next one, a failed transaction " +
+            "still spends its nonce, and every transaction ships exactly one +1 nonce edit on its sender.",
     },
     quorumParity: {
         // Dormant by default: blocks already on a running chain were synced
@@ -500,6 +533,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tlsnProofEnforcement: { ...DEFAULT_FORK_CONFIG.tlsnProofEnforcement },
         atomicWork: { ...DEFAULT_FORK_CONFIG.atomicWork },
         editBinding: { ...DEFAULT_FORK_CONFIG.editBinding },
+        nonceIntegrity: { ...DEFAULT_FORK_CONFIG.nonceIntegrity },
         quorumParity: { ...DEFAULT_FORK_CONFIG.quorumParity },
         committeeBinding: { ...DEFAULT_FORK_CONFIG.committeeBinding },
         commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },

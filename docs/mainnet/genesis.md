@@ -24,7 +24,7 @@ decided by the genesis owners and filled in once.
 |---|---|---|
 | `properties.shardSize` | `10` | the launch committee: quorum 7, at most 3 seats lost |
 | `mutables.minBlocksForValidationOnlineStatus` | `4` | same as testnet |
-| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs` | `activationHeight: 0` | mainnet starts with every safety fork on; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height |
+| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs` | `activationHeight: 0` | mainnet starts with every safety fork on; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height |
 | `forks.xmProofBinding`, `forks.atomicWork` | `activationHeight: null` | not scheduled at launch; a later activation is a coordinated schedule change |
 | `status` | `"confirmed"` | as on testnet |
 

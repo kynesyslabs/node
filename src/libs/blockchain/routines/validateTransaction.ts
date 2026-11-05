@@ -26,6 +26,8 @@ import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSep
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import { normalizePubkey } from "../gcr/handleGCR"
+import { expectsNonceEdit } from "../validation/editBinding"
+import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -97,6 +99,23 @@ export async function confirmTransaction(
         validityData.data.message =
             "[Tx Validation] [NONCE ERROR] Transaction nonce error. Expected >=" +
             (currentNonce + 1) +
+            ", got: " +
+            tx.content.nonce
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    // Same window the mempool enforces, so a client learns at confirm time
+    // rather than after paying for the execute round-trip.
+    if (
+        isForkActive("nonceIntegrity", referenceBlock) &&
+        expectsNonceEdit(tx) &&
+        tx.content.nonce > currentNonce + MEMPOOL_MAX_NONCE_AHEAD
+    ) {
+        validityData.data.message =
+            "[Tx Validation] [NONCE ERROR] Transaction nonce too far ahead. Expected <=" +
+            (currentNonce + MEMPOOL_MAX_NONCE_AHEAD) +
             ", got: " +
             tx.content.nonce
         validityData.data.valid = false

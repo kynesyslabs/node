@@ -144,7 +144,7 @@ as it is (its own entrypoint and user) and checks:
 
 | Scenario | Expected |
 | --- | --- |
-| Fresh database, correct genesis and pin | Boots; the six mainnet forks report activation height 0. |
+| Fresh database, correct genesis and pin | Boots; the mainnet forks report activation height 0. |
 | Fresh database, genesis one byte off | Exit 1; block 0 not written. |
 | Fresh database, no pin, production | Exit 1. |
 | Fresh database, malformed pin | Exit 1. |

@@ -2,9 +2,10 @@
  * Client read calls against a live devnet: a transaction a block keeps but
  * does not execute must read as failed, never included.
  *
- * Two transfers signed with the same nonce are both admitted (admission only
- * needs a nonce above the account's), so the block executes one and keeps
- * the other as failed with TX_NONCE_INVALID_LOW. Then:
+ * Two transfers signed with the same nonce are submitted to two different
+ * nodes (a node refuses a second pending tx for a nonce it already holds),
+ * so the merged block executes one and keeps the other as failed with
+ * TX_NONCE_INVALID_LOW. Then:
  *   - SDK broadcastAndWait resolves both, one included and one failed;
  *   - getTransactionStatus answers the same on two nodes, with the code and
  *     the height searched; the receiver gained only the executed amount;
@@ -52,21 +53,46 @@ const demos = new Demos()
 await demos.connect(NODE1_URL)
 await demos.connectWallet(readFileSync(IDENTITY_PATH, "utf8").trim())
 const sender = demos.getAddress()
+const demos2 = new Demos()
+await demos2.connect(NODE2_URL)
+await demos2.connectWallet(readFileSync(IDENTITY_PATH, "utf8").trim())
 
 const amount = BigInt(AMOUNT_OS)
-const receiverBefore = BigInt((await demos.getAddressInfo(RECEIVER_PUBKEY))?.balance ?? 0)
 
-// Both signed before either reaches the mempool, so both carry the same nonce.
-const txA = await demos.pay(RECEIVER_PUBKEY, amount)
-const txB = await demos.pay(RECEIVER_PUBKEY, amount * 2n)
+// Gossip can carry one transfer to the other node before that node admits
+// its own, which is then refused as a duplicate pending nonce and the pair
+// never meets in a block. That round is spent (the admitted transfer still
+// lands), so a fresh pair is signed with the next nonce and sent again.
+const PAIR_ATTEMPTS = 5
+let txA, txB, waited, states, receiverBefore
+for (let attempt = 1; attempt <= PAIR_ATTEMPTS; attempt++) {
+    receiverBefore = BigInt((await demos.getAddressInfo(RECEIVER_PUBKEY))?.balance ?? 0)
+    // Both signed before either reaches the mempool, so both carry the same nonce.
+    txA = await demos.pay(RECEIVER_PUBKEY, amount)
+    txB = await demos.pay(RECEIVER_PUBKEY, amount * 2n)
+    const valid = await Promise.all([DemosTransactions.confirm(txA, demos), DemosTransactions.confirm(txB, demos2)])
+    const clients = [demos, demos2]
+    const sent = await Promise.all(valid.map((v, i) => DemosTransactions.broadcast(v, clients[i])))
+    const refused = sent.map(r => /already pending/.test(JSON.stringify(r)))
+    if (refused.some(Boolean) && attempt < PAIR_ATTEMPTS) {
+        console.log(`[tx-status] attempt ${attempt}: one transfer reached the other node first; retrying with a fresh pair`)
+        await Promise.allSettled(
+            valid.map((v, i) => (refused[i] ? null : DemosTransactions.broadcastAndWait(v, clients[i], { timeoutMs: 120_000 }))),
+        )
+        for (let i = 0; i < 30 && (await demos.getAddressNonce(sender)) < txA.content.nonce; i++) {
+            await new Promise(r => setTimeout(r, 1000))
+        }
+        continue
+    }
+    // Both admitted: broadcastAndWait's own broadcast is answered as already
+    // held, and it waits for each outcome.
+    waited = await Promise.allSettled(
+        valid.map((v, i) => DemosTransactions.broadcastAndWait(v, clients[i], { timeoutMs: 120_000 })),
+    )
+    states = waited.map(r => (r.status === "fulfilled" ? r.value.status.state : `rejected: ${String(r.reason).slice(0, 200)}`))
+    break
+}
 check(txA.content.nonce === txB.content.nonce, "both transfers carry the same nonce", `${txA.content.nonce} / ${txB.content.nonce}`)
-
-const [validA, validB] = await Promise.all([DemosTransactions.confirm(txA, demos), DemosTransactions.confirm(txB, demos)])
-const waited = await Promise.allSettled([
-    DemosTransactions.broadcastAndWait(validA, demos, { timeoutMs: 120_000 }),
-    DemosTransactions.broadcastAndWait(validB, demos, { timeoutMs: 120_000 }),
-])
-const states = waited.map(r => (r.status === "fulfilled" ? r.value.status.state : `rejected: ${String(r.reason).slice(0, 200)}`))
 check(
     states.filter(s => s === "included").length === 1 && states.filter(s => s === "failed").length === 1,
     "SDK broadcastAndWait resolves one included and one failed",

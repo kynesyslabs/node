@@ -160,6 +160,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "nonceEnforcement",
     "signatureDomain",
     "editBinding",
+    "nonceIntegrity",
     "quorumParity",
     "committeeBinding",
     "commitLock",
