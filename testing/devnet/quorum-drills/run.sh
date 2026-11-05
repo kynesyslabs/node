@@ -93,7 +93,7 @@ esac
 # The halt and ride drills always run with gossip on, whatever the environment
 # says. With it off a restarted node never learns that the network is ahead:
 # a height claim above its own chain is refused unless it comes as a gossip
-# claim (Sync.ts:129-136, networkAheadVeto.ts:59), so the recovery result
+# claim (Sync.ts:133-143, networkAheadVeto.ts:59-72), so the recovery result
 # would measure that and not the halt. The other scenarios keep the harness
 # default (off; GOSSIP_ENABLED=true in the environment turns it on).
 case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) export GOSSIP_ENABLED=true ;; esac
