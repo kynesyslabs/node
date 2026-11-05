@@ -767,10 +767,15 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 	fi
 
 	# Suppressing errors if the database is not running
-	docker compose -f docker-compose.yml down >/dev/null 2>&1
+	if ! docker compose -f docker-compose.yml down >/dev/null 2>&1 && [[ "${CLEAN}" == "true" ]]; then
+		echo "❌ Could not stop the database container; the database was not wiped and nothing was migrated"
+		exit 1
+	fi
 	if [[ "${CLEAN}" == "true" ]]; then
-		rm -rf data_"${PG_PORT}" || rm -rf data_"${PG_PORT}"
-		mkdir data_"${PG_PORT}"
+		if ! { rm -rf data_"${PG_PORT}" || rm -rf data_"${PG_PORT}"; } || ! mkdir data_"${PG_PORT}"; then
+			echo "❌ Could not wipe ${PG_FOLDER}/data_${PG_PORT} (check ownership: ls -la ${PG_FOLDER}); nothing was migrated"
+			exit 1
+		fi
 	fi
 
 	# Finally starting the database
@@ -854,6 +859,18 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 			echo "❌ Failed to connect to PostgreSQL database"
 			exit 1
 		fi
+		# Only an EMPTY database gets migrated: if a wipe did not take effect, this
+		# would apply pending migrations to live data with no backup.
+		local tables
+		if ! tables="$(docker exec postgres_"${PG_PORT}" psql -U demosuser -d demos -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()")" || [[ ! "${tables}" =~ ^[0-9]+$ ]]; then
+			echo "❌ Could not check that the database is empty; not running migration:run"
+			exit 1
+		fi
+		if [[ "${tables}" -ne 0 ]]; then
+			echo "❌ The database still has ${tables} table(s) in the public schema, so the wipe did not take effect"
+			echo "   Not running migration:run. Back up and migrate by hand: docs/runbooks/database-migrations.md"
+			exit 1
+		fi
 		echo "🗄️  Creating the schema on the empty database (migration:run)"
 		if ! bun run migration:run; then
 			echo "❌ Error: migration:run failed on the empty database"
@@ -883,12 +900,17 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 		# Stop the database
 		echo "Stopping the database"
 		cd postgres_${PG_PORT} || exit
-		docker compose -f docker-compose.yml down
+		docker compose -f docker-compose.yml down || {
+			echo "❌ Could not stop the database container; nothing was wiped or migrated"
+			exit 1
+		}
 
 		# Remove the database folder
 		echo "Removing the database folder"
-		rm -rf data_* || sudo rm -rf data_*
-		mkdir data_"${PG_PORT}"
+		if ! { rm -rf data_* || sudo rm -rf data_*; } || ! mkdir data_"${PG_PORT}"; then
+			echo "❌ Could not wipe the database folder; nothing was migrated"
+			exit 1
+		fi
 
 		# Start the database
 		echo "Starting the database"

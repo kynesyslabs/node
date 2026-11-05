@@ -390,11 +390,11 @@ if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
     # still need explicit removal below because compose only drops them
     # when `--volumes` is paired with full project teardown AND no other
     # containers reference them.
-    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --volumes --remove-orphans || true
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --volumes --remove-orphans || { echo "ERROR: --clean could not stop the stack; nothing was wiped or migrated." >&2; exit 1; }
     for vol in "${CLEAN_VOLUMES[@]}"; do
         if docker volume inspect "$vol" >/dev/null 2>&1; then
             echo "+ --clean: removing volume $vol"
-            docker volume rm "$vol" || true
+            docker volume rm "$vol" || { echo "ERROR: --clean could not remove volume $vol; nothing was migrated. Stop whatever uses it and retry." >&2; exit 1; }
         fi
     done
 fi
@@ -542,6 +542,18 @@ fi
 if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
     echo "+ --clean: creating the schema on the empty database (migration:run)"
     docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} up -d --wait postgres
+    # Only an EMPTY database gets migrated. If the wipe above did not take
+    # effect, this would apply pending migrations to live data with no backup.
+    TABLE_COUNT="$(docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"')" || TABLE_COUNT=""
+    if [[ ! "$TABLE_COUNT" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: --clean could not check that the database is empty; not running migration:run." >&2
+        exit 1
+    fi
+    if [[ "$TABLE_COUNT" -ne 0 ]]; then
+        echo "ERROR: --clean: the database still has $TABLE_COUNT table(s) in the public schema, so the wipe did not take effect." >&2
+        echo "       Not running migration:run. Back up and migrate by hand: docs/runbooks/database-migrations.md" >&2
+        exit 1
+    fi
     docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} run --rm --no-deps node bun run migration:run
 fi
 

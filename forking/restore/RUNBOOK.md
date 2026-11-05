@@ -339,6 +339,9 @@ cd ..
 docker exec postgres_<PG_PORT> pg_isready -h 127.0.0.1 -U demosuser -d demos
 sleep 5
 docker exec postgres_<PG_PORT> pg_isready -h 127.0.0.1 -U demosuser -d demos
+# the database must be empty before you migrate: this prints 0. If any command above
+# failed (rm, down) or this prints another number, the wipe did not work: stop here
+docker exec postgres_<PG_PORT> psql -U demosuser -d demos -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"
 # migration:run reads PG_PORT from the environment or .env; on a port other than
 # the default (5332), set it to this directory's <PG_PORT> or it migrates the wrong database
 PG_PORT=<PG_PORT> bun run migration:run

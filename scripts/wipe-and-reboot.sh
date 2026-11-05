@@ -124,7 +124,11 @@ fi
 # 4. Wipe volumes
 # -----------------------------------------------------------------------------
 echo "[3/6] removing data volumes (${VOLUMES[*]})..."
-docker volume rm "${VOLUMES[@]}" 2>/dev/null || true
+for vol in "${VOLUMES[@]}"; do
+    if docker volume inspect "$vol" >/dev/null 2>&1; then
+        docker volume rm "$vol" >/dev/null || { echo "  ERROR: could not remove volume $vol; stopping before any migration. Stop whatever uses it and retry."; exit 1; }
+    fi
+done
 
 remaining="$(docker volume ls --format '{{.Name}}' | grep -E "$VOLUME_RE" || true)"
 if [[ "$IS_DEVNET" -eq 0 ]]; then

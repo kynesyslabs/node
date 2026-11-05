@@ -57,27 +57,48 @@ docker compose run --rm --no-deps node bun run migration:show
 
 Do it on **one** validator first, then the rest. Never on all at once.
 
-1. **Back up.** Stop the node, then dump the database:
+1. **Back up.** Stop the node, then dump the database. The dump holds the
+   whole chain database, so write it into a private directory and make the
+   file private from the start (`umask 077` before the redirect creates it
+   mode 600, not 644):
 
    ```bash
-   docker compose exec -T postgres pg_dump -U "${PG_USER:-demosuser}" -Fc "${PG_DATABASE:-demos}" > demos-$(date +%Y%m%d-%H%M).dump
+   mkdir -p ~/demos-backups && chmod 700 ~/demos-backups
+   umask 077
+   docker compose exec -T postgres pg_dump -U "${PG_USER:-demosuser}" -Fc "${PG_DATABASE:-demos}" > ~/demos-backups/demos-$(date +%Y%m%d-%H%M).dump
    ```
 
    That form is for the `postgres` service of the Docker stack
-   (`docker-compose.yml` in the checkout root). `-T` keeps Compose from
-   allocating a terminal, which would corrupt the binary dump. For the Postgres
-   the launcher starts by itself (container `postgres_<PG_PORT>`, 5332 by
-   default), use `docker exec postgres_<PG_PORT> pg_dump -U demosuser -Fc demos > <file>`.
+   (`docker-compose.yml` in the checkout root). `-T` is required: without it
+   Compose allocates a terminal, which corrupts the redirected binary dump. For
+   the Postgres the launcher starts by itself (container
+   `postgres_<PG_PORT>`, 5332 by default), use
+   `docker exec postgres_<PG_PORT> pg_dump -U demosuser -Fc demos > <file>`
+   (no `-t` either, for the same reason).
    For a bare-metal or external database, dump from the host with the `PG_HOST`,
    `PG_PORT`, `PG_USER` and `PG_DATABASE` of the node config. Keep the password
    off the command line: put it in `~/.pgpass` (mode 600) or point `PGPASSFILE`
    at a file:
 
    ```bash
-   pg_dump -h <PG_HOST> -p <PG_PORT> -U <PG_USER> -Fc <PG_DATABASE> > demos-$(date +%Y%m%d-%H%M).dump
+   umask 077
+   pg_dump -h <PG_HOST> -p <PG_PORT> -U <PG_USER> -Fc <PG_DATABASE> > ~/demos-backups/demos-$(date +%Y%m%d-%H%M).dump
    ```
 
-   Keep the file off the host. Check it is not empty (`pg_restore -l <file>`).
+   `umask` applies to the current shell only: run it in the same shell as the
+   dump. Keep a copy off the host.
+
+   **Check the dump before you migrate.** A failed `pg_dump` still leaves the
+   redirect target behind, possibly empty or cut short. Both must pass:
+
+   ```bash
+   test -s ~/demos-backups/<file>.dump && pg_restore --list ~/demos-backups/<file>.dump > /dev/null && echo dump OK
+   ```
+
+   `test -s` fails on a zero-byte file; `pg_restore --list` fails on a file that
+   is not a complete custom-format archive. If either fails, take the dump again
+   and do not go on to step 2. With no `pg_restore` on the host, run it in the
+   container: `docker compose exec -T postgres pg_restore --list < <file>`.
 
 2. **Apply on one validator.** With the new release deployed and the node
    stopped:
@@ -163,6 +184,13 @@ per wipe, before the node starts:
 - bare-metal `./run -c true` (clean start)
 - bare-metal `./run -b true` (restore): it exports the balances from the old
   database, wipes Postgres, then creates the schema on the empty one
+
+They fail closed. If stopping the stack or removing the volume or data directory
+fails, they stop with an error before anything is migrated. Right before
+`migration:run` they also check that the database has no tables in the public
+schema, and refuse with a message otherwise (a wipe that did not take effect
+would otherwise migrate live data with no backup). If you see that refusal, the
+database was not wiped: back it up and migrate by hand (procedure above).
 
 A plain start of the node never migrates. The one exception is the devnet
 harness (`testing/devnet/run-devnet`): it runs `migration:run` on every start,
