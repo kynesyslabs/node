@@ -162,7 +162,7 @@ printf '\n' >> "${FIX}/snapshot-ws/manifest.json"
 
 genesis_hash() { # $1 genesis file -> JSON from scripts/genesis-hash.ts (log lines dropped)
     local out
-    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/manifest" --json 2>>"${RUNLOG}")
+    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/image/snapshot" --json 2>>"${RUNLOG}")
     local rc=$?
     echo "${out}" | sed -n '/^{/,$p'
     return ${rc}
