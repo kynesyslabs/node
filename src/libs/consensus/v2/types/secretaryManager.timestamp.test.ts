@@ -5,6 +5,7 @@
  */
 
 import { beforeEach, describe, expect, jest, test } from "bun:test"
+import { mockSecretaryDeps } from "./secretaryManager.testMocks"
 
 const OUR_KEY = "0x" + "aa".repeat(32)
 const SECRETARY = "0x" + "11".repeat(32)
@@ -18,27 +19,10 @@ const sharedState: Record<string, any> = {
     forkConfig: {},
 }
 
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warning: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
-jest.mock("src/utilities/sharedState", () => ({
-    __esModule: true,
-    default: sharedState,
-    getSharedState: sharedState,
-}))
+mockSecretaryDeps(sharedState)
 jest.mock("src/libs/utils/calibrateTime", () => ({
     getNetworkTimestamp: () => NOW,
 }))
-jest.mock("src/libs/peer", () => ({ Peer: class {}, PeerManager: { getInstance: () => ({}) } }))
-jest.mock("src/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
 
 const { default: SecretaryManager } = await import("./secretaryManager")
 

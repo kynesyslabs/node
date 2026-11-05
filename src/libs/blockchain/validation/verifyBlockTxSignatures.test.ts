@@ -67,7 +67,16 @@ describe("verifyBlockTxSignatures", () => {
             from_ed25519_address: signer.publicKeyHex,
             to: "0x" + "ef".repeat(32),
             amount: 1,
+            data: ["native", {}],
+            gcr_edits: [],
             nonce,
+            timestamp: 1_760_000_000_000 + nonce,
+            transaction_fee: {
+                network_fee: 0,
+                rpc_fee: 0,
+                additional_fee: 0,
+                rpc_address: null,
+            },
         }
         // osDenomination is active from genesis in the default config, so the
         // hash commits to the OS-string serialization.
@@ -373,7 +382,19 @@ describe("verifyBlockTxSignatures", () => {
             )
 
             expect(verdict.valid).toBe(false)
-            expect(verdict.reason).toContain("unsigned")
+            // As the consensus step writes it, without a fee the insert
+            // could read; with one it is still refused as unsigned.
+            expect(verdict.reason).toContain("transaction_fee")
+            const withFee = {
+                ...local,
+                content: {
+                    ...local.content,
+                    transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0, rpc_address: null },
+                },
+            } as unknown as Transaction
+            const unsigned = await verifyBlockTxSignatures(blockOf(ACTIVATION, [withFee]), [withFee])
+            expect(unsigned.valid).toBe(false)
+            expect(unsigned.reason).toContain("unsigned")
         })
 
         it("does not exempt a standard transaction that merely calls itself a batch", async () => {

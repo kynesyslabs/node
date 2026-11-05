@@ -4,6 +4,8 @@ import { EntityManager, Repository } from "typeorm"
 import ensureGCRForUser from "../ensureGCRForUser"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment"
+import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState"
+import { GLOBAL_TREE_CAPACITY, GLOBAL_TREE_ID } from "@/features/zk/merkle/globalTree"
 import {
     IdentityCommitmentPayload,
     IdentityAttestationPayload,
@@ -11,6 +13,15 @@ import {
 import Datasource from "@/model/datasource"
 import { Config } from "src/config"
 import log from "@/utilities/logger"
+import {
+    NUL_NOT_STORABLE,
+    fitsIndexKey,
+    isBigintStorable,
+    isTextStorable,
+} from "@/libs/blockchain/validation/postgresStorable"
+import { BN254_FIELD_ORDER } from "@/features/zk/proof/publicSignals"
+
+export const PROVIDER_MAX_BYTES = 64
 
 /**
  * Process ZK commitment addition
@@ -39,16 +50,23 @@ export async function applyZkCommitmentAdd(
         }
     }
 
-    // Validate format: either 64-char hex (with optional 0x prefix) or numeric string
+    // The tree takes a field element, written as 64 hex digits or in
+    // canonical decimal, the form the SDK writes. Any other spelling of an
+    // element would be a second key for the same leaf, and digits without
+    // bound would be a primary key Postgres cannot index, failing the block's
+    // commit on every node.
     const hexPattern = /^(0x)?[0-9a-fA-F]{64}$/
     const isValidHex = hexPattern.test(payload.commitment_hash)
-    const isValidNumber =
-        /^\d+$/.test(payload.commitment_hash) && payload.commitment_hash.length > 0
+    const isValidNumber = /^(0|[1-9]\d{0,77})$/.test(payload.commitment_hash)
+    let element: bigint | null = null
+    if (isValidHex) element = BigInt("0x" + payload.commitment_hash.replace(/^0x/, ""))
+    else if (isValidNumber) element = BigInt(payload.commitment_hash)
 
-    if (!isValidHex && !isValidNumber) {
+    if (element === null || element >= BN254_FIELD_ORDER) {
         return {
             success: false,
-            message: "Commitment hash must be 64-char hex or numeric string",
+            message:
+                "Commitment hash must be a BN254 field element: 64 hex digits or canonical decimal",
         }
     }
 
@@ -79,10 +97,40 @@ export async function applyZkCommitmentAdd(
         }
     }
 
+    // The row is inserted in the block's database transaction, where a value
+    // Postgres refuses would fail the block on every node, not this one.
+    if (!isTextStorable(payload.provider)) {
+        return { success: false, message: `Provider ${NUL_NOT_STORABLE}` }
+    }
+    // Indexed. The SDK sends the provider's name ("github", "discord").
+    if (!fitsIndexKey(payload.provider, PROVIDER_MAX_BYTES)) {
+        return { success: false, message: `Provider is longer than ${PROVIDER_MAX_BYTES} bytes` }
+    }
+    if (!isBigintStorable(payload.timestamp)) {
+        return { success: false, message: "Timestamp must be a whole number in the bigint range" }
+    }
+
     // Get datasource for IdentityCommitment repository
     const db = await Datasource.getInstance()
     const dataSource = db.getDataSource()
     const commitmentRepo = dataSource.getRepository(IdentityCommitment)
+
+    // The block commit inserts every commitment it carries into the tree, and
+    // one past its capacity throws there, failing the block on every node.
+    // Counted as that insert counts: the leaves the tree held when this block
+    // began, plus the commitments earlier transactions of the block claimed.
+    // Every zk edit of a block applies in one group, in block order, so each
+    // node counts the same claims.
+    const tree = await dataSource
+        .getRepository(MerkleTreeState)
+        .findOne({ where: { treeId: GLOBAL_TREE_ID } })
+    const pending = entities?.zkCommitments?.size ?? 0
+    if ((tree?.leafCount ?? 0) + pending >= GLOBAL_TREE_CAPACITY) {
+        return {
+            success: false,
+            message: `Identity commitment tree is full (${GLOBAL_TREE_CAPACITY} leaves)`,
+        }
+    }
 
     if (simulate) {
         return {

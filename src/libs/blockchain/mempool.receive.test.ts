@@ -95,7 +95,7 @@ const tx = (hash: string, referenceBlock: number, status = "pending") =>
         status,
         reference_block: referenceBlock,
         blockNumber: 100,
-        content: { type: "demoswork", gcr_edits: [] },
+        content: { type: "demoswork", gcr_edits: [], timestamp: 1_700_000_000_000, nonce: 7 },
     }) as any
 
 describe("Mempool.receive admission", () => {
@@ -154,6 +154,26 @@ describe("Mempool.receive admission", () => {
         expect(insertedRows[0].status).toBe(TRANSACTION_STATUS.PENDING)
     })
 
+    it("stores the signed timestamp and nonce, not the ones the peer put beside them", async () => {
+        const relayed = { ...tx("0xa", 100), timestamp: "bad", nonce: "bad" }
+        await Mempool.receive([relayed])
+        expect(insertedRows).toHaveLength(1)
+        expect(insertedRows[0].timestamp).toBe(1_700_000_000_000)
+        expect(insertedRows[0].nonce).toBe(7)
+    })
+
+    it("drops a tx whose unsigned integer columns Postgres cannot store and keeps the rest", async () => {
+        // One such row would fail the insert of every tx merged with it.
+        await Mempool.receive([
+            { ...tx("0xblock", 100), blockNumber: "bad" },
+            { ...tx("0xnull", 100), blockNumber: null },
+            tx("0xfraction", 99.5),
+            { ...tx("0xhuge", 100), blockNumber: 2 ** 31 },
+            tx("0xa", 100),
+        ])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xa"])
+    })
+
     it("skips txs already in the mempool without querying the chain for them", async () => {
         mempoolRows = [{ hash: "0xheld" }]
         await Mempool.receive([tx("0xheld", 100), tx("0xnew", 100)])
@@ -167,6 +187,15 @@ describe("Mempool.receive admission", () => {
         const res = await Mempool.receive([tx("0xheld", 100)])
         expect(res.success).toBe(true)
         expect(insertedRows).toHaveLength(0)
+    })
+
+    it("drops a tx admission would refuse before the chain is queried by its hash", async () => {
+        // Postgres refuses U+0000 in the lookup's parameter, which would fail
+        // the whole merge rather than this tx.
+        await Mempool.receive([tx("0xbad\u0000", 100), tx("0xnew", 100)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xnew"])
+        const queried = getExistingTransactionHashes.mock.calls[0][0] as string[]
+        expect(queried).toEqual(["0xnew"])
     })
 
     it("rejects a tx whose edits the node would not generate", async () => {
