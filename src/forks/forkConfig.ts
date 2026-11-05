@@ -255,6 +255,28 @@ export type CommitLockConfig = BaseForkConfig
 export type FinalityProofsConfig = BaseForkConfig
 
 /**
+ * `identityCarryover` fork: a chain whose genesis carries user data over
+ * from another network (identities, points, referrals) without its money.
+ *
+ * At genesis (active at height 0) the snapshot import refuses any account
+ * with a non-zero balance and a manifest whose `balance_sum` is not 0, and
+ * a genesis validator list must equal the snapshot's `validators.jsonl`.
+ * The import also records every identity it carried over.
+ *
+ * At apply, from the activation height:
+ *  - a first-link award is never paid for an identity the genesis import
+ *    carried: its points came over with the account it was linked to;
+ *  - a web2 unlink names one platform account by `userId`; a request that
+ *    names only a username is resolved to the single link carrying it.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before. A mainnet genesis
+ * sets 0. No payload beyond the base.
+ */
+export type IdentityCarryoverConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -294,6 +316,7 @@ export type ForkConfig =
     | CommitteeBindingConfig
     | CommitLockConfig
     | FinalityProofsConfig
+    | IdentityCarryoverConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -315,6 +338,7 @@ export type ForkName =
     | "committeeBinding"
     | "commitLock"
     | "finalityProofs"
+    | "identityCarryover"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -335,6 +359,7 @@ export interface ForkConfigByName {
     committeeBinding: CommitteeBindingConfig
     commitLock: CommitLockConfig
     finalityProofs: FinalityProofsConfig
+    identityCarryover: IdentityCarryoverConfig
 }
 
 /**
@@ -514,6 +539,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A block commits its height, the result root of its parent's transactions and " +
             "the hash of its parent's validator set, so finality can be proven offline.",
     },
+    identityCarryover: {
+        // Dormant by default: it changes which first-link awards a block pays
+        // and which links an unlink removes, and a missing genesis entry
+        // hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Genesis imports user data without balances, imported identities pay no " +
+            "first-link award, and a web2 unlink removes one platform account by userId.",
+    },
 }
 
 /**
@@ -538,5 +572,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         committeeBinding: { ...DEFAULT_FORK_CONFIG.committeeBinding },
         commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
+        identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
     }
 }

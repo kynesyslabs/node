@@ -14,6 +14,8 @@ import { applyForksAtGenesis } from "src/libs/blockchain/genesis/applyForksAtGen
 import { mergeGenesisBalances } from "src/libs/blockchain/genesis/mergeGenesisBalances"
 import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
 import { markStorageProgramsDirty } from "./finality/storageRoot"
+import { assertCarryoverSnapshot } from "src/libs/blockchain/genesis/carryover"
+import { identityCarryoverActiveAtGenesis } from "@/forks/identityCarryoverGate"
 
 /**
  * `checkHash` sees block 0's hash before anything is written and may throw to
@@ -78,11 +80,15 @@ export async function generateGenesisBlock(
         // would refuse to retry).
         const snapshotHasValidators =
             snapshot.manifest.files["validators.jsonl"] !== undefined
+        const carryover = identityCarryoverActiveAtGenesis()
+        if (carryover) {
+            await assertCarryoverSnapshot(snapshot, genesisData.validators)
+        }
         // The restore writes gcr_storageprogram; a rolled-back restore
         // changes nothing, so only a commit needs the second mark.
         markStorageProgramsDirty()
         await dataSource.transaction(async em => {
-            await restoreSnapshot(em, snapshot)
+            await restoreSnapshot(em, snapshot, { carryover })
             // Overlay genesisData.balances on top of the snapshot rows.
             // Historical behavior silently dropped balances when a
             // snapshot was present — operator-written top-ups (e.g.
