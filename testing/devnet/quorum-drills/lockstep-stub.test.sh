@@ -153,13 +153,17 @@ fn_src() { # $1 function name: its definition, from `name() {` to the first line
 for f in psql_node pg_limit_preflight pg_limit_gate; do source <(fn_src "${f}"); done
 source <(grep -E '^(DB_TIMEOUT_S|PG_LIMITS)=' "${RUN_SH}")
 source <(region 'block_rows() {' 'phase_row() {')
-dc() { # ps -aq node-<n>: cid<n>, as the fake docker answers; anything else: fakepg (postgres)
-    case "$1 ${2:-}" in "ps -aq") [ -e "${FAKE:-}/nocontainer.${3#node-}" ] || echo "cid${3#node-}" ;; *) echo fakepg ;; esac
-}
+# run.sh's own dc: every compose call goes to the fake docker
+source <(grep -E '^dc\(\) ' "${RUN_SH}")
+RUN_DIR="${WORK}/run"; PROJECT=qdrill-stub
 mkdir -p "${WORK}/bin"
 # docker exec ... psql: FAKE_DB is rows (default), hang, stmt (the server cancels the
 # query) or toomany (the server is out of connections); SHOW max_connections
-# answers FAKE_MAXCONN (default 100, the postgres default).
+# answers FAKE_MAXCONN (default 100, the postgres default). An exec with an empty
+# container fails, as docker's does.
+# The postgres lookup, `compose ... ps -q postgres`, answers fakepg; FAKE_PGPS
+# makes it hang (sleep 60 s), hang-once (only the first lookup of a case), empty
+# (no running container) or fail (a daemon error).
 # The node logs: `compose ... ps -aq node-<n>` answers cid<n> (nothing when
 # FAKE/nocontainer.<n> exists), `logs ... cid<n>` prints FAKE/nodelog.<n> (its
 # last lines with --tail; no file: an empty log), after sleeping the seconds in
@@ -167,9 +171,21 @@ mkdir -p "${WORK}/bin"
 cat > "${WORK}/bin/docker" <<'FAKEDOCKER'
 #!/usr/bin/env bash
 echo "$*" >> "${FAKE_DOCKER_LOG}"
+case "$*" in "exec "*"  psql "*) echo "Error response from daemon: No such container: " >&2; exit 1 ;; esac
 case "$*" in *"SHOW max_connections"*) echo "${FAKE_MAXCONN:-100}"; exit 0 ;; esac
 case "$1" in
-    compose) case "$*" in *" ps -aq node-"*) n=${@: -1}; n=${n#node-}; [ -e "${FAKE}/nocontainer.${n}" ] || echo "cid${n}"; exit 0 ;; esac ;;
+    compose)
+        case "$*" in
+            *" ps -aq node-"*) n=${@: -1}; n=${n#node-}; [ -e "${FAKE}/nocontainer.${n}" ] || echo "cid${n}"; exit 0 ;;
+            *" ps -q postgres")
+                case "${FAKE_PGPS:-}" in
+                    hang) sleep 60 ;;
+                    hang-once) [ -e "${FAKE}/pgps.seen" ] || { touch "${FAKE}/pgps.seen"; sleep 60; } ;;
+                    empty) exit 0 ;;
+                    fail) echo "Error response from daemon: stub: compose ps failed" >&2; exit 1 ;;
+                esac
+                echo fakepg; exit 0 ;;
+        esac ;;
     logs)
         n=${@: -1}; n=${n#cid}; tail=all
         [ "$2" = --tail ] && tail=$3
@@ -235,7 +251,6 @@ echo "== postgres connection limit: 'too many clients' never ends in a pass or a
 # The gate's real log reads (and grep_logs, the reader it used up to ef47fe4c19)
 # against the fake docker: a case has 13 started nodes whose logs are FAKE/nodelog.<n>
 for f in pg_gate_unreadable grep_logs teardown; do source <(fn_src "${f}"); done
-RUN_DIR="${WORK}/run"; PROJECT=qdrill-stub
 write_verdict() { echo "VERDICT ${RESULT}: ${DETAIL}"; }
 gate_case() { # $1 name, $2 the result before the gate
     new_case "$1" 25; N=13; STARTED=(); for i in $(seq 1 13); do STARTED[i]=1; done
