@@ -242,8 +242,12 @@ that adds a migration.
 ## Test harnesses
 
 `testing/devnet/run-devnet` (used by the devnet, `consensus-race` and
-`quorum-drills`) and `testing/l2ps-messaging/e2e.sh` run `migration:run`
-before they start the node, because their databases are created empty. The
+`quorum-drills` on a devnet-style image) and `testing/l2ps-messaging/e2e.sh`
+run `migration:run` before they start the node, because their databases are
+created empty. On a release image `quorum-drills` has no `run-devnet`: the
+nodes run the image's own entrypoint, so `quorum-drills/run.sh` must migrate
+each node database itself, in a one-off container of the image, before any
+node starts. The
 devnet image is `oven/bun` with no Node, so `run-devnet` runs the TypeORM CLI
 through bun directly (`bun -r tsconfig-paths/register
 ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts`)
