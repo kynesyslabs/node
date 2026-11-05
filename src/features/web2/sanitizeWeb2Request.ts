@@ -37,6 +37,18 @@ export function stripSensitiveWeb2Headers(
     return Object.keys(sanitized).length > 0 ? sanitized : undefined
 }
 
+/**
+ * Headers for the broadcast-time replay of a signed `web2Request` tx. The
+ * replay must not carry the caller's credentials (they were only meant for the
+ * attested RPC call), so sensitive keys are dropped. Always returns an object:
+ * the proxy iterates the map and would throw on `undefined`.
+ */
+export function headersForReplay(
+    headers?: IWeb2Request["raw"]["headers"],
+): Web2Headers {
+    return (stripSensitiveWeb2Headers(headers) ?? {}) as Web2Headers
+}
+
 export function redactSensitiveWeb2Headers(
     headers?: IWeb2Request["raw"]["headers"],
 ): IWeb2Request["raw"]["headers"] {
