@@ -29,7 +29,7 @@ Linux is the supported and tested target. Ubuntu 22.04 LTS or newer is recommend
 
 ### Clock
 
-The node refuses to start without a trusted clock: at boot it needs two NTP answers (from `pool.ntp.org` and `time.google.com`) that agree, so the host must allow **outbound UDP 123**. Keep the host clock synchronised as well. On Ubuntu `systemd-timesyncd` does this by default; check it:
+The node refuses to start without a trusted clock: at boot it needs two NTP readings in a row that agree within 2 seconds. Both come from `pool.ntp.org`; `time.google.com`, `time.windows.com` and `time.apple.com` are asked only when it does not answer. The second reading catches a bad answer, it is not a second independent source, so the host's NTP path must be one nobody can tamper with. The host must allow **outbound UDP 123**. Keep the host clock synchronised as well. On Ubuntu `systemd-timesyncd` does this by default; check it:
 
 ```bash
 timedatectl            # "System clock synchronized: yes" and "NTP service: active"
@@ -222,7 +222,7 @@ Leave `PG_HOST=postgres` and `TLSNOTARY_HOST=tlsnotary` exactly as shipped — t
 
 ### Joining the network — required steps before real-world use
 
-A fresh node will run as an isolated single-validator chain by default. To participate in the actual Demos testnet/mainnet, you must do **three things**:
+A fresh node will run as an isolated single-validator chain by default. To participate in the actual Demos testnet/mainnet, you must do **three things** before the node's first start:
 
 **1. Set `EXPOSED_URL` to your reachable address.**
 
@@ -255,10 +255,9 @@ docker run --rm \
   -v demos_node_state:/state \
   -v /tmp/demos_peerlist.json:/seed/demos_peerlist.json:ro \
   alpine sh -c 'cp /seed/demos_peerlist.json /state/ && chown 1000:1000 /state /state/demos_peerlist.json'
-
-# Now start the stack (a validator on a released image: docker compose up -d --no-build)
-docker compose up
 ```
+
+Do not start the node yet: it needs the genesis pins of step 3 first.
 
 Replace the public keys and `bootstrap1.demos.network` etc. with the current bootstrap nodes from the team. The node will merge any peers it learns from these into the file as it runs.
 
@@ -298,6 +297,8 @@ services:
 ```
 
 The node also remembers the fork schedule it last ran with. A restart whose `data/genesis.json` adds, moves or removes a fork at or below the current height plus 50 blocks is refused, and the refusal names the change. If every operator agreed to that exact schedule, restart once with `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST` set to the digest the refusal prints. See `docs/design/genesis-enforcement.md`.
+
+With all three in place, start the node. A validator runs `./scripts/node-doctor --production` first and starts only when it passes (steps 4 and 5 of the release-image install above); a source build starts with `./run --docker -d`.
 
 ### Network Exposure
 
@@ -397,11 +398,19 @@ docker volume inspect demos_node_state
 Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up the whole `demos_node_state` volume, encrypted, and keep the backup off this host:
 
 ```bash
-docker compose stop node
-docker run --rm -v demos_node_state:/src:ro alpine tar czf - -C /src . \
-  | gpg --symmetric --cipher-algo AES256 -o "node-state-$(date +%F).tar.gz.gpg"
-docker compose up -d --no-build    # a source build: ./run --docker -d
+out="node-state-$(date +%F-%H%M%S).tar.gz.gpg"
+if docker compose stop node; then
+  ( set -o pipefail
+    docker run --rm -v demos_node_state:/src:ro alpine tar czf - -C /src . \
+      | gpg --symmetric --cipher-algo AES256 -o "$out"
+  ) || { echo "backup FAILED; removing $out" >&2; rm -f "$out"; }
+  docker compose up -d --no-build    # a source build: ./run --docker -d
+else
+  echo "the node did not stop; no backup taken" >&2
+fi
 ```
+
+A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup.
 
 `gpg` asks for a passphrase; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
 
