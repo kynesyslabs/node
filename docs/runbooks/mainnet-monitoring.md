@@ -147,8 +147,15 @@ Only metrics the node exports today are used.
    `monitoring/docker-compose.yml` has no `127.0.0.1:` prefix, unlike
    Alertmanager). `--web.enable-admin-api` opens unauthenticated delete,
    snapshot and tombstone-cleaning APIs to anyone who can reach that port. So
-   **before enabling the flag**, make port 9091 loopback-only or block it with
-   a firewall, and **remove the flag again as soon as the series is deleted**.
+   **before enabling the flag**, bind the port to loopback: in the `ports:` of
+   the `prometheus` service in `monitoring/docker-compose.yml`, change
+   `"${PROMETHEUS_PORT:-9091}:9090"` to
+   `"127.0.0.1:${PROMETHEUS_PORT:-9091}:9090"` (apply it in the same
+   `up -d prometheus` as the flag). Do not rely on a firewall rule such as
+   `ufw deny 9091`: Docker publishes ports through its own iptables rules,
+   which ufw and plain INPUT rules do not filter, so the port would stay open
+   unless the rule is in the `DOCKER-USER` chain. **Remove the flag again as
+   soon as the series is deleted** (the loopback binding can stay).
    - Enable: add `- --web.enable-admin-api` to the `command:` list of the
      `prometheus` service in `monitoring/docker-compose.yml` (next to
      `--web.enable-lifecycle`), then run
@@ -173,7 +180,9 @@ Only metrics the node exports today are used.
    The id is also printed by `amtool silence add` in step 2. A silence is
    expired, not deleted: it stays visible as expired.
 5. If the series is not deleted, the alert expires by itself 7 days after the
-   last event; leave the silence in place until then.
+   last event; leave the silence in place until then. A second double-sign on
+   that validator during those 7 days stays silenced (no page), so watch the
+   node logs and the dashboard in that window.
 
 The latch lives only in the Prometheus data. Retention must be at least 7 days
 (`PROMETHEUS_RETENTION`, 15 days by default) and the Prometheus data volume

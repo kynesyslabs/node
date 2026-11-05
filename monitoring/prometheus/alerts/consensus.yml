@@ -101,8 +101,10 @@ groups:
   #      the recorded series for that instance. This needs the Prometheus admin API,
   #      which is NOT enabled by default: add --web.enable-admin-api to the prometheus
   #      command: list and run `docker compose up -d prometheus`. Prometheus is published
-  #      on all interfaces without authentication, so make port 9091 loopback-only or
-  #      firewalled BEFORE enabling the flag, and remove the flag afterwards.
+  #      on all interfaces without authentication, so BEFORE enabling the flag change the
+  #      port mapping in monitoring/docker-compose.yml from "${PROMETHEUS_PORT:-9091}:9090"
+  #      to "127.0.0.1:${PROMETHEUS_PORT:-9091}:9090". A ufw/INPUT rule does not filter
+  #      Docker-published ports (only DOCKER-USER does). Remove the flag afterwards.
   #      e.g. curl -g -X POST http://127.0.0.1:9091/api/v1/admin/tsdb/delete_series
   #      --data-urlencode 'match[]=demos:conflicting_block:increase10m{instance="validator-2"}'
   #      The counter itself is left alone, so the evidence stays in the TSDB.
