@@ -130,7 +130,7 @@ async function main() {
         )
         console.error("The new identity system uses BIP39 mnemonic phrases.")
         console.error(
-            "Use 'bun run keygen' for old format, or regenerate identity with new system.",
+            "Move the old file away and run 'bun run keygen' to create a mnemonic identity.",
         )
         process.exit(1)
     }
