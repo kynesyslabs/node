@@ -45,10 +45,10 @@ export function safeBigInt(
 /**
  * Sum `staked_amount` across every validator active at `snapshotBlock`.
  *
- * Re-throws on `GCR.getGCRValidatorsAtBlock` failure. Callers that need
- * a deterministic on-chain fallback should wrap this in try/catch and
- * substitute 0n on error. Callers serving an RPC view should let the
- * exception surface so the operator sees the problem.
+ * A failed validator query does not throw: `GCR.getGCRValidatorsAtBlock`
+ * answers it with [], so the weight comes out 0n, the same value the
+ * on-chain tally falls back to on error. Only a failure to get the
+ * datasource throws.
  */
 export async function computeSnapshotWeight(
     snapshotBlock: number,
