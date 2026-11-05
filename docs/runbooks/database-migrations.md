@@ -101,8 +101,16 @@ dump must be re-synced from peers.
 
 A database with no tables has no schema until `bun run migration:run` runs
 once (the baseline migration creates it). Nothing to lose there, so no backup is
-needed. The launchers do it for you only after they empty the database:
-`./run --docker --clean`, `./run --docker --devnet --clean`,
-`./scripts/wipe-and-reboot.sh` and the bare-metal `./run --clean`. For a first
-install on a new host, run `bun run migration:run` yourself before the first
-start.
+needed. The launchers do it for you only after they empty the database, once
+per wipe, before the node starts:
+
+- `./run --docker --clean` and `./run --docker --devnet --clean`
+- `./scripts/wipe-and-reboot.sh`
+- bare-metal `./run -c true` (clean start)
+- bare-metal `./run -b true` (restore): it exports the balances from the old
+  database, wipes Postgres, then creates the schema on the empty one
+
+A plain start never migrates. Anything else that empties the database
+(`scripts/start_db -c`, `postgres/clean.sh`, deleting `data_*` or the Docker
+volume by hand) does not either: run `bun run migration:run` yourself before
+the node starts, as you do for a first install on a new host.

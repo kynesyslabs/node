@@ -766,6 +766,8 @@ cd postgres_5332
 ./start.sh
 ```
 
+`clean.sh` empties the database and the node does not create the schema at boot: run `bun run migration:run` from the node checkout before starting the node (`./run -c true` does it for you; see [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md)).
+
 **Missing dependencies**
 
 ```bash
