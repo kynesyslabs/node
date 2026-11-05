@@ -94,20 +94,6 @@ export async function createBlock(
         blockTimestamp,
         blockNumber,
     )
-    // The secretary's value was screened on receipt; this covers the floor
-    // the clamp may have raised it to, at the point the signature is made.
-    // Our own verifyBlock bound too, so we never send a vote for a block we
-    // would refuse on sync, however low the tolerance is set
-    const now = getNetworkTimestamp()
-    let timestampVerdict = checkCosignTimestamp(block.content.timestamp, now)
-    if (timestampVerdict.valid) {
-        timestampVerdict = checkTimestampNotAhead(block.content.timestamp, now)
-    }
-    if (!timestampVerdict.valid) {
-        throw new CosignTimestampError(
-            `refusing to sign block ${blockNumber}: ${timestampVerdict.reason}`,
-        )
-    }
     // Appended last, after native_tables_hashes, in their fixed order
     const commitments = await buildCommitments(blockNumber)
     if (commitments) {
@@ -138,6 +124,7 @@ export async function createBlock(
     }
     const policy = { production: getSharedState.PROD }
     checkBlockSignature(getSharedState.identityFile, round, policy)
+    assertTimestampSignable(block)
 
     const blockSignature = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
@@ -167,6 +154,26 @@ export async function createBlock(
     // Add the candidate to the shared state
     getSharedState.candidateBlock = block
     return block
+}
+
+/**
+ * The secretary's value was screened on receipt; this covers the floor the
+ * clamp may have raised it to, and our own verifyBlock bound too, so we never
+ * vote for a block we would refuse on sync, however low the tolerance is set.
+ * Called with no await before the signature: the clock can step back while
+ * commitments are built or the lock mutex is awaited.
+ */
+function assertTimestampSignable(block: Block): void {
+    const now = getNetworkTimestamp()
+    let verdict = checkCosignTimestamp(block.content.timestamp, now)
+    if (verdict.valid) {
+        verdict = checkTimestampNotAhead(block.content.timestamp, now)
+    }
+    if (!verdict.valid) {
+        throw new CosignTimestampError(
+            `refusing to sign block ${block.number}: ${verdict.reason}`,
+        )
+    }
 }
 
 /**
@@ -207,6 +214,7 @@ async function prevoteCandidate(
     // Under the mutex the precommit decision takes, so a precommit is never
     // decided between this prevote's record and its opening
     await withLockMutex(async () => {
+        assertTimestampSignable(block)
         recordPrevoteRound(getSharedState.identityFile, {
             genesisHash,
             height: block.number,

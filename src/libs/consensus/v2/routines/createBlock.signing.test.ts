@@ -68,6 +68,14 @@ let networkNow = 10_000
 jest.mock("src/libs/utils/calibrateTime", () => ({
     getNetworkTimestamp: () => networkNow,
 }))
+// Runs while commitments are built, between forging and signing
+let duringCommitments: (() => void) | null = null
+jest.mock("src/libs/blockchain/finality/commitments", () => ({
+    buildCommitments: async () => {
+        duringCommitments?.()
+        return null
+    },
+}))
 
 const { createBlock } = await import("./createBlock")
 const { CosignTimestampError } = await import("./cosignTimestamp")
@@ -89,6 +97,7 @@ beforeEach(() => {
     contentHash = "hash-1"
     networkNow = 10_000
     parentBlock = null
+    duringCommitments = null
     sign.mockReset()
     sign.mockImplementation(async () => ({
         signature: new Uint8Array([1, 2, 3]),
@@ -216,6 +225,17 @@ describe("createBlock signing guard", () => {
         const block = await forge(5, 1003)
         expect(block.content.timestamp).toBe(1010)
         expect(sign).toHaveBeenCalledTimes(1)
+    })
+
+    it("refuses when the clock steps back before the signature is made", async () => {
+        networkNow = 1000
+        duringCommitments = () => {
+            networkNow = 995
+        }
+        await expect(forge(5, 1004)).rejects.toBeInstanceOf(CosignTimestampError)
+        expect(sign).not.toHaveBeenCalled()
+        expect(fs.existsSync(signingRecordPath(sharedState.identityFile))).toBe(false)
+        expect(sharedState.candidateBlock).toBeNull()
     })
 
     it("refuses when the clamp lifts the timestamp past our clock", async () => {

@@ -73,16 +73,23 @@ jest.mock("src/libs/blockchain/chain", () => ({
     __esModule: true,
     default: { getBlockByNumber: async () => null },
 }))
+let clockStepBack = 0
+jest.mock("src/libs/utils/calibrateTime", () => ({
+    getNetworkTimestamp: () => Math.floor(Date.now() / 1000) - clockStepBack,
+}))
 
 const { createBlock } = await import("./createBlock")
 const { signingRecordPath, DoubleSignError, haltSigning, __resetSigningHalt } =
     await import("src/libs/identity/signingRecord")
 const { CommitLockError } = await import("../commitLock/lockStore")
+const { CosignTimestampError } = await import("./cosignTimestamp")
 const roundState = await import("../commitLock/roundState")
 const { prevoteRecordPath } = await import("../commitLock/prevoteRecord")
 
-const forge = (options: { round?: number; expectedHash?: string }) =>
-    createBlock([{ hash: "t1" } as any], "seed", "prev", 5, ["p"], 1000, options)
+const forge = (
+    options: { round?: number; expectedHash?: string },
+    timestamp = 1000,
+) => createBlock([{ hash: "t1" } as any], "seed", "prev", 5, ["p"], timestamp, options)
 
 beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "demos-createblock-lock-"))
@@ -91,6 +98,7 @@ beforeEach(() => {
     sharedState.forkConfig.commitLock.activationHeight = 0
     contentHash = "hash-1"
     signed.length = 0
+    clockStepBack = 0
     sign.mockClear()
     roundState.__resetRoundState()
     __resetSigningHalt()
@@ -138,6 +146,25 @@ describe("createBlock under commitLock", () => {
         // Within the lead an honest secretary's clock skew needs, it signs
         await forge({ round: Math.floor(Date.now() / 1000) + 2 })
         expect(sign).toHaveBeenCalledTimes(1)
+    })
+
+    it("rechecks the timestamp inside the lock mutex, after the clock steps back", async () => {
+        const now = Math.floor(Date.now() / 1000)
+        let release!: () => void
+        const held = roundState.withLockMutex(
+            () => new Promise<void>(resolve => (release = resolve)),
+        )
+        const pending = forge({ round: now }, now + 4)
+        await new Promise(resolve => setTimeout(resolve, 10))
+        expect(sign).not.toHaveBeenCalled()
+        clockStepBack = 10
+        release()
+        await held
+        await expect(pending).rejects.toBeInstanceOf(CosignTimestampError)
+        expect(sign).not.toHaveBeenCalled()
+        expect(roundState.latestPrevote()).toBeNull()
+        expect(fs.existsSync(prevoteRecordPath(sharedState.identityFile))).toBe(false)
+        expect(sharedState.candidateBlock).toBeNull()
     })
 
     it("never prevotes in a round lower than one it prevoted in, across a restart", async () => {
