@@ -59,6 +59,7 @@ SUITE_FILES=(
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
     src/libs/identity/web2Unlink.test.ts
+    src/libs/network/broadcastDisposition.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
@@ -80,6 +81,7 @@ SUITE_FILES=(
     src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts
+    src/libs/utils/keyMaker.test.ts
     src/model/dbPreflight.test.ts
     src/utilities/nodeVersion.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
@@ -94,6 +96,7 @@ SUITE_FILES=(
     testing/genesis/genesisPin.test.ts
     testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
+    tests/web2/proxy.test.ts
 )
 
 runner_for() {
