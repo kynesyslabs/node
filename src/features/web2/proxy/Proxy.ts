@@ -473,6 +473,14 @@ export class Proxy {
         // which any site that validates the header rejects — GitHub answers
         // 401 on api.github.com and 404 on raw.githubusercontent.com.
         if (targetAuthorization) {
+            // A caller header under any other casing would also go on the
+            // wire, so the target could read the caller's value instead of
+            // the token.
+            for (const key of Object.keys(headers)) {
+                if (key.toLowerCase() === "authorization") {
+                    delete headers[key]
+                }
+            }
             headers["Authorization"] = `Bearer ${targetAuthorization}`
         }
 

@@ -86,6 +86,22 @@ describe("Proxy outbound Authorization header", () => {
         expect(headers["Authorization"]).toBe("Bearer raw")
     })
 
+    it("lets the raw token replace caller Authorization headers of any casing", () => {
+        // Each casing would reach the wire as its own header, and the target
+        // could read the caller's value instead of the token.
+        const headers = headersFor(makeProxy(true), "raw", {
+            Authorization: "Bearer x",
+            authorization: "Bearer y",
+            AUTHORIZATION: "Bearer z",
+        })
+
+        const authKeys = Object.keys(headers).filter(
+            k => k.toLowerCase() === "authorization",
+        )
+        expect(authKeys).toEqual(["Authorization"])
+        expect(headers["Authorization"]).toBe("Bearer raw")
+    })
+
     it("still stamps the session id that gates inbound proxy access", () => {
         // The inbound control must be untouched by the outbound change.
         expect(headersFor(makeProxy(true), "")["x-dahr-session-id"]).toBe(
