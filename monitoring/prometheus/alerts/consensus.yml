@@ -19,13 +19,8 @@ groups:
       # BlockHashMismatch and ConflictingBlock are in the demos-consensus-latched
       # group at the end of this file.
 
-      - alert: ForeignSignature
-        expr: increase(demos_foreign_signature_total[10m]) > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: Another process is signing with this validator's key
-          description: "{{ $labels.instance }} saw a peer block carrying a signature by its own key that it never recorded, and stopped signing. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force."
+      # ForeignSignature and PrecommitEquivocation are in the demos-consensus-latched
+      # group at the end of this file.
 
       - alert: SigningHalted
         expr: demos_signing_halted == 1
@@ -34,14 +29,6 @@ groups:
         annotations:
           summary: Block signing is stopped on this validator
           description: "{{ $labels.instance }} refuses to sign blocks; its log has a [SIGNING] or [IDENTITY] line with the reason. The stop survives a restart only while the marker file exists (demos_signing_halt_marker_present = 1). If the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. Delete the marker only after confirming a single copy of the key runs; see docs/runbooks/validator-key.md."
-
-      - alert: PrecommitEquivocation
-        expr: increase(demos_precommit_equivocation_total[10m]) > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: A committee member precommitted two blocks in one round
-          description: "{{ $labels.instance }} received precommits from one member for two different blocks at the same height and round. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back."
 
       - alert: MissedSignatures
         expr: increase(demos_consensus_missed_signatures_total[15m]) >= 3
@@ -114,7 +101,9 @@ groups:
   #      itself is left alone, so the evidence stays in the TSDB.
   #   3. Otherwise it expires by itself 7 d after the last event.
   # Only metrics the node exports today are used. ForeignSignature and
-  # PrecommitEquivocation keep the 10 m window above.
+  # PrecommitEquivocation are double-sign signals and are latched the same way, with
+  # the same 7 d window and the same clear procedure (their recorded series are
+  # demos:foreign_signature:increase10m and demos:precommit_equivocation:increase10m).
   - name: demos-consensus-latched
     interval: 1m
     rules:
@@ -123,6 +112,12 @@ groups:
 
       - record: demos:conflicting_block:increase10m
         expr: increase(demos_conflicting_block_total[10m])
+
+      - record: demos:foreign_signature:increase10m
+        expr: increase(demos_foreign_signature_total[10m])
+
+      - record: demos:precommit_equivocation:increase10m
+        expr: increase(demos_precommit_equivocation_total[10m])
 
       - alert: BlockHashMismatch
         # No `for`: the old 5 m `for` only checked that the 10 m window still held the
@@ -141,6 +136,22 @@ groups:
         annotations:
           summary: Two blocks with a verified quorum existed at one height (latched)
           description: "{{ $labels.instance }} held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+
+      - alert: ForeignSignature
+        expr: max_over_time(demos:foreign_signature:increase10m[7d]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: Another process is signing with this validator's key (latched)
+          description: "{{ $labels.instance }} saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+
+      - alert: PrecommitEquivocation
+        expr: max_over_time(demos:precommit_equivocation:increase10m[7d]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: A committee member precommitted two blocks in one round (latched)
+          description: "{{ $labels.instance }} received precommits from one member for two different blocks at the same height and round, within the last 7 days. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
 
   # SEAM kynesyslabs/node#1084: rules from that PR plug in as their own file under
   # alerts/ (loaded by the alerts/*.yml glob) with its own group names, so nothing

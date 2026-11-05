@@ -78,9 +78,9 @@ Each fires per validator (`instance` label).
 | HeightStalled | no new block for 300 s, held 2 min; keeps firing 10 min after it clears | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. |
 | BlockHashMismatch | more than 3 peer disagreements on the candidate block hash within 10 min, **latched 7 days** | warning | This node and its peers are building different blocks (mempool or clock divergence). Check the mempool, clock skew and the log for the tx-set diff. Does not resolve by itself: see "Clearing a latched alert". |
 | ConflictingBlock | a peer holds a different block with a verified quorum at a height where this node has one, **latched 7 days** | critical | A fork. The node does not switch chains on its own. Search the log for `[FORK]` for the height and both hashes, decide which chain to keep. See "Clearing a latched alert". |
-| ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, within 10 min | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. |
+| ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, **latched 7 days** | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. A double-sign signal: does not resolve by itself, see "Clearing a latched alert". |
 | SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If it is 0, the marker write failed: keep the node stopped until every other copy of the key is stopped. |
-| PrecommitEquivocation | a committee member precommitted two different blocks at one height and round, within 10 min | critical | That member's key runs twice or its signing state was rolled back. The log line `[commitLock] Equivocation` names it. |
+| PrecommitEquivocation | a committee member precommitted two different blocks at one height and round, **latched 7 days** | critical | That member's key runs twice or its signing state was rolled back. The log line `[commitLock] Equivocation` names it. A double-sign signal: does not resolve by itself, see "Clearing a latched alert". |
 | MissedSignatures | 3 or more blocks in 15 min where the node was drawn into the shard and did not sign | warning | The node is online but not taking part in consensus. |
 | ForkScheduleMismatch | at least one validator reports a different fork schedule, held 5 min | critical | Genesis fork schedules differ; see `fork-schedule-policy.md`. |
 | ConsensusAbstaining | the node is skipping rounds because most validators differ from it, held 1 min | critical | The node has taken itself out of consensus; see `fork-schedule-policy.md`. |
@@ -101,23 +101,30 @@ loaded from the same directory and use the same routing. Among them:
 The rules have promtool unit tests in `monitoring/prometheus/tests/`; run
 `promtool test rules monitoring/prometheus/tests/*.test.yml` after editing them.
 
-Routing: `critical` (and an explicit `page`) goes to the **paging** receiver
-only, waits 10 s before the first message and repeats hourly. `warning` and
-`info` go to **Slack**, warnings repeating every 4 hours. `DeadMansSwitch` goes
-to its own **deadman** receiver and is re-sent every minute. Alerts are grouped
-per alert name and validator. All three receiver URLs are placeholders in
-`monitoring/secrets/`.
+Routing: `critical` (and an explicit `page`) goes to **both** the **paging**
+receiver and **Slack** (the paging route has `continue: true`, the next route
+sends the same alert to Slack), waits 10 s before the first message and repeats
+hourly. `warning` and `info` go to **Slack** only, warnings repeating every 4
+hours. `DeadMansSwitch` goes to its own **deadman** receiver only and is re-sent
+every minute. Alerts are grouped per alert name and validator. All three
+receiver URLs are placeholders in `monitoring/secrets/`.
 
 ## Clearing a latched alert
 
-`BlockHashMismatch` and `ConflictingBlock` keep firing for 7 days after the last
-event, through restarts and lost scrapes, because a fork is not over when the
-counter stops moving. A recording rule keeps the 10 minute burst size as its own
-series (`demos:consensus_block_hash_mismatch:increase10m`,
-`demos:conflicting_block:increase10m`) and the alert is its 7 day maximum.
+`BlockHashMismatch`, `ConflictingBlock`, `ForeignSignature` and
+`PrecommitEquivocation` keep firing for 7 days after the last event, through
+restarts and lost scrapes, because a fork or a double-sign is not over when the
+counter stops moving. `ForeignSignature` and `PrecommitEquivocation` are
+double-sign signals and must not auto-resolve after 10 minutes. A recording rule
+keeps the 10 minute burst size as its own series
+(`demos:consensus_block_hash_mismatch:increase10m`,
+`demos:conflicting_block:increase10m`, `demos:foreign_signature:increase10m`,
+`demos:precommit_equivocation:increase10m`) and the alert is its 7 day maximum.
 Only metrics the node exports today are used.
 
-1. Investigate and resolve the fork or mismatch first.
+1. Investigate and resolve the fork, mismatch or double-sign first (for
+   `ForeignSignature` and `PrecommitEquivocation`: every copy of the key found
+   and stopped, see `validator-key.md`).
 2. Acknowledge: add an Alertmanager silence for the alert and instance
    (`amtool silence add alertname=ConflictingBlock instance=validator-2 --comment="<ticket>"`).
    This stops the pages; the alert stays visible in Prometheus.
@@ -126,10 +133,16 @@ Only metrics the node exports today are used.
    (start Prometheus with `--web.enable-admin-api` for the occasion, then remove
    the flag):
    `POST /api/v1/admin/tsdb/delete_series?match[]=demos:conflicting_block:increase10m{instance="validator-2"}`.
-   The counter itself is not touched, so the evidence stays in the TSDB.
+   The series name is the one in the table below for the alert. The counter
+   itself is not touched, so the evidence stays in the TSDB.
 4. Otherwise the alert expires by itself 7 days after the last event.
 
-`ForeignSignature` and `PrecommitEquivocation` still use the 10 minute window.
+| Alert | Recorded series to delete |
+|-------|---------------------------|
+| BlockHashMismatch | `demos:consensus_block_hash_mismatch:increase10m` |
+| ConflictingBlock | `demos:conflicting_block:increase10m` |
+| ForeignSignature | `demos:foreign_signature:increase10m` |
+| PrecommitEquivocation | `demos:precommit_equivocation:increase10m` |
 
 ## Validator clock
 
@@ -177,7 +190,7 @@ curl -fsS -X POST http://127.0.0.1:9093/api/v2/alerts \
         "annotations":{"summary":"Routing test","description":"Synthetic alert, ignore."}}]'
 ```
 
-A Slack message arrives after the critical group wait (10 s). With `amtool`
+A Slack message and a page (the paging webhook) both arrive after the critical group wait (10 s). With `amtool`
 (shipped in the Alertmanager image):
 
 ```bash

@@ -1,7 +1,8 @@
 # Alertmanager for the Demos monitoring stack. Three receivers, none of them with a URL
 # in this repo: each URL is read from a file (compose secret, see monitoring/secrets/README.md):
-#   slack   - warnings and info          <- /run/secrets/slack_webhook  (<SLACK_WEBHOOK_URL_PLACEHOLDER>)
-#   paging  - critical and page          <- /run/secrets/pager_webhook  (<PAGER_WEBHOOK_URL_PLACEHOLDER>)
+#   slack   - everything except the heartbeat: critical and page (copy of the page),
+#             warnings and info          <- /run/secrets/slack_webhook  (<SLACK_WEBHOOK_URL_PLACEHOLDER>)
+#   paging  - critical and page, also sent to slack <- /run/secrets/pager_webhook  (<PAGER_WEBHOOK_URL_PLACEHOLDER>)
 #   deadman - the always-firing heartbeat <- /run/secrets/deadman_webhook (<DEADMAN_WEBHOOK_URL_PLACEHOLDER>)
 global:
   resolve_timeout: 5m
@@ -26,12 +27,18 @@ route:
       group_wait: 0s
       group_interval: 1m
       repeat_interval: 1m
-    # Critical (or an explicit `page`) wakes someone up; it does not go to Slack.
-    # To also keep a copy in Slack, add `continue: true` here and a second route with
-    # `receiver: slack` right below.
+    # Critical (or an explicit `page`) wakes someone up AND is posted to Slack. The
+    # paging route has `continue: true`, so matching goes on to the next route, which
+    # sends the same alert to Slack. Keep the two routes adjacent and in this order.
     - matchers:
         - severity=~"critical|page"
       receiver: paging
+      continue: true
+      group_wait: 10s
+      repeat_interval: 1h
+    - matchers:
+        - severity=~"critical|page"
+      receiver: slack
       group_wait: 10s
       repeat_interval: 1h
     - matchers:

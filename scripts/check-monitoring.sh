@@ -28,16 +28,21 @@ echo "== amtool check-config"
 "$amtool" check-config "$mon/alertmanager/alertmanager.yml"
 
 echo "== amtool routing"
-# Critical and page go to paging, warning and info to slack, the heartbeat to deadman.
+# Critical and page go to slack AND paging, warning and info to slack only, the
+# heartbeat to deadman only. --verify.receivers needs the exact list of receivers the
+# alert reaches, in route order (paging first, then slack), so "slack only" also fails
+# if paging is added by mistake.
 route() {
-    local receiver="$1"; shift
+    local receivers="$1"; shift
     "$amtool" config routes test --config.file="$mon/alertmanager/alertmanager.yml" \
-        --verify.receivers="$receiver" "$@" >/dev/null \
-        && echo "ok   $* -> $receiver"
+        --verify.receivers="$receivers" "$@" >/dev/null \
+        && echo "ok   $* -> $receivers"
 }
-route paging  severity=critical alertname=NodeDown instance=validator-1
-route paging  severity=page alertname=Anything
-route paging  severity=critical alertname=ConflictingBlock
-route slack   severity=warning alertname=DiskSpaceLow
-route slack   severity=info alertname=PortDriftDetected
-route deadman severity=none alertname=DeadMansSwitch
+route paging,slack severity=critical alertname=NodeDown instance=validator-1
+route paging,slack severity=critical alertname=ConflictingBlock
+route paging,slack severity=critical alertname=ForeignSignature
+route paging,slack severity=critical alertname=PrecommitEquivocation
+route paging,slack severity=page alertname=Anything
+route slack        severity=warning alertname=DiskSpaceLow
+route slack        severity=info alertname=PortDriftDetected
+route deadman      severity=none alertname=DeadMansSwitch
