@@ -82,6 +82,7 @@ SUITE_FILES=(
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts
     src/libs/utils/keyMaker.test.ts
+    src/model/datasource.test.ts
     src/model/dbPreflight.test.ts
     src/utilities/nodeVersion.test.ts
     src/utilities/tui/CategorizedLogger.level.test.ts

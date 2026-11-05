@@ -75,3 +75,19 @@ which checks `PROD=true`, `DEMOS_REQUIRE_VALIDATORS=true`, a synchronised
 clock, outbound NTP, the `abstain` mismatch policy, both genesis pins, the
 built-in fees, stake floor and block time (every validator must run the
 same ones), and that no one-start switch is left set.
+
+The node does not create its database schema at boot, so before its first
+start each validator creates it once, with the released image (Docker host):
+
+```bash
+docker compose pull node &&
+docker compose up -d --wait postgres &&
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:run &&
+docker compose up -d --no-build
+```
+
+A bare-metal host makes its first start `./run -c true`, which creates the
+schema on the launcher's empty Postgres. A node started without the schema
+stops at boot, before block 0, and names the command
+(`INSTALL.md`, step 5 of "Run a released image";
+`docs/runbooks/database-migrations.md`).

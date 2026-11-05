@@ -13,8 +13,10 @@
 #   1. Sanity-check the working tree is on a branch + clean (operator
 #      pushed everything they meant to push).
 #   2. Stops the stack via `./scripts/docker-run down` (or `--devnet down`).
-#   3. Removes the three named volumes (PG data, node data, node state)
-#      belonging to the targeted stack.
+#   3. Removes exactly three named volumes of the targeted stack: PG data,
+#      node data, node state (demos_pgdata, demos_node_data,
+#      demos_node_state; *_devnet with --devnet). The logs, Prometheus and
+#      Grafana volumes are kept.
 #   4. Forces a `--no-cache` rebuild of the node image (so source
 #      changes since the last build are picked up), then prunes build
 #      cache older than 24h.
@@ -50,7 +52,7 @@ for arg in "$@"; do
         --no-rebuild) DO_REBUILD=0 ;;
         --devnet) IS_DEVNET=1 ;;
         -h|--help)
-            sed -n '2,37p' "$0"
+            sed -n '2,39p' "$0"
             exit 0
             ;;
         *)
@@ -94,15 +96,23 @@ if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
     echo "        bake those into the image. Press Ctrl-C if not intended."
     git status --short | head -10 | sed 's/^/    /'
 fi
+# Stop, rebuild and boot all go through scripts/docker-run: only it creates the
+# schema on the wiped database, and a raw `docker compose up` would start the
+# node with none. Refuse before anything is wiped.
+if [[ ! -x ./scripts/docker-run ]]; then
+    echo "  ERROR: ./scripts/docker-run is missing or not executable (chmod +x scripts/docker-run); nothing was wiped."
+    exit 1
+fi
 
 # -----------------------------------------------------------------------------
 # 2. Confirm wipe
 # -----------------------------------------------------------------------------
 if [[ "$YES" -ne 1 ]]; then
     echo
-    echo "[!] About to WIPE all chain data volumes for the ${STACK_LABEL} stack:"
+    echo "[!] About to DELETE these Docker volumes of the ${STACK_LABEL} stack:"
     printf '      %s\n' "${VOLUMES[@]}"
-    echo "    This is destructive."
+    echo "    No other volume is deleted (logs, Prometheus and Grafana are kept)."
+    echo "    This is destructive: the chain database and the node state are lost."
     read -r -p "    Type 'wipe' to confirm: " confirm
     if [[ "$confirm" != "wipe" ]]; then
         echo "    aborted."
@@ -114,17 +124,22 @@ fi
 # 3. Stop the stack
 # -----------------------------------------------------------------------------
 echo "[2/6] stopping docker stack (${STACK_LABEL})..."
-if [[ -x ./scripts/docker-run ]]; then
-    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" down >/dev/null 2>&1 || true
-else
-    docker compose down >/dev/null 2>&1 || true
+# A failed teardown may leave the volumes unreferenced but the stack in an
+# unknown state; wiping then would lose the database for nothing.
+if ! ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" down >/dev/null 2>&1; then
+    echo "  ERROR: could not stop the stack; nothing was wiped." >&2
+    exit 1
 fi
 
 # -----------------------------------------------------------------------------
 # 4. Wipe volumes
 # -----------------------------------------------------------------------------
 echo "[3/6] removing data volumes (${VOLUMES[*]})..."
-docker volume rm "${VOLUMES[@]}" 2>/dev/null || true
+for vol in "${VOLUMES[@]}"; do
+    if docker volume inspect "$vol" >/dev/null 2>&1; then
+        docker volume rm "$vol" >/dev/null || { echo "  ERROR: could not remove volume $vol; stopping before any migration. Stop whatever uses it and retry."; exit 1; }
+    fi
+done
 
 remaining="$(docker volume ls --format '{{.Name}}' | grep -E "$VOLUME_RE" || true)"
 if [[ "$IS_DEVNET" -eq 0 ]]; then
@@ -143,12 +158,7 @@ fi
 # -----------------------------------------------------------------------------
 if [[ "$DO_REBUILD" -eq 1 ]]; then
     echo "[4/6] rebuilding node image (--no-cache)..."
-    if [[ -x ./scripts/docker-run ]]; then
-        ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --rebuild build
-    else
-        docker compose build --no-cache node
-        docker builder prune -f --filter until=24h || true
-    fi
+    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --rebuild build
 else
     echo "[4/6] skipping image rebuild (--no-rebuild)."
 fi
@@ -157,11 +167,10 @@ fi
 # 6. Boot
 # -----------------------------------------------------------------------------
 echo "[5/6] booting stack..."
-if [[ -x ./scripts/docker-run ]]; then
-    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" up -d
-else
-    docker compose up -d
-fi
+# --clean removes only the PG-data and node-data volumes, which step 3 already
+# removed, and makes docker-run create the schema on the empty database: the
+# node no longer migrates at boot.
+./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --clean up -d
 
 # -----------------------------------------------------------------------------
 # 7. Tail genesis log lines

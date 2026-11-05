@@ -55,7 +55,7 @@ step "postgres on :$PG_PORT (tmpfs)"
 docker run -d --rm --name "$PG_CONTAINER" --memory 1g --tmpfs /var/lib/postgresql/data \
     -p "127.0.0.1:$PG_PORT:5432" -e POSTGRES_USER=demosuser -e POSTGRES_PASSWORD=e2e -e POSTGRES_DB=demos \
     postgres:16-alpine >>"$LOG_DIR/e2e.log"
-for _ in $(seq 1 60); do docker exec "$PG_CONTAINER" pg_isready -U demosuser >/dev/null 2>&1 && break; sleep 1; done
+for _ in $(seq 1 60); do docker exec "$PG_CONTAINER" pg_isready -h 127.0.0.1 -U demosuser >/dev/null 2>&1 && break; sleep 1; done
 
 step "subnets $SUBNET_A, $SUBNET_B"
 for uid in "$SUBNET_A" "$SUBNET_B"; do
@@ -79,6 +79,7 @@ step "node: rpc :$RPC_PORT, messaging :$MSG_PORT"
         TLSNOTARY_ENABLED=false L2PS_ZK_ENABLED=false PROD=false \
         PG_HOST=127.0.0.1 PG_PORT PG_USER=demosuser PG_PASSWORD=e2e PG_DATABASE=demos \
         L2PS_MESSAGING_ENABLED=true L2PS_MESSAGING_PORT="$MSG_PORT"
+    bun run migration:run || exit 1 # the node no longer creates the schema
     exec bun -r tsconfig-paths/register src/index.ts --no-tui
 ) >"$LOG_DIR/node.log" 2>&1 &
 NODE_PID=$!

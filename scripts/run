@@ -756,21 +756,20 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 	fi
 	cd "$PG_FOLDER" || exit
 
-	# If we are cleaning, we need to remove the database
+	# Suppressing errors if the database is not running
+	if ! docker compose -f docker-compose.yml down >/dev/null 2>&1 && [[ "${CLEAN}" == "true" ]]; then
+		echo "❌ Could not stop the database container; the database was not wiped and nothing was migrated"
+		exit 1
+	fi
+	# If we are cleaning, we need to remove the database (only after a successful stop)
 	if [[ "${CLEAN}" == "true" ]]; then
 		echo "🧹 Cleaning the database..."
 		log_verbose "Removing existing database data for clean start"
-		sleep 1
-		rm -rf data_*
-		mkdir data_"${PG_PORT}"
+		if ! { rm -rf data_"${PG_PORT}" || sudo rm -rf data_"${PG_PORT}"; } || ! mkdir data_"${PG_PORT}"; then
+			echo "❌ Could not wipe ${PG_FOLDER}/data_${PG_PORT} (check ownership: ls -la ${PG_FOLDER}); nothing was migrated"
+			exit 1
+		fi
 		echo "✅ Database cleaned"
-	fi
-
-	# Suppressing errors if the database is not running
-	docker compose -f docker-compose.yml down >/dev/null 2>&1
-	if [[ "${CLEAN}" == "true" ]]; then
-		rm -rf data_"${PG_PORT}" || rm -rf data_"${PG_PORT}"
-		mkdir data_"${PG_PORT}"
 	fi
 
 	# Finally starting the database
@@ -785,7 +784,9 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 	cd ..
 
 	function is_db_ready() {
-		docker exec postgres_"${PG_PORT}" pg_isready -U demosuser -d demos >/dev/null 2>&1
+		# Over TCP, not the unix socket: during Postgres first-init the temporary
+		# server answers on the socket only, then restarts before it listens on TCP
+		docker exec postgres_"${PG_PORT}" pg_isready -h 127.0.0.1 -U demosuser -d demos >/dev/null 2>&1
 		return $?
 	}
 
@@ -843,6 +844,46 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 		exit 1
 	fi
 
+	# The node no longer migrates at boot, so a database we just emptied (--clean,
+	# or the wipe after the restore export below) gets its schema here, once
+	# per wipe. Nothing is created on any other run; see
+	# docs/runbooks/database-migrations.md
+	function create_schema() {
+		if ! wait_for_database_ready "$PG_PORT"; then
+			echo "❌ Failed to connect to PostgreSQL database"
+			exit 1
+		fi
+		# Only an EMPTY database gets migrated: if a wipe did not take effect, this
+		# would apply pending migrations to live data with no backup.
+		local tables
+		# Bounded (connect, query, and `timeout` inside the container for a server
+		# that accepts and then stops answering): a hang must not stall the launcher.
+		if ! tables="$(docker exec -e PGCONNECT_TIMEOUT=10 -e PGOPTIONS="-c statement_timeout=20000" postgres_"${PG_PORT}" timeout 30 psql -U demosuser -d demos -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()")" || [[ ! "${tables}" =~ ^[0-9]+$ ]]; then
+			echo "❌ Could not check that the database is empty (or the check timed out after 30s); not running migration:run"
+			exit 1
+		fi
+		if [[ "${tables}" -ne 0 ]]; then
+			echo "❌ The database still has ${tables} table(s) in the public schema, so the wipe did not take effect"
+			echo "   Not running migration:run. Back up and migrate by hand: docs/runbooks/database-migrations.md"
+			exit 1
+		fi
+		echo "🗄️  Creating the schema on the empty database (migration:run)"
+		# Same database as the probe above: the connection is pinned to the launcher's
+		# container (values of postgres/docker-compose.yml), so a PG_* in .env or the
+		# shell that points elsewhere cannot send the migration to another database.
+		# The command behind `bun run migration:run`, spelled out so the step after
+		# the wipe does not depend on how package.json defines it: it must work on
+		# a host with Bun only (GOSSIP_ENABLED=false).
+		if ! PG_HOST=localhost PG_PORT="${PG_PORT}" PG_USER=demosuser PG_PASSWORD=demospassword PG_DATABASE=demos bun -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts; then
+			echo "❌ Error: migration:run failed on the empty database"
+			exit 1
+		fi
+	}
+
+	if [[ "${CLEAN}" == "true" ]] && [[ "${RESTORE}" != "true" ]]; then
+		create_schema
+	fi
+
 	if [[ "${RESTORE}" == "true" ]]; then
 		if ! wait_for_database_ready "$PG_PORT"; then
 			echo "❌ Failed to connect to PostgreSQL database"
@@ -861,12 +902,17 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 		# Stop the database
 		echo "Stopping the database"
 		cd postgres_${PG_PORT} || exit
-		docker compose -f docker-compose.yml down
+		docker compose -f docker-compose.yml down || {
+			echo "❌ Could not stop the database container; nothing was wiped or migrated"
+			exit 1
+		}
 
 		# Remove the database folder
 		echo "Removing the database folder"
-		rm -rf data_* || sudo rm -rf data_*
-		mkdir data_"${PG_PORT}"
+		if ! { rm -rf data_* || sudo rm -rf data_*; } || ! mkdir data_"${PG_PORT}"; then
+			echo "❌ Could not wipe the database folder; nothing was migrated"
+			exit 1
+		fi
 
 		# Start the database
 		echo "Starting the database"
@@ -876,6 +922,10 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 		# Wait for the database to be available
 		echo "Restarting database"
 		wait_for_database "$PG_PORT"
+
+		# The export above read the old database; the node boots on this empty
+		# one, so it needs the schema before it starts
+		create_schema
 	# else
 	#     echo "Cleaning the output/ folder"
 	#     rm -rf output/*

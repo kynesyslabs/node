@@ -8,7 +8,7 @@ echo "Starting postgres + tlsnotary..."
 docker compose up -d postgres tlsnotary
 
 echo "Waiting for postgres to be healthy..."
-until docker compose exec postgres pg_isready -U demosuser -d postgres > /dev/null 2>&1; do
+until docker compose exec postgres pg_isready -h 127.0.0.1 -U demosuser -d postgres > /dev/null 2>&1; do
   sleep 1
 done
 echo "Postgres ready."

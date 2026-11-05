@@ -44,7 +44,7 @@ x-default-logging: &default-logging
 
 services:
   # ---------------------------------------------------------------------------
-  # PostgreSQL — primary datastore for the node (TypeORM with synchronize=true)
+  # PostgreSQL — primary datastore for the node (TypeORM; migrations applied by hand, see docs/runbooks/database-migrations.md)
   # Internal-only by default. Uncomment the ports stanza below to expose to host.
   # ---------------------------------------------------------------------------
   postgres:
@@ -60,7 +60,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-demosuser} -d ${PG_DATABASE:-demos}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${PG_USER:-demosuser} -d ${PG_DATABASE:-demos}"]
       interval: 5s
       timeout: 5s
       retries: 10

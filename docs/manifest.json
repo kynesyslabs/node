@@ -64,6 +64,13 @@
       "title": "Diagnose & Recover from Dormant Mode",
       "date": "2026-05-14",
       "status": "active"
+    },
+    {
+      "path": "runbooks/database-migrations.md",
+      "type": "runbook",
+      "title": "Apply Database Migrations by Hand",
+      "date": "2026-11-04",
+      "status": "active"
     }
   ]
 }

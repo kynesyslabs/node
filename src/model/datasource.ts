@@ -70,7 +70,9 @@ export const dataSource = new DataSource({
         //     Config.getInstance().database.idleTransactionTimeoutMs,
     },
     migrations: ["src/migrations/*.{ts,js}"],
-    migrationsRun: true,
+    // Migrations are applied by hand (`bun run migration:run`), never at
+    // boot: a bad one cannot be undone. See docs/runbooks/database-migrations.md
+    migrationsRun: false,
     entities: [
         Blocks,
         MempoolTx,
@@ -111,6 +113,34 @@ export const dataSource = new DataSource({
     synchronize: false,
     logging: false,
 })
+
+export class PendingMigrationsError extends Error {
+    constructor() {
+        super(
+            "The database has migrations that are not applied, and the node " +
+                "no longer applies them at boot. Stop here: back up the " +
+                "database, list the pending ones with `bun run migration:show`, " +
+                "apply them with `bun run migration:run` (Docker: `docker compose " +
+                "run --rm --no-deps node bun run migration:run`), then start the " +
+                "node again. A new, empty database needs the same one-time " +
+                "`migration:run`. See docs/runbooks/database-migrations.md",
+        )
+        this.name = "PendingMigrationsError"
+    }
+}
+
+/**
+ * Refuses to go on when the schema is behind the code. Without it the first
+ * sign of a skipped `migration:run` is a raw "relation ... does not exist"
+ * somewhere in genesis or block apply.
+ */
+export async function assertNoPendingMigrations(
+    source: Pick<DataSource, "showMigrations">,
+): Promise<void> {
+    if (await source.showMigrations()) {
+        throw new PendingMigrationsError()
+    }
+}
 
 class Datasource {
     private static instance: Datasource

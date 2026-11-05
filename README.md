@@ -297,7 +297,7 @@ src/
 - **Logging**: Use `CategorizedLogger` instead of `console.log` in `src/` (ESLint warns)
 - **Imports**: Prefer `@/` path aliases over deep relative imports
 - **SDK**: Import from `@kynesyslabs/demosdk`, check `demosdk-refs` MCP for docs
-- **Database**: TypeORM with `synchronize: true` is intentional for dev
+- **Database**: schema changes are TypeORM migrations in `src/migrations/`, applied by hand with `bun run migration:run` (the node never migrates at boot, `synchronize` is off). See `docs/runbooks/database-migrations.md`
 
 ### Issue Tracking
 
