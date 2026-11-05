@@ -19,6 +19,7 @@ SUITE_FILES=(
     scripts/validator-prove-signing.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
+    src/config/proxyChecks.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
@@ -83,6 +84,7 @@ SUITE_FILES=(
     src/libs/utils/clockProbe.test.ts
     src/libs/utils/keyMaker.test.ts
     src/model/datasource.test.ts
+    src/model/dbPreflight.test.ts
     src/utilities/nodeVersion.test.ts
     src/utilities/tui/CategorizedLogger.level.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
