@@ -354,6 +354,183 @@ print_report() {
 }
 
 # ============================================================================
+# Production checks (--production): a mainnet validator host
+# ============================================================================
+# One PASS/FAIL line per item and exit 1 on any FAIL, so the result can be
+# pasted as evidence and used as a gate before `docker compose up`.
+
+PROD_FAILS=0
+PROD_CHECKS=0
+ENV_SOURCE="auto"
+NODE_ENV_SOURCE=""
+declare -A NODE_ENV_VALUES=()
+
+prod_line() { # $1 PASS|FAIL, $2 item, $3 detail
+	PROD_CHECKS=$((PROD_CHECKS + 1))
+	printf '%s %s: %s\n' "$1" "$2" "$3"
+	[[ "$1" = PASS ]] || PROD_FAILS=$((PROD_FAILS + 1))
+}
+
+# The values the node will actually get. Under Docker only what the compose
+# file passes reaches the container, so read compose's resolved environment
+# for the node service (it already merges .env and any override file); a
+# bare-metal node reads the process environment, then .env for the rest.
+load_node_env() {
+	if [[ "${ENV_SOURCE}" != "env" ]] && [[ -f docker-compose.yml ]] && command -v docker &>/dev/null; then
+		local json
+		if json=$(docker compose config --format json 2>/dev/null) && command -v python3 &>/dev/null; then
+			local line
+			while IFS= read -r -d '' line; do
+				NODE_ENV_VALUES["${line%%=*}"]="${line#*=}"
+			done < <(printf '%s' "${json}" | python3 -c '
+import json, sys
+env = json.load(sys.stdin).get("services", {}).get("node", {}).get("environment") or {}
+if isinstance(env, list):
+    env = dict(e.split("=", 1) if "=" in e else (e, "") for e in env)
+for k, v in env.items():
+    sys.stdout.write(k + "=" + ("" if v is None else str(v)) + "\0")
+')
+			NODE_ENV_SOURCE="docker compose config, service node"
+			return 0
+		fi
+		if [[ "${ENV_SOURCE}" = "compose" ]]; then
+			echo "docker compose config failed (or python3 is missing); run from the node checkout" >&2
+			return 1
+		fi
+	fi
+	if [[ -f .env ]]; then
+		local key value
+		while IFS='=' read -r key value; do
+			key="${key#export }"
+			[[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+			value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
+			NODE_ENV_VALUES["${key}"]="${value}"
+		done < <(grep -E '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' .env | sed -E 's/^[[:space:]]+//')
+	fi
+	local k
+	for k in $(compgen -e); do NODE_ENV_VALUES["${k}"]="${!k}"; done
+	NODE_ENV_SOURCE="process environment over .env"
+}
+
+node_env() { printf '%s' "${NODE_ENV_VALUES[$1]-}"; }
+
+check_prod_flag() { # $1 key, $2 why
+	local v
+	v=$(node_env "$1")
+	if [[ "${v}" = "true" ]]; then
+		prod_line PASS "$1" "true"
+	else
+		prod_line FAIL "$1" "is '${v}', must be true: $2"
+	fi
+}
+
+check_clock_sync() {
+	local synced
+	if command -v timedatectl &>/dev/null; then
+		synced=$(timedatectl show -p NTPSynchronized --value 2>/dev/null)
+		if [[ "${synced}" = "yes" ]]; then
+			prod_line PASS "clock sync" "timedatectl NTPSynchronized=yes"
+			return
+		fi
+	fi
+	if command -v chronyc &>/dev/null && chronyc tracking 2>/dev/null | grep -qE '^Leap status[[:space:]]*:[[:space:]]*Normal'; then
+		prod_line PASS "clock sync" "chronyc tracking: Leap status Normal"
+		return
+	fi
+	prod_line FAIL "clock sync" "no synchronised clock (timedatectl NTPSynchronized=${synced:-unknown}, no chrony in sync): enable one with 'sudo timedatectl set-ntp true' or install chrony"
+}
+
+# The node itself asks public NTP servers at boot and refuses to start without
+# two agreeing answers, so the host's own sync is not enough: outbound UDP 123
+# must reach them too.
+check_ntp_egress() {
+	if ! command -v python3 &>/dev/null; then
+		prod_line FAIL "NTP egress" "python3 is needed to query pool.ntp.org on UDP 123"
+		return
+	fi
+	local out
+	if out=$(python3 - <<'PY' 2>&1
+import socket, struct, time
+for host in ("pool.ntp.org", "time.google.com"):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(3)
+        s.sendto(b"\x1b" + 47 * b"\0", (host, 123))
+        data, _ = s.recvfrom(48)
+        secs = struct.unpack("!I", data[40:44])[0] - 2208988800
+        print(f"{host} answered, offset {secs - time.time():+.1f} s")
+        raise SystemExit(0)
+    except (OSError, struct.error):
+        continue
+print("no answer from pool.ntp.org or time.google.com on UDP 123")
+raise SystemExit(1)
+PY
+	); then
+		prod_line PASS "NTP egress" "${out}"
+	else
+		prod_line FAIL "NTP egress" "${out}: allow outbound UDP 123"
+	fi
+}
+
+check_mismatch_policy() {
+	local v
+	v=$(node_env FORK_SCHEDULE_MISMATCH_POLICY)
+	if [[ -z "${v}" ]] || [[ "${v,,}" = "abstain" ]]; then
+		prod_line PASS "FORK_SCHEDULE_MISMATCH_POLICY" "${v:-unset (abstain)}"
+	else
+		prod_line FAIL "FORK_SCHEDULE_MISMATCH_POLICY" "is '${v}', must be abstain on mainnet (warn is for devnets and testnets)"
+	fi
+}
+
+check_genesis_pin() { # $1 key
+	local v
+	v=$(node_env "$1")
+	v="${v#0x}"
+	if [[ "${v,,}" =~ ^[0-9a-f]{64}$ ]]; then
+		prod_line PASS "$1" "set"
+	else
+		prod_line FAIL "$1" "not a 64-hex hash ('${v}'): set the value published with the mainnet genesis"
+	fi
+}
+
+# Switches meant for one start (recovery, takeover, a rehearsal) that must not
+# stay in the environment: left set, each one weakens a safety check on every
+# later restart.
+check_unset() { # $1 key, $2 why
+	local v
+	v=$(node_env "$1")
+	if [[ -z "${v}" ]] || [[ "${v}" = "false" ]] || [[ "${v}" = "0" ]]; then
+		prod_line PASS "$1" "unset"
+	else
+		prod_line FAIL "$1" "is set ('${v}'): $2"
+	fi
+}
+
+run_production_checks() {
+	load_node_env || return 1
+	echo "Mainnet validator host checks (node settings from ${NODE_ENV_SOURCE}):"
+	check_prod_flag PROD "a node without it creates a new identity when the key file is missing"
+	check_prod_flag DEMOS_REQUIRE_VALIDATORS "without it a node that cannot read the validator set uses every online peer as the committee"
+	check_clock_sync
+	check_ntp_egress
+	check_mismatch_policy
+	check_genesis_pin EXPECTED_GENESIS_HASH
+	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
+	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
+	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
+	check_unset DEMOS_IDENTITY_TAKEOVER "set it for the one takeover start only (docs/runbooks/validator-key.md)"
+	check_unset DEMOS_GENERATE_IDENTITY "keys are generated off-host"
+	check_unset DEMOS_SIGNING_RECORD_REBIND "set it for the one rebind start only (docs/runbooks/validator-key.md)"
+	check_unset DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST "set it for the one start that accepts an agreed schedule change only"
+	if [[ ${PROD_FAILS} -eq 0 ]]; then
+		echo "PASS all ${PROD_CHECKS} checks"
+	else
+		echo "FAIL ${PROD_FAILS} of ${PROD_CHECKS} checks"
+	fi
+	[[ ${PROD_FAILS} -eq 0 ]]
+}
+
+# ============================================================================
 # Help
 # ============================================================================
 
@@ -368,6 +545,13 @@ OPTIONS:
     -h, --help      Show this help message
     -v, --verbose   Show all check results (including passed)
     -q, --quiet     Only show problems (no progress output)
+    --production    Mainnet validator host checks only: PROD, DEMOS_REQUIRE_VALIDATORS,
+                    clock sync, outbound NTP, mismatch policy, genesis pins and
+                    one-start switches left set; one PASS/FAIL line each, exit 1 on any FAIL
+    --env-from compose|env
+                    With --production: where the node's settings are read from
+                    (default: docker compose config when docker-compose.yml is here,
+                    else the process environment over .env)
 
 DESCRIPTION:
     Node Doctor runs a series of health checks on your Demos Network node
@@ -382,6 +566,7 @@ DESCRIPTION:
 EXAMPLES:
     ./node-doctor           # Run all checks with standard output
     ./node-doctor --verbose # Show detailed results for all checks
+    ./scripts/node-doctor --production   # before starting a mainnet validator
 
 For more information: https://demos.network
 EOF
@@ -407,6 +592,20 @@ main() {
 			QUIET=true
 			shift
 			;;
+		--production)
+			PRODUCTION=true
+			shift
+			;;
+		--env-from)
+			case "${2-}" in
+			compose | env) ENV_SOURCE="$2" ;;
+			*)
+				echo "--env-from takes compose or env"
+				exit 2
+				;;
+			esac
+			shift 2
+			;;
 		*)
 			echo "Unknown option: $1"
 			echo "Use --help for usage information"
@@ -414,6 +613,12 @@ main() {
 			;;
 		esac
 	done
+
+	if [[ "${PRODUCTION-}" = true ]]; then
+		# The checks read files relative to the checkout, wherever this is called from
+		cd "$(dirname "$0")/.." || exit 2
+		if run_production_checks; then exit 0; else exit 1; fi
+	fi
 
 	echo ""
 	echo -e "${BOLD}🩺 Node Doctor - Demos Network Diagnostic Tool${NC}"
