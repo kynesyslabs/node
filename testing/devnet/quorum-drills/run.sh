@@ -615,6 +615,29 @@ read_error() { # $1 phase name
 step 03-bringup
 STARTED_STACK=1
 dc up -d postgres >> "${STEP_LOG}" 2>&1 || { say "ABORT: postgres did not start"; exit 2; }
+# A node that does not migrate at boot needs its schema before it starts, and a
+# release image has no run-devnet to create it. So on the image path each node
+# database gets the one-off migration an operator runs before a first start, in
+# a container of the image under test with the node's own environment and
+# mounts. Bun runs the TypeORM CLI directly: `bun run migration:run` needs tsx
+# and a node binary on newer trees and a ts-node loader on older ones. On a tree
+# that still migrates at boot, the node then finds nothing pending.
+if [ "${START_PATH}" = image ]; then
+    # Over TCP: during the first init Postgres answers only on its socket, and
+    # the node databases exist only once the init scripts have run
+    for _ in $(seq 1 60); do
+        dc exec -T postgres pg_isready -q -h 127.0.0.1 -U demosuser -d postgres >/dev/null 2>&1 && break
+        sleep 1
+    done
+    dc exec -T postgres pg_isready -q -h 127.0.0.1 -U demosuser -d postgres >/dev/null 2>&1 ||
+        { say "ABORT: postgres did not accept TCP connections within 60s"; exit 2; }
+    for i in $(seq 1 "${N}"); do
+        timeout 300 docker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" run --rm --no-deps -T --entrypoint bun "node-${i}" \
+            -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts \
+            >> "${STEP_LOG}" 2>&1 || { say "ABORT: migration:run failed on node${i}_db (see 03-bringup.log)"; exit 2; }
+    done
+    say "schema migrated on the ${N} node databases"
+fi
 for i in $(seq 1 "${START}"); do
     start_node "${i}" || { say "ABORT: node-${i} did not serve within 180s"; exit 2; }
     say "node-${i} serving"

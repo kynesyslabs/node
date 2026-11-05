@@ -42,6 +42,12 @@ start path from the result (`start=` in the preflight line of `run.sh`'s log):
   mounts; the peerlist is mounted at `/app/keys/demos_peerlist.json`, not at
   `/app/demos_peerlist.json`, because the entrypoint `mv`s a real file it finds
   there into `/app/state` and a bind mount cannot be moved.
+  Before any node starts, `run.sh` migrates each node database once, as an
+  operator does before a first start: a one-off `docker compose run` of that
+  node's service (its environment and mounts) with
+  `bun -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run`,
+  after Postgres accepts TCP connections. A node that no longer migrates at
+  boot needs it; on a tree that still does, the node then finds nothing pending.
 
 What still differs from mainnet on the image path: `NODE_ENV=development` (a
 production node needs `EXPECTED_GENESIS_HASH` for a genesis that is new each
