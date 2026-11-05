@@ -77,6 +77,12 @@ export interface RateLimitEntry {
      * Reason for rejection
      */
     rejectionReason?: string
+
+    /**
+     * The block was set only because the IP was at maxConnectionsPerIP, so
+     * slots handed back by proven validators may lift it early
+     */
+    connectionLimitBlock?: boolean
 }
 
 export interface RateLimitResult {

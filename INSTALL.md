@@ -106,6 +106,7 @@ When the stack is healthy:
 | `EXPOSED_URL` | `http://localhost:53550` | Public URL advertised to peers. Set to your public IP/domain when running on a VPS. |
 | `EXPECTED_GENESIS_HASH` | _(empty)_ | The network's published genesis hash. Required in the image (`NODE_ENV=production`) unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; see "Pin the network's genesis" below. |
 | `EXPECTED_GENESIS_BLOCK_HASH` | _(empty)_ | The network's published block 0 hash. Optional; when set, the node refuses any other block 0. |
+| `DEMOS_REQUIRE_VALIDATORS` | _(empty)_ | `true` on mainnet validators: with no active validators in the database the node refuses to run consensus instead of using every online peer as the committee. |
 | `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | `demosuser` / `demospassword` / `demos` | Postgres credentials. Change `PG_PASSWORD` if you're paranoid; it never leaves the compose network. |
 | `METRICS_ENABLED` / `METRICS_PORT` | `true` / `9090` | Prometheus scrape endpoint on the node. |
 | `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password. Change this. |
@@ -115,6 +116,8 @@ When the stack is healthy:
 | `L2PS_MESSAGING_SEND_BURST` | `30` | Messages a sender key may send at once before the rate applies. |
 | `L2PS_MESSAGING_BACKLOG_SHARE` | `0.5` | Largest fraction of `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` that messaging may hold, so RPC transactions keep the rest. `1` gives messaging all of it. |
 | `COMPOSE_PROFILES` | `monitoring,tlsnotary` | Which compose profiles are active. See below. |
+
+Under docker compose a variable reaches the node only when `docker-compose.yml` lists it in the node's `environment:`; a value in `.env` that is not listed there does nothing. Every node variable in this table is listed.
 
 Leave `PG_HOST=postgres` and `TLSNOTARY_HOST=tlsnotary` exactly as shipped — those are the in-network service names. They are only `localhost` for the bare-metal path (Track 2).
 
@@ -168,7 +171,11 @@ The image runs with `NODE_ENV=production`, and a production node refuses to star
 # In .env
 EXPECTED_GENESIS_HASH=<published genesis hash>
 EXPECTED_GENESIS_BLOCK_HASH=<published block 0 hash>
+# Mainnet validators only
+DEMOS_REQUIRE_VALIDATORS=true
 ```
+
+`scripts/genesis-hash.ts --genesis <file>` prints both values for a genesis file; the block 0 hash is the one labelled "genesis block hash".
 
 At every start the node checks it before it signs anything: on an empty database against `data/genesis.json` (and the snapshot that genesis declares), before block 0 is written; on an existing database against the stored block 0. A mismatch stops the node with exit code 1 and leaves the database as it was. A network that publishes no hash can opt out with `DEMOS_ALLOW_UNPINNED_GENESIS=true`; mainnet validators never set it. A node started without a pin and without that opt-out (a bare-metal `./run` install runs as development, so nothing refuses it) logs a `[GENESIS] EXPECTED_GENESIS_HASH is not set` warning at every boot.
 

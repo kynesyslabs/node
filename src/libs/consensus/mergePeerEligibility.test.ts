@@ -14,7 +14,14 @@ const SELF = "0x" + "44".repeat(32)
 
 const log = { debug: jest.fn(), info: jest.fn(), warning: jest.fn(), warn: jest.fn(), error: jest.fn(), only: jest.fn() }
 let stakedSet = new Set<string>()
+// Like the real pair: the plain getter answers a failed read with [], the
+// other throws.
+let validatorReadError: Error | null = null
 const getGCRValidatorsAtBlock = jest.fn(async (..._a: unknown[]) => [] as unknown[])
+const getGCRValidatorsAtBlockOrThrow = jest.fn(async (..._a: unknown[]) => {
+    if (validatorReadError) throw validatorReadError
+    return [] as unknown[]
+})
 const getEligiblePool = jest.fn(async (..._a: unknown[]) => [] as string[])
 
 mock.module("src/utilities/logger", () => ({ __esModule: true, default: log }))
@@ -23,7 +30,7 @@ mock.module("src/utilities/sharedState", () => ({
 }))
 mock.module("src/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
-    default: { getGCRValidatorsAtBlock },
+    default: { getGCRValidatorsAtBlock, getGCRValidatorsAtBlockOrThrow },
 }))
 mock.module("src/libs/peer", () => ({
     PeerManager: {
@@ -39,8 +46,9 @@ const savedRequire = process.env.DEMOS_REQUIRE_VALIDATORS
 
 beforeEach(() => {
     stakedSet = new Set()
-    getGCRValidatorsAtBlock.mockReset()
-    getGCRValidatorsAtBlock.mockImplementation(async () => [])
+    validatorReadError = null
+    getGCRValidatorsAtBlock.mockClear()
+    getGCRValidatorsAtBlockOrThrow.mockClear()
     getEligiblePool.mockReset()
     getEligiblePool.mockImplementation(async () => [])
     log.error.mockClear()
@@ -59,7 +67,7 @@ describe("a chain with validators", () => {
 
     it("admits a member of the active validator set without any further lookup", async () => {
         expect(await isMergePeerEligible("0x" + "AB".repeat(32))).toBe(true)
-        expect(getGCRValidatorsAtBlock).not.toHaveBeenCalled()
+        expect(getGCRValidatorsAtBlockOrThrow).not.toHaveBeenCalled()
         expect(getEligiblePool).not.toHaveBeenCalled()
     })
 
@@ -110,10 +118,9 @@ describe("a chain with no validator rows", () => {
 
 describe("a failure to read the validator set", () => {
     it("denies as unknown and logs the cause at error level, instead of reading as an empty set", async () => {
-        getGCRValidatorsAtBlock.mockImplementation(async () => {
-            throw new Error("connection terminated")
-        })
+        validatorReadError = new Error("connection terminated")
         expect(await isMergePeerEligible(KNOWN)).toBe(false)
+        expect(getGCRValidatorsAtBlock).not.toHaveBeenCalled()
         const line = log.error.mock.calls.map(c => String(c[0])).find(l => l.includes("cannot read the validator set"))
         expect(line).toContain("block 7")
         expect(line).toContain("connection terminated")

@@ -2,6 +2,8 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 
+const MAX_PAGE = 100
+
 function toWireRow<T extends object>(row: T): Record<string, unknown> {
     return Object.fromEntries(
         Object.entries(row).map(([key, value]) => [
@@ -20,7 +22,7 @@ export default async function getTransactions(
     data: InterfaceGetTransactionsData,
 ): Promise<RPCResponse> {
     // The SDK's getTransactions() leaves both optional.
-    const params = [data?.start ?? "latest", data?.limit ?? 100].map((value, index) => {
+    const params = [data?.start ?? "latest", data?.limit ?? MAX_PAGE].map((value, index) => {
         if (index === 0 && value === "latest") {
             return "latest"
         } else if (typeof value === "number") {
@@ -57,7 +59,12 @@ export default async function getTransactions(
         }
     }
 
-    const transactions = await Chain.getTransactions(start, limit as any)
+    // Same page cap as getTransactionHistory, enforced where the request
+    // is parsed rather than left to the storage layer.
+    const transactions = await Chain.getTransactions(
+        start,
+        Math.min(limit as number, MAX_PAGE),
+    )
 
     if (transactions && transactions.length > 0) {
         return {
