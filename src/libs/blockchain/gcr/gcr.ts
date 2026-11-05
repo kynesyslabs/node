@@ -284,7 +284,9 @@ export default class GCR {
     /**
      * @param strict - throw StateReadError when any read fails (the chain
      *   tip included), instead of answering null as if the row were absent;
-     *   block apply needs this.
+     *   block apply needs this. Without it only a failed row query answers
+     *   null; a failed tip read throws, as callers that check a balance next
+     *   rely on.
      */
     static async getGCRValidatorStatus(
         publicKeyHex: string,
@@ -292,35 +294,40 @@ export default class GCR {
         strict = false,
     ): Promise<Validators | null> {
         if (strict) {
-            return readState("validator row", () =>
-                GCR.readValidatorRow(publicKeyHex, blockNumber),
-            )
+            return readState("validator row", async () => {
+                const repository = await GCR.validatorsRepository()
+                const tip = blockNumber || (await Chain.getLastBlockNumber())
+                return GCR.findValidatorRow(repository, publicKeyHex, tip)
+            })
+        }
+        const repository = await GCR.validatorsRepository()
+        if (!blockNumber) {
+            blockNumber = await Chain.getLastBlockNumber()
         }
         try {
-            return await GCR.readValidatorRow(publicKeyHex, blockNumber)
+            return await GCR.findValidatorRow(repository, publicKeyHex, blockNumber)
         } catch (e) {
             log.error(`Error fetching validator status: ${e}`)
             return null
         }
     }
 
-    private static async readValidatorRow(
-        publicKeyHex: string,
-        blockNumber: number | null,
-    ): Promise<Validators | null> {
+    private static async validatorsRepository(): Promise<Repository<Validators>> {
         const db = await Datasource.getInstance()
-        if (!blockNumber) {
-            blockNumber = await Chain.getLastBlockNumber()
-        }
-        const info = await db
-            .getDataSource()
-            .getRepository(Validators)
-            .findOne({
-                where: {
-                    first_seen: LessThanOrEqual(blockNumber),
-                    address: publicKeyHex,
-                },
-            })
+        return db.getDataSource().getRepository(Validators)
+    }
+
+    private static async findValidatorRow(
+        repository: Repository<Validators>,
+        publicKeyHex: string,
+        blockNumber: number,
+    ): Promise<Validators | null> {
+        const info = await repository.findOne({
+            where: {
+                first_seen: LessThanOrEqual(blockNumber),
+                address: publicKeyHex,
+            },
+        })
         return info || null
     }
 

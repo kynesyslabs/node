@@ -538,6 +538,17 @@ describe("a state read that fails", () => {
         ).rejects.toBeInstanceOf(StateReadError)
     })
 
+    it("still throws a failed tip read to lenient callers, and answers null only for the row query", async () => {
+        const { default: GCR } = await import("./gcr")
+        ;(GCR.getGCRValidatorStatus as any).mockRestore?.()
+        const tip = spyOn(Chain, "getLastBlockNumber").mockRejectedValue(new Error("connection reset"))
+        await expect(GCR.getGCRValidatorStatus("0xabc")).rejects.toThrow("connection reset")
+
+        tip.mockResolvedValue(100)
+        failingTable("Validators")
+        expect(await GCR.getGCRValidatorStatus("0xabc")).toBeNull()
+    })
+
     it("aborts a vote instead of skipping it as from outside the snapshot", async () => {
         const { default: GCR } = await import("./gcr")
         seeded = {
