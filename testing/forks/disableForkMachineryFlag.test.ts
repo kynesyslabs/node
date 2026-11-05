@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import {
     isForkMachineryDisabled,
     loadForkConfigFromGenesis,
+    refuseDisabledForkMachineryOutsideTestChains,
 } from "@/forks/loadForkConfig"
 import {
     cloneDefaultForkConfig,
@@ -140,5 +141,63 @@ describe("DEMOS_DISABLE_FORK_MACHINERY (rehearsal flag)", () => {
         delete process.env.NODE_ENV
         process.env.DEMOS_DISABLE_FORK_MACHINERY = "true"
         expect(isForkMachineryDisabled()).toBe(true)
+    })
+
+    // Only the testnet and devnet ids may run without the fork machinery: on
+    // any other chain, mainnet included, the node would split at the first
+    // fork height, so neither NODE_ENV nor DEMOS_REHEARSAL lifts the refusal.
+    describe("on a chain other than the testnet and devnets", () => {
+        const genesis = (id: number) => ({
+            properties: { id },
+            forks: { osDenomination: { activationHeight: 5 } },
+        })
+        let priorChainId: number | null
+
+        beforeEach(() => {
+            priorChainId = getSharedState.chainId
+        })
+
+        afterEach(() => {
+            getSharedState.chainId = priorChainId
+        })
+
+        it("refuses to load with the flag set, whatever NODE_ENV says", () => {
+            process.env.DEMOS_DISABLE_FORK_MACHINERY = "true"
+            for (const nodeEnv of [undefined, "development", "production"]) {
+                if (nodeEnv === undefined) delete process.env.NODE_ENV
+                else process.env.NODE_ENV = nodeEnv
+                process.env.DEMOS_REHEARSAL = "true"
+                expect(() => loadForkConfigFromGenesis(genesis(4242))).toThrow(
+                    /chain id 4242/,
+                )
+            }
+        })
+
+        it("still lets the testnet and devnet ids rehearse without it", () => {
+            process.env.DEMOS_DISABLE_FORK_MACHINERY = "true"
+            for (const id of [1, 1337]) {
+                getSharedState.forkConfig.osDenomination.activationHeight = null
+                loadForkConfigFromGenesis(genesis(id))
+                expect(
+                    getSharedState.forkConfig.osDenomination.activationHeight,
+                ).toBeNull()
+            }
+        })
+
+        it("refuses a stored genesis of another chain, the check a node without a genesis file runs", () => {
+            expect(() =>
+                refuseDisabledForkMachineryOutsideTestChains({ properties: { id: 7 } }),
+            ).toThrow(/chain id 7/)
+            expect(() =>
+                refuseDisabledForkMachineryOutsideTestChains({ properties: { id: 1337 } }),
+            ).not.toThrow()
+        })
+
+        it("loads normally when the flag is unset", () => {
+            loadForkConfigFromGenesis(genesis(4242))
+            expect(
+                getSharedState.forkConfig.osDenomination.activationHeight,
+            ).toBe(5)
+        })
     })
 })

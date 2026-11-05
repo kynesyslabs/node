@@ -115,21 +115,14 @@ export default class GCRBalanceRoutines {
         if (editOperation.operation === "add") {
             accountGCR.balance = actualBalance + editAmount
         } else if (editOperation.operation === "remove") {
-            // Safeguarding the operation
-            // NOTE PROD flag is used to enable testing when not in production
-            if (
-                (actualBalance < editAmount || actualBalance === 0n) &&
-                getSharedState.PROD
-            ) {
+            // Apply is consensus, so the outcome must not depend on a
+            // node-local flag: an overdraft fails on every node instead of
+            // being clamped to 0, which minted the shortfall. The zero-balance
+            // refusal keeps the rule identical to what PROD nodes already ran.
+            if (actualBalance < editAmount || actualBalance === 0n) {
                 return { success: false, message: "Insufficient balance" }
             }
             accountGCR.balance = actualBalance - editAmount
-
-            // Safeguarding the operation by checking if the balance is negative
-            // NOTE This applies just to the non-production environment
-            if (accountGCR.balance < 0n && !getSharedState.PROD) {
-                accountGCR.balance = 0n
-            }
         }
 
         // Saving the account GCR if not simulating

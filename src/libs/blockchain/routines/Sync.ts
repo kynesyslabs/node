@@ -64,11 +64,9 @@ import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import Hashing from "@/libs/crypto/hashing"
 import {
-    assertSyncedNonceTrace,
+    applyWithSyncedNonceTrace,
     debugAssertionsEnabled,
-    noncesAfterApply,
     readNonceTrace,
-    readNonces,
 } from "@/libs/debug/nonceTrace"
 import {
     creditAdvertisedHeight,
@@ -1728,20 +1726,12 @@ async function applyBlockEdits(
         )
     }
 
-    const traceAccounts = Object.keys(nonceTrace)
-    const localBefore = await readNonces(traceAccounts)
-    const result = await HandleGCR.applyTransactions(
-        sortedTxs,
-        false,
-        clock,
-        options,
+    return await applyWithSyncedNonceTrace(
+        block.number,
+        nonceTrace,
+        !!options.defer,
+        () => HandleGCR.applyTransactions(sortedTxs, false, clock, options),
     )
-    const localAfter = options.defer
-        ? noncesAfterApply(result.pending, traceAccounts, localBefore)
-        : await readNonces(traceAccounts)
-
-    assertSyncedNonceTrace(block.number, nonceTrace, localBefore, localAfter)
-    return result
 }
 
 // Helper function to ask for the transactions in a block

@@ -19,6 +19,7 @@ SUITE_FILES=(
     scripts/validator-prove-signing.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
+    src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
@@ -53,6 +54,7 @@ SUITE_FILES=(
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
     src/libs/crypto/canonicalJson.test.ts
+    src/libs/debug/nonceTrace.test.ts
     src/libs/gossip/GossipManager.lifecycle.test.ts
     src/libs/gossip/sidecarHealth.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts
@@ -88,6 +90,7 @@ SUITE_FILES=(
     src/utilities/nodeVersion.test.ts
     src/utilities/tui/CategorizedLogger.level.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
+    testing/forks/disableForkMachineryFlag.test.ts
     testing/forks/loadForkConfig.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
     testing/genesis/buildGenesisBlock.test.ts

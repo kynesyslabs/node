@@ -99,11 +99,22 @@ export function buildNonceTrace(
     return trace
 }
 
+const isTraceEntry = (entry: unknown): entry is NonceTraceEntry =>
+    typeof entry === "object" &&
+    entry !== null &&
+    Number.isFinite((entry as NonceTraceEntry).startApply) &&
+    Number.isFinite((entry as NonceTraceEntry).endApply)
+
+/**
+ * The trace a block carries, or null when it is absent or malformed. A peer
+ * writes it, so only numbers reach the comparison and its log lines.
+ */
 export function readNonceTrace(
     attrs: Record<string, any> | null | undefined,
 ): NonceTrace | null {
     const trace = attrs?.[NONCE_TRACE_ATTR_KEY]
-    if (!trace || typeof trace !== "object") return null
+    if (!trace || typeof trace !== "object" || Array.isArray(trace)) return null
+    if (!Object.values(trace).every(isTraceEntry)) return null
     return trace as NonceTrace
 }
 
@@ -114,7 +125,7 @@ interface Mismatch {
     actual: number
 }
 
-function crash(context: string, blockNumber: number, mismatches: Mismatch[]) {
+function report(context: string, blockNumber: number, mismatches: Mismatch[]) {
     log.error(
         `[DEBUG_ASSERT] ${context}: nonce trace mismatch on block ${blockNumber} for ${mismatches.length} account(s)`,
     )
@@ -126,6 +137,10 @@ function crash(context: string, blockNumber: number, mismatches: Mismatch[]) {
     log.error(
         "[DEBUG_ASSERT] Mismatches: " + JSON.stringify(mismatches, null, 2),
     )
+}
+
+function crash(context: string, blockNumber: number, mismatches: Mismatch[]) {
+    report(context, blockNumber, mismatches)
     // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
     process.exit(1)
 }
@@ -194,7 +209,9 @@ export function assertForgedNonceTrace(
 
 /**
  * Sync-side check: our local nonces before and after applying the block must
- * match the values the forger recorded.
+ * match the values the forger recorded. Log only: the trace sits in the
+ * block's attrs, which the block hash does not cover, so any peer serving the
+ * block can write it and must not be able to stop this node.
  */
 export function assertSyncedNonceTrace(
     blockNumber: number,
@@ -208,26 +225,57 @@ export function assertSyncedNonceTrace(
         const before = localBefore[account] ?? 0
         const after = localAfter[account] ?? 0
 
-        if (before !== entry.startApply) {
+        if (before !== entry?.startApply) {
             mismatches.push({
                 account,
                 field: "startApply",
-                expected: entry.startApply,
+                expected: entry?.startApply,
                 actual: before,
             })
         }
 
-        if (after !== entry.endApply) {
+        if (after !== entry?.endApply) {
             mismatches.push({
                 account,
                 field: "endApply",
-                expected: entry.endApply,
+                expected: entry?.endApply,
                 actual: after,
             })
         }
     }
 
     if (mismatches.length > 0) {
-        crash("sync", blockNumber, mismatches)
+        report("sync", blockNumber, mismatches)
     }
+}
+
+/**
+ * Runs a synced block's apply with the trace check around it. The trace and
+ * its account keys come from a peer, so a read or check that fails on them is
+ * logged and the apply goes on.
+ */
+export async function applyWithSyncedNonceTrace<
+    R extends { pending?: PendingGCRWrite },
+>(
+    blockNumber: number,
+    trace: NonceTrace,
+    deferred: boolean,
+    apply: () => Promise<R>,
+): Promise<R> {
+    const accounts = Object.keys(trace)
+    const before = await readNonces(accounts).catch(error => {
+        log.warn(`[DEBUG_ASSERT] sync: nonce trace of block ${blockNumber} not checked: ${error}`)
+        return null
+    })
+    const result = await apply()
+    if (!before) return result
+    try {
+        const after = deferred
+            ? noncesAfterApply(result.pending, accounts, before)
+            : await readNonces(accounts)
+        assertSyncedNonceTrace(blockNumber, trace, before, after)
+    } catch (error) {
+        log.warn(`[DEBUG_ASSERT] sync: nonce trace of block ${blockNumber} not checked: ${error}`)
+    }
+    return result
 }
