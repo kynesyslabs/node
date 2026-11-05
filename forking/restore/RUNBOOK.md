@@ -325,26 +325,30 @@ Wipe and re-run:
 ```bash
 # Option A — use the run script wipe flag
 ./run -b true
+```
 
-# Option B — manual wipe
-cd postgres_<PG_PORT>
-docker compose down
-rm -rf data_*
-mkdir data_<PG_PORT>
-docker compose up -d
+Or Option B, a manual wipe, in three parts. Each part is a `&&` chain, so a failed step (`down`, `rm`, the emptiness check, `migration:run`) stops it and `./run` never starts on a database that was not wiped or not migrated. First wipe and restart Postgres:
+
+```bash
+cd postgres_<PG_PORT> &&
+docker compose down &&
+rm -rf data_* &&
+mkdir data_<PG_PORT> &&
+docker compose up -d &&
 cd ..
-# the wiped database has no schema and ./run does not create it; wait until this
-# answers "accepting connections" (Postgres restarts once on first init, so it can
-# answer once and then go away: wait a few seconds and run it a second time), then migrate
+```
+
+The wiped database has no schema and `./run` does not create it. Wait until this answers "accepting connections". Postgres restarts once on first init, so it can answer once and then go away: wait a few seconds and run it a second time.
+
+```bash
 docker exec postgres_<PG_PORT> sh -c 'exec pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-sleep 5
-docker exec postgres_<PG_PORT> sh -c 'exec pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-# the database must be empty before you migrate: this prints 0. If any command above
-# failed (rm, down) or this prints another number, the wipe did not work: stop here
-docker exec postgres_<PG_PORT> sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"'
-# migration:run reads PG_PORT from the environment or .env; on a port other than
-# the default (5332), set it to this directory's <PG_PORT> or it migrates the wrong database
-PG_PORT=<PG_PORT> bun run migration:run
+```
+
+Then check that the database is empty (the count must be `0`; any other number means the wipe did not work), migrate, and start. `migration:run` reads `PG_PORT` from the environment or `.env`; on a port other than the default (5332), set it to this directory's `<PG_PORT>` or it migrates the wrong database:
+
+```bash
+test "$(docker exec postgres_<PG_PORT> sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"')" = 0 &&
+PG_PORT=<PG_PORT> bun run migration:run &&
 ./run
 ```
 
