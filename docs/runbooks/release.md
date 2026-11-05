@@ -197,8 +197,10 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     1 and 1337.
   - Governance transactions are refused until the chain reaches the
     `activationHeight` the genesis gives the `networkGovernance` fork (0 turns
-    it on from the first block). A network that used governance before keeps
-    it only by scheduling the fork. On a live chain that follows
+    it on from the first block). The bundled testnet genesis
+    (`data/genesis.json`) does not schedule it, so governance transactions
+    fail on testnet from this release. A network that used governance before
+    keeps it only by scheduling the fork. On a live chain that follows
     [Changing the schedule](fork-schedule-policy.md#changing-the-schedule): a
     height more than 50 blocks ahead, with every validator on the new genesis
     before the window opens.
