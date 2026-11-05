@@ -248,13 +248,13 @@ devnet image is `oven/bun` with no Node, so `run-devnet` runs the TypeORM CLI
 through bun directly (`bun -r tsconfig-paths/register
 ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts`)
 instead of `bun run migration:run`, which needs `tsx` and so a `node` binary.
-`run-devnet` does this on every start, not only the first (idempotent). Known
-gap: `testing/genesis-acceptance/run.sh` starts the published image on empty
-databases (`CREATE DATABASE`) and does not migrate them. Run `bun run
-migration:run` against each of them first, or the node stops with a missing
-table error before the scenario's own refusal. Also, `consensus-race` runs a
-prebuilt `RACE_IMAGE`: only an image built from this commit has the migrate
-step.
+`run-devnet` does this on every start, not only the first (idempotent).
+`testing/genesis-acceptance/run.sh` starts the published image on empty
+databases (`CREATE DATABASE`); after each one it runs `bun run migration:run`
+once in a one-off container of the image under test, the operator's first-start
+step. Its `TEMPLATE chain_base` copies already have the schema. Also,
+`consensus-race` runs a prebuilt `RACE_IMAGE`: only an image built from this
+commit has the migrate step.
 
 ## Roll back
 

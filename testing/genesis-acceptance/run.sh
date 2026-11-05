@@ -233,6 +233,18 @@ docker exec "${PG}" psql -U "${PG_USER}" -d postgres -tAc 'SELECT 1' >/dev/null 
 
 psql_db() { docker exec "${PG}" psql -v ON_ERROR_STOP=1 -U "${PG_USER}" -d "$1" -tAc "$2" 2>&1; }
 admin() { psql_db postgres "$1" >> "${RUNLOG}" || die2 "postgres: $1"; }
+# The node does not create its schema at boot. Each empty database gets the
+# one-off `migration:run` an operator runs before a first start, from the
+# image under test; TEMPLATE copies of a migrated database need nothing.
+migrate_db() { # $1 database
+    local name="${RID}-migrate-$1"
+    CONTAINERS+=("${name}")
+    docker run --rm --name "${name}" --network "${NET}" \
+        --memory "${NODE_MEM}" --memory-swap "${NODE_MEM}" --cpus "${NODE_CPUS}" \
+        -e PG_HOST="${PG}" -e PG_PORT=5432 -e PG_USER="${PG_USER}" -e PG_PASSWORD="${PG_PASSWORD}" \
+        -e PG_DATABASE="$1" \
+        "${IMAGE}" bun run migration:run >> "${RUNLOG}" 2>&1 || die2 "migration:run failed on database $1"
+}
 block0_rows() { # count, or 0 when the table does not exist
     local out
     out=$(psql_db "$1" 'SELECT count(*) FROM blocks WHERE number = 0')
@@ -385,6 +397,7 @@ fresh_refused() { # id name genesis pin [extra docker args]; NEEDLE= a regex the
     CUR="${sid}-${name}"
     say "── ${CUR}"
     admin "CREATE DATABASE ${sid}"
+    migrate_db "${sid}"
     state_volume "${RID}-${sid}-state" || die2 "state volume failed"
     start_node "${sid}" "${sid}" "${RID}-${sid}-state" "${gen}" "${pin}" "$@" || die2 "docker run failed (${CUR})"
     wait_node "${REFUSE_TIMEOUT}"
@@ -447,6 +460,7 @@ restart_refused() { # id name genesis pin [regex the refusal must contain, or ""
 CUR="s01-fresh-correct"
 say "── ${CUR}"
 admin "CREATE DATABASE chain"
+migrate_db chain
 state_volume "${CHAIN_STATE}" || die2 "state volume failed"
 start_node s01 chain "${CHAIN_STATE}" "${FIX}/launch.json" "${PIN}" -e "EXPECTED_GENESIS_BLOCK_HASH=${BLOCK_PIN}" ||
     die2 "docker run failed (${CUR})"
