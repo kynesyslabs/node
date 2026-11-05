@@ -80,6 +80,25 @@ export function checkTimestampAgainstParent(
     return { valid: true }
 }
 
+/**
+ * The upper bound on a block timestamp: at most the configured tolerance
+ * ahead of this node's clock. Sync applies it to fetched blocks and the vote
+ * path before signing, so the node never signs a block it would refuse later.
+ */
+export function checkTimestampNotAhead(
+    blockTimestamp: number,
+    now: number = getNetworkTimestamp(),
+): BlockVerification {
+    const tolerance = getSharedState.getBlockTimestampTolerance()
+    if (blockTimestamp > now + tolerance) {
+        return {
+            valid: false,
+            reason: `block timestamp ${blockTimestamp} is ${blockTimestamp - now}s in the verifier's future (tolerance ${tolerance}s)`,
+        }
+    }
+    return { valid: true }
+}
+
 // Verified separately from the quorum tally, so a garbage entry under our key
 // can never read as our signature, however the tally is computed. Under
 // commitLock the signature that can sit in a block is our precommit.
@@ -286,13 +305,9 @@ export async function verifyBlock(
     if (!parentVerdict.valid) {
         return parentVerdict
     }
-    const tolerance = getSharedState.getBlockTimestampTolerance()
-    const verifierNow = getNetworkTimestamp()
-    if (blockTimestamp > verifierNow + tolerance) {
-        return {
-            valid: false,
-            reason: `block timestamp ${blockTimestamp} is ${blockTimestamp - verifierNow}s in the verifier's future (tolerance ${tolerance}s)`,
-        }
+    const aheadVerdict = checkTimestampNotAhead(blockTimestamp)
+    if (!aheadVerdict.valid) {
+        return aheadVerdict
     }
 
     const quorum = await checkSignerQuorum(block)
