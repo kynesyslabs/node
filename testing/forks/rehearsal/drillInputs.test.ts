@@ -232,24 +232,57 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
 
     describe("gen-inputs.py", () => {
         const repo = resolve(import.meta.dir, "../../..")
-        const gen = (forkSet: string | null, binding = "on") => {
-            const run = join(dir, `run-${forkSet}-${binding}`)
+        const gen = (forkSet: string | null, binding = "on", nodes = 4) => {
+            const run = join(dir, `run-${forkSet}-${binding}-${nodes}`)
             mkdirSync(join(run, "inputs"), { recursive: true })
-            PUBKEYS.forEach((p, i) => writeFileSync(join(run, "inputs", `pub${i + 1}`), p))
+            for (let i = 0; i < nodes; i++) writeFileSync(join(run, "inputs", `pub${i + 1}`), key(0xa1 + i))
             const r = spawnSync(
                 "python3",
                 [
                     // no -I, as run.sh: the script imports drill_inputs from its own directory
                     resolve(repo, "testing/devnet/quorum-drills/gen-inputs.py"),
-                    "--run-dir", run, "--repo", repo, "--nodes", "4", "--shard-size", "10", "--binding", binding,
+                    "--run-dir", run, "--repo", repo, "--nodes", String(nodes), "--shard-size", "10", "--binding", binding,
                     "--genesis-ts", "1", "--image", "img", "--uid", "1000", "--gid", "1000",
                     "--node-mem", "1g", "--consensus-time", "10",
                     ...(forkSet ? ["--fork-set", forkSet] : []),
                 ],
                 { encoding: "utf8" },
             )
-            return { r, genesis: r.status === 0 ? JSON.parse(readFileSync(join(run, "inputs/genesis.json"), "utf8")) : null }
+            return {
+                r,
+                genesis: r.status === 0 ? JSON.parse(readFileSync(join(run, "inputs/genesis.json"), "utf8")) : null,
+                compose: r.status === 0 ? JSON.parse(readFileSync(join(run, "compose.yml"), "utf8")) : null,
+            }
         }
+        it("starts the shared postgres with max_connections of at least 10 per node + 20, for 4, 10 and 13 nodes", () => {
+            // 10 = the TypeORM pool's default (src/model/datasource.ts sets no max); 20 = reserved
+            // superuser slots, the harness' psql reads, the healthcheck. The compose has twice the pools.
+            for (const [nodes, configured] of [[4, 100], [10, 220], [13, 280]] as const) {
+                const { r, compose } = gen(null, "on", nodes)
+                expect(r.status).toBe(0)
+                expect(Object.keys(compose.services).filter(s => s.startsWith("node-"))).toHaveLength(nodes)
+                const cmd: string[] = compose.services.postgres.command
+                expect(cmd.slice(0, 2)).toEqual(["postgres", "-c"])
+                const m = Number(cmd[2].match(/^max_connections=(\d+)$/)?.[1])
+                expect(m).toBe(configured)
+                expect(m).toBeGreaterThanOrEqual(10 * nodes + 20)
+                // 13 nodes were the case the default of 100 could not hold
+                if (nodes === 13) expect(m).toBeGreaterThan(100)
+            }
+        })
+        it("keeps the postgres image, its 1g memory limit, tmpfs and healthcheck as they were at 13 nodes", () => {
+            const { compose } = gen(null, "on", 13)
+            const { command: _command, ...pg } = compose.services.postgres
+            expect(pg).toMatchObject({ image: "postgres:16-alpine", mem_limit: "1g", memswap_limit: "1g", tmpfs: ["/var/lib/postgresql/data"] })
+            expect(pg.healthcheck.test).toEqual(["CMD-SHELL", "pg_isready -U demosuser -d postgres"])
+        })
+        it("drill_inputs.py pgconn prints the needed and the configured value the compose uses", () => {
+            const script = resolve(repo, "testing/devnet/quorum-drills/drill_inputs.py")
+            for (const [nodes, need, configured] of [[4, 60, 100], [10, 120, 220], [13, 150, 280]] as const) {
+                const r = spawnSync("python3", ["-I", script, "pgconn", "--nodes", String(nodes)], { encoding: "utf8" })
+                expect(r.stdout.trim()).toBe(`${need} ${configured}`)
+            }
+        })
         it("--fork-set launch writes the same forks scenario 12 gets", () => {
             const { r, genesis: g } = gen("launch")
             expect(r.status).toBe(0)

@@ -31,6 +31,11 @@ its inputs are written).
 prints the node tmpfs entries, one per line, exactly as gen-inputs.py writes
 them into the compose file (run.sh passes the same strings to `docker run
 --tmpfs` in its preflight check).
+
+    drill_inputs.py pgconn --nodes N
+prints "NEEDED CONFIGURED": the fewest max_connections an N-node drill can run
+on, and the value gen-inputs.py starts the shared postgres with (run.sh refuses
+a postgres below the first).
 """
 import argparse
 import json
@@ -44,6 +49,33 @@ EMPTY_SNAPSHOT = "empty-snapshot"
 # paths the node writes (/app, /app/data, /app/logs) are image directories the
 # Dockerfile already chowns to that user.
 NODE_TMPFS_PATHS = ["/app/state"]
+
+# Postgres connections. A node opens them from one place: the TypeORM DataSource
+# (src/model/datasource.ts:52-68), which sets no pool `max`, so pg-pool's default
+# of 10 applies (node_modules/pg-pool/index.js:89, typeorm passes
+# `max: options.poolSize`, PostgresDriver.js:1205). Nothing else in src/ holds a
+# connection while a node runs (README, "Postgres connections").
+PG_POOL_PER_NODE = 10
+# What is not a node: the superuser_reserved_connections (3, counted inside
+# max_connections), run.sh's psql reads (one at a time), the healthcheck's
+# pg_isready every 2 s, and slack
+PG_FIXED = 20
+
+
+def pg_connections_needed(n):
+    """Fewest max_connections an n-node drill can run on: every pool full."""
+    return PG_POOL_PER_NODE * n + PG_FIXED
+
+
+def pg_max_connections(n):
+    """max_connections the shared postgres is started with for n nodes.
+
+    Twice the pools: a node stopped with `docker compose stop -t 0` is killed,
+    and the server drops its 10 backends only when it sees the sockets close,
+    while the restarted node (restart: unless-stopped, and a node that cannot
+    pair yet exits and restarts) is already opening 10 more.
+    """
+    return 2 * PG_POOL_PER_NODE * n + PG_FIXED
 
 
 def with_genesis_timestamp(genesis, ts):
@@ -181,12 +213,17 @@ def main():
     tf = sub.add_parser("tmpfs")
     tf.add_argument("--uid", type=int, required=True)
     tf.add_argument("--gid", type=int, required=True)
+    pc = sub.add_parser("pgconn")
+    pc.add_argument("--nodes", type=int, required=True)
     a = ap.parse_args()
     if a.cmd == "readable":
         make_readable(a.dir)
         return
     if a.cmd == "tmpfs":
         print("\n".join(node_tmpfs_specs(a.uid, a.gid)))
+        return
+    if a.cmd == "pgconn":
+        print(pg_connections_needed(a.nodes), pg_max_connections(a.nodes))
         return
     if a.cmd == "launch-forks":
         with open(a.template) as f:

@@ -15,6 +15,7 @@ from drill_inputs import (
     fork_set_text,
     make_empty_snapshot,
     node_tmpfs_specs,
+    pg_max_connections,
     seed_peerlist,
     with_genesis_timestamp,
     with_launch_forks,
@@ -129,6 +130,18 @@ node_env = {
 services = {
     "postgres": {
         "image": "postgres:16-alpine",
+        # Every node has its own database on this one server, and each node
+        # opens up to 10 connections (a TypeORM pool with no `max`); real
+        # validators have a database each. The default max_connections of 100
+        # ran out at 13 nodes (13 x 10 = 130), as "too many clients already".
+        # M = 2 x 10 x N + 20: twice the pools, because a killed node's
+        # backends outlive it briefly while its restart opens new ones, plus 20
+        # for the 3 reserved superuser slots, the harness' psql reads and the
+        # healthcheck (drill_inputs.pg_max_connections). N=4: 100, 10: 220, 13: 280.
+        # It reserves no memory by itself: shared_buffers stays 128MB (it must
+        # be at least 16kB x M, 4.4MB at 280) and a backend costs memory only
+        # while it is open, so the 1g limit is unchanged.
+        "command": ["postgres", "-c", f"max_connections={pg_max_connections(n)}"],
         "mem_limit": "1g",
         "memswap_limit": "1g",
         "restart": "no",
