@@ -283,6 +283,19 @@ check "docker-run --clean: empty database -> migrates once" ok 1 "$W/scripts/doc
 start_case; seed_volumes
 check "docker-run up -d (no --clean) on a populated database -> never migrates" ok 0 "$W/scripts/docker-run" up -d
 
+# --clean migrates on the existing local image, so --build / --pull (which only
+# reach the final `up`) must be refused before anything is wiped
+for flag in --build --pull --pull=always; do
+    start_case; seed_volumes
+    check "docker-run --clean $flag: refused before the wipe, nothing migrated" fail 0 "$W/scripts/docker-run" --clean "$flag" up -d
+    case "$LAST_OUT" in *"--rebuild"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - docker-run --clean $flag: the refusal does not point to --rebuild"; esac
+    [[ -f "$ST/vol/demos_pgdata/tables/users" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - docker-run --clean $flag: volume demos_pgdata was wiped before the refusal"; }
+done
+start_case; seed_volumes
+check "docker-run --clean --build (flag after up): refused before the wipe" fail 0 "$W/scripts/docker-run" --clean up --build -d
+start_case; seed_volumes
+check "docker-run --clean --rebuild: still allowed, migrates once" ok 1 "$W/scripts/docker-run" --clean --rebuild up -d
+
 # -----------------------------------------------------------------------------
 # scripts/run
 # -----------------------------------------------------------------------------

@@ -48,10 +48,12 @@ database by the same `PG_*` settings the node uses.
 | `bun run migration:revert` | undoes the last one. Lossy, see above |
 
 In the Docker stack, run them in a one-off container (the node can be stopped,
-Postgres must be up: `--no-deps` does not start it):
+Postgres must be up: `--no-deps` does not start it). Keep `--name demos-migrate`:
+the node service sets `container_name`, so without it `run` reuses that name and
+fails with a name conflict while the stopped node container still exists:
 
 ```bash
-docker compose run --rm --no-deps node bun run migration:show
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:show
 ```
 
 ## Procedure
@@ -68,7 +70,9 @@ Do it on **one** validator first, then the rest. Never on all at once.
    - **Bare metal:** the launcher runs `docker compose down` on its Postgres
      (`postgres_<PG_PORT>`) when the node stops, so the container is gone and the
      dump fails (no such container, or connection refused). Start that Postgres
-     alone first, and wait until it is ready:
+     alone first, and wait until it is ready (the `postgres_<PG_PORT>` folder
+     exists only after the first `./run`; on a new host make the first start
+     `./run -c true` instead, which creates the schema itself):
 
      ```bash
      (cd postgres_<PG_PORT> && PG_PORT=<PG_PORT> docker compose up -d)
@@ -182,7 +186,7 @@ Do it on **one** validator first, then the rest. Never on all at once.
    ```
 
    On the Docker stack, run each as
-   `docker compose run --rm --no-deps node bun run migration:show` (see
+   `docker compose run --rm --no-deps --name demos-migrate node bun run migration:show` (see
    Commands).
 
    If it fails, the transaction rolls back and nothing changed. Do not start

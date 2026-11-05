@@ -113,8 +113,10 @@ the container runs; it must match
 
 The node does not migrate the database at boot. If the release adds a
 migration, back up and run `migration:show` / `migration:run` before the
-`up -d` above, per [database-migrations.md](database-migrations.md); on a first
-install, run `migration:run` once before the first start.
+`up -d` above, per [database-migrations.md](database-migrations.md), as
+`docker compose run --rm --no-deps --name demos-migrate node bun run migration:show`
+(and `... migration:run`); on a first install, run `migration:run` once before
+the first start.
 
 A bare-metal validator (`./run`) checks out the tag instead and verifies it
 locally before starting:

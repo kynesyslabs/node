@@ -376,6 +376,21 @@ if [[ ${#PASSTHROUGH[@]} -gt 0 ]]; then
     esac
 fi
 
+# --clean creates the schema with `compose run` on the image that already
+# exists locally, so --build / --pull (which only reach the final `up`) would
+# create it with the OLD image. Refuse before anything is wiped; --rebuild
+# builds before that step.
+if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" && ${#SUBCOMMAND_ARGS[@]} -gt 0 ]]; then
+    for arg in "${SUBCOMMAND_ARGS[@]}"; do
+        case "$arg" in
+            --build|--pull|--pull=*)
+                echo "scripts/docker-run: --clean cannot be combined with $arg: the schema is created with the existing local image before 'up', so $arg would not apply to it. Use --rebuild (builds the image first) instead. Nothing was wiped." >&2
+                exit 2
+                ;;
+        esac
+    done
+fi
+
 # --clean: bring everything down + drop the named volumes before `up`.
 # Only fires when SUBCOMMAND ends up as `up`; for explicit `down`/`logs`/etc
 # the wipe would be confusing.
