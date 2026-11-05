@@ -37,7 +37,7 @@ could not be carried out.
 
 | # | Scenario | Expected |
 | --- | --- | --- |
-| s01 | fresh-correct | boots; `getGenesisDataHash` = pin; the five forks active at 0 |
+| s01 | fresh-correct | boots; `getGenesisDataHash` = pin; the mainnet forks (`MAINNET_FORKS`) active at 0 |
 | s02 | fresh-genesis-1byte (timestamp + 1) | exit 1, no block 0 |
 | s03 | fresh-no-pin | exit 1, no block 0 |
 | s04 | fresh-bad-pin-format (63 hex) | exit 1, no block 0 |

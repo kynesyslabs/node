@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import {
     type GoNoGoInput,
+    KNOWN_FORKS,
     MAINNET_FORKS,
     type ValidatorProbe,
     checkLaunch,
@@ -519,10 +520,12 @@ describe("decideGoNoGo", () => {
     })
 })
 
-const mainnetForks = () => Object.fromEntries(MAINNET_FORKS.map(name => [name, { activationHeight: 0 }]))
+/** Every fork this build knows declared: the mainnet ones at 0, the rest off. */
+const mainnetForks = () =>
+    Object.fromEntries(KNOWN_FORKS.map(name => [name, { activationHeight: MAINNET_FORKS.includes(name) ? 0 : null }]))
 
 function genesisFile(rows: Array<{ address: string; status: string; valid_at: number | null }>, forks: Record<string, unknown> = mainnetForks()) {
-    return { properties: { id: 1, shardSize: 10 }, forks, validators: rows }
+    return { properties: { id: 7, shardSize: 10 }, forks, validators: rows }
 }
 
 describe("checkLaunch", () => {
