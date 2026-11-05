@@ -13,6 +13,8 @@ import {
     type TLSNotaryPresentation,
 } from "@/libs/tlsnotary"
 import { safeGCRSave, isFirstConnection } from "./utils"
+import { identityCarryoverActiveAtApply } from "@/forks/identityCarryoverGate"
+import { selectWeb2Unlink } from "@/libs/identity/web2Unlink"
 
 /**
  * Expected API endpoints for TLSN verification per context
@@ -278,23 +280,44 @@ export async function applyTLSNIdentityRemove(
         return id.username === username
     }
 
-    // Find the TLSN identity to remove
-    const identity = accountGCR.identities.web2[context].find(
-        (id: Web2GCRData["data"]) =>
-            isMatch(id as Web2GCRData["data"] & { proofType?: string }),
-    )
+    let identity: Web2GCRData["data"] | undefined
 
-    if (!identity) {
-        return { success: false, message: "TLSN identity not found" }
+    if (identityCarryoverActiveAtApply()) {
+        const links: Array<Web2GCRData["data"] & { proofType?: string }> =
+            accountGCR.identities.web2[context]
+        const pick = selectWeb2Unlink(
+            links,
+            { username, userId: editOperation.data?.userId },
+            "TLSN identity not found",
+            id => id.proofType === "tlsn",
+        )
+        if ("message" in pick) {
+            return { success: false, message: pick.message }
+        }
+        identity = pick.removed
+        const drop = new Set(pick.indexes)
+        accountGCR.identities.web2[context] = links.filter(
+            (_, i) => !drop.has(i),
+        )
+    } else {
+        // Find the TLSN identity to remove
+        identity = accountGCR.identities.web2[context].find(
+            (id: Web2GCRData["data"]) =>
+                isMatch(id as Web2GCRData["data"] & { proofType?: string }),
+        )
+
+        if (!identity) {
+            return { success: false, message: "TLSN identity not found" }
+        }
+
+        // Filter out only the matching TLSN identity
+        accountGCR.identities.web2[context] = accountGCR.identities.web2[
+            context
+        ].filter(
+            (id: Web2GCRData["data"]) =>
+                !isMatch(id as Web2GCRData["data"] & { proofType?: string }),
+        )
     }
-
-    // Filter out only the matching TLSN identity
-    accountGCR.identities.web2[context] = accountGCR.identities.web2[
-        context
-    ].filter(
-        (id: Web2GCRData["data"]) =>
-            !isMatch(id as Web2GCRData["data"] & { proofType?: string }),
-    )
 
     const deductPoints = async () => {
         // Trigger TLSN incentive rollback only for confirmed TLSN provenance.
