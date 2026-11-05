@@ -23,12 +23,17 @@ via the `proxy` compose profile (opt-in — no impact when off).
 | `https://${PROXY_DOMAIN}/prometheus/` | Prometheus `prometheus:9090` | none (read-only UI) |
 
 OmniProtocol (`:53551`) stays direct — its custom-fingerprint TLS cannot
-survive proxy termination.
+survive proxy termination. Gossip (`GOSSIP_PORT`, default `:9095`) stays
+direct too: peers dial the node's public host on that port over raw libp2p
+TCP, which Caddy does not forward. `docker-compose.proxy.yml` keeps both
+published and drops every other host port of the node.
 
 ## Prerequisites
 
 1. **DNS**: `${PROXY_DOMAIN}` must resolve to your host's public IP.
-2. **Firewall**: ports 80 + 443 (TCP + UDP for HTTP/3) open inbound.
+2. **Firewall**: ports 80 + 443 (TCP + UDP for HTTP/3) open inbound, plus
+   the two direct TCP ports: OmniProtocol (`OMNI_PORT`, default 53551) and
+   gossip (`GOSSIP_PORT`, default 9095).
 3. **Epic 14 must be deployed first.** Caddy will set `X-Forwarded-For`;
    the node needs `TRUSTED_PROXIES` populated to honour it (see step 4).
 4. **`TRUSTED_PROXIES` is required behind any proxy.** Left empty, the node
@@ -47,6 +52,10 @@ survive proxy termination.
 ```bash
 # Activate the proxy profile
 COMPOSE_PROFILES=monitoring,tlsnotary,proxy
+# Use the proxy override too. It is what makes the node refuse to start
+# while a basic-auth hash is empty or still the placeholder; without it
+# an empty METRICS_BASIC_AUTH_HASH fails silently (401 on /metrics).
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
 
 # Public DNS name + ACME contact
 PROXY_DOMAIN=node.example.com
@@ -165,7 +174,11 @@ support is required, run Prometheus on a dedicated subdomain
 ### `/mcp/` returns 401 even with credentials
 
 Default `MCP_BASIC_AUTH_HASH` is a sentinel that rejects all callers
-(Caddyfile comment explains). Generate a real hash:
+(Caddyfile comment explains). With `docker-compose.proxy.yml`, the node
+refuses to start while `METRICS_BASIC_AUTH_HASH` is empty or the placeholder;
+`PROXY_ALLOW_PLACEHOLDER_AUTH=true` keeps the route closed on purpose. The
+`MCP_BASIC_AUTH_HASH` check applies only if `MCP_ENABLED` is also passed to the
+node container (the shipped compose files do not pass it). Generate a real hash:
 
 ```bash
 docker run --rm caddy:2 caddy hash-password --plaintext 'mcp-password-here'
@@ -182,14 +195,33 @@ when re-enabling the server.
 ## Rolling back
 
 ```bash
-# Just stop caddy — other services keep running unchanged
-docker compose stop caddy
-# Or remove from active profiles
-sed -i 's/,proxy//' .env
+# The reaper stops the whole stack when the node container exits, and the
+# node is recreated below; stop it first (a no-op without the reaper profile)
+docker compose stop reaper caddy
+# Drop the proxy profile AND the proxy override from .env, touching only
+# those two settings. The profile list is padded with commas so `proxy` is
+# removed as a whole entry wherever it sits (first, middle, last or alone)
+sed -i \
+  -e '/^COMPOSE_PROFILES=/{s/=/=,/;s/$/,/;s/,proxy,/,/g;s/=,/=/;s/,$//}' \
+  -e '/^COMPOSE_FILE=/s/:docker-compose.proxy.yml//' .env
+# Serve Grafana from its own port again
+sed -i -e '/^GRAFANA_ROOT_URL=/d' -e '/^GRAFANA_SERVE_FROM_SUB_PATH=/d' .env
+# Recreate the services so their host ports are published again
 docker compose up -d
 ```
 
-Host ports `53550 53551 3005 9090 3000 9091 7047` keep working direct.
+Stopping caddy alone is not a rollback. While `docker-compose.proxy.yml`
+stays in `COMPOSE_FILE`, its `ports: !override` lists keep the RPC,
+signaling, metrics, Grafana and Prometheus host ports unpublished, so RPC
+stays unreachable from outside. Removing it from `COMPOSE_FILE` and running
+`docker compose up -d` recreates every service whose ports changed.
+
+Grafana keeps redirecting to the stopped proxy while `GRAFANA_ROOT_URL`
+points there with `GRAFANA_SERVE_FROM_SUB_PATH=true`; with both removed it
+falls back to `http://localhost:3000` at the root path.
+
+After that, host ports `53550 53551 3005 9090 3000 9091 7047` work direct
+again, next to `9095` (gossip), which stays published in both modes.
 
 ## Related
 

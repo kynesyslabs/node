@@ -175,6 +175,13 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:show   # from the node che
 PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> <other launcher options>
 ```
 
+## Upgrade notes
+
+- From the first release after `v1.0.0-rc.5`: a node started with `--proxy`
+  (`docker-compose.proxy.yml`) refuses to boot while `METRICS_BASIC_AUTH_HASH`
+  is empty or still the shipped placeholder. Before upgrading, set the hash, or set
+  `PROXY_ALLOW_PLACEHOLDER_AUTH=true` to boot without one (see `.env.example`).
+
 ## Known limits
 
 - Debian packages installed with `apt-get` (curl, ca-certificates, xz)
