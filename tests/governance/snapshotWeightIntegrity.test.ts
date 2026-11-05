@@ -51,13 +51,18 @@ jest.mock("@/libs/blockchain/chain", () => ({
     default: { getLastBlockNumber: jest.fn() },
 }))
 
-jest.mock("@/libs/blockchain/gcr/gcr", () => ({
-    __esModule: true,
-    default: {
-        getGCRValidatorStatus: jest.fn(),
-        getGCRValidatorsAtBlock: jest.fn(),
-    },
-}))
+jest.mock("@/libs/blockchain/gcr/gcr", () => {
+    // Vote apply reads through the throwing variant; one mock serves both.
+    const atBlock = jest.fn()
+    return {
+        __esModule: true,
+        default: {
+            getGCRValidatorStatus: jest.fn(),
+            getGCRValidatorsAtBlock: atBlock,
+            getGCRValidatorsAtBlockOrThrow: atBlock,
+        },
+    }
+})
 
 import Chain from "@/libs/blockchain/chain"
 import GCR from "@/libs/blockchain/gcr/gcr"

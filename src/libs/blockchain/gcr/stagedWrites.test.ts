@@ -61,6 +61,7 @@ mock.module("@/model/datasource", datasourceModule)
 
 const { default: HandleGCR } = await import("./handleGCR")
 const { default: Chain } = await import("../chain")
+const { StateReadError } = await import("./stateReadError")
 
 const caches = (): any => ({
     accounts: new Map(),
@@ -324,7 +325,7 @@ describe("governance edits", () => {
             ],
         }
         const { default: GCR } = await import("./gcr")
-        spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+        spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue([
             { address: "0xabc", staked_amount: "9" },
         ] as any)
 
@@ -489,4 +490,58 @@ const stakeTx = (amounts: string[]): any => ({
         from_ed25519_address: "0xabc",
         gcr_edits: amounts.map(stake),
     },
+})
+
+describe("a state read that fails", () => {
+    const failingTable = (table: string) => {
+        seeded = Object.defineProperty({}, table, {
+            get: () => {
+                throw new Error("connection reset")
+            },
+        })
+    }
+
+    it("aborts a proposal instead of refusing it as from a non-validator", async () => {
+        const { default: GCR } = await import("./gcr")
+        ;(GCR.getGCRValidatorStatus as any).mockRestore?.()
+        failingTable("Validators")
+
+        await expect(
+            HandleGCR.applyGCREdit(proposal("p1"), caches(), false, false),
+        ).rejects.toBeInstanceOf(StateReadError)
+    })
+
+    it("aborts a vote instead of skipping it as from outside the snapshot", async () => {
+        const { default: GCR } = await import("./gcr")
+        seeded = {
+            NetworkUpgrade: [
+                { proposalId: "p1", version: 1, status: "pending", snapshotBlock: 50, proposedParameters: {} },
+            ],
+        }
+        spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockRejectedValue(new Error("connection reset"))
+
+        await expect(
+            HandleGCR.applyGCREdit(vote("p1"), caches(), false, false),
+        ).rejects.toBeInstanceOf(StateReadError)
+    })
+
+    it("propagates out of the transaction apply instead of failing the transaction", async () => {
+        const entities = caches()
+        entities.accounts.set("0xabc", { pubkey: "0xabc", balance: 10n, nonce: 0 })
+        const edit = spyOn(HandleGCR, "applyStorableEdit").mockRejectedValue(
+            new StateReadError("validator row", "connection reset"),
+        )
+        try {
+            await expect(
+                HandleGCR.applyTransaction(entities, stakeTx(["5"]), false, false),
+            ).rejects.toBeInstanceOf(StateReadError)
+
+            // Any other error is still the transaction's own failure.
+            edit.mockRejectedValue(new Error("bad edit"))
+            const failed = await HandleGCR.applyTransaction(entities, stakeTx(["5"]), false, false)
+            expect(failed.success).toBe(false)
+        } finally {
+            edit.mockRestore()
+        }
+    })
 })

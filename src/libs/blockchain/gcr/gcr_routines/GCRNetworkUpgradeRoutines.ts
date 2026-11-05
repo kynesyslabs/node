@@ -23,6 +23,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { canonicalAddress } from "@/libs/network/utils/txHelpers"
 import type { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 import log from "src/utilities/logger"
+import { readState } from "@/libs/blockchain/gcr/stateReadError"
 
 // Server-derived fields filled in here (NOT carried in the edit):
 //   proposal: version, snapshotBlock, tallyBlock
@@ -48,7 +49,9 @@ export default class GCRNetworkUpgradeRoutines {
                 .getRepository(NetworkUpgrade)
 
         // Idempotent on duplicate proposalId.
-        const existing = await resolved.findOneBy({ proposalId: e.proposalId })
+        const existing = await readState("proposal", () =>
+            resolved.findOneBy({ proposalId: e.proposalId }),
+        )
         if (existing) {
             return {
                 success: true,
@@ -65,9 +68,11 @@ export default class GCRNetworkUpgradeRoutines {
             return { success: false, message: refusal }
         }
 
-        const open = await resolved.find({
-            where: { status: In(["pending", "approved", "activating"]) },
-        })
+        const open = await readState("open proposals", () =>
+            resolved.find({
+                where: { status: In(["pending", "approved", "activating"]) },
+            }),
+        )
         if (open.some(o => canonicalAddress(o.proposerPublicKey) === proposerKey)) {
             return {
                 success: false,
@@ -96,7 +101,8 @@ export default class GCRNetworkUpgradeRoutines {
         // part of applying block N, Chain.getLastBlockNumber() may return
         // N-1 (block not yet committed) and snapshotBlock would drift.
         const snapshotBlock =
-            currentBlock ?? (await Chain.getLastBlockNumber())
+            currentBlock ??
+            (await readState("chain tip", () => Chain.getLastBlockNumber()))
         const tallyBlock = snapshotBlock + VOTING_WINDOW_BLOCKS
         // Re-validate effectiveAtBlock against the server-computed snapshotBlock.
         // RPC validation only checks the invariant against the chain tip at
@@ -113,7 +119,9 @@ export default class GCRNetworkUpgradeRoutines {
                 message: `effectiveAtBlock ${e.effectiveAtBlock} below minimum ${minEffectiveAtBlock} (snapshot+window+grace)`,
             }
         }
-        const nextVersion = await computeNextVersion(resolved)
+        const nextVersion = await readState("proposal version", () =>
+            computeNextVersion(resolved),
+        )
 
         const row = resolved.create({
             proposalId: e.proposalId,
@@ -155,12 +163,14 @@ export default class GCRNetworkUpgradeRoutines {
             proposals ??= db.getDataSource().getRepository(NetworkUpgrade)
         }
 
-        const existing = await votes.findOne({
-            where: {
-                proposalId: e.proposalId,
-                voterAddress,
-            },
-        })
+        const existing = await readState("vote", () =>
+            votes.findOne({
+                where: {
+                    proposalId: e.proposalId,
+                    voterAddress,
+                },
+            }),
+        )
         if (existing) {
             return {
                 success: true,
@@ -168,9 +178,11 @@ export default class GCRNetworkUpgradeRoutines {
             }
         }
 
-        const proposal = await proposals.findOneBy({
-            proposalId: e.proposalId,
-        })
+        const proposal = await readState("proposal", () =>
+            proposals.findOneBy({
+                proposalId: e.proposalId,
+            }),
+        )
         if (!proposal) {
             // Should have been rejected at RPC entry; skip silently here
             // so a leaked vote doesn't break block confirmation.
@@ -185,14 +197,16 @@ export default class GCRNetworkUpgradeRoutines {
                 message: `Vote skipped: proposal ${e.proposalId} status=${proposal.status}, voting closed`,
             }
         }
-        const blockNumber = currentBlock ?? (await Chain.getLastBlockNumber())
+        const blockNumber =
+            currentBlock ??
+            (await readState("chain tip", () => Chain.getLastBlockNumber()))
 
         // Voter must be in the snapshot validator set; otherwise the vote
         // would be persisted with weight="0", contaminating tallies.
         // Validator rows are stored lower-cased (see GCRValidatorStakeRoutines)
         // so the comparison uses the canonical voter address.
-        const snapshotValidators = (await GCR.getGCRValidatorsAtBlock(
-            proposal.snapshotBlock,
+        const snapshotValidators = (await readState("snapshot validators", () =>
+            GCR.getGCRValidatorsAtBlockOrThrow(proposal.snapshotBlock),
         )) as Validators[]
         const v = snapshotValidators.find(x => x.address === voterAddress)
         if (!v || !v.staked_amount) {
@@ -270,7 +284,7 @@ async function proposalRefusal(
     // A stake edit earlier in the block (an unstake, say) wins over the saved row.
     const validator = stagedValidators?.has(proposerKey)
         ? stagedValidators.get(proposerKey)
-        : await GCR.getGCRValidatorStatus(proposerKey)
+        : await GCR.getGCRValidatorStatus(proposerKey, null, true)
     if (!validator || validator.status !== VALIDATOR_STATUS_ACTIVE) {
         return "Proposer is not an active validator"
     }

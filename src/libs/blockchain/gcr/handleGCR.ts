@@ -99,6 +99,7 @@ import {
     applyAtomicStoragePut,
     type StoragePutEdit,
 } from "@/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines"
+import { StateReadError } from "@/libs/blockchain/gcr/stateReadError"
 import {
     applySlotCas,
     applyWorkAttempt,
@@ -1553,6 +1554,7 @@ export default class HandleGCR {
                     place,
                 )
             } catch (error) {
+                if (error instanceof StateReadError) throw error
                 log.error(`[applyTransaction] Error applying GCREdit: ${error}`)
                 result = {
                     success: false,
