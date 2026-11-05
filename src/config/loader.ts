@@ -512,6 +512,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.gossip.heightsIntervalMs,
             ),
             keyFile: envStr(EnvKey.GOSSIP_KEY_FILE, d.gossip.keyFile),
+            ipcConnectTimeoutMs: envInt(
+                EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS,
+                d.gossip.ipcConnectTimeoutMs,
+            ),
         },
     }
 

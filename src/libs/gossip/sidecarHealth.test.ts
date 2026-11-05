@@ -2,6 +2,9 @@ import { describe, expect, it } from "bun:test"
 import {
     INBOUND_SILENCE_MS,
     judgeSidecarHealth,
+    RELAUNCH_BACKOFF_BASE_MS,
+    RELAUNCH_BACKOFF_CAP_MS,
+    relaunchDelayMs,
     RestartBudget,
     STATS_STALE_HARD_CAP_MS,
     STATS_STALE_MS,
@@ -101,5 +104,45 @@ describe("RestartBudget", () => {
         expect(b.take(500)).toBe(false)
         expect(b.take(1002)).toBe(true)
         expect(b.used(1002)).toBe(1)
+    })
+})
+
+describe("relaunchDelayMs", () => {
+    const max = () => 1
+    const min = () => 0
+
+    it("relaunches at once on the first try of a recovery", () => {
+        expect(relaunchDelayMs(0, max)).toBe(0)
+    })
+
+    it("doubles per failed attempt up to the cap", () => {
+        const delays = [1, 2, 3, 4, 5, 6, 7, 8, 20, 1000].map(i =>
+            relaunchDelayMs(i, max),
+        )
+        expect(delays.slice(0, 7)).toEqual([
+            1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000,
+        ])
+        for (const d of delays.slice(6)) expect(d).toBe(RELAUNCH_BACKOFF_CAP_MS)
+    })
+
+    it("jitters within [half, full] of the step, never below half", () => {
+        expect(relaunchDelayMs(1, min)).toBe(RELAUNCH_BACKOFF_BASE_MS / 2)
+        expect(relaunchDelayMs(30, min)).toBe(RELAUNCH_BACKOFF_CAP_MS / 2)
+        for (let i = 0; i < 200; i++) {
+            const d = relaunchDelayMs(3)
+            expect(d).toBeGreaterThanOrEqual(2_000)
+            expect(d).toBeLessThanOrEqual(4_000)
+        }
+    })
+
+    it("clamps an out-of-range random source", () => {
+        expect(relaunchDelayMs(1, () => 5)).toBe(1_000)
+        expect(relaunchDelayMs(1, () => -1)).toBe(500)
+    })
+
+    it("honours a custom base and cap", () => {
+        expect(relaunchDelayMs(1, max, 40, 160)).toBe(40)
+        expect(relaunchDelayMs(3, max, 40, 160)).toBe(160)
+        expect(relaunchDelayMs(9, max, 40, 160)).toBe(160)
     })
 })

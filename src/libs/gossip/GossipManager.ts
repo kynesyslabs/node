@@ -30,21 +30,26 @@ import {
     setReadyGauge,
     countTxIngest,
     countSidecarRestart,
+    countSidecarRelaunchFailure,
+    setSidecarDegradedGauge,
     countInbound,
     countSilenceProbe,
 } from "./metrics"
 import {
     INBOUND_SILENCE_MS,
     judgeSidecarHealth,
+    relaunchDelayMs,
     RestartBudget,
     STATS_STALE_MS,
 } from "./sidecarHealth"
 import { getStakedSet } from "src/libs/consensus/stakedSet"
+import { markSubsystem, subsystemError } from "src/utilities/subsystemRegistry"
 
 const PROTOCOL_VERSION = 1
-const IPC_CONNECT_TIMEOUT_MS = 5000
+const READY_TIMEOUT_MS = 10_000
+const IPC_RETRY_INTERVAL_MS = 100
 const STOP_KILL_ESCALATION_MS = 2000
-/** Restarts allowed per window before the node gives up (D11 fatal). */
+/** Restarts in a window beyond which a flapping sidecar is relaunched only after a backoff. */
 const RESTART_MAX = 3
 const RESTART_WINDOW_MS = 5 * 60_000
 /** Peers to hello when gossip is silent, to tell a dead mesh from a dead network. */
@@ -64,6 +69,13 @@ interface SidecarStats {
         }
     >
     lastInboundAt?: number
+}
+
+/** Configuration no relaunch can fix; fatal at first boot only. */
+class SidecarConfigError extends Error {}
+
+function errorText(e: unknown): string {
+    return e instanceof Error ? e.message : String(e)
 }
 
 export class GossipManager {
@@ -90,6 +102,24 @@ export class GossipManager {
     private lastSilenceProbeAt = 0
     private aloneLogged = false
     private sidecarTail: string[] = []
+    /** Budget refusals in a row; grows the backoff for a sidecar that keeps dying after a good launch. */
+    private flapStreak = 0
+    private recovery: Promise<void> | null = null
+    private wakeRetry: (() => void) | null = null
+    private degraded: {
+        since: number
+        reason: string
+        failedAttempts: number
+        nextAttemptAt: number | null
+    } | null = null
+
+    constructor(
+        private readonly backoff: {
+            baseMs?: number
+            capMs?: number
+            random?: () => number
+        } = {},
+    ) {}
 
     static getInstance(): GossipManager {
         if (!GossipManager.instance) {
@@ -102,7 +132,7 @@ export class GossipManager {
         return Config.getInstance().gossip.enabled
     }
 
-    // any gossip failure is fatal by design (debug posture).
+    // Only for configuration that no retry can fix, found at first boot.
     private fatal(context: string, error: unknown): never {
         const tail =
             this.sidecarTail.length > 0
@@ -135,52 +165,77 @@ export class GossipManager {
         return "sidecar/src/index.js"
     }
 
+    /**
+     * Brings gossip up. Exits the process only when the sidecar cannot run
+     * here at all (entry or Node runtime missing); a launch that merely
+     * fails, e.g. a slow IPC socket on a loaded host, leaves the node
+     * running on HTTP while the sidecar is relaunched in the background.
+     */
     async start(): Promise<void> {
         if (this.started) return
         const cfg = Config.getInstance().gossip
 
+        let entry: string
         try {
             registerGossipMetrics()
-
-            const entry = this.sidecarEntry()
+            entry = this.sidecarEntry()
             if (!fs.existsSync(entry)) {
-                throw new Error(
+                throw new SidecarConfigError(
                     `sidecar entry not found at ${entry} — run 'bun run sidecar:build' (or set GOSSIP_SIDECAR_PATH)`,
                 )
             }
-
-            await this.launchSidecar(entry)
-
-            this.lastTickAt = Date.now()
-            this.heightsTimer = setInterval(() => {
-                this.checkSidecarHealth(cfg.heightsIntervalMs)
-                this.publishOwnHeights().catch(e =>
-                    log.warning(
-                        `[GOSSIP] heights publish failed: ${
-                            e instanceof Error ? e.message : String(e)
-                        }`,
-                    ),
-                )
-                this.retryHeldTxs()
-                this.refreshGauges()
-            }, cfg.heightsIntervalMs)
-
-            this.started = true
-            // Receive-only unless staked: the tx topic is joined and left
-            // as the node's own stake status changes. Heights and blocks
-            // are always received; publishing them is gated per call.
-            this.stakeUnsubscribe = onSelfStakeChange(staked =>
-                this.setTxSubscription(staked),
-            )
-            log.info(
-                `[GOSSIP] started: sidecar peerId ${this.readyInfo?.peerId}, gossip port ${cfg.port}`,
-            )
         } catch (e) {
             this.fatal("start()", e)
         }
+
+        let firstLaunchError: unknown = null
+        try {
+            await this.launchSidecar(entry)
+        } catch (e) {
+            if (e instanceof SidecarConfigError) this.fatal("start()", e)
+            firstLaunchError = e
+            await this.teardownSidecar()
+        }
+
+        this.lastTickAt = Date.now()
+        this.heightsTimer = setInterval(() => {
+            this.checkSidecarHealth(cfg.heightsIntervalMs)
+            this.publishOwnHeights().catch(e =>
+                log.warning(
+                    `[GOSSIP] heights publish failed: ${
+                        e instanceof Error ? e.message : String(e)
+                    }`,
+                ),
+            )
+            this.retryHeldTxs()
+            this.refreshGauges()
+        }, cfg.heightsIntervalMs)
+
+        this.started = true
+        // Receive-only unless staked: the tx topic is joined and left
+        // as the node's own stake status changes. Heights and blocks
+        // are always received; publishing them is gated per call.
+        this.stakeUnsubscribe = onSelfStakeChange(staked =>
+            this.setTxSubscription(staked),
+        )
+
+        if (firstLaunchError !== null) {
+            void this.restartSidecar(
+                `first launch failed: ${errorText(firstLaunchError)}`,
+                { afterFailedLaunch: true },
+            )
+            return
+        }
+        this.markUp()
+        log.info(
+            `[GOSSIP] started: sidecar peerId ${this.readyInfo?.peerId}, gossip port ${cfg.port}`,
+        )
     }
 
-    /** Spawn the sidecar, connect IPC, wait for ready, and restore subscriptions and dials. */
+    /**
+     * Spawn the sidecar, connect IPC, wait for ready, and restore
+     * subscriptions and dials. On failure the caller tears the attempt down.
+     */
     private async launchSidecar(entry: string): Promise<void> {
         const cfg = Config.getInstance().gossip
         log.info(`[GOSSIP] spawning sidecar: node ${entry}`)
@@ -194,16 +249,26 @@ export class GossipManager {
             stdio: ["pipe", "ignore", "pipe"],
         })
         this.proc = proc
+        let launched = false
+        let failLaunch: (e: Error) => void = () => undefined
+        const launchFailed = new Promise<never>((_, reject) => {
+            failLaunch = reject
+        })
         proc.on("error", e => {
-            if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-                this.fatal(
-                    "sidecar spawn",
-                    new Error(
-                        "Node.js runtime not found on PATH — the gossip sidecar requires Node >= 20 (or set GOSSIP_ENABLED=false)",
-                    ),
-                )
+            const err =
+                (e as NodeJS.ErrnoException).code === "ENOENT"
+                    ? new SidecarConfigError(
+                          "Node.js runtime not found on PATH — the gossip sidecar requires Node >= 20 (or set GOSSIP_ENABLED=false)",
+                      )
+                    : e
+            if (!launched) {
+                failLaunch(err)
+                return
             }
-            this.fatal("sidecar spawn", e)
+            log.error(`[GOSSIP] sidecar process error: ${err.message}`)
+            if (this.proc === proc) {
+                this.onSidecarGone(`process error: ${err.message}`)
+            }
         })
         this.sidecarTail = []
         proc.stderr?.on("data", (d: Buffer) => {
@@ -218,14 +283,30 @@ export class GossipManager {
         })
         // "close" fires after stdio has drained, so the last stderr lines are logged first.
         proc.on("close", (code, signal) => {
+            const why = `process exited with code ${code}${signal ? ` (signal ${signal})` : ""}`
+            if (!launched) {
+                failLaunch(new Error(`sidecar ${why} before it was ready`))
+                return
+            }
             if (this.proc !== proc) return // a superseded process
-            this.onSidecarGone(
-                `process exited with code ${code}${signal ? ` (signal ${signal})` : ""}`,
-            )
+            this.onSidecarGone(why)
         })
 
-        await this.connectIpc()
-        await this.awaitReady()
+        const ready = this.awaitReady()
+        try {
+            await Promise.race([
+                this.connectIpc(proc, cfg.ipcConnectTimeoutMs).then(() =>
+                    ready.arm(),
+                ),
+                launchFailed,
+            ])
+        } finally {
+            ready.cancel()
+        }
+        if (this.proc !== proc) {
+            throw new Error("sidecar launch superseded or stopped")
+        }
+        launched = true
 
         // Judge staleness and silence from now.
         const now = Date.now()
@@ -247,41 +328,200 @@ export class GossipManager {
 
     /** The sidecar died or its bridge closed on its own. */
     private onSidecarGone(reason: string): void {
-        if (this.stopping || this.restarting) return
+        // Before start() completes, a failed first launch is handled there.
+        if (!this.started || this.stopping || this.restarting) return
         void this.restartSidecar(reason)
     }
 
-    /** Replace the sidecar; fatal once the restart budget is exhausted. */
-    private async restartSidecar(reason: string): Promise<void> {
-        if (this.restarting || this.stopping) return
+    /**
+     * Replace the sidecar, retrying failed launches with capped, jittered
+     * backoff until one succeeds or the node stops. Never exits the
+     * process: consensus, sync and block/tx propagation fall back to HTTP
+     * while gossip is down.
+     */
+    private restartSidecar(
+        reason: string,
+        opts: { afterFailedLaunch?: boolean } = {},
+    ): Promise<void> {
+        if (this.restarting || this.stopping) {
+            return this.recovery ?? Promise.resolve()
+        }
         this.restarting = true
+        this.recovery = this.runRecovery(reason, opts)
+            .catch(e => {
+                // The health tick sees the stale sidecar and starts a new recovery.
+                log.error(`[GOSSIP] sidecar recovery aborted: ${errorText(e)}`)
+            })
+            .finally(() => {
+                this.restarting = false
+                this.recovery = null
+            })
+        return this.recovery
+    }
+
+    private async runRecovery(
+        reason: string,
+        opts: { afterFailedLaunch?: boolean },
+    ): Promise<void> {
         const now = Date.now()
         countSidecarRestart(reason)
-        if (!this.restartBudget.take(now)) {
-            this.fatal(
-                "sidecar restart budget",
-                new Error(
-                    `${reason}; ${RESTART_MAX} restarts already in the last ${RESTART_WINDOW_MS / 60_000} min`,
-                ),
-            )
+        if (this.restartBudget.take(now)) {
+            this.flapStreak = 0
+        } else {
+            this.flapStreak++
         }
+        let failedAttempts = opts.afterFailedLaunch ? 1 : 0
+        this.enterDegraded(reason, failedAttempts)
         log.error(
-            `[GOSSIP] restarting sidecar: ${reason} (restart ${this.restartBudget.used(now)}/${RESTART_MAX} in window)`,
+            `[GOSSIP] restarting sidecar: ${reason} (restart ${this.restartBudget.used(now)}/${RESTART_MAX} in window${
+                this.flapStreak > 0
+                    ? `, flapping: relaunches delayed (streak ${this.flapStreak})`
+                    : ""
+            }); node continues without gossip, HTTP fallback in use`,
         )
         setReadyGauge(false)
-        try {
-            await this.teardownSidecar()
-            this.readyInfo = null
-            this.lastStats = null
-            await this.launchSidecar(this.sidecarEntry())
-            log.info(
-                `[GOSSIP] sidecar restarted: peerId ${this.readyInfo?.peerId}`,
-            )
-        } catch (e) {
-            this.fatal("sidecar restart", e)
-        } finally {
-            this.restarting = false
+
+        let delay = this.relaunchDelay(failedAttempts + this.flapStreak)
+        for (;;) {
+            if (delay > 0) {
+                this.noteNextAttempt(failedAttempts, Date.now() + delay)
+                await this.sleepUnlessStopping(delay)
+            }
+            if (this.stopping) return
+            try {
+                await this.teardownSidecar()
+                this.readyInfo = null
+                this.lastStats = null
+                if (this.stopping) return
+                await this.launchSidecar(this.sidecarEntry())
+                if (this.stopping) {
+                    await this.teardownSidecar()
+                    return
+                }
+                const downMs = this.degraded
+                    ? Date.now() - this.degraded.since
+                    : 0
+                this.markUp()
+                log.info(
+                    `[GOSSIP] sidecar restarted: peerId ${this.readyInfo?.peerId} (gossip was down ${downMs}ms, ${failedAttempts} failed attempt(s))`,
+                )
+                return
+            } catch (e) {
+                if (this.stopping) {
+                    await this.teardownSidecar()
+                    return
+                }
+                failedAttempts++
+                countSidecarRelaunchFailure()
+                const tail =
+                    this.sidecarTail.length > 0
+                        ? `; last sidecar stderr: ${this.sidecarTail.slice(-3).join(" | ")}`
+                        : ""
+                await this.teardownSidecar()
+                delay = this.relaunchDelay(failedAttempts + this.flapStreak)
+                log.error(
+                    `[GOSSIP] sidecar relaunch attempt ${failedAttempts} failed: ${errorText(e)}${tail}; node keeps running without gossip, retrying in ${delay}ms`,
+                )
+                this.noteFailure(e, failedAttempts)
+            }
         }
+    }
+
+    private relaunchDelay(index: number): number {
+        return relaunchDelayMs(
+            index,
+            this.backoff.random,
+            this.backoff.baseMs,
+            this.backoff.capMs,
+        )
+    }
+
+    private sleepUnlessStopping(ms: number): Promise<void> {
+        return new Promise(resolve => {
+            const t = setTimeout(() => {
+                this.wakeRetry = null
+                resolve()
+            }, ms)
+            this.wakeRetry = () => {
+                clearTimeout(t)
+                this.wakeRetry = null
+                resolve()
+            }
+        })
+    }
+
+    private enterDegraded(reason: string, failedAttempts: number): void {
+        const now = Date.now()
+        if (!this.degraded) {
+            this.degraded = {
+                since: now,
+                reason,
+                failedAttempts,
+                nextAttemptAt: null,
+            }
+            subsystemError(getSharedState.subsystems, "gossip", reason, "sidecar")
+        } else {
+            this.degraded.reason = reason
+            this.degraded.failedAttempts = failedAttempts
+        }
+        setSidecarDegradedGauge(true)
+        this.publishDegraded()
+    }
+
+    private noteNextAttempt(failedAttempts: number, at: number): void {
+        if (!this.degraded) return
+        this.degraded.failedAttempts = failedAttempts
+        this.degraded.nextAttemptAt = at
+        this.publishDegraded()
+    }
+
+    private noteFailure(e: unknown, failedAttempts: number): void {
+        if (!this.degraded) return
+        this.degraded.failedAttempts = failedAttempts
+        this.degraded.reason = errorText(e)
+        this.publishDegraded()
+    }
+
+    private publishDegraded(): void {
+        const d = this.degraded
+        if (!d) return
+        try {
+            markSubsystem(getSharedState.subsystems, "gossip", "failed", {
+                enabled: true,
+                extra: {
+                    degraded: true,
+                    downSince: d.since,
+                    reason: d.reason,
+                    failedAttempts: d.failedAttempts,
+                    nextAttemptAt: d.nextAttemptAt,
+                },
+            })
+        } catch {
+            /* health reporting must never break recovery */
+        }
+    }
+
+    private markUp(): void {
+        this.degraded = null
+        setSidecarDegradedGauge(false)
+        try {
+            markSubsystem(getSharedState.subsystems, "gossip", "ready", {
+                enabled: true,
+                extra: { degraded: false, peerId: this.readyInfo?.peerId },
+            })
+        } catch {
+            /* health reporting must never break gossip */
+        }
+    }
+
+    /** Degraded state for health probes; null while the sidecar is up. */
+    getDegradedState(): {
+        since: number
+        reason: string
+        failedAttempts: number
+        nextAttemptAt: number | null
+    } | null {
+        return this.degraded ? { ...this.degraded } : null
     }
 
     private async teardownSidecar(): Promise<void> {
@@ -318,13 +558,22 @@ export class GossipManager {
         )
     }
 
-    private connectIpc(): Promise<void> {
+    private connectIpc(proc: ChildProcess, timeoutMs: number): Promise<void> {
         const ipc = this.ipcPath()
-        const deadline = Date.now() + IPC_CONNECT_TIMEOUT_MS
+        const deadline = Date.now() + timeoutMs
         return new Promise((resolve, reject) => {
             const tryConnect = () => {
+                if (this.stopping || this.proc !== proc) {
+                    reject(new Error("sidecar launch abandoned"))
+                    return
+                }
                 const sock = net.connect(ipc)
                 sock.on("connect", () => {
+                    if (this.stopping || this.proc !== proc) {
+                        sock.destroy()
+                        reject(new Error("sidecar launch abandoned"))
+                        return
+                    }
                     this.sock = sock
                     sock.on("data", (d: Buffer) => this.onIpcData(d))
                     sock.on("close", () => {
@@ -339,30 +588,58 @@ export class GossipManager {
                     if (Date.now() > deadline) {
                         reject(
                             new Error(
-                                `could not connect to sidecar IPC at ${ipc} within ${IPC_CONNECT_TIMEOUT_MS}ms`,
+                                `could not connect to sidecar IPC at ${ipc} within ${timeoutMs}ms`,
                             ),
                         )
                         return
                     }
-                    setTimeout(tryConnect, 100)
+                    setTimeout(tryConnect, IPC_RETRY_INTERVAL_MS)
                 })
             }
             tryConnect()
         })
     }
 
-    private awaitReady(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const t = setTimeout(
-                () => reject(new Error("sidecar did not report ready in 10s")),
-                10_000,
-            )
-            this.onReady = () => {
-                clearTimeout(t)
+    /**
+     * Resolves on the sidecar's "ready". Registered before the IPC connect
+     * so a "ready" right behind the hello is not missed; the timeout runs
+     * from arm(), once IPC is connected.
+     */
+    private awaitReady(): {
+        promise: Promise<void>
+        arm: () => Promise<void>
+        cancel: () => void
+    } {
+        let timer: ReturnType<typeof setTimeout> | null = null
+        let settle: (e?: Error) => void = () => undefined
+        const promise = new Promise<void>((resolve, reject) => {
+            settle = e => {
+                if (timer) clearTimeout(timer)
+                timer = null
                 this.onReady = null
-                resolve()
+                if (e) reject(e)
+                else resolve()
             }
+            this.onReady = () => settle()
         })
+        // A launch that fails before IPC connects never awaits this promise.
+        promise.catch(() => undefined)
+        return {
+            promise,
+            arm: () => {
+                timer = setTimeout(
+                    () =>
+                        settle(
+                            new Error(
+                                `sidecar did not report ready in ${READY_TIMEOUT_MS}ms`,
+                            ),
+                        ),
+                    READY_TIMEOUT_MS,
+                )
+                return promise
+            },
+            cancel: () => settle(new Error("sidecar launch ended")),
+        }
     }
 
     private onReady: (() => void) | null = null
@@ -474,11 +751,15 @@ export class GossipManager {
         this.stopping = true
         this.started = false
         if (this.heightsTimer) clearInterval(this.heightsTimer)
+        this.heightsTimer = null
         this.stakeUnsubscribe?.()
         this.stakeUnsubscribe = null
         setReadyGauge(false)
+        this.wakeRetry?.()
         this.proc?.stdin?.end()
         await this.teardownSidecar()
+        await this.recovery
+        setSidecarDegradedGauge(false)
     }
 
     private lastTickAt = 0

@@ -206,5 +206,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         port: 9095,
         heightsIntervalMs: 1000,
         keyFile: ".demos_gossip_key",
+        // A loaded host can take well over 5 s to start the sidecar's libp2p stack.
+        ipcConnectTimeoutMs: 15_000,
     },
 }

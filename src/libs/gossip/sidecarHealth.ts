@@ -73,3 +73,24 @@ export class RestartBudget {
         return this.stamps.filter(t => now - t <= this.windowMs).length
     }
 }
+
+export const RELAUNCH_BACKOFF_BASE_MS = 1_000
+export const RELAUNCH_BACKOFF_CAP_MS = 60_000
+
+/**
+ * Wait before relaunch attempt `index` (0 = the first try of a recovery).
+ * Exponential with jitter in [d/2, d]: the floor keeps a failing host from
+ * being hammered, the spread keeps validators that lost their sidecars to
+ * the same load spike from relaunching in lockstep.
+ */
+export function relaunchDelayMs(
+    index: number,
+    random: () => number = Math.random,
+    baseMs = RELAUNCH_BACKOFF_BASE_MS,
+    capMs = RELAUNCH_BACKOFF_CAP_MS,
+): number {
+    if (index <= 0) return 0
+    const exp = Math.min(capMs, baseMs * 2 ** Math.min(index - 1, 30))
+    const half = exp / 2
+    return Math.round(half + half * Math.min(1, Math.max(0, random())))
+}
