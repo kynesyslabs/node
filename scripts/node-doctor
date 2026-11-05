@@ -367,6 +367,14 @@ declare -A NODE_ENV_VALUES=()
 PARAMETER_SHEET="docs/mainnet/parameters.env"
 declare -A SHEET_VALUES=()
 declare -a SHEET_KEYS=()
+declare -a SHEET_ERRORS=()
+# A sheet without one of these would let a node pass with any value for it.
+SHEET_REQUIRED_KEYS=(
+	CONSENSUS_TIME BLOCK_TIMESTAMP_MIN_DELTA BLOCK_TIMESTAMP_TOLERANCE
+	NETWORK_FEE RPC_FEE BURN_FEE RPC_FEE_PERCENT
+	MIN_VALIDATOR_STAKE ZK_ATTESTATION_POINTS
+	PROD DEMOS_REQUIRE_VALIDATORS FORK_SCHEDULE_MISMATCH_POLICY
+)
 
 prod_line() { # $1 PASS|FAIL, $2 item, $3 detail
 	PROD_CHECKS=$((PROD_CHECKS + 1))
@@ -426,17 +434,31 @@ for k, v in env.items():
 
 node_env() { printf '%s' "${NODE_ENV_VALUES[$1]-}"; }
 
-# The published must-match values (docs/mainnet/parameters.md). KEY=value
-# lines only; comments and blank lines are skipped.
+# The published must-match values (docs/mainnet/parameters.md): KEY=value,
+# comment and blank lines. Any other line, a repeated key or a missing
+# required key goes to SHEET_ERRORS, since a skipped line is a value the
+# doctor would never check.
 load_parameter_sheet() {
 	[[ -f "${PARAMETER_SHEET}" ]] || return 1
-	local line key
+	local line key n=0
 	while IFS= read -r line || [[ -n "${line}" ]]; do
-		[[ "${line}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+		n=$((n + 1))
+		[[ "${line}" =~ ^[[:space:]]*(#.*)?$ ]] && continue
+		if [[ ! "${line}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+			SHEET_ERRORS+=("line ${n} is not KEY=value: ${line}")
+			continue
+		fi
 		key="${BASH_REMATCH[1]}"
-		[[ -n "${SHEET_VALUES[${key}]+set}" ]] || SHEET_KEYS+=("${key}")
+		if [[ -n "${SHEET_VALUES[${key}]+set}" ]]; then
+			SHEET_ERRORS+=("line ${n} sets ${key} again")
+			continue
+		fi
+		SHEET_KEYS+=("${key}")
 		SHEET_VALUES["${key}"]="${BASH_REMATCH[2]%"${BASH_REMATCH[2]##*[![:space:]]}"}"
 	done <"${PARAMETER_SHEET}"
+	for key in "${SHEET_REQUIRED_KEYS[@]}"; do
+		[[ -n "${SHEET_VALUES[${key}]+set}" ]] || SHEET_ERRORS+=("has no ${key}= line")
+	done
 	[[ ${#SHEET_KEYS[@]} -gt 0 ]]
 }
 
@@ -470,7 +492,10 @@ check_parameter_sheet() {
 		prod_line FAIL "parameter sheet" "${PARAMETER_SHEET} is missing or has no KEY=value line: run from a checkout of the release tag"
 		return
 	fi
-	local key
+	local key error
+	for error in "${SHEET_ERRORS[@]}"; do
+		prod_line FAIL "parameter sheet" "${PARAMETER_SHEET} ${error}"
+	done
 	for key in "${SHEET_KEYS[@]}"; do
 		case "${key}" in
 		EXPECTED_GENESIS_HASH | EXPECTED_GENESIS_BLOCK_HASH) ;; # check_genesis_pin

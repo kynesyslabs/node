@@ -78,6 +78,30 @@ describe("node-doctor --production against the parameter sheet", () => {
         expect(line(other.lines, "EXPECTED_GENESIS_HASH")).toStartWith("FAIL EXPECTED_GENESIS_HASH: is cd")
     }, 60_000)
 
+    it("fails a sheet line it cannot read and a key the sheet repeats", () => {
+        const published = fs.readFileSync(path.join(repo, "docs/mainnet/parameters.env"), "utf8")
+        const sheet = writeSheet(
+            "malformed.env",
+            published.replace(/^PROD=true$/m, "PROD =true") + "NETWORK_FEE=2\n",
+        )
+        const { status, lines } = run(readSheet(path.join(repo, "docs/mainnet/parameters.env")), "--parameters", sheet)
+        expect(status).toBe(1)
+        expect(lines).toContain(`FAIL parameter sheet: ${sheet} line ${published.split("\n").findIndex(l => l === "PROD=true") + 1} is not KEY=value: PROD =true`)
+        expect(lines.some(l => l.startsWith("FAIL parameter sheet:") && l.endsWith("sets NETWORK_FEE again"))).toBe(true)
+        expect(lines).toContain(`FAIL parameter sheet: ${sheet} has no PROD= line`)
+    }, 60_000)
+
+    it("requires every published key and nothing beyond them", () => {
+        const published = readSheet(path.join(repo, "docs/mainnet/parameters.env"))
+        const full = run(published)
+        expect(full.lines.filter(l => l.startsWith("FAIL parameter sheet:"))).toEqual([])
+        const partial = run({ PROD: "true" }, "--parameters", writeSheet("partial.env", "PROD=true\n"))
+        expect(partial.status).toBe(1)
+        for (const key of Object.keys(published).filter(k => k !== "PROD")) {
+            expect(partial.lines).toContain(`FAIL parameter sheet: ${path.join(tmp, "partial.env")} has no ${key}= line`)
+        }
+    }, 60_000)
+
     it("fails when the sheet is missing", () => {
         const { status, lines } = run({}, "--parameters", path.join(tmp, "nope.env"))
         expect(status).toBe(1)
