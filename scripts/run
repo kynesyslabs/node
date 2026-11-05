@@ -756,26 +756,20 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 	fi
 	cd "$PG_FOLDER" || exit
 
-	# If we are cleaning, we need to remove the database
-	if [[ "${CLEAN}" == "true" ]]; then
-		echo "🧹 Cleaning the database..."
-		log_verbose "Removing existing database data for clean start"
-		sleep 1
-		rm -rf data_*
-		mkdir data_"${PG_PORT}"
-		echo "✅ Database cleaned"
-	fi
-
 	# Suppressing errors if the database is not running
 	if ! docker compose -f docker-compose.yml down >/dev/null 2>&1 && [[ "${CLEAN}" == "true" ]]; then
 		echo "❌ Could not stop the database container; the database was not wiped and nothing was migrated"
 		exit 1
 	fi
+	# If we are cleaning, we need to remove the database (only after a successful stop)
 	if [[ "${CLEAN}" == "true" ]]; then
+		echo "🧹 Cleaning the database..."
+		log_verbose "Removing existing database data for clean start"
 		if ! { rm -rf data_"${PG_PORT}" || rm -rf data_"${PG_PORT}"; } || ! mkdir data_"${PG_PORT}"; then
 			echo "❌ Could not wipe ${PG_FOLDER}/data_${PG_PORT} (check ownership: ls -la ${PG_FOLDER}); nothing was migrated"
 			exit 1
 		fi
+		echo "✅ Database cleaned"
 	fi
 
 	# Finally starting the database

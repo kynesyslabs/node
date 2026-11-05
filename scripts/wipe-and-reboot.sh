@@ -13,8 +13,10 @@
 #   1. Sanity-check the working tree is on a branch + clean (operator
 #      pushed everything they meant to push).
 #   2. Stops the stack via `./scripts/docker-run down` (or `--devnet down`).
-#   3. Removes the three named volumes (PG data, node data, node state)
-#      belonging to the targeted stack.
+#   3. Removes exactly three named volumes of the targeted stack: PG data,
+#      node data, node state (demos_pgdata, demos_node_data,
+#      demos_node_state; *_devnet with --devnet). The logs, Prometheus and
+#      Grafana volumes are kept.
 #   4. Forces a `--no-cache` rebuild of the node image (so source
 #      changes since the last build are picked up), then prunes build
 #      cache older than 24h.
@@ -50,7 +52,7 @@ for arg in "$@"; do
         --no-rebuild) DO_REBUILD=0 ;;
         --devnet) IS_DEVNET=1 ;;
         -h|--help)
-            sed -n '2,37p' "$0"
+            sed -n '2,39p' "$0"
             exit 0
             ;;
         *)
@@ -100,9 +102,10 @@ fi
 # -----------------------------------------------------------------------------
 if [[ "$YES" -ne 1 ]]; then
     echo
-    echo "[!] About to WIPE all chain data volumes for the ${STACK_LABEL} stack:"
+    echo "[!] About to DELETE these Docker volumes of the ${STACK_LABEL} stack:"
     printf '      %s\n' "${VOLUMES[@]}"
-    echo "    This is destructive."
+    echo "    No other volume is deleted (logs, Prometheus and Grafana are kept)."
+    echo "    This is destructive: the chain database and the node state are lost."
     read -r -p "    Type 'wipe' to confirm: " confirm
     if [[ "$confirm" != "wipe" ]]; then
         echo "    aborted."
@@ -162,8 +165,9 @@ fi
 # -----------------------------------------------------------------------------
 echo "[5/6] booting stack..."
 if [[ -x ./scripts/docker-run ]]; then
-    # --clean re-wipes the already-empty volumes (harmless) and makes docker-run
-    # create the schema on the empty database: the node no longer migrates at boot.
+    # --clean removes only the PG-data and node-data volumes, which step 3 already
+    # removed, and makes docker-run create the schema on the empty database: the
+    # node no longer migrates at boot.
     ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --clean up -d
 else
     docker compose up -d

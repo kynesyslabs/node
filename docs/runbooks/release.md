@@ -111,6 +111,11 @@ fails, which would run code nobody signed. The last line prints the digest
 the container runs; it must match
 `checksums.txt`. Post it on the release thread.
 
+The node does not migrate the database at boot. If the release adds a
+migration, back up and run `migration:show` / `migration:run` before the
+`up -d` above, per [database-migrations.md](database-migrations.md); on a first
+install, run `migration:run` once before the first start.
+
 A bare-metal validator (`./run`) checks out the tag instead and verifies it
 locally before starting:
 
@@ -125,7 +130,10 @@ git checkout v1.0.0-rc.1 &&
 ```
 
 The chain stops at the first failing check, so `./run` never starts an
-unverified tree. The full walk-through is in `INSTALL.md`.
+unverified tree. The full walk-through is in `INSTALL.md`. If the release
+adds a migration, stop the chain before the last line, back up, run
+`bun run migration:show` / `migration:run`
+([database-migrations.md](database-migrations.md)), then `./run`.
 
 ## Known limits
 

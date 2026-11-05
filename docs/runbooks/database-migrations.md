@@ -47,7 +47,8 @@ database by the same `PG_*` settings the node uses.
 | `bun run migration:run` | applies all pending migrations, in one transaction |
 | `bun run migration:revert` | undoes the last one. Lossy, see above |
 
-In the Docker stack, run them in a one-off container (the node can be stopped):
+In the Docker stack, run them in a one-off container (the node can be stopped,
+Postgres must be up: `--no-deps` does not start it):
 
 ```bash
 docker compose run --rm --no-deps node bun run migration:show
@@ -57,7 +58,28 @@ docker compose run --rm --no-deps node bun run migration:show
 
 Do it on **one** validator first, then the rest. Never on all at once.
 
-1. **Back up.** Stop the node, then dump the database. The dump holds the
+1. **Back up.** Stop the node but keep Postgres up, then dump the database.
+   Postgres has to be running for the dump, and for steps 2 and 3:
+
+   - **Docker:** stop only the node and its reaper, so Postgres stays up:
+     `docker compose stop reaper node`. Stopping the node alone is not enough:
+     the `reaper` service then stops the whole stack, Postgres included. Bring
+     the stack back with `docker compose up -d` (or `./run --docker`).
+   - **Bare metal:** the launcher runs `docker compose down` on its Postgres
+     (`postgres_<PG_PORT>`) when the node stops, so the container is gone and the
+     dump fails (no such container, or connection refused). Start that Postgres
+     alone first, and wait until it is ready:
+
+     ```bash
+     (cd postgres_<PG_PORT> && PG_PORT=<PG_PORT> docker compose up -d)
+     docker exec postgres_<PG_PORT> pg_isready -h 127.0.0.1 -U demosuser -d demos
+     ```
+
+     Repeat the `pg_isready` line until it prints `accepting connections`. The
+     next `./run` stops and restarts this container; the data stays in
+     `postgres_<PG_PORT>/data_<PG_PORT>`.
+
+   The dump holds the
    whole chain database, so write it into a private directory and make the
    file private from the start (`umask 077` before the redirect creates it
    mode 600, not 644):
@@ -151,13 +173,17 @@ Do it on **one** validator first, then the rest. Never on all at once.
 
    If any check fails, take the dump again and do not go on to step 2.
 
-2. **Apply on one validator.** With the new release deployed and the node
-   stopped:
+2. **Apply on one validator.** With the new release deployed, the node stopped
+   and Postgres still up (step 1):
 
    ```bash
    bun run migration:show    # the new migration(s) are listed as [ ]
    bun run migration:run
    ```
+
+   On the Docker stack, run each as
+   `docker compose run --rm --no-deps node bun run migration:show` (see
+   Commands).
 
    If it fails, the transaction rolls back and nothing changed. Do not start
    the node on the new release; fix the cause or restore the dump.
@@ -187,7 +213,8 @@ schema and fails with a database error: `relation "..." does not exist` or
 (missing `accepted_fork_schedule`), but other missing columns can fail later,
 while the node is already in consensus.
 
-If you see that, stop the node and run `bun run migration:show`. Any `[ ]` line
+If you see that, stop the node as step 1 says (Postgres stays up) and run
+`bun run migration:show`. Any `[ ]` line
 is pending: do the procedure above (backup first) and start the node again.
 Before `./run -U` or any update, run `bun run migration:show` after the pull and
 apply what is pending.

@@ -386,11 +386,11 @@ fi
 # parallel volume that compose never mounts.
 if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
     echo "+ --clean: tearing down stack + wiping volumes (${CLEAN_VOLUMES[*]})"
-    # Down with --volumes so anonymous volumes go too; named volumes
-    # still need explicit removal below because compose only drops them
-    # when `--volumes` is paired with full project teardown AND no other
+    # Down WITHOUT --volumes: it would also drop the logs/prometheus/grafana
+    # volumes, which --clean keeps. Only the CLEAN_VOLUMES are removed, below,
+    # and docker refuses to remove one while other
     # containers reference them.
-    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --volumes --remove-orphans || { echo "ERROR: --clean could not stop the stack; nothing was wiped or migrated." >&2; exit 1; }
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --remove-orphans || { echo "ERROR: --clean could not stop the stack; nothing was wiped or migrated." >&2; exit 1; }
     for vol in "${CLEAN_VOLUMES[@]}"; do
         if docker volume inspect "$vol" >/dev/null 2>&1; then
             echo "+ --clean: removing volume $vol"

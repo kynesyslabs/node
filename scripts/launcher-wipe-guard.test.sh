@@ -16,6 +16,10 @@
 #     stops it before migrate, instead of hanging forever
 #   - an empty database is migrated exactly once
 #   - a plain start never migrates
+#   - docker-run --clean runs `down` without --volumes and deletes only the
+#     CLEAN_VOLUMES (PG data, node data), not the logs/prometheus/grafana ones
+#   - run -c true wipes the data dir only after the container stopped (a failed
+#     stop leaves the data in place), in the order stop, wipe, start, migrate
 #
 # Usage:
 #   scripts/launcher-wipe-guard.test.sh                 # the scripts next to this file
@@ -241,6 +245,22 @@ check "docker-run --clean: volume removal fails -> stops before migrate" fail 0 
 
 start_case; seed_volumes; export STUB_FAIL_DOWN=1
 check "docker-run --clean: stack teardown fails -> stops before migrate" fail 0 "$W/scripts/docker-run" --clean up -d
+[[ -f "$ST/vol/demos_pgdata/tables/users" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - volume demos_pgdata was wiped although the teardown failed"; }
+
+# --clean must delete exactly the CLEAN_VOLUMES: `down` without --volumes (which
+# would also drop the logs/prometheus/grafana volumes), the others left alone
+start_case; seed_volumes; mkdir -p "$ST/vol/demos_node_logs" "$ST/vol/demos_prometheus_data" "$ST/vol/demos_grafana_data"
+check "docker-run --clean: empty database -> migrates once (volume scope)" ok 1 "$W/scripts/docker-run" --clean up -d
+grep -E 'docker compose .* down( |$)' "$ST/calls.log" | grep -qE -e '--volumes|down -v| -v( |$)' \
+    && { FAIL=$((FAIL + 1)); echo "FAIL - docker-run --clean passed --volumes to compose down"; }
+grep -qE 'docker compose .* down .*--remove-orphans' "$ST/calls.log" || { FAIL=$((FAIL + 1)); echo "FAIL - docker-run --clean did not run compose down --remove-orphans"; }
+for vol in demos_pgdata demos_node_data; do
+    # (the stub's `up` recreates an empty demos_pgdata, so look for the removal call)
+    grep -qE "^docker volume rm $vol\$" "$ST/calls.log" || { FAIL=$((FAIL + 1)); echo "FAIL - docker-run --clean did not remove volume $vol"; }
+done
+for vol in demos_node_state demos_node_logs demos_prometheus_data demos_grafana_data; do
+    [[ -d "$ST/vol/$vol" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - docker-run --clean deleted volume $vol, which is not in CLEAN_VOLUMES"; }
+done
 
 start_case; seed_volumes; export STUB_PSQL_TABLES=2
 check "docker-run --clean: database not empty after the wipe -> stops before migrate" fail 0 "$W/scripts/docker-run" --clean up -d
@@ -273,6 +293,9 @@ check "run -c true: data dir removal fails -> stops before migrate" fail 0 "$W/s
 
 start_case; seed_datadir; export STUB_FAIL_DOWN=1
 check "run -c true: container stop fails -> stops before migrate" fail 0 "$W/scripts/run" -c true -t -m
+# a failed stop must leave the data dir untouched: "the database was not wiped" is then true
+[[ -f "$W/postgres_5332/data_5332/postgres/tables/users" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - run -c true removed the data dir before the container stop failed"; }
+case "$LAST_OUT" in *"the database was not wiped"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - no 'database was not wiped' message"; esac
 
 start_case; seed_datadir; export STUB_PSQL_TABLES=3
 check "run -c true: database not empty after the wipe -> stops before migrate" fail 0 "$W/scripts/run" -c true -t -m
@@ -288,6 +311,11 @@ expect_bounded_probe
 
 start_case; seed_datadir
 check "run -c true: empty database -> migrates once" ok 1 "$W/scripts/run" -c true -t -m
+# order: stop, then wipe, then start, then migrate; the old rows are gone
+[[ -f "$W/postgres_5332/data_5332/postgres/tables/users" ]] && { FAIL=$((FAIL + 1)); echo "FAIL - run -c true left the old data in the data dir"; }
+[[ -f "$W/postgres_5332/data_5332/postgres/tables/migrations" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - run -c true did not migrate the wiped data dir"; }
+grep -nE 'docker compose .* (down|up)( |$)|bun run migration:run' "$ST/calls.log" | sed -E 's/^[0-9]+:docker compose .* (down|up)( .*|$)/\1/; s/^[0-9]+:bun run migration:run/migrate/' | tr '\n' ' ' \
+    | grep -qE '^down up migrate ' || { FAIL=$((FAIL + 1)); echo "FAIL - run -c true: wrong order of stop / start / migrate (got: $(grep -oE 'compose .* (down|up)|migration:run' "$ST/calls.log" | tr '\n' ';'))"; }
 
 start_case; seed_datadir
 check "run (plain start) on a populated database -> never migrates" ok 0 "$W/scripts/run" -t -m
@@ -297,6 +325,7 @@ check "run -b true (restore): data dir removal fails -> stops before migrate" fa
 
 start_case; seed_datadir
 check "run -b true (restore): wipe works -> migrates once" ok 1 "$W/scripts/run" -b true -t -m
+[[ -f "$W/postgres_5332/data_5332/postgres/tables/users" ]] && { FAIL=$((FAIL + 1)); echo "FAIL - run -b true left the old data in the data dir"; }
 
 # -----------------------------------------------------------------------------
 # wipe-and-reboot.sh

@@ -100,6 +100,8 @@ cp .env.example .env  # defaults are fine; edit only if you want to override
 ./run --docker        # docker compose up, with the commit the image is built from
 ```
 
+The node no longer migrates the database at boot. On a new host, create the schema once before that first start: `export GIT_COMMIT=$(git rev-parse HEAD)`, `docker compose up -d --wait postgres`, then `docker compose run --rm --no-deps node bun run migration:run` (it needs Postgres up). See [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md).
+
 The image refuses to build without the git commit it is built from. `./run --docker` exports it; to call compose directly, export it first: `export GIT_COMMIT=$(git rev-parse HEAD)`, then `docker compose up`.
 
 The first run pulls images and builds the node container, so expect a few minutes. Subsequent starts are near-instant.
@@ -443,6 +445,8 @@ docker compose up -d --no-build
 
 Then confirm the running digest as in step 6 there.
 
+The node does not migrate the database at boot. If the release adds a migration, back up first, then run `docker compose run --rm --no-deps node bun run migration:show` and `... migration:run` before `up -d` (stop only the node and its reaper while you do: `docker compose stop reaper node`, so Postgres stays up). Procedure: [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md).
+
 Volumes (and therefore your identity, chain data, peerlist cache) are preserved.
 
 A development host that builds from source instead: `git pull && ./run --docker -d --build`. Each such update leaves the previous image's layers in the build cache; the [daemon baseline](#docker-daemon-baseline) caps that at 10 GB, otherwise run `docker builder prune -f --filter until=24h` after updating.
@@ -621,6 +625,8 @@ git branch
 ```bash
 ./run
 ```
+
+The node no longer migrates the database at boot. On a new host, create the schema once before the first start: run `bun run migration:run` against the launcher's Postgres (start it first, see [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md)), or make the first start `./run -c true`, which creates it on the empty database. For an upgrade: back up, then `bun run migration:show` / `bun run migration:run` before `./run`, per the same runbook.
 
 Running the node the first time will generate a private key for your node and store it in the `.demos_identity` file by default. The public key is printed on the terminal and saved in a `publickey_*` file in the same directory.
 
