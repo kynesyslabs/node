@@ -68,29 +68,24 @@ every earlier vote is then behind it.
 
 ### Restart signing floor
 
-At every start, once the network clock is calibrated, the node refuses to
-sign any round up to the network time plus 5 seconds (the most a round may
-lead the clock), or up to the highest round in the files above when that is
-later. It logs `[SIGNING] Restart signing floor: only rounds after <round>
-are signed`, and signs nothing before that line. Every round an earlier run
-of the key can have signed is at or below the floor, so neither an older copy
-of the files nor a `.prevote.json` lost beside a surviving `.signed.json` can
-reopen such a round after a restart. Each restart sits out about 5 seconds of
-rounds.
+At every start, after the clock check, the node refuses to sign any round up
+to the host clock plus 5 seconds (the most a round may lead the clock), or up
+to the highest round in the files above when that is later. It logs
+`[SIGNING] Restart signing floor: only rounds after <round> are signed`, and
+signs nothing before that line. Every round an earlier run of the key can have
+signed is at or below the floor, so neither an older copy of the files nor a
+`.prevote.json` lost beside a surviving `.signed.json` can reopen such a round
+after a restart. Each restart sits out about 5 seconds of rounds.
 
-The node will not start without two NTP readings in a row that agree within
-2 seconds, and the second one sets the clock. Agreement shows the readings are
-consistent, not that they are right: both normally come from the same server
-(`pool.ntp.org`, with fallbacks only when it fails), so a server that is off
-by some seconds moves the floor by the same amount. A round still in the files
-above stays refused whatever the clock says; a round missing from them is
-covered only when the restart took longer than the clock's actual error. A
-normal boot (database, peers, two NTP readings) takes longer than the error of
-a healthy NTP server; a host whose NTP path can be tampered with, or which
-answers from a misconfigured local server, gets no such guarantee. A server that is not synchronised answers 1900, which is
-rejected. When every server fails, the boot stops with `refusing to start
-without a trusted clock`. Fix the host's outbound NTP (UDP 123) and start
-again.
+The floor reads the host clock, which the host's NTP service keeps right (see
+the Clock section of INSTALL.md); the node never corrects it. A host clock
+that is off by some seconds moves the floor by the same amount. A round still
+in the files above stays refused whatever the clock says; a round missing from
+them is covered only when the restart took longer than the clock's actual
+error, which a normal boot does for a host synchronised by chrony or
+`systemd-timesyncd`. A production node refuses to start when two or more
+public NTP servers agree its clock is off by more than the block timestamp
+tolerance (60 s): fix the host's NTP and start again.
 
 The files are not tied to a chain. When the key moves to another network
 with its old files, a round in them later than the network clock holds the
@@ -105,7 +100,7 @@ The floor does not cover:
   before every vote, so a `.prevote.json` lost under a running node can let
   it prevote a second block in a round it already prevoted in. Stop the node
   before touching any of its signing state files;
-- a network clock that is behind the earlier run's clock by more than the
+- a host clock that is behind the earlier run's clock by more than the
   files show;
 - the lock an older copy has forgotten: in a later round the node may still
   prevote a block its real lock forbids. The rule for older copies above

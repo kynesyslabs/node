@@ -30,9 +30,9 @@ could not be carried out.
    snapshot through `DEMOS_SNAPSHOT_DIR`.
 3. Computes the pin with `bun scripts/genesis-hash.ts --json` on the host.
 4. Starts a throwaway Postgres (the image pinned in `docker-compose.yml`) and
-   one node at a time on a private bridge network with no published ports. The
-   node needs a route out for NTP (it exits at boot when no NTP server
-   answers); its peer list is empty, so it dials no peer, and the testnet URLs
+   one node at a time on a private bridge network with no published ports. A
+   route out for NTP lets the node measure its clock offset (without one it
+   starts on the host clock); its peer list is empty, so it dials no peer, and the testnet URLs
    in the genesis validator list are only stored. The node gets a fresh
    identity in a docker volume owned by uid 1000, the genesis read-only over
    `/app/data/genesis.json`, and TLSNotary, metrics, MCP, gossip, OmniProtocol

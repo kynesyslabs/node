@@ -12,6 +12,7 @@ import path from "node:path"
 
 let dir: string
 const sharedState: any = {
+    getBlockTimestampTolerance: () => 60,
     identityFile: "",
     genesisBlockHash: "genesis-a",
     candidateBlock: null,

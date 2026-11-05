@@ -25,7 +25,6 @@ const sharedState: Record<string, any> = {
     lastBlockNumber: 9,
     lastBlockHash: "hash-9",
     genesisBlockHash: "hash-0",
-    timestampCorrection: 0,
     forkConfig: {
         quorumParity: { activationHeight: 0 },
         committeeBinding: { activationHeight: 0 },

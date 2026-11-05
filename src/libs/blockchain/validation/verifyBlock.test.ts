@@ -1,4 +1,8 @@
-import { checkTimestampAgainstParent, verifyBlock } from "./verifyBlock"
+import {
+    checkTimestampAgainstParent,
+    checkTimestampNotAhead,
+    verifyBlock,
+} from "./verifyBlock"
 import { getSharedState } from "src/utilities/sharedState"
 
 const A = "aa".repeat(32)
@@ -464,5 +468,24 @@ describe("whole-second block timestamps", () => {
         expect(checkTimestampAgainstParent(1500, 1000, 10).valid).toBe(true)
         getSharedState.forkConfig.committeeBinding.activationHeight = null
         expect(checkTimestampAgainstParent(1500.5, 1000, 10).valid).toBe(true)
+    })
+})
+
+describe("checkTimestampNotAhead", () => {
+    it("accepts a timestamp up to the tolerance ahead of the given clock", () => {
+        expect(checkTimestampNotAhead(5060, 5000).valid).toBe(true)
+        expect(checkTimestampNotAhead(4000, 5000).valid).toBe(true)
+    })
+
+    it("rejects a timestamp past the tolerance", () => {
+        const verdict = checkTimestampNotAhead(5061, 5000)
+        expect(verdict.valid).toBe(false)
+        expect(verdict.reason).toContain("61s in the verifier's future (tolerance 60s)")
+    })
+
+    it("reads this node's clock when no time is given", () => {
+        networkNow = 7000
+        expect(checkTimestampNotAhead(7060).valid).toBe(true)
+        expect(checkTimestampNotAhead(7061).valid).toBe(false)
     })
 })

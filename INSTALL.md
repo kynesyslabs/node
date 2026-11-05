@@ -29,12 +29,16 @@ Linux is the supported and tested target. Ubuntu 22.04 LTS or newer is recommend
 
 ### Clock
 
-The node refuses to start without a trusted clock: at boot it needs two NTP readings in a row that agree within 2 seconds. Both come from `pool.ntp.org`; `time.google.com`, `time.windows.com` and `time.apple.com` are asked only when it does not answer. The second reading catches a bad answer, it is not a second independent source, so the host's NTP path must be one nobody can tamper with. The host must allow **outbound UDP 123**. Keep the host clock synchronised as well. On Ubuntu `systemd-timesyncd` does this by default; check it:
+Validators keep time with the host's NTP service (chrony or `systemd-timesyncd`). The node uses the host clock as is and never corrects it itself: block timestamps, block checks and the peer authentication windows all read that one clock, so no single time server can move a validator's time. A Docker container shares the host's clock, so the host's NTP covers it.
+
+The node only measures the host clock. At boot and every 10 minutes it asks `pool.ntp.org`, `time.google.com`, `time.windows.com` and `time.apple.com`, takes the median of the answers that agree within 2 seconds (at least two must), logs the offset and publishes it as `demos_clock_offset_seconds`. It warns above 1 second: members refuse to sign a block stamped more than 5 seconds ahead of their own clock. With `PROD=true` it refuses to start when two or more servers agree the host is off by more than the block timestamp tolerance (`BLOCK_TIMESTAMP_TOLERANCE`, 60 s), because every peer would reject its blocks. When no server answers, or they disagree, the node starts on the host clock and logs a warning.
+
+Check the host's sync:
 
 ```bash
 timedatectl            # "System clock synchronized: yes" and "NTP service: active"
 # or, with chrony installed:
-chronyc tracking       # "Leap status : Normal"
+chronyc tracking       # "Leap status : Normal", "System time" well under 1 second
 ```
 
 If NTP is off: `sudo timedatectl set-ntp true`.
@@ -176,7 +180,7 @@ With `PROD=true` the node never creates a key by itself: a missing key stops it,
 ./scripts/node-doctor --production
 ```
 
-It prints one PASS or FAIL line per item (`PROD`, `DEMOS_REQUIRE_VALIDATORS`, clock sync, outbound NTP, fork-schedule policy, genesis pins, the fees, stake floor and block time every validator must share, one-start switches left set) and exits 1 on any FAIL. It reads the values the node container will get from `docker compose config`, so run it from the checkout with `.env` in place. Fix every FAIL before the next step.
+It prints one PASS, WARN or FAIL line per item (`PROD`, `DEMOS_REQUIRE_VALIDATORS`, clock sync, outbound NTP, fork-schedule policy, genesis pins, the fees, stake floor and block time every validator must share, one-start switches left set) and exits 1 on any FAIL. It reads the values the node container will get from `docker compose config`, so run it from the checkout with `.env` in place. Fix every FAIL, and check every WARN by hand, before the next step.
 
 **5. Pull, create the database schema, and start without building.**
 
@@ -321,7 +325,7 @@ When running on a VPS or any machine you want peers to connect to, you must allo
 | 9095 | TCP | inbound | Gossip (`GOSSIP_PORT`); peers dial `EXPOSED_URL`'s host on this port |
 | 7047 | TCP | inbound | TLSNotary attestation server (only if you want others to attest against your notary) |
 | 55688 | TCP | inbound | TLSNotary WebSocket proxy port the node advertises (`TLSNOTARY_PROXY_PORT`; only with TLSNotary on) |
-| 123 | UDP | outbound | NTP; the node does not start without it (see [Clock](#clock)) |
+| 123 | UDP | outbound | NTP: the host's time service, and the node's clock offset check (see [Clock](#clock)) |
 
 These ports should NOT be exposed publicly:
 
@@ -898,7 +902,7 @@ The variable replaces the pinned digest (it does not turn the check off), so a n
 | 7047        | TLSNotary    | TLSNotary server                        |
 | 55688       | WS Proxy     | TLSNotary WebSocket proxy the node advertises (TCP) |
 | 55000-57000 | WS Proxy     | Per-session TLSNotary proxies on bare metal (TCP); under Docker 55000-55063 on loopback, for a host reverse proxy |
-| 123 (out)   | NTP          | Outbound UDP; the node does not start without a trusted clock |
+| 123 (out)   | NTP          | Outbound UDP; host time sync and the node's clock offset check |
 
 ### Optional Ports
 
