@@ -14,6 +14,7 @@ import { spawn, spawnSync } from "child_process"
 import { existsSync, mkdirSync, copyFileSync, writeFileSync } from "fs"
 import { dirname, resolve } from "path"
 import { fileURLToPath } from "url"
+import { systemBinary } from "./systemBinary"
 
 // Bun supports `import.meta.dirname` natively, but in TypeScript with the
 // stock ts lib the field is typed as `string | undefined`, and falling
@@ -84,7 +85,7 @@ export const GENESIS_FORK_LOW_GAS_FEE = resolve(
  * routes through this same helper.
  */
 export function compose(args: string[], opts: { allowFail?: boolean } = {}): string {
-    const result = spawnSync("docker", ["compose", ...args], {
+    const result = spawnSync(systemBinary("docker"), ["compose", ...args], {
         cwd: DEVNET_DIR,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -107,13 +108,21 @@ export function compose(args: string[], opts: { allowFail?: boolean } = {}): str
  *
  * @param services Optional list of services to start. Defaults to "all".
  * @param profiles Optional docker-compose profiles to enable.
+ * @param overrideFiles Optional compose override files (absolute paths),
+ *   layered over docker-compose.yml. Without it the command is exactly the
+ *   plain `docker compose up -d`.
  */
 export function up(opts: {
     services?: string[]
     profiles?: string[]
     build?: boolean
+    overrideFiles?: string[]
 } = {}): void {
     const args: string[] = []
+    if (opts.overrideFiles && opts.overrideFiles.length > 0) {
+        args.push("-f", "docker-compose.yml")
+        for (const f of opts.overrideFiles) args.push("-f", f)
+    }
     for (const p of opts.profiles ?? []) {
         args.push("--profile", p)
     }
@@ -150,9 +159,19 @@ export function restartService(name: string): void {
     compose(["restart", name])
 }
 
+/** True when the container of `service` exists and is running. */
+export function isServiceRunning(service: string): boolean {
+    const r = spawnSync(
+        systemBinary("docker"),
+        ["inspect", "-f", "{{.State.Running}}", `demos-devnet-${service}`],
+        { encoding: "utf8" },
+    )
+    return r.status === 0 && r.stdout.trim() === "true"
+}
+
 /** Kill (SIGKILL) a service container. Used for ungraceful-shutdown tests. */
 export function killService(name: string): void {
-    spawnSync("docker", ["kill", `demos-devnet-${name}`], {
+    spawnSync(systemBinary("docker"), ["kill", `demos-devnet-${name}`], {
         stdio: "ignore",
     })
 }
@@ -338,7 +357,7 @@ export function streamLogsToFile(
         mkdirSync(dirname(outPath), { recursive: true })
     }
     const child = spawn(
-        "docker",
+        systemBinary("docker"),
         ["compose", "logs", "-f", "--no-color", service],
         {
             cwd: DEVNET_DIR,
