@@ -214,6 +214,22 @@ describe("sync stores only the signatures its quorum counted", () => {
         expect(await syncBlock(block, servingPeer())).toBe(false)
         expect(insertBlock).not.toHaveBeenCalled()
     })
+
+    it("does not let an own __proto__ key of the served block set the stored block's prototype or attrs", async () => {
+        const block = await signedBy(makeBlock(), members.slice(0, 3))
+        const forged = "{\"__proto__\":{\"attrs\":{\"gcrAppliedTxCount\":999,\"gcrAppliedTxsHash\":\"forged\"}},"
+        // JSON.parse keeps "__proto__" as an own property, as a peer's response does
+        const wire = JSON.parse(forged + JSON.stringify(block).slice(1))
+        expect(Object.keys(wire)).toContain("__proto__")
+
+        expect(await syncBlock(wire, servingPeer())).toBe(true)
+
+        expect(insertBlock).toHaveBeenCalledTimes(1)
+        const stored = insertBlock.mock.calls[0][0] as any
+        expect(Object.getPrototypeOf(stored)).toBe(Object.prototype)
+        expect(stored.attrs).toBeUndefined()
+        expect(storedSigners()).toEqual(members.slice(0, 3).map(m => m.identity).sort())
+    })
 })
 
 describe("a stored block re-propagates without outsider signatures", () => {

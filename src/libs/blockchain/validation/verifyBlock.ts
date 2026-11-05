@@ -338,8 +338,16 @@ export async function withCountedSignatures<T extends SignedBlock>(
         ...block.validation_data,
         signatures: Object.fromEntries(tally.counted),
     }
-    return Object.assign(Object.create(Object.getPrototypeOf(block)), block, {
-        validation_data: validationData,
+    // Descriptors, not assign: a peer's JSON can carry an own "__proto__" key,
+    // and assign would run its setter and swap the copy's prototype
+    return Object.create(Object.getPrototypeOf(block), {
+        ...Object.getOwnPropertyDescriptors(block),
+        validation_data: {
+            value: validationData,
+            enumerable: true,
+            writable: true,
+            configurable: true,
+        },
     }) as T
 }
 
