@@ -9,9 +9,12 @@
  *  - 4 nodes on `genesis-fork-low.json` with `properties.shardSize`
  *    overridden to 4, so quorum is floor(2*4/3)+1 = 3 of 4. Mainnet runs
  *    shardSize 10; this drill does not exercise that committee size.
- *  - quorumParity, committeeBinding and commitLock active from height 0,
- *    as on a chain launched from genesis with this build, so the drill
- *    runs the consensus rules mainnet will run.
+ *  - The fork set mainnet launches with: every fork that
+ *    `docs/mainnet/genesis.template.json` sets to 0 is active from height 0,
+ *    every null or "FILL: ..." one is off, and so is identityCarryover: it
+ *    needs a genesis snapshot and this drill mounts an empty one (the legacy
+ *    genesis path). Read from the template at run time (`withLaunchForks`),
+ *    logged, and reported in `DRILL_TIMINGS` with the exclusions.
  *  - Inputs a 4-node devnet needs to forge, mounted through a compose
  *    override for this scenario only (lib/drillInputs.ts): genesis time 60 s
  *    ahead, a peerlist seeding node-1 only, an empty directory over
@@ -61,6 +64,7 @@ import {
     GENESIS_FORK_LOW,
     compose,
     isServiceRunning,
+    logs,
     regenerateIdentities,
     restartService,
     sleep,
@@ -72,7 +76,15 @@ import {
 import { allReachedHeight, assertBlockHashConvergence } from "../lib/assertions"
 import { clearOverride, overridePath, writeOverride } from "../lib/composeOverrides"
 import { withCurrentDevnetValidators } from "../lib/drillGenesis"
-import { drillOverrideYaml, genesisTimestamp, stageDrillInputs } from "../lib/drillInputs"
+import {
+    LAUNCH_GENESIS_TEMPLATE,
+    bootRefusalLine,
+    drillOverrideYaml,
+    genesisTimestamp,
+    launchExcluded,
+    stageDrillInputs,
+    withLaunchForks,
+} from "../lib/drillInputs"
 import { getLastBlockNumber, query } from "../lib/nodeQueries"
 import {
     type BlockRow,
@@ -108,9 +120,6 @@ const RECOVERY_TIMEOUT_MS = 300_000
 const DB_READ_TIMEOUT_MS = 30_000
 /** How long the survivors get to agree on a head after the settle period. */
 const AGREE_TIMEOUT_MS = 3 * ROUND_MS
-/** Forks a chain launched from genesis with this build activates at 0. */
-const LAUNCH_FORKS = ["quorumParity", "committeeBinding", "commitLock"]
-
 /**
  * Must run after `regenerateIdentities`: the genesis validators are the keys
  * that call just wrote. With any other set, the bound committee holds no
@@ -126,14 +135,7 @@ function buildDrillGenesis(): Record<string, any> {
         NODE_IDS.length,
     )
     genesis.properties.shardSize = DRILL_SHARD_SIZE
-    genesis.forks = genesis.forks ?? {}
-    for (const name of LAUNCH_FORKS) {
-        genesis.forks[name] = {
-            activationHeight: 0,
-            description: "Rehearsal: active from genesis, as on mainnet.",
-        }
-    }
-    return genesis
+    return withLaunchForks(genesis)
 }
 
 function restartCount(id: number): number {
@@ -209,6 +211,7 @@ function reportTimings(
     marks: DrillMarks,
     observed: DrillHeights,
     forks: Record<string, number | null>,
+    excludedForks: Record<string, string>,
 ): void {
     const d = phaseDurations(marks)
     const forkText = Object.entries(forks)
@@ -232,6 +235,7 @@ function reportTimings(
         ...observed,
         consensusTimeS: CONSENSUS_TIME_S,
         shardSize: DRILL_SHARD_SIZE,
+        excludedForks,
         forks,
     }
     process.stdout.write(`DRILL_TIMINGS ${JSON.stringify(line)}\n`)
@@ -247,6 +251,17 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     const genesis = buildDrillGenesis()
     const forks: Record<string, number | null> = Object.fromEntries(
         Object.entries<any>(genesis.forks).map(([name, f]) => [name, f?.activationHeight ?? null]),
+    )
+    const excludedForks = launchExcluded()
+    const excludedText =
+        Object.entries(excludedForks)
+            .map(([name, why]) => `${name} (${why})`)
+            .join(", ") || "none"
+    const active = Object.keys(forks).filter(name => forks[name] === 0)
+    process.stdout.write(
+        `[scenario 12] launch fork set from ${LAUNCH_GENESIS_TEMPLATE}: active at 0: ${active.join(", ")}; ` +
+            `off: ${Object.keys(forks).filter(name => forks[name] !== 0).join(", ") || "none"}; ` +
+            `excluded: ${excludedText}\n`,
     )
     const marks = emptyMarks()
     const observed: DrillHeights = {
@@ -273,10 +288,12 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
         marks.t_up = Date.now()
         await restartForColdStart()
         await drill(ctx, quorum, marks, observed)
+    } catch (e) {
+        throw withBootRefusals(e)
     } finally {
         // Also on failure: print what was collected before the error propagates.
         try {
-            reportTimings(ctx, marks, observed, forks)
+            reportTimings(ctx, marks, observed, forks, excludedForks)
         } catch (e) {
             process.stderr.write(`[WARN] could not report drill timings: ${String(e)}\n`)
         }
@@ -287,6 +304,21 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
             rmSync(stagingDir, { recursive: true, force: true })
         }
     }
+}
+
+/** The error with the "Refusing to boot" line of every node that logged one, so a refused genesis is not just a timeout. */
+function withBootRefusals(e: unknown): unknown {
+    if (!(e instanceof Error)) return e
+    const refusals = NODE_IDS.flatMap(id => {
+        try {
+            const line = bootRefusalLine(logs(`node-${id}`, 400))
+            return line === null ? [] : [`node-${id}: ${line}`]
+        } catch {
+            return []
+        }
+    })
+    if (refusals.length > 0) e.message += `\nnode log:\n  ${refusals.join("\n  ")}`
+    return e
 }
 
 /**

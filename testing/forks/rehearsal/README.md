@@ -14,6 +14,19 @@ the unit tests use.
    `bun install` is enough.
 4. Postgres host port 5432 must be free (override with
    `POSTGRES_HOST_PORT=5532` in `testing/devnet/.env` if it conflicts).
+5. `testing/devnet/.env` must exist (scenario 12 uses the stock devnet
+   compose; a fresh checkout has only `.env.example`):
+
+   ```bash
+   cp testing/devnet/.env.example testing/devnet/.env
+   ```
+
+   Without it `docker compose` fails with `invalid empty volume spec`:
+   `testing/devnet/docker-compose.yml:13` mounts
+   `${PERSISTENT:+postgres-data:/var/lib/postgresql/data}`, which is empty
+   while `PERSISTENT` is unset, and `.env.example` sets it. This is the same
+   copy `testing/devnet/scripts/setup.sh` makes. The quorum drills' own
+   `run.sh` writes its own compose file and does not need it.
 
 The harness queries Postgres directly from the host. The host port is
 exposed by the devnet docker-compose (added together with the rehearsal
@@ -101,7 +114,7 @@ state chained across scenarios.
 | 6 | `06-mid-flight-tx.ts` | Medium | Boundary-block tx handling |
 | 2 | `02-validator-desync-recovery.ts` | High | Wipe + re-sync; loud failure on stale binary |
 | 3 | `03-fresh-node-post-fork.ts` | **HIGHEST** | Migration runs during historical replay |
-| 12 | `12-quorum-loss-halt-recovery.ts` | High | At `shardSize` 4 with quorumParity, committeeBinding and commitLock active from 0: 2 of 4 validators stopped, chain halts with no minority block (including during the settle window), survivors stay up; restart: chain resumes and all 4 converge (G3-6). This is the 4-validator version; the mainnet-shape halt cases (10 and 13 validators, `shardSize` 10) are in `testing/devnet/quorum-drills/` (`halt-n10s10`, `halt-n13s10`, `ride-n13s10`) |
+| 12 | `12-quorum-loss-halt-recovery.ts` | High | At `shardSize` 4 with the fork set `docs/mainnet/genesis.template.json` launches with (every fork it sets to 0 active from 0 except `identityCarryover`, which is left off by name because it needs a genesis snapshot and this drill mounts an empty one; read at run time and reported in `DRILL_TIMINGS` with the exclusion). On mainnet `identityCarryover` is active at 0 and every validator needs the genesis snapshot (matching block 0's `snapshot.manifestSha256`, in `data/snapshot` or `DEMOS_SNAPSHOT_DIR`) on every boot, restart and rebuild; this drill does not cover that check (see `testing/devnet/quorum-drills/README.md`, "What differs from mainnet: identityCarryover"). 2 of 4 validators stopped, chain halts with no minority block (including during the settle window), survivors stay up; restart: chain resumes and all 4 converge (G3-6). This is the 4-validator version; the mainnet-shape halt cases (10 and 13 validators, `shardSize` 10) are in `testing/devnet/quorum-drills/` (`halt-n10s10`, `halt-n13s10`, `ride-n13s10`) |
 
 `run-all.sh` runs them in this exact order (per REHEARSAL_PLAN §4).
 
@@ -182,3 +195,11 @@ its sole purpose is rehearsal.
   The staging is `testing/devnet/quorum-drills/drill_inputs.py`, shared
   with that directory's `gen-inputs.py`, so it needs `python3`. With
   `--keep-state` the temp dir and the override file are left in place.
+- Scenario 12 runs with `identityCarryover` off: the mainnet template has it
+  at 0, which makes a node refuse to boot without the genesis snapshot, and
+  the empty snapshot mount is the legacy genesis path. So the drill does not
+  check that a validator can boot, restart and rebuild with the snapshot in
+  place (`data/snapshot` or `DEMOS_SNAPSHOT_DIR`, matching block 0's
+  `snapshot.manifestSha256`), which mainnet needs every time. If a node
+  refuses its genesis the drill ends as a timeout on the baseline height, with
+  the node's `Refusing to boot` line appended to the error.

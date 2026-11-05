@@ -17,8 +17,8 @@
 #
 # Everything lives in a per-run dir under runs/ (gitignored: it holds the
 # devnet keys) and is torn down on exit, failure or Ctrl-C.
-# Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR:
-# a running node stopped answering mid-window, so no verdict is given).
+# Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR: a node
+# stopped answering mid-window, or postgres hit its connection limit: no verdict).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -91,11 +91,23 @@ esac
 # The halt and ride drills always run with gossip on, whatever the environment
 # says. With it off a restarted node never learns that the network is ahead:
 # a height claim above its own chain is refused unless it comes as a gossip
-# claim (Sync.ts:129-136, networkAheadVeto.ts:59), so the recovery result
+# claim (Sync.ts:133-143, networkAheadVeto.ts:59-72), so the recovery result
 # would measure that and not the halt. The other scenarios keep the harness
 # default (off; GOSSIP_ENABLED=true in the environment turns it on).
 case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) export GOSSIP_ENABLED=true ;; esac
+# The mainnet-shape drills run the fork set docs/mainnet/genesis.template.json
+# launches with (every fork it sets to 0, the rest off), read at run time. The
+# other scenarios keep the forks of genesis.devnet.json. Forks the drills cannot
+# run (identityCarryover: it needs a genesis snapshot and the drills mount an
+# empty one) are left off by name, drill_inputs.py LAUNCH_EXCLUDED_FORKS;
+# EXCLUDED_FORKS is that list, name -> reason, read from the generated inputs.
+FORK_SET=devnet
+EXCLUDED_FORKS='{}'
+case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) FORK_SET=launch ;; esac
 case "${BINDING}" in on|off) ;; *) echo "--binding must be on or off" >&2; exit 2 ;; esac
+if [ "${FORK_SET}" = launch ] && [ "${BINDING}" != on ]; then
+    echo "${SCENARIO} runs the launch fork set, which activates committeeBinding: --binding off does not apply" >&2; exit 2
+fi
 if [[ ! "${LABEL}" =~ ^[A-Za-z0-9_-]+$ ]]; then
     echo "label must match [A-Za-z0-9_-]+" >&2; exit 2
 fi
@@ -136,6 +148,12 @@ teardown() {
             cid=$(dc ps -aq "node-${i}" 2>/dev/null)
             [ -n "${cid}" ] && docker logs "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > "${LOG_DIR}/node-${i}.log"
         done
+        # Backstop for the exits that skip pg_limit_gate (an early exit 0 or 1):
+        # a connection-limit hit in the collected logs is never a result
+        if [ "${rc}" -le 1 ] && grep -aq "too many clients" "${LOG_DIR}"/node-*.log "${LOG_DIR}/psql-errors.log" 2>/dev/null; then
+            say "ABORT: could not run: postgres connection limit hit (exit ${rc} replaced by 2; see ${LOG_DIR}/node-*.log)"
+            rc=2
+        fi
         say "tearing down ${PROJECT}"
         for s in "${SIDECARS[@]}"; do docker rm -f "${s}" >/dev/null 2>&1 || true; done
         dc down -v --remove-orphans >"${LOG_DIR}/teardown.log" 2>&1 || true
@@ -245,7 +263,7 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
         echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/pub${i}"
     done
     python3 "${HERE}/gen-inputs.py" --run-dir "${RUN_DIR}" --repo "${REPO_ROOT}" \
-        --nodes "${N}" --shard-size "${SHARD}" --binding "${BINDING}" --genesis-ts "${GENESIS_TS}" \
+        --nodes "${N}" --shard-size "${SHARD}" --binding "${BINDING}" --fork-set "${FORK_SET}" --genesis-ts "${GENESIS_TS}" \
         --image "${IMAGE}" --uid "${IMAGE_UID}" --gid "${IMAGE_GID}" --src "${SRC_TREE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}" \
         --start "${START_PATH}" --image-entrypoint "${IMAGE_ENTRYPOINT}" --image-cmd "${IMAGE_CMD}"
     # Once, after everything is written, so the modes do not depend on the umask.
@@ -300,6 +318,12 @@ if [ "${START_PATH}" = image ]; then
 fi
 declare -a PUB UP
 for i in $(seq 1 "${N}"); do PUB[i]=$(tr 'A-Z' 'a-z' < "${RUN_DIR}/inputs/pub${i}"); UP[i]=0; done
+excluded_note=""
+if [ "${FORK_SET}" = launch ]; then
+    EXCLUDED_FORKS=$(jq -c . "${RUN_DIR}/inputs/launch-excluded.json") || abort_pre "no excluded-forks list in ${RUN_DIR}/inputs/launch-excluded.json"
+    excluded_note="; excluded: $(jq -r 'to_entries | map("\(.key) (\(.value))") | join(", ") | if . == "" then "none" else . end' <<< "${EXCLUDED_FORKS}")"
+fi
+say "forks (${FORK_SET}): $(jq -r '[.forks | to_entries[] | "\(.key)@\(.value.activationHeight)"] | join(", ")' "${RUN_DIR}/inputs/genesis.json")${excluded_note}"
 say "inputs ready (genesis in ${GENESIS_DELAY}s)"
 
 # ── helpers ─────────────────────────────────────────────────────────────
@@ -375,6 +399,17 @@ stop_node() {
     dc stop -t 0 "node-$1" >> "${STEP_LOG}" 2>&1
     UP[$1]=0
     event "node-$1 stopped"
+}
+# The last line in node $1's log that says why it would not boot, for the abort
+# message of a node that never served: a genesis refusal ("[GENESIS] Refusing to
+# boot: ...", findGenesisBlock.ts refuse()), or the last error line if there is
+# none. The node is restarted by its policy, so the log holds every attempt.
+boot_failure_line() {
+    local cid out; cid=$(dc ps -aq "node-$1" 2>/dev/null); [ -z "${cid}" ] && return 0
+    out=$(docker logs "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+    grep -aiE 'refusing to boot' <<< "${out}" | tail -1 | cut -c1-600 | grep . && return 0
+    grep -aiE 'error' <<< "${out}" | tail -1 | cut -c1-600
+    return 0
 }
 
 # Window (s) for a fresh lockstep, 120 up to N=6, 160 at 10, 190 at 13. The reads
@@ -589,8 +624,10 @@ write_verdict() {
     jq -n --arg run "${RUN_ID}" --arg scenario "${SCENARIO}" --arg binding "${BINDING}" \
         --argjson n "${N}" --argjson shardSize "${SHARD}" --argjson q "${Q}" --arg code "${CODE}" \
         --arg image "${IMAGE}" --arg detail "${DETAIL}" --arg result "${RESULT}" --argjson drill "${drill}" \
+        --arg forkSet "${FORK_SET}" --argjson excluded "${EXCLUDED_FORKS}" \
         '{run: $run, scenario: $scenario, binding: $binding, validators: $n, shardSize: $shardSize,
           q: $q, code: $code, image: $image, detail: $detail, result: $result}
+         + (if $forkSet == "launch" then {excludedForks: $excluded} else {} end)
          + (if $drill == null then {} else {drill: $drill} end)' > "${LOG_DIR}/verdict.json"
     local results="${RUNS_DIR}/results.tsv"
     [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"
@@ -611,10 +648,66 @@ read_error() { # $1 phase name
     exit 2
 }
 
+# Every database call is bounded: a table lock or a Postgres that accepts and
+# then stops answering must fail the read (and the drill gives no verdict), not
+# hang it past every scenario timeout. statement_timeout ends the query on the
+# server; the outer timeout ends a client stuck before or after it.
+DB_TIMEOUT_S=30
+PG_LIMITS=(-e PGCONNECT_TIMEOUT=10 -e "PGOPTIONS=-c statement_timeout=20000")
+psql_node() { # $1 node, $2 SQL
+    local rc errf="${LOG_DIR}/psql-err.$$.tmp"
+    # stderr goes to the caller as before and, when there is any, to
+    # psql-errors.log, which pg_limit_gate reads
+    timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
+    rc=$?
+    [ -s "${errf}" ] && { cat "${errf}" >&2; sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log"; }
+    rm -f "${errf}"
+    [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within ${DB_TIMEOUT_S}s" >&2
+    return "${rc}"
+}
+
+# The shared postgres must allow every connection N nodes can open. The compose
+# sets max_connections (gen-inputs.py), so this fails only if that setting did
+# not reach the server. Waits for the server: `up -d` does not.
+pg_limit_preflight() {
+    local need have tries=0
+    need=$(python3 -I "${HERE}/drill_inputs.py" pgconn --nodes "${N}" | cut -d' ' -f1)
+    [[ "${need}" =~ ^[0-9]+$ ]] || { say "ABORT: could not work out the connections ${N} nodes need"; return 1; }
+    while :; do
+        have=$(timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d postgres -tAc 'SHOW max_connections' 2>/dev/null)
+        [[ "${have}" =~ ^[0-9]+$ ]] && break
+        tries=$((tries + 1))
+        [ "${tries}" -ge 45 ] && { say "ABORT: could not read max_connections from postgres"; return 1; }
+        sleep 2
+    done
+    if [ "${have}" -lt "${need}" ]; then
+        say "ABORT: could not run: postgres max_connections is ${have}, ${N} nodes need ${need} (10 each + 20)"
+        return 1
+    fi
+    say "postgres max_connections ${have} (${N} nodes need ${need})"
+}
+
+# "sorry, too many clients already" in a node's log or in one of the harness'
+# own psql reads means something ran without a connection it needed: the run
+# proves nothing, whatever the verdict says. Called before the verdict is
+# written, so a PASS or a FAIL becomes exit 2 and says why.
+pg_limit_gate() {
+    local hits nodes
+    hits=$({ grep_logs "too many clients"; grep -a "too many clients" "${LOG_DIR}/psql-errors.log" 2>/dev/null; } | wc -l)
+    [ "${hits}" = 0 ] && return 0
+    nodes=$(grep_logs "too many clients" | cut -d: -f1 | sort -u | tr '\n' ' ')
+    say "ABORT: could not run: postgres connection limit hit (${hits} 'too many clients' lines; ${nodes:-harness psql reads only})"
+    DETAIL="could not run: postgres connection limit hit (${hits} lines${nodes:+ in ${nodes% }}); the result was ${RESULT}"
+    RESULT=ERROR
+    write_verdict
+    exit 2
+}
+
 # ── 3. bring-up ─────────────────────────────────────────────────────────
 step 03-bringup
 STARTED_STACK=1
 dc up -d postgres >> "${STEP_LOG}" 2>&1 || { say "ABORT: postgres did not start"; exit 2; }
+pg_limit_preflight || exit 2
 # A node that does not migrate at boot needs its schema before it starts, and a
 # release image has no run-devnet to create it. So on the image path each node
 # database gets the one-off migration an operator runs before a first start, in
@@ -639,7 +732,7 @@ if [ "${START_PATH}" = image ]; then
     say "schema migrated on the ${N} node databases"
 fi
 for i in $(seq 1 "${START}"); do
-    start_node "${i}" || { say "ABORT: node-${i} did not serve within 180s"; exit 2; }
+    start_node "${i}" || { say "ABORT: node-${i} did not serve within 180s"; why=$(boot_failure_line "${i}"); [ -n "${why}" ] && say "node-${i} log: ${why}"; exit 2; }
     say "node-${i} serving"
     # One node at a time: a simultaneous join races the committee freeze
     [ "${i}" -lt "${START}" ] && sleep 4
@@ -748,16 +841,6 @@ scenario_listed_stall() {
     expect_progress "listed-back" "${PHASE_END}" || ok=0
     DETAIL="listed=${pl} $(cut -f1,9 "${PHASES}" | tail -n +2 | tr '\t\n' ': ')"
     [ "${ok}" = 1 ] && RESULT=PASS
-}
-
-# Every database call is bounded: a table lock or a Postgres that accepts and
-# then stops answering must fail the read (and the drill gives no verdict), not
-# hang it past every scenario timeout. statement_timeout ends the query on the
-# server; the outer timeout ends a client stuck before or after it.
-DB_TIMEOUT_S=30
-PG_LIMITS=(-e PGCONNECT_TIMEOUT=10 -e "PGOPTIONS=-c statement_timeout=20000")
-psql_node() { # $1 node, $2 SQL
-    timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2"
 }
 
 scenario_fallback() {
@@ -933,13 +1016,15 @@ restart_counts() {
 
 # Rows {node, number, hash, signatures} for heights $1..$2 on nodes $3.., read
 # from each node's database as scenario 12 does (signatures are the keys of
-# validation_data->'signatures'). Fails when a database cannot be read.
+# validation_data->'signatures'). Fails when a database cannot be read or does
+# not answer within DB_TIMEOUT_S: the caller ends the run as exit 2.
 block_rows() {
     local from="$1" to="$2" i out all=""
     shift 2
     for i in "$@"; do
         out=$(psql_node "${i}" "SELECT number, hash, (SELECT count(*) FROM json_object_keys(validation_data->'signatures')) FROM blocks WHERE number BETWEEN ${from} AND ${to} ORDER BY number" |
-            jq -Rn --argjson node "${i}" '[inputs | split("|") | {node: $node, number: (.[0] | tonumber), hash: .[1], signatures: (.[2] | tonumber)}]') || return 1
+            jq -Rn --argjson node "${i}" '[inputs | split("|") | {node: $node, number: (.[0] | tonumber), hash: .[1], signatures: (.[2] | tonumber)}]') ||
+            { say "block rows ${from}..${to} of node-${i} could not be read from its database (failed or no answer within ${DB_TIMEOUT_S}s)"; return 1; }
         all+="${out}"$'\n'
     done
     printf '%s' "${all}" | jq -cs 'add // []'
@@ -1046,8 +1131,8 @@ drill_recover() {
 drill_judge() { # $1 mode: halt or ride
     local input="${RUN_DIR}/drill-input.json" rc hold_rounds=0
     [ "$1" = halt ] && hold_rounds="${HALT_ROUNDS}"
-    local forks; forks=$(jq -c '.forks | with_entries(select(.key | IN("quorumParity", "committeeBinding", "commitLock")) | .value |= .activationHeight)' \
-        "${RUN_DIR}/inputs/genesis.json")
+    # Every fork of the genesis the nodes ran, null where off
+    local forks; forks=$(jq -c '.forks | with_entries(.value |= .activationHeight)' "${RUN_DIR}/inputs/genesis.json")
     local marks; marks=$(jq -nc \
         --argjson up "${T_UP:-null}" --argjson baseline "${T_BASELINE:-null}" --argjson stop "${T_STOP:-null}" \
         --argjson halt "${T_HALT:-null}" --argjson holdEnd "${T_HOLD_END:-null}" --argjson restart "${T_RESTART:-null}" \
@@ -1057,13 +1142,15 @@ drill_judge() { # $1 mode: halt or ride
     local counts_after; counts_after=$(restart_counts "${SURVIVORS[@]}") || { say "ABORT: cannot read the survivors' restart counts"; exit 2; }
     jq -n --arg scenario "${SCENARIO}" --arg mode "$1" --argjson validators "${N}" --argjson shardSize "${SHARD}" \
         --argjson stopped "$(printf '%s\n' "${VICTIMS[@]}" | jq -sc .)" --argjson consensusTimeS "${CONSENSUS_TIME}" \
-        --argjson forks "${forks}" --argjson baselineMinHeight "${BASELINE_HEIGHT}" --argjson holdRounds "${hold_rounds}" \
+        --argjson forks "${forks}" --argjson excluded "${EXCLUDED_FORKS}" \
+        --argjson baselineMinHeight "${BASELINE_HEIGHT}" --argjson holdRounds "${hold_rounds}" \
         --argjson marks "${marks}" --argjson baseHeight "${BASE_HEIGHT}" --argjson baseHeads "${BASE_HEADS}" \
         --argjson baseRows "${BASE_ROWS}" --argjson pre "${PRE_HEIGHT}" --argjson peerlist "${PRE_PEERLIST}" \
         --argjson before "${COUNTS_BEFORE}" --argjson after "${counts_after}" \
         --argjson settle "${SETTLE_JSON}" --argjson hold "${HOLD_JSON}" --argjson recovery "${RECOVERY_JSON}" --argjson ride "${RIDE_JSON}" \
         '{scenario: $scenario, mode: $mode, validators: $validators, shardSize: $shardSize, stopped: $stopped,
-          consensusTimeS: $consensusTimeS, forks: $forks, baselineMinHeight: $baselineMinHeight, holdRounds: $holdRounds,
+          consensusTimeS: $consensusTimeS, forks: $forks, excludedForks: $excluded,
+          baselineMinHeight: $baselineMinHeight, holdRounds: $holdRounds,
           marks: $marks, baseline: {height: $baseHeight, heads: $baseHeads, rows: $baseRows},
           preStopHeight: $pre, preStopPeerlist: $peerlist, restartCounts: {before: $before, after: $after},
           settle: $settle, hold: $hold, recovery: $recovery, ride: $ride}' > "${input}"
@@ -1148,6 +1235,7 @@ case "${SCENARIO}" in
     partition) scenario_partition ;;
 esac
 
+pg_limit_gate
 write_verdict
 [ "${RESULT}" = PASS ] && exit 0
 exit 1
