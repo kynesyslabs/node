@@ -1250,12 +1250,14 @@ async function verifySyncedBlock(
 /**
  * Block `parent.number + 1` as `peer` serves it, for checking the results
  * `parent` is about to store. They depend on transaction attrs the peer
- * serves unsigned, so while the network is known to be past `parent` it is
- * not stored without its child in hand; a block stored at the head has its
- * failure codes repaired when its child arrives.
+ * serves unsigned, so while `peer` claims to be past `parent` it is not
+ * stored without its child in hand; a block stored at the head has its
+ * failure codes repaired when its child arrives. Only the asked peer's own
+ * claim counts: another peer's self-attested height would leave an honest
+ * peer at `parent` unable to sync it, and discredit it for the miss.
  *
- * @returns the child; undefined when none is needed or none exists yet; null
- *   when one exists but `peer` did not serve it
+ * @returns the child; undefined when none is needed or `peer` has none yet;
+ *   null when `peer` claims one but did not serve it
  */
 async function fetchChildBlock(
     peer: Peer,
@@ -1283,7 +1285,7 @@ async function fetchChildBlock(
             ? (response.response as Block[]).find(b => b?.number === number)
             : undefined
     if (served) return served
-    return latestBlock() > parent.number ? null : undefined
+    return peerHeight(peer) > parent.number ? null : undefined
 }
 
 /**
