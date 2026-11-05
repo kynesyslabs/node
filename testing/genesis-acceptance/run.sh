@@ -44,7 +44,7 @@ UNKNOWN_FORK=genesisAcceptanceUnknownFork
 RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
-MAINNET_FORKS="signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock"
+MAINNET_FORKS="signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -343,7 +343,7 @@ boot_checks() { # $1 expected pin; sets BOOT_NOTES, returns 0 when all hold
         [ "$(echo "${ni}" | jq -r ".response.forks.${f}.activated" 2>/dev/null)" = true ] &&
             [ "$(echo "${ni}" | jq -r ".response.forks.${f}.activationHeight" 2>/dev/null)" = 0 ] || bad="${bad} ${f}"
     done
-    if [ -z "${bad}" ]; then BOOT_NOTES="${BOOT_NOTES}; 5 forks active at 0"; else BOOT_NOTES="${BOOT_NOTES}; not active at 0:${bad}"; ok=1; fi
+    if [ -z "${bad}" ]; then BOOT_NOTES="${BOOT_NOTES}; 6 forks active at 0"; else BOOT_NOTES="${BOOT_NOTES}; not active at 0:${bad}"; ok=1; fi
     local cid tip
     cid=$(echo "${ni}" | jq -r '.response.chainId' 2>/dev/null)
     tip=$(echo "${ni}" | jq -r '.response.forks.signatureDomain.currentHeight' 2>/dev/null)
@@ -463,7 +463,7 @@ else VERDICT=FAIL; NOTES="${NOTES}; block 0 ${H0:-none} != genesis-hash.ts ${BLO
 [ "${OBS}" = exit ] && NOTES="$(refusal_line "${CUR}")"
 ACC1=$(accepted_row chain)
 NOTES="${NOTES}; block 0 ${H0:0:16}…; accepted schedule: $(echo "${ACC1}" | jq -r '.digest // .' 2>/dev/null || echo "${ACC1}")"
-record s01 fresh-correct "boots, both pins + 5 forks active" "${OBSERVED}" "${VERDICT}" "${CODE}" "${ROWS}" "${NOTES}"
+record s01 fresh-correct "boots, both pins + 6 forks active" "${OBSERVED}" "${VERDICT}" "${CODE}" "${ROWS}" "${NOTES}"
 S01_PASS=${VERDICT}
 
 # ── 2-5. fresh refusals ─────────────────────────────────────────────────

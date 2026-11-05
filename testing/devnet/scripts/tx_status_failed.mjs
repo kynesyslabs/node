@@ -14,11 +14,13 @@
  *   - getFinalizedHead answers a head at or above the inclusion block, with
  *     the hash that height is stored under and a non-negative age.
  *
- * Env: NODE1_URL, NODE2_URL, IDENTITY_PATH, RECEIVER_PUBKEY, AMOUNT_OS.
+ * Env: NODE1_URL, NODE2_URL, IDENTITY_PATH, RECEIVER_PUBKEY, AMOUNT_OS;
+ * optional TX_HASHES_OUT, a file the two hashes are written to for
+ * finality_proofs.mjs.
  * Prints "OK" and exits 0, or "FAIL: ..." and exits 1.
  */
 import { createPublicKey, verify as verifySignature } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 
 const { NODE1_URL, NODE2_URL, IDENTITY_PATH, RECEIVER_PUBKEY, AMOUNT_OS } = process.env
@@ -105,6 +107,10 @@ for (const [name, url] of [["node-1", NODE1_URL], ["node-2", NODE2_URL]]) {
 }
 
 const executedHash = hashes[states.indexOf("included")]
+if (process.env.TX_HASHES_OUT) {
+    const failedHash = hashes[states.indexOf("failed")]
+    writeFileSync(process.env.TX_HASHES_OUT, JSON.stringify({ failed: failedHash, executed: executedHash }))
+}
 const executedAmount = executedHash === txA.hash ? amount : amount * 2n
 let receiverAfter = receiverBefore
 for (let i = 0; i < 10 && receiverAfter === receiverBefore; i++) {

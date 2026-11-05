@@ -49,6 +49,8 @@ import {
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
+import { ensureValidatorSetSnapshot } from "./libs/blockchain/finality/validatorSet"
+import { pruneStorageHistory } from "./libs/blockchain/finality/storageHistory"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
 import {
     haltSigning,
@@ -595,6 +597,9 @@ async function preMainLoop() {
             )
         }
         await ensureValidatorSeed(genesisData)
+        // Committee selection under finalityProofs reads the set from here
+        await ensureValidatorSetSnapshot(await Chain.getLastBlockNumber())
+        await pruneStorageHistory(await Chain.getLastBlockNumber())
     }
     log.info("[CHAIN] 🖥️ Found the genesis block")
     getSharedState.genesisBlockHash = await Chain.getGenesisBlockHash()

@@ -417,6 +417,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.DEBUG_ASSERTIONS_ENABLED,
                 d.debug.assertionsEnabled,
             ),
+            storageRootRecompute: envBool(
+                EnvKey.DEBUG_STORAGE_ROOT_RECOMPUTE,
+                d.debug.storageRootRecompute,
+            ),
         },
 
         identity: {

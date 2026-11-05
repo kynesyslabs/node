@@ -7,9 +7,16 @@
 # from node-1's funded identity, submits them to two nodes and lets one block
 # execute one and keep the other as failed. tx_status_failed.mjs then checks
 # the SDK wait, the status answer on two nodes, the receiver balance and the
-# other read calls. tx_nonce_failed.mjs then checks that a transaction which
-# fails in a block spends its nonce for good (nonceIntegrity) and the
-# admission window and duplicate refusal.
+# other read calls. With finalityProofs active, storage_root.mjs then writes a
+# Storage Program and checks that all four nodes commit the same storage root
+# after each step, finality_commitments.mjs rebuilds every block's results
+# root independently, and finality_proofs.mjs verifies the transaction,
+# storage and segment proofs offline (node:crypto only, ed25519 quorum of 3
+# of 4). tx_nonce_failed.mjs runs last: a transaction which fails in a block
+# spends its nonce for good and pays its gas (nonceIntegrity), and admission
+# refuses a duplicate and a nonce past the window. It leaves a gapped
+# transaction of node-1's identity pending, so nothing signed by that
+# identity may follow it.
 #
 # Flags:
 #   --keep        Leave the devnet running on exit (for manual poking)
@@ -199,10 +206,36 @@ NODE2_URL="${NODE2_URL}" \
 IDENTITY_PATH="${DEVNET_DIR}/identities/node1.identity" \
 RECEIVER_PUBKEY="${RECEIVER_PUBKEY}" \
 AMOUNT_OS="${AMOUNT_OS}" \
+TX_HASHES_OUT="${RUN_TMP}/tx-hashes.json" \
     bun "${STATUS_SCRIPT}"
 
 echo "[tx-status-e2e] failed transaction reported as failed on both nodes"
 
+# -----------------------------------------------------------------------------
+# 6. Storage Program state root (only when the fork commits it)
+# -----------------------------------------------------------------------------
+if [[ "$(jq -r '.forks.finalityProofs.activationHeight // empty' "${RUN_TMP}/genesis.json")" == "0" ]]; then
+    NODE3_URL="http://localhost:${NODE3_PORT:-53555}"
+    NODE4_URL="http://localhost:${NODE4_PORT:-53557}"
+    NODE_URLS="${NODE1_URL},${NODE2_URL},${NODE3_URL},${NODE4_URL}" \
+    IDENTITY_PATH="${DEVNET_DIR}/identities/node1.identity" \
+    STORAGE_ADDRESS_OUT="${RUN_TMP}/storage.json" \
+        bun "${SCRIPT_DIR}/storage_root.mjs"
+    echo "[tx-status-e2e] storage root agrees on every node after each write"
+    NODE_URLS="${NODE1_URL},${NODE2_URL},${NODE3_URL},${NODE4_URL}" \
+        bun "${SCRIPT_DIR}/finality_commitments.mjs"
+    echo "[tx-status-e2e] every block's commitments rebuilt by an outside client"
+    NODE_URLS="${NODE1_URL},${NODE2_URL},${NODE3_URL},${NODE4_URL}" \
+    PROOF_INPUTS_DIR="${RUN_TMP}" \
+    SHARD_SIZE="$(jq -r '.properties.shardSize' "${RUN_TMP}/genesis.json")" \
+        bun "${SCRIPT_DIR}/finality_proofs.mjs"
+    echo "[tx-status-e2e] transaction, storage and segment proofs verified offline"
+fi
+
+# -----------------------------------------------------------------------------
+# 7. A failed transaction spends its nonce and pays its gas. Last: it leaves a
+#    gapped transaction of node-1's identity pending.
+# -----------------------------------------------------------------------------
 NODE1_URL="${NODE1_URL}" \
 NODE2_URL="${NODE2_URL}" \
 IDENTITY_PATH="${DEVNET_DIR}/identities/node1.identity" \
@@ -210,5 +243,5 @@ RECEIVER_PUBKEY="${RECEIVER_PUBKEY}" \
 AMOUNT_OS="${AMOUNT_OS}" \
     bun "${SCRIPT_DIR}/tx_nonce_failed.mjs"
 
-echo "[tx-status-e2e] a transaction that failed in a block spent its nonce on both nodes"
+echo "[tx-status-e2e] a transaction that failed in a block spent its nonce and paid its gas on both nodes"
 exit 0

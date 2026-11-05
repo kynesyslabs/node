@@ -74,6 +74,7 @@ import {
 } from "@/libs/identity/signingRecord"
 import { commitLockActive } from "./commitLock/domain"
 import { CommitLockError } from "./commitLock/lockStore"
+import { FinalityCommitmentError } from "src/libs/blockchain/finality/commitments"
 import {
     gatherRetryCandidates,
     rebuildTransactions,
@@ -1102,14 +1103,16 @@ async function forgeBlock(
         ) {
             throw error
         }
-        // A refused signature, an unusable signing record or a timestamp we
-        // will not sign ends this round without signing; anything else keeps
-        // its existing handling.
+        // A refused signature, an unusable signing record, a timestamp we
+        // will not sign or commitments this node cannot derive (a local gap
+        // in rows or snapshots) ends this round without signing; anything
+        // else keeps its existing handling.
         if (
             error instanceof DoubleSignError ||
             error instanceof SigningRecordError ||
             error instanceof CommitLockError ||
-            error instanceof CosignTimestampError
+            error instanceof CosignTimestampError ||
+            error instanceof FinalityCommitmentError
         ) {
             log.error(`[consensusRoutine] ${error.message}`)
             throw new AbortConsensusError(error.message)

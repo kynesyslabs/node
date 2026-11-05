@@ -1,5 +1,7 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
+import { isForkActive } from "@/forks/forkGates"
+import { FINALITY_FORK } from "src/libs/blockchain/finality/commitments"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
@@ -20,7 +22,25 @@ interface InterfaceGetTransactionStatusData {
  * round starts with a sync pass, so a node at the tip would flap to 503. The
  * state stays in the body in every case, because SDK clients read only the
  * body and keep polling on "unknown".
+ *
+ * Under finalityProofs a transaction in block m has its result committed by
+ * block m + 1, so `resultCommittedInBlock` is m + 1 once that block is within
+ * the height searched (getTransactionProof then answers), and null until
+ * then. It is absent where no block commits the result: before the fork and
+ * for genesis.
  */
+function resultCommitment(
+    blockNumber: number | undefined,
+    checkedThroughBlock: number,
+): { resultCommittedInBlock?: number | null } {
+    if (!Number.isSafeInteger(blockNumber) || blockNumber < 1) return {}
+    const committedIn = blockNumber + 1
+    if (!isForkActive(FINALITY_FORK, committedIn)) return {}
+    return {
+        resultCommittedInBlock: committedIn <= checkedThroughBlock ? committedIn : null,
+    }
+}
+
 export default async function getTransactionStatus(
     data: InterfaceGetTransactionStatusData,
 ): Promise<RPCResponse> {
@@ -42,7 +62,11 @@ export default async function getTransactionStatus(
         if (status.state !== "unknown") {
             return {
                 result: 200,
-                response: { ...status, checkedThroughBlock },
+                response: {
+                    ...status,
+                    ...resultCommitment(status.blockNumber, checkedThroughBlock),
+                    checkedThroughBlock,
+                },
                 extra: "",
                 require_reply: false,
             }

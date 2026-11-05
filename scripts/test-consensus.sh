@@ -16,14 +16,26 @@ SUITE_FILES=(
     scripts/validator-prove-signing.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
+    src/libs/blockchain/finality/commitments.test.ts
+    src/libs/blockchain/finality/storageHistory.test.ts
+    src/libs/blockchain/finality/storageRecord.test.ts
+    src/libs/blockchain/finality/storageRoot.test.ts
+    src/libs/blockchain/finality/validatorSet.test.ts
+    src/libs/blockchain/finality/verify.test.ts
+    src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
+    src/libs/blockchain/gcr/storageLeafWrite.test.ts
     src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
+    src/libs/blockchain/routines/syncVerification.test.ts
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
+    src/libs/crypto/canonicalJson.test.ts
+    src/libs/crypto/merkle/rfc6962.test.ts
+    src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
@@ -33,6 +45,7 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
+    src/libs/network/routines/nodecalls/finalityProofCalls.test.ts
     src/libs/network/routines/nodecalls/getFinalizedHead.test.ts
     src/libs/network/routines/nodecalls/readApi.test.ts
     src/libs/omniprotocol/peerAuthBinding.test.ts

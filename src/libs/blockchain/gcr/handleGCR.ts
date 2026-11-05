@@ -69,6 +69,9 @@ import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
 import { GCRStorageProgramRoutines } from "./gcr_routines/GCRStorageProgramRoutines"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
+import { storageProgramLeafHex } from "@/libs/blockchain/finality/storageRecord"
+import { markStorageProgramsDirty } from "@/libs/blockchain/finality/storageRoot"
+import { recordStorageHistory } from "@/libs/blockchain/finality/storageHistory"
 import { Referrals } from "@/features/incentive/referrals"
 // REVIEW: TLSNotary token management for native operations
 import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
@@ -345,7 +348,8 @@ export interface PendingGCRWrite {
     assignedTxs: Map<string, AssignedTxRecord[]>
     sideEffects: (() => Promise<void>)[]
     deferredWrites: DeferredWrite[]
-    write(em: EntityManager): Promise<void>
+    /** `block` is the block this state commits with; its storage undo log is written too. */
+    write(em: EntityManager, block?: number): Promise<void>
     afterCommit(): Promise<void>
 }
 
@@ -559,6 +563,20 @@ export default class HandleGCR {
      * @param txs Transactions to load entities for
      * @returns Caches for accounts, storage programs, and TLS notaries
      */
+    /**
+     * The edit to apply, carrying the transaction hash. The edits are part of
+     * the signed content, which is stored and served to syncing peers as is:
+     * stamping them, or letting a routine keep a reference into them, changes
+     * the content so that it no longer hashes to tx.hash, and every peer
+     * syncing that block rejects it.
+     */
+    static stampedEdit(edit: GCREdit, tx: Transaction, simulate: boolean): GCREdit {
+        if (simulate || !tx.hash) return edit
+        const copy = structuredClone(edit)
+        copy.txhash = tx.hash
+        return copy
+    }
+
     static async prepareEntities(txs: Transaction[]): Promise<GCREntityCaches> {
         const affectedPubkeys = new Set<string>()
         const affectedStorageAddresses = new Set<string>()
@@ -1182,12 +1200,13 @@ export default class HandleGCR {
                     }
                 }
             }
-            const applyOne = (edit: GCREdit, caches: GCREntityCaches) => {
-                if (!simulate && tx.hash) {
-                    edit.txhash = tx.hash
-                }
-                return HandleGCR.applyGCREdit(edit, caches, isRollback, simulate)
-            }
+            const applyOne = (edit: GCREdit, caches: GCREntityCaches) =>
+                HandleGCR.applyGCREdit(
+                    HandleGCR.stampedEdit(edit, tx, simulate),
+                    caches,
+                    isRollback,
+                    simulate,
+                )
             const inOrder = (edits: GCREdit[]) =>
                 isRollback ? [...edits].reverse() : edits
             const done = (
@@ -1283,10 +1302,8 @@ export default class HandleGCR {
         const appliedEdits: GCREdit[] = []
 
         // Apply all edits for this tx
-        for (const edit of gcrEdits) {
-            if (!simulate && tx.hash) {
-                edit.txhash = tx.hash
-            }
+        for (const signedEdit of gcrEdits) {
+            const edit = HandleGCR.stampedEdit(signedEdit, tx, simulate)
 
             let result: GCRResult
 
@@ -2175,14 +2192,20 @@ export default class HandleGCR {
             assignedTxs,
             sideEffects,
             deferredWrites,
-            write: em =>
+            write: (em, block) =>
                 HandleGCR.writeGCREditChanges(
                     em,
                     pending.entities,
                     pending.assignedTxs,
                     pending.deferredWrites,
+                    block,
                 ),
-            afterCommit: () => HandleGCR.runSideEffects(pending.sideEffects),
+            afterCommit: async () => {
+                if (pending.entities.storagePrograms.size > 0) {
+                    markStorageProgramsDirty()
+                }
+                await HandleGCR.runSideEffects(pending.sideEffects)
+            },
         }
         return pending
     }
@@ -2214,6 +2237,7 @@ export default class HandleGCR {
                 deferredWrites,
             )
         })
+        if (entities.storagePrograms.size > 0) markStorageProgramsDirty()
 
         await HandleGCR.runSideEffects(sideEffects)
 
@@ -2221,6 +2245,22 @@ export default class HandleGCR {
         log.only(
             `[saveGCREditChanges] Time taken: ${(end - now) / 1000}s for ${sideEffects.length} side effects`,
         )
+    }
+
+    /**
+     * The row's leaf in the storage state root. Null when the row has no
+     * leaf spelling (it then fails to save as well); the root computes it
+     * from the stored row instead.
+     */
+    static storageLeafOf(program: GCRStorageProgram): string | null {
+        try {
+            return storageProgramLeafHex(program)
+        } catch (error) {
+            log.warning(
+                `[saveGCREditChanges] no storage leaf for ${program.storageAddress}: ${error}`,
+            )
+            return null
+        }
     }
 
     /** Runs side effects in order once the state they follow from is durable. */
@@ -2238,13 +2278,16 @@ export default class HandleGCR {
 
     /**
      * Writes the entity caches, the assignment stamps and the deferred writes
-     * through one entity manager. The caller owns the transaction.
+     * through one entity manager. The caller owns the transaction. With
+     * `historyBlock`, the storage programs' records from before the write go
+     * to that block's undo log first.
      */
     static async writeGCREditChanges(
         em: EntityManager,
         entities: GCREntityCaches,
         assignedTxs?: Map<string, AssignedTxRecord[]>,
         deferredWrites: DeferredWrite[] = [],
+        historyBlock?: number,
     ) {
         // Save GCRMain entities
         const entitiesToSave = entities.accounts.values().toArray()
@@ -2267,6 +2310,18 @@ export default class HandleGCR {
                 } else {
                     spToSave.push(entity)
                 }
+            }
+
+            // Before the write as well as after the commit: a root computed
+            // while this transaction is open must not outlive it.
+            markStorageProgramsDirty()
+            for (const program of spToSave) {
+                program.smtLeaf = HandleGCR.storageLeafOf(program)
+            }
+            if (historyBlock !== undefined) {
+                await recordStorageHistory(em, historyBlock, [
+                    ...entities.storagePrograms.keys(),
+                ])
             }
 
             const spRepo = em.getRepository(GCRStorageProgram)
