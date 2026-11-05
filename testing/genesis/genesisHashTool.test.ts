@@ -89,4 +89,22 @@ describe("genesis-hash tool", () => {
         expect(text).toContain(`EXPECTED_GENESIS_BLOCK_HASH=${json.genesisBlockHash}\n`)
         expect(text).toContain(`EXPECTED_GENESIS_HASH=${json.genesisDataHash}\n`)
     }, 60_000)
+
+    it("reports a sudo key and balances the node would refuse after block 0", () => {
+        const clean = genesisValues(launchGenesis())
+        expect(clean.problems.filter(p => /sudoPubkey|BALANCES/.test(p))).toEqual([])
+
+        const g = launchGenesis()
+        g.properties = { ...g.properties, sudoPubkey: "FILL: a key" }
+        g.balances = [["0x" + "a".repeat(64), "12"], ["0x" + "b".repeat(64), "-1"], "FILL"]
+        const problems = genesisValues(g).problems.join("\n")
+        expect(problems).toContain("properties.sudoPubkey")
+        expect(problems).toContain("entry 1")
+        expect(problems).toContain("entry 2")
+        expect(problems).not.toContain("entry 0")
+
+        expect(genesisValues({ ...launchGenesis(), balances: "FILL: allocations" }).problems.join("\n")).toContain(
+            "balances is present but not an array",
+        )
+    })
 })

@@ -39,6 +39,7 @@ import {
 } from "@/libs/blockchain/genesis/acceptedForkScheduleStore"
 import { snapshotManifestHash } from "@/libs/blockchain/genesis/loadSnapshot"
 import { genesisFileExists, genesisFilePath } from "@/libs/blockchain/genesis/genesisFile"
+import { readGenesisSudoPubkey } from "@/libs/consensus/genesisSudoPubkey"
 import type { ForkConfigLike } from "@/libs/peer/routines/forkScheduleAgreement"
 import { WINDOW_BLOCKS } from "@/libs/peer/routines/forkScheduleWatch"
 import {
@@ -212,6 +213,7 @@ export default async function findGenesisBlock() {
     // Fail before block 0 is generated: a genesis without a valid shard
     // size would be committed, hashed, and impossible to fix in place.
     readGenesisShardSize(genesisData)
+    readGenesisSudoPubkey(genesisData)
 
     // Adding the genesis block to the chain
     const genesisBlock = await Chain.generateGenesisBlock(genesisData, hash => {

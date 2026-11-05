@@ -28,6 +28,8 @@ import * as path from "node:path"
 import { freshGenesisProblems, genesisTimestampProblem } from "src/libs/blockchain/genesis/genesisPin"
 import { hashGenesisData } from "src/libs/blockchain/genesis/normalizeGenesisForHash"
 import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
+import { genesisBalancesProblems } from "src/libs/blockchain/genesis/mergeGenesisBalances"
+import { readGenesisSudoPubkey } from "src/libs/consensus/genesisSudoPubkey"
 import { forkScheduleDigest } from "src/libs/peer/routines/forkScheduleAgreement"
 import { loadForkConfigFromGenesis } from "src/forks"
 import { getSharedState } from "src/utilities/sharedState"
@@ -108,6 +110,15 @@ export function genesisValues(genesis: unknown, manifestSha256: string | null = 
     } catch (e) {
         problems.push((e as Error).message)
     }
+    // Both are read only after block 0 is written, so a bad value would
+    // otherwise surface first on the launch validators
+    try {
+        readGenesisSudoPubkey(genesis)
+    } catch (e) {
+        problems.push((e as Error).message)
+    }
+    const balances = genesis && typeof genesis === "object" ? (genesis as { balances?: unknown }).balances : undefined
+    problems.push(...genesisBalancesProblems(balances))
     // Without a fixed timestamp block 0 takes the clock of whoever builds it,
     // so the hash above is this run's and no node will match it
     if (genesisTimestampProblem(genesis) !== null) genesisBlockHash = null

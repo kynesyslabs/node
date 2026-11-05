@@ -99,6 +99,23 @@ function parseGenesisBalanceEntry(
     return [pubkey, balance]
 }
 
+/** What mergeGenesisBalances would refuse in `genesisData.balances`, without a database. */
+export function genesisBalancesProblems(balances: unknown): string[] {
+    if (balances === undefined || balances === null) return []
+    if (!Array.isArray(balances)) {
+        return ["[GENESIS][BALANCES] genesisData.balances is present but not an array"]
+    }
+    const problems: string[] = []
+    balances.forEach((entry, i) => {
+        try {
+            parseGenesisBalanceEntry(entry, i)
+        } catch (e) {
+            problems.push((e as Error).message)
+        }
+    })
+    return problems
+}
+
 /**
  * Default JSON columns used for freshly-inserted gcr_main rows. Mirrors
  * the shape `HandleGCR.createAccount` writes so the row is
