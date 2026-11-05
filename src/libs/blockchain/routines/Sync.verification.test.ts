@@ -490,6 +490,35 @@ describe("fast sync under finalityProofs", () => {
             expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
         })
 
+        it("still checks the block before a tail it leaves out against that tail", async () => {
+            getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+            getSharedState.batchSyncBlockSize = 2
+            const tx = makeTx(alice)
+            const block = makeBlock([tx])
+            const child = childOf(block, "ab".repeat(32))
+            const peer = peerWith([child, block], [tx])
+            // The network is past the child, but the peer withholds the block after it
+            peer.sync = { block: HEIGHT + 2 }
+            peer.longCall = jest.fn(async (request: any) => {
+                const { start, limit } = request.params[0].data
+                const asksForGrandchild = start === HEIGHT + 2 && limit === 1
+                return { result: 200, response: clone(asksForGrandchild ? [child] : [child, block]) }
+            })
+            spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([peer])
+            spyOn(Math, "random").mockReturnValue(0)
+            spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+            spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([])
+            applyResult({ successfulTxs: [tx.hash] })
+            getSharedState.fastSyncCount = 1
+            getSharedState.syncStatus = true
+
+            await fastSync([], "test")
+
+            expect(applyTransactions).toHaveBeenCalledTimes(1)
+            expect(insertBlock).not.toHaveBeenCalled()
+            expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+        })
+
         it("stores nothing when the peer withholds a next block the network has", async () => {
             // A peer asked for HEIGHT + 1 answers with its highest block at or below it
             await syncLastOfBatch(async (_tx, block) => [block])

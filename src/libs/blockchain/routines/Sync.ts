@@ -1324,14 +1324,15 @@ async function batchDownloadBlocks(
     // Process each block in order. Order matters for the height-stable
     // verify: each block's validator set (valid_at <= number-1) is already
     // persisted by the time the next block is checked.
-    const ordered = blocks.toSorted((a, b) => a.number - b.number)
-    const tailChild = await fetchChildBlock(peer, ordered.at(-1))
+    const sorted = blocks.toSorted((a, b) => a.number - b.number)
+    const tailChild = await fetchChildBlock(peer, sorted.at(-1))
+    // A tail left out still serves as the child of the block before it.
+    const ordered = tailChild === null ? sorted.slice(0, -1) : sorted
     if (tailChild === null) {
         log.warning(
-            `[batchDownloadBlocks] ${peer.identity} did not serve block ${ordered.at(-1).number + 1}; ` +
-                `leaving block ${ordered.at(-1).number} to a peer that can`,
+            `[batchDownloadBlocks] ${peer.identity} did not serve block ${sorted.at(-1).number + 1}; ` +
+                `leaving block ${sorted.at(-1).number} to a peer that can`,
         )
-        ordered.pop()
     }
     for (const [index, block] of ordered.entries()) {
         if (getSharedState.isShuttingDown) {
@@ -1405,7 +1406,7 @@ async function batchDownloadBlocks(
             inserted = await applySyncedBlock(
                 block,
                 blockTxs,
-                ordered[index + 1] ?? tailChild,
+                sorted[index + 1] ?? tailChild,
             )
         } catch (error) {
             if (!(error instanceof SyncBlockRejectedError)) throw error
