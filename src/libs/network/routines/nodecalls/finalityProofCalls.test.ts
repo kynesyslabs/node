@@ -71,7 +71,7 @@ const { __resetCommitmentCache } = await import("src/libs/blockchain/finality/co
 const { verifyStorageProof, verifyTransactionProof } = await import("src/libs/blockchain/finality/verify")
 const { default: getTransactionProof } = await import("./getTransactionProof")
 const { default: getValidatorSet } = await import("./getValidatorSet")
-const { default: getBlockSegment, MAX_SEGMENT_BLOCKS } = await import("./getBlockSegment")
+const { default: getBlockSegment, MAX_SEGMENT_BLOCKS, MAX_SEGMENT_CONTENT_BYTES } = await import("./getBlockSegment")
 const { default: getStorageProof } = await import("./getStorageProof")
 
 interface Key {
@@ -267,6 +267,57 @@ describe("getBlockSegment", () => {
         expect((await getBlockSegment({ from: 9, to: 10 })).result).toBe(404)
         blocks.delete(1)
         expect((await getBlockSegment({ from: 0, to: 3 })).result).toBe(500)
+    })
+
+    /** Blocks 4..`head` on top of the built chain, each padded to `pad` content bytes. */
+    function extendChain(head: number, pad = 0) {
+        for (let n = 4; n <= head; n++) {
+            store(n, header(n, blocks.get(n - 1)!.hash, { padding: "x".repeat(pad) }))
+        }
+    }
+
+    /** Every range Chain.getBlockRange is asked for while `work` runs. */
+    async function rangesRead(work: () => Promise<unknown>): Promise<[number, number][]> {
+        const chain = (await import("src/libs/blockchain/chain")).default as any
+        const real = chain.getBlockRange
+        const ranges: [number, number][] = []
+        chain.getBlockRange = async (from: number, to: number) => {
+            ranges.push([from, to])
+            return await real(from, to)
+        }
+        try {
+            await work()
+        } finally {
+            chain.getBlockRange = real
+        }
+        return ranges
+    }
+
+    it("reads a long range in batches and serves it whole", async () => {
+        extendChain(60)
+        let reply: any
+        const ranges = await rangesRead(async () => (reply = await getBlockSegment({ from: 0, to: 60 })))
+        expect(reply.response).toMatchObject({ from: 0, to: 60, head: 60 })
+        expect(reply.response.headers.map((h: any) => h.number)).toEqual(Array.from({ length: 61 }, (_, i) => i))
+        expect(ranges).toEqual([[0, 24], [25, 49], [50, 60]])
+    })
+
+    it("stops reading once the reply reaches its byte cap", async () => {
+        extendChain(80, 1024 * 1024)
+        let reply: any
+        const ranges = await rangesRead(async () => (reply = await getBlockSegment({ from: 4, to: 80 })))
+        const served = reply.response.headers.length
+        expect(served).toBe(7)
+        expect(reply.response).toMatchObject({ from: 4, to: 4 + served - 1 })
+        const total = reply.response.headers.reduce((sum: number, h: any) => sum + h.contentBytes.length, 0)
+        expect(total).toBeLessThanOrEqual(MAX_SEGMENT_CONTENT_BYTES)
+        expect(ranges).toEqual([[4, 28]])
+    })
+
+    it("serves one block over the byte cap rather than nothing", async () => {
+        extendChain(5, MAX_SEGMENT_CONTENT_BYTES + 1)
+        const reply = await getBlockSegment({ from: 4, to: 5 })
+        expect(reply.response).toMatchObject({ from: 4, to: 4 })
     })
 })
 
