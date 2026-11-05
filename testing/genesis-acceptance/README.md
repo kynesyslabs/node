@@ -22,8 +22,9 @@ could not be carried out.
 2. Copies `data/genesis.json` and `data/snapshot/` out of the image
    (`docker create` + `docker cp`, the image is not run) and writes the
    fixtures with `fixtures.py`: a launch genesis (timestamp 1793318400, chain
-   id 4242, `signatureDomain`, `editBinding`, `nonceIntegrity`,
-   `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs` at height 0,
+   id 4242, `osDenomination`, `nonceEnforcement`, `signatureDomain`,
+   `editBinding`, `nonceIntegrity`, `quorumParity`, `committeeBinding`,
+   `commitLock`, `finalityProofs` at height 0,
    the bundled snapshot bound by `snapshot.manifestSha256`) and its variants.
 3. Computes the pin with `bun scripts/genesis-hash.ts --json` on the host.
 4. Starts a throwaway Postgres (the image pinned in `docker-compose.yml`) and

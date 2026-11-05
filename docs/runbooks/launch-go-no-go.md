@@ -129,8 +129,10 @@ exposed by the node, so it comes from the T-24h posts). Then:
   answer with their own proven identity, on the agreed genesis block and
   release commit; every launch validator has a complete operator/provider
   entry with no group above `shardSize − q`; the genesis schedules
-  `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`,
-  `committeeBinding` and `commitLock` at `activationHeight` 0; and no launch validator is one of
+  `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
+  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock` and
+  `finalityProofs` at `activationHeight` 0, each written out (a fork left
+  out of the file is not accepted on its default); and no launch validator is one of
   the pinned committee identities (`PINNED_SHARD_IDENTITIES`), which take
   a seat on any network whose pool holds them; and a node would accept
   the genesis file at its first boot (fixed timestamp, snapshot bound by

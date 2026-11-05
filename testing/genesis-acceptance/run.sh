@@ -44,7 +44,7 @@ UNKNOWN_FORK=genesisAcceptanceUnknownFork
 RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
-MAINNET_FORKS="signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs"
+MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 

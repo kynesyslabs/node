@@ -139,6 +139,8 @@ export interface GoNoGoDecision {
 
 /** Forks a mainnet genesis must switch on at block 0. */
 export const MAINNET_FORKS: readonly ForkName[] = [
+    "osDenomination",
+    "nonceEnforcement",
     "signatureDomain",
     "editBinding",
     "nonceIntegrity",
