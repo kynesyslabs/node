@@ -22,7 +22,6 @@ import {
 } from "@/forks/forkConfig"
 import { Config } from "src/config"
 import {
-    APP_VERSION,
     APP_VERSION_NAME,
     DEFAULT_SIGNING_ALGORITHM,
     DEFAULT_BLOCK_TIME,
@@ -35,6 +34,10 @@ import {
     RATE_LIMIT_DEFAULT_WINDOW_MS,
     RATE_LIMIT_POST_MAX_REQUESTS,
     RATE_LIMIT_POST_WINDOW_MS,
+    RATE_LIMIT_GET_MAX_REQUESTS,
+    RATE_LIMIT_GET_WINDOW_MS,
+    RATE_LIMIT_AUTH_FAILURE_MAX_REQUESTS,
+    RATE_LIMIT_AUTH_FAILURE_WINDOW_MS,
     RATE_LIMIT_TX_PER_BLOCK,
     RATE_LIMIT_IDENTITIES_MAX_REQUESTS,
     RATE_LIMIT_IDENTITIES_WINDOW_MS,
@@ -81,7 +84,8 @@ export default class SharedState {
 
     // !SECTION Constants
     prod = Config.getInstance().core.prod
-    version = APP_VERSION
+    // package.json is the one version source, so a release bump is one edit
+    version = NODE_VERSION.version
     version_name = APP_VERSION_NAME
 
     // Git commit hash of the running binary, resolved once at boot from
@@ -554,6 +558,14 @@ export default class SharedState {
             identities: {
                 maxRequests: RATE_LIMIT_IDENTITIES_MAX_REQUESTS,
                 windowMs: RATE_LIMIT_IDENTITIES_WINDOW_MS,
+            },
+            GET: {
+                maxRequests: RATE_LIMIT_GET_MAX_REQUESTS,
+                windowMs: RATE_LIMIT_GET_WINDOW_MS,
+            },
+            "auth-failure": {
+                maxRequests: RATE_LIMIT_AUTH_FAILURE_MAX_REQUESTS,
+                windowMs: RATE_LIMIT_AUTH_FAILURE_WINDOW_MS,
             },
         },
         txPerBlock: RATE_LIMIT_TX_PER_BLOCK,

@@ -73,6 +73,8 @@ export default async function manageGCRRoutines(
             break
 
         case "getReferralInfo": {
+            // Stored on purpose: validateReferralCode looks the code up in
+            // the table, so a code shown before the owner's first tx must exist.
             const account = await ensureGCRForUser(params[0])
             response.response = account.referralInfo
             break
