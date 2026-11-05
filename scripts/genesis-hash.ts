@@ -28,6 +28,10 @@ import * as path from "node:path"
 import { freshGenesisProblems, genesisTimestampProblem } from "src/libs/blockchain/genesis/genesisPin"
 import { hashGenesisData } from "src/libs/blockchain/genesis/normalizeGenesisForHash"
 import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
+import { genesisBalancesProblems } from "src/libs/blockchain/genesis/mergeGenesisBalances"
+import { genesisForkProblems } from "src/libs/blockchain/genesis/applyForksAtGenesis"
+import { type ForkStateEntry, verifySnapshot } from "src/libs/blockchain/genesis/verifySnapshot"
+import { readGenesisSudoPubkey } from "src/libs/consensus/genesisSudoPubkey"
 import { forkScheduleDigest } from "src/libs/peer/routines/forkScheduleAgreement"
 import { loadForkConfigFromGenesis } from "src/forks"
 import { getSharedState } from "src/utilities/sharedState"
@@ -70,6 +74,37 @@ export function snapshotManifestSha256(snapshotDir: string): string | null {
         : null
 }
 
+/**
+ * The fork_state rows the snapshot's manifest carries ([] for a manifest
+ * without them), or null when the directory has no manifest. It does not
+ * verify the snapshot; callers that do not verify it otherwise use
+ * verifiedSnapshot.
+ */
+export function snapshotManifestForkState(snapshotDir: string): ForkStateEntry[] | null {
+    const manifestFile = path.join(snapshotDir, "manifest.json")
+    if (!fs.existsSync(manifestFile)) return null
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"))
+    return Array.isArray(manifest?.fork_state) ? manifest.fork_state : []
+}
+
+/**
+ * The snapshot as the node checks it at boot (verifySnapshot): its
+ * fork_state rows when it passes, else the reason the node would refuse it.
+ */
+export async function verifiedSnapshot(
+    snapshotDir: string,
+): Promise<{ forkState: ForkStateEntry[] | null; problems: string[] }> {
+    try {
+        const manifest = await verifySnapshot(path.resolve(snapshotDir))
+        return { forkState: manifest.fork_state ?? [], problems: [] }
+    } catch (e) {
+        return {
+            forkState: null,
+            problems: [`a node would refuse the snapshot at boot: ${(e as Error).message}`],
+        }
+    }
+}
+
 /** The file as the node reads data/genesis.json: a JSON string holding JSON is parsed again. */
 export function readGenesisFile(file: string): any {
     let genesis = JSON.parse(fs.readFileSync(file, "utf8"))
@@ -82,7 +117,15 @@ export function readGenesisFile(file: string): any {
  * code. Loads the genesis fork schedule into shared state, as a booting
  * node does before it builds block 0.
  */
-export function genesisValues(genesis: unknown, manifestSha256: string | null = null): GenesisValues {
+/**
+ * @param snapshotForkState the snapshot manifest's fork_state rows; with
+ *   them, problems also hold what block 0's fork pre-apply would refuse
+ */
+export function genesisValues(
+    genesis: unknown,
+    manifestSha256: string | null = null,
+    snapshotForkState: ForkStateEntry[] | null = null,
+): GenesisValues {
     const problems: string[] = []
     try {
         loadForkConfigFromGenesis(genesis)
@@ -108,6 +151,19 @@ export function genesisValues(genesis: unknown, manifestSha256: string | null = 
     } catch (e) {
         problems.push((e as Error).message)
     }
+    // Both are read only after block 0 is written, so a bad value would
+    // otherwise surface first on the launch validators
+    try {
+        readGenesisSudoPubkey(genesis)
+    } catch (e) {
+        problems.push((e as Error).message)
+    }
+    const balances = genesis && typeof genesis === "object" ? (genesis as { balances?: unknown }).balances : undefined
+    problems.push(...genesisBalancesProblems(balances))
+    if (snapshotForkState !== null) {
+        const forks = genesis && typeof genesis === "object" ? (genesis as { forks?: unknown }).forks : undefined
+        problems.push(...genesisForkProblems(forks, snapshotForkState))
+    }
     // Without a fixed timestamp block 0 takes the clock of whoever builds it,
     // so the hash above is this run's and no node will match it
     if (genesisTimestampProblem(genesis) !== null) genesisBlockHash = null
@@ -124,7 +180,7 @@ export function genesisValues(genesis: unknown, manifestSha256: string | null = 
     }
 }
 
-function main(): number {
+async function main(): Promise<number> {
     let args: ReturnType<typeof parseArgs>
     try {
         args = parseArgs(process.argv.slice(2))
@@ -140,7 +196,9 @@ function main(): number {
         return 2
     }
 
-    const result = genesisValues(genesis, manifestSha256)
+    const snapshot = args.snapshot ? await verifiedSnapshot(args.snapshot) : null
+    const result = genesisValues(genesis, manifestSha256, snapshot?.forkState ?? null)
+    result.problems.push(...(snapshot?.problems ?? []))
     if (args.json) {
         console.log(JSON.stringify(result, null, 2))
     } else {
@@ -160,5 +218,10 @@ function main(): number {
 }
 
 if (import.meta.main) {
-    process.exit(main())
+    main()
+        .then(code => process.exit(code))
+        .catch(e => {
+            console.error((e as Error).stack ?? String(e))
+            process.exit(2)
+        })
 }

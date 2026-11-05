@@ -325,6 +325,16 @@ export class MetricsService {
             "Blocks where this node was drawn into the shard but its signature is missing",
             [],
         )
+        this.createCounter(
+            "storage_root_sync_mismatch_total",
+            "Synced blocks whose storage state root differs from the one this node computes before applying them",
+            [],
+        )
+        this.createCounter(
+            "storage_proof_root_mismatch_total",
+            "Storage proofs refused because the table rebuilt from the undo log did not give the anchor block's storage root",
+            [],
+        )
         this.createGauge(
             "fork_schedule_mismatch",
             "1 while the last fork-schedule comparison found a peer with a different schedule, else 0",

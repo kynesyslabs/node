@@ -27,6 +27,7 @@ import {
 import { CommitLockError } from "../commitLock/lockStore"
 import { recordPrevoteRound } from "../commitLock/prevoteRecord"
 import { recordPrevote, withLockMutex } from "../commitLock/roundState"
+import { buildCommitments } from "src/libs/blockchain/finality/commitments"
 
 export interface CandidateOptions {
     /** The attempt's round; required under commitLock, where it is signed. */
@@ -102,6 +103,11 @@ export async function createBlock(
         throw new CosignTimestampError(
             `refusing to sign block ${blockNumber}: ${timestampVerdict.reason}`,
         )
+    }
+    // Appended last, after native_tables_hashes, in their fixed order
+    const commitments = await buildCommitments(blockNumber)
+    if (commitments) {
+        Object.assign(block.content, commitments)
     }
     // REVIEW: P2 — route block hashing through the fork-aware serializer.
     // The block's own number is the correct height for gating.
