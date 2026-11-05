@@ -12,6 +12,7 @@ import {
     VerificationResult,
 } from "../verifySignature"
 import { PeerManager } from "@/libs/peer"
+import { getStakedSet } from "@/libs/consensus/stakedSet"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import {
     RATE_LIMIT_DEFAULT_BLOCK_DURATION_MS,
@@ -22,6 +23,13 @@ import {
 const BUCKET_SEPARATOR = "|"
 /** Bucket shared by every route that has no limit of its own. */
 const DEFAULT_BUCKET = "default"
+/** Failed request-signature checks, counted apart from the request quotas. */
+const AUTH_FAILURE_BUCKET = "auth-failure"
+/** Joins a key to a bucket name: one failure counter per exempt key. */
+const BUCKET_KEY_SEPARATOR = "@"
+// While the staked set is empty, getStakedSet caches nothing and every
+// signed request would hit the database again.
+const EMPTY_VALIDATOR_SET_RETRY_MS = 5_000
 
 interface RateLimitData {
     count: number
@@ -274,6 +282,12 @@ export class RateLimiter {
      * client cannot flood logs. Cleared by `destroy()`.
      */
     private xffRejectLastLog = new Map<string, number>()
+    /** Staked validator keys as of the last signed request; lowercase. */
+    private validatorKeys: ReadonlySet<string> = new Set()
+    /** The set is empty because the network has no validator rows, not because they could not be read. */
+    private noValidatorRows = false
+    private validatorSetRetryAt = 0
+    private validatorRefresh: Promise<void> | null = null
 
     constructor(config: RateLimitConfig) {
         this.config = config
@@ -391,9 +405,11 @@ export class RateLimiter {
     }
 
     private getLimitForBucket(bucket: string): MethodLimitConfig {
-        return bucket === DEFAULT_BUCKET
+        const at = bucket.indexOf(BUCKET_KEY_SEPARATOR)
+        const name = at > 0 ? bucket.slice(0, at) : bucket
+        return name === DEFAULT_BUCKET
             ? this.config.defaultLimit
-            : this.config.methodLimits[bucket] || this.config.defaultLimit
+            : this.config.methodLimits[name] || this.config.defaultLimit
     }
 
     /** The counter a method keeps for an IP, if it has one. */
@@ -594,6 +610,87 @@ export class RateLimiter {
         return socketIp
     }
 
+    /**
+     * Brings the validator keys to the current head; the set is cached per
+     * height. Kept here because the trust check below cannot await.
+     */
+    public refreshValidatorKeys(): Promise<void> {
+        if (
+            this.validatorKeys.size === 0 &&
+            Date.now() < this.validatorSetRetryAt
+        ) {
+            return Promise.resolve()
+        }
+        // Every signed request lands here before it is verified, so a burst
+        // must share one read rather than start one each.
+        this.validatorRefresh ??= this.loadValidatorKeys().finally(() => {
+            this.validatorRefresh = null
+        })
+        return this.validatorRefresh
+    }
+
+    private async loadValidatorKeys(): Promise<void> {
+        const now = Date.now()
+        const staked = await getStakedSet()
+        this.validatorKeys = staked
+        if (staked.size > 0) {
+            this.noValidatorRows = false
+            return
+        }
+        // Local to the limiter: consensus callers of getStakedSet still
+        // see the first validator rows at once.
+        this.validatorSetRetryAt = now + EMPTY_VALIDATOR_SET_RETRY_MS
+        // The cached set is also empty after a failed refresh. Only a
+        // network that really has no validators gets the peer-table
+        // fallback; a read failure must not open it.
+        try {
+            const { default: GCR } = await import("@/libs/blockchain/gcr/gcr")
+            // getGCRValidatorsAtBlock answers a failed read with [].
+            const rows = await GCR.getGCRValidatorsAtBlockOrThrow(
+                getSharedState.lastBlockNumber ?? 0,
+            )
+            this.noValidatorRows = rows.length === 0
+        } catch (e) {
+            this.noValidatorRows = false
+            log.warning(
+                `[Rate Limiter] cannot read the validator set (${
+                    e instanceof Error ? e.message : String(e)
+                }); no peer-table exemption until it can`,
+            )
+        }
+    }
+
+    private isValidatorKey(publicKey: string): boolean {
+        const key = publicKey.trim().toLowerCase()
+        return this.validatorKeys.has(key.startsWith("0x") ? key : `0x${key}`)
+    }
+
+    /**
+     * Where a failed signature check claiming `identity` is counted. The
+     * per-address bucket is shared by every client behind one proxy or NAT,
+     * so a key that skips the limits once verified gets a counter of its
+     * own: others' failures cannot lock it out, and forged claims of it are
+     * still refused before verification once over the limit. Only a forger
+     * behind the same address claiming that very key can block it.
+     */
+    private authFailureBucketFor(identity: string): string {
+        const claimed = identity.slice(identity.indexOf(":") + 1)
+        const key = claimed.trim().toLowerCase().replace(/^0x/, "")
+        if (!/^[0-9a-f]+$/.test(key)) return AUTH_FAILURE_BUCKET
+        const localKey = getSharedState.keypair?.publicKey
+            ? uint8ArrayToHex(getSharedState.keypair.publicKey as Uint8Array)
+                  .toLowerCase()
+                  .replace(/^0x/, "")
+            : null
+        const exempt =
+            key === localKey ||
+            this.isValidatorKey(key) ||
+            isKeyWhitelisted(key, this.config.whitelistedKeys)
+        return exempt
+            ? `${AUTH_FAILURE_BUCKET}${BUCKET_KEY_SEPARATOR}${key}`
+            : AUTH_FAILURE_BUCKET
+    }
+
     public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
         if (
             clientIP &&
@@ -620,7 +717,21 @@ export class RateLimiter {
             return true
         }
 
-        return !!PeerManager.getInstance().getPeer(authCtx.publicKey)
+        // Any node that sends hello_peer lands in the peer table, so being
+        // there earns no exemption; a staked validator's does.
+        if (this.isValidatorKey(authCtx.publicKey)) {
+            return true
+        }
+        // A bare development network has no validator rows, and its nodes
+        // know each other only from the peer table.
+        if (
+            this.validatorKeys.size === 0 &&
+            this.noValidatorRows &&
+            process.env.DEMOS_REQUIRE_VALIDATORS !== "true"
+        ) {
+            return !!PeerManager.getInstance().getPeer(authCtx.publicKey)
+        }
+        return false
     }
 
     private getMethodFromRequest(req: Request): string | null {
@@ -645,6 +756,13 @@ export class RateLimiter {
 
             if (req.method === "GET" && pathMethodMap[path]) {
                 return pathMethodMap[path]
+            }
+
+            // The daily POST quota has no per-minute cap, so a read route
+            // left out of the map above (storage-program search, zk reads)
+            // must not land in it.
+            if (req.method !== "POST") {
+                return "GET"
             }
 
             // For POST requests to root, we can't easily peek at the body
@@ -682,6 +800,9 @@ export class RateLimiter {
                 return await next()
             }
 
+            const clientIP = this.getClientIP(req, server)
+            const whitelistedIP = this.config.whitelistedIPs.includes(clientIP)
+
             // Check for identity/signature headers for key-based whitelisting
             const identity = req.headers.get("identity")
             const signature = req.headers.get("signature")
@@ -689,6 +810,23 @@ export class RateLimiter {
             let verifyResult: VerificationResult | null = null
 
             if (identity && signature) {
+                await this.refreshValidatorKeys()
+                const failureBucket = whitelistedIP
+                    ? null
+                    : this.authFailureBucketFor(identity)
+
+                // A source past the failure limit is refused before another
+                // verification is spent on it.
+                const failures = failureBucket
+                    ? this.ipRequests.get(bucketKey(failureBucket, clientIP))
+                    : undefined
+                if (failures?.blocked && failures.blockExpiry > Date.now()) {
+                    return this.blockedResponse(
+                        Math.ceil((failures.blockExpiry - Date.now()) / 1000),
+                        "IP blocked due to rate limiting",
+                    )
+                }
+
                 // AUDIT C3b — once nonceEnforcement is active, require the
                 // timestamp-bound auth signature (kills the static replayable
                 // token). Pre-fork keeps the legacy bare-pubkey verification so
@@ -705,10 +843,19 @@ export class RateLimiter {
                 )
 
                 if (!verifyResult.valid) {
-                    // Invalid signature - return 401
                     log.error(
                         `[Rate Limiter] Invalid signature: ${verifyResult.error}`,
                     )
+                    // Verification is the costly part of a request, so a
+                    // failed one is counted rather than answered for free.
+                    if (failureBucket) {
+                        const limited = this.consume(
+                            failureBucket,
+                            clientIP,
+                            Date.now(),
+                        )
+                        if (limited) return limited
+                    }
                     return new Response(
                         JSON.stringify({
                             error: "Invalid signature",
@@ -745,113 +892,123 @@ export class RateLimiter {
                 return await next()
             }
 
-            const clientIP = this.getClientIP(req, server)
-
             // Skip rate limiting for whitelisted IPs
             if (this.isTrustedInternalRequest(req, clientIP)) {
                 return await next()
             }
 
-            const now = Date.now()
             const method = this.getMethodFromRequest(req)
-            const limit = this.getLimitForMethod(method)
-
-            const counterKey = bucketKey(this.bucketFor(method), clientIP)
-            if (!this.ipRequests.has(counterKey)) {
-                this.makeRoomForCounter(now)
-            }
-            const ipData = this.ipRequests.get(counterKey) || {
-                count: 0,
-                firstRequest: now,
-                blocked: false,
-                lastSeenBlockNumber: 0,
-                lastSeenWithinBlockCount: 0,
-            }
-
-            // The block ending does not forgive the count: a long-window cap
-            // (the daily POST quota) must hold through the block, and the
-            // window reset below is what clears it once the window is over.
-            if (ipData.blocked && !(ipData.blockExpiry > now)) {
-                ipData.blocked = false
-                delete ipData.blockExpiry
-            }
-
-            const isBlocked = ipData.blocked
-
-            // Check if IP is currently blocked
-            if (isBlocked) {
-                const remainingTime = Math.ceil(
-                    (ipData.blockExpiry - now) / 1000,
-                )
-                log.warning(
-                    `[Rate Limiter] Blocked request from IP ${clientIP}, ${remainingTime}s remaining`,
-                )
-
-                return new Response(
-                    JSON.stringify({
-                        error: "IP blocked due to rate limiting",
-                        retryAfter: remainingTime,
-                    }),
-                    {
-                        status: 429,
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Retry-After": remainingTime.toString(),
-                        },
-                    },
-                )
-            }
-
-            // Reset window if expired
-            if (now - ipData.firstRequest > limit.windowMs) {
-                ipData.count = 0
-                ipData.firstRequest = now
-                ipData.blocked = false
-                delete ipData.blockExpiry
-            }
-
-            ipData.count++
-
-            // Block if limit exceeded
-            if (ipData.count > limit.maxRequests) {
-                const blockMs = this.blockDurationMs()
-                ipData.blocked = true
-                ipData.blockExpiry = now + blockMs
-
-                log.warning(
-                    `[Rate Limiter] IP ${clientIP} exceeded limit (${ipData.count}/${limit.maxRequests}) and blocked for ${blockMs}ms`,
-                )
-
-                this.ipRequests.set(counterKey, ipData)
-
-                return new Response(
-                    JSON.stringify({
-                        error: "Rate limit exceeded",
-                        // limit: limit.maxRequests,
-                        // windowMs: limit.windowMs,
-                        retryAfter: Math.ceil(blockMs / 1000),
-                    }),
-                    {
-                        status: 429,
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Retry-After": Math.ceil(blockMs / 1000).toString(),
-                        },
-                    },
-                )
-            }
-
-            this.ipRequests.set(counterKey, ipData)
-
-            // Log high usage (above 80% of limit)
-            if (ipData.count > limit.maxRequests * 0.8) {
-                log.warning(
-                    `[Rate Limiter] High usage from IP ${clientIP}: ${ipData.count}/${limit.maxRequests}`,
-                )
-            }
+            const limited = this.consume(
+                this.bucketFor(method),
+                clientIP,
+                Date.now(),
+            )
+            if (limited) return limited
 
             return await next()
         }
+    }
+
+    private blockedResponse(retryAfterSeconds: number, error: string): Response {
+        return new Response(
+            JSON.stringify({ error, retryAfter: retryAfterSeconds }),
+            {
+                status: 429,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Retry-After": retryAfterSeconds.toString(),
+                },
+            },
+        )
+    }
+
+    /**
+     * Counts one request against a bucket for the client. Returns the 429
+     * to send when the client is blocked or has just gone over the limit,
+     * otherwise null.
+     */
+    private consume(
+        bucket: string,
+        clientIP: string,
+        now: number,
+    ): Response | null {
+        const limit = this.getLimitForBucket(bucket)
+
+        const counterKey = bucketKey(bucket, clientIP)
+        if (!this.ipRequests.has(counterKey)) {
+            this.makeRoomForCounter(now)
+        }
+        const ipData = this.ipRequests.get(counterKey) || {
+            count: 0,
+            firstRequest: now,
+            blocked: false,
+            lastSeenBlockNumber: 0,
+            lastSeenWithinBlockCount: 0,
+        }
+
+        // The block ending does not forgive the count: a long-window cap
+        // (the daily POST quota) must hold through the block, and the
+        // window reset below is what clears it once the window is over.
+        if (ipData.blocked && !(ipData.blockExpiry > now)) {
+            ipData.blocked = false
+            delete ipData.blockExpiry
+        }
+
+        const isBlocked = ipData.blocked
+
+        // Check if IP is currently blocked
+        if (isBlocked) {
+            const remainingTime = Math.ceil(
+                (ipData.blockExpiry - now) / 1000,
+            )
+            log.warning(
+                `[Rate Limiter] Blocked request from IP ${clientIP}, ${remainingTime}s remaining`,
+            )
+
+            return this.blockedResponse(
+                remainingTime,
+                "IP blocked due to rate limiting",
+            )
+        }
+
+        // Reset window if expired
+        if (now - ipData.firstRequest > limit.windowMs) {
+            ipData.count = 0
+            ipData.firstRequest = now
+            ipData.blocked = false
+            delete ipData.blockExpiry
+        }
+
+        ipData.count++
+
+        // Block if limit exceeded
+        if (ipData.count > limit.maxRequests) {
+            const blockMs = this.blockDurationMs()
+            ipData.blocked = true
+            ipData.blockExpiry = now + blockMs
+
+            log.warning(
+                `[Rate Limiter] IP ${clientIP} exceeded limit (${ipData.count}/${limit.maxRequests}) and blocked for ${blockMs}ms`,
+            )
+
+            this.ipRequests.set(counterKey, ipData)
+
+            return this.blockedResponse(
+                Math.ceil(blockMs / 1000),
+                "Rate limit exceeded",
+            )
+        }
+
+        this.ipRequests.set(counterKey, ipData)
+
+        // Log high usage (above 80% of limit)
+        if (ipData.count > limit.maxRequests * 0.8) {
+            log.warning(
+                `[Rate Limiter] High usage from IP ${clientIP}: ${ipData.count}/${limit.maxRequests}`,
+            )
+        }
+
+        return null
     }
 
     /**

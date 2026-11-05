@@ -141,13 +141,17 @@ class FakeSocket extends EventEmitter {
     }
 }
 
-/** Feeds bytes in and returns the decoded nodeCall status of the next response. */
-async function exchange(socket: FakeSocket, bytes: Buffer): Promise<number> {
+/**
+ * Feeds bytes in and returns the decoded nodeCall status of the next
+ * response, or null when nothing is answered.
+ */
+async function exchange(socket: FakeSocket, bytes: Buffer): Promise<number | null> {
     const before = socket.written.length
     socket.emit("data", bytes)
     for (let i = 0; i < 100 && socket.written.length === before; i++) {
         await new Promise(r => setTimeout(r, 5))
     }
+    if (socket.written.length === before) return null
     const framer = new MessageFramer()
     framer.addData(socket.written[before])
     const message = framer.extractMessage()!
@@ -166,12 +170,13 @@ beforeEach(() => {
     nodeCalls.length = 0
 })
 
-const connections: { name: string; make: (s: FakeSocket) => any; identity: (c: any) => string | null; pending: (c: any) => boolean }[] = [
+const connections: { name: string; make: (s: FakeSocket) => any; identity: (c: any) => string | null; pending: (c: any) => boolean; readsAfterClose: boolean }[] = [
     {
         name: "PeerConnection",
         make: socket => new PeerConnection("pending:test", "", socket as any),
         identity: c => (c.peerIdentity.startsWith("pending:") ? null : c.peerIdentity),
         pending: c => c.getState() === 3,
+        readsAfterClose: false,
     },
     {
         name: "InboundConnection",
@@ -185,6 +190,7 @@ const connections: { name: string; make: (s: FakeSocket) => any; identity: (c: a
         },
         identity: c => c.getPeerIdentity(),
         pending: c => c.getState() === "PENDING_AUTH",
+        readsAfterClose: true,
     },
 ]
 
@@ -211,9 +217,10 @@ for (const kind of connections) {
             expect(kind.identity(conn)).not.toBe(idOf(victim))
             expect(socket.ended).toBe(true)
 
-            // The follow-up without auth must not arrive as the victim.
+            // The follow-up without auth must not arrive as the victim: it is
+            // either dropped with the closed connection or refused.
             const status = await exchange(socket, frame(OmniOpcode.NODE_CALL, greenlight()))
-            expect(status).toBe(401)
+            expect(status).toBe(kind.readsAfterClose ? 401 : null)
             expect(consensusCalls).toHaveLength(0)
             expect(kind.identity(conn)).not.toBe(idOf(victim))
         })

@@ -57,6 +57,11 @@ export class ConnectionPool extends EventEmitter {
     private static instance: ConnectionPool | null = null
     private connections: Map<string, PeerConnection[]> = new Map()
     private pendingConnections: Map<string, PeerConnection> = new Map() // Temp tracking before auth
+    // Inbound connections that hold a per-IP slot in the rate limiter
+    // (pending ones, and those authenticated as non-validators), with the IP
+    // captured at accept time: remoteAddress is gone once the socket is
+    // destroyed, and outbound connections never took a slot to give back.
+    private ipSlots: Map<PeerConnection, string> = new Map()
     private config: PoolConfig
     private cleanupTimer: NodeJS.Timeout | null = null
     public rateLimiter?: RateLimiter
@@ -114,9 +119,9 @@ export class ConnectionPool extends EventEmitter {
         this.pendingConnections.set(tempId, connection)
         log.debug(`Pending connections: ${this.pendingConnections.size}`)
 
-        // Register rate limiter connection
         if (this.rateLimiter) {
             this.rateLimiter.addConnection(remoteAddress)
+            this.ipSlots.set(connection, remoteAddress)
         }
 
         // Listen for authentication to re-register under real identity
@@ -153,6 +158,12 @@ export class ConnectionPool extends EventEmitter {
     ): void {
         // Remove from pending tracking
         this.pendingConnections.delete(tempId)
+
+        // A verified auth block proves only that the peer holds the key, and
+        // keys are free, so an identity alone does not earn its way out of
+        // the per-IP limit. Validators behind one NAT address share an IP:
+        // they give the slot back once the chain says they are validators.
+        void this.releaseIpSlotIfValidator(connection, peerIdentity)
 
         // Get existing connections for this peer
         const existing = this.connections.get(peerIdentity) || []
@@ -204,12 +215,56 @@ export class ConnectionPool extends EventEmitter {
             }
         }
 
-        // Notify rate limiter
-        if (this.rateLimiter && connection.socket?.remoteAddress) {
-            this.rateLimiter.removeConnection(connection.socket.remoteAddress)
-        }
+        this.releaseIpSlot(connection)
 
         this.emit("connection_closed", peerIdentity)
+    }
+
+    /**
+     * Give back the connection's per-IP slot if its proven identity is in
+     * the validator set. The lookup is async, so the connection may close
+     * (and free the slot) first; releaseIpSlot makes the late call a no-op.
+     */
+    private async releaseIpSlotIfValidator(
+        connection: PeerConnection,
+        peerIdentity: string,
+    ): Promise<void> {
+        if (!this.ipSlots.has(connection)) return
+        let validator = false
+        try {
+            const { isMergePeerEligible } = await import(
+                "src/libs/consensus/mergePeerEligibility"
+            )
+            // Same rule as committee membership: the staked set and the
+            // eligible pool from chain state, not the self-reported peerlist.
+            validator = await isMergePeerEligible(peerIdentity)
+        } catch (error) {
+            log.warning(
+                `[ConnectionPool] Validator lookup failed for ${peerIdentity}, keeping its per-IP slot: ${error}`,
+            )
+        }
+        if (validator) {
+            this.releaseIpSlot(connection, true)
+        }
+    }
+
+    /**
+     * Give back the per-IP slot taken in handleInboundSocket. Safe to call
+     * on every exit path: only the first call for a counted connection
+     * decrements.
+     */
+    private releaseIpSlot(
+        connection: PeerConnection,
+        provenValidator = false,
+    ): void {
+        const ip = this.ipSlots.get(connection)
+        if (ip === undefined) return
+        this.ipSlots.delete(connection)
+        if (provenValidator) {
+            this.rateLimiter?.releaseValidatorConnection(ip)
+        } else {
+            this.rateLimiter?.removeConnection(ip)
+        }
     }
 
     /**

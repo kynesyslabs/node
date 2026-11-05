@@ -5,7 +5,7 @@ import { Socket } from "net"
 import { EventEmitter } from "events"
 import forge from "node-forge"
 import { keccak_256 } from "@noble/hashes/sha3.js"
-import { MessageFramer } from "./MessageFramer"
+import { FrameTooLargeError, MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader, ParsedOmniMessage } from "../types/message"
 import type { AuthBlock } from "../auth/types"
 import { SignatureAlgorithm, SignatureMode } from "../auth/types"
@@ -28,8 +28,13 @@ import {
     ConnectionError,
     OmniProtocolError,
 } from "../types/errors"
-import { ERROR_CODE_UNAUTHORIZED } from "../constants"
+import {
+    ERROR_CODE_UNAUTHORIZED,
+    PEER_CLOSE_GRACE_MS,
+    PREAUTH_MAX_PAYLOAD_SIZE,
+} from "../constants"
 import { dispatchOmniMessage } from "../protocol/dispatcher"
+import { OmniOpcode } from "../protocol/opcodes"
 import { RateLimiter } from "../ratelimit"
 import { ConnectionPool } from "./ConnectionPool"
 
@@ -126,6 +131,10 @@ export class PeerConnection extends EventEmitter {
     // Rate limiting (for inbound connections)
     private rateLimiter?: RateLimiter
 
+    // Outbound only: settles once the peer has verified an auth block from
+    // us on this socket, after which it accepts full-size frames.
+    private identityProof: Promise<void> | null = null
+
     /**
      * Create a new PeerConnection
      *
@@ -151,6 +160,9 @@ export class PeerConnection extends EventEmitter {
             this.socket = socket
             this._state = ConnectionState.PENDING_AUTH
             this.connectedAt = Date.now()
+            // An unproven socket must not make us buffer a 16 MiB frame;
+            // the full limit comes back in adoptVerifiedIdentity().
+            this.framer.setMaxPayloadSize(PREAUTH_MAX_PAYLOAD_SIZE)
             this.setupSocketHandlers()
             this.startAuthTimeout()
         } else {
@@ -251,6 +263,7 @@ export class PeerConnection extends EventEmitter {
         }
 
         this.parsedConnection = parseConnectionString(this.connectionString)
+        this.identityProof = null
         this.setState(ConnectionState.CONNECTING)
 
         return new Promise((resolve, reject) => {
@@ -423,6 +436,17 @@ export class PeerConnection extends EventEmitter {
             )
         }
 
+        // The peer holds a fresh inbound socket to the pre-auth frame cap
+        // until an auth block from it verifies, and auth travels with each
+        // request, so a large first request would get the socket closed.
+        if (
+            this.origin === "outbound" &&
+            payload.length > PREAUTH_MAX_PAYLOAD_SIZE &&
+            payload.length <= MessageFramer.MAX_PAYLOAD_SIZE
+        ) {
+            await this.proveIdentity(privateKey, publicKey, options)
+        }
+
         const sequence = SequenceManager.next()
         const timeout = options.timeout ?? 30000 // 30 second default
         const timestamp = Date.now()
@@ -495,6 +519,45 @@ export class PeerConnection extends EventEmitter {
             this.lastActivity = Date.now()
             this.resetIdleTimer()
         })
+    }
+
+    /**
+     * Have the peer verify our identity on this socket with a small signed
+     * PROTO_PING. A peer that caps pre-auth frames binds the identity as
+     * soon as the auth block verifies, before it answers, so a request
+     * written after the answer is read under the full frame limit. Older
+     * peers have no cap and just answer the ping. Concurrent callers share
+     * one ping; a failed one is retried by the next large request.
+     */
+    private proveIdentity(
+        privateKey: Buffer,
+        publicKey: Buffer,
+        options: ConnectionOptions,
+    ): Promise<void> {
+        if (!this.identityProof) {
+            const proof = this.sendAuthenticated(
+                OmniOpcode.PROTO_PING,
+                Buffer.alloc(0),
+                privateKey,
+                publicKey,
+                options,
+            ).then(response => {
+                // A refused auth block comes back as a JSON error payload,
+                // not as a ping response with status 200.
+                if (response.length < 2 || response.readUInt16BE(0) !== 200) {
+                    throw new ConnectionError(
+                        `Peer ${this._peerIdentity} did not accept our identity proof`,
+                    )
+                }
+            })
+            proof.catch(() => {
+                if (this.identityProof === proof) {
+                    this.identityProof = null
+                }
+            })
+            this.identityProof = proof
+        }
+        return this.identityProof
     }
 
     /**
@@ -656,18 +719,32 @@ export class PeerConnection extends EventEmitter {
             }
         }
 
+        this.framer.clear()
+
         // Close socket
         return new Promise(resolve => {
-            if (this.socket) {
-                this.socket.once("close", () => {
-                    this.setState(ConnectionState.CLOSED)
-                    resolve()
-                })
-                this.socket.end()
-            } else {
+            const socket = this.socket
+            if (!socket) {
+                this.setState(ConnectionState.CLOSED)
+                resolve()
+                return
+            }
+
+            let settled = false
+            const finish = () => {
+                if (settled) return
+                settled = true
+                clearTimeout(forceTimer)
                 this.setState(ConnectionState.CLOSED)
                 resolve()
             }
+            const forceTimer = setTimeout(() => {
+                socket.destroy()
+                finish()
+            }, PEER_CLOSE_GRACE_MS)
+
+            socket.once("close", finish)
+            socket.end()
         })
     }
 
@@ -708,6 +785,12 @@ export class PeerConnection extends EventEmitter {
      * Handle incoming TCP data
      */
     private handleIncomingData(chunk: Buffer): void {
+        // Nothing read after close() is ever handled, and a peer that keeps
+        // the socket open must not be able to grow the framer meanwhile.
+        if (ConnectionStateUtils.isTerminal(this._state)) {
+            return
+        }
+
         this.lastActivity = Date.now()
         this.resetIdleTimer()
 
@@ -726,6 +809,18 @@ export class PeerConnection extends EventEmitter {
                 message = this.framer.extractMessage()
             }
         } catch (error) {
+            if (
+                error instanceof FrameTooLargeError &&
+                this._state === ConnectionState.PENDING_AUTH
+            ) {
+                // The rest of the oversized frame would only be misread as
+                // new headers, and the peer has not proven who it is.
+                log.warning(
+                    `[PeerConnection] ${this._peerIdentity} closed before auth: ${error.message}`,
+                )
+                this.close().catch(() => {})
+                return
+            }
             handleError(error, "NETWORK", {
                 source: "OmniProtocol PeerConnection.handleIncomingData",
             })
@@ -895,6 +990,7 @@ export class PeerConnection extends EventEmitter {
 
         this.setPeerIdentity(identity)
         this.setState(ConnectionState.READY)
+        this.framer.setMaxPayloadSize(MessageFramer.MAX_PAYLOAD_SIZE)
 
         if (this.authTimer) {
             clearTimeout(this.authTimer)
@@ -926,6 +1022,7 @@ export class PeerConnection extends EventEmitter {
             pending.reject(new Error("Connection closed"))
         }
         this.inFlightRequests.clear()
+        this.framer.clear()
 
         if (
             this._state !== ConnectionState.CLOSING &&

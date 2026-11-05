@@ -13,6 +13,9 @@ import {
     readCommittedRefusal,
 } from "./committedBlock"
 import { commitLockActive, voteMessageOf } from "../commitLock/domain"
+import { getBoundCommittee, getEligiblePool } from "./getShard"
+import { isForkActive } from "@/forks/forkGates"
+import { getMempoolLimits } from "@/libs/blockchain/mempoolLimits"
 
 /**
  * Per-peer vote outcome. The `signaturesToMerge` map carries every
@@ -97,6 +100,117 @@ async function verifyIncomingSignatures(
 }
 
 /**
+ * The identities whose vote signatures count at `height`: the set sync and
+ * the inbound proposal merge count against, so a reply cannot place in our
+ * candidate a signature no verifier would count.
+ */
+async function voteSignerSet(height: number): Promise<Set<string>> {
+    const bound = isForkActive("committeeBinding", height)
+    const signers = bound
+        ? await getBoundCommittee(height - 1)
+        : await getEligiblePool(height - 1)
+    if (signers.length === 0) {
+        throw new Error(
+            `${bound ? "bound committee" : "eligible signer pool"} is empty`,
+        )
+    }
+    return new Set(signers)
+}
+
+type SignerSetLookup = () => Promise<Set<string> | null>
+
+const MAX_REFUSAL_MESSAGE_LOG_CHARS = 200
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** The string entries of a peer-supplied tx hash list, bounded like a mempool. */
+function txHashList(value: unknown): string[] {
+    if (!Array.isArray(value)) return []
+    return value
+        .slice(0, getMempoolLimits().maxTxs)
+        .filter((h): h is string => typeof h === "string")
+}
+
+/**
+ * Diagnostic dump for a refusal: helps operators see why two shard members
+ * disagreed on the candidate content. `ourBlock` is the refusing peer's
+ * candidate, as it reported it.
+ */
+async function logCandidateMismatch(
+    peerId: string,
+    block: Block,
+    ourBlock: Record<string, unknown>,
+): Promise<void> {
+    // This is the one place a peer's candidate for our height is seen
+    // once per peer per round, so it is where disagreement is counted.
+    if (
+        ourBlock.hash !== block.hash &&
+        (ourBlock.number === undefined || ourBlock.number === block.number)
+    ) {
+        countBlockHashMismatch()
+    }
+    const theirTxHashes = txHashList(
+        Array.isArray(ourBlock.txHashes)
+            ? ourBlock.txHashes
+            : ourBlock.ordered_transactions,
+    )
+    const ourTxHashes = txHashList(block.content?.ordered_transactions)
+    const theirSet = new Set(theirTxHashes)
+    const ourSet = new Set(ourTxHashes)
+    const missingFromUs = theirTxHashes.filter(h => !ourSet.has(h))
+    const missingFromThem = ourTxHashes.filter(h => !theirSet.has(h))
+    log.error(
+        `[broadcastBlockHash] tx-set diff with ${peerId}: ` +
+            `missingFromUs=${missingFromUs.length}, ` +
+            `missingFromThem=${missingFromThem.length}`,
+    )
+    log.error("Missing from us: " + JSON.stringify(missingFromUs, null, 2))
+
+    if (missingFromThem.length > 0) {
+        // check if the missing transactions are in the mempool
+        const missing = await Mempool.getTransactionsByHashes(missingFromThem)
+        log.error("Missing from them, found in mempool: " + missing.length)
+        log.error(
+            "Missing from them, found in mempool: " +
+                JSON.stringify(
+                    missing.map(tx => ({
+                        hash: tx.hash,
+                        blockNumber: tx.blockNumber,
+                        referenceBlock: tx.reference_block,
+                    })),
+                    null,
+                    2,
+                ),
+        )
+    }
+
+    if (missingFromUs.length > 0) {
+        // check if the missing transactions are in the mempool
+        const missing = await Mempool.getTransactionsByHashes(missingFromUs)
+        log.error("Missing from us, found in mempool: " + missing.length)
+        log.error(
+            "Missing from us, found in mempool: " +
+                JSON.stringify(
+                    missing.map(tx => ({
+                        hash: tx.hash,
+                        blockNumber: tx.blockNumber,
+                        referenceBlock: tx.reference_block,
+                    })),
+                    null,
+                    2,
+                ),
+        )
+    }
+
+    log.error("Missing from them: " + JSON.stringify(missingFromThem, null, 2))
+    log.debug(
+        `[broadcastBlockHash] Their block: ${JSON.stringify(ourBlock, null, 2)}`,
+    )
+}
+
+/**
  * The block number travels after the first three params so receivers that
  * predate it read those unchanged; a receiver that has the height answers
  * with its committed block instead of a vote. Under commitLock the round of
@@ -116,6 +230,7 @@ async function proposeAndCollect(
     peer: Peer,
     block: Block,
     proposeParams: ProposeParams,
+    signerSet: SignerSetLookup,
 ): Promise<PeerVoteOutcome> {
     const peerId = peer.identity
     let response: RPCResponse
@@ -162,120 +277,41 @@ async function proposeAndCollect(
         }
     }
 
-    if (response.result !== 200) {
+    if (response?.result !== 200) {
+        // Peer input: a non-string can throw when interpolated (an own
+        // non-callable toString), which would reject the whole broadcast.
+        const rawMessage = isPlainObject(response?.extra)
+            ? response.extra.message
+            : undefined
         const extraMessage =
-            typeof response.extra === "object" && response.extra !== null
-                ? (response.extra as { message?: string }).message
+            typeof rawMessage === "string"
+                ? rawMessage.slice(0, MAX_REFUSAL_MESSAGE_LOG_CHARS)
                 : undefined
         log.error(
             "[broadcastBlockHash] Block hash not confirmed by validator " +
-                `${peerId}: result=${response.result} message=${extraMessage}`,
+                `${peerId}: result=${response?.result} message=${extraMessage}`,
         )
 
-        // Diagnostic dump preserved from prior implementation — helps
-        // operators investigate why two shard members disagreed on
-        // the candidate block content. The mismatched-block payload
-        // is only present on the 401 branch from
-        // `manageProposeBlockHash`; guard accordingly.
-        const extra = response.extra as
-            | {
-                  ourBlock?: {
-                      hash?: string
-                      number?: number
-                      txHashes?: string[]
-                      ordered_transactions?: string[]
-                  }
-              }
-            | undefined
-        if (extra?.ourBlock) {
-            // This is the one place a peer's candidate for our height is seen
-            // once per peer per round, so it is where disagreement is counted.
-            if (
-                extra.ourBlock.hash !== block.hash &&
-                (extra.ourBlock.number === undefined ||
-                    extra.ourBlock.number === block.number)
-            ) {
-                countBlockHashMismatch()
-            }
-            const theirTxHashes: string[] =
-                extra.ourBlock.txHashes ??
-                extra.ourBlock.ordered_transactions ??
-                []
-            const ourTxHashes: string[] =
-                getSharedState.candidateBlock.content.ordered_transactions
-            const theirSet = new Set(theirTxHashes)
-            const ourSet = new Set(ourTxHashes)
-            const missingFromUs = theirTxHashes.filter(h => !ourSet.has(h))
-            const missingFromThem = ourTxHashes.filter(h => !theirSet.has(h))
-            log.error(
-                `[broadcastBlockHash] tx-set diff with ${peerId}: ` +
-                    `missingFromUs=${missingFromUs.length}, ` +
-                    `missingFromThem=${missingFromThem.length}`,
-            )
-            log.error(
-                "Missing from us: " + JSON.stringify(missingFromUs, null, 2),
-            )
-
-            if (missingFromThem.length > 0) {
-                // check if the missing transactions are in the mempool
-                const missing =
-                    await Mempool.getTransactionsByHashes(missingFromThem)
+        // The payload is the refusing peer's own candidate: diagnostics
+        // only, so nothing in it may turn this con vote into a thrown round.
+        const ourBlock = isPlainObject(response?.extra)
+            ? response.extra.ourBlock
+            : undefined
+        if (isPlainObject(ourBlock)) {
+            try {
+                await logCandidateMismatch(peerId, block, ourBlock)
+            } catch (e) {
                 log.error(
-                    "Missing from them, found in mempool: " + missing.length,
-                )
-                log.error(
-                    "Missing from them, found in mempool: " +
-                        JSON.stringify(
-                            missing.map(tx => ({
-                                hash: tx.hash,
-                                blockNumber: tx.blockNumber,
-                                referenceBlock: tx.reference_block,
-                            })),
-                            null,
-                            2,
-                        ),
+                    `[broadcastBlockHash] tx-set diff with ${peerId} failed: ${e instanceof Error ? e.message : String(e)}`,
                 )
             }
-
-            if (missingFromUs.length > 0) {
-                // check if the missing transactions are in the mempool
-                const missing =
-                    await Mempool.getTransactionsByHashes(missingFromUs)
-                log.error(
-                    "Missing from us, found in mempool: " + missing.length,
-                )
-                log.error(
-                    "Missing from us, found in mempool: " +
-                        JSON.stringify(
-                            missing.map(tx => ({
-                                hash: tx.hash,
-                                blockNumber: tx.blockNumber,
-                                referenceBlock: tx.reference_block,
-                            })),
-                            null,
-                            2,
-                        ),
-                )
-            }
-
-            log.error(
-                "Missing from them: " +
-                    JSON.stringify(missingFromThem, null, 2),
-            )
-            log.debug(
-                `[broadcastBlockHash] Their block: ${JSON.stringify(
-                    extra.ourBlock,
-                    null,
-                    2,
-                )}`,
-            )
         }
 
         return {
             peerId,
             vote: "con",
             signaturesToMerge: {},
-            rejectionReason: `HTTP ${response.result}`,
+            rejectionReason: `HTTP ${response?.result}`,
         }
     }
 
@@ -284,10 +320,10 @@ async function proposeAndCollect(
     // `manageProposeBlockHash.ts` line 104). `response.response` is
     // the receiver's pubkey hex; `extra.signatures[response.response]`
     // is its signature over our block hash.
-    const extra = response.extra as
-        | { signatures?: Record<string, string> }
-        | undefined
-    const incomingSignatures = extra?.signatures ?? {}
+    const extra = isPlainObject(response.extra) ? response.extra : {}
+    const incomingSignatures = isPlainObject(extra.signatures)
+        ? (extra.signatures as Record<string, string>)
+        : {}
 
     // PR #888 Greptile P1: a `pro` vote must carry cryptographic
     // proof of agreement, not just an HTTP 200. A peer returning
@@ -310,8 +346,46 @@ async function proposeAndCollect(
         }
     }
 
+    // Throwaway keys can sign anything, so a valid signature proves nothing
+    // about membership. Only signers that count are kept: padding would
+    // otherwise be stored in the block and, under commitLock, push the
+    // prevote map past what a proof of lock accepts.
+    const signers = await signerSet()
+    if (signers === null) {
+        return {
+            peerId,
+            vote: "con",
+            signaturesToMerge: {},
+            rejectionReason: "vote signer set could not be resolved",
+        }
+    }
+    // Every signer must be a distinct member, so an honest map never
+    // outgrows the set; refusing a larger one bounds the work before any
+    // verification, as the inbound proposal does.
+    if (Object.keys(incomingSignatures).length > signers.size) {
+        log.error(
+            `[broadcastBlockHash] ${peerId} attached more signatures than the vote signer set holds; treating as con`,
+        )
+        return {
+            peerId,
+            vote: "con",
+            signaturesToMerge: {},
+            rejectionReason: "signature map larger than the vote signer set",
+        }
+    }
+    const fromSigners: Record<string, string> = {}
+    for (const [identity, signature] of Object.entries(incomingSignatures)) {
+        if (signers.has(identity)) {
+            fromSigners[identity] = signature
+        } else {
+            log.error(
+                `[broadcastBlockHash] Dropping signature by ${identity} relayed by ${peerId}: not in the vote signer set`,
+            )
+        }
+    }
+
     const verified = await verifyIncomingSignatures(
-        incomingSignatures,
+        fromSigners,
         block.hash,
         peerId,
         voteMessageOf(block) ?? block.hash,
@@ -426,8 +500,37 @@ export async function broadcastBlockHash(
         proposeParams = [...proposeParams, block.validation_data.round]
     }
 
+    // Resolved only when a reply needs it: a round of refusals reads no
+    // chain data. The set is chain data, so a second lookup can only find
+    // the same set or fail again; a failed lookup is therefore retried once,
+    // by the next reply that needs it, so a passing read error does not cost
+    // every vote of the round. Unresolved means no reply can be judged, so
+    // none is admitted.
+    let signerSetLookup: Promise<Set<string> | null> | null = null
+    let lookupsLeft = 2
+    const signerSet: SignerSetLookup = () => {
+        if (signerSetLookup === null) {
+            lookupsLeft--
+            const attempt = voteSignerSet(block.number).catch(e => {
+                log.error(
+                    `[broadcastBlockHash] Could not resolve the vote signer set for block ${block.number}: ` +
+                        (e instanceof Error ? e.message : String(e)),
+                )
+                return null
+            })
+            signerSetLookup = attempt
+            void attempt.then(signers => {
+                if (signers === null && lookupsLeft > 0) signerSetLookup = null
+            })
+            return attempt
+        }
+        return signerSetLookup
+    }
+
     const outcomes = await Promise.all(
-        shard.map(peer => proposeAndCollect(peer, block, proposeParams)),
+        shard.map(peer =>
+            proposeAndCollect(peer, block, proposeParams, signerSet),
+        ),
     )
 
     let pro = 0
