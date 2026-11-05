@@ -17,7 +17,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEVNET_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${DEVNET_DIR}/../.." && pwd)"
-NODE5_PORT="${NODE5_PORT:-53559}"
 
 PASS_ARGS=(--keep)
 for arg in "$@"; do
@@ -69,6 +68,21 @@ services:
 EOF
 COMPOSE_FILES+=(-f "${NODE5_OVERRIDE}")
 
+# Compose fills what the shell leaves unset from .env, so the probes must too.
+env_value() {
+    local name="$1" fallback="$2" value=""
+    if [[ -n "${!name+x}" ]]; then
+        printf '%s' "${!name}"
+        return
+    fi
+    if [[ -f "${DEVNET_DIR}/.env" ]]; then
+        value="$(sed -n "s/^${name}=//p" "${DEVNET_DIR}/.env" | tail -n 1)"
+        value="${value%\"}"; value="${value#\"}"
+    fi
+    printf '%s' "${value:-${fallback}}"
+}
+PG_USER="$(env_value POSTGRES_USER demosuser)"
+
 node_call() {
     local url="$1" message="$2" data="$3"
     curl -s -m 5 -X POST "${url}/" -H 'Content-Type: application/json' \
@@ -90,16 +104,23 @@ same_hash_at() {
 }
 snapshot_count() {
     local db="$1"
-    docker exec demos-devnet-postgres psql -U "${POSTGRES_USER:-demosuser}" -d "${db}" -tAc \
+    docker exec demos-devnet-postgres psql -U "${PG_USER}" -d "${db}" -tAc \
         "SELECT count(*) FROM validator_set_snapshots" 2>/dev/null | tr -d '[:space:]'
 }
 
-NODE1="http://localhost:${NODE1_PORT:-53551}"
-NODE5="http://localhost:${NODE5_PORT}"
+NODE1="http://localhost:$(env_value NODE1_PORT 53551)"
+NODE2="http://localhost:$(env_value NODE2_PORT 53553)"
+NODE5="http://localhost:$(env_value NODE5_PORT 53559)"
 fail() { echo "[finality-sync] FAIL $*"; docker compose "${COMPOSE_FILES[@]}" logs --tail=60 node-5 || true; exit 1; }
+# head_of answers -1 when the node does not; a target below 1 checks nothing.
+require_head() {
+    local what="$1" head="$2"
+    [[ "${head}" =~ ^[0-9]+$ && "${head}" -gt 0 ]] || fail "${what} reports no chain head (${head})"
+}
 
 # 1. A fresh node syncs the whole chain.
 TARGET="$(head_of "${NODE1}")"
+require_head node-1 "${TARGET}"
 echo "[finality-sync] chain at ${TARGET}; starting node-5 with an empty database"
 docker compose "${COMPOSE_FILES[@]}" up -d --no-build node-5 >/dev/null
 for _ in $(seq 1 180); do
@@ -126,13 +147,15 @@ echo "[finality-sync] PASS node-5 holds the same ${S5} validator set snapshot(s)
 # 2. A validator restarts without recording a new set.
 S2_BEFORE="$(snapshot_count node2_db)"
 docker restart demos-devnet-node-2 >/dev/null
-AFTER="$(( $(head_of "${NODE1}") + 3 ))"
+HEAD1="$(head_of "${NODE1}")"
+require_head node-1 "${HEAD1}"
+AFTER="$(( HEAD1 + 3 ))"
 for _ in $(seq 1 120); do
-    [[ "$(head_of "http://localhost:${NODE2_PORT:-53553}")" -ge "${AFTER}" ]] && break
+    [[ "$(head_of "${NODE2}")" -ge "${AFTER}" ]] && break
     sleep 2
 done
-[[ "$(head_of "http://localhost:${NODE2_PORT:-53553}")" -ge "${AFTER}" ]] || fail "node-2 did not follow the chain after restart"
-same_hash_at "http://localhost:${NODE2_PORT:-53553}" "${AFTER}" || fail "block ${AFTER} differs on node-2"
+[[ "$(head_of "${NODE2}")" -ge "${AFTER}" ]] || fail "node-2 did not follow the chain after restart"
+same_hash_at "${NODE2}" "${AFTER}" || fail "block ${AFTER} differs on node-2"
 S2_AFTER="$(snapshot_count node2_db)"
 [[ "${S2_AFTER}" == "${S2_BEFORE}" ]] || fail "node-2 snapshots ${S2_BEFORE} -> ${S2_AFTER} across a restart"
 echo "[finality-sync] PASS node-2 restarted, followed to ${AFTER} and recorded no new snapshot"
