@@ -33,6 +33,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/gcr_routines/routines/zkRoutines.test.ts
     src/libs/blockchain/gcr/handleGCR.atomic.test.ts
     src/libs/blockchain/gcr/handleGCR.failedTx.test.ts
+    src/libs/blockchain/gcr/handleGCR.identityRollback.test.ts
     src/libs/blockchain/gcr/handleGCR.keyRefusal.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
