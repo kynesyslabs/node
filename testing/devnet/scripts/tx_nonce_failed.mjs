@@ -1,12 +1,15 @@
 /**
- * A transaction that lands in a block and fails there spends its nonce
- * (`nonceIntegrity`), on every node, and the nonce cannot be used again.
+ * A transaction that lands in a block and fails there spends its nonce and
+ * pays its fee (`nonceIntegrity`), on every node, and the nonce cannot be
+ * used again.
  *
  *   1. Two creates of one storage program, signed with consecutive nonces
  *      and submitted together, each pass admission (it simulates against
  *      the chain, where the program does not exist yet). The second fails
- *      when a block applies it after the first. Its status reads failed and
- *      the sender's nonce moves past it on two nodes.
+ *      when a block applies it after the first. Its status reads failed,
+ *      the sender's nonce moves past it on two nodes, and the sender paid
+ *      the first create in full and only the gas of the failed one: not its
+ *      storage burn, and nothing refunded twice.
  *   2. The failed transaction confirmed again is refused, and so is another
  *      transaction signed for the nonce it spent.
  *   3. The next nonce applies: the failure left no gap behind.
@@ -58,6 +61,13 @@ const sender = demos.getAddress()
 const amount = BigInt(AMOUNT_OS)
 
 const nonceOn = async d => Number((await d.getAddressInfo(sender))?.nonce ?? -1)
+const balanceOn = async d => BigInt((await d.getAddressInfo(sender))?.balance ?? 0)
+const isSender = account => String(account).toLowerCase().replace(/^0x/, "") === sender.toLowerCase().replace(/^0x/, "")
+/** What `edits` change on the sender's balance, signed. */
+const senderDelta = edits =>
+    edits
+        .filter(e => e.type === "balance" && isSender(e.account))
+        .reduce((sum, e) => sum + (e.operation === "add" ? 1n : -1n) * BigInt(e.amount), 0n)
 async function settledNonce(target) {
     let seen = []
     for (let i = 0; i < 30; i++) {
@@ -108,7 +118,11 @@ async function sendAndWait(validity, d, url) {
 const start = await nonceOn(demos)
 check(start >= 0, "sender nonce readable", String(start))
 
-// 1. The second create of one program fails in the block.
+// 1. The second create of one program fails in the block. Storage programs
+//    are not native, so no fee edits are derived at apply: the shipped
+//    edits are the whole charge. No block rewards exist on the devnet.
+const balancesBefore = [await balanceOn(demos), await balanceOn(demos2)]
+check(balancesBefore[0] === balancesBefore[1], "both nodes report one sender balance", balancesBefore.join(" / "))
 const programName = "nonce-probe-" + randomBytes(6).toString("hex")
 const salt = Date.now()
 const createProgram = () => StorageProgram.createStorageProgram(sender, programName, { probe: 1 }, "json", undefined, { nonce: salt })
@@ -133,6 +147,29 @@ for (const [name, url] of [["node-1", NODE1_URL], ["node-2", NODE2_URL]]) {
 }
 const afterFail = await settledNonce(start + 2)
 check(afterFail.every(n => n === start + 2), "the failed create spent its nonce on both nodes", `${afterFail} == ${start + 2}`)
+
+const writeEdits = write.content.gcr_edits
+const gas = writeEdits[writeEdits.findIndex(e => e.type === "nonce") - 1]
+check(
+    gas?.type === "balance" && gas.operation === "remove" && isSender(gas.account) && BigInt(gas.amount) > 0n,
+    "the failed create ships a gas edit right before its nonce edit",
+    JSON.stringify(gas),
+)
+check(senderDelta(writeEdits) < senderDelta([gas]), "the failed create also ships a debit beyond its gas", String(senderDelta(writeEdits)))
+const expectedDelta = senderDelta(created.content.gcr_edits) + senderDelta([gas])
+for (const [name, d] of [["node-1", demos], ["node-2", demos2]]) {
+    let delta = null
+    for (let i = 0; i < 10; i++) {
+        delta = (await balanceOn(d)) - balancesBefore[0]
+        if (delta === expectedDelta) break
+        await sleep(1000)
+    }
+    check(
+        delta === expectedDelta,
+        `${name}: the sender paid the first create and only the gas of the failed one`,
+        `${delta} == ${expectedDelta} (nonce only would be ${senderDelta(created.content.gcr_edits)})`,
+    )
+}
 
 // 2. The spent nonce is gone for good.
 const replay = await confirmOn(write, demos)
