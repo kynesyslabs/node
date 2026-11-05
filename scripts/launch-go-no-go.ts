@@ -162,6 +162,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "quorumParity",
     "committeeBinding",
     "commitLock",
+    "finalityProofs",
 ]
 
 /**

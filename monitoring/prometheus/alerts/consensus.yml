@@ -61,6 +61,14 @@ groups:
           summary: Validator was drawn into the shard but its signature is missing
           description: "{{ $value }} blocks in 15m where {{ $labels.instance }} was selected for the shard and did not sign. The node is online but not taking part in consensus: check sync state and peer connectivity."
 
+      - alert: StorageRootSyncMismatch
+        expr: increase(demos_storage_root_sync_mismatch_total[15m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: Synced storage state differs from the network's
+          description: "{{ $labels.instance }} synced a block whose storage state root differs from the root of its own storage-program table. Sync carries on, but the node's storage state has diverged and its block votes will not match. Search its log for [syncVerify] storage root, then resync the node from a trusted snapshot."
+
       - alert: ForkScheduleMismatch
         expr: demos_fork_schedule_mismatch == 1
         for: 5m

@@ -45,7 +45,7 @@ RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
 # Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
-MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding quorumParity committeeBinding commitLock"
+MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding quorumParity committeeBinding commitLock finalityProofs"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 

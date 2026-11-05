@@ -57,6 +57,16 @@ export function countMissedSignature(): void {
     }
 }
 
+export function countStorageRootSyncMismatch(): void {
+    try {
+        getMetricsService().incrementCounter(
+            "storage_root_sync_mismatch_total",
+        )
+    } catch {
+        /* ignore */
+    }
+}
+
 export function setForkScheduleMismatch(mismatch: boolean): void {
     try {
         getMetricsService().setGauge("fork_schedule_mismatch", mismatch ? 1 : 0)

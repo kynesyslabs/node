@@ -6,6 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
+import { createHash } from "node:crypto"
 import {
     makeSignedTx,
     newAccount,
@@ -346,6 +347,272 @@ describe("fast sync after a rejected block", () => {
         expect(insertBlock).toHaveBeenCalledTimes(1)
         expect(applyTransactions).toHaveBeenCalledTimes(1)
         expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
+    })
+})
+
+describe("fast sync under finalityProofs", () => {
+    const sha256 = (s: string) => createHash("sha256").update(s).digest("hex")
+
+    /** Block HEIGHT + 1 on top of `block`, hashing to its own hash. */
+    function childOf(block: any, parentResultsRoot: string) {
+        const content = {
+            ordered_transactions: [],
+            peerlist: [],
+            previousHash: block.hash,
+            timestamp: 1_700_000_200,
+            native_tables_hashes: NATIVE_HASHES,
+            number: HEIGHT + 1,
+            parent_results_root: parentResultsRoot,
+        }
+        return {
+            number: HEIGHT + 1,
+            hash: sha256(JSON.stringify(content)),
+            proposer: "forger",
+            content,
+            validation_data: { signatures: {} },
+        } as any
+    }
+
+    const peerWith = (blocks: any[], txs: any[]) =>
+        ({
+            identity: "peer-1",
+            connection: { string: "http://peer-1" },
+            status: { online: true },
+            sync: { block: HEIGHT + 1 },
+            longCall: jest.fn(async () => ({ result: 200, response: clone(blocks) })),
+            call: jest.fn(async () => {
+                // Every round serves the same pair; one round shows the outcome
+                getSharedState.fastSyncAborted = true
+                return { result: 200, response: clone(txs) }
+            }),
+        }) as any
+
+    async function syncPair(parentResultsRoot: (tx: any) => Promise<string>) {
+        getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+        const tx = makeTx(alice)
+        const block = makeBlock([tx])
+        const child = childOf(block, await parentResultsRoot(tx))
+        spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([
+            peerWith([child, block], [tx]),
+        ])
+        spyOn(Math, "random").mockReturnValue(0)
+        spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+        spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([])
+        applyResult({ successfulTxs: [tx.hash] })
+        insertBlock.mockImplementation((async (inserted: any) => {
+            getSharedState.lastBlockNumber = inserted.number
+            return {}
+        }) as any)
+        getSharedState.fastSyncCount = 1
+        getSharedState.syncStatus = true
+
+        await fastSync([], "test")
+    }
+
+    async function confirmedRoot(tx: any): Promise<string> {
+        const { leafHash, toHex } = await import("src/libs/crypto/merkle/rfc6962")
+        const { jcsCanonicalize } = await import("src/libs/crypto/jcs")
+        const leaf = jcsCanonicalize({ code: null, hash: tx.hash, status: "confirmed" })
+        return toHex(leafHash(new TextEncoder().encode(leaf)))
+    }
+
+    it("stores a block whose results give the root the next block commits to", async () => {
+        await syncPair(confirmedRoot)
+
+        expect(insertBlock).toHaveBeenCalledTimes(2)
+        expect((insertBlock.mock.calls[0][0] as any).number).toBe(HEIGHT)
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT + 1)
+    })
+
+    it("stores nothing and cools the peer down when the next block's root contradicts the results", async () => {
+        const warning = log.warning as any
+        warning.mockClear()
+        await syncPair(async () => "ab".repeat(32))
+
+        expect(applyTransactions).toHaveBeenCalledTimes(1)
+        expect(insertBlock).not.toHaveBeenCalled()
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+        // An unsigned next block is the peer's word only: the peer is set
+        // aside and the block is synced from another one
+        const cooled = (log.warning as any).mock.calls.map((c: unknown[]) => String(c[0]))
+        expect(
+            cooled.some(
+                (line: string) =>
+                    line.includes("peer peer-1") && line.includes(`block ${HEIGHT + 1} commits`),
+            ),
+        ).toBe(true)
+    })
+
+    describe("when the batch ends at the block", () => {
+        const batchSizeAtStart = getSharedState.batchSyncBlockSize
+        afterEach(() => {
+            getSharedState.batchSyncBlockSize = batchSizeAtStart
+        })
+
+        /** Serves `block` as a one-block batch and `child` when asked for the block after it. */
+        async function syncLastOfBatch(childResponse: (tx: any, block: any) => Promise<any[]>) {
+            getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+            getSharedState.batchSyncBlockSize = 1
+            const tx = makeTx(alice)
+            const block = makeBlock([tx])
+            const served = await childResponse(tx, block)
+            const peer = peerWith([block], [tx])
+            peer.longCall = jest.fn(async (request: any) => {
+                const { start, limit } = request.params[0].data
+                const asksForChild = start === HEIGHT + 1 && limit === 1
+                return { result: 200, response: clone(asksForChild ? served : [block]) }
+            })
+            spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([peer])
+            spyOn(Math, "random").mockReturnValue(0)
+            spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+            spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([])
+            applyResult({ successfulTxs: [tx.hash] })
+            insertBlock.mockImplementation((async (inserted: any) => {
+                getSharedState.lastBlockNumber = inserted.number
+                return {}
+            }) as any)
+            getSharedState.fastSyncCount = 1
+            getSharedState.syncStatus = true
+
+            await fastSync([], "test")
+        }
+
+        it("checks it against the next block fetched from the peer", async () => {
+            await syncLastOfBatch(async (tx, block) => [childOf(block, await confirmedRoot(tx))])
+
+            expect((insertBlock.mock.calls[0][0] as any).number).toBe(HEIGHT)
+        })
+
+        it("stores nothing when the fetched next block contradicts its results", async () => {
+            await syncLastOfBatch(async (_tx, block) => [childOf(block, "ab".repeat(32))])
+
+            expect(insertBlock).not.toHaveBeenCalled()
+            expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+        })
+
+        it("still checks the block before a tail it leaves out against that tail", async () => {
+            getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+            getSharedState.batchSyncBlockSize = 2
+            const tx = makeTx(alice)
+            const block = makeBlock([tx])
+            const child = childOf(block, "ab".repeat(32))
+            const peer = peerWith([child, block], [tx])
+            // The network is past the child, but the peer withholds the block after it
+            peer.sync = { block: HEIGHT + 2 }
+            peer.longCall = jest.fn(async (request: any) => {
+                const { start, limit } = request.params[0].data
+                const asksForGrandchild = start === HEIGHT + 2 && limit === 1
+                return { result: 200, response: clone(asksForGrandchild ? [child] : [child, block]) }
+            })
+            spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([peer])
+            spyOn(Math, "random").mockReturnValue(0)
+            spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+            spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([])
+            applyResult({ successfulTxs: [tx.hash] })
+            getSharedState.fastSyncCount = 1
+            getSharedState.syncStatus = true
+
+            await fastSync([], "test")
+
+            expect(applyTransactions).toHaveBeenCalledTimes(1)
+            expect(insertBlock).not.toHaveBeenCalled()
+            expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+        })
+
+        it("stores nothing when the peer withholds a next block the network has", async () => {
+            // A peer asked for HEIGHT + 1 answers with its highest block at or below it
+            await syncLastOfBatch(async (_tx, block) => [block])
+
+            expect(applyTransactions).not.toHaveBeenCalled()
+            expect(insertBlock).not.toHaveBeenCalled()
+            expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+        })
+
+        it("stores the head of a peer that has no next block, whatever another peer claims", async () => {
+            getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
+            getSharedState.batchSyncBlockSize = 1
+            const tx = makeTx(alice)
+            const block = makeBlock([tx])
+            const peer = peerWith([block], [tx])
+            peer.sync = { block: HEIGHT }
+            const claimant = {
+                identity: "peer-2",
+                connection: { string: "http://peer-2" },
+                status: { online: true },
+                sync: { block: HEIGHT - 1 },
+                gossip: { height: HEIGHT + 5 },
+                longCall: jest.fn(async () => ({ result: 404, response: [] })),
+                call: jest.fn(async () => ({ result: 404, response: [] })),
+            } as any
+            spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([peer, claimant])
+            spyOn(Math, "random").mockReturnValue(0)
+            spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+            spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([])
+            applyResult({ successfulTxs: [tx.hash] })
+            insertBlock.mockImplementation((async (inserted: any) => {
+                getSharedState.lastBlockNumber = inserted.number
+                return {}
+            }) as any)
+            getSharedState.fastSyncCount = 1
+            getSharedState.syncStatus = true
+
+            await fastSync([], "test")
+
+            // Asked for HEIGHT + 1, the peer answered with its head
+            expect(insertBlock).toHaveBeenCalledTimes(1)
+            expect((insertBlock.mock.calls[0][0] as any).number).toBe(HEIGHT)
+        })
+    })
+})
+
+describe("a block whose parent was stored with a wrong failure code", () => {
+    const TX = "ab".repeat(32)
+    const parent = { number: HEIGHT - 1, hash: "parent-hash", content: { ordered_transactions: [TX] } }
+    const storedRow = { hash: TX, status: "failed", attrs: { code: "TX_NONCE_INVALID_LOW" }, blockNumber: HEIGHT - 1 }
+    const HONEST = "TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE"
+
+    async function syncChild(servedCode: string) {
+        const { resultsRoot, __resetCommitmentCache } = await import("../finality/commitments")
+        __resetCommitmentCache()
+        const committed = await resultsRoot(
+            [TX],
+            new Map([[TX, { ...storedRow, attrs: { code: HONEST } }]]),
+            HEIGHT - 1,
+        )
+        const child = makeBlock([])
+        child.content.parent_results_root = committed
+        spyOn(Chain, "getBlockByNumber").mockImplementation((async (n: number) =>
+            n === HEIGHT - 1 ? parent : null) as any)
+        spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([clone(storedRow)] as any)
+        const setFailureCodes = spyOn(Chain, "setFailureCodes").mockResolvedValue(undefined)
+        setFailureCodes.mockClear()
+        // The block verifies on everything but the parent's stored results
+        verifyBlock
+            .mockResolvedValueOnce({ valid: false, parentResultsMismatch: true, reason: "parent_results_root mismatch" })
+            .mockResolvedValueOnce({ valid: true })
+            .mockResolvedValueOnce({ valid: true })
+        applyResult({})
+        const peer = servingPeer([{ hash: TX, status: "failed", attrs: { code: servedCode } }])
+
+        const synced = await syncBlock(child, peer)
+        return { synced, setFailureCodes }
+    }
+
+    it("rewrites the code to the one the verified block commits to, then stores the block", async () => {
+        const { synced, setFailureCodes } = await syncChild(HONEST)
+
+        expect(synced).toBe(true)
+        expect((verifyBlock.mock.calls[1] as any[])[2]).toEqual({ skipParentResults: true })
+        expect(setFailureCodes).toHaveBeenCalledWith(HEIGHT - 1, new Map([[TX, HONEST]]))
+        expect(insertBlock).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps the stored code and rejects the block when the served codes do not give its root", async () => {
+        const { synced, setFailureCodes } = await syncChild("TX_EXECUTE_FAILED")
+
+        expect(synced).toBe(false)
+        expect(setFailureCodes).not.toHaveBeenCalled()
+        expect(insertBlock).not.toHaveBeenCalled()
     })
 })
 

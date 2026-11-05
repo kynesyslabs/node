@@ -144,6 +144,7 @@ export const EnvKey = {
 
     // --- Debug ---
     DEBUG_ASSERTIONS_ENABLED: "DEBUG_ASSERTIONS_ENABLED",
+    DEBUG_STORAGE_ROOT_RECOMPUTE: "DEBUG_STORAGE_ROOT_RECOMPUTE",
 
     // --- Identity & Web2 ---
     GITHUB_TOKEN: "GITHUB_TOKEN",

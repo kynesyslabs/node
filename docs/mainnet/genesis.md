@@ -24,7 +24,7 @@ decided by the genesis owners and filled in once.
 |---|---|---|
 | `properties.shardSize` | `10` | the launch committee: quorum 7, at most 3 seats lost |
 | `mutables.minBlocksForValidationOnlineStatus` | `4` | same as testnet |
-| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `quorumParity`, `committeeBinding`, `commitLock` | `activationHeight: 0` | mainnet starts with every safety fork on; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height |
+| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs` | `activationHeight: 0` | mainnet starts with every safety fork on; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height |
 | `forks.xmProofBinding`, `forks.atomicWork` | `activationHeight: null` | not scheduled at launch; a later activation is a coordinated schedule change |
 | `status` | `"confirmed"` | as on testnet |
 
@@ -51,7 +51,7 @@ them equal.
 The template declares exactly the forks this build knows, and go/no-go
 refuses a genesis that leaves one out (an undeclared fork takes the code
 default, which nobody reviewed for mainnet). A fork that only a later
-release knows, for example `finalityProofs`, is added to the template when
+release knows is added to the template when
 that release is the launch release: a node refuses to boot on a genesis
 that schedules a fork it does not know, so the genesis and the release
 must agree. The test in `scripts/launch-go-no-go.plan.test.ts` fails as
