@@ -15,7 +15,7 @@ export const NTP_PROBE_SERVERS = [
     "time.apple.com",
 ]
 // One unauthenticated answer proves nothing, so a reading needs at least two
-// servers within this distance of the median of every answer.
+// servers whose answers all lie within this span of each other.
 export const MAX_SERVER_SPREAD_MS = 2000
 export const MIN_AGREEING_SERVERS = 2
 // Members refuse to sign a block stamped more than 5 s ahead of their own
@@ -69,6 +69,30 @@ function median(values: number[]): number {
     return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
+/**
+ * The most answers that fit in one MAX_SERVER_SPREAD_MS window. Measuring
+ * each answer against the overall median would let two answers almost twice
+ * the span apart both pass. Two different windows of the same size leave no
+ * group the servers agree on.
+ */
+function largestAgreeingGroup(offsets: number[]): number[] {
+    const sorted = [...offsets].sort((a, b) => a - b)
+    let best: number[] = []
+    let tied = false
+    let low = 0
+    for (let high = 0; high < sorted.length; high++) {
+        while (sorted[high] - sorted[low] > MAX_SERVER_SPREAD_MS) low++
+        const size = high - low + 1
+        if (size > best.length) {
+            best = sorted.slice(low, high + 1)
+            tied = false
+        } else if (size === best.length) {
+            tied = true
+        }
+    }
+    return tied ? [] : best
+}
+
 export async function probeClockOffset(
     query: NtpOffsetQuery = queryNtpOffset,
     servers: string[] = NTP_PROBE_SERVERS,
@@ -83,8 +107,7 @@ export async function probeClockOffset(
             log.debug(`[CLOCK] No offset from ${servers[i]}: ${why instanceof Error ? why.message : String(why)}`)
         }
     })
-    const centre = median(offsets)
-    const agreeing = offsets.filter(o => Math.abs(o - centre) <= MAX_SERVER_SPREAD_MS)
+    const agreeing = largestAgreeingGroup(offsets)
     return {
         offsetMs: agreeing.length >= MIN_AGREEING_SERVERS ? median(agreeing) : null,
         agreeing: agreeing.length,

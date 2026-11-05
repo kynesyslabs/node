@@ -19,7 +19,7 @@ import TxValidatorPool from "./txValidatorPool"
 import { verifyBlockTxSignatures } from "./verifyBlockTxSignatures"
 import { blockRowRefusal } from "./postgresStorable"
 import { getSharedState } from "@/utilities/sharedState"
-import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import { checkTimestampNotAhead } from "./timestampBound"
 import {
     getBoundCommittee,
     getEligiblePool,
@@ -80,24 +80,7 @@ export function checkTimestampAgainstParent(
     return { valid: true }
 }
 
-/**
- * The upper bound on a block timestamp: at most the configured tolerance
- * ahead of this node's clock. Sync applies it to fetched blocks and the vote
- * path before signing, so the node never signs a block it would refuse later.
- */
-export function checkTimestampNotAhead(
-    blockTimestamp: number,
-    now: number = getNetworkTimestamp(),
-): BlockVerification {
-    const tolerance = getSharedState.getBlockTimestampTolerance()
-    if (blockTimestamp > now + tolerance) {
-        return {
-            valid: false,
-            reason: `block timestamp ${blockTimestamp} is ${blockTimestamp - now}s in the verifier's future (tolerance ${tolerance}s)`,
-        }
-    }
-    return { valid: true }
-}
+export { checkTimestampNotAhead } from "./timestampBound"
 
 // Verified separately from the quorum tally, so a garbage entry under our key
 // can never read as our signature, however the tally is computed. Under

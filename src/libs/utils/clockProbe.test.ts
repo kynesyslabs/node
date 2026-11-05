@@ -63,6 +63,16 @@ describe("probeClockOffset", () => {
         expect(result.offsetMs).toBeNull()
     })
 
+    it("needs the agreeing answers within the span of each other, not of the median", async () => {
+        const result = await probeClockOffset(answers({ [S1]: 59_000, [S2]: 62_900 }))
+        expect(result.offsetMs).toBeNull()
+    })
+
+    it("has no reading when the answers chain apart in equal windows", async () => {
+        const result = await probeClockOffset(answers({ [S1]: 0, [S2]: 1_500, [S3]: 3_000 }))
+        expect(result.offsetMs).toBeNull()
+    })
+
     it("survives a query that throws before returning a promise", async () => {
         const result = await probeClockOffset(server => {
             if (server === S1) throw new Error("boom")

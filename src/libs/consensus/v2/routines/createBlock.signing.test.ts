@@ -10,6 +10,7 @@ import path from "node:path"
 
 let dir: string
 const sharedState: any = {
+    getBlockTimestampTolerance: () => 60,
     identityFile: "",
     genesisBlockHash: "genesis-a",
     candidateBlock: null,
@@ -196,6 +197,17 @@ describe("createBlock signing guard", () => {
         // A few seconds of clock skew is still signed.
         await forge(5, 1005)
         expect(sign).toHaveBeenCalledTimes(1)
+    })
+
+    it("refuses a stamp within the signing lead but past a lower sync tolerance", async () => {
+        networkNow = 1000
+        sharedState.getBlockTimestampTolerance = () => 2
+        try {
+            await expect(forge(5, 1003)).rejects.toBeInstanceOf(CosignTimestampError)
+            expect(sign).not.toHaveBeenCalled()
+        } finally {
+            sharedState.getBlockTimestampTolerance = () => 60
+        }
     })
 
     it("signs the floor the clamp raises a low timestamp to", async () => {

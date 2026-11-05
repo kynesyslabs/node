@@ -12,6 +12,7 @@ import { serializeBlockContent } from "@/forks"
 import Chain from "src/libs/blockchain/chain"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { CosignTimestampError, checkCosignTimestamp } from "./cosignTimestamp"
+import { checkTimestampNotAhead } from "src/libs/blockchain/validation/timestampBound"
 import {
     assertSigningAllowed,
     checkBlockSignature,
@@ -95,10 +96,13 @@ export async function createBlock(
     )
     // The secretary's value was screened on receipt; this covers the floor
     // the clamp may have raised it to, at the point the signature is made.
-    const timestampVerdict = checkCosignTimestamp(
-        block.content.timestamp,
-        getNetworkTimestamp(),
-    )
+    // Our own verifyBlock bound too, so we never send a vote for a block we
+    // would refuse on sync, however low the tolerance is set
+    const now = getNetworkTimestamp()
+    let timestampVerdict = checkCosignTimestamp(block.content.timestamp, now)
+    if (timestampVerdict.valid) {
+        timestampVerdict = checkTimestampNotAhead(block.content.timestamp, now)
+    }
     if (!timestampVerdict.valid) {
         throw new CosignTimestampError(
             `refusing to sign block ${blockNumber}: ${timestampVerdict.reason}`,
