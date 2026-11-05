@@ -84,7 +84,11 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
     const rows = entries.map((v, i): LaunchValidatorRow => {
         const where = `launch list entry ${i}`
         if (!isRecord(v)) throw new Error(`${where}: not an object`)
-        const { address, status, connection_url, staked_amount, first_seen, valid_at } = v
+        const { address, status } = v
+        const connectionUrl = v.connection_url
+        const stakedAmount = v.staked_amount
+        const firstSeen = v.first_seen
+        const validAt = v.valid_at
         if (typeof address !== "string" || !/^0x[0-9a-f]{64}$/.test(address)) {
             throw new Error(`${where}: address must be lowercase 0x + 64 hex`)
         }
@@ -93,13 +97,13 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
         if (typeof status !== "string" || status === "") {
             throw new Error(`${where} (${address}): status must be a string`)
         }
-        if (connection_url !== null && (typeof connection_url !== "string" || connection_url === "")) {
+        if (connectionUrl !== null && (typeof connectionUrl !== "string" || connectionUrl === "")) {
             throw new Error(`${where} (${address}): connection_url must be null or a non-empty string`)
         }
-        if (typeof staked_amount !== "string" || !/^(0|[1-9][0-9]*)$/.test(staked_amount)) {
+        if (typeof stakedAmount !== "string" || !/^(0|[1-9][0-9]*)$/.test(stakedAmount)) {
             throw new Error(`${where} (${address}): staked_amount must be a decimal string`)
         }
-        for (const [name, value] of [["first_seen", first_seen], ["valid_at", valid_at]] as const) {
+        for (const [name, value] of [["first_seen", firstSeen], ["valid_at", validAt]] as const) {
             if (!Number.isSafeInteger(value) || (value as number) < 0) {
                 throw new Error(`${where} (${address}): ${name} must be a non-negative integer`)
             }
@@ -108,10 +112,10 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
         return {
             address,
             status,
-            connection_url: connection_url as string | null,
-            staked_amount,
-            first_seen: first_seen as number,
-            valid_at: valid_at as number,
+            connection_url: connectionUrl as string | null,
+            staked_amount: stakedAmount,
+            first_seen: firstSeen as number,
+            valid_at: validAt as number,
             unstake_requested_at: null,
             unstake_available_at: null,
         }

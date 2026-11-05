@@ -256,7 +256,7 @@ describe("block 0 under identityCarryover", () => {
 
     it("is NO-GO for a snapshot the node would refuse at block 0", async () => {
         const funded = await readBlockZeroValidators(genesis, snapshotDir(genesisRows, { balances: ["0", "5"] }))
-        expect(funded.reasons.join("\n")).toContain('balance_sum is "5"')
+        expect(funded.reasons.join("\n")).toContain("balance_sum is \"5\"")
         expect(funded.reasons.join("\n")).toContain(`row 2 (${id(101)}) holds balance 5`)
 
         const other = await readBlockZeroValidators(genesis, snapshotDir(genesisRows.slice(0, 9)))

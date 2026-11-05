@@ -304,9 +304,9 @@ describe("carry-over snapshot builder", () => {
     })
 
     it("refuses to rewrite a row that is not in canonical JSON form", () => {
-        expect(zeroBalanceLine('{"pubkey":"a","balance":"5"}', 1)).toBe('{"pubkey":"a","balance":"0"}')
-        expect(() => zeroBalanceLine('{"pubkey": "a","balance":"5"}', 2)).toThrow("canonical")
-        expect(() => zeroBalanceLine('{"pubkey":"a","balance":5}', 3)).toThrow("string balance")
+        expect(zeroBalanceLine("{\"pubkey\":\"a\",\"balance\":\"5\"}", 1)).toBe("{\"pubkey\":\"a\",\"balance\":\"0\"}")
+        expect(() => zeroBalanceLine("{\"pubkey\": \"a\",\"balance\":\"5\"}", 2)).toThrow("canonical")
+        expect(() => zeroBalanceLine("{\"pubkey\":\"a\",\"balance\":5}", 3)).toThrow("string balance")
     })
 })
 
@@ -321,7 +321,7 @@ describe("genesis refusals under identityCarryover", () => {
     it("refuses a snapshot whose rows hold a balance, before anything is written", async () => {
         const err = await assertCarryoverSnapshot(await load(source), []).catch(e => e)
         expect(err).toBeInstanceOf(GenesisRefusal)
-        expect(err.message).toContain('balance_sum is "5000000017"')
+        expect(err.message).toContain("balance_sum is \"5000000017\"")
         expect(err.message).toContain(`row 1 (${ALICE}) holds balance 5000000000`)
     })
 
