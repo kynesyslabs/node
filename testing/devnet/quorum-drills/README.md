@@ -481,7 +481,11 @@ A connection-limit hit can no longer pass:
 - **Preflight**: after `postgres` is up and before the image path's
   migrations and any node start, `run.sh`
   reads `SHOW max_connections` and ends the run as exit 2, `could not run:
-  postgres max_connections is X, N nodes need Y`, if X < 10 x N + 20.
+  postgres max_connections is X, N nodes need Y`, if X < 10 x N + 20. It
+  tries 45 times, 2 s apart; each try looks the postgres container up within
+  `LOG_READ_TIMEOUT_S` and reads within `DB_TIMEOUT_S`. If no try gets a
+  number, exit 2 too: `could not read max_connections from postgres (45
+  tries; last: why)`.
 - **Verdict**: before the verdict is written, `run.sh` greps every node's log
   and the log of its own `psql_node` reads (`logs/psql-errors.log`) for `too
   many clients`. Any hit turns a PASS or a FAIL into `ERROR`, exit 2, `could
@@ -502,7 +506,8 @@ A connection-limit hit can no longer pass:
 
 `lockstep-stub.test.sh` covers the preflight, the check and the backstop
 against a fake `docker` (a `docker logs` that fails, stalls past a 1 s bound
-set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log), and runs `run.sh` from the top on both start paths (on the image
+set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log; a
+postgres lookup that stalls, fails or finds no container), and runs `run.sh` from the top on both start paths (on the image
 path: preflight, then the 13 migrations, then node-1);
 `drillInputs.test.ts` the generated compose for N=4, 10 and 13.
 
@@ -555,8 +560,11 @@ drills also leave `drill-input.json` (what the run observed),
 empty or timed-out read of a node's head or hash during the lockstep waits),
 `NETSHOOT_IMAGE`, `RUNS_DIR`. Database reads and writes are not tunable: each
 has a 10 s connect timeout, a 20 s `statement_timeout` and a 30 s outer
-`timeout` (`DB_TIMEOUT_S`); a read that fails or times out ends the `halt-*`
-and `ride-*` runs as `ABORT`, exit 2. For the `halt-*` and `ride-*` drills:
+`timeout` (`DB_TIMEOUT_S`). Before a read, the postgres container is looked up
+(`docker compose ps`) within `LOG_READ_TIMEOUT_S` (60 s); a lookup that fails,
+finds no container or gets no answer is a failed read. A read that fails or
+times out ends the `halt-*` and `ride-*` runs as `ABORT`, exit 2. For the
+`halt-*` and `ride-*` drills:
 `BASELINE_HEIGHT` (6), `SETTLE_ROUNDS` (2), `HALT_ROUNDS` (12),
 `RECOVERY_BLOCKS` (3), `RECOVERY_TIMEOUT` (300), `RIDE_BLOCKS` (5),
 `RIDE_TIMEOUT` (300); the first five are scenario 12's values. The judge
