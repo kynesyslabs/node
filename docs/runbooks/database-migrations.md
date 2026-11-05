@@ -60,11 +60,15 @@ Do it on **one** validator first, then the rest. Never on all at once.
 1. **Back up.** Stop the node, then dump the database:
 
    ```bash
-   docker compose exec postgres pg_dump -U "${PG_USER:-demosuser}" -Fc "${PG_DATABASE:-demos}" > demos-$(date +%Y%m%d-%H%M).dump
+   docker compose exec -T postgres pg_dump -U "${PG_USER:-demosuser}" -Fc "${PG_DATABASE:-demos}" > demos-$(date +%Y%m%d-%H%M).dump
    ```
 
-   That form is for the Postgres the launcher runs in Docker Compose. For a
-   bare-metal or external database, dump from the host with the `PG_HOST`,
+   That form is for the `postgres` service of the Docker stack
+   (`docker-compose.yml` in the checkout root). `-T` keeps Compose from
+   allocating a terminal, which would corrupt the binary dump. For the Postgres
+   the launcher starts by itself (container `postgres_<PG_PORT>`, 5332 by
+   default), use `docker exec postgres_<PG_PORT> pg_dump -U demosuser -Fc demos > <file>`.
+   For a bare-metal or external database, dump from the host with the `PG_HOST`,
    `PG_PORT`, `PG_USER` and `PG_DATABASE` of the node config. Keep the password
    off the command line: put it in `~/.pgpass` (mode 600) or point `PGPASSFILE`
    at a file:
@@ -127,8 +131,13 @@ that adds a migration.
 ## Test harnesses
 
 `testing/devnet/run-devnet` (used by the devnet, `consensus-race` and
-`quorum-drills`) and `testing/l2ps-messaging/e2e.sh` run `bun run migration:run`
-before they start the node, because their databases are created empty. Known
+`quorum-drills`) and `testing/l2ps-messaging/e2e.sh` run `migration:run`
+before they start the node, because their databases are created empty. The
+devnet image is `oven/bun` with no Node, so `run-devnet` runs the TypeORM CLI
+through bun directly (`bun -r tsconfig-paths/register
+./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts`)
+instead of `bun run migration:run`, which needs `tsx` and so a `node` binary.
+`run-devnet` does this on every start, not only the first (idempotent). Known
 gap: `testing/genesis-acceptance/run.sh` starts the published image on empty
 databases (`CREATE DATABASE`) and does not migrate them. Run `bun run
 migration:run` against each of them first, or the node stops with a missing
@@ -155,7 +164,10 @@ per wipe, before the node starts:
 - bare-metal `./run -b true` (restore): it exports the balances from the old
   database, wipes Postgres, then creates the schema on the empty one
 
-A plain start never migrates. Anything else that empties the database
+A plain start of the node never migrates. The one exception is the devnet
+harness (`testing/devnet/run-devnet`): it runs `migration:run` on every start,
+not only after a wipe. That is safe, because `migration:run` applies only what
+is pending and does nothing on an up-to-date database. Anything else that empties the database
 (`scripts/start_db -c`, `postgres/clean.sh`, deleting `data_*` or the Docker
 volume by hand) does not either: run `bun run migration:run` yourself before
 the node starts, as you do for a first install on a new host.
