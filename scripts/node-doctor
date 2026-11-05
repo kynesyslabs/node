@@ -403,6 +403,11 @@ for k, v in env.items():
 		while IFS='=' read -r key value; do
 			key="${key#export }"
 			[[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+			# Unquoted values end at " #", as the node's and compose's .env readers have it.
+			if [[ "${value}" != [\"\']* ]]; then
+				value="${value%%[[:space:]]#*}"
+				value="${value%"${value##*[![:space:]]}"}"
+			fi
 			value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
 			NODE_ENV_VALUES["${key}"]="${value}"
 		done < <(grep -E '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' .env | sed -E 's/^[[:space:]]+//')
@@ -414,13 +419,39 @@ for k, v in env.items():
 
 node_env() { printf '%s' "${NODE_ENV_VALUES[$1]-}"; }
 
-check_prod_flag() { # $1 key, $2 why
+check_prod_flag() { # $1 key, $2 why, $3 extra accepted value (as the node parses it)
 	local v
 	v=$(node_env "$1")
-	if [[ "${v}" = "true" ]]; then
-		prod_line PASS "$1" "true"
+	if [[ "${v}" = "true" ]] || [[ -n "${3-}" && "${v}" = "$3" ]]; then
+		prod_line PASS "$1" "${v}"
 	else
 		prod_line FAIL "$1" "is '${v}', must be true: $2"
+	fi
+}
+
+# Fees, the stake floor and the block time come from each node's own
+# environment, not from the genesis, so a validator with a different value
+# accepts or rejects transactions the others do not. Mainnet runs the built-in
+# values; the effective value is what the node computes when the variable is
+# unset or empty.
+check_chain_param() { # $1 key, $2 built-in value, $3 value that also means the built-in one
+	local v effective
+	v=$(node_env "$1")
+	if [[ -z "${v}" ]]; then
+		prod_line PASS "$1" "unset (${2})"
+		return
+	fi
+	if [[ ! "${v}" =~ ^[0-9]+$ ]]; then
+		prod_line FAIL "$1" "is '${v}', not a whole number: unset it so the node uses ${2}"
+		return
+	fi
+	effective="${v#"${v%%[!0]*}"}"
+	effective="${effective:-0}"
+	[[ -n "${3-}" && "${effective}" = "$3" ]] && effective="$2"
+	if [[ "${effective}" = "$2" ]]; then
+		prod_line PASS "$1" "${2}"
+	else
+		prod_line FAIL "$1" "is ${v}, mainnet runs ${2}: every validator must use the same value, so unset it"
 	fi
 }
 
@@ -509,13 +540,19 @@ check_unset() { # $1 key, $2 why
 run_production_checks() {
 	load_node_env || return 1
 	echo "Mainnet validator host checks (node settings from ${NODE_ENV_SOURCE}):"
-	check_prod_flag PROD "a node without it creates a new identity when the key file is missing"
+	check_prod_flag PROD "a node without it creates a new identity when the key file is missing" 1
 	check_prod_flag DEMOS_REQUIRE_VALIDATORS "without it a node that cannot read the validator set uses every online peer as the committee"
 	check_clock_sync
 	check_ntp_egress
 	check_mismatch_policy
 	check_genesis_pin EXPECTED_GENESIS_HASH
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
+	check_chain_param CONSENSUS_TIME 10 0
+	check_chain_param RPC_FEE 1
+	check_chain_param NETWORK_FEE 1
+	check_chain_param BURN_FEE 1
+	check_chain_param RPC_FEE_PERCENT 10
+	check_chain_param MIN_VALIDATOR_STAKE 1000000000000
 	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
 	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
 	check_unset DEMOS_IDENTITY_TAKEOVER "set it for the one takeover start only (docs/runbooks/validator-key.md)"
@@ -546,8 +583,8 @@ OPTIONS:
     -v, --verbose   Show all check results (including passed)
     -q, --quiet     Only show problems (no progress output)
     --production    Mainnet validator host checks only: PROD, DEMOS_REQUIRE_VALIDATORS,
-                    clock sync, outbound NTP, mismatch policy, genesis pins and
-                    one-start switches left set; one PASS/FAIL line each, exit 1 on any FAIL
+                    clock sync, outbound NTP, mismatch policy, genesis pins,
+                    fees, stake floor and block time, and one-start switches left set; one PASS/FAIL line each, exit 1 on any FAIL
     --env-from compose|env
                     With --production: where the node's settings are read from
                     (default: docker compose config when docker-compose.yml is here,
