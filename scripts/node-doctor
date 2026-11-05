@@ -397,6 +397,10 @@ for k, v in env.items():
 			echo "docker compose config failed (or python3 is missing); run from the node checkout" >&2
 			return 1
 		fi
+	elif [[ "${ENV_SOURCE}" = "compose" ]]; then
+		# Falling back to .env would check values the container may never get
+		echo "--env-from compose needs docker and a docker-compose.yml in the node checkout" >&2
+		return 1
 	fi
 	if [[ -f .env ]]; then
 		local key value
