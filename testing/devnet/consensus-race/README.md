@@ -98,9 +98,8 @@ exit, including Ctrl-C. Only containers the run started are touched.
 - Gossip is off (`GOSSIP_ENABLED=false`): its sidecar cannot start in the
   Bun-only image. Without gossip a node that falls behind relies on block
   pushes, sync data and the height probe.
-- `LOG_LEVEL` stays `info`, which prints every level (`debug` would print
-  debug lines only): the round-start and secretary lines that time the
-  fault are debug lines, the vote tally is an info line.
+- `LOG_LEVEL` stays `info`, the operator default: the round-start,
+  secretary and vote-tally lines that time the fault are all info lines.
 - On code without the same-height fix, control ends in a fork: A holds X
   at H and stays there (`Committee of 1 is below the floor`), the other
   three certify Y with 3 votes and move on. Depending on timing the same
