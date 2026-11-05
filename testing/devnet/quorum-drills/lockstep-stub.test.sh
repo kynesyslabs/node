@@ -329,6 +329,7 @@ check "exit 0, node-4's log read stalls: exit 2, within the bound (${ms} ms; the
 gate_case td_cleared PASS; PG_GATE_PASSED=1; touch "${FAKE}/nodelog.2.fail"
 teardown_rc 0
 check "exit 0 after the gate cleared every log: a failed collection leaves it 0" has "rc=0"
+check "and is still named, with why" has "WARN: logs not collected whole: node-2 (docker logs failed (exit 1): "
 gate_case td_hit FAIL; printf 'FATAL:  sorry, too many clients already\n' > "${FAKE}/nodelog.7"
 teardown_rc 1
 check "exit 1 with a hit in the collected node-7 log: exit 2, as before" has "postgres connection limit hit (exit 1 replaced by 2"

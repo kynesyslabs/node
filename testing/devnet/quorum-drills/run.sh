@@ -149,6 +149,7 @@ teardown() {
         for i in $(seq 1 "${N}"); do
             why=$(read_node_log "${i}" "${LOG_DIR}/node-${i}.log") || { [ "${STARTED[i]:-0}" = 1 ] && unread+=" node-${i} (${why})"; }
         done
+        [ -n "${unread}" ] && say "WARN: logs not collected whole:${unread}"
         # Backstop for the exits that skip pg_limit_gate (an early exit 0 or 1):
         # a connection-limit hit in the collected logs is never a result, and
         # neither is an exit the gate did not clear while a log is unreadable
