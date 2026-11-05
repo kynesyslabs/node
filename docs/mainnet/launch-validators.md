@@ -67,7 +67,8 @@ where a missing region is only a warning.
 Before launch each operator also runs, on each host:
 
 ```bash
-./scripts/node-doctor --production
+./scripts/node-doctor --production              # Docker host
+./scripts/node-doctor --production --env-from env   # bare-metal host
 ```
 
 which checks `PROD=true`, `DEMOS_REQUIRE_VALIDATORS=true`, a synchronised

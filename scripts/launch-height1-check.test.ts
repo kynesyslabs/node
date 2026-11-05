@@ -147,6 +147,22 @@ describe("decideHeight1", () => {
         expect(d.verdict).toBe("inconclusive")
     })
 
+    it("is inconclusive when one node could not be fully checked, even if the others pass", () => {
+        const noBlock1 = decideHeight1(expectation(), [node(0), node(1, { blocks: [] })])
+        expect(failed(noBlock1)).toEqual([])
+        expect(noBlock1.verdict).toBe("inconclusive")
+
+        const noHash = decideHeight1(expectation(), [
+            node(0),
+            node(1, { blocks: [{ number: 1, hash: null, previousHash: BLOCK0, txCount: 0 }] as any }),
+        ])
+        expect(noHash.checks.find(c => c.node === "http://v1:53550" && c.name === "block-1-agreement")?.status).toBe("skip")
+        expect(noHash.verdict).toBe("inconclusive")
+
+        const stateSkipped = decideHeight1(expectation(), [node(0), node(1, { head: 50 })], { maxScan: 20 })
+        expect(stateSkipped.verdict).toBe("inconclusive")
+    })
+
     it("fails on an unreachable node", () => {
         const d = decideHeight1(expectation(), [node(0), { url: "http://v1:53550", reachable: false, error: "timeout" }])
         expect(d.verdict).toBe("fail")

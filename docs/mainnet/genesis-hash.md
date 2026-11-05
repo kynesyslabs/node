@@ -221,7 +221,9 @@ shape is reported as unreadable.
 A node answers state for its tip only. So the validator and balance comparison
 runs only while every block after block 0 is empty and the head is within
 `--max-scan` (default 20). Otherwise those two lines read `SKIP` with the
-reason. If no node could be compared, the result is inconclusive (exit 3).
+reason. If any node could not be checked in full (block 1 unread, or its
+state skipped), the result is inconclusive (exit 3), even when the others
+pass: every launch validator has to be proven.
 
 Exit codes: 0 PASS, 1 FAIL, 2 bad input, 3 inconclusive. The check reads what
 each node reports about itself. It is run against every launch validator, so

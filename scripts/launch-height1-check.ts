@@ -309,6 +309,8 @@ export function decideHeight1(
             if (block1.hash) {
                 const h = normHash(block1.hash)
                 block1Hashes.set(h, [...(block1Hashes.get(h) ?? []), node])
+            } else {
+                add(node, "block-1-agreement", "skip", "block 1 was served without its hash")
             }
         }
 
@@ -362,8 +364,11 @@ export function decideHeight1(
         add("*", "block-1-agreement", "pass", `every node that served block 1 holds ${[...block1Hashes.keys()][0]}`)
     }
 
+    // Every requested node has to be proven: one node that was only partly
+    // checked could hold another block 1 or other state while the rest pass
     const failed = checks.some(c => c.status === "fail")
-    return { verdict: failed ? "fail" : compared === 0 ? "inconclusive" : "pass", checks }
+    const partial = checks.some(c => c.status === "skip")
+    return { verdict: failed ? "fail" : partial || compared === 0 ? "inconclusive" : "pass", checks }
 }
 
 /**
