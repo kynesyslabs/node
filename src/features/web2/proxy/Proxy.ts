@@ -45,6 +45,12 @@ export class Proxy {
 
     /**
      * Sends an HTTP/HTTPS request through the proxy.
+     *
+     * `params.targetAuthorization` is the RAW token: the node adds the
+     * `Bearer ` prefix itself, so pass `abc123`, not `Bearer abc123` (that
+     * would be sent as `Bearer Bearer abc123`). `targetHeaders` and the URL
+     * are copied into the signed on-chain `web2Request` tx; `targetAuthorization`
+     * is not, so pass credentials there, not in `targetHeaders`.
      * @returns Promise resolving to the response data
      * @throws Error if the proxy server fails to start or if the request fails
      */
@@ -78,7 +84,6 @@ export class Proxy {
                 targetMethod,
                 targetHeaders,
                 targetAuthorization,
-                targetUrl,
             )
 
             const req = http.request({
@@ -429,7 +434,6 @@ export class Proxy {
         targetMethod: Web2Method,
         targetHeaders: IWeb2Request["raw"]["headers"],
         targetAuthorization: string,
-        targetUrl: string,
     ): IWeb2Request["raw"]["headers"] {
         // Base headers - only essential ones
         const headers: IWeb2Request["raw"]["headers"] = {
@@ -461,8 +465,22 @@ export class Proxy {
             headers["Accept-Encoding"] = "identity"
         }
 
-        // Add Authorization if required
-        if (this.requiresAuthorization(targetUrl, targetMethod)) {
+        // Only forward an Authorization the caller actually supplied.
+        // `requireAuthForAll` governs INBOUND access to this proxy (the
+        // x-dahr-session-id check in isAuthorizedRequest) and says nothing
+        // about what the target site should receive. Keying the outbound
+        // header on it stamps `Bearer undefined` onto every proxied request,
+        // which any site that validates the header rejects — GitHub answers
+        // 401 on api.github.com and 404 on raw.githubusercontent.com.
+        if (targetAuthorization) {
+            // A caller header under any other casing would also go on the
+            // wire, so the target could read the caller's value instead of
+            // the token.
+            for (const key of Object.keys(headers)) {
+                if (key.toLowerCase() === "authorization") {
+                    delete headers[key]
+                }
+            }
             headers["Authorization"] = `Bearer ${targetAuthorization}`
         }
 
@@ -510,20 +528,5 @@ export class Proxy {
         }
         entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
         return entries.map(e => `${e.key}:${e.value}`).join("\n")
-    }
-
-    private requiresAuthorization(url: string, method: Web2Method): boolean {
-        if (this._authConfig.requireAuthForAll) {
-            for (const exception of this._authConfig.exceptions) {
-                if (
-                    exception.urlPattern.test(url) &&
-                    exception.methods.includes(method)
-                ) {
-                    return false
-                }
-            }
-            return true
-        }
-        return false
     }
 }
