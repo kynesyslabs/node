@@ -153,15 +153,31 @@ fn_src() { # $1 function name: its definition, from `name() {` to the first line
 for f in psql_node pg_limit_preflight pg_limit_gate; do source <(fn_src "${f}"); done
 source <(grep -E '^(DB_TIMEOUT_S|PG_LIMITS)=' "${RUN_SH}")
 source <(region 'block_rows() {' 'phase_row() {')
-dc() { echo fakepg; }
+dc() { # ps -aq node-<n>: cid<n>, as the fake docker answers; anything else: fakepg (postgres)
+    case "$1 ${2:-}" in "ps -aq") [ -e "${FAKE:-}/nocontainer.${3#node-}" ] || echo "cid${3#node-}" ;; *) echo fakepg ;; esac
+}
 mkdir -p "${WORK}/bin"
 # docker exec ... psql: FAKE_DB is rows (default), hang, stmt (the server cancels the
 # query) or toomany (the server is out of connections); SHOW max_connections
-# answers FAKE_MAXCONN (default 100, the postgres default)
+# answers FAKE_MAXCONN (default 100, the postgres default).
+# The node logs: `compose ... ps -aq node-<n>` answers cid<n> (nothing when
+# FAKE/nocontainer.<n> exists), `logs ... cid<n>` prints FAKE/nodelog.<n> (its
+# last lines with --tail; no file: an empty log), after sleeping the seconds in
+# FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists
 cat > "${WORK}/bin/docker" <<'FAKEDOCKER'
 #!/usr/bin/env bash
 echo "$*" >> "${FAKE_DOCKER_LOG}"
 case "$*" in *"SHOW max_connections"*) echo "${FAKE_MAXCONN:-100}"; exit 0 ;; esac
+case "$1" in
+    compose) case "$*" in *" ps -aq node-"*) n=${@: -1}; n=${n#node-}; [ -e "${FAKE}/nocontainer.${n}" ] || echo "cid${n}"; exit 0 ;; esac ;;
+    logs)
+        n=${@: -1}; n=${n#cid}; tail=all
+        [ "$2" = --tail ] && tail=$3
+        [ -e "${FAKE}/nodelog.${n}.hang" ] && sleep "$(cat "${FAKE}/nodelog.${n}.hang")"
+        [ -e "${FAKE}/nodelog.${n}.fail" ] && { echo "Error response from daemon: stub: cannot read the log of cid${n}" >&2; exit 1; }
+        if [ "${tail}" = all ]; then cat "${FAKE}/nodelog.${n}" 2>/dev/null; else tail -n "${tail}" "${FAKE}/nodelog.${n}" 2>/dev/null; fi
+        exit 0 ;;
+esac
 case "${FAKE_DB:-rows}" in
     hang) sleep 30 ;;
     stmt) echo "ERROR:  canceling statement due to statement timeout" >&2; exit 1 ;;
@@ -170,7 +186,7 @@ case "${FAKE_DB:-rows}" in
 esac
 FAKEDOCKER
 chmod +x "${WORK}/bin/docker"
-export FAKE_DOCKER_LOG="${WORK}/docker.log"
+export FAKE_DOCKER_LOG="${WORK}/docker.log" FAKE
 PATH="${WORK}/bin:${PATH}"
 check "run.sh bounds its database calls at 30 s" test "${DB_TIMEOUT_S}" = 30
 new_case dbread 25; DB_TIMEOUT_S=1
@@ -216,19 +232,23 @@ for spec in "4 100 ok" "10 220 ok" "13 280 ok" "13 100 refused" "10 100 refused"
 done
 
 echo "== postgres connection limit: 'too many clients' never ends in a pass or a fail"
-grep_logs() { # the node logs of the fake: nodelog.<node>
-    local f
-    for f in "${FAKE}"/nodelog.*; do [ -e "${f}" ] || continue; grep -a "$1" "${f}" | sed "s/^/node-${f##*.}: /"; done
-}
+# The gate's real log reads (and grep_logs, the reader it used up to ef47fe4c19)
+# against the fake docker: a case has 13 started nodes whose logs are FAKE/nodelog.<n>
+for f in pg_gate_unreadable grep_logs; do source <(fn_src "${f}"); done
+RUN_DIR="${WORK}/run"; PROJECT=qdrill-stub
 write_verdict() { echo "VERDICT ${RESULT}: ${DETAIL}"; }
+gate_case() { # $1 name, $2 the result before the gate
+    new_case "$1" 25; N=13; STARTED=(); for i in $(seq 1 13); do STARTED[i]=1; done
+    RESULT=$2; DETAIL="phases fine"; PG_GATE_PASSED=0
+}
 for verdict in PASS FAIL; do
-    new_case gate_clean 25; RESULT=${verdict}; DETAIL="phases fine"
+    gate_case gate_clean "${verdict}"
     echo "FATAL: nothing wrong" > "${FAKE}/nodelog.1"
     OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
     check "no hit, ${verdict}: the gate lets it through" has "rc=0"
     check "no hit, ${verdict}: and writes nothing" test "$(grep -c VERDICT <<< "${OUT}")" = 0
 
-    new_case gate_nodes 25; RESULT=${verdict}; DETAIL="phases fine"
+    gate_case gate_nodes "${verdict}"
     printf 'ok line\nerror: sorry, too many clients already\n' > "${FAKE}/nodelog.7"
     printf 'FATAL:  sorry, too many clients already\n' > "${FAKE}/nodelog.11"
     OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
@@ -237,7 +257,7 @@ for verdict in PASS FAIL; do
     check "node logs hit, ${verdict}: the verdict is ERROR and keeps what the result was" has "VERDICT ERROR: could not run: postgres connection limit hit (2 lines in node-11 node-7); the result was ${verdict}"
 done
 
-new_case gate_psql 25; DB_TIMEOUT_S=2; RESULT=PASS; DETAIL="phases fine"
+gate_case gate_psql PASS; DB_TIMEOUT_S=2
 OUT=$(FAKE_DB=toomany psql_node 3 "SELECT 1" 2>&1; echo "rc=$?")
 check "a psql_node read refused for connections still fails (rc=2) and shows the server's words" has "too many clients already"
 check "(psql's own exit code is passed on)" has "rc=2"
@@ -245,10 +265,49 @@ check "and is recorded in psql-errors.log, with the database" grep -q "psql node
 OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "a harness read that hit the limit, node logs clean: the gate exits 2" has "rc=2"
 check "and says so" has "postgres connection limit hit (1 'too many clients' lines; harness psql reads only)"
-new_case gate_psql_ok 25; DB_TIMEOUT_S=2; RESULT=PASS; DETAIL="phases fine"
+gate_case gate_psql_ok PASS; DB_TIMEOUT_S=2
 FAKE_DB=stmt psql_node 3 "SELECT 1" > /dev/null 2>&1
 OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "another psql error is not a connection-limit hit" has "rc=0"
+
+echo "== the gate fails closed: a node log it cannot read whole is exit 2, never a pass or a fail"
+check "run.sh bounds each docker call of a node-log read at 60 s" test "${LOG_READ_TIMEOUT_S:-unset}" = 60
+QDRILL_TEST_LOG_READ_TIMEOUT_S=1 source <(grep -E '^LOG_READ_TIMEOUT_S=' "${RUN_SH}")
+check "QDRILL_TEST_LOG_READ_TIMEOUT_S sets the bound (1 s here)" test "${LOG_READ_TIMEOUT_S:-unset}" = 1
+gate() { # pg_limit_gate in a subshell: OUT, and ms it took
+    local t0; t0=$(date +%s%N)
+    OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
+    ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+}
+for verdict in PASS FAIL; do
+    gate_case gate_unread "${verdict}"; echo "clean" > "${FAKE}/nodelog.1"; touch "${FAKE}/nodelog.3.fail"
+    gate
+    echo "${OUT}" | tail -2 | cut -c1-220 | sed 's/^/    | /'
+    check "docker logs fails for node-3, ${verdict}: exit 2" has "rc=2"
+    check "docker logs fails for node-3, ${verdict}: the verdict is ERROR, names node-3 and docker's words, keeps the result" \
+        has "VERDICT ERROR: could not run: could not read the log of node-3 to check for the postgres connection limit (docker logs failed (exit 1): Error response from daemon: stub: cannot read the log of cid3); the result was ${verdict}"
+done
+gate_case gate_hang PASS; echo 6 > "${FAKE}/nodelog.2.hang"
+gate
+echo "${OUT}" | tail -2 | cut -c1-220 | sed 's/^/    | /'
+check "docker logs stalls for node-2: exit 2" has "rc=2"
+check "docker logs stalls for node-2: says it did not finish within the bound" has "could not read the log of node-2 to check for the postgres connection limit (docker logs did not finish within 1s)"
+check "docker logs stalls for node-2: the gate returns within the bound (${ms} ms; the stub sleeps 6 s)" test "${ms}" -lt 4000
+gate_case gate_nocontainer PASS; touch "${FAKE}/nocontainer.5"
+gate
+check "a started node with no container: exit 2, its log is unreadable" has "could not read the log of node-5 to check for the postgres connection limit (no container)"
+gate_case gate_big PASS; head -c 300 /dev/zero | tr '\0' x > "${FAKE}/nodelog.4"
+OUT=$( ( LOG_READ_MAX_BYTES=200; pg_limit_gate ) 2>&1; echo "rc=$?" )
+check "a log over LOG_READ_MAX_BYTES (200 here): exit 2, not read as a whole log" has "could not read the log of node-4 to check for the postgres connection limit (the log is over 200 bytes)"
+gate_case gate_psql_unread PASS; mkdir "${LOG_DIR}/psql-errors.log"
+gate
+check "psql-errors.log there but unreadable: exit 2" has "could not read ${LOG_DIR}/psql-errors.log to check for the postgres connection limit (grep failed)"
+gate_case gate_unstarted PASS; STARTED[13]=0; touch "${FAKE}/nodelog.13.fail"
+gate
+check "a node that was never started is not read: rc=0" has "rc=0"
+gate_case gate_hit_unread PASS; echo "FATAL:  sorry, too many clients already" > "${FAKE}/nodelog.2"; touch "${FAKE}/nodelog.9.fail"
+gate
+check "a hit in one log and another log unreadable: exit 2" has "rc=2"
 
 # The wiring: the gate sits before the verdict is written, the preflight before the first node starts,
 # and a teardown backstop covers the exits that skip the gate
@@ -367,8 +426,8 @@ check "no top-level call of run.sh reaches a function defined below it" bash -c 
 check "the check saw the top-level calls (at least 10)" test "$(sed -n 's/^top-level calls checked: //p' <<< "${ORDER}")" -ge 10
 
 echo "== boot_failure_line: the node's own refusal line for the abort of a node that never served"
-boot_failure_of() { # $1 the node's log, as docker logs prints it
-    ( BOOT_LOG="$1"; dc() { echo cid1; }; docker() { printf '%s\n' "${BOOT_LOG}"; }; boot_failure_line 1 )
+boot_failure_of() { # $1 the node's log, as docker logs prints it (the fake docker's nodelog.1)
+    ( new_case boot 25; printf '%s\n' "$1" > "${FAKE}/nodelog.1"; boot_failure_line 1 )
 }
 REFUSED=$'[INFO] [GENESIS] Looking for the genesis block...\n\e[31m[ERROR] [GENESIS] Refusing to boot: identityCarryover is active at genesis but no snapshot was found\e[0m\n[ERROR] unrelated error\n'
 check "a genesis refusal is found, without colour codes, even with a later error line" \
@@ -377,6 +436,32 @@ check "with no refusal the last error line is given" \
     test "$(boot_failure_of $'[INFO] up\n[ERROR] connect ECONNREFUSED\n[INFO] retrying')" = "[ERROR] connect ECONNREFUSED"
 check "a log with neither gives nothing, and rc 0" \
     bash -c '[ -z "$1" ]' _ "$(boot_failure_of $'[INFO] up\n[INFO] bye')"
+
+echo "== the bring-up abort of a node that never served: an unreadable log is named, within the bound, and the run still exits 2"
+# run.sh's own line, for node-1 with start_node failing
+BOOT_ABORT=$(grep -m1 '^    start_node "${i}" || ' "${RUN_SH}")
+boot_abort() { # OUT, and ms it took
+    local t0; t0=$(date +%s%N)
+    OUT=$( ( i=1; start_node() { return 1; }; eval "${BOOT_ABORT}" ) 2>&1; echo "rc=$?" )
+    ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+}
+new_case boot_unread 25; touch "${FAKE}/nodelog.1.fail"
+boot_abort
+echo "${OUT}" | tail -3 | cut -c1-220 | sed 's/^/    | /'
+check "docker logs fails: the abort says the log is unreadable, with docker's words" \
+    has "node-1 log: unreadable (docker logs failed (exit 1): Error response from daemon: stub: cannot read the log of cid1)"
+check "docker logs fails: exit 2" has "rc=2"
+new_case boot_hang 25; echo 6 > "${FAKE}/nodelog.1.hang"
+boot_abort
+echo "${OUT}" | tail -3 | cut -c1-220 | sed 's/^/    | /'
+check "docker logs stalls: the abort says the log is unreadable, not read within the bound" has "node-1 log: unreadable (docker logs did not finish within 1s)"
+check "docker logs stalls: exit 2" has "rc=2"
+check "docker logs stalls: returns within the bound (${ms} ms; the stub sleeps 6 s)" test "${ms}" -lt 4000
+new_case boot_refused 25; printf '%s\n' "${REFUSED}" > "${FAKE}/nodelog.1"
+boot_abort
+check "a readable log: the abort gives the refusal line, and exit 2" \
+    bash -c 'grep -q "^\[qdrill\] node-1 log: \[ERROR\] \[GENESIS\] Refusing to boot: identityCarryover" <<< "$1" && grep -q "^rc=2$" <<< "$1"' _ "${OUT}"
+check "the boot read takes the log's last BOOT_LOG_LINES lines (2000)" grep -q "^logs --tail 2000 cid1$" "${FAKE_DOCKER_LOG}"
 
 echo "== a recovery or ride that reaches the target only after its wait: no t_converged, and the judge gets the heads read inside it"
 # The real drill_recover and scenario_ride. heads_once answers below the target

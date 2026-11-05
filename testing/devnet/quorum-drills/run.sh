@@ -18,7 +18,8 @@
 # Everything lives in a per-run dir under runs/ (gitignored: it holds the
 # devnet keys) and is torn down on exit, failure or Ctrl-C.
 # Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR: a node
-# stopped answering mid-window, or postgres hit its connection limit: no verdict).
+# stopped answering mid-window, or postgres hit its connection limit, or a node
+# log that check needs could not be read: no verdict).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -317,7 +318,8 @@ if [ "${START_PATH}" = image ]; then
         abort_pre "the image's entrypoint does not reach the node with the drill's mounts: ${dry_fail:-docker run failed} (entrypoint: ${NODE1_ENTRYPOINT[*]})"
     say "start path: ${dry_fail}"
 fi
-declare -a PUB UP
+# STARTED: the nodes start_node was called for, whose logs the checks must read
+declare -a PUB UP STARTED
 for i in $(seq 1 "${N}"); do PUB[i]=$(tr 'A-Z' 'a-z' < "${RUN_DIR}/inputs/pub${i}"); UP[i]=0; done
 excluded_note=""
 if [ "${FORK_SET}" = launch ]; then
@@ -392,7 +394,7 @@ max_head() {
 }
 start_node() {
     dc up -d "node-$1" >> "${STEP_LOG}" 2>&1 || dc start "node-$1" >> "${STEP_LOG}" 2>&1
-    UP[$1]=1
+    UP[$1]=1; STARTED[$1]=1
     wait_serve "$1" 180 || return 1
     event "node-$1 started"
 }
@@ -401,15 +403,49 @@ stop_node() {
     UP[$1]=0
     event "node-$1 stopped"
 }
+# Node-log reads that an abort message or a result depends on (boot_failure_line,
+# pg_limit_gate, the teardown's collection) are bounded: every docker call by
+# LOG_READ_TIMEOUT_S, so a stalled daemon ends the read and not the run, and the
+# log by LOG_READ_MAX_BYTES (stripped). QDRILL_TEST_LOG_READ_TIMEOUT_S is for
+# lockstep-stub.test.sh only.
+LOG_READ_TIMEOUT_S="${QDRILL_TEST_LOG_READ_TIMEOUT_S:-60}"
+LOG_READ_MAX_BYTES=$((256 * 1024 * 1024))
+# Node $1's container log, colour codes stripped, into file $2: the whole log,
+# or its last $3 lines. Fails, printing why, when node $1 has no container or
+# it cannot be looked up, docker logs fails or does not finish in time, or the
+# log is over LOG_READ_MAX_BYTES: part of a log is never passed off as all of it.
+read_node_log() { # $1 node, $2 file, $3 last lines (default: all)
+    local cid rc
+    # dc ps, spelled out: timeout runs a command, not a shell function
+    cid=$(timeout -k 5 "${LOG_READ_TIMEOUT_S}" docker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" ps -aq "node-$1" 2>/dev/null)
+    rc=$?
+    case "${rc}" in
+        0) [ -n "${cid}" ] || { echo "no container"; return 1; } ;;
+        124 | 137) echo "docker compose ps did not answer within ${LOG_READ_TIMEOUT_S}s"; return 1 ;;
+        *) echo "docker compose ps failed (exit ${rc})"; return 1 ;;
+    esac
+    timeout -k 5 "${LOG_READ_TIMEOUT_S}" docker logs --tail "${3:-all}" "${cid}" 2>&1 |
+        sed 's/\x1b\[[0-9;]*m//g' | head -c $((LOG_READ_MAX_BYTES + 1)) > "$2"
+    rc=${PIPESTATUS[0]}
+    [ "$(wc -c < "$2")" -gt "${LOG_READ_MAX_BYTES}" ] && { echo "the log is over ${LOG_READ_MAX_BYTES} bytes"; return 1; }
+    case "${rc}" in
+        0) return 0 ;;
+        124 | 137) echo "docker logs did not finish within ${LOG_READ_TIMEOUT_S}s"; return 1 ;;
+        *) echo "docker logs failed (exit ${rc}): $(tail -1 "$2" | cut -c1-200)"; return 1 ;;
+    esac
+}
 # The last line in node $1's log that says why it would not boot, for the abort
 # message of a node that never served: a genesis refusal ("[GENESIS] Refusing to
 # boot: ...", findGenesisBlock.ts refuse()), or the last error line if there is
-# none. The node is restarted by its policy, so the log holds every attempt.
+# none. The node is restarted by its policy, so the log holds every attempt; its
+# last BOOT_LOG_LINES lines hold the last one. "unreadable (why)" when
+# read_node_log fails.
+BOOT_LOG_LINES=2000
 boot_failure_line() {
-    local cid out; cid=$(dc ps -aq "node-$1" 2>/dev/null); [ -z "${cid}" ] && return 0
-    out=$(docker logs "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
-    grep -aiE 'refusing to boot' <<< "${out}" | tail -1 | cut -c1-600 | grep . && return 0
-    grep -aiE 'error' <<< "${out}" | tail -1 | cut -c1-600
+    local f="${LOG_DIR}/node-$1.boot.tmp" why
+    why=$(read_node_log "$1" "${f}" "${BOOT_LOG_LINES}") || { rm -f "${f}"; echo "unreadable (${why})"; return 0; }
+    grep -aiE 'refusing to boot' "${f}" | tail -1 | cut -c1-600 | grep . || grep -aiE 'error' "${f}" | tail -1 | cut -c1-600
+    rm -f "${f}"
     return 0
 }
 
@@ -688,15 +724,36 @@ pg_limit_preflight() {
     say "postgres max_connections ${have} (${N} nodes need ${need})"
 }
 
+# pg_limit_gate could not read $1 ($2 why): no verdict
+pg_gate_unreadable() {
+    say "ABORT: could not run: could not read $1 to check for the postgres connection limit ($2)"
+    DETAIL="could not run: could not read $1 to check for the postgres connection limit ($2); the result was ${RESULT}"
+    RESULT=ERROR
+    write_verdict
+    exit 2
+}
+
 # "sorry, too many clients already" in a node's log or in one of the harness'
 # own psql reads means something ran without a connection it needed: the run
 # proves nothing, whatever the verdict says. Called before the verdict is
-# written, so a PASS or a FAIL becomes exit 2 and says why.
+# written, so a PASS or a FAIL becomes exit 2 and says why. It reads the whole
+# log of every started node (read_node_log) and psql-errors.log if there is
+# one: one it cannot read is exit 2 as well, never a log without hits.
 pg_limit_gate() {
-    local hits nodes
-    hits=$({ grep_logs "too many clients"; grep -a "too many clients" "${LOG_DIR}/psql-errors.log" 2>/dev/null; } | wc -l)
-    [ "${hits}" = 0 ] && return 0
-    nodes=$(grep_logs "too many clients" | cut -d: -f1 | sort -u | tr '\n' ' ')
+    local i n why hits=0 nodes="" f="${LOG_DIR}/pg-gate.tmp"
+    for i in $(seq 1 "${N}"); do
+        [ "${STARTED[i]:-0}" = 1 ] || continue
+        why=$(read_node_log "${i}" "${f}") || { rm -f "${f}"; pg_gate_unreadable "the log of node-${i}" "${why}"; }
+        n=$(grep -ac "too many clients" "${f}"); [ $? -le 1 ] || { rm -f "${f}"; pg_gate_unreadable "the log of node-${i}" "grep failed"; }
+        [ "${n}" -gt 0 ] && { hits=$((hits + n)); nodes+="node-${i}"$'\n'; }
+    done
+    rm -f "${f}"
+    if [ -e "${LOG_DIR}/psql-errors.log" ]; then
+        n=$(grep -ac "too many clients" "${LOG_DIR}/psql-errors.log"); [ $? -le 1 ] || pg_gate_unreadable "${LOG_DIR}/psql-errors.log" "grep failed"
+        hits=$((hits + n))
+    fi
+    [ "${hits}" = 0 ] && { PG_GATE_PASSED=1; return 0; }
+    nodes=$(printf '%s' "${nodes}" | sort -u | tr '\n' ' ')
     say "ABORT: could not run: postgres connection limit hit (${hits} 'too many clients' lines; ${nodes:-harness psql reads only})"
     DETAIL="could not run: postgres connection limit hit (${hits} lines${nodes:+ in ${nodes% }}); the result was ${RESULT}"
     RESULT=ERROR
