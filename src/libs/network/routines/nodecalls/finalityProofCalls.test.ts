@@ -30,6 +30,7 @@ mock.module("src/libs/blockchain/chain", () => ({
         getTxByHash,
         getBlockByNumber: async (n: number) => structuredClone(blocks.get(n) ?? null),
         getLastBlock: async () => structuredClone(blocks.get(lastNumber()) ?? null),
+        getLastStoredBlock: async () => structuredClone(blocks.get(lastNumber()) ?? null),
         getLastBlockNumber: async () => lastNumber(),
         getBlockRange: async (from: number, to: number) =>
             [...blocks.values()].filter(b => b.number >= from && b.number <= to).sort((a, b) => a.number - b.number).map(b => structuredClone(b)),
@@ -515,6 +516,42 @@ describe("getStorageProof", () => {
         expect(reply.result).toBe(503)
         expect(reply.extra).toEqual({ reason: "busy" })
         expect(countStorageProofRootMismatch).not.toHaveBeenCalled()
+    })
+
+    describe("while a committed block is not yet published", () => {
+        const chainModule = async () => (await import("src/libs/blockchain/chain")).default as any
+
+        /** Runs `work` with the published head held at `published`, as insertBlock does before its side effects finish. */
+        async function withPublishedHead<T>(published: number, work: () => Promise<T>): Promise<T> {
+            const chain = await chainModule()
+            const real = chain.getLastBlock
+            chain.getLastBlock = async () => structuredClone(blocks.get(published) ?? null)
+            try {
+                return await work()
+            } finally {
+                chain.getLastBlock = real
+            }
+        }
+
+        it("serves the committed head rather than failing on its state", async () => {
+            withStorage()
+            storeBlock(7, [["stor-1", row(1, { data: { i: 1, v: 3 } })]])
+            const reply = await withPublishedHead(6, () => getStorageProof({ storageAddresses: ["stor-1"] }))
+            expectServedState(reply, 7, ["stor-1"])
+            expect(countStorageProofRootMismatch).not.toHaveBeenCalled()
+        })
+
+        it("answers 503 busy, uncounted, when that block commits while the proof is built", async () => {
+            withStorage()
+            proveStoragePrograms.mockImplementation(async (addresses, undo, expectedRoot) => {
+                storeBlock(7, [["stor-1", row(1, { data: { i: 1, v: 3 } })]])
+                return await root.prove(addresses, undo, expectedRoot)
+            })
+            const reply = await withPublishedHead(6, () => getStorageProof({ storageAddresses: ["stor-1"] }))
+            expect(reply.result).toBe(503)
+            expect(reply.extra).toEqual({ reason: "busy" })
+            expect(countStorageProofRootMismatch).not.toHaveBeenCalled()
+        })
     })
 
     it("answers while a block apply holds the sync lock", async () => {

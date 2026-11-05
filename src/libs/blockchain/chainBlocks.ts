@@ -59,6 +59,19 @@ export async function getLastBlock(): Promise<Blocks> {
     return await getBlockByNumber(getSharedState.lastBlockNumber)
 }
 
+/**
+ * The highest block row in the database. A block's row and state commit
+ * together, but the head this node publishes moves only after the commit's
+ * side effects; a reader of committed state compares against this.
+ */
+export async function getLastStoredBlock(): Promise<Blocks | null> {
+    return await getBlocksRepo()
+        .createQueryBuilder("block")
+        .orderBy("block.number", "DESC")
+        .limit(1)
+        .getOne()
+}
+
 export async function getLastBlockNumber(): Promise<number> {
     if (!getSharedState.lastBlockNumber) {
         const block = await getBlocksRepo()

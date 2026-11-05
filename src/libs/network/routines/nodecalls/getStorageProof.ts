@@ -44,7 +44,8 @@ const storageRootOf = (block: { content?: unknown }): unknown =>
 
 /**
  * Sparse Merkle proofs for up to 16 storage programs against the storage
- * root committed in block B (`blockNumber`, default this node's head T).
+ * root committed in block B (`blockNumber`, default the highest stored
+ * block T).
  * Blocks are forged before they execute, so that root covers the state
  * after block B - 1 (`asOfBlock`). `anchor` is block B with its certificate;
  * `anchorParent` is block B - 1, whose committed peerlist and validator set
@@ -85,7 +86,10 @@ export default async function getStorageProof(data: {
     }
 
     try {
-        const head = await Chain.getLastBlock()
+        // The stored head, not the published one: a block's state is
+        // committed before insertBlock publishes it, and the table is read as
+        // committed.
+        const head = await Chain.getLastStoredBlock()
         if (!head) return refusal(503, "node_not_synced")
         const number = requestedNumber ?? head.number
         if (number > head.number) {
@@ -108,7 +112,7 @@ export default async function getStorageProof(data: {
         const parent = await Chain.getBlockByNumber(number - 1)
         if (!anchor || !parent || anchor.content?.previousHash !== parent.hash) {
             // Rolled back under the reads, or not stored below the head.
-            const now = await Chain.getLastBlock()
+            const now = await Chain.getLastStoredBlock()
             if (now?.hash !== head.hash) return busy()
             throw new Error(`blocks ${number - 1} and ${number} below the head are not stored as a chain`)
         }
@@ -126,7 +130,7 @@ export default async function getStorageProof(data: {
         if (proved.root !== anchorRoot) {
             // A block landing between the head read and the snapshot leaves
             // the table ahead of the undo range: not a log gap.
-            const now = await Chain.getLastBlock()
+            const now = await Chain.getLastStoredBlock()
             if (now?.hash !== head.hash) return busy()
             countStorageProofRootMismatch()
             log.error(

@@ -64,6 +64,10 @@ export default class Chain {
         return blockOps.getLastBlock()
     }
 
+    static async getLastStoredBlock(): Promise<Blocks | null> {
+        return blockOps.getLastStoredBlock()
+    }
+
     static async getLastBlockNumber(): Promise<number> {
         return blockOps.getLastBlockNumber()
     }
