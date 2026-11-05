@@ -284,6 +284,79 @@ describe("signer identity case", () => {
             expect(insertBlock).not.toHaveBeenCalled()
         })
 
+        describe("with many cases of one member key", () => {
+            /** `count` distinct spellings of `identity` that differ only in case. */
+            function caseVariants(identity: string, count: number): string[] {
+                const hex = identity.slice(2)
+                const letters = [...hex].flatMap((c, i) => (/[a-f]/.test(c) ? [i] : []))
+                const variants = new Set<string>()
+                for (let mask = 1; variants.size < count; mask++) {
+                    const chars = [...hex]
+                    letters.forEach((at, bit) => {
+                        if (mask & (1 << bit)) chars[at] = chars[at].toUpperCase()
+                    })
+                    variants.add("0x" + chars.join(""))
+                }
+                return [...variants]
+            }
+
+            async function floodedBlock(garbage = false) {
+                const block = await signedBy(makeBlock(), members.slice(0, 3))
+                for (const key of caseVariants(members[3].identity, 40)) {
+                    await sign(block, members[3], key)
+                    if (garbage) block.validation_data.signatures[key] = "00".repeat(64)
+                }
+                return block
+            }
+
+            it("verifies at most one signature per identity, so the work is bounded by the pool", async () => {
+                const block = await floodedBlock()
+                expect(Object.keys(block.validation_data.signatures).length).toBeGreaterThan(40)
+                const verify = spyOn(txValidatorPool.getInstance(), "verify")
+
+                const counted = await verification.countedSignatures(
+                    block.hash,
+                    block.validation_data.signatures,
+                    new Set(members.map(m => m.identity)),
+                    true,
+                )
+
+                expect(counted.size).toBe(4)
+                expect(verify.mock.calls.length).toBeLessThanOrEqual(members.length)
+                verify.mockRestore()
+            })
+
+            it("stores one entry for the flooded member and verifies a bounded number of times end to end", async () => {
+                const block = await floodedBlock()
+                const verify = spyOn(txValidatorPool.getInstance(), "verify")
+
+                expect(await syncBlock(block, servingPeer())).toBe(true)
+
+                expect(storedSigners()).toEqual(members.map(m => m.identity).sort())
+                // verifyBlock and withCountedSignatures each count once
+                expect(verify.mock.calls.length).toBeLessThanOrEqual(2 * members.length)
+                verify.mockRestore()
+            })
+
+            it("counts only the first spelling in map order, even when it does not verify", async () => {
+                const block = await floodedBlock(true)
+                const verify = spyOn(txValidatorPool.getInstance(), "verify")
+                // A valid signature under a later spelling is not tried
+                await sign(block, members[3], upper(members[3].identity))
+
+                const counted = await verification.countedSignatures(
+                    block.hash,
+                    block.validation_data.signatures,
+                    new Set(members.map(m => m.identity)),
+                    true,
+                )
+
+                expect([...counted.keys()].sort()).toEqual(members.slice(0, 3).map(m => m.identity).sort())
+                expect(verify.mock.calls.length).toBeLessThanOrEqual(members.length)
+                verify.mockRestore()
+            })
+        })
+
         it("counts a key in two cases once in the producer's commit check too", async () => {
             const { committeeCommitShortfall } = await import(
                 "src/libs/consensus/v2/routines/committeeCommit"

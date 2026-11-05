@@ -103,7 +103,7 @@ async function carriesOurSignature(block: Block): Promise<boolean> {
  * `signedMessage`: the block hash, or under commitLock the vote message.
  * With `canonical` (the `canonicalSigners` fork) identities compare in
  * lowercase, and a member whose key appears in two cases counts once, under
- * its lowercase identity with the first of its signatures that verifies.
+ * its lowercase identity with its first signature in map order, if that verifies.
  * Without it they compare as written, as they always have.
  */
 export async function countedSignatures(
@@ -117,10 +117,22 @@ export async function countedSignatures(
         ? new Set([...eligible].map(id => id.toLowerCase()))
         : eligible
     const entries = Object.entries(signatures)
+    // Under `canonical` a peer can spell one member's key in many cases, and
+    // each spelling is a member. Only the first spelling in map order is
+    // tried: a later one is skipped before any verify, so the work is at most
+    // one verify per member. If that first signature does not verify the
+    // member does not count, even when a later spelling carries a valid one.
+    // That is deterministic for every node holding the same map, and it
+    // grants a relay nothing new: it could already strip a signature.
+    const tried = new Set<string>()
     const signers = await Promise.all(
         entries.map(async ([key, signature]) => {
             const identity = canonical ? key.toLowerCase() : key
             if (!members.has(identity)) return null
+            if (canonical) {
+                if (tried.has(identity)) return null
+                tried.add(identity)
+            }
             try {
                 const ok = await TxValidatorPool.getInstance().verify({
                     algorithm: getSharedState.signingAlgorithm,
