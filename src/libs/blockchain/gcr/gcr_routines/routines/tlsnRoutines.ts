@@ -249,12 +249,17 @@ export async function applyTLSNIdentityRemove(
     editOperation: any,
     accountGCR: GCRMain,
 ): Promise<GCRResult> {
-    const { context, username } = editOperation.data as {
+    const { context, username, userId } = editOperation.data as {
         context?: string
         username?: string
+        userId?: unknown
     }
 
-    if (!context || !username) {
+    // Under the fork a userId alone names the link, as it does for web2.
+    const named = identityCarryoverActiveAtApply()
+        ? Boolean(username) || (userId !== undefined && userId !== null && userId !== "")
+        : Boolean(username)
+    if (!context || !named) {
         return {
             success: false,
             message: "Invalid payload: missing context or username",
@@ -287,7 +292,7 @@ export async function applyTLSNIdentityRemove(
             accountGCR.identities.web2[context]
         const pick = selectWeb2Unlink(
             links,
-            { username, userId: editOperation.data?.userId },
+            { username, userId },
             "TLSN identity not found",
             id => id.proofType === "tlsn",
         )

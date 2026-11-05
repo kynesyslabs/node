@@ -28,6 +28,7 @@ import { IncentiveManager } from "../IncentiveManager"
 import { applyWeb2IdentityAdd, applyWeb2IdentityRemove } from "./web2Routines"
 import { applyTLSNIdentityRemove } from "./tlsnRoutines"
 import { isFirstConnection } from "./utils"
+import { importedIdentityKeys } from "@/libs/blockchain/genesis/carryover"
 
 const identities = new Identities()
 
@@ -54,8 +55,16 @@ async function identityEdit(tx: Transaction): Promise<any> {
 const removeWeb2 = async (payload: Record<string, unknown>) =>
     identityEdit(await viaConfirm(() => identities.removeWeb2Identity(demos, payload as never)))
 
+// The released SDK builder cannot send a userId yet, so those requests are
+// built by hand; the rest go through the builder.
 const removeTlsn = async (payload: Record<string, unknown>) =>
-    identityEdit(await handMade("identity", { context: "tlsn", method: "tlsn_identity_remove", payload }))
+    payload.userId === undefined
+        ? identityEdit(
+              await viaConfirm(() =>
+                  identities.removeWeb2IdentityViaTLSN(demos, payload.context as never, payload.username as string),
+              ),
+          )
+        : identityEdit(await handMade("identity", { context: "tlsn", method: "tlsn_identity_remove", payload }))
 
 const account = (context: string, links: Array<Record<string, unknown>>): any => ({
     pubkey: demos.getAddress(),
@@ -165,6 +174,36 @@ describe("TLSN unlink", () => {
         const g = await applyTLSNIdentityRemove(await removeTlsn({ context: "github", username: "alice-gist" }), account("github", links))
         expect(g).toEqual({ success: false, message: "TLSN identity not found" })
     })
+
+    it("takes a userId alone under the fork, as web2 unlink does", async () => {
+        carryoverAt(0)
+        const r = await applyTLSNIdentityRemove(await removeTlsn({ context: "github", userId: "7" }), account("github", links))
+        expect(r.success).toBe(true)
+        expect(usernames(r, "github")).toEqual(["alice-gist", "bob"])
+
+        carryoverAt(null)
+        const legacy = await applyTLSNIdentityRemove(await removeTlsn({ context: "github", userId: "7" }), account("github", links))
+        expect(legacy).toEqual({ success: false, message: "Invalid payload: missing context or username" })
+    })
+})
+
+describe("unlink with another account's userId", () => {
+    // userId 8 is linked on some other account, never on this one.
+    const mine = [{ username: "alice", userId: "7", proofType: "tlsn", proof: "p", proofHash: "h", timestamp: 1 }]
+
+    it("changes nothing on this account", async () => {
+        carryoverAt(0)
+        const web2 = account("github", mine)
+        const before = JSON.stringify(web2)
+        const a = await applyWeb2IdentityRemove(await removeWeb2({ context: "github", username: "alice", userId: "8" }), web2)
+        expect(a).toEqual({ success: false, message: "Identity not found" })
+        expect(JSON.stringify(web2)).toBe(before)
+
+        const tlsn = account("github", mine)
+        const b = await applyTLSNIdentityRemove(await removeTlsn({ context: "github", userId: "8" }), tlsn)
+        expect(b).toEqual({ success: false, message: "TLSN identity not found" })
+        expect(JSON.stringify(tlsn)).toBe(before)
+    })
 })
 
 describe("first-link award for an imported identity", () => {
@@ -257,6 +296,13 @@ describe("first-link award for an imported identity", () => {
         expect(await isFirstConnection("humanpassport", { address: "0xAAAA" })).toBe(false)
         expect(await isFirstConnection("nomis", { chain: "evm", subchain: "mainnet", address: "0xAbCd" })).toBe(false)
         expect(await isFirstConnection("ethos", { chain: "evm", subchain: "mainnet", address: "0xabcd" })).toBe(false)
+        expect(gcrReads).toBe(0)
+        // Link time lowercases a wallet by the client's isEVM flag, so the
+        // same wallet can arrive in either case under any chain label.
+        registry = new Set(importedIdentityKeys({ xm: { solana: { mainnet: [{ address: "So1anaAddr" }] } } }))
+        expect(await isFirstConnection("web3", { chain: "solana", subchain: "mainnet", address: "so1anaaddr" })).toBe(false)
+        expect(await isFirstConnection("web3", { chain: "solana", subchain: "mainnet", address: "So1anaAddr" })).toBe(false)
+        expect(await isFirstConnection("web3", { chain: "Solana", subchain: "Mainnet", address: "SO1ANAADDR" })).toBe(false)
         expect(gcrReads).toBe(0)
         // A link without a userId cannot be keyed and falls through to the account scan.
         expect(await isFirstConnection("twitter", {})).toBe(true)
