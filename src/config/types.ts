@@ -281,6 +281,8 @@ export interface GossipConfig {
     port: number
     heightsIntervalMs: number
     keyFile: string
+    /** How long one sidecar launch may take to open its IPC socket. */
+    ipcConnectTimeoutMs: number
 }
 
 // --- Full Application Config ---
