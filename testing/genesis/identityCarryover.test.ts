@@ -19,6 +19,7 @@ import {
 import {
     assertCarryoverSnapshot,
     carryoverManifestProblems,
+    carryoverSnapshotProblems,
     expectedImportedIdentities,
     firstConnectionKey,
     importedIdentityDigest,
@@ -341,8 +342,9 @@ describe("genesis refusals under identityCarryover", () => {
     it("accepts the carry-over snapshot with the genesis that lists the same validators", async () => {
         const out = join(work, "out")
         await buildCarryoverSnapshot({ inDir: source, validatorsFile: launchFile, outDir: out })
-        await assertCarryoverSnapshot(await load(out), LAUNCH)
-        await assertCarryoverSnapshot(await load(out), [])
+        expect(await carryoverSnapshotProblems(await load(out), LAUNCH)).toEqual([])
+        expect(await carryoverSnapshotProblems(await load(out), [])).toEqual([])
+        await expect(assertCarryoverSnapshot(await load(out), LAUNCH)).resolves.toBeUndefined()
     })
 
     it("refuses a snapshot whose rows hold a balance, before anything is written", async () => {
@@ -392,6 +394,11 @@ describe("genesis refusals under identityCarryover", () => {
         const changed = [{ ...LAUNCH[0], staked_amount: "1001" }, LAUNCH[1]]
         expect(launchValidatorProblems(rows, changed)[0]).toContain("differs")
         expect(launchValidatorProblems(rows, [...LAUNCH, LAUNCH[0]])).toContain(`genesis validators lists ${LAUNCH[0].address} twice`)
+        const objectStake = [{ ...LAUNCH[0], staked_amount: { amount: "1000" } }, LAUNCH[1]]
+        expect(launchValidatorProblems(rows, objectStake).join()).toContain(
+            `genesis validator ${LAUNCH[0].address}: staked_amount must be a string or a number`,
+        )
+        expect(launchValidatorProblems(rows, [{ ...LAUNCH[0], status: true }, LAUNCH[1]]).join()).toContain("status must be")
     })
 })
 

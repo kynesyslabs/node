@@ -531,7 +531,7 @@ export async function openBoundGcrMain(
 ): Promise<BoundGcrMain> {
     const manifestPath = resolve(snapshotDir, "manifest.json")
     const manifestStat = await stat(manifestPath).catch(() => null)
-    if (!manifestStat || !manifestStat.isFile()) return { status: "missing" }
+    if (!manifestStat?.isFile()) return { status: "missing" }
     const manifestBytes = await readFile(manifestPath)
     const actual = createHash("sha256").update(manifestBytes).digest("hex")
     if (actual !== manifestSha256) return { status: "mismatch", manifestSha256: actual }

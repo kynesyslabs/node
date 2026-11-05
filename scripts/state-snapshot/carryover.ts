@@ -33,6 +33,7 @@ import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 
 import { osDenominationApplied } from "../../src/libs/blockchain/genesis/carryover"
+import { compareCodeUnits } from "../../src/libs/crypto/canonicalJson"
 import {
     readFileSinglePass,
     verifySnapshot,
@@ -92,13 +93,13 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
         const stakedAmount = v.staked_amount
         const firstSeen = v.first_seen
         const validAt = v.valid_at
+        if (typeof address !== "string" || !/^0x[0-9a-f]{64}$/.test(address)) {
+            throw new Error(`${where}: address must be lowercase 0x + 64 hex`)
+        }
         for (const name of ["unstake_requested_at", "unstake_available_at"] as const) {
             if (v[name] !== undefined && v[name] !== null) {
                 throw new Error(`${where} (${address}): ${name} must be null for a launch validator`)
             }
-        }
-        if (typeof address !== "string" || !/^0x[0-9a-f]{64}$/.test(address)) {
-            throw new Error(`${where}: address must be lowercase 0x + 64 hex`)
         }
         if (seen.has(address)) throw new Error(`${where}: ${address} listed twice`)
         seen.add(address)
@@ -108,7 +109,7 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
         if (connectionUrl !== null && (typeof connectionUrl !== "string" || connectionUrl === "")) {
             throw new Error(`${where} (${address}): connection_url must be null or a non-empty string`)
         }
-        if (typeof stakedAmount !== "string" || !/^(0|[1-9][0-9]*)$/.test(stakedAmount)) {
+        if (typeof stakedAmount !== "string" || !/^(0|[1-9]\d*)$/.test(stakedAmount)) {
             throw new Error(`${where} (${address}): staked_amount must be a decimal string`)
         }
         for (const [name, value] of [["first_seen", firstSeen], ["valid_at", validAt]] as const) {
@@ -128,7 +129,7 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
             unstake_available_at: null,
         }
     })
-    return rows.sort((a, b) => (a.address < b.address ? -1 : a.address > b.address ? 1 : 0))
+    return rows.sort((a, b) => compareCodeUnits(a.address, b.address))
 }
 
 /**
@@ -296,8 +297,10 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-    main().catch(err => {
+    try {
+        await main()
+    } catch (err) {
         console.error(err instanceof Error ? err.message : String(err))
         process.exit(1)
-    })
+    }
 }

@@ -21,6 +21,7 @@
 import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
+import { compareCodeUnits } from "src/libs/crypto/canonicalJson"
 import { maxRowsPerInsert } from "src/libs/blockchain/chainDb"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
@@ -250,7 +251,7 @@ async function insertGcrMainStream(
     await flushAssigned(true)
 
     if (carryover && identityKeys.size > 0) {
-        const rows = [...identityKeys].sort().map(identityKey => ({ identityKey }))
+        const rows = [...identityKeys].sort(compareCodeUnits).map(identityKey => ({ identityKey }))
         const chunkSize = maxRowsPerInsert(em, GenesisImportedIdentity)
         for (let i = 0; i < rows.length; i += chunkSize) {
             await em

@@ -10,6 +10,7 @@
 
 import { createHash } from "node:crypto"
 
+import { compareCodeUnits } from "@/libs/crypto/canonicalJson"
 import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
 import { GenesisRefusal } from "./genesisPin"
 import type {
@@ -114,30 +115,23 @@ function walletLists(
     return out
 }
 
-/**
- * The keys of every identity an account row carries, for the identities that
- * can earn a first-link award. Sorted and without duplicates.
- */
-export function importedIdentityKeys(identities: unknown): string[] {
-    const keys = new Set<string>()
-    const add = (key: string | null) => {
-        if (key !== null) keys.add(key)
-    }
-    if (!isRecord(identities)) return []
+type AddKey = (key: string | null) => void
 
-    const web2 = identities.web2
-    if (isRecord(web2)) {
-        for (const [context, list] of Object.entries(web2)) {
-            if (!WEB2_TYPES.has(context)) continue
-            for (const id of entries(list)) {
-                add(
-                    firstConnectionKey(context as FirstConnectionType, {
-                        userId: id.userId as string,
-                    }),
-                )
-            }
+function addWeb2Keys(web2: unknown, add: AddKey): void {
+    if (!isRecord(web2)) return
+    for (const [context, list] of Object.entries(web2)) {
+        if (!WEB2_TYPES.has(context)) continue
+        for (const id of entries(list)) {
+            add(
+                firstConnectionKey(context as FirstConnectionType, {
+                    userId: id.userId as string,
+                }),
+            )
         }
     }
+}
+
+function addWalletKeys(identities: Record<string, unknown>, add: AddKey): void {
     for (const [root, type] of [
         ["xm", "web3"],
         ["nomis", "nomis"],
@@ -150,6 +144,9 @@ export function importedIdentityKeys(identities: unknown): string[] {
             }
         }
     }
+}
+
+function addDomainAndPassportKeys(identities: Record<string, unknown>, add: AddKey): void {
     for (const id of entries(identities.ud)) {
         if (typeof id.domain === "string") add(firstConnectionKey("ud", { domain: id.domain }))
     }
@@ -158,7 +155,22 @@ export function importedIdentityKeys(identities: unknown): string[] {
             add(firstConnectionKey("humanpassport", { address: id.address }))
         }
     }
-    return [...keys].sort()
+}
+
+/**
+ * The keys of every identity an account row carries, for the identities that
+ * can earn a first-link award. Sorted and without duplicates.
+ */
+export function importedIdentityKeys(identities: unknown): string[] {
+    if (!isRecord(identities)) return []
+    const keys = new Set<string>()
+    const add: AddKey = key => {
+        if (key !== null) keys.add(key)
+    }
+    addWeb2Keys(identities.web2, add)
+    addWalletKeys(identities, add)
+    addDomainAndPassportKeys(identities, add)
+    return [...keys].sort(compareCodeUnits)
 }
 
 /** Refuses an account row that would bring a balance over. */
@@ -216,20 +228,83 @@ type ComparableValidator = {
     unstake_available_at: number | null
 }
 
+/**
+ * The text of a value written as a JSON string or number. Anything else
+ * (an object, an array, a boolean) has no text a stake or status could mean,
+ * so it is refused instead of compared as "[object Object]" or "true".
+ */
+function scalarText(value: unknown, field: string): string {
+    if (typeof value === "string") return value
+    if (typeof value === "number" || typeof value === "bigint") return String(value)
+    throw new GenesisRefusal(`${field} must be a string or a number, got ${JSON.stringify(value) ?? typeof value}`)
+}
+
 function comparable(v: Record<string, unknown>): ComparableValidator {
     const num = (x: unknown) => (x === null || x === undefined ? null : Number(x))
     return {
-        status: v.status === null || v.status === undefined ? null : String(v.status),
+        status: v.status === null || v.status === undefined ? null : scalarText(v.status, "status"),
         connection_url:
             typeof v.connection_url === "string" && v.connection_url !== ""
                 ? v.connection_url
                 : null,
-        staked_amount: String(v.staked_amount),
+        staked_amount: scalarText(v.staked_amount, "staked_amount"),
         first_seen: num(v.first_seen),
         valid_at: num(v.valid_at),
         unstake_requested_at: num(v.unstake_requested_at),
         unstake_available_at: num(v.unstake_available_at),
     }
+}
+
+/** `comparable`, with a refused value reported as a problem instead of thrown. */
+function comparableOrProblem(
+    v: Record<string, unknown>,
+    where: string,
+    problems: string[],
+): ComparableValidator | null {
+    try {
+        return comparable(v)
+    } catch (e) {
+        problems.push(`${where}: ${(e as Error).message}`)
+        return null
+    }
+}
+
+function snapshotValidators(
+    snapshotRows: ValidatorSeed[],
+    problems: string[],
+): Map<string, ComparableValidator> {
+    const fromSnapshot = new Map<string, ComparableValidator>()
+    for (const r of snapshotRows) {
+        const v = comparableOrProblem(r, `validators.jsonl row ${r.address}`, problems)
+        if (v) fromSnapshot.set(r.address, v)
+    }
+    // A launch validator that is already unstaking would leave the set
+    // within its first blocks.
+    for (const [address, v] of fromSnapshot) {
+        if (v.unstake_requested_at !== null || v.unstake_available_at !== null) {
+            problems.push(`validators.jsonl row ${address} has an unstake under way`)
+        }
+    }
+    return fromSnapshot
+}
+
+function genesisValidatorMap(
+    genesisValidators: unknown[],
+    problems: string[],
+): Map<string, ComparableValidator> {
+    const fromGenesis = new Map<string, ComparableValidator>()
+    for (const v of genesisValidators) {
+        if (!isRecord(v) || typeof v.address !== "string") {
+            problems.push("genesis validators holds an entry without an address")
+            continue
+        }
+        if (fromGenesis.has(v.address)) {
+            problems.push(`genesis validators lists ${v.address} twice`)
+        }
+        const g = comparableOrProblem(v, `genesis validator ${v.address}`, problems)
+        if (g) fromGenesis.set(v.address, g)
+    }
+    return fromGenesis
 }
 
 /**
@@ -244,26 +319,9 @@ export function launchValidatorProblems(
     genesisValidators: unknown,
 ): string[] {
     const problems: string[] = []
-    const fromSnapshot = new Map(snapshotRows.map(r => [r.address, comparable(r)]))
-    // A launch validator that is already unstaking would leave the set
-    // within its first blocks.
-    for (const [address, v] of fromSnapshot) {
-        if (v.unstake_requested_at !== null || v.unstake_available_at !== null) {
-            problems.push(`validators.jsonl row ${address} has an unstake under way`)
-        }
-    }
+    const fromSnapshot = snapshotValidators(snapshotRows, problems)
     if (!Array.isArray(genesisValidators) || genesisValidators.length === 0) return problems
-    const fromGenesis = new Map<string, ComparableValidator>()
-    for (const v of genesisValidators) {
-        if (!isRecord(v) || typeof v.address !== "string") {
-            problems.push("genesis validators holds an entry without an address")
-            continue
-        }
-        if (fromGenesis.has(v.address)) {
-            problems.push(`genesis validators lists ${v.address} twice`)
-        }
-        fromGenesis.set(v.address, comparable(v))
-    }
+    const fromGenesis = genesisValidatorMap(genesisValidators, problems)
     for (const [address, g] of fromGenesis) {
         const s = fromSnapshot.get(address)
         if (!s) {
@@ -328,7 +386,7 @@ export type ImportedIdentitySummary = { count: number; digest: string }
 
 /** Count and sha256 of the sorted keys, one per line. */
 export function importedIdentityDigest(keys: Iterable<string>): ImportedIdentitySummary {
-    const sorted = [...new Set(keys)].sort()
+    const sorted = [...new Set(keys)].sort(compareCodeUnits)
     return {
         count: sorted.length,
         digest: createHash("sha256").update(sorted.join("\n")).digest("hex"),
