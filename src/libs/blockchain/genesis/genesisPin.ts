@@ -149,6 +149,8 @@ export interface FreshGenesisInput {
     restore: boolean
     /** sha256 of the raw manifest.json bytes, or null when no snapshot is present. */
     snapshotManifestHash: string | null
+    /** identityCarryover is scheduled at height 0. */
+    carryoverAtGenesis?: boolean
 }
 
 /**
@@ -171,6 +173,14 @@ export function freshGenesisProblems(input: FreshGenesisInput): string[] {
                 `snapshot manifest hashes to ${input.snapshotManifestHash}, genesis declares ${declared}`,
             )
         }
+    }
+    // Without a declared snapshot the legacy balances path runs and the user
+    // data the carryover genesis promises never reaches the chain.
+    if (input.carryoverAtGenesis === true && declared === null) {
+        problems.push(
+            "identityCarryover is active at genesis but the genesis does not declare " +
+                "snapshot.manifestSha256",
+        )
     }
 
     if (input.pin === "") return problems

@@ -24,7 +24,7 @@ decided by the genesis owners and filled in once.
 |---|---|---|
 | `properties.shardSize` | `10` | the launch committee: quorum 7, at most 3 seats lost |
 | `mutables.minBlocksForValidationOnlineStatus` | `4` | same as testnet |
-| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs` | `activationHeight: 0` | mainnet starts with every safety fork on; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height |
+| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover` | `activationHeight: 0` | mainnet starts with every safety fork on; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height. `identityCarryover` makes block 0 import user data without balances and refuse any other snapshot ([genesis-import.md](genesis-import.md)) |
 | `forks.xmProofBinding`, `forks.atomicWork` | `activationHeight: null` | not scheduled at launch; a later activation is a coordinated schedule change |
 | `status` | `"confirmed"` | as on testnet |
 
@@ -44,7 +44,7 @@ them equal.
 | `snapshot.manifestSha256` | `sha256sum` of the launch snapshot's `manifest.json`. Keep the field: the launch tools model block 0 on the snapshot path, and the plan check and the height-1 check both require the snapshot |
 | `balances` | the agreed allocations, `[["0x<64 hex address>", "<amount>"], ...]`, each address lowercase. An entry replaces the balance an address has in the snapshot, it is not added to it, so write the whole balance the account starts with, never a top-up. The amount is in the snapshot's unit: these balances are written over the snapshot before block 0 applies `osDenomination`. Over a DEM snapshot (its manifest's `fork_state` has no applied `osDenomination`) enter DEM, and block 0 multiplies it by 10^9 with every other balance; over a snapshot already in OS units enter OS (1 DEM = 10^9 OS) |
 | `timestamp` | the launch time in seconds as a positive integer string. Block 0 is built from it, so the block 0 hash is known only once it is fixed |
-| `validators` | the launch validators, one object each: `address`, `status` `"2"`, `connection_url`, `staked_amount`, `first_seen` `0`, `valid_at` `0`. `staked_amount` is in OS units (1 DEM = 10^9 OS): the node seeds this list after block 0 applies `osDenomination` and stores each stake as written. When the snapshot carries `validators.jsonl`, the node seeds from that file instead and ignores this list |
+| `validators` | the launch validators, one object each: `address`, `status` `"2"`, `connection_url`, `staked_amount`, `first_seen` `0`, `valid_at` `0`. `staked_amount` is in OS units (1 DEM = 10^9 OS): the node seeds this list after block 0 applies `osDenomination` and stores each stake as written. When the snapshot carries `validators.jsonl`, the node seeds from that file instead. Under `identityCarryover` the launch snapshot is built from this list (`bun run snapshot:carryover --validators mainnet/genesis.json`), and block 0 refuses a snapshot whose `validators.jsonl` differs from it |
 
 ### Forks this build does not know yet
 

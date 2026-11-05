@@ -9,6 +9,8 @@ import { IncentiveManager } from "../IncentiveManager"
 import { safeGCRSave, isFirstConnection } from "./utils"
 import { sameWeb2UserId } from "@/libs/identity/web2UserId"
 import { web2CanonicalIdsActiveAtApply } from "@/forks/web2ProofBindingGate"
+import { identityCarryoverActiveAtApply } from "@/forks/identityCarryoverGate"
+import { selectWeb2Unlink } from "@/libs/identity/web2Unlink"
 
 export async function applyWeb2IdentityAdd(
     editOperation: any,
@@ -164,35 +166,54 @@ export async function applyWeb2IdentityRemove(
     editOperation: any,
     accountGCR: GCRMain,
 ): Promise<GCRResult> {
-    const { context, username } = editOperation.data as {
+    const { context, username, userId } = editOperation.data as {
         context: string
         username: string
+        userId?: unknown
     }
 
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     accountGCR.identities.web2[context] =
         accountGCR.identities.web2[context] || []
 
-    const exists = accountGCR.identities.web2[context].some(
-        (id: Web2GCRData["data"]) => id.username === username,
-    )
-
-    if (!exists) {
-        return { success: false, message: "Identity not found" }
-    }
-
     // Store the identity being removed for GitHub and Telegram unlinking (need userId)
     let removedIdentity: Web2GCRData["data"] | null = null
-    if (context === "github" || context === "telegram") {
-        removedIdentity =
-            accountGCR.identities.web2[context].find(
-                (id: Web2GCRData["data"]) => id.username === username,
-            ) || null
-    }
 
-    accountGCR.identities.web2[context] = accountGCR.identities.web2[
-        context
-    ].filter((id: Web2GCRData["data"]) => id.username !== username)
+    if (identityCarryoverActiveAtApply()) {
+        const links: Web2GCRData["data"][] = accountGCR.identities.web2[context]
+        const pick = selectWeb2Unlink(
+            links,
+            { username, userId },
+            "Identity not found",
+        )
+        if ("message" in pick) {
+            return { success: false, message: pick.message }
+        }
+        removedIdentity = pick.removed
+        const drop = new Set(pick.indexes)
+        accountGCR.identities.web2[context] = links.filter(
+            (_, i) => !drop.has(i),
+        )
+    } else {
+        const exists = accountGCR.identities.web2[context].some(
+            (id: Web2GCRData["data"]) => id.username === username,
+        )
+
+        if (!exists) {
+            return { success: false, message: "Identity not found" }
+        }
+
+        if (context === "github" || context === "telegram") {
+            removedIdentity =
+                accountGCR.identities.web2[context].find(
+                    (id: Web2GCRData["data"]) => id.username === username,
+                ) || null
+        }
+
+        accountGCR.identities.web2[context] = accountGCR.identities.web2[
+            context
+        ].filter((id: Web2GCRData["data"]) => id.username !== username)
+    }
 
     async function deductPoints() {
         /**
