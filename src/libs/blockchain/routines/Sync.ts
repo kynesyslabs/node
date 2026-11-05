@@ -18,16 +18,20 @@ import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
 import log from "src/utilities/logger"
-import { verifyBlock } from "../validation/verifyBlock"
+import { type BlockVerification, verifyBlock } from "../validation/verifyBlock"
 import {
     SyncBlockRejectedError,
+    checkResultsAgainstNextBlock,
     localStatuses,
+    pinResultCodes,
     pinFailureCodes,
     planBlockOutcome,
     statusDisagreements,
     verifyBlockTransactions,
     verifyNativeTablesHashes,
 } from "./syncVerification"
+import { isForkActive } from "@/forks"
+import { FINALITY_FORK, repairParentResultCodes } from "../finality/commitments"
 import { recordSyncedBlock } from "src/libs/consensus/v2/routines/stallDetection"
 import {
     RPCRequest,
@@ -655,7 +659,7 @@ export async function syncBlock(
         return true
     }
 
-    const verdict = await verifyBlock(block as never)
+    const verdict = await verifySyncedBlock(block, peer, fetchDeadline)
     if (!verdict.valid) {
         log.error(
             `[syncBlock] Rejecting synced block ${block.number} (${block.hash}): ${verdict.reason}`,
@@ -961,6 +965,8 @@ async function resolveForkedBlock(
  * Verify attrs, apply GCR edits and insert a synced block. Shared by
  * the batch loop and the fork-recovery path.
  *
+ * @param next The block after it, when the batch holds it: its result
+ *   root is checked against this block's results before they are stored
  * @returns False if the block was already inserted concurrently
  * @throws SyncBlockRejectedError when the served block disagrees with what
  *   the quorum signed or with the outcome of applying it here
@@ -968,6 +974,7 @@ async function resolveForkedBlock(
 async function applySyncedBlock(
     block: Block,
     blockTxs: Transaction[],
+    next?: Block,
 ): Promise<boolean> {
     await assertNoUnreconciledGcrState()
 
@@ -981,7 +988,7 @@ async function applySyncedBlock(
     await mergePeerlist(block)
     await verifyBlockAttrs(block, blockTxs)
 
-    await applyVerifiedBlock(block, blockTxs)
+    await applyVerifiedBlock(block, blockTxs, next)
 
     log.info(
         `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
@@ -1063,6 +1070,18 @@ export async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
         .getRawMany<{ hash: string; block: number | string }>()
     const hashes = [...new Set(rows.map(r => r.hash))]
     const blocks = [...new Set(rows.map(r => Number(r.block)))]
+
+    // Under nonceIntegrity a failed transaction also changed state (its fee
+    // and nonce) and is stamped too, but a rollback replays every edit of a
+    // stamped body as if it had applied. Undoing it from bodies alone would
+    // corrupt state, so such a block needs a resync instead.
+    const charging = blocks.find(block => isForkActive("nonceIntegrity", block - 1))
+    if (charging !== undefined) {
+        log.error(
+            `[applySyncedBlock] cannot roll back orphaned GCR state: block ${charging} was applied under nonceIntegrity, where the bodies do not say which transactions failed`,
+        )
+        return false
+    }
 
     const txs = await Mempool.getTransactionsByHashes(hashes)
     const found = new Set(txs.map(tx => tx.hash))
@@ -1149,12 +1168,16 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
  * transaction does on this node. The apply is held in memory until every
  * status agrees, then committed in the block's own database transaction, so
  * a rejected block and a failed insert both leave the state untouched.
+ * With the next block in hand, its result root must match the results about
+ * to be stored: once stored, a status is final and a failure code changes
+ * only by repair against a later verified block.
  *
  * @throws SyncBlockRejectedError when the block must not be applied
  */
 async function applyVerifiedBlock(
     block: Block,
     txs: Transaction[],
+    next?: Block,
 ): Promise<void> {
     await verifyBlockTransactions(block, txs)
     await verifyNativeTablesHashes(block)
@@ -1174,6 +1197,10 @@ async function applyVerifiedBlock(
         }
 
         pinFailureCodes(txs, plan)
+        pinResultCodes(txs, plan, block.number)
+        // Rejects only what this peer served: the caller cools it down and
+        // syncs the block from another one.
+        await checkResultsAgainstNextBlock(block, txs, next)
         await insertBlockOrHalt(block, txs, outcome.pending)
     })
 }
@@ -1200,6 +1227,89 @@ async function insertBlockOrHalt(
     }
 
     await recordSyncedBlock(block)
+}
+
+/**
+ * verifyBlock, repairing the stored failure codes of the parent when they
+ * are all `block` disagrees with. The parent may have been stored at the
+ * head with no child to check its codes against; `block`, once its quorum
+ * and everything else verify, says which codes the network committed, and
+ * the codes `peer` serves are kept only if they give exactly that root.
+ */
+async function verifySyncedBlock(
+    block: Block,
+    peer: Peer | undefined,
+    fetchDeadline?: number,
+): Promise<BlockVerification> {
+    const verdict = await verifyBlock(block as never)
+    if (verdict.valid || !verdict.parentResultsMismatch || !peer) return verdict
+
+    const rest = await verifyBlock(block as never, undefined, {
+        skipParentResults: true,
+    })
+    const parent = rest.valid
+        ? await Chain.getBlockByNumber(block.number - 1)
+        : null
+    const committed = (block.content as unknown as Record<string, unknown>)
+        ?.parent_results_root
+    if (!parent || typeof committed !== "string") return verdict
+
+    let repaired: number | null
+    try {
+        const served = await askTxsForBlock(parent as never, peer, fetchDeadline)
+        repaired = await repairParentResultCodes(parent, committed, served)
+    } catch (e) {
+        log.warning(
+            `[sync] could not repair the results of block ${parent.number} from ${peer.identity}: ${e instanceof Error ? e.message : String(e)}`,
+        )
+        return verdict
+    }
+    if (repaired === null) return verdict
+    log.warning(
+        `[sync] rewrote ${repaired} failure code(s) of block ${parent.number} to the results block ${block.number} commits to`,
+    )
+    return await verifyBlock(block as never)
+}
+
+/**
+ * Block `parent.number + 1` as `peer` serves it, for checking the results
+ * `parent` is about to store. They depend on transaction attrs the peer
+ * serves unsigned, so while `peer` claims to be past `parent` it is not
+ * stored without its child in hand; a block stored at the head has its
+ * failure codes repaired when its child arrives. Only the asked peer's own
+ * claim counts: another peer's self-attested height would leave an honest
+ * peer at `parent` unable to sync it, and discredit it for the miss.
+ *
+ * @returns the child; undefined when none is needed or `peer` has none yet;
+ *   null when `peer` claims one but did not serve it
+ */
+async function fetchChildBlock(
+    peer: Peer,
+    parent: Block,
+): Promise<Block | null | undefined> {
+    const number = parent.number + 1
+    if (!isForkActive(FINALITY_FORK, number)) return undefined
+
+    const response = await peer.longCall(
+        {
+            method: "nodeCall",
+            params: [
+                {
+                    message: "getBlocks",
+                    data: { start: number, limit: 1 },
+                    muid: null,
+                },
+            ],
+        },
+        true,
+        { protocol: "http", sleepTime: 1000, retries: 3, allowedCodes: [404] },
+    )
+    const served =
+        response.result === 200 && Array.isArray(response.response)
+            ? (response.response as Block[]).find(b => b?.number === number)
+            : undefined
+    if (served) return served
+    return peerHeight(peer) > parent.number ? null : undefined
 }
 
 /**
@@ -1283,7 +1393,17 @@ async function batchDownloadBlocks(
     // Process each block in order. Order matters for the height-stable
     // verify: each block's validator set (valid_at <= number-1) is already
     // persisted by the time the next block is checked.
-    for (const block of blocks.sort((a, b) => a.number - b.number)) {
+    const sorted = blocks.toSorted((a, b) => a.number - b.number)
+    const tailChild = await fetchChildBlock(peer, sorted.at(-1))
+    // A tail left out still serves as the child of the block before it.
+    const ordered = tailChild === null ? sorted.slice(0, -1) : sorted
+    if (tailChild === null) {
+        log.warning(
+            `[batchDownloadBlocks] ${peer.identity} did not serve block ${sorted.at(-1).number + 1}; ` +
+                `leaving block ${sorted.at(-1).number} to a peer that can`,
+        )
+    }
+    for (const [index, block] of ordered.entries()) {
         if (getSharedState.isShuttingDown) {
             log.info(
                 `[batchDownloadBlocks] Shutdown in progress, stopping before block ${block.number}`,
@@ -1297,7 +1417,7 @@ async function batchDownloadBlocks(
 
         // Hash + signature quorum on EACH historical block before insert
         // (height-stable signer set).
-        const verdict = await verifyBlock(block as never)
+        const verdict = await verifySyncedBlock(block, peer)
         if (!verdict.valid) {
             log.error(
                 `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}): ${verdict.reason}`,
@@ -1317,7 +1437,19 @@ async function batchDownloadBlocks(
             }
 
             try {
-                await applySyncedBlock(recovered.block, recovered.txs)
+                const child = await fetchChildBlock(
+                    recovered.peer,
+                    recovered.block,
+                )
+                // Without its child the block is synced on the next round
+                // from the recovery source, together with the child
+                if (child !== null) {
+                    await applySyncedBlock(
+                        recovered.block,
+                        recovered.txs,
+                        child,
+                    )
+                }
             } catch (error) {
                 if (!(error instanceof SyncBlockRejectedError)) throw error
                 log.error(
@@ -1340,7 +1472,11 @@ async function batchDownloadBlocks(
 
         let inserted: boolean
         try {
-            inserted = await applySyncedBlock(block, blockTxs)
+            inserted = await applySyncedBlock(
+                block,
+                blockTxs,
+                sorted[index + 1] ?? tailChild,
+            )
         } catch (error) {
             if (!(error instanceof SyncBlockRejectedError)) throw error
             log.error(
@@ -1354,6 +1490,9 @@ async function batchDownloadBlocks(
             return false
         }
     }
+
+    // The caller moves on to a peer that can serve the child
+    if (tailChild === null) return false
 
     log.debug(
         `[batchDownloadBlocks] Successfully processed batch of ${blocks.length} blocks`,

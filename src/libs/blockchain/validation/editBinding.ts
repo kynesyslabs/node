@@ -39,6 +39,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 import { denomination } from "@kynesyslabs/demosdk"
+import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
@@ -98,6 +99,22 @@ function toWireShape(edits: GCREdit[], postFork: boolean): GCREdit[] {
     return parsed.gcr_edits ?? []
 }
 
+/**
+ * The gas edit every SDK builder ships for a transaction of `type` sent by
+ * `account`, in the chain's wire shape; null for the types that pay none.
+ * Derived, not read from the shipped edits: without editBinding a sender
+ * could leave it out.
+ */
+export async function derivedGasEdit(
+    type: string,
+    account: string,
+    postFork: boolean,
+): Promise<GCREdit | null> {
+    if (type === "identity" || type === "d402_payment") return null
+    const gas = (await GCRGeneration.createGasEdit(account, "", false)) as GCREdit
+    return toWireShape([gas], postFork)[0] ?? null
+}
+
 async function osDenominationActive(): Promise<boolean> {
     return isForkActive("osDenomination", await Chain.getLastBlockNumber())
 }
@@ -108,12 +125,25 @@ async function osDenominationActive(): Promise<boolean> {
  * shape). A fork activating at height H binds the block applied on tip H,
  * which is block H + 1.
  */
-export async function editBindingState(): Promise<{ active: boolean; postFork: boolean }> {
+export async function editBindingState(): Promise<{
+    active: boolean
+    postFork: boolean
+    nonceBound: boolean
+}> {
     const tip = await Chain.getLastBlockNumber()
     return {
         active: isForkActive("editBinding", tip),
         postFork: isForkActive("osDenomination", tip),
+        nonceBound: isForkActive("nonceIntegrity", tip),
     }
+}
+
+/**
+ * Whether the `nonceIntegrity` rules hold for the block applied on the
+ * current tip, read from the same source as `editBinding`.
+ */
+export async function nonceIntegrityActive(): Promise<boolean> {
+    return isForkActive("nonceIntegrity", await Chain.getLastBlockNumber())
 }
 
 /**
@@ -139,7 +169,7 @@ function senderOf(tx: Transaction): string {
     return typeof content.from === "string" ? content.from : ""
 }
 
-function isAwardPointsTx(tx: Transaction): boolean {
+export function isAwardPointsTx(tx: Transaction): boolean {
     const data = tx.content?.data as unknown
     return (
         (tx.content?.type as string) === "identity" &&
@@ -343,6 +373,64 @@ export async function verifyEditsAtApply(
     return verifySenderBinding(tx)
 }
 
+/** The fields an SDK nonce edit carries; anything else was not generated. */
+const NONCE_EDIT_KEYS = new Set(["type", "operation", "account", "amount", "txhash", "isRollback"])
+
+/**
+ * Whether a transaction has to spend a nonce. Every SDK-built transaction
+ * does; the node-authored ones that carry no edits (relay batches, genesis,
+ * the node's own messages) and the incentive award do not.
+ */
+export function expectsNonceEdit(tx: Transaction): boolean {
+    const type = tx.content?.type as string
+    if (EDIT_FREE_TYPES.has(type) || isAwardPointsTx(tx)) return false
+    if (EDIT_FREE_OR_BOUND_TYPES.has(type) && (tx.content?.gcr_edits ?? []).length === 0) {
+        return false
+    }
+    return true
+}
+
+/**
+ * The nonce edit a transaction ships (`nonceIntegrity` fork): exactly one, +1
+ * on the sender's own account, not a rollback, or none for a transaction that
+ * spends no nonce. Apply adds whatever amount an edit names to whatever
+ * account it names, and a shipped rollback flag turns the add into a
+ * decrement, so the shape is bound for every type, whether or not
+ * `editBinding` binds the rest of the set.
+ */
+export function verifyNonceEditBinding(tx: Transaction): EditVerdict {
+    const edits = (tx.content?.gcr_edits ?? []) as unknown as Array<Record<string, unknown>>
+    const nonceEdits = edits.filter(e => e?.type === "nonce")
+    if (!expectsNonceEdit(tx)) {
+        return nonceEdits.length === 0
+            ? OK
+            : refuse(`${String(tx.content?.type)} transactions carry no nonce edit`)
+    }
+    if (nonceEdits.length !== 1) {
+        return refuse(`expected exactly one nonce edit, got ${nonceEdits.length}`)
+    }
+    const edit = nonceEdits[0]
+    const sender = senderOf(tx)
+    const account = sender !== "" && !sender.startsWith("0x") ? `0x${sender}` : sender
+    if (Object.keys(edit).some(k => !NONCE_EDIT_KEYS.has(k))) {
+        return refuse("nonce edit carries unexpected fields")
+    }
+    if (
+        account === "" ||
+        edit.account !== account ||
+        edit.operation !== "add" ||
+        edit.amount !== 1 ||
+        edit.isRollback !== false
+    ) {
+        return refuse("nonce edit is not +1 on the sender's account")
+    }
+    const nonce = tx.content?.nonce as unknown
+    if (typeof nonce !== "number" || !Number.isSafeInteger(nonce) || nonce < 1) {
+        return refuse("transaction nonce is not a positive integer")
+    }
+    return OK
+}
+
 /**
  * The check at gossip ingest and consensus merge.
  *
@@ -357,27 +445,19 @@ export async function verifyEditsAtApply(
  * generated from the payload alone, so the proof checked at admission is the
  * one applied), every other type the value-edit projection.
  *
+ * Under `nonceIntegrity`, on either side of `editBinding`, the nonce edit is
+ * bound as well: the value-edit projection does not look at it.
+ *
  * Fails closed: a transaction that cannot be checked is refused.
  */
 export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        const { active, postFork } = await editBindingState()
-        if (active) return await verifyEditsAtApply(tx, { postFork })
-
-        // The award cannot be regenerated by the SDK, so before the fork it
-        // keeps the value-edit projection it always had.
-        const type = tx.content?.type
-        const wholeIdentity = type === "identity" && !isAwardPointsTx(tx)
-        if (type === "native" || wholeIdentity || carriesWorkEdits(tx)) {
-            const { match } = await verifyGcrEditsMatch(tx, { expectFeeEdits: false })
-            return match ? OK : refuse("gcr_edits do not match regenerated set")
-        }
-        const { ok, unexplained } = await verifyNoUnexplainedValueEdits(tx)
-        return ok
-            ? OK
-            : refuse(
-                  `value edits with no counterpart in the regenerated set (${unexplained.join(", ")})`,
-              )
+        const { active, postFork, nonceBound } = await editBindingState()
+        const verdict = active
+            ? await verifyEditsAtApply(tx, { postFork })
+            : await verifyAdmissionEditsBeforeBinding(tx)
+        if (!verdict.ok || !nonceBound) return verdict
+        return verifyNonceEditBinding(tx)
     } catch (e) {
         return refuse(
             `gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,
@@ -385,18 +465,38 @@ export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict
     }
 }
 
+/** What admission checked before `editBinding`, kept for nodes on either side of its height. */
+async function verifyAdmissionEditsBeforeBinding(tx: Transaction): Promise<EditVerdict> {
+    // The award cannot be regenerated by the SDK, so before the fork it
+    // keeps the value-edit projection it always had.
+    const type = tx.content?.type
+    const wholeIdentity = type === "identity" && !isAwardPointsTx(tx)
+    if (type === "native" || wholeIdentity || carriesWorkEdits(tx)) {
+        const { match } = await verifyGcrEditsMatch(tx, { expectFeeEdits: false })
+        return match ? OK : refuse("gcr_edits do not match regenerated set")
+    }
+    const { ok, unexplained } = await verifyNoUnexplainedValueEdits(tx)
+    return ok
+        ? OK
+        : refuse(
+              `value edits with no counterpart in the regenerated set (${unexplained.join(", ")})`,
+          )
+}
+
 /**
  * The check a transaction submitted over RPC passes before this node reports
  * it accepted or queues it, so the node never accepts what its peers and the
  * apply step refuse.
  *
- * Inactive: nothing is checked here, because RPC intake keeps the comparison
- * it always made. `tx` must carry the edits as the sender signed them.
+ * Inactive: only the nonce edit (under `nonceIntegrity`), because RPC intake
+ * keeps the comparison it always made. `tx` must carry the edits as the
+ * sender signed them.
  */
 export async function verifyRpcEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        const { active } = await editBindingState()
-        return active ? await verifyAdmissionEdits(tx) : OK
+        const { active, nonceBound } = await editBindingState()
+        if (active) return await verifyAdmissionEdits(tx)
+        return nonceBound ? verifyNonceEditBinding(tx) : OK
     } catch (e) {
         return refuse(
             `gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,

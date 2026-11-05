@@ -321,17 +321,15 @@ afterEach(async () => {
 describe("restoreE2E_with_forks — genesis pre-apply (P7)", () => {
     // Two fork configs used across the suite:
     //
-    //   GENESIS_FORKS_RUN  — activationHeight=1 on both forks. Used to verify
+    //   GENESIS_FORKS_RUN  — osDenomination active at block 0. Used to verify
     //     that applyForksAtGenesis actually runs both migrations (balances × 1e9,
     //     burn/treasury accounts created, fork_state rows written).
     //
-    //   GENESIS_FORKS_NULL — activationHeight=null on both forks. Matches the
-    //     P7 production genesis.json shape. applyForksAtGenesis runs both
-    //     migrations unconditionally when called at genesis regardless of
-    //     activationHeight; the height only governs the chainBlocks block-N hook
-    //     (which stays dormant when null). This is verified in the second test.
+    //   GENESIS_FORKS_NULL — activationHeight=null on both forks. osDenomination
+    //     follows its height, as the block hook does, so it stays off; the
+    //     gasFeeSeparation entry is still applied.
     const GENESIS_FORKS_RUN: GenesisForkConfig = {
-        osDenomination: { activationHeight: 1 },
+        osDenomination: { activationHeight: 0 },
         gasFeeSeparation: {
             activationHeight: 1,
             treasuryAddress: TREASURY,
@@ -346,7 +344,7 @@ describe("restoreE2E_with_forks — genesis pre-apply (P7)", () => {
         },
     }
 
-    it("full genesis flow (non-null heights): restore + seedValidators + applyForksAtGenesis in one tx", async () => {
+    it("full genesis flow (osDenomination at 0): restore + seedValidators + applyForksAtGenesis in one tx", async () => {
         await writeTestSnapshot(snapshotDir)
         process.env.DEMOS_SNAPSHOT_DIR = snapshotDir
 
@@ -414,7 +412,7 @@ describe("restoreE2E_with_forks — genesis pre-apply (P7)", () => {
         }
     })
 
-    it("P7 production config (null activationHeight): applyForksAtGenesis still runs both migrations unconditionally at genesis", async () => {
+    it("null osDenomination height: no migration at genesis, the gasFeeSeparation entry still applied", async () => {
         await writeTestSnapshot(snapshotDir)
         process.env.DEMOS_SNAPSHOT_DIR = snapshotDir
 
@@ -428,12 +426,9 @@ describe("restoreE2E_with_forks — genesis pre-apply (P7)", () => {
             return applyForksAtGenesis(em, GENESIS_FORKS_NULL)
         })
 
-        // applyForksAtGenesis runs both migrations unconditionally.
-        // The null activationHeight only governs the block-N chainBlocks hook (which stays dormant).
-        expect(report.osDenominationApplied).toBe(true)
+        expect(report.osDenominationApplied).toBe(false)
         expect(report.gasFeeSeparationApplied).toBe(true)
 
-        // Balances scaled by 1e9
         const gcrRows: Array<{ pubkey: string; balance: string }> =
             await ds.query(
                 "SELECT pubkey, balance FROM gcr_main WHERE pubkey IN (?, ?, ?, ?, ?) ORDER BY pubkey",
@@ -441,14 +436,13 @@ describe("restoreE2E_with_forks — genesis pre-apply (P7)", () => {
             )
         const balMap = new Map(gcrRows.map(r => [r.pubkey, BigInt(r.balance)]))
         for (const f of GCR_FIXTURES) {
-            expect(balMap.get(f.pubkey)).toBe(f.balance * 1_000_000_000n)
+            expect(balMap.get(f.pubkey)).toBe(f.balance)
         }
 
-        // Both fork_state rows written
         const forkRows: Array<{ fork_name: string }> = await ds.query(
             "SELECT fork_name FROM fork_state ORDER BY fork_name",
         )
-        expect(forkRows).toHaveLength(2)
+        expect(forkRows.map(r => r.fork_name)).toEqual([GAS_FORK_NAME])
     })
 
     it("post-balance-sum check applies after genesis (not after block 1)", async () => {

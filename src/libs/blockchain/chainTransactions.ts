@@ -369,3 +369,35 @@ export async function insertTransactionsFromSync(
         return false
     }
 }
+
+/**
+ * Sets the failure code of transactions stored as failed with block
+ * `blockNumber`, all in one database transaction; a null code removes it.
+ * Any other row is left alone.
+ */
+export async function setFailureCodes(
+    blockNumber: number,
+    codes: Map<string, string | null>,
+): Promise<void> {
+    if (codes.size === 0) return
+    const datasourceModule = (await import("src/model/datasource")).default
+    const dataSource = (await datasourceModule.getInstance()).getDataSource()
+    await dataSource.transaction(async em => {
+        const rows = await em.find(Transactions, {
+            where: {
+                hash: In([...codes.keys()]),
+                blockNumber,
+                status: TRANSACTION_STATUS.FAILED,
+            },
+        })
+        for (const row of rows) {
+            const { code: _old, ...rest } = row.attrs ?? {}
+            const code = codes.get(row.hash)
+            await em.update(
+                Transactions,
+                { id: row.id },
+                { attrs: code === null ? rest : { ...rest, code } },
+            )
+        }
+    })
+}

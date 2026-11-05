@@ -214,6 +214,8 @@ export function loadConfig(): Readonly<AppConfig> {
                     EnvKey.FORK_SCHEDULE_MISMATCH_POLICY,
                     d.core.forkScheduleMismatchPolicy,
                 ),
+                // Read as getShard reads it: only the exact string switches it on
+                process.env[EnvKey.DEMOS_REQUIRE_VALIDATORS] === "true",
             ),
         },
 
@@ -417,6 +419,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.DEBUG_ASSERTIONS_ENABLED,
                 d.debug.assertionsEnabled,
             ),
+            storageRootRecompute: envBool(
+                EnvKey.DEBUG_STORAGE_ROOT_RECOMPUTE,
+                d.debug.storageRootRecompute,
+            ),
         },
 
         identity: {
@@ -506,12 +512,17 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.gossip.heightsIntervalMs,
             ),
             keyFile: envStr(EnvKey.GOSSIP_KEY_FILE, d.gossip.keyFile),
+            ipcConnectTimeoutMs: envInt(
+                EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS,
+                d.gossip.ipcConnectTimeoutMs,
+            ),
         },
     }
 
     assertConsensusTimingSane(config)
     assertL2psLimitsSane(config)
     assertRpcLimitsSane(config)
+    assertGossipSane(config)
 
     return deepFreeze(config)
 }
@@ -519,11 +530,23 @@ export function loadConfig(): Readonly<AppConfig> {
 /**
  * An unrecognised policy must stop the node: falling back to a default would
  * silently give an operator who typed "abstian" the opposite of what they meant.
+ *
+ * `warn` is for devnets and testnets. A mainnet validator (the one setting
+ * that marks it, DEMOS_REQUIRE_VALIDATORS=true) that kept voting on another
+ * fork schedule inside the pre-activation window would sign blocks its
+ * peers reject at the activation height, so the pair is refused.
  */
 function parseForkScheduleMismatchPolicy(
     raw: string,
+    requireValidators: boolean,
 ): ForkScheduleMismatchPolicy {
     const value = raw.trim().toLowerCase()
+    if (value === "warn" && requireValidators) {
+        throw new Error(
+            "[config] FORK_SCHEDULE_MISMATCH_POLICY=warn is for devnets and testnets; " +
+                "a mainnet validator (DEMOS_REQUIRE_VALIDATORS=true) runs abstain",
+        )
+    }
     if (value === "abstain" || value === "warn") return value
     throw new Error(
         `[config] FORK_SCHEDULE_MISMATCH_POLICY must be "abstain" or "warn" (got "${raw}")`,
@@ -576,6 +599,20 @@ function assertConsensusTimingSane(config: AppConfig): void {
     if (problems.length > 0) {
         throw new Error(
             `[config] invalid consensus timing configuration:\n  - ${problems.join("\n  - ")}`,
+        )
+    }
+}
+
+/**
+ * A non-positive IPC connect timeout fails every sidecar launch before the
+ * child can bind its socket, so gossip would stay degraded forever with a log
+ * that blames IPC instead of the setting.
+ */
+function assertGossipSane(config: AppConfig): void {
+    const { ipcConnectTimeoutMs } = config.gossip
+    if (!Number.isInteger(ipcConnectTimeoutMs) || ipcConnectTimeoutMs <= 0) {
+        throw new Error(
+            `[config] GOSSIP_IPC_CONNECT_TIMEOUT_MS must be an integer > 0 (got ${ipcConnectTimeoutMs})`,
         )
     }
 }

@@ -12,6 +12,7 @@ import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
 import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { getSharedState } from "@/utilities/sharedState"
+import { storageProgramsRoot } from "@/libs/blockchain/finality/storageRoot"
 
 /**
  * Generates a SHA-256 hash for tables that use 'publicKey' as their identifier.
@@ -115,11 +116,19 @@ export default async function hashGCRTables(
     const hashes = {
         native_subnets_txs: subnetsTxsHash,
         native_tlsnotary: tlsnotaryHash,
-    } as NativeTablesHashes & { native_atomic_work?: string }
+    } as NativeTablesHashes & {
+        native_atomic_work?: string
+        native_storage_programs?: string
+    }
     // Only from the fork on: an extra key changes the hash of every block
     // that carries it, and blocks before the fork must keep theirs.
     if (isForkActive("atomicWork", blockHeight)) {
         hashes.native_atomic_work = await hashAtomicWorkTables()
+    }
+    // A provable root rather than a flat hash: a client checks one program
+    // against it without the rest of the table.
+    if (isForkActive("finalityProofs", blockHeight)) {
+        hashes.native_storage_programs = await storageProgramsRoot()
     }
     return hashes
 }

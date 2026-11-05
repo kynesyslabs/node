@@ -64,6 +64,10 @@ export default class Chain {
         return blockOps.getLastBlock()
     }
 
+    static async getLastStoredBlock(): Promise<Blocks | null> {
+        return blockOps.getLastStoredBlock()
+    }
+
     static async getLastBlockNumber(): Promise<number> {
         return blockOps.getLastBlockNumber()
     }
@@ -82,6 +86,10 @@ export default class Chain {
 
     static async getBlocks(start: "latest" | number, limit: number): Promise<Blocks[]> {
         return blockOps.getBlocks(start, limit)
+    }
+
+    static async getBlockRange(from: number, to: number): Promise<Blocks[]> {
+        return blockOps.getBlockRange(from, to)
     }
 
     static async getBlockByNumber(number: number): Promise<Blocks> {
@@ -162,6 +170,13 @@ export default class Chain {
 
     static async insertTransactionsFromSync(transactions: Transaction[]): Promise<boolean> {
         return txOps.insertTransactionsFromSync(transactions)
+    }
+
+    static async setFailureCodes(
+        blockNumber: number,
+        codes: Map<string, string | null>,
+    ): Promise<void> {
+        return txOps.setFailureCodes(blockNumber, codes)
     }
 
     // ── Genesis ───────────────────────────────────────────────

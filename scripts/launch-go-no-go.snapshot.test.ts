@@ -8,7 +8,7 @@ import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { MAINNET_FORKS, type ValidatorProbe, checkLaunch } from "./launch-go-no-go"
+import { KNOWN_FORKS, MAINNET_FORKS, type ValidatorProbe, checkLaunch } from "./launch-go-no-go"
 import { NO_SNAPSHOT_REASON, activeAtBlockZero, readBlockZeroValidators } from "./launch-validator-set"
 
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
@@ -78,8 +78,8 @@ function snapshotDir(validators: object[] | null, { manifest = true } = {}): str
 
 const genesisRows = Array.from({ length: 10 }, (_, i) => row(i))
 const genesis = {
-    properties: { id: 1, shardSize: 10 },
-    forks: Object.fromEntries(MAINNET_FORKS.map(name => [name, { activationHeight: 0 }])),
+    properties: { id: 7, shardSize: 10 },
+    forks: Object.fromEntries(KNOWN_FORKS.map(name => [name, { activationHeight: MAINNET_FORKS.includes(name) ? 0 : null }])),
     validators: genesisRows,
 }
 

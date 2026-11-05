@@ -3,35 +3,55 @@
  * its transactions, or not at all. The stamps are what finds the orphan again
  * after a restart, so writing some undos while keeping the stamps would undo
  * those transactions a second time on the next attempt.
+ *
+ * Replaying the bodies in reverse is only right when every stamped
+ * transaction applied. Under `nonceIntegrity` a failed transaction is stamped
+ * too, its fee and nonce charged and its other edits never applied, so such a
+ * block is left for a resync instead.
  */
 
 import { beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
 
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
-    default: { debug: jest.fn(), info: jest.fn(), warning: jest.fn(), error: jest.fn(), only: jest.fn() },
+    default: {
+        debug: jest.fn(),
+        info: jest.fn(),
+        warning: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        only: jest.fn(),
+        custom: jest.fn(),
+    },
 }))
 
+const { default: Chain } = await import("../chain")
 const { default: HandleGCR } = await import("../gcr/handleGCR")
 const { default: Datasource } = await import("@/model/datasource")
 const { default: Mempool } = await import("../mempool")
-const { rollbackOrphanedGcrState } = await import("./Sync")
+const { cloneDefaultForkConfig } = await import("@/forks/forkConfig")
+const { getSharedState } = await import("@/utilities/sharedState")
+const { assertNoUnreconciledGcrState, rollbackOrphanedGcrState } = await import("./Sync")
 
 const TIP = 20
+const ORPHAN = TIP + 1
 const ORPHANS = [
-    { hash: "tx-a", block: 21 },
-    { hash: "tx-b", block: 21 },
-    { hash: "tx-c", block: 22 },
+    { hash: "tx-a", block: ORPHAN },
+    { hash: "tx-b", block: ORPHAN },
+    { hash: "tx-c", block: ORPHAN + 1 },
 ]
+let stamped: { hash: string; block: number }[] = ORPHANS
 
 /** What reached the database, in order, and whether it committed. */
 let log: string[] = []
 const em = { name: "em" }
+
 const queryBuilder: any = {
     select: () => queryBuilder,
     addSelect: () => queryBuilder,
     where: () => queryBuilder,
-    getRawMany: async () => ORPHANS,
+    getRawOne: async () => ({ max: Math.max(...stamped.map(s => s.block)) }),
+    getRawMany: async () => stamped,
 }
 const fakeDatasource = {
     getDataSource: () => ({
@@ -55,12 +75,25 @@ const pending = {
     }),
 }
 
+function nonceIntegrity(height: number | null) {
+    getSharedState.forkConfig = cloneDefaultForkConfig()
+    getSharedState.forkConfig.nonceIntegrity.activationHeight = height
+}
+
+function bodies() {
+    return stamped.map((s, nonce) => ({
+        hash: s.hash,
+        content: { from_ed25519_address: "ab".repeat(32), nonce, gcr_edits: [] },
+    })) as any
+}
+
 beforeEach(() => {
     log = []
+    stamped = ORPHANS
+    nonceIntegrity(null)
+    spyOn(Chain, "getLastBlockNumber").mockResolvedValue(TIP)
     spyOn(Datasource, "getInstance").mockResolvedValue(fakeDatasource as any)
-    spyOn(Mempool, "getTransactionsByHashes").mockResolvedValue(
-        ORPHANS.map((o, nonce) => ({ hash: o.hash, content: { from_ed25519_address: "ab".repeat(32), nonce } })) as any,
-    )
+    spyOn(Mempool, "getTransactionsByHashes").mockImplementation(async () => bodies())
     applyTransactions.mockReset()
     deleteAssigned.mockReset()
     deleteAssigned.mockImplementation((async (block: number, m: unknown) => {
@@ -108,6 +141,49 @@ describe("rolling back orphaned GCR state", () => {
 
         expect(await rollbackOrphanedGcrState(TIP)).toBe(false)
         expect(applyTransactions).not.toHaveBeenCalled()
+        expect(log).toEqual([])
+    })
+})
+
+// After the suite above, and in this order: a refused recovery latches the
+// node for the process.
+describe("orphaned GCR state and nonceIntegrity", () => {
+    beforeEach(() => {
+        stamped = [{ hash: "aa".repeat(32), block: ORPHAN }]
+        applyTransactions.mockResolvedValue({
+            successfulTxs: stamped.map(s => s.hash),
+            failedTxs: [],
+            skippedTxs: [],
+            pending,
+        } as any)
+    })
+
+    it("is rolled back from the stamped bodies for a block applied before the fork", async () => {
+        nonceIntegrity(null)
+
+        await assertNoUnreconciledGcrState()
+
+        expect(applyTransactions).toHaveBeenCalledTimes(1)
+        expect(applyTransactions.mock.calls[0][1]).toBe(true)
+        expect(log).toEqual(["begin", "write", `delete ${ORPHAN}`, "commit", "afterCommit"])
+    })
+
+    it("is rolled back for the block applied on tip H when the fork activates at H + 1", async () => {
+        nonceIntegrity(ORPHAN)
+
+        await assertNoUnreconciledGcrState()
+
+        expect(applyTransactions).toHaveBeenCalledTimes(1)
+        expect(log).toEqual(["begin", "write", `delete ${ORPHAN}`, "commit", "afterCommit"])
+    })
+
+    it("is left for a resync for a block applied under nonceIntegrity, changing nothing", async () => {
+        nonceIntegrity(ORPHAN - 1)
+
+        await expect(assertNoUnreconciledGcrState()).rejects.toThrow(/resynced/)
+
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(deleteAssigned).not.toHaveBeenCalled()
         expect(log).toEqual([])
     })
 })

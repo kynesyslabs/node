@@ -33,6 +33,8 @@ function repoFor(staged: Map<string, unknown[]>, name: string, check: StageCheck
         delete: async () => {},
         insert: async (row: unknown) => stage([row]),
         findOneBy: async () => null,
+        find: async () => [],
+        findOne: async () => null,
         manager: { connection: { getMetadata: () => ({ columns: [0, 1, 2] }) } },
         createQueryBuilder: () => query,
     }

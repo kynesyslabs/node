@@ -74,6 +74,7 @@ import {
 } from "@/libs/identity/signingRecord"
 import { commitLockActive } from "./commitLock/domain"
 import { CommitLockError } from "./commitLock/lockStore"
+import { FinalityCommitmentError } from "src/libs/blockchain/finality/commitments"
 import {
     gatherRetryCandidates,
     rebuildTransactions,
@@ -495,7 +496,11 @@ export async function consensusRoutine(): Promise<void> {
                 )
                 blockAttrs[NONCE_TRACE_ATTR_KEY] = nonceTrace
 
-                const appliedHashes = new Set(applyRes.appliedTxs)
+                // A failed tx that spent its nonce moved it like an applied one.
+                const appliedHashes = new Set([
+                    ...applyRes.appliedTxs,
+                    ...(applyRes.nonceChargedTxs ?? []),
+                ])
                 assertForgedNonceTrace(
                     blockRef,
                     nonceTrace,
@@ -953,6 +958,7 @@ async function applyGCREditsFromMergedMempool(
     appliedTxs: string[]
     failedTxs: FailedTranscation[]
     pending?: PendingGCRWrite
+    nonceChargedTxs?: string[]
 }> {
     let failedTxs: FailedTranscation[] = []
 
@@ -1008,6 +1014,7 @@ async function applyGCREditsFromMergedMempool(
         appliedTxs: res.successfulTxs,
         failedTxs,
         pending: res.pending,
+        nonceChargedTxs: res.nonceChargedTxs,
     }
 }
 
@@ -1096,14 +1103,16 @@ async function forgeBlock(
         ) {
             throw error
         }
-        // A refused signature, an unusable signing record or a timestamp we
-        // will not sign ends this round without signing; anything else keeps
-        // its existing handling.
+        // A refused signature, an unusable signing record, a timestamp we
+        // will not sign or commitments this node cannot derive (a local gap
+        // in rows or snapshots) ends this round without signing; anything
+        // else keeps its existing handling.
         if (
             error instanceof DoubleSignError ||
             error instanceof SigningRecordError ||
             error instanceof CommitLockError ||
-            error instanceof CosignTimestampError
+            error instanceof CosignTimestampError ||
+            error instanceof FinalityCommitmentError
         ) {
             log.error(`[consensusRoutine] ${error.message}`)
             throw new AbortConsensusError(error.message)

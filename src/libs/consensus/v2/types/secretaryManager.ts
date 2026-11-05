@@ -95,6 +95,10 @@ export default class SecretaryManager {
     // wait reads it; the vote still goes to them, in case their report was
     // only in flight.
     public behindMembers = new Set<string>()
+    /** The timeout release in flight, so a second timeout does not start another. */
+    private timeoutRelease: Promise<void> | null = null
+    /** A timeout that fired while a release was in flight; rerun when it finishes. */
+    private timeoutReleaseQueued = false
     public ended = false
     /** The peerlist committed in this round's block, dictated by the secretary. */
     public mergedPeerlist: string[] | null = null
@@ -463,21 +467,9 @@ export default class SecretaryManager {
                     log.error(
                         "[SECRETARY ROUTINE] Timeout waiting for SET_WAIT_STATUS",
                     )
-                    const waitingMembers = this.getWaitingMembers()
-                    const stillOnlineMembers =
-                        await this.handleNodesGoneOffline(waitingMembers)
-
-                    const allOnlineMembers =
-                        waitingMembers.concat(stillOnlineMembers)
-                    // NOTE: We don't await this. We just trigger it and continue the routine
-                    log.debug(
-                        "[SECRETARY ROUTINE] Releasing the waiting members",
-                    )
-                    this.releaseWaitingMembers(
-                        allOnlineMembers,
-                        null,
-                        "secretaryRoutine_TIMEOUT",
-                    )
+                    // NOTE: Not awaited, so the routine keeps taking reports;
+                    // one release at a time, and its failure is logged, not thrown.
+                    this.startTimeoutRelease()
                 }
 
                 if (error instanceof AbortError) {
@@ -489,6 +481,71 @@ export default class SecretaryManager {
                 }
             }
         }
+    }
+
+    /**
+     * Starts releaseAfterTimeout, one at a time. A release holds the lock
+     * through its greenlight sends, which can take a while; a timeout that
+     * fires meanwhile is queued and rerun once the release finishes, so the
+     * next phase is not left waiting for yet another timeout.
+     */
+    private startTimeoutRelease() {
+        if (this.timeoutRelease !== null) {
+            log.debug(
+                "[SECRETARY ROUTINE] A timeout release is already running, queuing this one",
+            )
+            this.timeoutReleaseQueued = true
+            return
+        }
+        this.timeoutRelease = this.releaseAfterTimeout()
+            .catch(error => {
+                log.error(
+                    `[SECRETARY ROUTINE] Timeout release failed: ${error}`,
+                )
+            })
+            .finally(() => {
+                this.timeoutRelease = null
+                if (this.timeoutReleaseQueued) {
+                    this.timeoutReleaseQueued = false
+                    if (this.runSecretaryRoutine) {
+                        this.startTimeoutRelease()
+                    }
+                }
+            })
+    }
+
+    /**
+     * Releases the members still waiting at our phase after SET_WAIT_STATUS
+     * timed out.
+     *
+     * The offline check can take a while, and members may report a later
+     * phase meanwhile. Those are left alone: resetting their wait status
+     * would make the next phase time out as well.
+     */
+    public async releaseAfterTimeout() {
+        const waitingMembers = this.getWaitingMembers()
+        const stillOnlineMembers =
+            await this.handleNodesGoneOffline(waitingMembers)
+
+        const ourPhase = this.ourValidatorPhase.currentPhase
+        const notAhead = (pubKey: string) =>
+            (this.shard.validationPhases[pubKey]?.currentPhase ?? 0) <=
+            ourPhase
+        const toRelease = [
+            ...new Set(this.getWaitingMembers().concat(stillOnlineMembers)),
+        ].filter(notAhead)
+
+        log.debug(
+            `[SECRETARY ROUTINE] Releasing the waiting members at phase ${ourPhase}: ${toRelease.length}`,
+        )
+        if (toRelease.length === 0) {
+            return
+        }
+        await this.releaseWaitingMembers(
+            toRelease,
+            ourPhase,
+            "secretaryRoutine_TIMEOUT",
+        )
     }
 
     /**
@@ -784,6 +841,10 @@ export default class SecretaryManager {
             if (resolveWaiter) {
                 // INFO: Release the waiting members
                 Waiter.resolve(Waiter.keys.SET_WAIT_STATUS)
+                // The routine's wait restarts for the next phase, so a timeout
+                // queued behind a running release is stale; rerunning it would
+                // release the next phase before its own wait runs out.
+                this.timeoutReleaseQueued = false
             }
 
             this.releaseWaitingMembers([], null, "releaseWaitingRoutine")
@@ -852,6 +913,15 @@ export default class SecretaryManager {
         const contactedMembers: string[] = []
 
         for (const pubKey of waitingMembers) {
+            // The peerlist await above is a gap; a member that reported a
+            // later phase during it must keep its wait status.
+            const memberPhase = this.shard.validationPhases[pubKey]?.currentPhase
+            if (memberPhase !== undefined && memberPhase > phase) {
+                log.debug(
+                    `[SECRETARY ROUTINE] Not releasing ${pubKey} at phase ${phase}: it already reported phase ${memberPhase}`,
+                )
+                continue
+            }
             const request: RPCRequest = {
                 method: "consensus_routine",
                 params: [
@@ -890,7 +960,19 @@ export default class SecretaryManager {
         }
 
         const results = await Promise.all(promises)
+        this.handleGreenlightResults(contactedMembers, results)
 
+        return true
+    }
+
+    /**
+     * Logs each member's answer to its greenlight; a 401 means the member
+     * follows another secretary.
+     */
+    private handleGreenlightResults(
+        contactedMembers: string[],
+        results: RPCResponse[],
+    ): void {
         for (const [index, result] of results.entries()) {
             const pubKey = contactedMembers[index]
 
@@ -928,10 +1010,7 @@ export default class SecretaryManager {
             // boundary, which will fire and trigger the standard
             // timeout-recovery path instead of taking the node down
             // with partial round state.
-            continue
         }
-
-        return true
     }
 
     /**

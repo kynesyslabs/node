@@ -46,6 +46,33 @@ function currentDigest(program: GCRStorageProgram | null | undefined): string | 
 }
 
 /**
+ * What a rollback needs to put an entry back. It is stored in the entry's
+ * metadata, which the storage state root commits to, so it holds only state
+ * every node agrees on: not the timestamps the database stamps from each
+ * node's clock, nor the derived leaf. The fee total is a decimal string
+ * because JSON has no bigint. One level: a block writes an address at most
+ * once, and a rollback only undoes that block.
+ */
+function snapshotOf(current: GCRStorageProgram): Record<string, unknown> {
+    const { createdAt: _c, updatedAt: _u, smtLeaf: _l, totalFeesPaid, ...stored } = current
+    const snapshot: Record<string, unknown> = { ...stored }
+    if (totalFeesPaid !== undefined && totalFeesPaid !== null) {
+        snapshot.totalFeesPaid = totalFeesPaid.toString()
+    }
+    const meta = atomicMeta(current)
+    if (meta) snapshot.metadata = { atomicWork: { ...meta, previous: null } }
+    return snapshot
+}
+
+function restoredFrom(previous: Record<string, unknown>): GCRStorageProgram {
+    const restored = Object.assign(new GCRStorageProgram(), previous)
+    if (typeof previous.totalFeesPaid === "string") {
+        restored.totalFeesPaid = BigInt(previous.totalFeesPaid)
+    }
+    return restored
+}
+
+/**
  * A Work's write to its derived storage address.
  *
  * Written into the ordinary storage-program table, so the result is readable
@@ -65,10 +92,7 @@ export function applyAtomicStoragePut(
             return { success: false, message: `cannot undo ${edit.target}: it was not written by this tx` }
         }
         const previous = atomicMeta(current)!.previous
-        programs.set(
-            edit.target,
-            previous ? Object.assign(new GCRStorageProgram(), previous) : null,
-        )
+        programs.set(edit.target, previous ? restoredFrom(previous) : null)
         return { success: true, message: "storage write undone" }
     }
 
@@ -103,16 +127,7 @@ export function applyAtomicStoragePut(
     }
 
     const txhash = edit.txhash ?? ""
-    const previous = current
-        ? (() => {
-              // One level: a block writes an address at most once, and a
-              // rollback only undoes that block.
-              const snapshot = { ...current } as Record<string, unknown>
-              const meta = atomicMeta(current)
-              if (meta) snapshot.metadata = { atomicWork: { ...meta, previous: null } }
-              return snapshot
-          })()
-        : null
+    const previous = current ? snapshotOf(current) : null
 
     const next = Object.assign(new GCRStorageProgram(), current ?? {}) as GCRStorageProgram
     if (!current) {

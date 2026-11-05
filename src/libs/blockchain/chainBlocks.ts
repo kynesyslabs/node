@@ -1,4 +1,4 @@
-import { LessThan, MoreThan } from "typeorm"
+import { Between, LessThan, MoreThan } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
@@ -37,6 +37,11 @@ import {
     blockRowRefusal,
     withStorableText,
 } from "./validation/postgresStorable"
+import {
+    pruneValidatorSetSnapshots,
+    recordValidatorSetSnapshot,
+} from "./finality/validatorSet"
+import { pruneStorageHistory, resetStorageHistory } from "./finality/storageHistory"
 
 export function isGenesis(block: Block): boolean {
     if (block.number === 0) {
@@ -56,6 +61,19 @@ export async function getLastBlock(): Promise<Blocks> {
     }
 
     return await getBlockByNumber(getSharedState.lastBlockNumber)
+}
+
+/**
+ * The highest block row in the database. A block's row and state commit
+ * together, but the head this node publishes moves only after the commit's
+ * side effects; a reader of committed state compares against this.
+ */
+export async function getLastStoredBlock(): Promise<Blocks | null> {
+    return await getBlocksRepo()
+        .createQueryBuilder("block")
+        .orderBy("block.number", "DESC")
+        .limit(1)
+        .getOne()
 }
 
 export async function getLastBlockNumber(): Promise<number> {
@@ -140,6 +158,14 @@ export async function getBlocks(
     }
 
     return await blocks.find(options)
+}
+
+/** Blocks `from..to` inclusive, ascending; the caller bounds the range. */
+export async function getBlockRange(from: number, to: number): Promise<Blocks[]> {
+    return await getBlocksRepo().find({
+        where: { number: Between(from, to) },
+        order: { number: "ASC" },
+    })
 }
 
 export async function getBlockByNumber(number: number): Promise<Blocks> {
@@ -363,10 +389,14 @@ export async function insertBlock(
     try {
         const commit = () => dataSource.transaction(
             async transactionalEntityManager => {
+                // Before the block's state, which logs into this block's
+                // rows of the storage undo log.
+                await resetStorageHistory(transactionalEntityManager, block.number)
+
                 // The block's state goes first, before the fork hooks that
                 // migrate it and before the block that authorises it.
                 if (pendingGCR) {
-                    await pendingGCR.write(transactionalEntityManager)
+                    await pendingGCR.write(transactionalEntityManager, block.number)
                 }
 
                 const saveBlockStart = Date.now()
@@ -520,6 +550,15 @@ export async function insertBlock(
                 )
                 await applyNetworkUpgrade(block.number, govProposalRepo)
 
+                // After every hook that can move a stake. Block 0's set is
+                // recorded at boot, once the validator seed is in place.
+                if (block.number > 0) {
+                    await recordValidatorSetSnapshot(
+                        transactionalEntityManager,
+                        block.number,
+                    )
+                }
+
                 return savedBlock
             },
         )
@@ -594,6 +633,8 @@ export async function insertBlock(
 
 export async function pruneBlocksToGenesisBlock(): Promise<void> {
     await getBlocksRepo().delete({ number: MoreThan(0) })
+    await pruneValidatorSetSnapshots(0)
+    await pruneStorageHistory(0)
     log.info("Pruned all blocks except the genesis block.")
 }
 

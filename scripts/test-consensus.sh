@@ -6,20 +6,43 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 SUITE_DIRS=(src/libs/consensus src/libs/blockchain/validation src/forks)
-# Single files outside SUITE_DIRS: the launch go/no-go tooling, the signing
-# guards, the consensus and sync routes the suites depend on, the peer
-# liveness checks that decide which committee members count, and the read
-# calls clients use to tell whether a transaction executed and which head
-# is final. A listed file that is gone fails its run instead of dropping
-# out silently
+# Single files outside SUITE_DIRS that guard consensus, boot and launch
+# safety. A listed file that is gone fails its run instead of dropping out
+# silently
 SUITE_FILES=(
     scripts/launch-go-no-go.committee.test.ts
     scripts/launch-go-no-go.test.ts
     scripts/launch-go-no-go.snapshot.test.ts
+    scripts/launch-go-no-go.plan.test.ts
+    scripts/launch-height1-check.test.ts
     scripts/validator-prove-signing.test.ts
+    src/config/loader.forkSchedulePolicy.test.ts
+    src/config/loader.gossip.test.ts
+    src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
+    src/libs/blockchain/finality/commitments.test.ts
+    src/libs/blockchain/finality/storageHistory.test.ts
+    src/libs/blockchain/finality/storageRecord.test.ts
+    src/libs/blockchain/finality/storageRoot.test.ts
+    src/libs/blockchain/finality/validatorSet.test.ts
+    src/libs/blockchain/finality/verify.test.ts
+    src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
+    src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
+    src/libs/blockchain/gcr/stagedWrites.test.ts
+    src/libs/blockchain/gcr/storageLeafWrite.test.ts
+    src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
+    src/libs/blockchain/routines/Sync.orphanRollback.test.ts
+    src/libs/blockchain/routines/Sync.verification.test.ts
+    src/libs/blockchain/routines/syncVerification.test.ts
+    src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
+    src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
+    src/libs/crypto/canonicalJson.test.ts
+    src/libs/gossip/GossipManager.lifecycle.test.ts
+    src/libs/gossip/sidecarHealth.test.ts
+    src/libs/crypto/merkle/rfc6962.test.ts
+    src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
@@ -29,15 +52,28 @@ SUITE_FILES=(
     src/libs/network/manageConsensusRoutines.commitLock.test.ts
     src/libs/network/manageConsensusRoutines.committed.test.ts
     src/libs/network/proposeBlockHashSender.test.ts
+    src/libs/network/routines/nodecalls/finalityProofCalls.test.ts
     src/libs/network/routines/nodecalls/getFinalizedHead.test.ts
     src/libs/network/routines/nodecalls/readApi.test.ts
+    src/libs/omniprotocol/integration/BaseAdapter.test.ts
+    src/libs/omniprotocol/peerAuthBinding.test.ts
     src/libs/omniprotocol/peerLiveness.test.ts
+    src/libs/peer/routines/anchorPairing.test.ts
+    src/libs/omniprotocol/server/preauthLimits.test.ts
+    src/libs/omniprotocol/transport/ConnectionPool.connectTimeout.test.ts
+    src/libs/omniprotocol/transport/preauthBuffering.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
+    src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/calibrateTime.boot.test.ts
+    src/utilities/nodeVersion.test.ts
+    testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/loadForkConfig.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
     testing/genesis/buildGenesisBlock.test.ts
+    testing/genesis/forkScheduleAbstain.test.ts
+    testing/genesis/forkScheduleAgreement.test.ts
+    testing/genesis/forkScheduleWatch.test.ts
     testing/genesis/genesisHashTool.test.ts
     testing/genesis/genesisMismatch.test.ts
     testing/genesis/genesisPin.test.ts

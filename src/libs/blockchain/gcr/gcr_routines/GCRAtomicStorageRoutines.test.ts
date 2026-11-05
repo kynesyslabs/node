@@ -106,4 +106,36 @@ describe("applyAtomicStoragePut", () => {
         applyAtomicStoragePut(put({ name, target: nulTarget }), programs, false)
         expect(unstorableRow("storagePrograms", programs.get(nulTarget))).toStartWith("storagePrograms.")
     })
+
+    it("snapshots a replaced entry without node-local columns, in a form jsonb can hold", () => {
+        const programs = new Map<string, GCRStorageProgram | null>()
+        applyAtomicStoragePut(put(), programs, false)
+        // As the next block loads it: database timestamps, a bigint fee, a leaf.
+        Object.assign(programs.get(target)!, {
+            totalFeesPaid: 7n,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            smtLeaf: "a".repeat(64),
+        })
+        const next = { paid: false }
+        const cas = put({
+            txhash: "tx2",
+            mode: "compare-and-set",
+            value: next,
+            valueDigest: storageValueDigest(next),
+            expectedPriorDigest: storageValueDigest({ paid: true, amount: 5 }),
+        })
+        applyAtomicStoragePut(cas, programs, false)
+
+        const metadata = programs.get(target)!.metadata as { atomicWork: { previous: Record<string, unknown> } }
+        const previous = metadata.atomicWork.previous
+        expect(Object.keys(previous)).not.toContain("createdAt")
+        expect(Object.keys(previous)).not.toContain("updatedAt")
+        expect(Object.keys(previous)).not.toContain("smtLeaf")
+        expect(previous.totalFeesPaid).toBe("7")
+        expect(() => JSON.stringify(metadata)).not.toThrow()
+
+        expect(applyAtomicStoragePut(cas, programs, true).success).toBe(true)
+        expect(programs.get(target)!.totalFeesPaid).toBe(7n)
+    })
 })
