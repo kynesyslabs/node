@@ -378,6 +378,41 @@ check "with no refusal the last error line is given" \
 check "a log with neither gives nothing, and rc 0" \
     bash -c '[ -z "$1" ]' _ "$(boot_failure_of $'[INFO] up\n[INFO] bye')"
 
+echo "== a recovery or ride wait that times out reaches the judge as timedOut, whatever the heads read after it say"
+# The real drill_recover and scenario_ride. heads_once answers below the target
+# while the wait runs (the caller's local `deadline`) and at the target once it
+# is over: nodes that got there late, which the read after the wait sees.
+for f in drill_recover scenario_ride; do source <(fn_src "${f}"); done
+source <(grep -E '^(kv_json|now_ms)\(\) ' "${RUN_SH}")
+heads_once() {
+    local i h="${LATE_HEAD}"
+    [ "${SECONDS}" -lt "${deadline}" ] && h="${EARLY_HEAD}"
+    for i in "$@"; do printf '%s %s\n' "${i}" "${h}"; done | kv_json
+}
+dc() { :; }
+event() { :; }
+phase_row() { :; }
+block_rows() { echo '[]'; }
+round_times() { echo "- -"; }
+drill_stop() { :; }
+drill_judge() { :; }
+json_is() { jq -e "$@" > /dev/null; }
+VICTIMS=(3); VICTIM_SERVICES=(node-3); SURVIVORS=(1 2); STOPS=1; PRE_HEIGHT=8; RECOVERY_BLOCKS=3; RIDE_BLOCKS=3
+for spec in "late 10 12 1 true" "in-time 12 12 30 false"; do
+    set -- ${spec}
+    new_case "recover-$1" 9 9 9; EARLY_HEAD=$2; LATE_HEAD=$3; RECOVERY_TIMEOUT=$4; T_FIRST=""; T_CONV=""; RECOVERY_JSON=null
+    drill_recover 9 > /dev/null
+    check "P5, $1: the judge gets timedOut=$5 (${RECOVERY_JSON:0:60}...)" json_is --argjson t "$5" --argjson s "$4" '.timedOut == $t and .timeoutS == $s' <<< "${RECOVERY_JSON}"
+    check "P5, $1: with the heads read after the wait (all at 12)" json_is '[.heads[]] == [12, 12, 12]' <<< "${RECOVERY_JSON}"
+    check "P5, $1: t_converged is $([ "$5" = true ] && echo unset || echo set)" test "$([ -n "${T_CONV}" ] && echo false || echo true)" = "$5"
+
+    new_case "ride-$1" 8 8 8; EARLY_HEAD=$((PRE_HEIGHT + 1)); [ "$1" = in-time ] && EARLY_HEAD=11
+    LATE_HEAD=11; RIDE_TIMEOUT=$4; PHASES="${LOG_DIR}/phases.tsv"; T_FIRST=""; T_CONV=""; RIDE_JSON=null
+    scenario_ride > /dev/null
+    check "ride, $1: the judge gets timedOut=$5, with the heads read after the wait at 11" \
+        json_is --argjson t "$5" '.timedOut == $t and ([.heads[]] == [11, 11])' <<< "${RIDE_JSON}"
+done
+
 echo "== run.sh executed from the top (stub docker and bun): the preflight is defined where the call runs"
 run_from_top() { # $1 what max_connections the stub postgres reports, $2 start path (run-devnet), $3 node whose migration fails
     STUB_LOG="${WORK}/run-top.docker.log"; : > "${STUB_LOG}"

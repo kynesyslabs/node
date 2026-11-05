@@ -43,6 +43,20 @@ import {
 
 export type DrillMode = "halt" | "ride"
 
+/**
+ * run.sh's wait for every node of a phase to reach a target, then one read of
+ * heads and rows. That read comes after the wait whether it saw the target or
+ * ran out (`timedOut`, after `timeoutS` s), so the heads alone do not say the
+ * nodes got there in time.
+ */
+export interface TargetPhase {
+    blocks: number
+    timedOut: boolean
+    timeoutS: number
+    heads: Record<number, number>
+    rows: BlockRow[]
+}
+
 export interface DrillInput {
     scenario: string
     mode: DrillMode
@@ -68,9 +82,9 @@ export interface DrillInput {
     /** Halt mode; null when the run ended before that phase. */
     settle: { heads: Record<number, number>; rows: BlockRow[] } | null
     hold: { samples: HeightSample[] } | null
-    recovery: { blocks: number; heads: Record<number, number>; rows: BlockRow[] } | null
+    recovery: TargetPhase | null
     /** Ride mode; null when the run ended before that phase. */
-    ride: { blocks: number; heads: Record<number, number>; rows: BlockRow[] } | null
+    ride: TargetPhase | null
 }
 
 export class DrillInputError extends Error {
@@ -90,6 +104,12 @@ function readInt(v: unknown, path: string, problems: Problems, min = 0): number 
     if (typeof v === "number" && Number.isInteger(v) && v >= min) return v
     problems.push(`${path}: expected an integer >= ${min}, got ${JSON.stringify(v)}`)
     return min
+}
+
+function readBool(v: unknown, path: string, problems: Problems): boolean {
+    if (typeof v === "boolean") return v
+    problems.push(`${path}: expected true or false, got ${JSON.stringify(v)}`)
+    return true
 }
 
 function readString(v: unknown, path: string, problems: Problems): string {
@@ -217,6 +237,16 @@ function readPhase<T>(
     return read(v)
 }
 
+function readTargetPhase(path: string, problems: Problems): (o: Record<string, unknown>) => TargetPhase {
+    return o => ({
+        blocks: readInt(o.blocks, `${path}.blocks`, problems, 1),
+        timedOut: readBool(o.timedOut, `${path}.timedOut`, problems),
+        timeoutS: readInt(o.timeoutS, `${path}.timeoutS`, problems, 1),
+        heads: readHeads(o.heads, `${path}.heads`, problems),
+        rows: readRows(o.rows, `${path}.rows`, problems),
+    })
+}
+
 /** Validates the JSON run.sh wrote. Throws `DrillInputError` listing every problem. */
 export function parseDrillInput(raw: unknown): DrillInput {
     const problems: Problems = []
@@ -269,16 +299,8 @@ export function parseDrillInput(raw: unknown): DrillInput {
         hold: readPhase(raw.hold, "hold", problems, o => ({
             samples: readSamples(o.samples, "hold.samples", problems),
         })),
-        recovery: readPhase(raw.recovery, "recovery", problems, o => ({
-            blocks: readInt(o.blocks, "recovery.blocks", problems, 1),
-            heads: readHeads(o.heads, "recovery.heads", problems),
-            rows: readRows(o.rows, "recovery.rows", problems),
-        })),
-        ride: readPhase(raw.ride, "ride", problems, o => ({
-            blocks: readInt(o.blocks, "ride.blocks", problems, 1),
-            heads: readHeads(o.heads, "ride.heads", problems),
-            rows: readRows(o.rows, "ride.rows", problems),
-        })),
+        recovery: readPhase(raw.recovery, "recovery", problems, readTargetPhase("recovery", problems)),
+        ride: readPhase(raw.ride, "ride", problems, readTargetPhase("ride", problems)),
     }
     if (problems.length > 0) throw new DrillInputError(problems)
     return input
@@ -376,6 +398,21 @@ function span(from: number | null, to: number | null): number | null {
     return from === null || to === null ? null : to - from
 }
 
+/**
+ * Reasons the wait of a recovery or ride phase fails on its own: the target
+ * counts only if the wait saw every node there (no timeout, and the
+ * t_converged mark it sets). Heads read after a timeout may show nodes that
+ * got there late; scenario 12's waitFor throws at its timeout for the same
+ * reason.
+ */
+function windowReasons(p: TargetPhase, converged: number | null, nodes: number, target: number): string[] {
+    if (p.timedOut) {
+        return [`timed out: the wait did not see all ${nodes} nodes at ${target} within ${p.timeoutS}s; heads read after it do not count`]
+    }
+    if (converged === null) return [`no t_converged mark: the wait did not record all ${nodes} nodes at ${target}`]
+    return []
+}
+
 /** Applies the drill's pass criteria to what run.sh observed. */
 export function judgeDrill(input: DrillInput): DrillVerdict {
     const nodes = Array.from({ length: input.validators }, (_, i) => i + 1)
@@ -469,7 +506,8 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
                 ride.rows,
                 quorum,
             )
-            phases.push(phase("R2", "ride", r.reasons))
+            const late = windowReasons(ride, input.marks.t_converged, survivors.length, heights.targetHeight)
+            phases.push(phase("R2", "ride", [...r.reasons, ...late]))
         }
         crash()
         return verdict()
@@ -540,7 +578,8 @@ export function judgeDrill(input: DrillInput): DrillVerdict {
             input.recovery.rows,
             quorum,
         )
-        phases.push(phase("P5", "recovery", r.reasons))
+        const late = windowReasons(input.recovery, input.marks.t_converged, nodes.length, heights.targetHeight)
+        phases.push(phase("P5", "recovery", [...r.reasons, ...late]))
     }
 
     crash()

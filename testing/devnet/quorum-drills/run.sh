@@ -1118,10 +1118,14 @@ drill_recover() {
         say "heads: $(jq -c . <<< "${hs}")"
         sleep 2
     done
+    # Read again either way, for the judge's hash and signature checks; after a
+    # timeout these heads may show nodes that got there late, so the judge is
+    # told the wait timed out and fails P5 on that alone
     hs=$(heads_once $(running))
     rows=$(block_rows "${PRE_HEIGHT}" "${target}" $(running)) || { say "ABORT: could not read the recovery blocks"; exit 2; }
     RECOVERY_JSON=$(jq -nc --argjson b "${RECOVERY_BLOCKS}" --argjson heads "${hs}" --argjson rows "${rows}" \
-        '{blocks: $b, heads: $heads, rows: $rows}')
+        --argjson timedOut "$([ "${converged}" = 1 ] && echo false || echo true)" --argjson timeoutS "${RECOVERY_TIMEOUT}" \
+        '{blocks: $b, timedOut: $timedOut, timeoutS: $timeoutS, heads: $heads, rows: $rows}')
     phase_row restarted 0 "${N}" "$1" "$(jq '[.[]] | min' <<< "${hs}")" "$([ "${converged}" = 1 ] && echo progress || echo stall)"
 }
 
@@ -1211,10 +1215,12 @@ scenario_ride() {
         say "heads: $(jq -c . <<< "${hs}")"
         sleep 2
     done
+    # As in drill_recover: a timed-out wait fails the ride, whatever is read now
     hs=$(heads_once "${SURVIVORS[@]}")
     rows=$(block_rows "${PRE_HEIGHT}" "${target}" "${SURVIVORS[@]}") || { say "ABORT: could not read the ride blocks"; exit 2; }
     RIDE_JSON=$(jq -nc --argjson b "${RIDE_BLOCKS}" --argjson heads "${hs}" --argjson rows "${rows}" \
-        '{blocks: $b, heads: $heads, rows: $rows}')
+        --argjson timedOut "$([ "${converged}" = 1 ] && echo false || echo true)" --argjson timeoutS "${RIDE_TIMEOUT}" \
+        '{blocks: $b, timedOut: $timedOut, timeoutS: $timeoutS, heads: $heads, rows: $rows}')
     mx=$(jq '[.[]] | max' <<< "${hs}")
     times=$(round_times "${SURVIVORS[0]}" "${PRE_HEIGHT}" "${mx}")
     printf 'ride\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${STOPS}" "${#SURVIVORS[@]}" "${PRE_HEIGHT}" "${mx}" \

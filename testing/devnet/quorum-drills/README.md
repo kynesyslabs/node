@@ -328,10 +328,16 @@ Scenario 12's, judged by `testing/forks/rehearsal/lib/haltDrill.ts`:
   `RECOVERY_TIMEOUT`, every height from pre-stop to the target has one hash
   on all nodes, every block above pre-stop has >= q signatures
   (`evaluateRecovery`). Running out of time is a failure, not `ERROR`.
+  "Within" is what the wait saw: `run.sh` reads the heads and rows once more
+  after the wait, also after a timeout, and passes `timedOut` to the judge,
+  which fails P5 on a timeout (or a missing `t_converged`) even when that
+  later read shows every node at the target, as scenario 12's `waitFor`
+  throws at its timeout.
 - P6 no crash: survivors' Docker restart counts are unchanged.
 - `ride-n13s10`: P1, R2 (the 10 survivors reach pre-stop + `RIDE_BLOCKS` in
-  `RIDE_TIMEOUT`, one hash per height, every block >= q signatures) and P6.
-  The stopped validators are not restarted.
+  `RIDE_TIMEOUT`, as the wait saw it, the same way as P5; one hash per
+  height, every block >= q signatures) and P6. The stopped validators are not
+  restarted.
 
 ### Where the verdict is computed
 

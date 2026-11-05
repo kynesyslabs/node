@@ -209,6 +209,41 @@ describe("halt drill verdict", () => {
         expect(reasons).toContain("node-13 head 10 < target 12")
         expect(reasons).toContain("height 12: stored on 12/13 nodes")
     })
+    // run.sh reads the heads and rows once more after its wait, also after a
+    // timeout: nodes that reached the target late look recovered in that read
+    it("fails recovery when the wait timed out, even if the heads read after it look recovered", () => {
+        const raw = loadRaw("halt-n13s10.pass")
+        raw.recovery.timedOut = true
+        raw.marks.t_converged = null
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["P5"])
+        expect(reasonsOf(input, "P5")).toEqual([
+            "timed out: the wait did not see all 13 nodes at 12 within 300s; heads read after it do not count",
+        ])
+        expect(judgeDrill(input).pass).toBe(false)
+    })
+    it("fails recovery on a timeout even with t_converged set", () => {
+        const raw = loadRaw("halt-n10s10.pass")
+        raw.recovery.timedOut = true
+        expect(failedPhases(parseDrillInput(raw))).toEqual(["P5"])
+    })
+    it("fails recovery without a t_converged mark, even when the wait says it did not time out", () => {
+        const raw = loadRaw("halt-n10s10.pass")
+        raw.marks.t_converged = null
+        expect(reasonsOf(parseDrillInput(raw), "P5")).toEqual([
+            "no t_converged mark: the wait did not record all 10 nodes at 12",
+        ])
+    })
+    it("refuses an input that does not say whether the recovery wait timed out", () => {
+        const raw = loadRaw("halt-n10s10.pass")
+        delete raw.recovery.timedOut
+        expect(() => parseDrillInput(raw)).toThrow("recovery.timedOut: expected true or false")
+        raw.recovery.timedOut = "no"
+        expect(() => parseDrillInput(raw)).toThrow("recovery.timedOut")
+        raw.recovery.timedOut = false
+        delete raw.recovery.timeoutS
+        expect(() => parseDrillInput(raw)).toThrow("recovery.timeoutS")
+    })
     it("fails when a survivor was restarted by docker", () => {
         const input = load("halt-n10s10.survivor-crash")
         expect(failedPhases(input)).toEqual(["P6"])
@@ -332,6 +367,20 @@ describe("ride drill verdict", () => {
         const input = load("ride-n13s10.stalled")
         expect(failedPhases(input)).toEqual(["R2"])
         expect(reasonsOf(input, "R2")[0]).toContain("node-1 head 8 < target 11")
+        expect(reasonsOf(input, "R2")).toContain(
+            "timed out: the wait did not see all 10 nodes at 11 within 300s; heads read after it do not count",
+        )
+    })
+    it("fails the ride when the wait timed out, even if the heads read after it are at the target", () => {
+        const raw = loadRaw("ride-n13s10.pass")
+        raw.ride.timedOut = true
+        raw.marks.t_converged = null
+        const input = parseDrillInput(raw)
+        expect(failedPhases(input)).toEqual(["R2"])
+        expect(reasonsOf(input, "R2")).toEqual([
+            "timed out: the wait did not see all 10 nodes at 11 within 300s; heads read after it do not count",
+        ])
+        expect(() => parseDrillInput({ ...raw, ride: { ...raw.ride, timedOut: undefined } })).toThrow("ride.timedOut")
     })
     it("fails a block with fewer than 7 signatures", () => {
         const raw = loadRaw("ride-n13s10.pass")
