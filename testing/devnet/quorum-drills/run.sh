@@ -629,6 +629,61 @@ read_error() { # $1 phase name
     exit 2
 }
 
+# A read of a node's database, bounded as scenario 12's DB_READ_TIMEOUT_MS bounds
+# its own: the server cancels a query after DB_READ_TIMEOUT s (statement_timeout)
+# and an outer timeout stops what the server cannot cancel (a stalled connect or
+# exec). Either way the read fails; callers treat that as "could not run".
+psql_node() { # $1 node, $2 SQL
+    local rc errf="${LOG_DIR}/psql-err.$$.tmp"
+    # stderr goes to the caller as before and, when there is any, to
+    # psql-errors.log, which pg_limit_gate reads
+    timeout -k 5 "$((DB_READ_TIMEOUT + 5))" docker exec -e PGCONNECT_TIMEOUT=10 \
+        -e "PGOPTIONS=-c statement_timeout=$((DB_READ_TIMEOUT * 1000))" \
+        "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
+    rc=$?
+    [ -s "${errf}" ] && { cat "${errf}" >&2; sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log"; }
+    rm -f "${errf}"
+    [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within $((DB_READ_TIMEOUT + 5))s (DB_READ_TIMEOUT=${DB_READ_TIMEOUT})" >&2
+    return "${rc}"
+}
+
+# The shared postgres must allow every connection N nodes can open. The compose
+# sets max_connections (gen-inputs.py), so this fails only if that setting did
+# not reach the server. Waits for the server: `up -d` does not.
+pg_limit_preflight() {
+    local need have tries=0
+    need=$(python3 -I "${HERE}/drill_inputs.py" pgconn --nodes "${N}" | cut -d' ' -f1)
+    [[ "${need}" =~ ^[0-9]+$ ]] || { say "ABORT: could not work out the connections ${N} nodes need"; return 1; }
+    while :; do
+        have=$(docker exec "$(dc ps -q postgres)" psql -U demosuser -d postgres -tAc 'SHOW max_connections' 2>/dev/null)
+        [[ "${have}" =~ ^[0-9]+$ ]] && break
+        tries=$((tries + 1))
+        [ "${tries}" -ge 45 ] && { say "ABORT: could not read max_connections from postgres"; return 1; }
+        sleep 2
+    done
+    if [ "${have}" -lt "${need}" ]; then
+        say "ABORT: could not run: postgres max_connections is ${have}, ${N} nodes need ${need} (10 each + 20)"
+        return 1
+    fi
+    say "postgres max_connections ${have} (${N} nodes need ${need})"
+}
+
+# "sorry, too many clients already" in a node's log or in one of the harness'
+# own psql reads means something ran without a connection it needed: the run
+# proves nothing, whatever the verdict says. Called before the verdict is
+# written, so a PASS or a FAIL becomes exit 2 and says why.
+pg_limit_gate() {
+    local hits nodes
+    hits=$({ grep_logs "too many clients"; grep -a "too many clients" "${LOG_DIR}/psql-errors.log" 2>/dev/null; } | wc -l)
+    [ "${hits}" = 0 ] && return 0
+    nodes=$(grep_logs "too many clients" | cut -d: -f1 | sort -u | tr '\n' ' ')
+    say "ABORT: could not run: postgres connection limit hit (${hits} 'too many clients' lines; ${nodes:-harness psql reads only})"
+    DETAIL="could not run: postgres connection limit hit (${hits} lines${nodes:+ in ${nodes% }}); the result was ${RESULT}"
+    RESULT=ERROR
+    write_verdict
+    exit 2
+}
+
 # ── 3. bring-up ─────────────────────────────────────────────────────────
 step 03-bringup
 STARTED_STACK=1
@@ -744,61 +799,6 @@ scenario_listed_stall() {
     expect_progress "listed-back" "${PHASE_END}" || ok=0
     DETAIL="listed=${pl} $(cut -f1,9 "${PHASES}" | tail -n +2 | tr '\t\n' ': ')"
     [ "${ok}" = 1 ] && RESULT=PASS
-}
-
-# A read of a node's database, bounded as scenario 12's DB_READ_TIMEOUT_MS bounds
-# its own: the server cancels a query after DB_READ_TIMEOUT s (statement_timeout)
-# and an outer timeout stops what the server cannot cancel (a stalled connect or
-# exec). Either way the read fails; callers treat that as "could not run".
-psql_node() { # $1 node, $2 SQL
-    local rc errf="${LOG_DIR}/psql-err.$$.tmp"
-    # stderr goes to the caller as before and, when there is any, to
-    # psql-errors.log, which pg_limit_gate reads
-    timeout -k 5 "$((DB_READ_TIMEOUT + 5))" docker exec -e PGCONNECT_TIMEOUT=10 \
-        -e "PGOPTIONS=-c statement_timeout=$((DB_READ_TIMEOUT * 1000))" \
-        "$(dc ps -q postgres)" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
-    rc=$?
-    [ -s "${errf}" ] && { cat "${errf}" >&2; sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log"; }
-    rm -f "${errf}"
-    [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within $((DB_READ_TIMEOUT + 5))s (DB_READ_TIMEOUT=${DB_READ_TIMEOUT})" >&2
-    return "${rc}"
-}
-
-# The shared postgres must allow every connection N nodes can open. The compose
-# sets max_connections (gen-inputs.py), so this fails only if that setting did
-# not reach the server. Waits for the server: `up -d` does not.
-pg_limit_preflight() {
-    local need have tries=0
-    need=$(python3 -I "${HERE}/drill_inputs.py" pgconn --nodes "${N}" | cut -d' ' -f1)
-    [[ "${need}" =~ ^[0-9]+$ ]] || { say "ABORT: could not work out the connections ${N} nodes need"; return 1; }
-    while :; do
-        have=$(docker exec "$(dc ps -q postgres)" psql -U demosuser -d postgres -tAc 'SHOW max_connections' 2>/dev/null)
-        [[ "${have}" =~ ^[0-9]+$ ]] && break
-        tries=$((tries + 1))
-        [ "${tries}" -ge 45 ] && { say "ABORT: could not read max_connections from postgres"; return 1; }
-        sleep 2
-    done
-    if [ "${have}" -lt "${need}" ]; then
-        say "ABORT: could not run: postgres max_connections is ${have}, ${N} nodes need ${need} (10 each + 20)"
-        return 1
-    fi
-    say "postgres max_connections ${have} (${N} nodes need ${need})"
-}
-
-# "sorry, too many clients already" in a node's log or in one of the harness'
-# own psql reads means something ran without a connection it needed: the run
-# proves nothing, whatever the verdict says. Called before the verdict is
-# written, so a PASS or a FAIL becomes exit 2 and says why.
-pg_limit_gate() {
-    local hits nodes
-    hits=$({ grep_logs "too many clients"; grep -a "too many clients" "${LOG_DIR}/psql-errors.log" 2>/dev/null; } | wc -l)
-    [ "${hits}" = 0 ] && return 0
-    nodes=$(grep_logs "too many clients" | cut -d: -f1 | sort -u | tr '\n' ' ')
-    say "ABORT: could not run: postgres connection limit hit (${hits} 'too many clients' lines; ${nodes:-harness psql reads only})"
-    DETAIL="could not run: postgres connection limit hit (${hits} lines${nodes:+ in ${nodes% }}); the result was ${RESULT}"
-    RESULT=ERROR
-    write_verdict
-    exit 2
 }
 
 scenario_fallback() {

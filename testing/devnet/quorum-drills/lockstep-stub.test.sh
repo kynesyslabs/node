@@ -147,7 +147,10 @@ check "finishes in under 5 s" test "${ms}" -lt 5000
 check "takes at least 2 s (one head round, one hash round)" test "${ms}" -ge 2000
 
 echo "== database reads (psql_node, block_rows) are bounded; a timed-out read is a failure, not an empty result"
-source <(region 'psql_node() {' 'scenario_fallback() {')
+fn_src() { # $1 function name: its definition, from `name() {` to the first line that is `}`
+    awk -v a="$1() {" 'index($0, a) == 1 { on = 1 } on { print } on && /^}/ { exit }' "${RUN_SH}"
+}
+for f in psql_node pg_limit_preflight pg_limit_gate; do source <(fn_src "${f}"); done
 source <(region 'block_rows() {' 'phase_row() {')
 dc() { echo fakepg; }
 mkdir -p "${WORK}/bin"
