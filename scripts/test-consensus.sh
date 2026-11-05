@@ -17,7 +17,9 @@ SUITE_FILES=(
     scripts/launch-height1-check.test.ts
     scripts/validator-prove-signing.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
+    src/config/loader.gossip.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
+    src/libs/blockchain/blockRowStorable.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts
     src/libs/blockchain/finality/storageHistory.test.ts
@@ -25,22 +27,36 @@ SUITE_FILES=(
     src/libs/blockchain/finality/storageRoot.test.ts
     src/libs/blockchain/finality/validatorSet.test.ts
     src/libs/blockchain/finality/verify.test.ts
+    src/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines.test.ts
+    src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines.granular.test.ts
     src/libs/blockchain/gcr/gcr_routines/hashGCR.storageRoot.test.ts
+    src/libs/blockchain/gcr/gcr_routines/routines/zkRoutines.test.ts
+    src/libs/blockchain/gcr/handleGCR.atomic.test.ts
+    src/libs/blockchain/gcr/handleGCR.failedTx.test.ts
+    src/libs/blockchain/gcr/handleGCR.keyRefusal.test.ts
+    src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
+    src/libs/blockchain/gcr/storableRows.test.ts
     src/libs/blockchain/mempool.nonceIntegrity.test.ts
+    src/libs/blockchain/mempool.editBinding.test.ts
+    src/libs/blockchain/mempool.receive.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
     src/libs/blockchain/routines/syncVerification.test.ts
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
+    src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
     src/libs/crypto/canonicalJson.test.ts
+    src/libs/gossip/GossipManager.lifecycle.test.ts
+    src/libs/gossip/sidecarHealth.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts
     src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
+    src/libs/identity/web2Unlink.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
@@ -51,10 +67,12 @@ SUITE_FILES=(
     src/libs/network/routines/nodecalls/finalityProofCalls.test.ts
     src/libs/network/routines/nodecalls/getFinalizedHead.test.ts
     src/libs/network/routines/nodecalls/readApi.test.ts
+    src/libs/omniprotocol/integration/BaseAdapter.test.ts
     src/libs/omniprotocol/peerAuthBinding.test.ts
     src/libs/omniprotocol/peerLiveness.test.ts
     src/libs/peer/routines/anchorPairing.test.ts
     src/libs/omniprotocol/server/preauthLimits.test.ts
+    src/libs/omniprotocol/transport/ConnectionPool.connectTimeout.test.ts
     src/libs/omniprotocol/transport/preauthBuffering.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/routines/peerBootstrap.test.ts
@@ -71,6 +89,7 @@ SUITE_FILES=(
     testing/genesis/genesisHashTool.test.ts
     testing/genesis/genesisMismatch.test.ts
     testing/genesis/genesisPin.test.ts
+    testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
 )
 

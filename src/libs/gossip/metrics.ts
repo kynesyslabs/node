@@ -47,6 +47,16 @@ export function registerGossipMetrics() {
         ["reason"],
     )
     m.createCounter(
+        "gossip_sidecar_relaunch_failures_total",
+        "Sidecar launch attempts that failed and were scheduled for retry",
+        [],
+    )
+    m.createGauge(
+        "gossip_sidecar_degraded",
+        "1 while the sidecar is down and being relaunched (node runs on HTTP only)",
+        [],
+    )
+    m.createCounter(
         "gossip_inbound_total",
         "Messages received from the mesh per topic",
         ["topic"],
@@ -150,6 +160,25 @@ export function countSidecarRestart(reason: string) {
         getMetricsService().incrementCounter("gossip_sidecar_restarts_total", {
             reason,
         })
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countSidecarRelaunchFailure() {
+    try {
+        getMetricsService().incrementCounter(
+            "gossip_sidecar_relaunch_failures_total",
+            {},
+        )
+    } catch {
+        /* ignore */
+    }
+}
+
+export function setSidecarDegradedGauge(degraded: boolean) {
+    try {
+        getMetricsService().setGauge("gossip_sidecar_degraded", degraded ? 1 : 0)
     } catch {
         /* ignore */
     }

@@ -21,12 +21,18 @@
 import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
+import { compareCodeUnits } from "src/libs/crypto/canonicalJson"
 import { maxRowsPerInsert } from "src/libs/blockchain/chainDb"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
 import { GCRStorageProgram } from "src/model/entities/GCRv2/GCR_StorageProgram"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
 import { Validators } from "src/model/entities/Validators"
+import { GenesisImportedIdentity } from "src/model/entities/GenesisImportedIdentity"
+import {
+    assertCarryoverRow,
+    importedIdentityKeys,
+} from "src/libs/blockchain/genesis/carryover"
 
 import type {
     SnapshotLoaderAvailable,
@@ -52,7 +58,10 @@ const VALIDATORS_BATCH = 200
  * Called from inside the same transaction the bulk inserts will use, so
  * the row counts we read are the same ones the inserts will see.
  */
-async function preflightEmpty(em: EntityManager): Promise<void> {
+async function preflightEmpty(
+    em: EntityManager,
+    carryover: boolean,
+): Promise<void> {
     const checks: Array<{ table: string; count: number }> = []
     for (const table of [
         "gcr_main",
@@ -61,6 +70,7 @@ async function preflightEmpty(em: EntityManager): Promise<void> {
         "identity_commitments",
         "blocks",
         "validators",
+        ...(carryover ? ["genesis_imported_identities"] : []),
     ]) {
         // Use raw SQL: cheaper than spinning up the repository abstraction
         // for a simple count and works uniformly across entities whose
@@ -178,11 +188,15 @@ async function insertGcrMainStream(
     stream: AsyncIterable<GCRMainSeed>,
     batchSize: number,
     onBatch: (inserted: number) => void,
-): Promise<number> {
+    carryover: boolean,
+): Promise<{ inserted: number; importedIdentities: number }> {
     type AssignedRow = { pubkey: string; txHash: string }
     let inserted = 0
     let mainBatch: Omit<GCRMainSeed, "assignedTxs">[] = []
     let assignedBatch: AssignedRow[] = []
+    // One identity linked to several accounts yields one key; the set keeps
+    // the inserts free of duplicates within this restore.
+    const identityKeys = new Set<string>()
 
     // gcr_main: TypeORM maps only entity columns, so the seed minus
     // assignedTxs is the exact column set. Cast mirrors the existing
@@ -216,7 +230,15 @@ async function insertGcrMainStream(
         }
     }
 
+    let rowNo = 0
     for await (const row of stream) {
+        rowNo++
+        if (carryover) {
+            assertCarryoverRow(row, rowNo)
+            for (const key of importedIdentityKeys(row.identities)) {
+                identityKeys.add(key)
+            }
+        }
         const { assignedTxs, ...mainRow } = row
         mainBatch.push(mainRow)
         for (const txHash of assignedTxs) {
@@ -227,7 +249,20 @@ async function insertGcrMainStream(
     }
     await flushMain()
     await flushAssigned(true)
-    return inserted
+
+    if (carryover && identityKeys.size > 0) {
+        const rows = [...identityKeys].sort(compareCodeUnits).map(identityKey => ({ identityKey }))
+        const chunkSize = maxRowsPerInsert(em, GenesisImportedIdentity)
+        for (let i = 0; i < rows.length; i += chunkSize) {
+            await em
+                .createQueryBuilder()
+                .insert()
+                .into(GenesisImportedIdentity)
+                .values(rows.slice(i, i + chunkSize))
+                .execute()
+        }
+    }
+    return { inserted, importedIdentities: identityKeys.size }
 }
 
 /**
@@ -247,13 +282,25 @@ export type RestoreReport = {
     gcrStorageProgram: number
     identityCommitments: number
     validators: number
+    /** Distinct identities recorded as carried over; 0 without carryover. */
+    importedIdentities: number
     elapsed_ms: number
+}
+
+export type RestoreOptions = {
+    /**
+     * identityCarryover at genesis: refuse any row with a balance and record
+     * every imported identity in genesis_imported_identities.
+     */
+    carryover?: boolean
 }
 
 export async function restoreSnapshot(
     em: EntityManager,
     loader: SnapshotLoaderAvailable,
+    options: RestoreOptions = {},
 ): Promise<RestoreReport> {
+    const carryover = options.carryover === true
     const t0 = Date.now()
     const manifest = loader.getSnapshotManifest()
     const expectedGcrMain = manifest.files["gcr_main.jsonl"].rows
@@ -264,21 +311,23 @@ export async function restoreSnapshot(
         `[GENESIS][SNAPSHOT] snapshot present: block=${manifest.source.chain_block_height} hash=${manifest.source.chain_block_hash.slice(0, 16)}`,
     )
 
-    await preflightEmpty(em)
+    await preflightEmpty(em, carryover)
 
     // gcr_main rows carry a legacy `assignedTxs` array (pre-MoveAssignedTxsToOwnTable
     // snapshot). insertGcrMainStream strips it from the gcr_main insert and
     // routes the assignments into gcr_assigned_txs within this same transaction.
-    const gcrMainInserted = await insertGcrMainStream(
-        em,
-        loader.streamGcrMain(),
-        GCR_MAIN_BATCH,
-        n => {
-            log.info(
-                `[GENESIS][SNAPSHOT] gcr_main: inserted ${n}/${expectedGcrMain}`,
-            )
-        },
-    )
+    const { inserted: gcrMainInserted, importedIdentities } =
+        await insertGcrMainStream(
+            em,
+            loader.streamGcrMain(),
+            GCR_MAIN_BATCH,
+            n => {
+                log.info(
+                    `[GENESIS][SNAPSHOT] gcr_main: inserted ${n}/${expectedGcrMain}`,
+                )
+            },
+            carryover,
+        )
     if (gcrMainInserted !== expectedGcrMain) {
         throw new Error(
             `[GENESIS][SNAPSHOT] gcr_main row mismatch: inserted ${gcrMainInserted}, manifest expects ${expectedGcrMain}`,
@@ -364,7 +413,9 @@ export async function restoreSnapshot(
 
     const elapsed_ms = Date.now() - t0
     log.info(
-        `[GENESIS][SNAPSHOT] restore complete: gcr_main=${gcrMainInserted}, gcr_storageprogram=${storageInserted}, identity_commitments=${identityInserted}, validators=${validatorsInserted} elapsed=${elapsed_ms}ms`,
+        `[GENESIS][SNAPSHOT] restore complete: gcr_main=${gcrMainInserted}, gcr_storageprogram=${storageInserted}, identity_commitments=${identityInserted}, validators=${validatorsInserted}` +
+            (carryover ? `, imported_identities=${importedIdentities}` : "") +
+            ` elapsed=${elapsed_ms}ms`,
     )
 
     return {
@@ -372,6 +423,7 @@ export async function restoreSnapshot(
         gcrStorageProgram: storageInserted,
         identityCommitments: identityInserted,
         validators: validatorsInserted,
+        importedIdentities,
         elapsed_ms,
     }
 }

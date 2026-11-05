@@ -37,7 +37,11 @@ import {
     readAcceptedSchedule,
     writeAcceptedSchedule,
 } from "@/libs/blockchain/genesis/acceptedForkScheduleStore"
-import { snapshotManifestHash } from "@/libs/blockchain/genesis/loadSnapshot"
+import { openBoundGcrMain, snapshotManifestHash } from "@/libs/blockchain/genesis/loadSnapshot"
+import { importedIdentityProblems } from "@/libs/blockchain/genesis/verifyImportedIdentities"
+import { GenesisImportedIdentity } from "@/model/entities/GenesisImportedIdentity"
+import Datasource from "src/model/datasource"
+import { identityCarryoverActiveAtGenesis } from "@/forks/identityCarryoverGate"
 import { genesisFileExists, genesisFilePath } from "@/libs/blockchain/genesis/genesisFile"
 import { readGenesisSudoPubkey } from "@/libs/consensus/genesisSudoPubkey"
 import type { ForkConfigLike } from "@/libs/peer/routines/forkScheduleAgreement"
@@ -174,6 +178,18 @@ export default async function findGenesisBlock() {
         )
         const storedBlockProblem = blockPinProblem(genesisBlockHash, blockPin, false)
         if (storedBlockProblem) refuse([storedBlockProblem])
+        refuse(
+            await importedIdentityProblems(stored, {
+                openGcrMain: openBoundGcrMain,
+                storedKeys: async () => {
+                    const db = (await Datasource.getInstance()).getDataSource()
+                    const rows = await db
+                        .getRepository(GenesisImportedIdentity)
+                        .find({ select: { identityKey: true } })
+                    return rows.map(row => row.identityKey)
+                },
+            }),
+        )
         await acceptLoadedForkSchedule(await Chain.getLastBlockNumber())
         await loadShardSizeFromGenesisBlock()
         return
@@ -199,6 +215,7 @@ export default async function findGenesisBlock() {
             pin,
             restore: Config.getInstance().core.restore,
             snapshotManifestHash: await snapshotManifestHash(),
+            carryoverAtGenesis: identityCarryoverActiveAtGenesis(),
         }),
     )
     if (pin !== "") {

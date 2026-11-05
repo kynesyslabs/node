@@ -13,6 +13,7 @@ import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
 import { expectsNonceEdit, verifyAdmissionEdits } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
+import { admissionRefusal } from "./validation/postgresStorable"
 import { checkIdentityAdmission } from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
@@ -36,6 +37,14 @@ const STORED_BYTES_SQL =
     "octet_length(\"content\"::text) + octet_length(\"signature\"::text) + " +
     "COALESCE(octet_length(\"extra\"::text), 0) + " +
     "COALESCE(octet_length(\"ed25519_signature\"), 0) + octet_length(\"hash\")"
+
+const INT4_MIN = -(2 ** 31)
+const INT4_MAX = 2 ** 31 - 1
+
+/** Whether an `integer` column takes `value` as it is. */
+function isInt4(value: unknown): value is number {
+    return Number.isInteger(value) && (value as number) >= INT4_MIN && (value as number) <= INT4_MAX
+}
 
 // The signed timestamp as a number, or NULL unless it is a JSON number that is
 // a positive whole number of at most 15 digits: the same definition as
@@ -508,6 +517,13 @@ export default class Mempool {
         blockRef?: number,
         options: AddTransactionOptions = {},
     ) {
+        // The node builds some transactions itself from user input (instant
+        // messages, L2PS batches); they enter here without passing admission.
+        const unstorable = admissionRefusal(transaction)
+        if (unstorable !== null) {
+            return { confirmationBlock: null, error: unstorable }
+        }
+
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
             return {
@@ -844,9 +860,21 @@ export default class Mempool {
         // include them in a block as failed.
         const lastBlock = await Chain.getLastBlockNumber()
 
-        const unseenCandidates = incoming.filter(
-            tx => !existingHashes[tx.hash],
-        )
+        // The merge holds what admission would have let in, whatever a peer
+        // sends: an unstorable string the block re-check does not look for,
+        // in the json body, still reaches the rows the edits write. Checked
+        // first, since the chain lookup below queries by the hash.
+        const unseenCandidates = incoming.filter(tx => {
+            if (existingHashes[tx.hash]) return false
+            const unstorable = admissionRefusal(tx)
+            if (unstorable !== null) {
+                log.error(
+                    `[Mempool.receive] Rejecting tx ${String(tx?.hash).slice(0, 80)}: ${unstorable}`,
+                )
+                return false
+            }
+            return true
+        })
         const onChain =
             unseenCandidates.length > 0
                 ? await Chain.getExistingTransactionHashes(
@@ -855,6 +883,15 @@ export default class Mempool {
                 : new Set<string>()
 
         const unseenTransactions = unseenCandidates.filter(tx => {
+            // Unsigned and copied into integer columns as the peer sent them:
+            // one Postgres refuses fails the insert of every tx merged with it.
+            const peerColumns = tx as unknown as { blockNumber?: unknown; reference_block?: unknown }
+            if (!isInt4(peerColumns.blockNumber) || !isInt4(peerColumns.reference_block)) {
+                log.error(
+                    `[Mempool.receive] Rejecting tx ${tx.hash}: blockNumber or reference_block is not an integer`,
+                )
+                return false
+            }
             if (onChain.has(tx.hash)) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${tx.hash}: already recorded on chain`,
@@ -993,11 +1030,19 @@ export default class Mempool {
         }
 
         if (validTransactions.length > 0) {
+            // The peer's own timestamp and nonce are unsigned: the row takes
+            // the signed ones, which the validator checked Postgres reads, as
+            // addTransaction does.
+            const rows = validTransactions.map(tx => ({
+                ...tx,
+                timestamp: tx.content.timestamp,
+                nonce: tx.content.nonce,
+            }))
             try {
                 const { inserted } = await chunkedInsert(
                     this.repo,
                     MempoolTx,
-                    validTransactions as any[],
+                    rows as any[],
                     {
                         conflictTarget: ["hash"],
                         overwrite: ["blockNumber"],

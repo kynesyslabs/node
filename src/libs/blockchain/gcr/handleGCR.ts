@@ -122,6 +122,14 @@ import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
 
 type AtomicWorkPayloadView = WorkEnvelope & { transfers?: { to?: unknown; amount?: unknown }[] }
 import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
+import {
+    type IndexedValues,
+    indexedValues,
+    unloadableEditKey,
+    unstorableClaim,
+    unstorableRow,
+} from "./storableRows"
+import { NOT_STORABLE, isKeyStorable } from "@/libs/blockchain/validation/postgresStorable"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -253,6 +261,45 @@ function snapshotStaged(
             )
     }
     return snapshot as Partial<StagedSnapshot>
+}
+
+interface RowSnapshot {
+    cache: Map<string, unknown>
+    key: string
+    present: boolean
+    row: unknown
+}
+
+/** Copies of the storage program and proof rows a transaction's edits target. */
+function snapshotRows(entities: GCREntityCaches, edits: GCREdit[]): RowSnapshot[] {
+    const snapshots: RowSnapshot[] = []
+    const seen = new Set<string>()
+    const take = (cache: Map<string, unknown>, key: string, tag: string) => {
+        if (seen.has(tag + key)) return
+        seen.add(tag + key)
+        const row = cache.get(key)
+        snapshots.push({
+            cache,
+            key,
+            present: cache.has(key),
+            row: row && typeof row === "object" ? structuredClone(row) : row,
+        })
+    }
+    for (const edit of edits) {
+        if (edit.type === "storageProgram") {
+            take(entities.storagePrograms, (edit as GCREditStorageProgram).target, "sp:")
+        } else if (edit.type === "tlsnotary") {
+            take(entities.tlsNotaries, (edit as GCREditTLSNotary).data.tokenId, "tls:")
+        }
+    }
+    return snapshots
+}
+
+function restoreRows(snapshots: RowSnapshot[]) {
+    for (const { cache, key, present, row } of snapshots) {
+        if (present) cache.set(key, row)
+        else cache.delete(key)
+    }
 }
 
 function restoreStaged(entities: GCREntityCaches, snapshot: Partial<StagedSnapshot>) {
@@ -477,6 +524,130 @@ export function isGCRMainEdit(
 ): edit is GCREditBalance | GCREditNonce | GCREditIdentity {
     const gcrMainEdits = new Set(["balance", "nonce", "identity"])
     return gcrMainEdits.has(edit.type)
+}
+
+/** Rows of one cache an edit can write: those under `keys`, or all of them. */
+type WrittenRows = { cache: string; rows: Map<unknown, unknown> | undefined; keys: unknown[] | "all" }
+
+/** Rows each written row held before the edit, by cache and then by key. */
+type StoredIndexes = Map<string, Map<unknown, IndexedValues | undefined>>
+
+/**
+ * The rows `edit` can write, which are the rows it is judged on. Only rows
+ * the edit's own group can write are named: groups apply concurrently over
+ * the same caches, so another group's row may hold a value it has not yet
+ * put back, and reading it would make the verdict depend on scheduling. An
+ * identity edit writes its account's cached row alone (other accounts it
+ * credits are not in the caches).
+ */
+function rowsEditWrites(edit: GCREdit, entities: GCREntityCaches): WrittenRows[] {
+    const fields = edit as unknown as Record<string, any>
+    const caches = entities as unknown as Record<string, Map<unknown, unknown> | undefined>
+    const one = (cache: string, key: unknown): WrittenRows[] => [{ cache, rows: caches[cache], keys: [key] }]
+    const all = (cache: string): WrittenRows => ({ cache, rows: caches[cache], keys: "all" })
+    switch (edit.type as string) {
+        case "identity":
+            return one("accounts", normalizePubkey(fields.account))
+        case "storageProgram":
+        case "storage-program-put":
+            return one("storagePrograms", fields.target)
+        case "tlsnotary":
+            return one("tlsNotaries", fields.data?.tokenId)
+        case "work-attempt":
+            return one("atomicWorks", fields.workId)
+        case "resource-slot-cas":
+            return one("resourceSlots", fields.resourceKey)
+        case "validatorStake":
+            return [all("validators")]
+        case "networkUpgrade":
+        case "networkUpgradeVote":
+            return [all("networkUpgrades"), all("networkUpgradeVotes")]
+        default:
+            return []
+    }
+}
+
+function writtenEntries(written: WrittenRows): [unknown, unknown][] {
+    if (!written.rows) return []
+    if (written.keys === "all") return [...written.rows.entries()]
+    return written.keys.map(key => [key, written.rows!.get(key)])
+}
+
+/** The indexed values of the rows `edit` can write, as they are before it applies. */
+function storedIndexes(edit: GCREdit, entities: GCREntityCaches): StoredIndexes {
+    const stored: StoredIndexes = new Map()
+    for (const written of rowsEditWrites(edit, entities)) {
+        const byKey = new Map<unknown, IndexedValues | undefined>()
+        for (const [key, row] of writtenEntries(written)) byKey.set(key, indexedValues(written.cache, row))
+        stored.set(written.cache, byKey)
+    }
+    return stored
+}
+
+/**
+ * Where a row `edit` has just written cannot be stored, as "cache.column",
+ * or null. Judged on the rows rather than the edit, so only what a routine
+ * really stores counts. Balance and nonce edits store numbers, under a key
+ * nothing checks for shape: a native send credits whatever its body names.
+ * The ZK claims are written only by zk edits, which all apply in one group.
+ * `stored` is what `storedIndexes` read before the edit applied.
+ */
+function unstorableAfter(edit: GCREdit, entities: GCREntityCaches, stored: StoredIndexes): string | null {
+    const fields = edit as unknown as Record<string, any>
+    switch (edit.type as string) {
+        case "balance":
+        case "nonce":
+            return isKeyStorable(normalizePubkey(fields.account)) ? null : "accounts.pubkey"
+    }
+    for (const written of rowsEditWrites(edit, entities)) {
+        for (const [key, row] of writtenEntries(written)) {
+            const where = unstorableRow(written.cache, row, stored.get(written.cache)?.get(key))
+            if (where) return where
+        }
+    }
+    if (edit.type === "identity" && stagedKeyOf(edit) === "zk") {
+        return (
+            unstorableClaim("zkCommitments", entities.zkCommitments) ??
+            unstorableClaim("zkNullifiers", entities.zkNullifiers)
+        )
+    }
+    return null
+}
+
+/**
+ * Why `pubkey` cannot be the key HandleGCR.createAccount builds an account
+ * under, or null. Kept in step with it by a test: the referral code it
+ * derives needs 64 characters after an optional 0x. Rows the chain creates
+ * all have that shape; a restored snapshot is not held to it.
+ */
+export function uncreatableAccountKey(pubkey: unknown): string | null {
+    if (typeof pubkey !== "string" || pubkey.trim().length === 0) return "not a public key"
+    const bare = pubkey.startsWith("0x") ? pubkey.slice(2) : pubkey
+    return bare.length === 64 ? null : "not 64 characters after 0x"
+}
+
+const NO_KEYS: ReadonlySet<string> = new Set()
+
+/**
+ * Why an edit's account cannot be loaded, as prepareEntities loads it, or
+ * null. Every account key must normalize to a storable key. One that is
+ * `loaded` and not among the `stored` rows is created, so it must also be
+ * creatable; one that is only grouped by never is.
+ */
+function accountKeyProblem(
+    account: unknown,
+    loaded: boolean,
+    stored: ReadonlySet<string> = NO_KEYS,
+): string | null {
+    let pubkey: string
+    try {
+        pubkey = normalizePubkey(account as string)
+    } catch {
+        return "not a public key"
+    }
+    if (typeof pubkey !== "string") return "not a public key"
+    if (!isKeyStorable(pubkey)) return NOT_STORABLE
+    return loaded && !stored.has(pubkey) ? uncreatableAccountKey(pubkey) : null
 }
 
 /**
@@ -1198,7 +1369,7 @@ export default class HandleGCR {
                 }
             }
             const applyOne = (edit: GCREdit, caches: GCREntityCaches) =>
-                HandleGCR.applyGCREdit(
+                HandleGCR.applyStorableEdit(
                     HandleGCR.stampedEdit(edit, tx, simulate),
                     caches,
                     isRollback,
@@ -1247,7 +1418,18 @@ export default class HandleGCR {
                 entities,
                 settledEdits(parts, isReplay ? "replayed" : "committed", true),
                 applyOne,
-                seal,
+                seal && (caches => {
+                    const sealed = seal(caches)
+                    if (!sealed.success) return sealed
+                    // The receipt quotes the Work's payload into jsonb.
+                    const where = unstorableRow(
+                        "atomicWorks",
+                        attempt ? caches.atomicWorks.get(attempt.workId) : null,
+                    )
+                    return where === null
+                        ? sealed
+                        : { success: false, message: `${where} holds a value Postgres cannot store` }
+                }),
             )
             if (result.success || simulate || isReplay) {
                 if (!result.success) {
@@ -1294,6 +1476,10 @@ export default class HandleGCR {
                 }
             }
         }
+        // A storage or proof row an edit wrote must not outlive a later edit
+        // of the same transaction that fails: the fee and nonce are put
+        // back, so the write would be free.
+        const rowSnapshots = snapshotRows(entities, gcrEdits)
         const sideEffects: (() => Promise<void>)[] = []
         const deferredWrites: DeferredWrite[] = []
         const appliedEdits: GCREdit[] = []
@@ -1305,7 +1491,7 @@ export default class HandleGCR {
             let result: GCRResult
 
             try {
-                result = await HandleGCR.applyGCREdit(
+                result = await HandleGCR.applyStorableEdit(
                     edit,
                     entities,
                     isRollback,
@@ -1320,7 +1506,12 @@ export default class HandleGCR {
             }
 
             if (!result.success) {
-                // Rollback all snapshots for this tx
+                // INFO: If on a serious run, rollback hard edits
+                if (!simulate && !this.GCRTxTypes.has(edit.type)) {
+                    await this.rollback(tx, entities, appliedEdits)
+                }
+                // After the rollback, which also reverses the balance edits:
+                // reversing them on the restored accounts would refund them twice.
                 for (const snap of snapshots) {
                     if (snap.entity === null) {
                         // Entity was newly created - restore to fresh state
@@ -1334,10 +1525,7 @@ export default class HandleGCR {
                         entities.accounts.set(snap.pubkey, snap.entity)
                     }
                 }
-                // INFO: If on a serious run, rollback hard edits
-                if (!simulate && !this.GCRTxTypes.has(edit.type)) {
-                    await this.rollback(tx, entities, appliedEdits)
-                }
+                restoreRows(rowSnapshots)
                 // After the rollback, which may have edited the staged rows
                 restoreStaged(entities, staged)
 
@@ -1621,10 +1809,10 @@ export default class HandleGCR {
     /** Delete gcr_assigned_txs rows stamped with `blockNumber`. */
     static async deleteAssignedTxsForBlock(
         blockNumber: number,
+        manager?: EntityManager,
     ): Promise<number> {
-        const db = await Datasource.getInstance()
-        const res = await db
-            .getDataSource()
+        const source = manager ?? (await Datasource.getInstance()).getDataSource()
+        const res = await source
             .getRepository(GCRAssignedTx)
             .delete({ blockNumber })
         return res.affected ?? 0
@@ -1673,6 +1861,54 @@ export default class HandleGCR {
             }
         }
         return refused
+    }
+
+    /**
+     * The transactions prepareEntities could not load the rows of (see
+     * unloadableEditKey): they fail here, the same way on every node, instead
+     * of failing the block. An account key createAccount would refuse is
+     * looked up first, so an existing row of that shape is edited, not
+     * refused; only storable keys are queried. Rollback is not checked: it
+     * replays only transactions that applied, whose rows loaded.
+     */
+    static async refuseUnloadableKeys(
+        txs: Transaction[],
+        blockNumber?: number,
+    ): Promise<Set<string>> {
+        const uncreatable = new Set<string>()
+        const collect = (account: unknown, loaded: boolean): string | null => {
+            const problem = accountKeyProblem(account, false)
+            if (problem === null && loaded) {
+                const pubkey = normalizePubkey(account as string)
+                if (uncreatableAccountKey(pubkey) !== null) uncreatable.add(pubkey)
+            }
+            return problem
+        }
+        for (const tx of txs) unloadableEditKey(tx, collect)
+        const stored = uncreatable.size === 0 ? NO_KEYS : await this.storedAccountKeys(uncreatable)
+
+        const refused = new Set<string>()
+        for (const tx of txs) {
+            const reason = unloadableEditKey(tx, (account, loaded) =>
+                accountKeyProblem(account, loaded, stored),
+            )
+            if (reason === null) continue
+            log.error(
+                `[applyTransactions] Refusing tx ${tx.hash}` +
+                    (blockNumber !== undefined ? ` of block ${blockNumber}` : "") +
+                    `: ${reason}`,
+            )
+            refused.add(tx.hash)
+        }
+        return refused
+    }
+
+    /** Which of `pubkeys` have a gcr_main row. */
+    private static async storedAccountKeys(pubkeys: Set<string>): Promise<Set<string>> {
+        const rows = await dataSource
+            .getRepository(GCRMain)
+            .find({ where: { pubkey: In([...pubkeys]) }, select: { pubkey: true } })
+        return new Set(rows.map(row => row.pubkey))
     }
 
     /**
@@ -1846,6 +2082,14 @@ export default class HandleGCR {
         // own orderings, and a winner picked by input position could differ
         // between them for the same block.
         const blockOrder = finalTxs
+        // Before contention, so a transaction that can never apply does not
+        // win a Work, slot or address over one that can.
+        const unkeyed = isRollback
+            ? new Set<string>()
+            : await this.refuseUnloadableKeys(finalTxs, clock?.height)
+        if (unkeyed.size > 0) {
+            finalTxs = finalTxs.filter(tx => !unkeyed.has(tx.hash))
+        }
         const contended = this.contendedInBlock(finalTxs)
         if (contended.size > 0) {
             log.warning(
@@ -1926,6 +2170,7 @@ export default class HandleGCR {
         const successfulTxs: string[] = []
         const failedTxs: string[] = []
         for (const h of contended) failedSet.add(h)
+        for (const h of unkeyed) failedSet.add(h)
         for (const tx of blockOrder) {
             if (successfulSet.has(tx.hash)) successfulTxs.push(tx.hash)
             else if (failedSet.has(tx.hash)) failedTxs.push(tx.hash)
@@ -2436,6 +2681,27 @@ export default class HandleGCR {
      *
      * @throws database errors during repository operations
      */
+    /**
+     * `applyGCREdit`, then a failure if a row it wrote holds what Postgres
+     * refuses: the transaction fails and is rolled back instead of the block
+     * failing to commit. A rollback writes back rows that were stored, so it
+     * is not checked.
+     */
+    static async applyStorableEdit(
+        edit: GCREdit,
+        entities: GCREntityCaches,
+        isRollback = false,
+        simulate = false,
+    ): Promise<GCRResult> {
+        const stored = isRollback ? new Map() : storedIndexes(edit, entities)
+        const result = await HandleGCR.applyGCREdit(edit, entities, isRollback, simulate)
+        if (!result.success || isRollback) return result
+        const where = unstorableAfter(edit, entities, stored)
+        return where === null
+            ? result
+            : { success: false, message: `${where} holds a value Postgres cannot store` }
+    }
+
     static async applyGCREdit(
         editOperation: GCREdit,
         entities: GCREntityCaches,
