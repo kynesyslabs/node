@@ -5,6 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
+import type { Blocks } from "src/model/entities/Blocks"
 
 const getLastBlock = jest.fn(async () => null as any)
 const getAheadValidatorPeers = jest.fn(async () => [] as unknown[])
@@ -172,7 +173,9 @@ describe("getFinalizedHead", () => {
             commitLock: { activationHeight: 0 },
             committeeBinding: { activationHeight: 0 },
         }
-        getLastBlock.mockResolvedValue(block({ validation_data: { signatures: SIGNATURES, round: 2 } }))
+        // Typed as the stored row so the type check covers the round field.
+        const validationData: Blocks["validation_data"] = { signatures: SIGNATURES, round: 2 }
+        getLastBlock.mockResolvedValue(block({ validation_data: validationData }))
         const reply = await getFinalizedHead()
         expect(reply.response.round).toBe(2)
         expect(reply.response.signedMessage).toMatch(/:4242:2:e3b0c442$/)

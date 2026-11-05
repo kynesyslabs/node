@@ -78,7 +78,7 @@ export async function recordValidatorSetSnapshot(
     const validators = await liveRecord(em)
     const setHash = validatorSetHash(validators)
     const previous = block > 0 ? await latestAtOrBelow(em, block - 1) : null
-    if (previous && previous.setHash === setHash) {
+    if (previous?.setHash === setHash) {
         return false
     }
     await repo.insert({ block, setHash, validators })
@@ -142,7 +142,17 @@ export async function ensureValidatorSetSnapshot(
         const validators = await liveRecord(em)
         const setHash = validatorSetHash(validators)
         const latest = await latestAtOrBelow(em, tip)
-        if (latest && latest.setHash === setHash) {
+        if (latest?.setHash === setHash) {
+            return null
+        }
+        // A snapshot at the tip was committed with the tip block: the next
+        // block commits to its hash, so the drifted table must not replace it.
+        if (latest?.block === tip && tip > 0) {
+            log.error(
+                `[finality] validators table differs from the set committed with block ${tip} ` +
+                    `(${latest.setHash}, table gives ${setHash}); keeping the committed set. ` +
+                    "The table has drifted from the chain.",
+            )
             return null
         }
         if (latest && tip > 0) {

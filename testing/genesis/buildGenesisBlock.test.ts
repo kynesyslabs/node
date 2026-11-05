@@ -9,15 +9,18 @@ import { loadForkConfigFromGenesis } from "src/forks"
 import { buildGenesisBlock } from "src/libs/blockchain/genesis/buildGenesisBlock"
 import { hashGenesisData } from "src/libs/blockchain/genesis/normalizeGenesisForHash"
 
+/**
+ * A frozen copy of a launch-shaped genesis, so editing data/genesis.json for
+ * a network never moves the hash this test pins.
+ */
 function launchGenesis(): Record<string, any> {
-    const data = JSON.parse(readFileSync("data/genesis.json", "utf8"))
-    return { ...data, timestamp: 1793318400 }
+    return JSON.parse(readFileSync("testing/genesis/fixtures/block0-genesis.json", "utf8"))
 }
 
 describe("buildGenesisBlock", () => {
     // Block 0 of a running chain can never change; a different value here means
     // nodes on this build would reject the chain they already hold.
-    it("builds the block 0 this repository's genesis has always produced", () => {
+    it("builds the block 0 this genesis has always produced", () => {
         const genesis = launchGenesis()
         loadForkConfigFromGenesis(genesis)
         expect(buildGenesisBlock(genesis).genesisBlock.hash).toBe(

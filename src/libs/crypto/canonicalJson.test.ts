@@ -47,8 +47,8 @@ describe("canonicalJson", () => {
     })
 
     it("sorts keys by UTF-16 code units, not code points", () => {
-        // U+FF61 sorts after the surrogate pair of U+1F600 by code point, but
-        // before it by UTF-16 code unit (0xFF61 > 0xD83D).
+        // U+FF61 sorts before U+1F600 by code point, but after it by UTF-16
+        // code unit: the pair starts with 0xD83D, below 0xFF61.
         const value = { "｡": 1, "\u{1f600}": 2, "é": 3, z: 4 }
         expect(canonicalJson(value)).toBe("{\"z\":4,\"é\":3,\"\u{1f600}\":2,\"｡\":1}")
     })
@@ -70,6 +70,14 @@ describe("canonicalJson", () => {
     it("follows JSON for undefined, functions and symbols below the top level", () => {
         expect(canonicalJson({ a: undefined, b: () => 1, c: Symbol("s"), d: 1 })).toBe("{\"d\":1}")
         expect(canonicalJson([undefined, () => 1, Symbol("s")])).toBe("[null,null,null]")
+    })
+
+    it("spells array holes as null, like JSON.stringify", () => {
+        // eslint-disable-next-line no-sparse-arrays
+        const sparse = [1, , 3]
+        expect(canonicalJson(sparse)).toBe("[1,null,3]")
+        expect(canonicalJson(new Array(2))).toBe("[null,null]")
+        expect(canonicalJson({ a: new Array(1) })).toBe(JSON.stringify({ a: new Array(1) }))
     })
 
     it("honours toJSON and unwraps boxed primitives, like JSON.stringify", () => {

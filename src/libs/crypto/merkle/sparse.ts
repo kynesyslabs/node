@@ -21,6 +21,7 @@
 
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesEqual, fromHex, hash32, toHex, type HashInput } from "./hex"
+import { compareCodeUnits } from "../canonicalJson"
 
 const NODE_PREFIX = Uint8Array.of(0x01)
 const LEAF_PREFIX = Uint8Array.of(0x02)
@@ -107,7 +108,7 @@ export class SparseMerkleTree {
             leaves.push({ key, valueHash, keyHex: toHex(key) })
         }
         // Lowercase hex of equal length sorts like the bytes it spells.
-        leaves.sort((x, y) => (x.keyHex < y.keyHex ? -1 : x.keyHex > y.keyHex ? 1 : 0))
+        leaves.sort((x, y) => compareCodeUnits(x.keyHex, y.keyHex))
         for (let i = 1; i < leaves.length; i++) {
             if (leaves[i].keyHex === leaves[i - 1].keyHex) {
                 throw new Error(`sparse: duplicate key ${leaves[i].keyHex}`)
@@ -181,7 +182,7 @@ function rootAlongPath(key: Uint8Array, terminalHash: Uint8Array, siblings: unkn
 function readTerminalLeaf(terminal: SparseTerminal): { key: Uint8Array; valueHash: Uint8Array } {
     const t = terminal as { key?: unknown; valueHash?: unknown }
     if (typeof t.key !== "string" || typeof t.valueHash !== "string") {
-        throw new Error("sparse: malformed leaf terminal")
+        throw new TypeError("sparse: malformed leaf terminal")
     }
     return { key: hash32(t.key, "terminal key"), valueHash: hash32(t.valueHash, "terminal valueHash") }
 }

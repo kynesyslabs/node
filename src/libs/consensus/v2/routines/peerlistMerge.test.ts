@@ -1,4 +1,6 @@
 import { getSharedState } from "src/utilities/sharedState"
+import Chain from "src/libs/blockchain/chain"
+import type { Blocks } from "src/model/entities/Blocks"
 import {
     __resetPeerlistMerge,
     computeMergedPeerlist,
@@ -28,6 +30,9 @@ const obs = (
     block: number = TIP_BLOCK,
     block_hash: string = TIP_HASH,
 ): SyncObservation => ({ identity, block, block_hash })
+
+// The merge reads only a stored block's number and hash.
+const storedBlock = (number: number, hash: string) => ({ number, hash }) as Blocks
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -445,6 +450,78 @@ describe("contributePeerlist", () => {
         const merged = await merge(SOLO)
         expect(merged).not.toContain(REPORTED_PEER)
         expect(merged).toContain(STALE_PEER)
+    })
+
+    it("keeps the round's contributions when a peer names a far-future height", async () => {
+        for (const c of ["c1", "c2", "c3"]) {
+            contributePeerlist(101, c, [obs(REPORTED_PEER)])
+        }
+        contributePeerlist(1100, "c1", [obs(STALE_PEER)])
+        expect(await merge()).toEqual([REPORTED_PEER])
+    })
+
+    it("records the round's contributions that arrive after a far-future one", async () => {
+        contributePeerlist(1100, "c1", [obs(STALE_PEER)])
+        for (const c of ["c1", "c2", "c3"]) {
+            contributePeerlist(101, c, [obs(REPORTED_PEER)])
+        }
+        expect(await merge()).toEqual([REPORTED_PEER])
+    })
+
+    it("refuses a height two past our tip, the nearest one that would reset the round", async () => {
+        contributePeerlist(102, "c1", [obs(STALE_PEER, 101, "hash-101")])
+        for (const c of ["c1", "c2", "c3"]) {
+            contributePeerlist(101, c, [obs(REPORTED_PEER)])
+        }
+        expect(await merge()).toEqual([REPORTED_PEER])
+    })
+
+    describe("a round opened before the shared tip caught up with the chain", () => {
+        // The round's blockRef comes from the stored chain; the shared tip
+        // moves only after the insert's commit, so for a moment it trails.
+        const ROUND = 102
+        const atRoundParent = (identity: string) => obs(identity, 101, "hash-101")
+
+        beforeEach(() => {
+            jest.mocked(Chain.getBlockByNumber).mockImplementation(
+                async (n: number) =>
+                    ({ 100: storedBlock(100, TIP_HASH), 101: storedBlock(101, "hash-101") })[n] ??
+                    null,
+            )
+            freezeLocalSyncObservations(ROUND)
+        })
+
+        afterEach(() => {
+            jest.mocked(Chain.getBlockByNumber).mockImplementation(async (n: number) =>
+                n === TIP_BLOCK ? storedBlock(TIP_BLOCK, TIP_HASH) : null,
+            )
+        })
+
+        it("records contributions for the round it opened", async () => {
+            for (const c of ["c1", "c2", "c3"]) {
+                contributePeerlist(ROUND, c, [atRoundParent(REPORTED_PEER)])
+            }
+            expect(await merge(SHARD, ROUND)).toEqual([REPORTED_PEER])
+        })
+
+        it("still refuses a height past that round", async () => {
+            for (const c of ["c1", "c2", "c3"]) {
+                contributePeerlist(ROUND, c, [atRoundParent(REPORTED_PEER)])
+            }
+            contributePeerlist(ROUND + 1, "c1", [obs(STALE_PEER, 102, "hash-102")])
+            expect(await merge(SHARD, ROUND)).toEqual([REPORTED_PEER])
+        })
+    })
+
+    it("refuses every height while our tip is unknown", async () => {
+        const tip = getSharedState.lastBlockNumber
+        getSharedState.lastBlockNumber = undefined as unknown as number
+        try {
+            contributePeerlist(101, "c1", [obs(REPORTED_PEER)])
+        } finally {
+            getSharedState.lastBlockNumber = tip
+        }
+        expect(await merge(SOLO)).toEqual([])
     })
 
     it("rejects non-integer blockRefs", async () => {

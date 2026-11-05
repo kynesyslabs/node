@@ -168,6 +168,13 @@ export default class Chain {
         return txOps.insertTransactionsFromSync(transactions)
     }
 
+    static async setFailureCodes(
+        blockNumber: number,
+        codes: Map<string, string | null>,
+    ): Promise<void> {
+        return txOps.setFailureCodes(blockNumber, codes)
+    }
+
     // ── Genesis ───────────────────────────────────────────────
     static async generateGenesisBlock(
         genesisData: any,

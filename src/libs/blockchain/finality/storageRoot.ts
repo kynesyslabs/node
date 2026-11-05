@@ -226,7 +226,9 @@ export class StorageProgramsRoot {
             } catch (error) {
                 // Only a cache of what the rows already determine: the next
                 // rebuild computes the same leaves again.
-                log.warning(`[storageRoot] could not store ${result.filled.length} computed leaf(s): ${error}`)
+                log.warning(
+                    `[storageRoot] could not store ${result.filled.length} computed leaf(s): ${error instanceof Error ? error.message : String(error)}`,
+                )
             }
         }
         this.cached = { epoch, root: result.root }

@@ -550,7 +550,9 @@ describe("results checked against the next block", () => {
             { code: "TX_EXECUTE_FAILED", hash: failed.hash, status: "failed" },
         ])
 
-        await checkResultsAgainstNextBlock(block, [ok, failed], nextBlock(block, root))
+        await expect(
+            checkResultsAgainstNextBlock(block, [ok, failed], nextBlock(block, root)),
+        ).resolves.toBeUndefined()
     })
 
     it("rejects results whose failure code differs from the committed one", async () => {
@@ -580,7 +582,9 @@ describe("results checked against the next block", () => {
             { code: "TX_EXISTS", hash: dup.hash, status: "failed" },
         ])
 
-        await checkResultsAgainstNextBlock(block, [dup], nextBlock(block, root))
+        await expect(
+            checkResultsAgainstNextBlock(block, [dup], nextBlock(block, root)),
+        ).resolves.toBeUndefined()
     })
 
     it("does not judge a next block that is not the one built on this block", async () => {
@@ -589,18 +593,20 @@ describe("results checked against the next block", () => {
         const wrong = "0".repeat(64)
 
         // Absent, before the fork, on another parent, or not hashing to itself
-        await checkResultsAgainstNextBlock(block, [ok], undefined)
-        await checkResultsAgainstNextBlock(block, [ok], {
-            ...nextBlock(block, wrong),
-            hash: "forged",
-        })
-        await checkResultsAgainstNextBlock(
-            block,
-            [ok],
+        const unjudged = [
+            undefined,
+            { ...nextBlock(block, wrong), hash: "forged" },
             nextBlock(block, wrong, { previousHash: "elsewhere" }),
-        )
+        ]
+        for (const next of unjudged) {
+            await expect(
+                checkResultsAgainstNextBlock(block, [ok], next),
+            ).resolves.toBeUndefined()
+        }
         getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 2
-        await checkResultsAgainstNextBlock(block, [ok], nextBlock(block, wrong))
+        await expect(
+            checkResultsAgainstNextBlock(block, [ok], nextBlock(block, wrong)),
+        ).resolves.toBeUndefined()
     })
 })
 

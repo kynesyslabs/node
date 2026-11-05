@@ -244,6 +244,17 @@ describe("boot", () => {
         expect(snapshots.map(s => s.block)).toEqual([0, 40])
     })
 
+    it("keeps the set committed with the tip block when the table drifted from it", async () => {
+        await ensureValidatorSetSnapshot(0)
+        validators.push(row(9))
+        await recordValidatorSetSnapshot(em, 40)
+        const committed = structuredClone(snapshots.find(s => s.block === 40))
+        validators.push(row(10))
+
+        expect(await ensureValidatorSetSnapshot(40)).toBeNull()
+        expect(snapshots.find(s => s.block === 40)).toEqual(committed)
+    })
+
     it("drops snapshots above the tip", async () => {
         await ensureValidatorSetSnapshot(0)
         validators.push(row(9))

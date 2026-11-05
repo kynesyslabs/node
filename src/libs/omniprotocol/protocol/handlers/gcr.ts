@@ -192,9 +192,9 @@ export const handleGetAddressInfo: OmniHandler<Buffer> = async ({
     }
 
     try {
-        const { default: ensureGCRForUser } =
-            await import("src/libs/blockchain/gcr/gcr_routines/ensureGCRForUser")
-        const info = await ensureGCRForUser(payload.address)
+        const { default: readGCRForUser } =
+            await import("src/libs/blockchain/gcr/gcr_routines/readGCRForUser")
+        const info = await readGCRForUser(payload.address)
 
         const balance = BigInt(
             typeof info.balance === "string"
