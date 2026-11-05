@@ -39,14 +39,21 @@ export default class GCRNetworkUpgradeRoutines {
         if (e.type !== "networkUpgrade") {
             return { success: false, message: "Invalid GCREdit type" }
         }
+        // Before the lookup: an undefined id there matches any row, which
+        // would report a malformed proposal as already persisted.
+        if (typeof e.proposalId !== "string" || e.proposalId === "") {
+            return { success: false, message: "Invalid proposalId" }
+        }
         // Canonicalise the proposer key before persistence so RPC reads
         // (which match against the lower-cased sender) line up.
         const proposerKey = canonicalAddress(e.account)
         const resolved =
             repo ??
-            (await Datasource.getInstance())
-                .getDataSource()
-                .getRepository(NetworkUpgrade)
+            (await readState("datasource", async () =>
+                (await Datasource.getInstance())
+                    .getDataSource()
+                    .getRepository(NetworkUpgrade),
+            ))
 
         // Idempotent on duplicate proposalId.
         const existing = await readState("proposal", () =>
@@ -157,8 +164,11 @@ export default class GCRNetworkUpgradeRoutines {
         const voterAddress = canonicalAddress(e.account)
         let votes = voteRepo
         let proposals = proposalRepo
+        if (typeof e.proposalId !== "string" || e.proposalId === "") {
+            return { success: false, message: "Invalid proposalId" }
+        }
         if (!votes || !proposals) {
-            const db = await Datasource.getInstance()
+            const db = await readState("datasource", () => Datasource.getInstance())
             votes ??= db.getDataSource().getRepository(NetworkUpgradeVote)
             proposals ??= db.getDataSource().getRepository(NetworkUpgrade)
         }

@@ -16,9 +16,11 @@ let seeded: Record<string, any[]> = {}
 
 const nameOf = (entity: any) => entity?.name ?? String(entity)
 
+// TypeORM 0.3 drops an undefined condition rather than matching on it.
 const matches = (row: any, where: Record<string, any>) =>
     Object.entries(where).every(([k, v]) =>
-        v instanceof In([]).constructor ? ((v as { value: unknown[] }).value).includes(row[k]) : row[k] === v,
+        v === undefined ||
+        (v instanceof In([]).constructor ? ((v as { value: unknown[] }).value).includes(row[k]) : row[k] === v),
     )
 
 function repoFor(table: string, sink: Map<string, unknown[]>, tag: string) {
@@ -276,6 +278,21 @@ describe("governance edits", () => {
         expect(entities.networkUpgrades.has("p4")).toBe(false)
     })
 
+    it("refuses a proposal without an id even when other proposals exist", async () => {
+        seeded = {
+            NetworkUpgrade: [{ proposalId: "p0", version: 1, status: "rejected", proposedParameters: {} }],
+        }
+        const result = await HandleGCR.applyGCREdit(
+            { ...proposal("p1"), proposalId: undefined },
+            caches(),
+            false,
+            false,
+        )
+
+        expect(result.success).toBe(false)
+        expect(result.message).toBe("Invalid proposalId")
+    })
+
     it("refuses a proposal from a validator that is not active", async () => {
         const { default: GCR } = await import("./gcr")
         spyOn(GCR, "getGCRValidatorStatus").mockResolvedValue({ status: "1" } as any)
@@ -505,6 +522,16 @@ describe("a state read that fails", () => {
         const { default: GCR } = await import("./gcr")
         ;(GCR.getGCRValidatorStatus as any).mockRestore?.()
         failingTable("Validators")
+
+        await expect(
+            HandleGCR.applyGCREdit(proposal("p1"), caches(), false, false),
+        ).rejects.toBeInstanceOf(StateReadError)
+    })
+
+    it("aborts a proposal when the chain tip cannot be read", async () => {
+        const { default: GCR } = await import("./gcr")
+        ;(GCR.getGCRValidatorStatus as any).mockRestore?.()
+        spyOn(Chain, "getLastBlockNumber").mockRejectedValue(new Error("connection reset"))
 
         await expect(
             HandleGCR.applyGCREdit(proposal("p1"), caches(), false, false),

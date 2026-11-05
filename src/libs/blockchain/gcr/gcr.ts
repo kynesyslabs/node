@@ -72,7 +72,7 @@ import TxValidatorPool from "../validation/txValidatorPool"
 import { GCRSubnetsTxs } from "@/model/entities/GCRv2/GCRSubnetsTxs"
 import { emptyResponse } from "@/libs/network"
 import { Validators } from "@/model/entities/Validators"
-import { StateReadError } from "@/libs/blockchain/gcr/stateReadError"
+import { readState } from "@/libs/blockchain/gcr/stateReadError"
 import { web2UserIdLookupKey } from "@/libs/identity/web2UserId"
 import {
     IDENTITIES_DEFAULT_LIMIT,
@@ -282,37 +282,46 @@ export default class GCR {
     // INFO Get a validator (or a public key anyway) status in the staking
     // NOTE While accepting a blockNumber, it defaults to the last one
     /**
-     * @param strict - throw StateReadError when the query fails, instead of
-     *   answering null as if the row were absent; block apply needs this.
+     * @param strict - throw StateReadError when any read fails (the chain
+     *   tip included), instead of answering null as if the row were absent;
+     *   block apply needs this.
      */
     static async getGCRValidatorStatus(
         publicKeyHex: string,
         blockNumber: number = null,
         strict = false,
-    ) {
+    ): Promise<Validators | null> {
+        if (strict) {
+            return readState("validator row", () =>
+                GCR.readValidatorRow(publicKeyHex, blockNumber),
+            )
+        }
+        try {
+            return await GCR.readValidatorRow(publicKeyHex, blockNumber)
+        } catch (e) {
+            log.error(`Error fetching validator status: ${e}`)
+            return null
+        }
+    }
+
+    private static async readValidatorRow(
+        publicKeyHex: string,
+        blockNumber: number | null,
+    ): Promise<Validators | null> {
         const db = await Datasource.getInstance()
-        const validatorsRepository = db
+        if (!blockNumber) {
+            blockNumber = await Chain.getLastBlockNumber()
+        }
+        const info = await db
             .getDataSource()
             .getRepository(Validators)
-
-        if (!blockNumber) {
-            blockNumber = await Chain.getLastBlockNumber() // Ensure this method is also ported to TypeORM
-        }
-
-        try {
-            const info = await validatorsRepository.findOne({
+            .findOne({
                 where: {
                     first_seen: LessThanOrEqual(blockNumber),
                     address: publicKeyHex,
                 },
             })
-
-            return info || null
-        } catch (e) {
-            if (strict) throw new StateReadError("validator row", e)
-            log.error(`Error fetching validator status: ${e}`)
-            return null
-        }
+        return info || null
     }
 
     static async getNativeSubnetsTxs(
