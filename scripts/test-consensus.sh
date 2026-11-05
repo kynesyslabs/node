@@ -82,6 +82,7 @@ SUITE_FILES=(
     src/libs/utils/calibrateTime.boot.test.ts
     src/libs/utils/keyMaker.test.ts
     src/utilities/nodeVersion.test.ts
+    src/utilities/tui/CategorizedLogger.level.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/loadForkConfig.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
