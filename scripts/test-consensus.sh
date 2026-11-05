@@ -21,6 +21,7 @@ SUITE_FILES=(
     src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
+    src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/identity/foreignSignature.test.ts
     src/libs/identity/signingRecord.test.ts
