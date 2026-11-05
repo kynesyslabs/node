@@ -71,7 +71,14 @@ function blockSignedBy(variant: string, signers: string[]) {
     for (const id of signers) {
         signatures[id] = toHex(new TextEncoder().encode(`${id}:${hash}`))
     }
-    return { number: 10, hash, content, validation_data: { signatures } } as any
+    return {
+        number: 10,
+        hash,
+        content,
+        proposer: "ab".repeat(32),
+        next_proposer: "cd".repeat(32),
+        validation_data: { signatures },
+    } as any
 }
 
 const accepted = async (variant: string, signers: string[]) =>

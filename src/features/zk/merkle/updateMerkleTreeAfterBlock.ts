@@ -12,9 +12,7 @@ import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState"
 import { MerkleTreeManager } from "./MerkleTreeManager"
 import log from "@/utilities/logger"
-
-// Global Merkle tree identifier
-const GLOBAL_TREE_ID = "global"
+import { GLOBAL_TREE_DEPTH, GLOBAL_TREE_ID } from "./globalTree"
 
 /**
  * Update Merkle tree with commitments from a specific block
@@ -81,7 +79,7 @@ async function updateMerkleTreeWithManager(
         )
 
         // Initialize Merkle tree manager
-        const merkleManager = new MerkleTreeManager(dataSource, 20, GLOBAL_TREE_ID)
+        const merkleManager = new MerkleTreeManager(dataSource, GLOBAL_TREE_DEPTH, GLOBAL_TREE_ID)
         await merkleManager.initialize()
 
         // Add each commitment to the tree and update the leaf index

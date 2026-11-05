@@ -342,6 +342,20 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         expect(entities.storagePrograms.get(target)).toBeNull()
     })
 
+    it("rolls back a Work whose storage write Postgres could not store, charging only its fee", async () => {
+        const entities = caches()
+        const w = work("test-store-v1", "s3")
+        const value = { note: "a\u0000b" }
+        const target = deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, "0xaa", "result", "1")
+        const put = { type: "storage-program-put", target, writer: "0xaa", name: "result", discriminator: "1", mode: "create-only", valueDigest: storageValueDigest(value), value, isRollback: false, txhash: "" }
+
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x16", "0xaa", w, [w.attempt(), put, w.slot()]), false, false, CLOCK)
+
+        expect(result.message).toContain("storagePrograms.data")
+        expect(entities.storagePrograms.get(target) ?? null).toBeNull()
+        expect(entities.atomicWorks.get(w.workId)?.winnerAttemptId ?? null).toBeNull()
+    })
+
     it("refuses a storage write signed by someone other than the writer", async () => {
         const entities = caches()
         const w = work("test-store-v1", "s2")

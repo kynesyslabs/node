@@ -115,6 +115,8 @@ async function nextBlockSignedBy(signers: Signer[]) {
         number,
         hash: Hashing.sha256(serializeBlockContent(content as never, number)),
         content,
+        proposer: "ab".repeat(32),
+        next_proposer: "cd".repeat(32),
         validation_data: { signatures: {} as Record<string, string> },
     }
     for (const s of signers) {
