@@ -22,6 +22,10 @@
  * is 0. A later height leaves the migration to the hook at that height, and
  * null leaves the chain in DEM units for good. The fork_state row written
  * here is what keeps the hook from running it a second time.
+ *
+ * DEMOS_DISABLE_FORK_MACHINERY turns the hook off, so it skips this
+ * migration as well; the marker of an already migrated snapshot is still
+ * seeded, because its balances are in OS units either way.
  */
 
 import type { EntityManager } from "typeorm"
@@ -35,6 +39,7 @@ import {
 } from "src/forks/migrations/gasFeeSeparation"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import { DEFAULT_FORK_CONFIG } from "src/forks/forkConfig"
+import { isForkMachineryDisabled } from "src/forks/loadForkConfig"
 import log from "src/utilities/logger"
 
 export interface GenesisForkConfig {
@@ -96,11 +101,16 @@ export async function applyForksAtGenesis(
                 "[GENESIS][FORKS] osDenomination already applied in snapshot; seeding fork_state, skipping migration",
             )
             await seedForkStateRow(em, osPre)
+            osDenominationApplied = true
+        } else if (isForkMachineryDisabled()) {
+            // A rehearsal of a pre-fork binary: the block hook is off too, so
+            // migrating here would start it in units it does not know
+            log.info("[GENESIS][FORKS] fork machinery disabled; osDenomination not pre-applied at block 0")
         } else {
             log.info("[GENESIS][FORKS] pre-applying osDenomination at block 0")
             await runOsDenominationMigration(em, 0)
+            osDenominationApplied = true
         }
-        osDenominationApplied = true
     } else if (osPre?.applied) {
         // OS-unit balances on a chain that is in DEM units until the height
         // (or for good): the hook would scale them again at that height

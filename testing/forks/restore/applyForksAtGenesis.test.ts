@@ -552,4 +552,76 @@ describe("applyForksAtGenesis", () => {
             expect(balMap.get(seed.pubkey)).toBe(seed.balance * 1_000_000_000n)
         }
     })
+
+    describe("with DEMOS_DISABLE_FORK_MACHINERY set", () => {
+        const saved = process.env.DEMOS_DISABLE_FORK_MACHINERY
+        beforeEach(() => {
+            process.env.DEMOS_DISABLE_FORK_MACHINERY = "true"
+        })
+        afterEach(() => {
+            if (saved === undefined) delete process.env.DEMOS_DISABLE_FORK_MACHINERY
+            else process.env.DEMOS_DISABLE_FORK_MACHINERY = saved
+        })
+
+        it("does not pre-apply osDenomination to an unmigrated snapshot", async () => {
+            const report = await ds.transaction(async em => {
+                await seedState(em)
+                return applyForksAtGenesis(
+                    em,
+                    { osDenomination: { activationHeight: 0 } } as GenesisForkConfig,
+                    [],
+                )
+            })
+
+            expect(report.osDenominationApplied).toBe(false)
+            const gcrRows: Array<{ pubkey: string; balance: string }> =
+                await ds.query(
+                    "SELECT pubkey, balance FROM gcr_main WHERE pubkey IN (?, ?, ?, ?, ?) ORDER BY pubkey",
+                    GCR_ROWS.map(r => r.pubkey),
+                )
+            const balMap = new Map(gcrRows.map(r => [r.pubkey, BigInt(r.balance)]))
+            for (const seed of GCR_ROWS) {
+                expect(balMap.get(seed.pubkey)).toBe(seed.balance)
+            }
+            const forkRows = await ds.query(
+                "SELECT fork_name FROM fork_state WHERE fork_name = ?",
+                [OS_FORK_NAME],
+            )
+            expect(forkRows).toHaveLength(0)
+        })
+
+        it("still seeds the marker of an already migrated snapshot", async () => {
+            const report = await ds.transaction(async em => {
+                await seedState(em)
+                return applyForksAtGenesis(
+                    em,
+                    { osDenomination: { activationHeight: 0 } } as GenesisForkConfig,
+                    [
+                        {
+                            fork_name: OS_FORK_NAME,
+                            applied: true,
+                            applied_at_block: "0",
+                            applied_at: null,
+                            pre_sum_dem: "4500000000",
+                            post_sum_os: "4500000000000000000",
+                            gcr_v2_row_count: GCR_ROWS.length,
+                            legacy_row_count: 0,
+                            validators_row_count: VALIDATOR_ROWS.length,
+                            capped_count: 0,
+                            total_value_lost_os: "0",
+                            malformed_validators_count: 0,
+                        },
+                    ],
+                )
+            })
+
+            expect(report.osDenominationApplied).toBe(true)
+            const forkRows: Array<{ applied: number }> = await ds.query(
+                "SELECT applied FROM fork_state WHERE fork_name = ?",
+                [OS_FORK_NAME],
+            )
+            expect(forkRows).toHaveLength(1)
+            expect(forkRows[0].applied).toBe(1)
+        })
+    })
 })
