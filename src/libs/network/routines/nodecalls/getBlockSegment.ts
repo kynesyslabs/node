@@ -18,6 +18,10 @@ export const MAX_SEGMENT_BLOCKS = 500
 // early and the client asks again from `to + 1`.
 export const MAX_SEGMENT_CONTENT_BYTES = 8 * 1024 * 1024
 
+// Rows are read this many at a time, so a range cut early by the byte cap
+// never loads the blocks past the cut.
+export const SEGMENT_READ_BATCH = 25
+
 /**
  * Signed headers `from..to` (inclusive), for a client walking the chain
  * from a checkpoint it trusts: each carries the bytes its hash is taken of,
@@ -50,23 +54,28 @@ export default async function getBlockSegment(data: {
                 : refusal(503, "node_not_synced", { head })
         }
         const last = Math.min(to, head)
-        const blocks = await Chain.getBlockRange(from, last)
-        if (blocks.length !== last - from + 1) {
-            throw new Error(`blocks ${from}..${last} are not all stored (${blocks.length} found)`)
-        }
 
         const headers: SignedHeader[] = []
         let bytes = 0
-        for (const [i, block] of blocks.entries()) {
-            if (block.number !== from + i) {
-                throw new Error(`block ${from + i} is missing from the stored range ${from}..${last}`)
+        let full = false
+        for (let start = from; start <= last && !full; start += SEGMENT_READ_BATCH) {
+            const end = Math.min(start + SEGMENT_READ_BATCH - 1, last)
+            const blocks = await Chain.getBlockRange(start, end)
+            if (blocks.length !== end - start + 1) {
+                throw new Error(`blocks ${start}..${end} are not all stored (${blocks.length} found)`)
             }
-            const header = signedHeader(block)
-            if (headers.length > 0 && bytes + header.contentBytes.length > MAX_SEGMENT_CONTENT_BYTES) {
-                break
+            for (const [i, block] of blocks.entries()) {
+                if (block.number !== start + i) {
+                    throw new Error(`block ${start + i} is missing from the stored range ${start}..${end}`)
+                }
+                const header = signedHeader(block)
+                if (headers.length > 0 && bytes + header.contentBytes.length > MAX_SEGMENT_CONTENT_BYTES) {
+                    full = true
+                    break
+                }
+                bytes += header.contentBytes.length
+                headers.push(header)
             }
-            bytes += header.contentBytes.length
-            headers.push(header)
         }
 
         return answer({
