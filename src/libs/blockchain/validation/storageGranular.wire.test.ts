@@ -4,11 +4,9 @@
  * regenerates, and the fee the node records must be the one the transaction
  * burns.
  *
- * Regeneration runs through the SDK the node is built with. Until the node
- * pins an SDK that emits the granular edits, point GRANULAR_SDK_BUILD at a
- * built SDK (its `build/` directory) to run these cases against it. With an
- * SDK that emits none this file fails: the node would refuse every granular
- * write such an SDK builds, so it must not ship with one.
+ * Regeneration runs through the SDK the node is built with, which must emit
+ * the granular edits: with one that emits none, the node would refuse every
+ * granular write a client builds.
  */
 
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test"
@@ -46,17 +44,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { SENDER, onTheWire, storageTx } from "./storageWire.fixtures"
 
-const sdkBuild = process.env.GRANULAR_SDK_BUILD
-const { GCRGeneration } = sdkBuild
-    ? await import(`${sdkBuild}/websdk/GCRGeneration.js`)
-    : await import("@kynesyslabs/demosdk/websdk")
-
-const realGeneration = await import("./generateGcrEdits")
-mock.module("./generateGcrEdits", () => ({
-    ...realGeneration,
-    generateGcrEdits: (tx: Transaction) => GCRGeneration.generate(tx),
-}))
-
+const { GCRGeneration } = await import("@kynesyslabs/demosdk/websdk")
 const { verifyEditsAtApply } = await import("./editBinding")
 const { default: HandleGCR, normalizePubkey } = await import(
     "@/libs/blockchain/gcr/handleGCR"
@@ -86,25 +74,18 @@ const payloads = {
     DELETE_ITEM: StorageProgram.deleteItem(ADDRESS, "list", 0),
 }
 
-const emitsGranular = (
-    (await GCRGeneration.generate(storageTx(payloads.SET_FIELD, ADDRESS, 8))) as GCREdit[]
-).some(e => e.type === "storageProgram")
-
 const storageEdit = (tx: Transaction) =>
     tx.content.gcr_edits.find(e => e.type === "storageProgram") as any
 
-const REQUIRED_SDK =
-    "the resolved @kynesyslabs/demosdk emits no GCR edits for granular storage operations: " +
-    "the node needs an SDK release newer than 4.0.18 that contains sdks commit 501fe22 " +
-    "(fix(storage): emit GCR edits for granular storage operations), pinned in package.json, " +
-    "or GRANULAR_SDK_BUILD pointing at a build of it"
-
-it("runs against an SDK that emits granular storage edits", () => {
-    if (!emitsGranular) throw new Error(REQUIRED_SDK)
-    expect(emitsGranular).toBe(true)
+it("runs against an SDK that emits granular storage edits", async () => {
+    // 4.0.19 is the first release that does.
+    for (const payload of Object.values(payloads)) {
+        const edits = (await GCRGeneration.generate(storageTx(payload, ADDRESS, 8))) as GCREdit[]
+        expect(edits.some(e => e.type === "storageProgram")).toBe(true)
+    }
 })
 
-describe.skipIf(!emitsGranular)("granular storage writes on the wire", () => {
+describe("granular storage writes on the wire", () => {
     for (const postFork of [false, true]) {
         describe(postFork ? "post osDenomination" : "pre osDenomination", () => {
             beforeEach(() => chainIs(postFork))
