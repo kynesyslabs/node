@@ -38,7 +38,11 @@ import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import { drawBoundCommittee } from "src/libs/consensus/v2/routines/getShard"
 import { compareIdentities } from "src/libs/consensus/v2/routines/peerlistMerge"
 import Hashing from "src/libs/crypto/hashing"
-import { DEFAULT_FORK_CONFIG, type ForkName } from "src/forks/forkConfig"
+import {
+    DEFAULT_FORK_CONFIG,
+    NON_MAINNET_CHAIN_IDS,
+    type ForkName,
+} from "src/forks/forkConfig"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
@@ -178,12 +182,7 @@ export const KNOWN_FORKS = Object.keys(DEFAULT_FORK_CONFIG) as ForkName[]
 /** The committee size the launch was rehearsed and drilled with (mainnet-launch#3). */
 export const LAUNCH_SHARD_SIZE = 10
 
-/**
- * Chain ids of the testnet (data/genesis.json) and the devnets. Signatures
- * bind to the chain id once signatureDomain is on, so a mainnet that shares
- * one would accept transactions signed for that network.
- */
-export const NON_MAINNET_CHAIN_IDS: readonly number[] = [1, 1337]
+export { NON_MAINNET_CHAIN_IDS }
 
 const norm = (id: string) => id.trim().toLowerCase()
 /** Operator and provider names are free text typed by people. */

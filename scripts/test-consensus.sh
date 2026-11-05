@@ -89,6 +89,7 @@ SUITE_FILES=(
     src/utilities/nodeVersion.test.ts
     src/utilities/tui/CategorizedLogger.level.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
+    testing/forks/disableForkMachineryFlag.test.ts
     testing/forks/loadForkConfig.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
     testing/genesis/buildGenesisBlock.test.ts

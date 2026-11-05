@@ -381,6 +381,13 @@ export const PLACEHOLDER_TREASURY_ADDRESS =
     "0x" + "0".repeat(64)
 
 /**
+ * Chain ids of the testnet (data/genesis.json) and the devnets. Signatures
+ * bind to the chain id once signatureDomain is on, so a mainnet that shares
+ * one would accept transactions signed for that network.
+ */
+export const NON_MAINNET_CHAIN_IDS: readonly number[] = [1, 1337]
+
+/**
  * Default fork configuration.
  *
  * `osDenomination` defaults to `activationHeight: 0` — fresh chains
