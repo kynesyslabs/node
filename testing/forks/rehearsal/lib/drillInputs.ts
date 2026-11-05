@@ -12,7 +12,7 @@
 import { spawnSync } from "child_process"
 import { writeFileSync } from "fs"
 import { resolve } from "path"
-import { DEVNET_DIR } from "./devnetControl"
+import { DEVNET_DIR, REPO_ROOT } from "./devnetControl"
 
 type Genesis = Record<string, any>
 
@@ -21,6 +21,26 @@ export const GENESIS_DELAY_S = 60
 
 const DRILL_INPUTS_SCRIPT = resolve(DEVNET_DIR, "quorum-drills", "drill_inputs.py")
 const GENESIS_IN = "genesis.in.json"
+
+/** The genesis whose fork activations the mainnet-shape drills run with. */
+export const LAUNCH_GENESIS_TEMPLATE = resolve(REPO_ROOT, "docs", "mainnet", "genesis.template.json")
+
+/**
+ * Copy of `genesis` with the launch fork set of the mainnet genesis template,
+ * read now from `template`: active at 0 for every fork the template sets to
+ * the number 0, off for null and "FILL: ..." (`drill_inputs.py launch-forks`,
+ * the code `run.sh` uses for the same drills).
+ */
+export function withLaunchForks(genesis: Genesis, template = LAUNCH_GENESIS_TEMPLATE): Genesis {
+    const r = spawnSync("python3", ["-I", DRILL_INPUTS_SCRIPT, "launch-forks", "--template", template], {
+        encoding: "utf8",
+        input: JSON.stringify(genesis),
+    })
+    if (r.status !== 0) {
+        throw new Error(`drill_inputs.py launch-forks failed (exit ${r.status}): ${r.stderr}${r.error ?? ""}`)
+    }
+    return JSON.parse(r.stdout)
+}
 
 /** Where the staged files are, as absolute host paths. */
 export interface StagedInputs {

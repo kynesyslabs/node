@@ -9,9 +9,10 @@
  *  - 4 nodes on `genesis-fork-low.json` with `properties.shardSize`
  *    overridden to 4, so quorum is floor(2*4/3)+1 = 3 of 4. Mainnet runs
  *    shardSize 10; this drill does not exercise that committee size.
- *  - quorumParity, committeeBinding and commitLock active from height 0,
- *    as on a chain launched from genesis with this build, so the drill
- *    runs the consensus rules mainnet will run.
+ *  - The fork set mainnet launches with: every fork that
+ *    `docs/mainnet/genesis.template.json` sets to 0 is active from height 0,
+ *    every null or "FILL: ..." one is off. Read from the template at run
+ *    time (`withLaunchForks`), logged, and reported in `DRILL_TIMINGS`.
  *  - Inputs a 4-node devnet needs to forge, mounted through a compose
  *    override for this scenario only (lib/drillInputs.ts): genesis time 60 s
  *    ahead, a peerlist seeding node-1 only, an empty directory over
@@ -72,7 +73,13 @@ import {
 import { allReachedHeight, assertBlockHashConvergence } from "../lib/assertions"
 import { clearOverride, overridePath, writeOverride } from "../lib/composeOverrides"
 import { withCurrentDevnetValidators } from "../lib/drillGenesis"
-import { drillOverrideYaml, genesisTimestamp, stageDrillInputs } from "../lib/drillInputs"
+import {
+    LAUNCH_GENESIS_TEMPLATE,
+    drillOverrideYaml,
+    genesisTimestamp,
+    stageDrillInputs,
+    withLaunchForks,
+} from "../lib/drillInputs"
 import { getLastBlockNumber, query } from "../lib/nodeQueries"
 import {
     type BlockRow,
@@ -107,9 +114,6 @@ const RECOVERY_TIMEOUT_MS = 300_000
 const DB_READ_TIMEOUT_MS = 30_000
 /** How long the survivors get to agree on a head after the settle period. */
 const AGREE_TIMEOUT_MS = 3 * ROUND_MS
-/** Forks a chain launched from genesis with this build activates at 0. */
-const LAUNCH_FORKS = ["quorumParity", "committeeBinding", "commitLock"]
-
 /**
  * Must run after `regenerateIdentities`: the genesis validators are the keys
  * that call just wrote. With any other set, the bound committee holds no
@@ -125,14 +129,7 @@ function buildDrillGenesis(): Record<string, any> {
         NODE_IDS.length,
     )
     genesis.properties.shardSize = DRILL_SHARD_SIZE
-    genesis.forks = genesis.forks ?? {}
-    for (const name of LAUNCH_FORKS) {
-        genesis.forks[name] = {
-            activationHeight: 0,
-            description: "Rehearsal: active from genesis, as on mainnet.",
-        }
-    }
-    return genesis
+    return withLaunchForks(genesis)
 }
 
 function restartCount(id: number): number {
@@ -246,6 +243,11 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     const genesis = buildDrillGenesis()
     const forks: Record<string, number | null> = Object.fromEntries(
         Object.entries<any>(genesis.forks).map(([name, f]) => [name, f?.activationHeight ?? null]),
+    )
+    const active = Object.keys(forks).filter(name => forks[name] === 0)
+    process.stdout.write(
+        `[scenario 12] launch fork set from ${LAUNCH_GENESIS_TEMPLATE}: active at 0: ${active.join(", ")}; ` +
+            `off: ${Object.keys(forks).filter(name => forks[name] !== 0).join(", ") || "none"}\n`,
     )
     const marks = emptyMarks()
     const observed: DrillHeights = {

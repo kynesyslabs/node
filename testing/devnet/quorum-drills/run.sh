@@ -95,7 +95,15 @@ esac
 # would measure that and not the halt. The other scenarios keep the harness
 # default (off; GOSSIP_ENABLED=true in the environment turns it on).
 case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) export GOSSIP_ENABLED=true ;; esac
+# The mainnet-shape drills run the fork set docs/mainnet/genesis.template.json
+# launches with (every fork it sets to 0, the rest off), read at run time. The
+# other scenarios keep the forks of genesis.devnet.json.
+FORK_SET=devnet
+case "${SCENARIO}" in halt-n10s10|halt-n13s10|ride-n13s10) FORK_SET=launch ;; esac
 case "${BINDING}" in on|off) ;; *) echo "--binding must be on or off" >&2; exit 2 ;; esac
+if [ "${FORK_SET}" = launch ] && [ "${BINDING}" != on ]; then
+    echo "${SCENARIO} runs the launch fork set, which activates committeeBinding: --binding off does not apply" >&2; exit 2
+fi
 if [[ ! "${LABEL}" =~ ^[A-Za-z0-9_-]+$ ]]; then
     echo "label must match [A-Za-z0-9_-]+" >&2; exit 2
 fi
@@ -245,7 +253,7 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
         echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/pub${i}"
     done
     python3 "${HERE}/gen-inputs.py" --run-dir "${RUN_DIR}" --repo "${REPO_ROOT}" \
-        --nodes "${N}" --shard-size "${SHARD}" --binding "${BINDING}" --genesis-ts "${GENESIS_TS}" \
+        --nodes "${N}" --shard-size "${SHARD}" --binding "${BINDING}" --fork-set "${FORK_SET}" --genesis-ts "${GENESIS_TS}" \
         --image "${IMAGE}" --uid "${IMAGE_UID}" --gid "${IMAGE_GID}" --src "${SRC_TREE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}" \
         --start "${START_PATH}" --image-entrypoint "${IMAGE_ENTRYPOINT}" --image-cmd "${IMAGE_CMD}"
     # Once, after everything is written, so the modes do not depend on the umask.
@@ -300,6 +308,7 @@ if [ "${START_PATH}" = image ]; then
 fi
 declare -a PUB UP
 for i in $(seq 1 "${N}"); do PUB[i]=$(tr 'A-Z' 'a-z' < "${RUN_DIR}/inputs/pub${i}"); UP[i]=0; done
+say "forks (${FORK_SET}): $(jq -r '[.forks | to_entries[] | "\(.key)@\(.value.activationHeight)"] | join(", ")' "${RUN_DIR}/inputs/genesis.json")"
 say "inputs ready (genesis in ${GENESIS_DELAY}s)"
 
 # ── helpers ─────────────────────────────────────────────────────────────
@@ -1014,8 +1023,8 @@ drill_recover() {
 drill_judge() { # $1 mode: halt or ride
     local input="${RUN_DIR}/drill-input.json" rc hold_rounds=0
     [ "$1" = halt ] && hold_rounds="${HALT_ROUNDS}"
-    local forks; forks=$(jq -c '.forks | with_entries(select(.key | IN("quorumParity", "committeeBinding", "commitLock")) | .value |= .activationHeight)' \
-        "${RUN_DIR}/inputs/genesis.json")
+    # Every fork of the genesis the nodes ran, null where off
+    local forks; forks=$(jq -c '.forks | with_entries(.value |= .activationHeight)' "${RUN_DIR}/inputs/genesis.json")
     local marks; marks=$(jq -nc \
         --argjson up "${T_UP:-null}" --argjson baseline "${T_BASELINE:-null}" --argjson stop "${T_STOP:-null}" \
         --argjson halt "${T_HALT:-null}" --argjson holdEnd "${T_HOLD_END:-null}" --argjson restart "${T_RESTART:-null}" \

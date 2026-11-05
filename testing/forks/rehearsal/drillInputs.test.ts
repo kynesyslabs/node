@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { spawnSync } from "child_process"
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join, resolve } from "path"
 import {
     GENESIS_DELAY_S,
+    LAUNCH_GENESIS_TEMPLATE,
     drillOverrideYaml,
     genesisTimestamp,
     peerSeedFromGenesis,
     stageDrillInputs,
+    withLaunchForks,
 } from "./lib/drillInputs"
 
 const key = (n: number) => `0x${n.toString(16).padStart(64, "0")}`
@@ -156,11 +158,149 @@ describe("drillOverrideYaml", () => {
     })
 })
 
+describe("launch fork set (drill_inputs.py launch-forks)", () => {
+    const template = (forks: Record<string, unknown>) => {
+        const file = join(dir, "template.json")
+        writeFileSync(file, JSON.stringify({ forks }))
+        return file
+    }
+    const MIN = {
+        quorumParity: { activationHeight: 0 },
+        committeeBinding: { activationHeight: 0 },
+        commitLock: { activationHeight: 0 },
+    }
+    const heights = (g: Record<string, any>) =>
+        Object.fromEntries(Object.entries<any>(g.forks).map(([n, f]) => [n, f.activationHeight]))
+
+    it("activates at 0 only the forks the real template sets to the number 0", () => {
+        const real = JSON.parse(readFileSync(LAUNCH_GENESIS_TEMPLATE, "utf8")).forks
+        const expected = Object.fromEntries(
+            Object.entries<any>(real).map(([n, f]) => [n, f.activationHeight === 0 ? 0 : null]),
+        )
+        expect(heights(withLaunchForks(genesis()))).toEqual(expected)
+        // The launch set the PR names: nine forks at 0, none of the FILL or null ones
+        for (const n of [
+            "osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity",
+            "quorumParity", "committeeBinding", "commitLock", "finalityProofs",
+        ]) {
+            expect(expected[n]).toBe(0)
+        }
+        for (const n of ["gasFeeSeparation", "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "atomicWork"]) {
+            expect(expected[n]).toBeNull()
+        }
+    })
+    it("keeps a fork off for null, a FILL placeholder and any value that is not the number 0", () => {
+        const g = withLaunchForks(
+            genesis(),
+            template({
+                ...MIN,
+                a: { activationHeight: null },
+                b: { activationHeight: "FILL: 0 or null" },
+                c: { activationHeight: "0" },
+                d: { activationHeight: false },
+                e: { activationHeight: 7 },
+                f: { activationHeight: 0.5 },
+                g: {},
+                h: null,
+            }),
+        )
+        expect(heights(g)).toEqual({ ...Object.fromEntries(Object.keys(MIN).map(n => [n, 0])), a: null, b: null, c: null, d: null, e: null, f: null, g: null, h: null })
+    })
+    it("replaces the genesis' own heights and does not leave a fork to the node's default", () => {
+        const own = { ...genesis(), forks: { osDenomination: { activationHeight: 5 }, gasFeeSeparation: { activationHeight: 0, treasuryAddress: key(0xee) }, stray: { activationHeight: 3 } } }
+        const g = withLaunchForks(own, template({ ...MIN, osDenomination: { activationHeight: 0 }, gasFeeSeparation: { activationHeight: "FILL: 0 or null", treasuryAddress: "FILL" } }))
+        expect(heights(g)).toEqual({ ...Object.fromEntries(Object.keys(MIN).map(n => [n, 0])), osDenomination: 0, gasFeeSeparation: null })
+        // an off gasFeeSeparation still carries a treasury, which the node validates
+        expect(g.forks.gasFeeSeparation.treasuryAddress).toBe(key(0xee))
+        expect(withLaunchForks(genesis(), template({ ...MIN, gasFeeSeparation: { activationHeight: null } })).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x0{64}$/)
+    })
+    it("keeps the rest of the genesis and does not modify its input", () => {
+        const input = genesis()
+        const g = withLaunchForks(input, template(MIN))
+        expect({ ...g, forks: undefined }).toEqual({ ...input, forks: undefined })
+        expect(input.forks).toEqual({ osDenomination: { activationHeight: 5 } })
+    })
+    it("refuses a template that drops a fork the drill's claims rest on", () => {
+        for (const n of Object.keys(MIN)) {
+            const { [n]: _dropped, ...rest } = MIN as Record<string, unknown>
+            expect(() => withLaunchForks(genesis(), template(rest))).toThrow(new RegExp(`does not activate ${n}`))
+            expect(() => withLaunchForks(genesis(), template({ ...rest, [n]: { activationHeight: "FILL: 0" } }))).toThrow(/does not activate/)
+        }
+        expect(() => withLaunchForks(genesis(), template({}))).toThrow(/no forks/)
+        expect(() => withLaunchForks(genesis(), join(dir, "missing.json"))).toThrow(/launch-forks failed/)
+    })
+
+    describe("gen-inputs.py", () => {
+        const repo = resolve(import.meta.dir, "../../..")
+        const gen = (forkSet: string | null, binding = "on") => {
+            const run = join(dir, `run-${forkSet}-${binding}`)
+            mkdirSync(join(run, "inputs"), { recursive: true })
+            PUBKEYS.forEach((p, i) => writeFileSync(join(run, "inputs", `pub${i + 1}`), p))
+            const r = spawnSync(
+                "python3",
+                [
+                    // no -I, as run.sh: the script imports drill_inputs from its own directory
+                    resolve(repo, "testing/devnet/quorum-drills/gen-inputs.py"),
+                    "--run-dir", run, "--repo", repo, "--nodes", "4", "--shard-size", "10", "--binding", binding,
+                    "--genesis-ts", "1", "--image", "img", "--uid", "1000", "--gid", "1000",
+                    "--node-mem", "1g", "--consensus-time", "10",
+                    ...(forkSet ? ["--fork-set", forkSet] : []),
+                ],
+                { encoding: "utf8" },
+            )
+            return { r, genesis: r.status === 0 ? JSON.parse(readFileSync(join(run, "inputs/genesis.json"), "utf8")) : null }
+        }
+        it("--fork-set launch writes the same forks scenario 12 gets", () => {
+            const { r, genesis: g } = gen("launch")
+            expect(r.status).toBe(0)
+            expect(r.stdout).toMatch(/launch fork set .*finalityProofs@0.* \| off: gasFeeSeparation/)
+            const devnet = JSON.parse(readFileSync(resolve(repo, "testing/devnet/genesis.devnet.json"), "utf8"))
+            expect(g.forks).toEqual(withLaunchForks(devnet).forks)
+            expect(g.forks.gasFeeSeparation).toEqual({
+                activationHeight: null,
+                treasuryAddress: devnet.forks.gasFeeSeparation.treasuryAddress,
+            })
+        })
+        it("the default and --fork-set devnet keep the forks of genesis.devnet.json plus the two the drills set", () => {
+            const devnet = JSON.parse(readFileSync(resolve(repo, "testing/devnet/genesis.devnet.json"), "utf8"))
+            for (const [forkSet, binding, committee] of [[null, "on", 0], ["devnet", "on", 0], [null, "off", null]] as const) {
+                const { r, genesis: g } = gen(forkSet, binding)
+                expect(r.status).toBe(0)
+                expect(g.forks).toEqual({ ...devnet.forks, quorumParity: { activationHeight: 0 }, committeeBinding: { activationHeight: committee } })
+            }
+        })
+        it("--fork-set launch refuses --binding off", () => {
+            const { r } = gen("launch", "off")
+            expect(r.status).not.toBe(0)
+            expect(r.stderr).toMatch(/--binding must be on/)
+        })
+    })
+})
+
+describe("run.sh fork set", () => {
+    const sh = readFileSync(resolve(import.meta.dir, "../../devnet/quorum-drills/run.sh"), "utf8")
+    it("runs the launch fork set for the three mainnet-shape drills and no other scenario", () => {
+        expect(sh).toMatch(/case "\$\{SCENARIO\}" in halt-n10s10\|halt-n13s10\|ride-n13s10\) FORK_SET=launch ;; esac/)
+        expect(sh).toContain("--fork-set \"${FORK_SET}\"")
+        expect(sh).toContain("FORK_SET=devnet\n")
+    })
+    it("hands the judge every fork of the genesis the nodes ran, not a fixed three", () => {
+        expect(sh).toContain(".forks | with_entries(.value |= .activationHeight)")
+        expect(sh).not.toContain("IN(\"quorumParity\"")
+    })
+})
+
 describe("scenario 12 wiring", () => {
     const src = readFileSync(
         resolve(import.meta.dir, "scenarios/12-quorum-loss-halt-recovery.ts"),
         "utf8",
     )
+    it("takes its forks from the launch template and not from a list of its own", () => {
+        expect(src).toContain("withLaunchForks(genesis)")
+        expect(src).not.toContain("LAUNCH_FORKS")
+        // reported in the DRILL_TIMINGS line, with every fork of the genesis
+        expect(src).toMatch(/const line = \{[^}]*\n {8}forks,\n {4}\}\n {4}process\.stdout\.write\(`DRILL_TIMINGS/)
+    })
     it("restarts nodes 2-4 after up() and before the P1 baseline wait", () => {
         const upCall = src.indexOf("up({ overrideFiles")
         const restart = src.indexOf("await restartForColdStart()")

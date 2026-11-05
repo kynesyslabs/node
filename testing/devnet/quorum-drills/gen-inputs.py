@@ -11,7 +11,15 @@ import argparse
 import json
 import os
 
-from drill_inputs import make_empty_snapshot, node_tmpfs_specs, seed_peerlist, with_genesis_timestamp, write_json
+from drill_inputs import (
+    fork_set_text,
+    make_empty_snapshot,
+    node_tmpfs_specs,
+    seed_peerlist,
+    with_genesis_timestamp,
+    with_launch_forks,
+    write_json,
+)
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--run-dir", required=True)
@@ -21,6 +29,11 @@ ap.add_argument("--shard-size", type=int, required=True)
 ap.add_argument("--binding", choices=["on", "off"], required=True)
 ap.add_argument("--genesis-ts", type=int, required=True)
 ap.add_argument("--image", required=True)
+# "devnet": the forks of testing/devnet/genesis.devnet.json, with quorumParity
+# and committeeBinding set below (every scenario before the mainnet-shape
+# drills). "launch": the fork set of docs/mainnet/genesis.template.json, read
+# from the repo at run time.
+ap.add_argument("--fork-set", choices=["devnet", "launch"], default="devnet")
 # The image's user, read from the image by run.sh: the node tmpfs is mounted
 # owned by it
 ap.add_argument("--uid", type=int, required=True)
@@ -40,6 +53,8 @@ image_entrypoint = json.loads(a.image_entrypoint) or []
 image_cmd = json.loads(a.image_cmd) or []
 if a.start == "image" and not (image_entrypoint or image_cmd):
     ap.error("--start image needs the image's entrypoint or cmd")
+if a.fork_set == "launch" and a.binding != "on":
+    ap.error("--fork-set launch activates committeeBinding (and commitLock needs it): --binding must be on")
 
 inputs = os.path.join(a.run_dir, "inputs")
 n = a.nodes
@@ -54,11 +69,15 @@ pubs = [open(f"{inputs}/pub{i}").read().strip() for i in range(1, n + 1)]
 g = json.load(open(f"{a.repo}/testing/devnet/genesis.devnet.json"))
 g = with_genesis_timestamp(g, a.genesis_ts)
 g["properties"]["shardSize"] = a.shard_size
-forks = g.setdefault("forks", {})
-forks["quorumParity"] = {"activationHeight": 0}
-# "off" keeps the fork dormant, to reproduce the pre-fork behaviour on the
-# same code
-forks["committeeBinding"] = {"activationHeight": 0 if a.binding == "on" else None}
+if a.fork_set == "launch":
+    with open(f"{a.repo}/docs/mainnet/genesis.template.json") as f:
+        g = with_launch_forks(g, json.load(f))
+else:
+    forks = g.setdefault("forks", {})
+    forks["quorumParity"] = {"activationHeight": 0}
+    # "off" keeps the fork dormant, to reproduce the pre-fork behaviour on the
+    # same code
+    forks["committeeBinding"] = {"activationHeight": 0 if a.binding == "on" else None}
 stake = "1000000000000000000"
 g["validators"] = [
     {
@@ -215,3 +234,5 @@ print(
     f"genesis shardSize {a.shard_size} validators {n} committeeBinding {a.binding}; "
     f"compose with {n} nodes"
 )
+if a.fork_set == "launch":
+    print(f"launch fork set (docs/mainnet/genesis.template.json): {fork_set_text(g['forks'])}")

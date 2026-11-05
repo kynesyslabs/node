@@ -17,6 +17,12 @@ CLI (used by the rehearsal harness):
 reads the genesis FILE and writes genesis.json, peerlist.json and an empty
 empty-snapshot/ into DIR, readable by any uid (see make_readable).
 
+    drill_inputs.py launch-forks --template FILE   (genesis JSON on stdin)
+prints the genesis with its `forks` replaced by the launch set of the
+mainnet genesis template (docs/mainnet/genesis.template.json): active at 0
+where the template says the number 0, off for null and "FILL: ..." (see
+with_launch_forks).
+
     drill_inputs.py readable --dir DIR
 sets every file under DIR to 644 and every directory to 755 (run.sh, once all
 its inputs are written).
@@ -29,6 +35,7 @@ them into the compose file (run.sh passes the same strings to `docker run
 import argparse
 import json
 import os
+import sys
 
 EMPTY_SNAPSHOT = "empty-snapshot"
 
@@ -44,6 +51,62 @@ def with_genesis_timestamp(genesis, ts):
     out = dict(genesis)
     out["timestamp"] = ts
     return out
+
+
+# What the mainnet-shape drills need active to mean what they say: the bound
+# committee and the lock on top of it (loadForkConfig.ts refuses commitLock
+# without committeeBinding). A template that drops one is an error, not a drill
+# that silently runs something else.
+DRILL_REQUIRED_FORKS = ("quorumParity", "committeeBinding", "commitLock")
+# gasFeeSeparation validates a treasury even when it is off (loadForkConfig.ts)
+OFF_TREASURY = "0x" + "0" * 64
+
+
+def launch_fork_heights(template):
+    """Fork name -> 0 or None, from a mainnet genesis template's `forks`.
+
+    A fork is active at 0 only where the template's activationHeight is the
+    number 0. null, a "FILL: ..." placeholder and anything else stay off.
+    """
+    forks = template.get("forks")
+    if not isinstance(forks, dict) or not forks:
+        raise ValueError("the genesis template has no forks object")
+    heights = {}
+    for name, entry in forks.items():
+        h = entry.get("activationHeight") if isinstance(entry, dict) else None
+        heights[name] = 0 if type(h) is int and h == 0 else None
+    missing = [n for n in DRILL_REQUIRED_FORKS if heights.get(n) != 0]
+    if missing:
+        raise ValueError(f"the genesis template does not activate {', '.join(missing)} at 0, which the drill needs")
+    return heights
+
+
+def with_launch_forks(genesis, template):
+    """Copy of `genesis` whose forks are the template's launch set.
+
+    The whole `forks` object is replaced, so no fork keeps a height the
+    template does not give it, and no fork is left to the node's own default
+    (osDenomination, nonceEnforcement and gasFeeSeparation default to 0).
+    Payload fields (gasFeeSeparation's treasuryAddress) are kept from the
+    genesis' own entry.
+    """
+    own = genesis.get("forks") or {}
+    forks = {}
+    for name, height in launch_fork_heights(template).items():
+        entry = {k: v for k, v in own.get(name, {}).items() if k not in ("activationHeight", "description")}
+        if name == "gasFeeSeparation":
+            entry.setdefault("treasuryAddress", OFF_TREASURY)
+        forks[name] = {"activationHeight": height, **entry}
+    out = dict(genesis)
+    out["forks"] = forks
+    return out
+
+
+def fork_set_text(forks):
+    """'a@0, b@0 | off: c, d' for a forks object of {name: {activationHeight}}."""
+    on = [n for n, f in forks.items() if f.get("activationHeight") == 0]
+    off = [n for n, f in forks.items() if f.get("activationHeight") != 0]
+    return f"{', '.join(f'{n}@0' for n in on)} | off: {', '.join(off) or 'none'}"
 
 
 def seed_peerlist(pubs, node1_port):
@@ -113,6 +176,8 @@ def main():
     st.add_argument("--out-dir", required=True)
     rd = sub.add_parser("readable")
     rd.add_argument("--dir", required=True)
+    lf = sub.add_parser("launch-forks")
+    lf.add_argument("--template", required=True)
     tf = sub.add_parser("tmpfs")
     tf.add_argument("--uid", type=int, required=True)
     tf.add_argument("--gid", type=int, required=True)
@@ -122,6 +187,10 @@ def main():
         return
     if a.cmd == "tmpfs":
         print("\n".join(node_tmpfs_specs(a.uid, a.gid)))
+        return
+    if a.cmd == "launch-forks":
+        with open(a.template) as f:
+            json.dump(with_launch_forks(json.load(sys.stdin), json.load(f)), sys.stdout)
         return
     with open(a.genesis) as f:
         genesis = json.load(f)
