@@ -184,6 +184,20 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
   (`docker-compose.proxy.yml`) refuses to boot while `METRICS_BASIC_AUTH_HASH`
   is empty or still the shipped placeholder. Before upgrading, set the hash, or set
   `PROXY_ALLOW_PLACEHOLDER_AUTH=true` to boot without one (see `.env.example`).
+- From `v1.0.0-rc.6`:
+  - The node uses the host clock and no longer corrects it from NTP servers.
+    Keep host NTP running (chrony or systemd-timesyncd). With `PROD=true` a
+    node refuses to boot when at least two NTP servers agree that the host
+    clock is further off than `BLOCK_TIMESTAMP_TOLERANCE`.
+  - A balance edit larger than the balance fails on every node. Before, a node
+    with `PROD=false` clamped the balance to 0 instead.
+  - Mainnet validators append `docs/mainnet/parameters.env` to `.env`, and
+    `node-doctor --production` fails on any value that differs from it.
+    `DEMOS_DISABLE_FORK_MACHINERY` is refused on any chain id other than
+    1 and 1337.
+  - Governance transactions are refused until the genesis schedules the
+    `networkGovernance` fork. A network that used governance before must
+    schedule it in its genesis fork schedule to keep it.
 
 ## Known limits
 
