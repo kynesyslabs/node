@@ -62,7 +62,7 @@ import { serializeTransactionContent } from "@/forks"
 import Hashing from "src/libs/crypto/hashing"
 import { txSignaturePreimage } from "@/libs/crypto/txSignaturePreimage"
 import { getSharedState } from "@/utilities/sharedState"
-import { OS, PEER, demos, onTheWire } from "@/libs/blockchain/validation/editBinding.fixtures"
+import { OS, PEER, SENDER, demos, onTheWire } from "@/libs/blockchain/validation/editBinding.fixtures"
 import { transactionRowRefusal } from "@/libs/blockchain/validation/postgresStorable"
 
 const { default: HandleGCR, uncreatableAccountKey } = await import("./handleGCR")
@@ -99,10 +99,22 @@ const credited = (tx: Transaction) =>
     (tx.content.gcr_edits as unknown as Array<{ type: string; operation: string; account: unknown }>)
         .find(e => e.type === "balance" && e.operation === "add")?.account
 
+const storedRow = (pubkey: string, balance: bigint) =>
+    Object.assign(new GCRMain(), {
+        pubkey,
+        balance,
+        nonce: 0,
+        identities: { xm: {}, web2: {}, pqc: {}, ud: [] },
+        points: { totalPoints: 0, breakdown: {} },
+        referralInfo: { totalReferrals: 0, referralCode: "", referrals: [] },
+    })
+
 let savedForks: ForkConfigByName
 beforeEach(() => {
     queried.length = 0
     storedAccounts.clear()
+    // Apply refuses an overdraft, so a transfer that should apply needs a funded sender.
+    storedAccounts.set(SENDER, storedRow(SENDER, 1_000n * OS))
     savedForks = getSharedState.forkConfig
     getSharedState.forkConfig = cloneDefaultForkConfig()
     getSharedState.forkConfig.osDenomination.activationHeight = 0
@@ -162,17 +174,7 @@ describe("an account the node cannot load", () => {
 
     it("is only one that would be created: a stored row of another shape is credited", async () => {
         const legacy = "0x1234"
-        storedAccounts.set(
-            legacy,
-            Object.assign(new GCRMain(), {
-                pubkey: legacy,
-                balance: 0n,
-                nonce: 0,
-                identities: { xm: {}, web2: {}, pqc: {}, ud: [] },
-                points: { totalPoints: 0, breakdown: {} },
-                referralInfo: { totalReferrals: 0, referralCode: "", referrals: [] },
-            }),
-        )
+        storedAccounts.set(legacy, storedRow(legacy, 0n))
         const tx = await sendTo(legacy)
         const out = await apply([tx])
         expect(out.failedTxs).toEqual([])
