@@ -58,12 +58,9 @@ export async function applyZkCommitmentAdd(
     const hexPattern = /^(0x)?[0-9a-fA-F]{64}$/
     const isValidHex = hexPattern.test(payload.commitment_hash)
     const isValidNumber = /^(0|[1-9]\d{0,77})$/.test(payload.commitment_hash)
-    const element =
-        isValidHex
-            ? BigInt("0x" + payload.commitment_hash.replace(/^0x/, ""))
-            : isValidNumber
-              ? BigInt(payload.commitment_hash)
-              : null
+    let element: bigint | null = null
+    if (isValidHex) element = BigInt("0x" + payload.commitment_hash.replace(/^0x/, ""))
+    else if (isValidNumber) element = BigInt(payload.commitment_hash)
 
     if (element === null || element >= BN254_FIELD_ORDER) {
         return {

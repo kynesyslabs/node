@@ -10,7 +10,10 @@
 
 import { beforeEach, describe, expect, it, mock } from "bun:test"
 
-let inserted: Array<Record<string, unknown>> = []
+import { installPoolStorageMocks } from "./mempool.fixtures"
+
+const inserted = installPoolStorageMocks()
+
 const logged: string[] = []
 
 mock.module("src/utilities/logger", () => ({
@@ -24,36 +27,12 @@ mock.module("src/utilities/logger", () => ({
         custom: () => {},
     },
 }))
-mock.module("@/model/datasource", () => ({
-    __esModule: true,
-    default: { getInstance: async () => ({}) },
-}))
-mock.module("src/libs/blockchain/chain", () => ({
-    __esModule: true,
-    default: {
-        getLastBlockNumber: async () => 100,
-        getExistingTransactionHashes: async () => new Set<string>(),
-        checkTxExists: async () => false,
-    },
-}))
 mock.module("src/libs/blockchain/validation/txValidatorPool", () => ({
     __esModule: true,
     default: {
         getInstance: () => ({
             validate: async (txs: Array<{ hash: string }>) => txs.map(t => ({ valid: true, hash: t.hash })),
         }),
-    },
-}))
-mock.module("src/libs/blockchain/chainDb", () => ({
-    chunkedInsert: async (_repo: unknown, _entity: unknown, rows: Array<Record<string, unknown>>) => {
-        inserted.push(...rows)
-        return { inserted: rows.length }
-    },
-}))
-mock.module("src/libs/consensus/v2/types/secretaryManager", () => ({
-    __esModule: true,
-    default: class {
-        static lastBlockRef = 100
     },
 }))
 mock.module("./validation/txAdmission", () => ({
@@ -126,7 +105,7 @@ const validity = (tx: Transaction): ValidityData =>
 
 beforeEach(() => {
     chainIs(true)
-    inserted = []
+    inserted.length = 0
     logged.length = 0
     ;(Mempool as any).repo = { find: async () => [] }
     ;(Mempool as any).addTransactionWithLock = async () => ({ confirmationBlock: 101 })

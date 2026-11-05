@@ -509,7 +509,13 @@ function firstUnstorable(cache: string, rows: Map<string, unknown> | undefined):
  * or null. Judged on the rows rather than the edit, so only what a routine
  * really stores counts. Balance and nonce edits store numbers, under a key
  * nothing checks for shape: a native send credits whatever its body names.
- * An identity edit may also credit another account.
+ *
+ * Only rows the edit's own group can write are read: groups apply
+ * concurrently over the same caches, so another group's row may hold a value
+ * it has not yet put back, and reading it would make the verdict depend on
+ * scheduling. An identity edit writes its account's cached row alone (other
+ * accounts it credits are not in the caches), and the ZK claims are written
+ * only by zk edits, which all apply in one group.
  */
 function unstorableAfter(edit: GCREdit, entities: GCREntityCaches): string | null {
     const fields = edit as unknown as Record<string, any>
@@ -519,9 +525,11 @@ function unstorableAfter(edit: GCREdit, entities: GCREntityCaches): string | nul
             return isKeyStorable(normalizePubkey(fields.account)) ? null : "accounts.pubkey"
         case "identity":
             return (
-                firstUnstorable("accounts", entities.accounts) ??
-                unstorableClaim("zkCommitments", entities.zkCommitments) ??
-                unstorableClaim("zkNullifiers", entities.zkNullifiers)
+                unstorableRow("accounts", entities.accounts.get(normalizePubkey(fields.account))) ??
+                (stagedKeyOf(edit) === "zk"
+                    ? unstorableClaim("zkCommitments", entities.zkCommitments) ??
+                      unstorableClaim("zkNullifiers", entities.zkNullifiers)
+                    : null)
             )
         case "storageProgram":
         case "storage-program-put":
@@ -548,8 +556,8 @@ function unstorableAfter(edit: GCREdit, entities: GCREntityCaches): string | nul
 /**
  * Why `pubkey` cannot be the key HandleGCR.createAccount builds an account
  * under, or null. Kept in step with it by a test: the referral code it
- * derives needs 64 characters after an optional 0x, so every stored account
- * key has that shape.
+ * derives needs 64 characters after an optional 0x. Rows the chain creates
+ * all have that shape; a restored snapshot is not held to it.
  */
 export function uncreatableAccountKey(pubkey: unknown): string | null {
     if (typeof pubkey !== "string" || pubkey.trim().length === 0) return "not a public key"
@@ -557,13 +565,19 @@ export function uncreatableAccountKey(pubkey: unknown): string | null {
     return bare.length === 64 ? null : "not 64 characters after 0x"
 }
 
+const NO_KEYS: ReadonlySet<string> = new Set()
+
 /**
  * Why an edit's account cannot be loaded, as prepareEntities loads it, or
- * null. A missing account is created, so an account that is `loaded` must be
- * creatable; one that is only grouped by must normalize. Either must be a
- * storable key.
+ * null. Every account key must normalize to a storable key. One that is
+ * `loaded` and not among the `stored` rows is created, so it must also be
+ * creatable; one that is only grouped by never is.
  */
-function accountKeyProblem(account: unknown, loaded: boolean): string | null {
+function accountKeyProblem(
+    account: unknown,
+    loaded: boolean,
+    stored: ReadonlySet<string> = NO_KEYS,
+): string | null {
     let pubkey: string
     try {
         pubkey = normalizePubkey(account as string)
@@ -571,11 +585,8 @@ function accountKeyProblem(account: unknown, loaded: boolean): string | null {
         return "not a public key"
     }
     if (typeof pubkey !== "string") return "not a public key"
-    if (loaded) {
-        const problem = uncreatableAccountKey(pubkey)
-        if (problem !== null) return problem
-    }
-    return isKeyStorable(pubkey) ? null : NOT_STORABLE
+    if (!isKeyStorable(pubkey)) return NOT_STORABLE
+    return loaded && !stored.has(pubkey) ? uncreatableAccountKey(pubkey) : null
 }
 
 /**
@@ -1186,8 +1197,8 @@ export default class HandleGCR {
                 entities,
                 settledEdits(parts, isReplay ? "replayed" : "committed", true),
                 applyOne,
-                seal && (async caches => {
-                    const sealed = await seal(caches)
+                seal && (caches => {
+                    const sealed = seal(caches)
                     if (!sealed.success) return sealed
                     // The receipt quotes the Work's payload into jsonb.
                     const where = unstorableRow(
@@ -1620,13 +1631,32 @@ export default class HandleGCR {
     /**
      * The transactions prepareEntities could not load the rows of (see
      * unloadableEditKey): they fail here, the same way on every node, instead
-     * of failing the block. Rollback is not checked: it replays only
-     * transactions that applied, whose rows loaded.
+     * of failing the block. An account key createAccount would refuse is
+     * looked up first, so an existing row of that shape is edited, not
+     * refused; only storable keys are queried. Rollback is not checked: it
+     * replays only transactions that applied, whose rows loaded.
      */
-    static refuseUnloadableKeys(txs: Transaction[], blockNumber?: number): Set<string> {
+    static async refuseUnloadableKeys(
+        txs: Transaction[],
+        blockNumber?: number,
+    ): Promise<Set<string>> {
+        const uncreatable = new Set<string>()
+        const collect = (account: unknown, loaded: boolean): string | null => {
+            const problem = accountKeyProblem(account, false)
+            if (problem === null && loaded) {
+                const pubkey = normalizePubkey(account as string)
+                if (uncreatableAccountKey(pubkey) !== null) uncreatable.add(pubkey)
+            }
+            return problem
+        }
+        for (const tx of txs) unloadableEditKey(tx, collect)
+        const stored = uncreatable.size === 0 ? NO_KEYS : await this.storedAccountKeys(uncreatable)
+
         const refused = new Set<string>()
         for (const tx of txs) {
-            const reason = unloadableEditKey(tx, accountKeyProblem)
+            const reason = unloadableEditKey(tx, (account, loaded) =>
+                accountKeyProblem(account, loaded, stored),
+            )
             if (reason === null) continue
             log.error(
                 `[applyTransactions] Refusing tx ${tx.hash}` +
@@ -1636,6 +1666,14 @@ export default class HandleGCR {
             refused.add(tx.hash)
         }
         return refused
+    }
+
+    /** Which of `pubkeys` have a gcr_main row. */
+    private static async storedAccountKeys(pubkeys: Set<string>): Promise<Set<string>> {
+        const rows = await dataSource
+            .getRepository(GCRMain)
+            .find({ where: { pubkey: In([...pubkeys]) }, select: { pubkey: true } })
+        return new Set(rows.map(row => row.pubkey))
     }
 
     static async applyTransactions(
@@ -1782,7 +1820,7 @@ export default class HandleGCR {
         // win a Work, slot or address over one that can.
         const unkeyed = isRollback
             ? new Set<string>()
-            : this.refuseUnloadableKeys(finalTxs, clock?.height)
+            : await this.refuseUnloadableKeys(finalTxs, clock?.height)
         if (unkeyed.size > 0) {
             finalTxs = finalTxs.filter(tx => !unkeyed.has(tx.hash))
         }

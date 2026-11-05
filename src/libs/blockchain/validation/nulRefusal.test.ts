@@ -14,35 +14,13 @@
 
 import { beforeEach, describe, expect, it, mock } from "bun:test"
 
-let inserted: Array<Record<string, unknown>> = []
+import { installPoolStorageMocks } from "../mempool.fixtures"
+
+const inserted = installPoolStorageMocks()
 
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
     default: { debug: () => {}, info: () => {}, warn: () => {}, warning: () => {}, error: () => {}, only: () => {}, custom: () => {} },
-}))
-mock.module("@/model/datasource", () => ({
-    __esModule: true,
-    default: { getInstance: async () => ({}) },
-}))
-mock.module("src/libs/blockchain/chain", () => ({
-    __esModule: true,
-    default: {
-        getLastBlockNumber: async () => 100,
-        getExistingTransactionHashes: async () => new Set<string>(),
-        checkTxExists: async () => false,
-    },
-}))
-mock.module("src/libs/blockchain/chainDb", () => ({
-    chunkedInsert: async (_repo: unknown, _entity: unknown, rows: Array<Record<string, unknown>>) => {
-        inserted.push(...rows)
-        return { inserted: rows.length }
-    },
-}))
-mock.module("src/libs/consensus/v2/types/secretaryManager", () => ({
-    __esModule: true,
-    default: class {
-        static lastBlockRef = 100
-    },
 }))
 mock.module("src/libs/blockchain/validation/identityAdmission", () => ({
     checkIdentityAdmission: async () => ({ ok: true }),
@@ -136,7 +114,7 @@ let queued: string[] = []
 
 beforeEach(() => {
     chainIs(true)
-    inserted = []
+    inserted.length = 0
     queued = []
     ;(Mempool as any).repo = { find: async () => [] }
     ;(Mempool as any).checkTransactionByHash = async () => null
@@ -266,17 +244,17 @@ describe("sync verification", () => {
 
     it("syncs a historical block whose U+0000 sits only in a body memo", async () => {
         const memo = { ...(await withNulMemo()), status: "confirmed" } as Transaction
-        await verifyBlockTransactions(blockOf([memo]), [memo])
+        await expect(verifyBlockTransactions(blockOf([memo]), [memo])).resolves.toBeUndefined()
     })
 
     it("accepts attrs served with U+0000: they are cleaned before they are stored", async () => {
         const served = { ...(await transfer(PEER)), status: "confirmed", attrs: { message: "\u0000" } } as unknown as Transaction
-        await verifyBlockTransactions(blockOf([served]), [served])
+        await expect(verifyBlockTransactions(blockOf([served]), [served])).resolves.toBeUndefined()
     })
 
     it("accepts a served block with a clean transfer", async () => {
         const good = { ...(await transfer(PEER)), status: "confirmed" } as Transaction
-        await verifyBlockTransactions(blockOf([good]), [good])
+        await expect(verifyBlockTransactions(blockOf([good]), [good])).resolves.toBeUndefined()
     })
 })
 

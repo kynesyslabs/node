@@ -1,4 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
+
+import {
+    ADDRESS,
+    SENDER,
+    START,
+    burn,
+    installStorageEditMocks,
+    storage,
+    storageCaches,
+    storedProgram,
+    tx,
+} from "./storageEdits.fixtures"
 
 /**
  * A transaction that fails part-way through its edits leaves the state as it
@@ -6,92 +18,13 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
  * write it made before the failing edit is gone.
  */
 
-const fakeDataSource = { getRepository: () => ({}) }
-const datasourceModule = () => ({
-    __esModule: true,
-    dataSource: fakeDataSource,
-    default: { getInstance: async () => ({ getDataSource: () => fakeDataSource }) },
-})
-mock.module("src/model/datasource", datasourceModule)
-mock.module("@/model/datasource", datasourceModule)
-mock.module("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: () => {},
-        info: () => {},
-        warning: () => {},
-        error: () => {},
-        only: () => {},
-    },
-}))
+installStorageEditMocks()
 
 const { default: HandleGCR } = await import("./handleGCR")
 const { default: Chain } = await import("../chain")
-const { GCRStorageProgram } = await import("@/model/entities/GCRv2/GCR_StorageProgram")
 const { getSharedState } = await import("@/utilities/sharedState")
 
-const SENDER = "0x" + "ab".repeat(32)
-const ADDRESS = "stor-" + "ef".repeat(20)
-const START = 100n
-
-function storedProgram() {
-    return Object.assign(new GCRStorageProgram(), {
-        storageAddress: ADDRESS,
-        owner: SENDER,
-        programName: "probe",
-        encoding: "json",
-        data: { n: 1 },
-        sizeBytes: 7,
-        acl: { mode: "owner" },
-        metadata: null,
-        storageLocation: "onchain",
-        ipfsCid: null,
-        salt: null,
-        createdByTx: "tx_create",
-        lastModifiedByTx: "tx_create",
-        interactionTxs: ["tx_create"],
-        totalFeesPaid: 1n,
-        isDeleted: false,
-        deletedByTx: null,
-    })
-}
-
-async function caches(program: unknown = storedProgram()): Promise<any> {
-    return {
-        accounts: new Map([
-            [SENDER, await HandleGCR.createAccount(SENDER, { balance: START }, true)],
-        ]),
-        storagePrograms: new Map([[ADDRESS, program]]),
-        tlsNotaries: new Map(),
-        atomicWorks: new Map(),
-        resourceSlots: new Map(),
-    }
-}
-
-const burn = (amount: number) => ({
-    type: "balance",
-    operation: "remove",
-    account: SENDER,
-    amount,
-    isRollback: false,
-    txhash: "",
-})
-const storage = (operation: string, variables: Record<string, unknown>) => ({
-    type: "storageProgram",
-    target: ADDRESS,
-    isRollback: false,
-    txhash: "",
-    context: {
-        operation,
-        sender: SENDER,
-        data: { variables: { operation, storageAddress: ADDRESS, ...variables }, metadata: null },
-    },
-})
-
-const tx = (edits: unknown[]): any => ({
-    hash: "aa".repeat(32),
-    content: { type: "storageProgram", from: SENDER, from_ed25519_address: SENDER, gcr_edits: edits },
-})
+const caches = (program: unknown = storedProgram()) => storageCaches(program)
 
 const prod = getSharedState.PROD
 beforeEach(() => {

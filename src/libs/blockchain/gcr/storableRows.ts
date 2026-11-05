@@ -47,6 +47,15 @@ export function indexedColumns(entity: Function): Set<string> {
     return indexed
 }
 
+function columnKind(type: unknown, indexed: boolean): ColumnKind {
+    let name = ""
+    if (typeof type === "string") name = type.toLowerCase()
+    else if (type === String) name = "varchar"
+    if (name === "jsonb") return "jsonb"
+    if (!TEXT_TYPES.has(name)) return "other"
+    return indexed ? "indexedText" : "text"
+}
+
 function columnKinds(entity: Function): Map<string, ColumnKind> {
     let kinds = kindsByEntity.get(entity)
     if (kinds) return kinds
@@ -54,16 +63,7 @@ function columnKinds(entity: Function): Map<string, ColumnKind> {
     const indexed = indexedColumns(entity)
     for (const column of getMetadataArgsStorage().columns) {
         if (column.target !== entity) continue
-        const type = column.options.type
-        const name = typeof type === "string" ? type.toLowerCase() : type === String ? "varchar" : ""
-        kinds.set(
-            column.propertyName,
-            name === "jsonb"
-                ? "jsonb"
-                : TEXT_TYPES.has(name)
-                  ? indexed.has(column.propertyName) ? "indexedText" : "text"
-                  : "other",
-        )
+        kinds.set(column.propertyName, columnKind(column.options.type, indexed.has(column.propertyName)))
     }
     kindsByEntity.set(entity, kinds)
     return kinds
@@ -164,44 +164,54 @@ export function unloadableEditKey(
 ): string | null {
     const content = (tx as { content?: { gcr_edits?: unknown; from_ed25519_address?: unknown } })?.content
     const edits: unknown[] = Array.isArray(content?.gcr_edits) ? content.gcr_edits : []
-    const account = (where: string, value: unknown, loaded = true) => {
-        const problem = accountProblem(value, loaded)
-        return problem === null ? null : `${where}: ${problem}`
-    }
-    const text = (where: string, value: unknown, maxBytes: number) =>
-        typeof value !== "string"
-            ? `${where}: not a string`
-            : !isKeyStorable(value)
-              ? `${where}: ${NOT_STORABLE}`
-              : !fitsIndexKey(value, maxBytes)
-                ? `${where}: longer than ${maxBytes} bytes`
-                : null
-
     for (const [i, item] of edits.entries()) {
         if (typeof item !== "object" || item === null) return `gcr_edits[${i}]: not an edit`
-        const edit = item as EditView
-        const type = String(edit.type)
-        const where = `gcr_edits[${i}] ${type}`
-        // Grouping the block's transactions reads it as a string.
-        if (type === "identity" && edit.operation != null && typeof edit.operation !== "string") {
-            return `${where}: operation is not a string`
-        }
-        const refusal = ACCOUNT_EDITS.has(type)
-            ? account(`${where} account`, edit.account)
-            : TARGET_EDITS.has(type)
-              ? text(`${where} target`, edit.target, EDIT_KEY_MAX_BYTES.storageAddress)
-              : type === "tlsnotary"
-                ? typeof edit.data === "object" && edit.data !== null
-                    ? text(`${where} tokenId`, (edit.data as { tokenId?: unknown }).tokenId, EDIT_KEY_MAX_BYTES.tokenId) ??
-                      (edit.account ? account(`${where} account`, edit.account, false) : null)
-                    : `${where}: no data`
-                : WORK_EDITS.has(type)
-                  ? text(`${where} workId`, edit.workId, EDIT_KEY_MAX_BYTES.workId)
-                  : type === "resource-slot-cas"
-                    ? text(`${where} resourceKey`, edit.resourceKey, EDIT_KEY_MAX_BYTES.resourceKey)
-                    : null
+        const refusal = editKeyRefusal(item as EditView, `gcr_edits[${i}] ${String((item as EditView).type)}`, accountProblem)
         if (refusal !== null) return refusal
     }
     const sender = content?.from_ed25519_address
-    return sender ? account("from_ed25519_address", sender) : null
+    return sender ? accountRefusal("from_ed25519_address", sender, true, accountProblem) : null
+}
+
+function accountRefusal(
+    where: string,
+    value: unknown,
+    loaded: boolean,
+    accountProblem: (account: unknown, loaded: boolean) => string | null,
+): string | null {
+    const problem = accountProblem(value, loaded)
+    return problem === null ? null : `${where}: ${problem}`
+}
+
+function textKeyRefusal(where: string, value: unknown, maxBytes: number): string | null {
+    if (typeof value !== "string") return `${where}: not a string`
+    if (!isKeyStorable(value)) return `${where}: ${NOT_STORABLE}`
+    if (!fitsIndexKey(value, maxBytes)) return `${where}: longer than ${maxBytes} bytes`
+    return null
+}
+
+/** Why one edit's row keys cannot be loaded, mirroring prepareEntities. */
+function editKeyRefusal(
+    edit: EditView,
+    where: string,
+    accountProblem: (account: unknown, loaded: boolean) => string | null,
+): string | null {
+    const type = String(edit.type)
+    // Grouping the block's transactions reads it as a string.
+    if (type === "identity" && edit.operation != null && typeof edit.operation !== "string") {
+        return `${where}: operation is not a string`
+    }
+    if (ACCOUNT_EDITS.has(type)) return accountRefusal(`${where} account`, edit.account, true, accountProblem)
+    if (TARGET_EDITS.has(type)) return textKeyRefusal(`${where} target`, edit.target, EDIT_KEY_MAX_BYTES.storageAddress)
+    if (WORK_EDITS.has(type)) return textKeyRefusal(`${where} workId`, edit.workId, EDIT_KEY_MAX_BYTES.workId)
+    if (type === "resource-slot-cas") {
+        return textKeyRefusal(`${where} resourceKey`, edit.resourceKey, EDIT_KEY_MAX_BYTES.resourceKey)
+    }
+    if (type !== "tlsnotary") return null
+    if (typeof edit.data !== "object" || edit.data === null) return `${where}: no data`
+    const tokenId = (edit.data as { tokenId?: unknown }).tokenId
+    return (
+        textKeyRefusal(`${where} tokenId`, tokenId, EDIT_KEY_MAX_BYTES.tokenId) ??
+        (edit.account ? accountRefusal(`${where} account`, edit.account, false, accountProblem) : null)
+    )
 }

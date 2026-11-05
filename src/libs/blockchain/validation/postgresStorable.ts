@@ -110,10 +110,9 @@ const INT8_MAX = 2n ** 63n - 1n
 
 /** Whether `value`, as the driver sends it, is accepted by a `bigint` column. */
 export function isBigintStorable(value: unknown): boolean {
-    const text =
-        typeof value === "bigint" || typeof value === "number" ? value.toString()
-        : typeof value === "string" ? value
-        : null
+    let text: string | null = null
+    if (typeof value === "bigint" || typeof value === "number") text = value.toString()
+    else if (typeof value === "string") text = value
     if (text === null || !/^-?\d+$/.test(text)) return false
     const n = BigInt(text)
     return n >= INT8_MIN && n <= INT8_MAX
@@ -122,10 +121,12 @@ export function isBigintStorable(value: unknown): boolean {
 /** The bytes Postgres' integer input skips around a number (C isspace). */
 const PG_SPACE = new Set([" ", "\t", "\n", "\v", "\f", "\r"])
 
+const BIGINT_PREFIX: Record<number, string> = { 2: "0b", 8: "0o", 16: "0x" }
+
 const RADIX_DIGITS: Record<number, RegExp> = {
     2: /^[01]$/,
     8: /^[0-7]$/,
-    10: /^[0-9]$/,
+    10: /^\d$/,
     16: /^[0-9a-fA-F]$/,
 }
 
@@ -175,7 +176,7 @@ export function isInt8Text(text: string): boolean {
     // parse a long one.
     const significant = digits.replace(/^0+/, "")
     if (significant.length > 64) return false
-    const prefix = radix === 16 ? "0x" : radix === 8 ? "0o" : radix === 2 ? "0b" : ""
+    const prefix = BIGINT_PREFIX[radix] ?? ""
     const magnitude = significant === "" ? 0n : BigInt(prefix + significant)
     const value = negative ? -magnitude : magnitude
     return value >= INT8_MIN && value <= INT8_MAX
@@ -254,7 +255,7 @@ export function entityBigint(value: unknown): bigint | undefined {
  */
 export function storedAddress(value: unknown): unknown {
     const converted = (value as Record<string, any>)["data"]?.toString("hex")
-    return converted ? converted : value
+    return converted || value
 }
 
 const storedAddressOrRaw = (value: unknown): unknown => {

@@ -36,12 +36,12 @@ const datasourceModule = () => ({
 mock.module("src/model/datasource", datasourceModule)
 mock.module("@/model/datasource", datasourceModule)
 
-import { denomination } from "@kynesyslabs/demosdk"
 import { StorageProgram } from "@kynesyslabs/demosdk/storage"
 import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
+import { SENDER, onTheWire, storageTx } from "./storageWire.fixtures"
 
 const sdkBuild = process.env.GRANULAR_SDK_BUILD
 const { GCRGeneration } = sdkBuild
@@ -59,45 +59,11 @@ const { default: HandleGCR, normalizePubkey } = await import(
     "@/libs/blockchain/gcr/handleGCR"
 )
 
-const SENDER = "0x" + "ab".repeat(32)
 const OTHER = "0x" + "cd".repeat(32)
 const ADDRESS = "stor-" + "ef".repeat(20)
 
-function storageTx(payload: unknown, nonce = 8): Transaction {
-    return {
-        hash: "",
-        content: {
-            type: "storageProgram",
-            from: SENDER,
-            from_ed25519_address: SENDER,
-            to: ADDRESS,
-            amount: 0,
-            data: ["storageProgram", payload],
-            gcr_edits: [],
-            nonce,
-            timestamp: 1_700_000_000_000,
-            transaction_fee: {
-                network_fee: 0,
-                rpc_fee: 0,
-                additional_fee: 0,
-                rpc_address: null,
-            },
-        },
-    } as unknown as Transaction
-}
-
-/** What a peer receives: the author's tx after the SDK wire serialisation. */
-function onTheWire(tx: Transaction, postFork: boolean): Transaction {
-    const copy = JSON.parse(JSON.stringify(tx)) as Transaction
-    copy.content = JSON.parse(
-        denomination.serializeTransactionContent(copy.content as any, postFork),
-    )
-    copy.hash = "de".repeat(32)
-    return copy
-}
-
 async function authored(payload: unknown, postFork: boolean): Promise<Transaction> {
-    const tx = storageTx(payload)
+    const tx = storageTx(payload, ADDRESS, 8)
     tx.content.gcr_edits = await GCRGeneration.generate(tx)
     return onTheWire(tx, postFork)
 }
@@ -118,7 +84,7 @@ const payloads = {
 }
 
 const emitsGranular = (
-    (await GCRGeneration.generate(storageTx(payloads.SET_FIELD))) as GCREdit[]
+    (await GCRGeneration.generate(storageTx(payloads.SET_FIELD, ADDRESS, 8))) as GCREdit[]
 ).some(e => e.type === "storageProgram")
 
 const storageEdit = (tx: Transaction) =>
@@ -132,6 +98,7 @@ const REQUIRED_SDK =
 
 it("runs against an SDK that emits granular storage edits", () => {
     if (!emitsGranular) throw new Error(REQUIRED_SDK)
+    expect(emitsGranular).toBe(true)
 })
 
 describe.skipIf(!emitsGranular)("granular storage writes on the wire", () => {
