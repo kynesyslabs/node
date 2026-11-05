@@ -841,6 +841,10 @@ export default class SecretaryManager {
             if (resolveWaiter) {
                 // INFO: Release the waiting members
                 Waiter.resolve(Waiter.keys.SET_WAIT_STATUS)
+                // The routine's wait restarts for the next phase, so a timeout
+                // queued behind a running release is stale; rerunning it would
+                // release the next phase before its own wait runs out.
+                this.timeoutReleaseQueued = false
             }
 
             this.releaseWaitingMembers([], null, "releaseWaitingRoutine")
