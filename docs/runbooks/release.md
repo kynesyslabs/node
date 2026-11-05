@@ -154,19 +154,25 @@ The chain stops at the first failing check, so `./run` never starts an
 unverified tree. The chain upgrades a host whose database already has its
 schema: a new host starts with the first-install steps in `INSTALL.md`
 (`./run -c true`), since a plain `./run` refuses to boot on an empty database.
-The full walk-through is in `INSTALL.md`. If the release
-adds a migration, leave `./run` off the chain and migrate first. The launcher
-stops its Postgres together with the node, so start it alone from its folder,
-wait until it is ready, back up, then go back to the node checkout and migrate
-there ([database-migrations.md](database-migrations.md), bare-metal track):
+The full walk-through is in `INSTALL.md`. Here `./run` stands for the host's
+own launcher command with all its options (`-d <PG_PORT>`, `-p`, `-i`, ...):
+a plain `./run` falls back to the defaults, Postgres on 5332 among them. If
+the release adds a migration, leave `./run` off the chain and migrate first.
+Install the release's dependencies first: `./run` would install them, but
+only when it starts, after the migration. The launcher stops its Postgres
+together with the node, so start it alone from its folder, wait until it is
+ready, back up, then go back to the node checkout and migrate there
+([database-migrations.md](database-migrations.md), bare-metal track):
 
 ```bash
+bun install --frozen-lockfile   # from the node checkout, right after the checkout
 (cd postgres_<PG_PORT> && PG_PORT=<PG_PORT> docker compose up -d)
 until docker exec postgres_<PG_PORT> pg_isready -q -h 127.0.0.1 -U demosuser -d demos; do sleep 1; done
 # the launcher passes its port only to the node it starts; .env may name another
 PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:show   # from the node checkout; [ ] = pending
-# back up (database-migrations.md step 1), then:
-PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run
+# back up (database-migrations.md step 1), then restart with the host's usual
+# launcher options; -d must name the port just migrated:
+PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> <other launcher options>
 ```
 
 ## Known limits
