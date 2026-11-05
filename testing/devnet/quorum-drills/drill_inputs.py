@@ -56,9 +56,10 @@ EMPTY_SNAPSHOT = "empty-snapshot"
 NODE_TMPFS_PATHS = ["/app/state"]
 
 # Postgres connections. A node opens them from one place: the TypeORM DataSource
-# (src/model/datasource.ts:55-71), which sets no pool `max`, so pg-pool's default
-# of 10 applies (node_modules/pg-pool/index.js:89, typeorm passes
-# `max: options.poolSize`, PostgresDriver.js:1205). Nothing else in src/ holds a
+# (`dataSource` in src/model/datasource.ts), which sets no pool `max`, so pg-pool's
+# default of 10 applies (`this.options.max` in node_modules/pg-pool/index.js, typeorm
+# passes `max: options.poolSize` in createPool of
+# node_modules/typeorm/driver/postgres/PostgresDriver.js). Nothing else in src/ holds a
 # connection while a node runs (README, "Postgres connections").
 PG_POOL_PER_NODE = 10
 # What is not a node: the superuser_reserved_connections (3, counted inside
@@ -101,8 +102,11 @@ OFF_TREASURY = "0x" + "0" * 64
 # Forks the template activates at 0 that the drills keep off, by name, each with
 # the reason. The drills mount an empty data/snapshot, so genesis takes the legacy
 # path; a fork that needs a snapshot has to be listed here, or a node with it
-# active at 0 refuses to boot (restoreGenesisState.ts:58-66, findGenesisBlock.ts:181-192
-# and 212-220) and the drill ends as "node-N did not serve" (exit 2).
+# active at 0 refuses to boot (restoreGenesisState in
+# src/libs/blockchain/genesis/restoreGenesisState.ts; the `refuse` calls around
+# importedIdentityProblems and freshGenesisProblems in
+# src/libs/blockchain/routines/findGenesisBlock.ts) and the drill ends as
+# "node-N did not serve" (exit 2).
 LAUNCH_EXCLUDED_FORKS = {
     "identityCarryover": "needs a genesis snapshot; the drills use the legacy genesis path",
 }

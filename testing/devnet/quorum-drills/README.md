@@ -57,7 +57,7 @@ start path from the result (`start=` in the preflight line of `run.sh`'s log):
 
 What still differs from mainnet on the image path: `NODE_ENV=development` (a
 production node needs `EXPECTED_GENESIS_HASH` for a genesis that is new each
-run, `genesisPin.ts:56-68`), postgres and `/app/state` on tmpfs, the generated
+run, `src/libs/blockchain/genesis/genesisPin.ts:56-68`), postgres and `/app/state` on tmpfs, the generated
 genesis and the empty snapshot, `OMNI_MODE=HTTP_ONLY`, TLSNotary off, and no
 published ports.
 
@@ -73,16 +73,21 @@ database:
 - **Fresh database or rebuild.** No snapshot is a refusal
   (`src/libs/blockchain/genesis/restoreGenesisState.ts:58-66`), and so is a
   genesis without `snapshot.manifestSha256`, a missing manifest or a manifest
-  that hashes differently (`routines/findGenesisBlock.ts:212-220`,
-  `genesis/genesisPin.ts:165-184`). The snapshot is loaded and verified file by
-  file (`genesis/loadSnapshot.ts:431`) and `assertCarryoverSnapshot` checks it
-  before the database transaction opens (`restoreGenesisState.ts:71-73`).
+  that hashes differently
+  (`src/libs/blockchain/routines/findGenesisBlock.ts:212-220`,
+  `src/libs/blockchain/genesis/genesisPin.ts:165-184`). The snapshot is loaded
+  and verified file by file
+  (`src/libs/blockchain/genesis/loadSnapshot.ts:431`) and
+  `assertCarryoverSnapshot` checks it before the database transaction opens
+  (`src/libs/blockchain/genesis/restoreGenesisState.ts:71-73`).
 - **Every restart.** The node reads the stored block 0, and if it schedules
   `identityCarryover` at 0 it opens the snapshot again: no manifest, a manifest
   that does not hash to block 0's value, or a `gcr_main.jsonl` that does not
   match the manifest stops the boot, as does an imported-identity registry that
-  differs from the snapshot (`routines/findGenesisBlock.ts:181-192`,
-  `genesis/verifyImportedIdentities.ts:40-77`, `genesis/loadSnapshot.ts:528-562`).
+  differs from the snapshot
+  (`src/libs/blockchain/routines/findGenesisBlock.ts:181-192`,
+  `src/libs/blockchain/genesis/verifyImportedIdentities.ts:40-77`,
+  `src/libs/blockchain/genesis/loadSnapshot.ts:528-562`).
   A restart does not re-hash the other snapshot files.
 
 The drills **do not cover any of this**: they run the legacy genesis path with
@@ -160,7 +165,7 @@ launches with, read from that file when the drill starts: a fork is active at
 0 if its `activationHeight` there is the number `0`; `null` and `"FILL: ..."`
 stay off. The genesis `forks` object is replaced as a whole, so no fork is left
 to a default (`osDenomination`, `nonceEnforcement` and `gasFeeSeparation`
-default to 0, `src/forks/forkConfig.ts:405-423`, `466-477`), and a template
+default to 0, `src/forks/forkConfig.ts:405-423`, `src/forks/forkConfig.ts:466-477`), and a template
 that stops activating `quorumParity`, `committeeBinding` or `commitLock` is an
 error. The code is `launch_fork_heights` and `with_launch_forks` in
 `drill_inputs.py` (`run.sh` through `gen-inputs.py --fork-set launch`; scenario
@@ -206,33 +211,45 @@ is new, and off):
 
 - **`finalityProofs`** draws the pool from the validator set snapshot after
   block B-2 and throws `no validator set snapshot at or below block N` without
-  one (`getShard.ts:83-101`); a block commits its parent's snapshot hash
-  (`finality/commitments.ts:215-225`, `248`). The snapshot is a row of
+  one (`src/libs/consensus/v2/routines/getShard.ts:83-101`); a block commits
+  its parent's snapshot hash
+  (`src/libs/blockchain/finality/commitments.ts:215-225`,
+  `src/libs/blockchain/finality/commitments.ts:248`). The snapshot is a row of
   Postgres' `validator_set_snapshots`, not a file, so the empty
   `data/snapshot` mount does not matter. Block 0's row is written at boot:
   with no snapshot manifest `loadSnapshot` is unavailable
-  (`genesis/loadSnapshot.ts:445-451`), `restoreGenesisState` returns false
-  (`genesis/restoreGenesisState.ts:58-66`; with `identityCarryover` off, as in
-  the drills, it neither refuses nor restores), `generateGenesisBlock` takes
-  the legacy path and seeds no validators (`chainGenesis.ts:71-85`),
-  `ensureValidatorSeed` then seeds them from `genesis.json` at block 0
-  (`index.ts:610`, `routines/ensureValidatorSeed.ts:119-151`) and
-  `ensureValidatorSetSnapshot(0)` records the set (`index.ts:612`,
-  `finality/validatorSet.ts:142-164`). Every later block adds a row only when
-  the set changed (`chainBlocks.ts:553-560`, `validatorSet.ts:71-89`), so the
+  (`src/libs/blockchain/genesis/loadSnapshot.ts:445-451`),
+  `restoreGenesisState` returns false
+  (`src/libs/blockchain/genesis/restoreGenesisState.ts:58-66`; with
+  `identityCarryover` off, as in the drills, it neither refuses nor restores),
+  `generateGenesisBlock` takes the legacy path and seeds no validators
+  (`src/libs/blockchain/chainGenesis.ts:71-85`), `ensureValidatorSeed` then
+  seeds them from `genesis.json` at block 0
+  (`src/index.ts:607`,
+  `src/libs/blockchain/routines/ensureValidatorSeed.ts:119-151`) and
+  `ensureValidatorSetSnapshot(0)` records the set (`src/index.ts:609`,
+  `src/libs/blockchain/finality/validatorSet.ts:142-164`). Every later block
+  adds a row only when the set changed
+  (`src/libs/blockchain/chainBlocks.ts:553-560`,
+  `src/libs/blockchain/finality/validatorSet.ts:71-89`), so the
   one row at block 0 answers every height here. A restarted node keeps its
   database; its boot check wants a row at or below tip-1
-  (`validatorSet.ts:128-140`), which is that row.
+  (`src/libs/blockchain/finality/validatorSet.ts:128-140`), which is that row.
 - **`osDenomination`** runs its migration when block 0 is inserted
-  (`chainBlocks.ts:414-428`), as on every fresh chain (its default is 0).
+  (`src/libs/blockchain/chainBlocks.ts:414-428`), as on every fresh chain (its
+  default is 0).
 - **`signatureDomain`** needs `properties.id` to be an integer
-  (`loadForkConfig.ts:201-209`, `255-263`; `signatureDomainGate.ts:36-52`);
+  (`src/forks/loadForkConfig.ts:201-209`, `src/forks/loadForkConfig.ts:255-263`;
+  `src/forks/signatureDomainGate.ts:36-52`);
   `genesis.devnet.json` has 1337 and `genesis-fork-low.json` has 1. Nothing in
-  the node refuses those ids (only `scripts/launch-go-no-go.ts:185` does, for a
+  the node refuses those ids (only `scripts/launch-go-no-go.ts:186` does, for a
   real launch).
 - **`nonceEnforcement`, `editBinding`, `nonceIntegrity`** act on transactions
-  (`handleGCR.ts:1155-1163`, `2026-2030`, `mempool.ts:582`, `643`,
-  `validateTransaction.ts:111`, `editBinding.ts:135-146`). The drills send none:
+  (`src/libs/blockchain/gcr/handleGCR.ts:1181-1189`,
+  `src/libs/blockchain/gcr/handleGCR.ts:2057-2061`,
+  `src/libs/blockchain/mempool.ts:582`, `src/libs/blockchain/mempool.ts:643`,
+  `src/libs/blockchain/routines/validateTransaction.ts:111`,
+  `src/libs/blockchain/validation/editBinding.ts:135-146`). The drills send none:
   `run.sh` makes only `getLastBlockNumber` and `getBlockByNumber` calls
   (`run.sh` `head_of`, `block_req`) and reads the databases, and scenario 12
   reads heads and `blocks` rows.
@@ -251,37 +268,49 @@ and `finalityProofs` active as well (both are in the launch fork set, see
 [Fork set](#fork-set)), read from `src/libs/consensus/v2`:
 
 - **Pool.** The committee for block B is drawn from the peerlist committed in
-  block B-1, intersected with the staked set (`routines/getShard.ts:165-201`,
-  `chainEligiblePool`; the rule is `eligiblePoolFrom`, `routines/poolRules.ts:37-56`).
+  block B-1, intersected with the staked set
+  (`src/libs/consensus/v2/routines/getShard.ts:165-201`, `chainEligiblePool`;
+  the rule is `eligiblePoolFrom`,
+  `src/libs/consensus/v2/routines/poolRules.ts:37-56`).
   Under `finalityProofs` the staked set is the validator set snapshot after
-  block B-2, not the live table (`getShard.ts:83-101`, `poolValidatorAddresses`):
+  block B-2, not the live table
+  (`src/libs/consensus/v2/routines/getShard.ts:83-101`, `poolValidatorAddresses`):
   a join or exit reaches the pool one block later. The drill has no joins or
   exits, so the set is the genesis validators throughout and the pool
   arithmetic below is the same as before the fork. Only when the pool holds
   fewer than q = 7 identities does it become the whole staked set
-  (`getShard.ts:272-296`, `getBoundPool`; `poolRules.ts:64-71`, `boundPoolFrom`);
+  (`src/libs/consensus/v2/routines/getShard.ts:272-296`, `getBoundPool`;
+  `src/libs/consensus/v2/routines/poolRules.ts:64-71`, `boundPoolFrom`);
   at a block without a peerlist (block 0) it is the staked set
-  (`getShard.ts:40-42`, `poolRules.ts:49-51`). It is not all staked validators
-  in the normal case.
+  (`src/libs/consensus/v2/routines/getShard.ts:40-42`,
+  `src/libs/consensus/v2/routines/poolRules.ts:49-51`). It is not all staked
+  validators in the normal case.
 - **Draw.** The pool is ranked with `Alea(seed)` and the first `shardSize`
-  identities are the committee (`getShard.ts:251-261`, `315-321`). The seed
-  is the common validator seed of the parent block (`getShard.ts:332-345`), so
+  identities are the committee
+  (`src/libs/consensus/v2/routines/getShard.ts:251-261`, `315-321`). The seed
+  is the common validator seed of the parent block
+  (`src/libs/consensus/v2/routines/getShard.ts:332-345`), so
   which validators are drawn is not known before that block exists.
 - **Offline members are not filtered out.** They stay in the committee and
-  count as missing votes (`getShard.ts:323-330`, `372-376`, `413-415`,
-  `448-473`; `boundCommittee.test.ts:266`, "does not replace an offline
-  member"). Only the pre-fork path drops them and takes the next live
-  identity (`getShard.ts:417-420`; run with `--binding off` to see it, but
+  count as missing votes
+  (`src/libs/consensus/v2/routines/getShard.ts:323-330`, `372-376`, `413-415`,
+  `448-473`; `src/libs/consensus/v2/routines/boundCommittee.test.ts:266`,
+  "does not replace an offline member"). Only the pre-fork path drops them and
+  takes the next live identity
+  (`src/libs/consensus/v2/routines/getShard.ts:417-420`; run with `--binding off` to see it, but
   see the note under `--binding`).
 - **What a block needs.** 2/3 + 1 of shardSize = 7 signatures
-  (`quorum.ts:10-12`, `19-27`), counted only from committee members
+  (`src/libs/consensus/v2/quorum.ts:10-12`, `19-27`), counted only from
+  committee members
   (`src/libs/blockchain/validation/verifyBlock.ts:139-151`, `165-209`). A
-  producer commits on the same bar (`PoRBFT.ts:1424-1431`).
+  producer commits on the same bar
+  (`src/libs/consensus/v2/PoRBFT.ts:1424-1431`).
 - **What the next pool is.** The committed peerlist lists the identities that
   at least 7 committee voters saw at the parent block
-  (`routines/peerlistMerge.ts:211-259`, `273-320`; the bar is `quorumThreshold(shardSize)`
-  at `:287-289`). A voter counts a peer only if its last known sync state is
-  exactly the parent block (`peerlistMerge.ts:74-100`, `isAtParent` at
+  (`src/libs/consensus/v2/routines/peerlistMerge.ts:211-259`, `273-320`; the
+  bar is `quorumThreshold(shardSize)` at `:287-289`). A voter counts a peer
+  only if its last known sync state is exactly the parent block
+  (`src/libs/consensus/v2/routines/peerlistMerge.ts:74-100`, `isAtParent` at
   `:281-284`), so a stopped validator drops out of the pool once the chain has
   moved past the height it stopped at; the block right after the stop can
   still list it. (This merge filters its list by the live validators table,
@@ -290,7 +319,8 @@ and `finalityProofs` active as well (both are in the launch fork set, see
 - **Secretary and floor.** Only live committee members form the shard; fewer
   than q refuse to forge, and the secretary is the first live member that
   holds our tip, replaced when it goes offline
-  (`types/secretaryManager.ts:259-274`, `303-310`, `605-649`).
+  (`src/libs/consensus/v2/types/secretaryManager.ts:259-274`, `303-310`,
+  `605-649`).
 
 What follows for 13 validators and a committee of 10:
 
@@ -386,7 +416,7 @@ What opens a Postgres connection while a node runs:
 
 | Where | Connections |
 |---|---|
-| `src/model/datasource.ts:55-71`, the one TypeORM `DataSource` (`Datasource.getInstance`, `:153-166`, is the only caller of `initialize()`; about 40 files go through it, the boot check for pending migrations included; `migrationsRun: false` at `:75`) | one pool of up to **10**: no `max` or `poolSize` is set, so TypeORM passes `max: undefined` (`typeorm/driver/postgres/PostgresDriver.js:1205`) and pg-pool uses 10 (`pg-pool/index.js:89`, pg-pool 3.10.1 under pg 8.16.3, typeorm 0.3.31) |
+| `src/model/datasource.ts:55-71`, the one TypeORM `DataSource` (`Datasource.getInstance`, `:153-166`, is the only caller of `initialize()`; about 40 files go through it, the boot check for pending migrations included; `migrationsRun: false` at `:75`) | one pool of up to **10**: no `max` or `poolSize` is set, so TypeORM passes `max: undefined` (`node_modules/typeorm/driver/postgres/PostgresDriver.js:1205`) and pg-pool uses 10 (`node_modules/pg-pool/index.js:89`, pg-pool 3.10.1 under pg 8.16.3, typeorm 0.3.31) |
 | `src/utilities/backupAndRestore.ts:35`, `new Client` from `pg` | 1, but it is the `bun run restore` tool (`package.json:46`), not started by the node or the image entrypoint |
 | a second `DataSource`, `new Pool`, LISTEN/NOTIFY | none in `src/`; the other `new DataSource` calls are in `*Pg.test.ts` files |
 | the sidecar (`sidecar/`), `scripts/docker-entrypoint.sh` | none |
@@ -521,8 +551,9 @@ needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
   scenarios other than `halt-n10s10`, `halt-n13s10` and `ride-n13s10`; those
   three always run with `GOSSIP_ENABLED=true`, whatever the environment says
   (`run.sh`), because with gossip off a restarted node never sees that the
-  network is ahead (`Sync.ts:133-143`, `networkAheadVeto.ts:59-72`,
-  `broadcastManager.ts:369-415`) and the
+  network is ahead (`src/libs/blockchain/routines/Sync.ts:133-137`,
+  `src/libs/consensus/v2/routines/networkAheadVeto.ts:58-73`,
+  `src/libs/communications/broadcastManager.ts:369-415`) and the
   recovery result would measure that, not the halt. Gossip needs the sidecar
   (`node sidecar/dist/gossip-sidecar.mjs`, started by the node process itself
   from `/app`, so under either start path): the preflight aborts when the image
