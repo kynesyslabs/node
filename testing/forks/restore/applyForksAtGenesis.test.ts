@@ -9,12 +9,9 @@
  * All tests use an in-memory SQLite DataSource (same pattern as the
  * existing migration tests) so no Postgres connection is required.
  *
- * Test matrix:
- *   1. Happy path — both forks applied, state correct.
- *   2. osDenomination null → skipped; report.osDenominationApplied=false.
- *   3. gasFeeSeparation null → skipped; report.gasFeeSeparationApplied=false.
- *   4. Both null → report all false, no DB mutations.
- *   5. forks=undefined → returns immediately with all false.
+ * osDenomination runs at block 0 only when its effective activation height
+ * (the genesis entry, else the code default 0) is 0, as the block hook
+ * decides; gasFeeSeparation follows the presence of its entry.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
@@ -179,7 +176,7 @@ describe("applyForksAtGenesis", () => {
         const report = await ds.transaction(async em => {
             await seedState(em)
             const forksConfig: GenesisForkConfig = {
-                osDenomination: { activationHeight: 1 },
+                osDenomination: { activationHeight: 0 },
                 gasFeeSeparation: {
                     activationHeight: 1,
                     treasuryAddress: TREASURY,
@@ -256,13 +253,10 @@ describe("applyForksAtGenesis", () => {
     })
 
     // -------------------------------------------------------------------------
-    // Test 2: osDenomination activationHeight=null → skip
+    // Test 2: osDenomination activationHeight=null → not applied
     // -------------------------------------------------------------------------
 
-    it("null activationHeight does NOT skip pre-apply (presence of forks block triggers it)", async () => {
-        // Production config has activationHeight=null because the block-N
-        // hook in chainBlocks.ts must stay dormant (forks already applied
-        // at genesis). Pre-apply still runs because the forks block exists.
+    it("null osDenomination height: no migration and no marker, as the hook never runs it", async () => {
         const report = await ds.transaction(async em => {
             await seedState(em)
             const forksConfig: GenesisForkConfig = {
@@ -275,10 +269,9 @@ describe("applyForksAtGenesis", () => {
             return applyForksAtGenesis(em, forksConfig)
         })
 
-        expect(report.osDenominationApplied).toBe(true)
+        expect(report.osDenominationApplied).toBe(false)
         expect(report.gasFeeSeparationApplied).toBe(true)
 
-        // Balances scaled by 1e9
         const gcrRows: Array<{ pubkey: string; balance: string }> =
             await ds.query(
                 "SELECT pubkey, balance FROM gcr_main WHERE pubkey IN (?, ?, ?, ?, ?) ORDER BY pubkey",
@@ -286,14 +279,58 @@ describe("applyForksAtGenesis", () => {
             )
         const balMap = new Map(gcrRows.map(r => [r.pubkey, BigInt(r.balance)]))
         for (const seed of GCR_ROWS) {
-            expect(balMap.get(seed.pubkey)).toBe(seed.balance * 1_000_000_000n)
+            expect(balMap.get(seed.pubkey)).toBe(seed.balance)
         }
 
-        // fork_state rows present for both forks
         const forkRows: Array<{ fork_name: string }> = await ds.query(
             "SELECT fork_name FROM fork_state ORDER BY fork_name",
         )
-        expect(forkRows).toHaveLength(2)
+        expect(forkRows.map(r => r.fork_name)).toEqual([GAS_FORK_NAME])
+    })
+
+    it("osDenomination at a later height: left to the block hook at that height", async () => {
+        const report = await ds.transaction(async em => {
+            await seedState(em)
+            return applyForksAtGenesis(em, {
+                osDenomination: { activationHeight: 5 },
+            } as GenesisForkConfig)
+        })
+
+        expect(report.osDenominationApplied).toBe(false)
+        const gcrRows: Array<{ pubkey: string; balance: string }> =
+            await ds.query(
+                "SELECT pubkey, balance FROM gcr_main WHERE pubkey IN (?, ?, ?, ?, ?) ORDER BY pubkey",
+                GCR_ROWS.map(r => r.pubkey),
+            )
+        const balMap = new Map(gcrRows.map(r => [r.pubkey, BigInt(r.balance)]))
+        for (const seed of GCR_ROWS) {
+            expect(balMap.get(seed.pubkey)).toBe(seed.balance)
+        }
+        const forkRows: Array<{ fork_name: string }> = await ds.query("SELECT fork_name FROM fork_state")
+        expect(forkRows).toHaveLength(0)
+    })
+
+    it("refuses an already migrated snapshot when osDenomination is not active at block 0", async () => {
+        for (const activationHeight of [null, 5]) {
+            const fresh = await createTestDataSource()
+            try {
+                await expect(
+                    fresh.transaction(async em => {
+                        await seedState(em)
+                        return applyForksAtGenesis(
+                            em,
+                            { osDenomination: { activationHeight } } as GenesisForkConfig,
+                            [{ fork_name: OS_FORK_NAME, applied: true }],
+                        )
+                    }),
+                ).rejects.toThrow(/already in OS units/)
+                // the transaction rolled back: nothing of the genesis is left
+                const rows: Array<{ n: number }> = await fresh.query("SELECT COUNT(*) AS n FROM gcr_main")
+                expect(Number(rows[0].n)).toBe(0)
+            } finally {
+                await fresh.destroy()
+            }
+        }
     })
 
     // -------------------------------------------------------------------------
@@ -305,7 +342,7 @@ describe("applyForksAtGenesis", () => {
             await seedState(em)
             // gasFeeSeparation key entirely absent
             const forksConfig = {
-                osDenomination: { activationHeight: null },
+                osDenomination: { activationHeight: 0 },
             } as unknown as GenesisForkConfig
             return applyForksAtGenesis(em, forksConfig)
         })
@@ -332,17 +369,16 @@ describe("applyForksAtGenesis", () => {
     // Test 4: Empty forks object — no sub-keys → both skip, no DB mutations
     // -------------------------------------------------------------------------
 
-    it("empty forks object → all false, no DB mutations", async () => {
+    it("empty forks object → osDenomination at its default height 0, nothing else", async () => {
         const report = await ds.transaction(async em => {
             await seedState(em)
             const forksConfig = {} as unknown as GenesisForkConfig
             return applyForksAtGenesis(em, forksConfig)
         })
 
-        expect(report.osDenominationApplied).toBe(false)
+        expect(report.osDenominationApplied).toBe(true)
         expect(report.gasFeeSeparationApplied).toBe(false)
 
-        // Balances untouched
         const gcrRows: Array<{ pubkey: string; balance: string }> =
             await ds.query(
                 "SELECT pubkey, balance FROM gcr_main WHERE pubkey IN (?, ?, ?, ?, ?) ORDER BY pubkey",
@@ -350,34 +386,32 @@ describe("applyForksAtGenesis", () => {
             )
         const balMap = new Map(gcrRows.map(r => [r.pubkey, BigInt(r.balance)]))
         for (const seed of GCR_ROWS) {
-            expect(balMap.get(seed.pubkey)).toBe(seed.balance)
+            expect(balMap.get(seed.pubkey)).toBe(seed.balance * 1_000_000_000n)
         }
 
         const forkRows: Array<{ fork_name: string }> = await ds.query(
             "SELECT fork_name FROM fork_state",
         )
-        expect(forkRows).toHaveLength(0)
+        expect(forkRows.map(r => r.fork_name)).toEqual([OS_FORK_NAME])
     })
 
     // -------------------------------------------------------------------------
-    // Test 5: forks=undefined → immediate early return
+    // Test 5: forks=undefined → only the default osDenomination
     // -------------------------------------------------------------------------
 
-    it("forks=undefined → returns immediately with all false, elapsed_ms=0", async () => {
+    it("forks=undefined → osDenomination at its default height 0, gasFeeSeparation not applied", async () => {
         const report = await ds.transaction(async em => {
             await seedState(em)
             return applyForksAtGenesis(em, undefined)
         })
 
-        expect(report.osDenominationApplied).toBe(false)
+        expect(report.osDenominationApplied).toBe(true)
         expect(report.gasFeeSeparationApplied).toBe(false)
-        expect(report.elapsed_ms).toBe(0)
 
-        // No fork_state rows written
         const forkRows: Array<{ fork_name: string }> = await ds.query(
             "SELECT fork_name FROM fork_state",
         )
-        expect(forkRows).toHaveLength(0)
+        expect(forkRows.map(r => r.fork_name)).toEqual([OS_FORK_NAME])
     })
 
     // -------------------------------------------------------------------------
@@ -388,7 +422,7 @@ describe("applyForksAtGenesis", () => {
         await ds.transaction(async em => {
             await seedState(em)
             const forksConfig: GenesisForkConfig = {
-                osDenomination: { activationHeight: 1 },
+                osDenomination: { activationHeight: 0 },
                 gasFeeSeparation: {
                     activationHeight: 1,
                     treasuryAddress: TREASURY,
@@ -417,7 +451,7 @@ describe("applyForksAtGenesis", () => {
         const report = await ds.transaction(async em => {
             await seedState(em)
             return applyForksAtGenesis(em, {
-                osDenomination: { activationHeight: 1 },
+                osDenomination: { activationHeight: 0 },
                 gasFeeSeparation: {
                     activationHeight: 1,
                     treasuryAddress: TREASURY,
@@ -438,7 +472,7 @@ describe("applyForksAtGenesis", () => {
         const report = await ds.transaction(async em => {
             await seedState(em)
             const forksConfig: GenesisForkConfig = {
-                osDenomination: { activationHeight: null },
+                osDenomination: { activationHeight: 0 },
             } as GenesisForkConfig
             // Manifest says the snapshot already carries OS-denominated values.
             return applyForksAtGenesis(em, forksConfig, [
@@ -503,7 +537,7 @@ describe("applyForksAtGenesis", () => {
             await seedState(em)
             return applyForksAtGenesis(
                 em,
-                { osDenomination: { activationHeight: null } } as GenesisForkConfig,
+                { osDenomination: { activationHeight: 0 } } as GenesisForkConfig,
                 [{ fork_name: OS_FORK_NAME, applied: false }],
             )
         })

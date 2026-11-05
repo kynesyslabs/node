@@ -16,11 +16,12 @@
  * transaction that holds restoreSnapshot + seedValidators, so a failure in
  * any migration rolls back the entire genesis atomically.
  *
- * When data/genesis.json has activationHeight=null for a fork, the
- * chainBlocks.ts block-N hook sees isForkActive(...) === false and skips.
- * The fork_state row written here is the durable "applied" record.
- * Two layers of defence: null height + idempotency guard both prevent
- * double-application.
+ * osDenomination runs here only when it is active at block 0, the same test
+ * the chainBlocks.ts hook applies to every block (block 0 included): its
+ * effective activationHeight, the genesis entry or else the code default,
+ * is 0. A later height leaves the migration to the hook at that height, and
+ * null leaves the chain in DEM units for good. The fork_state row written
+ * here is what keeps the hook from running it a second time.
  */
 
 import type { EntityManager } from "typeorm"
@@ -33,6 +34,7 @@ import {
     FORK_NAME as GAS_FORK_NAME,
 } from "src/forks/migrations/gasFeeSeparation"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
+import { DEFAULT_FORK_CONFIG } from "src/forks/forkConfig"
 import log from "src/utilities/logger"
 
 export interface GenesisForkConfig {
@@ -76,46 +78,61 @@ export async function applyForksAtGenesis(
     snapshotForkState?: ForkStateEntry[],
 ): Promise<ApplyForksReport> {
     const t0 = Date.now()
-
-    if (!forks || typeof forks !== "object") {
-        log.info(
-            "[GENESIS][FORKS] no forks block in genesis.json; nothing to pre-apply",
-        )
-        return {
-            osDenominationApplied: false,
-            gasFeeSeparationApplied: false,
-            elapsed_ms: 0,
-        }
-    }
+    const forkBlock = forks && typeof forks === "object" ? forks : undefined
 
     let osDenominationApplied = false
     let gasFeeSeparationApplied = false
 
     // --- 1. osDenomination ---------------------------------------------------
-    // Pre-apply when the forks block is present in genesis. A pre-fork (DEM)
-    // snapshot has the migration RUN here to upgrade balances in-place. A
-    // post-fork (OS) snapshot already carries OS values + an `applied`
-    // fork_state row in its manifest — for that case we seed the marker and
-    // SKIP the migration so balances are not multiplied by 1e9 a second time.
-    if (forks.osDenomination) {
-        const pre = findForkState(snapshotForkState, OS_FORK_NAME)
-        if (pre?.applied) {
+    // A pre-fork (DEM) snapshot is migrated here; a post-fork (OS) snapshot
+    // already carries OS values and an `applied` fork_state row in its
+    // manifest, so only the marker is seeded: migrating it again would
+    // multiply every balance by 1e9 a second time.
+    const osPre = findForkState(snapshotForkState, OS_FORK_NAME)
+    const osHeight = osDenominationHeight(forkBlock)
+    if (osHeight === 0) {
+        if (osPre?.applied) {
             log.info(
                 "[GENESIS][FORKS] osDenomination already applied in snapshot; seeding fork_state, skipping migration",
             )
-            await seedForkStateRow(em, pre)
+            await seedForkStateRow(em, osPre)
         } else {
             log.info("[GENESIS][FORKS] pre-applying osDenomination at block 0")
             await runOsDenominationMigration(em, 0)
         }
         osDenominationApplied = true
+    } else if (osPre?.applied) {
+        // OS-unit balances on a chain that is in DEM units until the height
+        // (or for good): the hook would scale them again at that height
+        throw new Error(
+            `[GENESIS][FORKS] the snapshot is already in OS units (osDenomination applied) but the genesis ` +
+                `activates osDenomination at ${JSON.stringify(osHeight)}, not at block 0; set ` +
+                "forks.osDenomination.activationHeight to 0",
+        )
+    } else {
+        log.info(
+            `[GENESIS][FORKS] osDenomination activates at ${JSON.stringify(osHeight)}; not applied at block 0`,
+        )
+    }
+
+    if (!forkBlock) {
+        log.info(
+            "[GENESIS][FORKS] no forks block in genesis.json; nothing else to pre-apply",
+        )
+        return {
+            osDenominationApplied,
+            gasFeeSeparationApplied,
+            elapsed_ms: Date.now() - t0,
+        }
     }
 
     // --- 2. gasFeeSeparation -------------------------------------------------
     // gasFeeSeparation creates burn + treasury accounts in OS units.
     // Must run after osDenomination so the documented ordering invariant holds.
-    // Same pre/post-fork handling as osDenomination.
-    if (forks.gasFeeSeparation) {
+    // It follows the entry, not the height: the testnet genesis declares it
+    // null over a snapshot that already holds it, and its block 0 seeded the
+    // marker on that basis.
+    if (forkBlock.gasFeeSeparation) {
         const pre = findForkState(snapshotForkState, GAS_FORK_NAME)
         if (pre?.applied) {
             log.info(
@@ -127,7 +144,7 @@ export async function applyForksAtGenesis(
             await runGasFeeSeparationMigration(
                 em,
                 0,
-                forks.gasFeeSeparation.treasuryAddress,
+                forkBlock.gasFeeSeparation.treasuryAddress,
             )
         }
         gasFeeSeparationApplied = true
@@ -141,6 +158,19 @@ export async function applyForksAtGenesis(
     )
 
     return { osDenominationApplied, gasFeeSeparationApplied, elapsed_ms }
+}
+
+/**
+ * osDenomination's effective activation height, as the fork loader resolves
+ * it: the genesis entry when there is one, else the code default.
+ */
+function osDenominationHeight(
+    forks: GenesisForkConfig | undefined,
+): number | null {
+    if (forks && Object.hasOwn(forks, "osDenomination") && forks.osDenomination) {
+        return forks.osDenomination.activationHeight
+    }
+    return DEFAULT_FORK_CONFIG.osDenomination.activationHeight
 }
 
 function findForkState(
