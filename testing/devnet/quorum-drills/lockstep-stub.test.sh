@@ -437,6 +437,8 @@ check "max_connections 280: run.sh went on to start node-1" started_node
 check "max_connections 280: and stopped there by the stub's SIGTERM (rc=130)" out_has '^rc=130$'
 check "max_connections 280: the forks line has identityCarryover off and says why it is excluded" \
     out_has 'forks (launch): .*identityCarryover@null.*; excluded: identityCarryover (needs a genesis snapshot; the drills use the legacy genesis path)$'
+check "max_connections 280: networkGovernance is off (null in the template) and not in the excluded list" \
+    out_has 'forks (launch): .*networkGovernance@null.*; excluded: identityCarryover ([^)]*)$'
 
 run_from_top 100
 sed 's/^/    | /' "${WORK}/run-top.out" | tail -5 | cut -c1-200
