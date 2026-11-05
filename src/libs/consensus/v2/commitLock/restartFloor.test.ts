@@ -3,8 +3,8 @@
  * the earlier run signed: an older but consistent backup of all three, or a
  * prevote record lost while the signing record survived. The files agree
  * with each other, so the gates that read them allow rounds the earlier run
- * already signed in. The restart floor, set at boot from the calibrated
- * clock, keeps every such round closed.
+ * already signed in. The restart floor, set at boot from the host clock,
+ * keeps every such round closed.
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test"
@@ -31,8 +31,8 @@ const { armRestartSigningFloor } = await import("./restartFloor")
 const { COSIGN_TIMESTAMP_MAX_LEAD_SECONDS: LEAD } = await import("../routines/cosignTimestamp")
 
 const GENESIS = "hash-0"
-// The network clock of the earlier run when it last signed, and of the
-// restarted process when it calibrates
+// The clock of the earlier run when it last signed, and of the restarted
+// process when it arms the floor
 const LAST_SIGNED_AT = 1_800_000_000
 const BOOT_NOW = LAST_SIGNED_AT + 20
 

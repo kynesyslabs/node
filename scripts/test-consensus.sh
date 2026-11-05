@@ -15,6 +15,7 @@ SUITE_FILES=(
     scripts/launch-go-no-go.snapshot.test.ts
     scripts/launch-go-no-go.plan.test.ts
     scripts/launch-height1-check.test.ts
+    scripts/node-doctor.test.ts
     scripts/validator-prove-signing.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
@@ -80,7 +81,7 @@ SUITE_FILES=(
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/routines/peerBootstrap.test.ts
     src/libs/peer/syncClaims.test.ts
-    src/libs/utils/calibrateTime.boot.test.ts
+    src/libs/utils/clockProbe.test.ts
     src/libs/utils/keyMaker.test.ts
     src/model/datasource.test.ts
     src/model/dbPreflight.test.ts
