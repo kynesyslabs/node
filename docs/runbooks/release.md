@@ -100,28 +100,41 @@ IMAGE_TAG=v1.0.0-rc.1@sha256:<digest from checksums.txt>
 ```
 
 ```bash
-./scripts/node-doctor --production && docker compose pull node
-docker compose up -d postgres   # the one-off migration command needs it; no-op if already up
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:show   # read-only; [ ] = pending
-# Pending migrations (or a first install): back up the database, then stop the
-# node and its reaper (Postgres stays up) and apply them:
-docker compose stop reaper node
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:run
-docker compose up -d --no-build
+./scripts/node-doctor --production &&
+docker compose pull node &&
+docker compose up -d --wait postgres &&
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:show
+```
+
+`migration:show` is read-only; each `[ ]` line is a pending migration. If it
+lists one, back up the database first ([database-migrations.md](database-migrations.md),
+step 1). On a first install there is nothing to back up. Then, only if the
+block above ended without an error:
+
+```bash
+./scripts/node-doctor --production &&
+docker compose stop reaper node &&
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:run &&
+docker compose up -d --no-build &&
 docker image inspect --format '{{index .RepoDigests 0}}' \
   "$(docker inspect --format '{{.Image}}' "$(docker compose ps -q node)")"
 ```
 
-The `&&` keeps a host that fails a node-doctor check from pulling or
-starting. `--no-build` keeps compose from building a local image when the
+Each block is one `&&` chain, so a host that fails a node-doctor check never
+pulls or starts, and a failed pull, Postgres start or `migration:run` stops
+the chain before `up`: the new release never starts on the old schema.
+`--no-build` keeps compose from building a local image when the
 pull fails, which would run code nobody signed. The last line prints the
 digest the container runs; it must match
 `checksums.txt`. Post it on the release thread.
 
 The node does not migrate the database at boot, so the migration step sits
 between `pull` and `up -d`: the new image is already local and the old node
-is not yet replaced. Skip the backup, `stop` and `migration:run` lines when
-`migration:show` lists nothing pending and this is not a first install.
+is not yet replaced. `stop reaper node` keeps Postgres up (stopping the node
+alone lets the reaper stop the whole stack). With nothing pending,
+`migration:run` only reports that and changes nothing, so the second block is
+the same for every release. A node started with migrations still pending
+refuses to boot and names the command.
 Procedure, including the backup: [database-migrations.md](database-migrations.md).
 
 A bare-metal validator (`./run`) checks out the tag instead and verifies it
@@ -139,9 +152,18 @@ git checkout v1.0.0-rc.1 &&
 
 The chain stops at the first failing check, so `./run` never starts an
 unverified tree. The full walk-through is in `INSTALL.md`. If the release
-adds a migration, stop the chain before the last line, back up, run
-`bun run migration:show` / `migration:run`
-([database-migrations.md](database-migrations.md)), then `./run`.
+adds a migration, leave `./run` off the chain and migrate first. The launcher
+stops its Postgres together with the node, so start it alone from its folder,
+wait until it is ready, back up, then go back to the node checkout and migrate
+there ([database-migrations.md](database-migrations.md), bare-metal track):
+
+```bash
+(cd postgres_<PG_PORT> && PG_PORT=<PG_PORT> docker compose up -d)
+until docker exec postgres_<PG_PORT> pg_isready -q -h 127.0.0.1 -U demosuser -d demos; do sleep 1; done
+bun run migration:show   # from the node checkout; [ ] = pending
+# back up (database-migrations.md step 1), then:
+bun run migration:run && ./run
+```
 
 ## Known limits
 

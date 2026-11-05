@@ -178,12 +178,16 @@ With `PROD=true` the node never creates a key by itself: a missing key stops it,
 
 It prints one PASS or FAIL line per item (`PROD`, `DEMOS_REQUIRE_VALIDATORS`, clock sync, outbound NTP, fork-schedule policy, genesis pins, the fees, stake floor and block time every validator must share, one-start switches left set) and exits 1 on any FAIL. It reads the values the node container will get from `docker compose config`, so run it from the checkout with `.env` in place. Fix every FAIL before the next step.
 
-**5. Pull and start without building.**
+**5. Pull, create the database schema, and start without building.**
 
 ```bash
-docker compose pull node
+docker compose pull node &&
+docker compose up -d --wait postgres &&
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:run &&
 docker compose up -d --no-build
 ```
+
+The node does not create or migrate its database at boot: on a new host the schema (block 0 needs tables such as `accepted_fork_schedule` and `genesis_imported_identities`) comes from the one-off `migration:run`, run by the released image itself against the Postgres that `up -d --wait postgres` started and waited for. Without it the node stops at boot and tells you to run it. The `&&` stops the chain at the first failure, so the node never starts on a missing or half-applied schema. Later starts skip the migration step unless a release adds a migration (see [Update the node](#update-the-node)).
 
 If the pull is refused with `denied` or `unauthorized`, the image is not public yet: log in once with a GitHub token that has only the `read:packages` scope (`docker login ghcr.io -u <github user>`, paste the token at the prompt) and pull again. `--no-build` matters: without it, compose falls back to building the image locally when the pull failed, and you would run your own build instead of the release.
 
@@ -443,19 +447,24 @@ curl http://localhost:53550/info    # node info (version, identity, etc.)
 A validator moves to a released image by tag and digest, never by building its own; see [docs/runbooks/release.md](docs/runbooks/release.md). Verify and check out the new tag (step 1 of [Run a released image](#run-a-released-image-validators)), set `IMAGE_TAG` in `.env` from the release's `checksums.txt`, then:
 
 ```bash
-docker compose pull node
-docker compose up -d postgres   # the one-off migration command needs it; no-op if already up
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:show   # read-only; [ ] = pending
-# Pending migrations (or a first install): back up the database, then stop the
-# node and its reaper (Postgres stays up) and apply them:
-docker compose stop reaper node
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:run
+./scripts/node-doctor --production &&
+docker compose pull node &&
+docker compose up -d --wait postgres &&
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:show
+```
+
+`migration:show` is read-only; each `[ ]` line is a pending migration. If it lists one, back up the database first ([docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md), step 1). Then, only if the block above ended without an error:
+
+```bash
+./scripts/node-doctor --production &&
+docker compose stop reaper node &&
+docker compose run --rm --no-deps --name demos-migrate node bun run migration:run &&
 docker compose up -d --no-build
 ```
 
 Then confirm the running digest as in step 6 there.
 
-The node does not migrate the database at boot, so the migration step sits between `pull` and `up -d`: the new image is already local and the old node is not yet replaced. Skip the backup, `stop` and `migration:run` lines when `migration:show` lists nothing pending (and this is not a first install). Procedure, including the backup: [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md).
+The node does not migrate the database at boot, so the migration step sits between `pull` and `up -d`: the new image is already local and the old node is not yet replaced. `stop reaper node` keeps Postgres up (stopping the node alone lets the reaper stop the whole stack). With nothing pending, `migration:run` only reports that and changes nothing. Each block is one `&&` chain: a failed doctor check, pull, Postgres start or migration stops it, so the node is never started on an old or half-migrated schema. Full procedure, including the backup: [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md).
 
 Volumes (and therefore your identity, chain data, peerlist cache) are preserved.
 
@@ -636,7 +645,15 @@ git branch
 ./run -c true
 ```
 
-The node no longer migrates the database at boot, and a plain `./run` does not create the schema on an empty database. `-c true` deletes the launcher's Postgres data (`postgres_<PG_PORT>/data_<PG_PORT>`) and then creates the schema on the empty database; nothing else is touched, and on a brand-new host there is no data to lose. The launcher's `postgres_<PG_PORT>` folder does not exist until the first `./run`, so there is no Postgres to start by hand yet. Run later starts as plain `./run`: never repeat `-c true` on a host with data. On later runs, when the folder exists, you can instead start the launcher's Postgres with `cd postgres_<PG_PORT>` and run `bun run migration:run` against it (see [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md)). For an upgrade: back up, then `bun run migration:show` / `bun run migration:run` before `./run`, per the same runbook.
+The node no longer migrates the database at boot, and a plain `./run` does not create the schema on an empty database. `-c true` deletes the launcher's Postgres data (`postgres_<PG_PORT>/data_<PG_PORT>`) and then creates the schema on the empty database; nothing else is touched, and on a brand-new host there is no data to lose. The launcher's `postgres_<PG_PORT>` folder does not exist until the first `./run`, so there is no Postgres to start by hand yet. Run later starts as plain `./run`: never repeat `-c true` on a host with data. On later runs, when the folder exists, you can instead migrate by hand: the launcher stops its Postgres together with the node, so start it alone from its folder, wait until it is ready, then go back to the node checkout and run the migration there (the command reads the checkout's `.env` and `src/migrations/`):
+
+```bash
+(cd postgres_<PG_PORT> && PG_PORT=<PG_PORT> docker compose up -d)
+until docker exec postgres_<PG_PORT> pg_isready -q -h 127.0.0.1 -U demosuser -d demos; do sleep 1; done
+bun run migration:run      # from the node checkout
+```
+
+See [docs/runbooks/database-migrations.md](docs/runbooks/database-migrations.md). For an upgrade: back up, then `bun run migration:show` / `bun run migration:run` before `./run`, per the same runbook.
 
 Running the node the first time will generate a private key for your node and store it in the `.demos_identity` file by default. The public key is printed on the terminal and saved in a `publickey_*` file in the same directory.
 
