@@ -117,8 +117,9 @@ export default class GCRBalanceRoutines {
         } else if (editOperation.operation === "remove") {
             // Apply is consensus, so the outcome must not depend on a
             // node-local flag: an overdraft fails on every node instead of
-            // being clamped to 0, which minted the shortfall.
-            if (actualBalance < editAmount) {
+            // being clamped to 0, which minted the shortfall. The zero-balance
+            // refusal keeps the rule identical to what PROD nodes already ran.
+            if (actualBalance < editAmount || actualBalance === 0n) {
                 return { success: false, message: "Insufficient balance" }
             }
             accountGCR.balance = actualBalance - editAmount

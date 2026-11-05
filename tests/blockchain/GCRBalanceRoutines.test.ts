@@ -239,6 +239,17 @@ describe("GCRBalanceRoutines.apply — overdraft", () => {
             expect(account.balance).toBe(0n)
         })
 
+        it(`refuses even a zero remove from a zero balance with PROD=${prod}`, async () => {
+            sharedStateStub.PROD = prod
+            const account = makeAccount(OTHER, 0n)
+            const r = await GCRBalanceRoutines.apply(
+                makeBalanceEdit({ operation: "remove", account: OTHER, amount: 0 }),
+                account,
+            )
+            expect(r.success).toBe(false)
+            expect(account.balance).toBe(0n)
+        })
+
         it(`allows removing exactly the whole balance with PROD=${prod}`, async () => {
             sharedStateStub.PROD = prod
             const account = makeAccount(OTHER, 10n)

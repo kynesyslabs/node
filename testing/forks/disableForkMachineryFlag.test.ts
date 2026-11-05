@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import {
     isForkMachineryDisabled,
     loadForkConfigFromGenesis,
+    refuseDisabledForkMachineryOutsideTestChains,
 } from "@/forks/loadForkConfig"
 import {
     cloneDefaultForkConfig,
@@ -181,6 +182,15 @@ describe("DEMOS_DISABLE_FORK_MACHINERY (rehearsal flag)", () => {
                     getSharedState.forkConfig.osDenomination.activationHeight,
                 ).toBeNull()
             }
+        })
+
+        it("refuses a stored genesis of another chain, the check a node without a genesis file runs", () => {
+            expect(() =>
+                refuseDisabledForkMachineryOutsideTestChains({ properties: { id: 7 } }),
+            ).toThrow(/chain id 7/)
+            expect(() =>
+                refuseDisabledForkMachineryOutsideTestChains({ properties: { id: 1337 } }),
+            ).not.toThrow()
         })
 
         it("loads normally when the flag is unset", () => {

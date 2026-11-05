@@ -188,7 +188,7 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
  * first fork height, so it is refused whatever NODE_ENV and DEMOS_REHEARSAL
  * say. A genesis without an id cannot be mainnet's: signatureDomain needs one.
  */
-function refuseDisabledForkMachineryOutsideTestChains(genesisData: any): void {
+export function refuseDisabledForkMachineryOutsideTestChains(genesisData: any): void {
     const chainId = genesisData?.properties?.id
     if (chainId === undefined || NON_MAINNET_CHAIN_IDS.includes(chainId)) return
     throw new ForkConfigValidationError(
