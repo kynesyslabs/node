@@ -142,9 +142,8 @@ describe("GCRBalanceRoutines.apply — burn-address spend prevention (DEM-665)",
             makeBalanceEdit({ operation: "remove", account: BURN }),
             makeAccount(BURN, 1000n),
         )
-        // Pre-fork the address has no consensus significance. The
-        // legacy path runs and the remove succeeds because PROD=false
-        // disables the balance underflow check in non-prod.
+        // Pre-fork the address has no consensus significance, so the
+        // ordinary balance check applies and 1000 covers the remove.
         expect(r.success).toBe(true)
     })
 
@@ -207,5 +206,64 @@ describe("GCRBalanceRoutines.apply — burn-address spend prevention (DEM-665)",
             makeAccount(BURN, 1000n),
         )
         expect(r.success).toBe(true)
+    })
+})
+
+describe("GCRBalanceRoutines.apply — overdraft", () => {
+    // Apply is consensus: a node-local flag must not change the outcome.
+    beforeEach(() => {
+        deactivateFork()
+    })
+
+    for (const prod of [false, true]) {
+        it(`refuses a remove larger than the balance with PROD=${prod}`, async () => {
+            sharedStateStub.PROD = prod
+            const account = makeAccount(OTHER, 5n)
+            const r = await GCRBalanceRoutines.apply(
+                makeBalanceEdit({ operation: "remove", account: OTHER, amount: 10 }),
+                account,
+            )
+            expect(r.success).toBe(false)
+            expect(r.message).toMatch(/Insufficient balance/)
+            expect(account.balance).toBe(5n)
+        })
+
+        it(`refuses a remove from a zero balance with PROD=${prod}`, async () => {
+            sharedStateStub.PROD = prod
+            const account = makeAccount(OTHER, 0n)
+            const r = await GCRBalanceRoutines.apply(
+                makeBalanceEdit({ operation: "remove", account: OTHER, amount: 1 }),
+                account,
+            )
+            expect(r.success).toBe(false)
+            expect(account.balance).toBe(0n)
+        })
+
+        it(`allows removing exactly the whole balance with PROD=${prod}`, async () => {
+            sharedStateStub.PROD = prod
+            const account = makeAccount(OTHER, 10n)
+            const r = await GCRBalanceRoutines.apply(
+                makeBalanceEdit({ operation: "remove", account: OTHER, amount: 10 }),
+                account,
+            )
+            expect(r.success).toBe(true)
+            expect(account.balance).toBe(0n)
+        })
+    }
+
+    it("refuses a rollback of an add whose amount is no longer there", async () => {
+        sharedStateStub.PROD = false
+        const account = makeAccount(OTHER, 3n)
+        const r = await GCRBalanceRoutines.apply(
+            makeBalanceEdit({
+                operation: "add",
+                isRollback: true,
+                account: OTHER,
+                amount: 10,
+            }),
+            account,
+        )
+        expect(r.success).toBe(false)
+        expect(account.balance).toBe(3n)
     })
 })
