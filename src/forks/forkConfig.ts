@@ -277,6 +277,23 @@ export type FinalityProofsConfig = BaseForkConfig
 export type IdentityCarryoverConfig = BaseForkConfig
 
 /**
+ * `networkGovernance` fork: admits and applies the two network-upgrade
+ * transactions, `networkUpgrade` and `networkUpgradeVote`.
+ *
+ * Inactive, both types are refused at RPC intake, at pool admission and at
+ * apply, and so is a transaction of any type that carries a governance edit.
+ * Active, a governance edit is applied only inside a transaction of its own
+ * type and only for the account that signed it, so a vote counts for the
+ * validator that cast it and a proposal for the validator that made it.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`) and at launch: the
+ * vote weights and quorum rules are not ready for a live network, so a
+ * later height-pinned activation turns it on. No payload beyond the base.
+ */
+export type NetworkGovernanceConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -317,6 +334,7 @@ export type ForkConfig =
     | CommitLockConfig
     | FinalityProofsConfig
     | IdentityCarryoverConfig
+    | NetworkGovernanceConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -339,6 +357,7 @@ export type ForkName =
     | "commitLock"
     | "finalityProofs"
     | "identityCarryover"
+    | "networkGovernance"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -360,6 +379,7 @@ export interface ForkConfigByName {
     commitLock: CommitLockConfig
     finalityProofs: FinalityProofsConfig
     identityCarryover: IdentityCarryoverConfig
+    networkGovernance: NetworkGovernanceConfig
 }
 
 /**
@@ -548,6 +568,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Genesis imports user data without balances, imported identities pay no " +
             "first-link award, and a web2 unlink removes one platform account by userId.",
     },
+    networkGovernance: {
+        // Dormant by default and at launch: a missing genesis entry hydrates
+        // from here, so governance stays off until a height is agreed.
+        activationHeight: null,
+        description:
+            "Admit and apply networkUpgrade and networkUpgradeVote transactions, each " +
+            "governance edit bound to the account that signed it.",
+    },
 }
 
 /**
@@ -573,5 +601,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
+        networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
     }
 }

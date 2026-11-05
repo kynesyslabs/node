@@ -169,6 +169,12 @@ export const MAINNET_FORKS: readonly ForkName[] = [
 ]
 
 /**
+ * Forks a mainnet genesis must leave unscheduled: the launch decision is
+ * that they are switched on later, at a height agreed on the running chain.
+ */
+export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["networkGovernance"]
+
+/**
  * Every fork this build knows. A mainnet genesis declares each one, with a
  * height or null: a missing entry takes the code default, which a later
  * build may change, and which nobody agreed to at launch.
@@ -571,8 +577,9 @@ export function decideGoNoGo(input: GoNoGoInput): GoNoGoDecision {
 
 /**
  * NO-GO reasons for a genesis whose fork block is not mainnet's: a mainnet
- * fork not at block 0, a fork this build knows left undeclared, or a
- * scheduled gasFeeSeparation without its own treasury.
+ * fork not at block 0, a launch-dormant fork scheduled, a fork this build
+ * knows left undeclared, or a scheduled gasFeeSeparation without its own
+ * treasury.
  */
 export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[] {
     if (!genesis) {
@@ -584,6 +591,15 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
             `fork ${name} is not scheduled at activationHeight 0 in the genesis ` +
             `(found ${JSON.stringify(forks[name]?.activationHeight ?? null)})`,
     )
+    for (const name of LAUNCH_DORMANT_FORKS) {
+        const height = forks[name]?.activationHeight
+        if (height !== null && height !== undefined) {
+            reasons.push(
+                `fork ${name} is scheduled at ${JSON.stringify(height)} in the genesis; ` +
+                    "it stays off at launch (activationHeight null) and is scheduled later on the running chain",
+            )
+        }
+    }
     const undeclared = KNOWN_FORKS.filter(
         name => !Object.hasOwn(forks, name) || forks[name] === null || typeof forks[name] !== "object" ||
             !Object.hasOwn(forks[name], "activationHeight"),
