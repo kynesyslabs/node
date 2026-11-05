@@ -257,5 +257,126 @@ check "pg_limit_preflight runs after postgres starts and before the first node (
     test -n "${pg_up}" -a -n "${pg_pre}" -a -n "${first_node}" -a "${pg_up:-0}" -lt "${pg_pre:-0}" -a "${pg_pre:-0}" -lt "${first_node:-0}"
 check "the teardown replaces exit 0/1 by 2 when the collected logs hold the error" grep -q 'exit ${rc} replaced by 2' "${RUN_SH}"
 
+# Run order: bash reads run.sh top down, so a function must be defined above the
+# first top-level call that reaches it. Everything above sources regions of run.sh, so a function defined below its
+# first top-level call (bash reads top down) passes there and fails in a real
+# run. This runs the real file for halt-n13s10 up to the first node start, with
+# docker and bun replaced and the host-load probes (nproc, vmstat) made benign.
+# The stub docker answers the image and container checks, `compose up -d
+# postgres`, `compose ps -q postgres` and SHOW max_connections (STUB_MAXCONN);
+# at `compose up -d node-1` it records the start and stops run.sh with SIGTERM
+# (exit 130 via run.sh's trap), so nothing waits for a node that is not there.
+mkdir -p "${WORK}/runbin"
+cat > "${WORK}/runbin/docker" <<'STUBDOCKER'
+#!/usr/bin/env bash
+echo "$*" >> "${STUB_LOG}"
+case "$1" in
+    image)
+        case "$*" in
+            *"{{.Id}}"*) echo sha256:0123456789abcdef0123456789abcdef ;;
+            *Entrypoint* | *Cmd*) echo null ;;
+        esac ;;
+    run)
+        # the image's user, read with `--entrypoint id IMAGE -u|-g`; every other
+        # throwaway container (run-devnet probe, exec and gossip checks) succeeds
+        case "${@: -1}" in -u | -g) echo 1000 ;; esac ;;
+    exec)
+        case "$*" in *"SHOW max_connections"*) echo "${STUB_MAXCONN}" ;; esac ;;
+    compose)
+        case "$*" in
+            *"ps -q postgres"*) echo fakepg ;;
+            *"up -d node-"*) kill -TERM "${PPID}"; exit 1 ;;
+        esac ;;
+esac
+exit 0
+STUBDOCKER
+cat > "${WORK}/runbin/bun" <<'STUBBUN'
+#!/usr/bin/env bash
+printf 'MNEMONIC:stub stub stub\nPUBKEY:0xAB%s\n' "$RANDOM"
+STUBBUN
+printf '#!/usr/bin/env bash\necho 4096\n' > "${WORK}/runbin/nproc"
+printf '#!/usr/bin/env bash\nfor i in 1 2 3 4 5; do echo "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"; done\n' > "${WORK}/runbin/vmstat"
+chmod +x "${WORK}/runbin/docker" "${WORK}/runbin/bun" "${WORK}/runbin/nproc" "${WORK}/runbin/vmstat"
+# The generic form of the same check, for every top-level call: a function must
+# be defined, along with every function its body calls, on a line before the
+# first top-level call that reaches it. Reads the script twice (definitions, then
+# calls); a call is the first word of a command (after ; | & ( ) { } `, if, do ...).
+# Prints one line per violation, then the number of top-level calls checked.
+order_violations() { # $1 a bash script
+    awk '
+    function firstcmds(line, out,    s, n, i, k, w, m) {
+        gsub(/[;|&(){}`]/, "\n", line)
+        n = split(line, s, "\n"); m = 0
+        for (i = 1; i <= n; i++) {
+            w = s[i]
+            while (match(w, /^[ \t]*(if|then|else|elif|do|while|until|!)[ \t]+/)) w = substr(w, RLENGTH + 1)
+            sub(/^[ \t]+/, "", w)
+            if (match(w, /^[A-Za-z_][A-Za-z0-9_]*([ \t]|$)/)) { k = substr(w, 1, RLENGTH); sub(/[ \t]+$/, "", k); out[++m] = k }
+        }
+        return m
+    }
+    function reach(f,    n, i, parts) {
+        if (f in seen) return
+        seen[f] = 1
+        n = split(bc[f], parts, " ")
+        for (i = 1; i <= n; i++) if (parts[i] in def) reach(parts[i])
+    }
+    FNR == NR { if (match($0, /^[A-Za-z_][A-Za-z0-9_]*\(\) *\{/)) { name = $0; sub(/\(\).*/, "", name); def[name] = FNR }; next }
+    {
+        line = $0; fn = ""
+        if (match(line, /^[A-Za-z_][A-Za-z0-9_]*\(\) *\{/)) {
+            fn = line; sub(/\(\).*/, "", fn)
+            body = line; sub(/^[^{]*\{/, "", body)
+            if (line !~ /\}[ \t]*$/) infn = fn
+        } else if (infn != "") { fn = infn; body = line; if (line ~ /^\}/) infn = "" }
+        if (fn != "") {
+            sub(/^[ \t]*#.*/, "", body)
+            n = firstcmds(body, c)
+            for (i = 1; i <= n; i++) if (c[i] in def) bc[fn] = bc[fn] " " c[i]
+        } else if (line !~ /^[ \t]*#/) {
+            n = firstcmds(line, c)
+            for (i = 1; i <= n; i++) if (c[i] in def) { tl++; tline[tl] = FNR; tfn[tl] = c[i] }
+        }
+    }
+    END {
+        for (t = 1; t <= tl; t++) {
+            delete seen; reach(tfn[t])
+            for (g in seen) if (def[g] > tline[t]) printf "line %d calls %s, which needs %s, defined at line %d\n", tline[t], tfn[t], g, def[g]
+        }
+        printf "top-level calls checked: %d\n", tl
+    }' "$1" "$1"
+}
+echo "== every function reached from a top-level call of run.sh is defined before that call"
+ORDER=$(order_violations "${RUN_SH}")
+echo "${ORDER}" | sed 's/^/    | /'
+check "no top-level call of run.sh reaches a function defined below it" bash -c '! grep -q "defined at line" <<< "$1"' _ "${ORDER}"
+check "the check saw the top-level calls (at least 10)" test "$(sed -n 's/^top-level calls checked: //p' <<< "${ORDER}")" -ge 10
+
+echo "== run.sh executed from the top (stub docker and bun): the preflight is defined where the call runs"
+run_from_top() { # $1 what max_connections the stub postgres reports
+    STUB_LOG="${WORK}/run-top.docker.log"; : > "${STUB_LOG}"
+    STUB_LOG="${STUB_LOG}" STUB_MAXCONN="$1" PATH="${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/runs" \
+        NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 \
+        timeout 120 bash "${RUN_SH}" halt-n13s10 stubtop > "${WORK}/run-top.out" 2>&1
+    echo "rc=$?" >> "${WORK}/run-top.out"
+}
+started_node() { grep -q 'compose .* up -d node-1' "${WORK}/run-top.docker.log"; }
+out_has() { grep -q -- "$1" "${WORK}/run-top.out"; }
+
+run_from_top 280
+sed 's/^/    | /' "${WORK}/run-top.out" | tail -6 | cut -c1-200
+check "max_connections 280: no 'command not found'" bash -c '! grep -q "command not found" "$1"' _ "${WORK}/run-top.out"
+check "max_connections 280: run.sh reached the preflight and read max_connections" grep -q 'SHOW max_connections' "${WORK}/run-top.docker.log"
+check "max_connections 280: the preflight passed (13 nodes need 150)" out_has 'postgres max_connections 280 (13 nodes need 150)'
+check "max_connections 280: run.sh went on to start node-1" started_node
+check "max_connections 280: and stopped there by the stub's SIGTERM (rc=130)" out_has '^rc=130$'
+
+run_from_top 100
+sed 's/^/    | /' "${WORK}/run-top.out" | tail -5 | cut -c1-200
+check "max_connections 100: no 'command not found'" bash -c '! grep -q "command not found" "$1"' _ "${WORK}/run-top.out"
+check "max_connections 100: exit 2 with the could-not-run message" out_has 'ABORT: could not run: postgres max_connections is 100, 13 nodes need 150'
+check "max_connections 100: rc=2" out_has '^rc=2$'
+check "max_connections 100: no node was started" bash -c '! grep -q "compose .* up -d node-" "$1"' _ "${WORK}/run-top.docker.log"
+
 echo
 if [ "${fails}" = 0 ]; then echo "lockstep stub tests: all passed"; else echo "lockstep stub tests: ${fails} FAILED"; exit 1; fi
