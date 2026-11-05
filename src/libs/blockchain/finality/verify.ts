@@ -10,6 +10,13 @@
  * client must hold that set: when its hash does not match, the answer is
  * "indeterminate" (fetch the set and retry), never a guess. Anything that
  * does not check out is "invalid".
+ *
+ * The parent comes from the prover, bound to the anchor by previousHash
+ * alone, so its peerlist is the prover's choice. It is trusted to narrow the
+ * signers only when the client vouches for the parent (`trustedBlockHash`)
+ * or names the committee itself; otherwise a quorum must come from a staked
+ * set no larger than the shard, where any quorum is 2/3 + 1 of every
+ * validator.
  */
 
 import { createPublicKey, verify as ed25519Verify } from "node:crypto"
@@ -104,6 +111,14 @@ export interface CommitteeRules {
      * otherwise count.
      */
     committee?: string[]
+    /**
+     * The hash of the block at `height` on a chain the client already holds
+     * (its own synced chain or a checkpoint), or undefined when it holds
+     * none. Without it, or a committee, a staked set larger than the shard
+     * gives "indeterminate": a quorum of the shard could otherwise sign a
+     * child of a parent it fabricated, with a peerlist of only itself.
+     */
+    trustedBlockHash?: (height: number) => string | undefined
     /** Ed25519 check; node:crypto by default. */
     verifySignature?: SignatureCheck
 }
@@ -211,12 +226,26 @@ function parseAnchor(
     return { anchor, parent }
 }
 
+/**
+ * Whether the client vouches for `parent`: true when its trusted chain holds
+ * the same block, false when it holds none at that height.
+ */
+function parentIsTrusted(parent: ParsedBlock, rules: CommitteeRules): boolean {
+    const held = rules.trustedBlockHash?.(parent.number)
+    if (typeof held !== "string") return false
+    if (stripHex(held) !== parent.hash) {
+        throw invalid(`block ${parent.number} is not the trusted chain's block ${parent.number}`)
+    }
+    return true
+}
+
 /** Identities the anchor's height admits as signers, by the getShard rules. */
 function signerPool(
     parent: ParsedBlock,
     trusted: TrustedValidatorSet,
     rules: CommitteeRules,
 ): Set<string> {
+    const trustedParent = parentIsTrusted(parent, rules)
     const committedSet = parent.content.validator_set_hash
     if (typeof committedSet !== "string" || !HASH_HEX.test(committedSet)) {
         throw new Rejection("indeterminate", `block ${parent.number} commits no validator set`)
@@ -249,11 +278,21 @@ function signerPool(
               .filter((id): id is string => typeof id === "string" && id.length > 0)
               .map(id => id.toLowerCase())
         : []
+    // The record form may carry 0x and a client-drawn committee may not.
+    const stakedIds = new Set([...staked].map(stripHex))
     if (rules.committee) {
         return new Set(
             rules.committee
-                .filter(id => typeof id === "string" && staked.has(id.toLowerCase()))
-                .map(stripHex),
+                .filter(id => typeof id === "string")
+                .map(stripHex)
+                .filter(id => stakedIds.has(id)),
+        )
+    }
+    if (!trustedParent && staked.size > rules.shardSize) {
+        throw new Rejection(
+            "indeterminate",
+            `block ${parent.number} is not on a chain the client holds and ${staked.size} validators are staked, ` +
+                `more than the shard size ${rules.shardSize}; supply its hash or the committee drawn for block ${parent.number + 1}`,
         )
     }
     const floor = quorumThreshold(rules.shardSize)
