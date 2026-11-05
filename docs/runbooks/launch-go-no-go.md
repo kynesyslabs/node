@@ -27,8 +27,9 @@ chain still makes blocks; a 4th stops it until one comes back.
    it will run, and a signing proof (below) for the agreed genesis block
    hash.
 2. **Operator and provider cap:** no single operator and no single cloud
-   provider runs more than `shardSize − q` launch validators: at most 3
-   with `shardSize` 10 and 10 to 13 validators (2 with 9). Those are the
+   provider runs more than `min(launch validators, shardSize) − q` launch
+   validators: at most 3 with `shardSize` 10 and 10 or more validators, 2
+   with 9, 1 with 8 and none with 7. Those are the
    committee seats the chain can lose and still sign; one party holding
    more can stop it alone. Names are compared case-insensitively and
    without surrounding spaces, so `AWS` and `aws` are one provider.
@@ -47,8 +48,9 @@ chain still makes blocks; a 4th stops it until one comes back.
    committee's votes (one validator, one vote), and every launch validator's
    region is recorded. `--plan` (below) checks this with the cap.
 
-Exit 0 from `scripts/launch-go-no-go.ts` is the T-0 check of rules 2 and 3
-only, plus the genesis checks below. It does not check rules 1, 4 and 5:
+Exit 0 from `scripts/launch-go-no-go.ts` is the T-0 check of rules 2, 3 and
+the one-third part of rule 6 (a missing region is only a warning there), plus
+the genesis checks below. It does not check rules 1, 4 and 5:
 people check those, with `scripts/validator-prove-signing.ts --verify
 --require-all` for the rule 1 proofs and the rehearsal network for rule 4.
 

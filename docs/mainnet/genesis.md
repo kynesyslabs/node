@@ -9,9 +9,11 @@ status: active
 
 `docs/mainnet/genesis.template.json` is the mainnet genesis with every
 value the code fixes already set and every owner decision left as a
-`FILL: ...` string. A node refuses to load a file that still holds a
-`FILL` value (the chain id, timestamp, balances and validators all fail
-their type checks), so an unfilled template can never boot by accident.
+`FILL: ...` string. A node refuses to boot on a file that still holds a
+`FILL` value in the chain id, a fork height, `sudoPubkey` or `balances`
+(and, with the genesis pinned, the timestamp), before it writes block 0.
+The plan check below reports each of them, so an unfilled template can
+never boot by accident.
 
 The template sets no identity, no chain id and no allocation. Those are
 decided by the genesis owners and filled in once.
@@ -22,7 +24,7 @@ decided by the genesis owners and filled in once.
 |---|---|---|
 | `properties.shardSize` | `10` | the launch committee: quorum 7, at most 3 seats lost |
 | `mutables.minBlocksForValidationOnlineStatus` | `4` | same as testnet |
-| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `quorumParity`, `committeeBinding`, `commitLock` | `activationHeight: 0` | mainnet starts with every safety fork on; an entry for `osDenomination` also stops block 0 from scaling an already migrated snapshot a second time |
+| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `quorumParity`, `committeeBinding`, `commitLock` | `activationHeight: 0` | mainnet starts with every safety fork on; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height |
 | `forks.xmProofBinding`, `forks.atomicWork` | `activationHeight: null` | not scheduled at launch; a later activation is a coordinated schedule change |
 | `status` | `"confirmed"` | as on testnet |
 
@@ -34,12 +36,12 @@ them equal.
 
 | Field | Fill with |
 |---|---|
-| `properties.id` | the mainnet chain id, an integer. Testnet `1` and devnet `1337` are refused: every signature binds to the chain id, so a reused id lets a testnet transaction replay on mainnet |
+| `properties.id` | the mainnet chain id, an integer. go/no-go and the plan check refuse testnet `1` and devnet `1337`: every signature binds to the chain id, so a reused id lets a testnet transaction replay on mainnet |
 | `properties.name`, `properties.currency` | network name and currency symbol |
 | `properties.sudoPubkey` | the lowercase `0x` + 64 hex key that may sign award transactions, or delete the field to accept none |
-| `forks.gasFeeSeparation` | `activationHeight` `0` or `null`; when scheduled, `treasuryAddress` is the mainnet treasury account (go/no-go refuses a scheduled fork without one) |
+| `forks.gasFeeSeparation` | `activationHeight` `0` or `null`, and `treasuryAddress`, the mainnet treasury account, in both cases: the node refuses the entry without it, and block 0 creates the burn and treasury accounts whenever the entry is present. The zero address is refused once the fork is scheduled |
 | `forks.web2ProofBinding`, `forks.tlsnProofEnforcement` | `activationHeight` `0` or `null` |
-| `snapshot.manifestSha256` | `sha256sum` of the launch snapshot's `manifest.json`, or delete `snapshot` when mainnet starts without one |
+| `snapshot.manifestSha256` | `sha256sum` of the launch snapshot's `manifest.json`. Keep the field: the launch tools model block 0 on the snapshot path, and the plan check and the height-1 check both require the snapshot |
 | `balances` | the agreed allocations, `[["0x<64 hex address>", "<amount>"], ...]` |
 | `timestamp` | the launch time in seconds as a positive integer string. Block 0 is built from it, so the block 0 hash is known only once it is fixed |
 | `validators` | the launch validators, one object each: `address`, `status` `"2"`, `connection_url`, `staked_amount`, `first_seen` `0`, `valid_at` `0`. When the snapshot carries `validators.jsonl`, the node seeds from that file instead and ignores this list |
@@ -89,5 +91,7 @@ height-1 check after launch are in [genesis-hash.md](genesis-hash.md).
 The published file is never edited, by its owners or by an operator.
 A changed validator URL, a different key order or reformatting builds a
 different block 0, and a node on that file cannot join. Operators mount the
-file and snapshot read-only (see `INSTALL.md`, "Run a released image").
+file and snapshot read-only (see `INSTALL.md`, "Joining the network —
+required steps before real-world use"); a bare-metal node points
+`DEMOS_GENESIS_FILE` and `DEMOS_SNAPSHOT_DIR` at them.
 Any change is a new genesis with new published values, under the 24 h rule.

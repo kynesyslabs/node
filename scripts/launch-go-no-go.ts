@@ -149,10 +149,9 @@ export interface GoNoGoDecision {
 
 /**
  * Forks a mainnet genesis must switch on at block 0. osDenomination and
- * nonceEnforcement are on by default, but block 0 skips the 10^9 balance
- * migration of an already migrated snapshot only when the genesis carries
- * an osDenomination entry (applyForksAtGenesis), so they are written out.
- * docs/mainnet/genesis-forks.json, testing/genesis-acceptance/run.sh and
+ * nonceEnforcement are on by default, but a default can change between
+ * releases while the genesis cannot, so they are written out.
+ * docs/mainnet/genesis.template.json, testing/genesis-acceptance/run.sh and
  * fixtures.py carry the same list; a test keeps them equal.
  */
 export const MAINNET_FORKS: readonly ForkName[] = [

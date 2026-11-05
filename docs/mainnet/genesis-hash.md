@@ -37,26 +37,25 @@ sets both pins.
 ### File checksum
 
 `sha256sum` of the file as published. No node computes it: the node parses the
-file (`src/libs/blockchain/routines/findGenesisBlock.ts:70-73`, a JSON string
+file (`src/libs/blockchain/routines/findGenesisBlock.ts:72-78`, a JSON string
 holding JSON is parsed a second time), so whitespace never reaches either hash.
 It is the only value that changes on every byte, which is why operators confirm
 it under the 24 h rule below.
 
 ### Genesis data hash
 
-`hashGenesisData` in `src/libs/blockchain/genesis/normalizeGenesisForHash.ts:181-184`:
+`hashGenesisData` in `src/libs/blockchain/genesis/normalizeGenesisForHash.ts:178-181`:
 
-1. `canonicalGenesisForHashing` (`:68-143`) copies every top-level key except
-   `validators` unchanged (`:87-110`): `properties` (chain id, shard size),
+1. `canonicalGenesisForHashing` (`:68-140`) copies every top-level key except
+   `validators` unchanged (`:87-107`): `properties` (chain id, shard size),
    `mutables`, `forks`, `balances`, `timestamp`, `status`, `snapshot` and any
    other key.
-2. Each `validators[]` entry loses `connection_url` (`:114-123`), and the
-   entries are sorted by `address`, compared as strings (`:125-137`).
-3. `stableStringify` (`:155-169`) serialises with object keys sorted at every
+2. Each `validators[]` entry loses `connection_url` (`:111-120`), and the
+   entries are sorted by `address`, compared as strings (`:122-134`).
+3. `stableStringify` (`:152-166`) serialises with object keys sorted at every
    depth and no whitespace. Arrays keep their order, and primitives go through
    `JSON.stringify`, so `"10"` and `10` differ, and `10` and `10.0` do not.
-   (The comment at `:103-108` says nested keys are not sorted, but the
-   serialiser sorts them at every depth, so key order never affects this hash.)
+   Key order therefore never affects this hash.
 4. `Hashing.sha256` (`src/libs/crypto/hashing.ts:15-16`): SHA-256 of the
    UTF-8 string, as 64 lowercase hex characters with no `0x`.
 
@@ -66,9 +65,10 @@ chain id, the timestamp, a balance and the snapshot binding.
 
 Where the node uses it:
 
-- On a fresh database it hashes `data/genesis.json` and refuses to boot on a
-  mismatch with `EXPECTED_GENESIS_HASH` (`src/libs/blockchain/genesis/genesisPin.ts:176-182`,
-  called from `findGenesisBlock.ts:190-200`). A production node with no pin
+- On a fresh database it hashes the genesis file (`data/genesis.json`, or
+  `DEMOS_GENESIS_FILE`) and refuses to boot on a mismatch with
+  `EXPECTED_GENESIS_HASH` (`src/libs/blockchain/genesis/genesisPin.ts:178-183`,
+  called from `findGenesisBlock.ts:196-203`). A production node with no pin
   refuses to start unless `DEMOS_ALLOW_UNPINNED_GENESIS=true` (`genesisPin.ts:56-68`).
 - `getGenesisDataHash` hashes the genesis data stored inside block 0
   (`src/libs/network/handlers/blockHandlers.ts:15-33`), so it reports what the
@@ -91,19 +91,20 @@ the data hash the tool prints, `a468396e…a2076bc`.
 - `content.timestamp` is the same timestamp, and `content.previousHash` is `"0x0"` (`:66-68`).
 - Hash: `sha256(serializeBlockContent(content, 0))` (`:80-82`), which is
   `JSON.stringify(content)` (`src/forks/serializerGate.ts:64-75`) over the
-  content fields `Block` sets (`src/libs/blockchain/block.ts:36-50`).
+  content fields `Block` sets (`src/libs/blockchain/block.ts:36-53`).
 
 Two files with the same data hash can therefore build different blocks 0. Two
 such cases are an edited validator URL and a re-ordered key. Nodes on different
 blocks 0 cannot pair. `EXPECTED_GENESIS_BLOCK_HASH` closes this: a fresh node
 refuses to write any other block 0, and an existing node refuses to run on one
-(`genesisPin.ts:95-103`, `findGenesisBlock.ts:173`, `:216-219`). The genesis
+(`genesisPin.ts:95-103`, `findGenesisBlock.ts:175-176`, `:219-222`). The genesis
 needs a fixed positive integer timestamp, or the hash is per host and the tool
 prints none (`genesisPin.ts:126-140`).
 
-`/genesisBlock` serves the stored block 0 record (`src/libs/network/server_rpc.ts:315-327`).
+`/genesisBlock` serves the stored block 0 record (`src/libs/network/server_rpc.ts:315-328`).
 A RESTORE overlay would change block 0, so it is refused whenever a pin is set
-(`genesisPin.ts:183-185`, `findGenesisBlock.ts:207-209`).
+(`genesisPin.ts:184-186`, checked by `findGenesisBlock.ts:196-203` before the
+overlay at `:208-211` is applied).
 
 ### Fork schedule digest
 
@@ -147,11 +148,15 @@ snapshot manifest sha256: <snapshot.manifestSha256>
 release:                  <tag> <commit> <image@digest>
 ```
 
-- Where: in the signed release (the tag message, and `checksums.txt` next to
-  the genesis file and snapshot as release assets), plus at least two channels
+- Where: in the GitHub release of the launch tag, plus at least two channels
   outside GitHub that are under different control, for example the operator
   mailing list and the validator chat's pinned message. An operator compares
-  at least two channels before booting.
+  at least two channels before booting. The release workflow drafts that
+  release with `checksums.txt` (tag, commit, `image@digest` and the source
+  archive's sha256) as its notes; it knows nothing about the genesis. Before
+  publishing the draft, the genesis owner adds the record above to the notes
+  and attaches the genesis file and the snapshot as assets. The tag message
+  cannot carry the image digest, since the image is built after the tag.
 - Operators never edit the file, not even a validator URL or key order. Any
   edit changes block 0, and the node then refuses to boot against
   `EXPECTED_GENESIS_BLOCK_HASH`. The file is mounted read-only (see INSTALL.md,
@@ -182,7 +187,7 @@ Run it right after block 1 is produced, before any transaction is sent:
 ```bash
 bun scripts/launch-height1-check.ts --genesis mainnet/genesis.json \
     --snapshot mainnet/snapshot --genesis-hash <genesis block hash> \
-    [--rpc URL,URL,...] [--balances 100|all] [--json]
+    [--rpc URL,URL,...] [--balances 100|all] [--timeout MS] [--json]
 ```
 
 Without `--rpc` it checks every validator staked at block 0, at its
@@ -203,13 +208,15 @@ Without `--rpc` it checks every validator staked at block 0, at its
 Across nodes, `block-1-agreement` checks that every node holds the same block 1.
 
 Denomination: stakes and balances are compared in the unit the node stores. The
-osDenomination migration (x 10^9) runs at block 0 when the genesis lists
-osDenomination and the snapshot is not already migrated
-(`src/libs/blockchain/genesis/applyForksAtGenesis.ts:100-112`). If the genesis
-leaves the fork out, it runs at its code-default height through the block hook
-(`src/libs/blockchain/chainBlocks.ts:370-383`). A value off by exactly 10^9 is
-named as such. That is the failure to look for when the forks block is
-incomplete.
+osDenomination migration (x 10^9) runs at block 0, before genesis validators
+are seeded, when its effective height (the genesis entry, or the code default
+0 when the entry is absent) is 0 and the snapshot is not already migrated; an
+already migrated snapshot under any other height is refused
+(`src/libs/blockchain/genesis/applyForksAtGenesis.ts:93-116`). At a later
+height it runs through the block hook over every row
+(`src/libs/blockchain/chainBlocks.ts:370-385`). A value off by exactly 10^9 is
+named as such. The node replies with amounts as decimal strings, and any other
+shape is reported as unreadable.
 
 A node answers state for its tip only. So the validator and balance comparison
 runs only while every block after block 0 is empty and the head is within

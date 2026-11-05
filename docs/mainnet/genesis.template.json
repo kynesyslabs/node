@@ -33,7 +33,7 @@
     },
     "gasFeeSeparation": {
       "activationHeight": "FILL: 0 or null",
-      "treasuryAddress": "FILL: lowercase 0x + 64 hex treasury account"
+      "treasuryAddress": "FILL: lowercase 0x + 64 hex treasury account, required whether the height is 0 or null"
     },
     "web2ProofBinding": {
       "activationHeight": "FILL: 0 or null"
@@ -49,7 +49,7 @@
     }
   },
   "snapshot": {
-    "manifestSha256": "FILL: sha256 of the launch snapshot's manifest.json bytes, or delete this field when mainnet starts without a snapshot"
+    "manifestSha256": "FILL: sha256 of the launch snapshot's manifest.json bytes (keep this field: the launch checks require the snapshot)"
   },
   "balances": "FILL: [[\"0x<64 hex address>\", \"<amount>\"], ...] the agreed allocations",
   "timestamp": "FILL: launch time in seconds, a positive integer string (testnet: \"1692734616\")",
