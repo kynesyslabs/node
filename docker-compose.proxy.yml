@@ -4,8 +4,9 @@
 # Used together with docker-compose.yml when Caddy fronts all HTTP/WS routes.
 # Drops every host port mapping that Caddy now serves, so a fresh
 # `docker compose ps` only shows 80/443 (Caddy) + 53551 (OmniProtocol) +
-# 7047 (TLSNotary direct mode only). OmniProtocol stays direct because
-# its custom-fingerprint TLS cannot survive proxy termination.
+# 9095 (gossip) + 7047 (TLSNotary direct mode only). OmniProtocol stays
+# direct because its custom-fingerprint TLS cannot survive proxy
+# termination; gossip is raw libp2p TCP, which Caddy does not forward.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.proxy.yml \
@@ -40,6 +41,9 @@ services:
     # TLS cannot survive a proxy hop).
     ports: !override
       - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
+      # Peers dial EXPOSED_URL's host on this port while gossip is enabled
+      # (the default), and Caddy cannot carry libp2p TCP.
+      - "${GOSSIP_PORT:-9095}:${GOSSIP_PORT:-9095}"
 
   prometheus:
     ports: !override []

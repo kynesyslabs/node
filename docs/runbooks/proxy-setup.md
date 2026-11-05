@@ -23,12 +23,17 @@ via the `proxy` compose profile (opt-in — no impact when off).
 | `https://${PROXY_DOMAIN}/prometheus/` | Prometheus `prometheus:9090` | none (read-only UI) |
 
 OmniProtocol (`:53551`) stays direct — its custom-fingerprint TLS cannot
-survive proxy termination.
+survive proxy termination. Gossip (`GOSSIP_PORT`, default `:9095`) stays
+direct too: peers dial the node's public host on that port over raw libp2p
+TCP, which Caddy does not forward. `docker-compose.proxy.yml` keeps both
+published and drops every other host port of the node.
 
 ## Prerequisites
 
 1. **DNS**: `${PROXY_DOMAIN}` must resolve to your host's public IP.
-2. **Firewall**: ports 80 + 443 (TCP + UDP for HTTP/3) open inbound.
+2. **Firewall**: ports 80 + 443 (TCP + UDP for HTTP/3) open inbound, plus
+   the two direct TCP ports: OmniProtocol (`OMNI_PORT`, default 53551) and
+   gossip (`GOSSIP_PORT`, default 9095).
 3. **Epic 14 must be deployed first.** Caddy will set `X-Forwarded-For`;
    the node needs `TRUSTED_PROXIES` populated to honour it (see step 4).
 4. **`TRUSTED_PROXIES` is required behind any proxy.** Left empty, the node
@@ -215,7 +220,8 @@ Grafana keeps redirecting to the stopped proxy while `GRAFANA_ROOT_URL`
 points there with `GRAFANA_SERVE_FROM_SUB_PATH=true`; with both removed it
 falls back to `http://localhost:3000` at the root path.
 
-After that, host ports `53550 53551 3005 9090 3000 9091 7047` work direct again.
+After that, host ports `53550 53551 3005 9090 3000 9091 7047` work direct
+again, next to `9095` (gossip), which stays published in both modes.
 
 ## Related
 
