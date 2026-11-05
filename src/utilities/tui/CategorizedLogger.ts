@@ -164,12 +164,13 @@ class RingBuffer<T> {
 
 // SECTION Level Priority Map
 
+// debug is the most verbose level, so LOG_LEVEL=debug must keep every other level
 const LEVEL_PRIORITY: Record<LogLevel, number> = {
+    debug: 0,
     info: 1,
     warning: 2,
     error: 3,
     critical: 4,
-    debug: 5,
 }
 
 // SECTION Color codes for terminal output (when not in TUI mode)

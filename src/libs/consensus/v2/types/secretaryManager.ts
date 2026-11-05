@@ -318,13 +318,15 @@ export default class SecretaryManager {
         log.only("\n\n\n")
         log.only("INITIALIZED SHARD:")
         log.only(`Last block number: ${lastBlockNumber}`)
-        log.only(`We are forging block ${this.shard.blockRef}`)
+        // The round start and its secretary stay at the default level:
+        // operators and the devnet fault harnesses time rounds by these lines
+        log.info(`We are forging block ${this.shard.blockRef}`)
         log.only(
             `SHARD: ${JSON.stringify(
                 this.shard.members.map(m => m.connection.string),
             )}`,
         )
-        log.only(`SECRETARY: ${this.secretary.identity}`)
+        log.info(`SECRETARY: ${this.secretary.identity}`)
 
         if (this.checkIfWeAreSecretary() && !this.blockTimestamp) {
             await this.assertParentIntervalElapsed(lastBlockNumber)
