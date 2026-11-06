@@ -122,4 +122,18 @@ describe("ConnectionPool per-peer limit after an address change", () => {
         expect(pool.getConnections("0xpeer")).toEqual([toA, toB])
         await pool.shutdown?.()
     })
+
+    it("tracks every connection when two calls race to replace the same one", async () => {
+        const pool = new ConnectionPool({ maxConnectionsPerPeer: 1 })
+        const toA: any = await pool.acquire("0xpeer", A)
+        const [first, second] = await Promise.all([
+            pool.acquire("0xpeer", B),
+            pool.acquire("0xpeer", B),
+        ])
+        expect(toA.closed).toBe(true)
+        for (const c of [first, second]) {
+            expect(pool.getConnections("0xpeer")).toContain(c)
+        }
+        await pool.shutdown?.()
+    })
 })

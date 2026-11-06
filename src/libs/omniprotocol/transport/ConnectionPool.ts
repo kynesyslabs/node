@@ -308,6 +308,7 @@ export class ConnectionPool extends EventEmitter {
                 c.origin === "outbound" &&
                 ConnectionStateUtils.isUsable(c.getState()),
         )
+        let retiring: Promise<void> | null = null
         if (usable.length >= this.config.maxConnectionsPerPeer) {
             // None of these reach connectionString, so after an address
             // change they only serve the requests already on them. An idle
@@ -327,15 +328,21 @@ export class ConnectionPool extends EventEmitter {
             log.debug(
                 `[ConnectionPool] Retiring idle connection to ${retired.connectionString} for ${peerIdentity} at ${connectionString}`,
             )
-            await this.closeConnection(retired)
+            // Not awaited here: closeConnection drops it from the pool
+            // synchronously, and nothing may run between this check and
+            // registering the new connection, or a concurrent acquire could
+            // register one this call then overwrites.
+            retiring = this.closeConnection(retired)
         }
 
         // Create new outbound connection
         const connection = new PeerConnection(peerIdentity, connectionString)
 
-        // Add to pool before connecting (allows tracking)
-        peerConnections.push(connection)
-        this.connections.set(peerIdentity, peerConnections)
+        // Add to pool before connecting (allows tracking). Re-read: retiring
+        // may have removed this peer's entry.
+        const tracked = this.connections.get(peerIdentity) || []
+        tracked.push(connection)
+        this.connections.set(peerIdentity, tracked)
 
         // Listen for close
         connection.on("close", () => {
@@ -364,6 +371,8 @@ export class ConnectionPool extends EventEmitter {
                 removeConnectionFromPool(connection)
                 return null
             })
+
+            await retiring
 
             // The request timeout bounds the answer, not the TCP connect: a
             // closed or filtered Omni port must fail within connectTimeout.
