@@ -291,7 +291,7 @@ export class InboundConnection extends EventEmitter {
             this.provenValidator = await isMergePeerEligible(identity)
         } catch (error) {
             log.warning(
-                `[InboundConnection] ${this.connectionId} validator lookup failed for ${identity}, keeping the per-IP limit: ${error}`,
+                `[InboundConnection] ${this.connectionId} validator lookup failed for ${identity}, keeping the per-IP limit: ${error instanceof Error ? error.message : String(error)}`,
             )
         }
     }
