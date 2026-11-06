@@ -16,17 +16,21 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   routes:
-    # SEAM kynesyslabs/node#1084: routes for rules from that PR go here, below the
-    # dead-man route and above the severity routes, matching on its own alertnames/labels.
-
-    # Heartbeat first, so no severity route can catch it. Re-sent every minute so the
-    # external watchdog sees it stop quickly.
+    # Heartbeat first, so no severity route can catch it. The group is flushed every
+    # group_interval (1m), but a flush only notifies once repeat_interval has passed since
+    # the last notification. repeat_interval is 50s, less than group_interval, so every
+    # flush notifies and the heartbeat is re-sent every minute (with repeat_interval: 1m
+    # the notification takes a few ms after the flush, so every other flush is skipped and
+    # it is re-sent only every 2 minutes). The external watchdog sees it stop quickly.
     - matchers:
         - alertname="DeadMansSwitch"
       receiver: deadman
       group_wait: 0s
       group_interval: 1m
-      repeat_interval: 1m
+      repeat_interval: 50s
+    # SEAM kynesyslabs/node#1084: routes for rules from that PR go here, below the
+    # dead-man route and above the severity routes, matching on its own alertnames/labels.
+
     # Critical (or an explicit `page`) wakes someone up AND is posted to Slack. The
     # paging route has `continue: true`, so matching goes on to the next route, which
     # sends the same alert to Slack. Keep the two routes adjacent and in this order.

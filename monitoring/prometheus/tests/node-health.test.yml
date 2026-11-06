@@ -39,6 +39,18 @@ tests:
             exp_annotations:
               summary: Demos node is down
               description: "Prometheus failed to scrape validator-1 for >1m. The node may have crashed or its metrics server is unreachable."
+      # validator-3 is down at minute 6 only (one scrape): pending, so without `for: 1m`
+      # it would fire here next to validator-1.
+      - eval_time: 6m
+        alertname: NodeDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: Demos node is down
+              description: "Prometheus failed to scrape validator-1 for >1m. The node may have crashed or its metrics server is unreachable."
       # Before anything is down.
       - eval_time: 3m
         alertname: NodeDown

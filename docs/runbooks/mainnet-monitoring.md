@@ -118,7 +118,9 @@ receiver and **Slack** (the paging route has `continue: true`, the next route
 sends the same alert to Slack), waits 10 s before the first message and repeats
 hourly. `warning` and `info` go to **Slack** only, warnings repeating every 4
 hours. `DeadMansSwitch` goes to its own **deadman** receiver only and is re-sent
-every minute. Alerts are grouped per alert name and validator. All three
+every minute (`group_interval: 1m` with `repeat_interval: 50s`; a `repeat_interval`
+of 1m would skip every other flush and re-send only every 2 minutes, so keep it
+below `group_interval`). Alerts are grouped per alert name and validator. All three
 receiver URLs are placeholders in `monitoring/secrets/`.
 
 ## Clearing a latched alert
@@ -140,7 +142,7 @@ Run the `docker compose` commands below from the repository root, as in setup.
    `ForeignSignature` and `PrecommitEquivocation`: every copy of the key found
    and stopped, see `validator-key.md`).
 2. Acknowledge: add an Alertmanager silence for the alert and instance
-   (`amtool silence add alertname=ConflictingBlock instance=validator-2 --duration=7d --comment="<ticket>"`).
+   (`docker exec demos-alertmanager amtool silence add alertname=ConflictingBlock instance=validator-2 --duration=7d --comment="<ticket>" --alertmanager.url=http://localhost:9093`).
    `amtool silence add` lasts 1 hour unless told otherwise, and the alert keeps
    firing for up to 7 days (the critical route repeats hourly), so always pass
    `--duration=7d` or an explicit `--end`. This stops the pages; the alert stays
