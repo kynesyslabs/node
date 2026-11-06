@@ -820,6 +820,30 @@ for sc in halt-n10s10 halt-n13s10 ride-n13s10; do
         _ "${OUT}" "${WORK}/run-top.docker.log"
 done
 
+echo "== two runs started in the same second with the same options: a run dir and a compose project each"
+# The run id's time is one fixed second (a stub date); each run stops at node-1 (the stub's SIGTERM)
+mkdir -p "${WORK}/datebin"
+REAL_DATE=$(command -v date); export REAL_DATE
+cat > "${WORK}/datebin/date" <<'STUBDATE'
+#!/usr/bin/env bash
+[ "$*" = "-u +%Y%m%dT%H%M%SZ" ] && { echo 20261106T000000Z; exit 0; }
+exec "${REAL_DATE}" "$@"
+STUBDATE
+chmod +x "${WORK}/datebin/date"
+same_second() {
+    STUB_LOG="${WORK}/same.docker.log" STUB_MAXCONN=280 STUB_START=run-devnet STUB_LOGDRIVER=json-file \
+        PATH="${WORK}/datebin:${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/same-runs" NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 \
+        timeout 120 bash "${RUN_SH}" floor same > /dev/null 2>&1
+}
+: > "${WORK}/same.docker.log"
+same_second; same_second
+check "two run dirs, the second with the suffix -2" test "$(ls "${WORK}/same-runs" | tr '\n' ' ')" = "20261106T000000Z-floor-on-same 20261106T000000Z-floor-on-same-2 "
+check "both mode 700" test "$(stat -c %a "${WORK}/same-runs/20261106T000000Z-floor-on-same" "${WORK}/same-runs/20261106T000000Z-floor-on-same-2" | tr '\n' ' ')" = "700 700 "
+for sfx in "" -2; do
+    check "the run${sfx:- without a suffix} starts node-1 with its own compose file and the project named after its dir" \
+        test "$(grep -c -- "^compose -f ${WORK}/same-runs/20261106T000000Z-floor-on-same${sfx}/compose.yml -p qdrill-20261106t000000z-floor-on-same${sfx} up -d node-1$" "${WORK}/same.docker.log")" = 1
+done
+
 # ── run.sh executed whole, against a stub chain ─────────────────────────
 # Past node-1: bring-up, the scenario and the verdict, with docker, bun and
 # sleep replaced (every sleep takes 20 ms; the stub's stalls use the real one).

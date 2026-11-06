@@ -120,13 +120,24 @@ fi
 Q=$(( SHARD * 2 / 3 + 1 ))
 GENESIS_DELAY="${GENESIS_DELAY:-$((60 + START * 25))}"
 
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${SCENARIO}-${BINDING}-${LABEL}"
+# The run dir is made with mkdir, not mkdir -p, so it is this run's alone: a run
+# started in the same second with the same options finds it taken and takes the
+# next free suffix (-2, -3, ...), and with it its own compose project
+mkdir -p "${RUNS_DIR}" || { echo "could not create ${RUNS_DIR}" >&2; exit 2; }
+RUN_BASE="$(date -u +%Y%m%dT%H%M%SZ)-${SCENARIO}-${BINDING}-${LABEL}"
+RUN_ID="${RUN_BASE}"
+for k in $(seq 2 100); do
+    mkdir -m 700 "${RUNS_DIR}/${RUN_ID}" 2>/dev/null && break
+    if [ ! -e "${RUNS_DIR}/${RUN_ID}" ] || [ "${k}" = 100 ]; then
+        echo "could not create a run dir ${RUNS_DIR}/${RUN_ID}" >&2; exit 2
+    fi
+    RUN_ID="${RUN_BASE}-${k}"
+done
 RUN_DIR="${RUNS_DIR}/${RUN_ID}"
 LOG_DIR="${RUN_DIR}/logs"
 # Compose project names allow [a-z0-9_-] only
 PROJECT="qdrill-$(echo "${RUN_ID}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')"
 mkdir -p "${LOG_DIR}" "${RUN_DIR}/inputs/empty-snapshot"
-chmod 700 "${RUN_DIR}"
 EVENTS="${LOG_DIR}/events.log"
 PHASES="${RUN_DIR}/phases.tsv"
 printf 'phase\tdown\tlive\tfrom\tto\tblocks\tmean_s\tmax_s\toutcome\n' > "${PHASES}"

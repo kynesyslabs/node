@@ -540,7 +540,8 @@ set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log; a
 postgres lookup that stalls, fails or finds no container), with file writes
 failing as on a full disk (a file size limit of 0, SIGXFSZ ignored: the copy
 of a node log, the psql errors, the rewritten records), and runs `run.sh` from the top on both start paths (on the image
-path: preflight, then the 13 migrations, then node-1). It also runs `run.sh`
+path: preflight, then the 13 migrations, then node-1), and twice in one
+second (a stub `date`: two run dirs and two compose projects). It also runs `run.sh`
 whole, bring-up to verdict, against a stub chain (a stub `docker` whose head
 grows while enough nodes run, a stub `bun` and judge, a 20 ms `sleep`):
 `drop-n7s10 --binding off`, `fallback` and `ride-n13s10`, and, with one
@@ -552,7 +553,11 @@ reads after the stop), each of which must end as exit 2 within the bound;
 ## Runs and logs
 
 Everything goes to `runs/<UTC time>-<scenario>-<binding>-<label>/`
-(gitignored, mode 700): `inputs/` (identities, genesis, peerlist, compose
+(gitignored, mode 700). The dir is created with `mkdir`, not `mkdir -p`, so
+it is never shared: a run started in the same second with the same options
+and label finds it taken and gets the next free suffix (`...-<label>-2`,
+`-3`, up to 99 tries, then exit 2), and the compose project is named after
+the dir it got. It holds `inputs/` (identities, genesis, peerlist, compose
 file: devnet keys, never commit them), `logs/01-preflight.log` ..
 `05-verdict.log` per step, `events.log` with a timestamped line per stop,
 start and partition change, `node-N.log` (full container logs, collected at
@@ -572,7 +577,8 @@ drills also leave `drill-input.json` (what the run observed),
   headroom), the 1-minute load is above the core count, the host is
   swapping, an image is missing, or another `crace-`/`qdrill-` stack is
   running.
-- A unique compose project per run (`qdrill-<run id>`), no container names,
+- A unique compose project per run (`qdrill-<run id>`, the run dir's name
+  lowercased: two runs never share one, see [Runs and logs](#runs-and-logs)), no container names,
   no published ports (the harness uses `docker exec`), postgres and node
   state on tmpfs, no named volumes. Memory caps: `NODE_MEM` (1800m) per
   node, 1 GB postgres, 64 MB per partition sidecar.
