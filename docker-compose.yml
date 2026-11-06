@@ -361,9 +361,10 @@ services:
     healthcheck:
       # Mirrors the Dockerfile HEALTHCHECK so compose-level wait + watch
       # commands work without depending on the image build (Epic 13 T11).
-      # /health returns 503 when chain DB is down or mainLoop is dead;
-      # 200 for ok/dormant/degraded (operator reads body for nuance).
-      test: ["CMD", "curl", "-fsS", "http://localhost:${RPC_PORT:-53550}/health"]
+      # /health/live returns 503 when chain DB is down or mainLoop is dead;
+      # 200 while syncing/dormant/degraded. /health is readiness and is 503
+      # until the node is booted and synced.
+      test: ["CMD", "curl", "-fsS", "http://localhost:${RPC_PORT:-53550}/health/live"]
       interval: 30s
       timeout: 5s
       retries: 3

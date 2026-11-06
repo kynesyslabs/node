@@ -124,7 +124,7 @@
 	}
 
 	# --- RPC — root + everything else ---------------------------------------
-	# Note: /health and /version on the node are intentionally fast and
+	# Note: /health, /health/live and /version on the node are intentionally fast and
 	# rate-limit-bypassed already (server_rpc.ts). LB / k8s probes can hit
 	# them directly through this vhost without auth.
 	# request_body caps what a public client may upload; keep it equal to the

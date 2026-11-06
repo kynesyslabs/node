@@ -20,10 +20,10 @@ surfaces explicitly.
 Any of these = dormant:
 
 ```bash
-curl -fsS http://localhost:53550/health | jq '.status'
+curl -sS http://localhost:53550/health | jq '.status'
 # "dormant"
 
-curl -fsS http://localhost:53550/health | jq '.dormant'
+curl -sS http://localhost:53550/health | jq '.dormant'
 # true
 
 # Prometheus
@@ -57,7 +57,7 @@ Prom alert `NodeDormant` fires after 10 minutes in this state.
 ### 1. Confirm dormant state and check the peer file
 
 ```bash
-curl -fsS http://localhost:53550/health | jq '{status, dormant, subsystems: (.subsystems | to_entries | map(select(.value.status=="skipped")))}'
+curl -sS http://localhost:53550/health | jq '{status, dormant, subsystems: (.subsystems | to_entries | map(select(.value.status=="skipped")))}'
 
 # Peer list
 cat demos_peerlist.json | jq length
@@ -153,7 +153,7 @@ simpler: bring the node up with a one-element local peer list.
 ## Verify after recovery
 
 ```bash
-curl -fsS http://localhost:53550/health | jq '{status, dormant, peers: .subsystems.signaling.status, mainLoop: .subsystems.main_loop.status}'
+curl -sS http://localhost:53550/health | jq '{status, dormant, peers: .subsystems.signaling.status, mainLoop: .subsystems.main_loop.status}'
 # Expect: status "ok" (or "degraded"), dormant false, signaling "ready", main_loop "ready"
 ```
 

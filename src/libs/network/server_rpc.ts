@@ -125,7 +125,9 @@ export async function serverRpcBun() {
         })
     })
 
-    server.get("/health", async () => {
+    // Shared body for /health (readiness) and /health/live (liveness); only
+    // the HTTP status differs.
+    const healthReport = async () => {
         // PR #797 contract — preserve every field so SDK probes do not
         // break. New blocks are additive (Epic 13 T7):
         //   - `status`: ok | degraded | dormant | failing
@@ -204,6 +206,14 @@ export async function serverRpcBun() {
             }
         }
 
+        // syncStatus alone, not `accepting`: a synced node runs short sync
+        // passes, and readiness must not flap with each one.
+        const notReady: string[] = []
+        if (status === "failing") notReady.push("failing")
+        if (getSharedState.dormantMode) notReady.push("dormant")
+        if (!getSharedState.isInitialized) notReady.push("booting")
+        if (!getSharedState.syncStatus) notReady.push("not_synced")
+
         const body = {
             version: getSharedState.version,
             version_name: getSharedState.version_name,
@@ -211,6 +221,8 @@ export async function serverRpcBun() {
             mempool_size: mempoolSize,
             uptime_s: getSharedState.getUptimeSeconds(),
             status,
+            ready: notReady.length === 0,
+            not_ready: notReady,
             dormant: getSharedState.dormantMode,
             boot: {
                 complete: bootSummary.complete,
@@ -239,15 +251,27 @@ export async function serverRpcBun() {
             },
         }
 
-        // Surface health via HTTP status so LB/k8s probes can detect an
-        // unhealthy node without parsing the JSON body. Dormant + degraded
-        // are 200 (intentional state), failing is 503.
-        const httpStatus = status === "failing" ? 503 : 200
         const extraHeaders: Record<string, string> = {}
         if (status === "dormant") {
             extraHeaders["X-Demos-Dormant"] = "true"
         }
-        return jsonResponse(body, httpStatus, extraHeaders)
+        return { body, status, ready: notReady.length === 0, extraHeaders }
+    }
+
+    // Readiness: 200 only for a node that can serve the chain. A dormant,
+    // booting or unsynced node answers RPC from stale state, so a load
+    // balancer or orchestrator must not route traffic to it.
+    server.get("/health", async () => {
+        const { body, ready, extraHeaders } = await healthReport()
+        return jsonResponse(body, ready ? 200 : 503, extraHeaders)
+    })
+
+    // Liveness: 503 only when the node is failing. The container
+    // healthcheck uses this one, so a node catching up for hours is not
+    // reported unhealthy.
+    server.get("/health/live", async () => {
+        const { body, status, extraHeaders } = await healthReport()
+        return jsonResponse(body, status === "failing" ? 503 : 200, extraHeaders)
     })
 
     // Slim sibling endpoint for ops dashboards that only need the

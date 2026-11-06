@@ -794,6 +794,7 @@ export class RateLimiter {
             const path = new URL(req.url).pathname
             if (
                 path === "/health" ||
+                path === "/health/live" ||
                 path === "/health/subsystems" ||
                 path === "/version"
             ) {

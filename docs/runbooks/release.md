@@ -191,6 +191,11 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
   message is accepted once. A new node refuses the old modes `0x03`/`0x04`; an
   old node refuses `0x06` (`does not bind the payload`) and closes the
   connection, and the sender falls back to HTTP.
+- From the first release after `v1.0.0-rc.5`, `/health` is a readiness probe:
+  503 while the node is booting, dormant or not synced. Probes that must stay
+  green while a node catches up (container healthchecks, liveness probes)
+  move to `/health/live`, which keeps the old meaning (503 only when
+  failing). The shipped Dockerfile and `docker-compose.yml` already use it.
 
 ## Known limits
 

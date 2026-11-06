@@ -99,7 +99,7 @@ First-time provisioning takes ~30s. Look for `obtained certificate` lines.
 
 ```bash
 # RPC root + health
-curl -fsS "https://${PROXY_DOMAIN}/health" | jq
+curl -sS "https://${PROXY_DOMAIN}/health" | jq
 
 # Grafana
 curl -fsS -o /dev/null -w "%{http_code}\n" "https://${PROXY_DOMAIN}/grafana/api/health"

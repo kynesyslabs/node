@@ -211,7 +211,7 @@ Do it on **one** validator first, then the rest. Never on all at once.
    - `bun run migration:show` lists every migration as `[X]`.
    - In Postgres: `SELECT name FROM migrations ORDER BY id DESC LIMIT 3;`
      (TypeORM's default table name) shows the new migration.
-   - Start the node. `curl -fsS http://localhost:53550/health | jq .status`
+   - Start the node. `curl -sS http://localhost:53550/health | jq .status`
      is `ok` (see `health-endpoint.md`).
    - Blocks are produced: run `SELECT max(number) FROM blocks;` twice, a
      minute apart, and compare with the other validators. The value rises,
