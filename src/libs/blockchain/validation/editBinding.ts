@@ -132,10 +132,10 @@ async function osDenominationActive(): Promise<boolean> {
  * Whether edits are bound, and the denomination shape expected, from one read
  * of the chain tip (the source the native edit check always used for the
  * shape). A fork activating at height H binds the block applied on tip H,
- * which is block H + 1. `governance`, `typeAllowList` and `messageBinding`
- * are the `networkGovernance`, `txTypeAllowList` and `instantMessagingBinding`
- * states, read from the same tip so admission and apply judge them alike;
- * `tip` is that tip.
+ * which is block H + 1. `governance`, `typeAllowList`, `messageBinding` and
+ * `stakeChecks` are the `networkGovernance`, `txTypeAllowList`,
+ * `instantMessagingBinding` and `stakeApplyChecks` states, read from the same
+ * tip so admission and apply judge them alike; `tip` is that tip.
  */
 export interface EditBindingState {
     active: boolean
@@ -144,6 +144,7 @@ export interface EditBindingState {
     governance: boolean
     typeAllowList: boolean
     messageBinding: boolean
+    stakeChecks: boolean
     tip: number
 }
 
@@ -156,6 +157,7 @@ export async function editBindingState(): Promise<EditBindingState> {
         governance: isForkActive("networkGovernance", tip),
         typeAllowList: isForkActive("txTypeAllowList", tip),
         messageBinding: isForkActive("instantMessagingBinding", tip),
+        stakeChecks: isForkActive("stakeApplyChecks", tip),
         tip,
     }
 }
@@ -199,6 +201,31 @@ export async function loadAdmissionReads(
 ): Promise<void> {
     const { messageBinding } = await reads.state()
     if (messageBinding && txs.some(isNodeMessage)) await reads.validators()
+}
+
+/**
+ * Why a transaction's stake edits act on another account than the sender's,
+ * or claim to be a rollback, or null. Under `stakeApplyChecks` a stake moves
+ * the balance of the account it names, so that account must be the one that
+ * signed, and a rolled back stake pays its bond back with no lock or floor
+ * check, which only the node's own rollback may do. Both hold whether or not
+ * `editBinding` binds the rest of the edits.
+ */
+export function stakeSenderRefusal(tx: Transaction): string | null {
+    const sender = senderOf(tx)
+    const account = sender !== "" && !sender.startsWith("0x") ? `0x${sender}` : sender
+    for (const edit of (tx.content?.gcr_edits ?? []) as unknown as Array<
+        Record<string, unknown>
+    >) {
+        if (String(edit.type) !== "validatorStake") continue
+        if (account === "" || edit.account !== account) {
+            return "validatorStake edit acts on another account than the sender"
+        }
+        if (edit.isRollback) {
+            return "validatorStake edit is shipped as a rollback"
+        }
+    }
+    return null
 }
 
 /**

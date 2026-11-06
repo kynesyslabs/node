@@ -1,0 +1,67 @@
+{
+  "id": "N06",
+  "kind": "negative (tampered copies of a live testnet bundle, offline)",
+  "issues": [
+    "kynesyslabs/node#1059 acceptance test 3 (tampering gives a rejection) - DACS-layer analogue only"
+  ],
+  "recorded_at_utc": "2026-09-07T18:17:41+00:00",
+  "run_id": "beta-testnet-20260907T180555Z",
+  "source_copy": "stor-85903c128510a54d32609b9c3944b67f7de8d06d",
+  "baseline": {
+    "reference": "pass",
+    "dacs_sdk_core": true
+  },
+  "mutations": {
+    "finality-removed": {
+      "rejected_by_reference": true,
+      "rejected_by_dacs_sdk": true,
+      "dacs_sdk_reason": "not an attestation bundle",
+      "reference_failed_steps": [
+        "structural",
+        "signer-rule",
+        "signatures"
+      ]
+    },
+    "chain-identity-replaced": {
+      "rejected_by_reference": true,
+      "rejected_by_dacs_sdk": true,
+      "dacs_sdk_reason": "not an attestation bundle",
+      "reference_failed_steps": [
+        "signatures",
+        "two-sided-anchoring"
+      ]
+    },
+    "content-changed": {
+      "rejected_by_reference": true,
+      "rejected_by_dacs_sdk": true,
+      "dacs_sdk_reason": "faultedParty is not permitted for outcome and anchoredByRole",
+      "reference_failed_steps": [
+        "structural",
+        "signer-rule",
+        "signatures"
+      ]
+    },
+    "vet-pass-forged": {
+      "rejected_by_reference": true,
+      "rejected_by_dacs_sdk": true,
+      "dacs_sdk_reason": "one or more signatures failed verification",
+      "reference_failed_steps": [
+        "signatures",
+        "two-sided-anchoring"
+      ]
+    },
+    "role-signature-broken": {
+      "rejected_by_reference": true,
+      "rejected_by_dacs_sdk": true,
+      "dacs_sdk_reason": "one or more signatures failed verification",
+      "reference_failed_steps": [
+        "signatures",
+        "two-sided-anchoring"
+      ]
+    }
+  },
+  "all_rejected": true,
+  "does_not_show": [
+    "tampering with node proofs: No node proof object is included or tested in this package."
+  ]
+}

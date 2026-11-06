@@ -40,6 +40,9 @@
     "identityCarryover": {
       "activationHeight": 0
     },
+    "stakeApplyChecks": {
+      "activationHeight": 0
+    },
     "txTypeAllowList": {
       "activationHeight": 0
     },

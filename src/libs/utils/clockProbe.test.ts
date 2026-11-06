@@ -31,7 +31,6 @@ const answers = (byServer: Record<string, number | Error>) => async (server: str
     return answer
 }
 const [S1, S2, S3, S4] = NTP_PROBE_SERVERS
-const TOLERANCE_S = 60
 
 describe("probeClockOffset", () => {
     it("takes the median of the servers that agree", async () => {
@@ -89,33 +88,53 @@ describe("checkClockAtBoot", () => {
     it("refuses a production start when two servers agree the host is past the tolerance", async () => {
         const query = answers({ [S1]: 61_000, [S2]: 61_500 })
         await expect(
-            checkClockAtBoot({ production: true, toleranceSeconds: TOLERANCE_S, query }),
+            checkClockAtBoot({ production: true, query }),
         ).rejects.toThrow(/61\.3s ahead of NTP.*Fix the host's NTP/)
+    })
+
+    it("refuses a host further ahead than members sign a block timestamp", async () => {
+        // Inside the 60 s sync tolerance, but every block it stamped as
+        // secretary would be refused.
+        const query = answers({ [S1]: 10_000, [S2]: 10_000 })
+        await expect(checkClockAtBoot({ production: true, query })).rejects.toThrow(
+            /10\.0s ahead of NTP.*more than the 5s members accept/,
+        )
+    })
+
+    it("refuses a host just past the signing limit and starts one just inside it", async () => {
+        await expect(
+            checkClockAtBoot({ production: true, query: answers({ [S1]: -5_500, [S2]: -5_500 }) }),
+        ).rejects.toThrow(/5\.5s behind NTP/)
+        const inside = await checkClockAtBoot({
+            production: true,
+            query: answers({ [S1]: 4_500, [S2]: 4_500 }),
+        })
+        expect(inside.offsetMs).toBe(4_500)
     })
 
     it("refuses a host that is behind as well", async () => {
         const query = answers({ [S1]: -90_000, [S2]: -90_000, [S3]: -90_000 })
         await expect(
-            checkClockAtBoot({ production: true, toleranceSeconds: TOLERANCE_S, query }),
+            checkClockAtBoot({ production: true, query }),
         ).rejects.toThrow(/90\.0s behind NTP/)
     })
 
     it("starts outside production whatever the offset", async () => {
         const query = answers({ [S1]: 61_000, [S2]: 61_500 })
-        const result = await checkClockAtBoot({ production: false, toleranceSeconds: TOLERANCE_S, query })
+        const result = await checkClockAtBoot({ production: false, query })
         expect(result.offsetMs).toBe(61_250)
     })
 
     it("starts within the tolerance and publishes the offset", async () => {
         const query = answers({ [S1]: 1500, [S2]: 2500 })
-        const result = await checkClockAtBoot({ production: true, toleranceSeconds: TOLERANCE_S, query })
+        const result = await checkClockAtBoot({ production: true, query })
         expect(result.offsetMs).toBe(2000)
         expect(gauges.get("clock_offset_seconds")).toBe(2)
         expect(gauges.get("clock_probe_agreeing_servers")).toBe(2)
     })
 
     it("starts when no NTP server answers", async () => {
-        const result = await checkClockAtBoot({ production: true, toleranceSeconds: TOLERANCE_S, query: answers({}) })
+        const result = await checkClockAtBoot({ production: true, query: answers({}) })
         expect(result.offsetMs).toBeNull()
         expect(gauges.get("clock_probe_agreeing_servers")).toBe(0)
         expect(gauges.has("clock_offset_seconds")).toBe(false)
@@ -123,13 +142,13 @@ describe("checkClockAtBoot", () => {
 
     it("starts when only one server reports a large offset", async () => {
         const query = answers({ [S1]: 3_600_000 })
-        const result = await checkClockAtBoot({ production: true, toleranceSeconds: TOLERANCE_S, query })
+        const result = await checkClockAtBoot({ production: true, query })
         expect(result.offsetMs).toBeNull()
     })
 
     it("starts when the servers disagree", async () => {
         const query = answers({ [S1]: 0, [S2]: 3_600_000 })
-        const result = await checkClockAtBoot({ production: true, toleranceSeconds: TOLERANCE_S, query })
+        const result = await checkClockAtBoot({ production: true, query })
         expect(result.offsetMs).toBeNull()
     })
 })

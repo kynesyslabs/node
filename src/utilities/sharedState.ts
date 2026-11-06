@@ -6,7 +6,6 @@ import Block from "src/libs/blockchain/block"
 import chain from "src/libs/blockchain/chain"
 import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars
-import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
 import { SigningAlgorithm, ValidityData } from "@kynesyslabs/demosdk/types"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
@@ -387,6 +386,14 @@ export default class SharedState {
      * features/networkUpgrade/types.ts.
      */
     networkParameters: unknown = null
+
+    /**
+     * The minimum validator stake set by an active network upgrade, or null
+     * when none sets it. Unlike `networkParameters` it never takes the
+     * operator's MIN_VALIDATOR_STAKE, so block apply reads the same value on
+     * every node.
+     */
+    governedMinValidatorStake: string | null = null
     serverPort = Config.getInstance().server.serverPort
     identityFile: string = Config.getInstance().core.identityFile
     peerListFile: string = Config.getInstance().core.peerListFile
@@ -461,35 +468,6 @@ export default class SharedState {
             SharedState.instance = new SharedState()
         }
         return SharedState.instance
-    }
-
-    // Getter for the current UTC time (optional in ms, default in s integer)
-    // It can use NTP or system time based on the ntp parameter, default is system time
-    public async getUTCTime(ntp = false, inSeconds = true): Promise<boolean> {
-        try {
-            if (ntp) {
-                this.currentUTCTime = await this.getNTPTime()
-            } else {
-                this.currentUTCTime = this.getTimestamp(inSeconds)
-            }
-            return true
-        } catch (err) {
-            log.error(err)
-            this.currentUTCTime = this.getTimestamp(inSeconds)
-            return false
-        }
-    }
-
-    // Getter for the current NTP time
-    public async getNTPTime(): Promise<number> {
-        const date = await new Promise<Date>((resolve, reject) => {
-            ntpClient.getNetworkTime("pool.ntp.org", 123, (err, date) => {
-                if (err) reject(err)
-                else resolve(date)
-            })
-        })
-        const timestamp = date.getTime()
-        return timestamp
     }
 
     // Getter for the current timestamp (optional in ms, default in s integer)

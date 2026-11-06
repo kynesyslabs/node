@@ -277,6 +277,27 @@ export type FinalityProofsConfig = BaseForkConfig
 export type IdentityCarryoverConfig = BaseForkConfig
 
 /**
+ * `stakeApplyChecks` fork: the staking rules hold where the stake is
+ * applied, not only at the node that took the transaction in.
+ *
+ * At apply, from the activation height:
+ *  - a stake is taken from the sender's balance (refused when the balance
+ *    does not cover it) and recorded as bonded; exit pays the bonded amount
+ *    back, once, so a stake that was never debited is never paid out;
+ *  - entering the validator set, as a new validator or one that exited,
+ *    takes at least the minimum stake and a connection URL;
+ *  - an unstake must come from an active validator with no unstake under
+ *    way, and is refused when it would leave fewer active validators than
+ *    the committee floor, below which no block is forged.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before. A mainnet genesis
+ * sets 0. No payload beyond the base.
+ */
+export type StakeApplyChecksConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -392,6 +413,7 @@ export type ForkName =
     | "commitLock"
     | "finalityProofs"
     | "identityCarryover"
+    | "stakeApplyChecks"
     | "networkGovernance"
     | "txTypeAllowList"
     | "instantMessagingBinding"
@@ -416,6 +438,7 @@ export interface ForkConfigByName {
     commitLock: CommitLockConfig
     finalityProofs: FinalityProofsConfig
     identityCarryover: IdentityCarryoverConfig
+    stakeApplyChecks: StakeApplyChecksConfig
     networkGovernance: NetworkGovernanceConfig
     txTypeAllowList: TxTypeAllowListConfig
     instantMessagingBinding: InstantMessagingBindingConfig
@@ -614,6 +637,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Genesis imports user data without balances, imported identities pay no " +
             "first-link award, and a web2 unlink removes one platform account by userId.",
     },
+    stakeApplyChecks: {
+        // Dormant by default: it changes what a stake, unstake and exit do to
+        // balances and validator rows, and a missing genesis entry hydrates
+        // from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Apply debits a stake from the balance and refunds it once at exit, checks the " +
+            "minimum stake on entry, and refuses an unstake below the committee floor.",
+    },
     networkGovernance: {
         // Dormant by default and at launch: a missing genesis entry hydrates
         // from here, so governance stays off until a height is agreed.
@@ -663,6 +695,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
+        stakeApplyChecks: { ...DEFAULT_FORK_CONFIG.stakeApplyChecks },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
         txTypeAllowList: { ...DEFAULT_FORK_CONFIG.txTypeAllowList },
         instantMessagingBinding: { ...DEFAULT_FORK_CONFIG.instantMessagingBinding },

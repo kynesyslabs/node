@@ -9,9 +9,12 @@ groups:
         for: 1m
         labels:
           severity: critical
+          # absent() carries no instance label; name the case so Alertmanager
+          # (grouped by instance) and the Slack line still say what is down.
+          instance: '{{ with $labels.instance }}{{ . }}{{ else }}no demos-node target{{ end }}'
         annotations:
           summary: Demos node is down
-          description: Prometheus failed to scrape `demos-node` for >1m, OR the target was removed from service discovery. Node may have crashed or metrics server is unreachable.
+          description: "{{ with $labels.instance }}Prometheus failed to scrape {{ . }} for >1m{{ else }}No demos-node target is left in service discovery{{ end }}. The node may have crashed or its metrics server is unreachable."
 
       - alert: NodeFailing
         # Exclude dormant mode — there, main_loop is intentionally
@@ -26,7 +29,7 @@ groups:
           severity: critical
         annotations:
           summary: Main loop is dead
-          description: 'demos_subsystem_up{subsystem="main_loop"} has been 0 for >2m and the subsystem was not intentionally skipped. The node is serving RPC but is no longer producing blocks. Check `/health.main_loop.exit_reason` and recent logs.'
+          description: 'demos_subsystem_up{subsystem="main_loop"} has been 0 for >2m on {{ $labels.instance }} and the subsystem was not intentionally skipped. The node is serving RPC but is no longer producing blocks. Check `/health.main_loop.exit_reason` and recent logs.'
 
       - alert: NodeDormant
         expr: demos_dormant_mode == 1
@@ -35,7 +38,7 @@ groups:
           severity: warning
         annotations:
           summary: Demos node is in dormant mode
-          description: The peer list was empty at boot and signaling/MCP/TLSN/mainLoop were skipped. RPC is up but consensus is frozen. See docs/runbooks/dormant-mode.md.
+          description: "The peer list of {{ $labels.instance }} was empty at boot and signaling/MCP/TLSN/mainLoop were skipped. RPC is up but consensus is frozen. See docs/runbooks/dormant-mode.md."
 
       - alert: BootIncomplete
         expr: demos_boot_complete == 0
@@ -44,31 +47,61 @@ groups:
           severity: warning
         annotations:
           summary: Node boot did not complete
-          description: demos_boot_complete has been 0 for >5m. One or more boot steps are stuck in running or pending. Check `/health.boot.current`.
+          description: "demos_boot_complete has been 0 for >5m on {{ $labels.instance }}. One or more boot steps are stuck in running or pending. Check `/health.boot.current`."
 
       - alert: MempoolStuck
-        expr: rate(demos_transactions_total[5m]) == 0 and demos_mempool_size > 0
+        # Summed over type/status so the label sets match demos_mempool_size;
+        # a bare `and` between the two never matched anything.
+        expr: sum without (type, status) (rate(demos_transactions_total[5m])) == 0 and demos_mempool_size > 0
         for: 10m
         labels:
           severity: warning
         annotations:
           summary: Mempool has pending transactions but throughput is zero
-          description: demos_mempool_size > 0 yet rate(demos_transactions_total) has been 0 for 5m. Block production may be stalled.
+          description: "demos_mempool_size > 0 on {{ $labels.instance }} yet no transaction has been included in a stored block for over 10m. Block production may be stalled."
 
       - alert: PeersZero
         expr: demos_peer_online_count == 0
         for: 5m
+        # One peer reconnecting for a scrape or two must not resolve and
+        # re-page the alert.
+        keep_firing_for: 5m
         labels:
           severity: warning
         annotations:
           summary: No connected peers
-          description: demos_peer_online_count has been 0 for >5m. Check network egress + bootstrap peer list.
+          description: "demos_peer_online_count has been 0 for >5m on {{ $labels.instance }}. Check network egress + bootstrap peer list."
 
       - alert: MainLoopHeartbeatStale
         expr: demos_main_loop_heartbeat_seconds > 120
         for: 1m
+        keep_firing_for: 5m
         labels:
           severity: warning
         annotations:
           summary: mainLoop heartbeat stale
-          description: "demos_main_loop_heartbeat_seconds = {{ $value }}. Loop is running slowly or stuck."
+          description: "demos_main_loop_heartbeat_seconds = {{ $value }} on {{ $labels.instance }}. Loop is running slowly or stuck."
+
+      # The node refuses to start below MIN_DISK_SPACE (default 5 GiB), and
+      # Postgres fails writes on a full disk: warn well before either. The gauge
+      # measures the filesystem of DISK_SPACE_PATH (the node data volume in
+      # Docker), not the Postgres volume.
+      - alert: DiskSpaceLow
+        expr: demos_disk_free_bytes < 20 * 1024 * 1024 * 1024
+        for: 10m
+        keep_firing_for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Validator disk is filling up
+          description: "{{ $labels.instance }} has {{ $value | humanize1024 }}B free on its data disk (DISK_SPACE_PATH), under 20 GiB. Prune logs, old snapshots and Docker build cache, or grow the volume."
+
+      - alert: DiskSpaceCritical
+        expr: demos_disk_free_bytes < 5 * 1024 * 1024 * 1024
+        for: 2m
+        keep_firing_for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: Validator disk is nearly full
+          description: "{{ $labels.instance }} has {{ $value | humanize1024 }}B free on its data disk (DISK_SPACE_PATH), under 5 GiB: the node will not restart (MIN_DISK_SPACE) and Postgres writes fail when it reaches 0. Free space now."
