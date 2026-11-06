@@ -490,6 +490,24 @@ describe("fast sync under finalityProofs", () => {
             expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
         })
 
+        it("stores nothing and cools the peer down when it serves a block that is not the child", async () => {
+            ;(log.warning as any).mockClear()
+            await syncLastOfBatch(async (tx, block) => {
+                // Hashes to itself, but builds on another parent
+                const impostor = childOf({ ...block, hash: "elsewhere" }, await confirmedRoot(tx))
+                return [impostor]
+            })
+
+            expect(insertBlock).not.toHaveBeenCalled()
+            expect(getSharedState.lastBlockNumber).toBe(HEIGHT - 1)
+            const cooled = (log.warning as any).mock.calls.map((c: unknown[]) => String(c[0]))
+            expect(
+                cooled.some(
+                    (line: string) => line.includes("peer peer-1") && line.includes("not built on it"),
+                ),
+            ).toBe(true)
+        })
+
         it("still checks the block before a tail it leaves out against that tail", async () => {
             getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
             getSharedState.batchSyncBlockSize = 2

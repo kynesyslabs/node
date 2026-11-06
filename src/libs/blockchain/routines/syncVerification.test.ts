@@ -589,26 +589,36 @@ describe("results checked against the next block", () => {
         ).resolves.toBeUndefined()
     })
 
-    it("does not judge a next block that is not the one built on this block", async () => {
+    it("has nothing to judge without a next block, or before the fork", async () => {
         const ok = makeTx(alice, { status: "confirmed" })
         const block = makeBlock([ok])
         const wrong = "0".repeat(64)
 
-        // Absent, before the fork, on another parent, or not hashing to itself
-        const unjudged = [
-            undefined,
-            { ...nextBlock(block, wrong), hash: "forged" },
-            nextBlock(block, wrong, { previousHash: "elsewhere" }),
-        ]
-        for (const next of unjudged) {
-            await expect(
-                checkResultsAgainstNextBlock(block, [ok], next),
-            ).resolves.toBeUndefined()
-        }
+        await expect(
+            checkResultsAgainstNextBlock(block, [ok], undefined),
+        ).resolves.toBeUndefined()
         getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 2
         await expect(
             checkResultsAgainstNextBlock(block, [ok], nextBlock(block, wrong)),
         ).resolves.toBeUndefined()
+    })
+
+    it("refuses a next block that is not the one built on this block, instead of skipping the check", async () => {
+        const ok = makeTx(alice, { status: "confirmed" })
+        const block = makeBlock([ok])
+        const wrong = "0".repeat(64)
+
+        // Not hashing to itself, on another parent, or at another height
+        const impostors = [
+            { ...nextBlock(block, wrong), hash: "forged" },
+            nextBlock(block, wrong, { previousHash: "elsewhere" }),
+            { ...nextBlock(block, wrong), number: HEIGHT + 2 },
+        ]
+        for (const next of impostors) {
+            const error = await checkResultsAgainstNextBlock(block, [ok], next).catch(e => e)
+            expect(error).toBeInstanceOf(SyncBlockRejectedError)
+            expect(error.message).toContain(`child of block ${HEIGHT}`)
+        }
     })
 })
 

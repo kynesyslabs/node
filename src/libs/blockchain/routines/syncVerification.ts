@@ -423,8 +423,9 @@ export function statusDisagreements(
  * remaining disagreement before the rows are stored: once N is stored its
  * statuses are final and its failure codes change only by repair.
  *
- * Only a next block that hashes to its own hash and builds on `block` is
- * compared; anything else is judged as a block on its own turn. It is not
+ * A next block that does not hash to its own hash or does not build on
+ * `block` is refused rather than skipped: skipping would let a peer store
+ * `block` unchecked by serving any block in the child's place. It is not
  * signature-checked yet (its committee depends on `block`), so a mismatch
  * rejects what this peer served, and nothing about this node's state.
  */
@@ -433,19 +434,16 @@ export async function checkResultsAgainstNextBlock(
     txs: Transaction[],
     next: Block | undefined,
 ): Promise<void> {
+    if (!next || !isForkActive(FINALITY_FORK, block.number + 1)) return
     if (
-        !next ||
         next.number !== block.number + 1 ||
-        !isForkActive(FINALITY_FORK, next.number) ||
-        next.content?.previousHash !== block.hash
-    ) {
-        return
-    }
-    if (
+        next.content?.previousHash !== block.hash ||
         Hashing.sha256(serializeBlockContent(next.content, next.number)) !==
-        next.hash
+            next.hash
     ) {
-        return
+        throw new SyncBlockRejectedError(
+            `block served as the child of block ${block.number} is not built on it`,
+        )
     }
 
     const committed = (next.content as unknown as Record<string, unknown>)
