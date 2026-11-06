@@ -79,6 +79,8 @@ export interface CoreConfig {
     /** How long an IP stays blocked after it exceeds a rate limit, in ms. */
     rateLimitBlockDurationMs: number
     mcpEnabled: boolean
+    /** WebRTC signaling server for instant messaging; consensus does not use it. */
+    signalingEnabled: boolean
     restore: boolean
     /**
      * Full genesis data hash (sha256 hex) the operator expects the network to
@@ -212,6 +214,8 @@ export interface MetricsConfig {
     enabled: boolean
     port: number
     host: string
+    /** When set, /metrics answers only `Authorization: Bearer <token>`. */
+    bearerToken: string
 }
 
 // --- System Diagnostics ---
@@ -220,6 +224,8 @@ export interface DiagnosticsConfig {
     minCpuSpeed: number
     minRam: number
     minDiskSpace: number
+    /** Path whose filesystem MIN_DISK_SPACE and demos_disk_free_bytes measure; "" means the working directory. */
+    diskSpacePath: string
     minNetworkDownloadSpeed: number
     minNetworkUploadSpeed: number
     networkTestFileSize: number

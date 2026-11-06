@@ -50,6 +50,16 @@ describe("assertSyncedNonceTrace", () => {
         expect(errors.length).toBeGreaterThan(0)
     })
 
+    it("logs a bounded number of lines however many accounts mismatch", () => {
+        const trace: Record<string, any> = {}
+        for (let i = 0; i < 500; i++) {
+            trace[`0x${i}`] = { startFilter: 0, projectedEnd: 1, startApply: 0, endApply: 1 }
+        }
+        assertSyncedNonceTrace(15, trace, {}, {})
+        expect(errors.length).toBeLessThanOrEqual(30)
+        expect(errors.join("\n").length).toBeLessThan(10_000)
+    })
+
     it("stays quiet when the trace matches", () => {
         const trace = {
             "0xaa": { startFilter: 1, projectedEnd: 2, startApply: 1, endApply: 2 },
@@ -71,6 +81,13 @@ describe("readNonceTrace", () => {
             expect(readNonceTrace({ nonceTrace: { "0xaa": { ...entry, startApply: bad } } })).toBeNull()
             expect(readNonceTrace({ nonceTrace: { "0xaa": { ...entry, endApply: bad } } })).toBeNull()
         }
+    })
+
+    it("drops a trace with more accounts than any block it checks could hold", () => {
+        const trace = (n: number) =>
+            Object.fromEntries(Array.from({ length: n }, (_, i) => [`0x${i}`, entry]))
+        expect(readNonceTrace({ nonceTrace: trace(5_000) })).toBeNull()
+        expect(readNonceTrace({ nonceTrace: trace(2_000) })).not.toBeNull()
     })
 
     it("drops a trace that is not a map of entries", () => {

@@ -52,6 +52,12 @@ import {
 import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
+import { isForkActive } from "@/forks/forkGates"
+import { getSharedState } from "@/utilities/sharedState"
+import {
+    chargedFeeMismatch,
+    shippedFeeMismatch,
+} from "@/libs/blockchain/validation/feeBinding"
 
 export type ApplyGasFeeSeparationResult =
     | { ok: true }
@@ -177,30 +183,25 @@ export async function applyGasFeeSeparation(
     // total would let a client skew the split (e.g. put everything in
     // network_fee, rpc_fee=0) and pass validation while the apply-time
     // distribution emits no RPC-fee block, making fee routing deterministically
-    // wrong (Greptile P1 #2). The SDK ships the same component split the node
-    // computes (network/rpc/additional), so a legit tx matches exactly; a
-    // skewed or underpaid one is rejected. A DEM number is ×1e9 to OS; an OS
-    // string is taken as-is.
-    const toOs = (v: unknown): bigint => {
-        if (typeof v === "string") return BigInt(v)
-        return BigInt(Math.round(Number(v ?? 0))) * 1_000_000_000n
-    }
-    const componentChecks: Array<[string, unknown, number]> = [
-        ["network_fee", shippedFee.network_fee, breakdown.network_fee],
-        ["rpc_fee", shippedFee.rpc_fee, breakdown.rpc_fee],
-        ["additional_fee", shippedFee.additional_fee, breakdown.additional_fee],
-    ]
-    for (const [name, shipped, computed] of componentChecks) {
-        const shippedOs = toOs(shipped)
-        const computedOs = BigInt(computed) * 1_000_000_000n
-        if (shippedOs !== computedOs) {
-            return {
-                ok: false,
-                message:
-                    `transaction_fee.${name} mismatch: shipped=${String(shipped)} ` +
-                    `(=${shippedOs} OS) but node computed ${computed} (=${computedOs} OS). ` +
-                    "Refusing — fee underpayment / forged or skewed fee split.",
-            }
+    // wrong (Greptile P1 #2). A native fee is charged at apply in ledger units
+    // as shipped, so it is compared on what apply deducts, as pool admission
+    // and apply compare it under feeBinding.
+    const mismatch =
+        (tx.content.type as string) === "native"
+            ? chargedFeeMismatch(
+                  shippedFee,
+                  breakdown,
+                  isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0),
+              )
+            : shippedFeeMismatch(shippedFee, breakdown)
+    if (mismatch) return { ok: false, message: mismatch }
+    // The rpc share of a native fee goes to the account the shipped fee names,
+    // and the SDK names none; a sender naming one would route it to itself.
+    if ((tx.content.type as string) === "native" && shippedFee.rpc_address) {
+        return {
+            ok: false,
+            message:
+                "transaction_fee names an rpc_address; the sender does not route the rpc share",
         }
     }
 

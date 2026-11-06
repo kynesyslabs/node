@@ -11,8 +11,14 @@ import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
-import { expectsNonceEdit, verifyAdmissionEdits } from "./validation/editBinding"
+import {
+    admissionReads,
+    expectsNonceEdit,
+    loadAdmissionReads,
+    verifyAdmissionEdits,
+} from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
+import { clientTxTypeRefusal } from "./validation/txTypes"
 import { admissionRefusal } from "./validation/postgresStorable"
 import {
     IDENTITY_ADMISSION_TIMEOUT_MS,
@@ -509,6 +515,12 @@ export default class Mempool {
         })
         if (!admission.ok) {
             return { accepted: false, reason: `${admission.code}: ${admission.reason}` }
+        }
+
+        // Node-authored types reach peers through the merge, never as gossip.
+        const typeRefusal = clientTxTypeRefusal(tx)
+        if (typeRefusal) {
+            return { accepted: false, reason: typeRefusal }
         }
 
         // handleGCR applies gcr_edits of any type as written, so every type
@@ -1054,8 +1066,13 @@ export default class Mempool {
         // comparison carries them.
         {
             const editVerifiedTransactions: Transaction[] = []
+            // The tip and the validator set are read once for the merge. A
+            // failed read fails the merge rather than drop transactions the
+            // peers keep.
+            const reads = admissionReads()
+            await loadAdmissionReads(validTransactions, reads)
             for (const tx of validTransactions) {
-                const edits = await verifyAdmissionEdits(tx)
+                const edits = await verifyAdmissionEdits(tx, reads)
                 if (!edits.ok) {
                     log.error(
                         `[Mempool.receive] Rejecting tx ${tx.hash}: ${edits.reason}`,

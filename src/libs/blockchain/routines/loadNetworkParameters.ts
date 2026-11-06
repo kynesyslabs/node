@@ -4,6 +4,10 @@ import { getSharedState } from "@/utilities/sharedState"
 import { getGenesisNetworkParameters } from "@/features/networkUpgrade/constants"
 import type { NetworkParameters } from "@/features/networkUpgrade/types"
 import log from "@/utilities/logger"
+import { governedMinValidatorStake } from "@/features/staking/chainMinStake"
+
+/** The parameters of the last load that read the upgrade rows. */
+let loadedFromChain: NetworkParameters | null = null
 
 // Precedence: governance (DB active rows) > env (Config) > hardcoded fallback.
 // Folds active upgrades onto env-resolved genesis in activation order;
@@ -18,6 +22,7 @@ export async function loadNetworkParameters(
         : never,
 ): Promise<NetworkParameters> {
     let active: NetworkUpgrade[] = []
+    let readOk = false
     try {
         let resolvedRepo = repo as
             | import("typeorm").Repository<NetworkUpgrade>
@@ -30,14 +35,17 @@ export async function loadNetworkParameters(
             where: { status: "active" },
             order: { effectiveAtBlock: "ASC", proposalId: "ASC" },
         })
+        readOk = true
     } catch (e) {
-        // Both datasource acquisition and the find() are inside this try
-        // so a missing/uninitialised datasource also falls through to
-        // genesis defaults instead of bubbling.
+        // Fees and their split are checked and routed at apply, so a failed
+        // read must not swap the chain's values for the genesis ones on this
+        // node alone: once loaded, they stay until a read succeeds. Before
+        // that (boot without a datasource) genesis defaults apply.
         log.error(
             "NETWORK_PARAMETERS",
-            `Failed to read active upgrades; falling back to genesis defaults: ${(e as Error).message}`,
+            `Failed to read active upgrades; ${loadedFromChain ? "keeping the loaded parameters" : "falling back to genesis defaults"}: ${(e as Error).message}`,
         )
+        if (loadedFromChain) return loadedFromChain
     }
 
     const genesis = getGenesisNetworkParameters()
@@ -70,7 +78,13 @@ export async function loadNetworkParameters(
         params.shardSize = getSharedState.shardSize
     }
 
+    if (readOk) loadedFromChain = params
     getSharedState.networkParameters = params
+    // A failed read says nothing about the minimum, so the last one read
+    // stands rather than the default.
+    if (readOk) {
+        getSharedState.governedMinValidatorStake = governedMinValidatorStake(active)
+    }
     // Mirror onto flat fields read by calculateCurrentGas.
     ;(getSharedState as unknown as { rpcFee: number }).rpcFee = params.rpcFee
     ;(getSharedState as unknown as { networkFee: number }).networkFee =

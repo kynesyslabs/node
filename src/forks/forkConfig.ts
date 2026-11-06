@@ -277,6 +277,81 @@ export type FinalityProofsConfig = BaseForkConfig
 export type IdentityCarryoverConfig = BaseForkConfig
 
 /**
+ * `stakeApplyChecks` fork: the staking rules hold where the stake is
+ * applied, not only at the node that took the transaction in.
+ *
+ * At apply, from the activation height:
+ *  - a stake is taken from the sender's balance (refused when the balance
+ *    does not cover it) and recorded as bonded; exit pays the bonded amount
+ *    back, once, so a stake that was never debited is never paid out;
+ *  - entering the validator set, as a new validator or one that exited,
+ *    takes at least the minimum stake and a connection URL;
+ *  - an unstake must come from an active validator with no unstake under
+ *    way, and is refused when it would leave fewer active validators than
+ *    the committee floor, below which no block is forged.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before. A mainnet genesis
+ * sets 0. No payload beyond the base.
+ */
+export type StakeApplyChecksConfig = BaseForkConfig
+
+/**
+ * `nativeSendBinding` fork: a native send pays the recipient and the amount
+ * its signed body names. The payment is applied from the native payload's
+ * args, while explorers, receipts and the RPC balance check read
+ * `content.to` and `content.amount`; nothing compared them, so a sender
+ * could sign a receipt for one payee and pay another.
+ *
+ * At admission (gossip ingest, consensus merge) and at apply, from the
+ * activation height, a native send is refused unless `args[0]` is
+ * `content.to` and `args[1]` pays what `content.amount` names. Amounts are
+ * compared in ledger units: args are paid as written, while a body number is
+ * DEM after osDenomination, as the signature hash reads it.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
+ * the base.
+ */
+export type NativeSendBindingConfig = BaseForkConfig
+
+/**
+ * `canonicalAddresses` fork: account keys are lowercase hex. The ledger keys
+ * an account by the exact string, so `0xAB…` and `0xab…` are two accounts,
+ * and a transfer to an upper-case spelling lands in one no wallet reads.
+ *
+ * At admission and at apply, from the activation height, a transaction is
+ * refused when its sender, the recipient of a native send, or the account of
+ * any balance edit it carries is a hex address with an upper-case digit.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
+ * the base.
+ */
+export type CanonicalAddressesConfig = BaseForkConfig
+
+/**
+ * `feeBinding` fork: the fee a native transaction carries is the one the
+ * network charges. Apply derives the fee edits from the shipped
+ * `transaction_fee`, which only the RPC confirm step compared with the
+ * network's fee, so a transaction gossiped or merged straight into a pool
+ * could pay less, or route the rpc share to an account of its choosing.
+ *
+ * At admission and at apply, from the activation height, and while
+ * `gasFeeSeparation` is active, a native transaction is refused unless each
+ * shipped fee component charges what the network computes and it names no
+ * `rpc_address`. Compared on what apply deducts: apply charges a component
+ * in ledger units as written, so after osDenomination a DEM number would pay
+ * a billionth of the fee its hash commits to.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
+ * the base.
+ */
+export type FeeBindingConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -292,6 +367,39 @@ export type IdentityCarryoverConfig = BaseForkConfig
  * later height-pinned activation turns it on. No payload beyond the base.
  */
 export type NetworkGovernanceConfig = BaseForkConfig
+
+/**
+ * `txTypeAllowList` fork: a transaction is admitted to a pool by the
+ * consensus merge and applied by a block only when its type is one the node
+ * implements (`BLOCK_TX_TYPES` in `libs/blockchain/validation/txTypes.ts`).
+ *
+ * Before it, the SDK gave a transaction of any type the universal gas and
+ * nonce edits, so an escrow, contract, token or made-up type was applied as a
+ * fee and a nonce with its own effect silently dropped.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before; a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type TxTypeAllowListConfig = BaseForkConfig
+
+/**
+ * `instantMessagingBinding` fork: an `instantMessaging` transaction without
+ * edits, the form the signalling server stores a message in, is merged and
+ * applied only when every signer field names a validator staked at the tip.
+ *
+ * Before it, that form paid no fee and spent no nonce whoever signed it, so
+ * any key could have such transactions merged into blocks and applied for
+ * free. A message that carries the universal gas and nonce edits pays like
+ * any transaction and is not affected.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before; a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type InstantMessagingBindingConfig = BaseForkConfig
 
 /**
  * `blockCaps` fork: bounds what one block takes from the pool and what one
@@ -355,6 +463,11 @@ export type ForkConfig =
     | FinalityProofsConfig
     | IdentityCarryoverConfig
     | NetworkGovernanceConfig
+    | TxTypeAllowListConfig
+    | InstantMessagingBindingConfig
+    | NativeSendBindingConfig
+    | CanonicalAddressesConfig
+    | FeeBindingConfig
     | BlockCapsConfig
 
 /**
@@ -378,7 +491,13 @@ export type ForkName =
     | "commitLock"
     | "finalityProofs"
     | "identityCarryover"
+    | "stakeApplyChecks"
     | "networkGovernance"
+    | "txTypeAllowList"
+    | "instantMessagingBinding"
+    | "nativeSendBinding"
+    | "canonicalAddresses"
+    | "feeBinding"
     | "blockCaps"
 
 /**
@@ -401,7 +520,13 @@ export interface ForkConfigByName {
     commitLock: CommitLockConfig
     finalityProofs: FinalityProofsConfig
     identityCarryover: IdentityCarryoverConfig
+    stakeApplyChecks: StakeApplyChecksConfig
     networkGovernance: NetworkGovernanceConfig
+    txTypeAllowList: TxTypeAllowListConfig
+    instantMessagingBinding: InstantMessagingBindingConfig
+    nativeSendBinding: NativeSendBindingConfig
+    canonicalAddresses: CanonicalAddressesConfig
+    feeBinding: FeeBindingConfig
     blockCaps: BlockCapsConfig
 }
 
@@ -598,6 +723,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Genesis imports user data without balances, imported identities pay no " +
             "first-link award, and a web2 unlink removes one platform account by userId.",
     },
+    stakeApplyChecks: {
+        // Dormant by default: it changes what a stake, unstake and exit do to
+        // balances and validator rows, and a missing genesis entry hydrates
+        // from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Apply debits a stake from the balance and refunds it once at exit, checks the " +
+            "minimum stake on entry, and refuses an unstake below the committee floor.",
+    },
     networkGovernance: {
         // Dormant by default and at launch: a missing genesis entry hydrates
         // from here, so governance stays off until a height is agreed.
@@ -605,6 +739,45 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         description:
             "Admit and apply networkUpgrade and networkUpgradeVote transactions, each " +
             "governance edit bound to the account that signed it.",
+    },
+    txTypeAllowList: {
+        // Dormant by default: a missing genesis entry hydrates from here, so a
+        // running chain keeps applying its history as before.
+        activationHeight: null,
+        description:
+            "Admit and apply only the transaction types the node implements; escrow, " +
+            "contract, token and unknown types are refused instead of applied as a fee.",
+    },
+    instantMessagingBinding: {
+        // Dormant by default: a missing genesis entry hydrates from here, so a
+        // running chain keeps applying its history as before.
+        activationHeight: null,
+        description:
+            "A fee-free instantMessaging transaction (no edits) is merged and applied only " +
+            "when a validator staked at the tip signed it.",
+    },
+    nativeSendBinding: {
+        // Dormant by default: it changes which transactions a block applies,
+        // and a missing genesis entry hydrates from here. A mainnet genesis
+        // sets 0.
+        activationHeight: null,
+        description:
+            "A native send pays the recipient and amount its signed body names: its args " +
+            "must equal content.to and content.amount.",
+    },
+    canonicalAddresses: {
+        // Dormant by default, as above. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Accounts are keyed by lowercase hex: a sender, recipient or balance edit " +
+            "account spelled with upper-case digits is refused.",
+    },
+    feeBinding: {
+        // Dormant by default, as above. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A native transaction's shipped fee equals the network fee and names no " +
+            "rpc_address, checked at admission and apply, not only at RPC confirm.",
     },
     blockCaps: {
         // Dormant by default: it changes which txs a block contains, and a
@@ -640,7 +813,13 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
+        stakeApplyChecks: { ...DEFAULT_FORK_CONFIG.stakeApplyChecks },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
+        txTypeAllowList: { ...DEFAULT_FORK_CONFIG.txTypeAllowList },
+        instantMessagingBinding: { ...DEFAULT_FORK_CONFIG.instantMessagingBinding },
+        nativeSendBinding: { ...DEFAULT_FORK_CONFIG.nativeSendBinding },
+        canonicalAddresses: { ...DEFAULT_FORK_CONFIG.canonicalAddresses },
+        feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
         blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
     }
 }

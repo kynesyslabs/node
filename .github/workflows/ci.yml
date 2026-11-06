@@ -37,9 +37,10 @@ jobs:
       - run: bun run test:consensus
 
   rehearsal-drill:
-    # Unit tests for the quorum-loss drills' pass criteria and inputs, plus
-    # a bundle of the drill itself so a broken import fails here. The drill needs
-    # Docker and a 4-node devnet, so it is not run in CI.
+    # Unit tests for the quorum-loss drills' pass criteria and inputs, the
+    # bash glue of the halt/ride drills against stubs, plus a bundle of the
+    # drill itself so a broken import fails here. The drills need Docker and
+    # a devnet of 4 to 13 nodes, so they are not run in CI.
     name: Rehearsal Drill Checks
     runs-on: ubuntu-latest
     steps:
@@ -51,6 +52,9 @@ jobs:
       # Every rehearsal unit test: the halt/ride judge and its fixtures, the
       # drill genesis and the input staging
       - run: bun test testing/forks/rehearsal/
+      # run.sh's lockstep wait, database reads, postgres gate and judge hand-off
+      # against a fake curl/docker, including run.sh executed from the top
+      - run: bash testing/devnet/quorum-drills/lockstep-stub.test.sh
       # bun build has no --no-emit (it is ignored and the whole bundle lands
       # in the log); write it to a scratch dir instead. A broken import still
       # fails the step.

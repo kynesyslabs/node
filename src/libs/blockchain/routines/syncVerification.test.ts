@@ -238,10 +238,12 @@ describe("verifyNativeTablesHashes", () => {
             })
         })
 
-        it("applies a block whose storage root differs, counting and logging the difference", async () => {
-            await verifyNativeTablesHashes(
+        it("refuses a block whose storage root differs, counting the difference", async () => {
+            const rejection = await verifyNativeTablesHashes(
                 makeBlock([], { native_subnets_txs: "a", native_storage_programs: "peer-root" }),
-            )
+            ).catch(e => e)
+            expect(rejection).toBeInstanceOf(SyncBlockRejectedError)
+            expect(rejection.message).toContain("native_storage_programs")
             expect(countStorageRootSyncMismatch).toHaveBeenCalledTimes(1)
         })
 
@@ -252,13 +254,13 @@ describe("verifyNativeTablesHashes", () => {
             expect(countStorageRootSyncMismatch).not.toHaveBeenCalled()
         })
 
-        it("still rejects another table that differs, naming only that table", async () => {
+        it("names every table that differs", async () => {
             const rejection = await verifyNativeTablesHashes(
                 makeBlock([], { native_subnets_txs: "b", native_storage_programs: "peer-root" }),
             ).catch(e => e)
             expect(rejection).toBeInstanceOf(SyncBlockRejectedError)
             expect(rejection.message).toContain("native_subnets_txs")
-            expect(rejection.message).not.toContain("native_storage_programs")
+            expect(rejection.message).toContain("native_storage_programs")
         })
 
         it("rejects a storage root present on one side only: the fork schedules disagree", async () => {
@@ -587,26 +589,36 @@ describe("results checked against the next block", () => {
         ).resolves.toBeUndefined()
     })
 
-    it("does not judge a next block that is not the one built on this block", async () => {
+    it("has nothing to judge without a next block, or before the fork", async () => {
         const ok = makeTx(alice, { status: "confirmed" })
         const block = makeBlock([ok])
         const wrong = "0".repeat(64)
 
-        // Absent, before the fork, on another parent, or not hashing to itself
-        const unjudged = [
-            undefined,
-            { ...nextBlock(block, wrong), hash: "forged" },
-            nextBlock(block, wrong, { previousHash: "elsewhere" }),
-        ]
-        for (const next of unjudged) {
-            await expect(
-                checkResultsAgainstNextBlock(block, [ok], next),
-            ).resolves.toBeUndefined()
-        }
+        await expect(
+            checkResultsAgainstNextBlock(block, [ok], undefined),
+        ).resolves.toBeUndefined()
         getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 2
         await expect(
             checkResultsAgainstNextBlock(block, [ok], nextBlock(block, wrong)),
         ).resolves.toBeUndefined()
+    })
+
+    it("refuses a next block that is not the one built on this block, instead of skipping the check", async () => {
+        const ok = makeTx(alice, { status: "confirmed" })
+        const block = makeBlock([ok])
+        const wrong = "0".repeat(64)
+
+        // Not hashing to itself, on another parent, or at another height
+        const impostors = [
+            { ...nextBlock(block, wrong), hash: "forged" },
+            nextBlock(block, wrong, { previousHash: "elsewhere" }),
+            { ...nextBlock(block, wrong), number: HEIGHT + 2 },
+        ]
+        for (const next of impostors) {
+            const error = await checkResultsAgainstNextBlock(block, [ok], next).catch(e => e)
+            expect(error).toBeInstanceOf(SyncBlockRejectedError)
+            expect(error.message).toContain(`child of block ${HEIGHT}`)
+        }
     })
 })
 

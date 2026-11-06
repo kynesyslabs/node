@@ -21,12 +21,17 @@ import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { signValidityData } from "../validation/validityData"
 import { checkTxAdmissible } from "../validation/txAdmission"
+import { clientTxTypeRefusal } from "../validation/txTypes"
 import { isForkActive } from "@/forks"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import { normalizePubkey } from "../gcr/handleGCR"
 import { expectsNonceEdit } from "../validation/editBinding"
+import {
+    nativeSendRefusal,
+    nonCanonicalAddressRefusal,
+} from "../validation/nativeValueRules"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -76,6 +81,15 @@ export async function confirmTransaction(
         return validityData
     }
 
+    const typeRefusal = clientTxTypeRefusal(tx)
+    if (typeRefusal) {
+        validityData.data.message =
+            "[Tx Validation] [TYPE ERROR] " + typeRefusal + "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
     // Check if the transaction status is set
     if (tx.status) {
         validityData.data.message =
@@ -84,6 +98,20 @@ export async function confirmTransaction(
             ">" +
             tx.status +
             "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    // Refused here whatever the forks say: the payment a client is told it
+    // made is the one in content.to and content.amount, and an account keyed
+    // by an upper-case spelling is one no wallet reads.
+    const valueRefusal =
+        nonCanonicalAddressRefusal(tx) ??
+        nativeSendRefusal(tx, isForkActive("osDenomination", referenceBlock))
+    if (valueRefusal) {
+        validityData.data.message =
+            "[Tx Validation] [STRUCTURE ERROR] " + valueRefusal + "\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
