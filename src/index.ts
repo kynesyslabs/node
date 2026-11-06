@@ -249,10 +249,7 @@ function parseL2PSMessagingPort(raw: string | undefined): number {
 
 // ANCHOR Checking the host clock
 async function checkClock() {
-    await checkClockAtBoot({
-        production: getSharedState.PROD,
-        toleranceSeconds: getSharedState.getBlockTimestampTolerance(),
-    })
+    await checkClockAtBoot({ production: getSharedState.PROD })
     startClockProbe()
     log.info("[SYNC] Network timestamp: " + getNetworkTimestamp())
 }
