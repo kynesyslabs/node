@@ -54,7 +54,7 @@ tests:
               severity: none
             exp_annotations:
               summary: Alerting pipeline heartbeat
-              description: This alert is always firing. If the external watchdog stops receiving it, the monitoring stack or its notification path is broken.
+              description: This alert is always firing. If the external watchdog stops receiving it, Prometheus, Alertmanager or the dead-man receiver path is broken. It does not prove that the paging or Slack webhooks work.
       - eval_time: 3h
         alertname: DeadMansSwitch
         exp_alerts:
@@ -62,4 +62,4 @@ tests:
               severity: none
             exp_annotations:
               summary: Alerting pipeline heartbeat
-              description: This alert is always firing. If the external watchdog stops receiving it, the monitoring stack or its notification path is broken.
+              description: This alert is always firing. If the external watchdog stops receiving it, Prometheus, Alertmanager or the dead-man receiver path is broken. It does not prove that the paging or Slack webhooks work.

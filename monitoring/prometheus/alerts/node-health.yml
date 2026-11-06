@@ -108,7 +108,9 @@ groups:
 
   # Dead-man's switch: always firing on purpose. Alertmanager routes it to the
   # `deadman` receiver, which should be an external watchdog that pages when the
-  # heartbeat STOPS, so a dead Prometheus, Alertmanager or notification path is noticed.
+  # heartbeat STOPS, so a dead Prometheus, Alertmanager or dead-man receiver path is
+  # noticed. It does NOT test the `paging` or `slack` webhooks: send a test alert to each
+  # after filling in the secrets (docs/runbooks/mainnet-monitoring.md, setup step 3).
   - name: demos-meta
     rules:
       - alert: DeadMansSwitch
@@ -117,4 +119,4 @@ groups:
           severity: none
         annotations:
           summary: Alerting pipeline heartbeat
-          description: This alert is always firing. If the external watchdog stops receiving it, the monitoring stack or its notification path is broken.
+          description: This alert is always firing. If the external watchdog stops receiving it, Prometheus, Alertmanager or the dead-man receiver path is broken. It does not prove that the paging or Slack webhooks work.

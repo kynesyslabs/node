@@ -63,7 +63,15 @@ monitoring host can scrape it; until then `NodeDown` fires for that node.
    container user can read them. Compose mounts them at `/run/secrets/` and
    Alertmanager reads them through `api_url_file` / `url_file`.
 3. `cd monitoring && docker compose up -d`. Alertmanager listens on
-   `127.0.0.1:9093` only.
+   `127.0.0.1:9093` only. Then send a test alert to each receiver and confirm
+   that a person sees it (the Slack message, the page, and the heartbeat at the
+   dead-man service): the heartbeat does not test the `slack` or `paging`
+   webhooks, and a placeholder URL left in a secret file is not detected at
+   start. Use `amtool alert add` against the running Alertmanager, one alert per
+   route (see "Testing the routing" below for the full commands):
+   `docker exec demos-alertmanager amtool alert add RoutingTest severity=critical instance=test --alertmanager.url=http://localhost:9093`
+   (critical reaches Slack and paging) and the same with `severity=warning`
+   (Slack only). Silence `RoutingTest` afterwards.
 4. `scripts/check-monitoring.sh` (needs `promtool` and `amtool`) checks the
    config, runs the rule unit tests in `monitoring/prometheus/tests/` and
    checks that each severity reaches the right receiver.
@@ -96,7 +104,7 @@ loaded from the same directory and use the same routing. Among them:
 | MempoolStuck | transactions pending and none included in a stored block for 10 min | warning | Block production has stalled while the pool fills. |
 | DiskSpaceLow | under 20 GiB free on the filesystem of `DISK_SPACE_PATH` (Docker: the `/app/data` volume; otherwise the working directory), held 10 min | warning | Prune logs, snapshots and Docker build cache, or grow the volume. |
 | DiskSpaceCritical | under 5 GiB free, held 2 min | critical | The node refuses to start below `MIN_DISK_SPACE` (default 5 GiB) and Postgres fails writes on a full disk. Neither alert sees the Postgres volume when it is on another filesystem; watch it through node-exporter's `node_filesystem_avail_bytes`. |
-| DeadMansSwitch | always firing | none | Heartbeat to the `deadman` receiver. If the external watchdog stops receiving it, Prometheus, Alertmanager or the notification path is down: check the monitoring host first. |
+| DeadMansSwitch | always firing | none | Heartbeat to the `deadman` receiver. It proves only that Prometheus, Alertmanager and the path to the dead-man receiver work. If the external watchdog stops receiving it, one of those is down: check the monitoring host first. It does **not** prove that the `paging` or `slack` webhooks work: a wrong or forgotten URL there fails silently while the heartbeat stays healthy (see the test alert in setup step 3). |
 
 The rules have promtool unit tests in `monitoring/prometheus/tests/`; run
 `promtool test rules monitoring/prometheus/tests/*.test.yml` after editing them.
@@ -126,16 +134,26 @@ Only metrics the node exports today are used.
    `ForeignSignature` and `PrecommitEquivocation`: every copy of the key found
    and stopped, see `validator-key.md`).
 2. Acknowledge: add an Alertmanager silence for the alert and instance
-   (`amtool silence add alertname=ConflictingBlock instance=validator-2 --comment="<ticket>"`).
-   This stops the pages; the alert stays visible in Prometheus.
+   (`amtool silence add alertname=ConflictingBlock instance=validator-2 --duration=7d --comment="<ticket>"`).
+   `amtool silence add` lasts 1 hour unless told otherwise, and the alert keeps
+   firing for up to 7 days (the critical route repeats hourly), so always pass
+   `--duration=7d` or an explicit `--end`. This stops the pages; the alert stays
+   visible in Prometheus.
 3. Clear: at least 10 minutes after the last event, delete the recorded series
-   for that instance through the Prometheus admin API, which is off by default
-   (start Prometheus with `--web.enable-admin-api` for the occasion, then remove
-   the flag):
-   `POST /api/v1/admin/tsdb/delete_series?match[]=demos:conflicting_block:increase10m{instance="validator-2"}`.
+   for that instance through the Prometheus admin API. The admin API is **not
+   enabled by default**, and `monitoring/docker-compose.yml` does not enable it:
+   clearing the series needs Prometheus restarted with `--web.enable-admin-api`
+   (remove the flag again afterwards). `curl` needs `-g` and `--data-urlencode`
+   because of the `{}` and `"` in the selector:
+   `curl -g -X POST http://127.0.0.1:9091/api/v1/admin/tsdb/delete_series --data-urlencode 'match[]=demos:conflicting_block:increase10m{instance="validator-2"}'`.
    The series name is the one in the table below for the alert. The counter
    itself is not touched, so the evidence stays in the TSDB.
 4. Otherwise the alert expires by itself 7 days after the last event.
+
+The latch lives only in the Prometheus data. Retention must be at least 7 days
+(`PROMETHEUS_RETENTION`, 15 days by default) and the Prometheus data volume
+(`prometheus_data`) must persist; a shorter retention shortens the latch, and a
+wiped volume loses it.
 
 | Alert | Recorded series to delete |
 |-------|---------------------------|

@@ -1,9 +1,11 @@
 # promtool unit tests for the demos-consensus-latched group in alerts/consensus.yml:
 # BlockHashMismatch, ConflictingBlock, ForeignSignature and PrecommitEquivocation must
-# keep firing after the counter stops moving, across a node restart and a lost scrape,
-# and expire only 7 days after the last event. ForeignSignature and PrecommitEquivocation
-# are double-sign signals: each has a case for firing on the event, still firing 1 h
-# later, and not firing when no event happened. Run: scripts/check-monitoring.sh
+# keep firing after the counter stops moving, and expire only 7 days after the last event.
+# In all four cases the series is: the event at minute 10, a node restart at minute 20
+# (counter back to 0) and no scrape at all from minute 30 on, and each alert is checked
+# to still fire 1 h or 2 h and 6 d later and to be gone 7 d 30 m later. ForeignSignature and PrecommitEquivocation are
+# double-sign signals: each also has a case for not firing when no event happened.
+# Run: scripts/check-monitoring.sh
 rule_files:
   - ../alerts/consensus.yml
 
@@ -14,9 +16,10 @@ evaluation_interval: 5m
 tests:
   - interval: 1m
     input_series:
-      # validator-1: 5 mismatches at minute 10, then quiet (the counter just stays at 5).
+      # validator-1: 5 mismatches at minute 10, the node is restarted at minute 20
+      # (counter back to 0) and from minute 30 it is not scraped at all.
       - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-1"}'
-        values: '0x9 5x12000'
+        values: '0x9 5x9 0x9 _x12000'
       # validator-2: a small disagreement (2) that stays under the "more than 3 in 10 m" bar.
       - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-2"}'
         values: '0x9 2x12000'
@@ -39,7 +42,8 @@ tests:
             exp_annotations:
               summary: "Peers disagreed with this node's candidate block hash (latched)"
               description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
-      # The 10 m window is long past (the old rule would have resolved by now): still firing.
+      # The 10 m window is long past (the old rule would have resolved by now), the counter
+      # was reset by the restart and the target is no longer scraped: still firing.
       - eval_time: 1h
         alertname: BlockHashMismatch
         exp_alerts:
@@ -119,9 +123,10 @@ tests:
 
   - interval: 1m
     input_series:
-      # validator-1: a foreign signature at minute 10, then quiet (the counter stays at 1).
+      # validator-1: a foreign signature at minute 10, the node is restarted at minute 20
+      # (counter back to 0) and from minute 30 it is not scraped at all.
       - series: 'demos_foreign_signature_total{job="demos-node",instance="validator-1"}'
-        values: '0x9 1x12000'
+        values: '0x9 1x9 0x9 _x12000'
       # validator-2: never saw one.
       - series: 'demos_foreign_signature_total{job="demos-node",instance="validator-2"}'
         values: '0x12000'
@@ -141,8 +146,9 @@ tests:
             exp_annotations:
               summary: "Another process is signing with this validator's key (latched)"
               description: "validator-1 saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
-      # The condition has cleared (counter flat for 50 m, the 10 m window is empty; the
-      # old rule would have resolved at minute ~21): still firing 1 h and 6 d later.
+      # The condition has cleared (the 10 m window is empty; the old rule would have
+      # resolved at minute ~21), the counter was reset by the restart and the target is no
+      # longer scraped: still firing 1 h and 6 d later.
       - eval_time: 1h
         alertname: ForeignSignature
         exp_alerts:

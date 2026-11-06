@@ -94,11 +94,15 @@ groups:
   #
   # Clearing (see docs/runbooks/mainnet-monitoring.md, "Clearing a latched alert"):
   #   1. Acknowledge: create an Alertmanager silence for the alert and instance, with the
-  #      ticket in the comment. The alert stays visible in Prometheus as firing.
+  #      ticket in the comment and --duration=7d (amtool silences last 1 h by default,
+  #      and the alert keeps firing, and paging every hour, for up to 7 d). The alert
+  #      stays visible in Prometheus as firing.
   #   2. Clear: once the fork is resolved and at least 10 m after the last event, delete
-  #      the recorded series for that instance (admin API, off by default), e.g.
-  #      match[]=demos:conflicting_block:increase10m{instance="validator-2"}. The counter
-  #      itself is left alone, so the evidence stays in the TSDB.
+  #      the recorded series for that instance. This needs the Prometheus admin API,
+  #      which is NOT enabled by default: restart Prometheus with --web.enable-admin-api.
+  #      e.g. curl -g -X POST http://127.0.0.1:9091/api/v1/admin/tsdb/delete_series
+  #      --data-urlencode 'match[]=demos:conflicting_block:increase10m{instance="validator-2"}'
+  #      The counter itself is left alone, so the evidence stays in the TSDB.
   #   3. Otherwise it expires by itself 7 d after the last event.
   # Only metrics the node exports today are used. ForeignSignature and
   # PrecommitEquivocation are double-sign signals and are latched the same way, with
