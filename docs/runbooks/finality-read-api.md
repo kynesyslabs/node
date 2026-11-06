@@ -38,19 +38,25 @@ network. Its trust inputs:
   carry, so that case also answers `indeterminate` unless `rules.committee`
   is given.
 
-Every refusal except the `400` of `getTransactionStatus` names its reason in
-`extra.reason`; what the body carries depends on the refusal:
+The finality calls name a refusal's reason in `extra.reason`, except the
+`400` of `getTransactionStatus`. The storage program reads
+(`getStorageProgram` and every other storage program read except
+`getStorageProof` and `getStorageProgramLimits`) use another envelope and
+name it in the body's `errorCode`. What the body carries
+depends on the refusal:
 
 | Refusal | Body | `extra` |
 |---|---|---|
 | 400, 404, 409, 410, 503 and `500 root_mismatch` of the proof, segment, set, identity and storage calls | `{ error: <reason>, ... }` with the fields the call adds (`head`, `blockNumber`, `committedIn`, `retryAfterSeconds`, ...) | `{ reason }` |
 | `500 content_unrecoverable` | `{ error: "content_unrecoverable", blockNumber, txHash? }` | `{ reason, error }` |
-| `500 lookup_failed` (any call) | `{ error: "INTERNAL_ERROR" }` (`getFinalizedHead` adds `nodeSynced: false`); the reason is only in `extra` | `{ reason: "lookup_failed", error }` |
+| `500 lookup_failed` (any finality call) | `{ error: "INTERNAL_ERROR" }` (`getFinalizedHead` adds `nodeSynced: false`); the reason is only in `extra` | `{ reason: "lookup_failed", error }` |
 | `getTransactionStatus` 404 / 503 | `{ state: "unknown", checkedThroughBlock }`, no `error` | `{ reason: "not_found" \| "node_not_synced" }` |
 | `getTransactionStatus` 400 | `{ error: <message> }` | none |
 | `getFinalizedHead` 503 | the head fields all `null`, `nodeSynced: false` | `{ reason: "node_not_synced" }` |
+| `getStorageProgram` and the other storage program reads: 400, 403, 500 | `{ error: <message>, errorCode }`, `errorCode` one of `INVALID_REQUEST`, `PERMISSION_DENIED`, `INTERNAL_ERROR` (the field reads add `INVALID_FIELD_TYPE` and a 404 `FIELD_NOT_FOUND`) | `""` |
 
-Read `extra.reason` to tell refusals apart. `404 not_found`,
+Read `extra.reason` to tell refusals of the finality calls apart, and
+`errorCode` for the storage program reads. `404 not_found`,
 `500 lookup_failed` and `503 node_not_synced` are never merged.
 
 ## Pin the network: `getChainIdentity`
@@ -131,6 +137,10 @@ verifyTransactionProof(proof, trustedSet, rules, {
   When `to` or `amount` is expected, the top-level `to` and `amount`, where
   present, must equal the args, and `gcr_edits` must hold a balance `add`
   (not a rollback) of that amount to that account; otherwise `invalid`.
+  The args stay as signed while the top-level amount and the edits are in
+  the wire shape, so the args amount is read as edit binding reads it: once
+  `osDenomination` applies, a number is DEM (`5` pays `"5000000000"` OS) and
+  a string is OS; before it, a string is OS and becomes DEM.
   For any other type they are the top-level fields.
 - Without `tx` (an older node) and no expectations, the verdict is as before.
   Expecting a field of a proof without `tx` is `indeterminate`.
