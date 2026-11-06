@@ -7,8 +7,10 @@ import { readFileSync } from "fs"
 import { join } from "path"
 
 const ROOT = join(import.meta.dir, "..", "..")
+// Bun.YAML exists at runtime but not in the pinned bun-types.
+const YAML = (Bun as unknown as { YAML: { parse(text: string): unknown } }).YAML
 const compose = (file: string) =>
-    Bun.YAML.parse(readFileSync(join(ROOT, file), "utf8")) as {
+    YAML.parse(readFileSync(join(ROOT, file), "utf8")) as {
         services: Record<string, any>
     }
 
