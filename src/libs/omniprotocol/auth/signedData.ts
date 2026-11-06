@@ -1,0 +1,25 @@
+import { keccak_256 } from "@noble/hashes/sha3.js"
+
+/** Separates these signatures from anything else the node key signs. */
+const OMNI_AUTH_DOMAIN = Buffer.from("DEMOS_OMNI_AUTH_V2", "utf8")
+
+/**
+ * Bytes signed under SIGN_TIMESTAMPED_PAYLOAD_HASH, shared by the sender and
+ * the verifier so the two cannot drift apart.
+ */
+export function timestampedSignedData(
+    opcode: number,
+    sequence: number,
+    timestamp: number,
+    payload: Buffer,
+): Buffer {
+    const fixed = Buffer.allocUnsafe(1 + 4 + 8)
+    fixed.writeUInt8(opcode, 0)
+    fixed.writeUInt32BE(sequence, 1)
+    fixed.writeBigUInt64BE(BigInt(timestamp), 5)
+    return Buffer.concat([
+        OMNI_AUTH_DOMAIN,
+        fixed,
+        Buffer.from(keccak_256(payload)),
+    ])
+}

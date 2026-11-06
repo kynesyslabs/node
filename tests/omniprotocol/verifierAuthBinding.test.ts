@@ -5,9 +5,11 @@
  * modes that do not cover the payload (SIGN_PUBKEY, SIGN_MESSAGE_ID,
  * SIGN_MESSAGE_ID_TIMESTAMP) before doing any signature work, because such a
  * signature is a static replayable bearer token that authorises any payload
- * for the claimed identity. Payload-binding modes (SIGN_FULL_PAYLOAD,
- * SIGN_MESSAGE_ID_PAYLOAD_HASH) must pass the mode gate (and then be subject
- * to the normal signature check).
+ * for the claimed identity. Modes that bind the payload but not the
+ * timestamp (SIGN_FULL_PAYLOAD, SIGN_MESSAGE_ID_PAYLOAD_HASH) are rejected
+ * too: a captured frame could be re-dated and replayed. Only
+ * SIGN_TIMESTAMPED_PAYLOAD_HASH passes the mode gate (and is then subject to
+ * the normal signature check).
  *
  * The mode gate runs FIRST (before timestamp + signature), so these tests use
  * a dummy signature: a non-binding mode is rejected for the mode reason; a
@@ -72,11 +74,10 @@ const NON_BINDING = [
     SignatureMode.SIGN_PUBKEY,
     SignatureMode.SIGN_MESSAGE_ID,
     SignatureMode.SIGN_MESSAGE_ID_TIMESTAMP,
-]
-const BINDING = [
     SignatureMode.SIGN_FULL_PAYLOAD,
     SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH,
 ]
+const BINDING = [SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH]
 
 describe("SignatureVerifier payload-binding enforcement (audit C3a)", () => {
     it.each(NON_BINDING)(
