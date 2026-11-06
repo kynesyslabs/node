@@ -427,10 +427,14 @@ stop_node() {
 # too. QDRILL_TEST_LOG_READ_TIMEOUT_S is for lockstep-stub.test.sh only.
 LOG_READ_TIMEOUT_S="${QDRILL_TEST_LOG_READ_TIMEOUT_S:-60}"
 LOG_READ_MAX_BYTES=$((256 * 1024 * 1024))
-# Node $1's container log, colour codes stripped, into file $2: the whole log,
-# or its last $3 lines. Fails, printing why, when node $1 has no container or
-# it cannot be looked up, docker logs fails or does not finish in time, or the
-# log is over LOG_READ_MAX_BYTES: part of a log is never passed off as all of it.
+# Node $1's container log, colour codes stripped, into file $2: all of it that
+# the Docker daemon keeps, or its last $3 lines. That is the whole log unless
+# the daemon's logging driver rotates logs (the local driver, or json-file with
+# max-size/max-file): then early lines can be gone, and the run log names the
+# driver at bring-up. Fails, printing why, when node $1 has no container or it
+# cannot be looked up, docker logs fails or does not finish in time, or the log
+# is over LOG_READ_MAX_BYTES: part of what docker logs gives is never passed
+# off as all of it.
 read_node_log() { # $1 node, $2 file, $3 last lines (default: all)
     local cid rc
     # dc ps, spelled out: timeout runs a command, not a shell function
@@ -803,9 +807,10 @@ pg_gate_unreadable() {
 # "sorry, too many clients already" in a node's log or in one of the harness'
 # own psql reads means something ran without a connection it needed: the run
 # proves nothing, whatever the verdict says. Called before the verdict is
-# written, so a PASS or a FAIL becomes exit 2 and says why. It reads the whole
-# log of every started node (read_node_log) and psql-errors.log if there is
-# one: one it cannot read is exit 2 as well, never a log without hits.
+# written, so a PASS or a FAIL becomes exit 2 and says why. It reads the log the
+# Docker daemon keeps of every started node (read_node_log: with a logging
+# driver that rotates logs, early lines can be gone) and psql-errors.log if
+# there is one: one it cannot read is exit 2 as well, never a log without hits.
 pg_limit_gate() {
     local i n why hits=0 nodes="" f="${LOG_DIR}/pg-gate.tmp"
     for i in $(seq 1 "${N}"); do
@@ -830,6 +835,10 @@ pg_limit_gate() {
 
 # ── 3. bring-up ─────────────────────────────────────────────────────────
 step 03-bringup
+# The node-log checks read what the daemon keeps, which a rotating logging
+# driver cuts short (read_node_log): the run log says which driver it is
+log_driver=$(timeout -k 5 "${LOG_READ_TIMEOUT_S}" docker info --format '{{.LoggingDriver}}' 2>/dev/null) || log_driver=""
+say "docker logging driver: ${log_driver:-unknown}"
 STARTED_STACK=1
 dc up -d postgres >> "${STEP_LOG}" 2>&1 || { say "ABORT: postgres did not start"; exit 2; }
 pg_limit_preflight || exit 2
