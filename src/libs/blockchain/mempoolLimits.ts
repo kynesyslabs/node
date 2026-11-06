@@ -331,11 +331,15 @@ function compareSlots(a: SenderSlot, b: SenderSlot): number {
  * arrived first, so members that end the merge having seen the same txs
  * keep the same ones. Returns the incoming hashes to refuse and the held
  * hashes to evict.
+ *
+ * Hashes in `keep` are never refused or evicted, and take no slot from the
+ * others: the rest is chosen exactly as a member without them chooses.
  */
 export function chooseSenderOverflow(
     held: readonly SenderSlot[],
     incoming: readonly SenderSlot[],
     maxPerSender: number = active.maxPerSender,
+    keep: ReadonlySet<string> = new Set(),
 ): { refuse: Set<string>; evict: string[] } {
     const bySender = new Map<string, { slot: SenderSlot; held: boolean }[]>()
     for (const slot of incoming) {
@@ -353,9 +357,30 @@ export function chooseSenderOverflow(
         if (list.length <= maxPerSender) continue
         list.sort((a, b) => compareSlots(a.slot, b.slot))
         for (const { slot, held: isHeld } of list.slice(maxPerSender)) {
+            if (keep.has(slot.hash)) continue
             if (isHeld) evict.push(slot.hash)
             else refuse.add(slot.hash)
         }
     }
     return { refuse, evict }
+}
+
+/**
+ * The txs of `txs` that the merge's per-sender cap keeps (see
+ * chooseSenderOverflow), in the order given. A pool may hold more of one
+ * sender than that, the node's own relay txs and the txs of its locked
+ * block being kept from eviction; this is the part a round exchanges and
+ * forges from, the same part every member holding those txs keeps.
+ */
+export function holdSendersToCap<
+    T extends { hash: string; content?: { from?: unknown; nonce?: unknown } },
+>(txs: readonly T[], maxPerSender: number = active.maxPerSender): T[] {
+    const slots: SenderSlot[] = []
+    for (const tx of txs) {
+        const from = tx.content?.from
+        if (typeof from !== "string") continue
+        slots.push({ hash: tx.hash, sender: from.toLowerCase(), nonce: tx.content.nonce })
+    }
+    const { refuse } = chooseSenderOverflow([], slots, maxPerSender)
+    return refuse.size === 0 ? [...txs] : txs.filter(tx => !refuse.has(tx.hash))
 }

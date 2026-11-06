@@ -352,9 +352,21 @@ export function firstCommittee(
     validators: ValidatorRow[],
     genesisHash: string,
     shardSize: number,
+    pins: readonly string[] = PINNED_SHARD_IDENTITIES,
 ): string[] {
     const pool = [...new Set(activeAtBlockZero(validators).map(v => String(v.address)))].sort(compareIdentities)
-    return drawBoundCommittee(firstCommitteeSeed(normHash(genesisHash)), pool, shardSize).map(norm)
+    return drawBoundCommittee(firstCommitteeSeed(normHash(genesisHash)), pool, shardSize, pins).map(norm)
+}
+
+/**
+ * The pins the node applies to block 1's committee under the genesis fork
+ * schedule (pinnedShardIdentities(1)): none once `unpinnedCommittee` is
+ * active at block 1. A missing entry is dormant, as the node hydrates it.
+ */
+export function firstCommitteePins(genesis: { forks?: unknown } | null): readonly string[] {
+    const forks = (genesis?.forks ?? {}) as Record<string, { activationHeight?: unknown } | null | undefined>
+    const height = forks.unpinnedCommittee?.activationHeight
+    return typeof height === "number" && height <= 1 ? [] : PINNED_SHARD_IDENTITIES
 }
 
 function countBy(ids: string[], key: (id: string) => string | null): Record<string, number> {
@@ -726,7 +738,7 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
         launchValidators: rows ? launchIdentities(rows) : (launchValidators ?? []),
     }
     const agreedHash = decideGoNoGo(base).genesisHash
-    const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize) : null
+    const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize, firstCommitteePins(genesis)) : null
     const decision = decideGoNoGo({ ...base, committee })
     decision.reasons.push(...(blockZero?.reasons ?? []), ...mainnetGenesisReasons(genesis))
     for (const problem of genesisFileProblems ?? []) {

@@ -31,7 +31,8 @@
 #     lock) unless --wipe-signing-state is given, and warns when it is
 #   - reset-node keeps every signing-state file next to the identity (signing
 #     record, halt marker, commit lock, prevote record), and when the clone
-#     fails and a backup cannot be moved back it says where the backup is
+#     fails and a backup cannot be moved back it says where the backup is; a
+#     restore that fails or finds no backup after a clean clone stops the reset
 #
 # Usage:
 #   scripts/launcher-wipe-guard.test.sh                 # the scripts next to this file
@@ -436,8 +437,9 @@ echo "# scripts/reset-node (scripts from: $SRC)"
 RESET_SIGNING=(.demos_identity.signed.json .demos_identity.signed.json.halted .demos_identity.commitlock.json .demos_identity.prevote.json)
 
 # A node checkout with an identity and every signing-state file. git clone
-# makes an empty checkout (or fails with STUB_FAIL_CLONE=1) and mv fails on a
-# .backup file with STUB_FAIL_MV=1.
+# makes an empty checkout (or fails with STUB_FAIL_CLONE=1, or first deletes
+# the backup of STUB_DROP_BACKUP) and mv fails on a .backup file with
+# STUB_FAIL_MV=1.
 new_reset_world() {
     N=$((N + 1))
     W="$ROOT/r$N"
@@ -451,6 +453,7 @@ new_reset_world() {
 #!/usr/bin/env bash
 [[ "${1:-}" == clone ]] || exit 0
 [[ "${STUB_FAIL_CLONE:-0}" == 1 ]] && { echo "fatal: unable to access" >&2; exit 128; }
+[[ -n "${STUB_DROP_BACKUP:-}" ]] && rm -f "$PWD/$STUB_DROP_BACKUP.backup"
 mkdir -p "${3:?}"
 STUB
     cat >"$W/bin/mv" <<'STUB'
@@ -505,6 +508,23 @@ reset_check "reset-node: clone fails, restore fails -> exits non-zero" fail -y
 unset STUB_FAIL_CLONE STUB_FAIL_MV
 [[ -f "$W/.demos_identity.commitlock.json.backup" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node lost the commit lock backup"; }
 case "$LAST_OUT" in *"$W/.demos_identity.commitlock.json.backup"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not say where the unrestored commit lock backup is";; esac
+
+# The clone works but a backup cannot be moved back, or is gone: the node must
+# not be reported ready to start without its signing state
+new_reset_world
+export STUB_FAIL_MV=1
+reset_check "reset-node: restore fails after a clean clone -> exits non-zero" fail -y
+unset STUB_FAIL_MV
+[[ -f "$W/.demos_identity.commitlock.json.backup" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node lost the commit lock backup after a failed restore"; }
+case "$LAST_OUT" in *"$W/.demos_identity.commitlock.json.backup"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not say where the unrestored commit lock backup is";; esac
+case "$LAST_OUT" in *"reset complete"*) FAIL=$((FAIL + 1)); echo "FAIL - reset-node reported success after a failed restore";; esac
+
+new_reset_world
+export STUB_DROP_BACKUP=.demos_identity.signed.json.halted
+reset_check "reset-node: a backup is missing at restore -> exits non-zero" fail -y
+unset STUB_DROP_BACKUP
+case "$LAST_OUT" in *"$W/.demos_identity.signed.json.halted.backup"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the missing halt marker backup";; esac
+case "$LAST_OUT" in *"reset complete"*) FAIL=$((FAIL + 1)); echo "FAIL - reset-node reported success with a backup missing";; esac
 
 echo
 echo "passed: $PASS  failed: $FAIL"
