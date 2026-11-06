@@ -10,19 +10,9 @@ import { beforeEach, describe, expect, it, jest } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-const getLastBlock = jest.fn(async () => null as any)
-const getAheadValidatorPeers = jest.fn(async () => [] as unknown[])
-const getNetworkTimestamp = jest.fn(() => 0)
-const sharedState: Record<string, unknown> = { syncStatus: true, inSyncLoop: false }
+import { mockFinalizedHeadReads } from "./finalizedHeadMocks"
 
-jest.mock("src/libs/blockchain/chain", () => ({ __esModule: true, default: { getLastBlock } }))
-jest.mock("src/libs/consensus/v2/routines/networkAheadVeto", () => ({ __esModule: true, getAheadValidatorPeers }))
-jest.mock("src/libs/utils/calibrateTime", () => ({ __esModule: true, getNetworkTimestamp }))
-jest.mock("src/utilities/sharedState", () => ({ __esModule: true, getSharedState: sharedState }))
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), warning: jest.fn(), error: jest.fn(), only: jest.fn() },
-}))
+const { getLastBlock, getAheadValidatorPeers, getNetworkTimestamp, sharedState } = mockFinalizedHeadReads()
 
 const { default: getFinalizedHead } = await import("./getFinalizedHead")
 

@@ -10,25 +10,10 @@ import { beforeEach, describe, expect, it, jest } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-const findOneBy = jest.fn(async (..._args: unknown[]) => null as any)
-const findByHash = jest.fn(async (..._args: unknown[]) => null as any)
-const getLastBlockNumber = jest.fn(async () => 0)
+import { mockTransactionStore } from "src/libs/blockchain/transactionStoreMocks"
 
-jest.mock("src/libs/blockchain/chainDb", () => ({
-    __esModule: true,
-    getBlocksRepo: jest.fn(),
-    getTransactionsRepo: () => ({ findOneBy }),
-    setupChainDb: jest.fn(),
-    readSql: jest.fn(),
-    writeSql: jest.fn(),
-    maxRowsPerInsert: jest.fn(() => 1000),
-    chunkedInsert: jest.fn(),
-}))
-jest.mock("src/libs/blockchain/mempool", () => ({ __esModule: true, default: { findByHash } }))
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), warning: jest.fn(), error: jest.fn(), only: jest.fn() },
-}))
+const getLastBlockNumber = jest.fn(async () => 0)
+const { findOneBy, findByHash } = mockTransactionStore()
 
 // The stored-row read is the real one; only the database under it is faked.
 const txOps = await import("src/libs/blockchain/chainTransactions")

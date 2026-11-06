@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it, mock } from "bun:test"
-import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto"
+import { sign } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -19,7 +19,6 @@ import type { ValidatorSetEntry } from "src/model/entities/ValidatorSetSnapshots
 import { jcsCanonicalize } from "src/libs/crypto/jcs"
 import { canonicalJson } from "src/libs/crypto/canonicalJson"
 import { auditPath, root, toHex } from "src/libs/crypto/merkle/rfc6962"
-import { SparseMerkleTree } from "src/libs/crypto/merkle/sparse"
 import { precommitMessage } from "src/libs/consensus/v2/commitLock/messages"
 import {
     GCRStorageProgramRoutines,
@@ -27,18 +26,23 @@ import {
     validateStorageProgramPayload,
 } from "src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
 import {
-    storageProgramKey,
-    storageProgramLeafHex,
-    storageProgramRecord,
-    type StorageProgramRow,
-} from "./storageRecord"
+    blockOf,
+    buildStorageProof,
+    buildTxProof,
+    certify,
+    newKey,
+    sha256Hex as sha256,
+    sortedKeys,
+    type Key,
+    type ProofChainSpec,
+} from "./proofTestKit"
+import { storageProgramLeafHex, storageProgramRecord, type StorageProgramRow } from "./storageRecord"
 import { validatorSetHash } from "./validatorSetRecord"
 import {
     verifyStorageProof,
     verifyTransactionProof,
     type BlockBytes,
     type CommitteeRules,
-    type SignedHeader,
     type StorageProof,
     type TransactionProof,
 } from "./verify"
@@ -57,23 +61,11 @@ const N05 = load("negative/N05_client_verifier_negatives_offline_20261014.json")
 const N06 = load("negative/N06_bundle_evidence_mutations_20260907.json")
 const N07 = load("negative/N07_included_but_failed_public_record.json")
 
-const sha256 = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex")
 const utf8 = new TextEncoder()
 
 // ── a four-member committee with real ed25519 keys ──────────────────────
 
-interface Key {
-    identity: string
-    privateKey: KeyObject
-}
-
-function newKey(): Key {
-    const { publicKey, privateKey } = generateKeyPairSync("ed25519")
-    const raw = publicKey.export({ format: "der", type: "spki" }).subarray(-32)
-    return { identity: `0x${raw.toString("hex")}`, privateKey }
-}
-
-const keys = Array.from({ length: 6 }, newKey).sort((a, b) => (a.identity < b.identity ? -1 : 1))
+const keys = sortedKeys(6)
 const members = keys.slice(0, 4)
 const outsider = keys[4]
 const newcomer = keys[5]
@@ -91,19 +83,6 @@ const trusted = { validators }
 const rules: CommitteeRules = { shardSize: 4 }
 const ROUND = 1_800_000_123
 
-function blockOf(number: number, content: Record<string, unknown>): BlockBytes {
-    const contentBytes = JSON.stringify(content)
-    return { number, hash: sha256(contentBytes), contentBytes }
-}
-
-function certify(block: BlockBytes, signers: Key[], message = precommitMessage(block.number, ROUND, block.hash)): SignedHeader {
-    const signatures: Record<string, string> = {}
-    for (const k of signers) {
-        signatures[k.identity] = sign(null, Buffer.from(message, "utf8"), k.privateKey).toString("hex")
-    }
-    return { ...block, round: ROUND, signedMessage: precommitMessage(block.number, ROUND, block.hash), signatures }
-}
-
 // ── N07's block: the failed transfer next to an executed one ────────────
 
 const FAILED_TX: string = N07.tx
@@ -119,48 +98,24 @@ const leafBytes = RESULTS.map(text => utf8.encode(text))
 
 interface ChainOptions {
     previousHash?: string
+    /** Block m's members and validator set: who may sign block m + 1. */
+    peerlist?: string[]
     setHash?: string
     signers?: Key[]
-    storageRoot?: string
 }
 
-function chain(options: ChainOptions = {}) {
-    const storage = { native_storage_programs: options.storageRoot ?? "00".repeat(32) }
-    const inclusion = blockOf(M, {
-        previousHash: options.previousHash ?? sha256(`block ${M - 1}`),
-        ordered_transactions: TX,
-        peerlist: memberIds,
-        native_tables_hashes: storage,
-        number: M,
-        parent_results_root: sha256(`results of ${M - 1}`),
-        validator_set_hash: options.setHash ?? SET_HASH,
-    })
-    const commit = blockOf(M + 1, {
-        previousHash: inclusion.hash,
-        ordered_transactions: [],
-        peerlist: memberIds,
-        native_tables_hashes: storage,
-        number: M + 1,
-        parent_results_root: toHex(root(leafBytes)),
-        validator_set_hash: SET_HASH,
-    })
-    return { inclusion, commit: certify(commit, options.signers ?? members.slice(0, 3)) }
-}
+const spec = (options: ChainOptions = {}): ProofChainSpec => ({
+    number: M,
+    transactions: TX,
+    results: RESULTS,
+    peerlist: options.peerlist ?? memberIds,
+    setHash: options.setHash ?? SET_HASH,
+    signers: options.signers ?? members.slice(0, 3),
+    round: ROUND,
+    previousHash: options.previousHash,
+})
 
-function txProof(index: number, options: ChainOptions = {}): TransactionProof {
-    const { inclusion, commit } = chain(options)
-    return {
-        hash: TX[index],
-        blockNumber: M,
-        leafIndex: index,
-        treeSize: TX.length,
-        leaf: RESULTS[index],
-        auditPath: auditPath(leafBytes, index).map(toHex),
-        committedIn: M + 1,
-        inclusionBlock: inclusion,
-        commitBlock: commit,
-    }
-}
+const txProof = (index: number, options: ChainOptions = {}): TransactionProof => buildTxProof(spec(options), index)
 
 const FINAL = new Set(["final-executed", "final-failed", "final"])
 
@@ -282,14 +237,14 @@ describe("#1059 acceptance test 3: tampering gives a rejection (N05, N06 analogu
 
     it("a signature reused from another height", () => {
         const proof = txProof(0)
-        const elsewhere = certify(proof.commitBlock, members.slice(0, 3), precommitMessage(M + 7, ROUND, proof.commitBlock.hash))
+        const elsewhere = certify(proof.commitBlock, members.slice(0, 3), ROUND, precommitMessage(M + 7, ROUND, proof.commitBlock.hash))
         proof.commitBlock.signatures = elsewhere.signatures
         expectRefused(verifyTransactionProof(proof, trusted, rules), "invalid", /0 verified signature/)
     })
 
     it("N05 cross-domain: signatures over the bare block hash", () => {
         const proof = txProof(0)
-        proof.commitBlock.signatures = certify(proof.commitBlock, members.slice(0, 3), proof.commitBlock.hash).signatures
+        proof.commitBlock.signatures = certify(proof.commitBlock, members.slice(0, 3), ROUND, proof.commitBlock.hash).signatures
         expectRefused(verifyTransactionProof(proof, trusted, rules), "invalid", /0 verified signature/)
     })
 
@@ -394,21 +349,8 @@ function anchorRow(anchor: Anchor, overrides: Partial<StorageProgramRow> = {}): 
     }
 }
 
-function storageProof(addresses: string[], rows: StorageProgramRow[], options: ChainOptions = {}): StorageProof {
-    const tree = SparseMerkleTree.build(
-        rows.map(r => ({ key: storageProgramKey(r.storageAddress), valueHash: storageProgramLeafHex(r) })),
-    )
-    const { inclusion, commit } = chain({ ...options, storageRoot: tree.rootHex })
-    return {
-        anchor: commit,
-        anchorParent: inclusion,
-        asOfBlock: M,
-        proofs: addresses.map(address => {
-            const row = rows.find(r => r.storageAddress === address)
-            return { storageAddress: address, record: row ? storageProgramRecord(row) : null, ...tree.prove(storageProgramKey(address)) }
-        }),
-    }
-}
+const storageProof = (addresses: string[], rows: StorageProgramRow[], options: ChainOptions = {}): StorageProof =>
+    buildStorageProof(spec(options), rows, addresses)
 
 const rows = anchors.map(a => anchorRow(a))
 const runOne = anchors.slice(0, 8).map(a => a.address)
