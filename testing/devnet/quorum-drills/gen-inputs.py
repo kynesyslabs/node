@@ -11,7 +11,17 @@ import argparse
 import json
 import os
 
-from drill_inputs import make_empty_snapshot, node_tmpfs_specs, seed_peerlist, with_genesis_timestamp, write_json
+from drill_inputs import (
+    fork_set_text,
+    launch_excluded,
+    make_empty_snapshot,
+    node_tmpfs_specs,
+    pg_max_connections,
+    seed_peerlist,
+    with_genesis_timestamp,
+    with_launch_forks,
+    write_json,
+)
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--run-dir", required=True)
@@ -21,10 +31,16 @@ ap.add_argument("--shard-size", type=int, required=True)
 ap.add_argument("--binding", choices=["on", "off"], required=True)
 ap.add_argument("--genesis-ts", type=int, required=True)
 ap.add_argument("--image", required=True)
+# "devnet": the forks of testing/devnet/genesis.devnet.json, with quorumParity
+# and committeeBinding set below (every scenario before the mainnet-shape
+# drills). "launch": the fork set of docs/mainnet/genesis.template.json, read
+# from the repo at run time.
+ap.add_argument("--fork-set", choices=["devnet", "launch"], default="devnet")
 # The image's user, read from the image by run.sh: the node tmpfs is mounted
-# owned by it
-ap.add_argument("--uid", type=int, required=True)
-ap.add_argument("--gid", type=int, required=True)
+# owned by it. Both or neither: without them the tmpfs is the root-owned
+# /app/state of the compose files before #1122 (see node_tmpfs_specs)
+ap.add_argument("--uid", type=int)
+ap.add_argument("--gid", type=int)
 ap.add_argument("--src", default="")
 ap.add_argument("--node-mem", required=True)
 ap.add_argument("--consensus-time", required=True)
@@ -40,6 +56,12 @@ image_entrypoint = json.loads(a.image_entrypoint) or []
 image_cmd = json.loads(a.image_cmd) or []
 if a.start == "image" and not (image_entrypoint or image_cmd):
     ap.error("--start image needs the image's entrypoint or cmd")
+if a.fork_set == "launch" and a.binding != "on":
+    ap.error("--fork-set launch activates committeeBinding (and commitLock needs it): --binding must be on")
+try:
+    node_tmpfs = node_tmpfs_specs(a.uid, a.gid)
+except ValueError as e:
+    ap.error(str(e))
 
 inputs = os.path.join(a.run_dir, "inputs")
 n = a.nodes
@@ -54,11 +76,20 @@ pubs = [open(f"{inputs}/pub{i}").read().strip() for i in range(1, n + 1)]
 g = json.load(open(f"{a.repo}/testing/devnet/genesis.devnet.json"))
 g = with_genesis_timestamp(g, a.genesis_ts)
 g["properties"]["shardSize"] = a.shard_size
-forks = g.setdefault("forks", {})
-forks["quorumParity"] = {"activationHeight": 0}
-# "off" keeps the fork dormant, to reproduce the pre-fork behaviour on the
-# same code
-forks["committeeBinding"] = {"activationHeight": 0 if a.binding == "on" else None}
+excluded = None
+if a.fork_set == "launch":
+    with open(f"{a.repo}/docs/mainnet/genesis.template.json") as f:
+        template = json.load(f)
+    g = with_launch_forks(g, template)
+    # run.sh logs these and records them in the verdict
+    excluded = launch_excluded(template)
+    write_json(f"{inputs}/launch-excluded.json", excluded)
+else:
+    forks = g.setdefault("forks", {})
+    forks["quorumParity"] = {"activationHeight": 0}
+    # "off" keeps the fork dormant, to reproduce the pre-fork behaviour on the
+    # same code
+    forks["committeeBinding"] = {"activationHeight": 0 if a.binding == "on" else None}
 stake = "1000000000000000000"
 g["validators"] = [
     {
@@ -110,6 +141,18 @@ node_env = {
 services = {
     "postgres": {
         "image": "postgres:16-alpine",
+        # Every node has its own database on this one server, and each node
+        # opens up to 10 connections (a TypeORM pool with no `max`); real
+        # validators have a database each. The default max_connections of 100
+        # ran out at 13 nodes (13 x 10 = 130), as "too many clients already".
+        # M = 2 x 10 x N + 20: twice the pools, because a killed node's
+        # backends outlive it briefly while its restart opens new ones, plus 20
+        # for the 3 reserved superuser slots, the harness' psql reads and the
+        # healthcheck (drill_inputs.pg_max_connections). N=4: 100, 10: 220, 13: 280.
+        # It reserves no memory by itself: shared_buffers stays 128MB (it must
+        # be at least 16kB x M, 4.4MB at 280) and a backend costs memory only
+        # while it is open, so the 1g limit is unchanged.
+        "command": ["postgres", "-c", f"max_connections={pg_max_connections(n)}"],
         "mem_limit": "1g",
         "memswap_limit": "1g",
         "restart": "no",
@@ -197,7 +240,7 @@ for i in range(1, n + 1):
         # code 0; it is restarted until the mesh forms. A drill stops a
         # validator with `docker compose stop`, which this policy respects.
         "restart": "unless-stopped",
-        "tmpfs": node_tmpfs_specs(a.uid, a.gid),
+        "tmpfs": node_tmpfs,
         "hostname": f"node{i}-host",
         "depends_on": {"postgres": {"condition": "service_healthy"}},
         "environment": {
@@ -217,3 +260,5 @@ print(
     f"genesis shardSize {a.shard_size} validators {n} committeeBinding {a.binding}; "
     f"compose with {n} nodes"
 )
+if a.fork_set == "launch":
+    print(f"launch fork set (docs/mainnet/genesis.template.json): {fork_set_text(g['forks'], excluded)}")
