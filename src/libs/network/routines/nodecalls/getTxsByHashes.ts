@@ -55,10 +55,11 @@ export default async function getTxsByHashes(
             // (because block is broadcasted right after voting,
             // and it's possible that this peer might be slow)
             // the block txs will not be in the transactions table yet,
-            // fetch them from the mempool, and update the blockNumber to match block.
-            // The blockNumber stays: syncing peers check it against the block
-            // (Sync.ts). It is not an inclusion claim, so `pending: true` tells
-            // other readers these are unconfirmed. Stored txs carry no such key.
+            // fetch them from the mempool.
+            // blockNumber is this node's last applied height, kept only so the
+            // response has the same shape as before. It is not an inclusion
+            // claim: `pending: true` tells readers these are unconfirmed.
+            // Stored txs carry no such key.
             const missing = await Mempool.getTransactionsByHashes(
                 Array.from(toGet),
             )
