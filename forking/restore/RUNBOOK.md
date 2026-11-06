@@ -350,10 +350,13 @@ Only if parts 1 and 2 both succeeded, check that the database is empty (the coun
 
 ```bash
 tables=$(docker exec postgres_<PG_PORT> sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"') &&
+echo "tables: $tables" &&
 test "$tables" = 0 &&
 PG_HOST=localhost PG_PORT=<PG_PORT> PG_USER=demosuser PG_PASSWORD=demospassword PG_DATABASE=demos bun run migration:run &&
 ./run -d <PG_PORT>
 ```
+
+If `migration:run` succeeded and only `./run` failed (for example the Node check on a Bun-only host), run `./run -d <PG_PORT>` again and do not paste part 3 again: the count is then non-zero because the migration created the tables.
 
 Both paths leave `data/snapshot/` untouched. The genesis builder picks it up again on the fresh boot.
 
