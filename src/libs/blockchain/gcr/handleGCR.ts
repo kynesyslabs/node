@@ -53,6 +53,7 @@ import {
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
 import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
+import { ensureNetworkParametersCurrent } from "src/libs/blockchain/routines/loadNetworkParameters"
 import {
     blockTxTypeRefusal,
     isNodeMessage,
@@ -1968,6 +1969,10 @@ export default class HandleGCR {
         // value rules, once for the block: none of them depends on the
         // transaction.
         const state = await editBindingState()
+        // Outside the per-transaction refusals: a fee read on stale
+        // parameters would refuse the block's correctly priced transactions
+        // on this node alone.
+        if (state.feeBound) await ensureNetworkParametersCurrent()
         const {
             active,
             postFork,

@@ -10,6 +10,7 @@ import _ from "lodash"
 import log from "src/utilities/logger"
 import { emptyResponse } from "../../../server_rpc"
 import { processOperations } from "./processOperations"
+import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
 // SECTION Operation types
 // SECTION Handlers
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
@@ -98,6 +99,13 @@ export default async function handleDemosWorkRequest(
     let compiledScript: DemoScript = _.cloneDeep(content)
     let operationsResults: OperationResult[] = []
     const response: RPCResponse = _.cloneDeep(emptyResponse)
+
+    const disabled = featureDisabledMessage("demoswork")
+    if (disabled) {
+        response.result = 403
+        response.extra = disabled
+        return response
+    }
 
     log.info("[demosWork] [handleDemosWorkRequest] Received a DemoScript: ")
     log.debug(JSON.stringify(content))
