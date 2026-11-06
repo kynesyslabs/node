@@ -487,7 +487,8 @@ check "the teardown replaces exit 0/1 by 2 when the collected logs hold the erro
 # STUB_START=image makes the image look like a release image (no run-devnet, an
 # ENTRYPOINT and a CMD), so run.sh takes the image path and its migration step:
 # `compose exec postgres pg_isready` and one `compose run ... migration:run` per
-# node, which fails for node STUB_MIGRATE_FAIL.
+# node, which fails for node STUB_MIGRATE_FAIL. `docker info` answers the
+# logging driver STUB_LOGDRIVER (json-file), or fails as a daemon error for fail.
 mkdir -p "${WORK}/runbin"
 cat > "${WORK}/runbin/docker" <<'STUBDOCKER'
 #!/usr/bin/env bash
@@ -507,6 +508,9 @@ case "$1" in
         case "${@: -1}" in -u | -g) echo 1000 ;; esac ;;
     exec)
         case "$*" in *"SHOW max_connections"*) echo "${STUB_MAXCONN}" ;; esac ;;
+    info)
+        [ "${STUB_LOGDRIVER}" = fail ] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
+        echo "${STUB_LOGDRIVER}" ;;
     compose)
         case "$*" in
             *"ps -q postgres"*) echo fakepg ;;
@@ -657,7 +661,7 @@ done
 echo "== run.sh executed from the top (stub docker and bun): the preflight is defined where the call runs"
 run_from_top() { # $1 what max_connections the stub postgres reports, $2 start path (run-devnet), $3 node whose migration fails
     STUB_LOG="${WORK}/run-top.docker.log"; : > "${STUB_LOG}"
-    STUB_LOG="${STUB_LOG}" STUB_MAXCONN="$1" STUB_START="${2:-run-devnet}" STUB_MIGRATE_FAIL="${3:-none}" \
+    STUB_LOG="${STUB_LOG}" STUB_MAXCONN="$1" STUB_START="${2:-run-devnet}" STUB_MIGRATE_FAIL="${3:-none}" STUB_LOGDRIVER="${STUB_LOGDRIVER:-json-file}" \
         PATH="${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/runs" \
         NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 \
         timeout 120 bash "${RUN_SH}" halt-n13s10 stubtop > "${WORK}/run-top.out" 2>&1
@@ -677,9 +681,13 @@ check "max_connections 280: the forks line has identityCarryover off and says wh
     out_has 'forks (launch): .*identityCarryover@null.*; excluded: identityCarryover (needs a genesis snapshot; the drills use the legacy genesis path)$'
 check "max_connections 280: networkGovernance is off (null in the template) and not in the excluded list" \
     out_has 'forks (launch): .*networkGovernance@null.*; excluded: identityCarryover ([^)]*)$'
+check "max_connections 280: the run log names the docker logging driver, once" \
+    test "$(grep -c 'docker logging driver: ' "${WORK}/run-top.out")" = 1 -a "$(grep -c 'docker logging driver: json-file$' "${WORK}/run-top.out")" = 1
 
-run_from_top 100
+STUB_LOGDRIVER=fail run_from_top 100
 sed 's/^/    | /' "${WORK}/run-top.out" | tail -5 | cut -c1-200
+check "docker info fails: the driver is unknown, and the run goes on (to the preflight)" \
+    bash -c 'grep -q "docker logging driver: unknown$" "$1" && grep -q "postgres max_connections is 100" "$1"' _ "${WORK}/run-top.out"
 check "max_connections 100: no 'command not found'" bash -c '! grep -q "command not found" "$1"' _ "${WORK}/run-top.out"
 check "max_connections 100: exit 2 with the could-not-run message" out_has 'ABORT: could not run: postgres max_connections is 100, 13 nodes need 150'
 check "max_connections 100: rc=2" out_has '^rc=2$'
@@ -688,8 +696,9 @@ check "max_connections 100: no node was started" bash -c '! grep -q "compose .* 
 echo "== run.sh executed from the top on the image path: preflight, then one migration per node database, then node-1"
 migrations() { grep -c 'compose .* run --rm --no-deps -T --entrypoint bun node-[0-9]* -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run' "${WORK}/run-top.docker.log"; }
 first_line() { grep -n -- "$1" "${WORK}/run-top.docker.log" | head -1 | cut -d: -f1; }
-run_from_top 280 image
+STUB_LOGDRIVER=local run_from_top 280 image
 sed 's/^/    | /' "${WORK}/run-top.out" | tail -4 | cut -c1-200
+check "image path: the local logging driver is named, not refused" out_has 'docker logging driver: local$'
 check "image path: no 'command not found'" bash -c '! grep -q "command not found" "$1"' _ "${WORK}/run-top.out"
 check "image path: run.sh took the image start path" out_has 'start=image'
 check "image path: the preflight passed" out_has 'postgres max_connections 280 (13 nodes need 150)'
