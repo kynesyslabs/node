@@ -52,7 +52,6 @@ import {
 } from "./routines/forkScheduleAbstain"
 import { ensureWindowChecked } from "@/libs/peer/routines/forkScheduleWatch"
 import {
-    filterMempoolByNonce,
     filterMempoolByRefBlock,
     type FailedTranscation,
     type MempoolTransaction,
@@ -60,7 +59,7 @@ import {
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
-import { selectBlockTransactions } from "./routines/blockCaps"
+import { judgeBlockTransactions } from "./routines/blockTransactions"
 import { blockCapsActive } from "@/forks/blockCapsGate"
 import { isForkActive } from "@/forks/forkGates"
 import {
@@ -263,28 +262,21 @@ export async function consensusRoutine(): Promise<void> {
 
         // Under blockCaps the block takes a bounded share of the pool; the
         // rest stays pooled for later blocks.
-        const initialMempool = blockCapsActive(blockRef)
-            ? selectBlockTransactions(
-                  mergedMempool,
-                  blockRef,
-                  isForkActive("osDenomination", blockRef),
-              )
-            : mergedMempool
-        if (initialMempool.length < mergedMempool.length) {
+        const capped = blockCapsActive(blockRef)
+        const judged = await judgeBlockTransactions(mergedMempool, blockRef, {
+            capped,
+            osDenominationActive: isForkActive("osDenomination", blockRef),
+        })
+        failedTxs.push(...judged.failedTxs)
+        let resNonce = judged.nonce
+        if (capped && judged.txs.length < mergedMempool.length) {
             log.info(
-                `[consensusRoutine] Block ${blockRef} takes ${initialMempool.length} of ${mergedMempool.length} pooled txs (block caps)`,
+                `[consensusRoutine] Block ${blockRef} takes ${judged.txs.length} of ${mergedMempool.length} pooled txs (block caps)`,
             )
         }
 
-        // filter txs by reference block
-        const resRef = filterMempoolByRefBlock(initialMempool, true)
-        failedTxs.push(...resRef.failedTxs)
-
-        let resNonce = await filterMempoolByNonce(resRef.validTxs)
-        failedTxs.push(...resNonce.failedTxs)
-
         // Write final mempool used to forge the block
-        blockTxs.push(...resNonce.validTxs)
+        blockTxs.push(...judged.txs)
 
         // Generate map of txs by hash
         for (const tx of blockTxs) {
