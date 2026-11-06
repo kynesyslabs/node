@@ -8,3 +8,6 @@ export const HELLO_AUTH_DOMAIN = "DEMOS_PEER_AUTH_V1"
 export function helloResponseMessage(nonce: string, url: string): Uint8Array {
     return new TextEncoder().encode(`${HELLO_AUTH_DOMAIN}:${nonce}:${url}`)
 }
+
+/** Prefix of addPeer's refusal when another identity holds the URL. */
+export const URL_BOUND_TO_OTHER = "URL already bound to another identity: "

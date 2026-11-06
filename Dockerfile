@@ -289,15 +289,16 @@ VOLUME ["/app/data", "/app/logs", "/app/state"]
 
 USER demos
 
-# Liveness check against the RPC /health endpoint. Returns 200 when the
-# node is accepting traffic, 503 when failing (chain DB down, mainLoop
-# dead). dormant/degraded states return 200 — operators read the body
-# for nuance. The RPC server listens only once block 0 and the snapshot
+# Liveness check against the RPC /health/live endpoint. Returns 503 only
+# when failing (chain DB down, mainLoop dead); a node still syncing,
+# dormant or degraded is alive and returns 200. /health is the readiness
+# probe (503 until booted and synced) and would mark a node catching up
+# as unhealthy. The RPC server listens only once block 0 and the snapshot
 # are in the database, so the start period covers DB connect plus a cold
 # snapshot restore. Epic 13 T10 — was previously hitting "/" which always
 # 200s regardless of node state.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
-    CMD curl -fsS "http://localhost:${RPC_PORT:-53550}/health" >/dev/null || exit 1
+    CMD curl -fsS "http://localhost:${RPC_PORT:-53550}/health/live" >/dev/null || exit 1
 
 # The entrypoint bridges runtime files into /app/state for persistence,
 # then execs the node. --no-tui is a CMD argument (no TTY in containers).

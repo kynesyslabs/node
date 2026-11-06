@@ -62,6 +62,10 @@ export class ConnectionPool extends EventEmitter {
     // captured at accept time: remoteAddress is gone once the socket is
     // destroyed, and outbound connections never took a slot to give back.
     private ipSlots: Map<PeerConnection, string> = new Map()
+    // Callers between acquire() and release(), per connection. A caller
+    // resumes after acquire() a turn later and only then puts its request in
+    // flight, so an idle-looking socket may still be about to carry one.
+    private reservations: Map<PeerConnection, number> = new Map()
     private config: PoolConfig
     private cleanupTimer: NodeJS.Timeout | null = null
     public rateLimiter?: RateLimiter
@@ -285,9 +289,13 @@ export class ConnectionPool extends EventEmitter {
     ): Promise<PeerConnection | null> {
         // Try to reuse existing usable connection (prefers newest)
         const totalConnections = this.getTotalConnectionCount()
-        const existing = this.findUsableConnection(peerIdentity)
+        const existing = this.findUsableConnection(
+            peerIdentity,
+            connectionString,
+        )
 
         if (existing) {
+            this.reserve(existing)
             return existing
         }
 
@@ -300,23 +308,47 @@ export class ConnectionPool extends EventEmitter {
 
         // Check per-peer limits
         const peerConnections = this.connections.get(peerIdentity) || []
-        const usableCount = peerConnections.filter(
+        const usable = peerConnections.filter(
             c =>
                 c.origin === "outbound" &&
                 ConnectionStateUtils.isUsable(c.getState()),
-        ).length
-        if (usableCount >= this.config.maxConnectionsPerPeer) {
-            throw new PoolCapacityError(
-                `Max connections to peer ${peerIdentity}: ${usableCount}/${this.config.maxConnectionsPerPeer}`,
+        )
+        let retiring: Promise<void> | null = null
+        if (usable.length >= this.config.maxConnectionsPerPeer) {
+            // None of these reach connectionString, so after an address
+            // change they only serve the requests already on them. An idle
+            // one gives its slot to the new address.
+            const retired = this.findOldestConnection(
+                usable.filter(
+                    c =>
+                        c.connectionString !== connectionString &&
+                        c.getInfo().inFlightCount === 0 &&
+                        !this.reservations.has(c),
+                ),
             )
+            if (!retired) {
+                throw new PoolCapacityError(
+                    `Max connections to peer ${peerIdentity}: ${usable.length}/${this.config.maxConnectionsPerPeer}`,
+                )
+            }
+            log.debug(
+                `[ConnectionPool] Retiring idle connection to ${retired.connectionString} for ${peerIdentity} at ${connectionString}`,
+            )
+            // Not awaited here: closeConnection drops it from the pool
+            // synchronously, and nothing may run between this check and
+            // registering the new connection, or a concurrent acquire could
+            // register one this call then overwrites.
+            retiring = this.closeConnection(retired)
         }
 
         // Create new outbound connection
         const connection = new PeerConnection(peerIdentity, connectionString)
 
-        // Add to pool before connecting (allows tracking)
-        peerConnections.push(connection)
-        this.connections.set(peerIdentity, peerConnections)
+        // Add to pool before connecting (allows tracking). Re-read: retiring
+        // may have removed this peer's entry.
+        const tracked = this.connections.get(peerIdentity) || []
+        tracked.push(connection)
+        this.connections.set(peerIdentity, tracked)
 
         // Listen for close
         connection.on("close", () => {
@@ -346,6 +378,8 @@ export class ConnectionPool extends EventEmitter {
                 return null
             })
 
+            await retiring
+
             // The request timeout bounds the answer, not the TCP connect: a
             // closed or filtered Omni port must fail within connectTimeout.
             await connection.connect({
@@ -356,6 +390,7 @@ export class ConnectionPool extends EventEmitter {
             log.debug(
                 `[ConnectionPool] Created outbound connection to ${peerIdentity}`,
             )
+            this.reserve(connection)
             return connection
         } catch (error) {
             // Remove failed connection from pool
@@ -364,13 +399,27 @@ export class ConnectionPool extends EventEmitter {
         }
     }
 
+    private reserve(connection: PeerConnection): void {
+        this.reservations.set(
+            connection,
+            (this.reservations.get(connection) ?? 0) + 1,
+        )
+    }
+
     /**
      * Release a connection back to the pool
-     * Does not close the connection - just marks it available for reuse
+     * Does not close the connection. Every acquire() must be paired with one
+     * release(): until then the connection is never retired for another
+     * address.
      */
     release(connection: PeerConnection): void {
-        // Connection stays in pool and will be reused or cleaned up by timer
-        // Could add activity tracking here if needed
+        const count = this.reservations.get(connection)
+        if (count === undefined) return
+        if (count <= 1) {
+            this.reservations.delete(connection)
+        } else {
+            this.reservations.set(connection, count - 1)
+        }
     }
 
     /**
@@ -413,6 +462,7 @@ export class ConnectionPool extends EventEmitter {
             )
             // On error, close the connection and remove from pool
             if (connection) {
+                this.release(connection)
                 await this.closeConnection(connection)
             }
 
@@ -466,6 +516,7 @@ export class ConnectionPool extends EventEmitter {
         } catch (error) {
             // On error, close the connection and remove from pool
             if (connection) {
+                this.release(connection)
                 await this.closeConnection(connection)
             }
 
@@ -641,16 +692,23 @@ export class ConnectionPool extends EventEmitter {
     /**
      * Find an existing usable connection for a peer (prefers newest)
      */
-    private findUsableConnection(peerIdentity: string): PeerConnection | null {
+    /**
+     * Only a socket opened to `connectionString` may carry the call: a hello
+     * to an address proves who serves it only if it actually reaches it.
+     */
+    private findUsableConnection(
+        peerIdentity: string,
+        connectionString: string,
+    ): PeerConnection | null {
         const peerConnections = this.connections.get(peerIdentity)
         if (!peerConnections || peerConnections.length === 0) {
             return null
         }
 
-        // Filter to usable connections
         const usable = peerConnections.filter(
             conn =>
                 conn.origin === "outbound" &&
+                conn.connectionString === connectionString &&
                 ConnectionStateUtils.isUsable(conn.getState()),
         )
 

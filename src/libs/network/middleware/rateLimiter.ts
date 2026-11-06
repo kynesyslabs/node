@@ -6,6 +6,7 @@ import { Middleware } from "../bunServer"
 import { getSharedState } from "@/utilities/sharedState"
 import { isForkActive } from "@/forks"
 import { getAuthContext, setAuthContext } from "../authContext"
+import { BODY_HASH_HEADER } from "../peerHttpAuth"
 import {
     verifySignature,
     isKeyWhitelisted,
@@ -794,6 +795,7 @@ export class RateLimiter {
             const path = new URL(req.url).pathname
             if (
                 path === "/health" ||
+                path === "/health/live" ||
                 path === "/health/subsystems" ||
                 path === "/version"
             ) {
@@ -807,6 +809,7 @@ export class RateLimiter {
             const identity = req.headers.get("identity")
             const signature = req.headers.get("signature")
             const timestamp = req.headers.get("timestamp")
+            const bodyHash = req.headers.get(BODY_HASH_HEADER)
             let verifyResult: VerificationResult | null = null
 
             if (identity && signature) {
@@ -840,6 +843,7 @@ export class RateLimiter {
                     signature,
                     timestamp,
                     requireTimestampBinding,
+                    bodyHash,
                 )
 
                 if (!verifyResult.valid) {
@@ -874,6 +878,7 @@ export class RateLimiter {
                     identity: verifyResult.identity,
                     publicKey: verifyResult.publicKey,
                     algorithm: verifyResult.algorithm,
+                    bodyHash: verifyResult.bodyHash ?? null,
                 })
             }
 

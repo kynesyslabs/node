@@ -9,6 +9,8 @@ import { FrameTooLargeError, MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader, ParsedOmniMessage } from "../types/message"
 import type { AuthBlock } from "../auth/types"
 import { SignatureAlgorithm, SignatureMode } from "../auth/types"
+import { timestampedSignedData } from "../auth/signedData"
+import { getSharedState } from "src/utilities/sharedState"
 import {
     ConnectionState,
     ConnectionStateValue,
@@ -451,11 +453,21 @@ export class PeerConnection extends EventEmitter {
         const timeout = options.timeout ?? 30000 // 30 second default
         const timestamp = Date.now()
 
-        // Build data to sign: Message ID + Keccak256(Payload)
-        const msgIdBuf = Buffer.allocUnsafe(4)
-        msgIdBuf.writeUInt32BE(sequence)
-        const payloadHash = Buffer.from(keccak_256(payload))
-        const dataToSign = Buffer.concat([msgIdBuf, payloadHash])
+        // Unknown network: a signature without it would verify anywhere.
+        const genesisHash = getSharedState.genesisBlockHash
+        if (!genesisHash) {
+            throw new SigningError(
+                "Genesis hash not known yet; refusing to sign Omni auth",
+            )
+        }
+
+        const dataToSign = timestampedSignedData(
+            genesisHash,
+            opcode,
+            sequence,
+            timestamp,
+            payload,
+        )
 
         // Sign with Ed25519 using node-forge
         let signature: Uint8Array
@@ -477,7 +489,7 @@ export class PeerConnection extends EventEmitter {
         // Build auth block
         const auth: AuthBlock = {
             algorithm: SignatureAlgorithm.ED25519,
-            signatureMode: SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH,
+            signatureMode: SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH,
             timestamp,
             identity: publicKey,
             signature: Buffer.from(signature),
