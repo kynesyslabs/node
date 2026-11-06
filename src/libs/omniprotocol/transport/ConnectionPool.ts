@@ -244,6 +244,7 @@ export class ConnectionPool extends EventEmitter {
             )
         }
         if (validator) {
+            connection.markProvenValidator()
             this.releaseIpSlot(connection, true)
         }
     }

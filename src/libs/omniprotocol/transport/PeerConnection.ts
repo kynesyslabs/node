@@ -130,6 +130,10 @@ export class PeerConnection extends EventEmitter {
 
     // Rate limiting (for inbound connections)
     private rateLimiter?: RateLimiter
+    // Set once the chain lists the proven identity as a validator: its
+    // requests then count on its own identity, not on the source IP it may
+    // share (NAT, proxy) with clients that can flood that IP's budget.
+    private provenValidator = false
 
     // Outbound only: settles once the peer has verified an auth block from
     // us on this socket, after which it accepts full-size frames.
@@ -224,6 +228,11 @@ export class PeerConnection extends EventEmitter {
         // Hash with keccak256 for a compact, unique identifier
         const hash = keccak_256(Buffer.from(data, "utf8"))
         return Buffer.from(hash).toString("hex")
+    }
+
+    /** The identity this connection proved is a validator (see ConnectionPool). */
+    markProvenValidator(): void {
+        this.provenValidator = true
     }
 
     /**
@@ -892,7 +901,9 @@ export class PeerConnection extends EventEmitter {
             const ipAddress = this.socket?.remoteAddress || "unknown"
 
             // Check IP-based rate limit
-            const ipResult = this.rateLimiter.checkIPRequest(ipAddress)
+            const ipResult = this.provenValidator
+                ? { allowed: true as const }
+                : this.rateLimiter.checkIPRequest(ipAddress)
             if (!ipResult.allowed) {
                 log.warning(
                     `[PeerConnection] ${this._peerIdentity} IP rate limit exceeded: ${ipResult.reason}`,
