@@ -91,7 +91,7 @@ do not depend on the working directory.
 ## Alerts
 
 Rules are in `monitoring/prometheus/alerts/consensus.yml` and `node-health.yml`.
-Each fires per validator (`instance` label).
+The node-specific alerts fire per validator (`instance` label). `DeadMansSwitch` is the exception: it is `vector(1)` with no `instance` label, so it is one heartbeat for the whole monitoring stack, not one per validator.
 
 | Alert | Condition | Severity | Meaning |
 |-------|-----------|----------|---------|
