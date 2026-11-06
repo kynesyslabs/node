@@ -1,7 +1,8 @@
 /**
  * When an operator switches XM or web2 off, a DemosWork step of that kind must
  * fail its operation: the refusal is not a result, and the steps after it must
- * not run as if the skipped work had been done.
+ * not run as if the skipped work had been done. The same holds when the
+ * feature is on and the XM dispatcher or the web2 proxy reports a failure.
  */
 
 import { afterEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
@@ -69,6 +70,8 @@ function script(firstContext: string): any {
 afterEach(() => {
     jest.restoreAllMocks()
     handleNativeRequest.mockClear()
+    digest.mockClear()
+    handleWeb2ProxyRequest.mockClear()
 })
 
 describe("DemosWork steps whose feature is switched off", () => {
@@ -86,6 +89,53 @@ describe("DemosWork steps whose feature is switched off", () => {
     it("an enabled step still runs and the next step follows", async () => {
         const [, results] = await processOperations(script("native"))
         expect(results[0].success).toBe(true)
+        expect(handleNativeRequest).toHaveBeenCalledTimes(2)
+    })
+})
+
+describe("DemosWork steps whose handler reports a failure", () => {
+    it("an XM step fails when the dispatcher reports failure", async () => {
+        digest.mockImplementationOnce(async () => ({
+            success: false,
+            message: "all_ops_failed",
+            results: {},
+        }))
+        const [compiled, results] = await processOperations(script("xm"))
+        expect(digest).toHaveBeenCalledTimes(1)
+        expect(results[0].success).toBe(false)
+        expect(results[0].error).toContain("all_ops_failed")
+        expect(handleNativeRequest).not.toHaveBeenCalled()
+        expect(compiled.steps.s1.output.s1).toMatchObject({ success: false })
+    })
+
+    it("a web2 step fails on a non-200 proxy result", async () => {
+        handleWeb2ProxyRequest.mockImplementationOnce(async () => ({
+            result: 400,
+            response: null,
+            extra: "Destination not allowed",
+        }))
+        const [, results] = await processOperations(script("web2"))
+        expect(handleWeb2ProxyRequest).toHaveBeenCalledTimes(1)
+        expect(results[0].success).toBe(false)
+        expect(results[0].error).toContain("Destination not allowed")
+        expect(handleNativeRequest).not.toHaveBeenCalled()
+    })
+
+    it("successful XM and web2 steps let the next step run", async () => {
+        digest.mockImplementationOnce(async () => ({
+            success: true,
+            message: "all_ops_ok",
+            results: {},
+        }) as any)
+        handleWeb2ProxyRequest.mockImplementationOnce(async () => ({
+            result: 200,
+            response: {},
+            extra: null,
+        }) as any)
+        const [, xmResults] = await processOperations(script("xm"))
+        const [, web2Results] = await processOperations(script("web2"))
+        expect(xmResults[0].success).toBe(true)
+        expect(web2Results[0].success).toBe(true)
         expect(handleNativeRequest).toHaveBeenCalledTimes(2)
     })
 })

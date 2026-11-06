@@ -48,9 +48,22 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
         // REVIEW Implement the logic for xm steps
         const xmScript = task as XMScript
         result = await handleXMRequest.digest(xmScript)
+        // A refused or fully failed XM script must stop the operation like
+        // any other failed step.
+        if (result?.success !== true) {
+            stepResult.success = false
+            stepResult.error = String(result?.message ?? "XM operation failed")
+        }
     } else if (context === "web2") {
         const web2Request = task as IWeb2Request
         result = await handleWeb2ProxyRequest({ web2Request })
+        if (result?.result !== 200) {
+            stepResult.success = false
+            stepResult.error =
+                typeof result?.extra === "string"
+                    ? result.extra
+                    : `web2 request failed with status ${result?.result}`
+        }
     } else if (context === "l2ps") {
         const l2psScript = task as unknown as L2PSTransaction
         result = await handleL2PS(l2psScript)
