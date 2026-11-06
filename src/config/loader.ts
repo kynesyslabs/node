@@ -7,7 +7,7 @@
 
 import * as dotenv from "dotenv"
 import { EnvKey } from "./envKeys"
-import { parseBoolFlag, parseIntSetting } from "./envFlags"
+import { parseBoolFlag, parseDurationMs, parseIntSetting } from "./envFlags"
 import { DEFAULT_CONFIG } from "./defaults"
 import type { AppConfig, ForkScheduleMismatchPolicy } from "./types"
 import { validateBuildProvenance, validateExposedUrl } from "./nodeUrl"
@@ -520,10 +520,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.gossip.heightsIntervalMs,
             ),
             keyFile: envStr(EnvKey.GOSSIP_KEY_FILE, d.gossip.keyFile),
-            ipcConnectTimeoutMs: envInt(
-                EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS,
-                d.gossip.ipcConnectTimeoutMs,
-            ),
+            ipcConnectTimeoutMs:
+                parseDurationMs(
+                    process.env[EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS],
+                ) ?? d.gossip.ipcConnectTimeoutMs,
         },
     }
 
@@ -620,7 +620,7 @@ function assertGossipSane(config: AppConfig): void {
     const { ipcConnectTimeoutMs } = config.gossip
     if (!Number.isInteger(ipcConnectTimeoutMs) || ipcConnectTimeoutMs <= 0) {
         throw new Error(
-            `[config] GOSSIP_IPC_CONNECT_TIMEOUT_MS must be an integer > 0 (got ${ipcConnectTimeoutMs})`,
+            `[config] GOSSIP_IPC_CONNECT_TIMEOUT_MS must be an integer > 0 in milliseconds, or a number with ms, s or m (got ${process.env[EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS]})`,
         )
     }
 }
