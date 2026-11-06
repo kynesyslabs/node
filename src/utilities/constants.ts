@@ -39,6 +39,13 @@ export const MEMPOOL_MAX_BYTES = 8 * 1024 * 1024
  * time for.
  */
 export const MERGE_PAYLOAD_MAX_BYTES = 12 * 1024 * 1024
+/**
+ * Most replies one merge exchange reads from a peer's pool: the reply to the
+ * last request and the follow-ups it asks for. A pool larger than one reply
+ * holds txs other members merged into it; past this many pages the rest
+ * comes in the next round, which bounds the work a peer pushes onto this one.
+ */
+export const MERGE_REPLY_MAX_PAGES = 4
 /** Most pending txs one sender may hold. */
 export const MEMPOOL_MAX_PENDING_PER_SENDER = 64
 /**

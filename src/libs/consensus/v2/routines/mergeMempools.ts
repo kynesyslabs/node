@@ -11,6 +11,7 @@ import {
     capMergeReply,
     splitMergeBatches,
 } from "@/libs/blockchain/mempoolLimits"
+import { MERGE_REPLY_MAX_PAGES } from "@/utilities/constants"
 import { contributePeerlist, getLocalSyncObservations } from "./peerlistMerge"
 
 const PEER_CALL_TIMEOUT_MS = 10_000
@@ -65,13 +66,14 @@ export async function mergeMempools(
     // splitMergeBatches), and the receiver refuses an oversized request
     // before merging anything, so the pool goes out in bounded requests.
     const batches = splitMergeBatches(mempool)
-    const buildRequest = (txs: Transaction[]): RPCRequest => ({
+    const buildRequest = (txs: Transaction[], after?: string): RPCRequest => ({
         method: "mempool",
         params: [
             {
                 txs,
                 peerlist: getLocalSyncObservations(blockRef),
                 blockRef,
+                ...(after === undefined ? {} : { after }),
             },
         ],
     })
@@ -85,10 +87,10 @@ export async function mergeMempools(
             `[mergeMempools] Merging mempool with ${peer.connection.string} in ${batches.length} request(s)`,
         )
         const outcomes: PromiseSettledResult<RPCResponse>[] = []
-        for (const batch of batches) {
+        const call = async (request: RPCRequest) => {
             const [outcome] = await Promise.allSettled([
                 withTimeout(
-                    peer.longCall(buildRequest(batch), true, {
+                    peer.longCall(request, true, {
                         sleepTime: 250,
                         retries: 2,
                     }),
@@ -97,9 +99,24 @@ export async function mergeMempools(
                 ),
             ])
             outcomes.push(outcome)
-            if (outcome.status === "rejected" || outcome.value.result !== 200) {
-                break
-            }
+            return outcome.status === "fulfilled" &&
+                outcome.value.result === 200
+                ? outcome.value
+                : null
+        }
+        let last: RPCResponse | null = null
+        for (const batch of batches) {
+            last = await call(buildRequest(batch))
+            if (!last) return outcomes
+        }
+        // A pool larger than one reply holds txs other members merged into
+        // it after its own requests went out; ask for the rest.
+        for (let page = 1; page < MERGE_REPLY_MAX_PAGES && last; page++) {
+            const reply = last.response as { txs?: unknown; more?: unknown }
+            const txs = Array.isArray(reply?.txs) ? reply.txs : []
+            const after = (txs[txs.length - 1] as { hash?: unknown })?.hash
+            if (reply?.more !== true || typeof after !== "string") break
+            last = await call(buildRequest([], after))
         }
         return outcomes
     }

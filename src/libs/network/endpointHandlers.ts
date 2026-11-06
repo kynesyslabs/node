@@ -184,15 +184,26 @@ export default class ServerHandlers {
             contributePeerlist(envelope.blockRef, sender, envelope.peerlist)
         }
 
-        // The reply is one frame: what does not fit reaches the caller in
-        // this node's own merge requests, which carry the whole pool.
-        const replyTxs = capMergeReply(response.mempool)
-        const responsePayload = envelope
-            ? {
-                  txs: replyTxs,
-                  peerlist: getLocalSyncObservations(envelope.blockRef),
-              }
-            : replyTxs
+        // The reply is one frame. Our own requests carry only the pool we
+        // had when our round began, not what other members merged into it
+        // since, so the rest is paged: in hash order, from just past the
+        // caller's `after`, with `more` set while some is left.
+        let responsePayload: unknown
+        if (envelope) {
+            const after =
+                typeof envelope.after === "string" ? envelope.after : null
+            const pending = (response.mempool as Array<{ hash: string }>)
+                .filter(tx => after === null || tx.hash > after)
+                .sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))
+            const replyTxs = capMergeReply(pending)
+            responsePayload = {
+                txs: replyTxs,
+                peerlist: getLocalSyncObservations(envelope.blockRef),
+                ...(replyTxs.length < pending.length ? { more: true } : {}),
+            }
+        } else {
+            responsePayload = capMergeReply(response.mempool)
+        }
 
         const ourId = getSharedState.publicKeyHex
         const ourDate = new Date().toISOString()

@@ -94,7 +94,7 @@ describe("handleMempool payload shape", () => {
         // 20 MiB of txs the caller lacks: the reply is cut at the merge
         // payload cap, in pool order, and the rest goes in our own requests.
         const big = Array.from({ length: 200 }, (_, i) => ({
-            hash: `0x${i}`,
+            hash: `0x${String(i).padStart(4, "0")}`,
             content: { pad: "x".repeat(100 * 1024) },
         }))
         receive.mockImplementationOnce(async () => ({ success: true, mempool: big }))
@@ -105,6 +105,32 @@ describe("handleMempool payload shape", () => {
         expect(txs.length).toBeLessThan(big.length)
         expect(txs.map(t => t.hash)).toEqual(big.slice(0, txs.length).map(t => t.hash))
         expect(Buffer.byteLength(JSON.stringify(res.response))).toBeLessThan(16 * 1024 * 1024)
+    })
+
+    it("pages a pool larger than one reply, so the caller can fetch all of it", async () => {
+        // Pool order is not hash order; pages follow the hash so a page
+        // boundary does not move when the pool changes between requests.
+        const big = Array.from({ length: 200 }, (_, i) => ({
+            hash: `0x${String(i).padStart(4, "0")}`,
+            content: { pad: "x".repeat(100 * 1024) },
+        })).reverse()
+        receive.mockImplementation(async () => ({ success: true, mempool: big }))
+        const seen: string[] = []
+        let after: string | undefined
+        for (let page = 0; page < 10; page++) {
+            const res = await ServerHandlers.handleMempool(
+                [{ txs: [], peerlist: [], blockRef: 5, after }],
+                STAKED,
+            )
+            expect(res.result).toBe(200)
+            const reply = res.response as { txs: Array<{ hash: string }>; more?: boolean }
+            expect(Buffer.byteLength(JSON.stringify(reply))).toBeLessThan(16 * 1024 * 1024)
+            seen.push(...reply.txs.map(t => t.hash))
+            if (!reply.more) break
+            after = reply.txs[reply.txs.length - 1].hash
+        }
+        receive.mockImplementation(async () => ({ success: true, mempool: [{ hash: "0xdiff" }] }))
+        expect(seen).toEqual(big.map(t => t.hash).sort())
     })
 
     it("refuses a batch longer than the pool can hold", async () => {
