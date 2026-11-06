@@ -33,8 +33,8 @@ ap.add_argument("--genesis-ts", type=int, required=True)
 ap.add_argument("--image", required=True)
 # "devnet": the forks of testing/devnet/genesis.devnet.json, with quorumParity
 # and committeeBinding set below, and commitLock off with --binding off (every
-# scenario before the mainnet-shape drills). "launch": the fork set of docs/mainnet/genesis.template.json, read
-# from the repo at run time.
+# scenario before the mainnet-shape drills). "launch": the fork set of
+# docs/mainnet/genesis.template.json, read from the repo at run time.
 ap.add_argument("--fork-set", choices=["devnet", "launch"], default="devnet")
 # The image's user, read from the image by run.sh: the node tmpfs is mounted
 # owned by it. Both or neither: without them the tmpfs is the root-owned
