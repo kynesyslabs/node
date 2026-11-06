@@ -64,7 +64,7 @@ mock.module("./routines/transactions/handleNativeBridgeTx", () => ({ __esModule:
 mock.module("./routines/transactions/handleL2PS", () => ({ __esModule: true, default: jest.fn() }))
 
 const { handleExecuteTransaction } = await import("./endpointExecution")
-const { Config } = await import("src/config")
+const { Config: appConfig } = await import("src/config")
 
 const SWITCHES = ["XM_ENABLED", "DEMOSWORK_ENABLED", "WEB2_ENABLED"] as const
 
@@ -97,12 +97,12 @@ function web2Tx(headers: Record<string, string>, authorization = "", resultHeade
 
 function setSwitch(name: (typeof SWITCHES)[number], on: boolean) {
     process.env[name] = on ? "true" : "false"
-    Config.resetInstance()
+    appConfig.resetInstance()
 }
 
 beforeEach(() => {
     for (const s of SWITCHES) delete process.env[s]
-    Config.resetInstance()
+    appConfig.resetInstance()
     submitValidatedTx.mockClear()
     handleDemosWorkRequest.mockClear()
     digest.mockClear()
@@ -111,7 +111,7 @@ beforeEach(() => {
 
 afterEach(() => {
     for (const s of SWITCHES) delete process.env[s]
-    Config.resetInstance()
+    appConfig.resetInstance()
 })
 
 describe("operator off switches", () => {
