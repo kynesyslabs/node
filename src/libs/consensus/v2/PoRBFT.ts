@@ -28,6 +28,7 @@ import HandleGCR, {
     type PendingGCRWrite,
 } from "src/libs/blockchain/gcr/handleGCR"
 import { StateReadError } from "src/libs/blockchain/gcr/stateReadError"
+import { CommittedBlockFollowUpError } from "src/libs/blockchain/committedBlockError"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
@@ -662,6 +663,14 @@ export async function consensusRoutine(): Promise<void> {
         const invalid =
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
+        // Disk holds a block memory has not caught up with; only a restart
+        // derives memory from disk again.
+        const diverged = error instanceof CommittedBlockFollowUpError
+        // Any other error also ends only the round: until the block commits
+        // nothing is on disk, and exiting would keep this validator out of
+        // every later round over a fault that may pass, such as a timed-out
+        // query or a dropped peer.
+        const unexpected = !aborted && !invalid && !diverged
 
         if (invalid && getSharedState.lastBlockNumber < blockRef) {
             recordFailedRound(
@@ -684,7 +693,7 @@ export async function consensusRoutine(): Promise<void> {
             )
         }
 
-        if (aborted || invalid) {
+        if (aborted || invalid || unexpected) {
             exitReason = "abortConsensus"
             // Its message is the only record of why the round stopped.
             if (error instanceof AbortConsensusError) {
@@ -693,6 +702,12 @@ export async function consensusRoutine(): Promise<void> {
             if (aborted) {
                 log.error(error)
                 log.error("[consensusRoutine] Exiting consensus routine")
+            }
+            if (unexpected) {
+                log.error(
+                    `[consensusRoutine] Round for block ${blockRef} failed, sitting it out: ${error}`,
+                )
+                console.error((error as Error)?.stack ?? error)
             }
             if (manager?.ourValidatorPhase) {
                 log.warn(
