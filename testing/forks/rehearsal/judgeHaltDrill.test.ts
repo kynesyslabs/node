@@ -12,6 +12,7 @@ import {
     main,
     parseDrillInput,
     ridePreconditionError,
+    timingsLine,
 } from "./lib/judgeHaltDrill"
 
 const REHEARSAL_DIR = resolve(import.meta.dir)
@@ -390,6 +391,27 @@ describe("report and CLI", () => {
         expect(payload.stopped).toEqual([7, 8, 9, 10, 11, 12, 13])
         expect(payload.marks.t_stop).toBe("2026-11-04T12:02:05.000Z")
         expect(lines).toContain("timing: restart to all 13 converged 55.0s")
+        // an input from before the exclusions has none, and says nothing about them
+        expect(input.excludedForks).toEqual({})
+        expect("excludedForks" in payload).toBe(false)
+        expect(lines.find(l => l.startsWith("config: "))).not.toContain("excluded")
+    })
+    it("carries the excluded forks into DRILL_TIMINGS, the verdict timings and the config line", () => {
+        const raw = loadRaw("halt-n10s10.pass")
+        const why = "needs a genesis snapshot; the drills use the legacy genesis path"
+        raw.excludedForks = { identityCarryover: why }
+        raw.forks = { ...raw.forks, identityCarryover: null }
+        const input = parseDrillInput(raw)
+        expect(input.excludedForks).toEqual({ identityCarryover: why })
+        const lines = formatReport(input, judgeDrill(input))
+        const line = lines.find(l => l.startsWith("DRILL_TIMINGS ")) ?? ""
+        expect(JSON.parse(line.slice("DRILL_TIMINGS ".length)).excludedForks).toEqual({ identityCarryover: why })
+        expect(lines.find(l => l.startsWith("config: "))).toContain(`; excluded: identityCarryover (${why})`)
+        expect(timingsLine(input, judgeDrill(input)).excludedForks).toEqual({ identityCarryover: why })
+        raw.excludedForks = { identityCarryover: "" }
+        expect(() => parseDrillInput(raw)).toThrow("excludedForks.identityCarryover")
+        raw.excludedForks = ["identityCarryover"]
+        expect(() => parseDrillInput(raw)).toThrow("excludedForks: expected an object")
     })
     it("exits 0 on pass, 1 on fail and 2 on malformed input, and writes the verdict file", () => {
         const dir = mkdtempSync(join(tmpdir(), "judge-halt-"))

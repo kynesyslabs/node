@@ -5,6 +5,40 @@ import { getMetricsService } from "./MetricsService"
  * own errors: a metrics failure must never reach the consensus path that calls it.
  */
 
+/**
+ * Transactions of a block this node stored, by final status. The type label
+ * stays "all": a tx type read from a peer's block would let it grow the label
+ * set without bound.
+ */
+export function countIncludedTransactions(
+    txs: ReadonlyArray<{ status?: string }>,
+): void {
+    try {
+        let failed = 0
+        for (const tx of txs) {
+            if (tx.status === "failed") failed++
+        }
+        const confirmed = txs.length - failed
+        const metrics = getMetricsService()
+        if (confirmed > 0) {
+            metrics.incrementCounter(
+                "transactions_total",
+                { type: "all", status: "confirmed" },
+                confirmed,
+            )
+        }
+        if (failed > 0) {
+            metrics.incrementCounter(
+                "transactions_total",
+                { type: "all", status: "failed" },
+                failed,
+            )
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
 export function countBlockHashMismatch(): void {
     try {
         getMetricsService().incrementCounter(

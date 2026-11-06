@@ -15,6 +15,10 @@ import required from "src/utilities/required"
 import SharedState from "@/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import log from "@/utilities/logger"
+import {
+    DAHR_PROXY_ERROR_HEADER,
+    UnattestableResponseError,
+} from "src/features/web2/dahr/originStatus"
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
@@ -101,6 +105,21 @@ export class Proxy {
             let requestHash: string | undefined
 
             req.on("response", res => {
+                // A response the proxy made up itself must never reach
+                // attestation, opt-in or not: it says nothing about the origin.
+                const proxyError = res.headers[DAHR_PROXY_ERROR_HEADER]
+                if (proxyError) {
+                    res.resume()
+                    reject(
+                        new UnattestableResponseError(
+                            `DAHR proxy did not relay an origin response (${String(proxyError)})`,
+                            "proxy-error",
+                            res.statusCode || 502,
+                        ),
+                    )
+                    return
+                }
+
                 statusCode = res.statusCode || 500
                 statusMessage = res.statusMessage || "Unknown"
                 responseHeaders = res.headers
@@ -292,6 +311,7 @@ export class Proxy {
                     if (res instanceof http.ServerResponse) {
                         res.writeHead(502, {
                             "Content-Type": "application/json",
+                            [DAHR_PROXY_ERROR_HEADER]: "tls",
                         })
                         res.end(
                             JSON.stringify({
@@ -308,6 +328,7 @@ export class Proxy {
                 if (res instanceof http.ServerResponse) {
                     res.writeHead(500, {
                         "Content-Type": "application/json",
+                        [DAHR_PROXY_ERROR_HEADER]: "upstream",
                     })
                     res.end(
                         JSON.stringify({
@@ -329,6 +350,8 @@ export class Proxy {
 
             // Listen for proxy responses to set the correct status code
             proxyServer.on("proxyRes", (proxyRes, _req, res) => {
+                // The origin must not be able to forge the proxy's own marker.
+                delete proxyRes.headers[DAHR_PROXY_ERROR_HEADER]
                 // Set the status code and headers from the target API
                 res.writeHead(proxyRes.statusCode || 500, proxyRes.headers)
             })
@@ -336,7 +359,9 @@ export class Proxy {
             // Create the main HTTP server
             this._server = http.createServer(async (req, res) => {
                 if (!this.isAuthorizedRequest(req)) {
-                    res.writeHead(403)
+                    res.writeHead(403, {
+                        [DAHR_PROXY_ERROR_HEADER]: "unauthorized",
+                    })
                     res.end("Unauthorized")
                     return
                 }
@@ -344,7 +369,9 @@ export class Proxy {
                 // Ensure target is still safe at request time (DNS may have changed)
                 const ok = await preflight()
                 if (!ok) {
-                    res.writeHead(400)
+                    res.writeHead(400, {
+                        [DAHR_PROXY_ERROR_HEADER]: "invalid-target",
+                    })
                     res.end("Invalid target host")
                     return
                 }

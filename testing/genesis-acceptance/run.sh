@@ -45,7 +45,7 @@ RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
 # Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
-MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs identityCarryover telegramSenderBinding xmRemoveCanonical"
+MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs identityCarryover stakeApplyChecks txTypeAllowList instantMessagingBinding nativeSendBinding canonicalAddresses feeBinding blockCaps unpinnedCommittee telegramSenderBinding xmRemoveCanonical"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -288,6 +288,7 @@ start_node() { # $1 scenario id, $2 db, $3 state volume, $4 genesis file, $5 pin
         -e GOSSIP_ENABLED=false -e OMNI_ENABLED=false -e OMNI_MODE=HTTP_ONLY \
         -e L2PS_MESSAGING_ENABLED=false -e L2PS_ZK_ENABLED=false \
         -e DEMOS_SKIP_SETUP_CHECK=true -e LOG_LEVEL=info \
+        -e PROD=true -e EXPOSED_URL="http://${NODE}:${RPC_PORT}" \
         "${pin_env[@]}" "${snap_env[@]}" "$@" \
         -v "${vol}:/app/state" \
         -v "${gen}:/app/data/genesis.json:ro" \

@@ -172,6 +172,11 @@ services:
       OMNI_ENABLED: ${OMNI_ENABLED:-true}
       OMNI_PORT: ${OMNI_PORT:-53551}
       OMNI_MODE: ${OMNI_MODE:-OMNI_PREFERRED}
+      SIGNALING_ENABLED: ${SIGNALING_ENABLED:-true}
+      MIN_DISK_SPACE: ${MIN_DISK_SPACE:-}
+      # The data volume, not the container's root filesystem. Postgres keeps
+      # its own volume, which node-exporter's filesystem metrics cover.
+      DISK_SPACE_PATH: ${DISK_SPACE_PATH:-/app/data}
       RPC_SIGNALING_PORT: ${RPC_SIGNALING_PORT:-3005}
       RPC_MCP_PORT: ${RPC_MCP_PORT:-3001}
       # Database — service name from this compose
@@ -209,7 +214,10 @@ services:
       # prometheus.yml scrape target (node:9090) stays valid. Use
       # METRICS_HOST_PORT in the ports stanza to remap on the host.
       METRICS_PORT: 9090
-      METRICS_HOST: ${METRICS_HOST:-0.0.0.0}
+      # Container-internal bind, pinned like METRICS_PORT. Host exposure is
+      # decided by METRICS_BIND in the ports stanza, not by this value.
+      METRICS_HOST: 0.0.0.0
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
       BLOCK_WATCHDOG_ENABLED: ${BLOCK_WATCHDOG_ENABLED:-}
       BLOCK_WATCHDOG_TIMEOUT_SECONDS: ${BLOCK_WATCHDOG_TIMEOUT_SECONDS:-}
       DEBUG_ASSERTIONS_ENABLED: ${DEBUG_ASSERTIONS_ENABLED:-}
@@ -427,7 +435,8 @@ services:
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
       - --web.console.libraries=/etc/prometheus/console_libraries
       - --web.console.templates=/etc/prometheus/consoles
-      - --web.enable-lifecycle
+      # No --web.enable-lifecycle: it lets any HTTP caller POST /-/quit or
+      # /-/reload. Reload rules with `docker kill -s HUP` instead.
       # NOTE — sub-path serving behind Caddy (Epic 12 T11):
       # The Caddyfile uses `handle_path /prometheus/*` which strips the
       # prefix before forwarding here, so Prom can stay at root with
@@ -441,9 +450,12 @@ services:
       # docs/runbooks/proxy-setup.md §"Prometheus sub-path caveats".
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # rule_files: alerts/*.yml in prometheus.yml resolves here; without
+      # this mount HeightStalled / NodeDown are never evaluated.
+      - ./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus_data:/prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9091}:9090"
+      - "${MONITORING_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9091}:9090"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
       interval: 30s
@@ -453,6 +465,26 @@ services:
     logging: *default-logging
     networks:
       - demos-network
+
+  # ---------------------------------------------------------------------------
+  # Refuses to let Grafana start without an admin password of the operator's
+  # own. Grafana depends on it completing, so `up` fails with this message.
+  # ---------------------------------------------------------------------------
+  grafana-password-check:
+    image: grafana/grafana:10.2.2
+    profiles: [monitoring]
+    restart: "no"
+    network_mode: none
+    environment:
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        case "$$GRAFANA_ADMIN_PASSWORD" in
+          "") echo "GRAFANA_ADMIN_PASSWORD is not set: set a strong Grafana admin password in .env before starting the monitoring profile." >&2; exit 1 ;;
+          demos) echo "GRAFANA_ADMIN_PASSWORD is the published default 'demos': set a strong Grafana admin password in .env." >&2; exit 1 ;;
+        esac
+    logging: *default-logging
 
   # ---------------------------------------------------------------------------
   # Grafana — dashboards. Provisioned datasource points at prometheus:9090.
@@ -469,9 +501,11 @@ services:
     depends_on:
       prometheus:
         condition: service_healthy
+      grafana-password-check:
+        condition: service_completed_successfully
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-demos}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
       # Sub-path serving for `proxy` compose profile. Auto-enabled
@@ -507,7 +541,7 @@ services:
       - ./monitoring/grafana/branding/demos-icon.svg:/usr/share/grafana/public/img/demos-icon.svg:ro
       - ./monitoring/grafana/branding/favicon.png:/usr/share/grafana/public/img/favicon.png:ro
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${MONITORING_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1"]
       interval: 30s
@@ -537,7 +571,7 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
     ports:
-      - "${NODE_EXPORTER_PORT:-9100}:9100"
+      - "${MONITORING_BIND:-127.0.0.1}:${NODE_EXPORTER_PORT:-9100}:9100"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9100/metrics"]
       interval: 30s
@@ -611,6 +645,9 @@ services:
       # would never take effect. See Caddyfile.devnet line 46 for shape.
       METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
       MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+      # Forwarded to the node's /metrics after basic_auth passes; empty when
+      # the node runs without a token, which it then ignores.
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
       # Epic 12 T14 — selects which tlsnotary-modes/*.caddy snippet
       # is imported. Allowed: subpath (default), subdomain, direct.
       TLSNOTARY_PROXY_MODE: ${TLSNOTARY_PROXY_MODE:-subpath}

@@ -15,11 +15,19 @@ import type {
     CommitLockConfig,
     FinalityProofsConfig,
     IdentityCarryoverConfig,
+    StakeApplyChecksConfig,
     NetworkGovernanceConfig,
+    TxTypeAllowListConfig,
+    InstantMessagingBindingConfig,
+    NativeSendBindingConfig,
+    CanonicalAddressesConfig,
+    FeeBindingConfig,
+    BlockCapsConfig,
     TelegramSenderBindingConfig,
     XmRemoveCanonicalConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
+    UnpinnedCommitteeConfig,
     Web2ProofBindingConfig,
     XmProofBindingConfig,
 } from "./forkConfig"
@@ -372,9 +380,39 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.identityCarryover =
                 config as IdentityCarryoverConfig
             return
+        case "stakeApplyChecks":
+            getSharedState.forkConfig.stakeApplyChecks =
+                config as StakeApplyChecksConfig
+            return
         case "networkGovernance":
             getSharedState.forkConfig.networkGovernance =
                 config as NetworkGovernanceConfig
+            return
+        case "txTypeAllowList":
+            getSharedState.forkConfig.txTypeAllowList =
+                config as TxTypeAllowListConfig
+            return
+        case "instantMessagingBinding":
+            getSharedState.forkConfig.instantMessagingBinding =
+                config as InstantMessagingBindingConfig
+            return
+        case "nativeSendBinding":
+            getSharedState.forkConfig.nativeSendBinding =
+                config as NativeSendBindingConfig
+            return
+        case "canonicalAddresses":
+            getSharedState.forkConfig.canonicalAddresses =
+                config as CanonicalAddressesConfig
+            return
+        case "feeBinding":
+            getSharedState.forkConfig.feeBinding = config as FeeBindingConfig
+            return
+        case "blockCaps":
+            getSharedState.forkConfig.blockCaps = config as BlockCapsConfig
+            return
+        case "unpinnedCommittee":
+            getSharedState.forkConfig.unpinnedCommittee =
+                config as UnpinnedCommitteeConfig
             return
         case "telegramSenderBinding":
             getSharedState.forkConfig.telegramSenderBinding =
@@ -521,8 +559,24 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as FinalityProofsConfig
         case "identityCarryover":
             return base as IdentityCarryoverConfig
+        case "stakeApplyChecks":
+            return base as StakeApplyChecksConfig
         case "networkGovernance":
             return base as NetworkGovernanceConfig
+        case "txTypeAllowList":
+            return base as TxTypeAllowListConfig
+        case "instantMessagingBinding":
+            return base as InstantMessagingBindingConfig
+        case "nativeSendBinding":
+            return base as NativeSendBindingConfig
+        case "canonicalAddresses":
+            return base as CanonicalAddressesConfig
+        case "feeBinding":
+            return base as FeeBindingConfig
+        case "blockCaps":
+            return base as BlockCapsConfig
+        case "unpinnedCommittee":
+            return base as UnpinnedCommitteeConfig
         case "telegramSenderBinding":
             return base as TelegramSenderBindingConfig
         case "xmRemoveCanonical":

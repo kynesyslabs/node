@@ -15,6 +15,18 @@ import { getSharedState } from "@/utilities/sharedState"
 import { storageProgramsRoot } from "@/libs/blockchain/finality/storageRoot"
 
 /**
+ * UTF-8 byte order: what Postgres gives under the "C" collation, and what the
+ * pinned Alpine image gives under its default one, since musl collates by
+ * bytes. A glibc or ICU collation orders case and punctuation differently, so
+ * the rows are sorted here and the hash does not depend on the database's
+ * locale.
+ */
+function byKeyBytes<T>(key: (row: T) => string): (a: T, b: T) => number {
+    return (a, b) =>
+        Buffer.compare(Buffer.from(key(a), "utf8"), Buffer.from(key(b), "utf8"))
+}
+
+/**
  * Generates a SHA-256 hash for tables that use 'publicKey' as their identifier.
  * The hash is created by:
  * 1. Ordering all records by publicKey (ASC)
@@ -56,6 +68,7 @@ export async function hashSubnetsTxsTable(): Promise<string> {
             tx_hash: "ASC",
         },
     })
+    records.sort(byKeyBytes(r => r.tx_hash))
 
     const tableString = JSON.stringify(records)
     return Hashing.sha256(tableString)
@@ -77,6 +90,7 @@ export async function hashTLSNotaryTable(): Promise<string> {
             tokenId: "ASC",
         },
     })
+    records.sort(byKeyBytes(r => r.tokenId))
 
     // Normalize to plain objects with fixed field order for deterministic hashing
     const normalized = records.map(r => ({
@@ -153,6 +167,9 @@ export async function hashAtomicWorkTables(): Promise<string> {
         .where("sp.metadata -> 'atomicWork' IS NOT NULL")
         .orderBy("sp.storageAddress", "ASC")
         .getMany()
+    works.sort(byKeyBytes(w => w.workId))
+    slots.sort(byKeyBytes(s => s.resourceKey))
+    writes.sort(byKeyBytes(w => w.storageAddress))
 
     // JCS, because slot records and stored values come back from jsonb with
     // their keys in the database's order, not the order they were written.

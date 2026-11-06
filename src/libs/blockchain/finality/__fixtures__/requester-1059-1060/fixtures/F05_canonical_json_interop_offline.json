@@ -1,0 +1,47 @@
+{
+  "id": "F05",
+  "kind": "positive (offline, client side)",
+  "issues": [
+    "kynesyslabs/node#1060 (U-02): dataHash over JCS, key order and numbers (acceptance test 9)"
+  ],
+  "captured_by": "PATH-OS lanes S152 (57-row container pilot) and S187 (cross-run of dacs-sdk vs PATH-OS adapter)",
+  "pins": {
+    "DACS-Standard next": "df7bc202ebdc179a59d61a8221072f33f482b933",
+    "DACS-Standard main": "4bb9e48a1095ab32c06c25b7c0b52018d3ce4091",
+    "dacs-sdk main": "3904d704fb540e6e1d7dd502a0be29f20569c92d"
+  },
+  "s187_crossrun_counts": {
+    "main": {
+      "rows": 32,
+      "agree": 32
+    },
+    "next": {
+      "rows": 57,
+      "agree": 57
+    }
+  },
+  "s152_four_lineage_pilot": {
+    "rows": 57,
+    "INTEROP-AGREE": 34,
+    "IMPLEMENTATION-DIVERGENCE": 23,
+    "divergence_owner": "all 23 traced to a third implementation (mj-deving/dacs-verify) in S152b triage; none in dacs-sdk or the Standard script"
+  },
+  "s187_next_provenance": {
+    "by_source": {
+      "Standard canonical-json-v0.1": 25,
+      "PATH-OS proposal seed": 29,
+      "PATH-OS convergence corpus": 3
+    },
+    "by_operation": {
+      "canonicalize": 52,
+      "signedScopeHash": 5
+    }
+  },
+  "shows": [
+    "The two compared implementations agree on 57/57 next-pilot rows: 25 Standard canonical-json vectors and 32 PATH-OS-authored cases (52 canonicalization and 5 signed-scope-hash operations). This is a scoped offline pilot, not node dataHash verification or full conformance."
+  ],
+  "does_not_show": [
+    "anything about the node; jsonb key reordering on the node is described in #1060 and not measured here",
+    "node dataHash verification or full conformance"
+  ]
+}

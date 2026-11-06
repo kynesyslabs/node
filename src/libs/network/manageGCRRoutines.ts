@@ -308,7 +308,8 @@ export default async function manageGCRRoutines(
         // REVIEW: Get storage program by address
         case "getStorageProgram": {
             const storageAddress = params[0]
-            const requesterAddress = params[1] // Optional identity for ACL check
+            // Only the verified sender counts; an address in params is a claim.
+            const requesterAddress = sender || undefined
 
             if (!storageAddress) {
                 response.result = 400
@@ -380,7 +381,7 @@ export default async function manageGCRRoutines(
         // REVIEW: Get storage programs by owner
         case "getStorageProgramsByOwner": {
             const owner = params[0]
-            const requesterAddress = params[1] // Optional identity for ACL filtering
+            const requesterAddress = sender || undefined
             const options = params[2] || {} // Optional { limit, offset }
 
             if (!owner) {
@@ -443,7 +444,7 @@ export default async function manageGCRRoutines(
         case "searchStoragePrograms": {
             const query = params[0]
             const options = params[1] || {} // { limit, offset, exactMatch }
-            const requesterAddress = params[2] // Optional identity for ACL filtering
+            const requesterAddress = sender || undefined
 
             if (!query || (typeof query === "string" && query.trim() === "")) {
                 response.result = 400

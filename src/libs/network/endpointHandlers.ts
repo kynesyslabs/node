@@ -42,7 +42,10 @@ import { handleExecuteTransaction } from "./endpointExecution"
 import { handleConsensusRequest } from "./endpointConsensus"
 import { handleL2PSHashUpdate } from "./endpointL2PSHash"
 import { isMergePeerEligible } from "src/libs/consensus/mergePeerEligibility"
-import { getMempoolLimits } from "src/libs/blockchain/mempoolLimits"
+import {
+    capMergeReply,
+    getMempoolLimits,
+} from "src/libs/blockchain/mempoolLimits"
 
 // Bounds the hellos one unauthenticated call can start.
 const MAX_ANNOUNCED_PEERS = 200
@@ -181,12 +184,26 @@ export default class ServerHandlers {
             contributePeerlist(envelope.blockRef, sender, envelope.peerlist)
         }
 
-        const responsePayload = envelope
-            ? {
-                  txs: response.mempool,
-                  peerlist: getLocalSyncObservations(envelope.blockRef),
-              }
-            : response.mempool
+        // The reply is one frame. Our own requests carry only the pool we
+        // had when our round began, not what other members merged into it
+        // since, so the rest is paged: in hash order, from just past the
+        // caller's `after`, with `more` set while some is left.
+        let responsePayload: unknown
+        if (envelope) {
+            const after =
+                typeof envelope.after === "string" ? envelope.after : null
+            const pending = (response.mempool as Array<{ hash: string }>)
+                .filter(tx => after === null || tx.hash > after)
+                .sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))
+            const replyTxs = capMergeReply(pending)
+            responsePayload = {
+                txs: replyTxs,
+                peerlist: getLocalSyncObservations(envelope.blockRef),
+                ...(replyTxs.length < pending.length ? { more: true } : {}),
+            }
+        } else {
+            responsePayload = capMergeReply(response.mempool)
+        }
 
         const ourId = getSharedState.publicKeyHex
         const ourDate = new Date().toISOString()

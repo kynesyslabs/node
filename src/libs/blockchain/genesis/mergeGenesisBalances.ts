@@ -41,6 +41,7 @@ import log from "src/utilities/logger"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import type { SavedUdIdentity } from "src/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
+import { duplicateBalanceProblems } from "./genesisPin"
 
 const GENESIS_ADDRESS_RE = /^0x[0-9a-f]{64}$/
 
@@ -123,6 +124,9 @@ export function genesisBalancesProblems(balances: unknown): string[] {
             problems.push((e as Error).message)
         }
     })
+    for (const problem of duplicateBalanceProblems(balances)) {
+        problems.push(`[GENESIS][BALANCES] ${problem}`)
+    }
     return problems
 }
 
@@ -221,13 +225,16 @@ export async function mergeGenesisBalances(
         `[GENESIS][BALANCES] overlaying ${balances.length} entries from genesisData.balances`,
     )
 
-    // Parse + dedupe upfront so we fail before any DB write if the
-    // operator shipped a malformed entry. Last-wins on duplicate pubkey
-    // — same rule createAccount would apply if called twice.
+    // Parsed upfront so a malformed or repeated entry fails before any DB
+    // write.
     const parsed = new Map<string, bigint>()
     for (let i = 0; i < balances.length; i++) {
         const [pubkey, balance] = parseGenesisBalanceEntry(balances[i], i)
         parsed.set(pubkey, balance)
+    }
+    const duplicates = duplicateBalanceProblems(balances)
+    if (duplicates.length > 0) {
+        throw new Error(`[GENESIS][BALANCES] ${duplicates.join("; ")}`)
     }
     result.total = parsed.size
 
