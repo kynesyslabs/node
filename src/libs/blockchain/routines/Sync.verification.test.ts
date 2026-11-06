@@ -906,6 +906,22 @@ describe("the tip check on the first sync after a restart", () => {
         await expect(fastSync([], "test")).resolves.toBeDefined()
     })
 
+    it("does not stop on a certified block from another height, and syncs from a peer that agrees", async () => {
+        const tx = makeTx(alice)
+        const block = makeBlock([tx])
+        verifyBlockCertificate.mockResolvedValue({ valid: true })
+        const stale = peerAt("tip-stale", { number: HEIGHT - 2, hash: "older-certified" }, block, [tx])
+        const honest = peerAt("tip-honest", { number: HEIGHT - 1, hash: OUR_TIP }, block, [tx])
+        startFromTip([stale, honest])
+        applyResult({ successfulTxs: [tx.hash] })
+
+        await fastSync([], "test")
+
+        expect(verifyBlockCertificate).not.toHaveBeenCalled()
+        expect(insertBlock).toHaveBeenCalledTimes(1)
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
+    })
+
     it("still refuses to sync when a peer serves a certified block that differs from our tip", async () => {
         const tx = makeTx(alice)
         const block = makeBlock([tx])

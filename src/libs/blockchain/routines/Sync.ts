@@ -458,6 +458,18 @@ async function verifyLastBlockIntegrity(
 
         if (lastSyncedBlock.hash === ourLastBlockHash) return "coherent"
 
+        // A certified block from another height of our own chain is not a
+        // conflict with our tip; the peer just did not answer the question.
+        if (Number(lastSyncedBlock.number) !== ourLastBlockNumber) {
+            log.error(
+                `[fastSync] Peer ${currentPeer.identity} answered block ${ourLastBlockNumber} with block ${lastSyncedBlock.number}; trying next peer`,
+            )
+            discreditAdvertisedHeight(currentPeer)
+            cooldownPeer(currentPeer.identity, "served the wrong height at our tip")
+            currentPeer = findNextAvailablePeer(seenPeers)
+            continue
+        }
+
         const certificate = await verifyBlockCertificate(lastSyncedBlock)
         if (certificate.valid) {
             log.error(
