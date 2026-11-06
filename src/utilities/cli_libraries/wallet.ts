@@ -124,6 +124,7 @@ export default class Wallet {
         await fs.promises.writeFile(
             filename,
             this.identity.privateKey.toString("hex"),
+            { mode: 0o600 },
         )
     }
 

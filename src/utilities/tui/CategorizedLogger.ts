@@ -289,9 +289,9 @@ export class CategorizedLogger extends EventEmitter {
             this.config.logsDir = `${this.config.logsDir}_${suffix}`
         }
 
-        // Create directory if it doesn't exist
+        // Logs carry peer addresses and request details: owner-only.
         if (!fs.existsSync(this.config.logsDir)) {
-            fs.mkdirSync(this.config.logsDir, { recursive: true })
+            fs.mkdirSync(this.config.logsDir, { recursive: true, mode: 0o700 })
         }
 
         this.logsInitialized = true
@@ -477,7 +477,7 @@ export class CategorizedLogger extends EventEmitter {
 
         if (!stream || stream.destroyed) {
             const filepath = path.join(this.config.logsDir, filename)
-            stream = fs.createWriteStream(filepath, { flags: "a" })
+            stream = fs.createWriteStream(filepath, { flags: "a", mode: 0o600 })
 
             // Handle stream errors to prevent crashes
             stream.on("error", err => {
