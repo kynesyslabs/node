@@ -44,6 +44,7 @@ async function main() {
     const output = await fs.promises.open(
         "public.key",
         fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW,
+        0o600,
     )
     try {
         const outputStat = await output.stat()

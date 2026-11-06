@@ -133,6 +133,10 @@ describe("mainnet genesis template", () => {
         const fromPy = /^MAINNET_FORKS = \[([^\]]*)\]/m.exec(py)?.[1].split(",").map(s => s.trim().replace(/"/g, ""))
         expect(fromSh).toEqual([...MAINNET_FORKS])
         expect(fromPy).toEqual([...MAINNET_FORKS])
+        // The harness's launch genesis must declare every fork, or the node
+        // refuses it on the mainnet-shaped chain id
+        const knownPy = /^KNOWN_FORKS = \[([^\]]*)\]/m.exec(py)?.[1].split(",").map(s => s.trim().replace(/"/g, ""))
+        expect(knownPy).toEqual([...KNOWN_FORKS])
     })
 })
 
