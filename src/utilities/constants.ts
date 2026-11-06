@@ -19,15 +19,6 @@ export const PEER_RECHECK_INTERVAL_MS = 10_000
 /** A peer not heard from for this long no longer counts as online. */
 export const PEER_LIVENESS_WINDOW_MS = 30_000
 
-/**
- * Max transactions accepted from a single peer in one mergeMempools round.
- * Bounds the work a peer can push onto the consensus-critical tick — without
- * a cap one peer can return an unbounded tx list, forcing unbounded
- * validation+insert synchronously inside block production (audit H4).
- * Generous (a healthy mempool is far smaller) but finite.
- */
-export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
-
 // --- Mempool admission caps ---
 // Identical on every validator, so the pool a committee member would drop is
 // the pool every other member drops too. They are not env settings on
@@ -36,8 +27,25 @@ export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
 export const MEMPOOL_MAX_TXS = 10_000
 /** Most txs one public mempool read returns; validators read the pool whole. */
 export const MEMPOOL_PUBLIC_PAGE_MAX = 100
-/** Most bytes of stored tx data the pool holds (peer request ceiling is twice this). */
-export const MEMPOOL_MAX_BYTES = 32 * 1024 * 1024
+/**
+ * Most bytes of stored tx data the pool holds. Small enough that a full pool,
+ * sent with its row fields, fits one merge payload (MERGE_PAYLOAD_MAX_BYTES).
+ */
+export const MEMPOOL_MAX_BYTES = 8 * 1024 * 1024
+/**
+ * Most bytes of txs, as sent, one mempool merge request or reply carries.
+ * Under the 16 MiB Omni frame with room for the envelope, so an exchange
+ * never needs the HTTP fallback, which the peer call timeout may not leave
+ * time for.
+ */
+export const MERGE_PAYLOAD_MAX_BYTES = 12 * 1024 * 1024
+/**
+ * Most replies one merge exchange reads from a peer's pool: the reply to the
+ * last request and the follow-ups it asks for. A pool larger than one reply
+ * holds txs other members merged into it; past this many pages the rest
+ * comes in the next round, which bounds the work a peer pushes onto this one.
+ */
+export const MERGE_REPLY_MAX_PAGES = 4
 /** Most pending txs one sender may hold. */
 export const MEMPOOL_MAX_PENDING_PER_SENDER = 64
 /**
@@ -52,6 +60,20 @@ export const MEMPOOL_MAX_NONCE_AHEAD = 16
 export const MEMPOOL_TX_TTL_MS = 10 * 60 * 1000
 /** How far ahead of the node's clock a signed timestamp may be. */
 export const MEMPOOL_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
+
+// --- Block caps (`blockCaps` fork) ---
+/**
+ * Most txs one block takes from the pool: 100 tx/s at the 10 s block time,
+ * and one getTxsByHashes batch (BATCH_SYNC_TX_SIZE), so a member rebuilding
+ * a candidate or a node syncing it fetches the block's txs in one call.
+ */
+export const BLOCK_MAX_TXS = 1_000
+/**
+ * Most bytes of canonical tx content one block takes. With BLOCK_MAX_TXS
+ * signatures of the largest kind beside it, the block's txs still fit one
+ * 16 MiB Omni frame.
+ */
+export const BLOCK_MAX_CONTENT_BYTES = 4 * 1024 * 1024
 
 /**
  * Validator identities guaranteed a committee slot whenever they are

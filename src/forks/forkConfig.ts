@@ -404,6 +404,26 @@ export type TxTypeAllowListConfig = BaseForkConfig
 export type InstantMessagingBindingConfig = BaseForkConfig
 
 /**
+ * `blockCaps` fork: bounds what one block takes from the pool and what one
+ * sender holds in it.
+ *
+ *  - A block takes at most BLOCK_MAX_TXS txs and BLOCK_MAX_CONTENT_BYTES of
+ *    canonical tx content, chosen deterministically from the merged pool
+ *    (see selectBlockTransactions); the rest stay pooled for later blocks.
+ *    A rebuilt locked candidate over either cap is not prevoted.
+ *  - The consensus mempool merge holds each sender to the admission cap
+ *    (MEMPOOL_MAX_PENDING_PER_SENDER), keeping the sender's lowest nonces,
+ *    so every member that has seen the same txs keeps the same ones.
+ *
+ * Activation at H applies to block H and later; the merge reads the block
+ * it prepares (tip + 1). Dormant by default (`activationHeight: null`): it
+ * changes which txs a block contains, and a missing genesis entry hydrates
+ * from here. A chain launched from genesis with this build sets 0. No
+ * payload beyond the base.
+ */
+export type BlockCapsConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -450,6 +470,7 @@ export type ForkConfig =
     | NativeSendBindingConfig
     | CanonicalAddressesConfig
     | FeeBindingConfig
+    | BlockCapsConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -479,6 +500,7 @@ export type ForkName =
     | "nativeSendBinding"
     | "canonicalAddresses"
     | "feeBinding"
+    | "blockCaps"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -507,6 +529,7 @@ export interface ForkConfigByName {
     nativeSendBinding: NativeSendBindingConfig
     canonicalAddresses: CanonicalAddressesConfig
     feeBinding: FeeBindingConfig
+    blockCaps: BlockCapsConfig
 }
 
 /**
@@ -758,6 +781,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A native transaction's shipped fee equals the network fee and names no " +
             "rpc_address, checked at admission and apply, not only at RPC confirm.",
     },
+    blockCaps: {
+        // Dormant by default: it changes which txs a block contains, and a
+        // missing genesis entry hydrates from here. A chain launched from
+        // genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "A block takes a bounded, deterministic share of the pool by tx count and " +
+            "content bytes, and the mempool merge holds each sender to the admission cap.",
+    },
 }
 
 /**
@@ -790,5 +822,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         nativeSendBinding: { ...DEFAULT_FORK_CONFIG.nativeSendBinding },
         canonicalAddresses: { ...DEFAULT_FORK_CONFIG.canonicalAddresses },
         feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
+        blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
     }
 }

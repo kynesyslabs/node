@@ -20,15 +20,21 @@ import {
 import { checkTxAdmissible } from "./validation/txAdmission"
 import { clientTxTypeRefusal } from "./validation/txTypes"
 import { admissionRefusal } from "./validation/postgresStorable"
-import { checkIdentityAdmission } from "./validation/identityAdmission"
+import {
+    IDENTITY_ADMISSION_TIMEOUT_MS,
+    checkIdentityAdmission,
+} from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
+import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
 import { MEMPOOL_MAX_NONCE_AHEAD, TRANSACTION_STATUS } from "@/utilities/constants"
 import {
     EvictionCandidate,
     MempoolRejectReason,
     PoolUsage,
+    SenderSlot,
     checkTxAge,
+    chooseSenderOverflow,
     chooseVictims,
     countMempoolRejection,
     getMempoolLimits,
@@ -256,6 +262,22 @@ export default class Mempool {
             counts.set(row.sender, Number(row.count))
         }
         return counts
+    }
+
+    /** Hash, sender and signed nonce of every pending tx from `addresses`. */
+    public static async listPendingBySenders(
+        addresses: string[],
+    ): Promise<SenderSlot[]> {
+        if (addresses.length === 0) return []
+        const rows = await this.repo.query(
+            `SELECT "hash", LOWER("content"->>'from') AS sender, "content"->>'nonce' AS nonce FROM "mempooltx" WHERE LOWER("content"->>'from') = ANY($1)`,
+            [addresses.map(a => a.toLowerCase())],
+        )
+        return rows.map((row: SenderSlot) => ({
+            hash: row.hash,
+            sender: row.sender,
+            nonce: row.nonce,
+        }))
     }
 
     /** Every row's eviction ranking inputs. Only read when the pool is full. */
@@ -850,16 +872,99 @@ export default class Mempool {
         return await repo.delete({ hash: In(hashes) })
     }
 
+    /**
+     * Holds the senders of merged-in `txs` to the per-sender cap (see
+     * chooseSenderOverflow), evicting the held txs that no longer fit, and
+     * returns the txs still to insert. Runs under the pool lock.
+     */
+    private static async enforceSenderCap(
+        txs: Transaction[],
+    ): Promise<Transaction[]> {
+        const incoming = new Map<string, SenderSlot>()
+        for (const tx of txs) {
+            const from = tx.content?.from
+            if (typeof from !== "string") continue
+            incoming.set(tx.hash, {
+                hash: tx.hash,
+                sender: from.toLowerCase(),
+                nonce: tx.content.nonce,
+            })
+        }
+        const slots = [...incoming.values()]
+        const held = await this.listPendingBySenders([
+            ...new Set(slots.map(slot => slot.sender)),
+        ])
+        // A held tx can arrive again (inserted by an overlapping exchange,
+        // or held past lastBlockRef where the hash check does not look). It
+        // is ranked once, as incoming; if it does not fit, its row leaves.
+        const { refuse, evict } = chooseSenderOverflow(
+            held.filter(slot => !incoming.has(slot.hash)),
+            slots,
+            getMempoolLimits().maxPerSender,
+        )
+        for (const slot of held) {
+            if (refuse.has(slot.hash)) evict.push(slot.hash)
+        }
+        if (refuse.size > 0 || evict.length > 0) {
+            log.warning(
+                `[Mempool.receive] Sender cap: refusing ${refuse.size} merged tx(s), evicting ${evict.length} held tx(s)`,
+            )
+        }
+        if (evict.length > 0) {
+            await this.repo.delete({ hash: In(evict) })
+            evict.forEach(() => countMempoolRejection("evicted"))
+        }
+        refuse.forEach(() => countMempoolRejection("sender_limit"))
+        return txs.filter(tx => !refuse.has(tx.hash))
+    }
+
+    /**
+     * Holds every sender in the pool to the per-sender cap by the merge's
+     * rule (see chooseSenderOverflow), evicting what does not fit, and
+     * returns the evicted hashes. The node's own txs skip the cap at
+     * admission and the merge caps only the senders it receives txs from,
+     * so without this a member keeps more of one sender than its peers do
+     * and forges a different block from the same txs. Runs under the pool
+     * lock.
+     */
+    public static async capPoolSenders(): Promise<string[]> {
+        const limit = getMempoolLimits().maxPerSender
+        const rows = await this.repo.query(
+            `SELECT "hash", LOWER("content"->>'from') AS sender, "content"->>'nonce' AS nonce FROM "mempooltx" WHERE LOWER("content"->>'from') IN (SELECT LOWER("content"->>'from') FROM "mempooltx" GROUP BY 1 HAVING COUNT(*) > $1)`,
+            [limit],
+        )
+        const slots: SenderSlot[] = rows.map((row: SenderSlot) => ({
+            hash: row.hash,
+            sender: row.sender,
+            nonce: row.nonce,
+        }))
+        const { refuse } = chooseSenderOverflow([], slots, limit)
+        if (refuse.size === 0) return []
+        const evict = [...refuse]
+        log.warning(
+            `[Mempool.capPoolSenders] Sender cap: evicting ${evict.length} held tx(s)`,
+        )
+        await this.repo.delete({ hash: In(evict) })
+        evict.forEach(() => countMempoolRejection("evicted"))
+        return evict
+    }
+
     public static async receive(incoming: Transaction[], returnDiff = true) {
         if (incoming.length === 0) {
+            // Nothing to merge, but a member with an empty pool, or one
+            // asking for the next page of ours, still gets our pool back.
+            if (!returnDiff) return { success: true, mempool: [] }
+            const blockNumber = SecretaryManager.lastBlockRef
+            const pool = await this.getMempool(blockNumber)
             return {
                 success: true,
-                mempool: [],
+                mempool: pool.filter(tx => tx.blockNumber === blockNumber),
             }
         }
 
         // INFO: Transactions not to send back back
         const noSendBackTxs = new Map<string, string>()
+        const capped = blockCapsActiveForPendingBlock()
 
         const blockNumber = SecretaryManager.lastBlockRef
         const existingHashes = await this.getMempoolHashMap(blockNumber)
@@ -1016,7 +1121,13 @@ export default class Mempool {
         // once per merge rather than once per identity transaction.
         {
             const verdicts = await Promise.all(
-                validTransactions.map(tx => checkIdentityAdmission(tx)),
+                validTransactions.map(tx =>
+                    checkIdentityAdmission(
+                        tx,
+                        IDENTITY_ADMISSION_TIMEOUT_MS,
+                        capped ? "merge" : "ingest",
+                    ),
+                ),
             )
             const proofChecked: Transaction[] = []
             verdicts.forEach((verdict, i) => {
@@ -1037,42 +1148,57 @@ export default class Mempool {
             `[Mempool.receive] Valid transactions: ${validTransactions.length}`,
         )
 
-        // The merge is not subject to the admission caps or the tx lifetime:
+        // The merge is not subject to the pool caps or the tx lifetime:
         // every committee member must end it holding the same pool, and a
         // cap or a clock applied per node would have each one drop
-        // different txs. Callers bound the batch size.
-        for (const tx of validTransactions) {
-            noSendBackTxs.set(tx.hash, tx.hash)
-            tx.status = TRANSACTION_STATUS.PENDING
-        }
+        // different txs. Callers bound the batch size. Under blockCaps the
+        // per-sender cap does apply, by a rule that depends only on the txs
+        // seen (see chooseSenderOverflow), so members still converge. The
+        // cap's read and the insert run under the pool lock: overlapping
+        // exchanges must see each other's txs, or each admits up to the cap
+        // and the sender ends over it on this member alone.
+        const store = async () => {
+            if (capped && validTransactions.length > 0) {
+                const kept = await this.enforceSenderCap(validTransactions)
+                validTransactions.length = 0
+                validTransactions.push(...kept)
+            }
 
-        if (validTransactions.length > 0) {
-            // The peer's own timestamp and nonce are unsigned: the row takes
-            // the signed ones, which the validator checked Postgres reads, as
-            // addTransaction does.
-            const rows = validTransactions.map(tx => ({
-                ...tx,
-                timestamp: tx.content.timestamp,
-                nonce: tx.content.nonce,
-            }))
-            try {
-                const { inserted } = await chunkedInsert(
-                    this.repo,
-                    MempoolTx,
-                    rows as any[],
-                    {
-                        conflictTarget: ["hash"],
-                        overwrite: ["blockNumber"],
-                    },
-                )
-                log.only(
-                    `[Mempool.receive] Inserted ${inserted}/${validTransactions.length} transactions`,
-                )
-            } catch (error) {
-                log.error("[Mempool.receive] Error saving received mempool:")
-                console.error(error)
+            for (const tx of validTransactions) {
+                noSendBackTxs.set(tx.hash, tx.hash)
+                tx.status = TRANSACTION_STATUS.PENDING
+            }
+
+            if (validTransactions.length > 0) {
+                // The peer's own timestamp and nonce are unsigned: the row takes
+                // the signed ones, which the validator checked Postgres reads, as
+                // addTransaction does.
+                const rows = validTransactions.map(tx => ({
+                    ...tx,
+                    timestamp: tx.content.timestamp,
+                    nonce: tx.content.nonce,
+                }))
+                try {
+                    const { inserted } = await chunkedInsert(
+                        this.repo,
+                        MempoolTx,
+                        rows as any[],
+                        {
+                            conflictTarget: ["hash"],
+                            overwrite: ["blockNumber"],
+                        },
+                    )
+                    log.only(
+                        `[Mempool.receive] Inserted ${inserted}/${validTransactions.length} transactions`,
+                    )
+                } catch (error) {
+                    log.error("[Mempool.receive] Error saving received mempool:")
+                    console.error(error)
+                }
             }
         }
+        if (capped) await this.lock.runExclusive(store)
+        else await store()
 
         if (!returnDiff) {
             return {

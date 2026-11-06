@@ -176,6 +176,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "nativeSendBinding",
     "canonicalAddresses",
     "feeBinding",
+    "blockCaps",
 ]
 
 /**

@@ -9,6 +9,7 @@
  */
 
 import { beforeEach, describe, expect, it, mock } from "bun:test"
+import { getSharedState } from "@/utilities/sharedState"
 
 import { installPoolStorageMocks, installPoolValidationMocks } from "./mempool.fixtures"
 
@@ -30,6 +31,19 @@ mock.module("src/utilities/logger", () => ({
 // Identity proofs are checked by their own admission step; this file covers
 // only the edit binding.
 installPoolValidationMocks()
+
+// The fee rule judges on the parameters the last read loaded; a failed read
+// leaves them as they were.
+let parametersReadable = true
+let parameterRefreshes = 0
+const realParameters = await import("src/libs/blockchain/routines/loadNetworkParameters")
+mock.module("src/libs/blockchain/routines/loadNetworkParameters", () => ({
+    ...realParameters,
+    ensureNetworkParametersCurrent: async () => {
+        parameterRefreshes++
+        if (!parametersReadable) throw new Error("connection reset")
+    },
+}))
 
 import { StorageProgram } from "@kynesyslabs/demosdk/storage"
 import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
@@ -163,6 +177,31 @@ describe("Mempool.receive", () => {
             expect(logged.some(m => m.includes(`Rejecting tx ${tx.hash}`))).toBe(true)
         })
     }
+
+    it("under feeBinding, aborts the merge rather than judge fees on parameters it could not refresh", async () => {
+        getSharedState.forkConfig.feeBinding.activationHeight = 0
+        parametersReadable = false
+        parameterRefreshes = 0
+        try {
+            const honest = onTheWire(await builders.unstake())
+            await expect(Mempool.receive([row(honest)], false)).rejects.toMatchObject({
+                name: "StateReadError",
+            })
+            expect(parameterRefreshes).toBe(1)
+            expect(inserted).toHaveLength(0)
+            expect(logged.some(m => m.includes("Rejecting tx"))).toBe(false)
+        } finally {
+            parametersReadable = true
+        }
+    })
+
+    it("does not refresh the parameters before feeBinding", async () => {
+        parameterRefreshes = 0
+        const honest = onTheWire(await builders.unstake())
+        await Mempool.receive([row(honest)], false)
+        expect(parameterRefreshes).toBe(0)
+        expect(inserted.map(r => r.hash)).toEqual([honest.hash])
+    })
 
     it("admits the honest transactions of a batch that also holds a forgery", async () => {
         const honest = onTheWire(await builders.unstake())

@@ -22,6 +22,7 @@ import type {
     NativeSendBindingConfig,
     CanonicalAddressesConfig,
     FeeBindingConfig,
+    BlockCapsConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -403,6 +404,9 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "feeBinding":
             getSharedState.forkConfig.feeBinding = config as FeeBindingConfig
             return
+        case "blockCaps":
+            getSharedState.forkConfig.blockCaps = config as BlockCapsConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -554,6 +558,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as CanonicalAddressesConfig
         case "feeBinding":
             return base as FeeBindingConfig
+        case "blockCaps":
+            return base as BlockCapsConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
