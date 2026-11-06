@@ -17,7 +17,7 @@ import type { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { isForkActive } from "@/forks"
 import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import { getSharedState } from "src/utilities/sharedState"
-import { chainMinValidatorStake } from "src/features/staking/chainMinStake"
+import { chainMinValidatorStakeAtApply } from "src/features/staking/chainMinStake"
 
 /** What a block's apply knows beyond the validator row. */
 export interface StakeApplyContext {
@@ -323,7 +323,7 @@ async function bondStake(
         (existing.status !== VALIDATOR_STATUS_ACTIVE &&
             existing.status !== VALIDATOR_STATUS_UNSTAKING)
     if (entering) {
-        const min = chainMinValidatorStake()
+        const min = await chainMinValidatorStakeAtApply()
         if (amount < min) {
             return {
                 success: false,

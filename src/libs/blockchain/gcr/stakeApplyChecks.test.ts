@@ -10,12 +10,17 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 
 /** Rows the fake database holds, keyed by table. */
 let seeded: Record<string, any[]> = {}
+/** Tables whose reads fail, as a database that is down would. */
+let failing = new Set<string>()
 
 const matches = (row: any, where: Record<string, any>) =>
     Object.entries(where).every(([k, v]) => v === undefined || row[k] === v)
 
 function repoFor(table: string) {
-    const rows = () => seeded[table] ?? []
+    const rows = () => {
+        if (failing.has(table)) throw new Error(`${table} read failed`)
+        return seeded[table] ?? []
+    }
     return {
         target: { name: table },
         create: (row: unknown) => ({ ...(row as object) }),
@@ -52,6 +57,8 @@ const { getSharedState } = await import("@/utilities/sharedState")
 const { cloneDefaultForkConfig } = await import("@/forks/forkConfig")
 const { stakeSenderRefusal } = await import("../validation/editBinding")
 const { DEFAULT_MIN_VALIDATOR_STAKE } = await import("@/features/staking/constants")
+const { StateReadError } = await import("./stateReadError")
+const { loadNetworkParameters } = await import("../routines/loadNetworkParameters")
 
 const MIN = BigInt(DEFAULT_MIN_VALIDATOR_STAKE)
 const SENDER = "0xabc"
@@ -93,10 +100,18 @@ function activeValidators(n: number): any[] {
     }))
 }
 
+const upgradeSetting = (min: bigint): any => ({
+    proposalId: "raise-min",
+    status: "active",
+    effectiveAtBlock: 1,
+    proposedParameters: { minValidatorStake: min.toString() },
+})
+
 let savedForkConfig: any
 
 beforeEach(() => {
     seeded = {}
+    failing = new Set()
     spyOn(Chain, "getLastBlockNumber").mockResolvedValue(100)
     savedForkConfig = getSharedState.forkConfig
     getSharedState.forkConfig = cloneDefaultForkConfig()
@@ -185,7 +200,7 @@ describe("stake at apply", () => {
     })
 
     it("holds the minimum an active network upgrade set, not the node's own", async () => {
-        getSharedState.governedMinValidatorStake = (MIN * 2n).toString()
+        seeded = { NetworkUpgrade: [upgradeSetting(MIN * 2n)] }
         const result = await apply(edit("stake", MIN.toString()), caches(MIN * 3n))
         expect(result.success).toBe(false)
     })
@@ -338,6 +353,33 @@ describe("a stake edit shipped as a rollback", () => {
         expect(undone.success).toBe(true)
         expect(BigInt(entities.accounts.get(SENDER).balance)).toBe(MIN)
         expect(entities.validators.get(SENDER).status).toBe("0")
+    })
+})
+
+describe("the governed minimum at apply", () => {
+    it("is read from the chain, so a failed refresh of the node's copy does not lower it", async () => {
+        seeded = { NetworkUpgrade: [upgradeSetting(MIN * 2n)] }
+        getSharedState.governedMinValidatorStake = null
+        const result = await apply(edit("stake", MIN.toString()), caches(MIN * 3n))
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("below minimum")
+    })
+
+    it("stops the block when the upgrades cannot be read", async () => {
+        failing.add("NetworkUpgrade")
+        await expect(
+            apply(edit("stake", MIN.toString()), caches(MIN * 3n)),
+        ).rejects.toBeInstanceOf(StateReadError)
+    })
+
+    it("is kept in the node's copy when a refresh cannot read the upgrades", async () => {
+        seeded = { NetworkUpgrade: [upgradeSetting(MIN * 2n)] }
+        await loadNetworkParameters()
+        expect(getSharedState.governedMinValidatorStake).toBe((MIN * 2n).toString())
+
+        failing.add("NetworkUpgrade")
+        await loadNetworkParameters()
+        expect(getSharedState.governedMinValidatorStake).toBe((MIN * 2n).toString())
     })
 })
 

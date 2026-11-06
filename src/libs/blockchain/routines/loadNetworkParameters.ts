@@ -4,6 +4,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { getGenesisNetworkParameters } from "@/features/networkUpgrade/constants"
 import type { NetworkParameters } from "@/features/networkUpgrade/types"
 import log from "@/utilities/logger"
+import { governedMinValidatorStake } from "@/features/staking/chainMinStake"
 
 // Precedence: governance (DB active rows) > env (Config) > hardcoded fallback.
 // Folds active upgrades onto env-resolved genesis in activation order;
@@ -18,6 +19,7 @@ export async function loadNetworkParameters(
         : never,
 ): Promise<NetworkParameters> {
     let active: NetworkUpgrade[] = []
+    let read = false
     try {
         let resolvedRepo = repo as
             | import("typeorm").Repository<NetworkUpgrade>
@@ -30,6 +32,7 @@ export async function loadNetworkParameters(
             where: { status: "active" },
             order: { effectiveAtBlock: "ASC", proposalId: "ASC" },
         })
+        read = true
     } catch (e) {
         // Both datasource acquisition and the find() are inside this try
         // so a missing/uninitialised datasource also falls through to
@@ -71,7 +74,11 @@ export async function loadNetworkParameters(
     }
 
     getSharedState.networkParameters = params
-    getSharedState.governedMinValidatorStake = governedMinValidatorStake(active)
+    // A failed read says nothing about the minimum, so the last one read
+    // stands rather than the default.
+    if (read) {
+        getSharedState.governedMinValidatorStake = governedMinValidatorStake(active)
+    }
     // Mirror onto flat fields read by calculateCurrentGas.
     ;(getSharedState as unknown as { rpcFee: number }).rpcFee = params.rpcFee
     ;(getSharedState as unknown as { networkFee: number }).networkFee =
@@ -117,19 +124,4 @@ export async function loadNetworkParameters(
         `Loaded NetworkParameters from ${active.length} active upgrade(s): ${JSON.stringify(params)}`,
     )
     return params
-}
-
-/** The minimum stake the latest active upgrade that sets one sets, or null. */
-function governedMinValidatorStake(active: NetworkUpgrade[]): string | null {
-    let value: string | null = null
-    for (const upgrade of active) {
-        const proposed = upgrade.proposedParameters as
-            | { minValidatorStake?: unknown }
-            | null
-            | undefined
-        if (typeof proposed?.minValidatorStake === "string") {
-            value = proposed.minValidatorStake
-        }
-    }
-    return value
 }
