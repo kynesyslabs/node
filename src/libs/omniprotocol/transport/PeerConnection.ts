@@ -901,8 +901,8 @@ export class PeerConnection extends EventEmitter {
             const ipAddress = this.socket?.remoteAddress || "unknown"
 
             // Check IP-based rate limit
-            const ipResult = this.provenValidator
-                ? { allowed: true as const }
+            const ipResult: { allowed: boolean; reason?: string } = this.provenValidator
+                ? { allowed: true }
                 : this.rateLimiter.checkIPRequest(ipAddress)
             if (!ipResult.allowed) {
                 log.warning(
