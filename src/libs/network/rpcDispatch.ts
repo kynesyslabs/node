@@ -126,7 +126,10 @@ export async function processPayload(
             return await manageAuth(payload.params[0] as AuthMessage)
         case "nodeCall": {
             try {
-                return await manageNodeCall(payload.params[0] as NodeCall)
+                return await manageNodeCall(
+                    payload.params[0] as NodeCall,
+                    sender,
+                )
             } catch (error) {
                 log.error(`[RPC Call] Error in nodeCall: ${error}`)
                 return {
