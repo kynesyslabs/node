@@ -44,6 +44,7 @@ import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import { isForkActive } from "@/forks/forkGates"
+import { readState } from "@/libs/blockchain/gcr/stateReadError"
 import { governanceGateRefusal } from "@/forks/governanceGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
@@ -165,7 +166,8 @@ export async function editBindingState(): Promise<EditBindingState> {
  * A batch (the consensus merge) shares one instance, so each is read once per
  * batch rather than once per transaction; the validator set only when a
  * message needs it. A failed read refuses every transaction that needs it,
- * as it would one by one.
+ * as it would one by one, unless the batch loaded them first (see
+ * `loadAdmissionReads`).
  */
 export interface AdmissionReads {
     state(): Promise<EditBindingState>
@@ -176,11 +178,27 @@ export function admissionReads(): AdmissionReads {
     let state: Promise<EditBindingState> | undefined
     let validators: Promise<ReadonlySet<string>> | undefined
     const reads: AdmissionReads = {
-        state: () => (state ??= editBindingState()),
+        state: () => (state ??= readState("fork state", editBindingState)),
         validators: () =>
-            (validators ??= reads.state().then(s => validatorKeysAt(s.tip))),
+            (validators ??= reads
+                .state()
+                .then(s => readState("validator set", () => validatorKeysAt(s.tip)))),
     }
     return reads
+}
+
+/**
+ * Makes the reads `txs` will need, so that a failed one throws a
+ * StateReadError here instead of refusing transactions in
+ * `verifyAdmissionEdits`. The consensus merge calls it: refusing there would
+ * leave this node alone without transactions every peer keeps.
+ */
+export async function loadAdmissionReads(
+    txs: Transaction[],
+    reads: AdmissionReads,
+): Promise<void> {
+    const { messageBinding } = await reads.state()
+    if (messageBinding && txs.some(isNodeMessage)) await reads.validators()
 }
 
 /**

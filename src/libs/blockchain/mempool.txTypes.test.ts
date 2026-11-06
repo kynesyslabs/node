@@ -6,7 +6,7 @@
  * before while the fork is dormant.
  */
 
-import { beforeEach, describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { installPoolStorageMocks, installPoolValidationMocks } from "./mempool.fixtures"
 import { mockLogger } from "./testSupport/mockMempoolDeps"
@@ -47,11 +47,19 @@ function allowList(height: number | null, messageBinding: number | null = null) 
     config.instantMessagingBinding = { activationHeight: messageBinding }
 }
 
+const pool = Mempool as any
+const originalRepo = pool.repo
+const originalAdd = pool.addTransactionWithLock
+
 beforeEach(() => {
     inserted.length = 0
-    const pool = Mempool as any
     pool.repo = { find: async () => [] }
     pool.addTransactionWithLock = async () => ({ confirmationBlock: 101 })
+})
+
+afterEach(() => {
+    pool.repo = originalRepo
+    pool.addTransactionWithLock = originalAdd
 })
 
 describe("Mempool.ingestGossiped", () => {
@@ -104,5 +112,23 @@ describe("Mempool.receive under instantMessagingBinding", () => {
         await Mempool.receive(messages.map(row), false)
         expect(inserted.map(r => r.hash)).toEqual(messages.map(m => m.hash))
         expect(validators.reads).toEqual([100])
+    })
+
+    it("fails the merge instead of dropping the messages when the validator set cannot be read", async () => {
+        allowList(0, 0)
+        validators.keys = [SENDER]
+        validators.fails = true
+        const messages = [await freeMessage(1), await pay()]
+        await expect(Mempool.receive(messages.map(row), false)).rejects.toThrow("State read failed")
+        expect(inserted).toEqual([])
+    })
+
+    it("does not read the validator set for a merge without such a message", async () => {
+        allowList(0, 0)
+        validators.fails = true
+        const tx = await pay()
+        await Mempool.receive([row(tx)], false)
+        expect(inserted.map(r => r.hash)).toEqual([tx.hash])
+        expect(validators.reads).toEqual([])
     })
 })

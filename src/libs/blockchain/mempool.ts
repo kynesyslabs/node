@@ -14,6 +14,7 @@ import { chunkedInsert } from "./chainDb"
 import {
     admissionReads,
     expectsNonceEdit,
+    loadAdmissionReads,
     verifyAdmissionEdits,
 } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
@@ -992,8 +993,11 @@ export default class Mempool {
         // comparison carries them.
         {
             const editVerifiedTransactions: Transaction[] = []
-            // The tip and the validator set are read once for the merge.
+            // The tip and the validator set are read once for the merge. A
+            // failed read fails the merge rather than drop transactions the
+            // peers keep.
             const reads = admissionReads()
+            await loadAdmissionReads(validTransactions, reads)
             for (const tx of validTransactions) {
                 const edits = await verifyAdmissionEdits(tx, reads)
                 if (!edits.ok) {
