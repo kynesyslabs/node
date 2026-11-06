@@ -1,7 +1,8 @@
 /**
- * getTxsByHashes serves mempool transactions to peers that are syncing a block
- * this node has not applied yet, stamped with the latest block number. A reader
- * of the public nodeCall must be able to tell those apart from included ones.
+ * getTxsByHashes falls back to the mempool for a block this node has not applied
+ * yet, stamped with its latest block number. Block sync rejects that stamp, so
+ * in practice only the commitLock rebuild uses these. A reader of the public
+ * nodeCall must be able to tell those apart from included ones.
  */
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
