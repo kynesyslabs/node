@@ -160,8 +160,9 @@ source <(region 'block_rows() {' 'phase_row() {')
 source <(grep -E '^dc\(\) ' "${RUN_SH}")
 RUN_DIR="${WORK}/run"; PROJECT=qdrill-stub
 mkdir -p "${WORK}/bin"
-# docker exec ... psql: FAKE_DB is rows (default), hang, stmt (the server cancels the
-# query) or toomany (the server is out of connections); SHOW max_connections
+# docker exec ... psql: FAKE_DB is rows (default), hang, killed (SIGKILL, nothing on
+# stderr), stmt (the server cancels the query) or toomany (the server is out of
+# connections); SHOW max_connections
 # answers FAKE_MAXCONN (default 100, the postgres default). An exec with an empty
 # container fails, as docker's does.
 # The postgres lookup, `compose ... ps -q postgres`, answers fakepg; FAKE_PGPS
@@ -199,6 +200,7 @@ case "$1" in
 esac
 case "${FAKE_DB:-rows}" in
     hang) sleep 30 ;;
+    killed) kill -KILL $$ ;;
     stmt) echo "ERROR:  canceling statement due to statement timeout" >&2; exit 1 ;;
     toomany) echo 'psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  sorry, too many clients already' >&2; exit 2 ;;
     *) printf '5|0xb5|7\n6|0xb6|8\n' ;;
@@ -309,6 +311,17 @@ check "only the append to psql-errors.log fails (it is over the limit): psql_nod
     bash -c 'grep -q "too many clients" "$1"/psql-err.*' _ "${LOG_DIR}"
 OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "and the gate exits 2" has "^rc=2$"
+check "a psql refused for connections, its errors written nowhere: not taken for one that gave none" \
+    bash -c '! grep -q "none given" "$1"/psql-err.* 2>/dev/null' _ "${WORK}/gate_psql_unwritten/logs"
+gate_case gate_psql_killed PASS; DB_TIMEOUT_S=3
+OUT=$(FAKE_DB=killed psql_node 3 "SELECT 1" 2>&1; echo "rc=$?")
+echo "${OUT}" | cut -c1-220 | sed 's/^/    | /'
+check "a psql killed with nothing on stderr: its exit status is passed on (137)" has "^rc=137$"
+check "and says the error text was none given, with the exit status" has "^psql node3_db: exit 137, error text: none given (${LOG_DIR}/psql-err\.[A-Za-z0-9]* is kept)$"
+check "not that its errors could not be written" eval '! has "could not be written"'
+check "the file it keeps says so too" grep -qx "psql node3_db: exit 137, error text: none given" "${LOG_DIR}"/psql-err.*
+OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
+check "the gate then exits 2, as for errors that could not be written" has "^rc=2$"
 
 echo "== the gate fails closed: a node log it cannot read whole is exit 2, never a pass or a fail"
 check "run.sh bounds each docker call of a node-log read at 60 s" test "${LOG_READ_TIMEOUT_S:-unset}" = 60
@@ -425,6 +438,7 @@ check "exit 1, psql errors psql_node could not write to psql-errors.log: exit 2,
 
 echo "== teardown backstop after the verdict: an exit it replaces by 2 makes verdict.json and results.tsv ERROR too"
 for f in results_row rewrite_verdict; do source <(fn_src "${f}"); done
+source <(grep -E '^RESULTS_LOCK_WAIT_S=' "${RUN_SH}")
 # The end of run.sh as it runs: the EXIT trap, pg_limit_gate, the real
 # write_verdict, exit 0 on PASS or 1, then teardown. $3 late: node-6 logs a hit
 # after the verdict is written; unwritable: so does node-6, and verdict.json is
@@ -489,6 +503,59 @@ check "rewrite_verdict, neither copy can be written: rc=1, verdict.json as it wa
 check "rewrite_verdict, neither copy can be written: results.tsv as it was, every row kept, and stderr says so" \
     bash -c 'cmp -s "$2" "$3" && grep -q "could not rewrite $2 (.*): the row of stub-copies still says PASS, the exit is 2" <<< "$1"' \
     _ "${ERR}" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+
+echo "== results.tsv is shared: the append and the rewrite each hold the lock next to it, and without it fail and say so"
+check "run.sh waits up to 30 s for the lock" test "${RESULTS_LOCK_WAIT_S:-unset}" = 30
+TSV_HEAD=$'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\nearlier\tfloor\ton\t4\t10\t7\timage\tfine\tPASS'
+lock_case() { # results.tsv: the header, an earlier run's row and stub-lock's PASS row
+    gate_case "$1" PASS; RUNS_DIR="${WORK}/$1/runs"; mkdir -p "${RUNS_DIR}"
+    printf '%s\nstub-lock\tdrop-n10s10\ton\t13\t10\t7\timage\tphases fine\tPASS\n' "${TSV_HEAD}" > "${RUNS_DIR}/results.tsv"
+    echo '{"result":"PASS","detail":"phases fine"}' > "${LOG_DIR}/verdict.json"
+    cp "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+}
+# Another run holds the lock (a process that took it, then sleeps) until release_lock
+hold_lock() {
+    ( exec 8>> "${RUNS_DIR}/results.tsv.lock"; flock 8; exec sleep 600 ) & HOLDER=$!
+    while flock -n "${RUNS_DIR}/results.tsv.lock" true; do sleep 0.05; done
+}
+release_lock() { kill "${HOLDER}"; wait "${HOLDER}" 2> /dev/null; }
+rewrite() { # rewrite_verdict of stub-lock, waiting $1 s for the lock: ERR (stderr, then rc=)
+    ERR=$( ( RUN_ID=stub-lock; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; RESULTS_LOCK_WAIT_S=$1
+        rewrite_verdict "could not run: stub" ) 2>&1 > /dev/null; echo "rc=$?")
+}
+append() { # the real write_verdict of stub-append, waiting $1 s for the lock: ERR
+    ERR=$( ( source <(fn_src write_verdict); source <(grep -E '^step\(\) ' "${RUN_SH}")
+        RUN_ID=stub-append; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; IMAGE=stub; FORK_SET=devnet; EXCLUDED_FORKS='{}'
+        PHASES="${LOG_DIR}/phases.tsv"; EVENTS="${LOG_DIR}/events.log"; : > "${PHASES}"; RESULTS_LOCK_WAIT_S=$1
+        write_verdict ) 2>&1 > /dev/null; echo "rc=$?")
+}
+row() { awk -F'\t' -v r="$1" '$1 == r { print $9 }' "${RUNS_DIR}/results.tsv"; }
+lock_case lock_rewrite; hold_lock; rewrite 1; release_lock
+check "rewrite_verdict, the lock held by another run: rc=1, results.tsv as it was" \
+    bash -c 'grep -q "^rc=1$" <<< "$1" && cmp -s "$2" "$3"' _ "${ERR}" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+check "and stderr says it got no lock" \
+    grep -q "could not rewrite ${RUNS_DIR}/results.tsv (no lock on ${RUNS_DIR}/results.tsv.lock within 1s): the row of stub-lock still says PASS, the exit is 2" <<< "${ERR}"
+rewrite 1
+check "the lock free: rc=0, the row says ERROR, the earlier one PASS, no row added" \
+    test "$(tail -1 <<< "${ERR}") $(row stub-lock) $(row earlier) $(wc -l < "${RUNS_DIR}/results.tsv")" = "rc=0 ERROR PASS 3"
+lock_case lock_append; hold_lock; append 1; release_lock
+check "write_verdict, the lock held by another run: no row added, and stderr says why" \
+    bash -c 'cmp -s "$1" "$2" && grep -q "ERROR: the row of stub-append could not be added to $1 (no lock on $1.lock within 1s, or a write failed)" <<< "$3"' \
+    _ "${RUNS_DIR}/results.tsv" "${WORK}/results.before" "${ERR}"
+append 1
+check "the lock free: the row is added after the others" test "$(tail -1 "${RUNS_DIR}/results.tsv" | cut -f1,9) $(wc -l < "${RUNS_DIR}/results.tsv")" = $'stub-append\tPASS 4'
+# Eight runs end at once, each rewriting its own row: one copy-and-replace at a
+# time, so none puts back a row another one changed
+lock_case lock_many
+for p in $(seq 1 8); do printf 'stub-p%s\tdrop-n10s10\ton\t13\t10\t7\timage\tphases fine\tPASS\n' "${p}" >> "${RUNS_DIR}/results.tsv"; done
+for p in $(seq 1 8); do
+    ( LOG_DIR="${WORK}/lock_many/p${p}"; STEP_LOG="${LOG_DIR}/step.log"; mkdir -p "${LOG_DIR}"; echo '{"result":"PASS"}' > "${LOG_DIR}/verdict.json"
+      RUN_ID="stub-p${p}"; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image
+      rewrite_verdict "could not run: stub ${p}" ) > /dev/null 2>&1 &
+done
+wait
+check "eight rewrites at once: every row of the eight says ERROR, the other two PASS, none lost or added" \
+    test "$(awk -F'\t' '$1 ~ /^stub-p/ && $9 == "ERROR"' "${RUNS_DIR}/results.tsv" | wc -l) $(row earlier) $(row stub-lock) $(wc -l < "${RUNS_DIR}/results.tsv")" = "8 PASS PASS 11"
 
 echo "== the postgres container lookup is bounded: one that stalls, fails or finds nothing fails the read, or the preflight's try, and says why"
 # A function of this shell in a fresh bash under an outside guard of $1 s, so a
@@ -859,7 +926,10 @@ done
 # logs with a round start past the head, a quorum refusal and a fallback line.
 # STUB_STALL makes calls stall (the real sleep, 300 s): logs:<n> node n's docker
 # logs, restart every RestartCount inspect, head:<n> node n's head reads once a
-# node was stopped. bun answers the identity helper, and the judge with a pass.
+# node was stopped. STUB_PSQL_KILL=<n>:<text> kills (SIGKILL, nothing on stderr)
+# node n's psql whose SQL holds text. With STUB_LATE_HIT=<n>, node n logs "too
+# many clients" once results.tsv (STUB_RESULTS) has a row. bun answers the
+# identity helper, and the judge with a pass.
 mkdir -p "${WORK}/fullbin"
 REAL_SLEEP=$(command -v sleep); export REAL_SLEEP
 cp "${WORK}/runbin/nproc" "${WORK}/runbin/vmstat" "${WORK}/fullbin/"
@@ -942,6 +1012,7 @@ case "$1" in
             cat) echo "anon 104857600" ;;
             psql)
                 n=$(sed 's/.* -d node\([0-9]*\)_db .*/\1/' <<< "$*")
+                case "${STUB_PSQL_KILL:-}" in "${n}:"*) case "$*" in *"${STUB_PSQL_KILL#*:}"*) kill -KILL $$ ;; esac ;; esac
                 case "$*" in
                     *"SHOW max_connections"*) echo "${STUB_MAXCONN:-1000}" ;;
                     *" -f -") cat > /dev/null; touch "${S}/rewritten.${n}" ;;
@@ -964,7 +1035,10 @@ case "$1" in
     logs)
         n=${@: -1}; n=${n#c}; stalls "logs:${n}"
         printf '[INFO] node-%s up\n\e[32m[INFO] We are forging block %s\e[0m\n' "${n}" $(($(head_now) + 1))
-        printf '[WARN] Shard of 4 is below the quorum of 7\n[INFO] drawing the committee from all 10 staked validators\n' ;;
+        printf '[WARN] Shard of 4 is below the quorum of 7\n[INFO] drawing the committee from all 10 staked validators\n'
+        if [ "${STUB_LATE_HIT:-}" = "${n}" ] && [ -s "${STUB_RESULTS}" ] && [ "$(wc -l < "${STUB_RESULTS}")" -ge 2 ]; then
+            echo "FATAL:  sorry, too many clients already"
+        fi ;;
 esac
 exit 0
 FULLDOCKER
@@ -973,7 +1047,7 @@ full_run() { # $1 label, $2.. run.sh's options and scenario; STUB_* from the cal
     local label="$1" t0; shift
     FULL="${WORK}/full-${label}"; rm -rf "${FULL}"; mkdir -p "${FULL}/state" "${FULL}/runs"; echo "0 0" > "${FULL}/state/chain"
     t0=$(date +%s%N)
-    STUB_STATE="${FULL}/state" STUB_LOG="${FULL}/docker.log" PATH="${WORK}/fullbin:${PATH}" RUNS_DIR="${FULL}/runs" \
+    STUB_STATE="${FULL}/state" STUB_LOG="${FULL}/docker.log" STUB_RESULTS="${FULL}/runs/results.tsv" PATH="${WORK}/fullbin:${PATH}" RUNS_DIR="${FULL}/runs" \
         QDRILL_TEST_LOG_READ_TIMEOUT_S=3 NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 GENESIS_DELAY=-1000 \
         CONSENSUS_TIME=1 STALL_WINDOW=3 timeout 240 bash "${RUN_SH}" "$@" "${label}" > "${FULL}/out" 2>&1
     echo "rc=$?" >> "${FULL}/out"
@@ -1035,6 +1109,35 @@ check "drop-n7s10, node-1's head reads stall after the stop: exit 2" exited 2
 check "drop-n7s10, node-1's head reads stall after the stop: ERROR, node-1 unread" fout 'ERROR: down-1: a running node does not answer its head (heads n1=? '
 check "drop-n7s10, node-1's head reads stall after the stop: verdict.json and results.tsv say ERROR" recorded ERROR 'down-1: node unreadable'
 check "drop-n7s10, node-1's head reads stall after the stop: within the bound (${ms} ms)" test "${ms}" -lt 120000
+
+echo "== floor --binding off, whole, a connection-limit hit logged after the verdict: the row is rewritten under the lock"
+STUB_N=4 STUB_MIN_LIVE=99 STUB_LATE_HIT=2 full_run floor-late --binding off floor
+check "floor, late hit: exit 0 replaced by 2" eval 'exited 2 && fout "postgres connection limit hit (exit 0 replaced by 2"'
+check "floor, late hit: verdict.json and results.tsv say ERROR, and that the result was PASS" \
+    recorded ERROR 'could not run: postgres connection limit hit (in the logs collected at teardown: node-2.log); the result was PASS'
+check "floor, late hit: one row, and the lock file next to results.tsv" \
+    test "$(wc -l < "${FULL}/runs/results.tsv") $([ -e "${FULL}/runs/results.tsv.lock" ] && echo lock)" = "2 lock"
+
+echo "== fallback, whole, node-3's head read from its database killed with nothing on stderr: none given, still exit 2"
+STUB_N=10 STUB_MIN_LIVE=7 STUB_PSQL_KILL='3:max(number)' full_run fallback-killed fallback
+check "fallback, psql killed: says the error text was none given, with the exit status" fout 'psql node3_db: exit 137, error text: none given ('
+check "fallback, psql killed: not that its errors could not be written" eval '! fout "could not be written"'
+check "fallback, psql killed: exit 2, the gate's ERROR naming the kept file, the result it replaced" \
+    eval 'exited 2 && recorded ERROR "(psql errors not written to it, kept in ${RD}/logs/psql-err." && recorded ERROR "; the result was PASS"'
+
+echo "== flock missing: run.sh does not start, and says why"
+# PATH: the stubs and links to every command of /usr/bin and /bin but flock
+mkdir -p "${WORK}/noflock"
+cp -s /usr/bin/* /bin/* "${WORK}/noflock/" 2> /dev/null
+rm -f "${WORK}/noflock/flock"
+: > "${WORK}/noflock.docker.log"
+OUT=$(STUB_LOG="${WORK}/noflock.docker.log" STUB_MAXCONN=280 STUB_START=run-devnet STUB_LOGDRIVER=json-file \
+    PATH="${WORK}/runbin:${WORK}/noflock" RUNS_DIR="${WORK}/noflock-runs" NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 \
+    timeout 60 bash "${RUN_SH}" floor noflock 2>&1; echo "rc=$?")
+check "(no flock on that PATH)" env PATH="${WORK}/runbin:${WORK}/noflock" bash -c '! command -v flock > /dev/null'
+check "flock missing: exit 2 with an ABORT that names it" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "ABORT: flock (util-linux) is not installed" <<< "$1"' _ "${OUT}"
+check "flock missing: no container started" bash -c '! grep -q "^compose " "$1"' _ "${WORK}/noflock.docker.log"
 
 echo
 if [ "${fails}" = 0 ]; then echo "lockstep stub tests: all passed"; else echo "lockstep stub tests: ${fails} FAILED"; exit 1; fi

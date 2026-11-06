@@ -117,7 +117,8 @@ Exit code 0 means pass, 1 fail, 2 the run could not be carried out
 an observation window (three tries) ends the run as `ERROR`, exit 2: a
 crashed node must not pass for a stalled one, and neither may a run in which
 Postgres ran out of connections (see "Postgres connections"). Each run with a verdict
-appends a row to `runs/results.tsv`. Log-line counts (floor refusals,
+appends a row to `runs/results.tsv`, under a lock other runs take too (see
+"Postgres connections", Backstop). Log-line counts (floor refusals,
 fallback lines) only take lines logged in the window being judged, and a
 node log such a count cannot read to the end (a docker error, or no answer
 within `LOG_READ_TIMEOUT_S`, see [Tuning](#tuning)) ends the run as `ERROR`,
@@ -522,7 +523,11 @@ A connection-limit hit can no longer pass:
   bound, or a copy of the log that could not be written (`could not write
   the copy to <file>`: a full disk). So are psql errors `psql_node` could not
   write to `psql-errors.log`: it keeps them in `logs/psql-err.XXXXXX` (`psql
-  errors not written to it, kept in ...`).
+  errors not written to it, kept in ...`). A psql that fails with nothing on
+  stderr (killed by a signal) is kept the same way, so the run still ends as
+  exit 2: `psql_node` then says `psql nodeN_db: exit 137, error text: none
+  given (... is kept)`, and the kept file holds that line. If even that line
+  cannot be written (a full disk), it says `its errors could not be written`.
 - **Backstop**: when the logs are collected at teardown (with the same
   bounds), a hit also replaces exit 0 or 1 by 2, for the exits that skip the
   verdict (an early FAIL) and for a hit a node logged after the check. So
@@ -532,6 +537,10 @@ A connection-limit hit can no longer pass:
   `ERROR`, `could not run: postgres connection limit hit (in the logs
   collected at teardown: node-N.log); the result was PASS`. A record that
   cannot be rewritten is named on stderr, and the exit is still 2.
+  `results.tsv` is shared by every run in `RUNS_DIR`, so its rewrite, like
+  the append of the row, holds an exclusive `flock` on `results.tsv.lock` next
+  to it and waits up to 30 s for it; without the lock the row is not
+  touched, and stderr says so (`no lock on .../results.tsv.lock within 30s`).
 
 `lockstep-stub.test.sh` covers the preflight, the check and the backstop
 (also after the verdict is written)
@@ -548,7 +557,12 @@ grows while enough nodes run, a stub `bun` and judge, a 20 ms `sleep`):
 docker call that stalls for 300 s, `floor` (a node's `docker logs`),
 `ride-n13s10` (the restart count `inspect`) and `drop-n7s10` (node-1's head
 reads after the stop), each of which must end as exit 2 within the bound;
-`drillInputs.test.ts` the generated compose for N=4, 10 and 13.
+then `floor` with a hit logged after the verdict (the row rewritten under the
+lock), `fallback` with one psql killed (`none given`, exit 2), and a `PATH`
+without `flock` (no start). The lock is tested on its own as well: held by
+another process, the append and the rewrite wait, then leave `results.tsv`
+as it was and say so; eight rewrites at once lose none of the eight rows.
+`drillInputs.test.ts` covers the generated compose for N=4, 10 and 13.
 
 ## Runs and logs
 
@@ -575,8 +589,9 @@ drills also leave `drill-input.json` (what the run observed),
 - Preflight aborts when free disk is under 10 GB, available RAM is under
   `START * NODE_EST_MB + 256 + HEADROOM_MB` (1100 MB per node, 3 GB
   headroom), the 1-minute load is above the core count, the host is
-  swapping, an image is missing, or another `crace-`/`qdrill-` stack is
-  running.
+  swapping, an image is missing, another `crace-`/`qdrill-` stack is
+  running, or `flock` (util-linux) is not installed: `run.sh` writes the
+  shared `runs/results.tsv` under a lock and does not start without it.
 - A unique compose project per run (`qdrill-<run id>`, the run dir's name
   lowercased: two runs never share one, see [Runs and logs](#runs-and-logs)), no container names,
   no published ports (the harness uses `docker exec`), postgres and node

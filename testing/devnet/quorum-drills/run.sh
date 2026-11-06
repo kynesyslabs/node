@@ -220,6 +220,9 @@ abort_pre() {
     ps -eo pid,comm,rss,%cpu --sort=-rss | head -10 >> "${STEP_LOG}"
     exit 2
 }
+# results.tsv is shared by the runs in RUNS_DIR and written under a flock
+# (write_verdict): without flock the run would end with no row, so it does not start
+command -v flock > /dev/null || abort_pre "flock (util-linux) is not installed: run.sh takes a lock with it to write ${RUNS_DIR}/results.tsv, which every run there shares"
 [ "${disk_gb:-0}" -lt "${MIN_DISK_GB}" ] && abort_pre "free disk ${disk_gb}G < ${MIN_DISK_GB}G"
 [ "${avail_mb:-0}" -lt "${need_mb}" ] && abort_pre "available RAM ${avail_mb}M < ${need_mb}M for ${START} nodes"
 awk -v l="${load1}" -v m="${cores}" 'BEGIN { exit !(l > m) }' && abort_pre "load ${load1} > ${cores} cores"
@@ -736,6 +739,10 @@ grep_logs() {
     return "${bad}"
 }
 
+# results.tsv is shared by every run in RUNS_DIR: write_verdict's append and
+# rewrite_verdict's rewrite each hold an exclusive flock on results.tsv.lock next
+# to it, waiting up to RESULTS_LOCK_WAIT_S for it (the preflight checks for flock)
+RESULTS_LOCK_WAIT_S=30
 # Verdict, written after the scenario or when a window cannot be judged
 write_verdict() {
     step 05-verdict
@@ -753,8 +760,11 @@ write_verdict() {
          + (if $forkSet == "launch" then {excludedForks: $excluded} else {} end)
          + (if $drill == null then {} else {drill: $drill} end)' > "${LOG_DIR}/verdict.json"
     local results="${RUNS_DIR}/results.tsv"
-    [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"
-    results_row >> "${results}"
+    if ! { flock -w "${RESULTS_LOCK_WAIT_S}" 9 &&
+        { [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"; } &&
+        results_row >> "${results}"; } 9>> "${results}.lock"; then
+        say "ERROR: the row of ${RUN_ID} could not be added to ${results} (no lock on ${results}.lock within ${RESULTS_LOCK_WAIT_S}s, or a write failed)" >&2
+    fi
     VERDICT_WRITTEN=1
     free -m | sed -n 2p | sed 's/^/host after run: /' >> "${LOG_DIR}/run.log"
     say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
@@ -768,22 +778,30 @@ results_row() {
 # detail, worded as pg_limit_gate words it. A record that cannot be rewritten is
 # said on stderr; the exit is 2 either way.
 rewrite_verdict() { # $1 why
-    local v="${LOG_DIR}/verdict.json" results="${RUNS_DIR}/results.tsv" was="${RESULT}" why st=0
+    local v="${LOG_DIR}/verdict.json" results="${RUNS_DIR}/results.tsv" was="${RESULT}" why="" st=0
     DETAIL="$1; the result was ${was}"
     RESULT=ERROR
     say "RESULT ERROR: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
     { jq --arg detail "${DETAIL}" '.detail = $detail | .result = "ERROR"' "${v}" > "${v}.tmp" && mv -f "${v}.tmp" "${v}"; } 2>/dev/null ||
         { rm -f "${v}.tmp"; say "ERROR: could not rewrite ${v}: it still says ${was}, the exit is 2" >&2; st=1; }
-    RUN="${RUN_ID}" ROW="$(results_row)" awk -F'\t' '$1 == ENVIRON["RUN"] { print ENVIRON["ROW"]; n++; next } { print } END { exit n ? 0 : 3 }' \
-        "${results}" > "${results}.tmp" 2>/dev/null
-    case $? in
-        # gawk exits 0 after an END exit 0 even when it could not write the
-        # copy: one with fewer lines than results.tsv replaces nothing
-        0) if [ "$(wc -l < "${results}.tmp")" != "$(wc -l < "${results}")" ]; then why="the copy could not be written whole"
-           else mv -f "${results}.tmp" "${results}" 2>/dev/null && return "${st}"; why="mv failed"; fi ;;
-        3) why="no row for ${RUN_ID}" ;;
-        *) why="it could not be read or the copy written" ;;
-    esac
+    # Copy and replace under the lock write_verdict's append takes
+    {
+        if ! flock -w "${RESULTS_LOCK_WAIT_S}" 9; then
+            why="no lock on ${results}.lock within ${RESULTS_LOCK_WAIT_S}s"
+        else
+            RUN="${RUN_ID}" ROW="$(results_row)" awk -F'\t' '$1 == ENVIRON["RUN"] { print ENVIRON["ROW"]; n++; next } { print } END { exit n ? 0 : 3 }' \
+                "${results}" > "${results}.tmp" 2>/dev/null
+            case $? in
+                # gawk exits 0 after an END exit 0 even when it could not write the
+                # copy: one with fewer lines than results.tsv replaces nothing
+                0) if [ "$(wc -l < "${results}.tmp")" != "$(wc -l < "${results}")" ]; then why="the copy could not be written whole"
+                   elif ! mv -f "${results}.tmp" "${results}" 2>/dev/null; then why="mv failed"; fi ;;
+                3) why="no row for ${RUN_ID}" ;;
+                *) why="it could not be read or the copy written" ;;
+            esac
+        fi
+    } 9>> "${results}.lock" || why="could not open ${results}.lock"
+    [ -z "${why}" ] && return "${st}"
     rm -f "${results}.tmp"
     say "ERROR: could not rewrite ${results} (${why}): the row of ${RUN_ID} still says ${was}, the exit is 2" >&2
     return 1
@@ -833,14 +851,16 @@ pg_cid() {
     echo "${cid}"
 }
 psql_node() { # $1 node, $2 SQL
-    local rc pg errf
+    local rc pg errf note=""
     pg=$(pg_cid) || { echo "psql node$1_db: ${pg}" >&2; return 1; }
     # stderr goes to the caller as before and, when there is any, to
     # psql-errors.log, which pg_limit_gate reads. errf is made before psql runs
     # (none, no psql) and removed once that append is done, or when there is
-    # nothing to append: a psql that failed, other than by the timeout, always
-    # says why, so an empty errf then is words that could not be written. An
-    # errf left behind fails the gate and the teardown backstop.
+    # nothing to append. A psql that failed, other than by the timeout, with an
+    # empty errf either said nothing (killed by a signal: exit 128 + n) or its
+    # words could not be written (a full disk). errf is kept either way: an
+    # errf left behind fails the gate and the teardown backstop (exit 2). When
+    # errf can still be written it gets a note that the error text was none given.
     errf=$(mktemp "${LOG_DIR}/psql-err.XXXXXX") || { echo "psql node$1_db: no file for its errors in ${LOG_DIR}: not run" >&2; return 1; }
     timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "${pg}" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
     rc=$?
@@ -849,8 +869,14 @@ psql_node() { # $1 node, $2 SQL
         sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log" && rm -f "${errf}"
     elif [ "${rc}" = 0 ] || [ "${rc}" = 124 ]; then
         rm -f "${errf}"
+    elif echo "psql node$1_db: exit ${rc}, error text: none given" 2> /dev/null > "${errf}"; then
+        note="exit ${rc}, error text: none given"
     fi
-    [ -e "${errf}" ] && echo "psql node$1_db: its errors could not be written to ${LOG_DIR}/psql-errors.log (${errf} is kept)" >&2
+    if [ -n "${note}" ]; then
+        echo "psql node$1_db: ${note} (${errf} is kept)" >&2
+    elif [ -e "${errf}" ]; then
+        echo "psql node$1_db: its errors could not be written to ${LOG_DIR}/psql-errors.log (${errf} is kept)" >&2
+    fi
     [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within ${DB_TIMEOUT_S}s" >&2
     return "${rc}"
 }
