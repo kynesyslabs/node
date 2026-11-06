@@ -91,6 +91,24 @@ describe("web2 proxy hardening", () => {
         ).rejects.toThrow(/1024 bytes/)
     })
 
+    it("does not hand back the origin's Set-Cookie, which the SDK would sign into the tx", async () => {
+        const proxy = new Proxy("session")
+        const port = await listen((_req, res) => {
+            res.setHeader("Set-Cookie", "sid=secret; HttpOnly")
+            res.setHeader("X-Kept", "yes")
+            res.end("ok")
+        })
+        ;(proxy as any).startProxyServer = async () => {
+            ;(proxy as any)._proxyPort = port
+        }
+
+        const result = await proxy.sendHTTPRequest(
+            request("https://example.com/") as any,
+        )
+        expect(result.headers["set-cookie"]).toBeUndefined()
+        expect(result.headers["x-kept"]).toBe("yes")
+    })
+
     it("checks certificates unless the operator set the dev flag", () => {
         expect((new Proxy("session") as any)._sslConfig.verifyCertificates).toBe(
             true,

@@ -1,4 +1,4 @@
-import { IWeb2Request } from "@kynesyslabs/demosdk/types"
+import { IWeb2Payload, IWeb2Request } from "@kynesyslabs/demosdk/types"
 
 const SENSITIVE_HEADER_KEYS = new Set([
     "authorization",
@@ -35,6 +35,34 @@ export function stripSensitiveWeb2Headers(
     }
 
     return Object.keys(sanitized).length > 0 ? sanitized : undefined
+}
+
+function sensitiveKeys(headers: unknown): string[] {
+    if (!headers || typeof headers !== "object") return []
+    return Object.keys(headers).filter(k =>
+        SENSITIVE_HEADER_KEYS.has(k.toLowerCase()),
+    )
+}
+
+/**
+ * Credential fields a signed `web2Request` tx would publish on chain. The tx
+ * is stored as signed, so the node cannot strip them; it can only refuse it.
+ */
+export function credentialFieldsInWeb2Payload(payload: unknown): string[] {
+    const message = (payload as IWeb2Payload | undefined)?.message
+    if (!message || typeof message !== "object") return []
+    const found: string[] = []
+    if (message.authorization) found.push("authorization")
+    const request = message.web2Request
+    for (const key of sensitiveKeys(request?.raw?.headers)) {
+        found.push(`request header ${key}`)
+    }
+    for (const key of sensitiveKeys(
+        (request?.result as { headers?: unknown } | undefined)?.headers,
+    )) {
+        found.push(`result header ${key}`)
+    }
+    return found
 }
 
 /**

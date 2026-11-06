@@ -147,10 +147,16 @@ export class Proxy {
                         this.canonicalizeHeaders(responseHeaders),
                     )
 
+                    // The SDK signs these headers into the on-chain tx, and a
+                    // cookie set for a credentialed request is a credential.
+                    // The headers hash already leaves set-cookie out.
+                    const { "set-cookie": _setCookie, ...returnedHeaders } =
+                        responseHeaders
+
                     resolve({
                         status: statusCode,
                         statusText: statusMessage,
-                        headers: responseHeaders,
+                        headers: returnedHeaders,
                         data: data,
                         responseHash: responseHash,
                         responseHeadersHash: responseHeadersHash,

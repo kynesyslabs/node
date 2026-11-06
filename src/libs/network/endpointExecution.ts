@@ -16,7 +16,15 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
-import { headersForReplay } from "@/features/web2/sanitizeWeb2Request"
+import {
+    credentialFieldsInWeb2Payload,
+    headersForReplay,
+} from "@/features/web2/sanitizeWeb2Request"
+import {
+    FEATURE_DISABLED,
+    featureDisabledMessage,
+    type OutboundFeature,
+} from "./outboundSwitches"
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 import {
     ucrypto,
@@ -50,6 +58,19 @@ export function withDisposition<T extends { extra?: unknown }>(
     const extra =
         reply.extra && typeof reply.extra === "object" ? reply.extra : {}
     return { ...reply, extra: { ...extra, hash, disposition } }
+}
+
+/** Marks `result` refused when the operator switched `feature` off. */
+function refusedAsDisabled(
+    result: ExecutionResult,
+    feature: OutboundFeature,
+): boolean {
+    const message = featureDisabledMessage(feature)
+    if (!message) return false
+    result.success = false
+    result.response = { error: FEATURE_DISABLED, message }
+    result.extra = { error: FEATURE_DISABLED, message }
+    return true
 }
 
 export async function handleExecuteTransaction(
@@ -162,6 +183,7 @@ export async function handleExecuteTransaction(
 
     switch (tx.content.type) {
         case "crosschainOperation": {
+            if (refusedAsDisabled(result, "xm")) break
             payload = tx.content.data
             const xmResult = await multichainDispatcher.digest(
                 payload[1] as XMScript,
@@ -232,8 +254,20 @@ export async function handleExecuteTransaction(
         }
 
         case "web2Request": {
+            if (refusedAsDisabled(result, "web2")) break
             const handleWeb2RequestStart = Date.now()
             payload = tx.content.data[1] as IWeb2Payload
+            const credentials = credentialFieldsInWeb2Payload(payload)
+            if (credentials.length > 0) {
+                const message =
+                    "web2Request tx carries credentials that would be stored on chain: " +
+                    credentials.join(", ") +
+                    ". Pass the token as the request's authorization option, not in the signed tx."
+                result.success = false
+                result.response = { error: "WEB2_CREDENTIALS_IN_TX", message }
+                result.extra = { error: "WEB2_CREDENTIALS_IN_TX", message }
+                break
+            }
             const params = parseWeb2ProxyRequest(payload)
             // This re-runs the request when the tx is broadcast. Drop the
             // credential headers on the sensitive-key list and the tx's own
@@ -253,6 +287,7 @@ export async function handleExecuteTransaction(
         }
 
         case "demoswork": {
+            if (refusedAsDisabled(result, "demoswork")) break
             const demosWorkPayload = tx.content.data
             const demosWorkScript = demosWorkPayload[1] as DemoScript
             try {
