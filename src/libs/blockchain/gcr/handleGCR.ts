@@ -52,6 +52,8 @@ import {
     verifyEditsAtApply,
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
+import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
+import { ensureNetworkParametersCurrent } from "src/libs/blockchain/routines/loadNetworkParameters"
 import {
     blockTxTypeRefusal,
     isNodeMessage,
@@ -1932,10 +1934,12 @@ export default class HandleGCR {
      * The transactions of a block refused before apply: those of a type the
      * node does not implement (`txTypeAllowList` fork), a fee-free message
      * not signed by a staked validator (`instantMessagingBinding`), those the
-     * `networkGovernance` rule refuses, whether or not `editBinding` is
-     * active, and those whose shipped edits are not the ones their signed
-     * body implies (`editBinding` fork). Apply runs the shipped edits as they
-     * are, so a block must never reach it with edits nobody derived.
+     * `networkGovernance` rule or a value rule (`nativeSendBinding`,
+     * `canonicalAddresses`, `feeBinding`) refuses, whether or not
+     * `editBinding` is active, and those whose shipped edits are not the ones
+     * their signed body implies (`editBinding` fork). Apply runs the shipped
+     * edits as they are, so a block must never reach it with edits nobody
+     * derived.
      *
      * Judged on the transactions as received, before the node derives fee
      * edits or drops the edits of types that do not mutate entities, and not
@@ -1961,8 +1965,14 @@ export default class HandleGCR {
         }
 
         // One read of the tip decides whether edits are bound, the shape
-        // expected of an amount and the governance rule, once for the block:
-        // none of them depends on the transaction.
+        // expected of an amount, the governance rule, the stake rule and the
+        // value rules, once for the block: none of them depends on the
+        // transaction.
+        const state = await editBindingState()
+        // Outside the per-transaction refusals: a fee read on stale
+        // parameters would refuse the block's correctly priced transactions
+        // on this node alone.
+        if (state.feeBound) await ensureNetworkParametersCurrent()
         const {
             active,
             postFork,
@@ -1971,13 +1981,23 @@ export default class HandleGCR {
             messageBinding,
             stakeChecks,
             tip,
-        } = await editBindingState()
+        } = state
         for (const tx of txs) {
             const reason =
                 (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
                 governanceGateRefusal(tx, governance) ??
                 (stakeChecks ? stakeSenderRefusal(tx) : null)
-            if (reason) refuse(tx, reason)
+            if (reason) {
+                refuse(tx, reason)
+                continue
+            }
+            let valueReason: string | null
+            try {
+                valueReason = await valueRulesRefusal(tx, state)
+            } catch (error) {
+                valueReason = `could not be verified: ${error}`
+            }
+            if (valueReason) refuse(tx, valueReason)
         }
         if (messageBinding) {
             await HandleGCR.refuseUnboundMessages(txs, refused, tip, refuse)

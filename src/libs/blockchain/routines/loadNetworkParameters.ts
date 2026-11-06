@@ -6,6 +6,11 @@ import type { NetworkParameters } from "@/features/networkUpgrade/types"
 import log from "@/utilities/logger"
 import { governedMinValidatorStake } from "@/features/staking/chainMinStake"
 
+/** The parameters of the last load that read the upgrade rows. */
+let loadedFromChain: NetworkParameters | null = null
+/** Whether the last load failed to read the upgrade rows. */
+let lastReadFailed = false
+
 // Precedence: governance (DB active rows) > env (Config) > hardcoded fallback.
 // Folds active upgrades onto env-resolved genesis in activation order;
 // later proposals overwrite earlier ones key-by-key.
@@ -19,7 +24,7 @@ export async function loadNetworkParameters(
         : never,
 ): Promise<NetworkParameters> {
     let active: NetworkUpgrade[] = []
-    let read = false
+    let readOk = false
     try {
         let resolvedRepo = repo as
             | import("typeorm").Repository<NetworkUpgrade>
@@ -32,15 +37,19 @@ export async function loadNetworkParameters(
             where: { status: "active" },
             order: { effectiveAtBlock: "ASC", proposalId: "ASC" },
         })
-        read = true
+        readOk = true
+        lastReadFailed = false
     } catch (e) {
-        // Both datasource acquisition and the find() are inside this try
-        // so a missing/uninitialised datasource also falls through to
-        // genesis defaults instead of bubbling.
+        lastReadFailed = true
+        // Fees and their split are checked and routed at apply, so a failed
+        // read must not swap the chain's values for the genesis ones on this
+        // node alone: once loaded, they stay until a read succeeds. Before
+        // that (boot without a datasource) genesis defaults apply.
         log.error(
             "NETWORK_PARAMETERS",
-            `Failed to read active upgrades; falling back to genesis defaults: ${(e as Error).message}`,
+            `Failed to read active upgrades; ${loadedFromChain ? "keeping the loaded parameters" : "falling back to genesis defaults"}: ${(e as Error).message}`,
         )
+        if (loadedFromChain) return loadedFromChain
     }
 
     const genesis = getGenesisNetworkParameters()
@@ -73,10 +82,11 @@ export async function loadNetworkParameters(
         params.shardSize = getSharedState.shardSize
     }
 
+    if (readOk) loadedFromChain = params
     getSharedState.networkParameters = params
     // A failed read says nothing about the minimum, so the last one read
     // stands rather than the default.
-    if (read) {
+    if (readOk) {
         getSharedState.governedMinValidatorStake = governedMinValidatorStake(active)
     }
     // Mirror onto flat fields read by calculateCurrentGas.
@@ -124,4 +134,23 @@ export async function loadNetworkParameters(
         `Loaded NetworkParameters from ${active.length} active upgrade(s): ${JSON.stringify(params)}`,
     )
     return params
+}
+
+/**
+ * Reloads the parameters when the last read failed, and throws when it fails
+ * again. The refresh after a block runs once, so a failed one may have missed
+ * a fee change that block activated: judging the next block's fees on the old
+ * values would refuse what every other node accepts and turn the block away
+ * on every retry. Block work waits for the read instead.
+ */
+export async function ensureNetworkParametersCurrent(
+    repo?: Parameters<typeof loadNetworkParameters>[0],
+): Promise<void> {
+    if (!lastReadFailed) return
+    await loadNetworkParameters(repo)
+    if (lastReadFailed) {
+        throw new Error(
+            "the network parameters could not be read; a block is not judged on fees that may be stale",
+        )
+    }
 }

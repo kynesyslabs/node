@@ -40,6 +40,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/handleGCR.failedTx.test.ts
     src/libs/blockchain/gcr/handleGCR.identityRollback.test.ts
     src/libs/blockchain/gcr/handleGCR.keyRefusal.test.ts
+    src/libs/blockchain/gcr/handleGCR.nativeValue.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
@@ -53,6 +54,7 @@ SUITE_FILES=(
     src/libs/blockchain/routines/Sync.verification.test.ts
     src/libs/blockchain/routines/syncVerification.test.ts
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
+    src/libs/blockchain/routines/validateTransaction.valueRules.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
     src/libs/crypto/canonicalJson.test.ts
