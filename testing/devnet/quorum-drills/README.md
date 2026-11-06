@@ -189,9 +189,9 @@ default to 0, `src/forks/forkConfig.ts:432-450`, `src/forks/forkConfig.ts:493-50
 that stops activating `quorumParity`, `committeeBinding` or `commitLock` is an
 error. The code is `launch_fork_heights` and `with_launch_forks` in
 `drill_inputs.py` (`run.sh` through `gen-inputs.py --fork-set launch`; scenario
-12 through `withLaunchForks`). The template has 10 forks at 0 now; the drills
-run 9: `osDenomination nonceEnforcement signatureDomain editBinding
-nonceIntegrity quorumParity committeeBinding commitLock finalityProofs`.
+12 through `withLaunchForks`). The drills run every fork the template has at
+0 except `identityCarryover`. The set is read from the template on each run,
+not kept in this file, and each run logs it (below).
 `identityCarryover` is at 0 in the template and **excluded by name** (the
 `LAUNCH_EXCLUDED_FORKS` list in `drill_inputs.py`, one reason per fork): the
 drills mount an empty `data/snapshot`, and a node with `identityCarryover`
@@ -209,7 +209,8 @@ by name, and the drills have it off although `genesis.devnet.json` has it at
 transactions and transactions carrying their edits, at RPC intake, pool
 admission and apply (`governanceGateRefusal`,
 `src/forks/governanceGate.ts:64-85`), and the drills send no transactions
-(see `nonceEnforcement` below). The genesis has all 16 forks of the template.
+(see `nonceEnforcement` below). The drill genesis lists every fork of the
+template, each at 0 or `null`.
 
 If the template ever sets another fork to 0 that needs a snapshot, add it to
 that list. Until then a drill with it active does not run: no node serves, and
@@ -230,8 +231,8 @@ scenario 12 the same in its fork-set line), and `drill-input.json`,
 the genesis the nodes ran. The excluded forks are in `DRILL_TIMINGS` and
 `drill.timings.excludedForks` too, and `run.sh` writes them to `verdict.json`
 as `excludedForks`. The other scenarios keep the forks of
-`genesis.devnet.json` (nine launch forks, `gasFeeSeparation` and
-`networkGovernance`, all at 0, plus the two `gen-inputs.py` sets, and
+`genesis.devnet.json` (each fork it lists, all at 0 there, `gasFeeSeparation`
+and `networkGovernance` among them, plus the two `gen-inputs.py` sets, and
 `commitLock` off with `--binding off`); their generated genesis and output
 are byte-identical to before (`--binding on`), and their compose differs only
 in the postgres `command` (see
