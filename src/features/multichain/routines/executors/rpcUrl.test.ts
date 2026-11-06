@@ -28,7 +28,7 @@ const { evmProviders } = await import(
 const { default: handlePayOperation } = await import("./pay")
 const { default: handleContractWrite } = await import("./contract_write")
 const { pickRpcUrl } = await import("./rpcUrl")
-const { Config } = await import("src/config")
+const { Config: appConfig } = await import("src/config")
 
 const METADATA = "http://169.254.169.254/latest/meta-data/"
 
@@ -117,8 +117,8 @@ describe("an allow-listed caller RPC stays with that caller", () => {
         const cache = (multichain.EVM as any).instances as Map<number, unknown>
         const saved = new Map(cache)
         cache.clear()
-        const real = Config.getInstance()
-        spyOn(Config, "getInstance").mockReturnValue({
+        const real = appConfig.getInstance()
+        spyOn(appConfig, "getInstance").mockReturnValue({
             ...real,
             outbound: { ...real.outbound, xmRpcAllowlist: ["rpc.partner.example"] },
         } as any)

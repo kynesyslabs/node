@@ -40,12 +40,12 @@ mock.module("../handleNativeRequest", () => ({
 }))
 mock.module("../handleL2PS", () => ({ __esModule: true, default: jest.fn() }))
 
-const { Config } = await import("src/config")
+const { Config: appConfig } = await import("src/config")
 const { processOperations } = await import("./processOperations")
 
 function switchOff(key: "xmEnabled" | "web2Enabled") {
-    const real = Config.getInstance()
-    spyOn(Config, "getInstance").mockReturnValue({
+    const real = appConfig.getInstance()
+    spyOn(appConfig, "getInstance").mockReturnValue({
         ...real,
         outbound: { ...real.outbound, [key]: false },
     } as any)
