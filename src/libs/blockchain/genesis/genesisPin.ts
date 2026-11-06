@@ -167,6 +167,34 @@ export function genesisTimestampProblem(genesisData: unknown): string | null {
     return null
 }
 
+/**
+ * One problem per address that `balances` names more than once. Every path
+ * that applies the list keeps the last entry, so a repeated allocation would
+ * silently replace the one the reviewers read first.
+ */
+export function duplicateBalanceProblems(balances: unknown): string[] {
+    if (!Array.isArray(balances)) return []
+    const seen = new Map<string, number[]>()
+    balances.forEach((entry, i) => {
+        const address = Array.isArray(entry) ? entry[0] : undefined
+        if (typeof address !== "string") return
+        // Case-folded: the legacy path keys accounts by the exact string, and
+        // two spellings of one key would be two credits nobody reviewed as such
+        const key = address.trim().toLowerCase()
+        seen.set(key, [...(seen.get(key) ?? []), i])
+    })
+    const problems: string[] = []
+    for (const [address, entries] of seen) {
+        if (entries.length > 1) {
+            problems.push(
+                `genesis balances name ${address} ${entries.length} times (entries ${entries.join(", ")}); ` +
+                    "each address may appear once",
+            )
+        }
+    }
+    return problems
+}
+
 export interface FreshGenesisInput {
     /** The genesis file as read. */
     genesisData: unknown
@@ -188,7 +216,9 @@ export interface FreshGenesisInput {
  * boot finds a block 0 and trusts it.
  */
 export function freshGenesisProblems(input: FreshGenesisInput): string[] {
-    const problems: string[] = []
+    const problems: string[] = duplicateBalanceProblems(
+        (input.genesisData as Record<string, unknown> | null)?.balances,
+    )
     const declared = declaredManifestHash(input.genesisData)
 
     if (declared !== null) {

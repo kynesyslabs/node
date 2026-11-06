@@ -225,6 +225,17 @@ describe("freshGenesisProblems", () => {
         ).toEqual([])
     })
 
+    it("refuses an address listed twice in the balances, pinned or not", () => {
+        const a = `0x${"1".repeat(64)}`
+        const b = `0x${"2".repeat(64)}`
+        const twice = { ...genesis, balances: [[a, "1"], [b, "2"], [a.toUpperCase().replace("0X", "0x"), "3"]] }
+        expect(freshGenesisProblems({ ...ok, genesisData: twice, pin: "" }).join()).toContain(
+            `name ${a} 2 times (entries 0, 2)`,
+        )
+        const once = { ...genesis, balances: [[a, "1"], [b, "2"]] }
+        expect(freshGenesisProblems({ ...ok, genesisData: once, pin: "" })).toEqual([])
+    })
+
     it("refuses a malformed snapshot declaration", () => {
         expect(() => declaredManifestHash({ snapshot: { manifestSha256: "x" } })).toThrow(
             GenesisRefusal,
