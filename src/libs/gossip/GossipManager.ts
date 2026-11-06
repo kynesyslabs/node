@@ -270,7 +270,7 @@ export class GossipManager {
             const err =
                 (e as NodeJS.ErrnoException).code === "ENOENT"
                     ? new SidecarConfigError(
-                          "Node.js runtime not found on PATH — the gossip sidecar requires Node >= 20 (GOSSIP_ENABLED=false also starts, but the node then learns of new blocks only by polling its peers)",
+                          "Node.js runtime not found on PATH — the gossip sidecar requires Node >= 20 (GOSSIP_ENABLED=false also starts, but blocks and heights then travel by direct HTTP pushes, with a 10 s height poll as the fallback)",
                       )
                     : e
             if (!launched) {
