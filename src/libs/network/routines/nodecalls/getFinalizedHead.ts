@@ -3,6 +3,7 @@ import Chain from "src/libs/blockchain/chain"
 import { certificateMessageOf } from "src/libs/consensus/v2/commitLock/domain"
 import { getAheadValidatorPeers } from "src/libs/consensus/v2/routines/networkAheadVeto"
 import { signerRuleOf } from "src/libs/blockchain/validation/signerRule"
+import { isForkActive } from "@/forks/forkGates"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
@@ -57,9 +58,16 @@ let lastSigners: { hash: string; signers: HeadSigners } | null = null
  * Who may sign the head and how many verified signatures it needs, by the
  * rule sync applies to it. Null for genesis, which nobody signs, and when
  * the set cannot be read: the head itself is still worth answering.
+ *
+ * Also null until finalityProofs applies to the head. Before it the pool is
+ * filtered by the validators table, which holds only the present: once the
+ * head is applied, a validator it unstaked is gone, so the set read now can
+ * leave out a signer sync counted and lower the threshold. From the fork on
+ * the pool comes from the validator set recorded with the parent's parent.
  */
 async function headSigners(block: { number: number; hash: string }): Promise<HeadSigners> {
     if (block.number === 0) return NO_SIGNERS
+    if (!isForkActive("finalityProofs", block.number)) return NO_SIGNERS
     if (lastSigners?.hash === block.hash) return lastSigners.signers
     try {
         const rule = await signerRuleOf(block.number)
@@ -95,7 +103,8 @@ async function headSigners(block: { number: number; hash: string }): Promise<Hea
  * `signatures` are the block's stored validator signatures and
  * `signedMessage` is the exact text each of them signs, so a client can
  * verify them, not just count them. `committee` is who may sign it and
- * `threshold` how many of them must, as this node counts them: a client
+ * `threshold` how many of them must, as this node counts them (null when
+ * they cannot be recovered for the head, see headSigners): a client
  * that holds its own validator set checks them against it instead of
  * trusting them. `timestamp` is in seconds, the unit `ageSeconds` is
  * derived in. Genesis is final by configuration and carries a single

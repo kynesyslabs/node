@@ -49,7 +49,7 @@ beforeEach(() => {
     getNetworkTimestamp.mockReturnValue(1_800_000_100)
     sharedState.syncStatus = true
     sharedState.inSyncLoop = false
-    sharedState.forkConfig = undefined
+    sharedState.forkConfig = { finalityProofs: { activationHeight: 0 } }
 })
 
 describe("getFinalizedHead", () => {
@@ -81,6 +81,26 @@ describe("getFinalizedHead", () => {
         expect(reply.response.committee).toEqual(["0xaa", "0xbb"])
         expect(reply.response.committeeRule).toBe("eligible_pool")
         expect(reply.response.threshold).toBe(2)
+    })
+
+    it("gives no signer set for a head whose pool was read from the live validators table", async () => {
+        // Before finalityProofs the pool is the present table, which no longer
+        // holds a validator the head itself unstaked: a set read now could
+        // leave out a signer that counted and lower the bar.
+        sharedState.forkConfig = { finalityProofs: { activationHeight: 81 } }
+        getLastBlock.mockResolvedValue(block({ number: 80, hash: "0180" }))
+        const before = await getFinalizedHead()
+        expect(before.result).toBe(200)
+        expect(before.response.committee).toBeNull()
+        expect(before.response.committeeRule).toBeNull()
+        expect(before.response.threshold).toBeNull()
+        expect(signerRuleOf).not.toHaveBeenCalled()
+
+        getLastBlock.mockResolvedValue(block({ number: 81, hash: "0181" }))
+        const from = await getFinalizedHead()
+        expect(from.response.committee).toEqual(COMMITTEE)
+        expect(from.response.threshold).toBe(3)
+        expect(signerRuleOf).toHaveBeenCalledWith(81)
     })
 
     it("reads the signer set once per head", async () => {
