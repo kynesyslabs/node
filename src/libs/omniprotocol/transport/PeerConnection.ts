@@ -472,6 +472,7 @@ export class PeerConnection extends EventEmitter {
 
         const dataToSign = timestampedSignedData(
             genesisHash,
+            this._peerIdentity,
             opcode,
             sequence,
             timestamp,
