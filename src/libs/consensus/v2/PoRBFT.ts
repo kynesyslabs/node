@@ -61,6 +61,7 @@ import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
 import {
+    MAX_NONCE_TRACE_ACCOUNTS,
     NONCE_TRACE_ATTR_KEY,
     assertForgedNonceTrace,
     buildNonceTrace,
@@ -465,7 +466,15 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             const traceAccounts = Array.from(resNonce.nonceAccounts)
-            const startApplyNonces = traceEnabled
+            const traceThisBlock =
+                traceEnabled &&
+                traceAccounts.length <= MAX_NONCE_TRACE_ACCOUNTS
+            if (traceEnabled && !traceThisBlock) {
+                log.warn(
+                    `[DEBUG_ASSERT] Block ${blockRef}: ${traceAccounts.length} nonce accounts, above the trace cap of ${MAX_NONCE_TRACE_ACCOUNTS}; no nonce trace for this block`,
+                )
+            }
+            const startApplyNonces = traceThisBlock
                 ? await readNonces(traceAccounts)
                 : {}
 
@@ -482,7 +491,7 @@ export async function consensusRoutine(): Promise<void> {
             // A block with no transactions still commits its L2PS proofs
             pendingGCR = applyRes.pending ?? HandleGCR.emptyPendingWrite()
 
-            if (traceEnabled) {
+            if (traceThisBlock) {
                 const endApplyNonces = noncesAfterApply(
                     pendingGCR,
                     traceAccounts,
