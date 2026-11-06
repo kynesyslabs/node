@@ -1,0 +1,137 @@
+{
+  "id": "F04",
+  "kind": "method (what a client can do today with the existing generic APIs)",
+  "issues": [
+    "kynesyslabs/node#1059 (U-01)",
+    "kynesyslabs/node#1060 (U-02)"
+  ],
+  "source": {
+    "repo": "https://github.com/cX3po/pathos-dacs-ref",
+    "commit": "390c5fa01ed3ff24f4a0b2a52464922b4fef264f",
+    "file": "src/live/demos-node-receipt-provider.ts",
+    "lines": "130-249"
+  },
+  "call_sequence": [
+    {
+      "step": 1,
+      "request": {
+        "method": "POST",
+        "url": "https://demosnode.discus.sh/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "method": "nodeCall",
+          "params": [
+            {
+              "message": "getStorageProgram",
+              "data": {
+                "storageAddress": "<stor-...>"
+              },
+              "muid": "fixture-read"
+            }
+          ]
+        }
+      },
+      "checks": [
+        "storageAddress equals the request",
+        "programName binds the logical address",
+        "owner non-empty",
+        "createdByTx is a 64-hex hash",
+        "sha256(JCS(data)) is the content hash"
+      ]
+    },
+    {
+      "step": 2,
+      "request": {
+        "method": "POST",
+        "url": "https://demosnode.discus.sh/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "method": "nodeCall",
+          "params": [
+            {
+              "message": "getTxByHash",
+              "data": {
+                "hash": "<createdByTx>"
+              },
+              "muid": "fixture-read"
+            }
+          ]
+        }
+      },
+      "checks": [
+        "hash equals the request",
+        "content.type == storageProgram",
+        "content.from == owner",
+        "nonce is a non-negative integer or decimal string",
+        "Recognize confirmed/included/pending; failed or unrecognized values are indeterminate.",
+        "Before issuing any receipt, reject tx.status=pending as indeterminate even if getTransactionStatus.state=included, because the two reads disagree."
+      ]
+    },
+    {
+      "step": 3,
+      "request": {
+        "method": "POST",
+        "url": "https://demosnode.discus.sh/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "method": "nodeCall",
+          "params": [
+            {
+              "message": "getTransactionStatus",
+              "data": {
+                "hash": "<createdByTx>"
+              },
+              "muid": "fixture-read"
+            }
+          ]
+        }
+      },
+      "checks": [
+        "state == included, else indeterminate (failed/rejected/unknown/pending are never accepted)",
+        "blockNumber equals the getTxByHash blockNumber"
+      ]
+    },
+    {
+      "step": 4,
+      "request": {
+        "method": "POST",
+        "url": "https://demosnode.discus.sh/",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "method": "nodeCall",
+          "params": [
+            {
+              "message": "getBlockByNumber",
+              "data": {
+                "blockNumber": "<blockNumber>"
+              },
+              "muid": "fixture-read"
+            }
+          ]
+        }
+      },
+      "checks": [
+        "number equals the request",
+        "hash present",
+        "content.ordered_transactions includes the tx",
+        "content.timestamp present",
+        "block.status confirmed or derived"
+      ]
+    }
+  ],
+  "result_states": {
+    "finalized (this provider's label)": "block.status == confirmed AND tx status == confirmed",
+    "included": "After every check passes, including the explicit pending rejection: tx status is confirmed or included and the block is confirmed or derived; otherwise indeterminate.",
+    "indeterminate": "any check fails or any read errors, including tx.status=pending"
+  },
+  "pending_and_dropped": "not demonstrated by captures: the inspected client code rejects pending/unknown/inconsistent observations; there is no pending or dropped transaction capture in this package",
+  "honest_limit": "every input is a single node's self-report. \"finalized\" here means the node said \"confirmed\" for both block and transaction; no validator signature, signer pool or quorum is checked, and getTransactionStatus alone cannot distinguish an included-but-failed transfer (see N07)"
+}

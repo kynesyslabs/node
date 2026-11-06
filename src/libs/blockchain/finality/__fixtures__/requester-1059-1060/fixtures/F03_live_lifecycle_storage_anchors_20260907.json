@@ -1,0 +1,115 @@
+{
+  "id": "F03",
+  "kind": "positive (re-readable public chain objects)",
+  "issues": [
+    "kynesyslabs/node#1060 (U-02)",
+    "kynesyslabs/node#1059 (U-01)"
+  ],
+  "captured_by": "PATH-OS reference implementation (cX3po/pathos-dacs-ref) live testnet runs, receipt provider demos-node",
+  "rpc": "https://demosnode.discus.sh/",
+  "network": "testnet",
+  "runs": [
+    {
+      "run_id": "beta-testnet-20260907T160447Z",
+      "job_id": "01M1Y9TVH3ZA4M4MESXM7G93KA",
+      "live_started_at_utc": "2026-09-07T16:04:49+00:00",
+      "live_finished_at_utc": "2026-09-07T16:07:23+00:00",
+      "rollup": "PASS",
+      "phases": [
+        {
+          "negotiate-fixed-price": "PASS"
+        },
+        {
+          "commit-agreement": "PASS"
+        },
+        {
+          "pay-dem": "PASS"
+        },
+        {
+          "deliver-storage-program": "PASS"
+        }
+      ],
+      "price_dem": 1,
+      "storage_program_anchors": {
+        "listing": "stor-d8e057eeed81401fc10ca14074493e97b0958f92",
+        "agreement": "stor-b6f9caef851a501dc221238c6386deb4f833f188",
+        "commitment": "stor-cea4a57019ec796a38273a973f7981492eb7d9ee",
+        "paymentEvidence": "stor-e38cf97976163bf46198163ef4e68075f19aaf40",
+        "deliverable": "stor-3d4eb2838dcea07cc50210eca7e022803be16cc5",
+        "deliveryEvidence": "stor-196f019ca8e6ea99583b46382335a908192ddae7",
+        "buyerBundle": "stor-7fd4e254fe243288754e41cc138c8de805f78b4d",
+        "sellerBundle": "stor-685d8fc91b41753f00181013020598e71864ed84"
+      }
+    },
+    {
+      "run_id": "beta-testnet-20260907T180555Z",
+      "job_id": "01M1YGRN37VZN7C6GAF528KA6M",
+      "live_started_at_utc": "2026-09-07T18:05:57+00:00",
+      "live_finished_at_utc": "2026-09-07T18:08:21+00:00",
+      "rollup": "PASS",
+      "phases": [
+        {
+          "negotiate-fixed-price": "PASS"
+        },
+        {
+          "commit-agreement": "PASS"
+        },
+        {
+          "pay-dem": "PASS"
+        },
+        {
+          "deliver-storage-program": "PASS"
+        }
+      ],
+      "price_dem": 1,
+      "storage_program_anchors": {
+        "listing": "stor-0d3dc54bbd6e5e55bd5f79f1a70d3ddba7be89cf",
+        "agreement": "stor-4abd57104b3e7a7b0b536ae5d73783c55402fd86",
+        "commitment": "stor-7c557e81b68c41189afb1ee50fb2a0ed9086eb17",
+        "paymentEvidence": "stor-81a1fe40f3e4040f3863988038ba21dd21a828bf",
+        "deliverable": "stor-76193f5cd9eb34365ff60516a229aa8335495ef8",
+        "deliveryEvidence": "stor-2907372a3dca38682e472f86cd015c007ebc7de0",
+        "buyerBundle": "stor-85903c128510a54d32609b9c3944b67f7de8d06d",
+        "sellerBundle": "stor-f4caf0332c0a2eb6bca69917236b59cff919d273"
+      }
+    }
+  ],
+  "note_on_issue_1060": "stor-e38cf97976163bf46198163ef4e68075f19aaf40, the existing fixture named in #1060, is the paymentEvidence anchor of run beta-testnet-20260907T160447Z",
+  "cold_verification_of_second_run": {
+    "recorded_at_utc": "2026-09-07T18:16:49+00:00",
+    "historical_verifier_pins": {
+      "reference (cX3po/pathos-dacs-ref)": "6037a1f3ce0e3d0f8927a82a16afbf4056b77b5d",
+      "dacs-sdk (DACS-Agent-commerce/dacs-sdk)": "3aa1d7dfa13ea6c6543a2b389720737f7ac89698",
+      "note": "commit pins as recorded by the 2026-09-07 cold-verification run; F04 describes source at a separate, later pin (390c5fa) and is not an exact replay of these historical captures"
+    },
+    "bundle_copies": {
+      "buyer": "stor-85903c128510a54d32609b9c3944b67f7de8d06d",
+      "seller": "stor-f4caf0332c0a2eb6bca69917236b59cff919d273"
+    },
+    "reference_verifier": {
+      "buyer": "pass",
+      "seller": "pass"
+    },
+    "dacs_sdk_core_verifier": {
+      "buyer": true,
+      "seller": true
+    },
+    "dacs_sdk_agent_mode": {
+      "buyer": false,
+      "seller": false
+    },
+    "dacs_sdk_agent_mode_reason": "reading the pay-dem payment anchor by its logical locator failed (the PC-2 locator gap, dacs-sdk#316); unrelated to node APIs"
+  },
+  "reproduce": "each address can be read with nodeCall getStorageProgram {\"storageAddress\": \"<stor-...>\"}; createdByTx in the answer can be read with getTxByHash and getTransactionStatus {\"hash\": ...}",
+  "shows": [
+    "F03 inventories 16 historical Storage Program addresses from two successful run summaries (both runs PASS; each run lists price_dem 1 and includes payment and Storage Program writes).",
+    "It retains passing cold-verification summaries for the second run's two bundle copies under reference and SDK core-anchor modes; SDK agent mode failed on the documented locator gap."
+  ],
+  "does_not_show": [
+    "a 16-anchor readback trace, or every anchor's inclusion/dataHash: per-anchor data/tx/status/block responses were not retained",
+    "an exact replay by F04: F04 describes source at a separate pin, rather than an exact replay of these historical captures",
+    "executed status of the DEM payment as a signed fact",
+    "BFT finality",
+    "that a read value is the current value at a named block"
+  ]
+}
