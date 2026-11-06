@@ -7,11 +7,34 @@
 
 import { EventEmitter } from "events"
 import fs from "fs"
+import os from "os"
 import path from "path"
 import { Config } from "src/config"
 
 // Capture original console.error at module initialization to avoid TUI interception/recursion
 const originalConsoleError = console.error.bind(console)
+
+/**
+ * A logs directory left by an older release keeps the mode it was created
+ * with; make it owner-only. Directories that are not the node's own (the
+ * working directory, home, the temp dir, the root) are left as they are.
+ */
+function restrictLogsDir(dir: string): void {
+    if (process.platform === "win32") return
+    const resolved = path.resolve(dir)
+    const shared = [process.cwd(), os.homedir(), os.tmpdir(), path.parse(resolved).root]
+    if (shared.some(d => path.resolve(d) === resolved)) return
+    try {
+        if ((fs.statSync(resolved).mode & 0o077) !== 0) {
+            fs.chmodSync(resolved, 0o700)
+        }
+    } catch (err) {
+        originalConsoleError(
+            `Could not make the logs directory ${resolved} owner-only; other users may read the logs:`,
+            err,
+        )
+    }
+}
 
 // SECTION Types and Interfaces
 
@@ -292,6 +315,8 @@ export class CategorizedLogger extends EventEmitter {
         // Logs carry peer addresses and request details: owner-only.
         if (!fs.existsSync(this.config.logsDir)) {
             fs.mkdirSync(this.config.logsDir, { recursive: true, mode: 0o700 })
+        } else {
+            restrictLogsDir(this.config.logsDir)
         }
 
         this.logsInitialized = true

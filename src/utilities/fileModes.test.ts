@@ -32,6 +32,16 @@ describe.skipIf(!posix)("files the node creates are owner-only", () => {
         expect(modeOf(file)).toBe(0o600)
     })
 
+    it("makes an existing world-readable wallet file 600 before writing the key", async () => {
+        const file = path.join(dir, "wallet.key")
+        fs.writeFileSync(file, "old", { mode: 0o644 })
+        fs.chmodSync(file, 0o644)
+        const wallet = new Wallet()
+        await wallet.save(file)
+        expect(modeOf(file)).toBe(0o600)
+        expect(fs.readFileSync(file, "utf8")).toBe(wallet.identity.privateKey.toString("hex"))
+    })
+
     it("writes show:pubkey's -o file as 600", () => {
         const out = path.join(dir, "pub")
         const run = Bun.spawnSync(
@@ -62,6 +72,20 @@ describe.skipIf(!posix)("files the node creates are owner-only", () => {
         const files = fs.readdirSync(logsDir)
         expect(files.length).toBeGreaterThan(0)
         for (const f of files) expect(modeOf(path.join(logsDir, f))).toBe(0o600)
+    })
+
+    it("makes an existing logs directory 700", () => {
+        const logsDir = path.join(dir, "logs")
+        fs.mkdirSync(logsDir, { mode: 0o755 })
+        fs.chmodSync(logsDir, 0o755)
+        CategorizedLogger.getInstance({ logsDir, terminalOutput: false }).initLogsDir()
+        expect(modeOf(logsDir)).toBe(0o700)
+    })
+
+    it("leaves the working directory's mode alone when logs go there", () => {
+        const before = modeOf(process.cwd())
+        CategorizedLogger.getInstance({ logsDir: ".", terminalOutput: false }).initLogsDir()
+        expect(modeOf(process.cwd())).toBe(before)
     })
 
     it("creates custom log files as 600", async () => {
