@@ -95,6 +95,34 @@ tests:
               summary: Subsystem l2ps is down
               description: 'demos_subsystem_up{subsystem="l2ps"} has been 0 for >2m on validator-1 without being intentionally skipped. Check /health/subsystems for last_error.'
 
+  # In fast sync: signaling is marked before the sync, so a failed signaling (up=0,
+  # skipped=0) fires during the catch-up; main_loop, still pending, stays silent.
+  - interval: 1m
+    input_series:
+      - series: 'demos_subsystem_up{subsystem="signaling",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_subsystem_skipped{subsystem="signaling",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_subsystem_up{subsystem="main_loop",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_subsystem_skipped{subsystem="main_loop",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_dormant_mode{instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_boot_step_status{step="fast_sync",instance="validator-1"}'
+        values: '1x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SubsystemDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              subsystem: signaling
+              instance: validator-1
+            exp_annotations:
+              summary: Subsystem signaling is down
+              description: 'demos_subsystem_up{subsystem="signaling"} has been 0 for >2m on validator-1 without being intentionally skipped. Check /health/subsystems for last_error.'
+
   # A dormant node never starts fast sync (no fast_sync step at all), but a subsystem that
   # failed there must still alert.
   - interval: 1m
