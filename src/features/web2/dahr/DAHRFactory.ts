@@ -1,6 +1,7 @@
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { DAHR } from "src/features/web2/dahr/DAHR"
 import log from "src/utilities/logger"
+import { Config } from "src/config"
 
 /**
  * DAHRFactory is a singleton class that manages DAHR instances.
@@ -8,7 +9,9 @@ import log from "src/utilities/logger"
 export class DAHRFactory {
     private static _instance: DAHRFactory
     private _dahrs: Map<string, { dahr: DAHR; lastAccess: number }> = new Map()
-    private readonly _maxAge: number = 24 * 60 * 60 * 1000 // 24 hours in milliseconds
+    // Idle lifetime: each started session holds a listening relay until it expires.
+    private readonly _maxAge: number =
+        Config.getInstance().outbound.web2SessionTtlMs
 
     /**
      * Private constructor to prevent direct object creation.
@@ -68,6 +71,13 @@ export class DAHRFactory {
      */
     getDAHR(sessionId: string): DAHR | undefined {
         const dahrEntry = this._dahrs.get(sessionId)
+        if (dahrEntry && Date.now() - dahrEntry.lastAccess > this._maxAge) {
+            // Expired sessions are otherwise only swept on the next create.
+            this._dahrs.delete(sessionId)
+            void dahrEntry.dahr.stopProxy()
+            log.info("DAHR", "[DAHRFactory] DAHR session expired")
+            return undefined
+        }
         if (dahrEntry) {
             dahrEntry.lastAccess = Date.now() // Update last access time
 

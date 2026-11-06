@@ -29,6 +29,15 @@ export function isSystemRelayTx(tx: Transaction): boolean {
 }
 
 /**
+ * The text a system relay transaction's hash is the sha256 of: the raw
+ * `JSON.stringify(content)` its producer hashed, with no denomination
+ * canonicalization.
+ */
+export function systemRelayContentString(content: unknown): string {
+    return JSON.stringify(content)
+}
+
+/**
  * Verify a system relay transaction by the rule its producer signs under.
  *
  * `l2psBatch` is built by the L2PS batch aggregator: the hash is the SHA-256
@@ -90,7 +99,7 @@ export async function verifySystemRelayTx(
         return invalid("system relay payload does not match its type")
     }
 
-    const contentString = JSON.stringify(content)
+    const contentString = systemRelayContentString(content)
     if (Hashing.sha256(contentString) !== hash) {
         return invalid("Transaction is not coherent")
     }

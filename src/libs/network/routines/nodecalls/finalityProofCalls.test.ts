@@ -20,7 +20,16 @@ interface StoredBlock {
 }
 
 let blocks = new Map<number, StoredBlock>()
-let txRows = new Map<string, { hash: string; status: string; attrs: any; blockNumber: number }>()
+interface TxRow {
+    hash: string
+    status: string
+    attrs: any
+    blockNumber: number
+    content: Record<string, any>
+    signature: { type: string; data: string; domain?: string }
+    ed25519_signature: string | null
+}
+let txRows = new Map<string, TxRow>()
 const getTxByHash = jest.fn(async (hash: string) => txRows.get(hash) ?? null)
 const lastNumber = () => Math.max(-1, ...blocks.keys())
 
@@ -90,6 +99,10 @@ const { default: getValidatorSet } = await import("./getValidatorSet")
 const { default: getBlockSegment, MAX_SEGMENT_BLOCKS, MAX_SEGMENT_CONTENT_BYTES } = await import("./getBlockSegment")
 const { default: getStorageProof } = await import("./getStorageProof")
 const { default: getStorageProgramLimits } = await import("./getStorageProgramLimits")
+const { STORAGE_PROGRAM_MAX_JSON_DEPTH, STORAGE_PROGRAM_MAX_SIZE_BYTES } = await import(
+    "src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
+)
+const { serializeTxContent } = await import("src/libs/crypto/txContentSerializer")
 const { STORAGE_HISTORY_BLOCKS } = await import("src/libs/blockchain/finality/storageHistory")
 
 interface Key {
@@ -105,7 +118,46 @@ const SET_HASH = validatorSetHash(validators)
 const trusted = { validators }
 const rules = { shardSize: 4 }
 
-const TX = { ok: sha256("ok"), failed: sha256("failed"), carried: sha256("carried"), later: sha256("later") }
+const PAYER = `0x${"a1".repeat(32)}`
+const PAYEE = `0x${"b2".repeat(32)}`
+/** A native transfer as a row stores it: amounts and fees as OS strings. */
+function transfer(nonce: number): Record<string, any> {
+    const amount = String(1_000_000_000 * nonce)
+    return {
+        type: "native",
+        from: PAYER,
+        to: PAYEE,
+        amount,
+        data: ["native", { nativeOperation: "send", args: [PAYEE, amount] }],
+        gcr_edits: [
+            { type: "balance", operation: "remove", isRollback: false, account: PAYER, txhash: "", amount },
+            { type: "balance", operation: "add", isRollback: false, account: PAYEE, txhash: "", amount },
+        ],
+        nonce,
+        timestamp: 1_790_000_000_000 + nonce,
+        transaction_fee: { network_fee: "1", rpc_fee: "0", additional_fee: "0", rpc_address: null },
+        from_ed25519_address: PAYER,
+    }
+}
+const CONTENT = { ok: transfer(1), failed: transfer(2), carried: transfer(3), later: transfer(4) }
+const BYTES = Object.fromEntries(
+    Object.entries(CONTENT).map(([name, content]) => [name, serializeTxContent(content as never, true)]),
+) as Record<keyof typeof CONTENT, string>
+const TX = {
+    ok: sha256(BYTES.ok),
+    failed: sha256(BYTES.failed),
+    carried: sha256(BYTES.carried),
+    later: sha256(BYTES.later),
+}
+const txRow = (name: keyof typeof CONTENT, status: string, attrs: any, blockNumber: number): TxRow => ({
+    hash: TX[name],
+    status,
+    attrs,
+    blockNumber,
+    content: structuredClone(CONTENT[name]),
+    signature: { type: "ed25519", data: sha256(`signature of ${name}`).repeat(2) },
+    ed25519_signature: null,
+})
 const leafOf = (hash: string, status: string, code: string | null) =>
     new TextEncoder().encode(jcsCanonicalize({ code, hash, status }))
 
@@ -142,15 +194,16 @@ function buildChain() {
     store(1, header(1, blocks.get(0)!.hash))
     const ordered = [TX.ok, TX.failed, TX.carried]
     store(2, header(2, blocks.get(1)!.hash, { ordered_transactions: ordered }))
-    txRows.set(TX.ok, { hash: TX.ok, status: "confirmed", attrs: null, blockNumber: 2 })
-    txRows.set(TX.failed, { hash: TX.failed, status: "failed", attrs: { code: "TX_NONCE_INVALID_LOW" }, blockNumber: 2 })
-    txRows.set(TX.carried, { hash: TX.carried, status: "confirmed", attrs: null, blockNumber: 1 })
+    txRows.set(TX.ok, txRow("ok", "confirmed", null, 2))
+    txRows.set(TX.failed, txRow("failed", "failed", { code: "TX_NONCE_INVALID_LOW" }, 2))
+    txRows.set(TX.carried, txRow("carried", "confirmed", null, 1))
     const leaves = [leafOf(TX.ok, "confirmed", null), leafOf(TX.failed, "failed", "TX_NONCE_INVALID_LOW"), leafOf(TX.carried, "failed", "TX_EXISTS")]
     store(3, header(3, blocks.get(2)!.hash, { parent_results_root: toHex(rfcRoot(leaves)), ordered_transactions: [TX.later] }))
-    txRows.set(TX.later, { hash: TX.later, status: "confirmed", attrs: null, blockNumber: 3 })
+    txRows.set(TX.later, txRow("later", "confirmed", null, 3))
 }
 
 const FORKS = {
+    osDenomination: { activationHeight: 0 },
     finalityProofs: { activationHeight: 0 },
     commitLock: { activationHeight: 0 },
     committeeBinding: { activationHeight: 0 },
@@ -161,6 +214,7 @@ beforeEach(() => {
     snapshots = [{ block: 0, setHash: SET_HASH, validators }]
     sharedState.syncStatus = true
     sharedState.forkConfig = structuredClone(FORKS)
+    delete sharedState.referenceBlockRoom
     proveStoragePrograms.mockReset()
 })
 
@@ -172,12 +226,94 @@ describe("getTransactionProof", () => {
         expect(ok.response.leaf).toBe(`{"code":null,"hash":"${TX.ok}","status":"confirmed"}`)
         expect(ok.response.commitBlock.signedMessage).toBe(precommitMessage(3, 1_800_000_003, blocks.get(3)!.hash))
         expect(sha256(ok.response.inclusionBlock.contentBytes)).toBe(blocks.get(2)!.hash)
-        expect(verifyTransactionProof(ok.response, trusted, rules)).toEqual({ verdict: "final-executed" })
+        expect(verifyTransactionProof(ok.response, trusted, rules)).toMatchObject({ verdict: "final-executed" })
 
         const failed = await getTransactionProof({ hash: TX.failed.toUpperCase() })
         expect(failed.result).toBe(200)
         expect(JSON.parse(failed.response.leaf)).toEqual({ code: "TX_NONCE_INVALID_LOW", hash: TX.failed, status: "failed" })
-        expect(verifyTransactionProof(failed.response, trusted, rules)).toEqual({ verdict: "final-failed" })
+        expect(verifyTransactionProof(failed.response, trusted, rules)).toMatchObject({ verdict: "final-failed" })
+    })
+
+    it("serves the transaction as hashed, so the verifier checks the expected payment", async () => {
+        const ok = await getTransactionProof({ hash: TX.ok })
+        expect(ok.response.tx).toEqual({
+            hash: TX.ok,
+            contentBytes: BYTES.ok,
+            signature: txRows.get(TX.ok)!.signature,
+            ed25519_signature: null,
+        })
+        const payment = { from: PAYER, to: PAYEE, amount: 1_000_000_000n, nonce: 1 }
+        const verdict = verifyTransactionProof(ok.response, trusted, rules, payment)
+        expect(verdict.verdict).toBe("final-executed")
+        expect(verdict.content).toMatchObject({ from: PAYER, to: PAYEE, amount: "1000000000", nonce: 1 })
+        for (const altered of [{ from: PAYEE }, { to: PAYER }, { amount: 2_000_000_000n }, { nonce: 2 }]) {
+            expect(verifyTransactionProof(ok.response, trusted, rules, { ...payment, ...altered }).verdict).toBe("invalid")
+        }
+
+        const failed = await getTransactionProof({ hash: TX.failed })
+        expect(verifyTransactionProof(failed.response, trusted, rules, { ...payment, amount: 2_000_000_000n, nonce: 2 }).verdict).toBe(
+            "final-failed",
+        )
+        const swapped = { ...ok.response, tx: failed.response.tx }
+        expect(verifyTransactionProof(swapped, trusted, rules).verdict).toBe("invalid")
+    })
+
+    /** Orders one transaction in block 4 and commits its result in block 5. */
+    function includeInBlock4(row: Omit<TxRow, "blockNumber" | "status" | "attrs">) {
+        const laterLeaf = [leafOf(TX.later, "confirmed", null)]
+        store(4, header(4, blocks.get(3)!.hash, { parent_results_root: toHex(rfcRoot(laterLeaf)), ordered_transactions: [row.hash] }))
+        store(5, header(5, blocks.get(4)!.hash, { parent_results_root: toHex(rfcRoot([leafOf(row.hash, "confirmed", null)])) }))
+        txRows.set(row.hash, { ...row, status: "confirmed", attrs: null, blockNumber: 4 })
+    }
+
+    it("serves a system relay transaction as its producer hashed it, raw JSON", async () => {
+        const content = {
+            type: "l2psBatch",
+            from: PAYER,
+            to: PAYER,
+            amount: 0,
+            data: ["l2psEncryptedTx", { l2ps_uid: "subnet", encrypted_batch: "ab".repeat(16) }],
+            gcr_edits: [],
+            nonce: 5,
+            timestamp: 1_790_000_000_005,
+            transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0, rpc_address: null },
+        }
+        const raw = JSON.stringify(content)
+        expect(serializeTxContent(content as never, true)).not.toBe(raw)
+        const signature = { type: "ed25519", data: sha256("relay signature").repeat(2), domain: "l2ps-batch" }
+        includeInBlock4({ hash: sha256(raw), content, signature, ed25519_signature: null })
+
+        const reply = await getTransactionProof({ hash: sha256(raw) })
+        expect(reply.result).toBe(200)
+        expect(reply.response.tx).toEqual({ hash: sha256(raw), contentBytes: raw, signature, ed25519_signature: null })
+        const verdict = verifyTransactionProof(reply.response, trusted, rules, { from: PAYER, nonce: 5 })
+        expect(verdict).toMatchObject({ verdict: "final-executed", content: { type: "l2psBatch", amount: 0 } })
+    })
+
+    it("serves a transaction admitted before osDenomination that landed just after it", async () => {
+        sharedState.forkConfig = { ...structuredClone(FORKS), osDenomination: { activationHeight: 4 } }
+        sharedState.referenceBlockRoom = 10
+        const content = { ...transfer(5), amount: 5, transaction_fee: { network_fee: 1, rpc_fee: 0, additional_fee: 0, rpc_address: null } }
+        const legacy = JSON.stringify(content)
+        expect(serializeTxContent(content as never, true)).not.toBe(legacy)
+        includeInBlock4({ hash: sha256(legacy), content, signature: { type: "ed25519", data: "00".repeat(64) }, ed25519_signature: null })
+
+        const reply = await getTransactionProof({ hash: sha256(legacy) })
+        expect(reply.result).toBe(200)
+        expect(reply.response.tx.contentBytes).toBe(legacy)
+
+        sharedState.referenceBlockRoom = 0
+        const outside = await getTransactionProof({ hash: sha256(legacy) })
+        expect(outside.result).toBe(500)
+        expect(outside.extra).toMatchObject({ reason: "content_unrecoverable" })
+    })
+
+    it("answers 500 content_unrecoverable when the stored transaction no longer hashes to its hash", async () => {
+        txRows.get(TX.ok)!.content.nonce = 9
+        const reply = await getTransactionProof({ hash: TX.ok })
+        expect(reply.result).toBe(500)
+        expect(reply.extra).toMatchObject({ reason: "content_unrecoverable" })
+        expect(reply.response).toEqual({ error: "content_unrecoverable", blockNumber: 2, txHash: TX.ok })
     })
 
     it("answers 409 not_yet_committed until the next block exists", async () => {
@@ -633,15 +769,26 @@ describe("getStorageProof", () => {
 })
 
 describe("getStorageProgramLimits", () => {
-    it("names the proof batch, the history window and the program pricing", async () => {
+    it("names the proof batch, the history window, the size and depth limits and the program pricing", async () => {
         const reply = getStorageProgramLimits()
         expect(reply.result).toBe(200)
         expect(reply.response).toEqual({
             maxAddressesPerProof: 16,
             historyBlocks: 64,
+            maxDataBytes: 1_048_576,
+            measuredOver: expect.stringContaining("JSON.stringify(data)"),
+            maxJsonDepth: 64,
+            appliesFromBlock: 0,
             maxProgramSizeBytes: 1_048_576,
             pricingChunkBytes: 10_240,
             feePerChunk: "1",
         })
+    })
+
+    it("reports the constants the storage routines enforce", async () => {
+        const { response } = getStorageProgramLimits()
+        expect(response.maxDataBytes).toBe(STORAGE_PROGRAM_MAX_SIZE_BYTES)
+        expect(response.maxJsonDepth).toBe(STORAGE_PROGRAM_MAX_JSON_DEPTH)
+        expect(response.measuredOver).toContain("binary")
     })
 })

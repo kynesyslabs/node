@@ -8,6 +8,8 @@ import { governedMinValidatorStake } from "@/features/staking/chainMinStake"
 
 /** The parameters of the last load that read the upgrade rows. */
 let loadedFromChain: NetworkParameters | null = null
+/** Whether the last load failed to read the upgrade rows. */
+let lastReadFailed = false
 
 // Precedence: governance (DB active rows) > env (Config) > hardcoded fallback.
 // Folds active upgrades onto env-resolved genesis in activation order;
@@ -36,7 +38,9 @@ export async function loadNetworkParameters(
             order: { effectiveAtBlock: "ASC", proposalId: "ASC" },
         })
         readOk = true
+        lastReadFailed = false
     } catch (e) {
+        lastReadFailed = true
         // Fees and their split are checked and routed at apply, so a failed
         // read must not swap the chain's values for the genesis ones on this
         // node alone: once loaded, they stay until a read succeeds. Before
@@ -130,4 +134,23 @@ export async function loadNetworkParameters(
         `Loaded NetworkParameters from ${active.length} active upgrade(s): ${JSON.stringify(params)}`,
     )
     return params
+}
+
+/**
+ * Reloads the parameters when the last read failed, and throws when it fails
+ * again. The refresh after a block runs once, so a failed one may have missed
+ * a fee change that block activated: judging the next block's fees on the old
+ * values would refuse what every other node accepts and turn the block away
+ * on every retry. Block work waits for the read instead.
+ */
+export async function ensureNetworkParametersCurrent(
+    repo?: Parameters<typeof loadNetworkParameters>[0],
+): Promise<void> {
+    if (!lastReadFailed) return
+    await loadNetworkParameters(repo)
+    if (lastReadFailed) {
+        throw new Error(
+            "the network parameters could not be read; a block is not judged on fees that may be stale",
+        )
+    }
 }

@@ -1,7 +1,12 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
-import { serializeBlockContent } from "@/forks"
+import { serializeBlockContent, serializeTransactionContent } from "@/forks"
 import Hashing from "src/libs/crypto/hashing"
 import { certificateMessageOf } from "src/libs/consensus/v2/commitLock/domain"
+import { previousRuleHeights } from "src/libs/blockchain/referenceBlockWindow"
+import {
+    isSystemRelayTx,
+    systemRelayContentString,
+} from "src/libs/blockchain/validation/systemRelayTx"
 
 /**
  * A block as a finality proof carries it: the exact text its hash is the
@@ -28,10 +33,32 @@ interface StoredBlock {
     validation_data?: { signatures?: Record<string, string>; round?: unknown } | null
 }
 
-/** The stored content no longer hashes to the stored hash. */
+/**
+ * A transaction as a proof carries it: the exact text its hash is the sha256
+ * of, and the signature the sender made, so a client reads the fields from
+ * hashed bytes instead of re-encoding a stored row.
+ */
+export interface TransactionBytes {
+    hash: string
+    contentBytes: string
+    signature: { type: string; data: string; domain?: string } | null
+    ed25519_signature: string | null
+}
+
+/**
+ * The stored content of a block, or of a transaction in it, no longer
+ * hashes to the stored hash.
+ */
 export class ContentUnrecoverableError extends Error {
-    constructor(readonly blockNumber: number) {
-        super(`content of block ${blockNumber} does not hash to its stored hash`)
+    constructor(
+        readonly blockNumber: number,
+        readonly txHash?: string,
+    ) {
+        super(
+            txHash
+                ? `content of transaction ${txHash} in block ${blockNumber} does not hash to its hash`
+                : `content of block ${blockNumber} does not hash to its stored hash`,
+        )
         this.name = "ContentUnrecoverableError"
     }
 }
@@ -47,6 +74,54 @@ export function blockBytes(block: StoredBlock): BlockBytes {
         throw new ContentUnrecoverableError(block.number)
     }
     return { number: block.number, hash: block.hash, contentBytes }
+}
+
+interface StoredTransaction {
+    hash: string
+    content: unknown
+    signature?: { type: string; data: string; domain?: string } | null
+    ed25519_signature?: string | null
+}
+
+/**
+ * The texts block sync accepts as hashing to a transaction of block m: a
+ * system relay type hashes its raw content; any other type is serialized at
+ * the rules of m, or of a height before a fork that activated within the deep
+ * window, since a transaction admitted under the old rule can still land in
+ * a block after the fork.
+ */
+function hashPreimages(tx: StoredTransaction, blockNumber: number): string[] {
+    if (isSystemRelayTx(tx as never)) return [systemRelayContentString(tx.content)]
+    const texts: string[] = []
+    for (const height of [blockNumber, ...previousRuleHeights(blockNumber)]) {
+        try {
+            const text = serializeTransactionContent(tx.content as never, height)
+            if (!texts.includes(text)) texts.push(text)
+        } catch {
+            // Content that this rule cannot serialize was not admitted under it.
+        }
+    }
+    return texts
+}
+
+/**
+ * The transaction as validation hashed it, so the bytes a client hashes are
+ * the ones the block committed to.
+ *
+ * @throws ContentUnrecoverableError when no accepted serialization of the
+ *   stored content hashes to the transaction's hash.
+ */
+export function transactionBytes(tx: StoredTransaction, blockNumber: number): TransactionBytes {
+    const contentBytes = hashPreimages(tx, blockNumber).find(text => Hashing.sha256(text) === tx.hash)
+    if (contentBytes === undefined) {
+        throw new ContentUnrecoverableError(blockNumber, tx.hash)
+    }
+    return {
+        hash: tx.hash,
+        contentBytes,
+        signature: tx.signature ?? null,
+        ed25519_signature: tx.ed25519_signature ?? null,
+    }
 }
 
 export function signedHeader(block: StoredBlock): SignedHeader {
@@ -83,7 +158,11 @@ export function failedRead(error: unknown): RPCResponse {
     if (error instanceof ContentUnrecoverableError) {
         return {
             result: 500,
-            response: { error: "content_unrecoverable", blockNumber: error.blockNumber },
+            response: {
+                error: "content_unrecoverable",
+                blockNumber: error.blockNumber,
+                ...(error.txHash ? { txHash: error.txHash } : {}),
+            },
             extra: { reason: "content_unrecoverable", error: message },
             require_reply: false,
         }
