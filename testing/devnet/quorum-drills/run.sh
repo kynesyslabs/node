@@ -156,8 +156,10 @@ teardown() {
         # not clear while a log is unreadable. A verdict already written is
         # rewritten as ERROR, so the records say what the exit code says.
         if [ "${rc}" -le 1 ]; then
-            for f in "${LOG_DIR}"/node-*.log "${LOG_DIR}/psql-errors.log"; do
+            for f in "${LOG_DIR}"/node-*.log "${LOG_DIR}/psql-errors.log" "${LOG_DIR}"/psql-err.*; do
                 [ -e "${f}" ] || continue
+                # psql errors psql_node could not write to psql-errors.log
+                case "${f##*/}" in psql-err.*) unread+=" psql-errors.log (psql errors not written to it, kept in ${f##*/})" ;; esac
                 grep -aq "too many clients" "${f}"
                 case $? in 0) hit+=" ${f##*/}" ;; 1) ;; *) unread+=" ${f##*/} (grep failed)" ;; esac
             done
@@ -765,14 +767,24 @@ pg_cid() {
     echo "${cid}"
 }
 psql_node() { # $1 node, $2 SQL
-    local rc pg errf="${LOG_DIR}/psql-err.$$.tmp"
+    local rc pg errf
     pg=$(pg_cid) || { echo "psql node$1_db: ${pg}" >&2; return 1; }
     # stderr goes to the caller as before and, when there is any, to
-    # psql-errors.log, which pg_limit_gate reads
+    # psql-errors.log, which pg_limit_gate reads. errf is made before psql runs
+    # (none, no psql) and removed once that append is done, or when there is
+    # nothing to append: a psql that failed, other than by the timeout, always
+    # says why, so an empty errf then is words that could not be written. An
+    # errf left behind fails the gate and the teardown backstop.
+    errf=$(mktemp "${LOG_DIR}/psql-err.XXXXXX") || { echo "psql node$1_db: no file for its errors in ${LOG_DIR}: not run" >&2; return 1; }
     timeout "${DB_TIMEOUT_S}" docker exec "${PG_LIMITS[@]}" "${pg}" psql -U demosuser -d "node$1_db" -tAc "$2" 2> "${errf}"
     rc=$?
-    [ -s "${errf}" ] && { cat "${errf}" >&2; sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log"; }
-    rm -f "${errf}"
+    if [ -s "${errf}" ]; then
+        cat "${errf}" >&2
+        sed "s/^/psql node$1_db: /" "${errf}" >> "${LOG_DIR}/psql-errors.log" && rm -f "${errf}"
+    elif [ "${rc}" = 0 ] || [ "${rc}" = 124 ]; then
+        rm -f "${errf}"
+    fi
+    [ -e "${errf}" ] && echo "psql node$1_db: its errors could not be written to ${LOG_DIR}/psql-errors.log (${errf} is kept)" >&2
     [ "${rc}" = 124 ] && echo "psql node$1_db: no answer within ${DB_TIMEOUT_S}s" >&2
     return "${rc}"
 }
@@ -820,9 +832,10 @@ pg_gate_unreadable() {
 # written, so a PASS or a FAIL becomes exit 2 and says why. It reads the log the
 # Docker daemon keeps of every started node (read_node_log: with a logging
 # driver that rotates logs, early lines can be gone) and psql-errors.log if
-# there is one: one it cannot read is exit 2 as well, never a log without hits.
+# there is one: one it cannot read is exit 2 as well, never a log without hits,
+# and so is a psql-errors.log that psql_node could not write all of.
 pg_limit_gate() {
-    local i n why hits=0 nodes="" f="${LOG_DIR}/pg-gate.tmp"
+    local i n why hits=0 nodes="" f="${LOG_DIR}/pg-gate.tmp" kept
     for i in $(seq 1 "${N}"); do
         [ "${STARTED[i]:-0}" = 1 ] || continue
         why=$(read_node_log "${i}" "${f}") || { rm -f "${f}"; pg_gate_unreadable "the log of node-${i}" "${why}"; }
@@ -834,6 +847,8 @@ pg_limit_gate() {
         n=$(grep -ac "too many clients" "${LOG_DIR}/psql-errors.log"); [ $? -le 1 ] || pg_gate_unreadable "${LOG_DIR}/psql-errors.log" "grep failed"
         hits=$((hits + n))
     fi
+    kept=$(compgen -G "${LOG_DIR}/psql-err.*") &&
+        pg_gate_unreadable "${LOG_DIR}/psql-errors.log" "psql errors not written to it, kept in ${kept//$'\n'/ }"
     [ "${hits}" = 0 ] && { PG_GATE_PASSED=1; return 0; }
     nodes=$(printf '%s' "${nodes}" | sort -u | tr '\n' ' ')
     say "ABORT: could not run: postgres connection limit hit (${hits} 'too many clients' lines; ${nodes:-harness psql reads only})"
