@@ -6,11 +6,12 @@ Prometheus + Grafana monitoring solution for Demos Network nodes with full Demos
 
 ```bash
 cd monitoring
+echo "GRAFANA_ADMIN_PASSWORD=<a strong password>" >> .env   # required; "demos" is refused
 docker compose up -d
 ```
 
 **Access Grafana**: http://localhost:3000
-**Default credentials**: admin / demos
+**Credentials**: `admin` / the `GRAFANA_ADMIN_PASSWORD` set in `monitoring/.env`
 
 ## Prerequisites
 
