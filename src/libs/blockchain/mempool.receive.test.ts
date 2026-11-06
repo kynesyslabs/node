@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test"
 
 const logError = jest.fn()
 
@@ -100,6 +100,7 @@ jest.mock("src/libs/consensus/v2/types/secretaryManager", () => ({
 
 import Mempool from "./mempool"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import { getSharedState } from "src/utilities/sharedState"
 
 // lastBlock=100, referenceBlockRoom=1: deep window cutoff 100 - 5*1 = 95.
 let mempoolRows: Array<{ hash: string }> = []
@@ -373,5 +374,173 @@ describe("Mempool.receive per-sender cap", () => {
         await Mempool.receive([fromSender("0xlow", 1), fromSender("0xhigh", 500)])
         expect(insertedRows.map(r => r.hash)).toEqual(["0xlow", "0xhigh"])
         expect(deletedHashes).toEqual([])
+    })
+})
+
+describe("Mempool.receive under blockCaps: txs a block left pooled", () => {
+    // A block under the caps leaves txs for later ones, and their rows keep
+    // the block number they entered with.
+    beforeEach(() => {
+        resetReceiveState()
+        blockCapsOn = true
+    })
+
+    const pooled = () => [
+        { ...tx("0xleft", 100), blockNumber: 98 },
+        tx("0xa", 100),
+        { ...tx("0xnext", 100), blockNumber: 101 },
+    ]
+
+    it("answers an empty request with every row through the round", async () => {
+        mempoolRows = pooled()
+        const res = await Mempool.receive([])
+        expect(res.mempool.map(t => t.hash)).toEqual(["0xleft", "0xa"])
+    })
+
+    it("carries them in the reply to a merge request", async () => {
+        mempoolRows = pooled()
+        const res = await Mempool.receive([tx("0xnew", 100)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xnew"])
+        expect(res.mempool.map(t => t.hash)).toEqual(["0xleft", "0xa"])
+    })
+
+    it("keeps the reply of the round only before the fork", async () => {
+        blockCapsOn = false
+        mempoolRows = pooled()
+        expect((await Mempool.receive([])).mempool.map(t => t.hash)).toEqual(["0xa"])
+    })
+})
+
+describe("Mempool.receive under blockCaps: txs no block can take", () => {
+    beforeEach(resetReceiveState)
+
+    const oversize = () => {
+        const t = tx("0xhuge", 100)
+        t.content = { ...t.content, data: "x".repeat(4 * 1024 * 1024 + 1) }
+        return t
+    }
+
+    it("refuses a tx whose content alone is over an empty block's byte cap", async () => {
+        blockCapsOn = true
+        await Mempool.receive([oversize(), tx("0xa", 100)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xa"])
+        expect(
+            logError.mock.calls.some(c => String(c[0]).includes("no block can take it")),
+        ).toBe(true)
+    })
+
+    it("admits it before the fork", async () => {
+        await Mempool.receive([oversize()])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xhuge"])
+    })
+})
+
+describe("Mempool per-sender cap: what stays queued past it", () => {
+    const SENDER = "0x" + "ab".repeat(32)
+    const OWN = "0x" + "ee".repeat(32)
+    const state = getSharedState as unknown as { publicKeyHex?: string }
+    const realLockedHashes = (Mempool as any).lockedHashes
+    let locked = new Set<string>()
+
+    beforeEach(() => {
+        resetReceiveState()
+        blockCapsOn = true
+        locked = new Set()
+        ;(Mempool as any).lockedHashes = () => new Set(locked)
+        state.publicKeyHex = OWN
+    })
+    afterEach(() => {
+        ;(Mempool as any).lockedHashes = realLockedHashes
+        state.publicKeyHex = undefined
+    })
+
+    const fromSender = (hash: string, nonce: number, from = SENDER, type = "demoswork") => {
+        const t = tx(hash, 100)
+        t.content = { ...t.content, from, nonce, type }
+        return t
+    }
+    const hold = (count: number, from = SENDER, type?: string) =>
+        Array.from({ length: count }, (_, i) => ({
+            hash: `0xheld${i}`,
+            sender: from,
+            nonce: String(i + 10),
+            ...(type ? { type } : {}),
+        }))
+
+    it("keeps a locked tx that lower nonces pushed past the cap at the round start", async () => {
+        heldBySender = [...hold(64), { hash: "0xlocked", sender: SENDER, nonce: "80" }]
+        locked = new Set(["0xlocked"])
+        expect(await Mempool.capPoolSenders()).toEqual([])
+        expect(heldBySender.some(row => row.hash === "0xlocked")).toBe(true)
+    })
+
+    it("keeps a locked tx when a merge brings lower nonces of its sender", async () => {
+        heldBySender = [...hold(63), { hash: "0xlocked", sender: SENDER, nonce: "80" }]
+        locked = new Set(["0xlocked"])
+        await Mempool.receive([fromSender("0xlow", 1)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xlow"])
+        expect(deletedHashes).toEqual([])
+    })
+
+    it("restores the txs of a block being rebuilt past the cap", async () => {
+        heldBySender = hold(64)
+        await Mempool.receive([fromSender("0xlocked", 80)], false, { rebuild: true })
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xlocked"])
+        expect(deletedHashes).toEqual([])
+    })
+
+    it("still refuses that tx to an ordinary merge", async () => {
+        heldBySender = hold(64)
+        await Mempool.receive([fromSender("0xlocked", 80)], false)
+        expect(insertedRows).toHaveLength(0)
+    })
+
+    it("does not offer a locked tx to a full pool's eviction", async () => {
+        ;(Mempool as any).repo.query = jest.fn(async () => [
+            { hash: "0xlocked", ts: "1", fee: { network_fee: 1 }, bytes: "10" },
+            { hash: "0xother", ts: "2", fee: { network_fee: 1 }, bytes: "10" },
+        ])
+        locked = new Set(["0xlocked"])
+        const candidates = await Mempool.listEvictionCandidates()
+        expect(candidates.map(c => c.hash)).toEqual(["0xother"])
+    })
+
+    it("keeps the node's own relay txs past the cap queued at the round start", async () => {
+        heldBySender = [...hold(70, OWN, "l2psBatch"), ...hold(70).map(r => ({ ...r, hash: `${r.hash}x` }))]
+        const evicted = await Mempool.capPoolSenders()
+        // Someone else's sender is still held to the cap.
+        expect(evicted).toHaveLength(6)
+        expect(evicted.every(h => h.endsWith("x"))).toBe(true)
+        expect(heldBySender.filter(row => row.sender === OWN)).toHaveLength(70)
+    })
+
+    it("does not give that to a tx from another sender labelled as a relay type", async () => {
+        heldBySender = hold(70, SENDER, "l2psBatch")
+        expect(await Mempool.capPoolSenders()).toHaveLength(6)
+    })
+
+    it("does not evict the node's own relay txs when a merge ranks them out", async () => {
+        heldBySender = hold(64, OWN, "l2psBatch")
+        await Mempool.receive([fromSender("0xlow", 1, OWN, "l2psBatch")])
+        expect(deletedHashes).toEqual([])
+        expect(heldBySender.filter(row => row.sender === OWN)).toHaveLength(65)
+    })
+
+    it("leaves its own relay txs past the cap out of a reply, keeping what a peer's merge keeps", async () => {
+        const own = Array.from({ length: 70 }, (_, i) =>
+            fromSender(`0xown${i}`, 70 - i, OWN, "l2psBatch"),
+        )
+        // What a peer keeps of them after its merge.
+        state.publicKeyHex = undefined
+        await Mempool.receive(own)
+        const peerKeeps = heldBySender.map(row => row.hash).sort()
+        expect(peerKeeps).toHaveLength(64)
+
+        resetReceiveState()
+        blockCapsOn = true
+        state.publicKeyHex = OWN
+        mempoolRows = own
+        const reply = await Mempool.receive([])
+        expect(reply.mempool.map(t => t.hash).sort()).toEqual(peerKeeps)
     })
 })

@@ -104,6 +104,12 @@ mock.module("src/libs/blockchain/validation/verifyGcrEdits", () => ({
     verifyNoUnexplainedValueEdits: jest.fn(async () => ({ ok: true, unexplained: [] })),
 }))
 
+let blockCapsOn = false
+mock.module("@/forks/blockCapsGate", () => ({
+    blockCapsActive: () => blockCapsOn,
+    blockCapsActiveForPendingBlock: () => blockCapsOn,
+}))
+
 const { default: Mempool } = await import("./mempool")
 const { __resetMempoolLimits, __setMempoolLimits, txStoredBytes, txTotalFee } =
     await import("./mempoolLimits")
@@ -228,6 +234,7 @@ beforeEach(() => {
     insertedRows = []
     seq = 0
     nonceEnforced = false
+    blockCapsOn = false
     nonceOfAccount = 0
     sharedState.inConsensusLoop = false
     balances.clear()
@@ -502,5 +509,31 @@ describe("peer merge (receive)", () => {
         expect(pool.map(h => h.hash)).toEqual(["0xheld"])
         expect(sweeps).toEqual([])
         expect(calls).not.toContain("delete")
+    })
+})
+
+describe("block caps", () => {
+    // Over an empty block's byte cap: no block can take it, and while it
+    // waits every later nonce of its sender waits too.
+    const oversize = () => makeTx({ pad: 4 * 1024 * 1024 + 1 })
+
+    it("refuses a tx no block can take, from every origin", async () => {
+        blockCapsOn = true
+        __setMempoolLimits({ maxBytes: 64 * 1024 * 1024 })
+        for (const submit of [rpc, gossip, internal]) {
+            const { error } = await submit(oversize())
+            expect(error).toContain("no block can take it")
+        }
+        expect(pool).toHaveLength(0)
+    })
+
+    it("admits a tx that fits an empty block", async () => {
+        blockCapsOn = true
+        expect((await rpc(makeTx({ pad: 1024 }))).error).toBe("")
+    })
+
+    it("admits the oversize tx before the fork", async () => {
+        __setMempoolLimits({ maxBytes: 64 * 1024 * 1024 })
+        expect((await rpc(oversize())).error).toBe("")
     })
 })

@@ -255,6 +255,19 @@ export type CommitLockConfig = BaseForkConfig
 export type FinalityProofsConfig = BaseForkConfig
 
 /**
+ * `unpinnedCommittee` fork: no identity is guaranteed a committee seat. The
+ * three validator keys in `PINNED_SHARD_IDENTITIES` stop being moved to the
+ * front of the committee (and so to the secretary seat) whenever they are
+ * eligible; every member is drawn by the seed alone.
+ *
+ * Activation at H applies to the committee of block H and later. Dormant by
+ * default (`activationHeight: null`): the testnet's committees, and so its
+ * signatures, depend on the pins. A chain launched from genesis with this
+ * build sets 0. No payload beyond the base.
+ */
+export type UnpinnedCommitteeConfig = BaseForkConfig
+
+/**
  * `identityCarryover` fork: a chain whose genesis carries user data over
  * from another network (identities, points, referrals) without its money.
  *
@@ -463,6 +476,7 @@ export type ForkConfig =
     | CommitteeBindingConfig
     | CommitLockConfig
     | FinalityProofsConfig
+    | UnpinnedCommitteeConfig
     | IdentityCarryoverConfig
     | NetworkGovernanceConfig
     | TxTypeAllowListConfig
@@ -492,6 +506,7 @@ export type ForkName =
     | "committeeBinding"
     | "commitLock"
     | "finalityProofs"
+    | "unpinnedCommittee"
     | "identityCarryover"
     | "stakeApplyChecks"
     | "networkGovernance"
@@ -521,6 +536,7 @@ export interface ForkConfigByName {
     committeeBinding: CommitteeBindingConfig
     commitLock: CommitLockConfig
     finalityProofs: FinalityProofsConfig
+    unpinnedCommittee: UnpinnedCommitteeConfig
     identityCarryover: IdentityCarryoverConfig
     stakeApplyChecks: StakeApplyChecksConfig
     networkGovernance: NetworkGovernanceConfig
@@ -790,6 +806,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A block takes a bounded, deterministic share of the pool by tx count and " +
             "content bytes, and the mempool merge holds each sender to the admission cap.",
     },
+    unpinnedCommittee: {
+        // Dormant by default: a missing genesis entry hydrates from here, and
+        // the testnet's committees still put the pinned identities first. A
+        // chain launched from genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "No identity is guaranteed a committee seat: the pinned validator keys are " +
+            "drawn by the seed like every other member.",
+    },
 }
 
 /**
@@ -814,6 +839,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         committeeBinding: { ...DEFAULT_FORK_CONFIG.committeeBinding },
         commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
+        unpinnedCommittee: { ...DEFAULT_FORK_CONFIG.unpinnedCommittee },
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
         stakeApplyChecks: { ...DEFAULT_FORK_CONFIG.stakeApplyChecks },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
