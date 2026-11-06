@@ -45,6 +45,7 @@ import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
 import { isForkActive } from "@/forks/forkGates"
 import { readState } from "@/libs/blockchain/gcr/stateReadError"
+import { ensureNetworkParametersCurrent } from "@/libs/blockchain/routines/loadNetworkParameters"
 import { governanceGateRefusal } from "@/forks/governanceGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
@@ -199,13 +200,20 @@ export function admissionReads(): AdmissionReads {
  * Makes the reads `txs` will need, so that a failed one throws a
  * StateReadError here instead of refusing transactions in
  * `verifyAdmissionEdits`. The consensus merge calls it: refusing there would
- * leave this node alone without transactions every peer keeps.
+ * leave this node alone without transactions every peer keeps. Under
+ * `feeBinding` that includes the network parameters the fees are judged on:
+ * after a failed refresh they may predate a fee change every peer applied.
  */
 export async function loadAdmissionReads(
     txs: Transaction[],
     reads: AdmissionReads,
 ): Promise<void> {
-    const { messageBinding } = await reads.state()
+    const { messageBinding, feeBound } = await reads.state()
+    if (feeBound && txs.length > 0) {
+        await readState("network parameters", () =>
+            ensureNetworkParametersCurrent(),
+        )
+    }
     if (messageBinding && txs.some(isNodeMessage)) await reads.validators()
 }
 
