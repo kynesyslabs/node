@@ -432,10 +432,69 @@ const EXPECTED_FIELDS: { field: keyof ExpectedTransaction; read: (value: unknown
     { field: "nonce", read: quantityText },
 ]
 
+interface NativeSend {
+    to: unknown
+    amount: unknown
+}
+
+/**
+ * The send a native transaction makes, or null for any other transaction.
+ * Its balance edits are built from `data[1].args`, never from the top-level
+ * `to` and `amount`, so a payment is judged by the args.
+ */
+function nativeSend(content: Record<string, unknown>): NativeSend | null {
+    if (content.type !== "native" || !Array.isArray(content.data)) return null
+    const payload = content.data[1] as { nativeOperation?: unknown; args?: unknown } | undefined
+    if (!payload || typeof payload !== "object" || payload.nativeOperation !== "send") return null
+    if (!Array.isArray(payload.args)) throw invalid("the native send carries no args")
+    return { to: payload.args[0], amount: payload.args[1] }
+}
+
+/** A send whose top-level fields name another payment than it makes is forged. */
+function requireTopLevelAgrees(content: Record<string, unknown>, send: NativeSend): void {
+    for (const [field, read] of [["to", addressText], ["amount", quantityText]] as const) {
+        const top = content[field]
+        if (top !== undefined && top !== null && read(top) !== read(send[field])) {
+            throw invalid(
+                `the transaction's top-level ${field} ${JSON.stringify(top)} is not the ${JSON.stringify(send[field] ?? null)} its send pays`,
+            )
+        }
+    }
+}
+
+/**
+ * The shipped edits are what apply runs, so the send must carry a balance
+ * credit of its amount to its recipient.
+ */
+function requirePaidEdit(content: Record<string, unknown>, send: NativeSend): void {
+    const to = addressText(send.to)
+    const amount = quantityText(send.amount)
+    const edits = Array.isArray(content.gcr_edits) ? (content.gcr_edits as unknown[]) : []
+    const paid = edits.some(raw => {
+        const edit = raw as Record<string, unknown> | null
+        return (
+            !!edit &&
+            edit.type === "balance" &&
+            edit.operation === "add" &&
+            edit.isRollback !== true &&
+            to !== null &&
+            addressText(edit.account) === to &&
+            amount !== null &&
+            quantityText(edit.amount) === amount
+        )
+    })
+    if (!paid) {
+        throw invalid(`the transaction's balance edits do not credit ${JSON.stringify(send.amount ?? null)} to ${JSON.stringify(send.to ?? null)}`)
+    }
+}
+
 /**
  * The content of the transaction the proof is about, checked against what
  * the client expects. The hash binds the bytes to the leaf the quorum
- * signed over, so the fields are read from those bytes only.
+ * signed over, so the fields are read from those bytes only. For a native
+ * send, `to` and `amount` are the recipient and amount it pays: the top-level
+ * fields, where present, must agree with them, and its edits must credit
+ * them.
  */
 function readContent(
     proof: TransactionProof,
@@ -469,14 +528,19 @@ function readContent(
         throw invalid("the transaction content is not an object")
     }
     const content = parsed as Record<string, unknown>
+    const paymentWanted = wanted.some(({ field }) => field === "to" || field === "amount")
+    const send = paymentWanted ? nativeSend(content) : null
+    if (send) requireTopLevelAgrees(content, send)
     for (const { field, read } of wanted) {
         const shown = JSON.stringify(String(expected![field]))
         const want = read(expected![field])
         if (want === null) throw invalid(`the expected ${field} ${shown} is not comparable`)
-        if (read(content[field]) !== want) {
-            throw invalid(`the transaction's ${field} is ${JSON.stringify(content[field] ?? null)}, expected ${shown}`)
+        const actual = send && (field === "to" || field === "amount") ? send[field] : content[field]
+        if (read(actual) !== want) {
+            throw invalid(`the transaction's ${field} is ${JSON.stringify(actual ?? null)}, expected ${shown}`)
         }
     }
+    if (send) requirePaidEdit(content, send)
     return content
 }
 
@@ -498,8 +562,10 @@ function run<T extends { verdict: string; reason?: string }>(
  *
  * When the proof carries the transaction, its bytes must hash to the proven
  * hash and the verdict returns the content read from them; each field of
- * `expected` must then match it. Expecting a field of a proof without the
- * transaction gives "indeterminate".
+ * `expected` must then match it. For a native send, `to` and `amount` are
+ * what the send pays (its args, credited by its balance edits); for other
+ * types they are the top-level fields. Expecting a field of a proof without
+ * the transaction gives "indeterminate".
  */
 export function verifyTransactionProof(
     proof: TransactionProof,

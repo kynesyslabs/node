@@ -79,6 +79,14 @@ function certify(block: BlockBytes, signers: Key[], round = ROUND): SignedHeader
 const resultLeafText = (hash: string, status: string, code: string | null) =>
     jcsCanonicalize({ code, hash, status })
 
+/** The balance edits the SDK ships with a native send of `amount` to `to`. */
+function sendEdits(to: string, amount: string) {
+    return [
+        { type: "balance", operation: "remove", isRollback: false, account: `0x${"a1".repeat(32)}`, txhash: "", amount },
+        { type: "balance", operation: "add", isRollback: false, account: to, txhash: "", amount },
+    ]
+}
+
 /** A native transfer as the node hashes it once osDenomination applies. */
 function transferContent(nonce: number, amount: bigint, to: string) {
     return {
@@ -87,7 +95,7 @@ function transferContent(nonce: number, amount: bigint, to: string) {
         to,
         amount,
         data: ["native", { nativeOperation: "send", args: [to, amount.toString()] }],
-        gcr_edits: [],
+        gcr_edits: sendEdits(to, amount.toString()),
         nonce,
         timestamp: 1_790_000_000_000 + nonce,
         transaction_fee: { network_fee: 1n, rpc_fee: 0n, additional_fee: 0n, rpc_address: null },
@@ -95,17 +103,56 @@ function transferContent(nonce: number, amount: bigint, to: string) {
     }
 }
 const PAYEE = `0x${"b2".repeat(32)}`
+const MALLORY = `0x${"c3".repeat(32)}`
+
+/** A native send whose top-level fields, args and edits can disagree. */
+function forgedContent(nonce: number, top: { to?: string; amount?: bigint }, args: [string, bigint], paid: [string, bigint]) {
+    const { to: _to, amount: _amount, ...rest } = transferContent(nonce, args[1], args[0])
+    return {
+        ...rest,
+        ...top,
+        gcr_edits: sendEdits(paid[0], paid[1].toString()),
+    }
+}
+const PAYMENT = 9_500_000_000n
+/** Top-level says the expected payment; the args and edits pay another account and amount. */
+const ARGS_ELSEWHERE_BYTES = serializeTxContent(
+    forgedContent(11, { to: PAYEE, amount: PAYMENT }, [MALLORY, 1_000_000_000n], [MALLORY, 1_000_000_000n]) as never,
+    true,
+)
+/** The args and edits pay the expected payment; the top-level names another account. */
+const TOP_ELSEWHERE_BYTES = serializeTxContent(
+    forgedContent(12, { to: MALLORY, amount: PAYMENT }, [PAYEE, PAYMENT], [PAYEE, PAYMENT]) as never,
+    true,
+)
+/** Top-level and args say the expected payment; the edits credit another account. */
+const EDITS_ELSEWHERE_BYTES = serializeTxContent(
+    forgedContent(13, { to: PAYEE, amount: PAYMENT }, [PAYEE, PAYMENT], [MALLORY, PAYMENT]) as never,
+    true,
+)
+/** A send with no top-level to or amount: the args and edits alone say the payment. */
+const ARGS_ONLY_BYTES = serializeTxContent(forgedContent(14, {}, [PAYEE, PAYMENT], [PAYEE, PAYMENT]) as never, true)
 const PAYMENT_BYTES = serializeTxContent(transferContent(7, 9_500_000_000n, PAYEE) as never, true)
 const LOW_NONCE_BYTES = serializeTxContent(transferContent(6, 9_500_000_000n, PAYEE) as never, true)
 const OTHER_BYTES = serializeTxContent(transferContent(8, 1_000_000_000n, PAYEE) as never, true)
 
-const TX = [sha256(PAYMENT_BYTES), sha256(LOW_NONCE_BYTES), sha256(OTHER_BYTES), sha256("d4"), sha256("e5")]
+const TX = [
+    sha256(PAYMENT_BYTES),
+    sha256(LOW_NONCE_BYTES),
+    sha256(OTHER_BYTES),
+    sha256(EDITS_ELSEWHERE_BYTES),
+    sha256(ARGS_ELSEWHERE_BYTES),
+    sha256(TOP_ELSEWHERE_BYTES),
+    sha256(ARGS_ONLY_BYTES),
+]
 const RESULTS = [
     resultLeafText(TX[0], "confirmed", null),
     resultLeafText(TX[1], "failed", "TX_NONCE_INVALID_LOW"),
     resultLeafText(TX[2], "confirmed", null),
     resultLeafText(TX[3], "failed", "TX_EXISTS"),
     resultLeafText(TX[4], "confirmed", null),
+    resultLeafText(TX[5], "confirmed", null),
+    resultLeafText(TX[6], "confirmed", null),
 ]
 const leafBytes = RESULTS.map(text => new TextEncoder().encode(text))
 const M = 41
@@ -406,6 +453,37 @@ describe("verifyTransactionProof with the transaction", () => {
             expect(verdict.verdict).toBe("invalid")
             expect(verdict.reason).toContain(field)
         }
+    })
+
+    it("judges a native send by the args its edits are built from", () => {
+        const argsElsewhere = withTx(4, ARGS_ELSEWHERE_BYTES)
+        for (const expected of [payment, { to: PAYEE }, { amount: PAYMENT }]) {
+            const verdict = verifyTransactionProof(argsElsewhere, trusted, rules, expected)
+            expect(verdict.verdict).toBe("invalid")
+            expect(verdict.reason).toContain("top-level")
+        }
+        const paidTo = verifyTransactionProof(argsElsewhere, trusted, rules, { to: MALLORY, amount: 1_000_000_000n })
+        expect(paidTo.verdict).toBe("invalid")
+
+        const topElsewhere = withTx(5, TOP_ELSEWHERE_BYTES)
+        for (const expected of [{ ...payment, nonce: 12 }, { to: PAYEE }, { to: MALLORY }]) {
+            const verdict = verifyTransactionProof(topElsewhere, trusted, rules, expected)
+            expect(verdict.verdict).toBe("invalid")
+            expect(verdict.reason).toContain("top-level to")
+        }
+        expect(verifyTransactionProof(topElsewhere, trusted, rules, { amount: PAYMENT }).verdict).toBe("invalid")
+    })
+
+    it("refuses a native send whose edits do not credit what its args pay", () => {
+        const verdict = verifyTransactionProof(withTx(3, EDITS_ELSEWHERE_BYTES), trusted, rules, { to: PAYEE, amount: PAYMENT })
+        expect(verdict.verdict).toBe("invalid")
+        expect(verdict.reason).toContain("balance edits")
+    })
+
+    it("accepts a native send without top-level to or amount when its args and edits pay", () => {
+        const verdict = verifyTransactionProof(withTx(6, ARGS_ONLY_BYTES), trusted, rules, { to: PAYEE, amount: PAYMENT, nonce: 14 })
+        expect(verdict.verdict).toBe("final-executed")
+        expect(verifyTransactionProof(withTx(6, ARGS_ONLY_BYTES), trusted, rules, { to: MALLORY }).verdict).toBe("invalid")
     })
 
     it("refuses content that hashes to another transaction", () => {
