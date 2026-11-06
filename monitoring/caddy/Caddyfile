@@ -103,7 +103,9 @@
 		basic_auth {
 			metrics {$METRICS_BASIC_AUTH_HASH:$2a$14$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
 		}
-		reverse_proxy node:9090
+		reverse_proxy node:9090 {
+			header_up Authorization "Bearer {$METRICS_BEARER_TOKEN}"
+		}
 	}
 
 	# --- Grafana sub-path ---------------------------------------------------
@@ -120,6 +122,11 @@
 	# documented as best-effort under sub-path mode — see
 	# docs/runbooks/proxy-setup.md §"Prometheus sub-path caveats".
 	handle_path /prometheus/* {
+		# Prometheus has no auth of its own; reuse the metrics credential.
+		# Default sentinel hash rejects everyone until the operator sets it.
+		basic_auth {
+			metrics {$METRICS_BASIC_AUTH_HASH:$2a$14$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+		}
 		reverse_proxy prometheus:9090
 	}
 

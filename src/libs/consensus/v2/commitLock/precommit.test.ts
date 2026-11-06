@@ -53,6 +53,7 @@ jest.mock("src/libs/peer/PeerManager", () => ({ __esModule: true, default: StubP
 
 const metrics = { locks: 0, moves: 0, equivocations: 0 }
 jest.mock("@/features/metrics/consensusMetrics", () => ({
+    countIncludedTransactions: () => undefined,
     countBlockHashMismatch: () => undefined,
     countConflictingBlock: () => undefined,
     countCommitLock: () => {
