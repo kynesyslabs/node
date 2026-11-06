@@ -20,11 +20,7 @@ import { verifyBlockTxSignatures } from "./verifyBlockTxSignatures"
 import { blockRowRefusal } from "./postgresStorable"
 import { getSharedState } from "@/utilities/sharedState"
 import { checkTimestampNotAhead } from "./timestampBound"
-import {
-    getBoundCommittee,
-    getEligiblePool,
-} from "src/libs/consensus/v2/routines/getShard"
-import { verifierThreshold } from "src/libs/consensus/v2/quorum"
+import { type SignerRule, signerRuleOf } from "./signerRule"
 import { isForkActive } from "@/forks/forkGates"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
@@ -146,17 +142,16 @@ async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
     // at least 2q - shardSize signers.
     const bound = isForkActive("committeeBinding", block.number)
     const signerSet = bound ? "bound committee" : "eligible signer pool"
-    let pool: string[]
+    let rule: SignerRule
     try {
-        pool = bound
-            ? await getBoundCommittee(block.number - 1)
-            : await getEligiblePool(block.number - 1)
+        rule = await signerRuleOf(block.number)
     } catch (e) {
         return {
             valid: false,
             reason: `could not resolve ${signerSet}: ${getErrorMessage(e)}`,
         }
     }
+    const pool = rule.members
 
     if (pool.length === 0) {
         return {
@@ -192,15 +187,8 @@ async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
         poolIdentities,
     )
 
-    // The bar is pinned to shardSize, not to the forger's liveness view;
-    // under quorumParity it is also the producer's, not shrunk by the pool.
-    // committeeBinding implies the same bar: the overlap of two accepted
-    // blocks is bounded against shardSize, not against a small committee.
-    const threshold = verifierThreshold(
-        getSharedState.shardSize,
-        pool.length,
-        bound || isForkActive("quorumParity", block.number),
-    )
+    // The bar is pinned to shardSize; see signerRuleOf.
+    const threshold = rule.threshold
     if (verifiedSigners.size < threshold) {
         return {
             valid: false,
