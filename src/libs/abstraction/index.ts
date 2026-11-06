@@ -1,4 +1,5 @@
 import { web2ProofBindingActiveForPendingBlock } from "@/forks/web2ProofBindingGate"
+import { telegramSenderBindingActive } from "@/forks/telegramSenderBindingGate"
 import { web2BoundProofMessage } from "./web2/boundMessage"
 import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
@@ -43,6 +44,13 @@ async function checkBotAuthorization(botAddress: string): Promise<boolean> {
     }
 
     return false
+}
+
+function sameAccountKey(a: unknown, b: unknown): boolean {
+    const norm = (v: unknown) =>
+        typeof v === "string" ? v.trim().toLowerCase().replace(/^0x/, "") : ""
+    const left = norm(a)
+    return left.length > 0 && left === norm(b)
 }
 
 async function verifyTelegramProof(
@@ -112,6 +120,19 @@ async function verifyTelegramProof(
         // Extract the attestation components
         const { payload: attestationPayload, signature } = telegramAttestation
         const { bot_address: botAddress } = attestationPayload
+
+        // The key that signed the challenge is the account the bot attested
+        // for. Attestations are public once linked, so without this any
+        // account could replay someone else's and claim their Telegram account.
+        if (
+            telegramSenderBindingActive() &&
+            !sameAccountKey(attestationPayload.public_key, sender)
+        ) {
+            return {
+                success: false,
+                message: "Telegram attestation was not issued to the sender",
+            }
+        }
 
         // INFO: Verify user signature
         const userSignatureValid = await TxValidatorPool.getInstance().verify({

@@ -16,6 +16,8 @@ import type {
     FinalityProofsConfig,
     IdentityCarryoverConfig,
     NetworkGovernanceConfig,
+    TelegramSenderBindingConfig,
+    XmRemoveCanonicalConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -374,6 +376,14 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.networkGovernance =
                 config as NetworkGovernanceConfig
             return
+        case "telegramSenderBinding":
+            getSharedState.forkConfig.telegramSenderBinding =
+                config as TelegramSenderBindingConfig
+            return
+        case "xmRemoveCanonical":
+            getSharedState.forkConfig.xmRemoveCanonical =
+                config as XmRemoveCanonicalConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -513,6 +523,10 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as IdentityCarryoverConfig
         case "networkGovernance":
             return base as NetworkGovernanceConfig
+        case "telegramSenderBinding":
+            return base as TelegramSenderBindingConfig
+        case "xmRemoveCanonical":
+            return base as XmRemoveCanonicalConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
