@@ -4,6 +4,11 @@ import httpProxy from "http-proxy"
 import { URL } from "url"
 import net from "net"
 import dns from "node:dns/promises"
+import { Config } from "src/config"
+import {
+    isPublicAddress,
+    publicOnlyLookup,
+} from "src/utilities/outboundAddress"
 import {
     IWeb2Request,
     IWeb2Result,
@@ -26,10 +31,12 @@ export class Proxy {
     private _proxyPort = 0
     private _isInitialized = false
     private _currentTargetUrl = ""
+    private _agent: http.Agent | null = null
 
     constructor(
         private readonly _dahrSessionId: string,
-        private readonly _proxyHost: string = "localhost",
+        // The relay is only ever reached from this process.
+        private readonly _proxyHost: string = "127.0.0.1",
         private readonly _authConfig: IAuthorizationConfig = {
             requireAuthForAll: SharedState.getInstance().PROD,
             exceptions: [],
@@ -37,8 +44,11 @@ export class Proxy {
         private readonly _sslConfig: {
             verifyCertificates: boolean
         } = {
-            verifyCertificates: SharedState.getInstance().PROD, // Enable in production, disable in dev
+            // Only an explicit operator dev flag turns certificate checks off.
+            verifyCertificates: !Config.getInstance().outbound.web2InsecureTls,
         },
+        private readonly _maxResponseBytes: number = Config.getInstance()
+            .outbound.web2MaxResponseBytes,
     ) {
         required(this._dahrSessionId, "Missing dahr session Id")
     }
@@ -99,6 +109,8 @@ export class Proxy {
             let statusCode = 500
             let statusMessage = "Unknown"
             let requestHash: string | undefined
+            let received = 0
+            let tooLarge = false
 
             req.on("response", res => {
                 statusCode = res.statusCode || 500
@@ -106,10 +118,24 @@ export class Proxy {
                 responseHeaders = res.headers
 
                 res.on("data", chunk => {
+                    if (tooLarge) return
+                    received += chunk.length
+                    // An unbounded body would be held in memory whole.
+                    if (received > this._maxResponseBytes) {
+                        tooLarge = true
+                        req.destroy()
+                        reject(
+                            new Error(
+                                `Origin response exceeds ${this._maxResponseBytes} bytes`,
+                            ),
+                        )
+                        return
+                    }
                     chunks.push(Buffer.from(chunk))
                 })
 
                 res.on("end", () => {
+                    if (tooLarge) return
                     const dataBuffer = Buffer.concat(chunks)
                     const data = dataBuffer.toString()
 
@@ -163,6 +189,8 @@ export class Proxy {
      * @returns void
      */
     async stopProxy(): Promise<void> {
+        this._agent?.destroy()
+        this._agent = null
         const srv = this._server
         if (!srv) {
             this._isInitialized = false
@@ -191,51 +219,11 @@ export class Proxy {
         return new Promise<void>((resolve, reject) => {
             const { targetProtocol, targetHostname } = this.parseUrl(targetUrl)
 
-            // SSRF hardening: resolve DNS and block private/link-local/loopback destinations
-            const isDisallowedAddress = (addr: string): boolean => {
-                const lower = addr.toLowerCase()
-                const ipVersion = net.isIP(lower)
-
-                // Helper for IPv4 space
-                const isDisallowedV4 = (v4: string): boolean => {
-                    if (/^127(?:\.\d{1,3}){3}$/.test(v4)) return true // loopback
-                    if (/^10\./.test(v4)) return true // private
-                    const ipMatch = v4.match(/^172\.(\d{1,3})\./)
-                    if (ipMatch) {
-                        const secondOctet = Number(ipMatch[1])
-                        if (secondOctet >= 16 && secondOctet <= 31) return true
-                    }
-                    if (/^192\.168\./.test(v4)) return true // private
-                    if (/^169\.254\./.test(v4)) return true // link-local
-                    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(v4))
-                        return true // CGNAT 100.64/10
-                    if (/^0\./.test(v4)) return true // this network
-                    if (/^(?:22[4-9]|23\d)\./.test(v4)) return true // multicast 224/4
-                    if (/^(?:24\d|25[0-5])\./.test(v4)) return true // reserved 240/4 incl 255.255.255.255
-                    return false
-                }
-
-                if (ipVersion === 6) {
-                    if (lower === "::" || lower === "::1") return true // unspecified/loopback
-                    if (lower.startsWith("ff")) return true // multicast ff00::/8
-                    // ULA fc00::/7
-                    if (lower.startsWith("fc") || lower.startsWith("fd"))
-                        return true
-                    // Link-local fe80::/10 → fe8x, fe9x, feax, febx
-                    if (/^fe[89ab][0-9a-f]*:/i.test(lower)) return true
-                    // IPv4-mapped IPv6 ::ffff:a.b.c.d → re-check mapped v4
-                    const v4map = lower.match(
-                        /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/,
-                    )
-                    if (v4map && isDisallowedV4(v4map[1])) return true
-                    return false
-                }
-
-                if (ipVersion === 4) {
-                    return isDisallowedV4(lower)
-                }
-                return false
-            }
+            // Fast refusal for a literal or currently-private target. The
+            // connection itself goes through publicOnlyLookup, which checks
+            // the address actually dialled.
+            const isDisallowedAddress = (addr: string): boolean =>
+                !isPublicAddress(addr)
 
             const preflight = async () => {
                 try {
@@ -264,9 +252,19 @@ export class Proxy {
                 return true
             }
 
+            const agent =
+                targetProtocol === "https:"
+                    ? new https.Agent({
+                          lookup: publicOnlyLookup,
+                          rejectUnauthorized: this._sslConfig.verifyCertificates,
+                      })
+                    : new http.Agent({ lookup: publicOnlyLookup })
+            this._agent = agent
+
             // Create the proxy server (defaults; per-request options are supplied in proxyServer.web)
             const proxyServer = httpProxy.createProxyServer({
                 target: targetUrl,
+                agent,
                 changeOrigin: true,
                 secure:
                     targetProtocol === "https:"
@@ -358,6 +356,7 @@ export class Proxy {
 
                 proxyServer.web(req, res, {
                     target: targetOrigin,
+                    agent,
                     changeOrigin: true,
                     secure:
                         targetProtocol === "https:"
@@ -367,7 +366,7 @@ export class Proxy {
             })
 
             // Start the server
-            this._server.listen(0, "0.0.0.0", () => {
+            this._server.listen(0, this._proxyHost, () => {
                 const address = this._server?.address()
                 if (typeof address === "object" && address !== null) {
                     this._proxyPort = address.port
