@@ -10,6 +10,7 @@ import getBlocks from "../routines/nodecalls/getBlocks"
 import getFinalizedHead from "../routines/nodecalls/getFinalizedHead"
 import getBlockSegment from "../routines/nodecalls/getBlockSegment"
 import getValidatorSet from "../routines/nodecalls/getValidatorSet"
+import getChainIdentity from "../routines/nodecalls/getChainIdentity"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 
@@ -45,6 +46,10 @@ export const blockHandlers: Record<string, NodeCallHandler> = {
             }
         }
         return response
+    },
+
+    getChainIdentity: async (_data, _response) => {
+        return await getChainIdentity()
     },
 
     getPreviousHashFromBlockNumber: async (data, response) => {

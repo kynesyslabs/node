@@ -225,4 +225,15 @@ export const DEFAULT_CONFIG: AppConfig = {
         // A loaded host can take well over 5 s to start the sidecar's libp2p stack.
         ipcConnectTimeoutMs: 15_000,
     },
+    outbound: {
+        xmEnabled: true,
+        demosWorkEnabled: true,
+        web2Enabled: true,
+        xmRpcAllowlist: [],
+        web2MaxResponseBytes: 10 * 1024 * 1024,
+        web2SessionTtlMs: 15 * 60 * 1000,
+        web2InsecureTls: false,
+        tlsnotaryAllowedPorts: [443],
+        tlsnotaryAllowPrivateTargets: false,
+    },
 }

@@ -35,3 +35,19 @@ export function serializeTxContent(
     }
     return serializeSdkTransactionContent(content, true)
 }
+
+/**
+ * An amount as the serializer puts it on the wire: an OS string once
+ * osDenomination applies (a number is DEM, a string or bigint is OS), a DEM
+ * number before. Edit binding brings the edits it regenerates from a body to
+ * this shape, so it is the denomination a send's args are paid in.
+ *
+ * @throws When the amount cannot be read in that denomination.
+ */
+export function wireAmount(amount: unknown, osDenominationActive: boolean): unknown {
+    const serialized = serializeSdkTransactionContent(
+        { gcr_edits: [{ type: "balance", amount }] } as never,
+        osDenominationActive,
+    )
+    return (JSON.parse(serialized) as { gcr_edits: { amount: unknown }[] }).gcr_edits[0].amount
+}
