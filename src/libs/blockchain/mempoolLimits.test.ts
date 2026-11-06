@@ -328,6 +328,20 @@ describe("chooseSenderOverflow", () => {
         expect([...refuse]).toEqual(["0xi5"])
         expect(evict).toEqual([])
     })
+
+    it("gives a kept tx that ranks inside the cap no slot of the others", () => {
+        const held = [
+            ...Array.from({ length: 63 }, (_, i) => slot(`0xh${i + 10}`, "s", i + 10)),
+            slot("0xkept", "s", 5),
+        ]
+        const incoming = [slot("0xi1", "s", 1)]
+        const without = chooseSenderOverflow(held.filter(s => s.hash !== "0xkept"), incoming, 64)
+        expect(without.refuse.size).toBe(0)
+        expect(without.evict).toEqual([])
+        const { refuse, evict } = chooseSenderOverflow(held, incoming, 64, new Set(["0xkept"]))
+        expect(refuse.size).toBe(0)
+        expect(evict).toEqual([])
+    })
 })
 
 describe("holdSendersToCap", () => {

@@ -354,10 +354,10 @@ export function chooseSenderOverflow(
     const refuse = new Set<string>()
     const evict: string[] = []
     for (const list of bySender.values()) {
-        if (list.length <= maxPerSender) continue
-        list.sort((a, b) => compareSlots(a.slot, b.slot))
-        for (const { slot, held: isHeld } of list.slice(maxPerSender)) {
-            if (keep.has(slot.hash)) continue
+        const ranked = list.filter(entry => !keep.has(entry.slot.hash))
+        if (ranked.length <= maxPerSender) continue
+        ranked.sort((a, b) => compareSlots(a.slot, b.slot))
+        for (const { slot, held: isHeld } of ranked.slice(maxPerSender)) {
             if (isHeld) evict.push(slot.hash)
             else refuse.add(slot.hash)
         }
