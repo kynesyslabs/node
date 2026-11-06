@@ -224,6 +224,8 @@ export interface DiagnosticsConfig {
     minCpuSpeed: number
     minRam: number
     minDiskSpace: number
+    /** Path whose filesystem MIN_DISK_SPACE and demos_disk_free_bytes measure; "" means the working directory. */
+    diskSpacePath: string
     minNetworkDownloadSpeed: number
     minNetworkUploadSpeed: number
     networkTestFileSize: number

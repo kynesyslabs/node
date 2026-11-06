@@ -372,6 +372,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.MIN_DISK_SPACE,
                 d.diagnostics.minDiskSpace,
             ),
+            diskSpacePath: envStr(
+                EnvKey.DISK_SPACE_PATH,
+                d.diagnostics.diskSpacePath,
+            ),
             minNetworkDownloadSpeed: envFloat(
                 EnvKey.MIN_NETWORK_DOWNLOAD_SPEED,
                 d.diagnostics.minNetworkDownloadSpeed,

@@ -83,7 +83,9 @@ groups:
           description: "demos_main_loop_heartbeat_seconds = {{ $value }} on {{ $labels.instance }}. Loop is running slowly or stuck."
 
       # The node refuses to start below MIN_DISK_SPACE (default 5 GiB), and
-      # Postgres fails writes on a full disk: warn well before either.
+      # Postgres fails writes on a full disk: warn well before either. The gauge
+      # measures the filesystem of DISK_SPACE_PATH (the node data volume in
+      # Docker), not the Postgres volume.
       - alert: DiskSpaceLow
         expr: demos_disk_free_bytes < 20 * 1024 * 1024 * 1024
         for: 10m
@@ -92,7 +94,7 @@ groups:
           severity: warning
         annotations:
           summary: Validator disk is filling up
-          description: "{{ $labels.instance }} has {{ $value | humanize1024 }}B of disk free, under 20 GiB. Prune logs, old snapshots and Docker build cache, or grow the volume."
+          description: "{{ $labels.instance }} has {{ $value | humanize1024 }}B free on its data disk (DISK_SPACE_PATH), under 20 GiB. Prune logs, old snapshots and Docker build cache, or grow the volume."
 
       - alert: DiskSpaceCritical
         expr: demos_disk_free_bytes < 5 * 1024 * 1024 * 1024
@@ -102,4 +104,4 @@ groups:
           severity: critical
         annotations:
           summary: Validator disk is nearly full
-          description: "{{ $labels.instance }} has {{ $value | humanize1024 }}B of disk free, under 5 GiB: the node will not restart (MIN_DISK_SPACE) and Postgres writes fail when it reaches 0. Free space now."
+          description: "{{ $labels.instance }} has {{ $value | humanize1024 }}B free on its data disk (DISK_SPACE_PATH), under 5 GiB: the node will not restart (MIN_DISK_SPACE) and Postgres writes fail when it reaches 0. Free space now."

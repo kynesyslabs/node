@@ -110,7 +110,7 @@ tests:
               instance: n1
             exp_annotations:
               summary: Validator disk is filling up
-              description: "n1 has 4GiB of disk free, under 20 GiB. Prune logs, old snapshots and Docker build cache, or grow the volume."
+              description: "n1 has 4GiB free on its data disk (DISK_SPACE_PATH), under 20 GiB. Prune logs, old snapshots and Docker build cache, or grow the volume."
       - eval_time: 15m
         alertname: DiskSpaceCritical
         exp_alerts:
@@ -120,4 +120,4 @@ tests:
               instance: n1
             exp_annotations:
               summary: Validator disk is nearly full
-              description: "n1 has 4GiB of disk free, under 5 GiB: the node will not restart (MIN_DISK_SPACE) and Postgres writes fail when it reaches 0. Free space now."
+              description: "n1 has 4GiB free on its data disk (DISK_SPACE_PATH), under 5 GiB: the node will not restart (MIN_DISK_SPACE) and Postgres writes fail when it reaches 0. Free space now."

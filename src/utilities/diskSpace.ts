@@ -2,6 +2,16 @@ import { statfsSync } from "fs"
 
 const GIB = 1024 ** 3
 
+/**
+ * The path whose filesystem the start check and the disk metric measure:
+ * DISK_SPACE_PATH when set, else the working directory. In Docker the
+ * working directory sits on the container's root filesystem, not on the data
+ * volumes, so the compose file points this at the data volume.
+ */
+export function diskSpacePath(configured: string): string {
+    return configured || process.cwd()
+}
+
 /** Bytes an unprivileged process can still write under `path`, or null when unknown. */
 export function freeDiskBytes(path: string): number | null {
     try {

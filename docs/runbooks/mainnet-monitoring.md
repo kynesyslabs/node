@@ -82,8 +82,8 @@ loaded from the same directory and use the same receiver. Among them:
 | Alert | Condition | Severity | Meaning |
 |-------|-----------|----------|---------|
 | MempoolStuck | transactions pending and none included in a stored block for 10 min | warning | Block production has stalled while the pool fills. |
-| DiskSpaceLow | under 20 GiB free in the node's working directory, held 10 min | warning | Prune logs, snapshots and Docker build cache, or grow the volume. |
-| DiskSpaceCritical | under 5 GiB free, held 2 min | critical | The node refuses to start below `MIN_DISK_SPACE` (default 5 GiB) and Postgres fails writes on a full disk. |
+| DiskSpaceLow | under 20 GiB free on the filesystem of `DISK_SPACE_PATH` (Docker: the `/app/data` volume; otherwise the working directory), held 10 min | warning | Prune logs, snapshots and Docker build cache, or grow the volume. |
+| DiskSpaceCritical | under 5 GiB free, held 2 min | critical | The node refuses to start below `MIN_DISK_SPACE` (default 5 GiB) and Postgres fails writes on a full disk. Neither alert sees the Postgres volume when it is on another filesystem; watch it through node-exporter's `node_filesystem_avail_bytes`. |
 
 The rules have promtool unit tests in `monitoring/prometheus/tests/`; run
 `promtool test rules monitoring/prometheus/tests/alerts.test.yml` after editing them.

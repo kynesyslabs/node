@@ -61,7 +61,11 @@ import {
 } from "./libs/peer/identityLiveness"
 import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
-import { freeDiskBytes, lowDiskRefusal } from "./utilities/diskSpace"
+import {
+    diskSpacePath,
+    freeDiskBytes,
+    lowDiskRefusal,
+} from "./utilities/diskSpace"
 import { startSignaling } from "./features/InstantMessagingProtocol/signalingServer/startSignaling"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
@@ -714,12 +718,12 @@ async function main() {
         indexState.TUI_ENABLED = false
     }
 
-    const diskRefusal = lowDiskRefusal(
-        freeDiskBytes(process.cwd()),
-        Config.getInstance().diagnostics.minDiskSpace,
-    )
+    const { diskSpacePath: diskPathSetting, minDiskSpace } =
+        Config.getInstance().diagnostics
+    const diskPath = diskSpacePath(diskPathSetting)
+    const diskRefusal = lowDiskRefusal(freeDiskBytes(diskPath), minDiskSpace)
     if (diskRefusal) {
-        log.error(`[BOOT] Refusing to start: ${diskRefusal}`)
+        log.error(`[BOOT] Refusing to start: ${diskPath}: ${diskRefusal}`)
         process.exit(1)
     }
 

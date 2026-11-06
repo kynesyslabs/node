@@ -163,6 +163,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         minRam: 0,
         // GiB the node needs free to start; 0 turns the check off.
         minDiskSpace: 5,
+        diskSpacePath: "",
         minNetworkDownloadSpeed: 0,
         minNetworkUploadSpeed: 0,
         networkTestFileSize: 0,

@@ -68,3 +68,11 @@ describe("block-stall alerting is loaded", () => {
         )
     })
 })
+
+describe("disk-space checks in Docker", () => {
+    it("measure the node data volume, not the container's root filesystem", () => {
+        const compose = read("docker-compose.yml")
+        expect(compose).toContain("DISK_SPACE_PATH: ${DISK_SPACE_PATH:-/app/data}")
+        expect(compose).toContain("node_data:/app/data")
+    })
+})
