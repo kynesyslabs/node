@@ -1,5 +1,10 @@
-# Alertmanager for the Demos monitoring stack. One Slack receiver; the webhook
-# URL is read from a file so it never lands in this repo (see monitoring/secrets/README.md).
+# Alertmanager for the Demos monitoring stack. Three receivers (plus `blackhole`, which sends nothing), none of them with a URL
+# in this repo: each URL is read from a file (compose secret, see monitoring/secrets/README.md):
+#   slack   - everything except the heartbeat and MissedSignatures (which goes to blackhole):
+#             critical and page (copy of the page), warnings and info
+#                                        <- /run/secrets/slack_webhook  (<SLACK_WEBHOOK_URL_PLACEHOLDER>)
+#   paging  - critical and page, also sent to slack <- /run/secrets/pager_webhook  (<PAGER_WEBHOOK_URL_PLACEHOLDER>)
+#   deadman - the always-firing heartbeat <- /run/secrets/deadman_webhook (<DEADMAN_WEBHOOK_URL_PLACEHOLDER>)
 global:
   resolve_timeout: 5m
 
@@ -12,10 +17,46 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   routes:
+    # Heartbeat first, so no severity route can catch it. The group is flushed every
+    # group_interval (1m), but a flush only notifies once repeat_interval has passed since
+    # the last notification. repeat_interval is 50s, less than group_interval, so every
+    # flush notifies and the heartbeat is re-sent every minute (with repeat_interval: 1m
+    # the notification takes a few ms after the flush, so every other flush is skipped and
+    # it is re-sent only every 2 minutes). The external watchdog sees it stop quickly.
     - matchers:
-        - severity="critical"
+        - alertname="DeadMansSwitch"
+      receiver: deadman
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 50s
+    # SEAM kynesyslabs/node#1084: routes for rules from that PR go here, below the
+    # dead-man route and above the severity routes, matching on its own alertnames/labels.
+
+    # MissedSignatures is a trend signal (severity info), not an alarm: on the 4-node soak it
+    # counted higher when healthy than during real faults. It stays visible in Prometheus and
+    # Grafana but notifies nobody. Revisit with mainnet data after launch week.
+    - matchers:
+        - alertname="MissedSignatures"
+      receiver: blackhole
+
+    # Critical (or an explicit `page`) wakes someone up AND is posted to Slack. The
+    # paging route has `continue: true`, so matching goes on to the next route, which
+    # sends the same alert to Slack. Keep the two routes adjacent and in this order.
+    - matchers:
+        - severity=~"critical|page"
+      receiver: paging
+      continue: true
+      group_wait: 10s
+      # Without this the route inherits group_interval: 5m, and an alert (or its resolve)
+      # that joins a group that already notified waits for the next 5-minute flush; seen
+      # live as 3-4 minute delivery delays. 30s keeps delivery well inside the stall budget.
+      group_interval: 30s
+      repeat_interval: 1h
+    - matchers:
+        - severity=~"critical|page"
       receiver: slack
       group_wait: 10s
+      group_interval: 30s
       repeat_interval: 1h
     - matchers:
         - severity="warning"
@@ -23,6 +64,8 @@ route:
       repeat_interval: 4h
 
 receivers:
+  # No notifier: alerts routed here are kept (Prometheus, Alertmanager UI) but not sent anywhere.
+  - name: blackhole
   - name: slack
     slack_configs:
       - api_url_file: /run/secrets/slack_webhook
@@ -32,3 +75,14 @@ receivers:
           {{ range .Alerts }}*{{ .Labels.instance }}*: {{ .Annotations.summary }}
           {{ .Annotations.description }}
           {{ end }}
+  # Paging: a generic webhook so any pager can sit behind it. For PagerDuty use
+  # `pagerduty_configs` with `routing_key_file` instead; same secret-file pattern.
+  - name: paging
+    webhook_configs:
+      - url_file: /run/secrets/pager_webhook
+        send_resolved: true
+  # Dead-man's switch: an external watchdog that alerts when this stops arriving.
+  - name: deadman
+    webhook_configs:
+      - url_file: /run/secrets/deadman_webhook
+        send_resolved: false

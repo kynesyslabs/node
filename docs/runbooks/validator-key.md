@@ -245,7 +245,12 @@ When it fires:
    start it with the newest state directory (identity file and record).
 
 The `ForeignSignature` alert fires on any increase of
-`demos_foreign_signature_total`.
+`demos_foreign_signature_total`, and also when the first scrape after a node start
+already reads 1 or more. It is latched: it keeps firing for 7 days after
+the last event, whatever the node does afterwards, and does not resolve after 10
+minutes. Once the second copy of the key is found and stopped, acknowledge and
+clear it as described in "Clearing a latched alert" in
+`mainnet-monitoring.md`.
 
 ## Production refusals
 
