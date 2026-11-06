@@ -242,15 +242,25 @@ main() {
 
 	cd "${node_dir}" || exit 1
 
+	# A node started without its signing record, halt marker or commit lock
+	# can sign a height it already signed, so any restore that does not land
+	# stops the reset before the operator is told to start the node.
+	local restore_failed=false
 	for f in "${preserve[@]}"; do
-		if [[ -f "${parent_dir}/${f}.backup" ]]; then
-			if mv "${parent_dir}/${f}.backup" "${f}"; then
-				print_success "Restored ${f}"
-			else
-				print_error "Failed to restore ${f}"
-			fi
+		if [[ ! -f "${parent_dir}/${f}.backup" ]]; then
+			print_error "Backup of ${f} is missing; expected at ${parent_dir}/${f}.backup"
+			restore_failed=true
+		elif mv "${parent_dir}/${f}.backup" "${f}"; then
+			print_success "Restored ${f}"
+		else
+			print_error "Failed to restore ${f}; backup is at ${parent_dir}/${f}.backup"
+			restore_failed=true
 		fi
 	done
+	if [[ "${restore_failed}" = true ]]; then
+		print_error "Reset incomplete: move every backup above into ${parent_dir}/${node_dir} before starting the node"
+		exit 1
+	fi
 
 	# Step 5: Install dependencies
 	print_step "Installing dependencies..."
