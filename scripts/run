@@ -720,7 +720,7 @@ fi
 if [[ "${GOSSIP_ENABLED:-true}" != "false" ]]; then
 	if ! command -v node >/dev/null 2>&1; then
 		echo "❌ Gossip is enabled but Node.js is not on PATH (the gossip sidecar requires Node >= 20)."
-		echo "   Install Node, or start with GOSSIP_ENABLED=false."
+		echo "   Install Node. GOSSIP_ENABLED=false also starts, but then blocks and heights travel by direct HTTP pushes, with a 10 s height poll as the fallback."
 		exit 1
 	fi
 	SIDECAR_BUNDLE="sidecar/dist/gossip-sidecar.mjs"
