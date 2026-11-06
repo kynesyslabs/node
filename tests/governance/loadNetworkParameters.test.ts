@@ -18,6 +18,22 @@ jest.mock("@/utilities/logger", () => ({
     },
 }))
 
+// nodeVersion reads `import.meta.url`, which the CommonJS output of ts-jest
+// cannot load; the loader only needs a commit value to check.
+jest.mock("@/utilities/nodeVersion", () => ({
+    __esModule: true,
+    NODE_VERSION: {
+        name: "demos-node",
+        version: "0.0.0-test",
+        commit: null,
+        commitShort: null,
+        commitMessage: null,
+        branch: null,
+        dirty: false,
+        builtAt: null,
+    },
+}))
+
 jest.mock("@/model/datasource", () => ({
     __esModule: true,
     default: { getInstance: jest.fn() },
@@ -50,6 +66,26 @@ beforeAll(async () => {
         "@/libs/blockchain/routines/loadNetworkParameters"
     ))
 })
+
+type Loader = typeof import("@/libs/blockchain/routines/loadNetworkParameters")
+
+/**
+ * A module instance that has never read the chain. Jest isolates the module
+ * registry; bun has no isolateModules, but a query suffix on the specifier
+ * gives a separate instance there.
+ */
+async function freshLoader(): Promise<Loader> {
+    if (typeof jest.isolateModulesAsync === "function") {
+        let fresh: Loader | undefined
+        await jest.isolateModulesAsync(async () => {
+            fresh = await import("@/libs/blockchain/routines/loadNetworkParameters")
+        })
+        return fresh as Loader
+    }
+    return import(
+        "../../src/libs/blockchain/routines/loadNetworkParameters.ts?first-read-fails"
+    )
+}
 
 function makeRepo(rows: Array<Record<string, unknown>>) {
     return {
@@ -132,9 +168,7 @@ describe("loadNetworkParameters", () => {
     it("falls back to genesis defaults when the first DB read throws", async () => {
         // A fresh module instance has never read the chain, which is the
         // boot-without-datasource case the genesis fallback exists for.
-        const fresh = await import(
-            "../../src/libs/blockchain/routines/loadNetworkParameters.ts?first-read-fails"
-        )
+        const fresh = await freshLoader()
         const params = await fresh.loadNetworkParameters(failingRepo())
         expect(params).toEqual(GENESIS)
         expect(sharedStateStub.networkParameters).toEqual(GENESIS)
