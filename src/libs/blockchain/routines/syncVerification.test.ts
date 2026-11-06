@@ -238,10 +238,12 @@ describe("verifyNativeTablesHashes", () => {
             })
         })
 
-        it("applies a block whose storage root differs, counting and logging the difference", async () => {
-            await verifyNativeTablesHashes(
+        it("refuses a block whose storage root differs, counting the difference", async () => {
+            const rejection = await verifyNativeTablesHashes(
                 makeBlock([], { native_subnets_txs: "a", native_storage_programs: "peer-root" }),
-            )
+            ).catch(e => e)
+            expect(rejection).toBeInstanceOf(SyncBlockRejectedError)
+            expect(rejection.message).toContain("native_storage_programs")
             expect(countStorageRootSyncMismatch).toHaveBeenCalledTimes(1)
         })
 
@@ -252,13 +254,13 @@ describe("verifyNativeTablesHashes", () => {
             expect(countStorageRootSyncMismatch).not.toHaveBeenCalled()
         })
 
-        it("still rejects another table that differs, naming only that table", async () => {
+        it("names every table that differs", async () => {
             const rejection = await verifyNativeTablesHashes(
                 makeBlock([], { native_subnets_txs: "b", native_storage_programs: "peer-root" }),
             ).catch(e => e)
             expect(rejection).toBeInstanceOf(SyncBlockRejectedError)
             expect(rejection.message).toContain("native_subnets_txs")
-            expect(rejection.message).not.toContain("native_storage_programs")
+            expect(rejection.message).toContain("native_storage_programs")
         })
 
         it("rejects a storage root present on one side only: the fork schedules disagree", async () => {

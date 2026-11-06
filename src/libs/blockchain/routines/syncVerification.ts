@@ -159,14 +159,10 @@ export async function verifyBlockTransactions(
 const NODE_LOCAL_TABLE_HASHES = new Set(["native_tlsnotary"])
 
 /**
- * Compared, but a difference is logged and counted instead of rejecting the
- * block. The storage root is new; until it has run on a live network, a
- * difference stopping every syncing node is the larger risk. Validators still
- * enforce it, since a forger with another root forges another block hash.
- * Present on one side only is still a rejection: that is a fork-schedule
- * disagreement, not diverged state.
+ * The storage root. A difference is counted before the block is refused, so
+ * a root that diverges on a live network shows up in the metrics too.
  */
-const WARN_ONLY_TABLE_HASHES = new Set(["native_storage_programs"])
+const STORAGE_ROOT_KEY = "native_storage_programs"
 
 /**
  * `native_tables_hashes` is taken by the forger before it applies the block,
@@ -188,13 +184,15 @@ export async function verifyNativeTablesHashes(block: Block): Promise<void> {
         key =>
             !NODE_LOCAL_TABLE_HASHES.has(key) && committed?.[key] !== local[key],
     )
-    for (const key of WARN_ONLY_TABLE_HASHES) {
-        const index = differing.indexOf(key)
-        if (index === -1 || !committed || !(key in committed) || !(key in local)) continue
-        differing.splice(index, 1)
+    if (
+        differing.includes(STORAGE_ROOT_KEY) &&
+        committed &&
+        STORAGE_ROOT_KEY in committed &&
+        STORAGE_ROOT_KEY in local
+    ) {
         countStorageRootSyncMismatch()
         log.error(
-            `[syncVerify] storage root of block ${block.number} differs from local state: block ${committed[key]}, local ${local[key]}; applying it anyway`,
+            `[syncVerify] storage root of block ${block.number} differs from local state: block ${committed[STORAGE_ROOT_KEY]}, local ${local[STORAGE_ROOT_KEY]}`,
         )
     }
     if (!committed || differing.length > 0) {
