@@ -205,4 +205,44 @@ describe("ReplayCache", () => {
         expect(cache.admit("b", "db", 2001 + WINDOW, 2001 + WINDOW)).toBe("admitted")
         expect(cache.senders).toBe(1)
     })
+
+    it("frees an expired sender's slot even behind a future-dated record", () => {
+        const cache = new ReplayCache(WINDOW, 10, 2)
+        expect(cache.admit("a", "da", 2000, 1000)).toBe("admitted")
+        expect(cache.admit("b", "db", 1000, 1001)).toBe("admitted")
+        // b's record left the window; a's, admitted before it, has not.
+        expect(cache.admit("c", "dc", 2001, 2001)).toBe("admitted")
+        expect(cache.admit("a", "da", 2000, 2001)).toBe("replayed")
+        expect(cache.senders).toBe(2)
+    })
+
+    it("frees an expired floor's slot even behind a later-expiring floor", () => {
+        const cache = new ReplayCache(WINDOW, 1, 3)
+        expect(cache.admit("a", "da", 2000, 1000)).toBe("admitted")
+        expect(cache.admit("b", "db", 1001, 1001)).toBe("admitted")
+        expect(cache.admit("c", "dc", 1002, 1002)).toBe("admitted")
+        // Whatever the evictions left as floors, b's own record is out of the
+        // window here, so its slot is free.
+        expect(cache.admit("d", "dd", 2002, 2002)).toBe("admitted")
+        expect(cache.admit("a", "da", 2000, 2002)).toBe("replayed")
+        expect(cache.admit("c", "dc", 1002, 2002)).toBe("replayed")
+    })
+
+    it("never drops a live record however the timestamps arrive", () => {
+        const cache = new ReplayCache(WINDOW, 8, 6)
+        const live: Array<[string, string, number]> = []
+        let now = 10_000
+        // Timestamps anywhere in [now - WINDOW, now + WINDOW], out of order.
+        for (let i = 0; i < 400; i++) {
+            now += 3
+            const ts = now - WINDOW + ((i * 7919) % (2 * WINDOW + 1))
+            const id = `s${i % 9}`
+            if (cache.admit(id, `m${i}`, ts, now) === "admitted") live.push([id, `m${i}`, ts])
+            for (const [lid, digest, lts] of live) {
+                if (lts >= now - WINDOW) expect(cache.admit(lid, digest, lts, now)).toBe("replayed")
+            }
+            expect(cache.size).toBeLessThanOrEqual(8)
+            expect(cache.senders).toBeLessThanOrEqual(6)
+        }
+    })
 })

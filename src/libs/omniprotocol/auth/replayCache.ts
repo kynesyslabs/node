@@ -16,13 +16,27 @@ export type AdmitResult = "admitted" | "replayed" | "full"
  * dropped, so a sender that would need a new slot while every slot is live is
  * refused ("full") until one expires; senders that already hold a slot are
  * not affected.
+ *
+ * Records expire by timestamp, not by arrival: the verifier accepts
+ * timestamps up to the skew on either side, so arrival order says nothing
+ * about which record leaves the window first. Entries and floors are kept in
+ * min-heaps by timestamp, so pruning takes exactly the expired ones and early
+ * eviction takes the entry closest to expiry.
  */
 export class ReplayCache {
-    private readonly seen = new Map<string, { identity: string; timestamp: number }>()
-    /** Re-inserted on every raise, so the oldest-raised floor is first. */
+    private readonly seen = new Map<string, Entry>()
+    /** The entries of `seen`, earliest timestamp on top. */
+    private readonly entryHeap = new MinHeap<Entry>()
     private readonly floors = new Map<string, number>()
+    /**
+     * Floors by value, earliest on top. A raise pushes the new value and
+     * leaves the old one behind; an item whose value is no longer the
+     * sender's floor is skipped when it surfaces.
+     */
+    private readonly floorHeap = new MinHeap<{ identity: string; timestamp: number; seq: number }>()
     /** Live records (entries plus a floor) per sender; a sender holds a slot while it has any. */
     private readonly records = new Map<string, number>()
+    private seq = 0
 
     constructor(
         private readonly windowMs: number,
@@ -60,40 +74,56 @@ export class ReplayCache {
             return "full"
         }
 
-        this.seen.set(key, { identity, timestamp })
+        const entry: Entry = { key, identity, timestamp, seq: this.seq++ }
+        this.seen.set(key, entry)
+        this.entryHeap.push(entry)
         this.hold(identity)
 
         // The evicted entry's sender already holds a slot, so this never
         // needs a new one and never drops a live record.
-        while (this.seen.size > this.maxEntries) this.evictOldest()
+        while (this.seen.size > this.maxEntries) this.evictEarliest()
         return "admitted"
     }
 
-    /** Entries go in roughly in timestamp order, so pruning stops at the first live one. */
     private prune(now: number): void {
         const cutoff = now - this.windowMs
-        for (const [key, entry] of this.seen) {
-            if (entry.timestamp >= cutoff) break
-            this.seen.delete(key)
-            this.release(entry.identity)
+        for (let top = this.entryHeap.peek(); top && top.timestamp < cutoff; top = this.entryHeap.peek()) {
+            this.entryHeap.pop()
+            this.seen.delete(top.key)
+            this.release(top.identity)
         }
-        for (const [identity, floor] of this.floors) {
-            if (floor >= cutoff) break
-            this.floors.delete(identity)
-            this.release(identity)
+        for (let top = this.floorHeap.peek(); top && top.timestamp < cutoff; top = this.floorHeap.peek()) {
+            this.floorHeap.pop()
+            if (this.floors.get(top.identity) !== top.timestamp) continue
+            this.floors.delete(top.identity)
+            this.release(top.identity)
         }
     }
 
-    private evictOldest(): void {
-        const first = this.seen.entries().next()
-        if (first.done) return
-        const [key, { identity, timestamp }] = first.value
-        this.seen.delete(key)
+    private evictEarliest(): void {
+        const entry = this.entryHeap.pop()
+        if (!entry) return
+        this.seen.delete(entry.key)
 
+        const { identity, timestamp } = entry
         const previous = this.floors.get(identity)
         if (previous === undefined) this.hold(identity)
-        this.floors.delete(identity)
-        this.floors.set(identity, Math.max(previous ?? -Infinity, timestamp))
+        if (previous === undefined || timestamp > previous) {
+            this.floors.set(identity, timestamp)
+            this.floorHeap.push({ identity, timestamp, seq: this.seq++ })
+            // Superseded values wait in the heap until they expire; rebuild
+            // before they outnumber the floors, so the heap stays within a
+            // constant of the floor count.
+            if (this.floorHeap.size > 2 * this.floors.size + 64) {
+                this.floorHeap.reset(
+                    [...this.floors].map(([id, ts]) => ({
+                        identity: id,
+                        timestamp: ts,
+                        seq: this.seq++,
+                    })),
+                )
+            }
+        }
         this.release(identity)
     }
 
@@ -106,4 +136,70 @@ export class ReplayCache {
         if (left > 0) this.records.set(identity, left)
         else this.records.delete(identity)
     }
+}
+
+interface Entry {
+    key: string
+    identity: string
+    timestamp: number
+    seq: number
+}
+
+/** Binary min-heap by timestamp, ties broken by insertion. */
+class MinHeap<T extends { timestamp: number; seq: number }> {
+    private items: T[] = []
+
+    get size(): number {
+        return this.items.length
+    }
+
+    peek(): T | undefined {
+        return this.items[0]
+    }
+
+    push(item: T): void {
+        const items = this.items
+        items.push(item)
+        let i = items.length - 1
+        while (i > 0) {
+            const parent = (i - 1) >> 1
+            if (!less(items[i], items[parent])) break
+            ;[items[i], items[parent]] = [items[parent], items[i]]
+            i = parent
+        }
+    }
+
+    pop(): T | undefined {
+        const items = this.items
+        const top = items[0]
+        const last = items.pop()
+        if (items.length > 0 && last !== undefined) {
+            items[0] = last
+            this.siftDown(0)
+        }
+        return top
+    }
+
+    reset(items: T[]): void {
+        this.items = items
+        for (let i = (items.length >> 1) - 1; i >= 0; i--) this.siftDown(i)
+    }
+
+    private siftDown(i: number): void {
+        const items = this.items
+        for (;;) {
+            const left = 2 * i + 1
+            const right = left + 1
+            let smallest = i
+            if (left < items.length && less(items[left], items[smallest])) smallest = left
+            if (right < items.length && less(items[right], items[smallest])) smallest = right
+            if (smallest === i) return
+            ;[items[i], items[smallest]] = [items[smallest], items[i]]
+            i = smallest
+        }
+    }
+}
+
+function less(a: { timestamp: number; seq: number }, b: { timestamp: number; seq: number }): boolean {
+    return a.timestamp < b.timestamp || (a.timestamp === b.timestamp && a.seq < b.seq)
 }
