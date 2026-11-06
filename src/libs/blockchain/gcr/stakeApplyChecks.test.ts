@@ -19,10 +19,16 @@ function repoFor(table: string) {
     return {
         target: { name: table },
         create: (row: unknown) => ({ ...(row as object) }),
-        findOneBy: async (where: Record<string, unknown>) =>
-            rows().find(row => matches(row, where)) ?? null,
+        // Copies, as a database read returns: an edit that changes a row it
+        // read must not change what the table holds.
+        findOneBy: async (where: Record<string, unknown>) => {
+            const row = rows().find(row => matches(row, where))
+            return row ? structuredClone(row) : null
+        },
         find: async (options?: { where?: Record<string, unknown> }) =>
-            rows().filter(row => matches(row, options?.where ?? {})),
+            rows()
+                .filter(row => matches(row, options?.where ?? {}))
+                .map(row => structuredClone(row)),
         save: async (saved: unknown) => saved,
     }
 }
@@ -255,6 +261,36 @@ describe("exit at apply", () => {
         row.unstake_available_at = 50
         expect((await apply(edit("exit"), entities)).success).toBe(true)
         expect(entities.accounts.get(SENDER).balance).toBe(MIN)
+    })
+})
+
+describe("a failed transaction with an exit", () => {
+    it("does not keep the refund, so the bond cannot be paid twice", async () => {
+        seeded = {
+            Validators: [
+                {
+                    address: SENDER,
+                    status: "3",
+                    staked_amount: MIN.toString(),
+                    bonded_amount: MIN.toString(),
+                    unstake_requested_at: 0,
+                    unstake_available_at: 50,
+                },
+            ],
+        }
+        const entities = caches(0n)
+        // No nonce or gas edit names the sender: the second exit fails.
+        const failed = await HandleGCR.applyTransaction(
+            entities,
+            tx([edit("exit"), edit("exit")]),
+            false,
+            false,
+        )
+        expect(failed.success).toBe(false)
+        expect(BigInt(entities.accounts.get(SENDER).balance)).toBe(0n)
+
+        expect((await apply(edit("exit"), entities)).success).toBe(true)
+        expect(BigInt(entities.accounts.get(SENDER).balance)).toBe(MIN)
     })
 })
 
