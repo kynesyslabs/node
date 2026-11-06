@@ -797,5 +797,15 @@ check "image path, node3_db migration fails: no node was started" bash -c '! gre
 run_from_top 100 image
 check "image path, max_connections 100: exit 2 before any migration" bash -c 'grep -q "^rc=2$" "$1" && [ "$2" = 0 ]' _ "${WORK}/run-top.out" "$(migrations)"
 
+echo "== --binding off: the launch cases still refuse it, before any docker call"
+for sc in halt-n10s10 halt-n13s10 ride-n13s10; do
+    : > "${WORK}/run-top.docker.log"
+    OUT=$(STUB_LOG="${WORK}/run-top.docker.log" PATH="${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/runs" \
+        timeout 60 bash "${RUN_SH}" --binding off "${sc}" refused 2>&1; echo "rc=$?")
+    check "${sc} --binding off: exit 2, says why, no docker call" \
+        bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "runs the launch fork set, which activates committeeBinding: --binding off does not apply" <<< "$1" && [ ! -s "$2" ]' \
+        _ "${OUT}" "${WORK}/run-top.docker.log"
+done
+
 echo
 if [ "${fails}" = 0 ]; then echo "lockstep stub tests: all passed"; else echo "lockstep stub tests: ${fails} FAILED"; exit 1; fi

@@ -17,13 +17,14 @@ testing/devnet/quorum-drills/run.sh [--image IMAGE] [--src TREE] [--binding on|o
   The tree must match the image's dependencies.
 - `--binding` (or `BINDING`): `on` (default) activates `committeeBinding`
   at block 0; `off` keeps it dormant to reproduce the pre-fork behaviour on
-  the same code. `quorumParity` is active from block 0 in both. **`off` does
-  not currently work:** `genesis.devnet.json` also activates `commitLock` at
-  0, and the node's fork loader refuses a genesis that has `commitLock`
-  without `committeeBinding` (`src/forks/loadForkConfig.ts:296-307`). Loading
-  the generated `--binding off` genesis with `loadForkConfigFromGenesis` gives
-  that error; a node boot was not run. The three mainnet-shape cases take
-  `--binding on` only.
+  the same code. `quorumParity` is active from block 0 in both. `off` also
+  turns `commitLock` off (`gen-inputs.py`, where it turns `committeeBinding`
+  off): `genesis.devnet.json` activates it at 0, and the node's fork loader
+  refuses a genesis that has `commitLock` without `committeeBinding`
+  (`assertCommitLockHasCommittee`, `src/forks/loadForkConfig.ts:296-315`).
+  `loadForkConfigFromGenesis` accepts the generated `--binding off` genesis
+  (`drillInputs.test.ts`); a node boot on it was not run. The three
+  mainnet-shape cases take `--binding on` only.
 
 ### How a node starts
 
@@ -211,9 +212,10 @@ the genesis the nodes ran. The excluded forks are in `DRILL_TIMINGS` and
 `drill.timings.excludedForks` too, and `run.sh` writes them to `verdict.json`
 as `excludedForks`. The other scenarios keep the forks of
 `genesis.devnet.json` (nine launch forks, `gasFeeSeparation` and
-`networkGovernance`, all at 0, plus the two `gen-inputs.py` sets); their
-generated genesis and output are byte-identical to before, and their compose
-differs only in the postgres `command` (see
+`networkGovernance`, all at 0, plus the two `gen-inputs.py` sets, and
+`commitLock` off with `--binding off`); their generated genesis and output
+are byte-identical to before (`--binding on`), and their compose differs only
+in the postgres `command` (see
 [Postgres connections](#postgres-connections)).
 
 What the drill genesis has to provide for the forks that were not all on

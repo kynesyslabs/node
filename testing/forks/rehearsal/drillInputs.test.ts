@@ -480,14 +480,38 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
                 treasuryAddress: devnet.forks.gasFeeSeparation.treasuryAddress,
             })
         })
-        it("the default and --fork-set devnet keep the forks of genesis.devnet.json plus the two the drills set", () => {
+        it("the default and --fork-set devnet keep the forks of genesis.devnet.json plus the two the drills set (three with --binding off)", () => {
             const devnet = JSON.parse(readFileSync(resolve(repo, "testing/devnet/genesis.devnet.json"), "utf8"))
+            expect(devnet.forks.commitLock).toEqual({ activationHeight: 0 })
             for (const [forkSet, binding, committee] of [[null, "on", 0], ["devnet", "on", 0], [null, "off", null]] as const) {
                 const { r, genesis: g } = gen(forkSet, binding)
                 expect(r.status).toBe(0)
-                expect(g.forks).toEqual({ ...devnet.forks, quorumParity: { activationHeight: 0 }, committeeBinding: { activationHeight: committee } })
+                // off turns commitLock off with committeeBinding: the loader refuses it alone
+                const lock = binding === "off" ? { commitLock: { activationHeight: null } } : {}
+                expect(g.forks).toEqual({ ...devnet.forks, quorumParity: { activationHeight: 0 }, committeeBinding: { activationHeight: committee }, ...lock })
                 // no exclusion list for the other scenarios
                 expect(existsSync(join(dir, `run-${forkSet}-${binding}-4`, "inputs", "launch-excluded.json"))).toBe(false)
+            }
+        })
+        it("the --binding off genesis loads: committeeBinding and commitLock off, quorumParity at 0", () => {
+            const saved = getSharedState.forkConfig
+            try {
+                for (const binding of ["on", "off"]) {
+                    const { genesis: g } = gen("devnet", binding)
+                    getSharedState.forkConfig = cloneDefaultForkConfig()
+                    loadForkConfigFromGenesis(g)
+                    const loaded = getSharedState.forkConfig as unknown as Record<string, { activationHeight: number | null }>
+                    const height = binding === "on" ? 0 : null
+                    expect(loaded.committeeBinding.activationHeight).toBe(height)
+                    expect(loaded.commitLock.activationHeight).toBe(height)
+                    expect(loaded.quorumParity.activationHeight).toBe(0)
+                }
+                // what the loader refused before: commitLock at 0 without committeeBinding
+                const { genesis: off } = gen("devnet", "off")
+                getSharedState.forkConfig = cloneDefaultForkConfig()
+                expect(() => loadForkConfigFromGenesis({ ...off, forks: { ...off.forks, commitLock: { activationHeight: 0 } } })).toThrow(/commitLock is scheduled at 0 but committeeBinding is not scheduled/)
+            } finally {
+                getSharedState.forkConfig = saved
             }
         })
         it("--fork-set launch refuses --binding off", () => {

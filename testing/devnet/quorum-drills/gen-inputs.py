@@ -32,8 +32,8 @@ ap.add_argument("--binding", choices=["on", "off"], required=True)
 ap.add_argument("--genesis-ts", type=int, required=True)
 ap.add_argument("--image", required=True)
 # "devnet": the forks of testing/devnet/genesis.devnet.json, with quorumParity
-# and committeeBinding set below (every scenario before the mainnet-shape
-# drills). "launch": the fork set of docs/mainnet/genesis.template.json, read
+# and committeeBinding set below, and commitLock off with --binding off (every
+# scenario before the mainnet-shape drills). "launch": the fork set of docs/mainnet/genesis.template.json, read
 # from the repo at run time.
 ap.add_argument("--fork-set", choices=["devnet", "launch"], default="devnet")
 # The image's user, read from the image by run.sh: the node tmpfs is mounted
@@ -88,8 +88,12 @@ else:
     forks = g.setdefault("forks", {})
     forks["quorumParity"] = {"activationHeight": 0}
     # "off" keeps the fork dormant, to reproduce the pre-fork behaviour on the
-    # same code
+    # same code. It turns commitLock off too: genesis.devnet.json has it at 0,
+    # and the fork loader refuses commitLock without committeeBinding
+    # (assertCommitLockHasCommittee in src/forks/loadForkConfig.ts)
     forks["committeeBinding"] = {"activationHeight": 0 if a.binding == "on" else None}
+    if a.binding == "off":
+        forks["commitLock"] = {"activationHeight": None}
 stake = "1000000000000000000"
 g["validators"] = [
     {
