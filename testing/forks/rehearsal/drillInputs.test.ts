@@ -270,10 +270,10 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
             Object.entries<any>(real).map(([n, f]) => [n, f.activationHeight === 0 && n !== "identityCarryover" ? 0 : null]),
         )
         expect(heights(withLaunchForks(genesis()))).toEqual(expected)
-        // 16 forks in the template, all of them in the genesis; identityCarryover is explicitly off
-        expect(Object.keys(expected)).toHaveLength(16)
+        // Every template fork is in the genesis; identityCarryover is explicitly off
+        expect(Object.keys(withLaunchForks(genesis()).forks).sort()).toEqual(Object.keys(real).sort())
         expect(withLaunchForks(genesis()).forks.identityCarryover).toEqual({ activationHeight: null })
-        // The launch set the PR names: nine forks at 0, none of the FILL or null ones
+        // The launch set includes at least these forks at 0, and none of the FILL or null ones
         for (const n of [
             "osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity",
             "quorumParity", "committeeBinding", "commitLock", "finalityProofs",
@@ -318,19 +318,23 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
             const excluded = known.filter(n => Object.keys(launchExcluded(template({ ...MIN, [n]: { activationHeight: 0 } }))).includes(n))
             expect(excluded).toEqual(["identityCarryover"])
         })
-        it("a genesis the launch set built loads: 16 forks, identityCarryover and networkGovernance off, nine at 0", () => {
+        it("a genesis the launch set built loads: every template fork, identityCarryover and networkGovernance off, the rest of the template's 0s at 0", () => {
             const saved = getSharedState.forkConfig
+            // Counted from the template so a fork added to the launch set does not break the drill test
+            const real = JSON.parse(readFileSync(LAUNCH_GENESIS_TEMPLATE, "utf8")).forks
+            const templateForks = Object.keys(real).length
+            const atZero = Object.entries<any>(real).filter(([n, f]) => f.activationHeight === 0 && n !== "identityCarryover").length
             try {
                 for (const base of [genesis(), JSON.parse(readFileSync(resolve(import.meta.dir, "../../devnet/genesis.devnet.json"), "utf8"))]) {
                     const g = withLaunchForks(base)
-                    expect(Object.keys(g.forks)).toHaveLength(16)
+                    expect(Object.keys(g.forks)).toHaveLength(templateForks)
                     getSharedState.forkConfig = cloneDefaultForkConfig()
                     loadForkConfigFromGenesis(g)
                     const loaded = getSharedState.forkConfig as unknown as Record<string, { activationHeight: number | null }>
                     expect(loaded.identityCarryover.activationHeight).toBeNull()
                     // null in the template; genesis.devnet.json has it at 0, which the launch set replaces
                     expect(loaded.networkGovernance.activationHeight).toBeNull()
-                    expect(Object.keys(g.forks).filter(n => loaded[n].activationHeight === 0)).toHaveLength(9)
+                    expect(Object.keys(g.forks).filter(n => loaded[n].activationHeight === 0)).toHaveLength(atZero)
                 }
             } finally {
                 getSharedState.forkConfig = saved
