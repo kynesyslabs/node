@@ -66,6 +66,34 @@ export function credentialFieldsInWeb2Payload(payload: unknown): string[] {
 }
 
 /**
+ * Credential headers in the web2 steps of a signed `demoswork` tx: the script
+ * is stored on chain as signed too, so these are refused like a web2Request's.
+ */
+export function credentialFieldsInDemoScript(script: unknown): string[] {
+    const steps = (script as { steps?: unknown } | undefined)?.steps
+    if (!steps || typeof steps !== "object") return []
+    const found: string[] = []
+    for (const [id, step] of Object.entries(steps)) {
+        const { context, content } = (step ?? {}) as {
+            context?: unknown
+            content?: IWeb2Request
+        }
+        if (context !== "web2") continue
+        // The id is the caller's; keep the echo short.
+        const label = `step ${id.slice(0, 64)}`
+        for (const key of sensitiveKeys(content?.raw?.headers)) {
+            found.push(`${label} request header ${key}`)
+        }
+        for (const key of sensitiveKeys(
+            (content?.result as { headers?: unknown } | undefined)?.headers,
+        )) {
+            found.push(`${label} result header ${key}`)
+        }
+    }
+    return found
+}
+
+/**
  * Headers for the broadcast-time replay of a signed `web2Request` tx. The
  * replay must not carry the caller's credentials (they were only meant for the
  * attested RPC call), so sensitive keys are dropped. Always returns an object:

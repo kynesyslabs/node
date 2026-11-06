@@ -4,7 +4,8 @@
  *   DEMOSWORK_ENABLED, WEB2_ENABLED), and the caller gets a clear refusal;
  * - a web2Request tx that carries credentials (Authorization, Cookie, API
  *   keys, a non-empty authorization field) is refused, because the signed tx
- *   is stored on chain verbatim and the node cannot strip them from it.
+ *   is stored on chain verbatim and the node cannot strip them from it. The
+ *   web2 steps of a DemosWork tx are stored the same way.
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test"
@@ -168,5 +169,47 @@ describe("web2Request credentials are not put on chain", () => {
         const reply = await handleExecuteTransaction(web2Tx({}, "", { "set-cookie": "sid=1" }), "sender")
         expect(reply.success).toBe(false)
         expect(submitValidatedTx).not.toHaveBeenCalled()
+    })
+})
+
+describe("DemosWork web2 step credentials are not put on chain", () => {
+    function workTx(context: string, headers: Record<string, string>, resultHeaders: Record<string, string> = {}) {
+        return tx("demoswork", {
+            operationOrder: ["op1"],
+            operations: { op1: { operationType: "base", id: ["s1"] } },
+            steps: {
+                s1: {
+                    id: "s1",
+                    context,
+                    description: "fetch",
+                    content: {
+                        raw: { action: "startProxy", method: "GET", url: "https://example.com/", headers },
+                        result: { status: 200, headers: resultHeaders },
+                    },
+                    output: {},
+                },
+            },
+        })
+    }
+
+    it("refuses a web2 step with a credential header before running or submitting it", async () => {
+        for (const [headers, resultHeaders] of [
+            [{ Authorization: "Bearer t" }, {}],
+            [{ "x-api-key": "k" }, {}],
+            [{}, { "Set-Cookie": "sid=1" }],
+        ] as const) {
+            const reply = await handleExecuteTransaction(workTx("web2", headers, resultHeaders), "sender")
+            expect(reply.success).toBe(false)
+            expect(JSON.stringify(reply)).toContain("WEB2_CREDENTIALS_IN_TX")
+        }
+        expect(handleDemosWorkRequest).not.toHaveBeenCalled()
+        expect(submitValidatedTx).not.toHaveBeenCalled()
+    })
+
+    it("accepts a web2 step without credentials", async () => {
+        const reply = await handleExecuteTransaction(workTx("web2", { Accept: "text/plain" }), "sender")
+        expect(reply.success).toBe(true)
+        expect(handleDemosWorkRequest).toHaveBeenCalledTimes(1)
+        expect(submitValidatedTx).toHaveBeenCalledTimes(1)
     })
 })
