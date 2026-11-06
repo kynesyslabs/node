@@ -38,10 +38,17 @@ export const DEFAULT_CONFIG: AppConfig = {
         password: "demospassword",
         database: "demos",
         connectTimeoutMs: 10_000,
-        statementTimeoutMs: 10_000,
+        // Bounds on a hang, not on normal work. The longest statements are a
+        // full block's chunked inserts and the whole-table scans of the state
+        // root, which take seconds; a statement that every node runs for a
+        // block must never hit the limit, or no node could store that block.
+        statementTimeoutMs: 120_000,
+        // Not applied: see sessionTimeouts in src/model/datasource.ts.
         queryTimeoutMs: 10_000,
-        lockTimeoutMs: 20_000,
-        idleTransactionTimeoutMs: 20_000,
+        // Locks are held for one short database transaction, which never
+        // waits on the network.
+        lockTimeoutMs: 30_000,
+        idleTransactionTimeoutMs: 60_000,
     },
 
     core: {

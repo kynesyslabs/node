@@ -28,6 +28,7 @@ import {
 import { isForkActive } from "@/forks/forkGates"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import { BlockInvalidError } from "@/errors"
+import { CommittedBlockFollowUpError } from "./committedBlockError"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { gcrWriteMutex } from "./gcr/gcrWriteMutex"
 import type { PendingGCRWrite } from "./gcr/handleGCR"
@@ -568,7 +569,11 @@ export async function insertBlock(
             : await commit()
 
         if (pendingGCR) {
-            await pendingGCR.afterCommit()
+            try {
+                await pendingGCR.afterCommit()
+            } catch (error) {
+                throw new CommittedBlockFollowUpError(block.number, error)
+            }
         }
 
         if (block.number > getSharedState.lastBlockNumber) {
