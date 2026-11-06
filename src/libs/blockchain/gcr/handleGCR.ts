@@ -48,6 +48,7 @@ import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdi
 import {
     derivedGasEdit,
     editBindingState,
+    stakeSenderRefusal,
     verifyEditsAtApply,
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
@@ -1737,6 +1738,15 @@ export default class HandleGCR {
                             keys.push("acc:" + normalizePubkey(tlsEdit.account))
                         }
                     }
+                    // A stake moves the balance of the account it names.
+                    if ((edit.type as string) === "validatorStake") {
+                        const stakeAccount = (
+                            edit as unknown as { account?: string | Uint8Array }
+                        ).account
+                        if (stakeAccount) {
+                            keys.push("acc:" + normalizePubkey(stakeAccount))
+                        }
+                    }
                     const stagedKey = stagedKeyOf(edit)
                     if (stagedKey) keys.push(stagedKey)
                     // A proposal reads the proposer's validator row as
@@ -1914,9 +1924,12 @@ export default class HandleGCR {
         // One read of the tip decides whether edits are bound, the shape
         // expected of an amount and the governance rule, once for the block:
         // none of them depends on the transaction.
-        const { active, postFork, governance } = await editBindingState()
+        const { active, postFork, governance, stakeChecks } =
+            await editBindingState()
         for (const tx of txs) {
-            const reason = governanceGateRefusal(tx, governance)
+            const reason =
+                governanceGateRefusal(tx, governance) ??
+                (stakeChecks ? stakeSenderRefusal(tx) : null)
             if (reason) refuse(tx, reason)
         }
         if (!active) return refused
@@ -2917,9 +2930,18 @@ export default class HandleGCR {
                     result = { success: true, message: "Simulated" }
                 } else {
                     const staged: DeferredWrite[] = []
+                    const stakeAccount = (
+                        editOperation as unknown as { account: string | Uint8Array }
+                    ).account
                     result = await GCRValidatorStakeRoutines.apply(
                         editOperation,
                         HandleGCR.stagedValidatorsRepo(entities, staged),
+                        undefined,
+                        {
+                            account:
+                                entities.accounts.get(normalizePubkey(stakeAccount)) ?? null,
+                            stagedRows: entities.validators,
+                        },
                     )
                     result.deferredWrite = deferredWriteOf(staged)
                 }

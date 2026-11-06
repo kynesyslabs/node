@@ -170,6 +170,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "commitLock",
     "finalityProofs",
     "identityCarryover",
+    "stakeApplyChecks",
 ]
 
 /**

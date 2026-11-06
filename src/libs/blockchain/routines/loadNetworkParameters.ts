@@ -71,6 +71,7 @@ export async function loadNetworkParameters(
     }
 
     getSharedState.networkParameters = params
+    getSharedState.governedMinValidatorStake = governedMinValidatorStake(active)
     // Mirror onto flat fields read by calculateCurrentGas.
     ;(getSharedState as unknown as { rpcFee: number }).rpcFee = params.rpcFee
     ;(getSharedState as unknown as { networkFee: number }).networkFee =
@@ -116,4 +117,19 @@ export async function loadNetworkParameters(
         `Loaded NetworkParameters from ${active.length} active upgrade(s): ${JSON.stringify(params)}`,
     )
     return params
+}
+
+/** The minimum stake the latest active upgrade that sets one sets, or null. */
+function governedMinValidatorStake(active: NetworkUpgrade[]): string | null {
+    let value: string | null = null
+    for (const upgrade of active) {
+        const proposed = upgrade.proposedParameters as
+            | { minValidatorStake?: unknown }
+            | null
+            | undefined
+        if (typeof proposed?.minValidatorStake === "string") {
+            value = proposed.minValidatorStake
+        }
+    }
+    return value
 }

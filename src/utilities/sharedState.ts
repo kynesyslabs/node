@@ -387,6 +387,14 @@ export default class SharedState {
      * features/networkUpgrade/types.ts.
      */
     networkParameters: unknown = null
+
+    /**
+     * The minimum validator stake set by an active network upgrade, or null
+     * when none sets it. Unlike `networkParameters` it never takes the
+     * operator's MIN_VALIDATOR_STAKE, so block apply reads the same value on
+     * every node.
+     */
+    governedMinValidatorStake: string | null = null
     serverPort = Config.getInstance().server.serverPort
     identityFile: string = Config.getInstance().core.identityFile
     peerListFile: string = Config.getInstance().core.peerListFile
