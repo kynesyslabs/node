@@ -16,6 +16,7 @@ import type {
     FinalityProofsConfig,
     IdentityCarryoverConfig,
     NetworkGovernanceConfig,
+    TxTypeAllowListConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -374,6 +375,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.networkGovernance =
                 config as NetworkGovernanceConfig
             return
+        case "txTypeAllowList":
+            getSharedState.forkConfig.txTypeAllowList =
+                config as TxTypeAllowListConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -513,6 +518,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as IdentityCarryoverConfig
         case "networkGovernance":
             return base as NetworkGovernanceConfig
+        case "txTypeAllowList":
+            return base as TxTypeAllowListConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

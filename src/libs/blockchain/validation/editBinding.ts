@@ -48,6 +48,7 @@ import { governanceGateRefusal } from "@/forks/governanceGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
+import { blockTxTypeRefusal } from "./txTypes"
 import {
     canonical,
     verifyGcrEditsMatch,
@@ -124,14 +125,16 @@ async function osDenominationActive(): Promise<boolean> {
  * Whether edits are bound, and the denomination shape expected, from one read
  * of the chain tip (the source the native edit check always used for the
  * shape). A fork activating at height H binds the block applied on tip H,
- * which is block H + 1. `governance` is the `networkGovernance` state, read
- * from the same tip so admission and apply judge it alike.
+ * which is block H + 1. `governance` is the `networkGovernance` state and
+ * `typeAllowList` the `txTypeAllowList` state, read from the same tip so
+ * admission and apply judge them alike.
  */
 export async function editBindingState(): Promise<{
     active: boolean
     postFork: boolean
     nonceBound: boolean
     governance: boolean
+    typeAllowList: boolean
 }> {
     const tip = await Chain.getLastBlockNumber()
     return {
@@ -139,6 +142,7 @@ export async function editBindingState(): Promise<{
         postFork: isForkActive("osDenomination", tip),
         nonceBound: isForkActive("nonceIntegrity", tip),
         governance: isForkActive("networkGovernance", tip),
+        typeAllowList: isForkActive("txTypeAllowList", tip),
     }
 }
 
@@ -451,13 +455,17 @@ export function verifyNonceEditBinding(tx: Transaction): EditVerdict {
  *
  * Under `nonceIntegrity`, on either side of `editBinding`, the nonce edit is
  * bound as well: the value-edit projection does not look at it. The
- * `networkGovernance` rule also holds on either side of `editBinding`.
+ * `networkGovernance` and `txTypeAllowList` rules also hold on either side of
+ * `editBinding`.
  *
  * Fails closed: a transaction that cannot be checked is refused.
  */
 export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        const { active, postFork, nonceBound, governance } = await editBindingState()
+        const { active, postFork, nonceBound, governance, typeAllowList } =
+            await editBindingState()
+        const typeRefusal = typeAllowList ? blockTxTypeRefusal(tx) : null
+        if (typeRefusal) return refuse(typeRefusal)
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
         const verdict = active

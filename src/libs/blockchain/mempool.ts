@@ -13,6 +13,7 @@ import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
 import { expectsNonceEdit, verifyAdmissionEdits } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
+import { clientTxTypeRefusal } from "./validation/txTypes"
 import { admissionRefusal } from "./validation/postgresStorable"
 import { checkIdentityAdmission } from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
@@ -487,6 +488,12 @@ export default class Mempool {
         })
         if (!admission.ok) {
             return { accepted: false, reason: `${admission.code}: ${admission.reason}` }
+        }
+
+        // Node-authored types reach peers through the merge, never as gossip.
+        const typeRefusal = clientTxTypeRefusal(tx)
+        if (typeRefusal) {
+            return { accepted: false, reason: typeRefusal }
         }
 
         // handleGCR applies gcr_edits of any type as written, so every type

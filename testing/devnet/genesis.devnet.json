@@ -42,6 +42,9 @@
     },
     "networkGovernance": {
       "activationHeight": 0
+    },
+    "txTypeAllowList": {
+      "activationHeight": 0
     }
   },
   "balances": [

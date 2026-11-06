@@ -294,6 +294,22 @@ export type IdentityCarryoverConfig = BaseForkConfig
 export type NetworkGovernanceConfig = BaseForkConfig
 
 /**
+ * `txTypeAllowList` fork: a transaction is admitted to a pool by the
+ * consensus merge and applied by a block only when its type is one the node
+ * implements (`BLOCK_TX_TYPES` in `libs/blockchain/validation/txTypes.ts`).
+ *
+ * Before it, the SDK gave a transaction of any type the universal gas and
+ * nonce edits, so an escrow, contract, token or made-up type was applied as a
+ * fee and a nonce with its own effect silently dropped.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before; a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type TxTypeAllowListConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -335,6 +351,7 @@ export type ForkConfig =
     | FinalityProofsConfig
     | IdentityCarryoverConfig
     | NetworkGovernanceConfig
+    | TxTypeAllowListConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -358,6 +375,7 @@ export type ForkName =
     | "finalityProofs"
     | "identityCarryover"
     | "networkGovernance"
+    | "txTypeAllowList"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -380,6 +398,7 @@ export interface ForkConfigByName {
     finalityProofs: FinalityProofsConfig
     identityCarryover: IdentityCarryoverConfig
     networkGovernance: NetworkGovernanceConfig
+    txTypeAllowList: TxTypeAllowListConfig
 }
 
 /**
@@ -583,6 +602,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Admit and apply networkUpgrade and networkUpgradeVote transactions, each " +
             "governance edit bound to the account that signed it.",
     },
+    txTypeAllowList: {
+        // Dormant by default: a missing genesis entry hydrates from here, so a
+        // running chain keeps applying its history as before.
+        activationHeight: null,
+        description:
+            "Admit and apply only the transaction types the node implements; escrow, " +
+            "contract, token and unknown types are refused instead of applied as a fee.",
+    },
 }
 
 /**
@@ -609,5 +636,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
+        txTypeAllowList: { ...DEFAULT_FORK_CONFIG.txTypeAllowList },
     }
 }

@@ -51,6 +51,7 @@ import {
     verifyEditsAtApply,
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
+import { blockTxTypeRefusal } from "src/libs/blockchain/validation/txTypes"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
@@ -1882,7 +1883,8 @@ export default class HandleGCR {
     }
 
     /**
-     * The transactions of a block refused before apply: those the
+     * The transactions of a block refused before apply: those of a type the
+     * node does not implement (`txTypeAllowList` fork), those the
      * `networkGovernance` rule refuses, whether or not `editBinding` is
      * active, and those whose shipped edits are not the ones their signed
      * body implies (`editBinding` fork). Apply runs the shipped edits as they
@@ -1914,9 +1916,12 @@ export default class HandleGCR {
         // One read of the tip decides whether edits are bound, the shape
         // expected of an amount and the governance rule, once for the block:
         // none of them depends on the transaction.
-        const { active, postFork, governance } = await editBindingState()
+        const { active, postFork, governance, typeAllowList } =
+            await editBindingState()
         for (const tx of txs) {
-            const reason = governanceGateRefusal(tx, governance)
+            const reason =
+                (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
+                governanceGateRefusal(tx, governance)
             if (reason) refuse(tx, reason)
         }
         if (!active) return refused
