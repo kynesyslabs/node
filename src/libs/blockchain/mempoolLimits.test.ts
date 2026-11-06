@@ -313,6 +313,17 @@ describe("chooseSenderOverflow", () => {
         expect(evict).toEqual([])
     })
 
+    it("ranks an unsafe integer nonce as its stored decimal text ranks", () => {
+        // A pooled row's nonce comes back as the JSON text Postgres holds, so
+        // the same tx must rank the same whether it arrives or is held.
+        const big = 2 ** 53 + 2
+        const higher = slot("0xhigher", "s", "9007199254740996")
+        const arriving = chooseSenderOverflow([higher], [slot("0xbig", "s", big)], 1)
+        const held = chooseSenderOverflow([slot("0xbig", "s", String(big))], [higher], 1)
+        expect([...arriving.refuse, ...arriving.evict]).toEqual(["0xhigher"])
+        expect([...held.refuse, ...held.evict]).toEqual(["0xhigher"])
+    })
+
     it("ranks an unreadable nonce last", () => {
         const { refuse } = chooseSenderOverflow([], [slot("0xbad", "s", "x"), slot("0xok", "s", 9)], 1)
         expect([...refuse]).toEqual(["0xbad"])

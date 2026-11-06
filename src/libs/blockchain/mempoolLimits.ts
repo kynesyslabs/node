@@ -304,8 +304,10 @@ export interface SenderSlot {
 }
 
 function slotNonce(value: unknown): bigint | null {
-    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
-        return BigInt(value)
+    // Through its decimal text, as a pooled row's nonce reads back, so an
+    // unsafe integer ranks the same arriving as held.
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+        return slotNonce(String(value))
     }
     if (typeof value === "string" && /^\d{1,20}$/.test(value)) {
         return BigInt(value)
