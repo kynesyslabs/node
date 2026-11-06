@@ -17,6 +17,8 @@ import type {
     IdentityCarryoverConfig,
     StakeApplyChecksConfig,
     NetworkGovernanceConfig,
+    TxTypeAllowListConfig,
+    InstantMessagingBindingConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -379,6 +381,14 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.networkGovernance =
                 config as NetworkGovernanceConfig
             return
+        case "txTypeAllowList":
+            getSharedState.forkConfig.txTypeAllowList =
+                config as TxTypeAllowListConfig
+            return
+        case "instantMessagingBinding":
+            getSharedState.forkConfig.instantMessagingBinding =
+                config as InstantMessagingBindingConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -520,6 +530,10 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as StakeApplyChecksConfig
         case "networkGovernance":
             return base as NetworkGovernanceConfig
+        case "txTypeAllowList":
+            return base as TxTypeAllowListConfig
+        case "instantMessagingBinding":
+            return base as InstantMessagingBindingConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
