@@ -33,11 +33,13 @@ demos_dormant_mode == 1
 [BOOT] DORMANT MODE: peer list empty; signaling / MCP / TLSNotary / ...
 
 # Response header: /health is a readiness probe and refuses a dormant node
+# (both routes are GET-only, so -I / HEAD gets a 404: dump headers instead)
+curl -sS -D - -o /dev/null http://localhost:53550/health
 HTTP/1.1 503 Service Unavailable
 X-Demos-Dormant: true
 
 # /health/live (liveness) still answers 200 with the same header
-curl -sSI http://localhost:53550/health/live
+curl -sS -D - -o /dev/null http://localhost:53550/health/live
 HTTP/1.1 200 OK
 X-Demos-Dormant: true
 ```
