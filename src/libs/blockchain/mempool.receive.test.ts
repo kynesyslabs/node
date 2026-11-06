@@ -330,6 +330,44 @@ describe("Mempool.receive per-sender cap", () => {
         expect(deletedHashes).toEqual([again.hash])
     })
 
+    it("trims a sender the local pool holds over the cap to what a peer's merge keeps", async () => {
+        // The node's own txs skip the cap at admission, so its pool can hold
+        // more of one sender than any peer keeps after the merge.
+        blockCapsOn = true
+        const own = Array.from({ length: 70 }, (_, i) =>
+            fromSender(`0xown${i}`, i + 1),
+        )
+        await Mempool.receive(own)
+        const peerKeeps = heldBySender.map(row => row.hash).sort()
+        expect(peerKeeps).toHaveLength(64)
+
+        resetReceiveState()
+        const other = "0x" + "cd".repeat(32)
+        heldBySender = [
+            ...own.map(t => ({
+                hash: t.hash,
+                sender: SENDER,
+                nonce: String(t.content.nonce),
+            })),
+            { hash: "0xother", sender: other, nonce: "1" },
+        ]
+        const evicted = await Mempool.capPoolSenders()
+        expect(evicted.sort()).toEqual(own.slice(64).map(t => t.hash).sort())
+        expect(
+            heldBySender
+                .filter(row => row.sender === SENDER)
+                .map(row => row.hash)
+                .sort(),
+        ).toEqual(peerKeeps)
+        expect(heldBySender.some(row => row.hash === "0xother")).toBe(true)
+    })
+
+    it("evicts nothing from a pool within the sender cap", async () => {
+        heldBySender = fullHold()
+        expect(await Mempool.capPoolSenders()).toEqual([])
+        expect(deletedHashes).toEqual([])
+    })
+
     it("leaves the merge uncapped before the fork", async () => {
         heldBySender = fullHold()
         await Mempool.receive([fromSender("0xlow", 1), fromSender("0xhigh", 500)])

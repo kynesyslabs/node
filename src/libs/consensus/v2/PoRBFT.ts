@@ -891,10 +891,14 @@ async function mergeAndOrderMempools(
     shard: Peer[],
     blockRef: number,
 ): Promise<{ txs: MempoolTransaction[]; peerlist: string[] }> {
-    // Fetch mempool, check chain for executed txs.
-    const preMempool = await Mempool.lock.runExclusive(
-        async () => await Mempool.getMempool(blockRef),
-    )
+    // Fetch mempool, check chain for executed txs. Under blockCaps the pool
+    // first gives up what the per-sender cap leaves out, as every peer's
+    // merge does with the same txs.
+    const capped = blockCapsActive(blockRef)
+    const preMempool = await Mempool.lock.runExclusive(async () => {
+        if (capped) await Mempool.capPoolSenders()
+        return await Mempool.getMempool(blockRef)
+    })
 
     log.only(`[mergeAndOrderMempools] Pre mempool: ${preMempool.length} txs`)
     const preHashes = preMempool.map(tx => tx.hash)
