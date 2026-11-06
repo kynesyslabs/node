@@ -76,7 +76,10 @@ do not depend on the working directory.
    `docker exec demos-alertmanager amtool alert add RoutingTest severity=critical instance=test --alertmanager.url=http://localhost:9093`
    (critical reaches Slack and paging) and the same with `severity=warning`
    (Slack only). Silence `RoutingTest` afterwards.
-4. `./scripts/check-monitoring.sh` (needs `promtool` and `amtool`) checks the
+4. After you change `monitoring/alertmanager/alertmanager.yml`, restart or recreate the
+   Alertmanager container (`docker compose -f monitoring/docker-compose.yml up -d --force-recreate alertmanager`). The file is bind-mounted as a single file, so a reload (SIGHUP) does not
+   pick up a replaced file. Prometheus rule files can be reloaded as before.
+5. `./scripts/check-monitoring.sh` (needs `promtool` and `amtool`) checks the
    config, runs the rule unit tests in `monitoring/prometheus/tests/` and
    checks that each severity reaches the right receiver.
 
