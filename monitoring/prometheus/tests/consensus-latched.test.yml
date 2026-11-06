@@ -1,10 +1,11 @@
 # promtool unit tests for the demos-consensus-latched group in alerts/consensus.yml:
-# BlockHashMismatch, ConflictingBlock, ForeignSignature and PrecommitEquivocation must
-# keep firing after the counter stops moving, and expire only 7 days after the last event.
-# In all four cases the series is: the event at minute 10, a node restart at minute 20
+# ConflictingBlock, ForeignSignature and PrecommitEquivocation must keep firing after the
+# counter stops moving, and expire only 7 days after the last event.
+# In all three cases the series is: the event at minute 10, a node restart at minute 20
 # (counter back to 0) and no scrape at all from minute 30 on, and each alert is checked
 # to still fire 1 h or 2 h and 6 d later and to be gone 7 d 30 m later. ForeignSignature and PrecommitEquivocation are
 # double-sign signals: each also has a case for not firing when no event happened.
+# BlockHashMismatch is not latched; its tests are in consensus-blockhash.test.yml.
 # Run: scripts/check-monitoring.sh
 rule_files:
   - ../alerts/consensus.yml
@@ -14,78 +15,6 @@ rule_files:
 evaluation_interval: 5m
 
 tests:
-  - interval: 1m
-    input_series:
-      # validator-1: 5 mismatches at minute 10, the node is restarted at minute 20
-      # (counter back to 0) and from minute 30 it is not scraped at all.
-      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-1"}'
-        values: '0x9 5x9 0x9 _x12000'
-      # validator-2: a small disagreement (2) that stays under the "4 or more in 10 m" bar.
-      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-2"}'
-        values: '0x9 2x12000'
-      # validator-3: counter never moves.
-      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-3"}'
-        values: '0x12000'
-    alert_rule_test:
-      # Before the burst: nothing.
-      - eval_time: 5m
-        alertname: BlockHashMismatch
-        exp_alerts: []
-      # Burst of 5 in 10 m: fires for validator-1 only (no `for`).
-      - eval_time: 15m
-        alertname: BlockHashMismatch
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              job: demos-node
-              instance: validator-1
-            exp_annotations:
-              summary: "Peers disagreed with this node's candidate block hash (latched)"
-              description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
-      # The 10 m window is long past (the old rule would have resolved by now), the counter
-      # was reset by the restart and the target is no longer scraped: still firing.
-      - eval_time: 1h
-        alertname: BlockHashMismatch
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              job: demos-node
-              instance: validator-1
-            exp_annotations:
-              summary: "Peers disagreed with this node's candidate block hash (latched)"
-              description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
-      # Six days later: still firing.
-      - eval_time: 6d
-        alertname: BlockHashMismatch
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              job: demos-node
-              instance: validator-1
-            exp_annotations:
-              summary: "Peers disagreed with this node's candidate block hash (latched)"
-              description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
-      # One hour short of 7 days: still firing. With 7d30m below this pins the window
-      # to 7 days within an hour, so a shorter latch (for example [6d]) is caught.
-      - eval_time: 6d23h
-        alertname: BlockHashMismatch
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              job: demos-node
-              instance: validator-1
-            exp_annotations:
-              summary: "Peers disagreed with this node's candidate block hash (latched)"
-              description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
-      # One hour past 7 days: gone (catches a longer latch, for example [8d]).
-      - eval_time: 7d1h
-        alertname: BlockHashMismatch
-        exp_alerts: []
-      # 7 days and 30 minutes after the burst: the latch has expired.
-      - eval_time: 7d30m
-        alertname: BlockHashMismatch
-        exp_alerts: []
-
   - interval: 1m
     input_series:
       # validator-1: one conflicting block at minute 10, the node is restarted at
@@ -308,27 +237,3 @@ tests:
       - eval_time: 6d
         alertname: PrecommitEquivocation
         exp_alerts: []
-
-  # BlockHashMismatch threshold on real scrape timing. The samples are 7 s apart, so they
-  # do not line up with the 10 m window and increase() extrapolates: exactly 3 events read
-  # slightly above 3 (about 3.02) and must stay quiet; 4 events must fire. One disagreeing
-  # round on a 4-validator network is exactly 3 events.
-  - interval: 7s
-    input_series:
-      # validator-1: exactly 3 events at 595 s.
-      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-1"}'
-        values: '0x84 3x600'
-      # validator-2: 4 events at 595 s.
-      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-2"}'
-        values: '0x84 4x600'
-    alert_rule_test:
-      - eval_time: 15m
-        alertname: BlockHashMismatch
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              job: demos-node
-              instance: validator-2
-            exp_annotations:
-              summary: "Peers disagreed with this node's candidate block hash (latched)"
-              description: "Up to 4.033613445378151 peer disagreements on the candidate block hash within 10m on validator-2 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."

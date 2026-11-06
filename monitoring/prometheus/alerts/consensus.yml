@@ -16,11 +16,23 @@ groups:
           summary: No new block for over 5 minutes
           description: "demos_seconds_since_last_block = {{ $value }} on {{ $labels.instance }}. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."
 
-      # BlockHashMismatch and ConflictingBlock are in the demos-consensus-latched
-      # group at the end of this file.
+      # Not latched. The counter rises once per disagreeing peer per round, and genesis has
+      # a shard of 10, so one round where 4 of 9 peers refuse this node's candidate (mempool
+      # lag) already counts 4. That must clear on its own, not latch for 7 days.
+      # Fires at 4 or more in 10 m, not at 3. increase() extrapolates to the window edges,
+      # so exactly 3 events read about 3.02 off the scrape grid and "> 3" would fire on them;
+      # one disagreeing round on a 4-validator network is exactly 3.
+      - alert: BlockHashMismatch
+        expr: increase(demos_consensus_block_hash_mismatch_total[10m]) > 3.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Peers disagreed with this node's candidate block hash
+          description: "About {{ $value | printf \"%.0f\" }} peer disagreements on the candidate block hash within 10m on {{ $labels.instance }} (one per disagreeing peer per round, so a single round can add several). This node, or the peers, forged different block content. Check the mempool, clock skew and the node logs for the tx-set diff; see docs/runbooks/mainnet-monitoring.md."
 
-      # ForeignSignature and PrecommitEquivocation are in the demos-consensus-latched
-      # group at the end of this file.
+      # ConflictingBlock, ForeignSignature and PrecommitEquivocation are in the
+      # demos-consensus-latched group at the end of this file.
 
       - alert: SigningHalted
         expr: demos_signing_halted == 1
@@ -95,36 +107,13 @@ groups:
   # over the last 7 days. Once the condition has been true the alert stays firing for 7 d,
   # whatever the node does afterwards (restart, crash, stop being scraped).
   #
-  # Clearing (see docs/runbooks/mainnet-monitoring.md, "Clearing a latched alert"):
-  #   1. Acknowledge: create an Alertmanager silence for the alert and instance, with the
-  #      ticket in the comment and --duration=7d (amtool silences last 1 h by default,
-  #      and the alert keeps firing, and paging every hour, for up to 7 d). The alert
-  #      stays visible in Prometheus as firing.
-  #   2. Clear: once the fork is resolved and at least 10 m after the last event, delete
-  #      the recorded series for that instance. This needs the Prometheus admin API,
-  #      which is NOT enabled by default: add --web.enable-admin-api to the prometheus
-  #      `command:` list of the prometheus service, then run `docker compose -f monitoring/docker-compose.yml up -d prometheus` (from the repo root). Prometheus is published
-  #      on all interfaces without authentication, so BEFORE enabling the flag change the
-  #      port mapping in monitoring/docker-compose.yml from "${PROMETHEUS_PORT:-9091}:9090"
-  #      to "127.0.0.1:${PROMETHEUS_PORT:-9091}:9090". A ufw/INPUT rule does not filter
-  #      Docker-published ports (only DOCKER-USER does). Remove the flag afterwards.
-  #      e.g. curl -g -X POST http://127.0.0.1:9091/api/v1/admin/tsdb/delete_series
-  #      --data-urlencode 'match[]=demos:conflicting_block:increase10m{instance="validator-2"}'
-  #      The counter itself is left alone, so the evidence stays in the TSDB.
-  #   3. Expire the silence from step 1 after the series is deleted: `amtool silence query
-  #      alertname=<alert> instance=<instance>` gives the id, then `amtool silence expire <id>`.
-  #      Otherwise a repeat double-sign or fork on that validator is silent for up to 7 d.
-  #   4. If the series is not deleted, it expires by itself 7 d after the last event.
-  # Only metrics the node exports today are used. ForeignSignature and
-  # PrecommitEquivocation are double-sign signals and are latched the same way, with
-  # the same 7 d window and the same clear procedure (their recorded series are
-  # demos:foreign_signature:increase10m and demos:precommit_equivocation:increase10m).
+  # Clearing: see docs/runbooks/mainnet-monitoring.md, section "Clearing a latched alert".
+  # Only metrics the node exports today are used. The recorded series are
+  # demos:conflicting_block:increase10m, demos:foreign_signature:increase10m and
+  # demos:precommit_equivocation:increase10m.
   - name: demos-consensus-latched
     interval: 1m
     rules:
-      - record: demos:consensus_block_hash_mismatch:increase10m
-        expr: increase(demos_consensus_block_hash_mismatch_total[10m])
-
       - record: demos:conflicting_block:increase10m
         expr: increase(demos_conflicting_block_total[10m])
 
@@ -133,19 +122,6 @@ groups:
 
       - record: demos:precommit_equivocation:increase10m
         expr: increase(demos_precommit_equivocation_total[10m])
-
-      - alert: BlockHashMismatch
-        # No `for`: the old 5 m `for` only checked that the 10 m window still held the
-        # burst, and a latch holds it for 7 d anyway.
-        # Fires at 4 or more disagreements in 10 m, not at 3. increase() extrapolates to the
-        # window edges, so exactly 3 events read about 3.02 off the scrape grid and "> 3" would
-        # fire on them; one disagreeing round on a 4-validator network is exactly 3.
-        expr: max_over_time(demos:consensus_block_hash_mismatch:increase10m[7d]) > 3.5
-        labels:
-          severity: warning
-        annotations:
-          summary: Peers disagreed with this node's candidate block hash (latched)
-          description: "Up to {{ $value }} peer disagreements on the candidate block hash within 10m on {{ $labels.instance }} during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
 
       - alert: ConflictingBlock
         expr: max_over_time(demos:conflicting_block:increase10m[7d]) > 0

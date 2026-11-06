@@ -204,9 +204,11 @@ scrape_configs:
 Rules are in `prometheus/alerts/`, routing in `alertmanager/alertmanager.yml`. What each
 alert means and what to do is in [`docs/runbooks/mainnet-monitoring.md`](../docs/runbooks/mainnet-monitoring.md).
 Critical and page alerts go to both Slack and paging, warning and info to Slack only (except `MissedSignatures`, which notifies nobody), the
-dead-man heartbeat to its own receiver only. `BlockHashMismatch`, `ConflictingBlock`,
+dead-man heartbeat to its own receiver only. `ConflictingBlock`,
 `ForeignSignature` and `PrecommitEquivocation` are latched for 7 days and do not resolve by
 themselves; the clear procedure is in the runbook ("Clearing a latched alert").
+`BlockHashMismatch` is a plain alert (4 or more peer disagreements in 10 min, counted per
+disagreeing peer, held 5 min) and resolves by itself.
 Unit tests for the rules are in `prometheus/tests/`. Check rules, config and routing with
 `./scripts/check-monitoring.sh` from the repository root (needs `promtool` and `amtool` on PATH).
 

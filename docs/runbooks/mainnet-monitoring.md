@@ -96,7 +96,7 @@ Each fires per validator (`instance` label).
 | Alert | Condition | Severity | Meaning |
 |-------|-----------|----------|---------|
 | HeightStalled | no new block for 300 s, held 2 min; keeps firing 10 min after it clears | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. The gauge is the age of the node's newest stored block, so a validator catching up in its boot-time fast sync after downtime can fire it: check `/health.boot.current` for `fast_sync` first. It is deliberately not gated on fast sync, because that would hide a hung sync from the critical route (`BootIncomplete`, a warning, covers it too). The gauge is also this host's clock minus the block's timestamp: if it stays firing while peers advance, check the host clock (`ClockOffset`, `chronyc tracking`, see [Validator clock](#validator-clock)); a clock more than 300 s ahead reads as a permanent stall. |
-| BlockHashMismatch | 4 or more peer disagreements on the candidate block hash within 10 min (3 does not fire: `increase()` extrapolates, so 3 events read about 3.02 and the threshold is 3.5), **latched 7 days** | warning | This node and its peers are building different blocks (mempool or clock divergence). Check the mempool, clock skew and the log for the tx-set diff. Does not resolve by itself: see "Clearing a latched alert". |
+| BlockHashMismatch | 4 or more peer disagreements on the candidate block hash within 10 min, held 5 min (3 does not fire: `increase()` extrapolates, so 3 events read slightly above 3 and the threshold is 3.5). The count is per disagreeing peer, not per round: one round where 4 peers refuse this node's candidate counts 4. Not latched: it resolves once the 10 min window has passed | warning | This node and its peers are building different blocks (mempool or clock divergence). Check the mempool, clock skew and the log for the tx-set diff. |
 | ConflictingBlock | a peer holds a different block with a verified quorum at a height where this node has one, **latched 7 days** | critical | A fork. The node does not switch chains on its own. Search the log for `[FORK]` for the height and both hashes, decide which chain to keep. See "Clearing a latched alert". |
 | ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, **latched 7 days** | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. A double-sign signal: does not resolve by itself, see "Clearing a latched alert". |
 | SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If it is 0, the marker write failed: keep the node stopped until every other copy of the key is stopped. |
@@ -137,16 +137,17 @@ receiver URLs are placeholders in `monitoring/secrets/`.
 
 ## Clearing a latched alert
 
-`BlockHashMismatch`, `ConflictingBlock`, `ForeignSignature` and
-`PrecommitEquivocation` keep firing for 7 days after the last event, through
-restarts and lost scrapes, because a fork or a double-sign is not over when the
-counter stops moving. `ForeignSignature` and `PrecommitEquivocation` are
-double-sign signals and must not auto-resolve after 10 minutes. A recording rule
-keeps the 10 minute burst size as its own series
-(`demos:consensus_block_hash_mismatch:increase10m`,
-`demos:conflicting_block:increase10m`, `demos:foreign_signature:increase10m`,
-`demos:precommit_equivocation:increase10m`) and the alert is its 7 day maximum.
-Only metrics the node exports today are used.
+`ConflictingBlock`, `ForeignSignature` and `PrecommitEquivocation` keep firing
+for 7 days after the last event, through restarts and lost scrapes, because a
+fork or a double-sign is not over when the counter stops moving.
+`ForeignSignature` and `PrecommitEquivocation` are double-sign signals and must
+not auto-resolve after 10 minutes. A recording rule keeps the 10 minute burst
+size as its own series (`demos:conflicting_block:increase10m`,
+`demos:foreign_signature:increase10m`, `demos:precommit_equivocation:increase10m`)
+and the alert is its 7 day maximum. Only metrics the node exports today are used.
+`BlockHashMismatch` is not latched: its counter rises once per disagreeing peer
+per round, so a single round with a lagging mempool can reach the threshold, and
+that must clear by itself.
 
 Run the `docker compose` commands below from the repository root, as in setup.
 
@@ -209,7 +210,6 @@ wiped volume loses it.
 
 | Alert | Recorded series to delete |
 |-------|---------------------------|
-| BlockHashMismatch | `demos:consensus_block_hash_mismatch:increase10m` |
 | ConflictingBlock | `demos:conflicting_block:increase10m` |
 | ForeignSignature | `demos:foreign_signature:increase10m` |
 | PrecommitEquivocation | `demos:precommit_equivocation:increase10m` |
