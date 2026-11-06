@@ -285,6 +285,24 @@ FAKE_DB=stmt psql_node 3 "SELECT 1" > /dev/null 2>&1
 OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "another psql error is not a connection-limit hit" has "rc=0"
 
+# Every file write of a command fails, as on a full disk: past a file size limit
+# of WRITE_LIMIT blocks (default 0), with SIGXFSZ ignored so that the write
+# fails (EFBIG, as ENOSPC would) and no process is killed
+unwritable() { ( trap '' XFSZ; ulimit -f "${WRITE_LIMIT:-0}"; "$@" ); }
+gate_case gate_psql_unwritten PASS; DB_TIMEOUT_S=2
+OUT=$(FAKE_DB=toomany unwritable psql_node 3 "SELECT 1" 2>&1; echo "rc=$?")
+check "a psql_node read refused for connections, its errors written nowhere: still rc=2" has "^rc=2$"
+check "and says they are not in psql-errors.log" has "psql node3_db: its errors could not be written to ${LOG_DIR}/psql-errors.log"
+OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
+check "the gate then exits 2, not 0, with a verdict of ERROR naming the file psql_node kept" \
+    has "VERDICT ERROR: could not run: could not read ${LOG_DIR}/psql-errors.log to check for the postgres connection limit (psql errors not written to it, kept in ${LOG_DIR}/psql-err\."
+gate_case gate_psql_append PASS; head -c 4096 /dev/zero | tr '\0' '\n' > "${LOG_DIR}/psql-errors.log"
+FAKE_DB=toomany WRITE_LIMIT=1 unwritable psql_node 3 "SELECT 1" > /dev/null 2>&1
+check "only the append to psql-errors.log fails (it is over the limit): psql_node keeps the errors" \
+    bash -c 'grep -q "too many clients" "$1"/psql-err.*' _ "${LOG_DIR}"
+OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
+check "and the gate exits 2" has "^rc=2$"
+
 echo "== the gate fails closed: a node log it cannot read whole is exit 2, never a pass or a fail"
 check "run.sh bounds each docker call of a node-log read at 60 s" test "${LOG_READ_TIMEOUT_S:-unset}" = 60
 QDRILL_TEST_LOG_READ_TIMEOUT_S=1 source <(grep -E '^LOG_READ_TIMEOUT_S=' "${RUN_SH}")
@@ -323,11 +341,31 @@ check "a node that was never started is not read: rc=0" has "rc=0"
 gate_case gate_hit_unread PASS; echo "FATAL:  sorry, too many clients already" > "${FAKE}/nodelog.2"; touch "${FAKE}/nodelog.9.fail"
 gate
 check "a hit in one log and another log unreadable: exit 2" has "rc=2"
+# Node-7, the one started, logged a hit and its copy cannot be written. Up to
+# 8b065d3753 the read gave 0 for the empty copy, and the gate passed.
+gate_case gate_unwritten PASS; STARTED=(); STARTED[7]=1; echo "FATAL:  sorry, too many clients already" > "${FAKE}/nodelog.7"
+OUT=$(unwritable read_node_log 7 "${LOG_DIR}/copy.log" 2> /dev/null; echo "rc=$?")
+check "node-7's log holds a hit, its copy cannot be written: the read fails (rc=1) and says why" \
+    test "${OUT}" = "could not write the copy to ${LOG_DIR}/copy.log"$'\n'"rc=1"
+gate_then() { pg_limit_gate; echo "gate returned $? PG_GATE_PASSED=${PG_GATE_PASSED}"; }
+OUT=$(unwritable gate_then 2>&1; echo "rc=$?")
+echo "${OUT}" | grep -E 'VERDICT|gate returned|^rc=' | cut -c1-220 | sed 's/^/    | /'
+check "the same in the gate: exit 2, the verdict is ERROR and says the copy could not be written" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "VERDICT ERROR: could not run: could not read the log of node-7 to check for the postgres connection limit (could not write the copy to $2); the result was PASS" <<< "$1"' \
+    _ "${OUT}" "${LOG_DIR}/pg-gate.tmp"
+check "the same in the gate: it does not pass" bash -c '! grep -q "PG_GATE_PASSED=1" <<< "$1"' _ "${OUT}"
+gate
+check "the copy written: the gate finds the hit (exit 2)" has "postgres connection limit hit (1 'too many clients' lines; node-7 )"
+# At the cap head stops reading: sed and docker, still writing 1 MiB, die of SIGPIPE
+gate_case gate_big_pipe PASS; yes 'a log line' | head -c 1048576 > "${FAKE}/nodelog.4"
+OUT=$( ( LOG_READ_MAX_BYTES=200; pg_limit_gate ) 2>&1; echo "rc=$?" )
+check "a 1 MiB log over LOG_READ_MAX_BYTES (200 here): still read as over it, not as a failed sed or docker" \
+    has "could not read the log of node-4 to check for the postgres connection limit (the log is over 200 bytes)"
 
 echo "== teardown backstop: an exit 0 or 1 the gate did not clear is exit 2 when a node log cannot be collected"
-teardown_rc() { # $1 the status run.sh exits with: OUT, the status after teardown, and ms it took
+teardown_rc() { # $1 the status run.sh exits with, $2 unwritable (as above): OUT, the status after teardown, and ms it took
     local t0; t0=$(date +%s%N)
-    OUT=$( ( STARTED_STACK=1; SIDECARS=(); (exit "$1"); teardown ) 2>&1; echo "rc=$?" )
+    OUT=$( ( STARTED_STACK=1; SIDECARS=(); [ "${2:-}" = unwritable ] && { trap '' XFSZ; ulimit -f 0; }; (exit "$1"); teardown ) 2>&1; echo "rc=$?" )
     ms=$(( ($(date +%s%N) - t0) / 1000000 ))
 }
 for st in 0 1; do
@@ -352,6 +390,18 @@ check "and node-7.log holds the collected log" grep -q "too many clients" "${LOG
 gate_case td_clean PASS; echo "clean" > "${FAKE}/nodelog.1"
 teardown_rc 0
 check "exit 0, every log collected and clean: exit 0" has "rc=0"
+for st in 0 1; do
+    gate_case td_unwritten FAIL; STARTED=(); STARTED[7]=1; echo "FATAL:  sorry, too many clients already" > "${FAKE}/nodelog.7"
+    teardown_rc "${st}" unwritable
+    echo "${OUT}" | grep -E 'ABORT|^rc=' | cut -c1-220 | sed 's/^/    | /'
+    check "exit ${st}, the gate not passed, node-7's log holds a hit and its copy cannot be written: exit 2, saying why" \
+        bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "ABORT: could not run: could not read node-7 (could not write the copy to $2) to check for the postgres connection limit (exit $3 replaced by 2)" <<< "$1"' \
+        _ "${OUT}" "${LOG_DIR}/node-7.log" "${st}"
+done
+gate_case td_psql_kept FAIL; DB_TIMEOUT_S=2; FAKE_DB=toomany unwritable psql_node 3 "SELECT 1" > /dev/null 2>&1
+teardown_rc 1
+check "exit 1, psql errors psql_node could not write to psql-errors.log: exit 2, naming the file that keeps them" \
+    has "could not read psql-errors.log (psql errors not written to it, kept in psql-err\.[A-Za-z0-9]*) to check for the postgres connection limit (exit 1 replaced by 2)"
 
 echo "== teardown backstop after the verdict: an exit it replaces by 2 makes verdict.json and results.tsv ERROR too"
 for f in results_row rewrite_verdict; do source <(fn_src "${f}"); done
@@ -405,6 +455,20 @@ echo "${ERR}" | cut -c1-220 | sed 's/^/    | /'
 check "a late hit, and neither record can be rewritten: still exit 2" has "rc=2"
 check "and stderr says verdict.json still says PASS" grep -q "could not rewrite ${LOG_DIR}/verdict.json: it still says PASS, the exit is 2" <<< "${ERR}"
 check "and stderr says results.tsv could not be rewritten" grep -q "could not rewrite ${RUNS_DIR}/results.tsv (it could not be read or the copy written): the row of stub-td_unwritable still says PASS, the exit is 2" <<< "${ERR}"
+# Neither copy of the rewrite can be written (unwritable): no record is replaced
+# by what was written of its copy. gawk exits 0 then; mawk, 2.
+gate_case td_copies_unwritten PASS; RUNS_DIR="${WORK}/td_copies_unwritten/runs"; mkdir -p "${RUNS_DIR}"
+printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\nearlier\tfloor\ton\t4\t10\t7\timage\tfine\tPASS\nstub-copies\tdrop-n10s10\ton\t13\t10\t7\timage\tphases fine\tPASS\n' > "${RUNS_DIR}/results.tsv"
+echo '{"result":"PASS","detail":"phases fine"}' > "${LOG_DIR}/verdict.json"
+cp "${RUNS_DIR}/results.tsv" "${WORK}/results.before"; cp "${LOG_DIR}/verdict.json" "${WORK}/verdict.before"
+ERR=$( ( RUN_ID=stub-copies; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; unwritable rewrite_verdict "could not run: stub" ) 2>&1 > /dev/null; echo "rc=$?")
+echo "${ERR}" | grep -E 'ERROR|^rc=' | cut -c1-220 | sed 's/^/    | /'
+check "rewrite_verdict, neither copy can be written: rc=1, verdict.json as it was, and stderr says it still says PASS" \
+    bash -c 'grep -q "^rc=1$" <<< "$1" && cmp -s "$2" "$3" && grep -q "could not rewrite $2: it still says PASS, the exit is 2" <<< "$1"' \
+    _ "${ERR}" "${LOG_DIR}/verdict.json" "${WORK}/verdict.before"
+check "rewrite_verdict, neither copy can be written: results.tsv as it was, every row kept, and stderr says so" \
+    bash -c 'cmp -s "$2" "$3" && grep -q "could not rewrite $2 (.*): the row of stub-copies still says PASS, the exit is 2" <<< "$1"' \
+    _ "${ERR}" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
 
 echo "== the postgres container lookup is bounded: one that stalls, fails or finds nothing fails the read, or the preflight's try, and says why"
 # A function of this shell in a fresh bash under an outside guard of $1 s, so a
