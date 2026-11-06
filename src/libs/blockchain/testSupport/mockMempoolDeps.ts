@@ -1,4 +1,5 @@
-import { jest, mock } from "bun:test"
+import { mock } from "bun:test"
+import { mockLogger } from "@/utilities/testSupport/coreMocks"
 
 /**
  * Module mocks shared by the L2PS mempool and handler tests. Each test calls
@@ -6,20 +7,7 @@ import { jest, mock } from "bun:test"
  * the module loads against the mocks.
  */
 
-/** Silences the logger; `specifier` is the path the module under test imports it by. */
-export function mockLogger(specifier = "@/utilities/logger"): void {
-    mock.module(specifier, () => ({
-        __esModule: true,
-        default: {
-            debug: jest.fn(),
-            info: jest.fn(),
-            warn: jest.fn(),
-            warning: jest.fn(),
-            error: jest.fn(),
-            only: jest.fn(),
-        },
-    }))
-}
+export { mockLogger }
 
 /**
  * What loading the mempool pulls in: the datasource (resolved lazily, so a

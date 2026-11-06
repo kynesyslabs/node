@@ -7,6 +7,7 @@
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 import forge from "node-forge"
+import { mockCore } from "src/utilities/testSupport/coreMocks"
 
 const pair = forge.pki.ed25519.generateKeyPair()
 const PUBKEY = Buffer.from(pair.publicKey).toString("hex")
@@ -34,23 +35,7 @@ const sharedState: Record<string, any> = {
     },
 }
 
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-        custom: jest.fn(),
-    },
-}))
-jest.mock("src/utilities/sharedState", () => ({
-    __esModule: true,
-    default: { getInstance: () => sharedState },
-    getSharedState: sharedState,
-}))
+mockCore(sharedState, { asInstance: true })
 jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
     __esModule: true,
     default: {
@@ -110,9 +95,7 @@ const axios = (await import("axios")).default
 }
 
 const { BunServer } = await import("./bunServer")
-let server: any
 BunServer.prototype.start = function () {
-    server = this
     return null as any
 }
 
@@ -120,8 +103,7 @@ const { serverRpcBun } = await import("./server_rpc")
 const { default: Peer } = await import("src/libs/peer/Peer")
 const Hashing = (await import("src/libs/crypto/hashing")).default
 
-const app = await serverRpcBun()
-server ??= app
+const server: any = await serverRpcBun()
 const fakeServer = { requestIP: () => ({ address: "198.51.100.7" }) }
 server.server = fakeServer
 

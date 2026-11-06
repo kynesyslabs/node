@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { mockCore } from "src/utilities/testSupport/coreMocks"
 
 const OUR_KEY = "0x" + "aa".repeat(32)
 const ALICE = "0x" + "a1".repeat(32)
@@ -25,23 +26,7 @@ const sharedState: Record<string, unknown> = {
     getConsensusTime: () => 10,
 }
 
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-        custom: jest.fn(),
-    },
-}))
-jest.mock("src/utilities/sharedState", () => ({
-    __esModule: true,
-    default: sharedState,
-    getSharedState: sharedState,
-}))
+mockCore(sharedState)
 jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
     __esModule: true,
     default: {

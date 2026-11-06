@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { mockCore } from "src/utilities/testSupport/coreMocks"
 
 const sharedState: Record<string, any> = {}
 
@@ -32,23 +33,7 @@ function resetState() {
     })
 }
 
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-        custom: jest.fn(),
-    },
-}))
-jest.mock("src/utilities/sharedState", () => ({
-    __esModule: true,
-    default: { getInstance: () => sharedState },
-    getSharedState: sharedState,
-}))
+mockCore(sharedState, { asInstance: true })
 jest.mock("src/libs/blockchain/mempool", () => ({
     __esModule: true,
     default: { count: async () => 0 },
