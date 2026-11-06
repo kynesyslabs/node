@@ -296,16 +296,25 @@ describe("#1059 acceptance test 3: tampering gives a rejection (N05, N06 analogu
 
 describe("#1059 acceptance test 4: a validator set change", () => {
     // Block m commits a set where the newcomer replaced members[3].
-    const changed = [...members.slice(0, 3), newcomer].map(entry)
-    const changedHash = validatorSetHash(changed)
+    const removed = members[3]
+    const changedMembers = [...members.slice(0, 3), newcomer]
+    const changed = { validators: changedMembers.map(entry) }
+    const changedSet = { peerlist: changedMembers.map(k => k.identity), setHash: validatorSetHash(changed.validators) }
 
-    it("verifies with the new set", () => {
-        const proof = txProof(0, { setHash: changedHash })
-        expect(verifyTransactionProof(proof, { validators: changed }, rules).verdict).toBe("final-executed")
+    it("needs the newcomer's signature to reach the threshold", () => {
+        const withNewcomer = txProof(0, { ...changedSet, signers: [members[0], members[1], newcomer] })
+        expect(verifyTransactionProof(withNewcomer, changed, rules).verdict).toBe("final-executed")
+        const withoutNewcomer = txProof(0, { ...changedSet, signers: members.slice(0, 2) })
+        expectRefused(verifyTransactionProof(withoutNewcomer, changed, rules), "invalid", /2 verified signature/)
+    })
+
+    it("does not count the removed member's signature", () => {
+        const proof = txProof(0, { ...changedSet, signers: [members[0], members[1], removed] })
+        expectRefused(verifyTransactionProof(proof, changed, rules), "invalid", /2 verified signature/)
     })
 
     it("is never final with the change left out", () => {
-        const proof = txProof(0, { setHash: changedHash })
+        const proof = txProof(0, { ...changedSet, signers: [members[0], members[1], newcomer] })
         expectRefused(verifyTransactionProof(proof, trusted, rules), "indeterminate", /commits validator set/)
     })
 })
