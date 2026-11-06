@@ -29,6 +29,9 @@
 #     executable
 #   - wipe-and-reboot.sh keeps the node state volume (signing record, commit
 #     lock) unless --wipe-signing-state is given, and warns when it is
+#   - reset-node keeps every signing-state file next to the identity (signing
+#     record, halt marker, commit lock, prevote record), and when the clone
+#     fails and a backup cannot be moved back it says where the backup is
 #
 # Usage:
 #   scripts/launcher-wipe-guard.test.sh                 # the scripts next to this file
@@ -424,6 +427,84 @@ start_case; seed_volumes; chmod -x "$W/scripts/docker-run"
 check "wipe-and-reboot: scripts/docker-run not executable -> refuses before the wipe" fail 0 "$W/scripts/wipe-and-reboot.sh" --yes --no-rebuild
 [[ -d "$ST/vol/demos_pgdata" && -f "$ST/vol/demos_pgdata/tables/users" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - wipe-and-reboot removed the PG volume although scripts/docker-run is not executable"; }
 grep -qE 'docker compose .*up' "$ST/calls.log" 2>/dev/null && { FAIL=$((FAIL + 1)); echo "FAIL - wipe-and-reboot ran a raw 'docker compose up' without scripts/docker-run"; }
+
+# -----------------------------------------------------------------------------
+# reset-node
+# -----------------------------------------------------------------------------
+echo "# scripts/reset-node (scripts from: $SRC)"
+
+RESET_SIGNING=(.demos_identity.signed.json .demos_identity.signed.json.halted .demos_identity.commitlock.json .demos_identity.prevote.json)
+
+# A node checkout with an identity and every signing-state file. git clone
+# makes an empty checkout (or fails with STUB_FAIL_CLONE=1) and mv fails on a
+# .backup file with STUB_FAIL_MV=1.
+new_reset_world() {
+    N=$((N + 1))
+    W="$ROOT/r$N"
+    mkdir -p "$W/node" "$W/bin"
+    cp "$SRC/reset-node" "$W/reset-node" || { echo "missing $SRC/reset-node" >&2; exit 99; }
+    chmod +x "$W/reset-node"
+    echo '{"name":"demos-node"}' >"$W/node/package.json"
+    local f
+    for f in .demos_identity "${RESET_SIGNING[@]}"; do echo "$f" >"$W/node/$f"; done
+    cat >"$W/bin/git" <<'STUB'
+#!/usr/bin/env bash
+[[ "${1:-}" == clone ]] || exit 0
+[[ "${STUB_FAIL_CLONE:-0}" == 1 ]] && { echo "fatal: unable to access" >&2; exit 128; }
+mkdir -p "${3:?}"
+STUB
+    cat >"$W/bin/mv" <<'STUB'
+#!/usr/bin/env bash
+if [[ "${STUB_FAIL_MV:-0}" == 1 && "${1:-}" == *.backup ]]; then
+    echo "mv: cannot move '$1': Permission denied" >&2
+    exit 1
+fi
+exec "$STUB_REAL_MV" "$@"
+STUB
+    printf '#!/usr/bin/env bash\nexit 0\n' >"$W/bin/bun"
+    chmod +x "$W/bin/git" "$W/bin/mv" "$W/bin/bun"
+}
+
+# reset_check NAME EXPECT_RC ARGS...   (EXPECT_RC: ok | fail)
+reset_check() {
+    local name="$1" want_rc="$2"
+    shift 2
+    local out rc
+    out="$(cd "$W/node" && env PATH="$W/bin:$PATH" STUB_REAL_MV="$(command -v mv)" \
+        timeout 60 "$W/reset-node" "$@" 2>&1)"
+    rc=$?
+    if [[ ("$want_rc" == ok && "$rc" -eq 0) || ("$want_rc" == fail && "$rc" -ne 0 && "$rc" -ne 124) ]]; then
+        PASS=$((PASS + 1))
+        echo "ok   - $name (exit $rc)"
+    else
+        FAIL=$((FAIL + 1))
+        echo "FAIL - $name: exit $rc (want $want_rc)"
+        echo "$out" | tail -8 | sed 's/^/         | /'
+    fi
+    LAST_OUT="$out"
+}
+
+new_reset_world
+reset_check "reset-node: plain reset completes" ok -y
+for f in .demos_identity "${RESET_SIGNING[@]}"; do
+    [[ -f "$W/node/$f" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node dropped $f"; }
+done
+
+new_reset_world
+reset_check "reset-node --wipe-signing-state: completes" ok -y --wipe-signing-state
+[[ -f "$W/node/.demos_identity" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node --wipe-signing-state dropped the identity"; }
+for f in "${RESET_SIGNING[@]}"; do
+    [[ -e "$W/node/$f" ]] && { FAIL=$((FAIL + 1)); echo "FAIL - reset-node --wipe-signing-state kept $f"; }
+done
+
+# The clone fails and a backup cannot be moved back: the operator must be told
+# where it is, or the signing record is silently left behind
+new_reset_world
+export STUB_FAIL_CLONE=1 STUB_FAIL_MV=1
+reset_check "reset-node: clone fails, restore fails -> exits non-zero" fail -y
+unset STUB_FAIL_CLONE STUB_FAIL_MV
+[[ -f "$W/.demos_identity.commitlock.json.backup" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node lost the commit lock backup"; }
+case "$LAST_OUT" in *"$W/.demos_identity.commitlock.json.backup"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not say where the unrestored commit lock backup is";; esac
 
 echo
 echo "passed: $PASS  failed: $FAIL"
