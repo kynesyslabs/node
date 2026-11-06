@@ -23,6 +23,8 @@ import type {
     CanonicalAddressesConfig,
     FeeBindingConfig,
     BlockCapsConfig,
+    TokenStakingGateConfig,
+    TokenStakingConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -407,6 +409,13 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "blockCaps":
             getSharedState.forkConfig.blockCaps = config as BlockCapsConfig
             return
+        case "tokenStakingGate":
+            getSharedState.forkConfig.tokenStakingGate =
+                config as TokenStakingGateConfig
+            return
+        case "tokenStaking":
+            getSharedState.forkConfig.tokenStaking = config as TokenStakingConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -560,6 +569,10 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as FeeBindingConfig
         case "blockCaps":
             return base as BlockCapsConfig
+        case "tokenStakingGate":
+            return base as TokenStakingGateConfig
+        case "tokenStaking":
+            return base as TokenStakingConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

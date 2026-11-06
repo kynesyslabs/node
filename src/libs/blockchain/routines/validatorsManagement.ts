@@ -13,6 +13,7 @@ import { requireSender } from "src/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { isForkActive } from "@/forks"
+import { TOKEN_STAKING_REFUSAL, tokenStakingOpen } from "@/forks/tokenStakingGate"
 import { chainMinValidatorStake } from "src/features/staking/chainMinStake"
 import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import type {
@@ -55,6 +56,11 @@ async function stakeChecksActive(): Promise<boolean> {
     return isForkActive("stakeApplyChecks", await Chain.getLastBlockNumber())
 }
 
+/** Whether token staking is open for the block applied on the current tip. */
+async function stakingOpen(): Promise<boolean> {
+    return tokenStakingOpen(await Chain.getLastBlockNumber())
+}
+
 type StakeTxResult = { valid: boolean; message: string }
 
 export default class ValidatorsManagement {
@@ -69,6 +75,9 @@ export default class ValidatorsManagement {
     static async manageValidatorStakeTx(
         tx: Transaction,
     ): Promise<StakeTxResult> {
+        if (!(await stakingOpen())) {
+            return { valid: false, message: TOKEN_STAKING_REFUSAL }
+        }
         const payload = extractStakePayload(tx)
         if (!payload) {
             return { valid: false, message: "Missing stake payload" }
@@ -165,6 +174,9 @@ export default class ValidatorsManagement {
     static async manageValidatorUnstakeTx(
         tx: Transaction,
     ): Promise<StakeTxResult> {
+        if (!(await stakingOpen())) {
+            return { valid: false, message: TOKEN_STAKING_REFUSAL }
+        }
         const sender = requireSender(tx)
         if (!sender) return { valid: false, message: "Missing sender" }
 

@@ -79,6 +79,12 @@
     },
     "networkGovernance": {
       "activationHeight": null
+    },
+    "tokenStakingGate": {
+      "activationHeight": null
+    },
+    "tokenStaking": {
+      "activationHeight": null
     }
   },
   "snapshot": {

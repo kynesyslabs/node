@@ -59,6 +59,7 @@ const { stakeSenderRefusal } = await import("../validation/editBinding")
 const { DEFAULT_MIN_VALIDATOR_STAKE } = await import("@/features/staking/constants")
 const { StateReadError } = await import("./stateReadError")
 const { loadNetworkParameters } = await import("../routines/loadNetworkParameters")
+const { TOKEN_STAKING_REFUSAL } = await import("@/forks/tokenStakingGate")
 
 const MIN = BigInt(DEFAULT_MIN_VALIDATOR_STAKE)
 const SENDER = "0xabc"
@@ -433,6 +434,67 @@ describe("a stake edit for another account", () => {
         expect(
             stakeSenderRefusal(tx([{ ...edit("stake", "1"), account: "0xvictim" }])),
         ).not.toBeNull()
+    })
+})
+
+describe("while token staking is closed (tokenStakingGate)", () => {
+    const self = () => ({
+        address: SENDER,
+        status: "2",
+        staked_amount: MIN.toString(),
+        bonded_amount: MIN.toString(),
+        unstake_requested_at: null,
+        unstake_available_at: null,
+    })
+
+    beforeEach(() => {
+        getSharedState.forkConfig.tokenStakingGate.activationHeight = 0
+    })
+
+    it("refuses a stake, an unstake and an exit shipped as a rollback, before reading the row", async () => {
+        seeded = { Validators: [self(), ...activeValidators(9)] }
+        const entities = caches(MIN)
+        for (const e of [
+            edit("stake", MIN.toString()),
+            edit("unstake"),
+            { ...edit("exit"), isRollback: true },
+        ]) {
+            expect(await apply(e, entities)).toMatchObject({
+                success: false,
+                message: TOKEN_STAKING_REFUSAL,
+            })
+        }
+        expect(entities.accounts.get(SENDER).balance).toBe(MIN)
+        expect(entities.validators?.get(SENDER)).toBeUndefined()
+    })
+
+    it("applies a stake from the block after the tokenStaking height, under stakeApplyChecks", async () => {
+        // The tip is 100: tokenStaking at 101 binds only from block 102.
+        getSharedState.forkConfig.tokenStaking.activationHeight = 101
+        const closed = await apply(edit("stake", MIN.toString()), caches(MIN))
+        expect(closed.message).toBe(TOKEN_STAKING_REFUSAL)
+
+        getSharedState.forkConfig.tokenStaking.activationHeight = 100
+        const entities = caches(MIN + 10n)
+        const result = await apply(edit("stake", MIN.toString()), entities)
+        expect(result.success).toBe(true)
+        expect(entities.accounts.get(SENDER).balance).toBe(10n)
+        expect(entities.validators.get(SENDER)).toMatchObject({
+            status: "2",
+            staked_amount: MIN.toString(),
+            bonded_amount: MIN.toString(),
+        })
+    })
+
+    it("does not judge the node's own rollback of an applied stake", async () => {
+        getSharedState.forkConfig.tokenStaking.activationHeight = 0
+        const entities = caches(MIN)
+        expect((await apply(edit("stake", MIN.toString()), entities)).success).toBe(true)
+
+        getSharedState.forkConfig.tokenStaking.activationHeight = null
+        const undone = await HandleGCR.applyGCREdit(edit("stake", MIN.toString()), entities, true, false)
+        expect(undone.success).toBe(true)
+        expect(BigInt(entities.accounts.get(SENDER).balance)).toBe(MIN)
     })
 })
 
