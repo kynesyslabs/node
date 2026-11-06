@@ -171,6 +171,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "finalityProofs",
     "identityCarryover",
     "txTypeAllowList",
+    "instantMessagingBinding",
 ]
 
 /**

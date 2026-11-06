@@ -45,6 +45,9 @@
     },
     "txTypeAllowList": {
       "activationHeight": 0
+    },
+    "instantMessagingBinding": {
+      "activationHeight": 0
     }
   },
   "balances": [

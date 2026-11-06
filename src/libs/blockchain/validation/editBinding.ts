@@ -48,7 +48,12 @@ import { governanceGateRefusal } from "@/forks/governanceGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
-import { blockTxTypeRefusal } from "./txTypes"
+import {
+    blockTxTypeRefusal,
+    isNodeMessage,
+    nodeMessageRefusal,
+    validatorKeysAt,
+} from "./txTypes"
 import {
     canonical,
     verifyGcrEditsMatch,
@@ -76,7 +81,8 @@ const EDIT_FREE_TYPES = new Set<string>(["l2psBatch", "genesis"])
 
 /**
  * The signalling server stores messages as `instantMessaging` transactions
- * signed by the node, with no edits. A client-signed one carries the universal
+ * signed by the node, with no edits; under `instantMessagingBinding` only a
+ * staked validator may sign one. A client-signed one carries the universal
  * edits instead and is compared like any other type.
  */
 const EDIT_FREE_OR_BOUND_TYPES = new Set<string>(["instantMessaging"])
@@ -125,9 +131,10 @@ async function osDenominationActive(): Promise<boolean> {
  * Whether edits are bound, and the denomination shape expected, from one read
  * of the chain tip (the source the native edit check always used for the
  * shape). A fork activating at height H binds the block applied on tip H,
- * which is block H + 1. `governance` is the `networkGovernance` state and
- * `typeAllowList` the `txTypeAllowList` state, read from the same tip so
- * admission and apply judge them alike.
+ * which is block H + 1. `governance`, `typeAllowList` and `messageBinding`
+ * are the `networkGovernance`, `txTypeAllowList` and `instantMessagingBinding`
+ * states, read from the same tip so admission and apply judge them alike;
+ * `tip` is that tip.
  */
 export async function editBindingState(): Promise<{
     active: boolean
@@ -135,6 +142,8 @@ export async function editBindingState(): Promise<{
     nonceBound: boolean
     governance: boolean
     typeAllowList: boolean
+    messageBinding: boolean
+    tip: number
 }> {
     const tip = await Chain.getLastBlockNumber()
     return {
@@ -143,6 +152,8 @@ export async function editBindingState(): Promise<{
         nonceBound: isForkActive("nonceIntegrity", tip),
         governance: isForkActive("networkGovernance", tip),
         typeAllowList: isForkActive("txTypeAllowList", tip),
+        messageBinding: isForkActive("instantMessagingBinding", tip),
+        tip,
     }
 }
 
@@ -455,17 +466,28 @@ export function verifyNonceEditBinding(tx: Transaction): EditVerdict {
  *
  * Under `nonceIntegrity`, on either side of `editBinding`, the nonce edit is
  * bound as well: the value-edit projection does not look at it. The
- * `networkGovernance` and `txTypeAllowList` rules also hold on either side of
- * `editBinding`.
+ * `networkGovernance`, `txTypeAllowList` and `instantMessagingBinding` rules
+ * also hold on either side of `editBinding`.
  *
  * Fails closed: a transaction that cannot be checked is refused.
  */
 export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        const { active, postFork, nonceBound, governance, typeAllowList } =
-            await editBindingState()
+        const {
+            active,
+            postFork,
+            nonceBound,
+            governance,
+            typeAllowList,
+            messageBinding,
+            tip,
+        } = await editBindingState()
         const typeRefusal = typeAllowList ? blockTxTypeRefusal(tx) : null
         if (typeRefusal) return refuse(typeRefusal)
+        if (messageBinding && isNodeMessage(tx)) {
+            const messageRefusal = nodeMessageRefusal(tx, await validatorKeysAt(tip))
+            if (messageRefusal) return refuse(messageRefusal)
+        }
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
         const verdict = active

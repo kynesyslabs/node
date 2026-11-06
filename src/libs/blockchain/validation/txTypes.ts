@@ -93,3 +93,59 @@ export function blockTxTypeRefusal(tx: TxView): string | null {
         ? null
         : notAccepted(type)
 }
+
+/**
+ * A message the signalling server stores: an `instantMessaging` transaction
+ * with no edits, so it pays no fee and spends no nonce.
+ */
+export function isNodeMessage(tx: TxView): boolean {
+    if (typeOf(tx) !== "instantMessaging") return false
+    const edits = ((tx as { content?: Record<string, unknown> }).content ?? {})
+        .gcr_edits
+    return !Array.isArray(edits) || edits.length === 0
+}
+
+/** A public key as validator rows and signer fields compare: lower-case, 0x-prefixed. */
+function keyOf(value: unknown): string | null {
+    if (typeof value !== "string" || value.length === 0) return null
+    const lower = value.toLowerCase()
+    return lower.startsWith("0x") ? lower : `0x${lower}`
+}
+
+/**
+ * Why a node message is refused under `instantMessagingBinding`, or null.
+ * Its exemption from fee and nonce is for the node that relays the message,
+ * so every signer field it names must be a validator staked at the tip
+ * (`validators`, keys as `keyOf` gives them). A message that carries the
+ * universal edits pays like any transaction and is not judged here.
+ */
+export function nodeMessageRefusal(
+    tx: TxView,
+    validators: ReadonlySet<string>,
+): string | null {
+    if (!isNodeMessage(tx)) return null
+    const content = ((tx as { content?: unknown }).content ?? {}) as Record<
+        string,
+        unknown
+    >
+    const signers = [content.from, content.from_ed25519_address]
+        .filter(s => s !== undefined && s !== null && s !== "")
+        .map(keyOf)
+    if (signers.length === 0 || signers.some(s => s === null || !validators.has(s))) {
+        return "an instantMessaging transaction without edits must be signed by a staked validator"
+    }
+    return null
+}
+
+/** The keys of the validators staked at `tip`; a failed read throws. */
+export async function validatorKeysAt(tip: number): Promise<Set<string>> {
+    // Lazy: gcr.ts imports the edit binding, which imports this module.
+    const { default: GCR } = await import("src/libs/blockchain/gcr/gcr")
+    const rows = await GCR.getGCRValidatorsAtBlockOrThrow(tip)
+    const keys = new Set<string>()
+    for (const row of rows) {
+        const key = keyOf(row.address)
+        if (key) keys.add(key)
+    }
+    return keys
+}

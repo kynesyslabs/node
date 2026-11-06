@@ -51,7 +51,12 @@ import {
     verifyEditsAtApply,
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
-import { blockTxTypeRefusal } from "src/libs/blockchain/validation/txTypes"
+import {
+    blockTxTypeRefusal,
+    isNodeMessage,
+    nodeMessageRefusal,
+    validatorKeysAt,
+} from "src/libs/blockchain/validation/txTypes"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
@@ -100,7 +105,7 @@ import {
     applyAtomicStoragePut,
     type StoragePutEdit,
 } from "@/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines"
-import { StateReadError } from "@/libs/blockchain/gcr/stateReadError"
+import { StateReadError, readState } from "@/libs/blockchain/gcr/stateReadError"
 import {
     applySlotCas,
     applyWorkAttempt,
@@ -1884,7 +1889,8 @@ export default class HandleGCR {
 
     /**
      * The transactions of a block refused before apply: those of a type the
-     * node does not implement (`txTypeAllowList` fork), those the
+     * node does not implement (`txTypeAllowList` fork), a fee-free message
+     * not signed by a staked validator (`instantMessagingBinding`), those the
      * `networkGovernance` rule refuses, whether or not `editBinding` is
      * active, and those whose shipped edits are not the ones their signed
      * body implies (`editBinding` fork). Apply runs the shipped edits as they
@@ -1916,13 +1922,27 @@ export default class HandleGCR {
         // One read of the tip decides whether edits are bound, the shape
         // expected of an amount and the governance rule, once for the block:
         // none of them depends on the transaction.
-        const { active, postFork, governance, typeAllowList } =
+        const { active, postFork, governance, typeAllowList, messageBinding, tip } =
             await editBindingState()
         for (const tx of txs) {
             const reason =
                 (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
                 governanceGateRefusal(tx, governance)
             if (reason) refuse(tx, reason)
+        }
+        const messages = messageBinding
+            ? txs.filter(tx => !refused.has(tx.hash) && isNodeMessage(tx))
+            : []
+        if (messages.length > 0) {
+            // A failed read says nothing about the messages: the block must
+            // not apply rather than fail them on this node alone.
+            const validators = await readState("validator set", () =>
+                validatorKeysAt(tip),
+            )
+            for (const tx of messages) {
+                const reason = nodeMessageRefusal(tx, validators)
+                if (reason) refuse(tx, reason)
+            }
         }
         if (!active) return refused
 

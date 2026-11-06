@@ -310,6 +310,23 @@ export type NetworkGovernanceConfig = BaseForkConfig
 export type TxTypeAllowListConfig = BaseForkConfig
 
 /**
+ * `instantMessagingBinding` fork: an `instantMessaging` transaction without
+ * edits, the form the signalling server stores a message in, is merged and
+ * applied only when every signer field names a validator staked at the tip.
+ *
+ * Before it, that form paid no fee and spent no nonce whoever signed it, so
+ * any key could have such transactions merged into blocks and applied for
+ * free. A message that carries the universal gas and nonce edits pays like
+ * any transaction and is not affected.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before; a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type InstantMessagingBindingConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -352,6 +369,7 @@ export type ForkConfig =
     | IdentityCarryoverConfig
     | NetworkGovernanceConfig
     | TxTypeAllowListConfig
+    | InstantMessagingBindingConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -376,6 +394,7 @@ export type ForkName =
     | "identityCarryover"
     | "networkGovernance"
     | "txTypeAllowList"
+    | "instantMessagingBinding"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -399,6 +418,7 @@ export interface ForkConfigByName {
     identityCarryover: IdentityCarryoverConfig
     networkGovernance: NetworkGovernanceConfig
     txTypeAllowList: TxTypeAllowListConfig
+    instantMessagingBinding: InstantMessagingBindingConfig
 }
 
 /**
@@ -610,6 +630,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Admit and apply only the transaction types the node implements; escrow, " +
             "contract, token and unknown types are refused instead of applied as a fee.",
     },
+    instantMessagingBinding: {
+        // Dormant by default: a missing genesis entry hydrates from here, so a
+        // running chain keeps applying its history as before.
+        activationHeight: null,
+        description:
+            "A fee-free instantMessaging transaction (no edits) is merged and applied only " +
+            "when a validator staked at the tip signed it.",
+    },
 }
 
 /**
@@ -637,5 +665,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
         txTypeAllowList: { ...DEFAULT_FORK_CONFIG.txTypeAllowList },
+        instantMessagingBinding: { ...DEFAULT_FORK_CONFIG.instantMessagingBinding },
     }
 }
