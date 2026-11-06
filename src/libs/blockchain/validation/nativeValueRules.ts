@@ -26,24 +26,39 @@ KyneSys Labs: https://www.kynesys.xyz/
  */
 
 import type { Transaction } from "@kynesyslabs/demosdk/types"
+import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
 import { feeBindingRefusal } from "./feeBinding"
 
 export interface ValueRules {
     sendBound: boolean
     canonical: boolean
     feeBound: boolean
+    /** osDenomination, which sets the unit amounts are paid and named in. */
+    postFork: boolean
 }
 
 /**
- * A signed integer amount, or null. Both sides of the comparison are in the
- * unit the same signer wrote them in (DEM numbers before osDenomination, OS
- * strings after), so they are compared as written.
+ * The ledger units a send's args pay, or null. Apply credits args[1] as is,
+ * so a number pays that many OS once osDenomination is active.
  */
-function signedInteger(value: unknown): bigint | null {
-    if (typeof value === "bigint") return value
+function paidAmount(value: unknown): bigint | null {
     if (typeof value === "number") return Number.isSafeInteger(value) ? BigInt(value) : null
     if (typeof value === "string" && /^-?(0|[1-9]\d*)$/.test(value)) return BigInt(value)
     return null
+}
+
+/**
+ * The ledger units content.amount names, or null: what the signature hash
+ * and the RPC balance check read, where a DEM number becomes OS once
+ * osDenomination is active.
+ */
+function namedAmount(value: unknown, postFork: boolean): bigint | null {
+    if (typeof value !== "number" && typeof value !== "string") return null
+    try {
+        return canonicalizeAmountToOs(value, postFork)
+    } catch {
+        return null
+    }
 }
 
 function nativeSendArgs(tx: Transaction): unknown[] | null | undefined {
@@ -53,16 +68,20 @@ function nativeSendArgs(tx: Transaction): unknown[] | null | undefined {
     return Array.isArray(payload.args) ? payload.args : null
 }
 
-/** Why a native send pays another recipient or amount than its body names, or null. */
-export function nativeSendRefusal(tx: Transaction): string | null {
+/**
+ * Why a native send pays another recipient or amount than its body names, or
+ * null. The amounts are compared in ledger units, not as written: after
+ * osDenomination a body amount of 1 names 1 DEM while args of 1 pay 1 OS.
+ */
+export function nativeSendRefusal(tx: Transaction, postFork: boolean): string | null {
     const args = nativeSendArgs(tx)
     if (args === undefined) return null
     if (args === null || args.length !== 2) return "native send args must be [to, amount]"
     if (typeof args[0] !== "string" || args[0] !== tx.content.to) {
         return "native send pays another recipient than content.to"
     }
-    const paid = signedInteger(args[1])
-    const named = signedInteger(tx.content.amount)
+    const paid = paidAmount(args[1])
+    const named = namedAmount(tx.content.amount, postFork)
     if (paid === null || named === null || paid !== named) {
         return "native send pays another amount than content.amount"
     }
@@ -115,11 +134,11 @@ export async function valueRulesRefusal(
         if (reason) return reason
     }
     if (rules.sendBound) {
-        const reason = nativeSendRefusal(tx)
+        const reason = nativeSendRefusal(tx, rules.postFork)
         if (reason) return reason
     }
     if (rules.feeBound) {
-        const reason = await feeBindingRefusal(tx)
+        const reason = await feeBindingRefusal(tx, rules.postFork)
         if (reason) return reason
     }
     return null

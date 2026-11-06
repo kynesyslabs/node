@@ -38,6 +38,8 @@ import { cloneDefaultForkConfig, type ForkConfigByName } from "@/forks/forkConfi
 import { getSharedState } from "@/utilities/sharedState"
 import type { GCREntityCaches } from "./handleGCR"
 import { OS, PEER, SENDER, VICTIM, demos, onTheWire } from "@/libs/blockchain/validation/editBinding.fixtures"
+import Hashing from "@/libs/crypto/hashing"
+import { serializeTxContent } from "@/libs/crypto/txContentSerializer"
 
 const { default: HandleGCR } = await import("./handleGCR")
 
@@ -104,8 +106,20 @@ function forks(rules: Rules) {
 const balanceOf = (key: string) => (caches.accounts.get(key) as any).balance as bigint
 const nonceOf = (key: string) => (caches.accounts.get(key) as any).nonce as number
 
+/**
+ * Whether the signed hash still covers `tx` after osDenomination: the
+ * serializer hashes a DEM number as the OS string it stands for, so a body
+ * rewritten from one shape to the other keeps its signature.
+ */
+const hashCovers = (tx: Transaction) => Hashing.sha256(serializeTxContent(tx.content, true)) === tx.hash
+
 /** A send signed by the real signer whose body and args can disagree. */
-async function send(opts: { to: string; amount: bigint; argsTo?: string; argsAmount?: bigint }): Promise<Transaction> {
+async function send(opts: {
+    to: string
+    amount: bigint
+    argsTo?: string
+    argsAmount?: bigint | number
+}): Promise<Transaction> {
     const tx = DemosTransactions.empty()
     tx.content.type = "native" as never
     tx.content.to = opts.to
@@ -114,7 +128,13 @@ async function send(opts: { to: string; amount: bigint; argsTo?: string; argsAmo
     tx.content.timestamp = Date.now()
     tx.content.data = [
         "native",
-        { nativeOperation: "send", args: [opts.argsTo ?? opts.to, String(opts.argsAmount ?? opts.amount)] },
+        {
+            nativeOperation: "send",
+            args: [
+                opts.argsTo ?? opts.to,
+                typeof opts.argsAmount === "number" ? opts.argsAmount : String(opts.argsAmount ?? opts.amount),
+            ],
+        },
     ] as never
     return onTheWire(await demos.sign(tx))
 }
@@ -191,6 +211,33 @@ describe("a native send whose args name another payment than its body", () => {
 
         expect(out.failedTxs).toEqual([tx.hash])
         expect(balanceOf(PEER)).toBe(0n)
+    })
+
+    it("is refused behind nativeSendBinding when its args pay in OS the DEM number its body names", async () => {
+        forks({ send: true })
+        // Args of 3 pay 3 OS; a body amount of 3 names 3 DEM to the hash,
+        // the receipts and the RPC balance check.
+        const tx = await send({ to: PEER, amount: 3n * OS, argsAmount: 3 })
+        tx.content.amount = 3 as never
+        expect(hashCovers(tx)).toBe(true)
+
+        const out = await HandleGCR.applyTransactions([tx], false)
+
+        expect(out.failedTxs).toEqual([tx.hash])
+        expect(balanceOf(PEER)).toBe(0n)
+        expect(balanceOf(SENDER)).toBe(100n * OS)
+    })
+
+    it("applies a send whose body names in DEM the OS its args pay behind nativeSendBinding", async () => {
+        forks({ send: true })
+        const tx = await send({ to: PEER, amount: 3n * OS })
+        tx.content.amount = 3 as never
+        expect(hashCovers(tx)).toBe(true)
+
+        const out = await HandleGCR.applyTransactions([tx], false)
+
+        expect(out.failedTxs).toEqual([])
+        expect(balanceOf(PEER)).toBe(3n * OS)
     })
 
     it("applies a send whose args are its body behind nativeSendBinding", async () => {
@@ -275,6 +322,36 @@ describe("a native transfer that reaches a block with a fee the network does not
 
         expect(out.failedTxs).toEqual([tx.hash])
         expect(balanceOf(SENDER)).toBe(100n * OS)
+    })
+
+    /** A transfer charged the network fee, its body then showing that fee as a DEM number. */
+    async function demNumberFee(): Promise<Transaction> {
+        const tx = await payWithFee({ network_fee: 1, rpc_fee: 0, additional_fee: 0, rpc_address: null })
+        expect(tx.content.transaction_fee.network_fee).toBe("1000000000")
+        tx.content.transaction_fee = { network_fee: 1, rpc_fee: 0, additional_fee: 0, rpc_address: null } as never
+        expect(hashCovers(tx)).toBe(true)
+        return tx
+    }
+
+    it("pays one OS for a network fee of one DEM shipped as a number before feeBinding", async () => {
+        forks({ gasFee: true })
+        const tx = await demNumberFee()
+
+        const out = await HandleGCR.applyTransactions([tx], false)
+
+        expect(out.failedTxs).toEqual([])
+        expect(balanceOf(SENDER)).toBe(100n * OS - 3n * OS - OS - 1n)
+    })
+
+    it("is refused behind feeBinding when it ships the network fee as a DEM number", async () => {
+        forks({ gasFee: true, fee: true })
+        const tx = await demNumberFee()
+
+        const out = await HandleGCR.applyTransactions([tx], false)
+
+        expect(out.failedTxs).toEqual([tx.hash])
+        expect(balanceOf(SENDER)).toBe(100n * OS)
+        expect(balanceOf(PEER)).toBe(0n)
     })
 
     it("charges the fee of an honest transfer behind feeBinding", async () => {

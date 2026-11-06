@@ -96,7 +96,9 @@ export async function confirmTransaction(
     // Refused here whatever the forks say: the payment a client is told it
     // made is the one in content.to and content.amount, and an account keyed
     // by an upper-case spelling is one no wallet reads.
-    const valueRefusal = nonCanonicalAddressRefusal(tx) ?? nativeSendRefusal(tx)
+    const valueRefusal =
+        nonCanonicalAddressRefusal(tx) ??
+        nativeSendRefusal(tx, isForkActive("osDenomination", referenceBlock))
     if (valueRefusal) {
         validityData.data.message =
             "[Tx Validation] [STRUCTURE ERROR] " + valueRefusal + "\n"

@@ -285,7 +285,9 @@ export type IdentityCarryoverConfig = BaseForkConfig
  *
  * At admission (gossip ingest, consensus merge) and at apply, from the
  * activation height, a native send is refused unless `args[0]` is
- * `content.to` and `args[1]` is `content.amount`.
+ * `content.to` and `args[1]` pays what `content.amount` names. Amounts are
+ * compared in ledger units: args are paid as written, while a body number is
+ * DEM after osDenomination, as the signature hash reads it.
  *
  * Activation at H binds from the block applied on tip H, which is block
  * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
@@ -317,8 +319,10 @@ export type CanonicalAddressesConfig = BaseForkConfig
  *
  * At admission and at apply, from the activation height, and while
  * `gasFeeSeparation` is active, a native transaction is refused unless each
- * shipped fee component equals the one the network computes and it names no
- * `rpc_address`.
+ * shipped fee component charges what the network computes and it names no
+ * `rpc_address`. Compared on what apply deducts: apply charges a component
+ * in ledger units as written, so after osDenomination a DEM number would pay
+ * a billionth of the fee its hash commits to.
  *
  * Activation at H binds from the block applied on tip H, which is block
  * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond

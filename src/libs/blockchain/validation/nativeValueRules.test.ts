@@ -24,7 +24,8 @@ import { getSharedState } from "@/utilities/sharedState"
 import { OS, PEER, SENDER, chainIs, demos, onTheWire } from "./editBinding.fixtures"
 import { verifyAdmissionEdits, verifyRpcEdits } from "./editBinding"
 import { nativeSendRefusal, nonCanonicalAddressRefusal } from "./nativeValueRules"
-import { feeBindingRefusal } from "./feeBinding"
+import { chargedFeeMismatch, feeBindingRefusal } from "./feeBinding"
+import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 
 const PEER_UPPER = "0x" + PEER.slice(2).toUpperCase()
 const saved = {
@@ -94,44 +95,56 @@ afterEach(() => {
 describe("nativeSendRefusal", () => {
     it("passes a send built by the SDK, on either side of osDenomination", async () => {
         forks({}, true)
-        expect(nativeSendRefusal(await honest())).toBeNull()
+        expect(nativeSendRefusal(await honest(), true)).toBeNull()
         forks({}, false)
-        expect(nativeSendRefusal(await honest())).toBeNull()
+        expect(nativeSendRefusal(await honest(), false)).toBeNull()
     })
 
     it("refuses args that pay another recipient or amount", async () => {
         forks({})
-        expect(nativeSendRefusal(await send({ to: SENDER, amount: 3n * OS, argsTo: PEER }))).toContain("recipient")
-        expect(nativeSendRefusal(await send({ to: PEER, amount: 1n, argsAmount: String(50n * OS) }))).toContain("amount")
+        expect(nativeSendRefusal(await send({ to: SENDER, amount: 3n * OS, argsTo: PEER }), true)).toContain("recipient")
+        expect(nativeSendRefusal(await send({ to: PEER, amount: 1n, argsAmount: String(50n * OS) }), true)).toContain("amount")
     })
 
     it("refuses args that are not [to, amount] and amounts that are not integers", async () => {
         forks({})
         const tx = await honest()
         ;(tx.content.data as any)[1].args = [PEER]
-        expect(nativeSendRefusal(tx)).toContain("[to, amount]")
+        expect(nativeSendRefusal(tx, true)).toContain("[to, amount]")
         ;(tx.content.data as any)[1].args = [PEER, "3000000000", "extra"]
-        expect(nativeSendRefusal(tx)).toContain("[to, amount]")
+        expect(nativeSendRefusal(tx, true)).toContain("[to, amount]")
         ;(tx.content.data as any)[1].args = [PEER, "3e9"]
         tx.content.amount = "3e9" as never
-        expect(nativeSendRefusal(tx)).toContain("amount")
+        expect(nativeSendRefusal(tx, true)).toContain("amount")
     })
 
-    it("compares the integer the body and the args name, whatever the JSON type", async () => {
+    it("compares the ledger units the args pay with the amount the body names", async () => {
         forks({})
+        // After osDenomination a body number is DEM, as the hash reads it,
+        // while args are paid as written, in OS.
         const tx = await honest()
-        // A stored row can surface the body amount as a number.
+        tx.content.amount = 3 as never
+        expect(nativeSendRefusal(tx, true)).toBeNull()
         tx.content.amount = 3_000_000_000 as never
-        expect(nativeSendRefusal(tx)).toBeNull()
+        expect(nativeSendRefusal(tx, true)).toContain("amount")
+        ;(tx.content.data as any)[1].args[1] = 3
+        tx.content.amount = 3 as never
+        expect(nativeSendRefusal(tx, true)).toContain("amount")
+        tx.content.amount = "3" as never
+        expect(nativeSendRefusal(tx, true)).toBeNull()
+        // Before it both are DEM.
+        expect(nativeSendRefusal(tx, false)).toBeNull()
+        tx.content.amount = 3 as never
+        expect(nativeSendRefusal(tx, false)).toBeNull()
     })
 
     it("leaves other native operations and other types alone", async () => {
         forks({})
         const tx = await honest()
         ;(tx.content.data as any)[1] = { nativeOperation: "tlsn_request", args: ["https://example.com"] }
-        expect(nativeSendRefusal(tx)).toBeNull()
+        expect(nativeSendRefusal(tx, true)).toBeNull()
         tx.content.type = "contractCall" as never
-        expect(nativeSendRefusal(tx)).toBeNull()
+        expect(nativeSendRefusal(tx, true)).toBeNull()
     })
 })
 
@@ -170,39 +183,74 @@ describe("nonCanonicalAddressRefusal", () => {
 })
 
 describe("feeBindingRefusal", () => {
-    it("passes the network fee, as an OS string or a DEM number", async () => {
+    it("passes the network fee, as an OS string after osDenomination or a DEM number before", async () => {
         forks({ gasFee: true }, true)
-        expect(await feeBindingRefusal(await honest())).toBeNull()
+        expect(await feeBindingRefusal(await honest(), true)).toBeNull()
         forks({ gasFee: true }, false)
-        expect(await feeBindingRefusal(await honest())).toBeNull()
+        expect(await feeBindingRefusal(await honest(), false)).toBeNull()
     })
 
     it("refuses an understated fee, a skewed split, a missing fee and a chosen rpc account", async () => {
         forks({ gasFee: true })
-        expect(await feeBindingRefusal(await payWithFee({ network_fee: "0", rpc_fee: "0", additional_fee: "0", rpc_address: null }))).toContain(
+        expect(await feeBindingRefusal(await payWithFee({ network_fee: "0", rpc_fee: "0", additional_fee: "0", rpc_address: null }), true)).toContain(
             "network_fee",
         )
         getSharedState.rpcFee = 1
         expect(
-            await feeBindingRefusal(await payWithFee({ network_fee: "2000000000", rpc_fee: "0", additional_fee: "0", rpc_address: null })),
+            await feeBindingRefusal(await payWithFee({ network_fee: "2000000000", rpc_fee: "0", additional_fee: "0", rpc_address: null }), true),
         ).toContain("mismatch")
         expect(
             await feeBindingRefusal(
                 await payWithFee({ network_fee: "1000000000", rpc_fee: "1000000000", additional_fee: "0", rpc_address: SENDER }),
+                true,
             ),
         ).toContain("rpc_address")
         const bare = await honest()
         ;(bare.content as any).transaction_fee = null
-        expect(await feeBindingRefusal(bare)).toContain("no transaction_fee")
+        expect(await feeBindingRefusal(bare, true)).toContain("no transaction_fee")
+    })
+
+    it("refuses a fee apply would charge in another unit than the network's", async () => {
+        forks({ gasFee: true })
+        const tx = await honest()
+        expect(tx.content.transaction_fee.network_fee).toBe("1000000000")
+        // Apply deducts a number as that many OS: one DEM shipped as 1 pays 1 OS.
+        tx.content.transaction_fee.network_fee = 1 as never
+        expect(await feeBindingRefusal(tx, true)).toContain("network_fee")
+        // Before osDenomination the ledger is in DEM, and an OS string
+        // would charge a billion times the fee.
+        expect(await feeBindingRefusal(tx, false)).toBeNull()
+        tx.content.transaction_fee.network_fee = "1000000000" as never
+        expect(await feeBindingRefusal(tx, false)).toContain("network_fee")
+        for (const odd of ["1e9", " 1000000000", "0x3b9aca00", 1e9 + 0.5, true, undefined]) {
+            tx.content.transaction_fee.network_fee = odd as never
+            expect(await feeBindingRefusal(tx, true)).toContain("network_fee")
+        }
+    })
+
+    it("compares on what apply charges, so the confirm step refuses a DEM number fee too", async () => {
+        forks({ gasFee: true })
+        const breakdown = { network_fee: 1, rpc_fee: 0, additional_fee: 0, total: 1 }
+        const os = { network_fee: "1000000000", rpc_fee: "0", additional_fee: "0", rpc_address: null }
+        expect(chargedFeeMismatch(os as never, breakdown, true)).toBeNull()
+        expect(chargedFeeMismatch({ ...os, network_fee: 1000000000 } as never, breakdown, true)).toBeNull()
+        expect(chargedFeeMismatch({ ...os, network_fee: 1 } as never, breakdown, true)).toContain("network_fee")
+        expect(chargedFeeMismatch({ ...os, network_fee: 1, rpc_fee: 0, additional_fee: null } as never, breakdown, false)).toBeNull()
+
+        const tx = await honest()
+        tx.content.transaction_fee.network_fee = 1 as never
+        const confirmed = await applyGasFeeSeparation(tx)
+        expect(confirmed.ok).toBe(false)
+        expect((confirmed as { message: string }).message).toContain("network_fee")
     })
 
     it("judges nothing while gasFeeSeparation is off, and no other type", async () => {
         forks({})
-        expect(await feeBindingRefusal(await payWithFee({ network_fee: "0", rpc_fee: "0", additional_fee: "0", rpc_address: null }))).toBeNull()
+        expect(await feeBindingRefusal(await payWithFee({ network_fee: "0", rpc_fee: "0", additional_fee: "0", rpc_address: null }), true)).toBeNull()
         forks({ gasFee: true })
         const other = await payWithFee({ network_fee: "0", rpc_fee: "0", additional_fee: "0", rpc_address: null })
         other.content.type = "contractCall" as never
-        expect(await feeBindingRefusal(other)).toBeNull()
+        expect(await feeBindingRefusal(other, true)).toBeNull()
     })
 })
 

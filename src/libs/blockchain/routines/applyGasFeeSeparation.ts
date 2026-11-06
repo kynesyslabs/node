@@ -52,7 +52,12 @@ import {
 import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
-import { shippedFeeMismatch } from "@/libs/blockchain/validation/feeBinding"
+import { isForkActive } from "@/forks/forkGates"
+import { getSharedState } from "@/utilities/sharedState"
+import {
+    chargedFeeMismatch,
+    shippedFeeMismatch,
+} from "@/libs/blockchain/validation/feeBinding"
 
 export type ApplyGasFeeSeparationResult =
     | { ok: true }
@@ -178,9 +183,17 @@ export async function applyGasFeeSeparation(
     // total would let a client skew the split (e.g. put everything in
     // network_fee, rpc_fee=0) and pass validation while the apply-time
     // distribution emits no RPC-fee block, making fee routing deterministically
-    // wrong (Greptile P1 #2). Pool admission and apply use the same comparison
-    // under feeBinding.
-    const mismatch = shippedFeeMismatch(shippedFee, breakdown)
+    // wrong (Greptile P1 #2). A native fee is charged at apply in ledger units
+    // as shipped, so it is compared on what apply deducts, as pool admission
+    // and apply compare it under feeBinding.
+    const mismatch =
+        (tx.content.type as string) === "native"
+            ? chargedFeeMismatch(
+                  shippedFee,
+                  breakdown,
+                  isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0),
+              )
+            : shippedFeeMismatch(shippedFee, breakdown)
     if (mismatch) return { ok: false, message: mismatch }
     // The rpc share of a native fee goes to the account the shipped fee names,
     // and the SDK names none; a sender naming one would route it to itself.
