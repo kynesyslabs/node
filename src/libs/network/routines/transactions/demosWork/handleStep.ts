@@ -40,7 +40,6 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
         const disabled = featureDisabledMessage(context)
         if (disabled) {
             stepResult.error = disabled
-            step.output[step.id] = disabled
             return stepResult
         }
     }
