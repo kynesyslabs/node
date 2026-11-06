@@ -60,6 +60,10 @@ With `NODE_ENV=production`, a node without a pin refuses to start unless
 opts out explicitly. Testnet installs that predate the pin set the opt-out once; the devnet compose
 overlay sets it.
 
+A genesis whose `properties.id` is not the testnet's or a devnet's (mainnet, or a
+network run like it) needs a pin whatever `NODE_ENV` says, and the opt-out does
+not apply to it: on a restart without a genesis file the id is read from block 0.
+
 ### Fresh database (no block 0)
 
 All checks run before anything is written to the database.

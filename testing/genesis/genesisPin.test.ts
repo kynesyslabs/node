@@ -110,6 +110,24 @@ describe("pinRequirementProblem", () => {
         expect(pinRequirementProblem("", { NODE_ENV: "development" })).toBeNull()
         expect(pinRequirementProblem("ab".repeat(32), { NODE_ENV: "production" })).toBeNull()
     })
+
+    it("requires a pin on a mainnet chain id whatever NODE_ENV and the opt-out say", () => {
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, 4242)).toContain(
+            "chain id 4242",
+        )
+        expect(pinRequirementProblem("", {}, 4242)).not.toBeNull()
+        expect(
+            pinRequirementProblem("", { DEMOS_ALLOW_UNPINNED_GENESIS: "true" }, 4242),
+        ).not.toBeNull()
+        expect(pinRequirementProblem("ab".repeat(32), {}, 4242)).toBeNull()
+    })
+
+    it("leaves the testnet, the devnet and an id-less genesis to NODE_ENV", () => {
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, 1)).toBeNull()
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, 1337)).toBeNull()
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, undefined)).toBeNull()
+        expect(pinRequirementProblem("", { NODE_ENV: "development" }, "4242")).toBeNull()
+    })
 })
 
 describe("freshGenesisProblems", () => {

@@ -23,6 +23,7 @@ import {
 import {
     GenesisRefusal,
     blockPinProblem,
+    chainIdOf,
     freshGenesisProblems,
     parseGenesisPin,
     parseStoredGenesisData,
@@ -157,7 +158,11 @@ export default async function findGenesisBlock() {
         Config.getInstance().core.expectedGenesisBlockHash,
         "EXPECTED_GENESIS_BLOCK_HASH",
     )
-    const pinProblem = pinRequirementProblem(pin, process.env)
+    const pinProblem = pinRequirementProblem(
+        pin,
+        process.env,
+        hasGenesisFile ? chainIdOf(readGenesisFile()) : undefined,
+    )
     if (pinProblem) refuse([pinProblem])
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
@@ -170,6 +175,9 @@ export default async function findGenesisBlock() {
             | { extra?: { genesisData?: unknown } }
             | undefined
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
+        // Without a file only block 0 says which chain this is
+        const storedPinProblem = pinRequirementProblem(pin, process.env, chainIdOf(stored))
+        if (storedPinProblem) refuse([storedPinProblem])
         // Without a file the fork loader never ran, so its chain id check did not either
         if (!hasGenesisFile && isForkMachineryDisabled()) {
             refuseDisabledForkMachineryOutsideTestChains(stored)

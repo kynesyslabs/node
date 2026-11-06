@@ -15,6 +15,7 @@ KyneSys Labs: https://www.kynesys.xyz/
  * acts on the problems returned. See docs/design/genesis-enforcement.md.
  */
 
+import { DEFAULT_FORK_CONFIG, NON_MAINNET_CHAIN_IDS } from "@/forks/forkConfig"
 import { hashGenesisCore, hashGenesisData } from "./normalizeGenesisForHash"
 
 const SHA256_HEX = /^[0-9a-f]{64}$/
@@ -52,12 +53,38 @@ function isTrue(raw: string | undefined): boolean {
     return v === "true" || v === "1" || v === "yes"
 }
 
-/** A production node runs with a pinned genesis unless the operator opted out by name. */
+/**
+ * True for a chain id that is neither the testnet's nor a devnet's: mainnet,
+ * or a network run like it. A genesis without an id is not one, since
+ * signatureDomain cannot run without it.
+ */
+export function isMainnetChainId(chainId: unknown): boolean {
+    return (
+        typeof chainId === "number" &&
+        Number.isInteger(chainId) &&
+        !NON_MAINNET_CHAIN_IDS.includes(chainId)
+    )
+}
+
+/**
+ * A production node, and any node on a mainnet chain id, runs with a pinned
+ * genesis. Only a production node on a test network may opt out by name: a
+ * bare-metal install runs as development, so NODE_ENV alone would let a
+ * mainnet validator boot on whatever genesis file it holds.
+ */
 export function pinRequirementProblem(
     pin: string,
     env: Record<string, string | undefined>,
+    chainId?: unknown,
 ): string | null {
     if (pin !== "") return null
+    if (isMainnetChainId(chainId)) {
+        return (
+            `EXPECTED_GENESIS_HASH is not set and the genesis has chain id ${String(chainId)}, ` +
+            "which is not a test network's. A node on it must pin the published genesis hash; " +
+            "DEMOS_ALLOW_UNPINNED_GENESIS does not apply"
+        )
+    }
     if (env.NODE_ENV !== "production") return null
     if (isTrue(env.DEMOS_ALLOW_UNPINNED_GENESIS)) return null
     return (
@@ -213,7 +240,8 @@ export interface RestartGenesisInput {
     pin: string
 }
 
-function chainIdOf(genesisData: unknown): unknown {
+/** `properties.id` of a genesis, or undefined. */
+export function chainIdOf(genesisData: unknown): unknown {
     if (genesisData === null || typeof genesisData !== "object") return undefined
     const props = (genesisData as Record<string, unknown>).properties
     if (props === null || typeof props !== "object") return undefined
