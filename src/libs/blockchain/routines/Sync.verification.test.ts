@@ -498,7 +498,7 @@ describe("fast sync under finalityProofs", () => {
         })
 
         it("stores nothing and cools the peer down when it serves a block that is not the child", async () => {
-            ;(log.warning as any).mockClear()
+            (log.warning as any).mockClear()
             await syncLastOfBatch(async (tx, block) => {
                 // Hashes to itself, but builds on another parent
                 const impostor = childOf({ ...block, hash: "elsewhere" }, await confirmedRoot(tx))
@@ -920,6 +920,20 @@ describe("the tip check on the first sync after a restart", () => {
         expect(verifyBlockCertificate).not.toHaveBeenCalled()
         expect(insertBlock).toHaveBeenCalledTimes(1)
         expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
+    })
+
+    it("does not stop on a block whose height is not a number", async () => {
+        const tx = makeTx(alice)
+        const block = makeBlock([tx])
+        verifyBlockCertificate.mockResolvedValue({ valid: true })
+        const malformed = peerAt("tip-malformed", { number: { toString: null }, hash: "other" }, block, [tx])
+        const honest = peerAt("tip-honest", { number: HEIGHT - 1, hash: OUR_TIP }, block, [tx])
+        startFromTip([malformed, honest])
+        applyResult({ successfulTxs: [tx.hash] })
+
+        await fastSync([], "test")
+
+        expect(insertBlock).toHaveBeenCalledTimes(1)
     })
 
     it("still refuses to sync when a peer serves a certified block that differs from our tip", async () => {
