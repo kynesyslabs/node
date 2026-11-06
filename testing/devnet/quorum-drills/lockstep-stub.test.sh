@@ -369,6 +369,19 @@ OUT=$( ( LOG_READ_MAX_BYTES=200; pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "a 1 MiB log over LOG_READ_MAX_BYTES (200 here): still read as over it, not as a failed sed or docker" \
     has "could not read the log of node-4 to check for the postgres connection limit (the log is over 200 bytes)"
 
+echo "== grep_logs: a node log it cannot read whole fails the read and is named, within the bound"
+gl_case() { gate_case "$1" PASS; printf 'x below the quorum of 7\n' > "${FAKE}/nodelog.3"; printf 'y below the quorum of 7\n' > "${FAKE}/nodelog.9"; }
+gl() { local t0; t0=$(date +%s%N); OUT=$(grep_logs "below the quorum" 2> "${LOG_DIR}/gl.err"; echo "rc=$?"); ERR=$(cat "${LOG_DIR}/gl.err"); ms=$(( ($(date +%s%N) - t0) / 1000000 )); }
+gl_case gl_read; gl
+check "every log read: rc=0, each matching line once with its node" test "${OUT}" = $'node-3: x below the quorum of 7\nnode-9: y below the quorum of 7\nrc=0'
+gl_case gl_fail; touch "${FAKE}/nodelog.5.fail"; gl
+check "node-5's docker logs fails: rc=1, the lines of the logs read still given" test "${OUT}" = $'node-3: x below the quorum of 7\nnode-9: y below the quorum of 7\nrc=1'
+check "node-5's docker logs fails: stderr names node-5" grep -q "WARN: node-5: docker logs failed (exit 1), its log not read whole" <<< "${ERR}"
+gl_case gl_hang; echo 30 > "${FAKE}/nodelog.9.hang"; gl
+check "node-9's docker logs stalls: rc=1, stderr names node-9 and the bound" \
+    bash -c 'grep -q "^rc=1$" <<< "$1" && grep -q "WARN: node-9: docker logs did not answer within 3s, its log not read whole" <<< "$2"' _ "${OUT}" "${ERR}"
+check "node-9's docker logs stalls: returns within the bound (${ms} ms; the stub sleeps 30 s)" test "${ms}" -lt 15000
+
 echo "== teardown backstop: an exit 0 or 1 the gate did not clear is exit 2 when a node log cannot be collected"
 teardown_rc() { # $1 the status run.sh exits with, $2 unwritable (as above): OUT, the status after teardown, and ms it took
     local t0; t0=$(date +%s%N)
@@ -806,6 +819,198 @@ for sc in halt-n10s10 halt-n13s10 ride-n13s10; do
         bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "runs the launch fork set, which activates committeeBinding: --binding off does not apply" <<< "$1" && [ ! -s "$2" ]' \
         _ "${OUT}" "${WORK}/run-top.docker.log"
 done
+
+# ── run.sh executed whole, against a stub chain ─────────────────────────
+# Past node-1: bring-up, the scenario and the verdict, with docker, bun and
+# sleep replaced (every sleep takes 20 ms; the stub's stalls use the real one).
+# The stub docker keeps the containers started (up.<n>, created.<n> in
+# STUB_STATE) and a head that grows one block every STUB_TICK_MS (300) while at
+# least STUB_MIN_LIVE (1) nodes run (STUB_STATE/chain: the head at the last
+# start or stop and the time of it in ms). It answers what run.sh asks: the
+# preflight's image and container checks, compose up/start/stop/ps, curl through
+# docker exec (serving, heads, blocks with hash 0xb<n> and a peerlist of the
+# STUB_N nodes), psql through docker exec (heads, block content, peerlist
+# length, block rows with 7 signatures, max_connections), inspect (restart
+# count 0, LogConfig.Config from STUB_LOGCONF, default null), stats, and node
+# logs with a round start past the head, a quorum refusal and a fallback line.
+# STUB_STALL makes calls stall (the real sleep, 300 s): logs:<n> node n's docker
+# logs, restart every RestartCount inspect, head:<n> node n's head reads once a
+# node was stopped. bun answers the identity helper, and the judge with a pass.
+mkdir -p "${WORK}/fullbin"
+REAL_SLEEP=$(command -v sleep); export REAL_SLEEP
+cp "${WORK}/runbin/nproc" "${WORK}/runbin/vmstat" "${WORK}/fullbin/"
+printf '#!/usr/bin/env bash\nexec "${REAL_SLEEP}" 0.02\n' > "${WORK}/fullbin/sleep"
+cat > "${WORK}/fullbin/bun" <<'FULLBUN'
+#!/usr/bin/env bash
+case "$1" in
+    *judgeHaltDrill.ts)
+        jq -e . "$2" > /dev/null || { echo "stub judge: $2 is not JSON" >&2; exit 2; }
+        [ "$3" = --out ] && echo '{"pass":true,"summary":"stub judge pass"}' > "$4"
+        echo "PASS: stub judge"; exit 0 ;;
+esac
+printf 'MNEMONIC:stub stub stub\nPUBKEY:0xAB%s%s\n' "$$" "${RANDOM}"
+FULLBUN
+cat > "${WORK}/fullbin/docker" <<'FULLDOCKER'
+#!/usr/bin/env bash
+echo "$*" >> "${STUB_LOG}"
+S="${STUB_STATE}"
+now_ms() { date +%s%3N; }
+head_now() {
+    local base since
+    read -r base since < "${S}/chain"
+    if [ "$(compgen -G "${S}/up.*" | wc -l)" -ge "${STUB_MIN_LIVE:-1}" ]; then
+        echo $((base + ($(now_ms) - since) / ${STUB_TICK_MS:-300}))
+    else
+        echo "${base}"
+    fi
+}
+# A start (+) or stop (-) of the nodes given: the head so far is carried over
+event() {
+    local op="$1" h n; shift
+    exec 9>> "${S}/lock"; flock 9
+    h=$(head_now)
+    for n in "$@"; do
+        if [ "${op}" = + ]; then touch "${S}/up.${n}" "${S}/created.${n}"; else rm -f "${S}/up.${n}"; touch "${S}/stopped"; fi
+    done
+    echo "${h} $(now_ms)" > "${S}/chain.tmp" && mv "${S}/chain.tmp" "${S}/chain"
+}
+stalls() { case " ${STUB_STALL:-} " in *" $1 "*) exec "${REAL_SLEEP}" 300 ;; esac; }
+peerlist() { local i; for i in $(seq 1 "${STUB_N}"); do printf '"0xp%s"\n' "${i}"; done | paste -sd, -; }
+case "$1" in
+    image)
+        case "$*" in
+            *"{{.Id}}"*) echo sha256:0123456789abcdef0123456789abcdef ;;
+            *Entrypoint* | *Cmd*) echo null ;;
+        esac ;;
+    run) case "${@: -1}" in -u | -g) echo 1000 ;; esac ;;
+    info) echo json-file ;;
+    compose)
+        shift 5 # compose -f FILE -p PROJECT
+        case "$1" in
+            up | start)
+                nodes=(); for s in "$@"; do case "${s}" in node-*) nodes+=("${s#node-}") ;; esac; done
+                [ "${#nodes[@]}" -gt 0 ] && event + "${nodes[@]}" ;;
+            stop) shift 3; event - "${@#node-}" ;; # stop -t 0 node-..
+            ps)
+                f=up; [ "$2" = -aq ] && f=created
+                case "${3:-}" in
+                    postgres) echo fakepg ;;
+                    node-*) [ -e "${S}/${f}.${3#node-}" ] && echo "c${3#node-}" ;;
+                    "") echo fakepg; for u in $(compgen -G "${S}/up.*"); do echo "c${u##*.}"; done ;;
+                esac ;;
+        esac ;;
+    exec)
+        shift
+        while [ "${1:0:1}" = - ]; do if [ "$1" = -e ]; then shift 2; else shift; fi; done
+        c="$1"; shift
+        case "$1" in
+            curl)
+                n=${c#c}; [ -e "${S}/up.${n}" ] || exit 1
+                case "$*" in
+                    *getLastBlockNumber*) [ -e "${S}/stopped" ] && stalls "head:${n}"; printf '{"result":200,"response":%s}' "$(head_now)" ;;
+                    *getBlockByNumber*)
+                        b=$(sed 's/.*"blockNumber":\([0-9]*\).*/\1/' <<< "$*")
+                        [ "${b}" -le "$(head_now)" ] || { echo '{"result":404}'; exit 0; }
+                        printf '{"result":200,"response":{"number":%s,"hash":"0xb%s","content":{"timestamp":%s,"peerlist":[%s]}}}' \
+                            "${b}" "${b}" $((1700000000 + 10 * b)) "$(peerlist)" ;;
+                    *) echo "Hello from the stub" ;;
+                esac ;;
+            cat) echo "anon 104857600" ;;
+            psql)
+                n=$(sed 's/.* -d node\([0-9]*\)_db .*/\1/' <<< "$*")
+                case "$*" in
+                    *"SHOW max_connections"*) echo "${STUB_MAXCONN:-1000}" ;;
+                    *" -f -") cat > /dev/null; touch "${S}/rewritten.${n}" ;;
+                    *"max(number)"*) head_now ;;
+                    *"SELECT content FROM"*) printf '{"peerlist":[%s],"timestamp":1}\n' "$(peerlist)" ;;
+                    *json_array_length*) if [ -e "${S}/rewritten.${n}" ]; then echo 6; else echo "${STUB_N}"; fi ;;
+                    *BETWEEN*)
+                        read -r from to < <(sed 's/.*BETWEEN \([0-9]*\) AND \([0-9]*\).*/\1 \2/' <<< "$*")
+                        h=$(head_now); [ "${to}" -gt "${h}" ] && to="${h}"
+                        for b in $(seq "${from}" "${to}"); do echo "${b}|0xb${b}|7"; done ;;
+                esac ;;
+        esac ;;
+    inspect)
+        case "$*" in
+            *RestartCount*) stalls restart; echo 0 ;;
+            *LogConfig*) echo "${STUB_LOGCONF:-null}" ;;
+            *) echo "/qdrill-${@: -1}" ;;
+        esac ;;
+    stats) shift 4; for c in "$@"; do echo "${c} 100MiB / 1.8GiB 1.00%"; done ;;
+    logs)
+        n=${@: -1}; n=${n#c}; stalls "logs:${n}"
+        printf '[INFO] node-%s up\n\e[32m[INFO] We are forging block %s\e[0m\n' "${n}" $(($(head_now) + 1))
+        printf '[WARN] Shard of 4 is below the quorum of 7\n[INFO] drawing the committee from all 10 staked validators\n' ;;
+esac
+exit 0
+FULLDOCKER
+chmod +x "${WORK}/fullbin/"*
+full_run() { # $1 label, $2.. run.sh's options and scenario; STUB_* from the caller. FULL, RD (the run dir), ms
+    local label="$1" t0; shift
+    FULL="${WORK}/full-${label}"; rm -rf "${FULL}"; mkdir -p "${FULL}/state" "${FULL}/runs"; echo "0 0" > "${FULL}/state/chain"
+    t0=$(date +%s%N)
+    STUB_STATE="${FULL}/state" STUB_LOG="${FULL}/docker.log" PATH="${WORK}/fullbin:${PATH}" RUNS_DIR="${FULL}/runs" \
+        QDRILL_TEST_LOG_READ_TIMEOUT_S=3 NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 GENESIS_DELAY=-1000 \
+        CONSENSUS_TIME=1 STALL_WINDOW=3 timeout 240 bash "${RUN_SH}" "$@" "${label}" > "${FULL}/out" 2>&1
+    echo "rc=$?" >> "${FULL}/out"
+    ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+    RD=$(compgen -G "${FULL}/runs/*-${label}" | head -1)
+    tail -3 "${FULL}/out" | cut -c1-200 | sed 's/^/    | /'
+}
+fout() { grep -q -- "$1" "${FULL}/out"; }
+exited() { grep -qE "^rc=($1)$" "${FULL}/out"; } # $1 a regex of exit statuses
+result_of() { jq -r .result "${RD}/logs/verdict.json" 2>/dev/null; }
+row_of() { awk -F'\t' -v r="${RD##*/}" '$1 == r { print $9 }' "${FULL}/runs/results.tsv" 2>/dev/null; }
+# verdict.json and this run's row of results.tsv both say $1, and the detail holds $2 (if given)
+recorded() { [ "$(result_of)" = "$1" ] && [ "$(row_of)" = "$1" ] && jq -e --arg d "${2:-}" '.detail | contains($d)' "${RD}/logs/verdict.json" > /dev/null; }
+
+echo "== drop-n7s10 --binding off, whole: stops node-7 mid-round, waits out the stall, restarts it, writes the verdict"
+# Whether the chain stalls in time is up to the host's speed: PASS or FAIL both reach the verdict
+STUB_N=7 STUB_MIN_LIVE=7 STUB_TICK_MS=1000 STUB_LOGCONF='{"max-file":"3","max-size":"10m"}' full_run drop-off --binding off drop-n7s10
+check "drop-n7s10 --binding off: no 'command not found'" eval '! fout "command not found"'
+check "drop-n7s10 --binding off: a verdict (PASS or FAIL: $(result_of)), exit 0 or 1, and its row in results.tsv" \
+    bash -c 'case "$1" in PASS | FAIL) [ "$1" = "$2" ] ;; *) false ;; esac' _ "$(result_of)" "$(row_of)"
+check "drop-n7s10 --binding off: exit 0 for a PASS, 1 for a FAIL" exited "$([ "$(result_of)" = PASS ] && echo 0 || echo 1)"
+check "drop-n7s10 --binding off: the genesis has committeeBinding and commitLock off, quorumParity at 0" \
+    jq -e '.forks.committeeBinding.activationHeight == null and .forks.commitLock.activationHeight == null and .forks.quorumParity.activationHeight == 0' "${RD}/inputs/genesis.json"
+check "drop-n7s10 --binding off: the run log names the node containers' log rotation" fout 'node log rotation: max-size 10m, max-file 3$'
+check "drop-n7s10 --binding off: the bring-up snapshot has the stats and anonymous memory of the 8 containers" \
+    test "$(grep -c ' 100MiB / 1.8GiB ' "${RD}/logs/03-bringup.log")" = 8 -a "$(grep -c ' anon 100 MiB$' "${RD}/logs/03-bringup.log")" = 8
+check "drop-n7s10 --binding off: stop_mid_round saw the round start in node-1's log" grep -q 'round start seen on node-1: We are forging block [0-9]' "${RD}/logs/events.log"
+check "drop-n7s10 --binding off: the phases all-up, down-1 and restarted were judged" \
+    test "$(cut -f1 "${RD}/phases.tsv" | tail -n +2 | tr '\n' ' ')" = "all-up down-1 restarted "
+
+echo "== fallback, whole: the peerlist rewrite goes to the postgres container pg_cid looked up"
+STUB_N=10 STUB_MIN_LIVE=7 full_run fallback-on fallback
+check "fallback: exit 0, and verdict.json and results.tsv say PASS" eval 'exited 0 && recorded PASS'
+check "fallback: every node database rewritten through the container the lookup gave (10)" \
+    test "$(grep -c '^exec -i -e PGCONNECT_TIMEOUT=10 -e PGOPTIONS=-c statement_timeout=20000 fakepg psql -U demosuser -d node[0-9]*_db -v ON_ERROR_STOP=1 -q -f -$' "${FULL}/docker.log")" = 10
+check "fallback: the fallback lines of all 10 node logs counted" fout 'fallback log lines: 10$'
+check "fallback: no rotation options set on the containers: said so" fout 'node log rotation: max-size/max-file none set$'
+
+echo "== ride-n13s10, whole: restart counts of the 10 survivors before and after, the judge's pass"
+STUB_N=13 STUB_MIN_LIVE=1 STUB_LOGCONF='{"max-size":"20m"}' full_run ride ride-n13s10
+check "ride-n13s10: exit 0, and verdict.json and results.tsv say PASS" eval 'exited 0 && recorded PASS'
+check "ride-n13s10: the judge got restart counts of the 10 survivors, before and after" \
+    jq -e '(.restartCounts.before | length) == 10 and (.restartCounts.after | length) == 10' "${RD}/drill-input.json"
+check "ride-n13s10: one rotation option set: the other is named as none set" fout 'node log rotation: max-size 20m, max-file none set$'
+
+echo "== a stalled docker call fails the run closed, within the bound, never as a pass"
+# Each stalled call sleeps 300 s: a run that waited one out would take over 300 s
+STUB_N=4 STUB_MIN_LIVE=99 STUB_STALL=logs:2 full_run floor-stall --binding off floor
+check "floor, node-2's docker logs stalls: exit 2 (the other logs' refusals would have made a pass)" exited 2
+check "floor, node-2's docker logs stalls: the WARN names node-2 and the bound" fout 'WARN: node-2: docker logs did not answer within 3s, its log not read whole'
+check "floor, node-2's docker logs stalls: verdict.json and results.tsv say ERROR, node log unreadable" recorded ERROR 'floor: node log unreadable'
+check "floor, node-2's docker logs stalls: within the bound (${ms} ms)" test "${ms}" -lt 120000
+STUB_N=13 STUB_MIN_LIVE=1 STUB_STALL=restart full_run ride-stall ride-n13s10
+check "ride-n13s10, the restart count inspect stalls: exit 2, ABORT, no verdict" \
+    eval 'exited 2 && fout "ABORT: cannot read the survivors. restart counts" && [ ! -e "${RD}/logs/verdict.json" ]'
+check "ride-n13s10, the restart count inspect stalls: within the bound (${ms} ms)" test "${ms}" -lt 120000
+STUB_N=7 STUB_MIN_LIVE=7 STUB_TICK_MS=1000 STUB_STALL=head:1 full_run drop-stall drop-n7s10
+check "drop-n7s10, node-1's head reads stall after the stop: exit 2" exited 2
+check "drop-n7s10, node-1's head reads stall after the stop: ERROR, node-1 unread" fout 'ERROR: down-1: a running node does not answer its head (heads n1=? '
+check "drop-n7s10, node-1's head reads stall after the stop: verdict.json and results.tsv say ERROR" recorded ERROR 'down-1: node unreadable'
+check "drop-n7s10, node-1's head reads stall after the stop: within the bound (${ms} ms)" test "${ms}" -lt 120000
 
 echo
 if [ "${fails}" = 0 ]; then echo "lockstep stub tests: all passed"; else echo "lockstep stub tests: ${fails} FAILED"; exit 1; fi

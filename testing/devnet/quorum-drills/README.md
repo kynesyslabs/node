@@ -118,7 +118,13 @@ an observation window (three tries) ends the run as `ERROR`, exit 2: a
 crashed node must not pass for a stalled one, and neither may a run in which
 Postgres ran out of connections (see "Postgres connections"). Each run with a verdict
 appends a row to `runs/results.tsv`. Log-line counts (floor refusals,
-fallback lines) only take lines logged in the window being judged.
+fallback lines) only take lines logged in the window being judged, and a
+node log such a count cannot read to the end (a docker error, or no answer
+within `LOG_READ_TIMEOUT_S`, see [Tuning](#tuning)) ends the run as `ERROR`,
+exit 2 (`<phase>: node log unreadable`), never as a count without that
+node's lines. A progress phase counts only a head read that finished inside
+its `PROGRESS_TIMEOUT` window: one that returns after it is not progress,
+whatever height it shows.
 
 ## Scenarios
 
@@ -499,7 +505,14 @@ A connection-limit hit can no longer pass:
   driver, or `json-file` with `max-size`/`max-file`): then early lines can
   have been dropped, and a hit in them is not seen. `run.log` names the
   driver at bring-up (`docker logging driver: json-file`, or `unknown` if
-  `docker info` fails); no driver is refused. Each docker call the check
+  `docker info` fails), and once the nodes run, the `max-size` and
+  `max-file` the node containers were created with, from their
+  `HostConfig.LogConfig.Config` (`node log rotation: max-size 10m, max-file
+  3`; `none set` for an option that is not; `unreadable` for a container
+  that could not be inspected in time). The compose file sets no logging
+  options, so these are the daemon's `log-opts`. With `json-file`, `none
+  set` means the whole log is kept; the `local` driver rotates even then, at
+  its own defaults (20 MB x 5 files). No driver is refused. Each docker call the check
   makes is bounded by `LOG_READ_TIMEOUT_S` (60 s), and the log by
   `LOG_READ_MAX_BYTES` (256 MiB, after colour codes are stripped). A log it
   cannot read in full, or a `psql-errors.log` it cannot read, is also
@@ -527,7 +540,13 @@ set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log; a
 postgres lookup that stalls, fails or finds no container), with file writes
 failing as on a full disk (a file size limit of 0, SIGXFSZ ignored: the copy
 of a node log, the psql errors, the rewritten records), and runs `run.sh` from the top on both start paths (on the image
-path: preflight, then the 13 migrations, then node-1);
+path: preflight, then the 13 migrations, then node-1). It also runs `run.sh`
+whole, bring-up to verdict, against a stub chain (a stub `docker` whose head
+grows while enough nodes run, a stub `bun` and judge, a 20 ms `sleep`):
+`drop-n7s10 --binding off`, `fallback` and `ride-n13s10`, and, with one
+docker call that stalls for 300 s, `floor` (a node's `docker logs`),
+`ride-n13s10` (the restart count `inspect`) and `drop-n7s10` (node-1's head
+reads after the stop), each of which must end as exit 2 within the bound;
 `drillInputs.test.ts` the generated compose for N=4, 10 and 13.
 
 ## Runs and logs
@@ -579,10 +598,23 @@ drills also leave `drill-input.json` (what the run observed),
 empty or timed-out read of a node's head or hash during the lockstep waits),
 `NETSHOOT_IMAGE`, `RUNS_DIR`. Database reads and writes are not tunable: each
 has a 10 s connect timeout, a 20 s `statement_timeout` and a 30 s outer
-`timeout` (`DB_TIMEOUT_S`). Before a read, the postgres container is looked up
+`timeout` (`DB_TIMEOUT_S`). Before a read or a write (the `fallback`
+rewrite too), the postgres container is looked up
 (`docker compose ps`) within `LOG_READ_TIMEOUT_S` (60 s); a lookup that fails,
 finds no container or gets no answer is a failed read. A read that fails or
-times out ends the `halt-*` and `ride-*` runs as `ABORT`, exit 2. For the
+times out ends the `halt-*` and `ride-*` runs as `ABORT`, exit 2. Every other
+docker call a check reads is bounded by `LOG_READ_TIMEOUT_S` as well, so a
+stalled Docker daemon ends the read and not the run: the node container
+lookups and the `docker exec` of every head and block read (`cid_of`, `rpc`),
+`serving`, the log reads of `stop_mid_round` and of the log-line counts
+(`grep_logs`), the restart counts and the bring-up snapshot (`docker stats`,
+memory). A call that does not answer in time is a failed read, never an
+answer, handled as any failed read of it: a head that cannot be read is an
+unreadable node (`ERROR` or `ABORT`, exit 2, in the other scenarios; `-1`,
+no answer, for the judge of the `halt-*` and `ride-*` drills), a log-line
+count `ERROR`, exit 2, the restart counts `ABORT`, exit 2, and a
+`stop_mid_round` that sees no round start stops the node at its 60 s
+deadline. The snapshot only notes the call in `03-bringup.log`. For the
 `halt-*` and `ride-*` drills:
 `BASELINE_HEIGHT` (6), `SETTLE_ROUNDS` (2), `HALT_ROUNDS` (12),
 `RECOVERY_BLOCKS` (3), `RECOVERY_TIMEOUT` (300), `RIDE_BLOCKS` (5),

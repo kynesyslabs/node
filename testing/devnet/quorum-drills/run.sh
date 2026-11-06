@@ -350,10 +350,12 @@ say "inputs ready (genesis in ${GENESIS_DELAY}s)"
 
 # ── helpers ─────────────────────────────────────────────────────────────
 port_of() { echo $((53549 + 2 * $1)); }
-cid_of() { dc ps -q "node-$1" 2>/dev/null; }
+# Container lookup and docker exec are bounded (bdc, bdocker, below): one that
+# does not answer gives no container, or no answer, as a failed read does
+cid_of() { bdc ps -q "node-$1" 2>/dev/null; }
 rpc() { # $1 node, $2 JSON body, $3 curl timeout in s (default 4)
     local cid; cid=$(cid_of "$1"); [ -z "${cid}" ] && return 1
-    docker exec "${cid}" curl -sS -m"${3:-4}" -X POST -H 'Content-Type: application/json' \
+    bdocker exec "${cid}" curl -sS -m"${3:-4}" -X POST -H 'Content-Type: application/json' \
         -d "$2" "http://localhost:$(port_of "$1")/" 2>/dev/null
 }
 head_of() { # $1 node, $2 curl timeout in s (default 4)
@@ -381,7 +383,7 @@ hash_read() {
 }
 # The hash, or nothing when it could not be read (after hash_read's retry)
 hash_at() { local h; h=$(hash_read "$1" "$2") && echo "${h}"; }
-serving() { local cid; cid=$(cid_of "$1"); [ -n "${cid}" ] && docker exec "${cid}" curl -sS -m3 "http://localhost:$(port_of "$1")/" 2>/dev/null | grep -q Hello; }
+serving() { local cid; cid=$(cid_of "$1"); [ -n "${cid}" ] && bdocker exec "${cid}" curl -sS -m3 "http://localhost:$(port_of "$1")/" 2>/dev/null | grep -q Hello; }
 wait_serve() {
     local deadline=$((SECONDS + $2))
     while [ ${SECONDS} -lt ${deadline} ]; do serving "$1" && return 0; sleep 3; done
@@ -426,18 +428,28 @@ stop_node() {
 # pg_limit_gate, the teardown's collection) are bounded: every docker call by
 # LOG_READ_TIMEOUT_S, so a stalled daemon ends the read and not the run, and the
 # log by LOG_READ_MAX_BYTES (stripped). pg_cid bounds the postgres lookup by it
-# too. QDRILL_TEST_LOG_READ_TIMEOUT_S is for lockstep-stub.test.sh only.
+# too, and bdocker / bdc every other docker call a check reads: the container
+# lookups (cid_of), the head and block reads (rpc), serving, the round-start and
+# log-line reads (stop_mid_round, grep_logs), restart_counts and the bring-up
+# snapshot. A call that does not answer in time is a failed read, never an
+# answer. QDRILL_TEST_LOG_READ_TIMEOUT_S is for lockstep-stub.test.sh only.
 LOG_READ_TIMEOUT_S="${QDRILL_TEST_LOG_READ_TIMEOUT_S:-60}"
 LOG_READ_MAX_BYTES=$((256 * 1024 * 1024))
+# docker, and docker compose on this run's project, ended after LOG_READ_TIMEOUT_S:
+# exit 124 then (137 if it ignores the TERM)
+bdocker() { timeout -k 5 "${LOG_READ_TIMEOUT_S}" docker "$@"; }
+bdc() { bdocker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" "$@"; }
+# Why a bdocker or bdc call with exit status $1 failed
+bounded_why() { case "$1" in 124 | 137) echo "did not answer within ${LOG_READ_TIMEOUT_S}s" ;; *) echo "failed (exit $1)" ;; esac; }
 # Node $1's container log, colour codes stripped, into file $2: all of it that
 # the Docker daemon keeps, or its last $3 lines. That is the whole log unless
 # the daemon's logging driver rotates logs (the local driver, or json-file with
 # max-size/max-file): then early lines can be gone, and the run log names the
-# driver at bring-up. Fails, printing why, when node $1 has no container or it
-# cannot be looked up, docker logs fails or does not finish in time, the copy
-# in $2 cannot be written whole (a full disk), or the log is over
-# LOG_READ_MAX_BYTES: part of what docker logs gives is never passed off as all
-# of it.
+# driver and the node containers' max-size/max-file at bring-up (log_rotation).
+# Fails, printing why, when node $1 has no container or it cannot be looked up,
+# docker logs fails or does not finish in time, the copy in $2 cannot be written
+# whole (a full disk), or the log is over LOG_READ_MAX_BYTES: part of what
+# docker logs gives is never passed off as all of it.
 read_node_log() { # $1 node, $2 file, $3 last lines (default: all)
     local cid rc size
     # dc ps, spelled out: timeout runs a command, not a shell function
@@ -480,6 +492,24 @@ boot_failure_line() {
     grep -aiE 'refusing to boot' "${f}" | tail -1 | cut -c1-600 | grep . || grep -aiE 'error' "${f}" | tail -1 | cut -c1-600
     rm -f "${f}"
     return 0
+}
+# The rotation options the started node containers were created with
+# (HostConfig.LogConfig.Config: the daemon's log-opts, as the compose file sets
+# none), each distinct answer once, joined by "; ": "max-size S, max-file F"
+# ("none set" for one of the two that is not), "max-size/max-file none set", or
+# "unreadable" for a container not looked up or inspected within LOG_READ_TIMEOUT_S
+log_rotation() {
+    local i cid conf
+    for i in $(seq 1 "${N}"); do
+        [ "${STARTED[i]:-0}" = 1 ] || continue
+        if cid=$(cid_of "${i}") && [ -n "${cid}" ] && conf=$(bdocker inspect -f '{{json .HostConfig.LogConfig.Config}}' "${cid}" 2>/dev/null); then
+            jq -r 'if (.["max-size"] // .["max-file"]) == null then "max-size/max-file none set"
+                   else "max-size \(.["max-size"] // "none set"), max-file \(.["max-file"] // "none set")" end' <<< "${conf}" 2>/dev/null ||
+                echo unreadable
+        else
+            echo unreadable
+        fi
+    done | sort -u | paste -sd ';' - | sed 's/;/; /g'
 }
 
 # Window (s) for a fresh lockstep, 120 up to N=6, 160 at 10, 190 at 13. The reads
@@ -615,16 +645,17 @@ reader() { local i; for i in $(running); do case " $* " in *" ${i} "*) ;; *) ech
 
 # Waits for PROGRESS_BLOCKS new blocks past $1; records a phase row
 expect_progress() { # $1 phase name, $2 from height
-    local deadline=$((SECONDS + PROGRESS_TIMEOUT)) m t0=${SECONDS} r times
+    local deadline=$((SECONDS + PROGRESS_TIMEOUT)) m t0=${SECONDS} r times seen=0
     while [ ${SECONDS} -lt ${deadline} ]; do
         m=$(max_head) || read_error "$1"
-        [ "${m}" -ge $(($2 + PROGRESS_BLOCKS)) ] && break
+        # A read that finished after the deadline does not count as inside the window
+        if [ ${SECONDS} -lt ${deadline} ] && [ "${m}" -ge $(($2 + PROGRESS_BLOCKS)) ]; then seen=1; break; fi
         sleep 2
     done
     r=$(reader)
     times=$(round_times "${r}" "$2" "${m}")
     local down=$((N - $(live_count)))
-    if [ "${m}" -ge $(($2 + PROGRESS_BLOCKS)) ]; then
+    if [ "${seen}" = 1 ]; then
         say "$1: progressing, ${2} -> ${m} in $((SECONDS - t0))s (round mean/max ${times// //} s)"
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\tprogress\n' "$1" "${down}" "$(live_count)" "$2" "${m}" $((m - $2)) ${times} >> "${PHASES}"
         PHASE_END="${m}"; return 0
@@ -656,14 +687,15 @@ expect_stall() { # $1 phase name, $2 height at the fault
     PHASE_END="${m}"; return 1
 }
 
-# Stops node $1 once a round past the current head has started on node $2
+# Stops node $1 once a round past the current head has started on node $2. Each
+# log read is bounded (bdocker): one that does not answer sees no round start
 stop_mid_round() {
     local victim="$1" watcher="$2" h since line deadline
     h=$(read_head "${watcher}") || read_error "stop node-${victim}"
     since=$(date -u +%s)
     deadline=$((SECONDS + 60))
     while [ ${SECONDS} -lt ${deadline} ]; do
-        line=$(docker logs --since "${since}" "$(cid_of "${watcher}")" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
+        line=$(bdocker logs --since "${since}" "$(cid_of "${watcher}")" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
             grep -aoE 'We are forging block [0-9]+' | awk -v h="${h}" '$5 > h' | head -1)
         [ -n "${line}" ] && break
         sleep 0.3
@@ -674,13 +706,23 @@ stop_mid_round() {
 }
 
 # Log lines matching $1 across every node, logged at or after unix time $2
-# (default: the whole log; a restarted container keeps its earlier lines)
+# (default: the whole log; a restarted container keeps its earlier lines).
+# Every docker call is bounded (bdc, bdocker). Fails when a node's container
+# could not be looked up or its log not read to the end (a docker error, or no
+# answer in time), after a WARN on stderr naming it: a count of these lines
+# then misses that node's, and the callers that judge on one give no verdict
+# (log_read_error).
 grep_logs() {
-    local i cid
+    local i cid rc bad=0
     for i in $(seq 1 "${N}"); do
-        cid=$(dc ps -aq "node-${i}" 2>/dev/null); [ -z "${cid}" ] && continue
-        docker logs --since "${2:-0}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "$1" | sed "s/^/node-${i}: /"
+        cid=$(bdc ps -aq "node-${i}" 2>/dev/null); rc=$?
+        [ "${rc}" = 0 ] || { say "WARN: node-${i}: docker compose ps $(bounded_why "${rc}"), its log not read" >&2; bad=1; continue; }
+        [ -z "${cid}" ] && continue
+        bdocker logs --since "${2:-0}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "$1" | sed "s/^/node-${i}: /"
+        rc=${PIPESTATUS[0]}
+        [ "${rc}" = 0 ] || { say "WARN: node-${i}: docker logs $(bounded_why "${rc}"), its log not read whole" >&2; bad=1; }
     done
+    return "${bad}"
 }
 
 # Verdict, written after the scenario or when a window cannot be judged
@@ -743,6 +785,16 @@ read_error() { # $1 phase name
     printf '%s\t%s\t%s\t-\t-\t-\t-\t-\tunreadable\n' "$1" "$((N - $(live_count)))" "$(live_count)" >> "${PHASES}"
     RESULT=ERROR
     DETAIL="${DETAIL:+${DETAIL} }$1: node unreadable ($(heads_line))"
+    write_verdict
+    exit 2
+}
+
+# A node log whose matching lines a result counts could not be read whole
+# (grep_logs failed and named it): no verdict from part of the logs, ERROR
+log_read_error() { # $1 phase name
+    say "ERROR: $1: a node log could not be read whole (the WARN lines above name it)"
+    RESULT=ERROR
+    DETAIL="${DETAIL:+${DETAIL} }$1: node log unreadable"
     write_verdict
     exit 2
 }
@@ -905,12 +957,25 @@ if [ "${wait_s}" -lt 0 ]; then
 else
     say "all ${START} up ${wait_s}s before the genesis time"
 fi
-docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' $(dc ps -q) >> "${STEP_LOG}" 2>&1
-# Anonymous memory is what the node really holds; the rest is page cache
-for c in $(dc ps -q); do
-    echo "$(docker inspect -f '{{.Name}}' "${c}") anon $(docker exec "${c}" cat /sys/fs/cgroup/memory.stat 2>/dev/null |
-        awk '/^anon /{print int($2 / 1048576)}') MiB"
-done >> "${STEP_LOG}" 2>&1
+# With max-size/max-file set, the daemon drops a log's oldest lines once it
+# fills them, which the node-log checks then cannot see (read_node_log): the run
+# log says whether the node containers rotate (above, the driver)
+say "node log rotation: $(log_rotation)"
+# A snapshot of what each container holds, every docker call bounded (bdc,
+# bdocker): one that does not answer is noted in the step log and skipped
+cids=$(bdc ps -q); ps_rc=$?
+if [ "${ps_rc}" = 0 ] && [ -n "${cids}" ]; then
+    mapfile -t CIDS <<< "${cids}"
+    bdocker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' "${CIDS[@]}" >> "${STEP_LOG}" 2>&1 ||
+        echo "docker stats: $(bounded_why $?)" >> "${STEP_LOG}"
+    # Anonymous memory is what the node really holds; the rest is page cache
+    for c in "${CIDS[@]}"; do
+        echo "$(bdocker inspect -f '{{.Name}}' "${c}") anon $(bdocker exec "${c}" cat /sys/fs/cgroup/memory.stat 2>/dev/null |
+            awk '/^anon /{print int($2 / 1048576)}') MiB"
+    done >> "${STEP_LOG}" 2>&1
+else
+    echo "docker compose ps -q $([ "${ps_rc}" = 0 ] && echo "found no container" || bounded_why "${ps_rc}"): no stats" >> "${STEP_LOG}"
+fi
 
 # ── 4. scenario ─────────────────────────────────────────────────────────
 step 04-scenario
@@ -944,7 +1009,7 @@ scenario_floor() {
     since=$(( GENESIS_TS < $(date -u +%s) ? $(date -u +%s) : GENESIS_TS ))
     while [ "$(date -u +%s)" -lt "${until_ts}" ]; do sleep 5; done
     m=$(max_head) || read_error floor
-    lines=$(grep_logs "below the (floor|quorum) of ${Q}" "${since}" | tee -a "${STEP_LOG}" | wc -l)
+    lines=$(grep_logs "below the (floor|quorum) of ${Q}" "${since}" | tee -a "${STEP_LOG}" | wc -l) || log_read_error floor
     say "head after $((8 * CONSENSUS_TIME + 30))s past genesis: ${m}; floor/quorum refusals logged in the window: ${lines}"
     grep_logs "below the (floor|quorum) of ${Q}" "${since}" | head -3 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     printf 'floor\t0\t%s\t0\t%s\t%s\t-\t-\t%s\n' "${N}" "${m}" "${m}" "$([ "${m}" = 0 ] && echo stall || echo progress)" >> "${PHASES}"
@@ -1007,7 +1072,7 @@ scenario_listed_stall() {
 
 scenario_fallback() {
     lockstep_or_abort 3
-    local i h heads_db listed pl_json fallback_lines ok=1
+    local i h heads_db listed pl_json fallback_lines pg ok=1
     # Stop every node at once right after a commit, so they all hold one head.
     # Exact, not within one block: block h is rewritten on every database below,
     # so every node must hold h and nothing above it when it stops
@@ -1038,7 +1103,9 @@ text = json.dumps(c, separators=(",", ":"))
 assert "$qdrill$" not in text
 print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = {int(sys.argv[2])};")
 ' "${pl_json}" "${h}" > "${RUN_DIR}/inputs/content-${i}.sql" || { say "ABORT: rewriting block ${h} failed"; exit 2; }
-        timeout "${DB_TIMEOUT_S}" docker exec -i "${PG_LIMITS[@]}" "$(dc ps -q postgres)" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q -f - \
+        # The postgres lookup bounded as psql_node's (pg_cid), before the write's own timeout
+        pg=$(pg_cid) || { say "ABORT: update failed on node${i}_db: ${pg}"; exit 2; }
+        timeout "${DB_TIMEOUT_S}" docker exec -i "${PG_LIMITS[@]}" "${pg}" psql -U demosuser -d "node${i}_db" -v ON_ERROR_STOP=1 -q -f - \
             < "${RUN_DIR}/inputs/content-${i}.sql" >> "${STEP_LOG}" 2>&1 || { say "ABORT: update failed on node${i}_db"; exit 2; }
         [ "$(psql_node "${i}" "SELECT json_array_length(content->'peerlist') FROM blocks WHERE number = ${h}")" = 6 ] ||
             { say "ABORT: node${i}_db does not list 6 at ${h}"; exit 2; }
@@ -1053,7 +1120,7 @@ print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = 
         # Pre-fork rule: the pool is the 6 listed, below the floor, forever
         expect_stall "listed-below-q" "${h}" || ok=0
     fi
-    fallback_lines=$(grep_logs "drawing the committee from all" "${since}" | tee -a "${STEP_LOG}" | wc -l)
+    fallback_lines=$(grep_logs "drawing the committee from all" "${since}" | tee -a "${STEP_LOG}" | wc -l) || log_read_error listed-below-q
     grep_logs "drawing the committee from all|Shard of [0-9]+ is below the floor" "${since}" | head -2 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     say "fallback log lines: ${fallback_lines}"
     if [ "${BINDING}" = on ] && [ "${fallback_lines}" = 0 ]; then ok=0; fi
@@ -1166,11 +1233,12 @@ heads_read() {
     done | kv_json
 }
 
-# Restart counts of the given containers; fails when one cannot be read
+# Restart counts of the given containers; fails when one cannot be read, or
+# not within LOG_READ_TIMEOUT_S (bdocker)
 restart_counts() {
     local i c
     for i in "$@"; do
-        c=$(docker inspect -f '{{.RestartCount}}' "$(cid_of "${i}")" 2>/dev/null) || return 1
+        c=$(bdocker inspect -f '{{.RestartCount}}' "$(cid_of "${i}")" 2>/dev/null) || return 1
         [[ "${c}" =~ ^[0-9]+$ ]] || return 1
         printf '%s %s\n' "${i}" "${c}"
     done | kv_json
