@@ -1,3 +1,6 @@
+import type { IOperation } from "@kynesyslabs/demosdk/types"
+import { EVM } from "@kynesyslabs/demosdk/xm-localsdk"
+import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import { Config } from "src/config"
 import log from "@/utilities/logger"
 
@@ -43,4 +46,45 @@ export function pickRpcUrl(
         `[XM] Ignoring caller RPC URL for host ${parsed.hostname}: not in XM_RPC_ALLOWLIST`,
     )
     return configuredUrl
+}
+
+/**
+ * Broadcasts an XM operation's signed EVM transaction. The SDK caches one
+ * instance per chain id, so only the configured RPC goes into that cache: an
+ * allow-listed caller URL gets a connection of its own, which later callers
+ * on the same chain never inherit.
+ */
+export async function sendSignedEvmTransaction(
+    operation: IOperation,
+    chainID: number,
+) {
+    const configuredUrl = evmProviders[operation.chain]?.[operation.subchain]
+    const rpcUrl = pickRpcUrl(operation.rpc, configuredUrl)
+    if (!rpcUrl) {
+        return {
+            result: "error",
+            error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
+        }
+    }
+
+    if (rpcUrl !== configuredUrl) {
+        const own = new EVM(rpcUrl, chainID)
+        try {
+            await own.connect()
+            return await own.sendSignedTransaction(
+                operation.task.signedPayloads[0],
+            )
+        } finally {
+            own.provider?.destroy?.()
+        }
+    }
+
+    let evmInstance = EVM.getInstance(chainID)
+    if (!evmInstance) {
+        evmInstance = EVM.createInstance(chainID, rpcUrl)
+        await evmInstance.connect()
+    }
+    return await evmInstance.sendSignedTransaction(
+        operation.task.signedPayloads[0],
+    )
 }

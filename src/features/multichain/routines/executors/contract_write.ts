@@ -1,35 +1,13 @@
 import type { IOperation } from "@kynesyslabs/demosdk/types"
-import { EVM, MULTIVERSX, SOLANA, TON } from "@kynesyslabs/demosdk/xm-localsdk"
-import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
+import { MULTIVERSX, SOLANA, TON } from "@kynesyslabs/demosdk/xm-localsdk"
 import log from "@/utilities/logger"
 import handleAptosContractWrite from "./aptos_contract_write"
 import { genericJsonRpcPay } from "./pay"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
-import { pickRpcUrl } from "./rpcUrl"
+import { pickRpcUrl, sendSignedEvmTransaction } from "./rpcUrl"
 
 async function handleEVMContractWrite(operation: IOperation, chainID: number) {
-    // NOTE: Logic is similar to handleEVMPay
-    let evmInstance = EVM.getInstance(chainID)
-
-    if (!evmInstance) {
-        const rpcUrl = pickRpcUrl(
-            operation.rpc,
-            evmProviders[operation.chain]?.[operation.subchain],
-        )
-        if (!rpcUrl) {
-            return {
-                result: "error",
-                error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
-            }
-        }
-
-        evmInstance = EVM.createInstance(chainID, rpcUrl)
-        await evmInstance.connect()
-    }
-
-    return await evmInstance.sendSignedTransaction(
-        operation.task.signedPayloads[0],
-    )
+    return await sendSignedEvmTransaction(operation, chainID)
 }
 
 async function handleSolanaContractWrite(operation: IOperation) {

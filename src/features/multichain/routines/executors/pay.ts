@@ -2,14 +2,13 @@ import { IOperation } from "@kynesyslabs/demosdk/types"
 import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
-import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 import checkSignedPayloads from "src/utilities/checkSignedPayloads"
 import validateIfUint8Array from "@/utilities/validateUint8Array"
 import handleAptosPayRest from "./aptos_pay_rest"
 import log from "@/utilities/logger"
 import { VersionedTransaction } from "@solana/web3.js"
-import { pickRpcUrl } from "./rpcUrl"
+import { pickRpcUrl, sendSignedEvmTransaction } from "./rpcUrl"
 
 /**
  * Executes a XM pay operation and returns
@@ -208,27 +207,7 @@ async function handleEVMPay(chainID: number, operation: IOperation) {
 
     log.debug(operation.task.signedPayloads[0])
 
-    let evmInstance = multichain.EVM.getInstance(chainID)
-
-    if (!evmInstance) {
-        const rpcUrl = pickRpcUrl(
-            operation.rpc,
-            evmProviders[operation.chain]?.[operation.subchain],
-        )
-        if (!rpcUrl) {
-            return {
-                result: "error",
-                error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
-            }
-        }
-
-        evmInstance = multichain.EVM.createInstance(chainID, rpcUrl)
-        await evmInstance.connect()
-    }
-
-    return await multichain.EVM.getInstance(chainID).sendSignedTransaction(
-        operation.task.signedPayloads[0],
-    )
+    return await sendSignedEvmTransaction(operation, chainID)
 }
 
 /**

@@ -28,6 +28,7 @@ const { evmProviders } = await import(
 const { default: handlePayOperation } = await import("./pay")
 const { default: handleContractWrite } = await import("./contract_write")
 const { pickRpcUrl } = await import("./rpcUrl")
+const { Config } = await import("src/config")
 
 const METADATA = "http://169.254.169.254/latest/meta-data/"
 
@@ -102,6 +103,42 @@ describe("XM executors ignore a caller-named RPC URL", () => {
         }) as any)
         await handleContractWrite(op("eth", "sepolia", true), 11155111)
         expect(urls).toEqual([evmProviders.eth.sepolia])
+    })
+})
+
+describe("an allow-listed caller RPC stays with that caller", () => {
+    const partner = "https://rpc.partner.example/"
+
+    it.each([
+        ["pay", (o: any) => handlePayOperation(o, 11155111)],
+        ["contract_write", (o: any) => handleContractWrite(o, 11155111)],
+    ])("%s: a later caller on the chain gets the configured RPC", async (_n, run) => {
+        // The SDK caches one EVM instance per chain id for the whole process.
+        const cache = (multichain.EVM as any).instances as Map<number, unknown>
+        const saved = new Map(cache)
+        cache.clear()
+        const real = Config.getInstance()
+        spyOn(Config, "getInstance").mockReturnValue({
+            ...real,
+            outbound: { ...real.outbound, xmRpcAllowlist: ["rpc.partner.example"] },
+        } as any)
+
+        const used: string[] = []
+        spyOn(multichain.EVM.prototype, "connect").mockResolvedValue(true)
+        spyOn(multichain.EVM.prototype, "sendSignedTransaction").mockImplementation(
+            async function (this: any) {
+                used.push(this.rpc_url)
+                return { result: "success", hash: "0x" }
+            },
+        )
+        try {
+            await run({ ...op("eth", "sepolia", true), rpc: partner })
+            await run({ ...op("eth", "sepolia", true), rpc: undefined })
+            expect(used).toEqual([partner, evmProviders.eth.sepolia])
+        } finally {
+            cache.clear()
+            for (const [k, v] of saved) cache.set(k, v)
+        }
     })
 })
 
