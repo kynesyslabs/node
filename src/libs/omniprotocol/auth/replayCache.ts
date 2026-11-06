@@ -6,11 +6,14 @@
  * the sender's floor is raised to that entry's timestamp and anything from
  * that sender at or below it is refused, so an early eviction never reopens
  * a replay. Floors are per sender: one peer flooding the cache only raises
- * its own.
+ * its own. When the floor cap forces a floor out while it is still live, its
+ * value moves into one floor shared by every sender instead of being lost:
+ * under that much pressure delayed messages are refused, never replayed.
  */
 export class ReplayCache {
-    private seen = new Map<string, { identity: string; timestamp: number }>()
-    private floors = new Map<string, number>()
+    private readonly seen = new Map<string, { identity: string; timestamp: number }>()
+    private readonly floors = new Map<string, number>()
+    private sharedFloor = -Infinity
 
     constructor(
         private readonly windowMs: number,
@@ -34,6 +37,7 @@ export class ReplayCache {
     ): boolean {
         this.prune(now)
 
+        if (timestamp <= this.sharedFloor) return false
         const floor = this.floors.get(identity)
         if (floor !== undefined && timestamp <= floor) return false
 
@@ -68,9 +72,11 @@ export class ReplayCache {
         this.floors.delete(identity)
         this.floors.set(identity, floor)
         while (this.floors.size > this.maxFloors) {
-            const oldest = this.floors.keys().next()
+            const oldest = this.floors.entries().next()
             if (oldest.done) break
-            this.floors.delete(oldest.value)
+            const [dropped, droppedFloor] = oldest.value
+            this.floors.delete(dropped)
+            this.sharedFloor = Math.max(this.sharedFloor, droppedFloor)
         }
     }
 }

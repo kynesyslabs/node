@@ -166,4 +166,17 @@ describe("ReplayCache", () => {
         // a's fresh traffic still passes.
         expect(cache.admit("a", "d9", 1010, 1010)).toBe(true)
     })
+
+    it("still refuses a replay after the floor cap drops a live floor", () => {
+        const cache = new ReplayCache(WINDOW, 1, 1)
+        expect(cache.admit("a", "da", 1000, 1000)).toBe(true)
+        // Each admit evicts the previous sender's entry into a floor; the
+        // third pushes a's floor out of the one-floor cap while it is live.
+        expect(cache.admit("b", "db", 1001, 1001)).toBe(true)
+        expect(cache.admit("c", "dc", 1002, 1002)).toBe(true)
+        expect(cache.admit("a", "da", 1000, 1010)).toBe(false)
+        expect(cache.admit("b", "db", 1001, 1010)).toBe(false)
+        // Traffic newer than every forgotten floor still passes.
+        expect(cache.admit("a", "dn", 1005, 1010)).toBe(true)
+    })
 })

@@ -28,7 +28,7 @@ export class SignatureVerifier {
         new Set([SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH])
 
     /** Messages already accepted inside the freshness window. */
-    private static replayCache = new ReplayCache(SignatureVerifier.MAX_CLOCK_SKEW)
+    private static readonly replayCache = new ReplayCache(SignatureVerifier.MAX_CLOCK_SKEW)
 
     /**
      * Verify authentication block against message
