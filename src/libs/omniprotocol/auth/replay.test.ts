@@ -145,38 +145,64 @@ describe("ReplayCache", () => {
 
     it("forgets entries once their timestamp is out of the window", () => {
         const cache = new ReplayCache(WINDOW, 10)
-        expect(cache.admit("a", "d1", 1000, 1000)).toBe(true)
-        expect(cache.admit("a", "d1", 1000, 1500)).toBe(false)
+        expect(cache.admit("a", "d1", 1000, 1000)).toBe("admitted")
+        expect(cache.admit("a", "d1", 1000, 1500)).toBe("replayed")
         // Out of the window the verifier refuses the timestamp itself.
         cache.admit("a", "d2", 2600, 2600)
         expect(cache.size).toBe(1)
+        expect(cache.senders).toBe(1)
     })
 
     it("stays bounded and refuses what it had to forget early", () => {
         const cache = new ReplayCache(WINDOW, 3)
         for (let i = 0; i < 5; i++) {
-            expect(cache.admit("a", `d${i}`, 1000 + i, 1000 + i)).toBe(true)
+            expect(cache.admit("a", `d${i}`, 1000 + i, 1000 + i)).toBe("admitted")
         }
         expect(cache.size).toBe(3)
         // d0 and d1 were evicted early: a replay of either is still refused.
-        expect(cache.admit("a", "d0", 1000, 1010)).toBe(false)
-        expect(cache.admit("a", "d1", 1001, 1010)).toBe(false)
+        expect(cache.admit("a", "d0", 1000, 1010)).toBe("replayed")
+        expect(cache.admit("a", "d1", 1001, 1010)).toBe("replayed")
         // Another identity is not affected by a's evictions.
-        expect(cache.admit("b", "d0", 1000, 1010)).toBe(true)
+        expect(cache.admit("b", "d0", 1000, 1010)).toBe("admitted")
         // a's fresh traffic still passes.
-        expect(cache.admit("a", "d9", 1010, 1010)).toBe(true)
+        expect(cache.admit("a", "d9", 1010, 1010)).toBe("admitted")
     })
 
-    it("still refuses a replay after the floor cap drops a live floor", () => {
+    it("still refuses a replay of an early-evicted frame when every sender slot is taken", () => {
+        const cache = new ReplayCache(WINDOW, 1, 2)
+        expect(cache.admit("a", "da", 1000, 1000)).toBe("admitted")
+        // b's entry pushes a's out of the one-entry cache into a's floor.
+        expect(cache.admit("b", "db", 1001, 1001)).toBe("admitted")
+        // A third sender would need a slot while a's floor is live: refused,
+        // not made room for by forgetting a.
+        expect(cache.admit("c", "dc", 1002, 1002)).toBe("full")
+        expect(cache.admit("a", "da", 1000, 1010)).toBe("replayed")
+        expect(cache.admit("b", "db", 1001, 1010)).toBe("replayed")
+        expect(cache.admit("a", "dn", 1005, 1010)).toBe("admitted")
+    })
+
+    it("lets no sender's future timestamps block another sender's fresh message", () => {
+        const cache = new ReplayCache(WINDOW, 2, 4)
+        expect(cache.admit("honest", "h1", 1000, 1000)).toBe("admitted")
+        // Many identities, each dated as far ahead as the verifier allows.
+        for (let i = 0; i < 20; i++) {
+            cache.admit(`attacker${i}`, `x${i}`, 1001 + i + WINDOW, 1001 + i)
+        }
+        expect(cache.admit("honest", "h2", 1030, 1030)).toBe("admitted")
+        // The early-evicted honest frame is still refused.
+        expect(cache.admit("honest", "h1", 1000, 1030)).toBe("replayed")
+        // So is every attacker frame that made it in.
+        expect(cache.admit("attacker0", "x0", 1001 + WINDOW, 1030)).toBe("replayed")
+    })
+
+    it("frees a sender slot once that sender's records leave the window", () => {
         const cache = new ReplayCache(WINDOW, 1, 1)
-        expect(cache.admit("a", "da", 1000, 1000)).toBe(true)
-        // Each admit evicts the previous sender's entry into a floor; the
-        // third pushes a's floor out of the one-floor cap while it is live.
-        expect(cache.admit("b", "db", 1001, 1001)).toBe(true)
-        expect(cache.admit("c", "dc", 1002, 1002)).toBe(true)
-        expect(cache.admit("a", "da", 1000, 1010)).toBe(false)
-        expect(cache.admit("b", "db", 1001, 1010)).toBe(false)
-        // Traffic newer than every forgotten floor still passes.
-        expect(cache.admit("a", "dn", 1005, 1010)).toBe(true)
+        expect(cache.admit("a", "da", 1000 + WINDOW, 1000)).toBe("admitted")
+        expect(cache.admit("b", "db", 1001, 1001)).toBe("full")
+        // a's future-dated record lives until its own timestamp leaves the
+        // window, then b gets the slot.
+        expect(cache.admit("b", "db", 2000, 2000 + WINDOW)).toBe("full")
+        expect(cache.admit("b", "db", 2001 + WINDOW, 2001 + WINDOW)).toBe("admitted")
+        expect(cache.senders).toBe(1)
     })
 })

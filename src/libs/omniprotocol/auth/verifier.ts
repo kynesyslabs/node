@@ -123,10 +123,17 @@ export class SignatureVerifier {
         // re-dated, so the cache would not stop it.
         if (auth.signatureMode === SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH) {
             const digest = Buffer.from(keccak_256(dataToVerify)).toString("hex")
-            if (!this.replayCache.admit(peerIdentity, digest, auth.timestamp)) {
+            const admitted = this.replayCache.admit(peerIdentity, digest, auth.timestamp)
+            if (admitted === "replayed") {
                 return {
                     valid: false,
                     error: "Replayed message: already accepted inside the freshness window",
+                }
+            }
+            if (admitted === "full") {
+                return {
+                    valid: false,
+                    error: "Replay cache full: no slot for a new sender until one expires",
                 }
             }
         }
