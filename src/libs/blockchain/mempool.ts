@@ -964,6 +964,7 @@ export default class Mempool {
 
         // INFO: Transactions not to send back back
         const noSendBackTxs = new Map<string, string>()
+        const capped = blockCapsActiveForPendingBlock()
 
         const blockNumber = SecretaryManager.lastBlockRef
         const existingHashes = await this.getMempoolHashMap(blockNumber)
@@ -1124,7 +1125,7 @@ export default class Mempool {
                     checkIdentityAdmission(
                         tx,
                         IDENTITY_ADMISSION_TIMEOUT_MS,
-                        "merge",
+                        capped ? "merge" : "ingest",
                     ),
                 ),
             )
@@ -1156,7 +1157,6 @@ export default class Mempool {
         // cap's read and the insert run under the pool lock: overlapping
         // exchanges must see each other's txs, or each admits up to the cap
         // and the sender ends over it on this member alone.
-        const capped = blockCapsActiveForPendingBlock()
         const store = async () => {
             if (capped && validTransactions.length > 0) {
                 const kept = await this.enforceSenderCap(validTransactions)
