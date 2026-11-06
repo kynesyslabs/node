@@ -359,6 +359,17 @@ describe("web2 proofs are bound to the claimed account", () => {
             expect((await verifyWeb2Proof(claim("42"), SENDER)).success).toBe(true)
         })
 
+        it("refuses a webhook message, whose author name the webhook owner sets", async () => {
+            discordMessages["333333333333333333"] = {
+                content: PROOF_TEXT,
+                webhook_id: "42",
+                author: { id: "42", username: "alice", bot: true },
+            }
+            const r = await verifyWeb2Proof(claim("42"), SENDER)
+            expect(r.success).toBe(false)
+            expect(r.message).toContain("webhook")
+        })
+
         it("refuses a message with no author", async () => {
             discordMessages["333333333333333333"] = { content: PROOF_TEXT }
             const r = await verifyWeb2Proof(claim("42"), SENDER)

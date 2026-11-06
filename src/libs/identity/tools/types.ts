@@ -15,6 +15,8 @@ export type DiscordMessage = {
     id: string
     channel_id: string
     guild_id?: string
+    /** Set when a webhook posted the message; its author fields are whatever the webhook owner chose. */
+    webhook_id?: string
     author: {
         id: string
         username: string

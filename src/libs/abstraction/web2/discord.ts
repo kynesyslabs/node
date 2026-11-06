@@ -38,6 +38,11 @@ export class DiscordProofParser extends Web2ProofParser {
         this.parseDiscordMessageUrl(proofUrl)
         const msg = await this.discord.getMessageByUrl(proofUrl)
 
+        // A webhook posts under any name its owner picks, so its author
+        // fields say nothing about which account wrote the proof.
+        if (msg?.webhook_id) {
+            throw new Error("Proof message was posted by a webhook, not a user")
+        }
         // Anyone can post a signed proof in a channel; only the author's id
         // says whose account it proves, and the payload's userId is what
         // gets stored and rewarded.
