@@ -626,8 +626,10 @@ Everything goes to `runs/<UTC time>-<scenario>-<binding>-<label>/`
 it is never shared: a run started in the same second with the same options
 and label finds it taken and gets the next free suffix (`...-<label>-2`,
 `-3`, up to 99 tries, then exit 2), and the compose project is named after
-the dir it got. It holds `inputs/` (identities, genesis, peerlist, compose
-file: devnet keys, never commit them), `logs/01-preflight.log` ..
+the dir it got, lowercased: labels that differ only in letter case (`Foo`,
+`foo`) started in the same second get distinct dirs but the same project. It
+holds `inputs/` (identities, genesis, peerlist, compose file: devnet keys,
+never commit them), `logs/01-preflight.log` ..
 `05-verdict.log` per step, `events.log` with a timestamped line per stop,
 start and partition change, `node-N.log` (full container logs, collected at
 teardown, each within the bounds of the connection-limit check below),
@@ -647,11 +649,12 @@ drills also leave `drill-input.json` (what the run observed),
   swapping, an image is missing, another `crace-`/`qdrill-` stack is
   running, or `flock` (util-linux) is not installed: `run.sh` writes the
   shared `runs/results.tsv` under a lock and does not start without it.
-- A unique compose project per run (`qdrill-<run id>`, the run dir's name
-  lowercased: two runs never share one, see [Runs and logs](#runs-and-logs)), no container names,
-  no published ports (the harness uses `docker exec`), postgres and node
-  state on tmpfs, no named volumes. Memory caps: `NODE_MEM` (1800m) per
-  node, 1 GB postgres, 64 MB per partition sidecar.
+- A compose project per run (`qdrill-<run id>`, the run dir's name
+  lowercased: two runs never share a run dir, and their projects differ unless
+  their labels differ only in letter case, see [Runs and logs](#runs-and-logs)),
+  no container names, no published ports (the harness uses `docker exec`),
+  postgres and node state on tmpfs, no named volumes. Memory caps:
+  `NODE_MEM` (1800m) per node, 1 GB postgres, 64 MB per partition sidecar.
 - The node runs as the image's user (`demos`, uid 1000 in the release image),
   and Docker creates a tmpfs root-owned. `run.sh` reads the uid and gid from
   `${IMAGE}` and mounts the node's `/app/state` as
@@ -692,7 +695,10 @@ count `ERROR`, exit 2, the restart counts `ABORT`, exit 2, and a
 `stop_mid_round` whose container lookup or log read fails or does not
 answer, or that sees no round start within `ROUND_START_WAIT_S` (60 s),
 `ERROR`, exit 2, before it stops the node (`stop node-N: round start unseen
-on node-1 (why)`): a stop not seen mid-round is not the drill. The snapshot
+on node-1 (why)`): a stop not seen mid-round is not the drill. The
+`ROUND_START_WAIT_S` deadline is checked before each `docker logs` read, not
+after it: a read that starts before the deadline and returns after it with a
+round start in it still leads to the stop. The snapshot
 only notes the call in `03-bringup.log`. For the
 `halt-*` and `ride-*` drills:
 `BASELINE_HEIGHT` (6), `SETTLE_ROUNDS` (2), `HALT_ROUNDS` (12),
