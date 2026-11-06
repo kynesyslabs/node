@@ -103,8 +103,9 @@ async function headSigners(block: { number: number; hash: string }): Promise<Hea
  * `signatures` are the block's stored validator signatures and
  * `signedMessage` is the exact text each of them signs, so a client can
  * verify them, not just count them. `committee` is who may sign it and
- * `threshold` how many of them must, as this node counts them (null when
- * they cannot be recovered for the head, see headSigners): a client
+ * `threshold` how many of them must, as this node counts them (under
+ * canonicalSigners in lowercase, each once; null when they cannot be
+ * recovered for the head, see headSigners): a client
  * that holds its own validator set checks them against it instead of
  * trusting them. `timestamp` is in seconds, the unit `ageSeconds` is
  * derived in. Genesis is final by configuration and carries a single

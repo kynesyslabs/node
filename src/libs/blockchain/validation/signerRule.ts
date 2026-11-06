@@ -10,6 +10,7 @@ import { getSharedState } from "@/utilities/sharedState"
 export interface SignerRule {
     /** The bound committee under committeeBinding, else the eligible signer pool. */
     bound: boolean
+    /** Under canonicalSigners in lowercase, each once, as sync counts them. */
     members: string[]
     threshold: number
 }
@@ -22,21 +23,21 @@ export interface SignerRule {
  * the producer's, and committeeBinding implies the same bar, since the
  * overlap of two accepted blocks is bounded against shardSize. Under
  * canonicalSigners a member listed in two cases is one signer, so the set
- * sizes the bar by its lowercase identities.
+ * is its lowercase identities, each once, and sizes the bar by them.
  *
  * @throws when the committee or pool cannot be read
  */
 export async function signerRuleOf(blockNumber: number): Promise<SignerRule> {
     const bound = isForkActive("committeeBinding", blockNumber)
-    const members = bound
+    const listed = bound
         ? await getBoundCommittee(blockNumber - 1)
         : await getEligiblePool(blockNumber - 1)
-    const size = isForkActive("canonicalSigners", blockNumber)
-        ? new Set(members.map(id => id.toLowerCase())).size
-        : members.length
+    const members = isForkActive("canonicalSigners", blockNumber)
+        ? [...new Set(listed.map(id => id.toLowerCase()))]
+        : listed
     const threshold = verifierThreshold(
         getSharedState.shardSize,
-        size,
+        members.length,
         bound || isForkActive("quorumParity", blockNumber),
     )
     return { bound, members, threshold }

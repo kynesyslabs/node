@@ -3,7 +3,7 @@
  * to clients: the bound committee and 2/3 + 1 of shardSize under
  * committeeBinding, the eligible pool and the pool-relative bar before it
  * (shardSize again under quorumParity). Under canonicalSigners a member
- * listed in two cases sizes the pool once.
+ * listed in two cases is one lowercase member and sizes the pool once.
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
@@ -50,14 +50,26 @@ describe("signerRuleOf", () => {
         expect((await signerRuleOf(9)).threshold).toBe(2)
     })
 
-    it("sizes the bar by lowercase identity under canonicalSigners", async () => {
-        const listedTwice = ["a", "b", "A", "B"]
+    it("is the set in lowercase, each once, under canonicalSigners", async () => {
+        // getFinalizedHead hands these members to clients as `committee`: in
+        // the pool's own spelling a client would match fewer stored keys.
         sharedState.forkConfig.canonicalSigners.activationHeight = 10
-        getEligiblePool.mockResolvedValueOnce(listedTwice).mockResolvedValueOnce(listedTwice)
-        const under = await signerRuleOf(10)
+        getEligiblePool.mockResolvedValueOnce(["a", "B", "A", "b"])
+        expect(await signerRuleOf(10)).toEqual({ bound: false, members: ["a", "b"], threshold: 2 })
+        sharedState.forkConfig.committeeBinding.activationHeight = 10
+        getBoundCommittee.mockResolvedValueOnce(["C", "a", "c", "D", "b"])
+        expect(await signerRuleOf(10)).toEqual({ bound: true, members: ["c", "a", "d", "b"], threshold: 3 })
+    })
+
+    it("is the set as listed while canonicalSigners is dormant", async () => {
+        const listed = ["a", "B", "A", "b"]
+        sharedState.forkConfig.canonicalSigners.activationHeight = 10
+        getEligiblePool.mockResolvedValueOnce(listed).mockResolvedValueOnce(listed)
         const before = await signerRuleOf(9)
-        expect(under).toEqual({ bound: false, members: listedTwice, threshold: 2 })
-        expect(before.threshold).toBe(3)
+        expect(before).toEqual({ bound: false, members: ["a", "B", "A", "b"], threshold: 3 })
+        expect(before.members).toBe(listed)
+        sharedState.forkConfig.canonicalSigners.activationHeight = null
+        expect((await signerRuleOf(10)).members).toBe(listed)
     })
 
     it("is the committee bound at the parent under committeeBinding", async () => {
