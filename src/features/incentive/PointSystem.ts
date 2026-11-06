@@ -213,7 +213,10 @@ export class PointSystem {
     /**
      * Get user's points from GCR
      */
-    private async getUserPointsInternal(userId: string): Promise<UserPoints> {
+    private async getUserPointsInternal(
+        userId: string,
+        persist = true,
+    ): Promise<UserPoints> {
         // Convert userId to hex string if it's a Buffer
         const userIdStr = Buffer.isBuffer(userId)
             ? userId.toString("hex")
@@ -223,11 +226,22 @@ export class PointSystem {
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         let account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
 
+        // A read (persist false) of an unknown address has nothing linked,
+        // and reading the identities would create its account.
         const { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedHumanPassport, linkedEthos } =
-            await this.getUserIdentitiesFromGCR(userIdStr)
+            account || persist
+                ? await this.getUserIdentitiesFromGCR(userIdStr)
+                : {
+                      linkedWallets: [],
+                      linkedSocials: {},
+                      linkedUDDomains: {},
+                      linkedNomis: [],
+                      linkedHumanPassport: [],
+                      linkedEthos: [],
+                  }
 
         if (!account) {
-            account = await HandleGCR.createAccount(userIdStr)
+            account = await HandleGCR.createAccount(userIdStr, {}, !persist)
         }
 
         // INFO: This is a fallback for accounts that were created before the referral code was added
@@ -238,7 +252,9 @@ export class PointSystem {
                 referrals: [],
                 referredBy: null,
             }
-            await gcrMainRepository.save(account)
+            if (persist) {
+                await gcrMainRepository.save(account)
+            }
         }
 
         // Create and return the response object
@@ -439,7 +455,8 @@ export class PointSystem {
      */
     async getUserPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPoints = await this.getUserPointsInternal(userId)
+            // Served to anyone over RPC: must not store an account.
+            const userPoints = await this.getUserPointsInternal(userId, false)
 
             return {
                 result: 200,
