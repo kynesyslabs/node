@@ -1,0 +1,189 @@
+{
+  "id": "N05",
+  "kind": "negative (offline, client side)",
+  "issues": [
+    "kynesyslabs/node#1059: tamper cases; DACS network-binding analogue; no Demos genesis-proof test",
+    "kynesyslabs/node#1060: capacity, large integers, tamper cases"
+  ],
+  "captured_by": "PATH-OS lane S154b against dacs-sdk main 3904d704fb540e6e1d7dd502a0be29f20569c92d",
+  "checked_at_utc": "2026-10-14T03:56:50.189Z",
+  "scope": "offline exact source; cached public signed fixtures; no signing or live chain actions",
+  "not_proved": [
+    "Demos node deployed verifier",
+    "funded transaction replay",
+    "on-chain same-job nonce consumption",
+    "all SDK admission APIs",
+    "durable multiprocess log"
+  ],
+  "totals": {
+    "checks": 129,
+    "passed": 129,
+    "failed": 0,
+    "by_category": {
+      "raw-json": 59,
+      "raw-canonical": 23,
+      "raw-json-edge": 9,
+      "raw-positive": 3,
+      "crypto": 5,
+      "network-binding": 4,
+      "channel-replay": 15,
+      "replayed-nonce": 4,
+      "nonce-binding": 4,
+      "operation-guard": 3
+    }
+  },
+  "selected_checks": [
+    {
+      "name": "overflow",
+      "category": "raw-json-edge",
+      "expected": "reject",
+      "observed": "reject",
+      "pass": true,
+      "stage": "profile",
+      "code": "NUMBER-NOT-BINARY64"
+    },
+    {
+      "name": "lone-high-surrogate",
+      "category": "raw-json-edge",
+      "expected": "reject",
+      "observed": "reject",
+      "pass": true,
+      "stage": "profile",
+      "code": "INVALID-UNICODE"
+    },
+    {
+      "name": "lone-low-surrogate",
+      "category": "raw-json-edge",
+      "expected": "reject",
+      "observed": "reject",
+      "pass": true,
+      "stage": "profile",
+      "code": "INVALID-UNICODE"
+    },
+    {
+      "name": "unsafe-integer",
+      "category": "raw-json-edge",
+      "expected": "reject",
+      "observed": "reject",
+      "pass": true,
+      "stage": "profile",
+      "code": "NUMBER-OUTSIDE-DACS-MAGNITUDE"
+    },
+    {
+      "name": "over-2pow53",
+      "category": "raw-json-edge",
+      "expected": "reject",
+      "observed": "reject",
+      "pass": true,
+      "stage": "profile",
+      "code": "NUMBER-OUTSIDE-DACS-MAGNITUDE"
+    },
+    {
+      "name": "rounded-fraction",
+      "category": "raw-json-edge",
+      "expected": "reject",
+      "observed": "reject",
+      "pass": true,
+      "stage": "profile",
+      "code": "NUMBER-OUTSIDE-DACS-MAGNITUDE"
+    },
+    {
+      "name": "duplicate",
+      "category": "raw-json-edge",
+      "expected": "reject",
+      "observed": "reject",
+      "pass": true,
+      "stage": "profile",
+      "code": "DUPLICATE-MEMBER"
+    },
+    {
+      "name": "deep",
+      "category": "raw-json-edge",
+      "expected": "reject",
+      "observed": "reject",
+      "pass": true,
+      "stage": "profile",
+      "code": "JSON-NESTING-TOO-DEEP"
+    },
+    {
+      "name": "oversized-valid-json",
+      "category": "raw-json-edge",
+      "expected": "BYTE-LIMIT-EXCEEDED",
+      "observed": "BYTE-LIMIT-EXCEEDED",
+      "pass": true,
+      "stage": "parse"
+    },
+    {
+      "name": "cached-signature-positive",
+      "category": "crypto",
+      "expected": "valid",
+      "observed": "valid",
+      "pass": true
+    },
+    {
+      "name": "forged-zero",
+      "category": "crypto",
+      "expected": "invalid",
+      "observed": "invalid",
+      "pass": true
+    },
+    {
+      "name": "forged-truncated",
+      "category": "crypto",
+      "expected": "invalid",
+      "observed": "invalid",
+      "pass": true
+    },
+    {
+      "name": "forged-bitflip",
+      "category": "crypto",
+      "expected": "invalid",
+      "observed": "invalid",
+      "pass": true
+    },
+    {
+      "name": "cross-domain",
+      "category": "crypto",
+      "expected": "invalid",
+      "observed": "invalid",
+      "pass": true
+    },
+    {
+      "name": "wrong-networkId-bound-by-signature",
+      "category": "network-binding",
+      "expected": "invalid",
+      "observed": "invalid",
+      "pass": true,
+      "scope": "extra signed-field mutation; not a network policy check"
+    },
+    {
+      "name": "network-change-hash",
+      "category": "network-binding",
+      "expected": "different",
+      "observed": "different",
+      "pass": true
+    },
+    {
+      "name": "wrong-network-claim",
+      "category": "network-binding",
+      "expected": "conflict",
+      "observed": "conflict",
+      "pass": true
+    },
+    {
+      "name": "literal-networkId-unknown-field",
+      "category": "network-binding",
+      "expected": "reject",
+      "observed": "reject",
+      "pass": true
+    }
+  ],
+  "shows": [
+    "129/129 client-side checks passed their individual expectations, including positive controls, expected refusals and replay/guard checks.",
+    "among the expected refusals: wrong-network bindings, forged/truncated/bit-flipped signatures, unsafe integers, values above 2^53, duplicate members, excessive depth and valid JSON over 1 MiB (BYTE-LIMIT-EXCEEDED)"
+  ],
+  "does_not_show": [
+    "any node behaviour: these exercise DACS-layer behavior, not Demos proof validation, validator quorum, or wrong-genesis finality-proof rejection",
+    "that all 129 checks are rejections; positive controls are expected to accept"
+  ]
+}

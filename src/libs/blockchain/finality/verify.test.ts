@@ -9,45 +9,34 @@
  */
 
 import { describe, expect, it } from "bun:test"
-import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto"
+import { sign } from "node:crypto"
 import { jcsCanonicalize } from "src/libs/crypto/jcs"
-import { auditPath, root, toHex } from "src/libs/crypto/merkle/rfc6962"
-import { SparseMerkleTree } from "src/libs/crypto/merkle/sparse"
 import { precommitMessage } from "src/libs/consensus/v2/commitLock/messages"
 import { serializeTxContent } from "src/libs/crypto/txContentSerializer"
 import type { ValidatorSetEntry } from "src/model/entities/ValidatorSetSnapshots"
 import {
-    storageProgramKey,
-    storageProgramLeafHex,
-    storageProgramRecord,
-    type StorageProgramRow,
-} from "./storageRecord"
+    buildChain,
+    buildStorageProof,
+    buildTxProof,
+    certify,
+    newKey,
+    sha256Hex as sha256,
+    sortedKeys,
+    type Key,
+    type ProofChainSpec,
+} from "./proofTestKit"
+import { storageProgramRecord, type StorageProgramRow } from "./storageRecord"
 import { validatorSetHash } from "./validatorSetRecord"
 import {
     verifyStorageProof,
     verifyTransactionProof,
-    type BlockBytes,
     type CommitteeRules,
     type ExpectedTransaction,
-    type SignedHeader,
     type StorageProof,
     type TransactionProof,
 } from "./verify"
 
-const sha256 = (text: string) => createHash("sha256").update(text).digest("hex")
-
-interface Key {
-    identity: string
-    privateKey: KeyObject
-}
-
-function newKey(): Key {
-    const { publicKey, privateKey } = generateKeyPairSync("ed25519")
-    const raw = publicKey.export({ format: "der", type: "spki" }).subarray(-32)
-    return { identity: `0x${raw.toString("hex")}`, privateKey }
-}
-
-const keys = Array.from({ length: 5 }, newKey).sort((a, b) => (a.identity < b.identity ? -1 : 1))
+const keys = sortedKeys(5)
 const members = keys.slice(0, 4)
 const outsider = keys[4]
 
@@ -61,20 +50,6 @@ const SET_HASH = validatorSetHash(validators)
 const trusted = { validators }
 const rules: CommitteeRules = { shardSize: 4 }
 const ROUND = 1_800_000_123
-
-function blockOf(number: number, content: Record<string, unknown>): BlockBytes {
-    const contentBytes = JSON.stringify(content)
-    return { number, hash: sha256(contentBytes), contentBytes }
-}
-
-function certify(block: BlockBytes, signers: Key[], round = ROUND): SignedHeader {
-    const message = precommitMessage(block.number, round, block.hash)
-    const signatures: Record<string, string> = {}
-    for (const k of signers) {
-        signatures[k.identity] = sign(null, Buffer.from(message, "utf8"), k.privateKey).toString("hex")
-    }
-    return { ...block, round, signedMessage: message, signatures }
-}
 
 const resultLeafText = (hash: string, status: string, code: string | null) =>
     jcsCanonicalize({ code, hash, status })
@@ -177,59 +152,35 @@ const RESULTS = [
     resultLeafText(TX[7], "confirmed", null),
     resultLeafText(TX[8], "confirmed", null),
 ]
-const leafBytes = RESULTS.map(text => new TextEncoder().encode(text))
 const M = 41
 
 interface ChainOptions {
     peerlist?: string[]
     setHash?: string
     signers?: Key[]
-    storageRoot?: string
 }
 
-function chain(options: ChainOptions = {}) {
-    const inclusion = blockOf(M, {
-        previousHash: sha256("block 40"),
-        ordered_transactions: TX,
-        peerlist: options.peerlist ?? members.map(k => k.identity),
-        native_tables_hashes: { native_storage_programs: options.storageRoot ?? "00".repeat(32) },
-        number: M,
-        parent_results_root: sha256("results of 40"),
-        validator_set_hash: options.setHash ?? SET_HASH,
-    })
-    const commit = blockOf(M + 1, {
-        previousHash: inclusion.hash,
-        ordered_transactions: [],
-        peerlist: members.map(k => k.identity),
-        native_tables_hashes: { native_storage_programs: options.storageRoot ?? "00".repeat(32) },
-        number: M + 1,
-        parent_results_root: toHex(root(leafBytes)),
-        validator_set_hash: SET_HASH,
-    })
-    return { inclusion, commit: certify(commit, options.signers ?? members.slice(0, 3)) }
-}
+const spec = (options: ChainOptions = {}): ProofChainSpec => ({
+    number: M,
+    transactions: TX,
+    results: RESULTS,
+    peerlist: members.map(k => k.identity),
+    setHash: SET_HASH,
+    signers: options.signers ?? members.slice(0, 3),
+    round: ROUND,
+    inclusionPeerlist: options.peerlist,
+    inclusionSetHash: options.setHash,
+})
 
-function txProof(index: number, options: ChainOptions = {}): TransactionProof {
-    const { inclusion, commit } = chain(options)
-    return {
-        hash: TX[index],
-        blockNumber: M,
-        leafIndex: index,
-        treeSize: TX.length,
-        leaf: RESULTS[index],
-        auditPath: auditPath(leafBytes, index).map(toHex),
-        committedIn: M + 1,
-        inclusionBlock: inclusion,
-        commitBlock: commit,
-    }
-}
+const chain = (options: ChainOptions = {}) => buildChain(spec(options))
+const txProof = (index: number, options: ChainOptions = {}): TransactionProof => buildTxProof(spec(options), index)
 
 const clone = <T>(value: T): T => structuredClone(value)
 
 describe("verifyTransactionProof", () => {
     it("accepts an executed and a failed transaction at every position", () => {
         for (let i = 0; i < TX.length; i++) {
-            const expected = RESULTS[i].includes('"confirmed"') ? "final-executed" : "final-failed"
+            const expected = JSON.parse(RESULTS[i]).status === "confirmed" ? "final-executed" : "final-failed"
             expect(verifyTransactionProof(txProof(i), trusted, rules)).toEqual({ verdict: expected })
         }
     })
@@ -336,7 +287,7 @@ describe("verifyTransactionProof", () => {
 
     it("rejects a block whose content commits another height", () => {
         const proof = txProof(0)
-        proof.commitBlock = certify({ ...proof.commitBlock, number: M + 2 }, members.slice(0, 3))
+        proof.commitBlock = certify({ ...proof.commitBlock, number: M + 2 }, members.slice(0, 3), ROUND)
         proof.committedIn = M + 2
         proof.blockNumber = M + 1
         proof.inclusionBlock = { ...proof.inclusionBlock, number: M + 1 }
@@ -580,20 +531,7 @@ function storageRow(i: number, overrides: Partial<StorageProgramRow> = {}): Stor
 }
 
 function storageProof(addresses: string[], options: ChainOptions = {}): StorageProof {
-    const rows = [1, 2, 3].map(i => storageRow(i))
-    const tree = SparseMerkleTree.build(
-        rows.map(r => ({ key: storageProgramKey(r.storageAddress), valueHash: storageProgramLeafHex(r) })),
-    )
-    const { inclusion, commit } = chain({ ...options, storageRoot: tree.rootHex })
-    return {
-        anchor: commit,
-        anchorParent: inclusion,
-        asOfBlock: M,
-        proofs: addresses.map(address => {
-            const row = rows.find(r => r.storageAddress === address)
-            return { storageAddress: address, record: row ? storageProgramRecord(row) : null, ...tree.prove(storageProgramKey(address)) }
-        }),
-    }
+    return buildStorageProof(spec(options), [1, 2, 3].map(i => storageRow(i)), addresses)
 }
 
 describe("verifyStorageProof", () => {

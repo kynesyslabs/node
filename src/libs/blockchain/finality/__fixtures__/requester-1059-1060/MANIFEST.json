@@ -1,0 +1,83 @@
+{
+  "package": "Demos testnet fixtures for kynesyslabs/node #1059 (U-01) and #1060 (U-02)",
+  "prepared_by": "PATH-OS (cX3po)",
+  "prepared_at_utc": "2026-10-15",
+  "algorithm": "sha256",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 9192,
+      "sha256": "97e9446f329ae871474d09cbae969dd81f227a15666e8a3bd8c2b78af6c96b65"
+    },
+    {
+      "path": "REQUIREMENT_MAP.md",
+      "bytes": 10272,
+      "sha256": "5ca5ad22a44409d68c7a82a01e35ff627d5bc701f87ce34fe3d6d775c97dab18"
+    },
+    {
+      "path": "SANITIZE_REPORT.md",
+      "bytes": 1989,
+      "sha256": "67eaed95811a57d4645068f6ec514ab411e21eaee2aec64ad177904fef9e236a"
+    },
+    {
+      "path": "fixtures/F01_soak_height_reads_20261014.json",
+      "bytes": 3576,
+      "sha256": "7fddca7c23b4bb9171933e13073fc3fda8108d18ab0ee3d2d2b7616fa69ee0ef"
+    },
+    {
+      "path": "fixtures/F02_node_method_shapes_20260907.json",
+      "bytes": 3796,
+      "sha256": "739015289f1af229af8f916cd46a0c0c5f4f7cefd3dfd92891c13b196dc3d03c"
+    },
+    {
+      "path": "fixtures/F03_live_lifecycle_storage_anchors_20260907.json",
+      "bytes": 4960,
+      "sha256": "a2517b13d467881d0247243bbff6a15d56abe898dc441467b3ca8cabe3d85f12"
+    },
+    {
+      "path": "fixtures/F04_existing_api_readback_composition.json",
+      "bytes": 4404,
+      "sha256": "841c70cf180d6d34a622ce0b197e31409e3c0974b1dfa15eecf462640cb00684"
+    },
+    {
+      "path": "fixtures/F05_canonical_json_interop_offline.json",
+      "bytes": 1662,
+      "sha256": "e5ff2d8094f3110e91531ca5c045c3a6fcbf83674cdc6ea9e9150c3b3daa29d5"
+    },
+    {
+      "path": "negative/N01_gateway_http502_window_20261014.json",
+      "bytes": 2016,
+      "sha256": "c8b7fe5f9cccde2ed69267bf03a903e30f85db3495e148bf938bb24a824f72c9"
+    },
+    {
+      "path": "negative/N02_gateway_status_probe_20261015.json",
+      "bytes": 437,
+      "sha256": "e7da107b3320eebbdfc2cce036543f48d0bdb088a5e7daf505954d94529eace7"
+    },
+    {
+      "path": "negative/N03_chain_identity_methods_501_20261014.json",
+      "bytes": 1509,
+      "sha256": "fdfbadcf9f44b3e7a5d590f471966394dae0e563b731c061921df619eaede826"
+    },
+    {
+      "path": "negative/N04_finality_not_exposed_info_20261014.json",
+      "bytes": 825,
+      "sha256": "36340d1fb76ead355ed5d09871b03b0c76027d5e6ee934cf00bebbca7303873e"
+    },
+    {
+      "path": "negative/N05_client_verifier_negatives_offline_20261014.json",
+      "bytes": 5201,
+      "sha256": "5344c45ef8b80989682de68660bc969be19ab471af7655539ddb07706249c651"
+    },
+    {
+      "path": "negative/N06_bundle_evidence_mutations_20260907.json",
+      "bytes": 1989,
+      "sha256": "fc44f6a9b039c6d6fbbe5fb3da552c00caf63db49accf4a49fc5553586ee5277"
+    },
+    {
+      "path": "negative/N07_included_but_failed_public_record.json",
+      "bytes": 2093,
+      "sha256": "63f3f3b75a8cf84777ff218f47ca875913bbef0b456e4439dd955c1744d8dacb"
+    }
+  ]
+}

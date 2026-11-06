@@ -103,7 +103,7 @@ describe("getChainIdentity", () => {
     })
 
     it("is a registered nodeCall", async () => {
-        const reply = await handlerRegistry.getChainIdentity({}, { result: 200, response: null, require_reply: false, extra: null })
+        const reply = await handlerRegistry.getChainIdentity({}, { result: 200, response: null, require_reply: false, extra: null }, "")
         expect(reply.result).toBe(200)
         expect(reply.response.chainId).toBe(4242)
     })
