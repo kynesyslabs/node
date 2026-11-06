@@ -501,10 +501,16 @@ A connection-limit hit can no longer pass:
   answer in time, no container, or a log over the bound.
 - **Backstop**: when the logs are collected at teardown (with the same
   bounds), a hit also replaces exit 0 or 1 by 2, for the exits that skip the
-  verdict (an early FAIL). So does a started node's log that could not be
-  collected, unless the check above already read every log.
+  verdict (an early FAIL) and for a hit a node logged after the check. So
+  does a started node's log that could not be collected, unless the check
+  above already read every log. When the verdict was already written,
+  `verdict.json` and the run's `results.tsv` row are rewritten to match:
+  `ERROR`, `could not run: postgres connection limit hit (in the logs
+  collected at teardown: node-N.log); the result was PASS`. A record that
+  cannot be rewritten is named on stderr, and the exit is still 2.
 
 `lockstep-stub.test.sh` covers the preflight, the check and the backstop
+(also after the verdict is written)
 against a fake `docker` (a `docker logs` that fails, stalls past a 1 s bound
 set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log; a
 postgres lookup that stalls, fails or finds no container), and runs `run.sh` from the top on both start paths (on the image
