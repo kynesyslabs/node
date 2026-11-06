@@ -38,10 +38,14 @@ mock.module("node:dns/promises", () => ({
 
 const { Proxy } = await import("@/features/web2/proxy/Proxy")
 const { Config } = await import("src/config")
+// The cap is read from the config singleton, which may predate the env above.
+Config.resetInstance()
 
 const servers: http.Server[] = []
 afterAll(() => {
     for (const s of servers) s.close()
+    delete process.env.WEB2_MAX_RESPONSE_BYTES
+    Config.resetInstance()
 })
 
 function listen(
@@ -83,7 +87,7 @@ describe("web2 proxy hardening", () => {
         const port = await listen((_req, res) => res.end(big))
         // Stand in for the local relay so the cap is exercised on its own.
         ;(proxy as any).startProxyServer = async () => {
-            ;(proxy as any)._proxyPort = port
+            (proxy as any)._proxyPort = port
         }
 
         await expect(
@@ -99,7 +103,7 @@ describe("web2 proxy hardening", () => {
             res.end("ok")
         })
         ;(proxy as any).startProxyServer = async () => {
-            ;(proxy as any)._proxyPort = port
+            (proxy as any)._proxyPort = port
         }
 
         const result = await proxy.sendHTTPRequest(
