@@ -201,21 +201,32 @@ async function chainEligiblePool(
 }
 
 /**
+ * Identities guaranteed a seat in the committee of block `blockNumber`: the
+ * pinned list, or none once `unpinnedCommittee` applies to that block.
+ */
+export function pinnedShardIdentities(blockNumber: number): readonly string[] {
+    return isForkActive("unpinnedCommittee", blockNumber) ? [] : PINNED_SHARD_IDENTITIES
+}
+
+/**
  * Move every pinned identity that is an online-eligible candidate to the
- * front of the committee, in `PINNED_SHARD_IDENTITIES` order, mutating
- * `shard` in place.
+ * front of the committee, in `pins` order, mutating `shard` in place.
  *
  * The result is deterministic given the seed, the pool and the online view.
  *
  * @returns A per-pin outcome summary for the debug log.
  */
-export function pinShardIdentities(shard: Peer[], candidates: Peer[]): string {
+export function pinShardIdentities(
+    shard: Peer[],
+    candidates: Peer[],
+    pins: readonly string[] = PINNED_SHARD_IDENTITIES,
+): string {
     const size = shard.length
     const drawnIds = new Set(shard.map(p => p.identity.toLowerCase()))
     const outcomes: string[] = []
 
     const front: Peer[] = []
-    for (const pinned of PINNED_SHARD_IDENTITIES) {
+    for (const pinned of pins) {
         const label = pinned.slice(0, 10)
         const candidate = candidates.find(
             p => p.identity.toLowerCase() === pinned,
@@ -297,13 +308,16 @@ export async function getBoundPool(parentNumber: number): Promise<string[]> {
 
 /**
  * Ranked pool with every pinned identity it contains moved to the front in
- * `PINNED_SHARD_IDENTITIES` order. Unlike `pinShardIdentities` it ignores
- * who is online, so the result depends on chain data only.
+ * `pins` order. Unlike `pinShardIdentities` it ignores who is online, so the
+ * result depends on chain data only.
  */
-export function pinRankedPool(ranked: string[]): string[] {
+export function pinRankedPool(
+    ranked: string[],
+    pins: readonly string[] = PINNED_SHARD_IDENTITIES,
+): string[] {
     const byLowercase = new Map(ranked.map(id => [id.toLowerCase(), id]))
     const front: string[] = []
-    for (const pinned of PINNED_SHARD_IDENTITIES) {
+    for (const pinned of pins) {
         const id = byLowercase.get(pinned)
         if (id !== undefined && !front.includes(id)) front.push(id)
     }
@@ -316,8 +330,9 @@ export function drawBoundCommittee(
     seed: string,
     pool: string[],
     shardSize: number,
+    pins: readonly string[] = PINNED_SHARD_IDENTITIES,
 ): string[] {
-    return pinRankedPool(rankPool(seed, pool)).slice(0, shardSize)
+    return pinRankedPool(rankPool(seed, pool), pins).slice(0, shardSize)
 }
 
 /**
@@ -341,7 +356,12 @@ export async function getBoundCommittee(
         seed = (await getCommonValidatorSeed(parent)).commonValidatorSeed
     }
     const pool = await getBoundPool(parentNumber)
-    return drawBoundCommittee(seed, pool, getSharedState.shardSize)
+    return drawBoundCommittee(
+        seed,
+        pool,
+        getSharedState.shardSize,
+        pinnedShardIdentities(parentNumber + 1),
+    )
 }
 
 /**
@@ -419,7 +439,11 @@ export default async function getShard(
         .slice(0, getSharedState.shardSize)
         .map(identity => liveByIdentity.get(identity))
 
-    const pinOutcome = pinShardIdentities(shard, candidates)
+    const pinOutcome = pinShardIdentities(
+        shard,
+        candidates,
+        pinnedShardIdentities(lastBlockNumber + 1),
+    )
 
     log.debug(
         `[getShard] pool at block ${lastBlockNumber}: ${pool.length}; ` +

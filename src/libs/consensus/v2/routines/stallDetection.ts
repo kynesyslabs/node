@@ -14,6 +14,7 @@ import {
     getBoundCommittee,
     getEligiblePool,
     pinShardIdentities,
+    pinnedShardIdentities,
 } from "./getShard"
 import { isForkActive } from "@/forks/forkGates"
 import { countMissedSignature } from "@/features/metrics/consensusMetrics"
@@ -134,6 +135,7 @@ async function wasSelectedForBlock(
     pinShardIdentities(
         shard,
         candidates.map(id => new Peer("", id)),
+        pinnedShardIdentities(block.number),
     )
 
     return shard.some(member => member.identity === ourKey)

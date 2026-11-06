@@ -18,6 +18,7 @@ import type {
     NetworkGovernanceConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
+    UnpinnedCommitteeConfig,
     Web2ProofBindingConfig,
     XmProofBindingConfig,
 } from "./forkConfig"
@@ -374,6 +375,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.networkGovernance =
                 config as NetworkGovernanceConfig
             return
+        case "unpinnedCommittee":
+            getSharedState.forkConfig.unpinnedCommittee =
+                config as UnpinnedCommitteeConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -513,6 +518,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as IdentityCarryoverConfig
         case "networkGovernance":
             return base as NetworkGovernanceConfig
+        case "unpinnedCommittee":
+            return base as UnpinnedCommitteeConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

@@ -19,10 +19,10 @@ import json
 import os
 
 # Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
-MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover"]
+MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "unpinnedCommittee"]
 # Same list as KNOWN_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal.
 # A node on a mainnet chain id refuses a genesis that leaves one undeclared.
-KNOWN_FORKS = ["osDenomination", "gasFeeSeparation", "tlsnProofEnforcement", "web2ProofBinding", "xmProofBinding", "signatureDomain", "nonceEnforcement", "atomicWork", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "networkGovernance"]
+KNOWN_FORKS = ["osDenomination", "gasFeeSeparation", "tlsnProofEnforcement", "web2ProofBinding", "xmProofBinding", "signatureDomain", "nonceEnforcement", "atomicWork", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "networkGovernance", "unpinnedCommittee"]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--base", required=True, help="the image's data/genesis.json")

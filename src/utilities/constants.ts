@@ -56,7 +56,9 @@ export const MEMPOOL_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
 /**
  * Validator identities guaranteed a committee slot whenever they are
  * eligible and online, placed at the front of the shard in this order so
- * the first online pin acts as secretary (see getShard).
+ * the first online pin acts as secretary (see getShard). Only until
+ * `unpinnedCommittee` applies: the testnet's committees depend on them, and
+ * a chain launched with that fork at 0 never uses them.
  */
 export const PINNED_SHARD_IDENTITIES: readonly string[] = [
     "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156",

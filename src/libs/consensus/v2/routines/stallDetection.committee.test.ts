@@ -58,6 +58,7 @@ jest.mock("./getShard", () => ({
     getEligiblePool: async () => [OUR_KEY, OTHER],
     getBoundCommittee: async () => committee,
     pinShardIdentities: () => "",
+    pinnedShardIdentities: () => [],
 }))
 jest.mock("@/features/metrics/consensusMetrics", () => ({
     countMissedSignature: () => {
