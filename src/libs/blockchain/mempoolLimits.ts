@@ -6,6 +6,7 @@ import {
     MEMPOOL_MAX_PENDING_PER_SENDER,
     MEMPOOL_MAX_TXS,
     MEMPOOL_TX_TTL_MS,
+    MERGE_PAYLOAD_MAX_BYTES,
 } from "src/utilities/constants"
 
 export interface MempoolLimits {
@@ -14,6 +15,8 @@ export interface MempoolLimits {
     maxPerSender: number
     ttlMs: number
     maxFutureSkewMs: number
+    /** Most bytes of txs, as sent, in one merge request or reply. */
+    mergeMaxBytes: number
 }
 
 const DEFAULT_LIMITS: MempoolLimits = {
@@ -22,6 +25,7 @@ const DEFAULT_LIMITS: MempoolLimits = {
     maxPerSender: MEMPOOL_MAX_PENDING_PER_SENDER,
     ttlMs: MEMPOOL_TX_TTL_MS,
     maxFutureSkewMs: MEMPOOL_MAX_FUTURE_SKEW_MS,
+    mergeMaxBytes: MERGE_PAYLOAD_MAX_BYTES,
 }
 
 let active: MempoolLimits = { ...DEFAULT_LIMITS }
@@ -234,15 +238,27 @@ export function chooseVictims(
     return over() ? null : victims
 }
 
+/** Size of a tx as a merge request or reply carries it. */
+export function txWireBytes(tx: unknown): number {
+    try {
+        return Buffer.byteLength(JSON.stringify(tx) ?? "")
+    } catch {
+        // Cannot be sent at all; sized so it travels alone.
+        return Number.MAX_SAFE_INTEGER
+    }
+}
+
 /**
- * Splits a pool into the requests that carry it to a peer. A request is
- * held to the pool caps, which the receiving side enforces on every merge
- * request, but the pool itself may be larger than the caps: the node's own
- * relay tx and the txs merged in from committee members are exempt from
- * them. Always returns at least one batch, because an empty exchange still
+ * Splits a pool into the requests that carry it to a peer, in the pool's
+ * order. A request holds at most the pool's tx count, which the receiving
+ * side enforces, and at most `mergeMaxBytes` as sent, so it fits one Omni
+ * frame. A pool within the admission caps is one request; the pool can be
+ * larger, because the node's own relay tx and the txs merged in from
+ * committee members are exempt from them. A tx larger than a request ships
+ * alone. Always returns at least one batch, because an empty exchange still
  * brings the peer's pool back.
  */
-export function splitMergeBatches<T extends Parameters<typeof txStoredBytes>[0]>(
+export function splitMergeBatches<T>(
     txs: readonly T[],
     limits: MempoolLimits = active,
 ): T[][] {
@@ -250,11 +266,11 @@ export function splitMergeBatches<T extends Parameters<typeof txStoredBytes>[0]>
     let current: T[] = []
     let currentBytes = 0
     for (const tx of txs) {
-        const bytes = txStoredBytes(tx)
+        const bytes = txWireBytes(tx)
         if (
             current.length > 0 &&
             (current.length + 1 > limits.maxTxs ||
-                currentBytes + bytes > limits.maxBytes)
+                currentBytes + bytes > limits.mergeMaxBytes)
         ) {
             batches.push(current)
             current = []
@@ -265,4 +281,16 @@ export function splitMergeBatches<T extends Parameters<typeof txStoredBytes>[0]>
     }
     if (current.length > 0 || batches.length === 0) batches.push(current)
     return batches
+}
+
+/**
+ * The part of `txs` one merge reply carries: the leading txs that fit one
+ * request, in the order given. The rest reach the caller through this node's
+ * own requests to it, which carry the whole pool.
+ */
+export function capMergeReply<T>(
+    txs: readonly T[],
+    limits: MempoolLimits = active,
+): T[] {
+    return splitMergeBatches(txs, limits)[0]
 }

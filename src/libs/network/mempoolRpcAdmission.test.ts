@@ -90,6 +90,23 @@ describe("handleMempool payload shape", () => {
         expect(receive).not.toHaveBeenCalled()
     })
 
+    it("replies with no more of its pool than one frame carries", async () => {
+        // 20 MiB of txs the caller lacks: the reply is cut at the merge
+        // payload cap, in pool order, and the rest goes in our own requests.
+        const big = Array.from({ length: 200 }, (_, i) => ({
+            hash: `0x${i}`,
+            content: { pad: "x".repeat(100 * 1024) },
+        }))
+        receive.mockImplementationOnce(async () => ({ success: true, mempool: big }))
+        const res = await ServerHandlers.handleMempool(envelope([]), STAKED)
+        expect(res.result).toBe(200)
+        const txs = (res.response as { txs: Array<{ hash: string }> }).txs
+        expect(txs.length).toBeGreaterThan(0)
+        expect(txs.length).toBeLessThan(big.length)
+        expect(txs.map(t => t.hash)).toEqual(big.slice(0, txs.length).map(t => t.hash))
+        expect(Buffer.byteLength(JSON.stringify(res.response))).toBeLessThan(16 * 1024 * 1024)
+    })
+
     it("refuses a batch longer than the pool can hold", async () => {
         const txs = Array.from({ length: 10_001 }, (_, i) => ({ hash: `0x${i}` }))
         const res = await ServerHandlers.handleMempool(envelope(txs), STAKED)

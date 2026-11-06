@@ -7,8 +7,10 @@ import {
     Transaction,
 } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
-import { splitMergeBatches } from "@/libs/blockchain/mempoolLimits"
-import { MERGE_MEMPOOL_MAX_TXS_PER_PEER } from "@/utilities/constants"
+import {
+    capMergeReply,
+    splitMergeBatches,
+} from "@/libs/blockchain/mempoolLimits"
 import { contributePeerlist, getLocalSyncObservations } from "./peerlistMerge"
 
 const PEER_CALL_TIMEOUT_MS = 10_000
@@ -143,13 +145,15 @@ export async function mergeMempools(
             continue
         }
 
-        let txs = rawTxs
-        if (txs.length > MERGE_MEMPOOL_MAX_TXS_PER_PEER) {
+        // An honest peer's reply already fits one request (capMergeReply on
+        // its side); a longer one only bounds the work it can push onto the
+        // round.
+        const txs = capMergeReply(rawTxs)
+        if (txs.length < rawTxs.length) {
             log.warning(
-                `[mergeMempools] Peer ${peer.connection.string} returned ${txs.length} txs; ` +
-                    `capping at ${MERGE_MEMPOOL_MAX_TXS_PER_PEER} for this round`,
+                `[mergeMempools] Peer ${peer.connection.string} returned ${rawTxs.length} txs; ` +
+                    `taking the first ${txs.length} for this round`,
             )
-            txs = txs.slice(0, MERGE_MEMPOOL_MAX_TXS_PER_PEER)
         }
 
         log.only(

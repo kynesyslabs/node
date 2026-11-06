@@ -42,7 +42,10 @@ import { handleExecuteTransaction } from "./endpointExecution"
 import { handleConsensusRequest } from "./endpointConsensus"
 import { handleL2PSHashUpdate } from "./endpointL2PSHash"
 import { isMergePeerEligible } from "src/libs/consensus/mergePeerEligibility"
-import { getMempoolLimits } from "src/libs/blockchain/mempoolLimits"
+import {
+    capMergeReply,
+    getMempoolLimits,
+} from "src/libs/blockchain/mempoolLimits"
 
 // Bounds the hellos one unauthenticated call can start.
 const MAX_ANNOUNCED_PEERS = 200
@@ -181,12 +184,15 @@ export default class ServerHandlers {
             contributePeerlist(envelope.blockRef, sender, envelope.peerlist)
         }
 
+        // The reply is one frame: what does not fit reaches the caller in
+        // this node's own merge requests, which carry the whole pool.
+        const replyTxs = capMergeReply(response.mempool)
         const responsePayload = envelope
             ? {
-                  txs: response.mempool,
+                  txs: replyTxs,
                   peerlist: getLocalSyncObservations(envelope.blockRef),
               }
-            : response.mempool
+            : replyTxs
 
         const ourId = getSharedState.publicKeyHex
         const ourDate = new Date().toISOString()

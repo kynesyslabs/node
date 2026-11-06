@@ -110,10 +110,27 @@ describe("mergeMempools batching", () => {
 
     it("collects the txs peers return across all of their responses, once each", async () => {
         __setMempoolLimits({ maxTxs: 1 })
-        const peer = fakePeer("0xp1", () => ok([tx("x"), tx("y")]))
-        await mergeMempools([tx("a"), tx("b")], [peer], 7)
+        const replies = [[tx("x")], [tx("y")]]
+        let call = 0
+        const peer = fakePeer("0xp1", () => ok(replies[call++]))
+        const again = fakePeer("0xp2", () => ok([tx("x")]))
+        await mergeMempools([tx("a"), tx("b")], [peer, again], 7)
         expect(received).toHaveLength(1)
         expect((received[0] as Array<{ hash: string }>).map(t => t.hash).sort()).toEqual(["x", "y"])
+    })
+
+    it("takes a full pool from one reply, not a fixed part of it", async () => {
+        const theirs = Array.from({ length: 7_000 }, (_, i) => tx(`t${i}`))
+        const peer = fakePeer("0xp1", () => ok(theirs))
+        await mergeMempools([], [peer], 7)
+        expect(received[0]).toHaveLength(7_000)
+    })
+
+    it("bounds a reply larger than one request to the part that fits", async () => {
+        __setMempoolLimits({ maxTxs: 3 })
+        const peer = fakePeer("0xp1", () => ok(["a", "b", "c", "d", "e"].map(tx)))
+        await mergeMempools([], [peer], 7)
+        expect((received[0] as Array<{ hash: string }>).map(t => t.hash)).toEqual(["a", "b", "c"])
     })
 
     it("stops sending to a peer that fails, without affecting the others", async () => {
