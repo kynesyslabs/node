@@ -3,7 +3,8 @@
  * (genesisScheduleProblems, defaultTreasuryWarning in
  * src/libs/blockchain/genesis/genesisPin.ts): a missing genesis file, a missing
  * `forks` field or an undeclared fork must not fall back to the build's
- * defaults on a pinned node or a mainnet chain id.
+ * defaults on a pinned node or a mainnet chain id; and devModeProblem, which
+ * refuses PROD=false on a mainnet chain id.
  */
 
 import { describe, it, expect } from "bun:test"
@@ -11,6 +12,7 @@ import { readFileSync } from "node:fs"
 import { DEFAULT_FORK_CONFIG } from "src/forks/forkConfig"
 import {
     defaultTreasuryWarning,
+    devModeProblem,
     genesisScheduleProblems,
 } from "src/libs/blockchain/genesis/genesisPin"
 
@@ -123,5 +125,18 @@ describe("defaultTreasuryWarning", () => {
     it("is quiet when the genesis names its own", () => {
         expect(defaultTreasuryWarning(testnetGenesis())).toBeNull()
         expect(defaultTreasuryWarning(mainnetGenesis())).toBeNull()
+    })
+})
+
+describe("devModeProblem", () => {
+    it("refuses PROD=false on a mainnet chain id", () => {
+        expect(devModeProblem(false, 4242)).toContain("set PROD=true")
+    })
+
+    it("allows PROD=true anywhere and PROD=false on the testnet, the devnet or an id-less genesis", () => {
+        expect(devModeProblem(true, 4242)).toBeNull()
+        for (const id of [1, 1337, undefined]) {
+            expect(devModeProblem(false, id)).toBeNull()
+        }
     })
 })

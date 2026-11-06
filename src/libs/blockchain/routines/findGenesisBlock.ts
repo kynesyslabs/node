@@ -25,6 +25,7 @@ import {
     blockPinProblem,
     chainIdOf,
     defaultTreasuryWarning,
+    devModeProblem,
     genesisScheduleProblems,
     freshGenesisProblems,
     parseGenesisPin,
@@ -160,12 +161,11 @@ export default async function findGenesisBlock() {
         Config.getInstance().core.expectedGenesisBlockHash,
         "EXPECTED_GENESIS_BLOCK_HASH",
     )
-    const pinProblem = pinRequirementProblem(
-        pin,
-        process.env,
-        hasGenesisFile ? chainIdOf(readGenesisFile()) : undefined,
-    )
+    const fileChainId = hasGenesisFile ? chainIdOf(readGenesisFile()) : undefined
+    const pinProblem = pinRequirementProblem(pin, process.env, fileChainId)
     if (pinProblem) refuse([pinProblem])
+    const modeProblem = devModeProblem(Config.getInstance().core.prod, fileChainId)
+    if (modeProblem) refuse([modeProblem])
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
@@ -180,6 +180,8 @@ export default async function findGenesisBlock() {
         // Without a file only block 0 says which chain this is
         const storedPinProblem = pinRequirementProblem(pin, process.env, chainIdOf(stored))
         if (storedPinProblem) refuse([storedPinProblem])
+        const storedModeProblem = devModeProblem(Config.getInstance().core.prod, chainIdOf(stored))
+        if (storedModeProblem) refuse([storedModeProblem])
         refuse(
             genesisScheduleProblems({
                 fileGenesisData: hasGenesisFile ? readGenesisFile() : null,

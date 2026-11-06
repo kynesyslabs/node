@@ -95,6 +95,20 @@ export function pinRequirementProblem(
 }
 
 /**
+ * A node on a mainnet chain id runs with PROD=true. PROD=false relaxes the
+ * double-sign record, the boot clock check, peer and proxy checks, which is
+ * acceptable on a test network only.
+ */
+export function devModeProblem(prod: boolean, chainId: unknown): string | null {
+    if (prod || !isMainnetChainId(chainId)) return null
+    return (
+        `PROD is not true and the genesis has chain id ${String(chainId)}, which is not a test ` +
+        "network's. Development mode relaxes the double-sign protection and other checks; " +
+        "set PROD=true"
+    )
+}
+
+/**
  * The warning for a node that runs without a pin and was not told that is
  * intended. Outside production nothing refuses such a node (a bare-metal
  * install runs as development), so the operator must at least see it.
