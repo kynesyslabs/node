@@ -389,6 +389,18 @@ Scenario 12's, judged by `testing/forks/rehearsal/lib/haltDrill.ts`:
   `RIDE_TIMEOUT`, one hash per height, every block >= q signatures) and P6.
   The stopped validators are not restarted.
 
+Late recovery does not pass (6dbe2b40a3, 4643532f7e). P5 and R2 count a
+target only when it is reached inside `RECOVERY_TIMEOUT` (`RIDE_TIMEOUT`):
+`run.sh` sets `t_converged` only from a read in which every node is at the
+target and that finished before the deadline, and the judge fails the phase
+when `t_converged` is null (`the nodes did not reach the target inside the
+timeout (t_converged is null)`), whatever the heads and rows read after it
+show. So a node that catches up after the deadline fails the phase, and so
+does a head read that starts inside the window but returns after it, even
+with every node at the target: it is not counted as reaching it in time.
+The older scenarios' progress phases follow the same rule (see the exit
+codes above).
+
 ### Where the verdict is computed
 
 `run.sh` stops and starts the containers and writes what it saw (heads, block
@@ -422,6 +434,24 @@ block, restart to all converged, total), also in `run.log` and under `drill`
 in `verdict.json`. `cold start` starts when all N validators serve, so it
 includes the wait for the genesis time. `ride-n13s10` reports stop to first
 new block and stop to target instead of the restart timings.
+
+### Not covered
+
+The drills test the chain's behaviour under validator loss. They send no
+transactions, and some launch forks are never exercised:
+
+- `gasFeeSeparation` and `networkGovernance`: off in the mainnet-shape
+  drills, because the template has `gasFeeSeparation` as `"FILL: 0 or
+  null"` and `networkGovernance` as `null` (only the number 0 activates a
+  fork, see [Fork set](#fork-set)). The other scenarios inherit both at 0
+  from `genesis.devnet.json`, but nothing in them pays a fee or sends a
+  governance transaction.
+- `identityCarryover`: at 0 in the template, but excluded by name
+  (`LAUNCH_EXCLUDED_FORKS`): it needs a genesis snapshot and the drills
+  mount an empty one (see
+  [What differs from mainnet](#what-differs-from-mainnet-identitycarryover)).
+
+No scenario covers them, and none is planned here.
 
 ### Resources per case
 

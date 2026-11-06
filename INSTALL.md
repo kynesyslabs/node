@@ -449,6 +449,8 @@ A copy taken while the node runs can hold a signing state older than the key's l
 
 Restoring is not the reverse of this: an old copy can make the key vote against a vote it already cast. Follow the restore rules in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) (newest complete copy, network head above the key's last possible vote, never two hosts running the key).
 
+This volume does not hold the genesis snapshot (`./mainnet/snapshot` above): keep the genesis snapshot on every validator for the life of the chain; with `identityCarryover` active a node without it refuses to start ([docs/mainnet/genesis-import.md](docs/mainnet/genesis-import.md)).
+
 ### View logs
 
 ```bash
