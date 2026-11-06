@@ -352,6 +352,10 @@ export function loadConfig(): Readonly<AppConfig> {
             enabled: envBool(EnvKey.METRICS_ENABLED, d.metrics.enabled),
             port: envInt(EnvKey.METRICS_PORT, d.metrics.port),
             host: envStr(EnvKey.METRICS_HOST, d.metrics.host),
+            bearerToken: envStr(
+                EnvKey.METRICS_BEARER_TOKEN,
+                d.metrics.bearerToken,
+            ),
         },
 
         diagnostics: {

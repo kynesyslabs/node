@@ -61,6 +61,7 @@ Create a `.env` file in the monitoring directory or export these variables:
 | `GRAFANA_ADMIN_PASSWORD` | `demos`                 | Grafana admin password                                       |
 | `GRAFANA_ROOT_URL`       | `http://localhost:3000` | Public Grafana URL                                           |
 | `NODE_EXPORTER_PORT`     | `9100`                  | Node Exporter port (full profile)                            |
+| `MONITORING_BIND`        | `127.0.0.1`             | Host interface for the Prometheus, Grafana and Node Exporter ports; never `0.0.0.0` |
 
 ### Example `.env` file
 

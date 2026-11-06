@@ -23,7 +23,14 @@ validator-3 (METRICS_BIND=10.0.0.13) <--/
 
 `docker-compose.yml` publishes the node's metrics port on loopback by default:
 `${METRICS_BIND:-127.0.0.1}:${METRICS_HOST_PORT:-9090}:9090`. The endpoint has
-no authentication and lists peers and heights, so it must not face the internet.
+no authentication by default and lists peers and heights, so it must not face
+the internet.
+
+`METRICS_BEARER_TOKEN` adds a second line of defence: with it set, `/metrics`
+answers only `Authorization: Bearer <token>` (`/health` stays open). Put the
+same token in a file on the monitoring host and add
+`authorization: { credentials_file: <file> }` to the `demos-node` scrape job;
+the Caddy `/metrics` route forwards the token on its own.
 
 To let the monitoring host in, set `METRICS_BIND` in the validator's `.env` to
 the address of the private interface (a VPN or VPC address), or leave the
@@ -32,6 +39,11 @@ Restrict the port to the monitoring host's address in the firewall as well.
 
 Nothing else depends on the host-side port: the bundled Prometheus and the
 Caddy proxy reach the node as `node:9090` over the compose network.
+
+A bare-metal validator (`./run`) has no compose layer: the metrics server
+itself binds `METRICS_HOST`, which defaults to `127.0.0.1`. Set
+`METRICS_HOST` to the private interface's address in its `.env` so the
+monitoring host can scrape it; until then `NodeDown` fires for that node.
 
 ## Setup on the monitoring host
 

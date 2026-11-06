@@ -891,7 +891,7 @@ async function main() {
 
             indexState.metricsServer = metricsServer
             log.info(
-                `[METRICS] Prometheus metrics server started on http://0.0.0.0:${indexState.METRICS_PORT}/metrics`,
+                `[METRICS] Prometheus metrics server started on http://${Config.getInstance().metrics.host}:${indexState.METRICS_PORT}/metrics`,
             )
 
             // REVIEW: Start metrics collector for live data gathering

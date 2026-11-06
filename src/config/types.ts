@@ -212,6 +212,8 @@ export interface MetricsConfig {
     enabled: boolean
     port: number
     host: string
+    /** When set, /metrics answers only `Authorization: Bearer <token>`. */
+    bearerToken: string
 }
 
 // --- System Diagnostics ---

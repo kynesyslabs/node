@@ -126,6 +126,7 @@ export const EnvKey = {
     METRICS_ENABLED: "METRICS_ENABLED",
     METRICS_PORT: "METRICS_PORT",
     METRICS_HOST: "METRICS_HOST",
+    METRICS_BEARER_TOKEN: "METRICS_BEARER_TOKEN",
     // Compose-scoped: the host interface the node publishes the metrics port on.
     METRICS_BIND: "METRICS_BIND",
 
