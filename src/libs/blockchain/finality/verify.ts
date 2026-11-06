@@ -35,6 +35,7 @@ import {
     type SparseTerminal,
 } from "src/libs/crypto/merkle/sparse"
 import Hashing from "src/libs/crypto/hashing"
+import { serializeTxContent, wireAmount } from "src/libs/crypto/txContentSerializer"
 import type { ValidatorSetEntry } from "src/model/entities/ValidatorSetSnapshots"
 import {
     storageProgramKey,
@@ -438,16 +439,38 @@ interface NativeSend {
 }
 
 /**
+ * Whether the bytes are the osDenomination serialization: that one is a
+ * fixed point of itself, while the older plain JSON keeps amounts as DEM
+ * numbers the serializer would rewrite.
+ */
+function osDenominationShape(content: Record<string, unknown>, contentBytes: string): boolean {
+    try {
+        return serializeTxContent(content as never, true) === contentBytes
+    } catch {
+        return false
+    }
+}
+
+/**
  * The send a native transaction makes, or null for any other transaction.
  * Its balance edits are built from `data[1].args`, never from the top-level
- * `to` and `amount`, so a payment is judged by the args.
+ * `to` and `amount`, so a payment is judged by the args. The serializer
+ * leaves the args as signed (a number is DEM once osDenomination applies)
+ * while it puts the top-level amount and the edits in the wire shape, so the
+ * amount is brought to that shape as edit binding does.
  */
-function nativeSend(content: Record<string, unknown>): NativeSend | null {
+function nativeSend(content: Record<string, unknown>, contentBytes: string): NativeSend | null {
     if (content.type !== "native" || !Array.isArray(content.data)) return null
     const payload = content.data[1] as { nativeOperation?: unknown; args?: unknown } | undefined
     if (!payload || typeof payload !== "object" || payload.nativeOperation !== "send") return null
     if (!Array.isArray(payload.args)) throw invalid("the native send carries no args")
-    return { to: payload.args[0], amount: payload.args[1] }
+    let amount: unknown
+    try {
+        amount = wireAmount(payload.args[1], osDenominationShape(content, contentBytes))
+    } catch {
+        throw invalid(`the native send's amount ${JSON.stringify(payload.args[1] ?? null)} is not an amount`)
+    }
+    return { to: payload.args[0], amount }
 }
 
 /** A send whose top-level fields name another payment than it makes is forged. */
@@ -529,7 +552,7 @@ function readContent(
     }
     const content = parsed as Record<string, unknown>
     const paymentWanted = wanted.some(({ field }) => field === "to" || field === "amount")
-    const send = paymentWanted ? nativeSend(content) : null
+    const send = paymentWanted ? nativeSend(content, tx.contentBytes) : null
     if (send) requireTopLevelAgrees(content, send)
     for (const { field, read } of wanted) {
         const shown = JSON.stringify(String(expected![field]))

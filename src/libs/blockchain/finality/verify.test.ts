@@ -80,7 +80,7 @@ const resultLeafText = (hash: string, status: string, code: string | null) =>
     jcsCanonicalize({ code, hash, status })
 
 /** The balance edits the SDK ships with a native send of `amount` to `to`. */
-function sendEdits(to: string, amount: string) {
+function sendEdits(to: string, amount: string | number) {
     return [
         { type: "balance", operation: "remove", isRollback: false, account: `0x${"a1".repeat(32)}`, txhash: "", amount },
         { type: "balance", operation: "add", isRollback: false, account: to, txhash: "", amount },
@@ -132,6 +132,25 @@ const EDITS_ELSEWHERE_BYTES = serializeTxContent(
 )
 /** A send with no top-level to or amount: the args and edits alone say the payment. */
 const ARGS_ONLY_BYTES = serializeTxContent(forgedContent(14, {}, [PAYEE, PAYMENT], [PAYEE, PAYMENT]) as never, true)
+/** A send signed with DEM numbers, as the SDK's sign() takes them. */
+function demSendContent(nonce: number, argAmount: number | string) {
+    return {
+        type: "native",
+        from: `0x${"a1".repeat(32)}`,
+        to: PAYEE,
+        amount: 5,
+        data: ["native", { nativeOperation: "send", args: [PAYEE, argAmount] }],
+        gcr_edits: sendEdits(PAYEE, 5),
+        nonce,
+        timestamp: 1_790_000_000_000 + nonce,
+        transaction_fee: { network_fee: 1, rpc_fee: 0, additional_fee: 0, rpc_address: null },
+        from_ed25519_address: `0x${"a1".repeat(32)}`,
+    }
+}
+/** After osDenomination: top-level amount and edits become OS strings, the args stay 5 DEM. */
+const DEM_ARGS_BYTES = serializeTxContent(demSendContent(15, 5) as never, true)
+/** Before osDenomination: plain JSON in DEM, with the args in OS as edit binding reads them then. */
+const LEGACY_OS_ARGS_BYTES = serializeTxContent(demSendContent(16, "5000000000") as never, false)
 const PAYMENT_BYTES = serializeTxContent(transferContent(7, 9_500_000_000n, PAYEE) as never, true)
 const LOW_NONCE_BYTES = serializeTxContent(transferContent(6, 9_500_000_000n, PAYEE) as never, true)
 const OTHER_BYTES = serializeTxContent(transferContent(8, 1_000_000_000n, PAYEE) as never, true)
@@ -144,6 +163,8 @@ const TX = [
     sha256(ARGS_ELSEWHERE_BYTES),
     sha256(TOP_ELSEWHERE_BYTES),
     sha256(ARGS_ONLY_BYTES),
+    sha256(DEM_ARGS_BYTES),
+    sha256(LEGACY_OS_ARGS_BYTES),
 ]
 const RESULTS = [
     resultLeafText(TX[0], "confirmed", null),
@@ -153,6 +174,8 @@ const RESULTS = [
     resultLeafText(TX[4], "confirmed", null),
     resultLeafText(TX[5], "confirmed", null),
     resultLeafText(TX[6], "confirmed", null),
+    resultLeafText(TX[7], "confirmed", null),
+    resultLeafText(TX[8], "confirmed", null),
 ]
 const leafBytes = RESULTS.map(text => new TextEncoder().encode(text))
 const M = 41
@@ -484,6 +507,19 @@ describe("verifyTransactionProof with the transaction", () => {
         const verdict = verifyTransactionProof(withTx(6, ARGS_ONLY_BYTES), trusted, rules, { to: PAYEE, amount: PAYMENT, nonce: 14 })
         expect(verdict.verdict).toBe("final-executed")
         expect(verifyTransactionProof(withTx(6, ARGS_ONLY_BYTES), trusted, rules, { to: MALLORY }).verdict).toBe("invalid")
+    })
+
+    it("reads a send's args in the denomination its edits are applied in", () => {
+        expect(DEM_ARGS_BYTES).toContain(`"args":["${PAYEE}",5]`)
+        expect(DEM_ARGS_BYTES).toContain(`"amount":"5000000000"`)
+        const demArgs = withTx(7, DEM_ARGS_BYTES)
+        const paid = verifyTransactionProof(demArgs, trusted, rules, { to: PAYEE, amount: 5_000_000_000n, nonce: 15 })
+        expect(paid.verdict).toBe("final-executed")
+        expect(verifyTransactionProof(demArgs, trusted, rules, { amount: 5 }).verdict).toBe("invalid")
+
+        const legacy = withTx(8, LEGACY_OS_ARGS_BYTES)
+        expect(verifyTransactionProof(legacy, trusted, rules, { to: PAYEE, amount: 5, nonce: 16 }).verdict).toBe("final-executed")
+        expect(verifyTransactionProof(legacy, trusted, rules, { amount: 5_000_000_000n }).verdict).toBe("invalid")
     })
 
     it("refuses content that hashes to another transaction", () => {
