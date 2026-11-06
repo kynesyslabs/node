@@ -524,6 +524,17 @@ export class GCRStorageProgramRoutines {
         const operation = spEdit.context.operation
         const storageAddress = spEdit.target
 
+        // An edit carries only the new state, never the one it replaced, so
+        // no operation can be undone from it. Replaying it forward would keep
+        // the write while the caller records the rollback as done; refusing
+        // fails the rollback, which a caller then resolves by resyncing.
+        if (spEdit.isRollback) {
+            return {
+                success: false,
+                message: `${operation} cannot be rolled back`,
+            }
+        }
+
         log.info(
             `[StorageProgram] Processing ${operation} for ${storageAddress}`,
         )
