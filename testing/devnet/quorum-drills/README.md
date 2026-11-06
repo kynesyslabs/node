@@ -586,7 +586,9 @@ A connection-limit hit can no longer pass:
   the append of the row, holds an exclusive `flock` on `results.tsv.lock` next
   to it and waits up to 30 s for it; without the lock the row is not
   touched, and stderr says so (`no lock on .../results.tsv.lock within 30s`).
-  An append without the lock is also `ERROR`, exit 2 (above).
+  An append without the lock is also `ERROR`, exit 2 (above). The rewrite's
+  copy of the table is the run's own (`results.tsv.tmp.<run>`), made,
+  renamed and removed only while it holds the lock.
 
 `lockstep-stub.test.sh` covers the preflight, the check and the backstop
 (also after the verdict is written)
@@ -612,9 +614,9 @@ lock), `fallback` with one psql killed (`none given`, exit 2), a
 `ride-n13s10` whose judge refuses the fork set (`ERROR`, the fork named in
 the detail), and a `PATH` without `flock` (no start). The lock is tested on its own as well: held by
 another process, the append and the rewrite wait, then leave `results.tsv`
-as it was and say so, and the append makes `verdict.json` `ERROR`, exit 2 (as
-it does when `results.tsv` cannot be written); eight rewrites at once lose
-none of the eight rows.
+and that process's copy as they were and say so, and the append makes
+`verdict.json` `ERROR`, exit 2 (as it does when `results.tsv` cannot be
+written); eight rewrites at once lose none of the eight rows.
 `drillInputs.test.ts` covers the generated compose for N=4, 10 and 13.
 
 ## Runs and logs

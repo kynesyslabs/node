@@ -589,6 +589,8 @@ check "rewrite_verdict, neither copy can be written: rc=1, verdict.json as it wa
 check "rewrite_verdict, neither copy can be written: results.tsv as it was, every row kept, and stderr says so" \
     bash -c 'cmp -s "$2" "$3" && grep -q "could not rewrite $2 (.*): the row of stub-copies still says PASS, the exit is 2" <<< "$1"' \
     _ "${ERR}" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+check "rewrite_verdict, neither copy can be written: the empty copy of results.tsv is removed" \
+    test -z "$(compgen -G "${RUNS_DIR}/results.tsv.tmp*")"
 
 echo "== results.tsv is shared: the append and the rewrite each hold the lock next to it, and without it fail and say so"
 check "run.sh waits up to 30 s for the lock" test "${RESULTS_LOCK_WAIT_S:-unset}" = 30
@@ -616,14 +618,31 @@ append() { # the real write_verdict of stub-append, waiting $1 s for the lock: E
         write_verdict ) 2>&1 > /dev/null; echo "rc=$?")
 }
 row() { awk -F'\t' -v r="$1" '$1 == r { print $9 }' "${RUNS_DIR}/results.tsv"; }
-lock_case lock_rewrite; hold_lock; rewrite 1; release_lock
+# The run holding the lock has its copy next to results.tsv: results.tsv.tmp.other,
+# or results.tsv.tmp, the name every run used up to b4ccfffd3f
+lock_case lock_rewrite; hold_lock
+echo "run other's copy" > "${RUNS_DIR}/results.tsv.tmp.other"; echo "a shared copy" > "${RUNS_DIR}/results.tsv.tmp"
+rewrite 1; release_lock
 check "rewrite_verdict, the lock held by another run: rc=1, results.tsv as it was" \
     bash -c 'grep -q "^rc=1$" <<< "$1" && cmp -s "$2" "$3"' _ "${ERR}" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
 check "and stderr says it got no lock" \
     grep -q "could not rewrite ${RUNS_DIR}/results.tsv (no lock on ${RUNS_DIR}/results.tsv.lock within 1s): the row of stub-lock still says PASS, the exit is 2" <<< "${ERR}"
+check "and the copies of the run holding the lock are left alone" \
+    test "$(cat "${RUNS_DIR}/results.tsv.tmp.other" "${RUNS_DIR}/results.tsv.tmp" 2>&1 | tr '\n' '|')" = "run other's copy|a shared copy|"
 rewrite 1
 check "the lock free: rc=0, the row says ERROR, the earlier one PASS, no row added" \
     test "$(tail -1 <<< "${ERR}") $(row stub-lock) $(row earlier) $(wc -l < "${RUNS_DIR}/results.tsv")" = "rc=0 ERROR PASS 3"
+check "the lock free: its own copy (results.tsv.tmp.stub-lock) is gone, the others' are left" \
+    test "$(cd "${RUNS_DIR}" && ls results.tsv.tmp* | tr '\n' ' ')" = "results.tsv.tmp results.tsv.tmp.other "
+# Every line of rewrite_verdict that names its copy lies between the flock and the
+# end of the block the lock is held for
+rv=$(fn_src rewrite_verdict)
+lock_from=$(grep -n 'flock -w' <<< "${rv}" | head -1 | cut -d: -f1)
+lock_to=$(grep -n '^    } 9>> ' <<< "${rv}" | head -1 | cut -d: -f1)
+tmp_lines=$(grep -n '"${tmp}"' <<< "${rv}" | cut -d: -f1 | tr '\n' ' ')
+outside=$(for l in ${tmp_lines}; do [ "${l}" -gt "${lock_from:-0}" ] && [ "${l}" -lt "${lock_to:-0}" ] || echo "${l}"; done)
+check "rewrite_verdict makes, renames and removes its copy only under the lock (lines ${tmp_lines}in ${lock_from:-?}..${lock_to:-?})" \
+    test -n "${tmp_lines}" -a -n "${lock_from}" -a -n "${lock_to}" -a -z "${outside}"
 # Up to b4ccfffd3f a run whose row could not be added still exited 0 on a PASS
 lock_case lock_append; hold_lock; append 1; release_lock
 check "write_verdict, the lock held by another run: exit 2, no row added, and stderr says why" \

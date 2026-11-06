@@ -818,31 +818,35 @@ results_row() {
 # detail, worded as pg_limit_gate words it. A record that cannot be rewritten is
 # said on stderr; the exit is 2 either way.
 rewrite_verdict() { # $1 why
-    local v="${LOG_DIR}/verdict.json" results="${RUNS_DIR}/results.tsv" was="${RESULT}" why="" st=0
+    local v="${LOG_DIR}/verdict.json" results="${RUNS_DIR}/results.tsv" tmp="${RUNS_DIR}/results.tsv.tmp.${RUN_ID}" was="${RESULT}" why="" st=0
     DETAIL="$1; the result was ${was}"
     RESULT=ERROR
     say "RESULT ERROR: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
     { jq --arg detail "${DETAIL}" '.detail = $detail | .result = "ERROR"' "${v}" > "${v}.tmp" && mv -f "${v}.tmp" "${v}"; } 2>/dev/null ||
         { rm -f "${v}.tmp"; say "ERROR: could not rewrite ${v}: it still says ${was}, the exit is 2" >&2; st=1; }
-    # Copy and replace under the lock write_verdict's append takes
+    # Copy and replace under the lock write_verdict's append takes. The copy is
+    # this run's own (results.tsv.tmp.<run>: unique, as its run dir is, where a
+    # pid can repeat across PID namespaces), made, renamed and removed only while
+    # the lock is held: no run touches another one's
     {
         if ! flock -w "${RESULTS_LOCK_WAIT_S}" 9; then
             why="no lock on ${results}.lock within ${RESULTS_LOCK_WAIT_S}s"
         else
             RUN="${RUN_ID}" ROW="$(results_row)" awk -F'\t' '$1 == ENVIRON["RUN"] { print ENVIRON["ROW"]; n++; next } { print } END { exit n ? 0 : 3 }' \
-                "${results}" > "${results}.tmp" 2>/dev/null
+                "${results}" > "${tmp}" 2>/dev/null
             case $? in
                 # gawk exits 0 after an END exit 0 even when it could not write the
                 # copy: one with fewer lines than results.tsv replaces nothing
-                0) if [ "$(wc -l < "${results}.tmp")" != "$(wc -l < "${results}")" ]; then why="the copy could not be written whole"
-                   elif ! mv -f "${results}.tmp" "${results}" 2>/dev/null; then why="mv failed"; fi ;;
+                0) if [ "$(wc -l < "${tmp}")" != "$(wc -l < "${results}")" ]; then why="the copy could not be written whole"
+                   elif ! mv -f "${tmp}" "${results}" 2>/dev/null; then why="mv failed"; fi ;;
                 3) why="no row for ${RUN_ID}" ;;
                 *) why="it could not be read or the copy written" ;;
             esac
+            # A copy that did not replace results.tsv
+            rm -f "${tmp}"
         fi
     } 9>> "${results}.lock" || why="could not open ${results}.lock"
     [ -z "${why}" ] && return "${st}"
-    rm -f "${results}.tmp"
     say "ERROR: could not rewrite ${results} (${why}): the row of ${RUN_ID} still says ${was}, the exit is 2" >&2
     return 1
 }
