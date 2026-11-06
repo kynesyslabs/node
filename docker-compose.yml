@@ -271,6 +271,17 @@ services:
       GOSSIP_ENABLED: ${GOSSIP_ENABLED:-true}
       GOSSIP_PORT: ${GOSSIP_PORT:-9095}
       GOSSIP_IPC_CONNECT_TIMEOUT_MS: ${GOSSIP_IPC_CONNECT_TIMEOUT_MS:-15000}
+      # Outbound requests made for callers (XM, DemosWork, web2, TLSNotary
+      # relay). Empty means the node's own default (see .env.example).
+      XM_ENABLED: ${XM_ENABLED:-}
+      DEMOSWORK_ENABLED: ${DEMOSWORK_ENABLED:-}
+      WEB2_ENABLED: ${WEB2_ENABLED:-}
+      XM_RPC_ALLOWLIST: ${XM_RPC_ALLOWLIST:-}
+      WEB2_MAX_RESPONSE_BYTES: ${WEB2_MAX_RESPONSE_BYTES:-}
+      WEB2_SESSION_TTL_MS: ${WEB2_SESSION_TTL_MS:-}
+      WEB2_INSECURE_TLS: ${WEB2_INSECURE_TLS:-}
+      TLSNOTARY_ALLOWED_PORTS: ${TLSNOTARY_ALLOWED_PORTS:-}
+      TLSNOTARY_ALLOW_PRIVATE_TARGETS: ${TLSNOTARY_ALLOW_PRIVATE_TARGETS:-}
       # Setup check at start and the `bun run setup` answers (empty = unset).
       # The subnet key and IV variables are not listed on purpose: values here
       # show up in `docker inspect`. Use DEMOS_SETUP_L2PS_KEY_FILE / _IV_FILE.

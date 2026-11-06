@@ -285,6 +285,32 @@ export interface GossipConfig {
     ipcConnectTimeoutMs: number
 }
 
+// --- Outbound requests the node makes for callers ---
+
+export interface OutboundConfig {
+    /** Off refuses cross-chain (XM) operations at the RPC entry. */
+    xmEnabled: boolean
+    /** Off refuses DemosWork scripts at the RPC entry. */
+    demosWorkEnabled: boolean
+    /** Off refuses web2 (DAHR) proxy requests at the RPC entry. */
+    web2Enabled: boolean
+    /**
+     * Hosts (or full origins) whose RPC URL an XM caller may name instead of
+     * the node's configured one. Empty: the configured RPC is always used.
+     */
+    xmRpcAllowlist: string[]
+    /** Largest web2 origin response the proxy reads, in bytes. */
+    web2MaxResponseBytes: number
+    /** Idle lifetime of a web2 (DAHR) session, in ms. */
+    web2SessionTtlMs: number
+    /** Dev only: skip certificate checks on web2 HTTPS targets. Refused with PROD. */
+    web2InsecureTls: boolean
+    /** Target ports the TLSNotary relay may connect to. */
+    tlsnotaryAllowedPorts: number[]
+    /** Dev only: let the TLSNotary relay reach private and loopback addresses. */
+    tlsnotaryAllowPrivateTargets: boolean
+}
+
 // --- Full Application Config ---
 
 export interface AppConfig {
@@ -301,4 +327,5 @@ export interface AppConfig {
     bridges: BridgesConfig
     ipfs: IPFSConfig
     gossip: GossipConfig
+    outbound: OutboundConfig
 }

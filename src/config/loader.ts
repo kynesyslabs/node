@@ -517,12 +517,46 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.gossip.ipcConnectTimeoutMs,
             ),
         },
+
+        outbound: {
+            xmEnabled: envBool(EnvKey.XM_ENABLED, d.outbound.xmEnabled),
+            demosWorkEnabled: envBool(
+                EnvKey.DEMOSWORK_ENABLED,
+                d.outbound.demosWorkEnabled,
+            ),
+            web2Enabled: envBool(EnvKey.WEB2_ENABLED, d.outbound.web2Enabled),
+            xmRpcAllowlist: envList(
+                EnvKey.XM_RPC_ALLOWLIST,
+                d.outbound.xmRpcAllowlist,
+            ),
+            web2MaxResponseBytes: envInt(
+                EnvKey.WEB2_MAX_RESPONSE_BYTES,
+                d.outbound.web2MaxResponseBytes,
+            ),
+            web2SessionTtlMs: envInt(
+                EnvKey.WEB2_SESSION_TTL_MS,
+                d.outbound.web2SessionTtlMs,
+            ),
+            web2InsecureTls: envBool(
+                EnvKey.WEB2_INSECURE_TLS,
+                d.outbound.web2InsecureTls,
+            ),
+            tlsnotaryAllowedPorts: envList(
+                EnvKey.TLSNOTARY_ALLOWED_PORTS,
+                d.outbound.tlsnotaryAllowedPorts.map(String),
+            ).map(Number),
+            tlsnotaryAllowPrivateTargets: envBool(
+                EnvKey.TLSNOTARY_ALLOW_PRIVATE_TARGETS,
+                d.outbound.tlsnotaryAllowPrivateTargets,
+            ),
+        },
     }
 
     assertConsensusTimingSane(config)
     assertL2psLimitsSane(config)
     assertRpcLimitsSane(config)
     assertGossipSane(config)
+    assertOutboundSane(config)
 
     return deepFreeze(config)
 }
@@ -599,6 +633,42 @@ function assertConsensusTimingSane(config: AppConfig): void {
     if (problems.length > 0) {
         throw new Error(
             `[config] invalid consensus timing configuration:\n  - ${problems.join("\n  - ")}`,
+        )
+    }
+}
+
+/**
+ * A cap or lifetime of 0 or less would refuse every web2 response or expire
+ * every session at once; a bad port would silently allow nothing. Skipping
+ * certificate checks is a dev setting and must not reach a production node.
+ */
+function assertOutboundSane(config: AppConfig): void {
+    const o = config.outbound
+    const problems: string[] = []
+    if (!Number.isInteger(o.web2MaxResponseBytes) || o.web2MaxResponseBytes <= 0) {
+        problems.push(
+            `WEB2_MAX_RESPONSE_BYTES must be an integer > 0 (got ${o.web2MaxResponseBytes})`,
+        )
+    }
+    if (!Number.isInteger(o.web2SessionTtlMs) || o.web2SessionTtlMs <= 0) {
+        problems.push(
+            `WEB2_SESSION_TTL_MS must be an integer > 0 (got ${o.web2SessionTtlMs})`,
+        )
+    }
+    const badPorts = o.tlsnotaryAllowedPorts.filter(
+        p => !Number.isInteger(p) || p < 1 || p > 65535,
+    )
+    if (badPorts.length > 0) {
+        problems.push(
+            `TLSNOTARY_ALLOWED_PORTS must list ports 1..65535 (got ${process.env[EnvKey.TLSNOTARY_ALLOWED_PORTS]})`,
+        )
+    }
+    if (o.web2InsecureTls && config.core.prod) {
+        problems.push("WEB2_INSECURE_TLS is a dev setting and is refused with PROD=true")
+    }
+    if (problems.length > 0) {
+        throw new Error(
+            `[config] invalid outbound request configuration:\n  - ${problems.join("\n  - ")}`,
         )
     }
 }
