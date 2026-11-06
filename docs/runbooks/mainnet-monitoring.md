@@ -154,6 +154,17 @@ not auto-resolve after 10 minutes. A recording rule keeps the 10 minute burst
 size as its own series (`demos:conflicting_block:increase10m`,
 `demos:foreign_signature:increase10m`, `demos:precommit_equivocation:increase10m`)
 and the alert is its 7 day maximum. Only metrics the node exports today are used.
+The burst size is `increase()` of the counter over 10 minutes, plus one case
+`increase()` cannot see: when the first sample Prometheus holds for a counter is
+already 1 or more (an event between node start and the first scrape, on a node new
+to Prometheus or unscraped for over 15 minutes), the rule records the counter
+itself, but only while the series has no sample from 10 minutes earlier and
+`demos_process_start_time_seconds` is under 15 minutes old. Counters restart at 0
+with the process, so that value is an event of the new process. An event on a node
+that was not restarted and was not scraped at the time is not seen (it looks like
+an old counter value), and neither is one on a restarted node that Prometheus
+first reaches more than 15 minutes after the start. Check such a node's log and
+`/metrics` by hand after a long outage.
 `BlockHashMismatch` is not latched: its counter rises once per disagreeing peer
 per round, so a single round with a lagging mempool can reach the threshold, and
 that must clear by itself.
@@ -177,7 +188,8 @@ remove the flag after the last one.
    firing for up to 7 days (the critical route repeats hourly), so always pass
    `--duration=7d` or an explicit `--end`. This stops the pages; the alert stays
    visible in Prometheus.
-3. Clear: at least 10 minutes after the last event, delete the recorded series
+3. Clear: at least 20 minutes after the last event (the rule can still record a
+   positive value up to 15 minutes after a node start), delete the recorded series
    for that instance through the Prometheus admin API. The admin API is **not
    enabled by default**, and `monitoring/docker-compose.yml` does not enable it.
    **Security: Prometheus has no authentication.** The port line in

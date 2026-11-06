@@ -111,17 +111,53 @@ groups:
   # Only metrics the node exports today are used. The recorded series are
   # demos:conflicting_block:increase10m, demos:foreign_signature:increase10m and
   # demos:precommit_equivocation:increase10m.
+  #
+  # How the latch starts. increase() over 10 m is the normal trigger, but it is 0 when
+  # the first sample Prometheus ever sees of the counter is already 1 or more (an event
+  # between process start and the first scrape, on a node new to Prometheus or unscraped
+  # for over ~15 m): there is no earlier sample to subtract. So each rule also takes the
+  # counter's own value when (a) the series has no sample 10 m earlier and (b)
+  # demos_process_start_time_seconds says the process started under 15 m ago. The counter
+  # is 0 at every process start, so a value above 0 that young is an event of this process.
+  # (b) keeps a counter that has sat at 1 for days from latching again after a scrape gap.
+  # `or` ignores __name__ when it matches, so it would drop the second side whenever the
+  # increase() side exists (even as 0). label_replace gives the second side a marker label
+  # (first_sample) so both survive, and max without (first_sample) merges them.
   - name: demos-consensus-latched
     interval: 1m
     rules:
       - record: demos:conflicting_block:increase10m
-        expr: increase(demos_conflicting_block_total[10m])
+        expr: |
+          max without (first_sample) (
+            increase(demos_conflicting_block_total[10m])
+            or
+            label_replace(
+              (demos_conflicting_block_total > 0 unless demos_conflicting_block_total offset 10m)
+                and on (instance, job) ((time() - demos_process_start_time_seconds) < 900),
+              "first_sample", "1", "", "")
+          )
 
       - record: demos:foreign_signature:increase10m
-        expr: increase(demos_foreign_signature_total[10m])
+        expr: |
+          max without (first_sample) (
+            increase(demos_foreign_signature_total[10m])
+            or
+            label_replace(
+              (demos_foreign_signature_total > 0 unless demos_foreign_signature_total offset 10m)
+                and on (instance, job) ((time() - demos_process_start_time_seconds) < 900),
+              "first_sample", "1", "", "")
+          )
 
       - record: demos:precommit_equivocation:increase10m
-        expr: increase(demos_precommit_equivocation_total[10m])
+        expr: |
+          max without (first_sample) (
+            increase(demos_precommit_equivocation_total[10m])
+            or
+            label_replace(
+              (demos_precommit_equivocation_total > 0 unless demos_precommit_equivocation_total offset 10m)
+                and on (instance, job) ((time() - demos_process_start_time_seconds) < 900),
+              "first_sample", "1", "", "")
+          )
 
       - alert: ConflictingBlock
         expr: max_over_time(demos:conflicting_block:increase10m[7d]) > 0
