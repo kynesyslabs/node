@@ -5,7 +5,10 @@
  * TxValidatorPool. Only chain storage and the validator set are stubbed.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, jest } from "bun:test"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import {
     type Signer,
@@ -25,6 +28,7 @@ const sharedState: Record<string, any> = {
     forkConfig: {
         quorumParity: { activationHeight: 0 },
         committeeBinding: { activationHeight: 0 },
+        canonicalSigners: { activationHeight: null },
     },
     identity: { masterSeed: new Uint8Array(128).fill(7) },
     getBlockTimestampMinDelta: () => 1,
@@ -49,6 +53,12 @@ const { getBoundCommittee, __resetValidatorCache: resetPoolCache } = await impor
     "src/libs/consensus/v2/routines/getShard"
 )
 const validatorPool = (await import("./txValidatorPool")).default.getInstance()
+const {
+    __resetSigningHalt: resetSigningHalt,
+    recordBlockSignature,
+    signingHaltMarkerPath,
+    signingHaltReason,
+} = await import("src/libs/identity/signingRecord")
 
 let signers: Signer[] = []
 let committee: string[] = []
@@ -168,6 +178,67 @@ describe("verifyBlock with the node's own pool signature", () => {
 
         delete block.validation_data.signatures[node.identity]
         expect((await verifyBlock(block)).valid).toBe(false)
+    })
+})
+
+describe("the signing halt for our key in another case", () => {
+    const upper = (id: string) => "0x" + id.slice(2).toUpperCase()
+    let others: Signer[] = []
+    let dir: string
+
+    beforeEach(async () => {
+        sharedState.shardSize = 7
+        chain.peerlist = [...signers.map(s => s.identity), node.identity]
+        resetPoolCache()
+        const committee = await getBoundCommittee(9)
+        others = signers.filter(s => committee.includes(s.identity)).slice(0, 4)
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "demos-own-key-"))
+        sharedState.identityFile = path.join(dir, ".demos_identity")
+        sharedState.genesisBlockHash = "genesis-a"
+        sharedState.publicKeyHex = node.identity
+        sharedState.forkConfig.canonicalSigners.activationHeight = 0
+        resetSigningHalt()
+        // Our record holds another block of the same round, so a block
+        // carrying our signature was signed by a second copy of this key
+        recordBlockSignature(sharedState.identityFile, {
+            genesisHash: "genesis-a",
+            height: 10,
+            timestamp: 1500,
+            hash: "another",
+        })
+    })
+
+    afterEach(() => {
+        resetSigningHalt()
+        sharedState.publicKeyHex = ""
+        sharedState.forkConfig.canonicalSigners.activationHeight = null
+        fs.rmSync(dir, { recursive: true, force: true })
+    })
+
+    // A block whose quorum needs our signature, keyed as `key`
+    const signedUnder = async (key: string) => {
+        const block = await signedBy(makeBlock("own"), [node, ...others])
+        const ours = block.validation_data.signatures[node.identity]
+        delete block.validation_data.signatures[node.identity]
+        block.validation_data.signatures[key] = ours
+        return block
+    }
+
+    it("stops signing for our exact key", async () => {
+        expect(await verifyBlock(await signedUnder(node.identity))).toEqual({ valid: true })
+        expect(signingHaltReason()).toContain("another process")
+    })
+
+    it("stops signing for our key written upper-case", async () => {
+        expect(await verifyBlock(await signedUnder(upper(node.identity)))).toEqual({ valid: true })
+        expect(signingHaltReason()).toContain("another process")
+        expect(fs.existsSync(signingHaltMarkerPath(sharedState.identityFile))).toBe(true)
+    })
+
+    it("neither counts nor checks that key while the fork is dormant", async () => {
+        sharedState.forkConfig.canonicalSigners.activationHeight = null
+        expect((await verifyBlock(await signedUnder(upper(node.identity)))).valid).toBe(false)
+        expect(signingHaltReason()).toBeNull()
     })
 })
 

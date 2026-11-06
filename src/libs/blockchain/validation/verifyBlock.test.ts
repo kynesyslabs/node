@@ -11,6 +11,8 @@ const B = "bb".repeat(32)
 const C = "cc".repeat(32)
 const D = "dd".repeat(32)
 const OUTSIDER = "ee".repeat(32)
+// A signature that does not verify under any key
+const FORGED = "0bad"
 
 let pool: string[] | Error = []
 let committee: string[] | Error = []
@@ -36,6 +38,7 @@ jest.mock("src/utilities/sharedState", () => ({
         forkConfig: {
             quorumParity: { activationHeight: null },
             committeeBinding: { activationHeight: null },
+            canonicalSigners: { activationHeight: null },
         },
         getBlockTimestampMinDelta: () => 1,
         getBlockTimestampTolerance: () => 60,
@@ -87,7 +90,16 @@ jest.mock("./txValidatorPool", () => ({
     __esModule: true,
     default: {
         getInstance: () => ({
-            verify: async ({ publicKey }: { publicKey: Uint8Array }) => {
+            verify: async ({
+                publicKey,
+                signature,
+            }: {
+                publicKey: Uint8Array
+                signature: Uint8Array
+            }) => {
+                if (Buffer.from(signature).toString("hex") === FORGED) {
+                    return false
+                }
                 const hex = Buffer.from(publicKey).toString("hex")
                 return verifyingSigners.has(hex)
             },
@@ -145,6 +157,7 @@ beforeEach(() => {
     verifyingSigners = new Set([A, B, C, D])
     getSharedState.forkConfig.quorumParity.activationHeight = null
     getSharedState.forkConfig.committeeBinding.activationHeight = null
+    getSharedState.forkConfig.canonicalSigners.activationHeight = null
     committee = [A, B, C, D]
 })
 
@@ -349,6 +362,109 @@ describe("verifyBlock", () => {
                 validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
             })
             expect((await verifyBlock(block)).valid).toBe(false)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+    })
+
+    describe("own-key self-check under canonicalSigners", () => {
+        const ownCheck = { number: 10, hash: "valid-hash", timestamp: 1500 }
+        const signed = (signatures: Record<string, string>) =>
+            makeBlock({ validation_data: { signatures } })
+
+        beforeEach(() => {
+            getSharedState.forkConfig.canonicalSigners.activationHeight = 0
+        })
+
+        it("checks our key written upper-case when it supplies the quorum", async () => {
+            const block = signed({ [A.toUpperCase()]: "s1", [B]: "s2", [C]: "s3" })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+        })
+
+        it("checks the other spelling when the exact key's signature does not verify", async () => {
+            const block = signed({
+                [A]: FORGED,
+                [A.toUpperCase()]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+        })
+
+        it("checks the exact key when the other spelling's signature does not verify", async () => {
+            const block = signed({
+                [A.toUpperCase()]: FORGED,
+                [A]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+        })
+
+        it("checks a block once when both spellings verify", async () => {
+            const block = signed({
+                [A]: "s1",
+                [A.toUpperCase()]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledTimes(1)
+        })
+
+        it("skips every spelling of our key whose signature does not verify", async () => {
+            const block = signed({
+                [A]: FORGED,
+                [A.toUpperCase()]: FORGED,
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
+        it("looks only at the exact key while the fork is dormant", async () => {
+            getSharedState.forkConfig.canonicalSigners.activationHeight = null
+            const block = signed({
+                [A.toUpperCase()]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+
+            delete block.validation_data.signatures[D]
+            expect((await verifyBlock(block)).valid).toBe(false)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
+        it("accepts a block before our keypair is loaded", async () => {
+            const state = getSharedState as { publicKeyHex: string | null }
+            state.publicKeyHex = null
+            try {
+                const block = signed({ [A]: "s1", [B]: "s2", [C]: "s3" })
+                expect((await verifyBlock(block)).valid).toBe(true)
+                expect(checkOwnSignature).not.toHaveBeenCalled()
+            } finally {
+                state.publicKeyHex = A
+            }
+        })
+
+        it("looks only at blocks from the activation height on", async () => {
+            getSharedState.forkConfig.canonicalSigners.activationHeight = 11
+            const block = signed({
+                [A.toUpperCase()]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).not.toHaveBeenCalled()
         })
     })

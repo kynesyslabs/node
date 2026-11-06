@@ -80,9 +80,27 @@ export { checkTimestampNotAhead } from "./timestampBound"
 
 // Verified separately from the quorum tally, so a garbage entry under our key
 // can never read as our signature, however the tally is computed. Under
-// commitLock the signature that can sit in a block is our precommit.
+// commitLock the signature that can sit in a block is our precommit. Under
+// canonicalSigners the tally counts our key in any case, so every spelling
+// of it in the map is tried; before it only the exact key is.
 async function carriesOurSignature(block: Block): Promise<boolean> {
-    const ours = block.validation_data?.signatures?.[getSharedState.publicKeyHex]
+    // null until the keypair is loaded
+    const ownKey = getSharedState.publicKeyHex
+    const signatures = block.validation_data?.signatures
+    const keys =
+        isForkActive("canonicalSigners", block.number) &&
+        typeof ownKey === "string"
+            ? Object.keys(signatures ?? {}).filter(
+                  key => key.toLowerCase() === ownKey.toLowerCase(),
+              )
+            : [ownKey]
+    for (const key of keys) {
+        if (await verifiesAsOurs(block, signatures?.[key])) return true
+    }
+    return false
+}
+
+async function verifiesAsOurs(block: Block, ours: unknown): Promise<boolean> {
     if (typeof ours !== "string") return false
     const message = certificateMessageOf(block)
     if (message === null) return false
