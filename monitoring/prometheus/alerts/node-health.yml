@@ -66,7 +66,9 @@ groups:
           description: "demos_mempool_size > 0 on {{ $labels.instance }} yet no transaction has been included in a stored block for over 10m. Block production may be stalled."
 
       - alert: PeersZero
-        expr: demos_peer_online_count == 0
+        # The node counts itself as online (PeerManager.isPeerFresh), so the
+        # gauge is 1 when every real peer is gone and `== 0` could never fire.
+        expr: demos_peer_online_count <= 1
         for: 5m
         # One peer reconnecting for a scrape or two must not resolve and
         # re-page the alert.
@@ -74,8 +76,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: No connected peers
-          description: "demos_peer_online_count has been 0 for >5m on {{ $labels.instance }}. Check network egress + bootstrap peer list."
+          summary: No connected peers (only the node itself is online)
+          description: "demos_peer_online_count has been 1 or less for >5m on {{ $labels.instance }}. The count includes the node itself, so 1 means no other peer is online. Check network egress + bootstrap peer list."
 
       - alert: MainLoopHeartbeatStale
         expr: demos_main_loop_heartbeat_seconds > 120

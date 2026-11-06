@@ -156,3 +156,52 @@ tests:
       - eval_time: 16m
         alertname: MainLoopHeartbeatStale
         exp_alerts: []
+
+  # PeersZero: the node counts itself, so the gauge is 1 when every real peer is gone.
+  - interval: 1m
+    input_series:
+      # validator-1: alone for the whole run (count 1): fires after the 5 m `for`.
+      - series: 'demos_peer_online_count{job="demos-node",instance="validator-1"}'
+        values: '1x20'
+      # validator-2: one real peer online (count 2): never fires.
+      - series: 'demos_peer_online_count{job="demos-node",instance="validator-2"}'
+        values: '2x20'
+      # validator-3: alone until minute 7, then three peers return; kept firing for 5 m.
+      - series: 'demos_peer_online_count{job="demos-node",instance="validator-3"}'
+        values: '1x7 4x13'
+    alert_rule_test:
+      # Alone for under 5 m: pending only.
+      - eval_time: 4m
+        alertname: PeersZero
+        exp_alerts: []
+      # validator-1 fires at minute 5. validator-3 fired at minute 5 too and its peers came
+      # back at minute 7, but keep_firing_for (5 m) still holds it at minute 10.
+      # validator-2 has a real peer and never appears.
+      - eval_time: 10m
+        alertname: PeersZero
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: No connected peers (only the node itself is online)
+              description: "demos_peer_online_count has been 1 or less for >5m on validator-1. The count includes the node itself, so 1 means no other peer is online. Check network egress + bootstrap peer list."
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-3
+            exp_annotations:
+              summary: No connected peers (only the node itself is online)
+              description: "demos_peer_online_count has been 1 or less for >5m on validator-3. The count includes the node itself, so 1 means no other peer is online. Check network egress + bootstrap peer list."
+      # validator-3 is released by minute 14; validator-1 is still alone.
+      - eval_time: 14m
+        alertname: PeersZero
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: No connected peers (only the node itself is online)
+              description: "demos_peer_online_count has been 1 or less for >5m on validator-1. The count includes the node itself, so 1 means no other peer is online. Check network egress + bootstrap peer list."
