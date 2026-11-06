@@ -145,26 +145,32 @@ teardown() {
     trap - EXIT INT TERM
     if [ "${STARTED_STACK}" = 1 ]; then
         say "collecting container logs"
-        local i why unread="" f hit=0
+        local i why unread="" f hit="" reason=""
         for i in $(seq 1 "${N}"); do
             why=$(read_node_log "${i}" "${LOG_DIR}/node-${i}.log") || { [ "${STARTED[i]:-0}" = 1 ] && unread+=" node-${i} (${why})"; }
         done
         [ -n "${unread}" ] && say "WARN: logs not collected whole:${unread}"
-        # Backstop for the exits that skip pg_limit_gate (an early exit 0 or 1):
-        # a connection-limit hit in the collected logs is never a result, and
-        # neither is an exit the gate did not clear while a log is unreadable
+        # Backstop for the exits that skip pg_limit_gate (an early exit 0 or 1)
+        # and for a hit logged after the gate: a connection-limit hit in the
+        # collected logs is never a result, and neither is an exit the gate did
+        # not clear while a log is unreadable. A verdict already written is
+        # rewritten as ERROR, so the records say what the exit code says.
         if [ "${rc}" -le 1 ]; then
             for f in "${LOG_DIR}"/node-*.log "${LOG_DIR}/psql-errors.log"; do
                 [ -e "${f}" ] || continue
                 grep -aq "too many clients" "${f}"
-                case $? in 0) hit=1 ;; 1) ;; *) unread+=" ${f##*/} (grep failed)" ;; esac
+                case $? in 0) hit+=" ${f##*/}" ;; 1) ;; *) unread+=" ${f##*/} (grep failed)" ;; esac
             done
-            if [ "${hit}" = 1 ]; then
+            if [ -n "${hit}" ]; then
                 say "ABORT: could not run: postgres connection limit hit (exit ${rc} replaced by 2; see ${LOG_DIR}/node-*.log)"
-                rc=2
+                reason="could not run: postgres connection limit hit (in the logs collected at teardown: ${hit# })"
             elif [ -n "${unread}" ] && [ "${PG_GATE_PASSED:-0}" != 1 ]; then
                 say "ABORT: could not run: could not read${unread} to check for the postgres connection limit (exit ${rc} replaced by 2)"
+                reason="could not run: could not read${unread} to check for the postgres connection limit"
+            fi
+            if [ -n "${reason}" ]; then
                 rc=2
+                [ "${VERDICT_WRITTEN:-0}" = 1 ] && rewrite_verdict "${reason}"
             fi
         fi
         say "tearing down ${PROJECT}"
@@ -679,10 +685,36 @@ write_verdict() {
          + (if $drill == null then {} else {drill: $drill} end)' > "${LOG_DIR}/verdict.json"
     local results="${RUNS_DIR}/results.tsv"
     [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${RUN_ID}" "${SCENARIO}" "${BINDING}" "${N}" "${SHARD}" "${Q}" \
-        "${CODE}" "${DETAIL}" "${RESULT}" >> "${results}"
+    results_row >> "${results}"
+    VERDICT_WRITTEN=1
     free -m | sed -n 2p | sed 's/^/host after run: /' >> "${LOG_DIR}/run.log"
     say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
+}
+results_row() {
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${RUN_ID}" "${SCENARIO}" "${BINDING}" "${N}" "${SHARD}" "${Q}" \
+        "${CODE}" "${DETAIL}" "${RESULT}"
+}
+# The teardown backstop turned exit 0 or 1 into 2 after write_verdict ($1 why):
+# verdict.json and this run's row of results.tsv become ERROR with $1 as the
+# detail, worded as pg_limit_gate words it. A record that cannot be rewritten is
+# said on stderr; the exit is 2 either way.
+rewrite_verdict() { # $1 why
+    local v="${LOG_DIR}/verdict.json" results="${RUNS_DIR}/results.tsv" was="${RESULT}" why st=0
+    DETAIL="$1; the result was ${was}"
+    RESULT=ERROR
+    say "RESULT ERROR: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
+    { jq --arg detail "${DETAIL}" '.detail = $detail | .result = "ERROR"' "${v}" > "${v}.tmp" && mv -f "${v}.tmp" "${v}"; } 2>/dev/null ||
+        { rm -f "${v}.tmp"; say "ERROR: could not rewrite ${v}: it still says ${was}, the exit is 2" >&2; st=1; }
+    RUN="${RUN_ID}" ROW="$(results_row)" awk -F'\t' '$1 == ENVIRON["RUN"] { print ENVIRON["ROW"]; n++; next } { print } END { exit n ? 0 : 3 }' \
+        "${results}" > "${results}.tmp" 2>/dev/null
+    case $? in
+        0) mv -f "${results}.tmp" "${results}" 2>/dev/null && return "${st}"; why="mv failed" ;;
+        3) why="no row for ${RUN_ID}" ;;
+        *) why="it could not be read or the copy written" ;;
+    esac
+    rm -f "${results}.tmp"
+    say "ERROR: could not rewrite ${results} (${why}): the row of ${RUN_ID} still says ${was}, the exit is 2" >&2
+    return 1
 }
 
 # A running node that cannot be read leaves the window without a verdict:
