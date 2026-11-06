@@ -353,6 +353,59 @@ gate_case td_clean PASS; echo "clean" > "${FAKE}/nodelog.1"
 teardown_rc 0
 check "exit 0, every log collected and clean: exit 0" has "rc=0"
 
+echo "== teardown backstop after the verdict: an exit it replaces by 2 makes verdict.json and results.tsv ERROR too"
+for f in results_row rewrite_verdict; do source <(fn_src "${f}"); done
+# The end of run.sh as it runs: the EXIT trap, pg_limit_gate, the real
+# write_verdict, exit 0 on PASS or 1, then teardown. $3 late: node-6 logs a hit
+# after the verdict is written; unwritable: so does node-6, and verdict.json is
+# not JSON and results.tsv is gone by then. results.tsv holds an earlier run's
+# row first. OUT: stdout then rc=; ERR: stderr.
+end_case() { # $1 name, $2 the result before the gate, $3 late, unwritable or none
+    gate_case "$1" "$2"; echo "clean" > "${FAKE}/nodelog.1"
+    RUNS_DIR="${WORK}/$1/runs"; mkdir -p "${RUNS_DIR}"
+    printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\nearlier\tfloor\ton\t4\t10\t7\timage\tfine\tPASS\n' > "${RUNS_DIR}/results.tsv"
+    OUT=$( (
+        source <(fn_src write_verdict); source <(grep -E '^step\(\) ' "${RUN_SH}")
+        RUN_ID="stub-$1"; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; IMAGE=stub; FORK_SET=devnet; EXCLUDED_FORKS='{}'
+        PHASES="${LOG_DIR}/phases.tsv"; EVENTS="${LOG_DIR}/events.log"; : > "${PHASES}"; STARTED_STACK=1; SIDECARS=()
+        trap teardown EXIT
+        pg_limit_gate
+        write_verdict
+        [ "$3" != none ] && printf 'FATAL:  sorry, too many clients already\n' > "${FAKE}/nodelog.6"
+        [ "$3" = unwritable ] && { echo "not json" > "${LOG_DIR}/verdict.json"; rm "${RUNS_DIR}/results.tsv"; }
+        [ "${RESULT}" = PASS ] && exit 0
+        exit 1
+    ) 2> "${LOG_DIR}/stderr"; echo "rc=$?" )
+    ERR=$(cat "${LOG_DIR}/stderr")
+}
+verdict_is() { jq -e --arg r "$1" --arg d "$2" '.result == $r and .detail == $d' "${LOG_DIR}/verdict.json" > /dev/null; }
+tsv_is() { # $1 run, $2 detail, $3 result: results.tsv is the header, the earlier run's row, then that run's row
+    printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\nearlier\tfloor\ton\t4\t10\t7\timage\tfine\tPASS\n%s\tdrop-n10s10\ton\t13\t10\t7\timage\t%s\t%s\n' \
+        "$1" "$2" "$3" | cmp -s - "${RUNS_DIR}/results.tsv"
+}
+for verdict in PASS FAIL; do
+    st=$([ "${verdict}" = PASS ] && echo 0 || echo 1)
+    why="could not run: postgres connection limit hit (in the logs collected at teardown: node-6.log); the result was ${verdict}"
+    end_case td_late "${verdict}" late
+    echo "${OUT}" | grep -E 'RESULT|ABORT|^rc=' | cut -c1-220 | sed 's/^/    | /'
+    check "gate passed, ${verdict} written, then a late hit: exit 2" has "rc=2"
+    check "gate passed, ${verdict} written, then a late hit: says exit ${st} was replaced" has "postgres connection limit hit (exit ${st} replaced by 2"
+    check "gate passed, ${verdict} written, then a late hit: verdict.json says ERROR, why, and what the result was" verdict_is ERROR "${why}"
+    check "gate passed, ${verdict} written, then a late hit: its results.tsv row says ERROR and why, the earlier row is kept, none is added" \
+        tsv_is stub-td_late "${why}" ERROR
+    check "gate passed, ${verdict} written, then a late hit: run.log says RESULT ERROR" grep -q "RESULT ERROR: drop-n10s10 .*${why}" "${LOG_DIR}/05-verdict.log"
+    check "gate passed, ${verdict} written, then a late hit: nothing on stderr" test -z "${ERR}"
+done
+end_case td_end_clean PASS none
+check "gate passed, PASS written, no late hit: exit 0" has "rc=0"
+check "gate passed, PASS written, no late hit: verdict.json keeps PASS" verdict_is PASS "phases fine"
+check "gate passed, PASS written, no late hit: its results.tsv row keeps PASS" tsv_is stub-td_end_clean "phases fine" PASS
+end_case td_unwritable PASS unwritable
+echo "${ERR}" | cut -c1-220 | sed 's/^/    | /'
+check "a late hit, and neither record can be rewritten: still exit 2" has "rc=2"
+check "and stderr says verdict.json still says PASS" grep -q "could not rewrite ${LOG_DIR}/verdict.json: it still says PASS, the exit is 2" <<< "${ERR}"
+check "and stderr says results.tsv could not be rewritten" grep -q "could not rewrite ${RUNS_DIR}/results.tsv (it could not be read or the copy written): the row of stub-td_unwritable still says PASS, the exit is 2" <<< "${ERR}"
+
 echo "== the postgres container lookup is bounded: one that stalls, fails or finds nothing fails the read, or the preflight's try, and says why"
 # A function of this shell in a fresh bash under an outside guard of $1 s, so a
 # lookup that is not bounded ends the case (rc=124, the guard's) and not the
