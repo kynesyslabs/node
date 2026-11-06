@@ -117,7 +117,7 @@ groups:
   # `deadman` receiver, which should be an external watchdog that pages when the
   # heartbeat STOPS, so a dead Prometheus, Alertmanager or dead-man receiver path is
   # noticed. It does NOT test the `paging` or `slack` webhooks: send a test alert to each
-  # after filling in the secrets (docs/runbooks/mainnet-monitoring.md, setup step 3).
+  # after filling in the secrets (docs/runbooks/mainnet-monitoring.md, setup step 4).
   - name: demos-meta
     rules:
       - alert: DeadMansSwitch

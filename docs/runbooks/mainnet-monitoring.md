@@ -66,7 +66,12 @@ do not depend on the working directory.
    (gitignored; see `monitoring/secrets/README.md`). `chmod 644` them so the
    container user can read them. Compose mounts them at `/run/secrets/` and
    Alertmanager reads them through `api_url_file` / `url_file`.
-3. `docker compose -f monitoring/docker-compose.yml up -d`. Alertmanager listens on
+3. Set a strong `GRAFANA_ADMIN_PASSWORD` in `monitoring/.env` (for example
+   `echo "GRAFANA_ADMIN_PASSWORD=<a strong password>" >> monitoring/.env`) or in
+   the environment of the shell that runs `up`. It is required: without it
+   Compose fails at interpolation and starts nothing, including Alertmanager,
+   and the published default `demos` is refused.
+4. `docker compose -f monitoring/docker-compose.yml up -d`. Alertmanager listens on
    `127.0.0.1:9093` only. Then send a test alert to each receiver and confirm
    that a person sees it (the Slack message, the page, and the heartbeat at the
    dead-man service): the heartbeat does not test the `slack` or `paging`
@@ -76,7 +81,7 @@ do not depend on the working directory.
    `docker exec demos-alertmanager amtool alert add RoutingTest severity=critical instance=test --alertmanager.url=http://localhost:9093`
    (critical reaches Slack and paging) and the same with `severity=warning`
    (Slack only). Silence `RoutingTest` afterwards.
-4. After you change `monitoring/alertmanager/alertmanager.yml`, restart or recreate the
+5. After you change `monitoring/alertmanager/alertmanager.yml`, restart or recreate the
    Alertmanager container (`docker compose -f monitoring/docker-compose.yml up -d --force-recreate alertmanager`). The file is bind-mounted as a single file, so a reload (SIGHUP) does not
    pick up a replaced file. The same goes for `monitoring/prometheus/prometheus.yml`, also
    a single-file bind mount: after you change it, run
@@ -84,7 +89,7 @@ do not depend on the working directory.
    The rule files in `monitoring/prometheus/alerts/` are a directory mount: a SIGHUP
    (`docker kill -s HUP demos-prometheus`) reloads them; there is no HTTP reload,
    because `--web.enable-lifecycle` is off.
-5. `./scripts/check-monitoring.sh` (needs `promtool` and `amtool`) checks the
+6. `./scripts/check-monitoring.sh` (needs `promtool` and `amtool`) checks the
    config, runs the rule unit tests in `monitoring/prometheus/tests/` and
    checks that each severity reaches the right receiver.
 
@@ -119,7 +124,7 @@ loaded from the same directory and use the same routing. Among them:
 | PeersZero | `demos_peer_online_count <= 1` for 5 min; keeps firing 5 min after it clears | warning | The validator sees no other peer. The gauge counts the node itself (`PeerManager.isPeerFresh`), so 1 means every real peer is gone and the rule cannot test for 0. Check network egress, the bootstrap peer list and the peers' own state. |
 | DiskSpaceLow | under 20 GiB free on the filesystem of `DISK_SPACE_PATH` (Docker: the `/app/data` volume; otherwise the working directory), held 10 min | warning | Prune logs, snapshots and Docker build cache, or grow the volume. |
 | DiskSpaceCritical | under 5 GiB free, held 2 min | critical | The node refuses to start below `MIN_DISK_SPACE` (default 5 GiB) and Postgres fails writes on a full disk. Neither alert sees the Postgres volume when it is on another filesystem; watch it through node-exporter's `node_filesystem_avail_bytes`. |
-| DeadMansSwitch | always firing | none | Heartbeat to the `deadman` receiver. It proves only that Prometheus, Alertmanager and the path to the dead-man receiver work. If the external watchdog stops receiving it, one of those is down: check the monitoring host first. It does **not** prove that the `paging` or `slack` webhooks work: a wrong or forgotten URL there fails silently while the heartbeat stays healthy (see the test alert in setup step 3). |
+| DeadMansSwitch | always firing | none | Heartbeat to the `deadman` receiver. It proves only that Prometheus, Alertmanager and the path to the dead-man receiver work. If the external watchdog stops receiving it, one of those is down: check the monitoring host first. It does **not** prove that the `paging` or `slack` webhooks work: a wrong or forgotten URL there fails silently while the heartbeat stays healthy (see the test alert in setup step 4). |
 
 The rules have promtool unit tests in `monitoring/prometheus/tests/`; run
 `promtool test rules monitoring/prometheus/tests/*.test.yml` after editing them.
@@ -169,8 +174,13 @@ Run the `docker compose` commands below from the repository root, as in setup.
    loopback unless `MONITORING_BIND` is set. `--web.enable-admin-api` opens
    unauthenticated delete, snapshot and tombstone-cleaning APIs to anyone who
    can reach that port. So **before enabling the flag**, check that
-   `MONITORING_BIND` is unset or a loopback address (`docker compose -f
-   monitoring/docker-compose.yml config | grep 9090` shows the bound address).
+   `MONITORING_BIND` is unset or a loopback address. Read the resolved
+   Prometheus port mapping with `docker compose -f monitoring/docker-compose.yml
+   config --format json | jq '.services.prometheus.ports'` (without `jq`, run
+   `config` and read the `ports:` block under `prometheus`). Its `host_ip` must
+   be `127.0.0.1` (and `published` is the host port, `9091` by default) before
+   you enable the admin API. Do not grep for `9090`: that matches only the
+   container-side `target` line, and `host_ip` is on a different line.
    Do not rely on a firewall rule such as `ufw deny 9091` for a non-loopback
    bind: Docker publishes ports through its own iptables rules, which ufw and
    plain INPUT rules do not filter, so the port would stay open unless the rule
