@@ -78,7 +78,12 @@ do not depend on the working directory.
    (Slack only). Silence `RoutingTest` afterwards.
 4. After you change `monitoring/alertmanager/alertmanager.yml`, restart or recreate the
    Alertmanager container (`docker compose -f monitoring/docker-compose.yml up -d --force-recreate alertmanager`). The file is bind-mounted as a single file, so a reload (SIGHUP) does not
-   pick up a replaced file. Prometheus rule files can be reloaded as before.
+   pick up a replaced file. The same goes for `monitoring/prometheus/prometheus.yml`, also
+   a single-file bind mount: after you change it, run
+   `docker compose -f monitoring/docker-compose.yml up -d --force-recreate prometheus`.
+   The rule files in `monitoring/prometheus/alerts/` are a directory mount: a SIGHUP
+   (`docker kill -s HUP demos-prometheus`) reloads them; there is no HTTP reload,
+   because `--web.enable-lifecycle` is off.
 5. `./scripts/check-monitoring.sh` (needs `promtool` and `amtool`) checks the
    config, runs the rule unit tests in `monitoring/prometheus/tests/` and
    checks that each severity reaches the right receiver.
@@ -90,8 +95,8 @@ Each fires per validator (`instance` label).
 
 | Alert | Condition | Severity | Meaning |
 |-------|-----------|----------|---------|
-| HeightStalled | no new block for 300 s, held 2 min; keeps firing 10 min after it clears | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. |
-| BlockHashMismatch | more than 3 peer disagreements on the candidate block hash within 10 min, **latched 7 days** | warning | This node and its peers are building different blocks (mempool or clock divergence). Check the mempool, clock skew and the log for the tx-set diff. Does not resolve by itself: see "Clearing a latched alert". |
+| HeightStalled | no new block for 300 s, held 2 min; keeps firing 10 min after it clears | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. The gauge is the age of the node's newest stored block, so a validator catching up in its boot-time fast sync after downtime can fire it: check `/health.boot.current` for `fast_sync` first. It is deliberately not gated on fast sync, because that would hide a hung sync from the critical route (`BootIncomplete`, a warning, covers it too). The gauge is also this host's clock minus the block's timestamp: if it stays firing while peers advance, check the host clock (`ClockOffset`, `chronyc tracking`, see [Validator clock](#validator-clock)); a clock more than 300 s ahead reads as a permanent stall. |
+| BlockHashMismatch | 4 or more peer disagreements on the candidate block hash within 10 min (3 does not fire: `increase()` extrapolates, so 3 events read about 3.02 and the threshold is 3.5), **latched 7 days** | warning | This node and its peers are building different blocks (mempool or clock divergence). Check the mempool, clock skew and the log for the tx-set diff. Does not resolve by itself: see "Clearing a latched alert". |
 | ConflictingBlock | a peer holds a different block with a verified quorum at a height where this node has one, **latched 7 days** | critical | A fork. The node does not switch chains on its own. Search the log for `[FORK]` for the height and both hashes, decide which chain to keep. See "Clearing a latched alert". |
 | ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, **latched 7 days** | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. A double-sign signal: does not resolve by itself, see "Clearing a latched alert". |
 | SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If it is 0, the marker write failed: keep the node stopped until every other copy of the key is stopped. |
@@ -108,6 +113,8 @@ loaded from the same directory and use the same routing. Among them:
 | Alert | Condition | Severity | Meaning |
 |-------|-----------|----------|---------|
 | NodeDown | `up == 0` for 1 min on a validator's `demos-node` target | critical | That validator's metrics endpoint is unreachable (crash, host down, firewall). Each validator alerts on its own `instance`. Check the process and the host first; if several fire at once suspect the network path to the monitoring host. A removed single target is not detected, only "no target at all". |
+| NodeFailing | the `main_loop` subsystem is down and not skipped, held 2 min, **only once the boot-time fast sync has finished** (`demos_boot_step_status{step="fast_sync"} == 2`) | critical | The node serves RPC but no longer produces blocks. The node marks `main_loop` running only after fast sync, so a validator catching up after downtime does not fire it while the sync runs. A sync that never finishes is caught by `BootIncomplete` (warning). |
+| SubsystemDown | a subsystem is down and not skipped, held 2 min (not `dtr`, which the node never marks), once fast sync has finished or the node is dormant | warning | Same gate as `NodeFailing`: `main_loop` and `l2ps` are marked only after fast sync. A dormant node never starts fast sync, so it is let through. |
 | MempoolStuck | transactions pending and none included in a stored block for 10 min | warning | Block production has stalled while the pool fills. |
 | DiskSpaceLow | under 20 GiB free on the filesystem of `DISK_SPACE_PATH` (Docker: the `/app/data` volume; otherwise the working directory), held 10 min | warning | Prune logs, snapshots and Docker build cache, or grow the volume. |
 | DiskSpaceCritical | under 5 GiB free, held 2 min | critical | The node refuses to start below `MIN_DISK_SPACE` (default 5 GiB) and Postgres fails writes on a full disk. Neither alert sees the Postgres volume when it is on another filesystem; watch it through node-exporter's `node_filesystem_avail_bytes`. |
@@ -120,7 +127,8 @@ Routing: `critical` (and an explicit `page`) goes to **both** the **paging**
 receiver and **Slack** (the paging route has `continue: true`, the next route
 sends the same alert to Slack), waits 10 s before the first message and repeats
 hourly. `warning` and `info` go to **Slack** only, warnings repeating every 4
-hours. `DeadMansSwitch` goes to its own **deadman** receiver only and is re-sent
+hours, except `MissedSignatures` (info), which goes to `blackhole` (no
+notification; it stays visible in Prometheus and Grafana). `DeadMansSwitch` goes to its own **deadman** receiver only and is re-sent
 every minute (`group_interval: 1m` with `repeat_interval: 50s`; a `repeat_interval`
 of 1m would skip every other flush and re-send only every 2 minutes, so keep it
 below `group_interval`). Alerts are grouped per alert name and validator. All three
@@ -153,23 +161,21 @@ Run the `docker compose` commands below from the repository root, as in setup.
 3. Clear: at least 10 minutes after the last event, delete the recorded series
    for that instance through the Prometheus admin API. The admin API is **not
    enabled by default**, and `monitoring/docker-compose.yml` does not enable it.
-   **Security: Prometheus is published on all interfaces, without
-   authentication** (the `"${PROMETHEUS_PORT:-9091}:9090"` port line in
-   `monitoring/docker-compose.yml` has no `127.0.0.1:` prefix, unlike
-   Alertmanager). `--web.enable-admin-api` opens unauthenticated delete,
-   snapshot and tombstone-cleaning APIs to anyone who can reach that port. So
-   **before enabling the flag**, bind the port to loopback: in the `ports:` of
-   the `prometheus` service in `monitoring/docker-compose.yml`, change
-   `"${PROMETHEUS_PORT:-9091}:9090"` to
-   `"127.0.0.1:${PROMETHEUS_PORT:-9091}:9090"` (apply it in the same
-   `up -d prometheus` as the flag). Do not rely on a firewall rule such as
-   `ufw deny 9091`: Docker publishes ports through its own iptables rules,
-   which ufw and plain INPUT rules do not filter, so the port would stay open
-   unless the rule is in the `DOCKER-USER` chain. **Remove the flag again as
-   soon as the series is deleted** (the loopback binding can stay).
+   **Security: Prometheus has no authentication.** The port line in
+   `monitoring/docker-compose.yml` is
+   `"${MONITORING_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9091}:9090"`, so it is on
+   loopback unless `MONITORING_BIND` is set. `--web.enable-admin-api` opens
+   unauthenticated delete, snapshot and tombstone-cleaning APIs to anyone who
+   can reach that port. So **before enabling the flag**, check that
+   `MONITORING_BIND` is unset or a loopback address (`docker compose -f
+   monitoring/docker-compose.yml config | grep 9090` shows the bound address).
+   Do not rely on a firewall rule such as `ufw deny 9091` for a non-loopback
+   bind: Docker publishes ports through its own iptables rules, which ufw and
+   plain INPUT rules do not filter, so the port would stay open unless the rule
+   is in the `DOCKER-USER` chain. **Remove the flag again as soon as the series
+   is deleted.**
    - Enable: add `- --web.enable-admin-api` to the `command:` list of the
-     `prometheus` service in `monitoring/docker-compose.yml` (next to
-     `--web.enable-lifecycle`), then run
+     `prometheus` service in `monitoring/docker-compose.yml`, then run
      `docker compose -f monitoring/docker-compose.yml up -d prometheus`. Use
      `up -d`, not `restart`: `restart` keeps the old flags. The data volume
      is kept, so the latch survives the recreate.
@@ -181,7 +187,7 @@ Run the `docker compose` commands below from the repository root, as in setup.
      clears within about a minute.
    - Remove: delete the `- --web.enable-admin-api` line again and run
      `docker compose -f monitoring/docker-compose.yml up -d prometheus`.
-4. Expire the silence from step 2 once the series is deleted. Otherwise the
+4. Expire the silence from step 2 once the alert shows as resolved. Otherwise the
    7 day silence keeps running, and a repeat double-sign or fork on the same
    validator (same alert name and instance) fires with no page and no Slack
    message for days. Get the id with

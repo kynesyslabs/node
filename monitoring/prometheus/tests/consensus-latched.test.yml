@@ -20,7 +20,7 @@ tests:
       # (counter back to 0) and from minute 30 it is not scraped at all.
       - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-1"}'
         values: '0x9 5x9 0x9 _x12000'
-      # validator-2: a small disagreement (2) that stays under the "more than 3 in 10 m" bar.
+      # validator-2: a small disagreement (2) that stays under the "4 or more in 10 m" bar.
       - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-2"}'
         values: '0x9 2x12000'
       # validator-3: counter never moves.
@@ -308,3 +308,27 @@ tests:
       - eval_time: 6d
         alertname: PrecommitEquivocation
         exp_alerts: []
+
+  # BlockHashMismatch threshold on real scrape timing. The samples are 7 s apart, so they
+  # do not line up with the 10 m window and increase() extrapolates: exactly 3 events read
+  # slightly above 3 (about 3.02) and must stay quiet; 4 events must fire. One disagreeing
+  # round on a 4-validator network is exactly 3 events.
+  - interval: 7s
+    input_series:
+      # validator-1: exactly 3 events at 595 s.
+      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-1"}'
+        values: '0x84 3x600'
+      # validator-2: 4 events at 595 s.
+      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-2"}'
+        values: '0x84 4x600'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: BlockHashMismatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-2
+            exp_annotations:
+              summary: "Peers disagreed with this node's candidate block hash (latched)"
+              description: "Up to 4.033613445378151 peer disagreements on the candidate block hash within 10m on validator-2 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."

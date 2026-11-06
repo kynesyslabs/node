@@ -137,7 +137,10 @@ groups:
       - alert: BlockHashMismatch
         # No `for`: the old 5 m `for` only checked that the 10 m window still held the
         # burst, and a latch holds it for 7 d anyway.
-        expr: max_over_time(demos:consensus_block_hash_mismatch:increase10m[7d]) > 3
+        # Fires at 4 or more disagreements in 10 m, not at 3. increase() extrapolates to the
+        # window edges, so exactly 3 events read about 3.02 off the scrape grid and "> 3" would
+        # fire on them; one disagreeing round on a 4-validator network is exactly 3.
+        expr: max_over_time(demos:consensus_block_hash_mismatch:increase10m[7d]) > 3.5
         labels:
           severity: warning
         annotations:

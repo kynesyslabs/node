@@ -40,3 +40,55 @@ tests:
             exp_annotations:
               summary: No new block for over 5 minutes
               description: "demos_seconds_since_last_block = 450 on validator-1. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."
+
+  # ConsensusAbstaining: demos_consensus_abstaining == 1 held for 1 m, per validator.
+  - interval: 15s
+    input_series:
+      # validator-1 starts abstaining at 135 s and stays there.
+      - series: 'demos_consensus_abstaining{job="demos-node",instance="validator-1"}'
+        values: '0x8 1x40'
+      # validator-2 never abstains.
+      - series: 'demos_consensus_abstaining{job="demos-node",instance="validator-2"}'
+        values: '0x48'
+      # validator-3 abstains for 30 s only: shorter than the 1 m `for`.
+      - series: 'demos_consensus_abstaining{job="demos-node",instance="validator-3"}'
+        values: '0x8 1x2 0x38'
+    alert_rule_test:
+      # 15 s after it started: pending only.
+      - eval_time: 150s
+        alertname: ConsensusAbstaining
+        exp_alerts: []
+      # Held over 1 m: fires for validator-1 only.
+      - eval_time: 4m
+        alertname: ConsensusAbstaining
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: Validator is sitting out consensus because of a fork schedule mismatch
+              description: "validator-1 skips forging and voting because most validators report a different fork schedule than its own. It keeps syncing and resumes once no majority differs. Confirm its genesis.json against the published hash first: if the majority is the one with the wrong schedule, this node is on the right side. See docs/runbooks/fork-schedule-policy.md."
+
+  # SigningHalted: demos_signing_halted == 1, no `for`, per validator.
+  - interval: 15s
+    input_series:
+      # validator-1 halts signing at 75 s and stays halted.
+      - series: 'demos_signing_halted{job="demos-node",instance="validator-1"}'
+        values: '0x4 1x20'
+      - series: 'demos_signing_halted{job="demos-node",instance="validator-2"}'
+        values: '0x24'
+    alert_rule_test:
+      - eval_time: 60s
+        alertname: SigningHalted
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: SigningHalted
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: Block signing is stopped on this validator
+              description: "validator-1 refuses to sign blocks; its log has a [SIGNING] or [IDENTITY] line with the reason. The stop survives a restart only while the marker file exists (demos_signing_halt_marker_present = 1). If the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. Delete the marker only after confirming a single copy of the key runs; see docs/runbooks/validator-key.md."

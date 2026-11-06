@@ -22,6 +22,9 @@ tests:
         values: '0x10'
       - series: 'demos_subsystem_skipped{subsystem="dtr",instance="validator-1"}'
         values: '0x10'
+      # The boot-time fast sync has finished (2 = ready).
+      - series: 'demos_boot_step_status{step="fast_sync",instance="validator-1"}'
+        values: '2x10'
     alert_rule_test:
       - eval_time: 5m
         alertname: SubsystemDown
@@ -33,3 +36,83 @@ tests:
             exp_annotations:
               summary: Subsystem mcp is down
               description: 'demos_subsystem_up{subsystem="mcp"} has been 0 for >2m on validator-1 without being intentionally skipped. Check /health/subsystems for last_error.'
+
+  # In fast sync: l2ps is only marked after the sync, so it is up=0, skipped=0 for the
+  # whole catch-up. Fast sync is still running (1) for 10 minutes: no alert.
+  - interval: 1m
+    input_series:
+      - series: 'demos_subsystem_up{subsystem="l2ps",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_subsystem_skipped{subsystem="l2ps",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_dormant_mode{instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_boot_step_status{step="fast_sync",instance="validator-1"}'
+        values: '1x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SubsystemDown
+        exp_alerts: []
+
+  # Before fast sync starts the fast_sync step does not exist yet: no alert either.
+  - interval: 1m
+    input_series:
+      - series: 'demos_subsystem_up{subsystem="l2ps",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_subsystem_skipped{subsystem="l2ps",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_dormant_mode{instance="validator-1"}'
+        values: '0x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SubsystemDown
+        exp_alerts: []
+
+  # After fast sync: it finishes at minute 5, l2ps is still down, so the alert goes
+  # pending then and fires 2 m later.
+  - interval: 1m
+    input_series:
+      - series: 'demos_subsystem_up{subsystem="l2ps",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_subsystem_skipped{subsystem="l2ps",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_dormant_mode{instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_boot_step_status{step="fast_sync",instance="validator-1"}'
+        values: '1x4 2x11'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: SubsystemDown
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: SubsystemDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              subsystem: l2ps
+              instance: validator-1
+            exp_annotations:
+              summary: Subsystem l2ps is down
+              description: 'demos_subsystem_up{subsystem="l2ps"} has been 0 for >2m on validator-1 without being intentionally skipped. Check /health/subsystems for last_error.'
+
+  # A dormant node never starts fast sync (no fast_sync step at all), but a subsystem that
+  # failed there must still alert.
+  - interval: 1m
+    input_series:
+      - series: 'demos_subsystem_up{subsystem="omni",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_subsystem_skipped{subsystem="omni",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_dormant_mode{instance="validator-1"}'
+        values: '1x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SubsystemDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              subsystem: omni
+              instance: validator-1
+            exp_annotations:
+              summary: Subsystem omni is down
+              description: 'demos_subsystem_up{subsystem="omni"} has been 0 for >2m on validator-1 without being intentionally skipped. Check /health/subsystems for last_error.'

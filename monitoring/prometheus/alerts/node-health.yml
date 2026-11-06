@@ -22,8 +22,13 @@ groups:
         # NodeDormant warning instead (Greptile P1). Without this gate,
         # every dormant boot fires NodeFailing as critical at 2m, which
         # arrives ~8m before the matching NodeDormant warning.
+        # Also wait for the boot-time fast sync: src/index.ts awaits it before it
+        # marks main_loop running, so a validator catching up after downtime has
+        # main_loop at 0 for as long as the sync takes. The fast_sync boot step is
+        # registered when the sync starts and is 2 (ready) once it has finished.
         expr: demos_subsystem_up{subsystem="main_loop"} == 0
               and demos_subsystem_skipped{subsystem="main_loop"} == 0
+              and on (instance) demos_boot_step_status{step="fast_sync"} == 2
         for: 2m
         labels:
           severity: critical

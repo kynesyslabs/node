@@ -13,6 +13,10 @@ docker compose up -d
 **Access Grafana**: http://localhost:3000
 **Credentials**: `admin` / the `GRAFANA_ADMIN_PASSWORD` set in `monitoring/.env`
 
+`up` also needs the three Alertmanager webhook files (`slack_webhook`, `pager_webhook`,
+`deadman_webhook`) in `monitoring/secrets/`; create them first as described in
+[`secrets/README.md`](secrets/README.md).
+
 ## Prerequisites
 
 - Docker and Docker Compose v2+
@@ -199,7 +203,7 @@ scrape_configs:
 
 Rules are in `prometheus/alerts/`, routing in `alertmanager/alertmanager.yml`. What each
 alert means and what to do is in [`docs/runbooks/mainnet-monitoring.md`](../docs/runbooks/mainnet-monitoring.md).
-Critical and page alerts go to both Slack and paging, warning and info to Slack only, the
+Critical and page alerts go to both Slack and paging, warning and info to Slack only (except `MissedSignatures`, which notifies nobody), the
 dead-man heartbeat to its own receiver only. `BlockHashMismatch`, `ConflictingBlock`,
 `ForeignSignature` and `PrecommitEquivocation` are latched for 7 days and do not resolve by
 themselves; the clear procedure is in the runbook ("Clearing a latched alert").

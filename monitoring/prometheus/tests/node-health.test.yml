@@ -75,3 +75,84 @@ tests:
             exp_annotations:
               summary: Alerting pipeline heartbeat
               description: This alert is always firing. If the external watchdog stops receiving it, Prometheus, Alertmanager or the dead-man receiver path is broken. It does not prove that the paging or Slack webhooks work.
+
+  # NodeFailing in fast sync: src/index.ts marks main_loop running only after the boot-time
+  # fast sync, so main_loop is up=0, skipped=0 for the whole catch-up. Fast sync is still
+  # running (1) for 10 minutes: no alert.
+  - interval: 1m
+    input_series:
+      - series: 'demos_subsystem_up{subsystem="main_loop",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_subsystem_skipped{subsystem="main_loop",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_boot_step_status{step="fast_sync",instance="validator-1"}'
+        values: '1x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NodeFailing
+        exp_alerts: []
+
+  # NodeFailing after fast sync: it finishes at minute 5 and main_loop is still down, so
+  # the alert goes pending then and fires 2 m later.
+  - interval: 1m
+    input_series:
+      - series: 'demos_subsystem_up{subsystem="main_loop",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_subsystem_skipped{subsystem="main_loop",instance="validator-1"}'
+        values: '0x15'
+      - series: 'demos_boot_step_status{step="fast_sync",instance="validator-1"}'
+        values: '1x4 2x11'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: NodeFailing
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: NodeFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              subsystem: main_loop
+              instance: validator-1
+            exp_annotations:
+              summary: Main loop is dead
+              description: 'demos_subsystem_up{subsystem="main_loop"} has been 0 for >2m on validator-1 and the subsystem was not intentionally skipped. The node is serving RPC but is no longer producing blocks. Check `/health.main_loop.exit_reason` and recent logs.'
+
+  # MainLoopHeartbeatStale: heartbeat age over 120 s held 1 m, kept firing 5 m after it clears.
+  - interval: 1m
+    input_series:
+      # validator-1: the loop is stuck from minute 3 to 8 (age 200 s), then recovers.
+      - series: 'demos_main_loop_heartbeat_seconds{job="demos-node",instance="validator-1"}'
+        values: '10x3 200x5 10x12'
+      # validator-2: healthy.
+      - series: 'demos_main_loop_heartbeat_seconds{job="demos-node",instance="validator-2"}'
+        values: '10x20'
+    alert_rule_test:
+      # Over the threshold for under 1 m: pending only.
+      - eval_time: 3m
+        alertname: MainLoopHeartbeatStale
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MainLoopHeartbeatStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: mainLoop heartbeat stale
+              description: "demos_main_loop_heartbeat_seconds = 200 on validator-1. Loop is running slowly or stuck."
+      # Recovered at minute 9, still held by keep_firing_for (5 m) 3 m later (the value is
+      # the last firing one), gone 7 m later.
+      - eval_time: 12m
+        alertname: MainLoopHeartbeatStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: mainLoop heartbeat stale
+              description: "demos_main_loop_heartbeat_seconds = 200 on validator-1. Loop is running slowly or stuck."
+      - eval_time: 16m
+        alertname: MainLoopHeartbeatStale
+        exp_alerts: []
