@@ -6,53 +6,21 @@
  * the gossip mesh are replaced.
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
+import { describe, expect, it } from "bun:test"
 
-mock.module("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: () => {},
-        info: () => {},
-        warning: () => {},
-        warn: () => {},
-        error: () => {},
-        only: () => {},
-        custom: () => {},
-    },
-}))
-mock.module("src/libs/blockchain/chain", () => ({
-    __esModule: true,
-    default: { getLastBlockNumber: async () => 100 },
-}))
-mock.module("src/libs/gossip/GossipManager", () => ({
-    __esModule: true,
-    default: { isEnabled: () => false },
-}))
-mock.module("src/libs/consensus/confirmationEstimate", () => ({
-    estimateNextConfirmationBlock: async () => 101,
-}))
-
+import { captureQueued, installSubmissionMocks } from "./txSubmission.fixtures"
+import { mockLogger } from "src/libs/blockchain/testSupport/mockMempoolDeps"
 import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import type { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import Mempool from "src/libs/blockchain/mempool"
 import { PEER, chainIs, demos, handMade, onTheWire } from "src/libs/blockchain/validation/editBinding.fixtures"
 
+mockLogger("src/utilities/logger")
+installSubmissionMocks()
+
 const { submitValidatedTx } = await import("./txSubmission")
 
-const original = (Mempool as any).addTransactionWithLock
-let queued: string[] = []
-
-beforeEach(() => {
-    queued = []
-    ;(Mempool as any).addTransactionWithLock = async (tx: Transaction) => {
-        queued.push(tx.hash)
-        return { confirmationBlock: 101 }
-    }
-})
-
-afterEach(() => {
-    ;(Mempool as any).addTransactionWithLock = original
-})
+const queued = captureQueued(Mempool)
 
 const envelope = (tx: Transaction) => ({ data: { transaction: tx, reference_block: 100 } }) as unknown as ValidityData
 
@@ -75,7 +43,7 @@ describe("RPC submission of a transaction type", () => {
                 expect(out.ok).toBe(false)
                 expect(out.error).toContain("is not accepted")
             }
-            expect(queued).toEqual([])
+            expect(queued.hashes).toEqual([])
         })
 
         it(`refuses node-only types, with or without edits (${label})`, async () => {
@@ -87,14 +55,14 @@ describe("RPC submission of a transaction type", () => {
                     expect(out.error).toContain("authored by nodes only")
                 }
             }
-            expect(queued).toEqual([])
+            expect(queued.hashes).toEqual([])
         })
 
         it(`queues what the SDK builds for an implemented type (${label})`, async () => {
             chainIs(true, editBinding)
             const tx = onTheWire(await DemosTransactions.pay(PEER, 3n, demos))
             expect((await submitValidatedTx(envelope(tx), tx)).ok).toBe(true)
-            expect(queued).toEqual([tx.hash])
+            expect(queued.hashes).toEqual([tx.hash])
         })
     }
 })
