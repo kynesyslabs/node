@@ -2941,6 +2941,7 @@ export default class HandleGCR {
                             account:
                                 entities.accounts.get(normalizePubkey(stakeAccount)) ?? null,
                             stagedRows: entities.validators,
+                            rollback: isRollback,
                         },
                     )
                     result.deferredWrite = deferredWriteOf(staged)

@@ -25,6 +25,11 @@ export interface StakeApplyContext {
     account?: GCRMain | null
     /** Validator rows the block already staged, by address. */
     stagedRows?: Map<string, Validators | null>
+    /**
+     * Whether the caller is reversing this edit. The edit's own flag came
+     * with the transaction, so the sender could set it.
+     */
+    rollback?: boolean
 }
 
 /**
@@ -262,7 +267,7 @@ async function applyChecked(
     currentBlock: number,
     context: StakeApplyContext,
 ): Promise<GCRResult> {
-    const rollback = edit.isRollback === true
+    const rollback = context.rollback === true
     switch (edit.operation) {
         case "stake":
             return rollback

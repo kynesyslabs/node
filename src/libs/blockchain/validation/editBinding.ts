@@ -146,8 +146,10 @@ export async function editBindingState(): Promise<{
 
 /**
  * Why a transaction's stake edits act on another account than the sender's,
- * or null. Under `stakeApplyChecks` a stake moves the balance of the account
- * it names, so that account must be the one that signed, whether or not
+ * or claim to be a rollback, or null. Under `stakeApplyChecks` a stake moves
+ * the balance of the account it names, so that account must be the one that
+ * signed, and a rolled back stake pays its bond back with no lock or floor
+ * check, which only the node's own rollback may do. Both hold whether or not
  * `editBinding` binds the rest of the edits.
  */
 export function stakeSenderRefusal(tx: Transaction): string | null {
@@ -159,6 +161,9 @@ export function stakeSenderRefusal(tx: Transaction): string | null {
         if (String(edit.type) !== "validatorStake") continue
         if (account === "" || edit.account !== account) {
             return "validatorStake edit acts on another account than the sender"
+        }
+        if (edit.isRollback) {
+            return "validatorStake edit is shipped as a rollback"
         }
     }
     return null

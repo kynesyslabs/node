@@ -258,6 +258,53 @@ describe("exit at apply", () => {
     })
 })
 
+describe("a stake edit shipped as a rollback", () => {
+    const bonded = () => ({
+        address: SENDER,
+        status: "2",
+        staked_amount: MIN.toString(),
+        bonded_amount: MIN.toString(),
+        unstake_requested_at: null,
+        unstake_available_at: null,
+    })
+
+    it("does not pay the bond back outside a rollback", async () => {
+        // Below the floor and inside no lock: only a real rollback may refund.
+        seeded = { Validators: [bonded(), ...activeValidators(6)] }
+        const entities = caches(0n)
+        await apply({ ...edit("stake", MIN.toString()), isRollback: true }, entities)
+
+        expect(BigInt(entities.accounts.get(SENDER).balance)).toBe(0n)
+        const row = entities.validators?.get(SENDER)
+        if (row) expect(row).toMatchObject({ status: "2", bonded_amount: MIN.toString() })
+    })
+
+    it("is refused before apply", () => {
+        expect(
+            stakeSenderRefusal(tx([{ ...edit("stake", "1"), isRollback: true }])),
+        ).not.toBeNull()
+        expect(
+            stakeSenderRefusal(tx([{ ...edit("stake", "1"), isRollback: false }])),
+        ).toBeNull()
+    })
+
+    it("still lets a rollback of the block undo the stake", async () => {
+        const entities = caches(MIN)
+        expect((await apply(edit("stake", MIN.toString()), entities)).success).toBe(true)
+        expect(BigInt(entities.accounts.get(SENDER).balance)).toBe(0n)
+
+        const undone = await HandleGCR.applyGCREdit(
+            edit("stake", MIN.toString()),
+            entities,
+            true,
+            false,
+        )
+        expect(undone.success).toBe(true)
+        expect(BigInt(entities.accounts.get(SENDER).balance)).toBe(MIN)
+        expect(entities.validators.get(SENDER).status).toBe("0")
+    })
+})
+
 describe("unstake at apply", () => {
     const self = () => ({
         address: SENDER,
