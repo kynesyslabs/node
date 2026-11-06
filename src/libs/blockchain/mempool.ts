@@ -860,6 +860,52 @@ export default class Mempool {
         return await repo.delete({ hash: In(hashes) })
     }
 
+    /**
+     * Holds the senders of merged-in `txs` to the per-sender cap (see
+     * chooseSenderOverflow), evicting the held txs that no longer fit, and
+     * returns the txs still to insert. Runs under the pool lock.
+     */
+    private static async enforceSenderCap(
+        txs: Transaction[],
+    ): Promise<Transaction[]> {
+        const incoming = new Map<string, SenderSlot>()
+        for (const tx of txs) {
+            const from = tx.content?.from
+            if (typeof from !== "string") continue
+            incoming.set(tx.hash, {
+                hash: tx.hash,
+                sender: from.toLowerCase(),
+                nonce: tx.content.nonce,
+            })
+        }
+        const slots = [...incoming.values()]
+        const held = await this.listPendingBySenders([
+            ...new Set(slots.map(slot => slot.sender)),
+        ])
+        // A held tx can arrive again (inserted by an overlapping exchange,
+        // or held past lastBlockRef where the hash check does not look). It
+        // is ranked once, as incoming; if it does not fit, its row leaves.
+        const { refuse, evict } = chooseSenderOverflow(
+            held.filter(slot => !incoming.has(slot.hash)),
+            slots,
+            getMempoolLimits().maxPerSender,
+        )
+        for (const slot of held) {
+            if (refuse.has(slot.hash)) evict.push(slot.hash)
+        }
+        if (refuse.size > 0 || evict.length > 0) {
+            log.warning(
+                `[Mempool.receive] Sender cap: refusing ${refuse.size} merged tx(s), evicting ${evict.length} held tx(s)`,
+            )
+        }
+        if (evict.length > 0) {
+            await this.repo.delete({ hash: In(evict) })
+            evict.forEach(() => countMempoolRejection("evicted"))
+        }
+        refuse.forEach(() => countMempoolRejection("sender_limit"))
+        return txs.filter(tx => !refuse.has(tx.hash))
+    }
+
     public static async receive(incoming: Transaction[], returnDiff = true) {
         if (incoming.length === 0) {
             // Nothing to merge, but a member with an empty pool, or one
@@ -1065,40 +1111,9 @@ export default class Mempool {
         const capped = blockCapsActiveForPendingBlock()
         const store = async () => {
             if (capped && validTransactions.length > 0) {
-                const incoming = new Map<string, SenderSlot>()
-                for (const tx of validTransactions) {
-                    const from = tx.content?.from
-                    if (typeof from !== "string") continue
-                    incoming.set(tx.hash, {
-                        hash: tx.hash,
-                        sender: from.toLowerCase(),
-                        nonce: tx.content.nonce,
-                    })
-                }
-                const slots = [...incoming.values()]
-                const held = await this.listPendingBySenders([
-                    ...new Set(slots.map(slot => slot.sender)),
-                ])
-                const { refuse, evict } = chooseSenderOverflow(
-                    held,
-                    slots,
-                    getMempoolLimits().maxPerSender,
-                )
-                if (refuse.size > 0 || evict.length > 0) {
-                    log.warning(
-                        `[Mempool.receive] Sender cap: refusing ${refuse.size} merged tx(s), evicting ${evict.length} held tx(s)`,
-                    )
-                }
-                if (evict.length > 0) {
-                    await this.repo.delete({ hash: In(evict) })
-                    evict.forEach(() => countMempoolRejection("evicted"))
-                }
-                if (refuse.size > 0) {
-                    const kept = validTransactions.filter(tx => !refuse.has(tx.hash))
-                    validTransactions.length = 0
-                    validTransactions.push(...kept)
-                    refuse.forEach(() => countMempoolRejection("sender_limit"))
-                }
+                const kept = await this.enforceSenderCap(validTransactions)
+                validTransactions.length = 0
+                validTransactions.push(...kept)
             }
 
             for (const tx of validTransactions) {

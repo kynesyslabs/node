@@ -307,6 +307,29 @@ describe("Mempool.receive per-sender cap", () => {
         expect(heldBySender.some(row => row.hash === "0xb")).toBe(false)
     })
 
+    it("counts a tx it already holds once when it arrives again", async () => {
+        // Held past lastBlockRef, or inserted by an overlapping exchange: the
+        // hash check does not skip it, and the cap must not count it twice.
+        blockCapsOn = true
+        heldBySender = [
+            ...fullHold().slice(0, 63),
+            { hash: "0xagain", sender: SENDER, nonce: "5" },
+        ]
+        await Mempool.receive([fromSender("0xagain", 5)])
+        expect(deletedHashes).toEqual([])
+        expect(new Set(heldBySender.map(row => row.hash)).size).toBe(64)
+    })
+
+    it("evicts the held row of a tx that arrives again and no longer fits", async () => {
+        blockCapsOn = true
+        const hold = fullHold()
+        heldBySender = hold
+        const again = hold[63]
+        await Mempool.receive([fromSender("0xlow", 1), fromSender(again.hash, Number(again.nonce))])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xlow"])
+        expect(deletedHashes).toEqual([again.hash])
+    })
+
     it("leaves the merge uncapped before the fork", async () => {
         heldBySender = fullHold()
         await Mempool.receive([fromSender("0xlow", 1), fromSender("0xhigh", 500)])
