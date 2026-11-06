@@ -918,6 +918,37 @@ export default class Mempool {
         return txs.filter(tx => !refuse.has(tx.hash))
     }
 
+    /**
+     * Holds every sender in the pool to the per-sender cap by the merge's
+     * rule (see chooseSenderOverflow), evicting what does not fit, and
+     * returns the evicted hashes. The node's own txs skip the cap at
+     * admission and the merge caps only the senders it receives txs from,
+     * so without this a member keeps more of one sender than its peers do
+     * and forges a different block from the same txs. Runs under the pool
+     * lock.
+     */
+    public static async capPoolSenders(): Promise<string[]> {
+        const limit = getMempoolLimits().maxPerSender
+        const rows = await this.repo.query(
+            `SELECT "hash", LOWER("content"->>'from') AS sender, "content"->>'nonce' AS nonce FROM "mempooltx" WHERE LOWER("content"->>'from') IN (SELECT LOWER("content"->>'from') FROM "mempooltx" GROUP BY 1 HAVING COUNT(*) > $1)`,
+            [limit],
+        )
+        const slots: SenderSlot[] = rows.map((row: SenderSlot) => ({
+            hash: row.hash,
+            sender: row.sender,
+            nonce: row.nonce,
+        }))
+        const { refuse } = chooseSenderOverflow([], slots, limit)
+        if (refuse.size === 0) return []
+        const evict = [...refuse]
+        log.warning(
+            `[Mempool.capPoolSenders] Sender cap: evicting ${evict.length} held tx(s)`,
+        )
+        await this.repo.delete({ hash: In(evict) })
+        evict.forEach(() => countMempoolRejection("evicted"))
+        return evict
+    }
+
     public static async receive(incoming: Transaction[], returnDiff = true) {
         if (incoming.length === 0) {
             // Nothing to merge, but a member with an empty pool, or one
@@ -933,6 +964,7 @@ export default class Mempool {
 
         // INFO: Transactions not to send back back
         const noSendBackTxs = new Map<string, string>()
+        const capped = blockCapsActiveForPendingBlock()
 
         const blockNumber = SecretaryManager.lastBlockRef
         const existingHashes = await this.getMempoolHashMap(blockNumber)
@@ -1093,7 +1125,7 @@ export default class Mempool {
                     checkIdentityAdmission(
                         tx,
                         IDENTITY_ADMISSION_TIMEOUT_MS,
-                        "merge",
+                        capped ? "merge" : "ingest",
                     ),
                 ),
             )
@@ -1125,7 +1157,6 @@ export default class Mempool {
         // cap's read and the insert run under the pool lock: overlapping
         // exchanges must see each other's txs, or each admits up to the cap
         // and the sender ends over it on this member alone.
-        const capped = blockCapsActiveForPendingBlock()
         const store = async () => {
             if (capped && validTransactions.length > 0) {
                 const kept = await this.enforceSenderCap(validTransactions)

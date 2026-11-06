@@ -7,24 +7,28 @@ import {
     VerificationResult,
 } from "./types"
 import type { OmniMessageHeader } from "../types/message"
+import { ReplayCache } from "./replayCache"
+import { timestampedSignedData } from "./signedData"
 import log from "src/utilities/logger"
+import { getSharedState } from "src/utilities/sharedState"
 
 export class SignatureVerifier {
     // Maximum clock skew allowed (5 minutes)
     private static readonly MAX_CLOCK_SKEW = 5 * 60 * 1000
 
     /**
-     * Signature modes whose signed bytes actually cover the message payload.
-     * Only these may authenticate a payload-bearing, auth-required opcode —
-     * the others (SIGN_PUBKEY, SIGN_MESSAGE_ID, SIGN_MESSAGE_ID_TIMESTAMP) bind
-     * nothing about the payload, so a captured signature could authorise any
-     * substituted payload for the claimed identity (audit C3a).
+     * Signature modes whose signed bytes cover the payload, the opcode and
+     * the timestamp. Only these may authenticate an auth-required opcode:
+     * the others either bind nothing about the payload, so a captured
+     * signature authorises any substituted payload (audit C3a), or leave the
+     * timestamp unsigned, so a captured frame can be re-dated and replayed
+     * for ever.
      */
     private static readonly PAYLOAD_BINDING_MODES: ReadonlySet<SignatureMode> =
-        new Set([
-            SignatureMode.SIGN_FULL_PAYLOAD,
-            SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH,
-        ])
+        new Set([SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH])
+
+    /** Messages already accepted inside the freshness window. */
+    private static readonly replayCache = new ReplayCache(SignatureVerifier.MAX_CLOCK_SKEW)
 
     /**
      * Verify authentication block against message
@@ -62,7 +66,7 @@ export class SignatureVerifier {
         ) {
             return {
                 valid: false,
-                error: `Signature mode ${auth.signatureMode} does not bind the payload; an auth-required opcode requires SIGN_FULL_PAYLOAD or SIGN_MESSAGE_ID_PAYLOAD_HASH`,
+                error: `Signature mode ${auth.signatureMode} does not bind the payload and timestamp; an auth-required opcode requires SIGN_TIMESTAMPED_PAYLOAD_HASH`,
             }
         }
 
@@ -72,6 +76,18 @@ export class SignatureVerifier {
             return {
                 valid: false,
                 error: `Timestamp outside acceptable window: ${auth.timestamp} (now: ${Date.now()})`,
+            }
+        }
+
+        // 2b. The signed bytes name our network; without it we cannot tell
+        // a frame from another network apart, so nothing is accepted.
+        if (
+            auth.signatureMode === SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH &&
+            !getSharedState.genesisBlockHash
+        ) {
+            return {
+                valid: false,
+                error: "Genesis hash not known yet; cannot verify network-bound auth",
             }
         }
 
@@ -101,6 +117,26 @@ export class SignatureVerifier {
 
         // 5. Derive peer identity from public key
         const peerIdentity = this.derivePeerIdentity(auth.identity)
+
+        // 6. Accept each signed message once. Only modes that sign the
+        // timestamp are tracked: for the others a replay can simply be
+        // re-dated, so the cache would not stop it.
+        if (auth.signatureMode === SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH) {
+            const digest = Buffer.from(keccak_256(dataToVerify)).toString("hex")
+            const admitted = this.replayCache.admit(peerIdentity, digest, auth.timestamp)
+            if (admitted === "replayed") {
+                return {
+                    valid: false,
+                    error: "Replayed message: already accepted inside the freshness window",
+                }
+            }
+            if (admitted === "full") {
+                return {
+                    valid: false,
+                    error: "Replay cache full: no slot for a new sender until one expires",
+                }
+            }
+        }
 
         return {
             valid: true,
@@ -161,6 +197,15 @@ export class SignatureVerifier {
                 const payloadHash = Buffer.from(keccak_256(payload))
                 return Buffer.concat([msgId, payloadHash])
             }
+
+            case SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH:
+                return timestampedSignedData(
+                    getSharedState.genesisBlockHash as string,
+                    header.opcode,
+                    header.sequence,
+                    timestamp,
+                    payload,
+                )
 
             case SignatureMode.SIGN_MESSAGE_ID_TIMESTAMP: {
                 // Sign (Message ID + Timestamp)

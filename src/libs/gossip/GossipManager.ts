@@ -10,6 +10,7 @@ import { Config, isLoopbackHost, parseNodeUrl } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import { Peer, PeerManager } from "src/libs/peer"
 import { reportTwin } from "src/libs/peer/identityLiveness"
+import { URL_BOUND_TO_OTHER } from "src/libs/peer/helloAuth"
 
 import {
     buildHeightsRecord,
@@ -1204,6 +1205,11 @@ export class GossipManager {
                 log.info(
                     `[GOSSIP] ${record.pubkey} announced new URL ${record.url}: ${ok ? "updated" : `rejected (${message})`}`,
                 )
+                // Another identity holds that URL: a signed record is not
+                // proof of serving it, a hello reply from there is.
+                if (!ok && message.startsWith(URL_BOUND_TO_OTHER)) {
+                    this.helloUnknownPeer(record.pubkey, record.url)
+                }
             }
 
             if (

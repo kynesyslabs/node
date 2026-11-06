@@ -7,7 +7,6 @@
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 import forge from "node-forge"
-import { keccak_256 } from "@noble/hashes/sha3.js"
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -26,6 +25,7 @@ const sharedState: Record<string, any> = {
     publicKeyHex: "0xself",
     keypair: { publicKey: new Uint8Array(32) },
     signingAlgorithm: "ed25519",
+    genesisBlockHash: "d5".repeat(32),
     isOmniProtocolEnabled: true,
     omniAdapter: null,
     omniConfig: { port: 0, rateLimit: { enabled: false } },
@@ -60,6 +60,7 @@ const { encodeNodeCallRequest, decodeNodeCallResponse } = await import(
     "./serialization/control"
 )
 const { SignatureAlgorithm, SignatureMode } = await import("./auth/types")
+const { timestampedSignedData } = await import("./auth/signedData")
 const { OmniOpcode } = await import("./protocol/opcodes")
 const { DEFAULT_OMNIPROTOCOL_CONFIG } = await import("./types/config")
 
@@ -89,17 +90,16 @@ function message(payload: Buffer, sign?: { claims: Keys; signer: Keys }) {
     if (!sign) {
         bytes = MessageFramer.encodeMessage(header, payload)
     } else {
-        const msgId = Buffer.allocUnsafe(4)
-        msgId.writeUInt32BE(seq)
-        const data = Buffer.concat([msgId, Buffer.from(keccak_256(payload))])
+        const timestamp = Date.now()
+        const data = timestampedSignedData(sharedState.genesisBlockHash, header.opcode, seq, timestamp, payload)
         const signature = forge.pki.ed25519.sign({
             message: data,
             privateKey: sign.signer.privateKey as forge.pki.ed25519.NativeBuffer,
         })
         bytes = MessageFramer.encodeMessage(header, payload, {
             algorithm: SignatureAlgorithm.ED25519,
-            signatureMode: SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH,
-            timestamp: Date.now(),
+            signatureMode: SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH,
+            timestamp,
             identity: sign.claims.publicKey,
             signature: Buffer.from(signature),
         })

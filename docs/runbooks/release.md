@@ -184,6 +184,31 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
   (`docker-compose.proxy.yml`) refuses to boot while `METRICS_BASIC_AUTH_HASH`
   is empty or still the shipped placeholder. Before upgrading, set the hash, or set
   `PROXY_ALLOW_PLACEHOLDER_AUTH=true` to boot without one (see `.env.example`).
+- From the first release after `v1.0.0-rc.5`, peer-to-peer auth changes on the
+  wire and every node of a network must be upgraded together (mainnet starts
+  on this release). Omni requests are signed with mode `0x06`, which covers the
+  network's genesis hash, the opcode, the sequence, the timestamp and the
+  payload hash, and each signed message is accepted once per process: the
+  record of accepted messages is kept in memory and is lost on a restart, so a
+  frame captured before a node restarts can be accepted once more while its
+  timestamp is still inside the 5-minute clock-skew window. A frame signed on
+  another network fails verification. A new node refuses the old modes `0x03`/`0x04`; an
+  old node refuses `0x06` (`does not bind the payload`) and closes the
+  connection, and the sender falls back to HTTP.
+- In the same release, HTTP peer requests sign the body too: the signature
+  covers the genesis hash, identity, timestamp and the SHA-256 of the body,
+  sent in a `body-hash` header, so a request from another network is
+  refused. `hello_peer`, `mempool` and `consensus_routine` are
+  refused without it (HTTP 401). An old node answers a new node's signed
+  request with `401 Invalid signature`; a new node refuses an old node's
+  peer methods and still accepts the old form for client methods, which is
+  what the SDK sends. Together with the Omni change, old and new nodes do
+  not peer with each other.
+- From the first release after `v1.0.0-rc.5`, `/health` is a readiness probe:
+  503 while the node is booting, dormant or not synced. Probes that must stay
+  green while a node catches up (container healthchecks, liveness probes)
+  move to `/health/live`, which keeps the old meaning (503 only when
+  failing). The shipped Dockerfile and `docker-compose.yml` already use it.
 - From `v1.0.0-rc.6`:
   - The node uses the host clock and no longer corrects it from NTP servers.
     Keep host NTP running (chrony or systemd-timesyncd). With `PROD=true` a

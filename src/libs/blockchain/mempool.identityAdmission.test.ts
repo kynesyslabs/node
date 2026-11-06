@@ -330,13 +330,27 @@ describe("identity proofs are checked when a transaction reaches the mempool fro
             expect(insertedRows).toEqual([])
         })
 
-        it("keeps a proof apply checks again when its check cannot finish here", async () => {
+        it("under blockCaps, keeps every proof apply checks again, whatever its check would say in time", async () => {
+            // Whether the check finishes before the deadline differs between
+            // members; inclusion must not.
+            getSharedState.forkConfig.blockCaps.activationHeight = 0
+            ;(Mempool as any).repo.query = jest.fn(async () => [])
             await Mempool.receive([
                 zkAttestationTx("0xzkunchecked"),
                 identityTx("0xzkempty", "zk_commitmentadd", []),
             ])
-            // An unverifiable check admits; a definite bad proof still refuses.
-            expect(insertedRows.map(r => r.hash)).toEqual(["0xzkunchecked"])
+            expect(insertedRows.map(r => r.hash).sort()).toEqual([
+                "0xzkempty",
+                "0xzkunchecked",
+            ])
+        })
+
+        it("before blockCaps, refuses a proof it could not check, as entry nodes do", async () => {
+            await Mempool.receive([
+                zkAttestationTx("0xzkunchecked"),
+                identityTx("0xzkempty", "zk_commitmentadd", []),
+            ])
+            expect(insertedRows).toEqual([])
         })
 
         it("refuses identity edits that differ from the ones the payload implies", async () => {
@@ -376,7 +390,7 @@ describe("checkIdentityAdmission", () => {
         }
     })
 
-    it("in the merge, admits an unfinished check only for kinds apply checks again", async () => {
+    it("in the merge, admits kinds apply checks again without checking them, and no other kind", async () => {
         const { checkIdentityAdmission } = await import("./validation/identityAdmission")
         const ethos = spyOn(EthosApiClient.getInstance(), "getScore").mockImplementation(
             () => new Promise(() => {}),
@@ -390,8 +404,20 @@ describe("checkIdentityAdmission", () => {
                 ok: false,
                 reason: "identity proof could not be verified in time",
             })
+            const { default: Datasource } = await import("@/model/datasource")
+            const proofStore = Datasource.getInstance as unknown as ReturnType<typeof jest.fn>
+            proofStore.mockClear()
             expect(
                 await checkIdentityAdmission(zkAttestationTx("0xzk"), 50, "merge"),
+            ).toEqual({ ok: true })
+            expect(proofStore).not.toHaveBeenCalled()
+            // A definite bad proof is admitted too: apply refuses it everywhere.
+            expect(
+                await checkIdentityAdmission(
+                    identityTx("0xzkempty", "zk_commitmentadd", []),
+                    50,
+                    "merge",
+                ),
             ).toEqual({ ok: true })
             // Entry nodes still refuse what they could not check.
             const ingest = await checkIdentityAdmission(zkAttestationTx("0xzk"), 50)

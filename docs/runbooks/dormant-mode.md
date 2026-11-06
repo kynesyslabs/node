@@ -20,10 +20,10 @@ surfaces explicitly.
 Any of these = dormant:
 
 ```bash
-curl -fsS http://localhost:53550/health | jq '.status'
+curl -sS http://localhost:53550/health | jq '.status'
 # "dormant"
 
-curl -fsS http://localhost:53550/health | jq '.dormant'
+curl -sS http://localhost:53550/health | jq '.dormant'
 # true
 
 # Prometheus
@@ -32,7 +32,14 @@ demos_dormant_mode == 1
 # Boot log
 [BOOT] DORMANT MODE: peer list empty; signaling / MCP / TLSNotary / ...
 
-# Response header
+# Response header: /health is a readiness probe and refuses a dormant node
+# (both routes are GET-only, so -I / HEAD gets a 404: dump headers instead)
+curl -sS -D - -o /dev/null http://localhost:53550/health
+HTTP/1.1 503 Service Unavailable
+X-Demos-Dormant: true
+
+# /health/live (liveness) still answers 200 with the same header
+curl -sS -D - -o /dev/null http://localhost:53550/health/live
 HTTP/1.1 200 OK
 X-Demos-Dormant: true
 ```
@@ -57,7 +64,7 @@ Prom alert `NodeDormant` fires after 10 minutes in this state.
 ### 1. Confirm dormant state and check the peer file
 
 ```bash
-curl -fsS http://localhost:53550/health | jq '{status, dormant, subsystems: (.subsystems | to_entries | map(select(.value.status=="skipped")))}'
+curl -sS http://localhost:53550/health | jq '{status, dormant, subsystems: (.subsystems | to_entries | map(select(.value.status=="skipped")))}'
 
 # Peer list
 cat demos_peerlist.json | jq length
@@ -153,7 +160,7 @@ simpler: bring the node up with a one-element local peer list.
 ## Verify after recovery
 
 ```bash
-curl -fsS http://localhost:53550/health | jq '{status, dormant, peers: .subsystems.signaling.status, mainLoop: .subsystems.main_loop.status}'
+curl -sS http://localhost:53550/health | jq '{status, dormant, peers: .subsystems.signaling.status, mainLoop: .subsystems.main_loop.status}'
 # Expect: status "ok" (or "degraded"), dormant false, signaling "ready", main_loop "ready"
 ```
 

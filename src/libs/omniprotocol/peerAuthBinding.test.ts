@@ -7,7 +7,6 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 import { EventEmitter } from "events"
 import forge from "node-forge"
-import { keccak_256 } from "@noble/hashes/sha3.js"
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -23,6 +22,7 @@ jest.mock("src/utilities/logger", () => ({
 }))
 jest.mock("src/utilities/sharedState", () => ({
     getSharedState: {
+        genesisBlockHash: "d5".repeat(32),
         getConnectionString: async () => "",
         version: "test",
         getInfo: async () => ({}),
@@ -78,6 +78,7 @@ const { encodeProposeBlockHashRequest } = await import(
     "./serialization/consensus"
 )
 const { SignatureAlgorithm, SignatureMode } = await import("./auth/types")
+const { timestampedSignedData } = await import("./auth/signedData")
 const { OmniOpcode } = await import("./protocol/opcodes")
 
 type Keys = { publicKey: Buffer; privateKey: Buffer }
@@ -103,17 +104,16 @@ function frame(
     const header = { version: 1, opcode, sequence: seq, payloadLength: payload.length }
     if (!sign) return MessageFramer.encodeMessage(header, payload)
 
-    const msgId = Buffer.allocUnsafe(4)
-    msgId.writeUInt32BE(seq)
-    const data = Buffer.concat([msgId, Buffer.from(keccak_256(payload))])
+    const timestamp = Date.now()
+    const data = timestampedSignedData("d5".repeat(32), header.opcode, seq, timestamp, payload)
     const signature = forge.pki.ed25519.sign({
         message: data,
         privateKey: sign.signer.privateKey as forge.pki.ed25519.NativeBuffer,
     })
     return MessageFramer.encodeMessage(header, payload, {
         algorithm: SignatureAlgorithm.ED25519,
-        signatureMode: SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH,
-        timestamp: Date.now(),
+        signatureMode: SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH,
+        timestamp,
         identity: sign.claims.publicKey,
         signature: Buffer.from(signature),
     })

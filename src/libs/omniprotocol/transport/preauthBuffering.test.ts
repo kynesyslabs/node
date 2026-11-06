@@ -24,6 +24,7 @@ mock.module("src/utilities/logger", () => ({
 }))
 mock.module("src/utilities/sharedState", () => ({
     getSharedState: {
+        genesisBlockHash: "d5".repeat(32),
         getConnectionString: async () => "",
         version: "test",
         getInfo: async () => ({}),

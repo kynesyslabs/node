@@ -11,7 +11,8 @@ export type IdentityAdmission = { ok: true } | { ok: false; reason: string }
 
 /**
  * Where the transaction arrives from. "ingest" is gossip or RPC at an entry
- * node; "merge" is the consensus mempool merge between committee members.
+ * node, and the consensus mempool merge before `blockCaps`; "merge" is the
+ * merge under `blockCaps`.
  */
 export type IdentityAdmissionMode = "ingest" | "merge"
 
@@ -56,11 +57,15 @@ function proofRecheckedAtApply(tx: Transaction): boolean {
  *
  * Fails closed: an unreachable provider, a thrown error or the deadline
  * refuses the transaction. The one exception is the merge, for kinds whose
- * proof apply checks again: there a check that could not finish admits, so a
- * slow or overloaded member does not drop what the others keep. Kinds whose
- * claim apply stores as signed (provider scores, web2 posts) stay closed in
- * the merge too, since a provider outage an attacker can provoke would
- * otherwise let a forged claim through.
+ * proof apply checks again: there the check is not run and the transaction
+ * is admitted. Whether a check finishes in time differs between members, so
+ * admitting only on a timeout, or refusing only on a definite failure, would
+ * have members keep different txs and forge different blocks; admitting
+ * every one is the same decision on every member, and apply refuses a bad
+ * proof on every node alike. Kinds whose claim apply stores as signed
+ * (provider scores, web2 posts) stay closed in the merge too, since a
+ * provider outage an attacker can provoke would otherwise let a forged claim
+ * through.
  */
 export async function checkIdentityAdmission(
     tx: Transaction,
@@ -78,19 +83,18 @@ export async function checkIdentityAdmission(
         return { ok: false, reason: "identity transaction has no ed25519 sender" }
     }
 
-    const admitUnverified = mode === "merge" && proofRecheckedAtApply(tx)
-    const unverifiable = (reason: string): IdentityAdmission =>
-        admitUnverified ? { ok: true } : { ok: false, reason }
+    if (mode === "merge" && proofRecheckedAtApply(tx)) {
+        return { ok: true }
+    }
 
     let timer: ReturnType<typeof setTimeout> | undefined
     const deadline = new Promise<IdentityAdmission>(resolve => {
         timer = setTimeout(
             () =>
-                resolve(
-                    unverifiable(
-                        "identity proof could not be verified in time",
-                    ),
-                ),
+                resolve({
+                    ok: false,
+                    reason: "identity proof could not be verified in time",
+                }),
             timeoutMs,
         )
     })
@@ -107,9 +111,10 @@ export async function checkIdentityAdmission(
                 ? { ok: true }
                 : { ok: false, reason: result.message }
         } catch (e) {
-            return unverifiable(
-                `identity proof verification error: ${e instanceof Error ? e.message : String(e)}`,
-            )
+            return {
+                ok: false,
+                reason: `identity proof verification error: ${e instanceof Error ? e.message : String(e)}`,
+            }
         }
     }
 
