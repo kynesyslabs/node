@@ -285,7 +285,10 @@ export class ConnectionPool extends EventEmitter {
     ): Promise<PeerConnection | null> {
         // Try to reuse existing usable connection (prefers newest)
         const totalConnections = this.getTotalConnectionCount()
-        const existing = this.findUsableConnection(peerIdentity)
+        const existing = this.findUsableConnection(
+            peerIdentity,
+            connectionString,
+        )
 
         if (existing) {
             return existing
@@ -641,16 +644,23 @@ export class ConnectionPool extends EventEmitter {
     /**
      * Find an existing usable connection for a peer (prefers newest)
      */
-    private findUsableConnection(peerIdentity: string): PeerConnection | null {
+    /**
+     * Only a socket opened to `connectionString` may carry the call: a hello
+     * to an address proves who serves it only if it actually reaches it.
+     */
+    private findUsableConnection(
+        peerIdentity: string,
+        connectionString: string,
+    ): PeerConnection | null {
         const peerConnections = this.connections.get(peerIdentity)
         if (!peerConnections || peerConnections.length === 0) {
             return null
         }
 
-        // Filter to usable connections
         const usable = peerConnections.filter(
             conn =>
                 conn.origin === "outbound" &&
+                conn.connectionString === connectionString &&
                 ConnectionStateUtils.isUsable(conn.getState()),
         )
 

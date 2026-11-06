@@ -1,6 +1,7 @@
 /**
  * The pool connects within its own connect timeout. The request timeout a
  * caller passes bounds the answer and must not stretch the TCP connect.
+ * A pooled connection is reused only for the address it was opened to.
  */
 
 import { describe, expect, it, jest } from "bun:test"
@@ -30,7 +31,11 @@ jest.mock("./PeerConnection", () => {
             super()
         }
         getState() {
-            return "CONNECTED"
+            // READY: usable, so the pool may reuse it
+            return 11
+        }
+        getInfo() {
+            return { lastActivity: 0 }
         }
         async connect(options: unknown) {
             connectOptions.push(options)
@@ -61,6 +66,20 @@ describe("ConnectionPool connect timeout", () => {
         }
         expect(connectOptions).toHaveLength(1)
         expect((connectOptions[0] as any).timeout).toBe(1234)
+        await pool.shutdown?.()
+    })
+})
+
+describe("ConnectionPool reuse", () => {
+    it("does not answer a call to one address over a socket to another", async () => {
+        const pool = new ConnectionPool()
+        const toA = await pool.acquire("0xpeer", "tcp://10.0.0.1:53551")
+        expect(await pool.acquire("0xpeer", "tcp://10.0.0.1:53551")).toBe(toA)
+        // The same identity at another address: proving that address needs
+        // a socket that actually reaches it.
+        const toB = await pool.acquire("0xpeer", "tcp://10.0.0.2:53551")
+        expect(toB).not.toBe(toA)
+        expect(toB!.connectionString).toBe("tcp://10.0.0.2:53551")
         await pool.shutdown?.()
     })
 })
