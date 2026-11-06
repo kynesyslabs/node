@@ -93,4 +93,15 @@ describe("pollPeerHeights", () => {
         expect(scheduleHeightProbe).toHaveBeenCalledTimes(1)
         expect(scheduleHeightProbe).toHaveBeenCalledWith(ahead, 120)
     })
+
+    it("does not let a peer that never answers hold the round", async () => {
+        const ahead = peer("0xahead", head(130))
+        const silent = peer("0xsilent", () => new Promise(() => {}))
+        const outcome = await Promise.race([
+            pollPeerHeights([silent, ahead], 20).then(() => "done"),
+            new Promise(resolve => setTimeout(() => resolve("held"), 1_000)),
+        ])
+        expect(outcome).toBe("done")
+        expect(scheduleHeightProbe).toHaveBeenCalledWith(ahead, 130)
+    })
 })
