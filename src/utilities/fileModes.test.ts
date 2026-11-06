@@ -88,6 +88,32 @@ describe.skipIf(!posix)("files the node creates are owner-only", () => {
         expect(modeOf(process.cwd())).toBe(before)
     })
 
+    it("leaves the working directory's mode alone when a logs symlink points there", () => {
+        const work = path.join(dir, "work")
+        fs.mkdirSync(work)
+        fs.chmodSync(work, 0o755)
+        const logsLink = path.join(dir, "logs-link")
+        fs.symlinkSync(work, logsLink)
+        const cwd = process.cwd()
+        process.chdir(work)
+        try {
+            CategorizedLogger.getInstance({ logsDir: logsLink, terminalOutput: false }).initLogsDir()
+        } finally {
+            process.chdir(cwd)
+        }
+        expect(modeOf(work)).toBe(0o755)
+    })
+
+    it("makes the target of a logs symlink 700", () => {
+        const target = path.join(dir, "node-logs")
+        fs.mkdirSync(target)
+        fs.chmodSync(target, 0o755)
+        const logsLink = path.join(dir, "logs-link")
+        fs.symlinkSync(target, logsLink)
+        CategorizedLogger.getInstance({ logsDir: logsLink, terminalOutput: false }).initLogsDir()
+        expect(modeOf(target)).toBe(0o700)
+    })
+
     it("creates custom log files as 600", async () => {
         const prefix = LegacyLoggerAdapter.LOG_CUSTOM_PREFIX
         const onlyFlag = LegacyLoggerAdapter.LOG_ONLY_ENABLED

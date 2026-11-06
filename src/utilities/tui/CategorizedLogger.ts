@@ -21,9 +21,17 @@ const originalConsoleError = console.error.bind(console)
  */
 function restrictLogsDir(dir: string): void {
     if (process.platform === "win32") return
-    const resolved = path.resolve(dir)
+    // chmod follows symlinks, so compare the directories they lead to.
+    const real = (d: string) => {
+        try {
+            return fs.realpathSync(d)
+        } catch {
+            return path.resolve(d)
+        }
+    }
+    const resolved = real(dir)
     const shared = [process.cwd(), os.homedir(), os.tmpdir(), path.parse(resolved).root]
-    if (shared.some(d => path.resolve(d) === resolved)) return
+    if (shared.some(d => real(d) === resolved)) return
     try {
         if ((fs.statSync(resolved).mode & 0o077) !== 0) {
             fs.chmodSync(resolved, 0o700)
