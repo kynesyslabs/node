@@ -32,7 +32,12 @@ demos_dormant_mode == 1
 # Boot log
 [BOOT] DORMANT MODE: peer list empty; signaling / MCP / TLSNotary / ...
 
-# Response header
+# Response header: /health is a readiness probe and refuses a dormant node
+HTTP/1.1 503 Service Unavailable
+X-Demos-Dormant: true
+
+# /health/live (liveness) still answers 200 with the same header
+curl -sSI http://localhost:53550/health/live
 HTTP/1.1 200 OK
 X-Demos-Dormant: true
 ```
