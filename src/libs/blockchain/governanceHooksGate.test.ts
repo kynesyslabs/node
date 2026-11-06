@@ -17,7 +17,14 @@ mock.module("src/utilities/logger", () => ({
 
 const tallied: number[] = []
 const activated: number[] = []
+const dropped: number[] = []
 await stubBlockInsertCollaborators({
+    "src/libs/blockchain/routines/dropPreGovernanceRows": {
+        default: async (activationHeight: number) => {
+            dropped.push(activationHeight)
+            return { proposals: 0, votes: 0 }
+        },
+    },
     "src/libs/blockchain/routines/tallyUpgradeVotes": {
         default: async (height: number) => {
             tallied.push(height)
@@ -59,6 +66,7 @@ function governanceAt(activationHeight: number | null) {
 beforeEach(() => {
     tallied.length = 0
     activated.length = 0
+    dropped.length = 0
     getSharedState.fastSyncCount = 0
 })
 
@@ -69,6 +77,7 @@ describe("governance hooks in insertBlock", () => {
         await insertBlock(block(20), [])
         expect(tallied).toEqual([])
         expect(activated).toEqual([])
+        expect(dropped).toEqual([])
     })
 
     it("run from the block applied on the activation tip", async () => {
@@ -82,5 +91,17 @@ describe("governance hooks in insertBlock", () => {
         await insertBlock(block(31), [])
         expect(tallied).toEqual([31])
         expect(activated).toEqual([31])
+    })
+
+    it("drop the rows an older binary left at the activation block only", async () => {
+        governanceAt(30)
+        for (const n of [29, 30, 31, 32]) {
+            getSharedState.lastBlockNumber = n - 1
+            await insertBlock(block(n), [])
+        }
+        // Block 30 still refuses governance edits; block 31 is the first to
+        // admit them, so it must see no row the others lack.
+        expect(dropped).toEqual([30])
+        expect(tallied).toEqual([31, 32])
     })
 })

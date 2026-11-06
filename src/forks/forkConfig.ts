@@ -308,7 +308,9 @@ export type StakeApplyChecksConfig = BaseForkConfig
  * validator that cast it and a proposal for the validator that made it.
  *
  * Activation at H binds from the block applied on tip H, which is block
- * H + 1. Dormant by default (`activationHeight: null`) and at launch: the
+ * H + 1. Block H deletes the proposals and votes recorded before H, which
+ * only nodes that ran an older binary hold. Dormant by default
+ * (`activationHeight: null`) and at launch: the
  * vote weights and quorum rules are not ready for a live network, so a
  * later height-pinned activation turns it on. No payload beyond the base.
  */
