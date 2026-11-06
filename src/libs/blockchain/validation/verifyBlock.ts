@@ -214,6 +214,28 @@ async function checkSignerQuorum(block: Block): Promise<BlockVerification> {
 }
 
 /**
+ * Whether `block` hashes to its own hash and carries the signer quorum its
+ * height admits, whichever parent it names. A peer cannot forge this, so a
+ * certified block that differs from ours at the same height is evidence
+ * against our chain, while an uncertified one is only the peer's word.
+ */
+export async function verifyBlockCertificate(
+    block: Block,
+): Promise<BlockVerification> {
+    try {
+        const expectedHash = Hashing.sha256(
+            serializeBlockContent(block.content, block.number),
+        )
+        if (expectedHash !== block.hash) {
+            return { valid: false, reason: "block hash mismatch" }
+        }
+        return await checkSignerQuorum(block)
+    } catch (e) {
+        return { valid: false, reason: getErrorMessage(e) }
+    }
+}
+
+/**
  * Verify a synced block's hash + signature quorum.
  *
  * When the block's transactions are supplied (an empty array counts) they are re-judged at the

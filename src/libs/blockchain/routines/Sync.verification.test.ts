@@ -14,10 +14,14 @@ import {
 } from "../testSupport/signedTx"
 
 const verifyBlock = jest.fn(async (_block: unknown) => ({ valid: true }) as any)
+const verifyBlockCertificate = jest.fn(
+    async (_block: unknown) => ({ valid: false, reason: "no quorum" }) as any,
+)
 const realVerifyBlock = await import("../validation/verifyBlock")
 mock.module("../validation/verifyBlock", () => ({
     ...realVerifyBlock,
     verifyBlock,
+    verifyBlockCertificate,
 }))
 
 const hashGCRTables = jest.fn(async (_height: number) => ({}) as any)
@@ -53,6 +57,7 @@ const { orderDeterministically } = await import(
 const { default: log } = await import("src/utilities/logger")
 const { default: PeerManager } = await import("@/libs/peer/PeerManager")
 const { BroadcastManager } = await import("@/libs/communications/broadcastManager")
+const { default: Mempool } = await import("../mempool")
 const { syncBlock, fastSync } = await import("./Sync")
 
 const HEIGHT = 12
@@ -149,6 +154,8 @@ afterEach(() => {
 beforeEach(() => {
     verifyBlock.mockReset()
     verifyBlock.mockResolvedValue({ valid: true })
+    verifyBlockCertificate.mockReset()
+    verifyBlockCertificate.mockResolvedValue({ valid: false, reason: "no quorum" })
     hashGCRTables.mockReset()
     hashGCRTables.mockResolvedValue({ ...NATIVE_HASHES })
 
@@ -752,5 +759,160 @@ describe("fast sync with a forked block", () => {
         expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
         const cooled = (log.warning as any).mock.calls.map((c: unknown[]) => String(c[0]))
         expect(cooled.some((line: string) => line.includes("peer recovery"))).toBe(true)
+    })
+})
+
+describe("a peer that serves data the block does not add up to", () => {
+    const coolingDown = (identity: string) =>
+        (log.warning as any).mock.calls
+            .map((call: unknown[]) => String(call[0]))
+            .some((line: string) => line.includes(`cooling down peer ${identity}`))
+
+    /** Block attrs are unsigned; these claim more applied txs than the block has. */
+    const withLyingAttrs = (block: any) => ({
+        ...block,
+        attrs: { gcrAppliedTxCount: 7, gcrAppliedTxsHash: "x", gcrAppliedTxs: [] },
+    })
+
+    function peerServing(identity: string, block: any, txs: any[], onTxs = () => {}) {
+        const handle = async (request: any) => {
+            if (request.params[0].message === "getBlocks") {
+                return { result: 200, response: [clone(block)] }
+            }
+            onTxs()
+            return { result: 200, response: clone(txs) }
+        }
+        return {
+            identity,
+            connection: { string: `http://${identity}` },
+            status: { online: true },
+            sync: { block: HEIGHT },
+            longCall: jest.fn(handle),
+            call: jest.fn(handle),
+        } as any
+    }
+
+    it("is cooled down when it pushes the block, which is refused", async () => {
+        const tx = makeTx(alice)
+        ;(log.warning as any).mockClear()
+
+        const synced = await syncBlock(withLyingAttrs(makeBlock([tx])), servingPeer([tx]))
+
+        expect(synced).toBe(false)
+        expect(insertBlock).not.toHaveBeenCalled()
+        expect(coolingDown("peer-1")).toBe(true)
+    })
+
+    it("is not retried in a loop: the block is synced from the next peer", async () => {
+        const tx = makeTx(alice)
+        const block = makeBlock([tx])
+        let badServed = 0
+        // Names no other test cools down: cooldowns outlive a test
+        const bad = peerServing("attrs-liar", withLyingAttrs(block), [tx], () => {
+            // Bounds the run should the same peer be asked again and again
+            if (++badServed >= 3) getSharedState.fastSyncAborted = true
+        })
+        const good = peerServing("attrs-honest", block, [tx])
+        spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([bad, good])
+        spyOn(Math, "random").mockReturnValue(0)
+        spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+        applyResult({ successfulTxs: [tx.hash] })
+        insertBlock.mockImplementation((async (inserted: any) => {
+            getSharedState.lastBlockNumber = inserted.number
+            return {}
+        }) as any)
+        getSharedState.fastSyncCount = 1
+        ;(log.warning as any).mockClear()
+
+        await fastSync([], "test")
+
+        expect(badServed).toBe(1)
+        expect(coolingDown("attrs-liar")).toBe(true)
+        expect(insertBlock).toHaveBeenCalledTimes(1)
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
+    })
+})
+
+describe("the tip check on the first sync after a restart", () => {
+    const OUR_TIP = "our-tip"
+    const GENESIS = "genesis"
+
+    /** A peer at HEIGHT that serves `atTip` as our last block and `block` to sync. */
+    function peerAt(identity: string, atTip: any, block: any, txs: any[]) {
+        const handle = async (request: any) => {
+            const { message, data } = request.params[0]
+            if (message === "getBlockByNumber") {
+                const number = Number(data.blockNumber)
+                if (number === 0) return { result: 200, response: { number: 0, hash: GENESIS } }
+                return { result: 200, response: clone(atTip) }
+            }
+            if (message === "getBlocks") return { result: 200, response: [clone(block)] }
+            return { result: 200, response: clone(txs) }
+        }
+        return {
+            identity,
+            connection: { string: `http://${identity}` },
+            status: { online: true },
+            sync: { block: HEIGHT },
+            longCall: jest.fn(handle),
+            call: jest.fn(handle),
+        } as any
+    }
+
+    function startFromTip(peers: any[]) {
+        spyOn(PeerManager.getInstance(), "getAll").mockReturnValue(peers)
+        spyOn(Chain, "getGenesisBlockHash").mockResolvedValue(GENESIS)
+        spyOn(Mempool, "cleanMempool").mockResolvedValue(undefined as any)
+        spyOn(Math, "random").mockReturnValue(0)
+        spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+        insertBlock.mockImplementation((async (inserted: any) => {
+            getSharedState.lastBlockNumber = inserted.number
+            return {}
+        }) as any)
+        getSharedState.fastSyncCount = 0
+        getSharedState.lastBlockHash = OUR_TIP
+    }
+
+    const fastSyncCountAtStart = getSharedState.fastSyncCount
+    const lastBlockHashAtStart = getSharedState.lastBlockHash
+    afterEach(() => {
+        getSharedState.fastSyncCount = fastSyncCountAtStart
+        getSharedState.lastBlockHash = lastBlockHashAtStart
+    })
+
+    it("does not stop on one peer's uncertified word, and syncs from a peer that agrees", async () => {
+        const tx = makeTx(alice)
+        const block = makeBlock([tx])
+        const liar = peerAt("tip-liar", { number: HEIGHT - 1, hash: "invented" }, block, [tx])
+        const honest = peerAt("tip-honest", { number: HEIGHT - 1, hash: OUR_TIP }, block, [tx])
+        startFromTip([liar, honest])
+        applyResult({ successfulTxs: [tx.hash] })
+        ;(log.warning as any).mockClear()
+
+        await fastSync([], "test")
+
+        expect(verifyBlockCertificate).toHaveBeenCalledTimes(1)
+        expect((log.warning as any).mock.calls.some((c: unknown[]) => String(c[0]).includes("cooling down peer tip-liar"))).toBe(true)
+        expect(insertBlock).toHaveBeenCalledTimes(1)
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
+    })
+
+    it("does not stop when the only peer disagrees without a certificate", async () => {
+        const tx = makeTx(alice)
+        const block = makeBlock([tx])
+        startFromTip([peerAt("tip-liar", { number: HEIGHT - 1, hash: "invented" }, block, [tx])])
+        applyResult({ successfulTxs: [tx.hash] })
+
+        await expect(fastSync([], "test")).resolves.toBeDefined()
+    })
+
+    it("still refuses to sync when a peer serves a certified block that differs from our tip", async () => {
+        const tx = makeTx(alice)
+        const block = makeBlock([tx])
+        verifyBlockCertificate.mockResolvedValue({ valid: true })
+        startFromTip([peerAt("tip-certified", { number: HEIGHT - 1, hash: "certified" }, block, [tx])])
+
+        await expect(fastSync([], "test")).rejects.toThrow("integrity check failed")
+        expect(insertBlock).not.toHaveBeenCalled()
     })
 })

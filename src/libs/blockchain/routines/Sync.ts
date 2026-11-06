@@ -18,7 +18,11 @@ import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
 import log from "src/utilities/logger"
-import { type BlockVerification, verifyBlock } from "../validation/verifyBlock"
+import {
+    type BlockVerification,
+    verifyBlock,
+    verifyBlockCertificate,
+} from "../validation/verifyBlock"
 import {
     SyncBlockRejectedError,
     checkResultsAgainstNextBlock,
@@ -106,7 +110,12 @@ export function waitForInFlightBlockApply(): Promise<void> {
     return inFlightBlockApply ?? Promise.resolve()
 }
 
-class SyncAssertionError extends Error {
+/**
+ * What a peer served does not add up (missing bodies, attrs that disagree
+ * with the block). The peer is at fault, so it is cooled down and the block
+ * synced from another one, like any other rejected block.
+ */
+class SyncAssertionError extends SyncBlockRejectedError {
     constructor(message: string) {
         super(message)
         this.name = "SyncAssertionError"
@@ -383,18 +392,26 @@ async function getRemoteBlock(peer: Peer, blockNumber: number) {
 }
 
 /**
- * Verify if our last block is coherent with the same block from the peer.
+ * What the peers say about our last block. `conflict` means a peer served a
+ * block at our height that differs from ours and carries a valid quorum:
+ * our tip is not the network's. A differing block without one is only that
+ * peer's word, so the peer is set aside and the next one asked; when no peer
+ * confirms or certifiably contradicts our tip the result is `unverified`.
+ */
+type TipVerdict = "coherent" | "conflict" | "unverified"
+
+/**
+ * Verify if our last block is coherent with the same block from the peers.
  *
- * @param peer - The peer to cross-check with
+ * @param peer - The peer to cross-check with first
  * @param ourLastBlockNumber - Our last block number
  * @param ourLastBlockHash - Our last block hash
- * @returns True if the last block hash is coherent, false otherwise
  */
 async function verifyLastBlockIntegrity(
     peer: Peer,
     ourLastBlockNumber: number,
     ourLastBlockHash: string,
-): Promise<boolean> {
+): Promise<TipVerdict> {
     const ourGenesisHash = await Chain.getGenesisBlockHash()
     const seenPeers = new Set<string>()
     let currentPeer: Peer | null = peer
@@ -439,13 +456,27 @@ async function verifyLastBlockIntegrity(
             continue
         }
 
-        return lastSyncedBlock.hash === ourLastBlockHash
+        if (lastSyncedBlock.hash === ourLastBlockHash) return "coherent"
+
+        const certificate = await verifyBlockCertificate(lastSyncedBlock)
+        if (certificate.valid) {
+            log.error(
+                `[fastSync] Peer ${currentPeer.identity} serves a certified block ${ourLastBlockNumber} (${lastSyncedBlock.hash}) that differs from ours (${ourLastBlockHash})`,
+            )
+            return "conflict"
+        }
+        log.error(
+            `[fastSync] Peer ${currentPeer.identity} serves a block ${ourLastBlockNumber} that differs from ours without a valid certificate (${certificate.reason}); trying next peer`,
+        )
+        discreditAdvertisedHeight(currentPeer)
+        cooldownPeer(currentPeer.identity, "served another block at our tip")
+        currentPeer = findNextAvailablePeer(seenPeers)
     }
 
     log.error(
         "[fastSync] Exhausted all peers, could not verify last block integrity",
     )
-    return false
+    return "unverified"
 }
 
 async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
@@ -686,9 +717,8 @@ export async function syncBlock(
 
     await assertNoUnreconciledGcrState()
 
-    await verifyBlockAttrs(block, txs)
-
     try {
+        await verifyBlockAttrs(block, txs)
         await applyVerifiedBlock(block, txs)
     } catch (error) {
         if (error instanceof SyncBlockRejectedError) {
@@ -1680,6 +1710,9 @@ async function requestBlocks(): Promise<boolean> {
                     error instanceof Error ? error.message : "Unknown error"
                 }`,
             )
+            // What the peer served may be what threw: the next round
+            // prefers another peer instead of retrying this one first.
+            cooldownPeer(peer.identity, "unexpected error during batch sync")
             return false
         }
     }
@@ -1878,25 +1911,26 @@ async function fastSyncRoutine(peers: Peer[] = []) {
 
     if (getSharedState.fastSyncCount === 0) {
         // INFO: Only run integrity checks on first sync
-        const verified = await verifyLastBlockIntegrity(
+        const verdict = await verifyLastBlockIntegrity(
             highestBlockPeer(),
             getSharedState.lastBlockNumber,
             getSharedState.lastBlockHash,
         )
 
-        if (!verified) {
-            if (getSharedState.lastBlockNumber === 0) {
-                // Our block 0 is our own; a peer that disagrees is on another
-                // network, not evidence that our chain is broken.
-                log.error(
-                    "[fastSync] No reachable peer shares our genesis block; nothing to verify at height 0",
-                )
-            } else {
-                log.error("[fastSync] Last block is not coherent")
-                throw new Error(
-                    "[fastSync] Last block integrity check failed — node refusing to sync against incoherent chain",
-                )
-            }
+        if (verdict === "conflict" && getSharedState.lastBlockNumber > 0) {
+            log.error("[fastSync] Last block is not coherent")
+            throw new Error(
+                "[fastSync] Last block integrity check failed — node refusing to sync against incoherent chain",
+            )
+        }
+        if (verdict === "unverified") {
+            // Every block synced on top of the tip is still checked against
+            // it, so a tip no peer vouched for is not a reason to stop.
+            log.warning(
+                getSharedState.lastBlockNumber === 0
+                    ? "[fastSync] No reachable peer shares our genesis block; nothing to verify at height 0"
+                    : "[fastSync] No peer confirmed or certifiably contradicted our last block; syncing on top of it",
+            )
         }
         // The check may have dropped the peers that looked ahead of us.
         if (latestBlock() === getSharedState.lastBlockNumber) {
