@@ -43,6 +43,12 @@
     "networkGovernance": {
       "activationHeight": 0
     },
+    "txTypeAllowList": {
+      "activationHeight": 0
+    },
+    "instantMessagingBinding": {
+      "activationHeight": 0
+    },
     "nativeSendBinding": {
       "activationHeight": 0
     },

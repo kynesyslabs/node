@@ -21,6 +21,7 @@ import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { signValidityData } from "../validation/validityData"
 import { checkTxAdmissible } from "../validation/txAdmission"
+import { clientTxTypeRefusal } from "../validation/txTypes"
 import { isForkActive } from "@/forks"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
@@ -75,6 +76,15 @@ export async function confirmTransaction(
         else if (admission.code === "structure") label = "STRUCTURE ERROR"
         validityData.data.message =
             `[Tx Validation] [${label}] ` + admission.reason + "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    const typeRefusal = clientTxTypeRefusal(tx)
+    if (typeRefusal) {
+        validityData.data.message =
+            "[Tx Validation] [TYPE ERROR] " + typeRefusal + "\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData

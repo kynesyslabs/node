@@ -633,10 +633,13 @@ describe("the editBinding fork gates admission as well as apply", () => {
             postFork: false,
             nonceBound: false,
             governance: true,
+            typeAllowList: false,
+            messageBinding: false,
             stakeChecks: false,
             sendBound: false,
             canonical: false,
             feeBound: false,
+            tip: 119,
         })
         tip = 120
         expect(await editBindingState()).toEqual({
@@ -644,10 +647,13 @@ describe("the editBinding fork gates admission as well as apply", () => {
             postFork: true,
             nonceBound: false,
             governance: true,
+            typeAllowList: false,
+            messageBinding: false,
             stakeChecks: false,
             sendBound: false,
             canonical: false,
             feeBound: false,
+            tip: 120,
         })
     })
 })

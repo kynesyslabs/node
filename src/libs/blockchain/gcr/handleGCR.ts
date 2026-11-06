@@ -53,6 +53,12 @@ import {
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
 import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
+import {
+    blockTxTypeRefusal,
+    isNodeMessage,
+    nodeMessageRefusal,
+    validatorKeysAt,
+} from "src/libs/blockchain/validation/txTypes"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
@@ -1924,7 +1930,9 @@ export default class HandleGCR {
     }
 
     /**
-     * The transactions of a block refused before apply: those the
+     * The transactions of a block refused before apply: those of a type the
+     * node does not implement (`txTypeAllowList` fork), a fee-free message
+     * not signed by a staked validator (`instantMessagingBinding`), those the
      * `networkGovernance` rule or a value rule (`nativeSendBinding`,
      * `canonicalAddresses`, `feeBinding`) refuses, whether or not
      * `editBinding` is active, and those whose shipped edits are not the ones
@@ -1960,9 +1968,18 @@ export default class HandleGCR {
         // value rules, once for the block: none of them depends on the
         // transaction.
         const state = await editBindingState()
-        const { active, postFork, governance, stakeChecks } = state
+        const {
+            active,
+            postFork,
+            governance,
+            typeAllowList,
+            messageBinding,
+            stakeChecks,
+            tip,
+        } = state
         for (const tx of txs) {
             const reason =
+                (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
                 governanceGateRefusal(tx, governance) ??
                 (stakeChecks ? stakeSenderRefusal(tx) : null)
             if (reason) {
@@ -1977,6 +1994,9 @@ export default class HandleGCR {
             }
             if (valueReason) refuse(tx, valueReason)
         }
+        if (messageBinding) {
+            await HandleGCR.refuseUnboundMessages(txs, refused, tip, refuse)
+        }
         if (!active) return refused
 
         for (const tx of txs) {
@@ -1990,6 +2010,30 @@ export default class HandleGCR {
             if (!verdict.ok) refuse(tx, verdict.reason)
         }
         return refused
+    }
+
+    /**
+     * Refuses the fee-free messages of a block, among those not yet
+     * `refused`, that no validator staked at `tip` signed. The validator set
+     * is read once for the block, and only when it carries such a message.
+     */
+    private static async refuseUnboundMessages(
+        txs: Transaction[],
+        refused: ReadonlySet<string>,
+        tip: number,
+        refuse: (tx: Transaction, reason: string) => void,
+    ): Promise<void> {
+        const messages = txs.filter(tx => !refused.has(tx.hash) && isNodeMessage(tx))
+        if (messages.length === 0) return
+        // A failed read says nothing about the messages: the block must not
+        // apply rather than fail them on this node alone.
+        const validators = await readState("validator set", () =>
+            validatorKeysAt(tip),
+        )
+        for (const tx of messages) {
+            const reason = nodeMessageRefusal(tx, validators)
+            if (reason) refuse(tx, reason)
+        }
     }
 
     /**

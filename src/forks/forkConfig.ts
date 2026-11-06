@@ -369,6 +369,39 @@ export type FeeBindingConfig = BaseForkConfig
 export type NetworkGovernanceConfig = BaseForkConfig
 
 /**
+ * `txTypeAllowList` fork: a transaction is admitted to a pool by the
+ * consensus merge and applied by a block only when its type is one the node
+ * implements (`BLOCK_TX_TYPES` in `libs/blockchain/validation/txTypes.ts`).
+ *
+ * Before it, the SDK gave a transaction of any type the universal gas and
+ * nonce edits, so an escrow, contract, token or made-up type was applied as a
+ * fee and a nonce with its own effect silently dropped.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before; a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type TxTypeAllowListConfig = BaseForkConfig
+
+/**
+ * `instantMessagingBinding` fork: an `instantMessaging` transaction without
+ * edits, the form the signalling server stores a message in, is merged and
+ * applied only when every signer field names a validator staked at the tip.
+ *
+ * Before it, that form paid no fee and spent no nonce whoever signed it, so
+ * any key could have such transactions merged into blocks and applied for
+ * free. A message that carries the universal gas and nonce edits pays like
+ * any transaction and is not affected.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before; a chain started from
+ * genesis with this build sets it to 0. No payload beyond the base.
+ */
+export type InstantMessagingBindingConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -410,6 +443,8 @@ export type ForkConfig =
     | FinalityProofsConfig
     | IdentityCarryoverConfig
     | NetworkGovernanceConfig
+    | TxTypeAllowListConfig
+    | InstantMessagingBindingConfig
     | NativeSendBindingConfig
     | CanonicalAddressesConfig
     | FeeBindingConfig
@@ -437,6 +472,8 @@ export type ForkName =
     | "identityCarryover"
     | "stakeApplyChecks"
     | "networkGovernance"
+    | "txTypeAllowList"
+    | "instantMessagingBinding"
     | "nativeSendBinding"
     | "canonicalAddresses"
     | "feeBinding"
@@ -463,6 +500,8 @@ export interface ForkConfigByName {
     identityCarryover: IdentityCarryoverConfig
     stakeApplyChecks: StakeApplyChecksConfig
     networkGovernance: NetworkGovernanceConfig
+    txTypeAllowList: TxTypeAllowListConfig
+    instantMessagingBinding: InstantMessagingBindingConfig
     nativeSendBinding: NativeSendBindingConfig
     canonicalAddresses: CanonicalAddressesConfig
     feeBinding: FeeBindingConfig
@@ -678,6 +717,22 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Admit and apply networkUpgrade and networkUpgradeVote transactions, each " +
             "governance edit bound to the account that signed it.",
     },
+    txTypeAllowList: {
+        // Dormant by default: a missing genesis entry hydrates from here, so a
+        // running chain keeps applying its history as before.
+        activationHeight: null,
+        description:
+            "Admit and apply only the transaction types the node implements; escrow, " +
+            "contract, token and unknown types are refused instead of applied as a fee.",
+    },
+    instantMessagingBinding: {
+        // Dormant by default: a missing genesis entry hydrates from here, so a
+        // running chain keeps applying its history as before.
+        activationHeight: null,
+        description:
+            "A fee-free instantMessaging transaction (no edits) is merged and applied only " +
+            "when a validator staked at the tip signed it.",
+    },
     nativeSendBinding: {
         // Dormant by default: it changes which transactions a block applies,
         // and a missing genesis entry hydrates from here. A mainnet genesis
@@ -728,6 +783,8 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
         stakeApplyChecks: { ...DEFAULT_FORK_CONFIG.stakeApplyChecks },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
+        txTypeAllowList: { ...DEFAULT_FORK_CONFIG.txTypeAllowList },
+        instantMessagingBinding: { ...DEFAULT_FORK_CONFIG.instantMessagingBinding },
         nativeSendBinding: { ...DEFAULT_FORK_CONFIG.nativeSendBinding },
         canonicalAddresses: { ...DEFAULT_FORK_CONFIG.canonicalAddresses },
         feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
