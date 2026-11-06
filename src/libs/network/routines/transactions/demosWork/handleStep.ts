@@ -11,6 +11,7 @@ import handleL2PS from "../handleL2PS"
 import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import handleNativeRequest from "../handleNativeRequest"
+import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
 // ? Remove this proxy if possible
 const handleXMRequest = multichainDispatcher
 
@@ -33,6 +34,16 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
             " and description: " +
             step.description,
     )
+    // A step the operator switched off must fail the operation, not be
+    // recorded as done with the refusal as its output.
+    if (context === "xm" || context === "web2") {
+        const disabled = featureDisabledMessage(context)
+        if (disabled) {
+            stepResult.error = disabled
+            step.output[step.id] = disabled
+            return stepResult
+        }
+    }
     stepResult.success = true // Until proven otherwise
     if (context === "xm") {
         // REVIEW Implement the logic for xm steps
