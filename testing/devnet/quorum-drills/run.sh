@@ -724,7 +724,10 @@ rewrite_verdict() { # $1 why
     RUN="${RUN_ID}" ROW="$(results_row)" awk -F'\t' '$1 == ENVIRON["RUN"] { print ENVIRON["ROW"]; n++; next } { print } END { exit n ? 0 : 3 }' \
         "${results}" > "${results}.tmp" 2>/dev/null
     case $? in
-        0) mv -f "${results}.tmp" "${results}" 2>/dev/null && return "${st}"; why="mv failed" ;;
+        # gawk exits 0 after an END exit 0 even when it could not write the
+        # copy: one with fewer lines than results.tsv replaces nothing
+        0) if [ "$(wc -l < "${results}.tmp")" != "$(wc -l < "${results}")" ]; then why="the copy could not be written whole"
+           else mv -f "${results}.tmp" "${results}" 2>/dev/null && return "${st}"; why="mv failed"; fi ;;
         3) why="no row for ${RUN_ID}" ;;
         *) why="it could not be read or the copy written" ;;
     esac
