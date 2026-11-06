@@ -10,6 +10,7 @@ import type { OmniMessageHeader, ParsedOmniMessage } from "../types/message"
 import type { AuthBlock } from "../auth/types"
 import { SignatureAlgorithm, SignatureMode } from "../auth/types"
 import { timestampedSignedData } from "../auth/signedData"
+import { getSharedState } from "src/utilities/sharedState"
 import {
     ConnectionState,
     ConnectionStateValue,
@@ -452,7 +453,16 @@ export class PeerConnection extends EventEmitter {
         const timeout = options.timeout ?? 30000 // 30 second default
         const timestamp = Date.now()
 
+        // Unknown network: a signature without it would verify anywhere.
+        const genesisHash = getSharedState.genesisBlockHash
+        if (!genesisHash) {
+            throw new SigningError(
+                "Genesis hash not known yet; refusing to sign Omni auth",
+            )
+        }
+
         const dataToSign = timestampedSignedData(
+            genesisHash,
             opcode,
             sequence,
             timestamp,

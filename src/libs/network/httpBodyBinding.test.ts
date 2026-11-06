@@ -1,6 +1,7 @@
 /**
  * A peer's HTTP auth headers sign the request body, so a captured request
- * cannot be replayed with another body. Runs the real sender (Peer.httpCall),
+ * cannot be replayed with another body. The signature also names the
+ * network (genesis hash), so a request from another network is refused. Runs the real sender (Peer.httpCall),
  * the real auth middleware and the real RPC route.
  */
 
@@ -11,6 +12,8 @@ const pair = forge.pki.ed25519.generateKeyPair()
 const PUBKEY = Buffer.from(pair.publicKey).toString("hex")
 const SENDER = "0x" + PUBKEY
 const IDENTITY = "ed25519:" + SENDER
+const OUR_GENESIS = "d5".repeat(32)
+const OTHER_GENESIS = "e7".repeat(32)
 
 const sharedState: Record<string, any> = {
     signingAlgorithm: "ed25519",
@@ -18,6 +21,7 @@ const sharedState: Record<string, any> = {
     keypair: { publicKey: new Uint8Array(32).fill(7) },
     SUDO_PUBKEY: "",
     connectionString: "http://us:53550",
+    genesisBlockHash: OUR_GENESIS,
     serverPort: 0,
     rateLimitConfig: {
         enabled: true,
@@ -150,6 +154,7 @@ const hello = (url: string) => ({
 
 beforeEach(() => {
     dispatched.length = 0
+    sharedState.genesisBlockHash = OUR_GENESIS
 })
 
 describe("peer HTTP auth", () => {
@@ -196,5 +201,29 @@ describe("peer HTTP auth", () => {
         expect(dispatched).toEqual([
             { method: "nodeCall", sender: SENDER, params: [{ message: "getLastBlockNumber" }] },
         ])
+    })
+
+    it("refuses a peer request signed on another network", async () => {
+        sharedState.genesisBlockHash = OTHER_GENESIS
+        const { body, headers } = await capture(hello("http://me.example:53550"))
+        sharedState.genesisBlockHash = OUR_GENESIS
+        await deliver(body, headers)
+        expect(dispatched.filter(d => d.sender === SENDER)).toEqual([])
+    })
+
+    it("does not serve peer methods before the node knows its network", async () => {
+        const { body, headers } = await capture(hello("http://me.example:53550"))
+        sharedState.genesisBlockHash = null
+        await deliver(body, headers)
+        expect(dispatched.filter(d => d.sender === SENDER)).toEqual([])
+    })
+
+    it("does not sign a peer request before the node knows its network", async () => {
+        sharedState.genesisBlockHash = null
+        captured = null
+        const peer = new Peer("http://peer.example:53550", "0x" + "ee".repeat(32))
+        const reply = await peer.httpCall(hello("http://me.example:53550") as any, true)
+        expect(captured).toBeNull()
+        expect(reply.result).not.toBe(200)
     })
 })

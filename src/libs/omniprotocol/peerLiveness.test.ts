@@ -25,6 +25,7 @@ const sharedState: Record<string, any> = {
     publicKeyHex: "0xself",
     keypair: { publicKey: new Uint8Array(32) },
     signingAlgorithm: "ed25519",
+    genesisBlockHash: "d5".repeat(32),
     isOmniProtocolEnabled: true,
     omniAdapter: null,
     omniConfig: { port: 0, rateLimit: { enabled: false } },
@@ -90,7 +91,7 @@ function message(payload: Buffer, sign?: { claims: Keys; signer: Keys }) {
         bytes = MessageFramer.encodeMessage(header, payload)
     } else {
         const timestamp = Date.now()
-        const data = timestampedSignedData(header.opcode, seq, timestamp, payload)
+        const data = timestampedSignedData(sharedState.genesisBlockHash, header.opcode, seq, timestamp, payload)
         const signature = forge.pki.ed25519.sign({
             message: data,
             privateKey: sign.signer.privateKey as forge.pki.ed25519.NativeBuffer,

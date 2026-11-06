@@ -291,6 +291,20 @@ export default class Peer {
         const body = JSON.stringify(request)
         const bodyHash = Hashing.sha256(body)
 
+        // Unknown network: a signature without it would verify anywhere.
+        const genesisHash = getSharedState.genesisBlockHash
+        if (isAuthenticated && !genesisHash) {
+            log.warning(
+                `[RPC Call] [${method}] not sent: genesis hash not known yet`,
+            )
+            return {
+                result: 503,
+                response: "Genesis hash not known yet; peer auth unavailable",
+                require_reply: false,
+                extra: null,
+            }
+        }
+
         if (isAuthenticated) {
             const ourPublicKey = (
                 await ucrypto.getIdentity(getSharedState.signingAlgorithm)
@@ -300,7 +314,7 @@ export default class Peer {
             const bufferSignature = await TxValidatorPool.getInstance().sign(
                 getSharedState.signingAlgorithm,
                 new TextEncoder().encode(
-                    httpAuthMessage(pubkey, timestamp, bodyHash),
+                    httpAuthMessage(genesisHash!, pubkey, timestamp, bodyHash),
                 ),
             )
 

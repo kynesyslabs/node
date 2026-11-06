@@ -10,6 +10,7 @@ import type { OmniMessageHeader } from "../types/message"
 import { ReplayCache } from "./replayCache"
 import { timestampedSignedData } from "./signedData"
 import log from "src/utilities/logger"
+import { getSharedState } from "src/utilities/sharedState"
 
 export class SignatureVerifier {
     // Maximum clock skew allowed (5 minutes)
@@ -75,6 +76,18 @@ export class SignatureVerifier {
             return {
                 valid: false,
                 error: `Timestamp outside acceptable window: ${auth.timestamp} (now: ${Date.now()})`,
+            }
+        }
+
+        // 2b. The signed bytes name our network; without it we cannot tell
+        // a frame from another network apart, so nothing is accepted.
+        if (
+            auth.signatureMode === SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH &&
+            !getSharedState.genesisBlockHash
+        ) {
+            return {
+                valid: false,
+                error: "Genesis hash not known yet; cannot verify network-bound auth",
             }
         }
 
@@ -180,6 +193,7 @@ export class SignatureVerifier {
 
             case SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH:
                 return timestampedSignedData(
+                    getSharedState.genesisBlockHash as string,
                     header.opcode,
                     header.sequence,
                     timestamp,

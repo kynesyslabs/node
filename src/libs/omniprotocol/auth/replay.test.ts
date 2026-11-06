@@ -2,7 +2,8 @@
  * An authenticated Omni message is good once. Its timestamp and opcode are
  * covered by the signature, so a captured frame cannot be given a fresh
  * timestamp or another opcode, and the same frame sent again inside the
- * freshness window is refused.
+ * freshness window is refused. The signature also names the network
+ * (genesis hash), so a frame from another network does not verify.
  */
 
 import { describe, expect, it, jest } from "bun:test"
@@ -20,6 +21,15 @@ jest.mock("src/utilities/logger", () => ({
         only: jest.fn(),
         custom: jest.fn(),
     },
+}))
+
+const OUR_GENESIS = "d5".repeat(32)
+const OTHER_GENESIS = "e7".repeat(32)
+const sharedState: Record<string, unknown> = { genesisBlockHash: OUR_GENESIS }
+jest.mock("src/utilities/sharedState", () => ({
+    __esModule: true,
+    default: { getInstance: () => sharedState },
+    getSharedState: sharedState,
 }))
 
 const { PeerConnection } = await import("../transport/PeerConnection")
@@ -106,6 +116,26 @@ describe("Omni auth replay", () => {
             const result = await verify(legacy)
             expect(result.valid).toBe(false)
             expect(result.error).toMatch(/timestamp/i)
+        }
+    })
+})
+
+describe("Omni auth network binding", () => {
+    it("refuses a frame signed on another network", async () => {
+        sharedState.genesisBlockHash = OTHER_GENESIS
+        const m = await sentFrame()
+        sharedState.genesisBlockHash = OUR_GENESIS
+        const result = await verify(m)
+        expect(result.valid).toBe(false)
+    })
+
+    it("refuses to verify before the node knows its network", async () => {
+        const m = await sentFrame()
+        sharedState.genesisBlockHash = null
+        try {
+            expect((await verify(m)).valid).toBe(false)
+        } finally {
+            sharedState.genesisBlockHash = OUR_GENESIS
         }
     })
 })

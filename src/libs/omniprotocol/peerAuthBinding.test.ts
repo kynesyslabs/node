@@ -22,6 +22,7 @@ jest.mock("src/utilities/logger", () => ({
 }))
 jest.mock("src/utilities/sharedState", () => ({
     getSharedState: {
+        genesisBlockHash: "d5".repeat(32),
         getConnectionString: async () => "",
         version: "test",
         getInfo: async () => ({}),
@@ -104,7 +105,7 @@ function frame(
     if (!sign) return MessageFramer.encodeMessage(header, payload)
 
     const timestamp = Date.now()
-    const data = timestampedSignedData(header.opcode, seq, timestamp, payload)
+    const data = timestampedSignedData("d5".repeat(32), header.opcode, seq, timestamp, payload)
     const signature = forge.pki.ed25519.sign({
         message: data,
         privateKey: sign.signer.privateKey as forge.pki.ed25519.NativeBuffer,

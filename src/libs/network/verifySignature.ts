@@ -11,6 +11,7 @@ import log from "src/utilities/logger"
 import Hashing from "src/libs/crypto/hashing"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { httpAuthMessage } from "./peerHttpAuth"
+import { getSharedState } from "src/utilities/sharedState"
 
 /**
  * Max age of a timestamp-bound auth header (audit C3b). A captured header is
@@ -95,6 +96,19 @@ export async function verifySignature(
         }
     }
 
+    // The body-bound form names our network; until it is known no such
+    // request can be checked, so peer methods are not served yet.
+    const genesisHash = getSharedState.genesisBlockHash
+    if (bodyBound && !genesisHash) {
+        return {
+            valid: false,
+            identity,
+            publicKey: null,
+            algorithm: null,
+            error: "Genesis hash not known yet",
+        }
+    }
+
     // AUDIT C3b — when timestamp-binding is required (nonceEnforcement fork
     // active), the auth signature must cover `${identity}:${timestamp}` with a
     // fresh timestamp, so a captured header is not a static replayable bearer
@@ -149,7 +163,7 @@ export async function verifySignature(
             // timestamp form signs sha256(`${identity}:${timestamp}`); legacy
             // form signs the bare publicKey hex (splits[1]).
             const authMessage = bodyBound
-                ? httpAuthMessage(identity, timestamp!, bodyHash!)
+                ? httpAuthMessage(genesisHash!, identity, timestamp!, bodyHash!)
                 : requireTimestampBinding
                   ? Hashing.sha256(`${identity}:${timestamp}`)
                   : publicKeyHex
@@ -169,7 +183,7 @@ export async function verifySignature(
             const signatureBytes = hexToUint8Array(signature)
 
             const authMessage = bodyBound
-                ? httpAuthMessage(identity, timestamp!, bodyHash!)
+                ? httpAuthMessage(genesisHash!, identity, timestamp!, bodyHash!)
                 : requireTimestampBinding
                   ? Hashing.sha256(`${identity}:${timestamp}`)
                   : identity

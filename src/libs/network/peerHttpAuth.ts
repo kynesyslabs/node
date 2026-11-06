@@ -22,12 +22,17 @@ export const BODY_BOUND_METHODS: ReadonlySet<string> = new Set([
     "consensus_routine",
 ])
 
+/**
+ * The genesis hash names the network, so a request captured on one network
+ * is refused on another.
+ */
 export function httpAuthMessage(
+    genesisHash: string,
     identity: string,
     timestamp: string | number,
     bodyHash: string,
 ): string {
     return Hashing.sha256(
-        `${HTTP_AUTH_DOMAIN}:${identity}:${timestamp}:${bodyHash}`,
+        `${HTTP_AUTH_DOMAIN}:${genesisHash}:${identity}:${timestamp}:${bodyHash}`,
     )
 }
