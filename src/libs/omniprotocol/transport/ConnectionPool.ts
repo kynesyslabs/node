@@ -62,6 +62,10 @@ export class ConnectionPool extends EventEmitter {
     // captured at accept time: remoteAddress is gone once the socket is
     // destroyed, and outbound connections never took a slot to give back.
     private ipSlots: Map<PeerConnection, string> = new Map()
+    // Callers between acquire() and release(), per connection. A caller
+    // resumes after acquire() a turn later and only then puts its request in
+    // flight, so an idle-looking socket may still be about to carry one.
+    private reservations: Map<PeerConnection, number> = new Map()
     private config: PoolConfig
     private cleanupTimer: NodeJS.Timeout | null = null
     public rateLimiter?: RateLimiter
@@ -291,6 +295,7 @@ export class ConnectionPool extends EventEmitter {
         )
 
         if (existing) {
+            this.reserve(existing)
             return existing
         }
 
@@ -317,7 +322,8 @@ export class ConnectionPool extends EventEmitter {
                 usable.filter(
                     c =>
                         c.connectionString !== connectionString &&
-                        c.getInfo().inFlightCount === 0,
+                        c.getInfo().inFlightCount === 0 &&
+                        !this.reservations.has(c),
                 ),
             )
             if (!retired) {
@@ -384,6 +390,7 @@ export class ConnectionPool extends EventEmitter {
             log.debug(
                 `[ConnectionPool] Created outbound connection to ${peerIdentity}`,
             )
+            this.reserve(connection)
             return connection
         } catch (error) {
             // Remove failed connection from pool
@@ -392,13 +399,27 @@ export class ConnectionPool extends EventEmitter {
         }
     }
 
+    private reserve(connection: PeerConnection): void {
+        this.reservations.set(
+            connection,
+            (this.reservations.get(connection) ?? 0) + 1,
+        )
+    }
+
     /**
      * Release a connection back to the pool
-     * Does not close the connection - just marks it available for reuse
+     * Does not close the connection. Every acquire() must be paired with one
+     * release(): until then the connection is never retired for another
+     * address.
      */
     release(connection: PeerConnection): void {
-        // Connection stays in pool and will be reused or cleaned up by timer
-        // Could add activity tracking here if needed
+        const count = this.reservations.get(connection)
+        if (count === undefined) return
+        if (count <= 1) {
+            this.reservations.delete(connection)
+        } else {
+            this.reservations.set(connection, count - 1)
+        }
     }
 
     /**
@@ -441,6 +462,7 @@ export class ConnectionPool extends EventEmitter {
             )
             // On error, close the connection and remove from pool
             if (connection) {
+                this.release(connection)
                 await this.closeConnection(connection)
             }
 
@@ -494,6 +516,7 @@ export class ConnectionPool extends EventEmitter {
         } catch (error) {
             // On error, close the connection and remove from pool
             if (connection) {
+                this.release(connection)
                 await this.closeConnection(connection)
             }
 

@@ -48,6 +48,7 @@ jest.mock("./PeerConnection", () => {
             connectOptions.push(options)
         }
         async send() {
+            if (this.closed) throw new Error("socket closed")
             return Buffer.alloc(0)
         }
         async close() {
@@ -102,6 +103,8 @@ describe("ConnectionPool per-peer limit after an address change", () => {
         const pool = new ConnectionPool({ maxConnectionsPerPeer: 2 })
         const toA: any = await pool.acquire("0xpeer", A)
         const toB: any = await pool.acquire("0xpeer", B)
+        pool.release(toA)
+        pool.release(toB)
         const toC: any = await pool.acquire("0xpeer", C)
         expect(toC.connectionString).toBe(C)
         expect(toA.closed).toBe(true)
@@ -126,6 +129,7 @@ describe("ConnectionPool per-peer limit after an address change", () => {
     it("tracks every connection when two calls race to replace the same one", async () => {
         const pool = new ConnectionPool({ maxConnectionsPerPeer: 1 })
         const toA: any = await pool.acquire("0xpeer", A)
+        pool.release(toA)
         const [first, second] = await Promise.all([
             pool.acquire("0xpeer", B),
             pool.acquire("0xpeer", B),
@@ -134,6 +138,37 @@ describe("ConnectionPool per-peer limit after an address change", () => {
         for (const c of [first, second]) {
             expect(pool.getConnections("0xpeer")).toContain(c)
         }
+        await pool.shutdown?.()
+    })
+
+    it("does not retire a socket a caller has acquired but not yet sent on", async () => {
+        const pool = new ConnectionPool({ maxConnectionsPerPeer: 1 })
+        const toA: any = await pool.acquire("0xpeer", A)
+        pool.release(toA)
+        // The first call reuses toA and resumes only after the second call's
+        // synchronous part ran, so toA is idle when the second one looks.
+        const [sending, replacing] = await Promise.allSettled([
+            pool.send("0xpeer", A, 1, Buffer.from("x")),
+            pool.acquire("0xpeer", B),
+        ])
+        expect(sending.status).toBe("fulfilled")
+        expect(replacing.status).toBe("rejected")
+        expect(String((replacing as PromiseRejectedResult).reason)).toContain(
+            "Max connections to peer",
+        )
+        expect(toA.closed).toBe(false)
+        expect(pool.getConnections("0xpeer")).toEqual([toA])
+        await pool.shutdown?.()
+    })
+
+    it("retires the socket again once its caller released it", async () => {
+        const pool = new ConnectionPool({ maxConnectionsPerPeer: 1 })
+        const toA: any = await pool.acquire("0xpeer", A)
+        await pool.send("0xpeer", A, 1, Buffer.from("x"))
+        pool.release(toA)
+        const toB: any = await pool.acquire("0xpeer", B)
+        expect(toA.closed).toBe(true)
+        expect(pool.getConnections("0xpeer")).toEqual([toB])
         await pool.shutdown?.()
     })
 })
