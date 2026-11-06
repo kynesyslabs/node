@@ -300,9 +300,9 @@ export type StakeApplyChecksConfig = BaseForkConfig
 /**
  * `tokenStakingGate` fork: the validator set is the genesis list until
  * `tokenStaking` opens token staking. A `validatorStake` or
- * `validatorUnstake` transaction, and a stake or unstake edit in a
- * transaction of any type, is refused at RPC intake, at pool admission and
- * at apply.
+ * `validatorUnstake` transaction, and a `validatorStake` edit that stakes,
+ * unstakes or is an exit flagged `isRollback` in a transaction of any type,
+ * is refused at RPC intake, at pool admission and at apply.
  *
  * It refuses what a chain without it accepts, so it is the fork that is
  * scheduled, not the one that opens staking: a genesis that leaves it out
