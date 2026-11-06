@@ -14,7 +14,10 @@ import { chunkedInsert } from "./chainDb"
 import { expectsNonceEdit, verifyAdmissionEdits } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
 import { admissionRefusal } from "./validation/postgresStorable"
-import { checkIdentityAdmission } from "./validation/identityAdmission"
+import {
+    IDENTITY_ADMISSION_TIMEOUT_MS,
+    checkIdentityAdmission,
+} from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
 import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
@@ -1018,7 +1021,13 @@ export default class Mempool {
         // once per merge rather than once per identity transaction.
         {
             const verdicts = await Promise.all(
-                validTransactions.map(tx => checkIdentityAdmission(tx)),
+                validTransactions.map(tx =>
+                    checkIdentityAdmission(
+                        tx,
+                        IDENTITY_ADMISSION_TIMEOUT_MS,
+                        "merge",
+                    ),
+                ),
             )
             const proofChecked: Transaction[] = []
             verdicts.forEach((verdict, i) => {
