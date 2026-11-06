@@ -61,6 +61,12 @@ import {
 } from "./libs/peer/identityLiveness"
 import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+import {
+    diskSpacePath,
+    freeDiskBytes,
+    lowDiskRefusal,
+} from "./utilities/diskSpace"
+import { startSignaling } from "./features/InstantMessagingProtocol/signalingServer/startSignaling"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
 import { genesisFilePath } from "./libs/blockchain/genesis/genesisFile"
@@ -684,7 +690,6 @@ async function preMainLoop() {
  * Performs chain setup, warmup, time calibration, and pre-main-loop initialization; then ensures peer availability, starts the signaling server, optionally starts the MCP server, and initializes the DTR relay retry service when running in production.
  *
  * Side effects:
- * - May call process.exit(1) if the signaling server fails to start.
  * - Sets shared-state flags such as `isSignalingServerStarted` and `isMCPServerStarted`.
  * - Starts background services (MCP server) when configured.
  */
@@ -708,6 +713,15 @@ async function main() {
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
+    }
+
+    const { diskSpacePath: diskPathSetting, minDiskSpace } =
+        Config.getInstance().diagnostics
+    const diskPath = diskSpacePath(diskPathSetting)
+    const diskRefusal = lowDiskRefusal(freeDiskBytes(diskPath), minDiskSpace)
+    if (diskRefusal) {
+        log.error(`[BOOT] Refusing to start: ${diskPath}: ${diskRefusal}`)
+        process.exit(1)
     }
 
     // Before the TUI takes over the terminal, so its banner and the optional
@@ -888,7 +902,7 @@ async function main() {
 
             indexState.metricsServer = metricsServer
             log.info(
-                `[METRICS] Prometheus metrics server started on http://0.0.0.0:${indexState.METRICS_PORT}/metrics`,
+                `[METRICS] Prometheus metrics server started on http://${Config.getInstance().metrics.host}:${indexState.METRICS_PORT}/metrics`,
             )
 
             // REVIEW: Start metrics collector for live data gathering
@@ -963,30 +977,31 @@ async function main() {
         if (indexState.COMMANDLINE_MODE) {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
-        // Starting the signaling server
         bootTracker.start("signaling")
-        indexState.signalingServer = new SignalingServer(
+        const signaling = startSignaling(
+            Config.getInstance().core.signalingEnabled,
             indexState.SIGNALING_SERVER_PORT,
+            port => new SignalingServer(port),
         )
-        if (indexState.signalingServer) {
+        if (signaling.status === "ready") {
+            indexState.signalingServer = signaling.server
             getSharedState.isSignalingServerStarted = true
-            log.info("[NETWORK] Signaling server started")
             bootTracker.ready("signaling")
             markSubsystem(getSharedState.subsystems, "signaling", "ready", {
                 port: indexState.SIGNALING_SERVER_PORT,
             })
+        } else if (signaling.status === "skipped") {
+            bootTracker.skip("signaling", "disabled")
+            markSubsystem(getSharedState.subsystems, "signaling", "skipped", {
+                reason: "SIGNALING_ENABLED=false",
+            })
         } else {
-            log.error("[NETWORK] Failed to start the signaling server")
-            bootTracker.fail(
-                "signaling",
-                new Error("constructor returned null"),
-            )
+            bootTracker.fail("signaling", signaling.error)
             subsystemError(
                 getSharedState.subsystems,
                 "signaling",
-                new Error("constructor returned null"),
+                signaling.error,
             )
-            process.exit(1)
         }
 
         // Start L2PS Messaging server (failsafe)

@@ -49,7 +49,7 @@ cp .env.example .env  # defaults are fine; edit only if you want to override
 
 The image refuses to build without the git commit it is built from. `./run --docker` exports it; to call compose directly, export it first: `export GIT_COMMIT=$(git rev-parse HEAD)`, then `docker compose up`.
 
-Once the stack is healthy: RPC at http://localhost:53550 (try `curl http://localhost:53550/info`) and Grafana at http://localhost:3000 (default `admin` / `demos`).
+Once the stack is healthy: RPC at http://localhost:53550 (try `curl http://localhost:53550/info`) and Grafana at http://localhost:3000 (`admin` / the `GRAFANA_ADMIN_PASSWORD` you set in `.env`).
 
 ### Reverse-proxy mode (Caddy)
 
@@ -118,7 +118,7 @@ This provides linear console output that can be easily piped, searched with grep
 
 ## Monitoring
 
-Prometheus + Grafana are part of the unified compose (default profile). Once `docker compose up` is healthy, Grafana is at http://localhost:3000 (`admin` / `demos`) with pre-provisioned dashboards. Configuration knobs (`GRAFANA_ADMIN_PASSWORD`, `PROMETHEUS_RETENTION`, etc.) live in `.env` — see [INSTALL.md → Track 1](INSTALL.md) for the full list.
+Prometheus + Grafana are part of the unified compose (default profile). Once `docker compose up` is healthy, Grafana is at http://localhost:3000 (`admin` / your `GRAFANA_ADMIN_PASSWORD`, which the monitoring profile requires) with pre-provisioned dashboards. Configuration knobs (`GRAFANA_ADMIN_PASSWORD`, `PROMETHEUS_RETENTION`, etc.) live in `.env` — see [INSTALL.md → Track 1](INSTALL.md) for the full list.
 
 Available node-side metrics (scraped at `node:9090/metrics`):
 

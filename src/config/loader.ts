@@ -7,7 +7,7 @@
 
 import * as dotenv from "dotenv"
 import { EnvKey } from "./envKeys"
-import { parseBoolFlag, parseIntSetting } from "./envFlags"
+import { parseBoolFlag, parseDurationMs, parseIntSetting } from "./envFlags"
 import { DEFAULT_CONFIG } from "./defaults"
 import type { AppConfig, ForkScheduleMismatchPolicy } from "./types"
 import { validateBuildProvenance, validateExposedUrl } from "./nodeUrl"
@@ -188,6 +188,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.core.rateLimitBlockDurationMs,
             ),
             mcpEnabled: envBool(EnvKey.MCP_ENABLED, d.core.mcpEnabled),
+            signalingEnabled: envBool(
+                EnvKey.SIGNALING_ENABLED,
+                d.core.signalingEnabled,
+            ),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
             expectedGenesisHash: envStr(
                 EnvKey.EXPECTED_GENESIS_HASH,
@@ -352,6 +356,10 @@ export function loadConfig(): Readonly<AppConfig> {
             enabled: envBool(EnvKey.METRICS_ENABLED, d.metrics.enabled),
             port: envInt(EnvKey.METRICS_PORT, d.metrics.port),
             host: envStr(EnvKey.METRICS_HOST, d.metrics.host),
+            bearerToken: envStr(
+                EnvKey.METRICS_BEARER_TOKEN,
+                d.metrics.bearerToken,
+            ),
         },
 
         diagnostics: {
@@ -363,6 +371,10 @@ export function loadConfig(): Readonly<AppConfig> {
             minDiskSpace: envFloat(
                 EnvKey.MIN_DISK_SPACE,
                 d.diagnostics.minDiskSpace,
+            ),
+            diskSpacePath: envStr(
+                EnvKey.DISK_SPACE_PATH,
+                d.diagnostics.diskSpacePath,
             ),
             minNetworkDownloadSpeed: envFloat(
                 EnvKey.MIN_NETWORK_DOWNLOAD_SPEED,
@@ -512,10 +524,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.gossip.heightsIntervalMs,
             ),
             keyFile: envStr(EnvKey.GOSSIP_KEY_FILE, d.gossip.keyFile),
-            ipcConnectTimeoutMs: envInt(
-                EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS,
-                d.gossip.ipcConnectTimeoutMs,
-            ),
+            ipcConnectTimeoutMs:
+                parseDurationMs(
+                    process.env[EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS],
+                ) ?? d.gossip.ipcConnectTimeoutMs,
         },
     }
 
@@ -612,7 +624,7 @@ function assertGossipSane(config: AppConfig): void {
     const { ipcConnectTimeoutMs } = config.gossip
     if (!Number.isInteger(ipcConnectTimeoutMs) || ipcConnectTimeoutMs <= 0) {
         throw new Error(
-            `[config] GOSSIP_IPC_CONNECT_TIMEOUT_MS must be an integer > 0 (got ${ipcConnectTimeoutMs})`,
+            `[config] GOSSIP_IPC_CONNECT_TIMEOUT_MS must be an integer > 0 in milliseconds, or a number with ms, s or m (got ${process.env[EnvKey.GOSSIP_IPC_CONNECT_TIMEOUT_MS]})`,
         )
     }
 }

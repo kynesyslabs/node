@@ -37,6 +37,7 @@ import { gcrWriteMutex } from "./gcr/gcrWriteMutex"
 import type { PendingGCRWrite } from "./gcr/handleGCR"
 import type { FindManyOptions } from "typeorm"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import { countIncludedTransactions } from "@/features/metrics/consensusMetrics"
 import {
     blockRowRefusal,
     withStorableText,
@@ -580,6 +581,8 @@ export async function insertBlock(
                 throw new CommittedBlockFollowUpError(block.number, error)
             }
         }
+
+        countIncludedTransactions(transactionEntities)
 
         if (block.number > getSharedState.lastBlockNumber) {
             getSharedState.lastBlockNumber = block.number

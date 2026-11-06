@@ -88,6 +88,9 @@ export const DEFAULT_CONFIG: AppConfig = {
         // Opt-in via MCP_ENABLED=true after reading docs/runbooks/mcp-security.md.
         // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mcpEnabled: false,
+        // On by default: compose publishes 3005 and the proxy routes
+        // /signaling/ to it, so existing deployments expect it running.
+        signalingEnabled: true,
         restore: false,
         expectedGenesisHash: "",
         expectedGenesisBlockHash: "",
@@ -155,13 +158,19 @@ export const DEFAULT_CONFIG: AppConfig = {
     metrics: {
         enabled: true,
         port: 9090,
-        host: "0.0.0.0",
+        // Loopback by default: /metrics has no authentication. Compose pins
+        // METRICS_HOST=0.0.0.0 inside the container and controls host
+        // exposure with METRICS_BIND; bare-metal operators opt in explicitly.
+        host: "127.0.0.1",
+        bearerToken: "",
     },
 
     diagnostics: {
         minCpuSpeed: 0,
         minRam: 0,
-        minDiskSpace: 0,
+        // GiB the node needs free to start; 0 turns the check off.
+        minDiskSpace: 5,
+        diskSpacePath: "",
         minNetworkDownloadSpeed: 0,
         minNetworkUploadSpeed: 0,
         networkTestFileSize: 0,
