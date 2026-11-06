@@ -1,0 +1,111 @@
+{
+  "id": "F01",
+  "kind": "positive (observational)",
+  "issues": [
+    "kynesyslabs/node#1059 (U-01)"
+  ],
+  "captured_by": "PATH-OS testnet soak (tools/demos_testnet_soak.py), lane S159",
+  "capture_form": "reduced telemetry; the soak never stores raw response bodies by design, so each response is recorded as parsed fields only",
+  "requests": {
+    "height": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getLastBlockNumber",
+            "data": {},
+            "muid": "testnet-soak-read"
+          }
+        ]
+      }
+    },
+    "info": {
+      "method": "GET",
+      "url": "https://demosnode.discus.sh/info"
+    }
+  },
+  "response_parsing": {
+    "height": "body.result must be 200; height = integer(body.response)",
+    "info": "height = integer(blockHeight), else the own-identity peerlist entry sync.block; finalized height = integer(finalizedHeight) if present; version = version if present",
+    "presence_caveat": "integer() returns null for a missing key, an explicit null, a string or a negative/unsafe number alike, so finalized_height_parsed=false does not establish that the key was absent; raw responses and key-presence flags were not saved"
+  },
+  "samples": [
+    {
+      "observed_at_utc": "2026-10-14T02:53:11.713972Z",
+      "kind": "height",
+      "ok": true,
+      "height": 527889,
+      "finalized_height_parsed": false,
+      "version_field_parsed": false,
+      "latency_ms": 815.22
+    },
+    {
+      "observed_at_utc": "2026-10-14T02:53:22.233901Z",
+      "kind": "info",
+      "ok": true,
+      "height": 527890,
+      "finalized_height_parsed": false,
+      "version_field_parsed": false,
+      "latency_ms": 515.87
+    },
+    {
+      "observed_at_utc": "2026-10-14T02:53:32.764065Z",
+      "kind": "height",
+      "ok": true,
+      "height": 527891,
+      "finalized_height_parsed": false,
+      "version_field_parsed": false,
+      "latency_ms": 527.54
+    },
+    {
+      "observed_at_utc": "2026-10-14T02:53:43.274428Z",
+      "kind": "info",
+      "ok": true,
+      "height": 527892,
+      "finalized_height_parsed": false,
+      "version_field_parsed": false,
+      "latency_ms": 506.95
+    },
+    {
+      "observed_at_utc": "2026-10-14T02:53:54.046915Z",
+      "kind": "height",
+      "ok": true,
+      "height": 527893,
+      "finalized_height_parsed": false,
+      "version_field_parsed": false,
+      "latency_ms": 768.52
+    },
+    {
+      "observed_at_utc": "2026-10-14T02:54:05.288992Z",
+      "kind": "info",
+      "ok": true,
+      "height": 527895,
+      "finalized_height_parsed": false,
+      "version_field_parsed": false,
+      "latency_ms": 1238.89
+    }
+  ],
+  "derived": {
+    "samples": 6,
+    "successes": 6,
+    "height_first": 527889,
+    "height_last": 527895,
+    "blocks_per_second_observed": 0.094489,
+    "finality_observations": 0
+  },
+  "shows": [
+    "the head height advanced from 527889 to 527895 over about 54 s on 2026-10-14 02:53-02:54Z",
+    "None of three successful info samples retained a parseable non-negative safe-integer finalized height. Raw responses and key-presence flags were not saved, so field absence is not established."
+  ],
+  "does_not_show": [
+    "the retained height telemetry contains no consensus timestamp or head-age evidence",
+    "any signed or finality data",
+    "executed status of any transaction",
+    "whether a finalizedHeight key was present in any response"
+  ]
+}
