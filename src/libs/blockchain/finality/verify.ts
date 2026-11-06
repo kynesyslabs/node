@@ -35,6 +35,7 @@ import {
     type SparseTerminal,
 } from "src/libs/crypto/merkle/sparse"
 import Hashing from "src/libs/crypto/hashing"
+import { serializeTxContent, wireAmount } from "src/libs/crypto/txContentSerializer"
 import type { ValidatorSetEntry } from "src/model/entities/ValidatorSetSnapshots"
 import {
     storageProgramKey,
@@ -55,7 +56,18 @@ export interface SignedHeader extends BlockBytes {
     signatures: Record<string, string>
 }
 
-/** getTransactionProof's answer. */
+/**
+ * The transaction as getTransactionProof serves it: `contentBytes` is the
+ * exact text its hash is the sha256 of.
+ */
+export interface TransactionBytes {
+    hash: string
+    contentBytes: string
+    signature?: { type: string; data: string } | null
+    ed25519_signature?: string | null
+}
+
+/** getTransactionProof's answer. `tx` is absent from older nodes. */
 export interface TransactionProof {
     hash: string
     blockNumber: number
@@ -66,6 +78,19 @@ export interface TransactionProof {
     committedIn: number
     inclusionBlock: BlockBytes
     commitBlock: SignedHeader
+    tx?: TransactionBytes
+}
+
+/**
+ * What the client expects the transaction to be. Addresses compare without
+ * case or 0x; amount and nonce compare as the integers the signed content
+ * carries (amount in OS once osDenomination applies, a DEM number before).
+ */
+export interface ExpectedTransaction {
+    from?: string
+    to?: string
+    amount?: bigint | number | string
+    nonce?: bigint | number | string
 }
 
 export interface StorageProofEntry {
@@ -132,6 +157,8 @@ export type TransactionVerdict =
 export interface TransactionVerification {
     verdict: TransactionVerdict
     reason?: string
+    /** The signed transaction content, when the proof carries it. */
+    content?: Record<string, unknown>
 }
 
 export interface StorageVerification {
@@ -378,6 +405,168 @@ function readLeaf(proof: TransactionProof): { status: "confirmed" | "failed" } {
     throw invalid(`the leaf has status ${JSON.stringify(leaf.status)} with code ${JSON.stringify(leaf.code)}`)
 }
 
+/** One canonical spelling of an integer amount or nonce, or null. */
+function quantityText(value: unknown): string | null {
+    if (typeof value === "bigint") return value.toString()
+    if (typeof value === "number") {
+        if (!Number.isFinite(value)) return null
+        // Past 2^53 the number is no longer the integer that was signed.
+        if (Number.isInteger(value) && !Number.isSafeInteger(value)) return null
+        return String(value)
+    }
+    if (typeof value === "string") {
+        const text = value.trim()
+        if (/^-?\d+$/.test(text)) return BigInt(text).toString()
+        const n = Number(text)
+        return text !== "" && Number.isFinite(n) && !Number.isInteger(n) ? String(n) : null
+    }
+    return null
+}
+
+const addressText = (value: unknown): string | null =>
+    typeof value === "string" && value.length > 0 ? stripHex(value) : null
+
+const EXPECTED_FIELDS: { field: keyof ExpectedTransaction; read: (value: unknown) => string | null }[] = [
+    { field: "from", read: addressText },
+    { field: "to", read: addressText },
+    { field: "amount", read: quantityText },
+    { field: "nonce", read: quantityText },
+]
+
+interface NativeSend {
+    to: unknown
+    amount: unknown
+}
+
+/**
+ * Whether the bytes are the osDenomination serialization: that one is a
+ * fixed point of itself, while the older plain JSON keeps amounts as DEM
+ * numbers the serializer would rewrite.
+ */
+function osDenominationShape(content: Record<string, unknown>, contentBytes: string): boolean {
+    try {
+        return serializeTxContent(content as never, true) === contentBytes
+    } catch {
+        return false
+    }
+}
+
+/**
+ * The send a native transaction makes, or null for any other transaction.
+ * Its balance edits are built from `data[1].args`, never from the top-level
+ * `to` and `amount`, so a payment is judged by the args. The serializer
+ * leaves the args as signed (a number is DEM once osDenomination applies)
+ * while it puts the top-level amount and the edits in the wire shape, so the
+ * amount is brought to that shape as edit binding does.
+ */
+function nativeSend(content: Record<string, unknown>, contentBytes: string): NativeSend | null {
+    if (content.type !== "native" || !Array.isArray(content.data)) return null
+    const payload = content.data[1] as { nativeOperation?: unknown; args?: unknown } | undefined
+    if (!payload || typeof payload !== "object" || payload.nativeOperation !== "send") return null
+    if (!Array.isArray(payload.args)) throw invalid("the native send carries no args")
+    let amount: unknown
+    try {
+        amount = wireAmount(payload.args[1], osDenominationShape(content, contentBytes))
+    } catch {
+        throw invalid(`the native send's amount ${JSON.stringify(payload.args[1] ?? null)} is not an amount`)
+    }
+    return { to: payload.args[0], amount }
+}
+
+/** A send whose top-level fields name another payment than it makes is forged. */
+function requireTopLevelAgrees(content: Record<string, unknown>, send: NativeSend): void {
+    for (const [field, read] of [["to", addressText], ["amount", quantityText]] as const) {
+        const top = content[field]
+        if (top !== undefined && top !== null && read(top) !== read(send[field])) {
+            throw invalid(
+                `the transaction's top-level ${field} ${JSON.stringify(top)} is not the ${JSON.stringify(send[field] ?? null)} its send pays`,
+            )
+        }
+    }
+}
+
+/**
+ * The shipped edits are what apply runs, so the send must carry a balance
+ * credit of its amount to its recipient.
+ */
+function requirePaidEdit(content: Record<string, unknown>, send: NativeSend): void {
+    const to = addressText(send.to)
+    const amount = quantityText(send.amount)
+    const edits = Array.isArray(content.gcr_edits) ? (content.gcr_edits as unknown[]) : []
+    const paid = edits.some(raw => {
+        const edit = raw as Record<string, unknown> | null
+        return (
+            !!edit &&
+            edit.type === "balance" &&
+            edit.operation === "add" &&
+            edit.isRollback !== true &&
+            to !== null &&
+            addressText(edit.account) === to &&
+            amount !== null &&
+            quantityText(edit.amount) === amount
+        )
+    })
+    if (!paid) {
+        throw invalid(`the transaction's balance edits do not credit ${JSON.stringify(send.amount ?? null)} to ${JSON.stringify(send.to ?? null)}`)
+    }
+}
+
+/**
+ * The content of the transaction the proof is about, checked against what
+ * the client expects. The hash binds the bytes to the leaf the quorum
+ * signed over, so the fields are read from those bytes only. For a native
+ * send, `to` and `amount` are the recipient and amount it pays: the top-level
+ * fields, where present, must agree with them, and its edits must credit
+ * them.
+ */
+function readContent(
+    proof: TransactionProof,
+    expected: ExpectedTransaction | undefined,
+): Record<string, unknown> | undefined {
+    const wanted = EXPECTED_FIELDS.filter(({ field }) => expected?.[field] !== undefined)
+    const tx = proof.tx
+    if (tx === undefined || tx === null) {
+        if (wanted.length === 0) return undefined
+        throw new Rejection(
+            "indeterminate",
+            `the proof carries no transaction content to check ${wanted.map(w => w.field).join(", ")} against`,
+        )
+    }
+    if (typeof tx !== "object" || typeof tx.contentBytes !== "string") {
+        throw invalid("the transaction carries no content bytes")
+    }
+    if (tx.hash !== undefined && (typeof tx.hash !== "string" || stripHex(tx.hash) !== proof.hash)) {
+        throw invalid("the transaction served is not the one proven")
+    }
+    if (Hashing.sha256(tx.contentBytes) !== proof.hash) {
+        throw invalid(`the transaction content does not hash to ${proof.hash}`)
+    }
+    let parsed: unknown
+    try {
+        parsed = JSON.parse(tx.contentBytes)
+    } catch {
+        throw invalid("the transaction content is not JSON")
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw invalid("the transaction content is not an object")
+    }
+    const content = parsed as Record<string, unknown>
+    const paymentWanted = wanted.some(({ field }) => field === "to" || field === "amount")
+    const send = paymentWanted ? nativeSend(content, tx.contentBytes) : null
+    if (send) requireTopLevelAgrees(content, send)
+    for (const { field, read } of wanted) {
+        const shown = JSON.stringify(String(expected![field]))
+        const want = read(expected![field])
+        if (want === null) throw invalid(`the expected ${field} ${shown} is not comparable`)
+        const actual = send && (field === "to" || field === "amount") ? send[field] : content[field]
+        if (read(actual) !== want) {
+            throw invalid(`the transaction's ${field} is ${JSON.stringify(actual ?? null)}, expected ${shown}`)
+        }
+    }
+    if (send) requirePaidEdit(content, send)
+    return content
+}
+
 function run<T extends { verdict: string; reason?: string }>(
     work: () => T,
 ): T | { verdict: "invalid" | "indeterminate"; reason: string } {
@@ -393,11 +582,19 @@ function run<T extends { verdict: string; reason?: string }>(
  * Whether `proof` shows its transaction executed or failed in a final block.
  * The tree size is read from block m's signed `ordered_transactions`, never
  * from the prover: an RFC 6962 root does not commit to it.
+ *
+ * When the proof carries the transaction, its bytes must hash to the proven
+ * hash and the verdict returns the content read from them; each field of
+ * `expected` must then match it. For a native send, `to` and `amount` are
+ * what the send pays (its args, credited by its balance edits); for other
+ * types they are the top-level fields. Expecting a field of a proof without
+ * the transaction gives "indeterminate".
  */
 export function verifyTransactionProof(
     proof: TransactionProof,
     trusted: TrustedValidatorSet,
     rules: CommitteeRules,
+    expected?: ExpectedTransaction,
 ): TransactionVerification {
     return run(() => {
         if (!proof || typeof proof !== "object") throw invalid("no proof")
@@ -432,7 +629,9 @@ export function verifyTransactionProof(
         }
 
         checkQuorum(proof.commitBlock, signerPool(parent, trusted, rules), rules)
-        return { verdict: status === "confirmed" ? "final-executed" : "final-failed" }
+        const content = readContent(proof, expected)
+        const verdict: TransactionVerdict = status === "confirmed" ? "final-executed" : "final-failed"
+        return content ? { verdict, content } : { verdict }
     })
 }
 

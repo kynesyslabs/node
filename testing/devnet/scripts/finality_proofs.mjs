@@ -10,8 +10,12 @@
  *     m+1's parent_results_root with the tree size taken from block m, and
  *     block m+1 carries ed25519 precommits from 2/3 + 1 of the shard (3 of
  *     4) in its signer pool (peerlist of m within the set m commits);
+ *   - the proof carries the transaction: its content bytes hash to the
+ *     proven hash, and node-2 serves the same bytes;
  *   - the same proof tampered (flipped leaf, wrong tree size, a dropped
  *     signature below the quorum) is rejected, so the checks are not vacuous;
+ *   - getChainIdentity answers the same chain id and genesis on both nodes,
+ *     and its genesis hash is block 0's;
  *   - getStorageProof for the storage program and for an address never
  *     created: the sparse Merkle path of each verifies against the anchor's
  *     native_storage_programs, and the anchor carries a quorum;
@@ -236,14 +240,18 @@ for (const [label, hash, status, code] of [
     const leaf = JSON.parse(proof.leaf)
     check(leaf.status === status && leaf.code === code, `${label}: leaf commits status ${status}`, proof.leaf)
 
+    const content = proof.tx?.contentBytes
+    check(typeof content === "string" && sha256Hex(content) === hash, `${label}: the served transaction bytes hash to the proven hash`, String(proof.tx?.hash))
+
     const status2 = await nodeCall(urls[0], "getTransactionStatus", { hash })
     check(status2.response?.resultCommittedInBlock === proof.committedIn, `${label}: getTransactionStatus names the committing block`, JSON.stringify(status2.response))
 
     const other = await nodeCall(urls[1], "getTransactionProof", { hash })
     check(
         other.result === 200 && other.response.leaf === proof.leaf && other.response.commitBlock.hash === proof.commitBlock.hash &&
-            JSON.stringify(other.response.auditPath) === JSON.stringify(proof.auditPath),
-        `${label}: node-2 serves the same leaf, path and committing block`,
+            JSON.stringify(other.response.auditPath) === JSON.stringify(proof.auditPath) &&
+            other.response.tx?.contentBytes === content,
+        `${label}: node-2 serves the same leaf, path, committing block and transaction bytes`,
     )
 
     if (label === "failed") {
@@ -351,6 +359,16 @@ for (const { label, block, answer } of headAnswers) {
     if (answer.result === 200 && answer.response.anchor.number === block) headWrote++
 }
 check(headWrote > 0, "a head proof was served while the head block itself wrote the program", `${headWrote} of ${headAnswers.length}`)
+
+const identities = await Promise.all(urls.slice(0, 2).map(url => nodeCall(url, "getChainIdentity", {})))
+const block0 = await nodeCall(urls[0], "getBlockByNumber", { blockNumber: "0" })
+check(
+    identities.every(a => a.result === 200) &&
+        JSON.stringify(identities[0].response) === JSON.stringify(identities[1].response) &&
+        identities[0].response.genesisHash === block0.response?.hash,
+    "getChainIdentity: both nodes answer the same chain id and genesis, and the genesis hash is block 0's",
+    JSON.stringify(identities.map(a => a.response)),
+)
 
 const limits = await nodeCall(urls[0], "getStorageProgramLimits", {})
 const HISTORY_BLOCKS = limits.response?.historyBlocks
