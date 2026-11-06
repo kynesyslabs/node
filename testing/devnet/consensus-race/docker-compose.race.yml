@@ -43,8 +43,11 @@ x-node: &node
   # A node that cannot pair with the anchor at a cold boot exits with code 0;
   # it is restarted until the mesh forms. `down -v` stops it regardless.
   restart: unless-stopped
+  # Docker creates a tmpfs root-owned: it is mounted owned by the image's user
+  # (uid 1000 in the release image, root in the devnet image), which run.sh
+  # reads from the image, as quorum-drills does. Mode 0700: it holds the identity.
   tmpfs:
-    - /app/state
+    - /app/state:uid=${IMAGE_UID},gid=${IMAGE_GID},mode=0700
   depends_on:
     postgres:
       condition: service_healthy

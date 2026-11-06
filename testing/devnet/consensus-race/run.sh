@@ -127,6 +127,14 @@ for img in "${IMAGE}" "${NETSHOOT_IMAGE}" postgres:16-alpine; do
     docker image inspect "${img}" >/dev/null 2>&1 || abort_pre "image ${img} is not present locally"
 done
 IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
+# The image's user (uid 1000 in the release image, root in the devnet image),
+# read from the image as ../quorum-drills/run.sh does: the node tmpfs is
+# mounted owned by it (docker-compose.race.yml), since Docker creates it
+# root-owned and a node running as uid 1000 could not write its state there
+IMAGE_UID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE}" -u 2>/dev/null)
+IMAGE_GID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE}" -g 2>/dev/null)
+[[ "${IMAGE_UID}" =~ ^[0-9]+$ && "${IMAGE_GID}" =~ ^[0-9]+$ ]] ||
+    abort_pre "could not read the user of ${IMAGE} (id -u '${IMAGE_UID}', id -g '${IMAGE_GID}')"
 CODE="image"
 [ -n "${SRC_TREE}" ] && CODE="src:${SRC_TREE}@$(git -C "${SRC_TREE}" rev-parse --short HEAD 2>/dev/null || echo '?')$(git -C "${SRC_TREE}" diff --quiet HEAD -- src 2>/dev/null || echo '+dirty')"
 say "mode=${MODE} label=${LABEL} image=${IMAGE} (${IMAGE_ID:7:12}) code=${CODE}"
@@ -174,6 +182,8 @@ RUN_DIR=${RUN_DIR}
 SRC_TREE=${SRC_TREE:-/nonexistent}
 CONSENSUS_TIME=${CONSENSUS_TIME}
 NODE_MEM=${NODE_MEM}
+IMAGE_UID=${IMAGE_UID}
+IMAGE_GID=${IMAGE_GID}
 EOF
 
 # ── 3. staggered bring-up ───────────────────────────────────────────────

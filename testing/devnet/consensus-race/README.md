@@ -82,8 +82,13 @@ run. `runs/results.tsv` collects one row per run.
 
 The compose project is unique per run (`crace-<run id>`), there are no
 `container_name`s, no published ports (the harness uses `docker exec`), and
-postgres and the nodes' state dirs are on tmpfs: no named volumes. Memory
-caps: 2 GB per node (`NODE_MEM`), 1 GB postgres, 64 MB per sidecar. A trap
+postgres and the nodes' state dirs are on tmpfs: no named volumes. Docker
+creates a tmpfs root-owned, and the node runs as the image's user (uid 1000
+in the release image), so `run.sh` reads that uid and gid from the image
+(`id -u`, `id -g` in a throwaway container; the preflight aborts if it
+cannot) and the compose file mounts `/app/state` as
+`/app/state:uid=<uid>,gid=<gid>,mode=0700`, as `../quorum-drills/` does.
+Memory caps: 2 GB per node (`NODE_MEM`), 1 GB postgres, 64 MB per sidecar. A trap
 collects logs, removes the sidecars and runs `docker compose down -v` on any
 exit, including Ctrl-C. Only containers the run started are touched.
 
