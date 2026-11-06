@@ -862,9 +862,14 @@ export default class Mempool {
 
     public static async receive(incoming: Transaction[], returnDiff = true) {
         if (incoming.length === 0) {
+            // Nothing to merge, but a member with an empty pool, or one
+            // asking for the next page of ours, still gets our pool back.
+            if (!returnDiff) return { success: true, mempool: [] }
+            const blockNumber = SecretaryManager.lastBlockRef
+            const pool = await this.getMempool(blockNumber)
             return {
                 success: true,
-                mempool: [],
+                mempool: pool.filter(tx => tx.blockNumber === blockNumber),
             }
         }
 

@@ -224,6 +224,21 @@ describe("Mempool.receive admission", () => {
         expect(insertedRows).toHaveLength(0)
     })
 
+    it("answers an empty request with the pool it holds for the round", async () => {
+        // A member with an empty pool, or one asking for the next page of
+        // ours, sends no txs and still needs ours back.
+        mempoolRows = [tx("0xa", 100), { ...tx("0xnext", 100), blockNumber: 101 }]
+        const res = await Mempool.receive([])
+        expect(res.success).toBe(true)
+        expect(res.mempool.map(t => t.hash)).toEqual(["0xa"])
+        expect(insertedRows).toHaveLength(0)
+    })
+
+    it("answers an empty request with nothing when no diff is wanted", async () => {
+        mempoolRows = [tx("0xa", 100)]
+        expect((await Mempool.receive([], false)).mempool).toEqual([])
+    })
+
     it("drops a tx admission would refuse before the chain is queried by its hash", async () => {
         // Postgres refuses U+0000 in the lookup's parameter, which would fail
         // the whole merge rather than this tx.
