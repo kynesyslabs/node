@@ -773,7 +773,9 @@ RESULTS_LOCK_WAIT_S=30
 # Verdict, written after the scenario or when a window cannot be judged. This
 # run's row goes into results.tsv first: a row that cannot be added (no lock
 # within RESULTS_LOCK_WAIT_S, or a failed write) makes verdict.json ERROR, with
-# why and what the result was, and the exit 2, results.tsv left as it is. No
+# why and what the result was, and the exit 2. With no lock results.tsv is not
+# touched; a write that fails part way (a full disk on a first run, after the
+# header line, for example) can leave a header or a partial row in it. No
 # result stands that results.tsv does not show.
 write_verdict() {
     step 05-verdict

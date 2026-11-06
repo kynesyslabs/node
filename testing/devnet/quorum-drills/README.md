@@ -119,10 +119,11 @@ crashed node must not pass for a stalled one, and neither may a run in which
 Postgres ran out of connections (see "Postgres connections"). Each run with a verdict
 appends a row to `runs/results.tsv`, under a lock other runs take too (see
 "Postgres connections", Backstop), before it writes `verdict.json`. A row
-that cannot be added (no lock within 30 s, or a write that fails) leaves
-`results.tsv` as it is and makes the verdict `ERROR`, exit 2: `could not
+that cannot be added makes the verdict `ERROR`, exit 2: `could not
 record the verdict: no row added to .../results.tsv (why); the result was
-PASS (detail)`. Log-line counts (floor refusals,
+PASS (detail)`. With no lock within 30 s the table is not touched; a write
+that fails part way (a full disk on a first run, after the header line, for
+example) can leave a header or a partial row in it. Log-line counts (floor refusals,
 fallback lines) only take lines logged in the window being judged, and a
 node log such a count cannot read to the end (a docker error, no answer
 within `LOG_READ_TIMEOUT_S`, see [Tuning](#tuning), or a `sed` or `grep`
