@@ -1,7 +1,9 @@
 /**
  * The `canonicalSigners` fork ships dormant: until a height is pinned,
  * block signatures count as they always did, and a dormant entry leaves the
- * fork schedule peers compare unchanged. A launch genesis sets it to 0.
+ * fork schedule peers compare unchanged. A new chain may schedule it at
+ * height 0 explicitly; the mainnet template leaves it dormant until it is
+ * scheduled.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"

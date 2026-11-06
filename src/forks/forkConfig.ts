@@ -435,8 +435,9 @@ export type BlockCapsConfig = BaseForkConfig
  *
  * Activation at H applies to block H and later. Dormant by default
  * (`activationHeight: null`), so a node carrying the code counts exactly
- * as one without it; a chain started from genesis with this build sets it
- * to 0. No payload beyond the base.
+ * as one without it. A new chain may schedule it at height 0 explicitly;
+ * the mainnet genesis template leaves it dormant until it is scheduled.
+ * No payload beyond the base.
  */
 export type CanonicalSignersConfig = BaseForkConfig
 
