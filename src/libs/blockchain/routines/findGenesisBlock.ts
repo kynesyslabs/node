@@ -231,6 +231,7 @@ export default async function findGenesisBlock() {
             restore: Config.getInstance().core.restore,
             snapshotManifestHash: await snapshotManifestHash(),
             carryoverAtGenesis: identityCarryoverActiveAtGenesis(),
+            blockPin,
         }),
     )
     if (pin !== "") {

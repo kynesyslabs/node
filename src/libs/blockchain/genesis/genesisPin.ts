@@ -178,6 +178,8 @@ export interface FreshGenesisInput {
     snapshotManifestHash: string | null
     /** identityCarryover is scheduled at height 0. */
     carryoverAtGenesis?: boolean
+    /** Normalized EXPECTED_GENESIS_BLOCK_HASH, "" when none. */
+    blockPin?: string
 }
 
 /**
@@ -207,6 +209,20 @@ export function freshGenesisProblems(input: FreshGenesisInput): string[] {
         problems.push(
             "identityCarryover is active at genesis but the genesis does not declare " +
                 "snapshot.manifestSha256",
+        )
+    }
+
+    // Block 0 commits to the genesis file, and through it to a declared
+    // manifest only: a block pin alone does not bind an undeclared snapshot.
+    if (
+        declared === null &&
+        input.snapshotManifestHash !== null &&
+        input.pin === "" &&
+        (input.blockPin ?? "") !== ""
+    ) {
+        problems.push(
+            "a snapshot is present but the genesis does not declare snapshot.manifestSha256, " +
+                "so EXPECTED_GENESIS_BLOCK_HASH does not bind it",
         )
     }
 

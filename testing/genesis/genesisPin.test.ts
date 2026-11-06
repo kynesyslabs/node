@@ -204,6 +204,27 @@ describe("freshGenesisProblems", () => {
         ).toEqual([])
     })
 
+    it("refuses an undeclared snapshot when only block 0 is pinned", () => {
+        const { snapshot: _s, ...unbound } = genesis
+        const problems = freshGenesisProblems({
+            ...ok,
+            genesisData: unbound,
+            pin: "",
+            blockPin: "cd".repeat(32),
+        })
+        expect(problems.join()).toContain("EXPECTED_GENESIS_BLOCK_HASH does not bind it")
+        // No snapshot on disk: nothing is left unbound
+        expect(
+            freshGenesisProblems({
+                ...ok,
+                genesisData: unbound,
+                pin: "",
+                blockPin: "cd".repeat(32),
+                snapshotManifestHash: null,
+            }),
+        ).toEqual([])
+    })
+
     it("refuses a malformed snapshot declaration", () => {
         expect(() => declaredManifestHash({ snapshot: { manifestSha256: "x" } })).toThrow(
             GenesisRefusal,
