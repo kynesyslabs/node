@@ -76,6 +76,16 @@ jest.mock("src/libs/blockchain/chainDb", () => ({
     chunkedInsert: jest.fn(
         async (_repo: unknown, _entity: unknown, rows: Array<Record<string, unknown>>) => {
             insertedRows.push(...rows)
+            // Inserted rows join the pool the per-sender cap reads.
+            for (const row of rows as any[]) {
+                if (typeof row.content?.from === "string") {
+                    heldBySender.push({
+                        hash: row.hash,
+                        sender: row.content.from.toLowerCase(),
+                        nonce: String(row.content.nonce),
+                    })
+                }
+            }
             return { inserted: rows.length }
         },
     ),
@@ -117,9 +127,17 @@ function resetReceiveState() {
     deletedHashes = []
     ;(Mempool as any).repo = {
         find: jest.fn(async () => mempoolRows),
-        query: jest.fn(async () => heldBySender),
+        query: jest.fn(async () => {
+            // A read that takes time, as a database round trip does.
+            const snapshot = [...heldBySender]
+            await new Promise(resolve => setTimeout(resolve, 5))
+            return snapshot
+        }),
         delete: jest.fn(async (where: { hash: { value: string[] } }) => {
             deletedHashes.push(...where.hash.value)
+            heldBySender = heldBySender.filter(
+                row => !where.hash.value.includes(row.hash),
+            )
             return { affected: where.hash.value.length }
         }),
     }
@@ -260,6 +278,18 @@ describe("Mempool.receive per-sender cap", () => {
         // 0xlow outranks the held nonce 73, which leaves; 0xhigh does not fit.
         expect(insertedRows.map(r => r.hash)).toEqual(["0xlow"])
         expect(deletedHashes).toEqual(["0xheld63"])
+    })
+
+    it("keeps the sender cap when two merge exchanges overlap", async () => {
+        blockCapsOn = true
+        heldBySender = fullHold().slice(0, 63)
+        await Promise.all([
+            Mempool.receive([fromSender("0xa", 100)]),
+            Mempool.receive([fromSender("0xb", 101)]),
+        ])
+        // Handled one after the other, the higher nonce gives way.
+        expect(heldBySender).toHaveLength(64)
+        expect(heldBySender.some(row => row.hash === "0xb")).toBe(false)
     })
 
     it("leaves the merge uncapped before the fork", async () => {
