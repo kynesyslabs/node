@@ -24,6 +24,8 @@ import {
     GenesisRefusal,
     blockPinProblem,
     chainIdOf,
+    defaultTreasuryWarning,
+    genesisScheduleProblems,
     freshGenesisProblems,
     parseGenesisPin,
     parseStoredGenesisData,
@@ -178,6 +180,15 @@ export default async function findGenesisBlock() {
         // Without a file only block 0 says which chain this is
         const storedPinProblem = pinRequirementProblem(pin, process.env, chainIdOf(stored))
         if (storedPinProblem) refuse([storedPinProblem])
+        refuse(
+            genesisScheduleProblems({
+                fileGenesisData: hasGenesisFile ? readGenesisFile() : null,
+                storedGenesisData: stored,
+                pin,
+                blockPin,
+            }),
+        )
+        warnDefaultTreasury(hasGenesisFile ? readGenesisFile() : stored)
         // Without a file the fork loader never ran, so its chain id check did not either
         if (!hasGenesisFile && isForkMachineryDisabled()) {
             refuseDisabledForkMachineryOutsideTestChains(stored)
@@ -224,6 +235,8 @@ export default async function findGenesisBlock() {
 
     // Everything is checked before the first write: a refused node must leave
     // an empty database, or its next boot finds a block 0 and trusts it.
+    refuse(genesisScheduleProblems({ fileGenesisData: genesisData, pin, blockPin }))
+    warnDefaultTreasury(genesisData)
     refuse(
         freshGenesisProblems({
             genesisData,
@@ -269,6 +282,11 @@ function currentSchedule() {
         getSharedState.forkConfig as unknown as ForkConfigLike,
         getSharedState.chainId,
     )
+}
+
+function warnDefaultTreasury(genesisData: unknown): void {
+    const warning = defaultTreasuryWarning(genesisData)
+    if (warning) log.warning(`[FORKS] ${warning}`)
 }
 
 function refuse(problems: string[]): void {

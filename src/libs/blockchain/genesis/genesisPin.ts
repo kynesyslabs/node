@@ -278,6 +278,94 @@ export function freshGenesisProblems(input: FreshGenesisInput): string[] {
     return problems
 }
 
+export interface GenesisScheduleInput {
+    /** The genesis file as read, or null when there is none. */
+    fileGenesisData: unknown
+    /** Block 0's genesis on a restart. */
+    storedGenesisData?: unknown
+    /** Normalized pins, "" when none. */
+    pin: string
+    blockPin: string
+}
+
+const KNOWN_FORKS = Object.keys(DEFAULT_FORK_CONFIG)
+
+function declaresHeight(forks: Record<string, unknown>, name: string): boolean {
+    const entry = forks[name]
+    return (
+        Object.hasOwn(forks, name) &&
+        entry !== null &&
+        typeof entry === "object" &&
+        Object.hasOwn(entry, "activationHeight")
+    )
+}
+
+/**
+ * Problems with the fork schedule a node is about to run. A missing file or
+ * `forks` field, or an undeclared fork, takes this build's defaults, which can
+ * change between releases while the network's schedule cannot. On a test
+ * network without pins that stays allowed; a pinned node must have a file
+ * and a schedule, and a mainnet chain id must declare every fork this build
+ * knows.
+ */
+export function genesisScheduleProblems(input: GenesisScheduleInput): string[] {
+    const mainnet =
+        isMainnetChainId(chainIdOf(input.fileGenesisData)) ||
+        isMainnetChainId(chainIdOf(input.storedGenesisData))
+    const pinned = input.pin !== "" || input.blockPin !== ""
+    if (!mainnet && !pinned) return []
+
+    const why = mainnet ? "the chain id is not a test network's" : "the genesis is pinned"
+    if (input.fileGenesisData === null || input.fileGenesisData === undefined) {
+        return [
+            `no genesis file, and ${why}: the node would run with this build's default ` +
+                "fork schedule instead of the network's. Mount the network's genesis file",
+        ]
+    }
+    const forks = (input.fileGenesisData as Record<string, unknown>).forks
+    if (forks === null || typeof forks !== "object" || Array.isArray(forks)) {
+        return [
+            `the genesis declares no fork schedule (forks), and ${why}: the node would run ` +
+                "with this build's defaults",
+        ]
+    }
+    if (!mainnet) return []
+    const undeclared = KNOWN_FORKS.filter(
+        name => !declaresHeight(forks as Record<string, unknown>, name),
+    )
+    if (undeclared.length === 0) return []
+    return [
+        `the genesis does not declare ${undeclared.join(", ")}: on a mainnet chain id every ` +
+            "fork this build knows needs an activationHeight (a height or null), or it takes " +
+            "this build's default" +
+            (undeclared.includes("gasFeeSeparation")
+                ? "; gasFeeSeparation would pay the treasury share to the built-in address"
+                : ""),
+    ]
+}
+
+/**
+ * The warning for a genesis that leaves gasFeeSeparation to the default, which
+ * is scheduled with a treasury address the code names, not the network.
+ */
+export function defaultTreasuryWarning(genesisData: unknown): string | null {
+    const forks = (genesisData as Record<string, unknown> | null)?.forks
+    if (
+        forks !== null &&
+        typeof forks === "object" &&
+        declaresHeight(forks as Record<string, unknown>, "gasFeeSeparation")
+    ) {
+        return null
+    }
+    const fallback = DEFAULT_FORK_CONFIG.gasFeeSeparation
+    if (fallback.activationHeight === null) return null
+    return (
+        "the genesis does not declare gasFeeSeparation: it runs from height " +
+        `${fallback.activationHeight} with the built-in treasury ${fallback.treasuryAddress}. ` +
+        "Declare it with the network's treasuryAddress"
+    )
+}
+
 export interface RestartGenesisInput {
     /** The genesis data stored in block 0. */
     storedGenesisData: unknown

@@ -5,7 +5,8 @@ round trip would not for 18-digit stakes.
 
 Writes into --out:
   launch.json       the launch genesis: fixed timestamp, chain id, the
-                    mainnet forks at height 0, snapshot bound by its manifest
+                    mainnet forks at height 0, every other known fork
+                    declared, snapshot bound by its manifest
   onebyte.json      launch with the timestamp one second later
   forkpast.json     launch with commitLock moved to height 1 (inside tip + 50)
   forkfar.json      launch with atomicWork scheduled at 1000000 (beyond the window)
@@ -19,6 +20,9 @@ import os
 
 # Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
 MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover"]
+# Same list as KNOWN_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal.
+# A node on a mainnet chain id refuses a genesis that leaves one undeclared.
+KNOWN_FORKS = ["osDenomination", "gasFeeSeparation", "tlsnProofEnforcement", "web2ProofBinding", "xmProofBinding", "signatureDomain", "nonceEnforcement", "atomicWork", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "networkGovernance"]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--base", required=True, help="the image's data/genesis.json")
@@ -43,6 +47,9 @@ launch.setdefault("properties", {})["id"] = a.chain_id
 forks = launch.setdefault("forks", {})
 for name in MAINNET_FORKS:
     forks[name] = {"activationHeight": 0}
+# The base genesis declares gasFeeSeparation with its treasury; the rest stay off
+for name in KNOWN_FORKS:
+    forks.setdefault(name, {"activationHeight": None})
 launch["snapshot"] = {"manifestSha256": manifest_sha}
 
 
