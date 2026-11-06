@@ -19,7 +19,8 @@
 # devnet keys) and is torn down on exit, failure or Ctrl-C.
 # Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR: a node
 # stopped answering mid-window, or postgres hit its connection limit, or a node
-# log that check needs could not be read: no verdict).
+# log that check needs could not be read: no verdict; or the verdict's row could
+# not be added to results.tsv).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -769,11 +770,29 @@ grep_logs() {
 # rewrite_verdict's rewrite each hold an exclusive flock on results.tsv.lock next
 # to it, waiting up to RESULTS_LOCK_WAIT_S for it (the preflight checks for flock)
 RESULTS_LOCK_WAIT_S=30
-# Verdict, written after the scenario or when a window cannot be judged
+# Verdict, written after the scenario or when a window cannot be judged. This
+# run's row goes into results.tsv first: a row that cannot be added (no lock
+# within RESULTS_LOCK_WAIT_S, or a failed write) makes verdict.json ERROR, with
+# why and what the result was, and the exit 2, results.tsv left as it is. No
+# result stands that results.tsv does not show.
 write_verdict() {
     step 05-verdict
     column -t -s $'\t' "${PHASES}" | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     sed 's/^/    /' "${EVENTS}" 2>/dev/null | tee -a "${LOG_DIR}/run.log" >/dev/null
+    local results="${RUNS_DIR}/results.tsv" why=""
+    {
+        if ! flock -w "${RESULTS_LOCK_WAIT_S}" 9; then
+            why="no lock on ${results}.lock within ${RESULTS_LOCK_WAIT_S}s"
+        elif ! { [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"; } ||
+            ! results_row >> "${results}"; then
+            why="a write to it failed"
+        fi
+    } 9>> "${results}.lock" || why="could not open ${results}.lock"
+    if [ -n "${why}" ]; then
+        say "ERROR: the row of ${RUN_ID} could not be added to ${results} (${why}): the verdict is ERROR, the exit is 2" >&2
+        DETAIL="could not record the verdict: no row added to ${results} (${why}); the result was ${RESULT}${DETAIL:+ (${DETAIL})}"
+        RESULT=ERROR
+    fi
     # halt-* and ride-* drills: the judge's per-phase verdict and timings
     local drill=null
     [ -s "${RUN_DIR}/drill-verdict.json" ] && drill=$(jq -c . "${RUN_DIR}/drill-verdict.json")
@@ -785,15 +804,10 @@ write_verdict() {
           q: $q, code: $code, image: $image, detail: $detail, result: $result}
          + (if $forkSet == "launch" then {excludedForks: $excluded} else {} end)
          + (if $drill == null then {} else {drill: $drill} end)' > "${LOG_DIR}/verdict.json"
-    local results="${RUNS_DIR}/results.tsv"
-    if ! { flock -w "${RESULTS_LOCK_WAIT_S}" 9 &&
-        { [ -f "${results}" ] || printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\n' > "${results}"; } &&
-        results_row >> "${results}"; } 9>> "${results}.lock"; then
-        say "ERROR: the row of ${RUN_ID} could not be added to ${results} (no lock on ${results}.lock within ${RESULTS_LOCK_WAIT_S}s, or a write failed)" >&2
-    fi
     VERDICT_WRITTEN=1
     free -m | sed -n 2p | sed 's/^/host after run: /' >> "${LOG_DIR}/run.log"
     say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
+    [ -z "${why}" ] || exit 2
 }
 results_row() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${RUN_ID}" "${SCENARIO}" "${BINDING}" "${N}" "${SHARD}" "${Q}" \

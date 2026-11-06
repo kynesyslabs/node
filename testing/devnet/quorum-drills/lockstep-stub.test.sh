@@ -624,12 +624,24 @@ check "and stderr says it got no lock" \
 rewrite 1
 check "the lock free: rc=0, the row says ERROR, the earlier one PASS, no row added" \
     test "$(tail -1 <<< "${ERR}") $(row stub-lock) $(row earlier) $(wc -l < "${RUNS_DIR}/results.tsv")" = "rc=0 ERROR PASS 3"
+# Up to b4ccfffd3f a run whose row could not be added still exited 0 on a PASS
 lock_case lock_append; hold_lock; append 1; release_lock
-check "write_verdict, the lock held by another run: no row added, and stderr says why" \
-    bash -c 'cmp -s "$1" "$2" && grep -q "ERROR: the row of stub-append could not be added to $1 (no lock on $1.lock within 1s, or a write failed)" <<< "$3"' \
+check "write_verdict, the lock held by another run: exit 2, no row added, and stderr says why" \
+    bash -c 'grep -q "^rc=2$" <<< "$3" && cmp -s "$1" "$2" && grep -q "ERROR: the row of stub-append could not be added to $1 (no lock on $1.lock within 1s): the verdict is ERROR, the exit is 2" <<< "$3"' \
     _ "${RUNS_DIR}/results.tsv" "${WORK}/results.before" "${ERR}"
+check "write_verdict, the lock held by another run: verdict.json says ERROR, why, and what the result was" \
+    verdict_is ERROR "could not record the verdict: no row added to ${RUNS_DIR}/results.tsv (no lock on ${RUNS_DIR}/results.tsv.lock within 1s); the result was PASS (phases fine)"
+check "write_verdict, the lock held by another run: the run log says RESULT ERROR" \
+    grep -q "RESULT ERROR: drop-n10s10 .*could not record the verdict: " "${LOG_DIR}/05-verdict.log"
 append 1
-check "the lock free: the row is added after the others" test "$(tail -1 "${RUNS_DIR}/results.tsv" | cut -f1,9) $(wc -l < "${RUNS_DIR}/results.tsv")" = $'stub-append\tPASS 4'
+check "the lock free: rc=0, the row is added after the others, verdict.json says PASS" \
+    test "$(tail -1 <<< "${ERR}") $(tail -1 "${RUNS_DIR}/results.tsv" | cut -f1,9) $(wc -l < "${RUNS_DIR}/results.tsv") $(jq -r .result "${LOG_DIR}/verdict.json")" = $'rc=0 stub-append\tPASS 4 PASS'
+lock_case lock_append_unwritable; rm "${RUNS_DIR}/results.tsv"; mkdir "${RUNS_DIR}/results.tsv"; append 1
+check "write_verdict, results.tsv cannot be written (a directory here): exit 2, and stderr says a write failed" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "ERROR: the row of stub-append could not be added to $2 (a write to it failed): the verdict is ERROR, the exit is 2" <<< "$1"' \
+    _ "${ERR}" "${RUNS_DIR}/results.tsv"
+check "write_verdict, results.tsv cannot be written: verdict.json says ERROR and why" \
+    verdict_is ERROR "could not record the verdict: no row added to ${RUNS_DIR}/results.tsv (a write to it failed); the result was PASS (phases fine)"
 # Eight runs end at once, each rewriting its own row: one copy-and-replace at a
 # time, so none puts back a row another one changed
 lock_case lock_many

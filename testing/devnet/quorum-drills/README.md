@@ -118,7 +118,11 @@ an observation window (three tries) ends the run as `ERROR`, exit 2: a
 crashed node must not pass for a stalled one, and neither may a run in which
 Postgres ran out of connections (see "Postgres connections"). Each run with a verdict
 appends a row to `runs/results.tsv`, under a lock other runs take too (see
-"Postgres connections", Backstop). Log-line counts (floor refusals,
+"Postgres connections", Backstop), before it writes `verdict.json`. A row
+that cannot be added (no lock within 30 s, or a write that fails) leaves
+`results.tsv` as it is and makes the verdict `ERROR`, exit 2: `could not
+record the verdict: no row added to .../results.tsv (why); the result was
+PASS (detail)`. Log-line counts (floor refusals,
 fallback lines) only take lines logged in the window being judged, and a
 node log such a count cannot read to the end (a docker error, no answer
 within `LOG_READ_TIMEOUT_S`, see [Tuning](#tuning), or a `sed` or `grep`
@@ -582,6 +586,7 @@ A connection-limit hit can no longer pass:
   the append of the row, holds an exclusive `flock` on `results.tsv.lock` next
   to it and waits up to 30 s for it; without the lock the row is not
   touched, and stderr says so (`no lock on .../results.tsv.lock within 30s`).
+  An append without the lock is also `ERROR`, exit 2 (above).
 
 `lockstep-stub.test.sh` covers the preflight, the check and the backstop
 (also after the verdict is written)
@@ -607,7 +612,9 @@ lock), `fallback` with one psql killed (`none given`, exit 2), a
 `ride-n13s10` whose judge refuses the fork set (`ERROR`, the fork named in
 the detail), and a `PATH` without `flock` (no start). The lock is tested on its own as well: held by
 another process, the append and the rewrite wait, then leave `results.tsv`
-as it was and say so; eight rewrites at once lose none of the eight rows.
+as it was and say so, and the append makes `verdict.json` `ERROR`, exit 2 (as
+it does when `results.tsv` cannot be written); eight rewrites at once lose
+none of the eight rows.
 `drillInputs.test.ts` covers the generated compose for N=4, 10 and 13.
 
 ## Runs and logs
