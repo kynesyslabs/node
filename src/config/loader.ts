@@ -188,6 +188,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.core.rateLimitBlockDurationMs,
             ),
             mcpEnabled: envBool(EnvKey.MCP_ENABLED, d.core.mcpEnabled),
+            signalingEnabled: envBool(
+                EnvKey.SIGNALING_ENABLED,
+                d.core.signalingEnabled,
+            ),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
             expectedGenesisHash: envStr(
                 EnvKey.EXPECTED_GENESIS_HASH,

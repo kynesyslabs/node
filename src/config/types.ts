@@ -79,6 +79,8 @@ export interface CoreConfig {
     /** How long an IP stays blocked after it exceeds a rate limit, in ms. */
     rateLimitBlockDurationMs: number
     mcpEnabled: boolean
+    /** WebRTC signaling server for instant messaging; consensus does not use it. */
+    signalingEnabled: boolean
     restore: boolean
     /**
      * Full genesis data hash (sha256 hex) the operator expects the network to

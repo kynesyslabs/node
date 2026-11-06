@@ -81,6 +81,9 @@ export const DEFAULT_CONFIG: AppConfig = {
         // Opt-in via MCP_ENABLED=true after reading docs/runbooks/mcp-security.md.
         // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mcpEnabled: false,
+        // On by default: compose publishes 3005 and the proxy routes
+        // /signaling/ to it, so existing deployments expect it running.
+        signalingEnabled: true,
         restore: false,
         expectedGenesisHash: "",
         expectedGenesisBlockHash: "",
