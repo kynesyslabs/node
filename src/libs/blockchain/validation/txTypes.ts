@@ -100,8 +100,7 @@ export function blockTxTypeRefusal(tx: TxView): string | null {
  */
 export function isNodeMessage(tx: TxView): boolean {
     if (typeOf(tx) !== "instantMessaging") return false
-    const edits = ((tx as { content?: Record<string, unknown> }).content ?? {})
-        .gcr_edits
+    const edits = (tx as { content?: Record<string, unknown> }).content?.gcr_edits
     return !Array.isArray(edits) || edits.length === 0
 }
 

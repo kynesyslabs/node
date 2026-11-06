@@ -1930,19 +1930,8 @@ export default class HandleGCR {
                 governanceGateRefusal(tx, governance)
             if (reason) refuse(tx, reason)
         }
-        const messages = messageBinding
-            ? txs.filter(tx => !refused.has(tx.hash) && isNodeMessage(tx))
-            : []
-        if (messages.length > 0) {
-            // A failed read says nothing about the messages: the block must
-            // not apply rather than fail them on this node alone.
-            const validators = await readState("validator set", () =>
-                validatorKeysAt(tip),
-            )
-            for (const tx of messages) {
-                const reason = nodeMessageRefusal(tx, validators)
-                if (reason) refuse(tx, reason)
-            }
+        if (messageBinding) {
+            await HandleGCR.refuseUnboundMessages(txs, refused, tip, refuse)
         }
         if (!active) return refused
 
@@ -1957,6 +1946,30 @@ export default class HandleGCR {
             if (!verdict.ok) refuse(tx, verdict.reason)
         }
         return refused
+    }
+
+    /**
+     * Refuses the fee-free messages of a block, among those not yet
+     * `refused`, that no validator staked at `tip` signed. The validator set
+     * is read once for the block, and only when it carries such a message.
+     */
+    private static async refuseUnboundMessages(
+        txs: Transaction[],
+        refused: ReadonlySet<string>,
+        tip: number,
+        refuse: (tx: Transaction, reason: string) => void,
+    ): Promise<void> {
+        const messages = txs.filter(tx => !refused.has(tx.hash) && isNodeMessage(tx))
+        if (messages.length === 0) return
+        // A failed read says nothing about the messages: the block must not
+        // apply rather than fail them on this node alone.
+        const validators = await readState("validator set", () =>
+            validatorKeysAt(tip),
+        )
+        for (const tx of messages) {
+            const reason = nodeMessageRefusal(tx, validators)
+            if (reason) refuse(tx, reason)
+        }
     }
 
     /**
