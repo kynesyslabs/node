@@ -450,7 +450,7 @@ describe("Mempool per-sender cap: what stays queued past it", () => {
         state.publicKeyHex = OWN
     })
     afterEach(() => {
-        ;(Mempool as any).lockedHashes = realLockedHashes
+        (Mempool as any).lockedHashes = realLockedHashes
         state.publicKeyHex = undefined
     })
 
@@ -496,7 +496,7 @@ describe("Mempool per-sender cap: what stays queued past it", () => {
     })
 
     it("does not offer a locked tx to a full pool's eviction", async () => {
-        ;(Mempool as any).repo.query = jest.fn(async () => [
+        (Mempool as any).repo.query = jest.fn(async () => [
             { hash: "0xlocked", ts: "1", fee: { network_fee: 1 }, bytes: "10" },
             { hash: "0xother", ts: "2", fee: { network_fee: 1 }, bytes: "10" },
         ])
