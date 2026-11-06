@@ -63,6 +63,7 @@ import { getLastBlockSigners } from "../chainBlocks"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import Hashing from "@/libs/crypto/hashing"
+import { CommittedBlockFollowUpError } from "src/libs/blockchain/committedBlockError"
 import {
     applyWithSyncedNonceTrace,
     debugAssertionsEnabled,
@@ -1221,6 +1222,12 @@ async function insertBlockOrHalt(
             `[applySyncedBlock] block ${block.number} failed to insert; its GCR edits were not committed: ` +
                 `${e instanceof Error ? e.message : String(e)}`,
         )
+        // Disk may hold the block while memory does not: sync skips a stored
+        // block, so only a restart derives memory from disk again.
+        if (e instanceof CommittedBlockFollowUpError) {
+            log.error(`[applySyncedBlock] ${e.message}; exiting`)
+            process.exit(1)
+        }
         throw e
     }
 

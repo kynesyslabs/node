@@ -28,7 +28,10 @@ import {
 import { isForkActive } from "@/forks/forkGates"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import { BlockInvalidError } from "@/errors"
-import { CommittedBlockFollowUpError } from "./committedBlockError"
+import {
+    BlockCommitUnknownError,
+    CommittedBlockFollowUpError,
+} from "./committedBlockError"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { gcrWriteMutex } from "./gcr/gcrWriteMutex"
 import type { PendingGCRWrite } from "./gcr/handleGCR"
@@ -564,9 +567,11 @@ export async function insertBlock(
             },
         )
         // State writers are serialised; a block carrying state is one.
-        const result = pendingGCR
-            ? await gcrWriteMutex.runExclusive(commit)
-            : await commit()
+        const result = await (
+            pendingGCR ? gcrWriteMutex.runExclusive(commit) : commit()
+        ).catch(async error => {
+            throw await commitFailure(block, error)
+        })
 
         if (pendingGCR) {
             try {
@@ -633,6 +638,23 @@ export async function insertBlock(
             `[ChainDB] [ ERROR ]: Failed to insert block ${block.number} with hash ${block.hash}: ${error}`,
         )
         throw error
+    }
+}
+
+/**
+ * A COMMIT whose reply is lost rejects although the block is on disk. Memory
+ * then trails disk and sync skips a stored block, so only a restart brings
+ * them together again; a block that is not on disk failed like any other.
+ */
+async function commitFailure(block: Block, error: unknown): Promise<unknown> {
+    try {
+        const stored = await getBlocksRepo().findOneBy({ hash: block.hash })
+        return stored ? new BlockCommitUnknownError(block.number, error) : error
+    } catch (lookupError) {
+        log.error(
+            `[ChainDB] could not tell whether block ${block.number} committed: ${lookupError}`,
+        )
+        return new BlockCommitUnknownError(block.number, error)
     }
 }
 
