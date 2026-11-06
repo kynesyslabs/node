@@ -60,6 +60,9 @@ import {
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
+import { selectBlockTransactions } from "./routines/blockCaps"
+import { blockCapsActive } from "@/forks/blockCapsGate"
+import { isForkActive } from "@/forks/forkGates"
 import {
     NONCE_TRACE_ATTR_KEY,
     assertForgedNonceTrace,
@@ -252,11 +255,26 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools with the mempool lock
         log.only("[consensusRoutine] Merging and ordering the mempools...")
         markStep("consensus", "mergeAndOrderMempools")
-        const { txs: initialMempool, peerlist: mergedPeerlist } =
+        const { txs: mergedMempool, peerlist: mergedPeerlist } =
             await mergeAndOrderMempools(
                 manager.shard.members,
                 manager.shard.blockRef,
             )
+
+        // Under blockCaps the block takes a bounded share of the pool; the
+        // rest stays pooled for later blocks.
+        const initialMempool = blockCapsActive(blockRef)
+            ? selectBlockTransactions(
+                  mergedMempool,
+                  blockRef,
+                  isForkActive("osDenomination", blockRef),
+              )
+            : mergedMempool
+        if (initialMempool.length < mergedMempool.length) {
+            log.info(
+                `[consensusRoutine] Block ${blockRef} takes ${initialMempool.length} of ${mergedMempool.length} pooled txs (block caps)`,
+            )
+        }
 
         // filter txs by reference block
         const resRef = filterMempoolByRefBlock(initialMempool, true)

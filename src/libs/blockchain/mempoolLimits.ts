@@ -294,3 +294,68 @@ export function capMergeReply<T>(
 ): T[] {
     return splitMergeBatches(txs, limits)[0]
 }
+
+/** One pending tx as the per-sender cap of the merge sees it. */
+export interface SenderSlot {
+    hash: string
+    /** Lowercase `content.from`. */
+    sender: string
+    nonce: unknown
+}
+
+function slotNonce(value: unknown): bigint | null {
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+        return BigInt(value)
+    }
+    if (typeof value === "string" && /^\d{1,20}$/.test(value)) {
+        return BigInt(value)
+    }
+    return null
+}
+
+function compareSlots(a: SenderSlot, b: SenderSlot): number {
+    const na = slotNonce(a.nonce)
+    const nb = slotNonce(b.nonce)
+    if (na !== nb) {
+        if (na === null) return 1
+        if (nb === null) return -1
+        return na < nb ? -1 : 1
+    }
+    return a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0
+}
+
+/**
+ * Holds every sender with merged-in txs to `maxPerSender` pending txs,
+ * keeping the lowest nonces (then the lowest hashes) of what is held and
+ * what arrives. The choice depends only on the set of txs, not on which
+ * arrived first, so members that end the merge having seen the same txs
+ * keep the same ones. Returns the incoming hashes to refuse and the held
+ * hashes to evict.
+ */
+export function chooseSenderOverflow(
+    held: readonly SenderSlot[],
+    incoming: readonly SenderSlot[],
+    maxPerSender: number = active.maxPerSender,
+): { refuse: Set<string>; evict: string[] } {
+    const bySender = new Map<string, { slot: SenderSlot; held: boolean }[]>()
+    for (const slot of incoming) {
+        const list = bySender.get(slot.sender) ?? []
+        list.push({ slot, held: false })
+        bySender.set(slot.sender, list)
+    }
+    for (const slot of held) {
+        bySender.get(slot.sender)?.push({ slot, held: true })
+    }
+
+    const refuse = new Set<string>()
+    const evict: string[] = []
+    for (const list of bySender.values()) {
+        if (list.length <= maxPerSender) continue
+        list.sort((a, b) => compareSlots(a.slot, b.slot))
+        for (const { slot, held: isHeld } of list.slice(maxPerSender)) {
+            if (isHeld) evict.push(slot.hash)
+            else refuse.add(slot.hash)
+        }
+    }
+    return { refuse, evict }
+}

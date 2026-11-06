@@ -380,6 +380,47 @@ describe("rebuilding a block's transactions", () => {
         ])
     })
 
+    describe("under blockCaps", () => {
+        beforeEach(() => {
+            sharedState.forkConfig = { blockCaps: { activationHeight: 0 } }
+        })
+        afterEach(() => {
+            delete sharedState.forkConfig
+        })
+
+        it("refuses a block with more txs than the cap, without fetching them", async () => {
+            const calls: string[][] = []
+            const source = {
+                identity: "a",
+                call: async (req: any) => {
+                    calls.push(req.params[0].data.hashes)
+                    return { result: 200, response: [] }
+                },
+            }
+            const block = Array.from({ length: 1_001 }, (_, i) => `t${i}`)
+            expect(await rebuildTransactions(10, inputs(block), [source as any])).toBeNull()
+            expect(calls).toEqual([])
+        })
+
+        it("refuses a block over the content byte cap", async () => {
+            const big = (hash: string, nonce: number) => {
+                const t = tx(hash, nonce)
+                ;(t.content as any).pad = "x".repeat(3 * 1024 * 1024)
+                return t
+            }
+            mempool.set("t1", big("t1", 1))
+            mempool.set("t2", big("t2", 2))
+            expect(await rebuildTransactions(10, inputs(["t1", "t2"]), [])).toBeNull()
+        })
+
+        it("rebuilds a block within the caps as before", async () => {
+            mempool.set("t1", tx("t1", 1))
+            mempool.set("t2", tx("t2", 2))
+            const rebuilt = await rebuildTransactions(10, inputs(["t1", "t2"]), [])
+            expect(rebuilt?.txs.map(t => t.hash)).toEqual(["t1", "t2"])
+        })
+    })
+
     it("refuses inputs that extend another parent", async () => {
         expect(
             await rebuildTransactions(10, { ...inputs([]), previousHash: "other" }, []),

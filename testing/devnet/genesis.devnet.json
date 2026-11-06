@@ -40,6 +40,9 @@
     "finalityProofs": {
       "activationHeight": 0
     },
+    "blockCaps": {
+      "activationHeight": 0
+    },
     "networkGovernance": {
       "activationHeight": 0
     }

@@ -17,12 +17,15 @@ import { admissionRefusal } from "./validation/postgresStorable"
 import { checkIdentityAdmission } from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
+import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
 import { MEMPOOL_MAX_NONCE_AHEAD, TRANSACTION_STATUS } from "@/utilities/constants"
 import {
     EvictionCandidate,
     MempoolRejectReason,
     PoolUsage,
+    SenderSlot,
     checkTxAge,
+    chooseSenderOverflow,
     chooseVictims,
     countMempoolRejection,
     getMempoolLimits,
@@ -250,6 +253,22 @@ export default class Mempool {
             counts.set(row.sender, Number(row.count))
         }
         return counts
+    }
+
+    /** Hash, sender and signed nonce of every pending tx from `addresses`. */
+    public static async listPendingBySenders(
+        addresses: string[],
+    ): Promise<SenderSlot[]> {
+        if (addresses.length === 0) return []
+        const rows = await this.repo.query(
+            `SELECT "hash", LOWER("content"->>'from') AS sender, "content"->>'nonce' AS nonce FROM "mempooltx" WHERE LOWER("content"->>'from') = ANY($1)`,
+            [addresses.map(a => a.toLowerCase())],
+        )
+        return rows.map((row: SenderSlot) => ({
+            hash: row.hash,
+            sender: row.sender,
+            nonce: row.nonce,
+        }))
     }
 
     /** Every row's eviction ranking inputs. Only read when the pool is full. */
@@ -1020,10 +1039,49 @@ export default class Mempool {
             `[Mempool.receive] Valid transactions: ${validTransactions.length}`,
         )
 
-        // The merge is not subject to the admission caps or the tx lifetime:
+        // The merge is not subject to the pool caps or the tx lifetime:
         // every committee member must end it holding the same pool, and a
         // cap or a clock applied per node would have each one drop
-        // different txs. Callers bound the batch size.
+        // different txs. Callers bound the batch size. Under blockCaps the
+        // per-sender cap does apply, by a rule that depends only on the txs
+        // seen (see chooseSenderOverflow), so members still converge.
+        if (blockCapsActiveForPendingBlock() && validTransactions.length > 0) {
+            const incoming = new Map<string, SenderSlot>()
+            for (const tx of validTransactions) {
+                const from = tx.content?.from
+                if (typeof from !== "string") continue
+                incoming.set(tx.hash, {
+                    hash: tx.hash,
+                    sender: from.toLowerCase(),
+                    nonce: tx.content.nonce,
+                })
+            }
+            const slots = [...incoming.values()]
+            const held = await this.listPendingBySenders([
+                ...new Set(slots.map(slot => slot.sender)),
+            ])
+            const { refuse, evict } = chooseSenderOverflow(
+                held,
+                slots,
+                getMempoolLimits().maxPerSender,
+            )
+            if (refuse.size > 0 || evict.length > 0) {
+                log.warning(
+                    `[Mempool.receive] Sender cap: refusing ${refuse.size} merged tx(s), evicting ${evict.length} held tx(s)`,
+                )
+            }
+            if (evict.length > 0) {
+                await this.repo.delete({ hash: In(evict) })
+                evict.forEach(() => countMempoolRejection("evicted"))
+            }
+            if (refuse.size > 0) {
+                const kept = validTransactions.filter(tx => !refuse.has(tx.hash))
+                validTransactions.length = 0
+                validTransactions.push(...kept)
+                refuse.forEach(() => countMempoolRejection("sender_limit"))
+            }
+        }
+
         for (const tx of validTransactions) {
             noSendBackTxs.set(tx.hash, tx.hash)
             tx.status = TRANSACTION_STATUS.PENDING

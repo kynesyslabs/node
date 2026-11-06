@@ -54,6 +54,20 @@ export const MEMPOOL_TX_TTL_MS = 10 * 60 * 1000
 /** How far ahead of the node's clock a signed timestamp may be. */
 export const MEMPOOL_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
 
+// --- Block caps (`blockCaps` fork) ---
+/**
+ * Most txs one block takes from the pool: 100 tx/s at the 10 s block time,
+ * and one getTxsByHashes batch (BATCH_SYNC_TX_SIZE), so a member rebuilding
+ * a candidate or a node syncing it fetches the block's txs in one call.
+ */
+export const BLOCK_MAX_TXS = 1_000
+/**
+ * Most bytes of canonical tx content one block takes. With BLOCK_MAX_TXS
+ * signatures of the largest kind beside it, the block's txs still fit one
+ * 16 MiB Omni frame.
+ */
+export const BLOCK_MAX_CONTENT_BYTES = 4 * 1024 * 1024
+
 /**
  * Validator identities guaranteed a committee slot whenever they are
  * eligible and online, placed at the front of the shard in this order so

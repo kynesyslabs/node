@@ -42,6 +42,11 @@ jest.mock("@/forks", () => ({
     isForkActive: jest.fn(() => true),
 }))
 
+let blockCapsOn = false
+jest.mock("@/forks/blockCapsGate", () => ({
+    blockCapsActiveForPendingBlock: () => blockCapsOn,
+}))
+
 let badSignatures = new Set<string>()
 jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
     __esModule: true,
@@ -88,6 +93,8 @@ import { TRANSACTION_STATUS } from "@/utilities/constants"
 
 // lastBlock=100, referenceBlockRoom=1: deep window cutoff 100 - 5*1 = 95.
 let mempoolRows: Array<{ hash: string }> = []
+let heldBySender: Array<{ hash: string; sender: string; nonce: string }> = []
+let deletedHashes: string[] = []
 
 const tx = (hash: string, referenceBlock: number, status = "pending") =>
     ({
@@ -98,18 +105,28 @@ const tx = (hash: string, referenceBlock: number, status = "pending") =>
         content: { type: "demoswork", gcr_edits: [], timestamp: 1_700_000_000_000, nonce: 7 },
     }) as any
 
+function resetReceiveState() {
+    onChainHashes = new Set()
+    badSignatures = new Set()
+    insertedRows = []
+    mempoolRows = []
+    logError.mockClear()
+    getExistingTransactionHashes.mockClear()
+    blockCapsOn = false
+    heldBySender = []
+    deletedHashes = []
+    ;(Mempool as any).repo = {
+        find: jest.fn(async () => mempoolRows),
+        query: jest.fn(async () => heldBySender),
+        delete: jest.fn(async (where: { hash: { value: string[] } }) => {
+            deletedHashes.push(...where.hash.value)
+            return { affected: where.hash.value.length }
+        }),
+    }
+}
+
 describe("Mempool.receive admission", () => {
-    beforeEach(() => {
-        onChainHashes = new Set()
-        badSignatures = new Set()
-        insertedRows = []
-        mempoolRows = []
-        logError.mockClear()
-        getExistingTransactionHashes.mockClear()
-        ;(Mempool as any).repo = {
-            find: jest.fn(async () => mempoolRows),
-        }
-    })
+    beforeEach(resetReceiveState)
 
     it("rejects txs already recorded on chain, failed or confirmed", async () => {
         onChainHashes = new Set(["0xseen"])
@@ -216,5 +233,39 @@ describe("Mempool.receive admission", () => {
 
         editsVerdict.ok = true
         editsVerdict.reason = undefined
+    })
+})
+
+describe("Mempool.receive per-sender cap", () => {
+    beforeEach(resetReceiveState)
+
+    const SENDER = "0x" + "ab".repeat(32)
+    const fromSender = (hash: string, nonce: number) => {
+        const t = tx(hash, 100)
+        t.content = { ...t.content, from: SENDER, nonce }
+        return t
+    }
+    // The sender already holds the admission cap (64) in this pool.
+    const fullHold = () =>
+        Array.from({ length: 64 }, (_, i) => ({
+            hash: `0xheld${i}`,
+            sender: SENDER,
+            nonce: String(i + 10),
+        }))
+
+    it("holds merged-in txs to the sender cap under blockCaps, keeping the lowest nonces", async () => {
+        blockCapsOn = true
+        heldBySender = fullHold()
+        await Mempool.receive([fromSender("0xlow", 1), fromSender("0xhigh", 500)])
+        // 0xlow outranks the held nonce 73, which leaves; 0xhigh does not fit.
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xlow"])
+        expect(deletedHashes).toEqual(["0xheld63"])
+    })
+
+    it("leaves the merge uncapped before the fork", async () => {
+        heldBySender = fullHold()
+        await Mempool.receive([fromSender("0xlow", 1), fromSender("0xhigh", 500)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xlow", "0xhigh"])
+        expect(deletedHashes).toEqual([])
     })
 })

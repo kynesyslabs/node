@@ -294,6 +294,26 @@ export type IdentityCarryoverConfig = BaseForkConfig
 export type NetworkGovernanceConfig = BaseForkConfig
 
 /**
+ * `blockCaps` fork: bounds what one block takes from the pool and what one
+ * sender holds in it.
+ *
+ *  - A block takes at most BLOCK_MAX_TXS txs and BLOCK_MAX_CONTENT_BYTES of
+ *    canonical tx content, chosen deterministically from the merged pool
+ *    (see selectBlockTransactions); the rest stay pooled for later blocks.
+ *    A rebuilt locked candidate over either cap is not prevoted.
+ *  - The consensus mempool merge holds each sender to the admission cap
+ *    (MEMPOOL_MAX_PENDING_PER_SENDER), keeping the sender's lowest nonces,
+ *    so every member that has seen the same txs keeps the same ones.
+ *
+ * Activation at H applies to block H and later; the merge reads the block
+ * it prepares (tip + 1). Dormant by default (`activationHeight: null`): it
+ * changes which txs a block contains, and a missing genesis entry hydrates
+ * from here. A chain launched from genesis with this build sets 0. No
+ * payload beyond the base.
+ */
+export type BlockCapsConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -335,6 +355,7 @@ export type ForkConfig =
     | FinalityProofsConfig
     | IdentityCarryoverConfig
     | NetworkGovernanceConfig
+    | BlockCapsConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -358,6 +379,7 @@ export type ForkName =
     | "finalityProofs"
     | "identityCarryover"
     | "networkGovernance"
+    | "blockCaps"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -380,6 +402,7 @@ export interface ForkConfigByName {
     finalityProofs: FinalityProofsConfig
     identityCarryover: IdentityCarryoverConfig
     networkGovernance: NetworkGovernanceConfig
+    blockCaps: BlockCapsConfig
 }
 
 /**
@@ -583,6 +606,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Admit and apply networkUpgrade and networkUpgradeVote transactions, each " +
             "governance edit bound to the account that signed it.",
     },
+    blockCaps: {
+        // Dormant by default: it changes which txs a block contains, and a
+        // missing genesis entry hydrates from here. A chain launched from
+        // genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "A block takes a bounded, deterministic share of the pool by tx count and " +
+            "content bytes, and the mempool merge holds each sender to the admission cap.",
+    },
 }
 
 /**
@@ -609,5 +641,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
+        blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
     }
 }

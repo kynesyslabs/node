@@ -13,6 +13,7 @@ const {
     __setMempoolLimits,
     capMergeReply,
     checkTxAge,
+    chooseSenderOverflow,
     chooseVictims,
     getMempoolLimits,
     splitMergeBatches,
@@ -269,5 +270,50 @@ describe("capMergeReply", () => {
     it("returns the whole list when it fits", () => {
         const pool = [tx("a"), tx("b")]
         expect(capMergeReply(pool)).toEqual(pool)
+    })
+})
+
+describe("chooseSenderOverflow", () => {
+    const slot = (hash: string, sender: string, nonce: unknown) => ({ hash, sender, nonce })
+
+    it("refuses merged txs over the sender cap, keeping the lowest nonces", () => {
+        const held = [slot("0xh1", "s", 1), slot("0xh2", "s", 2)]
+        const incoming = [slot("0xi3", "s", 3), slot("0xi0", "s", 0)]
+        const { refuse, evict } = chooseSenderOverflow(held, incoming, 3)
+        expect([...refuse]).toEqual(["0xi3"])
+        expect(evict).toEqual([])
+    })
+
+    it("evicts held txs that a lower merged nonce displaces", () => {
+        const held = [slot("0xh5", "s", "5"), slot("0xh6", "s", "6")]
+        const incoming = [slot("0xi1", "s", 1)]
+        const { refuse, evict } = chooseSenderOverflow(held, incoming, 2)
+        expect(refuse.size).toBe(0)
+        expect(evict).toEqual(["0xh6"])
+    })
+
+    it("keeps the same txs whichever member held which", () => {
+        const all = Array.from({ length: 10 }, (_, i) => slot(`0x${i}`, "s", i % 4))
+        const keptBy = (held: typeof all, incoming: typeof all) => {
+            const { refuse, evict } = chooseSenderOverflow(held, incoming, 4)
+            const gone = new Set([...refuse, ...evict])
+            return [...held, ...incoming].map(s => s.hash).filter(h => !gone.has(h)).sort()
+        }
+        const a = keptBy(all.slice(0, 4), all.slice(4))
+        const b = keptBy(all.slice(6), all.slice(0, 6))
+        expect(a).toEqual(b)
+        expect(a).toHaveLength(4)
+    })
+
+    it("leaves senders within the cap and held-only senders alone", () => {
+        const held = [slot("0xa", "other", 1), slot("0xb", "other", 2)]
+        const { refuse, evict } = chooseSenderOverflow(held, [slot("0xc", "s", 1)], 1)
+        expect(refuse.size).toBe(0)
+        expect(evict).toEqual([])
+    })
+
+    it("ranks an unreadable nonce last", () => {
+        const { refuse } = chooseSenderOverflow([], [slot("0xbad", "s", "x"), slot("0xok", "s", 9)], 1)
+        expect([...refuse]).toEqual(["0xbad"])
     })
 })
