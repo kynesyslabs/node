@@ -727,14 +727,23 @@ stop_mid_round() {
 # then misses that node's, and the callers that judge on one give no verdict
 # (log_read_error).
 grep_logs() {
-    local i cid rc bad=0
+    local i cid rc st bad=0
     for i in $(seq 1 "${N}"); do
         cid=$(bdc ps -aq "node-${i}" 2>/dev/null); rc=$?
         [ "${rc}" = 0 ] || { say "WARN: node-${i}: docker compose ps $(bounded_why "${rc}"), its log not read" >&2; bad=1; continue; }
         [ -z "${cid}" ] && continue
         bdocker logs --since "${2:-0}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "$1" | sed "s/^/node-${i}: /"
-        rc=${PIPESTATUS[0]}
-        [ "${rc}" = 0 ] || { say "WARN: node-${i}: docker logs $(bounded_why "${rc}"), its log not read whole" >&2; bad=1; }
+        st=("${PIPESTATUS[@]}")
+        # A caller that reads only the first lines (`| head`) closes the pipe: the
+        # last stage, then docker, die of SIGPIPE (141), and the read is all that
+        # caller wanted. docker at 141 with a last stage that was not is a stage
+        # in between that stopped (grep refused the pattern), lines missing. A
+        # timeout is never 141: timeout gives 124 (137 after -k) whatever signal
+        # then ended docker
+        case "${st[0]}:${st[3]}" in
+            0:* | 141:141) ;;
+            *) say "WARN: node-${i}: docker logs $(bounded_why "${st[0]}"), its log not read whole" >&2; bad=1 ;;
+        esac
     done
     return "${bad}"
 }

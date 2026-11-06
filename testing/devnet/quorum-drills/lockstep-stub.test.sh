@@ -171,7 +171,8 @@ mkdir -p "${WORK}/bin"
 # The node logs: `compose ... ps -aq node-<n>` answers cid<n> (nothing when
 # FAKE/nocontainer.<n> exists), `logs ... cid<n>` prints FAKE/nodelog.<n> (its
 # last lines with --tail; no file: an empty log), after sleeping the seconds in
-# FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists
+# FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists;
+# cut off by its reader, it dies of SIGPIPE, as the docker CLI does
 cat > "${WORK}/bin/docker" <<'FAKEDOCKER'
 #!/usr/bin/env bash
 echo "$*" >> "${FAKE_DOCKER_LOG}"
@@ -196,6 +197,7 @@ case "$1" in
         [ -e "${FAKE}/nodelog.${n}.hang" ] && sleep "$(cat "${FAKE}/nodelog.${n}.hang")"
         [ -e "${FAKE}/nodelog.${n}.fail" ] && { echo "Error response from daemon: stub: cannot read the log of cid${n}" >&2; exit 1; }
         if [ "${tail}" = all ]; then cat "${FAKE}/nodelog.${n}" 2>/dev/null; else tail -n "${tail}" "${FAKE}/nodelog.${n}" 2>/dev/null; fi
+        [ $? = 141 ] && kill -PIPE $$
         exit 0 ;;
 esac
 case "${FAKE_DB:-rows}" in
@@ -394,6 +396,36 @@ gl_case gl_hang; echo 30 > "${FAKE}/nodelog.9.hang"; gl
 check "node-9's docker logs stalls: rc=1, stderr names node-9 and the bound" \
     bash -c 'grep -q "^rc=1$" <<< "$1" && grep -q "WARN: node-9: docker logs did not answer within 3s, its log not read whole" <<< "$2"' _ "${OUT}" "${ERR}"
 check "node-9's docker logs stalls: returns within the bound (${ms} ms; the stub sleeps 30 s)" test "${ms}" -lt 15000
+# The display-only reads (`grep_logs ... | head -N`): head stops reading and docker,
+# still writing, dies of SIGPIPE. Up to 74a076ea48 that was a WARN on a healthy run
+glh() { OUT=$(grep_logs "$1" 2> "${LOG_DIR}/gl.err" | head -1; echo "rc=${PIPESTATUS[0]}"); ERR=$(cat "${LOG_DIR}/gl.err"); }
+big_log() { yes "z below the quorum of 7" | head -c 1048576 > "${FAKE}/nodelog.$1"; }
+gl_case gl_head; big_log 3
+OUT=$(bdocker logs --since 0 cid3 | head -1 > /dev/null; echo "${PIPESTATUS[0]}")
+check "(the fake docker logs of a 1 MiB log, cut off by head -1, dies of SIGPIPE as docker does: exit ${OUT})" test "${OUT}" = 141
+glh "below the quorum"
+check "| head -1 on a 1 MiB log of matching lines: the first line, rc=0" test "${OUT}" = $'node-3: z below the quorum of 7\nrc=0'
+check "| head -1 on a 1 MiB log of matching lines: no WARN" test -z "${ERR}"
+gl_case gl_head_fail; big_log 3; touch "${FAKE}/nodelog.5.fail"; glh "below the quorum"
+check "| head -1, node-5's docker logs fails: rc=1, stderr names node-5 and only node-5" \
+    bash -c 'grep -q "^rc=1$" <<< "$1" && [ "$2" = "[qdrill] WARN: node-5: docker logs failed (exit 1), its log not read whole" ]' _ "${OUT}" "${ERR}"
+gl_case gl_head_hang; big_log 3; echo 30 > "${FAKE}/nodelog.9.hang"; glh "below the quorum"
+check "| head -1, node-9's docker logs stalls after head stopped reading: a timeout, not a SIGPIPE (rc=1, named with the bound)" \
+    bash -c 'grep -q "^rc=1$" <<< "$1" && [ "$2" = "[qdrill] WARN: node-9: docker logs did not answer within 3s, its log not read whole" ]' _ "${OUT}" "${ERR}"
+# The counting callers (scenario_floor, listed-below-q) read through tee and wc, which
+# read to the end: docker is never cut off there, and a failed read fails the count
+count() { OUT=$(lines=$(grep_logs "$1" 2> "${LOG_DIR}/gl.err" | tee -a "${STEP_LOG}" | wc -l) || echo "log_read_error"; echo "lines=${lines}"); ERR=$(cat "${LOG_DIR}/gl.err"); }
+gl_case gl_count; big_log 3; count "below the quorum"
+check "a count over a 1 MiB log: every matching line, no error" test "${OUT}" = "lines=$(( $(grep -c "below the quorum" "${FAKE}/nodelog.3") + 1 ))"
+gl_case gl_count_fail; big_log 3; touch "${FAKE}/nodelog.5.fail"; count "below the quorum"
+check "a count, node-5's docker logs fails: log_read_error" grep -q "^log_read_error$" <<< "${OUT}"
+gl_case gl_count_hang; echo 30 > "${FAKE}/nodelog.9.hang"; count "below the quorum"
+check "a count, node-9's docker logs stalls: log_read_error, named with the bound" \
+    bash -c 'grep -q "^log_read_error$" <<< "$1" && grep -q "WARN: node-9: docker logs did not answer within 3s" <<< "$2"' _ "${OUT}" "${ERR}"
+# docker cut off inside grep_logs, by a grep that stops reading, is lines missing
+gl_case gl_count_grep; big_log 3; count "("
+check "a count whose grep refuses the pattern: docker, cut off by it, is a failed read (log_read_error, node-3 named)" \
+    bash -c 'grep -q "^log_read_error$" <<< "$1" && grep -q "WARN: node-3: docker logs failed (exit 141), its log not read whole" <<< "$2"' _ "${OUT}" "${ERR}"
 
 echo "== teardown backstop: an exit 0 or 1 the gate did not clear is exit 2 when a node log cannot be collected"
 teardown_rc() { # $1 the status run.sh exits with, $2 unwritable (as above): OUT, the status after teardown, and ms it took
