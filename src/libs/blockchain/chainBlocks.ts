@@ -539,16 +539,21 @@ export async function insertBlock(
                 // Governance hooks scoped to the block transaction so they
                 // commit/rollback atomically with it. sharedState refresh
                 // is deferred to post-commit (below) — RAM never ahead of DB.
-                const govProposalRepo =
-                    transactionalEntityManager.getRepository(NetworkUpgrade)
-                const govVoteRepo =
-                    transactionalEntityManager.getRepository(NetworkUpgradeVote)
-                await tallyUpgradeVotes(
-                    block.number,
-                    govProposalRepo,
-                    govVoteRepo,
-                )
-                await applyNetworkUpgrade(block.number, govProposalRepo)
+                // While governance is dormant no proposal applies, so any row
+                // here was left by an older binary: acting on it would move
+                // only the nodes that kept it.
+                if (isForkActive("networkGovernance", block.number - 1)) {
+                    const govProposalRepo =
+                        transactionalEntityManager.getRepository(NetworkUpgrade)
+                    const govVoteRepo =
+                        transactionalEntityManager.getRepository(NetworkUpgradeVote)
+                    await tallyUpgradeVotes(
+                        block.number,
+                        govProposalRepo,
+                        govVoteRepo,
+                    )
+                    await applyNetworkUpgrade(block.number, govProposalRepo)
+                }
 
                 // After every hook that can move a stake. Block 0's set is
                 // recorded at boot, once the validator seed is in place.
