@@ -12,8 +12,8 @@
  *
  * Exit codes: 0 pass, 1 fail, 2 the input could not be read or is malformed,
  * or its genesis did not have quorumParity, committeeBinding and commitLock
- * active at block 0 (no verdict). Prints one line per phase, the timings and a `DRILL_TIMINGS`
- * JSON line, as scenario 12 does.
+ * active at block 0 (no verdict). Prints one line per phase, the timings and
+ * a `DRILL_TIMINGS` JSON line, as scenario 12 does.
  *
  * Two modes:
  *  - `halt`: P1 baseline, P2 settle, P3 halt, P4 halt agreement, P5 recovery
