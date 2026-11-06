@@ -46,7 +46,7 @@ const { verifyAdmissionEdits, verifyRpcEdits } = await import("@/libs/blockchain
 const { PEER, SENDER, demos, onTheWire } = await import("@/libs/blockchain/validation/editBinding.fixtures")
 const { DEFAULT_FORK_CONFIG, cloneDefaultForkConfig } = await import("./forkConfig")
 const { loadForkConfigFromGenesis } = await import("./loadForkConfig")
-const { TOKEN_STAKING_REFUSAL, tokenStakingOpen } = await import("./tokenStakingGate")
+const { TOKEN_STAKING_REFUSAL, tokenStakingOpen, tokenStakingRefusal } = await import("./tokenStakingGate")
 const { forkScheduleDigest } = await import("@/libs/peer/routines/forkScheduleAgreement")
 const { getSharedState } = await import("@/utilities/sharedState")
 const { DEFAULT_MIN_VALIDATOR_STAKE } = await import("@/features/staking/constants")
@@ -59,6 +59,21 @@ const stake = async () =>
     onTheWire(await DemosTransactions.stake(MIN.toString(), "https://node.example", demos))
 const unstake = async () => onTheWire(await DemosTransactions.unstake(demos))
 const pay = async () => onTheWire(await DemosTransactions.pay(PEER, 3n, demos))
+
+/** A pay carrying an exit edit for the sender, with `rollback` spread over it. */
+const payWithExit = async (rollback: Record<string, unknown>) => {
+    const tx = await pay()
+    ;(tx.content.gcr_edits as unknown as Array<Record<string, unknown>>).push({
+        type: "validatorStake",
+        operation: "exit",
+        account: SENDER,
+        amount: MIN.toString(),
+        connectionUrl: "https://node.example",
+        txhash: "",
+        ...rollback,
+    })
+    return tx
+}
 
 /** The mainnet forks with stakeApplyChecks on, and the two staking forks at the given heights. */
 const forks = (gate: number | null, staking: number | null) =>
@@ -167,6 +182,25 @@ describe("intake", () => {
     })
 })
 
+describe("an exit shipped as a rollback", () => {
+    // Apply turns an exit into a stake whenever isRollback is truthy.
+    it("is refused while closed for any truthy isRollback", async () => {
+        forks(0, null)
+        for (const isRollback of [1, "yes", {}]) {
+            const tx = await payWithExit({ isRollback })
+            expect(tokenStakingRefusal(tx, tokenStakingOpen(chainTip.height))).toBe(TOKEN_STAKING_REFUSAL)
+        }
+    })
+
+    it("is not refused for a falsy or absent isRollback", async () => {
+        forks(0, null)
+        for (const rollback of [{ isRollback: false }, { isRollback: 0 }, { isRollback: "" }, {}]) {
+            const tx = await payWithExit(rollback)
+            expect(tokenStakingRefusal(tx, tokenStakingOpen(chainTip.height))).toBeNull()
+        }
+    })
+})
+
 describe("block apply", () => {
     const block = stubBlockApply(handleGCR)
     const sender = () => block.caches.accounts.get(SENDER) as any
@@ -189,6 +223,18 @@ describe("block apply", () => {
             expect(sender().balance).toBe(SENDER_BALANCE)
             expect(block.caches.validators?.get(SENDER)).toBeUndefined()
         }
+    })
+
+    it("fails an exit with isRollback 1 while closed, before stakeApplyChecks and editBinding, with no validator row", async () => {
+        mainnetForks({ editBinding: null, stakeApplyChecks: null, tokenStakingGate: 0, tokenStaking: null })
+        reset(SENDER_BALANCE)
+        const tx = await payWithExit({ isRollback: 1 })
+        expect(await block.refused([tx])).toEqual([tx.hash])
+        const out = await block.apply([tx])
+
+        expect(out.failedTxs).toEqual([tx.hash])
+        expect(out.successfulTxs).toEqual([])
+        expect(block.caches.validators?.get(SENDER)).toBeUndefined()
     })
 
     it("refuses it before apply, from the tip, next to a transaction the block applies", async () => {

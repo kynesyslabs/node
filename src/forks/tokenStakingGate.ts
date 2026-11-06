@@ -31,7 +31,7 @@ export function isTokenStakingEdit(edit: unknown): boolean {
     return (
         operation === "stake" ||
         operation === "unstake" ||
-        (operation === "exit" && isRollback === true)
+        (operation === "exit" && Boolean(isRollback))
     )
 }
 
