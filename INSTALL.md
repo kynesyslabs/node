@@ -117,7 +117,7 @@ The first run pulls images and builds the node container, so expect a few minute
 When the stack is healthy:
 
 - Node RPC: http://localhost:53550 (try `curl http://localhost:53550/info`)
-- Grafana: http://localhost:3000 (default `admin` / `demos`)
+- Grafana: http://localhost:3000 (`admin` / the `GRAFANA_ADMIN_PASSWORD` you set in `.env`; the monitoring profile does not start without it)
 - Prometheus: http://localhost:9091
 
 ### Run a released image (validators)
@@ -242,7 +242,7 @@ It must print `parameters match`. Any other output is a key the container lacks 
 | `IMAGE_NAME` / `IMAGE_TAG` | `demos-node` / `local` | The node image. Validators set the released image and `tag@sha256:digest`; the defaults name a local build. |
 | `PG_USER` / `PG_PASSWORD` / `PG_DATABASE` | `demosuser` / `demospassword` / `demos` | Postgres credentials. Change `PG_PASSWORD` if you're paranoid; it never leaves the compose network. |
 | `METRICS_ENABLED` / `METRICS_PORT` | `true` / `9090` | Prometheus scrape endpoint on the node. |
-| `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password. Change this. |
+| `GRAFANA_ADMIN_PASSWORD` | _(none, required)_ | Grafana admin password. The monitoring profile refuses to start while it is empty or `demos`. |
 | `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET` | `50000` | Most executed L2PS transactions one subnet may have waiting for a batch. At the cap new ones are refused with `L2PS_BACKLOG_FULL` (HTTP 429, or a retry-later error on the messaging socket) until the aggregator catches up. `0` turns the limit off; the hash cycle then sorts the whole queue every few seconds, with no bound and without the primary-key index, so only do that on a node with a small subnet. A positive value must be at least `L2PS_MIN_BATCH_SIZE`, and a negative one is refused, or the node does not start. |
 | `L2PS_AGGREGATOR_MAX_BATCHES_PER_CYCLE` | `5` | Batches (each up to `L2PS_MAX_BATCH_SIZE` transactions, capped by the ZK circuit size) the L2PS aggregator builds per subnet per cycle. Raise it if a busy subnet's queue keeps growing; each batch costs one ZK proof when proofs are on. At most 100. |
 | `L2PS_MESSAGING_SEND_RATE` | `5` | Messages per second one sender key may send through the messaging relay once its burst is spent. Over it the sender gets `RATE_LIMITED` with a retry time and keeps its socket. `0` turns the limit off. |

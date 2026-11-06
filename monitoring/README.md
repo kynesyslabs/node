@@ -58,7 +58,7 @@ Create a `.env` file in the monitoring directory or export these variables:
 | `PROMETHEUS_RETENTION`   | `15d`                   | Data retention period                                        |
 | `GRAFANA_PORT`           | `3000`                  | Grafana external port                                        |
 | `GRAFANA_ADMIN_USER`     | `admin`                 | Grafana admin username                                       |
-| `GRAFANA_ADMIN_PASSWORD` | `demos`                 | Grafana admin password                                       |
+| `GRAFANA_ADMIN_PASSWORD` | _(required)_            | Grafana admin password; compose refuses to start without it, or with `demos` |
 | `GRAFANA_ROOT_URL`       | `http://localhost:3000` | Public Grafana URL                                           |
 | `NODE_EXPORTER_PORT`     | `9100`                  | Node Exporter port (full profile)                            |
 | `MONITORING_BIND`        | `127.0.0.1`             | Host interface for the Prometheus, Grafana and Node Exporter ports; never `0.0.0.0` |

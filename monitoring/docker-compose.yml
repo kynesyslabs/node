@@ -7,7 +7,8 @@
 #   docker compose up -d
 #
 # Access:
-#   Grafana: http://localhost:3000 (admin credentials via env vars)
+#   Grafana: http://localhost:3000 (admin credentials via env vars;
+#            GRAFANA_ADMIN_PASSWORD is required, compose refuses to start without it)
 #   Prometheus: http://localhost:9091 (internal, optional exposure)
 
 services:
@@ -62,7 +63,8 @@ services:
         environment:
             # Authentication
             - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-            - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-demos}
+            # No default: compose refuses to start until it is set.
+            - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is not set - set a strong Grafana admin password in monitoring/.env or the environment}
             - GF_USERS_ALLOW_SIGN_UP=false
             - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000}
 
@@ -119,7 +121,26 @@ services:
         networks:
             - demos-monitoring
         depends_on:
-            - prometheus
+            prometheus:
+                condition: service_started
+            grafana-password-check:
+                condition: service_completed_successfully
+
+    # Refuses the published default password; an unset one already stops
+    # compose at the GF_SECURITY_ADMIN_PASSWORD line above.
+    grafana-password-check:
+        image: grafana/grafana:10.2.2
+        restart: "no"
+        network_mode: none
+        environment:
+            - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is not set - set a strong Grafana admin password in monitoring/.env or the environment}
+        entrypoint: ["/bin/sh", "-c"]
+        command:
+            - |
+                if [ "$$GRAFANA_ADMIN_PASSWORD" = demos ]; then
+                  echo "GRAFANA_ADMIN_PASSWORD is the published default 'demos': set a strong Grafana admin password." >&2
+                  exit 1
+                fi
 
     # Optional: Node Exporter for host-level metrics
     node-exporter:

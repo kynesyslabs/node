@@ -992,11 +992,11 @@ if [[ "${MONITORING_DISABLED}" != "true" ]]; then
 		log_verbose "Starting monitoring containers"
 		if ! docker compose up -d; then
 			echo "⚠️  Warning: Failed to start monitoring stack"
-			echo "💡 Monitoring dashboards will not be available"
+			echo "💡 Monitoring dashboards will not be available. GRAFANA_ADMIN_PASSWORD must be set (monitoring/.env or the environment)."
 		else
 			echo "✅ Monitoring stack started"
 			echo "   📈 Prometheus: http://localhost:${PROMETHEUS_PORT:-9091}"
-			echo "   📊 Grafana:    http://localhost:${GRAFANA_PORT:-3000} (admin/demos)"
+			echo "   📊 Grafana:    http://localhost:${GRAFANA_PORT:-3000} (admin / your GRAFANA_ADMIN_PASSWORD)"
 
 			# Wait for Grafana to be healthy (max 30 seconds)
 			log_verbose "Waiting for Grafana to be healthy..."
