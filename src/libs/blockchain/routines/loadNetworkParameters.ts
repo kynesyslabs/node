@@ -4,6 +4,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { getGenesisNetworkParameters } from "@/features/networkUpgrade/constants"
 import type { NetworkParameters } from "@/features/networkUpgrade/types"
 import log from "@/utilities/logger"
+import { governedMinValidatorStake } from "@/features/staking/chainMinStake"
 
 /** The parameters of the last load that read the upgrade rows. */
 let loadedFromChain: NetworkParameters | null = null
@@ -79,6 +80,11 @@ export async function loadNetworkParameters(
 
     if (readOk) loadedFromChain = params
     getSharedState.networkParameters = params
+    // A failed read says nothing about the minimum, so the last one read
+    // stands rather than the default.
+    if (readOk) {
+        getSharedState.governedMinValidatorStake = governedMinValidatorStake(active)
+    }
     // Mirror onto flat fields read by calculateCurrentGas.
     ;(getSharedState as unknown as { rpcFee: number }).rpcFee = params.rpcFee
     ;(getSharedState as unknown as { networkFee: number }).networkFee =

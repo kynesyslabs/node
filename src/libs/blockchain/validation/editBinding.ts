@@ -126,8 +126,9 @@ async function osDenominationActive(): Promise<boolean> {
  * of the chain tip (the source the native edit check always used for the
  * shape). A fork activating at height H binds the block applied on tip H,
  * which is block H + 1. `governance` is the `networkGovernance` state, read
- * from the same tip so admission and apply judge it alike, and so are the
- * value rules (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`).
+ * from the same tip so admission and apply judge it alike, and so are
+ * `stakeChecks` (`stakeApplyChecks`) and the value rules
+ * (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`).
  */
 export async function editBindingState(): Promise<
     {
@@ -135,6 +136,7 @@ export async function editBindingState(): Promise<
         postFork: boolean
         nonceBound: boolean
         governance: boolean
+        stakeChecks: boolean
     } & ValueRules
 > {
     const tip = await Chain.getLastBlockNumber()
@@ -143,10 +145,36 @@ export async function editBindingState(): Promise<
         postFork: isForkActive("osDenomination", tip),
         nonceBound: isForkActive("nonceIntegrity", tip),
         governance: isForkActive("networkGovernance", tip),
+        stakeChecks: isForkActive("stakeApplyChecks", tip),
         sendBound: isForkActive("nativeSendBinding", tip),
         canonical: isForkActive("canonicalAddresses", tip),
         feeBound: isForkActive("feeBinding", tip),
     }
+}
+
+/**
+ * Why a transaction's stake edits act on another account than the sender's,
+ * or claim to be a rollback, or null. Under `stakeApplyChecks` a stake moves
+ * the balance of the account it names, so that account must be the one that
+ * signed, and a rolled back stake pays its bond back with no lock or floor
+ * check, which only the node's own rollback may do. Both hold whether or not
+ * `editBinding` binds the rest of the edits.
+ */
+export function stakeSenderRefusal(tx: Transaction): string | null {
+    const sender = senderOf(tx)
+    const account = sender !== "" && !sender.startsWith("0x") ? `0x${sender}` : sender
+    for (const edit of (tx.content?.gcr_edits ?? []) as unknown as Array<
+        Record<string, unknown>
+    >) {
+        if (String(edit.type) !== "validatorStake") continue
+        if (account === "" || edit.account !== account) {
+            return "validatorStake edit acts on another account than the sender"
+        }
+        if (edit.isRollback) {
+            return "validatorStake edit is shipped as a rollback"
+        }
+    }
+    return null
 }
 
 /**

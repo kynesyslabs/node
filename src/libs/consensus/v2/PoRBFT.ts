@@ -28,6 +28,7 @@ import HandleGCR, {
     type PendingGCRWrite,
 } from "src/libs/blockchain/gcr/handleGCR"
 import { StateReadError } from "src/libs/blockchain/gcr/stateReadError"
+import { CommittedBlockFollowUpError } from "src/libs/blockchain/committedBlockError"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
@@ -61,6 +62,7 @@ import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
 import {
+    MAX_NONCE_TRACE_ACCOUNTS,
     NONCE_TRACE_ATTR_KEY,
     assertForgedNonceTrace,
     buildNonceTrace,
@@ -465,7 +467,15 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             const traceAccounts = Array.from(resNonce.nonceAccounts)
-            const startApplyNonces = traceEnabled
+            const traceThisBlock =
+                traceEnabled &&
+                traceAccounts.length <= MAX_NONCE_TRACE_ACCOUNTS
+            if (traceEnabled && !traceThisBlock) {
+                log.warn(
+                    `[DEBUG_ASSERT] Block ${blockRef}: ${traceAccounts.length} nonce accounts, above the trace cap of ${MAX_NONCE_TRACE_ACCOUNTS}; no nonce trace for this block`,
+                )
+            }
+            const startApplyNonces = traceThisBlock
                 ? await readNonces(traceAccounts)
                 : {}
 
@@ -482,7 +492,7 @@ export async function consensusRoutine(): Promise<void> {
             // A block with no transactions still commits its L2PS proofs
             pendingGCR = applyRes.pending ?? HandleGCR.emptyPendingWrite()
 
-            if (traceEnabled) {
+            if (traceThisBlock) {
                 const endApplyNonces = noncesAfterApply(
                     pendingGCR,
                     traceAccounts,
@@ -662,6 +672,14 @@ export async function consensusRoutine(): Promise<void> {
         const invalid =
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
+        // Disk holds a block memory has not caught up with; only a restart
+        // derives memory from disk again.
+        const diverged = error instanceof CommittedBlockFollowUpError
+        // Any other error also ends only the round: until the block commits
+        // nothing is on disk, and exiting would keep this validator out of
+        // every later round over a fault that may pass, such as a timed-out
+        // query or a dropped peer.
+        const unexpected = !aborted && !invalid && !diverged
 
         if (invalid && getSharedState.lastBlockNumber < blockRef) {
             recordFailedRound(
@@ -684,7 +702,7 @@ export async function consensusRoutine(): Promise<void> {
             )
         }
 
-        if (aborted || invalid) {
+        if (aborted || invalid || unexpected) {
             exitReason = "abortConsensus"
             // Its message is the only record of why the round stopped.
             if (error instanceof AbortConsensusError) {
@@ -693,6 +711,12 @@ export async function consensusRoutine(): Promise<void> {
             if (aborted) {
                 log.error(error)
                 log.error("[consensusRoutine] Exiting consensus routine")
+            }
+            if (unexpected) {
+                log.error(
+                    `[consensusRoutine] Round for block ${blockRef} failed, sitting it out: ${error}`,
+                )
+                console.error((error as Error)?.stack ?? error)
             }
             if (manager?.ourValidatorPhase) {
                 log.warn(

@@ -12,13 +12,23 @@ import searchStoragePrograms from "../routines/nodecalls/searchStoragePrograms"
 import type { NodeCallHandler } from "./types"
 
 /**
+ * Read ACLs are checked against the verified sender only. A requesterAddress
+ * in the request body is the caller's own claim, so it is replaced; without
+ * a verified sender the read is anonymous.
+ */
+function asVerifiedRequester(data: unknown, sender: string) {
+    const fields = data && typeof data === "object" ? data : {}
+    return { ...fields, requesterAddress: sender || undefined }
+}
+
+/**
  * Read-side RPC handlers for the StorageProgram subsystem.
  *
  * Each handler returns its own RPCResponse (not the shared mutable
  * `response` argument) — the dispatcher's adapter just returns whatever
  * we hand back. ACL enforcement happens inside each handler via
- * GCRStorageProgramRoutines.checkReadPermission, with anonymous callers
- * limited to public programs.
+ * GCRStorageProgramRoutines.checkReadPermission against the verified
+ * sender, with anonymous callers limited to public programs.
  */
 export const storageProgramHandlers: Record<string, NodeCallHandler> = {
     // No read check: a proof serves a program's record, which carries the
@@ -26,32 +36,32 @@ export const storageProgramHandlers: Record<string, NodeCallHandler> = {
     getStorageProof: async data => {
         return await getStorageProof(data)
     },
-    getStorageProgram: async data => {
-        return await getStorageProgram(data)
+    getStorageProgram: async (data, _response, sender) => {
+        return await getStorageProgram(asVerifiedRequester(data, sender))
     },
-    getStorageProgramAll: async data => {
-        return await getStorageProgramAll(data)
+    getStorageProgramAll: async (data, _response, sender) => {
+        return await getStorageProgramAll(asVerifiedRequester(data, sender))
     },
-    getStorageProgramFields: async data => {
-        return await getStorageProgramFields(data)
+    getStorageProgramFields: async (data, _response, sender) => {
+        return await getStorageProgramFields(asVerifiedRequester(data, sender))
     },
-    getStorageProgramFieldType: async data => {
-        return await getStorageProgramFieldType(data)
+    getStorageProgramFieldType: async (data, _response, sender) => {
+        return await getStorageProgramFieldType(asVerifiedRequester(data, sender))
     },
     getStorageProgramLimits: async () => getStorageProgramLimits(),
-    getStorageProgramItem: async data => {
-        return await getStorageProgramItem(data)
+    getStorageProgramItem: async (data, _response, sender) => {
+        return await getStorageProgramItem(asVerifiedRequester(data, sender))
     },
-    getStorageProgramValue: async data => {
-        return await getStorageProgramValue(data)
+    getStorageProgramValue: async (data, _response, sender) => {
+        return await getStorageProgramValue(asVerifiedRequester(data, sender))
     },
-    getStorageProgramsByOwner: async data => {
-        return await getStorageProgramsByOwner(data)
+    getStorageProgramsByOwner: async (data, _response, sender) => {
+        return await getStorageProgramsByOwner(asVerifiedRequester(data, sender))
     },
-    hasStorageProgramField: async data => {
-        return await hasStorageProgramField(data)
+    hasStorageProgramField: async (data, _response, sender) => {
+        return await hasStorageProgramField(asVerifiedRequester(data, sender))
     },
-    searchStoragePrograms: async data => {
-        return await searchStoragePrograms(data)
+    searchStoragePrograms: async (data, _response, sender) => {
+        return await searchStoragePrograms(asVerifiedRequester(data, sender))
     },
 }

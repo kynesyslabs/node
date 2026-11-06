@@ -22,9 +22,11 @@ SUITE_FILES=(
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
+    src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts
+    src/libs/blockchain/finality/requesterFixtures.test.ts
     src/libs/blockchain/finality/storageHistory.test.ts
     src/libs/blockchain/finality/storageRecord.test.ts
     src/libs/blockchain/finality/storageRoot.test.ts
@@ -75,6 +77,8 @@ SUITE_FILES=(
     src/libs/network/routines/nodecalls/finalityProofCalls.test.ts
     src/libs/network/routines/nodecalls/getFinalizedHead.test.ts
     src/libs/network/routines/nodecalls/readApi.test.ts
+    src/libs/network/routines/nodecalls/requesterFixtures.head.test.ts
+    src/libs/network/routines/nodecalls/requesterFixtures.status.test.ts
     src/libs/omniprotocol/integration/BaseAdapter.test.ts
     src/libs/omniprotocol/peerAuthBinding.test.ts
     src/libs/omniprotocol/peerLiveness.test.ts

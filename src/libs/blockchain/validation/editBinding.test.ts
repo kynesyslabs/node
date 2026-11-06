@@ -184,6 +184,29 @@ describe("a forged edit shipped by a peer that signed the transaction itself", (
         await refusedEverywhere(tx)
     })
 
+    it("a TLSNotary proof store on the sender's own tlsn_store, the only way a proof row could be written", async () => {
+        const { TLSNotaryService: Service } = await import("@kynesyslabs/demosdk/tlsnotary/service")
+        const tx = onTheWire(
+            await (Service.prototype as any).createTlsnStoreTransaction.call(
+                { demos },
+                "token-1",
+                "proof-bytes",
+                "onchain",
+                2n * OS,
+            ),
+        )
+        expect(edits(tx).some(e => e.type === "tlsnotary")).toBe(false)
+        edits(tx).push({
+            type: "tlsnotary",
+            operation: "store",
+            account: SENDER,
+            data: { tokenId: "token-1", domain: "d", proof: "proof-bytes", storageType: "onchain", timestamp: 1 },
+            isRollback: false,
+            txhash: "",
+        })
+        await refusedEverywhere(tx)
+    })
+
     it("a dropped gas edit, which would make the transaction free", async () => {
         const tx = await wire("unstake")
         tx.content.gcr_edits = edits(tx).filter(e => e.type !== "balance") as unknown as GCREdit[]
@@ -610,6 +633,7 @@ describe("the editBinding fork gates admission as well as apply", () => {
             postFork: false,
             nonceBound: false,
             governance: true,
+            stakeChecks: false,
             sendBound: false,
             canonical: false,
             feeBound: false,
@@ -620,6 +644,7 @@ describe("the editBinding fork gates admission as well as apply", () => {
             postFork: true,
             nonceBound: false,
             governance: true,
+            stakeChecks: false,
             sendBound: false,
             canonical: false,
             feeBound: false,

@@ -1,0 +1,129 @@
+{
+  "id": "F02",
+  "kind": "positive (shape only)",
+  "issues": [
+    "kynesyslabs/node#1059 (U-01)",
+    "kynesyslabs/node#1060 (U-02)"
+  ],
+  "captured_by": "PATH-OS node shape probe run as live-run preflight",
+  "recorded_at_utc": "2026-09-07T18:05:57+00:00",
+  "previous_recorded_at_utc": "2026-09-07T17:46:39+00:00",
+  "rpc": "https://demosnode.discus.sh/",
+  "requests": {
+    "getStorageProgram": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getStorageProgram",
+            "data": {
+              "storageAddress": "stor-d8e057eeed81401fc10ca14074493e97b0958f92"
+            },
+            "muid": "fixture-read"
+          }
+        ]
+      }
+    },
+    "getTxByHash": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getTxByHash",
+            "data": {
+              "hash": "feb24e421e2251b19dae2fce782eea303819364d28a5fd9a31eca6993ceaee17"
+            },
+            "muid": "fixture-read"
+          }
+        ]
+      }
+    },
+    "getTransactionStatus": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getTransactionStatus",
+            "data": {
+              "hash": "feb24e421e2251b19dae2fce782eea303819364d28a5fd9a31eca6993ceaee17"
+            },
+            "muid": "fixture-read"
+          }
+        ]
+      }
+    },
+    "getBlockByNumber": {
+      "method": "POST",
+      "url": "https://demosnode.discus.sh/",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "method": "nodeCall",
+        "params": [
+          {
+            "message": "getBlockByNumber",
+            "data": {
+              "blockNumber": "<the blockNumber from getTxByHash>"
+            },
+            "muid": "fixture-read"
+          }
+        ]
+      }
+    }
+  },
+  "refs_from_run": "beta-testnet-20260907T160447Z",
+  "top_level_field_types_checked": {
+    "getStorageProgram": {
+      "owner": "string",
+      "programName": "string",
+      "createdByTx": "string",
+      "data": "object"
+    },
+    "getTxByHash": {
+      "status": "string",
+      "blockNumber": "number",
+      "hash": "string",
+      "content": "object"
+    },
+    "getTransactionStatus": {
+      "state": "string",
+      "blockNumber": "number"
+    },
+    "getBlockByNumber": {
+      "number": "number",
+      "status": "string",
+      "hash": "string",
+      "content": "object"
+    }
+  },
+  "drift": [],
+  "unavailable": [],
+  "capture_form": "top-level field names and JSON types only, for the fields the probe checks; values and the other fields were not stored",
+  "shows": [
+    "all four read methods answered on 2026-09-07 with the checked fields present",
+    "F02 records only the types of getTransactionStatus state and blockNumber; it retains neither state values nor the complete response",
+    "The recorded allowlisted fields contain no block/proof field; other response fields were not retained."
+  ],
+  "does_not_show": [
+    "full response bodies",
+    "that no other fields exist (only checked fields were recorded)",
+    "any actual state value, so it cannot establish the requested state enum or the absence of checkedThroughBlock",
+    "that a proof, checkpoint or block field or API is absent from the deployed node; #1059/#1060 separately describe deployed behavior"
+  ]
+}

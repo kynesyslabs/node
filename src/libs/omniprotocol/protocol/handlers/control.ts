@@ -279,11 +279,14 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
         (params.length === 0 ? {} : params.length === 1 ? params[0] : params)
     const actualMuid = innerCall?.muid ?? ""
 
-    const response = await manageNodeCall({
-        message: actualMessage,
-        data: actualData,
-        muid: actualMuid,
-    })
+    const response = await manageNodeCall(
+        {
+            message: actualMessage,
+            data: actualData,
+            muid: actualMuid,
+        },
+        context.isAuthenticated ? context.peerIdentity ?? "" : "",
+    )
 
     return encodeNodeCallResponse({
         status: response.result,

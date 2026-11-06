@@ -9,11 +9,12 @@ groups:
         # which uses {step} labels and never matched.
         expr: demos_subsystem_up == 0 and demos_subsystem_skipped == 0
         for: 2m
+        keep_firing_for: 5m
         labels:
           severity: warning
         annotations:
           summary: Subsystem {{ $labels.subsystem }} is down
-          description: 'demos_subsystem_up{subsystem="{{ $labels.subsystem }}"} has been 0 for >2m without being intentionally skipped. Check /health/subsystems for last_error.'
+          description: 'demos_subsystem_up{subsystem="{{ $labels.subsystem }}"} has been 0 for >2m on {{ $labels.instance }} without being intentionally skipped. Check /health/subsystems for last_error.'
 
       - alert: PortDriftDetected
         expr: abs(demos_port_drift) > 0
@@ -22,4 +23,4 @@ groups:
           severity: info
         annotations:
           summary: Subsystem {{ $labels.subsystem }} drifted from requested port
-          description: 'Subsystem bound to a different port than configured (drift = {{ $value }}). Reachability + firewall rules may need an update.'
+          description: 'Subsystem on {{ $labels.instance }} bound to a different port than configured (drift = {{ $value }}). Reachability + firewall rules may need an update.'
