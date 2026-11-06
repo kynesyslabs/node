@@ -99,6 +99,9 @@ const { default: getValidatorSet } = await import("./getValidatorSet")
 const { default: getBlockSegment, MAX_SEGMENT_BLOCKS, MAX_SEGMENT_CONTENT_BYTES } = await import("./getBlockSegment")
 const { default: getStorageProof } = await import("./getStorageProof")
 const { default: getStorageProgramLimits } = await import("./getStorageProgramLimits")
+const { STORAGE_PROGRAM_MAX_JSON_DEPTH, STORAGE_PROGRAM_MAX_SIZE_BYTES } = await import(
+    "src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
+)
 const { serializeTxContent } = await import("src/libs/crypto/txContentSerializer")
 const { STORAGE_HISTORY_BLOCKS } = await import("src/libs/blockchain/finality/storageHistory")
 
@@ -712,15 +715,26 @@ describe("getStorageProof", () => {
 })
 
 describe("getStorageProgramLimits", () => {
-    it("names the proof batch, the history window and the program pricing", async () => {
+    it("names the proof batch, the history window, the size and depth limits and the program pricing", async () => {
         const reply = getStorageProgramLimits()
         expect(reply.result).toBe(200)
         expect(reply.response).toEqual({
             maxAddressesPerProof: 16,
             historyBlocks: 64,
+            maxDataBytes: 1_048_576,
+            measuredOver: expect.stringContaining("JSON.stringify(data)"),
+            maxJsonDepth: 64,
+            appliesFromBlock: 0,
             maxProgramSizeBytes: 1_048_576,
             pricingChunkBytes: 10_240,
             feePerChunk: "1",
         })
+    })
+
+    it("reports the constants the storage routines enforce", async () => {
+        const { response } = getStorageProgramLimits()
+        expect(response.maxDataBytes).toBe(STORAGE_PROGRAM_MAX_SIZE_BYTES)
+        expect(response.maxJsonDepth).toBe(STORAGE_PROGRAM_MAX_JSON_DEPTH)
+        expect(response.measuredOver).toContain("binary")
     })
 })
