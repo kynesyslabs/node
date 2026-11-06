@@ -327,15 +327,17 @@ Wipe and re-run:
 ./run -b true
 ```
 
-Or Option B, a manual wipe, in three parts. Each part is a `&&` chain, so a failed step (`down`, `rm`, the emptiness check, `migration:run`) stops it and `./run` never starts on a database that was not wiped or not migrated. First wipe and restart Postgres:
+Or Option B, a manual wipe, in three parts. Option B is for the repo's own local Postgres container only (`postgres_<PG_PORT>/`), never an external database. Check that `.env` points at it (`PG_HOST=localhost`, `PG_USER=demosuser`, `PG_DATABASE=demos`) before you start. Each part is a `&&` chain, so a failed step (`down`, `rm`, the emptiness check, `migration:run`) stops it and `./run` never starts on a database that was not wiped or not migrated. Replace `<PG_PORT>` everywhere with the same port. First wipe and restart Postgres. The first block runs in a subshell, so your shell stays in the repo root even when a step fails and you can paste it again. The Postgres files belong to the container's user, so on Linux bare metal a plain `rm` usually fails; the `sudo` fallback is the same one `scripts/run` uses for `./run -b true`:
 
 ```bash
-cd postgres_<PG_PORT> &&
-docker compose down &&
-rm -rf data_* &&
-mkdir data_<PG_PORT> &&
-docker compose up -d &&
-cd ..
+(
+  export PG_PORT=<PG_PORT> &&
+  cd postgres_<PG_PORT> &&
+  docker compose down &&
+  { rm -rf data_<PG_PORT> || sudo rm -rf data_<PG_PORT>; } &&
+  mkdir data_<PG_PORT> &&
+  docker compose up -d
+)
 ```
 
 The wiped database has no schema and `./run` does not create it. Wait until this answers "accepting connections". Postgres restarts once on first init, so it can answer once and then go away: wait a few seconds and run it a second time.
@@ -344,12 +346,12 @@ The wiped database has no schema and `./run` does not create it. Wait until this
 docker exec postgres_<PG_PORT> sh -c 'exec pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 ```
 
-Then check that the database is empty (the count must be `0`; any other number means the wipe did not work), migrate, and start. `migration:run` reads `PG_PORT` from the environment or `.env`; on a port other than the default (5332), set it to this directory's `<PG_PORT>` or it migrates the wrong database:
+Then check that the database is empty (the count must be `0`; any other number means the wipe did not work), migrate, and start. `migration:run` reads the connection settings from the environment or `.env`, so the command pins all five to the container's values (the same ones `scripts/run` pins) and cannot reach a different database than the emptiness check. `./run -d <PG_PORT>` passes the port; without `-d` it defaults to 5332:
 
 ```bash
 test "$(docker exec postgres_<PG_PORT> sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"')" = 0 &&
-PG_PORT=<PG_PORT> bun run migration:run &&
-./run
+PG_HOST=localhost PG_PORT=<PG_PORT> PG_USER=demosuser PG_PASSWORD=demospassword PG_DATABASE=demos bun run migration:run &&
+./run -d <PG_PORT>
 ```
 
 Both paths leave `data/snapshot/` untouched. The genesis builder picks it up again on the fresh boot.
