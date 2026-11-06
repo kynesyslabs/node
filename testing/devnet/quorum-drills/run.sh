@@ -432,11 +432,12 @@ LOG_READ_MAX_BYTES=$((256 * 1024 * 1024))
 # the daemon's logging driver rotates logs (the local driver, or json-file with
 # max-size/max-file): then early lines can be gone, and the run log names the
 # driver at bring-up. Fails, printing why, when node $1 has no container or it
-# cannot be looked up, docker logs fails or does not finish in time, or the log
-# is over LOG_READ_MAX_BYTES: part of what docker logs gives is never passed
-# off as all of it.
+# cannot be looked up, docker logs fails or does not finish in time, the copy
+# in $2 cannot be written whole (a full disk), or the log is over
+# LOG_READ_MAX_BYTES: part of what docker logs gives is never passed off as all
+# of it.
 read_node_log() { # $1 node, $2 file, $3 last lines (default: all)
-    local cid rc
+    local cid rc size
     # dc ps, spelled out: timeout runs a command, not a shell function
     cid=$(timeout -k 5 "${LOG_READ_TIMEOUT_S}" docker compose -f "${RUN_DIR}/compose.yml" -p "${PROJECT}" ps -aq "node-$1" 2>/dev/null)
     rc=$?
@@ -447,12 +448,21 @@ read_node_log() { # $1 node, $2 file, $3 last lines (default: all)
     esac
     timeout -k 5 "${LOG_READ_TIMEOUT_S}" docker logs --tail "${3:-all}" "${cid}" 2>&1 |
         sed 's/\x1b\[[0-9;]*m//g' | head -c $((LOG_READ_MAX_BYTES + 1)) > "$2"
-    rc=${PIPESTATUS[0]}
-    [ "$(wc -c < "$2")" -gt "${LOG_READ_MAX_BYTES}" ] && { echo "the log is over ${LOG_READ_MAX_BYTES} bytes"; return 1; }
-    case "${rc}" in
+    local st=("${PIPESTATUS[@]}")
+    # head exits 0 when it stops at the cap too. Any other status, or a $2 that
+    # could not be opened (bash gives the stage 1 and runs no head), is a copy
+    # with lines missing
+    [ "${st[2]}" = 0 ] || { echo "could not write the copy to $2"; return 1; }
+    size=$(wc -c < "$2") || { echo "could not read back the copy in $2"; return 1; }
+    # At the cap head closes the pipe: sed and docker may die of SIGPIPE then
+    [ "${size}" -gt "${LOG_READ_MAX_BYTES}" ] && { echo "the log is over ${LOG_READ_MAX_BYTES} bytes"; return 1; }
+    # Under it head read to the end, so sed and docker ran to theirs: a sed that
+    # failed lost lines
+    [ "${st[1]}" = 0 ] || { echo "stripping colour codes failed (sed exit ${st[1]})"; return 1; }
+    case "${st[0]}" in
         0) return 0 ;;
         124 | 137) echo "docker logs did not finish within ${LOG_READ_TIMEOUT_S}s"; return 1 ;;
-        *) echo "docker logs failed (exit ${rc}): $(tail -1 "$2" | cut -c1-200)"; return 1 ;;
+        *) echo "docker logs failed (exit ${st[0]}): $(tail -1 "$2" | cut -c1-200)"; return 1 ;;
     esac
 }
 # The last line in node $1's log that says why it would not boot, for the abort
