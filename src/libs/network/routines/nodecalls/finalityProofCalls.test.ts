@@ -26,7 +26,7 @@ interface TxRow {
     attrs: any
     blockNumber: number
     content: Record<string, any>
-    signature: { type: string; data: string }
+    signature: { type: string; data: string; domain?: string }
     ed25519_signature: string | null
 }
 let txRows = new Map<string, TxRow>()
@@ -129,7 +129,10 @@ function transfer(nonce: number): Record<string, any> {
         to: PAYEE,
         amount,
         data: ["native", { nativeOperation: "send", args: [PAYEE, amount] }],
-        gcr_edits: [],
+        gcr_edits: [
+            { type: "balance", operation: "remove", isRollback: false, account: PAYER, txhash: "", amount },
+            { type: "balance", operation: "add", isRollback: false, account: PAYEE, txhash: "", amount },
+        ],
         nonce,
         timestamp: 1_790_000_000_000 + nonce,
         transaction_fee: { network_fee: "1", rpc_fee: "0", additional_fee: "0", rpc_address: null },
@@ -211,6 +214,7 @@ beforeEach(() => {
     snapshots = [{ block: 0, setHash: SET_HASH, validators }]
     sharedState.syncStatus = true
     sharedState.forkConfig = structuredClone(FORKS)
+    delete sharedState.referenceBlockRoom
     proveStoragePrograms.mockReset()
 })
 
@@ -252,6 +256,56 @@ describe("getTransactionProof", () => {
         )
         const swapped = { ...ok.response, tx: failed.response.tx }
         expect(verifyTransactionProof(swapped, trusted, rules).verdict).toBe("invalid")
+    })
+
+    /** Orders one transaction in block 4 and commits its result in block 5. */
+    function includeInBlock4(row: Omit<TxRow, "blockNumber" | "status" | "attrs">) {
+        const laterLeaf = [leafOf(TX.later, "confirmed", null)]
+        store(4, header(4, blocks.get(3)!.hash, { parent_results_root: toHex(rfcRoot(laterLeaf)), ordered_transactions: [row.hash] }))
+        store(5, header(5, blocks.get(4)!.hash, { parent_results_root: toHex(rfcRoot([leafOf(row.hash, "confirmed", null)])) }))
+        txRows.set(row.hash, { ...row, status: "confirmed", attrs: null, blockNumber: 4 })
+    }
+
+    it("serves a system relay transaction as its producer hashed it, raw JSON", async () => {
+        const content = {
+            type: "l2psBatch",
+            from: PAYER,
+            to: PAYER,
+            amount: 0,
+            data: ["l2psEncryptedTx", { l2ps_uid: "subnet", encrypted_batch: "ab".repeat(16) }],
+            gcr_edits: [],
+            nonce: 5,
+            timestamp: 1_790_000_000_005,
+            transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0, rpc_address: null },
+        }
+        const raw = JSON.stringify(content)
+        expect(serializeTxContent(content as never, true)).not.toBe(raw)
+        const signature = { type: "ed25519", data: sha256("relay signature").repeat(2), domain: "l2ps-batch" }
+        includeInBlock4({ hash: sha256(raw), content, signature, ed25519_signature: null })
+
+        const reply = await getTransactionProof({ hash: sha256(raw) })
+        expect(reply.result).toBe(200)
+        expect(reply.response.tx).toEqual({ hash: sha256(raw), contentBytes: raw, signature, ed25519_signature: null })
+        const verdict = verifyTransactionProof(reply.response, trusted, rules, { from: PAYER, nonce: 5 })
+        expect(verdict).toMatchObject({ verdict: "final-executed", content: { type: "l2psBatch", amount: 0 } })
+    })
+
+    it("serves a transaction admitted before osDenomination that landed just after it", async () => {
+        sharedState.forkConfig = { ...structuredClone(FORKS), osDenomination: { activationHeight: 4 } }
+        sharedState.referenceBlockRoom = 10
+        const content = { ...transfer(5), amount: 5, transaction_fee: { network_fee: 1, rpc_fee: 0, additional_fee: 0, rpc_address: null } }
+        const legacy = JSON.stringify(content)
+        expect(serializeTxContent(content as never, true)).not.toBe(legacy)
+        includeInBlock4({ hash: sha256(legacy), content, signature: { type: "ed25519", data: "00".repeat(64) }, ed25519_signature: null })
+
+        const reply = await getTransactionProof({ hash: sha256(legacy) })
+        expect(reply.result).toBe(200)
+        expect(reply.response.tx.contentBytes).toBe(legacy)
+
+        sharedState.referenceBlockRoom = 0
+        const outside = await getTransactionProof({ hash: sha256(legacy) })
+        expect(outside.result).toBe(500)
+        expect(outside.extra).toMatchObject({ reason: "content_unrecoverable" })
     })
 
     it("answers 500 content_unrecoverable when the stored transaction no longer hashes to its hash", async () => {

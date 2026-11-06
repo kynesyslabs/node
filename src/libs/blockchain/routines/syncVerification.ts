@@ -5,9 +5,9 @@ import hashGCRTables from "../gcr/gcr_routines/hashGCR"
 import TxValidatorPool from "../validation/txValidatorPool"
 import { isSystemRelayTx, verifySystemRelayTx } from "../validation/systemRelayTx"
 import {
-    EXPIRED_TX_DEEP_WINDOW_MULTIPLIER,
     isReferenceBlockAllowed,
     isWithinDeepWindow,
+    previousRuleHeights,
 } from "../referenceBlockWindow"
 import { filterMempoolByNonce } from "src/libs/consensus/v2/routines/mempoolFilters"
 import type { MempoolTransaction } from "src/libs/consensus/v2/routines/mempoolFilters"
@@ -49,39 +49,6 @@ async function validateAtHeight(
         isForkActive("osDenomination", height),
         txSignatureContext(height),
     )
-}
-
-const SIGNATURE_RULE_FORKS = ["osDenomination", "signatureDomain"] as const
-
-/**
- * Heights whose rules a block's transactions may legitimately have been
- * admitted under, besides the block's own: the height before each fork that
- * activated no more than a deep window ago.
- *
- * The forger admits a tx under the rules of the tip it saw and never
- * revalidates its mempool. A tx kept for a later round (a nonce ahead of its
- * predecessor) can therefore reach a block after a fork activated, for as long
- * as its reference block is still inside the deep window; past that the forger
- * drops it. Every fork rule is judged separately because they activate at
- * different heights.
- */
-function previousRuleHeights(height: number): number[] {
-    const window =
-        EXPIRED_TX_DEEP_WINDOW_MULTIPLIER * getSharedState.referenceBlockRoom
-    const heights = new Set<number>()
-    for (const fork of SIGNATURE_RULE_FORKS) {
-        const activation = getSharedState.forkConfig?.[fork]?.activationHeight
-        if (
-            activation !== null &&
-            activation !== undefined &&
-            activation > 0 &&
-            height >= activation &&
-            height < activation + window
-        ) {
-            heights.add(activation - 1)
-        }
-    }
-    return [...heights]
 }
 
 /**

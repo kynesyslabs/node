@@ -2,6 +2,11 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { serializeBlockContent, serializeTransactionContent } from "@/forks"
 import Hashing from "src/libs/crypto/hashing"
 import { certificateMessageOf } from "src/libs/consensus/v2/commitLock/domain"
+import { previousRuleHeights } from "src/libs/blockchain/referenceBlockWindow"
+import {
+    isSystemRelayTx,
+    systemRelayContentString,
+} from "src/libs/blockchain/validation/systemRelayTx"
 
 /**
  * A block as a finality proof carries it: the exact text its hash is the
@@ -36,7 +41,7 @@ interface StoredBlock {
 export interface TransactionBytes {
     hash: string
     contentBytes: string
-    signature: { type: string; data: string } | null
+    signature: { type: string; data: string; domain?: string } | null
     ed25519_signature: string | null
 }
 
@@ -74,25 +79,41 @@ export function blockBytes(block: StoredBlock): BlockBytes {
 interface StoredTransaction {
     hash: string
     content: unknown
-    signature?: { type: string; data: string } | null
+    signature?: { type: string; data: string; domain?: string } | null
     ed25519_signature?: string | null
 }
 
 /**
- * Serialized as validation hashes it, at the height of the block the
- * transaction sits in, since osDenomination changes the bytes.
+ * The texts block sync accepts as hashing to a transaction of block m: a
+ * system relay type hashes its raw content; any other type is serialized at
+ * the rules of m, or of a height before a fork that activated within the deep
+ * window, since a transaction admitted under the old rule can still land in
+ * a block after the fork.
+ */
+function hashPreimages(tx: StoredTransaction, blockNumber: number): string[] {
+    if (isSystemRelayTx(tx as never)) return [systemRelayContentString(tx.content)]
+    const texts: string[] = []
+    for (const height of [blockNumber, ...previousRuleHeights(blockNumber)]) {
+        try {
+            const text = serializeTransactionContent(tx.content as never, height)
+            if (!texts.includes(text)) texts.push(text)
+        } catch {
+            // Content that this rule cannot serialize was not admitted under it.
+        }
+    }
+    return texts
+}
+
+/**
+ * The transaction as validation hashed it, so the bytes a client hashes are
+ * the ones the block committed to.
  *
- * @throws ContentUnrecoverableError when those bytes do not hash to the
- *   transaction's hash.
+ * @throws ContentUnrecoverableError when no accepted serialization of the
+ *   stored content hashes to the transaction's hash.
  */
 export function transactionBytes(tx: StoredTransaction, blockNumber: number): TransactionBytes {
-    let contentBytes: string
-    try {
-        contentBytes = serializeTransactionContent(tx.content as never, blockNumber)
-    } catch {
-        throw new ContentUnrecoverableError(blockNumber, tx.hash)
-    }
-    if (Hashing.sha256(contentBytes) !== tx.hash) {
+    const contentBytes = hashPreimages(tx, blockNumber).find(text => Hashing.sha256(text) === tx.hash)
+    if (contentBytes === undefined) {
         throw new ContentUnrecoverableError(blockNumber, tx.hash)
     }
     return {
