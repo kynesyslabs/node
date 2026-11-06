@@ -53,7 +53,7 @@ depends on the refusal:
 | `getTransactionStatus` 404 / 503 | `{ state: "unknown", checkedThroughBlock }`, no `error` | `{ reason: "not_found" \| "node_not_synced" }` |
 | `getTransactionStatus` 400 | `{ error: <message> }` | none |
 | `getFinalizedHead` 503 | the head fields all `null`, `nodeSynced: false` | `{ reason: "node_not_synced" }` |
-| `getStorageProgram` and the other storage program reads: 400, 403, 500 | `{ error: <message>, errorCode }`, `errorCode` one of `INVALID_REQUEST`, `PERMISSION_DENIED`, `INTERNAL_ERROR` (the field reads add `INVALID_FIELD_TYPE` and a 404 `FIELD_NOT_FOUND`) | `""` |
+| `getStorageProgram` and the other storage program reads: 400, 403, 500 | `{ error: <message>, errorCode }`, `errorCode` one of `INVALID_REQUEST`, `PERMISSION_DENIED`, `INTERNAL_ERROR` (the field reads add `INVALID_FIELD_TYPE`, a 404 `FIELD_NOT_FOUND` and, for an item index past the end of an array, `INDEX_OUT_OF_BOUNDS`) | `""` |
 
 Read `extra.reason` to tell refusals of the finality calls apart, and
 `errorCode` for the storage program reads. `404 not_found`,
