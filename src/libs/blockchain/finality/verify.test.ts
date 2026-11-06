@@ -12,6 +12,7 @@ import { describe, expect, it } from "bun:test"
 import { sign } from "node:crypto"
 import { jcsCanonicalize } from "src/libs/crypto/jcs"
 import { precommitMessage } from "src/libs/consensus/v2/commitLock/messages"
+import { serializeTxContent } from "src/libs/crypto/txContentSerializer"
 import type { ValidatorSetEntry } from "src/model/entities/ValidatorSetSnapshots"
 import {
     buildChain,
@@ -30,6 +31,7 @@ import {
     verifyStorageProof,
     verifyTransactionProof,
     type CommitteeRules,
+    type ExpectedTransaction,
     type StorageProof,
     type TransactionProof,
 } from "./verify"
@@ -52,13 +54,103 @@ const ROUND = 1_800_000_123
 const resultLeafText = (hash: string, status: string, code: string | null) =>
     jcsCanonicalize({ code, hash, status })
 
-const TX = ["a1", "b2", "c3", "d4", "e5"].map(seed => sha256(seed))
+/** The balance edits the SDK ships with a native send of `amount` to `to`. */
+function sendEdits(to: string, amount: string | number) {
+    return [
+        { type: "balance", operation: "remove", isRollback: false, account: `0x${"a1".repeat(32)}`, txhash: "", amount },
+        { type: "balance", operation: "add", isRollback: false, account: to, txhash: "", amount },
+    ]
+}
+
+/** A native transfer as the node hashes it once osDenomination applies. */
+function transferContent(nonce: number, amount: bigint, to: string) {
+    return {
+        type: "native",
+        from: `0x${"a1".repeat(32)}`,
+        to,
+        amount,
+        data: ["native", { nativeOperation: "send", args: [to, amount.toString()] }],
+        gcr_edits: sendEdits(to, amount.toString()),
+        nonce,
+        timestamp: 1_790_000_000_000 + nonce,
+        transaction_fee: { network_fee: 1n, rpc_fee: 0n, additional_fee: 0n, rpc_address: null },
+        from_ed25519_address: `0x${"a1".repeat(32)}`,
+    }
+}
+const PAYEE = `0x${"b2".repeat(32)}`
+const MALLORY = `0x${"c3".repeat(32)}`
+
+/** A native send whose top-level fields, args and edits can disagree. */
+function forgedContent(nonce: number, top: { to?: string; amount?: bigint }, args: [string, bigint], paid: [string, bigint]) {
+    const { to: _to, amount: _amount, ...rest } = transferContent(nonce, args[1], args[0])
+    return {
+        ...rest,
+        ...top,
+        gcr_edits: sendEdits(paid[0], paid[1].toString()),
+    }
+}
+const PAYMENT = 9_500_000_000n
+/** Top-level says the expected payment; the args and edits pay another account and amount. */
+const ARGS_ELSEWHERE_BYTES = serializeTxContent(
+    forgedContent(11, { to: PAYEE, amount: PAYMENT }, [MALLORY, 1_000_000_000n], [MALLORY, 1_000_000_000n]) as never,
+    true,
+)
+/** The args and edits pay the expected payment; the top-level names another account. */
+const TOP_ELSEWHERE_BYTES = serializeTxContent(
+    forgedContent(12, { to: MALLORY, amount: PAYMENT }, [PAYEE, PAYMENT], [PAYEE, PAYMENT]) as never,
+    true,
+)
+/** Top-level and args say the expected payment; the edits credit another account. */
+const EDITS_ELSEWHERE_BYTES = serializeTxContent(
+    forgedContent(13, { to: PAYEE, amount: PAYMENT }, [PAYEE, PAYMENT], [MALLORY, PAYMENT]) as never,
+    true,
+)
+/** A send with no top-level to or amount: the args and edits alone say the payment. */
+const ARGS_ONLY_BYTES = serializeTxContent(forgedContent(14, {}, [PAYEE, PAYMENT], [PAYEE, PAYMENT]) as never, true)
+/** A send signed with DEM numbers, as the SDK's sign() takes them. */
+function demSendContent(nonce: number, argAmount: number | string) {
+    return {
+        type: "native",
+        from: `0x${"a1".repeat(32)}`,
+        to: PAYEE,
+        amount: 5,
+        data: ["native", { nativeOperation: "send", args: [PAYEE, argAmount] }],
+        gcr_edits: sendEdits(PAYEE, 5),
+        nonce,
+        timestamp: 1_790_000_000_000 + nonce,
+        transaction_fee: { network_fee: 1, rpc_fee: 0, additional_fee: 0, rpc_address: null },
+        from_ed25519_address: `0x${"a1".repeat(32)}`,
+    }
+}
+/** After osDenomination: top-level amount and edits become OS strings, the args stay 5 DEM. */
+const DEM_ARGS_BYTES = serializeTxContent(demSendContent(15, 5) as never, true)
+/** Before osDenomination: plain JSON in DEM, with the args in OS as edit binding reads them then. */
+const LEGACY_OS_ARGS_BYTES = serializeTxContent(demSendContent(16, "5000000000") as never, false)
+const PAYMENT_BYTES = serializeTxContent(transferContent(7, 9_500_000_000n, PAYEE) as never, true)
+const LOW_NONCE_BYTES = serializeTxContent(transferContent(6, 9_500_000_000n, PAYEE) as never, true)
+const OTHER_BYTES = serializeTxContent(transferContent(8, 1_000_000_000n, PAYEE) as never, true)
+
+const TX = [
+    sha256(PAYMENT_BYTES),
+    sha256(LOW_NONCE_BYTES),
+    sha256(OTHER_BYTES),
+    sha256(EDITS_ELSEWHERE_BYTES),
+    sha256(ARGS_ELSEWHERE_BYTES),
+    sha256(TOP_ELSEWHERE_BYTES),
+    sha256(ARGS_ONLY_BYTES),
+    sha256(DEM_ARGS_BYTES),
+    sha256(LEGACY_OS_ARGS_BYTES),
+]
 const RESULTS = [
     resultLeafText(TX[0], "confirmed", null),
     resultLeafText(TX[1], "failed", "TX_NONCE_INVALID_LOW"),
     resultLeafText(TX[2], "confirmed", null),
     resultLeafText(TX[3], "failed", "TX_EXISTS"),
     resultLeafText(TX[4], "confirmed", null),
+    resultLeafText(TX[5], "confirmed", null),
+    resultLeafText(TX[6], "confirmed", null),
+    resultLeafText(TX[7], "confirmed", null),
+    resultLeafText(TX[8], "confirmed", null),
 ]
 const M = 41
 
@@ -300,6 +392,124 @@ describe("verifyTransactionProof", () => {
         for (const broken of [null, {}, { ...txProof(0), auditPath: "x" }, { ...txProof(0), commitBlock: null }, { ...txProof(0), leaf: "{" }]) {
             expect(verifyTransactionProof(broken as never, trusted, rules).verdict).toBe("invalid")
         }
+    })
+})
+
+describe("verifyTransactionProof with the transaction", () => {
+    const withTx = (index = 0, contentBytes = PAYMENT_BYTES, hash = TX[index]): TransactionProof => ({
+        ...txProof(index),
+        tx: { hash, contentBytes, signature: { type: "ed25519", data: "00".repeat(64) }, ed25519_signature: null },
+    })
+    const payment: ExpectedTransaction = { from: `0x${"a1".repeat(32)}`, to: PAYEE, amount: 9_500_000_000n, nonce: 7 }
+
+    it("serves the signed content and accepts the expected payment", () => {
+        const verdict = verifyTransactionProof(withTx(), trusted, rules, payment)
+        expect(verdict.verdict).toBe("final-executed")
+        expect(verdict.content).toMatchObject({ from: payment.from, to: PAYEE, amount: "9500000000", nonce: 7 })
+    })
+
+    it("compares addresses without case or 0x and quantities in any integer spelling", () => {
+        const loose = { from: "A1".repeat(32), to: PAYEE.toUpperCase().replace("0X", "0x"), amount: "09500000000", nonce: 7n }
+        expect(verifyTransactionProof(withTx(), trusted, rules, loose).verdict).toBe("final-executed")
+        expect(verifyTransactionProof(withTx(), trusted, rules, { amount: 9_500_000_000 }).verdict).toBe("final-executed")
+    })
+
+    it("refuses a payment whose from, to, amount or nonce is not the expected one", () => {
+        const altered: [keyof ExpectedTransaction, unknown][] = [
+            ["from", `0x${"c3".repeat(32)}`],
+            ["to", `0x${"c3".repeat(32)}`],
+            ["amount", 9_500_000_001n],
+            ["amount", "9.5"],
+            ["nonce", 8],
+        ]
+        for (const [field, value] of altered) {
+            const verdict = verifyTransactionProof(withTx(), trusted, rules, { ...payment, [field]: value })
+            expect(verdict.verdict).toBe("invalid")
+            expect(verdict.reason).toContain(field)
+        }
+    })
+
+    it("judges a native send by the args its edits are built from", () => {
+        const argsElsewhere = withTx(4, ARGS_ELSEWHERE_BYTES)
+        for (const expected of [payment, { to: PAYEE }, { amount: PAYMENT }]) {
+            const verdict = verifyTransactionProof(argsElsewhere, trusted, rules, expected)
+            expect(verdict.verdict).toBe("invalid")
+            expect(verdict.reason).toContain("top-level")
+        }
+        const paidTo = verifyTransactionProof(argsElsewhere, trusted, rules, { to: MALLORY, amount: 1_000_000_000n })
+        expect(paidTo.verdict).toBe("invalid")
+
+        const topElsewhere = withTx(5, TOP_ELSEWHERE_BYTES)
+        for (const expected of [{ ...payment, nonce: 12 }, { to: PAYEE }, { to: MALLORY }]) {
+            const verdict = verifyTransactionProof(topElsewhere, trusted, rules, expected)
+            expect(verdict.verdict).toBe("invalid")
+            expect(verdict.reason).toContain("top-level to")
+        }
+        expect(verifyTransactionProof(topElsewhere, trusted, rules, { amount: PAYMENT }).verdict).toBe("invalid")
+    })
+
+    it("refuses a native send whose edits do not credit what its args pay", () => {
+        const verdict = verifyTransactionProof(withTx(3, EDITS_ELSEWHERE_BYTES), trusted, rules, { to: PAYEE, amount: PAYMENT })
+        expect(verdict.verdict).toBe("invalid")
+        expect(verdict.reason).toContain("balance edits")
+    })
+
+    it("accepts a native send without top-level to or amount when its args and edits pay", () => {
+        const verdict = verifyTransactionProof(withTx(6, ARGS_ONLY_BYTES), trusted, rules, { to: PAYEE, amount: PAYMENT, nonce: 14 })
+        expect(verdict.verdict).toBe("final-executed")
+        expect(verifyTransactionProof(withTx(6, ARGS_ONLY_BYTES), trusted, rules, { to: MALLORY }).verdict).toBe("invalid")
+    })
+
+    it("reads a send's args in the denomination its edits are applied in", () => {
+        expect(DEM_ARGS_BYTES).toContain(`"args":["${PAYEE}",5]`)
+        expect(DEM_ARGS_BYTES).toContain(`"amount":"5000000000"`)
+        const demArgs = withTx(7, DEM_ARGS_BYTES)
+        const paid = verifyTransactionProof(demArgs, trusted, rules, { to: PAYEE, amount: 5_000_000_000n, nonce: 15 })
+        expect(paid.verdict).toBe("final-executed")
+        expect(verifyTransactionProof(demArgs, trusted, rules, { amount: 5 }).verdict).toBe("invalid")
+
+        const legacy = withTx(8, LEGACY_OS_ARGS_BYTES)
+        expect(verifyTransactionProof(legacy, trusted, rules, { to: PAYEE, amount: 5, nonce: 16 }).verdict).toBe("final-executed")
+        expect(verifyTransactionProof(legacy, trusted, rules, { amount: 5_000_000_000n }).verdict).toBe("invalid")
+    })
+
+    it("refuses content that hashes to another transaction", () => {
+        for (const proof of [withTx(0, OTHER_BYTES), withTx(0, OTHER_BYTES, TX[2])]) {
+            expect(verifyTransactionProof(proof, trusted, rules).verdict).toBe("invalid")
+            expect(verifyTransactionProof(proof, trusted, rules, payment).verdict).toBe("invalid")
+        }
+        const flipped = withTx(0, PAYMENT_BYTES.replace('"nonce":7', '"nonce":8'))
+        expect(verifyTransactionProof(flipped, trusted, rules).reason).toContain("does not hash to")
+    })
+
+    it("refuses content that is not a JSON object even when it hashes", () => {
+        const proof = withTx(0, "[1]")
+        proof.hash = sha256("[1]")
+        expect(verifyTransactionProof(proof, trusted, rules).verdict).toBe("invalid")
+        expect(verifyTransactionProof({ ...withTx(), tx: { hash: TX[0] } } as never, trusted, rules).verdict).toBe("invalid")
+    })
+
+    it("checks the content of a failed transaction too, and keeps its verdict", () => {
+        const failed = withTx(1, LOW_NONCE_BYTES)
+        const verdict = verifyTransactionProof(failed, trusted, rules, { ...payment, nonce: 6 })
+        expect(verdict.verdict).toBe("final-failed")
+        expect(verdict.content).toMatchObject({ nonce: 6 })
+        expect(verifyTransactionProof(failed, trusted, rules, payment).verdict).toBe("invalid")
+    })
+
+    it("keeps today's answer without the transaction, and is indeterminate when fields are expected", () => {
+        expect(verifyTransactionProof(txProof(0), trusted, rules)).toEqual({ verdict: "final-executed" })
+        expect(verifyTransactionProof(txProof(0), trusted, rules, {})).toEqual({ verdict: "final-executed" })
+        const unchecked = verifyTransactionProof(txProof(0), trusted, rules, { to: PAYEE })
+        expect(unchecked.verdict).toBe("indeterminate")
+        expect(unchecked.reason).toContain("to")
+    })
+
+    it("still answers invalid for a broken proof that carries the right transaction", () => {
+        const proof = withTx()
+        proof.commitBlock.signatures = {}
+        expect(verifyTransactionProof(proof, trusted, rules, payment).verdict).toBe("invalid")
+        expect(verifyTransactionProof({ ...txProof(0), commitBlock: proof.commitBlock }, trusted, rules, payment).verdict).toBe("invalid")
     })
 })
 

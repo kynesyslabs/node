@@ -10,7 +10,7 @@
 
 import { beforeEach, describe, expect, it, mock } from "bun:test"
 
-import { installPoolStorageMocks } from "./mempool.fixtures"
+import { installPoolStorageMocks, installPoolValidationMocks } from "./mempool.fixtures"
 
 const inserted = installPoolStorageMocks()
 
@@ -27,23 +27,9 @@ mock.module("src/utilities/logger", () => ({
         custom: () => {},
     },
 }))
-mock.module("src/libs/blockchain/validation/txValidatorPool", () => ({
-    __esModule: true,
-    default: {
-        getInstance: () => ({
-            validate: async (txs: Array<{ hash: string }>) => txs.map(t => ({ valid: true, hash: t.hash })),
-        }),
-    },
-}))
-mock.module("./validation/txAdmission", () => ({
-    checkTxAdmissible: async () => ({ ok: true }),
-}))
-
 // Identity proofs are checked by their own admission step; this file covers
 // only the edit binding.
-mock.module("./validation/identityAdmission", () => ({
-    checkIdentityAdmission: async () => ({ ok: true }),
-}))
+installPoolValidationMocks()
 
 import { StorageProgram } from "@kynesyslabs/demosdk/storage"
 import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"

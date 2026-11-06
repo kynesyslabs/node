@@ -66,6 +66,9 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                     case ProxyError.INVALID_URL:
                         response.result = 400
                         break
+                    case ProxyError.TARGET_NOT_ALLOWED:
+                        response.result = 403
+                        break
                     case ProxyError.PORT_EXHAUSTED:
                         response.result = 503
                         break

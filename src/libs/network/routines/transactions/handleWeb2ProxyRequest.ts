@@ -1,3 +1,4 @@
+import { featureDisabledMessage } from "src/libs/network/outboundSwitches"
 import { DAHR } from "src/features/web2/dahr/DAHR"
 import {
     EnumWeb2Actions,
@@ -33,6 +34,9 @@ export async function handleWeb2ProxyRequest({
 }:
     | IWeb2Payload["message"]
     | IHandleWeb2ProxyRequestStepParams): Promise<RPCResponse> {
+    const disabled = featureDisabledMessage("web2")
+    if (disabled) return createRPCResponse(403, null, disabled)
+
     try {
         switch (web2Request.raw.action) {
             case EnumWeb2Actions.CREATE: {

@@ -27,6 +27,8 @@ type StorageProgramPayload = storage.StorageProgramPayload
 export const STORAGE_PROGRAM_MAX_SIZE_BYTES = 1048576 // 1MB
 export const STORAGE_PROGRAM_PRICING_CHUNK_BYTES = 10240 // 10KB
 export const STORAGE_PROGRAM_FEE_PER_CHUNK = 1n // 1 DEM per chunk
+/** Deepest JSON data accepted; a top-level object or array is depth 1. */
+export const STORAGE_PROGRAM_MAX_JSON_DEPTH = 64
 const MAX_INTERACTION_TXS = 1000
 const STORAGE_NOT_STORABLE = `Storage program payload ${NOT_STORABLE}`
 
@@ -205,10 +207,10 @@ export function validateStorageProgramPayload(
         // For JSON encoding, validate nesting depth
         if (encoding === "json" && typeof payload.data === "object") {
             const nestingDepth = calculateJsonNestingDepth(payload.data)
-            if (nestingDepth > 64) {
+            if (nestingDepth > STORAGE_PROGRAM_MAX_JSON_DEPTH) {
                 return {
                     valid: false,
-                    message: `JSON nesting depth ${nestingDepth} exceeds maximum 64 levels`,
+                    message: `JSON nesting depth ${nestingDepth} exceeds maximum ${STORAGE_PROGRAM_MAX_JSON_DEPTH} levels`,
                 }
             }
         }
@@ -524,6 +526,17 @@ export class GCRStorageProgramRoutines {
         const operation = spEdit.context.operation
         const storageAddress = spEdit.target
 
+        // An edit carries only the new state, never the one it replaced, so
+        // no operation can be undone from it. Replaying it forward would keep
+        // the write while the caller records the rollback as done; refusing
+        // fails the rollback, which a caller then resolves by resyncing.
+        if (spEdit.isRollback) {
+            return {
+                success: false,
+                message: `${operation} cannot be rolled back`,
+            }
+        }
+
         log.info(
             `[StorageProgram] Processing ${operation} for ${storageAddress}`,
         )
@@ -653,10 +666,10 @@ export class GCRStorageProgramRoutines {
 
         if (encoding === "json" && variables.data && typeof variables.data === "object") {
             const depth = calculateJsonNestingDepth(variables.data)
-            if (depth > 64) {
+            if (depth > STORAGE_PROGRAM_MAX_JSON_DEPTH) {
                 return {
                     success: false,
-                    message: `JSON nesting depth ${depth} exceeds maximum 64 levels`,
+                    message: `JSON nesting depth ${depth} exceeds maximum ${STORAGE_PROGRAM_MAX_JSON_DEPTH} levels`,
                 }
             }
         }
@@ -785,10 +798,10 @@ export class GCRStorageProgramRoutines {
 
         if (encoding === "json" && variables.data && typeof variables.data === "object") {
             const depth = calculateJsonNestingDepth(variables.data)
-            if (depth > 64) {
+            if (depth > STORAGE_PROGRAM_MAX_JSON_DEPTH) {
                 return {
                     success: false,
-                    message: `JSON nesting depth ${depth} exceeds maximum 64 levels`,
+                    message: `JSON nesting depth ${depth} exceeds maximum ${STORAGE_PROGRAM_MAX_JSON_DEPTH} levels`,
                 }
             }
         }
@@ -1356,8 +1369,8 @@ export class GCRStorageProgramRoutines {
         }
         const footprint = granularWriteFootprint(variables)
         const depth = calculateJsonNestingDepth(footprint)
-        if (depth > 64) {
-            return fail(`JSON nesting depth ${depth} exceeds maximum 64 levels`)
+        if (depth > STORAGE_PROGRAM_MAX_JSON_DEPTH) {
+            return fail(`JSON nesting depth ${depth} exceeds maximum ${STORAGE_PROGRAM_MAX_JSON_DEPTH} levels`)
         }
         return {
             value: structuredClone(variables.value),
