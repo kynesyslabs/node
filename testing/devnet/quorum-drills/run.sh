@@ -701,20 +701,33 @@ expect_stall() { # $1 phase name, $2 height at the fault
     PHASE_END="${m}"; return 1
 }
 
-# Stops node $1 once a round past the current head has started on node $2. Each
-# log read is bounded (bdocker): one that does not answer sees no round start
+# Stops node $1 once a round past the current head has started on node $2,
+# within ROUND_START_WAIT_S. Each log read is bounded (bdc, bdocker). A lookup
+# or log read that fails or does not answer, or no round start in time, ends
+# the drill as ERROR before node $1 is stopped (round_start_error): a stop not
+# seen mid-round is not the drill
+ROUND_START_WAIT_S=60
 stop_mid_round() {
-    local victim="$1" watcher="$2" h since line deadline
+    local victim="$1" watcher="$2" h since line="" deadline cid rc
     h=$(read_head "${watcher}") || read_error "stop node-${victim}"
     since=$(date -u +%s)
-    deadline=$((SECONDS + 60))
-    while [ ${SECONDS} -lt ${deadline} ]; do
-        line=$(bdocker logs --since "${since}" "$(cid_of "${watcher}")" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
-            grep -aoE 'We are forging block [0-9]+' | awk -v h="${h}" '$5 > h' | head -1)
-        [ -n "${line}" ] && break
-        sleep 0.3
+    deadline=$((SECONDS + ROUND_START_WAIT_S))
+    while [ -z "${line}" ]; do
+        [ ${SECONDS} -lt ${deadline} ] ||
+            round_start_error "${victim}" "${watcher}" "no round past ${h} started within ${ROUND_START_WAIT_S}s"
+        cid=$(cid_of "${watcher}"); rc=$?
+        [ "${rc}" = 0 ] || round_start_error "${victim}" "${watcher}" "docker compose ps $(bounded_why "${rc}")"
+        [ -n "${cid}" ] || round_start_error "${victim}" "${watcher}" "no container"
+        # awk keeps the first round start past h and reads on, so no stage is cut
+        # off and, with pipefail, a status other than 0 is the read's own failure
+        # (grep finding no round start yet is not one)
+        line=$(bdocker logs --since "${since}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' |
+            { grep -aoE 'We are forging block [0-9]+' || [ $? = 1 ]; } | awk -v h="${h}" '$5 > h && !n++')
+        rc=$?
+        [ "${rc}" = 0 ] || round_start_error "${victim}" "${watcher}" "docker logs $(bounded_why "${rc}")"
+        [ -n "${line}" ] || sleep 0.3
     done
-    event "round start seen on node-${watcher}: ${line:-none within 60s}"
+    event "round start seen on node-${watcher}: ${line}"
     stop_node "${victim}"
     STOP_HEIGHT="${h}"
 }
@@ -837,6 +850,17 @@ log_read_error() { # $1 phase name
     say "ERROR: $1: a node log could not be read whole (the WARN lines above name it)"
     RESULT=ERROR
     DETAIL="${DETAIL:+${DETAIL} }$1: node log unreadable"
+    write_verdict
+    exit 2
+}
+
+# stop_mid_round saw no round start on node $2 ($3 why), so node $1 is not
+# stopped: a stop not seen mid-round is not the drill, ERROR
+round_start_error() { # $1 victim, $2 watcher, $3 why
+    say "ERROR: stop node-$1: no round start seen on node-$2 ($3); node-$1 not stopped"
+    event "round start not seen on node-$2 ($3): node-$1 not stopped"
+    RESULT=ERROR
+    DETAIL="${DETAIL:+${DETAIL} }stop node-$1: round start unseen on node-$2 ($3)"
     write_verdict
     exit 2
 }

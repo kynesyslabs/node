@@ -168,7 +168,7 @@ mkdir -p "${WORK}/bin"
 # The postgres lookup, `compose ... ps -q postgres`, answers fakepg; FAKE_PGPS
 # makes it hang (sleep 60 s), hang-once (only the first lookup of a case), empty
 # (no running container) or fail (a daemon error).
-# The node logs: `compose ... ps -aq node-<n>` answers cid<n> (nothing when
+# The node logs: `compose ... ps -aq node-<n>` (and `ps -q`) answers cid<n> (nothing when
 # FAKE/nocontainer.<n> exists), `logs ... cid<n>` prints FAKE/nodelog.<n> (its
 # last lines with --tail; no file: an empty log), after sleeping the seconds in
 # FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists.
@@ -185,7 +185,7 @@ case "$*" in *"SHOW max_connections"*) echo "${FAKE_MAXCONN:-100}"; exit 0 ;; es
 case "$1" in
     compose)
         case "$*" in
-            *" ps -aq node-"*) n=${@: -1}; n=${n#node-}; [ -e "${FAKE}/nocontainer.${n}" ] || echo "cid${n}"; exit 0 ;;
+            *" ps -aq node-"* | *" ps -q node-"*) n=${@: -1}; n=${n#node-}; [ -e "${FAKE}/nocontainer.${n}" ] || echo "cid${n}"; exit 0 ;;
             *" ps -q postgres")
                 case "${FAKE_PGPS:-}" in
                     hang) sleep 60 ;;
@@ -442,6 +442,44 @@ check "a count whose grep refuses the pattern: docker, cut off by it, is a faile
 gl_case gl_count_grep_short; count "("
 check "a count whose grep refuses the pattern, on short logs: a failed read too (log_read_error, node-3 and node-9 named)" \
     bash -c 'grep -q "^log_read_error$" <<< "$1" && grep -q "WARN: node-3: " <<< "$2" && grep -q "WARN: node-9: " <<< "$2"' _ "${OUT}" "${ERR}"
+
+echo "== stop_mid_round: no round start seen (a read that fails or stalls, or none in time) is ERROR, exit 2, and no node is stopped"
+for f in stop_mid_round round_start_error; do source <(fn_src "${f}"); done
+source <(grep -E '^(ROUND_START_WAIT_S=|event\(\) )' "${RUN_SH}")
+check "run.sh waits up to 60 s for a round start" test "${ROUND_START_WAIT_S:-unset}" = 60
+smr_case() { # $1 name: 13 nodes up, node-1 (the watcher) at head 25 and its log $2
+    gate_case "$1" PASS; UP=(); for i in $(seq 1 13); do UP[i]=1; done
+    EVENTS="${LOG_DIR}/events.log"; : > "${EVENTS}"; : > "${FAKE_DOCKER_LOG}"; printf "$2" > "${FAKE}/nodelog.1"
+}
+smr() { # stop_mid_round 7 1 in a subshell: OUT (its output, then rc=), ms it took
+    local t0; t0=$(date +%s%N)
+    OUT=$( ( stop_mid_round 7 1; echo "returned, STOP_HEIGHT=${STOP_HEIGHT}" ) 2>&1; echo "rc=$?" )
+    ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+}
+stopped7() { grep -q " stop -t 0 node-7$" "${FAKE_DOCKER_LOG}"; }
+smr_error() { # $1 why: ERROR and exit 2 saying it, the verdict ERROR, node-7 not stopped
+    grep -q "^rc=2$" <<< "${OUT}" &&
+        has "ERROR: stop node-7: no round start seen on node-1 ($1); node-7 not stopped" &&
+        has "VERDICT ERROR: phases fine stop node-7: round start unseen on node-1 ($1)$" &&
+        grep -q "round start not seen on node-1 ($1): node-7 not stopped" "${EVENTS}" && ! stopped7
+}
+smr_case smr_seen 'We are forging block 25\n\e[32m[INFO] We are forging block 26\e[0m\nWe are forging block 27\n'
+smr
+check "a round past head 25 starts on node-1: node-7 is stopped, STOP_HEIGHT=25" \
+    bash -c 'grep -q "^returned, STOP_HEIGHT=25$" <<< "$1" && grep -q "^rc=0$" <<< "$1" && grep -q " stop -t 0 node-7$" "$2"' _ "${OUT}" "${FAKE_DOCKER_LOG}"
+check "and the event names the first round start past 25" grep -q "^[0-9:]* round start seen on node-1: We are forging block 26$" "${EVENTS}"
+smr_case smr_fail 'We are forging block 26\n'; touch "${FAKE}/nodelog.1.fail"; smr
+echo "${OUT}" | grep -E 'ERROR|^rc=' | cut -c1-220 | sed 's/^/    | /'
+check "node-1's docker logs fails: ERROR, exit 2, node-7 not stopped" smr_error "docker logs failed (exit 1)"
+smr_case smr_hang 'We are forging block 26\n'; echo 30 > "${FAKE}/nodelog.1.hang"; smr
+check "node-1's docker logs stalls: ERROR naming the bound, exit 2, node-7 not stopped" smr_error "docker logs did not answer within 3s"
+check "node-1's docker logs stalls: within the bound (${ms} ms; the stub sleeps 30 s)" test "${ms}" -lt 15000
+smr_case smr_nocontainer 'We are forging block 26\n'; touch "${FAKE}/nocontainer.1"; smr
+check "node-1 has no container: ERROR, exit 2, node-7 not stopped" smr_error "no container"
+smr_case smr_none 'We are forging block 24\nWe are forging block 25\n'; ROUND_START_WAIT_S=2; smr; ROUND_START_WAIT_S=60
+check "no round past 25 within ROUND_START_WAIT_S (2 s here): ERROR, exit 2, node-7 not stopped" smr_error "no round past 25 started within 2s"
+# SECONDS counts whole seconds of the clock: a 2 s deadline comes 1 to 2 s on
+check "and it waited for the deadline, not past it (${ms} ms)" bash -c '[ "$1" -ge 1000 ] && [ "$1" -lt 10000 ]' _ "${ms}"
 
 echo "== teardown backstop: an exit 0 or 1 the gate did not clear is exit 2 when a node log cannot be collected"
 teardown_rc() { # $1 the status run.sh exits with, $2 unwritable (as above): OUT, the status after teardown, and ms it took
@@ -1164,6 +1202,14 @@ check "drop-n7s10, node-1's head reads stall after the stop: exit 2" exited 2
 check "drop-n7s10, node-1's head reads stall after the stop: ERROR, node-1 unread" fout 'ERROR: down-1: a running node does not answer its head (heads n1=? '
 check "drop-n7s10, node-1's head reads stall after the stop: verdict.json and results.tsv say ERROR" recorded ERROR 'down-1: node unreadable'
 check "drop-n7s10, node-1's head reads stall after the stop: within the bound (${ms} ms)" test "${ms}" -lt 120000
+# Up to b4ccfffd3f stop_mid_round stopped node-7 anyway, and the drill could pass
+STUB_N=7 STUB_MIN_LIVE=7 STUB_TICK_MS=1000 STUB_STALL=logs:1 full_run drop-unseen drop-n7s10
+check "drop-n7s10, node-1's docker logs stalls as stop_mid_round waits for a round start: exit 2, ERROR saying so" \
+    eval 'exited 2 && fout "ERROR: stop node-7: no round start seen on node-1 (docker logs did not answer within 3s); node-7 not stopped"'
+check "drop-n7s10, node-1's docker logs stalls as stop_mid_round waits: verdict.json and results.tsv say ERROR" \
+    recorded ERROR 'stop node-7: round start unseen on node-1 (docker logs did not answer within 3s)'
+check "drop-n7s10, node-1's docker logs stalls as stop_mid_round waits: node-7 is never stopped" bash -c '! grep -q " stop -t 0 node-7$" "$1"' _ "${FULL}/docker.log"
+check "drop-n7s10, node-1's docker logs stalls as stop_mid_round waits: within the bound (${ms} ms)" test "${ms}" -lt 120000
 
 echo "== floor --binding off, whole, a connection-limit hit logged after the verdict: the row is rewritten under the lock"
 STUB_N=4 STUB_MIN_LIVE=99 STUB_LATE_HIT=2 full_run floor-late --binding off floor

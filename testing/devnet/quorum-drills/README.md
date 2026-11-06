@@ -600,7 +600,8 @@ grows while enough nodes run, a stub `bun` and judge, a 20 ms `sleep`):
 `drop-n7s10 --binding off`, `fallback` and `ride-n13s10`, and, with one
 docker call that stalls for 300 s, `floor` (a node's `docker logs`),
 `ride-n13s10` (the restart count `inspect`) and `drop-n7s10` (node-1's head
-reads after the stop), each of which must end as exit 2 within the bound;
+reads after the stop, and node-1's `docker logs` as `stop_mid_round` waits
+for a round start: no node stopped), each of which must end as exit 2 within the bound;
 then `floor` with a hit logged after the verdict (the row rewritten under the
 lock), `fallback` with one psql killed (`none given`, exit 2), a
 `ride-n13s10` whose judge refuses the fork set (`ERROR`, the fork named in
@@ -679,8 +680,11 @@ answer, handled as any failed read of it: a head that cannot be read is an
 unreadable node (`ERROR` or `ABORT`, exit 2, in the other scenarios; `-1`,
 no answer, for the judge of the `halt-*` and `ride-*` drills), a log-line
 count `ERROR`, exit 2, the restart counts `ABORT`, exit 2, and a
-`stop_mid_round` that sees no round start stops the node at its 60 s
-deadline. The snapshot only notes the call in `03-bringup.log`. For the
+`stop_mid_round` whose container lookup or log read fails or does not
+answer, or that sees no round start within `ROUND_START_WAIT_S` (60 s),
+`ERROR`, exit 2, before it stops the node (`stop node-N: round start unseen
+on node-1 (why)`): a stop not seen mid-round is not the drill. The snapshot
+only notes the call in `03-bringup.log`. For the
 `halt-*` and `ride-*` drills:
 `BASELINE_HEIGHT` (6), `SETTLE_ROUNDS` (2), `HALT_ROUNDS` (12),
 `RECOVERY_BLOCKS` (3), `RECOVERY_TIMEOUT` (300), `RIDE_BLOCKS` (5),
@@ -714,6 +718,8 @@ needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
   has no bundle or its `node` is not a real Node.js >= 20 (a devnet-style
   image has Bun's wrapper), so those three cases need a release image.
 - Validators are stopped with `docker compose stop -t 0` right after a
-  round start is logged, so the restart policy leaves them down.
+  round start is logged, so the restart policy leaves them down. A round
+  start that is not seen (see [Tuning](#tuning)) stops nothing: the run
+  ends as `ERROR`, exit 2.
 - Round times come from block timestamps, so they show the chain's own
   pace, including retries at a height.
