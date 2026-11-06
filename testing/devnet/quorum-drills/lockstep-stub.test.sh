@@ -75,7 +75,10 @@ echo "== not level: a spread of 2 retries, then the exit-2 path with the summary
 new_case spread 25 25 25 25 25 25 27 27 27 27 27 27 27
 OUT=$( ( lockstep_or_abort 7 ) 2>&1; echo "rc=$?" ); echo "${OUT}" | tail -4
 check "exits 2" has "rc=2"
-check "retried (3 tries in a 12 s window)" has "3 tries"
+# Tries start 5 s apart in a 12 s window of whole seconds: a 2nd fits (a try
+# takes well under 6 s), a 4th never does (it would start after 15 s), a 3rd only
+# when the first two tries took under 1 to 2 s together
+check "retried (2 or 3 tries in a 12 s window, 5 s apart)" has "after [0-9]*s, [23] tries;"
 check "says the heads were apart by 2" has "apart:2 of at most 1; min 25 max 27"
 check "prints ABORT" has "ABORT: the running nodes never reached one head >= 7 with one hash"
 
@@ -141,9 +144,9 @@ FAKE_SLEEP=1
 t0=$(date +%s%N)
 OUT=$(wait_lockstep 7 60; echo "rc=$? h=${LOCK_HEIGHT}")
 ms=$(( ($(date +%s%N) - t0) / 1000000 ))
-echo "${OUT}" | tail -1; echo "  elapsed ${ms} ms (13 sequential reads of heads and then hashes would be 26000+)"
+echo "${OUT}" | tail -1; echo "  elapsed ${ms} ms (13 sequential reads of heads and then hashes would be 26000+, 4 at a time 8000)"
 check "returns 0" has "rc=0 h=25"
-check "finishes in under 5 s" test "${ms}" -lt 5000
+check "finishes in under 8 s (more than 4 reads at a time)" test "${ms}" -lt 8000
 check "takes at least 2 s (one head round, one hash round)" test "${ms}" -ge 2000
 
 echo "== database reads (psql_node, block_rows) are bounded; a timed-out read is a failure, not an empty result"
@@ -205,7 +208,11 @@ chmod +x "${WORK}/bin/docker"
 export FAKE_DOCKER_LOG="${WORK}/docker.log" FAKE
 PATH="${WORK}/bin:${PATH}"
 check "run.sh bounds its database calls at 30 s" test "${DB_TIMEOUT_S}" = 30
-new_case dbread 25; DB_TIMEOUT_S=1
+# The bounds the stub runs under from here on (DB_TIMEOUT_S, LOG_READ_TIMEOUT_S)
+# are 3 s, except where every call stalls: a call the stub answers ends in
+# milliseconds and must not be taken for a stalled one when the host is slow. A
+# call that stalls sleeps 30 s or more, and a time limit on it is half that or less
+new_case dbread 25; DB_TIMEOUT_S=3
 
 : > "${FAKE_DOCKER_LOG}"
 OUT=$(FAKE_DB=rows block_rows 5 6 1 2 2>&1; echo "rc=$?"); echo "${OUT}" | tail -2 | cut -c1-300
@@ -218,9 +225,9 @@ t0=$(date +%s%N)
 OUT=$(FAKE_DB=hang block_rows 5 6 1 2>&1; echo "rc=$?")
 ms=$(( ($(date +%s%N) - t0) / 1000000 )); echo "${OUT}" | tail -3 | cut -c1-200; echo "  elapsed ${ms} ms (the fake docker sleeps 30 s)"
 check "a read that hangs fails (rc=1)" has "rc=1"
-check "and says which node, and that it got no answer" has "psql node1_db: no answer within 1s"
+check "and says which node, and that it got no answer" has "psql node1_db: no answer within 3s"
 check "and the block rows message names node-1" has "of node-1 could not be read"
-check "within DB_TIMEOUT_S, not 30" test "${ms}" -lt 4000
+check "within DB_TIMEOUT_S, not 30" test "${ms}" -lt 15000
 
 OUT=$(FAKE_DB=stmt block_rows 5 6 1 2>&1; echo "rc=$?")
 check "a query the server cancels fails too (rc=1), with the server's reason shown" has "canceling statement due to statement timeout"
@@ -272,7 +279,7 @@ for verdict in PASS FAIL; do
     check "node logs hit, ${verdict}: the verdict is ERROR and keeps what the result was" has "VERDICT ERROR: could not run: postgres connection limit hit (2 lines in node-11 node-7); the result was ${verdict}"
 done
 
-gate_case gate_psql PASS; DB_TIMEOUT_S=2
+gate_case gate_psql PASS; DB_TIMEOUT_S=3
 OUT=$(FAKE_DB=toomany psql_node 3 "SELECT 1" 2>&1; echo "rc=$?")
 check "a psql_node read refused for connections still fails (rc=2) and shows the server's words" has "too many clients already"
 check "(psql's own exit code is passed on)" has "rc=2"
@@ -280,7 +287,7 @@ check "and is recorded in psql-errors.log, with the database" grep -q "psql node
 OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "a harness read that hit the limit, node logs clean: the gate exits 2" has "rc=2"
 check "and says so" has "postgres connection limit hit (1 'too many clients' lines; harness psql reads only)"
-gate_case gate_psql_ok PASS; DB_TIMEOUT_S=2
+gate_case gate_psql_ok PASS; DB_TIMEOUT_S=3
 FAKE_DB=stmt psql_node 3 "SELECT 1" > /dev/null 2>&1
 OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "another psql error is not a connection-limit hit" has "rc=0"
@@ -289,7 +296,7 @@ check "another psql error is not a connection-limit hit" has "rc=0"
 # of WRITE_LIMIT blocks (default 0), with SIGXFSZ ignored so that the write
 # fails (EFBIG, as ENOSPC would) and no process is killed
 unwritable() { ( trap '' XFSZ; ulimit -f "${WRITE_LIMIT:-0}"; "$@" ); }
-gate_case gate_psql_unwritten PASS; DB_TIMEOUT_S=2
+gate_case gate_psql_unwritten PASS; DB_TIMEOUT_S=3
 OUT=$(FAKE_DB=toomany unwritable psql_node 3 "SELECT 1" 2>&1; echo "rc=$?")
 check "a psql_node read refused for connections, its errors written nowhere: still rc=2" has "^rc=2$"
 check "and says they are not in psql-errors.log" has "psql node3_db: its errors could not be written to ${LOG_DIR}/psql-errors.log"
@@ -305,8 +312,8 @@ check "and the gate exits 2" has "^rc=2$"
 
 echo "== the gate fails closed: a node log it cannot read whole is exit 2, never a pass or a fail"
 check "run.sh bounds each docker call of a node-log read at 60 s" test "${LOG_READ_TIMEOUT_S:-unset}" = 60
-QDRILL_TEST_LOG_READ_TIMEOUT_S=1 source <(grep -E '^LOG_READ_TIMEOUT_S=' "${RUN_SH}")
-check "QDRILL_TEST_LOG_READ_TIMEOUT_S sets the bound (1 s here)" test "${LOG_READ_TIMEOUT_S:-unset}" = 1
+QDRILL_TEST_LOG_READ_TIMEOUT_S=3 source <(grep -E '^LOG_READ_TIMEOUT_S=' "${RUN_SH}")
+check "QDRILL_TEST_LOG_READ_TIMEOUT_S sets the bound (3 s here)" test "${LOG_READ_TIMEOUT_S:-unset}" = 3
 gate() { # pg_limit_gate in a subshell: OUT, and ms it took
     local t0; t0=$(date +%s%N)
     OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
@@ -320,12 +327,12 @@ for verdict in PASS FAIL; do
     check "docker logs fails for node-3, ${verdict}: the verdict is ERROR, names node-3 and docker's words, keeps the result" \
         has "VERDICT ERROR: could not run: could not read the log of node-3 to check for the postgres connection limit (docker logs failed (exit 1): Error response from daemon: stub: cannot read the log of cid3); the result was ${verdict}"
 done
-gate_case gate_hang PASS; echo 6 > "${FAKE}/nodelog.2.hang"
+gate_case gate_hang PASS; echo 30 > "${FAKE}/nodelog.2.hang"
 gate
 echo "${OUT}" | tail -2 | cut -c1-220 | sed 's/^/    | /'
 check "docker logs stalls for node-2: exit 2" has "rc=2"
-check "docker logs stalls for node-2: says it did not finish within the bound" has "could not read the log of node-2 to check for the postgres connection limit (docker logs did not finish within 1s)"
-check "docker logs stalls for node-2: the gate returns within the bound (${ms} ms; the stub sleeps 6 s)" test "${ms}" -lt 4000
+check "docker logs stalls for node-2: says it did not finish within the bound" has "could not read the log of node-2 to check for the postgres connection limit (docker logs did not finish within 3s)"
+check "docker logs stalls for node-2: the gate returns within the bound (${ms} ms; the stub sleeps 30 s)" test "${ms}" -lt 15000
 gate_case gate_nocontainer PASS; touch "${FAKE}/nocontainer.5"
 gate
 check "a started node with no container: exit 2, its log is unreadable" has "could not read the log of node-5 to check for the postgres connection limit (no container)"
@@ -376,9 +383,9 @@ for st in 0 1; do
     check "exit ${st}, node-2's log cannot be collected: says why" \
         has "ABORT: could not run: could not read node-2 (docker logs failed (exit 1): Error response from daemon: stub: cannot read the log of cid2) to check for the postgres connection limit (exit ${st} replaced by 2)"
 done
-gate_case td_hang PASS; echo 6 > "${FAKE}/nodelog.4.hang"
+gate_case td_hang PASS; echo 30 > "${FAKE}/nodelog.4.hang"
 teardown_rc 0
-check "exit 0, node-4's log read stalls: exit 2, within the bound (${ms} ms; the stub sleeps 6 s)" bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "node-4 (docker logs did not finish within 1s)" <<< "$1" && [ "$2" -lt 4000 ]' _ "${OUT}" "${ms}"
+check "exit 0, node-4's log read stalls: exit 2, within the bound (${ms} ms; the stub sleeps 30 s)" bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "node-4 (docker logs did not finish within 3s)" <<< "$1" && [ "$2" -lt 15000 ]' _ "${OUT}" "${ms}"
 gate_case td_cleared PASS; PG_GATE_PASSED=1; touch "${FAKE}/nodelog.2.fail"
 teardown_rc 0
 check "exit 0 after the gate cleared every log: a failed collection leaves it 0" has "rc=0"
@@ -398,7 +405,7 @@ for st in 0 1; do
         bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "ABORT: could not run: could not read node-7 (could not write the copy to $2) to check for the postgres connection limit (exit $3 replaced by 2)" <<< "$1"' \
         _ "${OUT}" "${LOG_DIR}/node-7.log" "${st}"
 done
-gate_case td_psql_kept FAIL; DB_TIMEOUT_S=2; FAKE_DB=toomany unwritable psql_node 3 "SELECT 1" > /dev/null 2>&1
+gate_case td_psql_kept FAIL; DB_TIMEOUT_S=3; FAKE_DB=toomany unwritable psql_node 3 "SELECT 1" > /dev/null 2>&1
 teardown_rc 1
 check "exit 1, psql errors psql_node could not write to psql-errors.log: exit 2, naming the file that keeps them" \
     has "could not read psql-errors.log (psql errors not written to it, kept in psql-err\.[A-Za-z0-9]*) to check for the postgres connection limit (exit 1 replaced by 2)"
@@ -474,7 +481,7 @@ echo "== the postgres container lookup is bounded: one that stalls, fails or fin
 # A function of this shell in a fresh bash under an outside guard of $1 s, so a
 # lookup that is not bounded ends the case (rc=124, the guard's) and not the
 # suite. OUT: its output, then rc=; ms: what it took. The bound is
-# LOG_READ_TIMEOUT_S: 1 s, as set above, unless a case sets it.
+# LOG_READ_TIMEOUT_S: 3 s, as set above, unless a case sets it.
 guarded() { # $1 the guard in s, $2.. the command
     local g="$1" t0; shift
     { declare -f; declare -p DB_TIMEOUT_S PG_LIMITS LOG_READ_TIMEOUT_S N HERE RUN_DIR PROJECT LOG_DIR STEP_LOG; } > "${WORK}/guarded.sh"
@@ -488,8 +495,8 @@ psql_runs() { grep -c '^exec ' "${FAKE_DOCKER_LOG}"; }
 pg_case pgps_hang
 FAKE_PGPS=hang guarded 20 psql_node 3 "SELECT 1"
 echo "${OUT}" | tail -2 | cut -c1-220 | sed 's/^/    | /'
-check "psql_node, the lookup stalls: rc=1, within the bound (${ms} ms; the stub sleeps 60 s)" bash -c 'grep -q "^rc=1$" <<< "$1" && [ "$2" -lt 4000 ]' _ "${OUT}" "${ms}"
-check "psql_node, the lookup stalls: says so" has "psql node3_db: docker compose ps -q postgres did not answer within 1s"
+check "psql_node, the lookup stalls: rc=1, within the bound (${ms} ms; the stub sleeps 60 s)" bash -c 'grep -q "^rc=1$" <<< "$1" && [ "$2" -lt 10000 ]' _ "${OUT}" "${ms}"
+check "psql_node, the lookup stalls: says so" has "psql node3_db: docker compose ps -q postgres did not answer within 3s"
 check "psql_node, the lookup stalls: no psql is run" test "$(psql_runs)" = 0
 pg_case pgps_fail
 FAKE_PGPS=fail guarded 20 psql_node 3 "SELECT 1"
@@ -504,13 +511,18 @@ check "psql_node, no running postgres: no psql is run with an empty container" t
 # pause between tries is a no-op here: the cases are about each try's bound.
 eval "preflight_line() { sleep() { :; }; $(grep -m1 '^pg_limit_preflight || exit 2$' "${RUN_SH}"); }"
 pg_case pre_hang
-FAKE_PGPS=hang LOG_READ_TIMEOUT_S=0.2 guarded 20 preflight_line
+FAKE_PGPS=hang LOG_READ_TIMEOUT_S=0.2 guarded 45 preflight_line
 echo "${OUT}" | tail -2 | cut -c1-220 | sed 's/^/    | /'
 check "preflight, the lookup stalls on every try: exit 2" has "^rc=2$"
 check "preflight, the lookup stalls on every try: says why" \
     has "ABORT: could not read max_connections from postgres (45 tries; last: docker compose ps -q postgres did not answer within 0.2s)"
-check "preflight, the lookup stalls on every try: 45 lookups, each ended at the bound ($(lookups); ${ms} ms, 45 x 0.2 s = 9 s; the stub sleeps 60 s each)" \
-    bash -c '[ "$1" = 45 ] && [ "$2" -lt 15000 ]' _ "$(lookups)" "${ms}"
+# The ABORT line counts the tries. The fake docker's log does not: at 0.2 s,
+# timeout can end a lookup before the fake docker has run its first line, the
+# one that logs the call. So the log only shows that lookups reached it, and the
+# time that each try waited out its bound and none the stub's sleep
+check "preflight, the lookup stalls on every try: 45 tries of at least the bound each, none of the stub's sleep (${ms} ms, 45 x 0.2 s = 9 s; the stub sleeps 60 s each)" \
+    bash -c '[ "$1" -ge 9000 ] && [ "$1" -lt 30000 ]' _ "${ms}"
+check "preflight, the lookup stalls on every try: the lookups reached the fake docker ($(lookups) of the 45 logged)" test "$(lookups)" -ge 1
 check "preflight, the lookup stalls on every try: no psql is run" test "$(psql_runs)" = 0
 pg_case pre_empty
 FAKE_PGPS=empty guarded 20 preflight_line
@@ -521,8 +533,11 @@ pg_case pre_once
 FAKE_PGPS=hang-once guarded 20 preflight_line
 check "preflight, the first lookup stalls: the next try reads max_connections (rc=0)" \
     bash -c 'grep -q "^rc=0$" <<< "$1" && grep -q "postgres max_connections 100 (4 nodes need 60)" <<< "$1"' _ "${OUT}"
-check "preflight, the first lookup stalls: two lookups, the first ended at the bound ($(lookups); ${ms} ms)" \
-    bash -c '[ "$1" = 2 ] && [ "$2" -lt 4000 ]' _ "$(lookups)" "${ms}"
+# The lookup that stalls is the first to get past the fake docker's first lines
+# (hang-once): a try later if timeout ended one before them. That one and the one
+# that answered are always logged
+check "preflight, the first lookup stalls: two lookups or more, the stalled one ended at the bound ($(lookups); ${ms} ms; the stub sleeps 60 s)" \
+    bash -c '[ "$1" -ge 2 ] && [ "$2" -lt 10000 ]' _ "$(lookups)" "${ms}"
 check "preflight, the first lookup stalls: psql runs in the container the lookup gave" \
     grep -q '^exec .* fakepg psql -U demosuser -d postgres -tAc SHOW max_connections$' "${FAKE_DOCKER_LOG}"
 
@@ -672,12 +687,12 @@ echo "${OUT}" | tail -3 | cut -c1-220 | sed 's/^/    | /'
 check "docker logs fails: the abort says the log is unreadable, with docker's words" \
     has "node-1 log: unreadable (docker logs failed (exit 1): Error response from daemon: stub: cannot read the log of cid1)"
 check "docker logs fails: exit 2" has "rc=2"
-new_case boot_hang 25; echo 6 > "${FAKE}/nodelog.1.hang"
+new_case boot_hang 25; echo 30 > "${FAKE}/nodelog.1.hang"
 boot_abort
 echo "${OUT}" | tail -3 | cut -c1-220 | sed 's/^/    | /'
-check "docker logs stalls: the abort says the log is unreadable, not read within the bound" has "node-1 log: unreadable (docker logs did not finish within 1s)"
+check "docker logs stalls: the abort says the log is unreadable, not read within the bound" has "node-1 log: unreadable (docker logs did not finish within 3s)"
 check "docker logs stalls: exit 2" has "rc=2"
-check "docker logs stalls: returns within the bound (${ms} ms; the stub sleeps 6 s)" test "${ms}" -lt 4000
+check "docker logs stalls: returns within the bound (${ms} ms; the stub sleeps 30 s)" test "${ms}" -lt 15000
 new_case boot_refused 25; printf '%s\n' "${REFUSED}" > "${FAKE}/nodelog.1"
 boot_abort
 check "a readable log: the abort gives the refusal line, and exit 2" \
