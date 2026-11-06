@@ -1,4 +1,4 @@
-import { Web2ProofParser, Web2Claim, sameId } from "./parsers"
+import { Web2ProofParser, Web2Claim, sameHandle, sameId } from "./parsers"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { Discord } from "@/libs/identity/tools/discord"
 
@@ -43,6 +43,11 @@ export class DiscordProofParser extends Web2ProofParser {
         // gets stored and rewarded.
         if (!sameId(msg?.author?.id, claim?.userId)) {
             throw new Error("Message author does not match the claimed user id")
+        }
+        // The username is stored with the link and accounts are looked up
+        // by it, so it must be the author's too, not one the sender picks.
+        if (!sameHandle(msg?.author?.username, claim?.username)) {
+            throw new Error("Message author does not match the claimed username")
         }
 
         const content = (msg?.content as string) || ""
