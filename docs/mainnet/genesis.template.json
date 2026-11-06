@@ -40,6 +40,27 @@
     "identityCarryover": {
       "activationHeight": 0
     },
+    "stakeApplyChecks": {
+      "activationHeight": 0
+    },
+    "txTypeAllowList": {
+      "activationHeight": 0
+    },
+    "instantMessagingBinding": {
+      "activationHeight": 0
+    },
+    "nativeSendBinding": {
+      "activationHeight": 0
+    },
+    "canonicalAddresses": {
+      "activationHeight": 0
+    },
+    "feeBinding": {
+      "activationHeight": 0
+    },
+    "blockCaps": {
+      "activationHeight": 0
+    },
     "unpinnedCommittee": {
       "activationHeight": 0
     },

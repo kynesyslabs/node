@@ -159,6 +159,13 @@ const gossip = (tx: any) =>
         data: { transaction: tx, reference_block: tx.reference_block },
     } as any)
 
+// The proof store the attestation check reads is unreachable under this
+// mock, so the check throws rather than answering.
+const zkAttestationTx = (hash: string) =>
+    identityTx(hash, "zk_attestationadd", [
+        { proof: { pi_a: [] }, public_signals: ["1", "2"] },
+    ])
+
 describe("identity proofs are checked when a transaction reaches the mempool from a peer", () => {
     const restores: Array<() => void> = []
     let ethosScore: ReturnType<typeof spyOn>
@@ -323,6 +330,15 @@ describe("identity proofs are checked when a transaction reaches the mempool fro
             expect(insertedRows).toEqual([])
         })
 
+        it("keeps a proof apply checks again when its check cannot finish here", async () => {
+            await Mempool.receive([
+                zkAttestationTx("0xzkunchecked"),
+                identityTx("0xzkempty", "zk_commitmentadd", []),
+            ])
+            // An unverifiable check admits; a definite bad proof still refuses.
+            expect(insertedRows.map(r => r.hash)).toEqual(["0xzkunchecked"])
+        })
+
         it("refuses identity edits that differ from the ones the payload implies", async () => {
             editsMatch.match = false
             await Mempool.receive([ethosTx("0xswapped", 1450)])
@@ -354,6 +370,32 @@ describe("checkIdentityAdmission", () => {
                 ok: false,
                 reason: "identity proof could not be verified in time",
             })
+        } finally {
+            ethos.mockRestore()
+            ids.mockRestore()
+        }
+    })
+
+    it("in the merge, admits an unfinished check only for kinds apply checks again", async () => {
+        const { checkIdentityAdmission } = await import("./validation/identityAdmission")
+        const ethos = spyOn(EthosApiClient.getInstance(), "getScore").mockImplementation(
+            () => new Promise(() => {}),
+        )
+        const ids = spyOn(IdentityManager, "getIdentities").mockResolvedValue({
+            evm: { mainnet: [{ address: ETHOS_WALLET }] },
+        } as any)
+        try {
+            // A provider-backed claim is stored as signed, so it stays closed.
+            expect(await checkIdentityAdmission(ethosTx("0xslow", 1450), 50, "merge")).toEqual({
+                ok: false,
+                reason: "identity proof could not be verified in time",
+            })
+            expect(
+                await checkIdentityAdmission(zkAttestationTx("0xzk"), 50, "merge"),
+            ).toEqual({ ok: true })
+            // Entry nodes still refuse what they could not check.
+            const ingest = await checkIdentityAdmission(zkAttestationTx("0xzk"), 50)
+            expect(ingest.ok).toBe(false)
         } finally {
             ethos.mockRestore()
             ids.mockRestore()

@@ -28,6 +28,7 @@ import HandleGCR, {
     type PendingGCRWrite,
 } from "src/libs/blockchain/gcr/handleGCR"
 import { StateReadError } from "src/libs/blockchain/gcr/stateReadError"
+import { CommittedBlockFollowUpError } from "src/libs/blockchain/committedBlockError"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
@@ -52,7 +53,6 @@ import {
 } from "./routines/forkScheduleAbstain"
 import { ensureWindowChecked } from "@/libs/peer/routines/forkScheduleWatch"
 import {
-    filterMempoolByNonce,
     filterMempoolByRefBlock,
     type FailedTranscation,
     type MempoolTransaction,
@@ -60,7 +60,11 @@ import {
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
+import { judgeBlockTransactions } from "./routines/blockTransactions"
+import { blockCapsActive } from "@/forks/blockCapsGate"
+import { isForkActive } from "@/forks/forkGates"
 import {
+    MAX_NONCE_TRACE_ACCOUNTS,
     NONCE_TRACE_ATTR_KEY,
     assertForgedNonceTrace,
     buildNonceTrace,
@@ -252,21 +256,29 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools with the mempool lock
         log.only("[consensusRoutine] Merging and ordering the mempools...")
         markStep("consensus", "mergeAndOrderMempools")
-        const { txs: initialMempool, peerlist: mergedPeerlist } =
+        const { txs: mergedMempool, peerlist: mergedPeerlist } =
             await mergeAndOrderMempools(
                 manager.shard.members,
                 manager.shard.blockRef,
             )
 
-        // filter txs by reference block
-        const resRef = filterMempoolByRefBlock(initialMempool, true)
-        failedTxs.push(...resRef.failedTxs)
-
-        let resNonce = await filterMempoolByNonce(resRef.validTxs)
-        failedTxs.push(...resNonce.failedTxs)
+        // Under blockCaps the block takes a bounded share of the pool; the
+        // rest stays pooled for later blocks.
+        const capped = blockCapsActive(blockRef)
+        const judged = await judgeBlockTransactions(mergedMempool, blockRef, {
+            capped,
+            osDenominationActive: isForkActive("osDenomination", blockRef),
+        })
+        failedTxs.push(...judged.failedTxs)
+        let resNonce = judged.nonce
+        if (capped && judged.txs.length < mergedMempool.length) {
+            log.info(
+                `[consensusRoutine] Block ${blockRef} takes ${judged.txs.length} of ${mergedMempool.length} pooled txs (block caps)`,
+            )
+        }
 
         // Write final mempool used to forge the block
-        blockTxs.push(...resNonce.validTxs)
+        blockTxs.push(...judged.txs)
 
         // Generate map of txs by hash
         for (const tx of blockTxs) {
@@ -465,7 +477,15 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             const traceAccounts = Array.from(resNonce.nonceAccounts)
-            const startApplyNonces = traceEnabled
+            const traceThisBlock =
+                traceEnabled &&
+                traceAccounts.length <= MAX_NONCE_TRACE_ACCOUNTS
+            if (traceEnabled && !traceThisBlock) {
+                log.warn(
+                    `[DEBUG_ASSERT] Block ${blockRef}: ${traceAccounts.length} nonce accounts, above the trace cap of ${MAX_NONCE_TRACE_ACCOUNTS}; no nonce trace for this block`,
+                )
+            }
+            const startApplyNonces = traceThisBlock
                 ? await readNonces(traceAccounts)
                 : {}
 
@@ -482,7 +502,7 @@ export async function consensusRoutine(): Promise<void> {
             // A block with no transactions still commits its L2PS proofs
             pendingGCR = applyRes.pending ?? HandleGCR.emptyPendingWrite()
 
-            if (traceEnabled) {
+            if (traceThisBlock) {
                 const endApplyNonces = noncesAfterApply(
                     pendingGCR,
                     traceAccounts,
@@ -662,6 +682,14 @@ export async function consensusRoutine(): Promise<void> {
         const invalid =
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
+        // Disk holds a block memory has not caught up with; only a restart
+        // derives memory from disk again.
+        const diverged = error instanceof CommittedBlockFollowUpError
+        // Any other error also ends only the round: until the block commits
+        // nothing is on disk, and exiting would keep this validator out of
+        // every later round over a fault that may pass, such as a timed-out
+        // query or a dropped peer.
+        const unexpected = !aborted && !invalid && !diverged
 
         if (invalid && getSharedState.lastBlockNumber < blockRef) {
             recordFailedRound(
@@ -684,7 +712,7 @@ export async function consensusRoutine(): Promise<void> {
             )
         }
 
-        if (aborted || invalid) {
+        if (aborted || invalid || unexpected) {
             exitReason = "abortConsensus"
             // Its message is the only record of why the round stopped.
             if (error instanceof AbortConsensusError) {
@@ -693,6 +721,12 @@ export async function consensusRoutine(): Promise<void> {
             if (aborted) {
                 log.error(error)
                 log.error("[consensusRoutine] Exiting consensus routine")
+            }
+            if (unexpected) {
+                log.error(
+                    `[consensusRoutine] Round for block ${blockRef} failed, sitting it out: ${error}`,
+                )
+                console.error((error as Error)?.stack ?? error)
             }
             if (manager?.ourValidatorPhase) {
                 log.warn(

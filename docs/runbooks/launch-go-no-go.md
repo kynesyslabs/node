@@ -161,7 +161,7 @@ exposed by the node, so it comes from the T-24h posts). Then:
   entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
   third of the first committee's votes; the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
-  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover` and `unpinnedCommittee` at
+  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps` and `unpinnedCommittee` at
   `activationHeight` 0, leaves `networkGovernance` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
   code default), gives a scheduled `gasFeeSeparation` its `treasuryAddress`,
   uses a chain id other than testnet `1` and devnet `1337`, and sets

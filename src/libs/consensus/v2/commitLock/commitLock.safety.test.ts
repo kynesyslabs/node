@@ -43,6 +43,7 @@ const chain: StubChain = { peerlist: [], staked: null, tip: 9 }
 mockCommitteeChain(sharedState, chain)
 
 jest.mock("@/features/metrics/consensusMetrics", () => ({
+    countIncludedTransactions: () => undefined,
     countBlockHashMismatch: () => undefined,
     countConflictingBlock: () => undefined,
     countCommitLock: () => undefined,

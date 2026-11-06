@@ -52,6 +52,34 @@ import { GenesisImportedIdentity } from "./entities/GenesisImportedIdentity.js"
 // L2PS Messaging
 import { L2PSMessage } from "@/features/l2ps-messaging/entities/L2PSMessage"
 
+/**
+ * Server-side limits for every session, so a stuck query, a lock that is
+ * never released or a transaction left open ends in an error instead of
+ * holding the consensus round, and with it the chain, forever.
+ *
+ * query_timeout is left off on purpose: it is a client-side timer that
+ * leaves the statement running on the server and the connection busy.
+ *
+ * The typeorm CLI loads this file to run migrations, which may rewrite whole
+ * tables; the limits are sized for the node's own queries, so the CLI runs
+ * without them.
+ */
+export function sessionTimeouts(
+    db: {
+        statementTimeoutMs: number
+        lockTimeoutMs: number
+        idleTransactionTimeoutMs: number
+    },
+    argv: string[] = process.argv,
+): Record<string, number> {
+    if (argv.some(arg => arg.startsWith("migration:"))) return {}
+    return {
+        statement_timeout: db.statementTimeoutMs,
+        lock_timeout: db.lockTimeoutMs,
+        idle_in_transaction_session_timeout: db.idleTransactionTimeoutMs,
+    }
+}
+
 export const dataSource = new DataSource({
     type: "postgres",
     host: Config.getInstance().database.host,
@@ -63,11 +91,7 @@ export const dataSource = new DataSource({
         connectionTimeoutMillis: Config.getInstance().database.connectTimeoutMs,
         keepAlive: true,
         keepAliveInitialDelayMillis: 5000,
-        // statement_timeout: Config.getInstance().database.statementTimeoutMs,
-        // query_timeout: Config.getInstance().database.queryTimeoutMs,
-        // lock_timeout: Config.getInstance().database.lockTimeoutMs,
-        // idle_in_transaction_session_timeout:
-        //     Config.getInstance().database.idleTransactionTimeoutMs,
+        ...sessionTimeouts(Config.getInstance().database),
     },
     migrations: ["src/migrations/*.{ts,js}"],
     // Migrations are applied by hand (`bun run migration:run`), never at

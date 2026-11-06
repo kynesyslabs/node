@@ -1,0 +1,18 @@
+{
+  "id": "N02",
+  "kind": "negative (availability, current status)",
+  "issues": [
+    "kynesyslabs/node#1059",
+    "kynesyslabs/node#1060"
+  ],
+  "request": {
+    "method": "GET",
+    "url": "https://demosnode.discus.sh/info"
+  },
+  "probed_at_utc": "2026-10-15T10:23:49Z",
+  "response": {
+    "http_status": 502,
+    "time_total_s": 0.508
+  },
+  "note": "single read-only probe recording current status when this package was built"
+}

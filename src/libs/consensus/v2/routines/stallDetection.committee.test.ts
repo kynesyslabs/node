@@ -59,6 +59,8 @@ jest.mock("./getShard", () => ({
     getBoundCommittee: async () => committee,
     pinShardIdentities: () => "",
     pinnedShardIdentities: () => [],
+    drawLiveShard: (_seed: string, pool: string[], isLive: (id: string) => boolean, size: number) =>
+        pool.filter(isLive).slice(0, size),
 }))
 jest.mock("@/features/metrics/consensusMetrics", () => ({
     countMissedSignature: () => {

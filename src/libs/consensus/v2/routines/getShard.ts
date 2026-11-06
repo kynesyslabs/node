@@ -272,6 +272,20 @@ export function rankPool(seed: string, pool: string[]): string[] {
 }
 
 /**
+ * The committee before pinning: the live members of the ranked pool, in
+ * rank order, up to `shardSize`. getShard and the stall detector both draw
+ * through here, so the detector cannot reconstruct a different committee.
+ */
+export function drawLiveShard(
+    seed: string,
+    pool: string[],
+    isLive: (identity: string) => boolean,
+    shardSize: number,
+): string[] {
+    return rankPool(seed, pool).filter(isLive).slice(0, shardSize)
+}
+
+/**
  * Pool the bound committee is drawn from at `parentNumber`: the eligible
  * pool, or, when it holds fewer identities than a quorum, the whole staked
  * validator set at that block. A parent whose committed peerlist shrank
@@ -434,10 +448,12 @@ export default async function getShard(
         return liveBoundMembers(committee, lastBlockNumber, liveByIdentity)
     }
 
-    const shard = rankPool(seed, pool)
-        .filter(identity => liveByIdentity.has(identity))
-        .slice(0, getSharedState.shardSize)
-        .map(identity => liveByIdentity.get(identity))
+    const shard = drawLiveShard(
+        seed,
+        pool,
+        identity => liveByIdentity.has(identity),
+        getSharedState.shardSize,
+    ).map(identity => liveByIdentity.get(identity))
 
     const pinOutcome = pinShardIdentities(
         shard,

@@ -17,6 +17,7 @@ export function mockLogger(specifier = "@/utilities/logger"): void {
             warning: jest.fn(),
             error: jest.fn(),
             only: jest.fn(),
+            custom: jest.fn(),
         },
     }))
 }

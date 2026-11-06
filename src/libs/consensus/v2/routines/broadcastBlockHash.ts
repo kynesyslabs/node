@@ -16,6 +16,7 @@ import { commitLockActive, voteMessageOf } from "../commitLock/domain"
 import { getBoundCommittee, getEligiblePool } from "./getShard"
 import { isForkActive } from "@/forks/forkGates"
 import { getMempoolLimits } from "@/libs/blockchain/mempoolLimits"
+import { StateReadError } from "@/libs/blockchain/gcr/stateReadError"
 
 /**
  * Per-peer vote outcome. The `signaturesToMerge` map carries every
@@ -31,6 +32,8 @@ interface PeerVoteOutcome {
     rejectionReason?: string
     /** Hash the peer reports it already committed at our height. */
     committedHash?: string
+    /** The reply needed the vote signer set and none could be read. */
+    unjudged?: boolean
 }
 
 /**
@@ -118,6 +121,29 @@ async function voteSignerSet(height: number): Promise<Set<string>> {
 }
 
 type SignerSetLookup = () => Promise<Set<string> | null>
+
+/**
+ * The vote signer set, read at most twice. It is chain data, so a second
+ * read can only find the same set or fail again, and the retry rides out a
+ * passing read error.
+ */
+async function readVoteSignerSet(
+    height: number,
+): Promise<{ signers: Set<string> } | { error: unknown }> {
+    let error: unknown
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            return { signers: await voteSignerSet(height) }
+        } catch (e) {
+            error = e
+            log.error(
+                `[broadcastBlockHash] Could not resolve the vote signer set for block ${height} (attempt ${attempt}): ` +
+                    (e instanceof Error ? e.message : String(e)),
+            )
+        }
+    }
+    return { error }
+}
 
 const MAX_REFUSAL_MESSAGE_LOG_CHARS = 200
 
@@ -357,6 +383,7 @@ async function proposeAndCollect(
             vote: "con",
             signaturesToMerge: {},
             rejectionReason: "vote signer set could not be resolved",
+            unjudged: true,
         }
     }
     // Every signer must be a distinct member, so an honest map never
@@ -431,6 +458,9 @@ async function proposeAndCollect(
  * relayed a third party's attestation" and inflate the tally past
  * what 2/3+1 implies.
  *
+ * @throws StateReadError when a reply needed the vote signer set and it
+ *   could not be read: there is then no tally to return.
+ *
  * Concurrency notes (audit-sweep batch D):
  *  - Per-peer outbound calls run in parallel via `Promise.all`.
  *    Each one is wrapped in a try/catch so a single peer's network
@@ -500,30 +530,17 @@ export async function broadcastBlockHash(
         proposeParams = [...proposeParams, block.validation_data.round]
     }
 
-    // Resolved only when a reply needs it: a round of refusals reads no
-    // chain data. The set is chain data, so a second lookup can only find
-    // the same set or fail again; a failed lookup is therefore retried once,
-    // by the next reply that needs it, so a passing read error does not cost
-    // every vote of the round. Unresolved means no reply can be judged, so
-    // none is admitted.
+    // Resolved once, and only when a reply needs it: a round of refusals
+    // reads no chain data. Unresolved means no reply can be judged, so none
+    // is admitted.
+    let lookupError: unknown = null
     let signerSetLookup: Promise<Set<string> | null> | null = null
-    let lookupsLeft = 2
     const signerSet: SignerSetLookup = () => {
-        if (signerSetLookup === null) {
-            lookupsLeft--
-            const attempt = voteSignerSet(block.number).catch(e => {
-                log.error(
-                    `[broadcastBlockHash] Could not resolve the vote signer set for block ${block.number}: ` +
-                        (e instanceof Error ? e.message : String(e)),
-                )
-                return null
-            })
-            signerSetLookup = attempt
-            void attempt.then(signers => {
-                if (signers === null && lookupsLeft > 0) signerSetLookup = null
-            })
-            return attempt
-        }
+        signerSetLookup ??= readVoteSignerSet(block.number).then(read => {
+            if ("signers" in read) return read.signers
+            lookupError = read.error
+            return null
+        })
         return signerSetLookup
     }
 
@@ -532,6 +549,16 @@ export async function broadcastBlockHash(
             proposeAndCollect(peer, block, proposeParams, signerSet),
         ),
     )
+
+    // A reply we could not judge is no vote against the block: counting it
+    // as one would fail a round on a read error of ours alone. The round is
+    // sat out instead, as for any state read that fails mid-round.
+    if (outcomes.some(outcome => outcome.unjudged)) {
+        throw new StateReadError(
+            `vote signer set of block ${block.number}`,
+            lookupError,
+        )
+    }
 
     let pro = 0
     let con = 0

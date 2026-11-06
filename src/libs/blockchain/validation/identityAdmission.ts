@@ -10,6 +10,37 @@ export const IDENTITY_ADMISSION_TIMEOUT_MS = 5_000
 export type IdentityAdmission = { ok: true } | { ok: false; reason: string }
 
 /**
+ * Where the transaction arrives from. "ingest" is gossip or RPC at an entry
+ * node; "merge" is the consensus mempool merge between committee members.
+ */
+export type IdentityAdmissionMode = "ingest" | "merge"
+
+/**
+ * Identity kinds whose proof block application checks again by itself,
+ * without the network. Admitting one of these unverified cannot store an
+ * unproven claim: a bad proof fails at apply on every node alike.
+ */
+function proofRecheckedAtApply(tx: Transaction): boolean {
+    const payload = tx.content?.data?.[1] as
+        | { method?: string; payload?: { context?: string } }
+        | undefined
+    const method = payload?.method
+    if (typeof method !== "string") return false
+    if (method.endsWith("_identity_remove")) return true
+    if (
+        method === "tlsn_identity_assign" ||
+        method === "zk_attestationadd" ||
+        method === "zk_commitmentadd"
+    ) {
+        return true
+    }
+    return (
+        method === "web2_identity_assign" &&
+        payload.payload?.context === "telegram"
+    )
+}
+
+/**
  * Runs the identity proof checks the RPC confirm path runs (signatures, web2
  * posts, provider scores) for a transaction reaching this node by gossip or by
  * the consensus mempool merge. Without it, a transaction pushed straight into
@@ -24,11 +55,17 @@ export type IdentityAdmission = { ok: true } | { ok: false; reason: string }
  * round until the transaction leaves its mempool, but never splits state.
  *
  * Fails closed: an unreachable provider, a thrown error or the deadline
- * refuses the transaction.
+ * refuses the transaction. The one exception is the merge, for kinds whose
+ * proof apply checks again: there a check that could not finish admits, so a
+ * slow or overloaded member does not drop what the others keep. Kinds whose
+ * claim apply stores as signed (provider scores, web2 posts) stay closed in
+ * the merge too, since a provider outage an attacker can provoke would
+ * otherwise let a forged claim through.
  */
 export async function checkIdentityAdmission(
     tx: Transaction,
     timeoutMs = IDENTITY_ADMISSION_TIMEOUT_MS,
+    mode: IdentityAdmissionMode = "ingest",
 ): Promise<IdentityAdmission> {
     if (tx.content?.type !== "identity") {
         return { ok: true }
@@ -41,14 +78,19 @@ export async function checkIdentityAdmission(
         return { ok: false, reason: "identity transaction has no ed25519 sender" }
     }
 
+    const admitUnverified = mode === "merge" && proofRecheckedAtApply(tx)
+    const unverifiable = (reason: string): IdentityAdmission =>
+        admitUnverified ? { ok: true } : { ok: false, reason }
+
     let timer: ReturnType<typeof setTimeout> | undefined
     const deadline = new Promise<IdentityAdmission>(resolve => {
         timer = setTimeout(
             () =>
-                resolve({
-                    ok: false,
-                    reason: "identity proof could not be verified in time",
-                }),
+                resolve(
+                    unverifiable(
+                        "identity proof could not be verified in time",
+                    ),
+                ),
             timeoutMs,
         )
     })
@@ -65,10 +107,9 @@ export async function checkIdentityAdmission(
                 ? { ok: true }
                 : { ok: false, reason: result.message }
         } catch (e) {
-            return {
-                ok: false,
-                reason: `identity proof verification error: ${e instanceof Error ? e.message : String(e)}`,
-            }
+            return unverifiable(
+                `identity proof verification error: ${e instanceof Error ? e.message : String(e)}`,
+            )
         }
     }
 
