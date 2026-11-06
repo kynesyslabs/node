@@ -12,6 +12,9 @@ import { calculateFeeBreakdown } from "./calculateCurrentGas"
 import { requireSender } from "src/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
+import { isForkActive } from "@/forks"
+import { chainMinValidatorStake } from "src/features/staking/chainMinStake"
+import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import type {
     ValidatorStakePayload,
     GCREditValidatorStake,
@@ -47,6 +50,11 @@ export function getMinValidatorStake(): bigint {
     return BigInt(DEFAULT_MIN_VALIDATOR_STAKE)
 }
 
+/** Whether `stakeApplyChecks` holds for the block applied on the current tip. */
+async function stakeChecksActive(): Promise<boolean> {
+    return isForkActive("stakeApplyChecks", await Chain.getLastBlockNumber())
+}
+
 type StakeTxResult = { valid: boolean; message: string }
 
 export default class ValidatorsManagement {
@@ -80,7 +88,21 @@ export default class ValidatorsManagement {
         }
 
         const existing = await GCR.getGCRValidatorStatus(sender)
-        const min = getMinValidatorStake()
+        const bonding = await stakeChecksActive()
+        const min = bonding
+            ? maxOf(getMinValidatorStake(), chainMinValidatorStake())
+            : getMinValidatorStake()
+
+        if (bonding) {
+            return checkBondedStake(
+                existing,
+                amount,
+                payload.connectionUrl,
+                min,
+                await GCR.getAccountBalance(sender),
+                BigInt((await calculateFeeBreakdown(tx)).total),
+            )
+        }
 
         // The stake must be backed by funds: the cumulative staked amount
         // after this tx (prior stake + increase) plus the tx gas fee must
@@ -160,6 +182,20 @@ export default class ValidatorsManagement {
             return {
                 valid: false,
                 message: "Unstake already requested",
+            }
+        }
+        if (await stakeChecksActive()) {
+            const active = (
+                (await GCR.getGCRValidatorsAtBlock(
+                    await Chain.getLastBlockNumber(),
+                )) as unknown[]
+            ).length
+            const floor = quorumThreshold(getSharedState.shardSize)
+            if (active - 1 < floor) {
+                return {
+                    valid: false,
+                    message: `Unstake would leave ${active - 1} active validators, below the committee floor of ${floor}`,
+                }
             }
         }
         return { valid: true, message: "Unstake valid" }
@@ -275,6 +311,48 @@ export default class ValidatorsManagement {
         )
         // TODO: connection test (legacy TODO carried over).
     }
+}
+
+function maxOf(a: bigint, b: bigint): bigint {
+    return a > b ? a : b
+}
+
+/**
+ * Admission rule for a stake under `stakeApplyChecks`, where the stake leaves
+ * the balance: the balance covers this stake and the fee, and entering the
+ * set (new, or after an exit) takes the minimum and a connection URL.
+ */
+function checkBondedStake(
+    existing: { status: string | null; connection_url: string | null } | null,
+    amount: bigint,
+    connectionUrl: string,
+    min: bigint,
+    balance: bigint,
+    gasFee: bigint,
+): StakeTxResult {
+    if (balance < amount + gasFee) {
+        return {
+            valid: false,
+            message: `Insufficient balance for stake: ${amount} + gas ${gasFee} exceeds balance ${balance}`,
+        }
+    }
+    const entering =
+        !existing ||
+        (existing.status !== VALIDATOR_STATUS_ACTIVE &&
+            existing.status !== VALIDATOR_STATUS_UNSTAKING)
+    if (!entering) {
+        return { valid: true, message: "Validator stake increase valid" }
+    }
+    if (amount < min) {
+        return {
+            valid: false,
+            message: `Initial stake ${amount} below minimum ${min}`,
+        }
+    }
+    if (!connectionUrl && !existing?.connection_url) {
+        return { valid: false, message: "connectionUrl required for first stake" }
+    }
+    return { valid: true, message: "Validator entrance valid" }
 }
 
 /** Pull the `ValidatorStakePayload` out of a tx, or return null if malformed. */

@@ -50,6 +50,10 @@ scrape_configs:
       metrics_path: /metrics
       scrape_interval: 5s # More frequent for real-time monitoring
       scrape_timeout: 5s
+      # With METRICS_BEARER_TOKEN set on the node, mount a file holding the
+      # same token and uncomment:
+      # authorization:
+      #   credentials_file: /etc/prometheus/metrics_token
 
     # Node Exporter for host-level metrics (optional)
     # Only scraped if node-exporter is running (--profile full)

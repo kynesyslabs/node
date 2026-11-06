@@ -15,7 +15,10 @@ export interface NodeCall {
  * @param content - NodeCall containing `message` (the RPC action to perform), `data` (payload for the action), and `muid` (message unique id)
  * @returns An RPCResponse containing the numeric status, the response payload for the requested action, and optional `extra` diagnostic data
  */
-export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
+export async function manageNodeCall(
+    content: NodeCall,
+    sender = "",
+): Promise<RPCResponse> {
     const { data } = content
     const response = structuredClone(emptyResponse)
     response.result = 200
@@ -24,7 +27,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
     const handler = handlerRegistry[content.message]
     if (handler) {
-        return await handler(data, response)
+        return await handler(data, response, sender)
     }
 
     // Return a real 404 with a structured error body so SDK clients can

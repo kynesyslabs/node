@@ -53,6 +53,8 @@ export interface DrillInput {
     stopped: number[]
     consensusTimeS: number
     forks: Record<string, number | null>
+    /** Forks the drill kept off by name, with the reason; empty when none (`drill_inputs.py`). */
+    excludedForks: Record<string, string>
     baselineMinHeight: number
     /** Minimum number of hold-window samples (halt mode). */
     holdRounds: number
@@ -186,6 +188,20 @@ function readForks(v: unknown, path: string, problems: Problems): Record<string,
     return out
 }
 
+/** Fork name -> reason; absent (an input from before the exclusions) is none. */
+function readExcludedForks(v: unknown, path: string, problems: Problems): Record<string, string> {
+    const out: Record<string, string> = {}
+    if (v === undefined) return out
+    if (!isRecord(v)) {
+        problems.push(`${path}: expected an object of fork name -> reason`)
+        return out
+    }
+    for (const [name, why] of Object.entries(v)) {
+        out[name] = readString(why, `${path}.${name}`, problems)
+    }
+    return out
+}
+
 /** A phase object, or null when the run ended before it. */
 function readPhase<T>(
     v: unknown,
@@ -231,6 +247,7 @@ export function parseDrillInput(raw: unknown): DrillInput {
         stopped,
         consensusTimeS: readInt(raw.consensusTimeS, "consensusTimeS", problems, 1),
         forks: readForks(raw.forks, "forks", problems),
+        excludedForks: readExcludedForks(raw.excludedForks, "excludedForks", problems),
         baselineMinHeight: readInt(raw.baselineMinHeight, "baselineMinHeight", problems),
         holdRounds: readInt(raw.holdRounds, "holdRounds", problems),
         marks: readMarks(raw.marks, "marks", problems),
@@ -556,6 +573,7 @@ export function timingsLine(input: DrillInput, verdict: DrillVerdict): Record<st
         validators: input.validators,
         stopped: input.stopped,
         forks: input.forks,
+        ...(Object.keys(input.excludedForks).length > 0 ? { excludedForks: input.excludedForks } : {}),
     }
 }
 
@@ -587,7 +605,10 @@ export function formatReport(input: DrillInput, verdict: DrillVerdict): string[]
             `target ${verdict.targetHeight ?? "n/a"}, ${verdict.settleBlocks ?? "n/a"} block(s) landed during settle`,
         `config: CONSENSUS_TIME ${input.consensusTimeS}s, ${input.validators} validators, shardSize ${input.shardSize}, ` +
             `quorum ${verdict.quorum}, stopped [${input.stopped.join(",")}], ` +
-            `forks ${Object.entries(input.forks).map(([n, h]) => `${n}@${h}`).join(", ")}`,
+            `forks ${Object.entries(input.forks).map(([n, h]) => `${n}@${h}`).join(", ")}` +
+            (Object.keys(input.excludedForks).length > 0
+                ? `; excluded: ${Object.entries(input.excludedForks).map(([n, why]) => `${n} (${why})`).join(", ")}`
+                : ""),
         `${verdict.pass ? "PASS" : "FAIL"}: ${verdict.scenario} ${verdict.summary}`,
         `DRILL_TIMINGS ${JSON.stringify(timingsLine(input, verdict))}`,
     )

@@ -167,6 +167,25 @@ describe("createBlock under commitLock", () => {
         expect(sharedState.candidateBlock).toBeNull()
     })
 
+    it("rechecks the round inside the lock mutex, after the clock steps back", async () => {
+        const now = Math.floor(Date.now() / 1000)
+        let release!: () => void
+        const held = roundState.withLockMutex(
+            () => new Promise<void>(resolve => (release = resolve)),
+        )
+        // A rebuilt block keeps its earlier timestamp; only the round is new.
+        const pending = forge({ round: now + 4 }, now - 100)
+        await new Promise(resolve => setTimeout(resolve, 10))
+        expect(sign).not.toHaveBeenCalled()
+        clockStepBack = 10
+        release()
+        await held
+        await expect(pending).rejects.toBeInstanceOf(CommitLockError)
+        expect(sign).not.toHaveBeenCalled()
+        expect(roundState.latestPrevote()).toBeNull()
+        expect(sharedState.candidateBlock).toBeNull()
+    })
+
     it("never prevotes in a round lower than one it prevoted in, across a restart", async () => {
         await forge({ round: 7000 })
         expect(JSON.parse(fs.readFileSync(prevoteRecordPath(sharedState.identityFile), "utf8"))).toMatchObject({

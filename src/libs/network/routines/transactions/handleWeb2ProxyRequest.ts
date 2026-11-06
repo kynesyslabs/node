@@ -4,10 +4,15 @@ import {
     EnumWeb2Actions,
     RPCResponse,
     IWeb2Payload,
+    IWeb2Result,
 } from "@kynesyslabs/demosdk/types"
 import { handleWeb2 } from "src/features/web2/handleWeb2"
 import { DAHRFactory } from "src/features/web2/dahr/DAHRFactory"
 import { validateAndNormalizeHttpUrl } from "src/features/web2/validator"
+import {
+    allowsNonSuccessStatus,
+    UnattestableResponseError,
+} from "src/features/web2/dahr/originStatus"
 import log from "src/utilities/logger"
 
 type IHandleWeb2ProxyRequestStepParams = Pick<
@@ -87,13 +92,33 @@ export async function handleWeb2ProxyRequest({
 
                 const { method, headers } = web2Request.raw
 
-                const response = await dahr.startProxy({
-                    method,
-                    headers,
-                    payload,
-                    authorization,
-                    url: validation.normalizedUrl,
-                })
+                let response: IWeb2Result
+                try {
+                    response = await dahr.startProxy({
+                        method,
+                        headers,
+                        payload,
+                        authorization,
+                        url: validation.normalizedUrl,
+                        // Read from the incoming request: it is the one the
+                        // client signs into the web2Request tx.
+                        allowNonSuccessStatus: allowsNonSuccessStatus(
+                            web2Request.raw,
+                        ),
+                    })
+                } catch (error) {
+                    if (error instanceof UnattestableResponseError) {
+                        // `response` stays null: SDKs that skip the result
+                        // check then fail before signing a tx, instead of
+                        // anchoring an empty result.
+                        return createRPCResponse(
+                            error.rpcStatus,
+                            null,
+                            error.message,
+                        )
+                    }
+                    throw error
+                }
 
                 return createRPCResponse(200, response)
             }

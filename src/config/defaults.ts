@@ -38,10 +38,17 @@ export const DEFAULT_CONFIG: AppConfig = {
         password: "demospassword",
         database: "demos",
         connectTimeoutMs: 10_000,
-        statementTimeoutMs: 10_000,
+        // Bounds on a hang, not on normal work. The longest statements are a
+        // full block's chunked inserts and the whole-table scans of the state
+        // root, which take seconds; a statement that every node runs for a
+        // block must never hit the limit, or no node could store that block.
+        statementTimeoutMs: 120_000,
+        // Not applied: see sessionTimeouts in src/model/datasource.ts.
         queryTimeoutMs: 10_000,
-        lockTimeoutMs: 20_000,
-        idleTransactionTimeoutMs: 20_000,
+        // Locks are held for one short database transaction, which never
+        // waits on the network.
+        lockTimeoutMs: 30_000,
+        idleTransactionTimeoutMs: 60_000,
     },
 
     core: {
@@ -81,6 +88,9 @@ export const DEFAULT_CONFIG: AppConfig = {
         // Opt-in via MCP_ENABLED=true after reading docs/runbooks/mcp-security.md.
         // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mcpEnabled: false,
+        // On by default: compose publishes 3005 and the proxy routes
+        // /signaling/ to it, so existing deployments expect it running.
+        signalingEnabled: true,
         restore: false,
         expectedGenesisHash: "",
         expectedGenesisBlockHash: "",
@@ -148,13 +158,19 @@ export const DEFAULT_CONFIG: AppConfig = {
     metrics: {
         enabled: true,
         port: 9090,
-        host: "0.0.0.0",
+        // Loopback by default: /metrics has no authentication. Compose pins
+        // METRICS_HOST=0.0.0.0 inside the container and controls host
+        // exposure with METRICS_BIND; bare-metal operators opt in explicitly.
+        host: "127.0.0.1",
+        bearerToken: "",
     },
 
     diagnostics: {
         minCpuSpeed: 0,
         minRam: 0,
-        minDiskSpace: 0,
+        // GiB the node needs free to start; 0 turns the check off.
+        minDiskSpace: 5,
+        diskSpacePath: "",
         minNetworkDownloadSpeed: 0,
         minNetworkUploadSpeed: 0,
         networkTestFileSize: 0,

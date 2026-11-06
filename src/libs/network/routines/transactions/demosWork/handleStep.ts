@@ -57,6 +57,8 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
     } else if (context === "web2") {
         const web2Request = task as IWeb2Request
         result = await handleWeb2ProxyRequest({ web2Request })
+        // A refused request (non-2xx origin, proxy failure) has no data for
+        // the next steps to build on.
         if (result?.result !== 200) {
             stepResult.success = false
             stepResult.error =
