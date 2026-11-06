@@ -13,6 +13,7 @@ import { chunkedInsert, getBlocksRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
 import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
 import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
+import dropPreGovernanceRows from "./routines/dropPreGovernanceRows"
 import { loadNetworkParameters } from "./routines/loadNetworkParameters"
 import { getStakedSet } from "src/libs/consensus/stakedSet"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
@@ -544,16 +545,33 @@ export async function insertBlock(
                 // Governance hooks scoped to the block transaction so they
                 // commit/rollback atomically with it. sharedState refresh
                 // is deferred to post-commit (below) — RAM never ahead of DB.
-                const govProposalRepo =
-                    transactionalEntityManager.getRepository(NetworkUpgrade)
-                const govVoteRepo =
-                    transactionalEntityManager.getRepository(NetworkUpgradeVote)
-                await tallyUpgradeVotes(
-                    block.number,
-                    govProposalRepo,
-                    govVoteRepo,
-                )
-                await applyNetworkUpgrade(block.number, govProposalRepo)
+                // While governance is dormant no proposal applies, so any row
+                // here was left by an older binary: acting on it would move
+                // only the nodes that kept it. The block at the activation
+                // height drops such rows, so the first block that admits
+                // governance edits reads the same, empty, set on every node.
+                if (
+                    isForkActive("networkGovernance", block.number) &&
+                    !isForkActive("networkGovernance", block.number - 1)
+                ) {
+                    await dropPreGovernanceRows(
+                        block.number,
+                        transactionalEntityManager.getRepository(NetworkUpgrade),
+                        transactionalEntityManager.getRepository(NetworkUpgradeVote),
+                    )
+                }
+                if (isForkActive("networkGovernance", block.number - 1)) {
+                    const govProposalRepo =
+                        transactionalEntityManager.getRepository(NetworkUpgrade)
+                    const govVoteRepo =
+                        transactionalEntityManager.getRepository(NetworkUpgradeVote)
+                    await tallyUpgradeVotes(
+                        block.number,
+                        govProposalRepo,
+                        govVoteRepo,
+                    )
+                    await applyNetworkUpgrade(block.number, govProposalRepo)
+                }
 
                 // After every hook that can move a stake. Block 0's set is
                 // recorded at boot, once the validator seed is in place.
