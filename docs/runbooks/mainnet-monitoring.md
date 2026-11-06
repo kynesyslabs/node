@@ -65,7 +65,7 @@ validator (`instance` label).
 
 | Alert | Condition | Severity | Meaning |
 |-------|-----------|----------|---------|
-| HeightStalled | no new block for 300 s, held 2 min | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. |
+| HeightStalled | no new block for 300 s, held 2 min; keeps firing 5 min after it clears | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. |
 | BlockHashMismatch | more than 3 peer disagreements on the candidate block hash in 10 min, held 5 min | warning | This node and its peers are building different blocks (mempool or clock divergence). |
 | ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, within 10 min | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. |
 | SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If it is 0, the marker write failed: keep the node stopped until every other copy of the key is stopped. |
@@ -77,7 +77,16 @@ validator (`instance` label).
 | ClockOffset | the host clock more than 1 s from NTP, held 15 min | warning | The validator's host NTP is not keeping time; see [Validator clock](#validator-clock). |
 
 The existing alerts in `node-health.yml`, `errors.yml` and `subsystems.yml` are
-loaded from the same directory and use the same receiver.
+loaded from the same directory and use the same receiver. Among them:
+
+| Alert | Condition | Severity | Meaning |
+|-------|-----------|----------|---------|
+| MempoolStuck | transactions pending and none included in a stored block for 10 min | warning | Block production has stalled while the pool fills. |
+| DiskSpaceLow | under 20 GiB free in the node's working directory, held 10 min | warning | Prune logs, snapshots and Docker build cache, or grow the volume. |
+| DiskSpaceCritical | under 5 GiB free, held 2 min | critical | The node refuses to start below `MIN_DISK_SPACE` (default 5 GiB) and Postgres fails writes on a full disk. |
+
+The rules have promtool unit tests in `monitoring/prometheus/tests/`; run
+`promtool test rules monitoring/prometheus/tests/alerts.test.yml` after editing them.
 
 Routing: critical and warning both go to the one Slack receiver. Critical
 alerts wait 10 s before the first message and repeat hourly; warnings repeat

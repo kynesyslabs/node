@@ -173,6 +173,7 @@ services:
       OMNI_PORT: ${OMNI_PORT:-53551}
       OMNI_MODE: ${OMNI_MODE:-OMNI_PREFERRED}
       SIGNALING_ENABLED: ${SIGNALING_ENABLED:-true}
+      MIN_DISK_SPACE: ${MIN_DISK_SPACE:-}
       RPC_SIGNALING_PORT: ${RPC_SIGNALING_PORT:-3005}
       RPC_MCP_PORT: ${RPC_MCP_PORT:-3001}
       # Database — service name from this compose

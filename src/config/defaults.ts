@@ -161,7 +161,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     diagnostics: {
         minCpuSpeed: 0,
         minRam: 0,
-        minDiskSpace: 0,
+        // GiB the node needs free to start; 0 turns the check off.
+        minDiskSpace: 5,
         minNetworkDownloadSpeed: 0,
         minNetworkUploadSpeed: 0,
         networkTestFileSize: 0,

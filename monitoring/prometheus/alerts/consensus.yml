@@ -6,6 +6,9 @@ groups:
       - alert: HeightStalled
         expr: demos_seconds_since_last_block > 300
         for: 2m
+        # A block that slips through a stalled network resets the gauge for
+        # one scrape; hold the alert so it does not resolve and re-page.
+        keep_firing_for: 5m
         labels:
           severity: critical
         annotations:
@@ -102,6 +105,7 @@ groups:
         # so the alert fires before the pool starts rejecting transactions.
         expr: demos_mempool_size > 8000
         for: 5m
+        keep_firing_for: 10m
         labels:
           severity: warning
         annotations:

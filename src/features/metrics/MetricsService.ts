@@ -141,6 +141,11 @@ export class MetricsService {
         )
         this.createGauge("block_height", "Current block height", [])
         this.createGauge("mempool_size", "Number of pending transactions", [])
+        this.createGauge(
+            "disk_free_bytes",
+            "Disk bytes the node process can still write in its working directory",
+            [],
+        )
 
         // === Network Metrics ===
         this.createGauge("peers_connected", "Currently connected peers", [])

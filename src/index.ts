@@ -61,6 +61,7 @@ import {
 } from "./libs/peer/identityLiveness"
 import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+import { freeDiskBytes, lowDiskRefusal } from "./utilities/diskSpace"
 import { startSignaling } from "./features/InstantMessagingProtocol/signalingServer/startSignaling"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
@@ -711,6 +712,15 @@ async function main() {
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
+    }
+
+    const diskRefusal = lowDiskRefusal(
+        freeDiskBytes(process.cwd()),
+        Config.getInstance().diagnostics.minDiskSpace,
+    )
+    if (diskRefusal) {
+        log.error(`[BOOT] Refusing to start: ${diskRefusal}`)
+        process.exit(1)
     }
 
     // Before the TUI takes over the terminal, so its banner and the optional

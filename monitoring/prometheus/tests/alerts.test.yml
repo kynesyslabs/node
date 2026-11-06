@@ -38,3 +38,84 @@ tests:
             exp_annotations:
               summary: Mempool has pending transactions but throughput is zero
               description: "demos_mempool_size > 0 on n1 yet no transaction has been included in a stored block for over 10m. Block production may be stalled."
+
+  # absent() drops every label but job; the rule names the case in the
+  # instance label that Alertmanager groups on.
+  - interval: 1m
+    input_series:
+      - series: 'demos_mempool_size{job="demos-node",instance="n1"}'
+        values: '0x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NodeDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: no demos-node target
+            exp_annotations:
+              summary: Demos node is down
+              description: "No demos-node target is left in service discovery. The node may have crashed or its metrics server is unreachable."
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="demos-node",instance="n1"}'
+        values: '0x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NodeDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: n1
+            exp_annotations:
+              summary: Demos node is down
+              description: "Prometheus failed to scrape n1 for >1m. The node may have crashed or its metrics server is unreachable."
+
+  # One block slipping through a stalled network drops the gauge for a
+  # single scrape at 11m; the alert keeps firing instead of resolving and
+  # paging again two minutes later.
+  - interval: 1m
+    input_series:
+      - series: 'demos_seconds_since_last_block{job="demos-node",instance="n1"}'
+        values: '400x10 5 400x10'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HeightStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: n1
+            exp_annotations:
+              summary: No new block for over 5 minutes
+              description: "demos_seconds_since_last_block = 400 on n1. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."
+
+  - interval: 1m
+    input_series:
+      - series: 'demos_disk_free_bytes{job="demos-node",instance="n1"}'
+        values: '4294967296x20'
+      - series: 'demos_disk_free_bytes{job="demos-node",instance="n2"}'
+        values: '107374182400x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DiskSpaceLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: n1
+            exp_annotations:
+              summary: Validator disk is filling up
+              description: "n1 has 4GiB of disk free, under 20 GiB. Prune logs, old snapshots and Docker build cache, or grow the volume."
+      - eval_time: 15m
+        alertname: DiskSpaceCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: n1
+            exp_annotations:
+              summary: Validator disk is nearly full
+              description: "n1 has 4GiB of disk free, under 5 GiB: the node will not restart (MIN_DISK_SPACE) and Postgres writes fail when it reaches 0. Free space now."
