@@ -1,5 +1,5 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
-import { serializeBlockContent } from "@/forks"
+import { serializeBlockContent, serializeTransactionContent } from "@/forks"
 import Hashing from "src/libs/crypto/hashing"
 import { certificateMessageOf } from "src/libs/consensus/v2/commitLock/domain"
 
@@ -28,10 +28,32 @@ interface StoredBlock {
     validation_data?: { signatures?: Record<string, string>; round?: unknown } | null
 }
 
-/** The stored content no longer hashes to the stored hash. */
+/**
+ * A transaction as a proof carries it: the exact text its hash is the sha256
+ * of, and the signature the sender made, so a client reads the fields from
+ * hashed bytes instead of re-encoding a stored row.
+ */
+export interface TransactionBytes {
+    hash: string
+    contentBytes: string
+    signature: { type: string; data: string } | null
+    ed25519_signature: string | null
+}
+
+/**
+ * The stored content of a block, or of a transaction in it, no longer
+ * hashes to the stored hash.
+ */
 export class ContentUnrecoverableError extends Error {
-    constructor(readonly blockNumber: number) {
-        super(`content of block ${blockNumber} does not hash to its stored hash`)
+    constructor(
+        readonly blockNumber: number,
+        readonly txHash?: string,
+    ) {
+        super(
+            txHash
+                ? `content of transaction ${txHash} in block ${blockNumber} does not hash to its hash`
+                : `content of block ${blockNumber} does not hash to its stored hash`,
+        )
         this.name = "ContentUnrecoverableError"
     }
 }
@@ -47,6 +69,38 @@ export function blockBytes(block: StoredBlock): BlockBytes {
         throw new ContentUnrecoverableError(block.number)
     }
     return { number: block.number, hash: block.hash, contentBytes }
+}
+
+interface StoredTransaction {
+    hash: string
+    content: unknown
+    signature?: { type: string; data: string } | null
+    ed25519_signature?: string | null
+}
+
+/**
+ * Serialized as validation hashes it, at the height of the block the
+ * transaction sits in, since osDenomination changes the bytes.
+ *
+ * @throws ContentUnrecoverableError when those bytes do not hash to the
+ *   transaction's hash.
+ */
+export function transactionBytes(tx: StoredTransaction, blockNumber: number): TransactionBytes {
+    let contentBytes: string
+    try {
+        contentBytes = serializeTransactionContent(tx.content as never, blockNumber)
+    } catch {
+        throw new ContentUnrecoverableError(blockNumber, tx.hash)
+    }
+    if (Hashing.sha256(contentBytes) !== tx.hash) {
+        throw new ContentUnrecoverableError(blockNumber, tx.hash)
+    }
+    return {
+        hash: tx.hash,
+        contentBytes,
+        signature: tx.signature ?? null,
+        ed25519_signature: tx.ed25519_signature ?? null,
+    }
 }
 
 export function signedHeader(block: StoredBlock): SignedHeader {
@@ -83,7 +137,11 @@ export function failedRead(error: unknown): RPCResponse {
     if (error instanceof ContentUnrecoverableError) {
         return {
             result: 500,
-            response: { error: "content_unrecoverable", blockNumber: error.blockNumber },
+            response: {
+                error: "content_unrecoverable",
+                blockNumber: error.blockNumber,
+                ...(error.txHash ? { txHash: error.txHash } : {}),
+            },
             extra: { reason: "content_unrecoverable", error: message },
             require_reply: false,
         }

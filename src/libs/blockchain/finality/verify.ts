@@ -55,7 +55,18 @@ export interface SignedHeader extends BlockBytes {
     signatures: Record<string, string>
 }
 
-/** getTransactionProof's answer. */
+/**
+ * The transaction as getTransactionProof serves it: `contentBytes` is the
+ * exact text its hash is the sha256 of.
+ */
+export interface TransactionBytes {
+    hash: string
+    contentBytes: string
+    signature?: { type: string; data: string } | null
+    ed25519_signature?: string | null
+}
+
+/** getTransactionProof's answer. `tx` is absent from older nodes. */
 export interface TransactionProof {
     hash: string
     blockNumber: number
@@ -66,6 +77,19 @@ export interface TransactionProof {
     committedIn: number
     inclusionBlock: BlockBytes
     commitBlock: SignedHeader
+    tx?: TransactionBytes
+}
+
+/**
+ * What the client expects the transaction to be. Addresses compare without
+ * case or 0x; amount and nonce compare as the integers the signed content
+ * carries (amount in OS once osDenomination applies, a DEM number before).
+ */
+export interface ExpectedTransaction {
+    from?: string
+    to?: string
+    amount?: bigint | number | string
+    nonce?: bigint | number | string
 }
 
 export interface StorageProofEntry {
@@ -132,6 +156,8 @@ export type TransactionVerdict =
 export interface TransactionVerification {
     verdict: TransactionVerdict
     reason?: string
+    /** The signed transaction content, when the proof carries it. */
+    content?: Record<string, unknown>
 }
 
 export interface StorageVerification {
@@ -378,6 +404,82 @@ function readLeaf(proof: TransactionProof): { status: "confirmed" | "failed" } {
     throw invalid(`the leaf has status ${JSON.stringify(leaf.status)} with code ${JSON.stringify(leaf.code)}`)
 }
 
+/** One canonical spelling of an integer amount or nonce, or null. */
+function quantityText(value: unknown): string | null {
+    if (typeof value === "bigint") return value.toString()
+    if (typeof value === "number") {
+        if (!Number.isFinite(value)) return null
+        // Past 2^53 the number is no longer the integer that was signed.
+        if (Number.isInteger(value) && !Number.isSafeInteger(value)) return null
+        return String(value)
+    }
+    if (typeof value === "string") {
+        const text = value.trim()
+        if (/^-?\d+$/.test(text)) return BigInt(text).toString()
+        const n = Number(text)
+        return text !== "" && Number.isFinite(n) && !Number.isInteger(n) ? String(n) : null
+    }
+    return null
+}
+
+const addressText = (value: unknown): string | null =>
+    typeof value === "string" && value.length > 0 ? stripHex(value) : null
+
+const EXPECTED_FIELDS: { field: keyof ExpectedTransaction; read: (value: unknown) => string | null }[] = [
+    { field: "from", read: addressText },
+    { field: "to", read: addressText },
+    { field: "amount", read: quantityText },
+    { field: "nonce", read: quantityText },
+]
+
+/**
+ * The content of the transaction the proof is about, checked against what
+ * the client expects. The hash binds the bytes to the leaf the quorum
+ * signed over, so the fields are read from those bytes only.
+ */
+function readContent(
+    proof: TransactionProof,
+    expected: ExpectedTransaction | undefined,
+): Record<string, unknown> | undefined {
+    const wanted = EXPECTED_FIELDS.filter(({ field }) => expected?.[field] !== undefined)
+    const tx = proof.tx
+    if (tx === undefined || tx === null) {
+        if (wanted.length === 0) return undefined
+        throw new Rejection(
+            "indeterminate",
+            `the proof carries no transaction content to check ${wanted.map(w => w.field).join(", ")} against`,
+        )
+    }
+    if (typeof tx !== "object" || typeof tx.contentBytes !== "string") {
+        throw invalid("the transaction carries no content bytes")
+    }
+    if (tx.hash !== undefined && (typeof tx.hash !== "string" || stripHex(tx.hash) !== proof.hash)) {
+        throw invalid("the transaction served is not the one proven")
+    }
+    if (Hashing.sha256(tx.contentBytes) !== proof.hash) {
+        throw invalid(`the transaction content does not hash to ${proof.hash}`)
+    }
+    let parsed: unknown
+    try {
+        parsed = JSON.parse(tx.contentBytes)
+    } catch {
+        throw invalid("the transaction content is not JSON")
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw invalid("the transaction content is not an object")
+    }
+    const content = parsed as Record<string, unknown>
+    for (const { field, read } of wanted) {
+        const shown = JSON.stringify(String(expected![field]))
+        const want = read(expected![field])
+        if (want === null) throw invalid(`the expected ${field} ${shown} is not comparable`)
+        if (read(content[field]) !== want) {
+            throw invalid(`the transaction's ${field} is ${JSON.stringify(content[field] ?? null)}, expected ${shown}`)
+        }
+    }
+    return content
+}
+
 function run<T extends { verdict: string; reason?: string }>(
     work: () => T,
 ): T | { verdict: "invalid" | "indeterminate"; reason: string } {
@@ -393,11 +495,17 @@ function run<T extends { verdict: string; reason?: string }>(
  * Whether `proof` shows its transaction executed or failed in a final block.
  * The tree size is read from block m's signed `ordered_transactions`, never
  * from the prover: an RFC 6962 root does not commit to it.
+ *
+ * When the proof carries the transaction, its bytes must hash to the proven
+ * hash and the verdict returns the content read from them; each field of
+ * `expected` must then match it. Expecting a field of a proof without the
+ * transaction gives "indeterminate".
  */
 export function verifyTransactionProof(
     proof: TransactionProof,
     trusted: TrustedValidatorSet,
     rules: CommitteeRules,
+    expected?: ExpectedTransaction,
 ): TransactionVerification {
     return run(() => {
         if (!proof || typeof proof !== "object") throw invalid("no proof")
@@ -432,7 +540,9 @@ export function verifyTransactionProof(
         }
 
         checkQuorum(proof.commitBlock, signerPool(parent, trusted, rules), rules)
-        return { verdict: status === "confirmed" ? "final-executed" : "final-failed" }
+        const content = readContent(proof, expected)
+        const verdict: TransactionVerdict = status === "confirmed" ? "final-executed" : "final-failed"
+        return content ? { verdict, content } : { verdict }
     })
 }
 
