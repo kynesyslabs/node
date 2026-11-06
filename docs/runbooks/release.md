@@ -191,6 +191,14 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
   message is accepted once. A new node refuses the old modes `0x03`/`0x04`; an
   old node refuses `0x06` (`does not bind the payload`) and closes the
   connection, and the sender falls back to HTTP.
+- In the same release, HTTP peer requests sign the body too: the signature
+  covers identity, timestamp and the SHA-256 of the body, sent in a
+  `body-hash` header. `hello_peer`, `mempool` and `consensus_routine` are
+  refused without it (HTTP 401). An old node answers a new node's signed
+  request with `401 Invalid signature`; a new node refuses an old node's
+  peer methods and still accepts the old form for client methods, which is
+  what the SDK sends. Together with the Omni change, old and new nodes do
+  not peer with each other.
 - From the first release after `v1.0.0-rc.5`, `/health` is a readiness probe:
   503 while the node is booting, dormant or not synced. Probes that must stay
   green while a node catches up (container healthchecks, liveness probes)

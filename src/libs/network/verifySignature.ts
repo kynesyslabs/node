@@ -10,6 +10,7 @@ import { Ed25519SignedObject, signedObject } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import Hashing from "src/libs/crypto/hashing"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import { httpAuthMessage } from "./peerHttpAuth"
 
 /**
  * Max age of a timestamp-bound auth header (audit C3b). A captured header is
@@ -39,6 +40,12 @@ export interface VerificationResult {
     algorithm: string | null
 
     /**
+     * The body hash the signature covers, when the caller used the
+     * body-bound form; the body itself still has to be checked against it.
+     */
+    bodyHash?: string | null
+
+    /**
      * Error message if verification failed
      */
     error?: string
@@ -63,6 +70,7 @@ export async function verifySignature(
     signature: string,
     timestamp?: string | null,
     requireTimestampBinding = false,
+    bodyHash?: string | null,
 ): Promise<VerificationResult> {
     if (!identity || !signature) {
         return {
@@ -74,12 +82,25 @@ export async function verifySignature(
         }
     }
 
+    // The body-bound form is only sent by upgraded nodes, so its timestamp
+    // is checked whatever the fork state.
+    const bodyBound = typeof bodyHash === "string"
+    if (bodyBound && !/^[0-9a-f]{64}$/.test(bodyHash)) {
+        return {
+            valid: false,
+            identity,
+            publicKey: null,
+            algorithm: null,
+            error: "Malformed body-hash header",
+        }
+    }
+
     // AUDIT C3b — when timestamp-binding is required (nonceEnforcement fork
     // active), the auth signature must cover `${identity}:${timestamp}` with a
     // fresh timestamp, so a captured header is not a static replayable bearer
     // token. A legacy client that signs the bare public key (no/empty
     // timestamp) is rejected with a clear upgrade message.
-    if (requireTimestampBinding) {
+    if (requireTimestampBinding || bodyBound) {
         if (!timestamp) {
             return {
                 valid: false,
@@ -124,11 +145,14 @@ export async function verifySignature(
             const publicKeyBytes = hexToUint8Array(publicKeyHex)
             const signatureBytes = hexToUint8Array(signature)
 
-            // Bound form signs sha256(`${identity}:${timestamp}`); legacy form
-            // signs the bare publicKey hex (splits[1]).
-            const authMessage = requireTimestampBinding
-                ? Hashing.sha256(`${identity}:${timestamp}`)
-                : publicKeyHex
+            // Body-bound form signs identity, timestamp and body hash; the
+            // timestamp form signs sha256(`${identity}:${timestamp}`); legacy
+            // form signs the bare publicKey hex (splits[1]).
+            const authMessage = bodyBound
+                ? httpAuthMessage(identity, timestamp!, bodyHash!)
+                : requireTimestampBinding
+                  ? Hashing.sha256(`${identity}:${timestamp}`)
+                  : publicKeyHex
 
             signatureObj = {
                 algorithm: algorithm,
@@ -144,9 +168,11 @@ export async function verifySignature(
             const publicKeyBytes = hexToUint8Array(publicKeyHex)
             const signatureBytes = hexToUint8Array(signature)
 
-            const authMessage = requireTimestampBinding
-                ? Hashing.sha256(`${identity}:${timestamp}`)
-                : identity
+            const authMessage = bodyBound
+                ? httpAuthMessage(identity, timestamp!, bodyHash!)
+                : requireTimestampBinding
+                  ? Hashing.sha256(`${identity}:${timestamp}`)
+                  : identity
 
             signatureObj = {
                 algorithm: algorithm,
@@ -164,6 +190,7 @@ export async function verifySignature(
                 identity,
                 publicKey: publicKeyHex,
                 algorithm,
+                bodyHash: bodyBound ? bodyHash : null,
             }
         }
 

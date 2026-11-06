@@ -13,6 +13,8 @@ import { isOperatorRequest } from "./operatorAuth"
 import { isMergePeerEligible } from "../consensus/mergePeerEligibility"
 import { Config } from "src/config"
 import { getAuthContext } from "./authContext"
+import { BODY_BOUND_METHODS } from "./peerHttpAuth"
+import Hashing from "src/libs/crypto/hashing"
 import { handleError } from "src/errors"
 
 import { isRPCRequest, processPayload, emptyResponse } from "./rpcDispatch"
@@ -443,8 +445,23 @@ export async function serverRpcBun() {
     server.post("/", async req => {
         try {
             const clientIP = rateLimiter.getClientIP(req, server.server)
+            const authCtx = getAuthContext(req)
 
-            const payload = await req.json()
+            // A body-bound signature covers these exact bytes; anything else
+            // is captured headers carrying another body.
+            let payload: any
+            if (authCtx.verified && authCtx.bodyHash) {
+                const raw = new Uint8Array(await req.arrayBuffer())
+                if (Hashing.sha256Bytes(raw) !== authCtx.bodyHash) {
+                    return jsonResponse(
+                        { error: "Request body does not match the signed body hash" },
+                        401,
+                    )
+                }
+                payload = JSON.parse(new TextDecoder().decode(raw))
+            } else {
+                payload = await req.json()
+            }
 
             const rateLimitResponse = handleIdentityTxRateLimit(
                 req,
@@ -464,7 +481,18 @@ export async function serverRpcBun() {
                 )
             }
 
-            const authCtx = getAuthContext(req)
+            if (BODY_BOUND_METHODS.has(payload.method) && !authCtx.bodyHash) {
+                return jsonResponse(
+                    {
+                        result: 401,
+                        response: `${payload.method} requires a body-bound signature`,
+                        require_reply: false,
+                        extra: null,
+                    },
+                    401,
+                )
+            }
+
             const sender = authCtx.publicKey || ""
             const response = await processPayload(payload, sender)
 
