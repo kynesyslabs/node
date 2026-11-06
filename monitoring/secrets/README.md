@@ -2,6 +2,6 @@ Alertmanager reads each receiver URL from a file here (gitignored, `chmod 644` s
 
 | File | Receiver | Placeholder to replace |
 |------|----------|------------------------|
-| `slack_webhook` | `slack` (warnings, info, and a copy of every critical and page) | `<SLACK_WEBHOOK_URL_PLACEHOLDER>` |
+| `slack_webhook` | `slack` (warnings, info, and a copy of every critical and page; not `MissedSignatures`, which notifies nobody) | `<SLACK_WEBHOOK_URL_PLACEHOLDER>` |
 | `pager_webhook` | `paging` (critical, page; these also go to `slack`) | `<PAGER_WEBHOOK_URL_PLACEHOLDER>` |
 | `deadman_webhook` | `deadman` (always-firing heartbeat) | `<DEADMAN_WEBHOOK_URL_PLACEHOLDER>` |

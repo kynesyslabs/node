@@ -80,7 +80,11 @@ do not depend on the working directory.
    route (see "Testing the routing" below for the full commands):
    `docker exec demos-alertmanager amtool alert add RoutingTest severity=critical instance=test --alertmanager.url=http://localhost:9093`
    (critical reaches Slack and paging) and the same with `severity=warning`
-   (Slack only). Silence `RoutingTest` afterwards.
+   (Slack only). Do not silence `RoutingTest`: a silence also holds back the
+   resolved message, and `amtool` does not send it again, so the page would stay
+   open in the pager. The alert has no end time, so Alertmanager resolves it by
+   itself 5 minutes after it was sent (`resolve_timeout`), and the resolved
+   message reaches the pager then.
 5. After you change `monitoring/alertmanager/alertmanager.yml`, restart or recreate the
    Alertmanager container (`docker compose -f monitoring/docker-compose.yml up -d --force-recreate alertmanager`). The file is bind-mounted as a single file, so a reload (SIGHUP) does not
    pick up a replaced file. The same goes for `monitoring/prometheus/prometheus.yml`, also
@@ -155,6 +159,14 @@ per round, so a single round with a lagging mempool can reach the threshold, and
 that must clear by itself.
 
 Run the `docker compose` commands below from the repository root, as in setup.
+
+`ConflictingBlock` and `PrecommitEquivocation` fire on every validator that saw
+the event, so the same alert can be open for several `instance` values (check
+Alerts in Prometheus). The silence, the series delete and the silence expiry
+below are per instance (the examples use `validator-2`): repeat steps 2, 3 and 4
+for each instance that is firing, with its own `instance` value in each command.
+The admin API only needs to be enabled once for all the deletes (step 3), and
+remove the flag after the last one.
 
 1. Investigate and resolve the fork, mismatch or double-sign first (for
    `ForeignSignature` and `PrecommitEquivocation`: every copy of the key found
@@ -277,8 +289,13 @@ A Slack message and a page (the paging webhook) both arrive after the critical g
 docker exec demos-alertmanager amtool check-config /etc/alertmanager/alertmanager.yml
 docker exec demos-alertmanager amtool config routes test --config.file=/etc/alertmanager/alertmanager.yml severity=warning alertname=MempoolBacklog
 docker exec demos-alertmanager amtool alert add RoutingTest severity=critical instance=test --alertmanager.url=http://localhost:9093
-docker exec demos-alertmanager amtool silence add alertname=RoutingTest --alertmanager.url=http://localhost:9093 --comment="routing test done"
 ```
+
+Do not silence `RoutingTest` after the test. The synthetic alert (this one and
+the `curl` one) has no end time, so Alertmanager resolves it 5 minutes after it
+was sent (`resolve_timeout` in `monitoring/alertmanager/alertmanager.yml`) and
+sends the resolved message. A silence would hold that message back and the test
+page would stay open in the pager.
 
 To check a rule itself, query Prometheus (`:9091`) for its expression, for
 example `demos_consensus_abstaining`, and look at Alerts in the UI.
