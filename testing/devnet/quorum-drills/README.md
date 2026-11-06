@@ -117,13 +117,17 @@ Exit code 0 means pass, 1 fail, 2 the run could not be carried out
 an observation window (three tries) ends the run as `ERROR`, exit 2: a
 crashed node must not pass for a stalled one, and neither may a run in which
 Postgres ran out of connections (see "Postgres connections"). Each run with a verdict
-appends a row to `runs/results.tsv`, under a lock other runs take too (see
-"Postgres connections", Backstop), before it writes `verdict.json`. A row
-that cannot be added makes the verdict `ERROR`, exit 2: `could not
+writes `verdict.json`, then appends a row to `runs/results.tsv`, under a lock
+other runs take too (see "Postgres connections", Backstop). A row that
+cannot be added rewrites `verdict.json` as `ERROR`, exit 2: `could not
 record the verdict: no row added to .../results.tsv (why); the result was
+PASS (detail)` (`run.log` says `RESULT PASS`, then `RESULT ERROR`). A
+`verdict.json` that cannot be written makes the row `ERROR` instead, exit 2:
+`could not record the verdict: .../verdict.json not written; the result was
 PASS (detail)`. With no lock within 30 s the table is not touched; a write
 that fails part way (a full disk on a first run, after the header line, for
-example) can leave a header or a partial row in it. Log-line counts (floor refusals,
+example) can leave a header or a partial row in it. What a crash between the
+two leaves is in [Notes](#notes). Log-line counts (floor refusals,
 fallback lines) only take lines logged in the window being judged, and a
 node log such a count cannot read to the end (a docker error, no answer
 within `LOG_READ_TIMEOUT_S`, see [Tuning](#tuning), or a `sed` or `grep`
@@ -587,7 +591,8 @@ A connection-limit hit can no longer pass:
   the append of the row, holds an exclusive `flock` on `results.tsv.lock` next
   to it and waits up to 30 s for it; without the lock the row is not
   touched, and stderr says so (`no lock on .../results.tsv.lock within 30s`).
-  An append without the lock is also `ERROR`, exit 2 (above). The rewrite's
+  An append without the lock is also `ERROR`, exit 2: the `verdict.json`
+  written before it is rewritten (above). The rewrite's
   copy of the table is the run's own (`results.tsv.tmp.<run>`), made,
   renamed and removed only while it holds the lock.
 
@@ -615,9 +620,15 @@ lock), `fallback` with one psql killed (`none given`, exit 2), a
 `ride-n13s10` whose judge refuses the fork set (`ERROR`, the fork named in
 the detail), and a `PATH` without `flock` (no start). The lock is tested on its own as well: held by
 another process, the append and the rewrite wait, then leave `results.tsv`
-and that process's copy as they were and say so, and the append makes
-`verdict.json` `ERROR`, exit 2 (as it does when `results.tsv` cannot be
-written); eight rewrites at once lose none of the eight rows.
+and that process's copy as they were and say so, and the append rewrites the
+`verdict.json` it wrote as `PASS` to `ERROR`, exit 2 (as it does when
+`results.tsv` cannot be written); eight rewrites at once lose none of the
+eight rows. The order is tested where the append starts (a stub `flock`
+that copies both records, then kills the run): `verdict.json` already says
+`PASS`, `results.tsv` has no row of the run, and the kill leaves them so. A
+kill before `verdict.json`'s `mv` leaves neither. A `verdict.json` that
+cannot be written (an `ERROR` row, exit 2), or not rewritten after the row
+failed (it still says `PASS`, stderr says so, exit 2), is tested too.
 `drillInputs.test.ts` covers the generated compose for N=4, 10 and 13.
 
 ## Runs and logs
@@ -739,3 +750,13 @@ needs `HALT_ROUNDS` samples, so lowering it only shortens the hold window.
   ends as `ERROR`, exit 2.
 - Round times come from block timestamps, so they show the chain's own
   pace, including retries at a height.
+- `write_verdict` writes `verdict.json` whole (to `verdict.json.tmp`, then
+  `mv`) and only then appends the row to `results.tsv`. A crash before the
+  `mv` leaves no `verdict.json` and no row (`verdict.json.tmp` may be left).
+  A crash or an interrupt after it and before the row leaves a
+  `verdict.json` with the scenario's result and no row; so does a crash
+  after a row that could not be added and before the `ERROR` rewrite's
+  `mv`, and so does a rewrite that fails (stderr says so, exit 2). After
+  the row both say the same. No crash leaves a row with no `verdict.json`;
+  the only row without one is the `ERROR` row of a `verdict.json` that
+  could not be written.

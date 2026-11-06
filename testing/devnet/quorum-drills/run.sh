@@ -20,7 +20,7 @@
 # Exit codes: 0 pass, 1 fail, 2 the run could not be carried out (ERROR: a node
 # stopped answering mid-window, or postgres hit its connection limit, or a node
 # log that check needs could not be read: no verdict; or the verdict's row could
-# not be added to results.tsv).
+# not be added to results.tsv, or verdict.json could not be written).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -772,18 +772,32 @@ grep_logs() {
 # rewrite_verdict's rewrite each hold an exclusive flock on results.tsv.lock next
 # to it, waiting up to RESULTS_LOCK_WAIT_S for it (the preflight checks for flock)
 RESULTS_LOCK_WAIT_S=30
-# Verdict, written after the scenario or when a window cannot be judged. This
-# run's row goes into results.tsv first: a row that cannot be added (no lock
-# within RESULTS_LOCK_WAIT_S, or a failed write) makes verdict.json ERROR, with
-# why and what the result was, and the exit 2. With no lock results.tsv is not
-# touched; a write that fails part way (a full disk on a first run, after the
-# header line, for example) can leave a header or a partial row in it. No
-# result stands that results.tsv does not show.
+# Verdict, written after the scenario or when a window cannot be judged:
+# verdict.json first, then this run's row of results.tsv, so that a crash
+# between the two leaves a verdict.json with no row, never a row with no
+# verdict.json. A row that cannot be added (no lock within RESULTS_LOCK_WAIT_S,
+# or a failed write) rewrites verdict.json as ERROR, with why and what the
+# result was. A verdict.json that cannot be written makes the row ERROR
+# instead, with why and what the result was. Either way the exit is 2. With no
+# lock results.tsv is not touched; a write that fails part way (a full disk on
+# a first run, after the header line, for example) can leave a header or a
+# partial row in it. The exit is 0 or 1 only with both written. A crash or an
+# interrupt between the two, or an ERROR rewrite that fails too (said on
+# stderr), leaves a verdict.json whose result results.tsv does not show.
 write_verdict() {
     step 05-verdict
     column -t -s $'\t' "${PHASES}" | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"
     sed 's/^/    /' "${EVENTS}" 2>/dev/null | tee -a "${LOG_DIR}/run.log" >/dev/null
-    local results="${RUNS_DIR}/results.tsv" why=""
+    local v="${LOG_DIR}/verdict.json" results="${RUNS_DIR}/results.tsv" written=1 was="" why=""
+    if ! verdict_json; then
+        written=0
+        say "ERROR: could not write ${v}: the verdict is ERROR, the exit is 2" >&2
+        DETAIL="could not record the verdict: ${v} not written; the result was ${RESULT}${DETAIL:+ (${DETAIL})}"
+        RESULT=ERROR
+    fi
+    VERDICT_WRITTEN=1
+    free -m | sed -n 2p | sed 's/^/host after run: /' >> "${LOG_DIR}/run.log"
+    say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
     {
         if ! flock -w "${RESULTS_LOCK_WAIT_S}" 9; then
             why="no lock on ${results}.lock within ${RESULTS_LOCK_WAIT_S}s"
@@ -794,11 +808,23 @@ write_verdict() {
     } 9>> "${results}.lock" || why="could not open ${results}.lock"
     if [ -n "${why}" ]; then
         say "ERROR: the row of ${RUN_ID} could not be added to ${results} (${why}): the verdict is ERROR, the exit is 2" >&2
+        was="${RESULT}"
         DETAIL="could not record the verdict: no row added to ${results} (${why}); the result was ${RESULT}${DETAIL:+ (${DETAIL})}"
         RESULT=ERROR
+        # A verdict.json that could not be written is not tried again
+        if [ "${written}" = 1 ] && ! verdict_json; then
+            say "ERROR: could not rewrite ${v}: it still says ${was}, the exit is 2" >&2
+        fi
+        say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
     fi
+    [ -z "${why}" ] && [ "${written}" = 1 ] || exit 2
+}
+# verdict.json from RESULT and DETAIL, whole or not at all: written to
+# verdict.json.tmp, then moved over it, so a crash part way leaves that copy,
+# never a torn verdict.json. A copy that failed is removed.
+verdict_json() {
+    local v="${LOG_DIR}/verdict.json" drill=null
     # halt-* and ride-* drills: the judge's per-phase verdict and timings
-    local drill=null
     [ -s "${RUN_DIR}/drill-verdict.json" ] && drill=$(jq -c . "${RUN_DIR}/drill-verdict.json")
     jq -n --arg run "${RUN_ID}" --arg scenario "${SCENARIO}" --arg binding "${BINDING}" \
         --argjson n "${N}" --argjson shardSize "${SHARD}" --argjson q "${Q}" --arg code "${CODE}" \
@@ -807,11 +833,10 @@ write_verdict() {
         '{run: $run, scenario: $scenario, binding: $binding, validators: $n, shardSize: $shardSize,
           q: $q, code: $code, image: $image, detail: $detail, result: $result}
          + (if $forkSet == "launch" then {excludedForks: $excluded} else {} end)
-         + (if $drill == null then {} else {drill: $drill} end)' > "${LOG_DIR}/verdict.json"
-    VERDICT_WRITTEN=1
-    free -m | sed -n 2p | sed 's/^/host after run: /' >> "${LOG_DIR}/run.log"
-    say "RESULT ${RESULT}: ${SCENARIO} (N=${N}, shardSize ${SHARD}, q ${Q}, binding ${BINDING}) ${DETAIL}"
-    [ -z "${why}" ] || exit 2
+         + (if $drill == null then {} else {drill: $drill} end)' > "${v}.tmp" &&
+        mv -f "${v}.tmp" "${v}" && return 0
+    rm -f "${v}.tmp"
+    return 1
 }
 results_row() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${RUN_ID}" "${SCENARIO}" "${BINDING}" "${N}" "${SHARD}" "${Q}" \

@@ -535,7 +535,7 @@ end_case() { # $1 name, $2 the result before the gate, $3 late, unwritable or no
     RUNS_DIR="${WORK}/$1/runs"; mkdir -p "${RUNS_DIR}"
     printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\nearlier\tfloor\ton\t4\t10\t7\timage\tfine\tPASS\n' > "${RUNS_DIR}/results.tsv"
     OUT=$( (
-        source <(fn_src write_verdict); source <(grep -E '^step\(\) ' "${RUN_SH}")
+        for f in write_verdict verdict_json; do source <(fn_src "${f}"); done; source <(grep -E '^step\(\) ' "${RUN_SH}")
         RUN_ID="stub-$1"; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; IMAGE=stub; FORK_SET=devnet; EXCLUDED_FORKS='{}'
         PHASES="${LOG_DIR}/phases.tsv"; EVENTS="${LOG_DIR}/events.log"; : > "${PHASES}"; STARTED_STACK=1; SIDECARS=()
         trap teardown EXIT
@@ -611,12 +611,14 @@ rewrite() { # rewrite_verdict of stub-lock, waiting $1 s for the lock: ERR (stde
     ERR=$( ( RUN_ID=stub-lock; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; RESULTS_LOCK_WAIT_S=$1
         rewrite_verdict "could not run: stub" ) 2>&1 > /dev/null; echo "rc=$?")
 }
-append() { # the real write_verdict of stub-append, waiting $1 s for the lock: ERR
-    ERR=$( ( source <(fn_src write_verdict); source <(grep -E '^step\(\) ' "${RUN_SH}")
+append() { # the real write_verdict of stub-append, waiting $1 s for the lock, after the commands $2 (if any): ERR
+    ERR=$( ( for f in write_verdict verdict_json; do source <(fn_src "${f}"); done; source <(grep -E '^step\(\) ' "${RUN_SH}")
         RUN_ID=stub-append; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; IMAGE=stub; FORK_SET=devnet; EXCLUDED_FORKS='{}'
         PHASES="${LOG_DIR}/phases.tsv"; EVENTS="${LOG_DIR}/events.log"; : > "${PHASES}"; RESULTS_LOCK_WAIT_S=$1
+        eval "${2:-}"
         write_verdict ) 2>&1 > /dev/null; echo "rc=$?")
 }
+results_said() { grep -o 'RESULT [A-Z]*' "${LOG_DIR}/05-verdict.log" | tr '\n' ' '; }
 row() { awk -F'\t' -v r="$1" '$1 == r { print $9 }' "${RUNS_DIR}/results.tsv"; }
 # The run holding the lock has its copy next to results.tsv: results.tsv.tmp.other,
 # or results.tsv.tmp, the name every run used up to b4ccfffd3f
@@ -643,15 +645,16 @@ tmp_lines=$(grep -n '"${tmp}"' <<< "${rv}" | cut -d: -f1 | tr '\n' ' ')
 outside=$(for l in ${tmp_lines}; do [ "${l}" -gt "${lock_from:-0}" ] && [ "${l}" -lt "${lock_to:-0}" ] || echo "${l}"; done)
 check "rewrite_verdict makes, renames and removes its copy only under the lock (lines ${tmp_lines}in ${lock_from:-?}..${lock_to:-?})" \
     test -n "${tmp_lines}" -a -n "${lock_from}" -a -n "${lock_to}" -a -z "${outside}"
-# Up to b4ccfffd3f a run whose row could not be added still exited 0 on a PASS
+# Up to b4ccfffd3f a run whose row could not be added still exited 0 on a PASS.
+# verdict.json is written first, PASS, then rewritten as ERROR
 lock_case lock_append; hold_lock; append 1; release_lock
 check "write_verdict, the lock held by another run: exit 2, no row added, and stderr says why" \
     bash -c 'grep -q "^rc=2$" <<< "$3" && cmp -s "$1" "$2" && grep -q "ERROR: the row of stub-append could not be added to $1 (no lock on $1.lock within 1s): the verdict is ERROR, the exit is 2" <<< "$3"' \
     _ "${RUNS_DIR}/results.tsv" "${WORK}/results.before" "${ERR}"
-check "write_verdict, the lock held by another run: verdict.json says ERROR, why, and what the result was" \
+check "write_verdict, the lock held by another run: verdict.json, written as PASS first, says ERROR, why, and what the result was" \
     verdict_is ERROR "could not record the verdict: no row added to ${RUNS_DIR}/results.tsv (no lock on ${RUNS_DIR}/results.tsv.lock within 1s); the result was PASS (phases fine)"
-check "write_verdict, the lock held by another run: the run log says RESULT ERROR" \
-    grep -q "RESULT ERROR: drop-n10s10 .*could not record the verdict: " "${LOG_DIR}/05-verdict.log"
+check "write_verdict, the lock held by another run: the run log says RESULT PASS, then RESULT ERROR" \
+    bash -c 'test "$1" = "RESULT PASS RESULT ERROR " && grep -q "RESULT ERROR: drop-n10s10 .*could not record the verdict: " "$2"' _ "$(results_said)" "${LOG_DIR}/05-verdict.log"
 append 1
 check "the lock free: rc=0, the row is added after the others, verdict.json says PASS" \
     test "$(tail -1 <<< "${ERR}") $(tail -1 "${RUNS_DIR}/results.tsv" | cut -f1,9) $(wc -l < "${RUNS_DIR}/results.tsv") $(jq -r .result "${LOG_DIR}/verdict.json")" = $'rc=0 stub-append\tPASS 4 PASS'
@@ -661,6 +664,38 @@ check "write_verdict, results.tsv cannot be written (a directory here): exit 2, 
     _ "${ERR}" "${RUNS_DIR}/results.tsv"
 check "write_verdict, results.tsv cannot be written: verdict.json says ERROR and why" \
     verdict_is ERROR "could not record the verdict: no row added to ${RUNS_DIR}/results.tsv (a write to it failed); the result was PASS (phases fine)"
+# Where the append starts (flock, here a function that copies verdict.json and
+# results.tsv as they are, then kills the run as a crash would): verdict.json
+# already holds the result and results.tsv no row of the run. Up to f025ae13ed
+# the row came first, and a crash there left a PASS row with no verdict.json
+lock_case lock_order; rm "${LOG_DIR}/verdict.json"
+append 1 'flock() { cp "${LOG_DIR}/verdict.json" "${WORK}/lock_order/verdict.at-lock"; cp "${RUNS_DIR}/results.tsv" "${WORK}/lock_order/results.at-lock"; kill -KILL "${BASHPID}"; }'
+check "write_verdict, as it takes the lock: verdict.json is there and says PASS, results.tsv has no row of the run" \
+    bash -c 'jq -e ".run == \"stub-append\" and .result == \"PASS\" and .detail == \"phases fine\"" "$1" > /dev/null && cmp -s "$2" "$3"' \
+    _ "${WORK}/lock_order/verdict.at-lock" "${WORK}/lock_order/results.at-lock" "${WORK}/results.before"
+check "write_verdict, killed there: verdict.json says PASS, results.tsv as it was, no copy of verdict.json left" \
+    bash -c 'grep -q "^rc=137$" <<< "$1" && jq -e ".result == \"PASS\"" "$2" > /dev/null && [ ! -e "$2.tmp" ] && cmp -s "$3" "$4"' \
+    _ "${ERR}" "${LOG_DIR}/verdict.json" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+# Killed between writing verdict.json's copy and the mv: no verdict.json, no row
+lock_case lock_crash_mv; rm "${LOG_DIR}/verdict.json"
+append 1 'mv() { kill -KILL "${BASHPID}"; }'
+check "write_verdict, killed before verdict.json's mv: no verdict.json, results.tsv as it was" \
+    bash -c 'grep -q "^rc=137$" <<< "$1" && [ ! -e "$2" ] && cmp -s "$3" "$4"' _ "${ERR}" "${LOG_DIR}/verdict.json" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+# No row, and verdict.json cannot be rewritten (its copy is a directory by then)
+lock_case lock_no_rewrite
+append 1 'flock() { mkdir "${LOG_DIR}/verdict.json.tmp"; return 1; }'
+check "write_verdict, no row and verdict.json not rewritten: exit 2, results.tsv as it was, verdict.json still PASS, and stderr says so" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && cmp -s "$2" "$3" && jq -e ".result == \"PASS\"" "$4" > /dev/null && grep -q "ERROR: could not rewrite $4: it still says PASS, the exit is 2" <<< "$1"' \
+    _ "${ERR}" "${RUNS_DIR}/results.tsv" "${WORK}/results.before" "${LOG_DIR}/verdict.json"
+# verdict.json cannot be written (its copy is a directory): no PASS row; the row
+# says ERROR
+lock_case lock_verdict_unwritable; rm "${LOG_DIR}/verdict.json"; mkdir "${LOG_DIR}/verdict.json.tmp"; append 1
+check "write_verdict, verdict.json cannot be written: exit 2, no verdict.json, and stderr says so" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && [ ! -e "$2" ] && grep -q "ERROR: could not write $2: the verdict is ERROR, the exit is 2" <<< "$1"' _ "${ERR}" "${LOG_DIR}/verdict.json"
+check "write_verdict, verdict.json cannot be written: the row says ERROR, why and what the result was, after the others; the run log RESULT ERROR" \
+    bash -c 'cmp -s <(head -3 "$1") "$2" && test "$(tail -n +4 "$1" | cut -f1,8,9)" = "$3" && test "$4" = "RESULT ERROR "' \
+    _ "${RUNS_DIR}/results.tsv" "${WORK}/results.before" \
+    "$(printf 'stub-append\tcould not record the verdict: %s not written; the result was PASS (phases fine)\tERROR' "${LOG_DIR}/verdict.json")" "$(results_said)"
 # Eight runs end at once, each rewriting its own row: one copy-and-replace at a
 # time, so none puts back a row another one changed
 lock_case lock_many
