@@ -503,13 +503,16 @@ A connection-limit hit can no longer pass:
   cannot read in full, or a `psql-errors.log` it cannot read, is also
   `ERROR`, exit 2: `could not run: could not read the log of node-N to check
   for the postgres connection limit (why); the result was PASS`. The reason
-  can be a docker error, no answer in time, no container, or a log over the
-  bound.
+  can be a docker error, no answer in time, no container, a log over the
+  bound, or a copy of the log that could not be written (`could not write
+  the copy to <file>`: a full disk). So are psql errors `psql_node` could not
+  write to `psql-errors.log`: it keeps them in `logs/psql-err.XXXXXX` (`psql
+  errors not written to it, kept in ...`).
 - **Backstop**: when the logs are collected at teardown (with the same
   bounds), a hit also replaces exit 0 or 1 by 2, for the exits that skip the
   verdict (an early FAIL) and for a hit a node logged after the check. So
-  does a started node's log that could not be collected, unless the check
-  above already read every log. When the verdict was already written,
+  does a started node's log that could not be collected, or written, or a
+  kept `psql-err.XXXXXX`, unless the check above already read every log. When the verdict was already written,
   `verdict.json` and the run's `results.tsv` row are rewritten to match:
   `ERROR`, `could not run: postgres connection limit hit (in the logs
   collected at teardown: node-N.log); the result was PASS`. A record that
@@ -519,7 +522,9 @@ A connection-limit hit can no longer pass:
 (also after the verdict is written)
 against a fake `docker` (a `docker logs` that fails, stalls past a 1 s bound
 set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log; a
-postgres lookup that stalls, fails or finds no container), and runs `run.sh` from the top on both start paths (on the image
+postgres lookup that stalls, fails or finds no container), with file writes
+failing as on a full disk (a file size limit of 0, SIGXFSZ ignored: the copy
+of a node log, the psql errors, the rewritten records), and runs `run.sh` from the top on both start paths (on the image
 path: preflight, then the 13 migrations, then node-1);
 `drillInputs.test.ts` the generated compose for N=4, 10 and 13.
 
