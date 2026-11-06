@@ -76,7 +76,13 @@ Everything goes to `runs/<UTC time>-<mode>-<label>/` (gitignored, mode 700):
 `logs/01-preflight.log` .. `07-verdict.log` per step, `05-fault.log` with a
 timestamped line per rule change and tally, `node-N.log` (full container
 logs, collected at teardown), `verdict.json`, and `run.log` with the whole
-run. `runs/results.tsv` collects one row per run.
+run. `runs/results.tsv` collects one row per run. The node runs as the
+image's user (uid 1000 in the release image), not the host user, so the
+files in `inputs/` are 644 and its dirs 755; the run dir is made 700 before
+any key is written, which keeps other host users out. Before bring-up a
+throwaway container reads them as the image's user and copies the identity
+into `/app/state`, a tmpfs mounted with the nodes' options; the run aborts
+(exit 2) if it cannot.
 
 ## Isolation on a shared host
 

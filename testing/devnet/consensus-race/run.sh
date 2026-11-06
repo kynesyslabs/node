@@ -67,6 +67,9 @@ LOG_DIR="${RUN_DIR}/logs"
 # Compose project names allow [a-z0-9_-] only
 PROJECT="crace-$(echo "${RUN_ID}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')"
 mkdir -p "${LOG_DIR}" "${RUN_DIR}/inputs/empty-snapshot"
+# Private before any key is written: the inputs are readable by any uid (step 2),
+# so this dir is what keeps other host users out
+chmod 700 "${RUN_DIR}" || { echo "could not make ${RUN_DIR} mode 700" >&2; exit 2; }
 
 say() { echo "[race $(date -u +%H:%M:%S)] $*" | tee -a "${LOG_DIR}/run.log"; }
 
@@ -148,8 +151,6 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
         echo "${out}" | grep '^MNEMONIC:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/node${i}.identity"
         echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/pub${i}"
     done
-    chmod 600 "${RUN_DIR}"/inputs/node*.identity
-    chmod 700 "${RUN_DIR}"
     python3 - "${RUN_DIR}/inputs" "${REPO_ROOT}" "${GENESIS_TS}" <<'PY'
 import json, sys
 inputs, repo, genesis_ts = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -174,6 +175,20 @@ json.dump({pubs[0]: "http://node-1:53551"}, open(f"{inputs}/peerlist.json", "w")
 print("genesis shardSize", g["properties"]["shardSize"], "validators", len(pubs))
 PY
 } > "${LOG_DIR}/${step}.log" 2>&1 || { say "ABORT: generating inputs failed (see ${step}.log)"; exit 2; }
+# Once, after everything is written, so the modes do not depend on the umask:
+# 644 files in a 755 inputs/ under the 0700 run dir, as ../quorum-drills/ does.
+# The node runs as the image's user (uid 1000 in the release image), not the
+# host user, and these are throwaway devnet keys
+python3 -I "${HERE}/../quorum-drills/drill_inputs.py" readable --dir "${RUN_DIR}/inputs" >> "${LOG_DIR}/${step}.log" 2>&1 ||
+    { say "ABORT: making the inputs readable failed (see ${step}.log)"; exit 2; }
+# Read them as that user before bring-up: a throwaway container, no network,
+# inputs/ read-only and /app/state mounted as the compose file does, copying the
+# identity as the node's entrypoint does
+probe_fail=$(docker run --rm --network none --memory 64m --entrypoint sh -v "${RUN_DIR}/inputs:/inputs:ro" \
+    --tmpfs "/app/state:uid=${IMAGE_UID},gid=${IMAGE_GID},mode=0700" "${IMAGE}" -c '
+    cat /inputs/genesis.json /inputs/peerlist.json > /dev/null && ls /inputs/empty-snapshot > /dev/null &&
+        cp /inputs/node1.identity /app/state/node.identity' 2>&1) ||
+    abort_pre "the user of ${IMAGE} (uid ${IMAGE_UID} gid ${IMAGE_GID}) cannot read the inputs: ${probe_fail:-docker run failed}; host uid $(id -u), inputs in ${RUN_DIR}/inputs"
 say "inputs ready"
 
 cat > "${ENVFILE}" <<EOF
