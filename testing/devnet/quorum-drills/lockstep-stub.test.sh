@@ -171,8 +171,12 @@ mkdir -p "${WORK}/bin"
 # The node logs: `compose ... ps -aq node-<n>` answers cid<n> (nothing when
 # FAKE/nocontainer.<n> exists), `logs ... cid<n>` prints FAKE/nodelog.<n> (its
 # last lines with --tail; no file: an empty log), after sleeping the seconds in
-# FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists;
-# cut off by its reader, it dies of SIGPIPE, as the docker CLI does
+# FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists.
+# Cut off by its reader, it exits 141 as if it died of SIGPIPE, as the docker CLI
+# does whether SIGPIPE is ignored or not: a Go program that gets EPIPE on stdout
+# raises SIGPIPE with its default action. Its cat dies of SIGPIPE, or where
+# SIGPIPE is ignored fails with "Broken pipe", and in bash a SIGPIPE that came
+# in ignored cannot be unignored, so the fake exits 141 instead of raising it
 cat > "${WORK}/bin/docker" <<'FAKEDOCKER'
 #!/usr/bin/env bash
 echo "$*" >> "${FAKE_DOCKER_LOG}"
@@ -196,8 +200,10 @@ case "$1" in
         [ "$2" = --tail ] && tail=$3
         [ -e "${FAKE}/nodelog.${n}.hang" ] && sleep "$(cat "${FAKE}/nodelog.${n}.hang")"
         [ -e "${FAKE}/nodelog.${n}.fail" ] && { echo "Error response from daemon: stub: cannot read the log of cid${n}" >&2; exit 1; }
-        if [ "${tail}" = all ]; then cat "${FAKE}/nodelog.${n}" 2>/dev/null; else tail -n "${tail}" "${FAKE}/nodelog.${n}" 2>/dev/null; fi
-        [ $? = 141 ] && kill -PIPE $$
+        [ -e "${FAKE}/nodelog.${n}" ] || exit 0
+        # cat's stdout to the reader, its stderr into err
+        { err=$(if [ "${tail}" = all ]; then LC_ALL=C cat "${FAKE}/nodelog.${n}"; else LC_ALL=C tail -n "${tail}" "${FAKE}/nodelog.${n}"; fi 2>&1 >&3 3>&-); rc=$?; } 3>&1
+        case "${rc}:${err}" in 141:* | *"Broken pipe"*) exit 141 ;; esac
         exit 0 ;;
 esac
 case "${FAKE_DB:-rows}" in
@@ -379,7 +385,7 @@ check "the same in the gate: it does not pass" bash -c '! grep -q "PG_GATE_PASSE
 gate
 check "the copy written: the gate finds the hit (exit 2)" has "postgres connection limit hit (1 'too many clients' lines; node-7 )"
 # At the cap head stops reading: sed and docker, still writing 1 MiB, die of SIGPIPE
-gate_case gate_big_pipe PASS; yes 'a log line' | head -c 1048576 > "${FAKE}/nodelog.4"
+gate_case gate_big_pipe PASS; yes 'a log line' 2> /dev/null | head -c 1048576 > "${FAKE}/nodelog.4"
 OUT=$( ( LOG_READ_MAX_BYTES=200; pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "a 1 MiB log over LOG_READ_MAX_BYTES (200 here): still read as over it, not as a failed sed or docker" \
     has "could not read the log of node-4 to check for the postgres connection limit (the log is over 200 bytes)"
@@ -396,13 +402,18 @@ gl_case gl_hang; echo 30 > "${FAKE}/nodelog.9.hang"; gl
 check "node-9's docker logs stalls: rc=1, stderr names node-9 and the bound" \
     bash -c 'grep -q "^rc=1$" <<< "$1" && grep -q "WARN: node-9: docker logs did not answer within 3s, its log not read whole" <<< "$2"' _ "${OUT}" "${ERR}"
 check "node-9's docker logs stalls: returns within the bound (${ms} ms; the stub sleeps 30 s)" test "${ms}" -lt 15000
-# The display-only reads (`grep_logs ... | head -N`): head stops reading and docker,
-# still writing, dies of SIGPIPE. Up to 74a076ea48 that was a WARN on a healthy run
+# The display-only reads (`grep_logs ... | head -N`): head stops reading, and
+# grep_logs drains the rest so that docker is not cut off. Up to 74a076ea48 docker
+# died of SIGPIPE then, a WARN on a healthy run, and up to b4ccfffd3f still where
+# SIGPIPE is ignored (run this file under `trap '' PIPE` to see that case)
 glh() { OUT=$(grep_logs "$1" 2> "${LOG_DIR}/gl.err" | head -1; echo "rc=${PIPESTATUS[0]}"); ERR=$(cat "${LOG_DIR}/gl.err"); }
-big_log() { yes "z below the quorum of 7" | head -c 1048576 > "${FAKE}/nodelog.$1"; }
+big_log() { yes "z below the quorum of 7" 2> /dev/null | head -c 1048576 > "${FAKE}/nodelog.$1"; }
 gl_case gl_head; big_log 3
 OUT=$(bdocker logs --since 0 cid3 | head -1 > /dev/null; echo "${PIPESTATUS[0]}")
-check "(the fake docker logs of a 1 MiB log, cut off by head -1, dies of SIGPIPE as docker does: exit ${OUT})" test "${OUT}" = 141
+# SIGPIPE as this shell got it (Linux: SigIgn of /proc/<pid>/status, bit 13 - 1)
+sigpipe=$(awk '/^SigIgn:/ { print $2 }' "/proc/$$/status" 2> /dev/null)
+sigpipe=$( (( 0x${sigpipe:-0} & 0x1000 )) && echo ignored || echo default)
+check "(the fake docker logs of a 1 MiB log, cut off by head -1, exits 141 as docker does, SIGPIPE ${sigpipe} here: exit ${OUT})" test "${OUT}" = 141
 glh "below the quorum"
 check "| head -1 on a 1 MiB log of matching lines: the first line, rc=0" test "${OUT}" = $'node-3: z below the quorum of 7\nrc=0'
 check "| head -1 on a 1 MiB log of matching lines: no WARN" test -z "${ERR}"
@@ -426,6 +437,11 @@ check "a count, node-9's docker logs stalls: log_read_error, named with the boun
 gl_case gl_count_grep; big_log 3; count "("
 check "a count whose grep refuses the pattern: docker, cut off by it, is a failed read (log_read_error, node-3 named)" \
     bash -c 'grep -q "^log_read_error$" <<< "$1" && grep -q "WARN: node-3: docker logs failed (exit 141), its log not read whole" <<< "$2"' _ "${OUT}" "${ERR}"
+# A short log can be in the pipe before grep stops: docker exits 0 then, and the
+# status of grep (2) or of the sed it cut off is what says lines are missing
+gl_case gl_count_grep_short; count "("
+check "a count whose grep refuses the pattern, on short logs: a failed read too (log_read_error, node-3 and node-9 named)" \
+    bash -c 'grep -q "^log_read_error$" <<< "$1" && grep -q "WARN: node-3: " <<< "$2" && grep -q "WARN: node-9: " <<< "$2"' _ "${OUT}" "${ERR}"
 
 echo "== teardown backstop: an exit 0 or 1 the gate did not clear is exit 2 when a node log cannot be collected"
 teardown_rc() { # $1 the status run.sh exits with, $2 unwritable (as above): OUT, the status after teardown, and ms it took

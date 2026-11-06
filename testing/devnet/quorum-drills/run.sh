@@ -722,28 +722,32 @@ stop_mid_round() {
 # Log lines matching $1 across every node, logged at or after unix time $2
 # (default: the whole log; a restarted container keeps its earlier lines).
 # Every docker call is bounded (bdc, bdocker). Fails when a node's container
-# could not be looked up or its log not read to the end (a docker error, or no
-# answer in time), after a WARN on stderr naming it: a count of these lines
-# then misses that node's, and the callers that judge on one give no verdict
-# (log_read_error).
+# could not be looked up or its log not read and filtered to the end (a docker
+# error, no answer in time, or a sed or grep that failed), after a WARN on
+# stderr naming it: a count of these lines then misses that node's, and the
+# callers that judge on one give no verdict (log_read_error).
 grep_logs() {
     local i cid rc st bad=0
     for i in $(seq 1 "${N}"); do
         cid=$(bdc ps -aq "node-${i}" 2>/dev/null); rc=$?
         [ "${rc}" = 0 ] || { say "WARN: node-${i}: docker compose ps $(bounded_why "${rc}"), its log not read" >&2; bad=1; continue; }
         [ -z "${cid}" ] && continue
-        bdocker logs --since "${2:-0}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "$1" | sed "s/^/node-${i}: /"
-        st=("${PIPESTATUS[@]}")
         # A caller that reads only the first lines (`| head`) closes the pipe: the
-        # last stage, then docker, die of SIGPIPE (141), and the read is all that
-        # caller wanted. docker at 141 with a last stage that was not is a stage
-        # in between that stopped (grep refused the pattern), lines missing. A
-        # timeout is never 141: timeout gives 124 (137 after -k) whatever signal
-        # then ended docker
-        case "${st[0]}:${st[3]}" in
-            0:* | 141:141) ;;
-            *) say "WARN: node-${i}: docker logs $(bounded_why "${st[0]}"), its log not read whole" >&2; bad=1 ;;
-        esac
+        # last stage then fails, dying of SIGPIPE or, where SIGPIPE is ignored,
+        # getting EPIPE (its error is dropped), and cat drains the rest. So
+        # docker, sed and grep read to the end whatever the caller reads and
+        # however SIGPIPE is set, and any other status of theirs is lines
+        # missing: a docker error or timeout (124, 137 after -k), or a stage that
+        # stopped (grep refusing the pattern cuts docker off). The counting
+        # callers read to the end through tee and wc, and pipefail catches those
+        bdocker logs --since "${2:-0}" "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -aE "$1" |
+            { sed "s/^/node-${i}: /" 2> /dev/null; cat > /dev/null; }
+        st=("${PIPESTATUS[@]}")
+        if [ "${st[0]}" != 0 ]; then
+            say "WARN: node-${i}: docker logs $(bounded_why "${st[0]}"), its log not read whole" >&2; bad=1
+        elif [ "${st[1]}" != 0 ] || [ "${st[2]}" -gt 1 ]; then
+            say "WARN: node-${i}: its log could not be filtered (sed exit ${st[1]}, grep exit ${st[2]}), lines missing" >&2; bad=1
+        fi
     done
     return "${bad}"
 }

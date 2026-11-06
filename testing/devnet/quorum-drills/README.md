@@ -120,10 +120,13 @@ Postgres ran out of connections (see "Postgres connections"). Each run with a ve
 appends a row to `runs/results.tsv`, under a lock other runs take too (see
 "Postgres connections", Backstop). Log-line counts (floor refusals,
 fallback lines) only take lines logged in the window being judged, and a
-node log such a count cannot read to the end (a docker error, or no answer
-within `LOG_READ_TIMEOUT_S`, see [Tuning](#tuning)) ends the run as `ERROR`,
-exit 2 (`<phase>: node log unreadable`), never as a count without that
-node's lines. A progress phase counts only a head read that finished inside
+node log such a count cannot read to the end (a docker error, no answer
+within `LOG_READ_TIMEOUT_S`, see [Tuning](#tuning), or a `sed` or `grep`
+that failed on it) ends the run as `ERROR`, exit 2 (`<phase>: node log
+unreadable`), never as a count without that node's lines. The few lines
+`run.log` shows of them (`grep_logs ... | head`) are read the same way, the
+rest of each log drained, so a reader that stops early is not taken for a
+failed read, whether SIGPIPE is ignored or not. A progress phase counts only a head read that finished inside
 its `PROGRESS_TIMEOUT` window: one that returns after it is not progress,
 whatever height it shows.
 
@@ -582,8 +585,11 @@ A connection-limit hit can no longer pass:
 
 `lockstep-stub.test.sh` covers the preflight, the check and the backstop
 (also after the verdict is written)
-against a fake `docker` (a `docker logs` that fails, stalls past a 1 s bound
-set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log; a
+against a fake `docker` (a `docker logs` that fails, stalls past a 3 s bound
+set with `QDRILL_TEST_LOG_READ_TIMEOUT_S`, or prints an oversize log, and
+that exits 141 when its reader goes away, as the docker CLI does whether
+SIGPIPE is ignored or not; the file passes either way, e.g. under
+`trap '' PIPE`; a
 postgres lookup that stalls, fails or finds no container), with file writes
 failing as on a full disk (a file size limit of 0, SIGXFSZ ignored: the copy
 of a node log, the psql errors, the rewritten records), and runs `run.sh` from the top on both start paths (on the image
