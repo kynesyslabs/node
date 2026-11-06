@@ -1,0 +1,40 @@
+# promtool unit tests for the alert rules:
+#   promtool test rules monitoring/prometheus/tests/alerts.test.yml
+# testing/monitoring/alertRules.test.ts runs this through promtool or the
+# prom/prometheus image.
+rule_files:
+  - ../alerts/node-health.yml
+  - ../alerts/consensus.yml
+  - ../alerts/subsystems.yml
+  - ../alerts/errors.yml
+
+evaluation_interval: 1m
+
+tests:
+  # The node keeps the counter flat while the pool holds transactions: only
+  # n1 is stuck, n2 includes transactions every minute.
+  - interval: 1m
+    input_series:
+      - series: 'demos_transactions_total{job="demos-node",instance="n1",type="all",status="confirmed"}'
+        values: '5+0x30'
+      - series: 'demos_transactions_total{job="demos-node",instance="n1",type="all",status="failed"}'
+        values: '0+0x30'
+      - series: 'demos_mempool_size{job="demos-node",instance="n1"}'
+        values: '3+0x30'
+      - series: 'demos_transactions_total{job="demos-node",instance="n2",type="all",status="confirmed"}'
+        values: '0+4x30'
+      - series: 'demos_transactions_total{job="demos-node",instance="n2",type="all",status="failed"}'
+        values: '0+0x30'
+      - series: 'demos_mempool_size{job="demos-node",instance="n2"}'
+        values: '3+0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MempoolStuck
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: n1
+            exp_annotations:
+              summary: Mempool has pending transactions but throughput is zero
+              description: "demos_mempool_size > 0 on n1 yet no transaction has been included in a stored block for over 10m. Block production may be stalled."

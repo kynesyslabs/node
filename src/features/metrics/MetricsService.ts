@@ -163,11 +163,17 @@ export class MetricsService {
         )
 
         // === Transaction Metrics ===
-        this.createCounter(
+        const transactions = this.createCounter(
             "transactions_total",
-            "Total transactions processed",
+            "Transactions included in blocks this node stored",
             ["type", "status"],
         )
+        // The series exist from boot: rate() over a series that was never
+        // written is empty, not 0, so MempoolStuck could not fire on a node
+        // that has not stored a block since it started.
+        for (const status of ["confirmed", "failed"]) {
+            transactions.inc({ type: "all", status }, 0)
+        }
         this.createCounter(
             "transactions_failed_total",
             "Total failed transactions",

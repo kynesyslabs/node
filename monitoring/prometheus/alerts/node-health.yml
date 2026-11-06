@@ -47,13 +47,15 @@ groups:
           description: demos_boot_complete has been 0 for >5m. One or more boot steps are stuck in running or pending. Check `/health.boot.current`.
 
       - alert: MempoolStuck
-        expr: rate(demos_transactions_total[5m]) == 0 and demos_mempool_size > 0
+        # Summed over type/status so the label sets match demos_mempool_size;
+        # a bare `and` between the two never matched anything.
+        expr: sum without (type, status) (rate(demos_transactions_total[5m])) == 0 and demos_mempool_size > 0
         for: 10m
         labels:
           severity: warning
         annotations:
           summary: Mempool has pending transactions but throughput is zero
-          description: demos_mempool_size > 0 yet rate(demos_transactions_total) has been 0 for 5m. Block production may be stalled.
+          description: "demos_mempool_size > 0 on {{ $labels.instance }} yet no transaction has been included in a stored block for over 10m. Block production may be stalled."
 
       - alert: PeersZero
         expr: demos_peer_online_count == 0
