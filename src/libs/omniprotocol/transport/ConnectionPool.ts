@@ -303,15 +303,31 @@ export class ConnectionPool extends EventEmitter {
 
         // Check per-peer limits
         const peerConnections = this.connections.get(peerIdentity) || []
-        const usableCount = peerConnections.filter(
+        const usable = peerConnections.filter(
             c =>
                 c.origin === "outbound" &&
                 ConnectionStateUtils.isUsable(c.getState()),
-        ).length
-        if (usableCount >= this.config.maxConnectionsPerPeer) {
-            throw new PoolCapacityError(
-                `Max connections to peer ${peerIdentity}: ${usableCount}/${this.config.maxConnectionsPerPeer}`,
+        )
+        if (usable.length >= this.config.maxConnectionsPerPeer) {
+            // None of these reach connectionString, so after an address
+            // change they only serve the requests already on them. An idle
+            // one gives its slot to the new address.
+            const retired = this.findOldestConnection(
+                usable.filter(
+                    c =>
+                        c.connectionString !== connectionString &&
+                        c.getInfo().inFlightCount === 0,
+                ),
             )
+            if (!retired) {
+                throw new PoolCapacityError(
+                    `Max connections to peer ${peerIdentity}: ${usable.length}/${this.config.maxConnectionsPerPeer}`,
+                )
+            }
+            log.debug(
+                `[ConnectionPool] Retiring idle connection to ${retired.connectionString} for ${peerIdentity} at ${connectionString}`,
+            )
+            await this.closeConnection(retired)
         }
 
         // Create new outbound connection
