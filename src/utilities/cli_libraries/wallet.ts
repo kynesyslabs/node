@@ -121,11 +121,21 @@ export default class Wallet {
     }
 
     async save(filename: string) {
-        await fs.promises.writeFile(
+        // The create mode does not change an existing file, which an older
+        // release may have left readable by others. Restrict it before
+        // truncating, so a failed chmod stops the save with the file intact.
+        const file = await fs.promises.open(
             filename,
-            this.identity.privateKey.toString("hex"),
-            { mode: 0o600 },
+            fs.constants.O_WRONLY | fs.constants.O_CREAT,
+            0o600,
         )
+        try {
+            await file.chmod(0o600)
+            await file.truncate(0)
+            await file.writeFile(this.identity.privateKey.toString("hex"))
+        } finally {
+            await file.close()
+        }
     }
 
     read(filename: string) {
