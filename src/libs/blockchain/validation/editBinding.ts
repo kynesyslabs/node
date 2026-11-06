@@ -48,6 +48,7 @@ import { governanceGateRefusal } from "@/forks/governanceGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
+import { valueRulesRefusal, type ValueRules } from "./nativeValueRules"
 import {
     canonical,
     verifyGcrEditsMatch,
@@ -125,20 +126,26 @@ async function osDenominationActive(): Promise<boolean> {
  * of the chain tip (the source the native edit check always used for the
  * shape). A fork activating at height H binds the block applied on tip H,
  * which is block H + 1. `governance` is the `networkGovernance` state, read
- * from the same tip so admission and apply judge it alike.
+ * from the same tip so admission and apply judge it alike, and so are the
+ * value rules (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`).
  */
-export async function editBindingState(): Promise<{
-    active: boolean
-    postFork: boolean
-    nonceBound: boolean
-    governance: boolean
-}> {
+export async function editBindingState(): Promise<
+    {
+        active: boolean
+        postFork: boolean
+        nonceBound: boolean
+        governance: boolean
+    } & ValueRules
+> {
     const tip = await Chain.getLastBlockNumber()
     return {
         active: isForkActive("editBinding", tip),
         postFork: isForkActive("osDenomination", tip),
         nonceBound: isForkActive("nonceIntegrity", tip),
         governance: isForkActive("networkGovernance", tip),
+        sendBound: isForkActive("nativeSendBinding", tip),
+        canonical: isForkActive("canonicalAddresses", tip),
+        feeBound: isForkActive("feeBinding", tip),
     }
 }
 
@@ -451,15 +458,20 @@ export function verifyNonceEditBinding(tx: Transaction): EditVerdict {
  *
  * Under `nonceIntegrity`, on either side of `editBinding`, the nonce edit is
  * bound as well: the value-edit projection does not look at it. The
- * `networkGovernance` rule also holds on either side of `editBinding`.
+ * `networkGovernance` rule and the value rules (`nativeSendBinding`,
+ * `canonicalAddresses`, `feeBinding`) also hold on either side of
+ * `editBinding`.
  *
  * Fails closed: a transaction that cannot be checked is refused.
  */
 export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        const { active, postFork, nonceBound, governance } = await editBindingState()
+        const state = await editBindingState()
+        const { active, postFork, nonceBound, governance } = state
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
+        const valueRefusal = await valueRulesRefusal(tx, state)
+        if (valueRefusal) return refuse(valueRefusal)
         const verdict = active
             ? await verifyEditsAtApply(tx, { postFork })
             : await verifyAdmissionEditsBeforeBinding(tx)
@@ -501,10 +513,13 @@ async function verifyAdmissionEditsBeforeBinding(tx: Transaction): Promise<EditV
  */
 export async function verifyRpcEdits(tx: Transaction): Promise<EditVerdict> {
     try {
-        const { active, nonceBound, governance } = await editBindingState()
+        const state = await editBindingState()
+        const { active, nonceBound, governance } = state
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
         if (active) return await verifyAdmissionEdits(tx)
+        const valueRefusal = await valueRulesRefusal(tx, state)
+        if (valueRefusal) return refuse(valueRefusal)
         return nonceBound ? verifyNonceEditBinding(tx) : OK
     } catch (e) {
         return refuse(

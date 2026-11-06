@@ -27,6 +27,10 @@ import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import { normalizePubkey } from "../gcr/handleGCR"
 import { expectsNonceEdit } from "../validation/editBinding"
+import {
+    nativeSendRefusal,
+    nonCanonicalAddressRefusal,
+} from "../validation/nativeValueRules"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -84,6 +88,18 @@ export async function confirmTransaction(
             ">" +
             tx.status +
             "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    // Refused here whatever the forks say: the payment a client is told it
+    // made is the one in content.to and content.amount, and an account keyed
+    // by an upper-case spelling is one no wallet reads.
+    const valueRefusal = nonCanonicalAddressRefusal(tx) ?? nativeSendRefusal(tx)
+    if (valueRefusal) {
+        validityData.data.message =
+            "[Tx Validation] [STRUCTURE ERROR] " + valueRefusal + "\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData

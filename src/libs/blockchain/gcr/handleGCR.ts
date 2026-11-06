@@ -51,6 +51,7 @@ import {
     verifyEditsAtApply,
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
+import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
@@ -1883,10 +1884,12 @@ export default class HandleGCR {
 
     /**
      * The transactions of a block refused before apply: those the
-     * `networkGovernance` rule refuses, whether or not `editBinding` is
-     * active, and those whose shipped edits are not the ones their signed
-     * body implies (`editBinding` fork). Apply runs the shipped edits as they
-     * are, so a block must never reach it with edits nobody derived.
+     * `networkGovernance` rule or a value rule (`nativeSendBinding`,
+     * `canonicalAddresses`, `feeBinding`) refuses, whether or not
+     * `editBinding` is active, and those whose shipped edits are not the ones
+     * their signed body implies (`editBinding` fork). Apply runs the shipped
+     * edits as they are, so a block must never reach it with edits nobody
+     * derived.
      *
      * Judged on the transactions as received, before the node derives fee
      * edits or drops the edits of types that do not mutate entities, and not
@@ -1912,12 +1915,23 @@ export default class HandleGCR {
         }
 
         // One read of the tip decides whether edits are bound, the shape
-        // expected of an amount and the governance rule, once for the block:
-        // none of them depends on the transaction.
-        const { active, postFork, governance } = await editBindingState()
+        // expected of an amount, the governance rule and the value rules,
+        // once for the block: none of them depends on the transaction.
+        const state = await editBindingState()
+        const { active, postFork, governance } = state
         for (const tx of txs) {
             const reason = governanceGateRefusal(tx, governance)
-            if (reason) refuse(tx, reason)
+            if (reason) {
+                refuse(tx, reason)
+                continue
+            }
+            let valueReason: string | null
+            try {
+                valueReason = await valueRulesRefusal(tx, state)
+            } catch (error) {
+                valueReason = `could not be verified: ${error}`
+            }
+            if (valueReason) refuse(tx, valueReason)
         }
         if (!active) return refused
 

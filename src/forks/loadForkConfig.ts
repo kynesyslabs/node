@@ -16,6 +16,9 @@ import type {
     FinalityProofsConfig,
     IdentityCarryoverConfig,
     NetworkGovernanceConfig,
+    NativeSendBindingConfig,
+    CanonicalAddressesConfig,
+    FeeBindingConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
@@ -374,6 +377,17 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.networkGovernance =
                 config as NetworkGovernanceConfig
             return
+        case "nativeSendBinding":
+            getSharedState.forkConfig.nativeSendBinding =
+                config as NativeSendBindingConfig
+            return
+        case "canonicalAddresses":
+            getSharedState.forkConfig.canonicalAddresses =
+                config as CanonicalAddressesConfig
+            return
+        case "feeBinding":
+            getSharedState.forkConfig.feeBinding = config as FeeBindingConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -513,6 +527,12 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as IdentityCarryoverConfig
         case "networkGovernance":
             return base as NetworkGovernanceConfig
+        case "nativeSendBinding":
+            return base as NativeSendBindingConfig
+        case "canonicalAddresses":
+            return base as CanonicalAddressesConfig
+        case "feeBinding":
+            return base as FeeBindingConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

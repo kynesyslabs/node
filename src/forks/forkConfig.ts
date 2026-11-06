@@ -277,6 +277,56 @@ export type FinalityProofsConfig = BaseForkConfig
 export type IdentityCarryoverConfig = BaseForkConfig
 
 /**
+ * `nativeSendBinding` fork: a native send pays the recipient and the amount
+ * its signed body names. The payment is applied from the native payload's
+ * args, while explorers, receipts and the RPC balance check read
+ * `content.to` and `content.amount`; nothing compared them, so a sender
+ * could sign a receipt for one payee and pay another.
+ *
+ * At admission (gossip ingest, consensus merge) and at apply, from the
+ * activation height, a native send is refused unless `args[0]` is
+ * `content.to` and `args[1]` is `content.amount`.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
+ * the base.
+ */
+export type NativeSendBindingConfig = BaseForkConfig
+
+/**
+ * `canonicalAddresses` fork: account keys are lowercase hex. The ledger keys
+ * an account by the exact string, so `0xAB…` and `0xab…` are two accounts,
+ * and a transfer to an upper-case spelling lands in one no wallet reads.
+ *
+ * At admission and at apply, from the activation height, a transaction is
+ * refused when its sender, the recipient of a native send, or the account of
+ * any balance edit it carries is a hex address with an upper-case digit.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
+ * the base.
+ */
+export type CanonicalAddressesConfig = BaseForkConfig
+
+/**
+ * `feeBinding` fork: the fee a native transaction carries is the one the
+ * network charges. Apply derives the fee edits from the shipped
+ * `transaction_fee`, which only the RPC confirm step compared with the
+ * network's fee, so a transaction gossiped or merged straight into a pool
+ * could pay less, or route the rpc share to an account of its choosing.
+ *
+ * At admission and at apply, from the activation height, and while
+ * `gasFeeSeparation` is active, a native transaction is refused unless each
+ * shipped fee component equals the one the network computes and it names no
+ * `rpc_address`.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
+ * the base.
+ */
+export type FeeBindingConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -335,6 +385,9 @@ export type ForkConfig =
     | FinalityProofsConfig
     | IdentityCarryoverConfig
     | NetworkGovernanceConfig
+    | NativeSendBindingConfig
+    | CanonicalAddressesConfig
+    | FeeBindingConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -358,6 +411,9 @@ export type ForkName =
     | "finalityProofs"
     | "identityCarryover"
     | "networkGovernance"
+    | "nativeSendBinding"
+    | "canonicalAddresses"
+    | "feeBinding"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -380,6 +436,9 @@ export interface ForkConfigByName {
     finalityProofs: FinalityProofsConfig
     identityCarryover: IdentityCarryoverConfig
     networkGovernance: NetworkGovernanceConfig
+    nativeSendBinding: NativeSendBindingConfig
+    canonicalAddresses: CanonicalAddressesConfig
+    feeBinding: FeeBindingConfig
 }
 
 /**
@@ -583,6 +642,29 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "Admit and apply networkUpgrade and networkUpgradeVote transactions, each " +
             "governance edit bound to the account that signed it.",
     },
+    nativeSendBinding: {
+        // Dormant by default: it changes which transactions a block applies,
+        // and a missing genesis entry hydrates from here. A mainnet genesis
+        // sets 0.
+        activationHeight: null,
+        description:
+            "A native send pays the recipient and amount its signed body names: its args " +
+            "must equal content.to and content.amount.",
+    },
+    canonicalAddresses: {
+        // Dormant by default, as above. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Accounts are keyed by lowercase hex: a sender, recipient or balance edit " +
+            "account spelled with upper-case digits is refused.",
+    },
+    feeBinding: {
+        // Dormant by default, as above. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A native transaction's shipped fee equals the network fee and names no " +
+            "rpc_address, checked at admission and apply, not only at RPC confirm.",
+    },
 }
 
 /**
@@ -609,5 +691,8 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
+        nativeSendBinding: { ...DEFAULT_FORK_CONFIG.nativeSendBinding },
+        canonicalAddresses: { ...DEFAULT_FORK_CONFIG.canonicalAddresses },
+        feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
     }
 }

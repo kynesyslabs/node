@@ -42,6 +42,15 @@
     },
     "networkGovernance": {
       "activationHeight": 0
+    },
+    "nativeSendBinding": {
+      "activationHeight": 0
+    },
+    "canonicalAddresses": {
+      "activationHeight": 0
+    },
+    "feeBinding": {
+      "activationHeight": 0
     }
   },
   "balances": [
