@@ -1,0 +1,21 @@
+{
+  "id": "N04",
+  "kind": "negative (finalized height not demonstrated)",
+  "issues": [
+    "kynesyslabs/node#1059 (U-01): getFinalizedHead / finality"
+  ],
+  "request": {
+    "method": "GET",
+    "url": "https://demosnode.discus.sh/info"
+  },
+  "observed": {
+    "successful_info_responses": 3,
+    "with_parseable_finalized_height": 0,
+    "window_utc": "2026-10-14T02:53:11Z..02:54:05Z"
+  },
+  "related": "the 6 successful samples in F01 (3 height, 3 info) all report finalized_height_parsed=false",
+  "shows": [
+    "None of the three successful info samples retained a parseable non-negative safe-integer finalized height. Raw responses and key-presence flags were not saved, so field absence is not established.",
+    "the soak therefore reports finality as unknown and never substitutes peer sync for finality"
+  ]
+}

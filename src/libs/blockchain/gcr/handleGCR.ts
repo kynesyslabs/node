@@ -48,6 +48,7 @@ import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdi
 import {
     derivedGasEdit,
     editBindingState,
+    stakeSenderRefusal,
     verifyEditsAtApply,
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
@@ -99,7 +100,7 @@ import {
     applyAtomicStoragePut,
     type StoragePutEdit,
 } from "@/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines"
-import { StateReadError } from "@/libs/blockchain/gcr/stateReadError"
+import { StateReadError, readState } from "@/libs/blockchain/gcr/stateReadError"
 import {
     applySlotCas,
     applyWorkAttempt,
@@ -272,6 +273,30 @@ function snapshotStaged(
             )
     }
     return snapshot as Partial<StagedSnapshot>
+}
+
+/**
+ * The accounts whose balance the transaction's stake edits move, to be put
+ * back with the rest when it fails: an exit's refund cannot be reversed, and
+ * a restored validator row would pay it again. Only under `stakeApplyChecks`,
+ * read from the tip as the stake routine reads it, and only accounts the
+ * caches hold, since the routine moves no other.
+ */
+async function stakedAccounts(
+    entities: GCREntityCaches,
+    edits: GCREdit[],
+    simulate: boolean,
+): Promise<string[]> {
+    if (simulate) return []
+    const accounts = edits
+        .filter(edit => (edit.type as string) === "validatorStake")
+        .map(edit =>
+            normalizePubkey((edit as unknown as { account: string | Uint8Array }).account),
+        )
+        .filter(pubkey => entities.accounts.has(pubkey))
+    if (accounts.length === 0) return []
+    const tip = await readState("chain tip", () => Chain.getLastBlockNumber())
+    return isForkActive("stakeApplyChecks", tip) ? accounts : []
 }
 
 interface RowSnapshot {
@@ -1005,7 +1030,11 @@ export default class HandleGCR {
         // Taken before apply: a failure reverses the applied edits in place,
         // and its snapshot restore followed by that reversal can leave a
         // balance edit undone twice.
-        const before = HandleGCR.snapshotAccounts(entities, tx)
+        const before = HandleGCR.snapshotAccounts(
+            entities,
+            tx,
+            await stakedAccounts(entities, tx.content.gcr_edits ?? [], simulate),
+        )
         const fee = await HandleGCR.failureFee(tx, nonceEdit, !!options.osAmounts)
         const nonceCharge = structuredClone(nonceEdit)
 
@@ -1050,11 +1079,13 @@ export default class HandleGCR {
     private static snapshotAccounts(
         entities: GCREntityCaches,
         tx: Transaction,
+        staked: string[],
     ): Map<string, GCRMain | null> {
         const before = new Map<string, GCRMain | null>()
-        for (const edit of tx.content.gcr_edits ?? []) {
-            if (!isGCRMainEdit(edit)) continue
-            const pubkey = normalizePubkey(edit.account)
+        const pubkeys = (tx.content.gcr_edits ?? [])
+            .filter(isGCRMainEdit)
+            .map(edit => normalizePubkey(edit.account))
+        for (const pubkey of [...pubkeys, ...staked]) {
             if (before.has(pubkey)) continue
             const entity = entities.accounts.get(pubkey)
             before.set(pubkey, entity ? structuredClone(entity) : null)
@@ -1515,17 +1546,18 @@ export default class HandleGCR {
         const staged = snapshotStaged(entities, gcrEdits)
         const editPubkeys = new Set<string>()
 
-        for (const edit of gcrEdits) {
-            if (isGCRMainEdit(edit)) {
-                const pubkey = normalizePubkey(edit.account)
-                if (!editPubkeys.has(pubkey)) {
-                    editPubkeys.add(pubkey)
-                    const entity = entities.accounts.get(pubkey)
-                    snapshots.push({
-                        pubkey,
-                        entity: entity ? structuredClone(entity) : null,
-                    })
-                }
+        const pubkeys = [
+            ...gcrEdits.filter(isGCRMainEdit).map(edit => normalizePubkey(edit.account)),
+            ...(await stakedAccounts(entities, gcrEdits, simulate)),
+        ]
+        for (const pubkey of pubkeys) {
+            if (!editPubkeys.has(pubkey)) {
+                editPubkeys.add(pubkey)
+                const entity = entities.accounts.get(pubkey)
+                snapshots.push({
+                    pubkey,
+                    entity: entity ? structuredClone(entity) : null,
+                })
             }
         }
         // A storage or proof row an edit wrote must not outlive a later edit
@@ -1737,6 +1769,15 @@ export default class HandleGCR {
                             keys.push("acc:" + normalizePubkey(tlsEdit.account))
                         }
                     }
+                    // A stake moves the balance of the account it names.
+                    if ((edit.type as string) === "validatorStake") {
+                        const stakeAccount = (
+                            edit as unknown as { account?: string | Uint8Array }
+                        ).account
+                        if (stakeAccount) {
+                            keys.push("acc:" + normalizePubkey(stakeAccount))
+                        }
+                    }
                     const stagedKey = stagedKeyOf(edit)
                     if (stagedKey) keys.push(stagedKey)
                     // A proposal reads the proposer's validator row as
@@ -1914,9 +1955,12 @@ export default class HandleGCR {
         // One read of the tip decides whether edits are bound, the shape
         // expected of an amount and the governance rule, once for the block:
         // none of them depends on the transaction.
-        const { active, postFork, governance } = await editBindingState()
+        const { active, postFork, governance, stakeChecks } =
+            await editBindingState()
         for (const tx of txs) {
-            const reason = governanceGateRefusal(tx, governance)
+            const reason =
+                governanceGateRefusal(tx, governance) ??
+                (stakeChecks ? stakeSenderRefusal(tx) : null)
             if (reason) refuse(tx, reason)
         }
         if (!active) return refused
@@ -2917,9 +2961,19 @@ export default class HandleGCR {
                     result = { success: true, message: "Simulated" }
                 } else {
                     const staged: DeferredWrite[] = []
+                    const stakeAccount = (
+                        editOperation as unknown as { account: string | Uint8Array }
+                    ).account
                     result = await GCRValidatorStakeRoutines.apply(
                         editOperation,
                         HandleGCR.stagedValidatorsRepo(entities, staged),
+                        undefined,
+                        {
+                            account:
+                                entities.accounts.get(normalizePubkey(stakeAccount)) ?? null,
+                            stagedRows: entities.validators,
+                            rollback: isRollback,
+                        },
                     )
                     result.deferredWrite = deferredWriteOf(staged)
                 }

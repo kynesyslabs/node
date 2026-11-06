@@ -15,6 +15,7 @@ import type {
     CommitLockConfig,
     FinalityProofsConfig,
     IdentityCarryoverConfig,
+    StakeApplyChecksConfig,
     NetworkGovernanceConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
@@ -370,6 +371,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.identityCarryover =
                 config as IdentityCarryoverConfig
             return
+        case "stakeApplyChecks":
+            getSharedState.forkConfig.stakeApplyChecks =
+                config as StakeApplyChecksConfig
+            return
         case "networkGovernance":
             getSharedState.forkConfig.networkGovernance =
                 config as NetworkGovernanceConfig
@@ -511,6 +516,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as FinalityProofsConfig
         case "identityCarryover":
             return base as IdentityCarryoverConfig
+        case "stakeApplyChecks":
+            return base as StakeApplyChecksConfig
         case "networkGovernance":
             return base as NetworkGovernanceConfig
         default: {

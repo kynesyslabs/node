@@ -720,7 +720,7 @@ fi
 if [[ "${GOSSIP_ENABLED:-true}" != "false" ]]; then
 	if ! command -v node >/dev/null 2>&1; then
 		echo "❌ Gossip is enabled but Node.js is not on PATH (the gossip sidecar requires Node >= 20)."
-		echo "   Install Node, or start with GOSSIP_ENABLED=false."
+		echo "   Install Node. GOSSIP_ENABLED=false also starts, but then blocks and heights travel by direct HTTP pushes, with a 10 s height poll as the fallback."
 		exit 1
 	fi
 	SIDECAR_BUNDLE="sidecar/dist/gossip-sidecar.mjs"
@@ -992,11 +992,11 @@ if [[ "${MONITORING_DISABLED}" != "true" ]]; then
 		log_verbose "Starting monitoring containers"
 		if ! docker compose up -d; then
 			echo "⚠️  Warning: Failed to start monitoring stack"
-			echo "💡 Monitoring dashboards will not be available"
+			echo "💡 Monitoring dashboards will not be available. GRAFANA_ADMIN_PASSWORD must be set (monitoring/.env or the environment)."
 		else
 			echo "✅ Monitoring stack started"
 			echo "   📈 Prometheus: http://localhost:${PROMETHEUS_PORT:-9091}"
-			echo "   📊 Grafana:    http://localhost:${GRAFANA_PORT:-3000} (admin/demos)"
+			echo "   📊 Grafana:    http://localhost:${GRAFANA_PORT:-3000} (admin / your GRAFANA_ADMIN_PASSWORD)"
 
 			# Wait for Grafana to be healthy (max 30 seconds)
 			log_verbose "Waiting for Grafana to be healthy..."
