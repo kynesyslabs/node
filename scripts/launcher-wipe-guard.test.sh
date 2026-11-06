@@ -27,6 +27,8 @@
 #     bun only (no node binary on the host)
 #   - wipe-and-reboot.sh refuses before any wipe when scripts/docker-run is not
 #     executable
+#   - wipe-and-reboot.sh keeps the node state volume (signing record, commit
+#     lock) unless --wipe-signing-state is given, and warns when it is
 #
 # Usage:
 #   scripts/launcher-wipe-guard.test.sh                 # the scripts next to this file
@@ -406,6 +408,15 @@ case "$LAST_OUT" in *"booting stack"*) FAIL=$((FAIL + 1)); echo "FAIL - wipe-and
 
 start_case; seed_volumes
 check "wipe-and-reboot: volumes removed -> migrates once" ok 1 "$W/scripts/wipe-and-reboot.sh" --yes --no-rebuild
+# The state volume carries the signing record and commit lock: a plain wipe
+# keeps it, only --wipe-signing-state deletes it, and says so loudly
+[[ -d "$ST/vol/demos_node_state" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - wipe-and-reboot deleted demos_node_state (the signing record) without --wipe-signing-state"; }
+[[ -d "$ST/vol/demos_node_data" ]] && { FAIL=$((FAIL + 1)); echo "FAIL - wipe-and-reboot kept demos_node_data"; }
+
+start_case; seed_volumes
+check "wipe-and-reboot --wipe-signing-state: state volume removed -> migrates once" ok 1 "$W/scripts/wipe-and-reboot.sh" --yes --no-rebuild --wipe-signing-state
+[[ -d "$ST/vol/demos_node_state" ]] && { FAIL=$((FAIL + 1)); echo "FAIL - wipe-and-reboot --wipe-signing-state kept demos_node_state"; }
+case "$LAST_OUT" in *"signing record"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - wipe-and-reboot --wipe-signing-state did not warn about the signing record";; esac
 
 # Without an executable scripts/docker-run nothing creates the schema, so the
 # script must refuse before it deletes anything, and never boot with raw compose
