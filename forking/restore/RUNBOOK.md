@@ -327,16 +327,16 @@ Wipe and re-run:
 ./run -b true
 ```
 
-Or Option B, a manual wipe, in three parts. Option B is for the repo's own local Postgres container only (`postgres_<PG_PORT>/`), never an external database. Check that `.env` points at it (`PG_HOST=localhost`, `PG_USER=demosuser`, `PG_PASSWORD=demospassword`, `PG_DATABASE=demos`) before you start. Each part is a `&&` chain, so a failed step (`down`, `rm`, the emptiness check, `migration:run`) stops it and `./run` never starts on a database that was not wiped or not migrated. Replace `<PG_PORT>` everywhere with the same port. First wipe and restart Postgres. The first block runs in a subshell, so your shell stays in the repo root even when a step fails and you can paste it again. The Postgres files belong to the container's user, so on Linux bare metal a plain `rm` usually fails; the `sudo` fallback is the same one `scripts/run` uses for `./run -b true`. If `sudo` asks for a password, it reads the next pasted lines as the password, so paste block 1 on its own and wait for it to finish before pasting the next block:
+Or Option B, a manual wipe, in three parts. Option B is for the repo's own local Postgres container only (`postgres_<PG_PORT>/`), never an external database. Check that `.env` points at it (`PG_HOST=localhost`, `PG_USER=demosuser`, `PG_PASSWORD=demospassword`, `PG_DATABASE=demos`) before you start. Parts 1 and 3 are `&&` chains, so a failed step (`down`, `rm`, the emptiness check, `migration:run`) stops them and `./run` never starts on a database that was not wiped or not migrated. Part 2 is a single readiness check. Both compose commands name the file (`-f docker-compose.yml`) as `scripts/run` does, so if `postgres_<PG_PORT>/docker-compose.yml` is missing they fail instead of picking up a compose file from a parent directory (the full node stack). Replace `<PG_PORT>` everywhere with the same port. First wipe and restart Postgres. The first block runs in a subshell, so your shell stays in the repo root even when a step fails and you can paste it again. The Postgres files belong to the container's user, so on Linux bare metal a plain `rm` usually fails; the `sudo` fallback is the same one `scripts/run` uses for `./run -b true`. If `sudo` asks for a password, it reads the next pasted lines as the password, so paste block 1 on its own and wait for it to finish before pasting the next block:
 
 ```bash
 (
   export PG_PORT=<PG_PORT> &&
   cd postgres_<PG_PORT> &&
-  docker compose down &&
+  docker compose -f docker-compose.yml down &&
   { rm -rf data_<PG_PORT> || sudo rm -rf data_<PG_PORT>; } &&
   mkdir data_<PG_PORT> &&
-  docker compose up -d
+  docker compose -f docker-compose.yml up -d
 )
 ```
 
