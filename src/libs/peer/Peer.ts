@@ -9,6 +9,7 @@ import PeerManager from "./PeerManager"
 import { sleep } from "@kynesyslabs/demosdk/utils"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import Hashing from "../crypto/hashing"
+import { BODY_HASH_HEADER, httpAuthMessage } from "../network/peerHttpAuth"
 
 export interface SyncData {
     status: boolean
@@ -286,6 +287,23 @@ export default class Peer {
         // Prepare a request with our identity
         let pubkey = ""
         let signature = ""
+        // Sent as this exact string so the receiver hashes the bytes we signed.
+        const body = JSON.stringify(request)
+        const bodyHash = Hashing.sha256(body)
+
+        // Unknown network: a signature without it would verify anywhere.
+        const genesisHash = getSharedState.genesisBlockHash
+        if (isAuthenticated && !genesisHash) {
+            log.warning(
+                `[RPC Call] [${method}] not sent: genesis hash not known yet`,
+            )
+            return {
+                result: 503,
+                response: "Genesis hash not known yet; peer auth unavailable",
+                require_reply: false,
+                extra: null,
+            }
+        }
 
         if (isAuthenticated) {
             const ourPublicKey = (
@@ -296,7 +314,7 @@ export default class Peer {
             const bufferSignature = await TxValidatorPool.getInstance().sign(
                 getSharedState.signingAlgorithm,
                 new TextEncoder().encode(
-                    Hashing.sha256(`${pubkey}:${timestamp}`),
+                    httpAuthMessage(genesisHash!, pubkey, timestamp, bodyHash),
                 ),
             )
 
@@ -323,13 +341,16 @@ export default class Peer {
 
             const response = await axios.post<RPCResponse>(
                 connectionUrl,
-                request,
+                body,
                 {
                     headers: {
                         "Content-Type": "application/json",
                         identity: pubkey,
                         signature,
                         timestamp: timestamp,
+                        ...(isAuthenticated
+                            ? { [BODY_HASH_HEADER]: bodyHash }
+                            : {}),
                     },
                     timeout: RPC_TIMEOUT_MS,
                     signal: abortController.signal,

@@ -17,7 +17,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import { isLoopbackHost, parseNodeUrl } from "src/config"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import type { HelloPeerRequest } from "../network/manageHelloPeer"
-import { helloResponseMessage } from "./helloAuth"
+import { helloResponseMessage, URL_BOUND_TO_OTHER } from "./helloAuth"
 import { noteCallerKnownAt } from "./identityLiveness"
 import { corroborateSyncData } from "./syncClaims"
 import {
@@ -285,7 +285,18 @@ export default class PeerManager {
         )
     }
 
-    addPeer(peer: Peer, urlSignedByOwner = false): [boolean, string] {
+    /**
+     * `urlSignedByOwner`: the peer itself signed this update, so it may move
+     * its own URL. `urlServedByOwner`: we dialed the URL and the key answered
+     * over our nonce, the only proof that may take a URL from another
+     * identity. A signed claim alone is the claimant's word and would let any
+     * peer evict another by naming its address.
+     */
+    addPeer(
+        peer: Peer,
+        urlSignedByOwner = false,
+        urlServedByOwner = false,
+    ): [boolean, string] {
         if (this.isRefusedAnchor(peer.identity)) {
             return [false, "Anchor refused this node; kept out until restart"]
         }
@@ -334,16 +345,15 @@ export default class PeerManager {
             peer.identity,
         )
         if (sameUrlOtherKey.length > 0) {
-            if (!urlSignedByOwner) {
+            if (!urlServedByOwner) {
                 log.warning(
                     `[PEERMANAGER] ${peer.connection.string} is already bound to ${sameUrlOtherKey
                         .map(p => p.identity)
-                        .join(", ")}: refusing unsigned claim by ${peer.identity}`,
+                        .join(", ")}: refusing unproven claim by ${peer.identity}`,
                 )
                 return [
                     false,
-                    "URL already bound to another identity: " +
-                        peer.connection.string,
+                    URL_BOUND_TO_OTHER + peer.connection.string,
                 ]
             }
             for (const stale of sameUrlOtherKey) {
@@ -402,7 +412,7 @@ export default class PeerManager {
             }
 
             if (
-                urlSignedByOwner &&
+                (urlSignedByOwner || urlServedByOwner) &&
                 peer.connection.string !== existingPeer.connection.string
             ) {
                 existingPeer.connection.string = peer.connection.string
@@ -768,7 +778,7 @@ export default class PeerManager {
                 )
             }
 
-            peerman.addPeer(peer, verdict === "verified")
+            peerman.addPeer(peer, verdict === "verified", verdict === "verified")
             peerman.removeOfflinePeer(peer.identity)
 
             return { peers: response.extra.peerlist || [], verdict }
