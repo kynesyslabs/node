@@ -5,14 +5,23 @@ import log from "@/utilities/logger"
 import handleAptosContractWrite from "./aptos_contract_write"
 import { genericJsonRpcPay } from "./pay"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
+import { pickRpcUrl } from "./rpcUrl"
 
 async function handleEVMContractWrite(operation: IOperation, chainID: number) {
     // NOTE: Logic is similar to handleEVMPay
     let evmInstance = EVM.getInstance(chainID)
 
     if (!evmInstance) {
-        const rpcUrl =
-            operation.rpc || evmProviders[operation.chain][operation.subchain]
+        const rpcUrl = pickRpcUrl(
+            operation.rpc,
+            evmProviders[operation.chain]?.[operation.subchain],
+        )
+        if (!rpcUrl) {
+            return {
+                result: "error",
+                error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
+            }
+        }
 
         evmInstance = EVM.createInstance(chainID, rpcUrl)
         await evmInstance.connect()
@@ -37,7 +46,7 @@ async function handleMultiversxContractWrite(operation: IOperation) {
     // POSTs it to the MultiversX REST API at /transaction/send.
     return await genericJsonRpcPay(
         MULTIVERSX,
-        operation.rpc || chainProviders.egld[operation.subchain],
+        pickRpcUrl(operation.rpc, chainProviders.egld[operation.subchain]),
         operation,
     )
 }
@@ -47,7 +56,7 @@ async function handleTonContractWrite(operation: IOperation) {
     // TON.sendTransaction parses it and broadcasts via TonCenter.
     return await genericJsonRpcPay(
         TON,
-        operation.rpc || chainProviders.ton[operation.subchain],
+        pickRpcUrl(operation.rpc, chainProviders.ton[operation.subchain]),
         operation,
     )
 }

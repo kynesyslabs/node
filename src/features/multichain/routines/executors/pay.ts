@@ -9,6 +9,7 @@ import validateIfUint8Array from "@/utilities/validateUint8Array"
 import handleAptosPayRest from "./aptos_pay_rest"
 import log from "@/utilities/logger"
 import { VersionedTransaction } from "@solana/web3.js"
+import { pickRpcUrl } from "./rpcUrl"
 
 /**
  * Executes a XM pay operation and returns
@@ -48,8 +49,10 @@ export default async function handlePayOperation(
     log.debug("[XMScript Parser] Non-EVM PAY")
 
     // ANCHOR Ripple
-    const rpcUrl =
-        operation.rpc || chainProviders[operation.chain][operation.subchain]
+    const rpcUrl = pickRpcUrl(
+        operation.rpc,
+        chainProviders[operation.chain]?.[operation.subchain],
+    )
     if (!rpcUrl) {
         return {
             result: "error",
@@ -208,8 +211,16 @@ async function handleEVMPay(chainID: number, operation: IOperation) {
     let evmInstance = multichain.EVM.getInstance(chainID)
 
     if (!evmInstance) {
-        const rpcUrl =
-            operation.rpc || evmProviders[operation.chain][operation.subchain]
+        const rpcUrl = pickRpcUrl(
+            operation.rpc,
+            evmProviders[operation.chain]?.[operation.subchain],
+        )
+        if (!rpcUrl) {
+            return {
+                result: "error",
+                error: `RPC URL not found for ${operation.chain}.${operation.subchain}`,
+            }
+        }
 
         evmInstance = multichain.EVM.createInstance(chainID, rpcUrl)
         await evmInstance.connect()
