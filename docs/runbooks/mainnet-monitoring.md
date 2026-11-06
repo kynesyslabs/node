@@ -65,7 +65,7 @@ validator (`instance` label).
 
 | Alert | Condition | Severity | Meaning |
 |-------|-----------|----------|---------|
-| HeightStalled | no new block for 300 s, held 2 min; keeps firing 5 min after it clears | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. |
+| HeightStalled | no new block for 300 s, held 2 min; keeps firing 10 min after it clears | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. |
 | BlockHashMismatch | more than 3 peer disagreements on the candidate block hash in 10 min, held 5 min | warning | This node and its peers are building different blocks (mempool or clock divergence). |
 | ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, within 10 min | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. |
 | SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If it is 0, the marker write failed: keep the node stopped until every other copy of the key is stopped. |

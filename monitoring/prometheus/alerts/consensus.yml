@@ -6,9 +6,10 @@ groups:
       - alert: HeightStalled
         expr: demos_seconds_since_last_block > 300
         for: 2m
-        # A block that slips through a stalled network resets the gauge for
-        # one scrape; hold the alert so it does not resolve and re-page.
-        keep_firing_for: 5m
+        # A block that slips through a stalled network resets the gauge, and it
+        # needs over 300s to cross the threshold again. Hold longer than that
+        # plus scrape and evaluation lag so the alert does not resolve and re-page.
+        keep_firing_for: 10m
         labels:
           severity: critical
         annotations:

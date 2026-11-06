@@ -8,7 +8,8 @@ rule_files:
   - ../alerts/subsystems.yml
   - ../alerts/errors.yml
 
-evaluation_interval: 1m
+# Matches global.evaluation_interval in prometheus.yml.
+evaluation_interval: 15s
 
 tests:
   # The node keeps the counter flat while the pool holds transactions: only
@@ -73,15 +74,16 @@ tests:
               summary: Demos node is down
               description: "Prometheus failed to scrape n1 for >1m. The node may have crashed or its metrics server is unreachable."
 
-  # One block slipping through a stalled network drops the gauge for a
-  # single scrape at 11m; the alert keeps firing instead of resolving and
-  # paging again two minutes later.
-  - interval: 1m
+  # One block slipping through a stalled network at 10m15s resets the gauge,
+  # which then climbs one second per second and passes 300 only after 5m15s
+  # at the real 15s evaluation interval. The alert keeps firing through that
+  # instead of resolving and paging again two minutes later.
+  - interval: 15s
     input_series:
       - series: 'demos_seconds_since_last_block{job="demos-node",instance="n1"}'
-        values: '400x10 5 400x10'
+        values: '400x40 0+15x60'
     alert_rule_test:
-      - eval_time: 12m
+      - eval_time: 16m
         alertname: HeightStalled
         exp_alerts:
           - exp_labels:
@@ -90,7 +92,7 @@ tests:
               instance: n1
             exp_annotations:
               summary: No new block for over 5 minutes
-              description: "demos_seconds_since_last_block = 400 on n1. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."
+              description: "demos_seconds_since_last_block = 345 on n1. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."
 
   - interval: 1m
     input_series:
