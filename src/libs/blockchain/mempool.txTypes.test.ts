@@ -10,15 +10,20 @@ import { beforeEach, describe, expect, it } from "bun:test"
 
 import { installPoolStorageMocks, installPoolValidationMocks } from "./mempool.fixtures"
 import { mockLogger } from "./testSupport/mockMempoolDeps"
+import { stubValidatorSet } from "./testSupport/forkGates"
 import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import type { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
-import { PEER, chainIs, demos, handMade, onTheWire } from "./validation/editBinding.fixtures"
+import { PEER, SENDER, chainIs, demos, handMade, onTheWire } from "./validation/editBinding.fixtures"
 import { getSharedState } from "@/utilities/sharedState"
 import Mempool from "./mempool"
 
 const inserted = installPoolStorageMocks()
 mockLogger("src/utilities/logger")
 installPoolValidationMocks()
+
+const { default: GCR } = await import("./gcr/gcr")
+
+const validators = stubValidatorSet(GCR)
 
 const validity = (tx: Transaction): ValidityData =>
     ({ data: { transaction: tx, reference_block: 100 } }) as unknown as ValidityData
@@ -91,3 +96,13 @@ describe("Mempool.receive", () => {
     })
 })
 
+describe("Mempool.receive under instantMessagingBinding", () => {
+    it("reads the validator set once for the whole merge", async () => {
+        allowList(0, 0)
+        validators.keys = [SENDER]
+        const messages = [await freeMessage(1), await freeMessage(2), await freeMessage(3)]
+        await Mempool.receive(messages.map(row), false)
+        expect(inserted.map(r => r.hash)).toEqual(messages.map(m => m.hash))
+        expect(validators.reads).toEqual([100])
+    })
+})

@@ -11,7 +11,11 @@ import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
-import { expectsNonceEdit, verifyAdmissionEdits } from "./validation/editBinding"
+import {
+    admissionReads,
+    expectsNonceEdit,
+    verifyAdmissionEdits,
+} from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
 import { clientTxTypeRefusal } from "./validation/txTypes"
 import { admissionRefusal } from "./validation/postgresStorable"
@@ -988,8 +992,10 @@ export default class Mempool {
         // comparison carries them.
         {
             const editVerifiedTransactions: Transaction[] = []
+            // The tip and the validator set are read once for the merge.
+            const reads = admissionReads()
             for (const tx of validTransactions) {
-                const edits = await verifyAdmissionEdits(tx)
+                const edits = await verifyAdmissionEdits(tx, reads)
                 if (!edits.ok) {
                     log.error(
                         `[Mempool.receive] Rejecting tx ${tx.hash}: ${edits.reason}`,

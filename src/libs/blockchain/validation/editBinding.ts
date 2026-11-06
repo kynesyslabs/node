@@ -136,7 +136,7 @@ async function osDenominationActive(): Promise<boolean> {
  * states, read from the same tip so admission and apply judge them alike;
  * `tip` is that tip.
  */
-export async function editBindingState(): Promise<{
+export interface EditBindingState {
     active: boolean
     postFork: boolean
     nonceBound: boolean
@@ -144,7 +144,9 @@ export async function editBindingState(): Promise<{
     typeAllowList: boolean
     messageBinding: boolean
     tip: number
-}> {
+}
+
+export async function editBindingState(): Promise<EditBindingState> {
     const tip = await Chain.getLastBlockNumber()
     return {
         active: isForkActive("editBinding", tip),
@@ -155,6 +157,30 @@ export async function editBindingState(): Promise<{
         messageBinding: isForkActive("instantMessagingBinding", tip),
         tip,
     }
+}
+
+/**
+ * The reads admission makes that do not depend on the transaction: the fork
+ * state at the tip and, for fee-free messages, the validators staked there.
+ * A batch (the consensus merge) shares one instance, so each is read once per
+ * batch rather than once per transaction; the validator set only when a
+ * message needs it. A failed read refuses every transaction that needs it,
+ * as it would one by one.
+ */
+export interface AdmissionReads {
+    state(): Promise<EditBindingState>
+    validators(): Promise<ReadonlySet<string>>
+}
+
+export function admissionReads(): AdmissionReads {
+    let state: Promise<EditBindingState> | undefined
+    let validators: Promise<ReadonlySet<string>> | undefined
+    const reads: AdmissionReads = {
+        state: () => (state ??= editBindingState()),
+        validators: () =>
+            (validators ??= reads.state().then(s => validatorKeysAt(s.tip))),
+    }
+    return reads
 }
 
 /**
@@ -469,23 +495,20 @@ export function verifyNonceEditBinding(tx: Transaction): EditVerdict {
  * `networkGovernance`, `txTypeAllowList` and `instantMessagingBinding` rules
  * also hold on either side of `editBinding`.
  *
- * Fails closed: a transaction that cannot be checked is refused.
+ * Fails closed: a transaction that cannot be checked is refused. A batch
+ * passes one `reads` to every call (see `admissionReads`).
  */
-export async function verifyAdmissionEdits(tx: Transaction): Promise<EditVerdict> {
+export async function verifyAdmissionEdits(
+    tx: Transaction,
+    reads: AdmissionReads = admissionReads(),
+): Promise<EditVerdict> {
     try {
-        const {
-            active,
-            postFork,
-            nonceBound,
-            governance,
-            typeAllowList,
-            messageBinding,
-            tip,
-        } = await editBindingState()
+        const { active, postFork, nonceBound, governance, typeAllowList, messageBinding } =
+            await reads.state()
         const typeRefusal = typeAllowList ? blockTxTypeRefusal(tx) : null
         if (typeRefusal) return refuse(typeRefusal)
         if (messageBinding && isNodeMessage(tx)) {
-            const messageRefusal = nodeMessageRefusal(tx, await validatorKeysAt(tip))
+            const messageRefusal = nodeMessageRefusal(tx, await reads.validators())
             if (messageRefusal) return refuse(messageRefusal)
         }
         const governanceRefusal = governanceGateRefusal(tx, governance)

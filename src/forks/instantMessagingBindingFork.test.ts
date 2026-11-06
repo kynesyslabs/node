@@ -21,7 +21,7 @@ import {
     stubValidatorSet,
 } from "@/libs/blockchain/testSupport/forkGates"
 import type { Transaction } from "@kynesyslabs/demosdk/types"
-import { verifyAdmissionEdits } from "@/libs/blockchain/validation/editBinding"
+import { admissionReads, verifyAdmissionEdits } from "@/libs/blockchain/validation/editBinding"
 import { PEER, SENDER, handMade, onTheWire } from "@/libs/blockchain/validation/editBinding.fixtures"
 
 mockChainAndLogger()
@@ -77,6 +77,16 @@ describe("consensus merge", () => {
         forks(null)
         expect(await verifyAdmissionEdits(await freeMessage())).toEqual({ ok: true })
         expect(validators.reads).toEqual([])
+    })
+
+    it("reads the tip and the validator set once for a whole merge", async () => {
+        forks(0)
+        validators.keys = [SENDER]
+        const reads = admissionReads()
+        for (let i = 0; i < 3; i++) {
+            expect(await verifyAdmissionEdits(await freeMessage(), reads)).toEqual({ ok: true })
+        }
+        expect(validators.reads).toEqual([100])
     })
 
     it("refuses when the validator set cannot be read", async () => {
