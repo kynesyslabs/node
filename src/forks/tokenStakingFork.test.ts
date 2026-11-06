@@ -96,6 +96,22 @@ describe("token staking fork config", () => {
         )
     })
 
+    it("is closed from block 0 by the mainnet template, which leaves tokenStaking unscheduled", () => {
+        const template = readJson("docs/mainnet/genesis.template.json")
+        expect(template.forks.tokenStakingGate).toEqual({ activationHeight: 0 })
+        expect(template.forks.tokenStaking).toEqual({ activationHeight: null })
+
+        getSharedState.forkConfig = cloneDefaultForkConfig()
+        loadForkConfigFromGenesis({
+            forks: {
+                tokenStakingGate: template.forks.tokenStakingGate,
+                tokenStaking: template.forks.tokenStaking,
+            },
+        })
+        expect(tokenStakingOpen(0)).toBe(false)
+        expect(tokenStakingOpen(1_000_000)).toBe(false)
+    })
+
     it("opens from the height tokenStaking is pinned at", () => {
         getSharedState.forkConfig = cloneDefaultForkConfig()
         loadForkConfigFromGenesis({

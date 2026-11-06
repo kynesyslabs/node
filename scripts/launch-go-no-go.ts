@@ -177,13 +177,14 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "canonicalAddresses",
     "feeBinding",
     "blockCaps",
+    "tokenStakingGate",
 ]
 
 /**
  * Forks a mainnet genesis must leave unscheduled: the launch decision is
  * that they are switched on later, at a height agreed on the running chain.
  */
-export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["networkGovernance"]
+export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["networkGovernance", "tokenStaking"]
 
 /**
  * Every fork this build knows. A mainnet genesis declares each one, with a
