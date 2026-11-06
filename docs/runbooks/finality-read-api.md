@@ -15,11 +15,43 @@ HTTP, or as an OmniProtocol `nodeCall`; both reach the same handlers.
 
 The reference offline verifier is `src/libs/blockchain/finality/verify.ts`
 (`verifyTransactionProof`, `verifyStorageProof`). It reads nothing from the
-network and needs a validator set the client trusts.
+network. Its trust inputs:
 
-Every refusal carries its reason in the body (`{ error: <reason>, ... }`) and
-in `extra.reason`. `404 not_found`, `500 lookup_failed` and
-`503 node_not_synced` are never merged.
+- `trustedSet`: the staked validator set the client trusts (from genesis, a
+  checkpoint, or `getValidatorSet` checked against a block it already
+  trusts).
+- `rules.shardSize`: the committee size of the chain.
+- When the trusted set holds more staked validators than `shardSize`, a
+  quorum of one shard could sign a child of a parent block it made up, so
+  the signatures alone do not settle it. The client then also passes one of:
+  - `rules.trustedBlockHash(height)`: the hash of the block at `height` on a
+    chain the client already holds (its own synced chain or a checkpoint),
+    or `undefined` where it holds none. The verifier asks it for the anchor's
+    parent block; a different hash is `invalid`.
+  - `rules.committee`: the identities drawn for the anchor block, for a
+    client that drew the committee itself.
+
+  Both are trust inputs like `trustedSet`: never take them from the node
+  being checked. Without either, the verdict is `indeterminate`, never
+  `final-*`. Even with a trusted parent, a committee drawn from a bound pool
+  larger than `shardSize` depends on a seed from blocks the proof does not
+  carry, so that case also answers `indeterminate` unless `rules.committee`
+  is given.
+
+Every refusal except the `400` of `getTransactionStatus` names its reason in
+`extra.reason`; what the body carries depends on the refusal:
+
+| Refusal | Body | `extra` |
+|---|---|---|
+| 400, 404, 409, 410, 503 and `500 root_mismatch` of the proof, segment, set, identity and storage calls | `{ error: <reason>, ... }` with the fields the call adds (`head`, `blockNumber`, `committedIn`, `retryAfterSeconds`, ...) | `{ reason }` |
+| `500 content_unrecoverable` | `{ error: "content_unrecoverable", blockNumber, txHash? }` | `{ reason, error }` |
+| `500 lookup_failed` (any call) | `{ error: "INTERNAL_ERROR" }` (`getFinalizedHead` adds `nodeSynced: false`); the reason is only in `extra` | `{ reason: "lookup_failed", error }` |
+| `getTransactionStatus` 404 / 503 | `{ state: "unknown", checkedThroughBlock }`, no `error` | `{ reason: "not_found" \| "node_not_synced" }` |
+| `getTransactionStatus` 400 | `{ error: <message> }` | none |
+| `getFinalizedHead` 503 | the head fields all `null`, `nodeSynced: false` | `{ reason: "node_not_synced" }` |
+
+Read `extra.reason` to tell refusals apart. `404 not_found`,
+`500 lookup_failed` and `503 node_not_synced` are never merged.
 
 ## Pin the network: `getChainIdentity`
 
@@ -60,9 +92,17 @@ The result of a transaction in block m is committed by block m + 1
 | `tx` | the transaction: `{ hash, contentBytes, signature, ed25519_signature }` |
 
 `tx.contentBytes` is the exact text the transaction hash is the sha256 of,
-serialized as validation hashes it at height m (amounts and fees are OS
-decimal strings once `osDenomination` applies, which mainnet runs from block
-0). Read `from`, `to`, `amount` and `nonce` from these bytes, never from
+by the rule block sync checks that transaction with:
+
+- a system relay transaction (`l2psBatch`) is the raw `JSON.stringify` of its
+  content, as its producer hashed it; its `signature` carries the `domain` it
+  was signed under;
+- any other transaction is serialized at the rules of height m (amounts and
+  fees are OS decimal strings once `osDenomination` applies, which mainnet
+  runs from block 0), or at the rules before a fork that activated within the
+  deep window below m, for a transaction admitted just before that fork.
+
+Read `from`, `to`, `amount` and `nonce` from these bytes, never from
 `getTxByHash`: its columns are re-encoded views of the stored row.
 
 Refusals: `400 invalid_hash`; `404 not_found` (`503 node_not_synced`);
@@ -85,6 +125,13 @@ verifyTransactionProof(proof, trustedSet, rules, {
 - Each expected field given must match: addresses without case or `0x`,
   `amount` and `nonce` as integers in the units the signed content carries
   (OS for amounts). A mismatch is `invalid`.
+- For a native send (`type: "native"`, `data[1].nativeOperation: "send"`),
+  `to` and `amount` are what the send pays: `data[1].args` = `[to, amount]`,
+  the values its balance edits are built from, not the top-level fields.
+  When `to` or `amount` is expected, the top-level `to` and `amount`, where
+  present, must equal the args, and `gcr_edits` must hold a balance `add`
+  (not a rollback) of that amount to that account; otherwise `invalid`.
+  For any other type they are the top-level fields.
 - Without `tx` (an older node) and no expectations, the verdict is as before.
   Expecting a field of a proof without `tx` is `indeterminate`.
 - `final-failed` means final and not executed: the transfer did not pay.
