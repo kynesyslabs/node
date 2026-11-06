@@ -12,7 +12,7 @@ import {
 } from "@kynesyslabs/demosdk/encryption"
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
-import { helloResponseMessage } from "../peer/helloAuth"
+import { helloResponseMessage, URL_BOUND_TO_OTHER } from "../peer/helloAuth"
 import GossipManager from "../gossip/GossipManager"
 import { parseNodeUrl } from "src/config"
 import { reportTwin } from "../peer/identityLiveness"
@@ -186,6 +186,22 @@ export async function manageHelloPeer(
             true,
         )
         if (!isAddedToPeerlist) {
+            // The new URL is held by another identity: only dialing it can
+            // show the caller now serves it, so check before moving anything.
+            if (
+                message.startsWith(URL_BOUND_TO_OTHER) &&
+                !PeerManager.verifying.has(peerObject.identity)
+            ) {
+                void PeerManager.sayHelloToPeer(
+                    new Peer(peerObject.connection.string, peerObject.identity),
+                ).catch(error =>
+                    log.warning(
+                        `[Hello Peer Listener] Verifying ${peerObject.identity} @ ${peerObject.connection.string} failed: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`,
+                    ),
+                )
+            }
             response.result = 400
             response.response = false
             response.extra = {

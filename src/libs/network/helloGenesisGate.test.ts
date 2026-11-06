@@ -62,7 +62,10 @@ jest.mock("../blockchain/validation/txValidatorPool", () => ({
     __esModule: true,
     default: { getInstance: () => ({ verify: async () => true, sign: async () => ({ signature: new Uint8Array(64) }) }) },
 }))
-jest.mock("../peer/helloAuth", () => ({ helloResponseMessage: () => new Uint8Array(1) }))
+jest.mock("../peer/helloAuth", () => ({
+    helloResponseMessage: () => new Uint8Array(1),
+    URL_BOUND_TO_OTHER: "URL already bound to another identity: ",
+}))
 jest.mock("../gossip/GossipManager", () => ({ __esModule: true, default: { isEnabled: () => false } }))
 jest.mock("src/config", () => ({ parseNodeUrl: (u: string) => ({ origin: u }) }))
 jest.mock("../peer/identityLiveness", () => ({ reportTwin: jest.fn() }))
