@@ -119,22 +119,35 @@ beforeEach(() => {
 function makeRequest(
     urlPath: string,
     headers: Record<string, string> = {},
+    verifiedAs?: string,
 ): Request {
-    return new Request(`http://localhost:53550${urlPath}`, {
+    const req = new Request(`http://localhost:53550${urlPath}`, {
         headers: new Headers(headers),
     })
+    if (verifiedAs) {
+        // What the auth middleware records after a valid signature.
+        const { setAuthContext } = require("src/libs/network/authContext")
+        setAuthContext(req, {
+            verified: true,
+            identity: verifiedAs,
+            publicKey: verifiedAs,
+            algorithm: "ed25519",
+        })
+    }
+    return req
 }
 
 async function callRoute(
     pattern: string,
     urlPath: string,
     headers: Record<string, string> = {},
+    verifiedAs?: string,
 ): Promise<{ status: number; body: any }> {
     const handler = capturedRoutes.get(pattern)
     if (!handler) {
         throw new Error(`Route not found: ${pattern}. Available: ${Array.from(capturedRoutes.keys()).join(", ")}`)
     }
-    const response = await handler(makeRequest(urlPath, headers))
+    const response = await handler(makeRequest(urlPath, headers, verifiedAs))
     const body = await response.json()
     return { status: response.status, body }
 }
@@ -214,7 +227,7 @@ describe("StorageProgram HTTP Routes", () => {
             expect(body.errorCode).toBe("PERMISSION_DENIED")
         })
 
-        it("200: owner-mode program with owner identity", async () => {
+        it("200: owner-mode program with a verified owner signature", async () => {
             mockRepository.findOneBy.mockResolvedValue(
                 entityFixtures.owner_json_program,
             )
@@ -222,7 +235,8 @@ describe("StorageProgram HTTP Routes", () => {
             const { status, body } = await callRoute(
                 "/storage-program/*",
                 "/storage-program/stor-owner-only-789",
-                { identity: "owner_addr_1" },
+                {},
+                "owner_addr_1",
             )
             expect(status).toBe(200)
             expect(body.success).toBe(true)
