@@ -37,8 +37,8 @@ services:
         depends_on:
             - alertmanager
 
-    # Alert routing. Reads the Slack webhook from the compose secret below
-    # (monitoring/secrets/slack_webhook, gitignored); `up` fails until it exists.
+    # Alert routing. Reads the Slack, paging and dead-man webhook URLs from the compose
+    # secrets below (monitoring/secrets/*, gitignored); `up` fails until they exist.
     alertmanager:
         image: prom/alertmanager:v0.27.0
         container_name: demos-alertmanager
@@ -51,6 +51,8 @@ services:
             - alertmanager_data:/alertmanager
         secrets:
             - slack_webhook
+            - pager_webhook
+            - deadman_webhook
         ports:
             - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
         networks:
@@ -170,6 +172,10 @@ networks:
 secrets:
     slack_webhook:
         file: ./secrets/slack_webhook
+    pager_webhook:
+        file: ./secrets/pager_webhook
+    deadman_webhook:
+        file: ./secrets/deadman_webhook
 
 volumes:
     prometheus_data:

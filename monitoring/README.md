@@ -193,6 +193,13 @@ scrape_configs:
           - targets: ["host.docker.internal:8080"]
 ```
 
+### Alert rules and routing
+
+Rules are in `prometheus/alerts/`, routing in `alertmanager/alertmanager.yml`. What each
+alert means and what to do is in [`docs/runbooks/mainnet-monitoring.md`](../docs/runbooks/mainnet-monitoring.md).
+Unit tests for the rules are in `prometheus/tests/`. Check rules, config and routing with
+`scripts/check-monitoring.sh` (needs `promtool` and `amtool` on PATH).
+
 ### Creating Custom Dashboards
 
 1. Log into Grafana
@@ -254,7 +261,11 @@ monitoring/
 ├── docker-compose.yml          # Main stack configuration
 ├── README.md                   # This file
 ├── prometheus/
-│   └── prometheus.yml          # Prometheus scrape configuration
+│   ├── prometheus.yml          # Prometheus scrape configuration
+│   ├── alerts/                 # Alert rules (loaded by alerts/*.yml)
+│   └── tests/                  # promtool unit tests for the alert rules
+├── alertmanager/
+│   └── alertmanager.yml        # Routing: Slack, paging, dead-man receivers
 └── grafana/
     ├── grafana.ini             # Grafana settings
     ├── branding/               # Custom logos and assets

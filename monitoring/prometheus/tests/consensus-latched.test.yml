@@ -1,0 +1,116 @@
+# promtool unit tests for the demos-consensus-latched group in alerts/consensus.yml:
+# BlockHashMismatch and ConflictingBlock must keep firing after the counter stops
+# moving, across a node restart and a lost scrape, and expire only 7 days after the
+# last event. Run: scripts/check-monitoring.sh
+rule_files:
+  - ../alerts/consensus.yml
+
+# The rules run every 1 m in production. promtool caps a query at 10000 samples, and a
+# 7 d range of 1 m samples is 10080, so the test evaluates every 5 m (input stays at 1 m).
+evaluation_interval: 5m
+
+tests:
+  - interval: 1m
+    input_series:
+      # validator-1: 5 mismatches at minute 10, then quiet (the counter just stays at 5).
+      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-1"}'
+        values: '0x9 5x12000'
+      # validator-2: a small disagreement (2) that stays under the "more than 3 in 10 m" bar.
+      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-2"}'
+        values: '0x9 2x12000'
+      # validator-3: counter never moves.
+      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-3"}'
+        values: '0x12000'
+    alert_rule_test:
+      # Before the burst: nothing.
+      - eval_time: 5m
+        alertname: BlockHashMismatch
+        exp_alerts: []
+      # Burst of 5 in 10 m: fires for validator-1 only (no `for`).
+      - eval_time: 15m
+        alertname: BlockHashMismatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Peers disagreed with this node's candidate block hash (latched)"
+              description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # The 10 m window is long past (the old rule would have resolved by now): still firing.
+      - eval_time: 1h
+        alertname: BlockHashMismatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Peers disagreed with this node's candidate block hash (latched)"
+              description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # Six days later: still firing.
+      - eval_time: 6d
+        alertname: BlockHashMismatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Peers disagreed with this node's candidate block hash (latched)"
+              description: "Up to 5 peer disagreements on the candidate block hash within 10m on validator-1 during the last 7 days. This node, or the peers, forged different block content. This alert does not resolve by itself: check the mempool, clock skew and the node logs for the tx-set diff, then clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # 7 days and 30 minutes after the burst: the latch has expired.
+      - eval_time: 7d30m
+        alertname: BlockHashMismatch
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      # validator-1: one conflicting block at minute 10, the node is restarted at
+      # minute 20 (counter back to 0) and from minute 30 it is not scraped at all.
+      - series: 'demos_conflicting_block_total{job="demos-node",instance="validator-1"}'
+        values: '0x9 1x9 0x9 _x12000'
+      # validator-2: never saw a conflict.
+      - series: 'demos_conflicting_block_total{job="demos-node",instance="validator-2"}'
+        values: '0x12000'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ConflictingBlock
+        exp_alerts: []
+      # One conflicting block: fires for validator-1 only.
+      - eval_time: 15m
+        alertname: ConflictingBlock
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Two blocks with a verified quorum existed at one height (latched)"
+              description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # After the restart (counter reset to 0) and with the target no longer scraped
+      # at all (minute 30 onwards): still firing 2 h and 6 d later.
+      - eval_time: 2h
+        alertname: ConflictingBlock
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Two blocks with a verified quorum existed at one height (latched)"
+              description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 6d
+        alertname: ConflictingBlock
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Two blocks with a verified quorum existed at one height (latched)"
+              description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # Expired 7 days after the event.
+      - eval_time: 7d30m
+        alertname: ConflictingBlock
+        exp_alerts: []

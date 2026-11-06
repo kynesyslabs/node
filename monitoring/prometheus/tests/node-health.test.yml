@@ -1,0 +1,65 @@
+# promtool unit tests for alerts/node-health.yml: NodeDown per validator and DeadMansSwitch.
+# The other rules in that file are tested in alerts.test.yml.
+# Run: scripts/check-monitoring.sh
+rule_files:
+  - ../alerts/node-health.yml
+
+evaluation_interval: 1m
+
+tests:
+  # NodeDown: one validator down fires its own alert, carrying its own instance label.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="demos-node",instance="validator-1"}'
+        values: '1x3 0x20'
+      - series: 'up{job="demos-node",instance="validator-2"}'
+        values: '1x23'
+      # validator-3 misses a single scrape: shorter than the 1 m `for`.
+      - series: 'up{job="demos-node",instance="validator-3"}'
+        values: '1x5 0 1x17'
+    alert_rule_test:
+      # validator-1 went down at minute 4: pending after one evaluation, firing after 1 m.
+      - eval_time: 5m
+        alertname: NodeDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: Demos node is down
+              description: "Prometheus failed to scrape validator-1 for >1m. The node may have crashed or its metrics server is unreachable."
+      - eval_time: 15m
+        alertname: NodeDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: Demos node is down
+              description: "Prometheus failed to scrape validator-1 for >1m. The node may have crashed or its metrics server is unreachable."
+      # Before anything is down.
+      - eval_time: 3m
+        alertname: NodeDown
+        exp_alerts: []
+
+  # DeadMansSwitch: always firing, with no input at all.
+  - interval: 1m
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: DeadMansSwitch
+        exp_alerts:
+          - exp_labels:
+              severity: none
+            exp_annotations:
+              summary: Alerting pipeline heartbeat
+              description: This alert is always firing. If the external watchdog stops receiving it, the monitoring stack or its notification path is broken.
+      - eval_time: 3h
+        alertname: DeadMansSwitch
+        exp_alerts:
+          - exp_labels:
+              severity: none
+            exp_annotations:
+              summary: Alerting pipeline heartbeat
+              description: This alert is always firing. If the external watchdog stops receiving it, the monitoring stack or its notification path is broken.

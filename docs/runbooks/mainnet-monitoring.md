@@ -15,7 +15,7 @@ endpoint over a private address. Validators run no Prometheus of their own.
 
 ```
 validator-1 (METRICS_BIND=10.0.0.11) <--\
-validator-2 (METRICS_BIND=10.0.0.12) <---+-- monitoring host: Prometheus -> Alertmanager -> Slack
+validator-2 (METRICS_BIND=10.0.0.12) <---+-- monitoring host: Prometheus -> Alertmanager -> Slack / paging / dead-man
 validator-3 (METRICS_BIND=10.0.0.13) <--/
 ```
 
@@ -49,24 +49,35 @@ monitoring host can scrape it; until then `NodeDown` fires for that node.
 
 1. In `monitoring/prometheus/prometheus.yml`, replace the `demos-node` target
    (`node:9090`, which only resolves inside the validators' compose network)
-   with the validators' private `address:port` list. Keep the job name
-   `demos-node`; the alert rules and the Grafana dashboards select on it.
-2. Put the Slack incoming-webhook URL, alone on one line, in
-   `monitoring/secrets/slack_webhook` (gitignored). `chmod 644` it so the
-   container user can read it. Compose mounts it at `/run/secrets/slack_webhook`
-   and Alertmanager reads it through `api_url_file`.
+   with one `static_configs` entry per validator, each with its own `instance`
+   label (`validator-1`, `validator-2`, ...; the commented template at the end of
+   the file shows the shape). Keep the job name `demos-node`; the alert rules
+   and the Grafana dashboards select on it. One target per validator is what
+   makes a single validator's NodeDown, HeightStalled or DiskSpaceLow fire on
+   its own instead of as one merged alert. Do the same for the optional
+   `node-exporter` job (`--profile full` in the validator's compose) if you
+   want host metrics such as the Postgres volume's free space.
+2. Put the three webhook URLs, each alone on one line, in
+   `monitoring/secrets/slack_webhook`, `pager_webhook` and `deadman_webhook`
+   (gitignored; see `monitoring/secrets/README.md`). `chmod 644` them so the
+   container user can read them. Compose mounts them at `/run/secrets/` and
+   Alertmanager reads them through `api_url_file` / `url_file`.
 3. `cd monitoring && docker compose up -d`. Alertmanager listens on
    `127.0.0.1:9093` only.
+4. `scripts/check-monitoring.sh` (needs `promtool` and `amtool`) checks the
+   config, runs the rule unit tests in `monitoring/prometheus/tests/` and
+   checks that each severity reaches the right receiver.
 
 ## Alerts
 
-Rules are in `monitoring/prometheus/alerts/consensus.yml`. Each fires per
-validator (`instance` label).
+Rules are in `monitoring/prometheus/alerts/consensus.yml` and `node-health.yml`.
+Each fires per validator (`instance` label).
 
 | Alert | Condition | Severity | Meaning |
 |-------|-----------|----------|---------|
 | HeightStalled | no new block for 300 s, held 2 min; keeps firing 10 min after it clears | critical | The node has stopped advancing. If the whole network stalls, this fires on every validator at once: compare heights across validators before acting on one. |
-| BlockHashMismatch | more than 3 peer disagreements on the candidate block hash in 10 min, held 5 min | warning | This node and its peers are building different blocks (mempool or clock divergence). |
+| BlockHashMismatch | more than 3 peer disagreements on the candidate block hash within 10 min, **latched 7 days** | warning | This node and its peers are building different blocks (mempool or clock divergence). Check the mempool, clock skew and the log for the tx-set diff. Does not resolve by itself: see "Clearing a latched alert". |
+| ConflictingBlock | a peer holds a different block with a verified quorum at a height where this node has one, **latched 7 days** | critical | A fork. The node does not switch chains on its own. Search the log for `[FORK]` for the height and both hashes, decide which chain to keep. See "Clearing a latched alert". |
 | ForeignSignature | a peer block carries a signature by this node's key that the node never recorded, within 10 min | critical | The key runs somewhere else and this node stopped signing; see `validator-key.md`. |
 | SigningHalted | `demos_signing_halted` is 1, for as long as signing is stopped | critical | The stop holds across restarts only while `demos_signing_halt_marker_present` is 1. If it is 0, the marker write failed: keep the node stopped until every other copy of the key is stopped. |
 | PrecommitEquivocation | a committee member precommitted two different blocks at one height and round, within 10 min | critical | That member's key runs twice or its signing state was rolled back. The log line `[commitLock] Equivocation` names it. |
@@ -77,20 +88,48 @@ validator (`instance` label).
 | ClockOffset | the host clock more than 1 s from NTP, held 15 min | warning | The validator's host NTP is not keeping time; see [Validator clock](#validator-clock). |
 
 The existing alerts in `node-health.yml`, `errors.yml` and `subsystems.yml` are
-loaded from the same directory and use the same receiver. Among them:
+loaded from the same directory and use the same routing. Among them:
 
 | Alert | Condition | Severity | Meaning |
 |-------|-----------|----------|---------|
+| NodeDown | `up == 0` for 1 min on a validator's `demos-node` target | critical | That validator's metrics endpoint is unreachable (crash, host down, firewall). Each validator alerts on its own `instance`. Check the process and the host first; if several fire at once suspect the network path to the monitoring host. A removed single target is not detected, only "no target at all". |
 | MempoolStuck | transactions pending and none included in a stored block for 10 min | warning | Block production has stalled while the pool fills. |
 | DiskSpaceLow | under 20 GiB free on the filesystem of `DISK_SPACE_PATH` (Docker: the `/app/data` volume; otherwise the working directory), held 10 min | warning | Prune logs, snapshots and Docker build cache, or grow the volume. |
 | DiskSpaceCritical | under 5 GiB free, held 2 min | critical | The node refuses to start below `MIN_DISK_SPACE` (default 5 GiB) and Postgres fails writes on a full disk. Neither alert sees the Postgres volume when it is on another filesystem; watch it through node-exporter's `node_filesystem_avail_bytes`. |
+| DeadMansSwitch | always firing | none | Heartbeat to the `deadman` receiver. If the external watchdog stops receiving it, Prometheus, Alertmanager or the notification path is down: check the monitoring host first. |
 
 The rules have promtool unit tests in `monitoring/prometheus/tests/`; run
-`promtool test rules monitoring/prometheus/tests/alerts.test.yml` after editing them.
+`promtool test rules monitoring/prometheus/tests/*.test.yml` after editing them.
 
-Routing: critical and warning both go to the one Slack receiver. Critical
-alerts wait 10 s before the first message and repeat hourly; warnings repeat
-every 4 hours. Alerts are grouped per alert name and validator.
+Routing: `critical` (and an explicit `page`) goes to the **paging** receiver
+only, waits 10 s before the first message and repeats hourly. `warning` and
+`info` go to **Slack**, warnings repeating every 4 hours. `DeadMansSwitch` goes
+to its own **deadman** receiver and is re-sent every minute. Alerts are grouped
+per alert name and validator. All three receiver URLs are placeholders in
+`monitoring/secrets/`.
+
+## Clearing a latched alert
+
+`BlockHashMismatch` and `ConflictingBlock` keep firing for 7 days after the last
+event, through restarts and lost scrapes, because a fork is not over when the
+counter stops moving. A recording rule keeps the 10 minute burst size as its own
+series (`demos:consensus_block_hash_mismatch:increase10m`,
+`demos:conflicting_block:increase10m`) and the alert is its 7 day maximum.
+Only metrics the node exports today are used.
+
+1. Investigate and resolve the fork or mismatch first.
+2. Acknowledge: add an Alertmanager silence for the alert and instance
+   (`amtool silence add alertname=ConflictingBlock instance=validator-2 --comment="<ticket>"`).
+   This stops the pages; the alert stays visible in Prometheus.
+3. Clear: at least 10 minutes after the last event, delete the recorded series
+   for that instance through the Prometheus admin API, which is off by default
+   (start Prometheus with `--web.enable-admin-api` for the occasion, then remove
+   the flag):
+   `POST /api/v1/admin/tsdb/delete_series?match[]=demos:conflicting_block:increase10m{instance="validator-2"}`.
+   The counter itself is not touched, so the evidence stays in the TSDB.
+4. Otherwise the alert expires by itself 7 days after the last event.
+
+`ForeignSignature` and `PrecommitEquivocation` still use the 10 minute window.
 
 ## Validator clock
 

@@ -1,5 +1,8 @@
-# Alertmanager for the Demos monitoring stack. One Slack receiver; the webhook
-# URL is read from a file so it never lands in this repo (see monitoring/secrets/README.md).
+# Alertmanager for the Demos monitoring stack. Three receivers, none of them with a URL
+# in this repo: each URL is read from a file (compose secret, see monitoring/secrets/README.md):
+#   slack   - warnings and info          <- /run/secrets/slack_webhook  (<SLACK_WEBHOOK_URL_PLACEHOLDER>)
+#   paging  - critical and page          <- /run/secrets/pager_webhook  (<PAGER_WEBHOOK_URL_PLACEHOLDER>)
+#   deadman - the always-firing heartbeat <- /run/secrets/deadman_webhook (<DEADMAN_WEBHOOK_URL_PLACEHOLDER>)
 global:
   resolve_timeout: 5m
 
@@ -12,9 +15,23 @@ route:
   group_interval: 5m
   repeat_interval: 4h
   routes:
+    # SEAM kynesyslabs/node#1084: routes for rules from that PR go here, below the
+    # dead-man route and above the severity routes, matching on its own alertnames/labels.
+
+    # Heartbeat first, so no severity route can catch it. Re-sent every minute so the
+    # external watchdog sees it stop quickly.
     - matchers:
-        - severity="critical"
-      receiver: slack
+        - alertname="DeadMansSwitch"
+      receiver: deadman
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
+    # Critical (or an explicit `page`) wakes someone up; it does not go to Slack.
+    # To also keep a copy in Slack, add `continue: true` here and a second route with
+    # `receiver: slack` right below.
+    - matchers:
+        - severity=~"critical|page"
+      receiver: paging
       group_wait: 10s
       repeat_interval: 1h
     - matchers:
@@ -32,3 +49,14 @@ receivers:
           {{ range .Alerts }}*{{ .Labels.instance }}*: {{ .Annotations.summary }}
           {{ .Annotations.description }}
           {{ end }}
+  # Paging: a generic webhook so any pager can sit behind it. For PagerDuty use
+  # `pagerduty_configs` with `routing_key_file` instead; same secret-file pattern.
+  - name: paging
+    webhook_configs:
+      - url_file: /run/secrets/pager_webhook
+        send_resolved: true
+  # Dead-man's switch: an external watchdog that alerts when this stops arriving.
+  - name: deadman
+    webhook_configs:
+      - url_file: /run/secrets/deadman_webhook
+        send_resolved: false

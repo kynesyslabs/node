@@ -1,0 +1,42 @@
+# promtool unit tests for alerts/consensus.yml (the demos-consensus group).
+# Run: scripts/check-monitoring.sh
+rule_files:
+  - ../alerts/consensus.yml
+
+evaluation_interval: 15s
+
+tests:
+  # HeightStalled per validator: the block must be older than 300 s AND that must hold for
+  # 2 m. (The hold past a gauge reset is tested in alerts.test.yml.)
+  - interval: 15s
+    input_series:
+      # validator-1 stopped producing: its block age grows 15 s every 15 s.
+      - series: 'demos_seconds_since_last_block{job="demos-node",instance="validator-1"}'
+        values: '0+15x60'
+      # validator-2 is healthy.
+      - series: 'demos_seconds_since_last_block{job="demos-node",instance="validator-2"}'
+        values: '5+0x60'
+      # validator-3 is slow once: block age reaches 360 s, then a block arrives (age 0).
+      - series: 'demos_seconds_since_last_block{job="demos-node",instance="validator-3"}'
+        values: '0+15x24 0+0x36'
+    alert_rule_test:
+      # Block age 300 s: not over the threshold yet.
+      - eval_time: 5m
+        alertname: HeightStalled
+        exp_alerts: []
+      # Block age 360 s: over the threshold, but pending only. Nothing fires.
+      - eval_time: 6m
+        alertname: HeightStalled
+        exp_alerts: []
+      # Block age 450 s: fires for validator-1 only; validator-2 (healthy) and
+      # validator-3 (recovered before the `for` ran out) stay quiet.
+      - eval_time: 7m30s
+        alertname: HeightStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: No new block for over 5 minutes
+              description: "demos_seconds_since_last_block = 450 on validator-1. If the whole network has stalled this fires on EVERY validator at once; the block watchdog is off on purpose, this alert is what replaces it. Check whether peers are at the same height before acting on one node."

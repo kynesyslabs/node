@@ -105,3 +105,16 @@ groups:
         annotations:
           summary: Validator disk is nearly full
           description: "{{ $labels.instance }} has {{ $value | humanize1024 }}B free on its data disk (DISK_SPACE_PATH), under 5 GiB: the node will not restart (MIN_DISK_SPACE) and Postgres writes fail when it reaches 0. Free space now."
+
+  # Dead-man's switch: always firing on purpose. Alertmanager routes it to the
+  # `deadman` receiver, which should be an external watchdog that pages when the
+  # heartbeat STOPS, so a dead Prometheus, Alertmanager or notification path is noticed.
+  - name: demos-meta
+    rules:
+      - alert: DeadMansSwitch
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: Alerting pipeline heartbeat
+          description: This alert is always firing. If the external watchdog stops receiving it, the monitoring stack or its notification path is broken.
