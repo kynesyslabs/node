@@ -43,6 +43,17 @@ jest.mock("node:dns/promises", () => ({
         ],
     },
 }))
+// The proxy also checks the address it dials, which would refuse the loopback
+// origin, so the dial resolves normally here. The pre-connect check still
+// refuses the private answer the dns stub gives "blocked.test".
+jest.mock("src/utilities/outboundAddress", () => {
+    const dns = require("node:dns")
+    return {
+        __esModule: true,
+        isPublicAddress: (address: string) => !address.startsWith("10."),
+        publicOnlyLookup: dns.lookup,
+    }
+})
 
 import http from "http"
 import { AddressInfo } from "net"

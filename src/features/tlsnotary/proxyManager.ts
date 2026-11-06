@@ -42,6 +42,11 @@ import {
     type PortPoolState,
 } from "./portAllocator"
 import { PORT_CONFIG } from "./constants"
+import { Config } from "src/config"
+import {
+    DisallowedAddressError,
+    resolvePublicAddress,
+} from "@/utilities/outboundAddress"
 
 const execAsync = promisify(exec)
 
@@ -53,6 +58,7 @@ export enum ProxyError {
     PORT_EXHAUSTED = "PORT_EXHAUSTED",
     INVALID_URL = "INVALID_URL",
     WSTCP_NOT_AVAILABLE = "WSTCP_NOT_AVAILABLE",
+    TARGET_NOT_ALLOWED = "TARGET_NOT_ALLOWED",
 }
 
 /**
@@ -303,6 +309,7 @@ async function spawnProxy(
     targetPort: number,
     localPort: number,
     requestOrigin?: string,
+    dialHost: string = domain,
 ): Promise<ProxyInfo> {
     const state = getTLSNotaryState()
 
@@ -318,7 +325,7 @@ async function spawnProxy(
     const args = [
         "--bind-addr",
         `${bindHost}:${localPort}`,
-        `${domain}:${targetPort}`,
+        `${dialHost}:${targetPort}`,
     ]
     log.info(`[TLSNotary] Spawning wstcp: wstcp ${args.join(" ")}`)
 
@@ -487,6 +494,40 @@ function isProxyAlive(proxy: ProxyInfo): boolean {
     }
 }
 
+async function checkRelayTarget(
+    domain: string,
+    targetPort: number,
+): Promise<{ dialHost: string } | ProxyRequestError> {
+    const { tlsnotaryAllowedPorts, tlsnotaryAllowPrivateTargets } =
+        Config.getInstance().outbound
+    if (!tlsnotaryAllowedPorts.includes(targetPort)) {
+        return {
+            error: ProxyError.TARGET_NOT_ALLOWED,
+            message: `Target port ${targetPort} is not allowed (TLSNOTARY_ALLOWED_PORTS)`,
+            targetDomain: domain,
+        }
+    }
+    if (tlsnotaryAllowPrivateTargets) return { dialHost: domain }
+
+    try {
+        const address = await resolvePublicAddress(domain)
+        return { dialHost: address.includes(":") ? `[${address}]` : address }
+    } catch (err: any) {
+        if (err instanceof DisallowedAddressError) {
+            return {
+                error: ProxyError.TARGET_NOT_ALLOWED,
+                message: err.message,
+                targetDomain: domain,
+            }
+        }
+        return {
+            error: ProxyError.INVALID_URL,
+            message: `Cannot resolve ${domain}: ${err?.code ?? err?.message}`,
+            targetDomain: domain,
+        }
+    }
+}
+
 /**
  * Request a proxy for the given target URL
  * Main entry point for the proxy manager
@@ -522,6 +563,13 @@ export async function requestProxy(
             message: err.message,
         }
     }
+
+    // 2b. The relay is a raw TCP tunnel from this host, so only public
+    // addresses on allowed ports; wstcp dials the address checked here, not
+    // the name, so a later DNS answer cannot redirect it.
+    const target = await checkRelayTarget(domain, targetPort)
+    if ("error" in target) return target
+    const dialHost = target.dialHost
 
     // 3. Lazy cleanup of stale proxies
     cleanupStaleProxies()
@@ -564,6 +612,7 @@ export async function requestProxy(
                 targetPort,
                 localPort,
                 requestOrigin,
+                dialHost,
             )
 
             // Register in state
