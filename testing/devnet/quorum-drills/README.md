@@ -491,14 +491,20 @@ A connection-limit hit can no longer pass:
   many clients`. Any hit turns a PASS or a FAIL into `ERROR`, exit 2, `could
   not run: postgres connection limit hit (n lines in node-.. node-..); the
   result was PASS`, in `verdict.json` and `results.tsv`.
-- **Unreadable logs**: the check reads the whole log of every node that was
-  started (`read_node_log`). Each docker call it makes is bounded by
-  `LOG_READ_TIMEOUT_S` (60 s), and the log by `LOG_READ_MAX_BYTES` (256 MiB,
-  after colour codes are stripped). A log it cannot read whole, or a
-  `psql-errors.log` it cannot read, is also `ERROR`, exit 2: `could not
-  run: could not read the log of node-N to check for the postgres connection
-  limit (why); the result was PASS`. The reason can be a docker error, no
-  answer in time, no container, or a log over the bound.
+- **Unreadable logs**: the check reads, for every node that was started
+  (`read_node_log`), the log the Docker daemon keeps. That is the node's
+  whole log unless the host's logging driver rotates logs (the `local`
+  driver, or `json-file` with `max-size`/`max-file`): then early lines can
+  have been dropped, and a hit in them is not seen. `run.log` names the
+  driver at bring-up (`docker logging driver: json-file`, or `unknown` if
+  `docker info` fails); no driver is refused. Each docker call the check
+  makes is bounded by `LOG_READ_TIMEOUT_S` (60 s), and the log by
+  `LOG_READ_MAX_BYTES` (256 MiB, after colour codes are stripped). A log it
+  cannot read in full, or a `psql-errors.log` it cannot read, is also
+  `ERROR`, exit 2: `could not run: could not read the log of node-N to check
+  for the postgres connection limit (why); the result was PASS`. The reason
+  can be a docker error, no answer in time, no container, or a log over the
+  bound.
 - **Backstop**: when the logs are collected at teardown (with the same
   bounds), a hit also replaces exit 0 or 1 by 2, for the exits that skip the
   verdict (an early FAIL) and for a hit a node logged after the check. So
