@@ -814,7 +814,8 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
     canonicalSigners: {
         // Dormant by default: it changes which signatures count toward a
         // block's quorum, and a missing genesis entry hydrates from here. A
-        // chain launched from genesis with this build sets 0.
+        // new chain may schedule it at height 0 explicitly; the mainnet
+        // genesis template leaves it dormant until it is scheduled.
         activationHeight: null,
         description:
             "A block's signatures match its signer set by lowercase identity, and a key " +
