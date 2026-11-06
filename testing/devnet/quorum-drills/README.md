@@ -395,8 +395,16 @@ Scenario 12's, judged by `testing/forks/rehearsal/lib/haltDrill.ts`:
 rows with signature counts from `validation_data->'signatures'`, restart
 counts, wall-clock marks) to `drill-input.json`. It then runs
 `bun testing/forks/rehearsal/lib/judgeHaltDrill.ts drill-input.json --out drill-verdict.json`
-and takes its exit code (0 pass, 1 fail, 2 malformed input, which `run.sh`
-reports as `ERROR`). The judge imports `evaluateSettle`, `evaluateHalt`,
+and takes its exit code (0 pass, 1 fail, 2 no verdict, which `run.sh`
+reports as `ERROR`, exit 2, with the judge's reasons in the detail: `the
+judge gave no verdict on .../drill-input.json (exit 2); forks.commitLock: the
+drill needs commitLock active at block 0, got null`). No verdict is given on
+malformed input, nor on a genesis that does not have `quorumParity`,
+`committeeBinding` and `commitLock` each active at block 0
+(`DRILL_REQUIRED_FORKS` in `judgeHaltDrill.ts`): the pass criteria rest on
+them, so the judge checks the fork set again after `drill_inputs.py` and
+`gen-inputs.py`, and names each one that is missing, off or at another
+height. The judge imports `evaluateSettle`, `evaluateHalt`,
 `evaluateRecovery`, `evaluateNoCrash`, `agreedHeight`, `signatureQuorum` and
 `phaseDurations` from `haltDrill.ts`, so the criteria are scenario 12's and
 nothing is re-implemented in bash.
@@ -558,8 +566,9 @@ docker call that stalls for 300 s, `floor` (a node's `docker logs`),
 `ride-n13s10` (the restart count `inspect`) and `drop-n7s10` (node-1's head
 reads after the stop), each of which must end as exit 2 within the bound;
 then `floor` with a hit logged after the verdict (the row rewritten under the
-lock), `fallback` with one psql killed (`none given`, exit 2), and a `PATH`
-without `flock` (no start). The lock is tested on its own as well: held by
+lock), `fallback` with one psql killed (`none given`, exit 2), a
+`ride-n13s10` whose judge refuses the fork set (`ERROR`, the fork named in
+the detail), and a `PATH` without `flock` (no start). The lock is tested on its own as well: held by
 another process, the append and the rewrite wait, then leave `results.tsv`
 as it was and say so; eight rewrites at once lose none of the eight rows.
 `drillInputs.test.ts` covers the generated compose for N=4, 10 and 13.

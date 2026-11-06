@@ -939,6 +939,10 @@ cat > "${WORK}/fullbin/bun" <<'FULLBUN'
 case "$1" in
     *judgeHaltDrill.ts)
         jq -e . "$2" > /dev/null || { echo "stub judge: $2 is not JSON" >&2; exit 2; }
+        # STUB_JUDGE=refuse: the real judge's refusal of a genesis without commitLock at 0
+        if [ "${STUB_JUDGE:-}" = refuse ]; then
+            printf 'malformed drill input:\n  - forks.commitLock: the drill needs commitLock active at block 0, got null\n' >&2; exit 2
+        fi
         [ "$3" = --out ] && echo '{"pass":true,"summary":"stub judge pass"}' > "$4"
         echo "PASS: stub judge"; exit 0 ;;
 esac
@@ -1092,6 +1096,9 @@ check "ride-n13s10: exit 0, and verdict.json and results.tsv say PASS" eval 'exi
 check "ride-n13s10: the judge got restart counts of the 10 survivors, before and after" \
     jq -e '(.restartCounts.before | length) == 10 and (.restartCounts.after | length) == 10' "${RD}/drill-input.json"
 check "ride-n13s10: one rotation option set: the other is named as none set" fout 'node log rotation: max-size 20m, max-file none set$'
+STUB_N=13 STUB_MIN_LIVE=1 STUB_JUDGE=refuse full_run ride-refused ride-n13s10
+check "ride-n13s10, the judge refuses the fork set (exit 2): ERROR, exit 2, and the detail names the fork" \
+    eval 'exited 2 && recorded ERROR "(exit 2); forks.commitLock: the drill needs commitLock active at block 0, got null"'
 
 echo "== a stalled docker call fails the run closed, within the bound, never as a pass"
 # Each stalled call sleeps 300 s: a run that waited one out would take over 300 s

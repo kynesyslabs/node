@@ -1428,7 +1428,11 @@ drill_judge() { # $1 mode: halt or ride
     case "${rc}" in
         0) RESULT=PASS ;;
         1) RESULT=FAIL ;;
-        *) RESULT=ERROR; DETAIL="the judge could not read ${input} (exit ${rc})"; write_verdict; exit 2 ;;
+        # Malformed or unreadable input, or a genesis without the forks the
+        # criteria rest on: the judge's reasons ("  - ..." lines) go in the detail
+        *) RESULT=ERROR
+           DETAIL="the judge gave no verdict on ${input} (exit ${rc})$(sed -n 's/^  - /; /p' "${LOG_DIR}/judge.out" | head -5 | tr -d '\n')"
+           write_verdict; exit 2 ;;
     esac
     DETAIL=$(jq -r .summary "${RUN_DIR}/drill-verdict.json")
 }
