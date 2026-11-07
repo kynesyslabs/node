@@ -55,6 +55,12 @@ scrape_configs:
       # authorization:
       #   credentials_file: /etc/prometheus/metrics_token
 
+    # Optional public RPC watcher (--profile network); no validator metrics access.
+    - job_name: demos-network-watcher
+      static_configs:
+          - targets: [network-watcher:9465]
+      scrape_timeout: 5s
+
     # Node Exporter for host-level metrics (optional)
     # Only scraped if node-exporter is running (--profile full)
     - job_name: node-exporter

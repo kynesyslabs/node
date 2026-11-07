@@ -1,0 +1,51 @@
+groups:
+  - name: demos-network
+    rules:
+      - alert: NetworkHeadStalled
+        expr: time() - demos_watch_head_last_advance_timestamp_seconds > 300
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Network head has stopped advancing
+          description: "{{ $labels.instance }} observed no higher head for over 300 seconds. Check independent public endpoints."
+      - alert: ChainForkAcrossEndpoints
+        expr: demos_watch_fork_detected == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Public RPC endpoints disagree on a block
+          description: "{{ $labels.instance }} observed different hashes at the same height, two blocks behind the lowest reachable head."
+      - alert: SignerCountLow
+        expr: demos_watch_block_signers <= demos_watch_signature_threshold + 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Block signatures are close to quorum
+          description: "{{ $labels.instance }} observed {{ $value }} signatures; at most one above the genesis committee quorum."
+      - alert: ValidatorNotSigning
+        expr: demos_watch_validator_signed_in_window == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Validator has no signatures in the observed window
+          description: "Validator {{ $labels.validator }} has no signatures in the complete recent window observed by {{ $labels.instance }}."
+      - alert: RpcEndpointDown
+        expr: demos_watch_endpoint_up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Public RPC endpoint is unavailable
+          description: "Endpoint {{ $labels.endpoint }} failed its head read."
+      - alert: RpcEndpointBehind
+        expr: demos_watch_head_max - ignoring(endpoint) group_right demos_watch_endpoint_head > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Public RPC endpoint is behind the network
+          description: "Endpoint {{ $labels.endpoint }} is {{ $value }} blocks behind the highest reachable head."

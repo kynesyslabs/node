@@ -142,6 +142,22 @@ services:
                   exit 1
                 fi
 
+    # Public RPC observer: docker compose --profile network up -d
+    network-watcher:
+        image: oven/bun:1.3.2
+        restart: unless-stopped
+        profiles: [network]
+        working_dir: /watcher
+        command: [bun, index.ts]
+        environment:
+            WATCH_RPC_URLS: ${WATCH_RPC_URLS:-}
+            WATCH_POLL_SECONDS: ${WATCH_POLL_SECONDS:-15}
+            WATCH_SIGN_WINDOW: ${WATCH_SIGN_WINDOW:-20}
+            WATCH_PORT: 9465
+        volumes:
+            - ./network-watcher:/watcher:ro
+        networks: [demos-monitoring]
+
     # Optional: Node Exporter for host-level metrics
     node-exporter:
         image: prom/node-exporter:v1.7.0

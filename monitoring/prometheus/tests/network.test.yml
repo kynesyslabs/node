@@ -1,0 +1,177 @@
+rule_files:
+- ../alerts/network.yml
+evaluation_interval: 15s
+tests:
+- name: NetworkHeadStalled duration and healthy boundary
+  interval: 1m
+  input_series:
+  - series: demos_watch_head_last_advance_timestamp_seconds{job="demos-network-watcher",instance="watcher:9465",case="stalled"}
+    values: 0+0x20
+  - series: demos_watch_head_last_advance_timestamp_seconds{job="demos-network-watcher",instance="watcher:9465",case="advancing"}
+    values: 0+60x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: NetworkHeadStalled
+    exp_alerts: []
+  - eval_time: 6m15s
+    alertname: NetworkHeadStalled
+    exp_alerts:
+    - exp_labels:
+        job: demos-network-watcher
+        instance: watcher:9465
+        case: stalled
+        severity: critical
+      exp_annotations:
+        summary: Network head has stopped advancing
+        description: watcher:9465 observed no higher head for over 300 seconds. Check independent public endpoints.
+- name: ChainForkAcrossEndpoints duration and healthy boundary
+  interval: 1m
+  input_series:
+  - series: demos_watch_fork_detected{job="demos-network-watcher",instance="watcher:9465",case="fork"}
+    values: 1+0x20
+  - series: demos_watch_fork_detected{job="demos-network-watcher",instance="watcher:9465",case="same"}
+    values: 0+0x20
+  alert_rule_test:
+  - eval_time: 1m45s
+    alertname: ChainForkAcrossEndpoints
+    exp_alerts: []
+  - eval_time: 2m
+    alertname: ChainForkAcrossEndpoints
+    exp_alerts:
+    - exp_labels:
+        job: demos-network-watcher
+        instance: watcher:9465
+        case: fork
+        severity: critical
+      exp_annotations:
+        summary: Public RPC endpoints disagree on a block
+        description: watcher:9465 observed different hashes at the same height, two blocks behind the lowest reachable
+          head.
+- name: SignerCountLow duration and healthy boundary
+  interval: 1m
+  input_series:
+  - series: demos_watch_block_signers{job="demos-network-watcher",instance="watcher:9465",case="low"}
+    values: 8+0x20
+  - series: demos_watch_signature_threshold{job="demos-network-watcher",instance="watcher:9465",case="low"}
+    values: 7+0x20
+  - series: demos_watch_block_signers{job="demos-network-watcher",instance="watcher:9465",case="healthy"}
+    values: 9+0x20
+  - series: demos_watch_signature_threshold{job="demos-network-watcher",instance="watcher:9465",case="healthy"}
+    values: 7+0x20
+  - series: demos_watch_block_signers{job="demos-network-watcher",instance="watcher:9465",case="below"}
+    values: 6+0x20
+  - series: demos_watch_signature_threshold{job="demos-network-watcher",instance="watcher:9465",case="below"}
+    values: 7+0x20
+  alert_rule_test:
+  - eval_time: 4m45s
+    alertname: SignerCountLow
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: SignerCountLow
+    exp_alerts:
+    - exp_labels:
+        job: demos-network-watcher
+        instance: watcher:9465
+        case: low
+        severity: critical
+      exp_annotations:
+        summary: Block signatures are close to quorum
+        description: watcher:9465 observed 8 signatures; at most one above the genesis committee quorum.
+    - exp_labels:
+        job: demos-network-watcher
+        instance: watcher:9465
+        case: below
+        severity: critical
+      exp_annotations:
+        summary: Block signatures are close to quorum
+        description: watcher:9465 observed 6 signatures; at most one above the genesis committee quorum.
+- name: ValidatorNotSigning duration and healthy boundary
+  interval: 1m
+  input_series:
+  - series: demos_watch_validator_signed_in_window{job="demos-network-watcher",instance="watcher:9465",validator="silent"}
+    values: 0+0x20
+  - series: demos_watch_validator_signed_in_window{job="demos-network-watcher",instance="watcher:9465",validator="signing"}
+    values: 1+0x20
+  alert_rule_test:
+  - eval_time: 9m45s
+    alertname: ValidatorNotSigning
+    exp_alerts: []
+  - eval_time: 10m
+    alertname: ValidatorNotSigning
+    exp_alerts:
+    - exp_labels:
+        job: demos-network-watcher
+        instance: watcher:9465
+        validator: silent
+        severity: warning
+      exp_annotations:
+        summary: Validator has no signatures in the observed window
+        description: Validator silent has no signatures in the complete recent window observed by watcher:9465.
+- name: RpcEndpointDown duration and healthy boundary
+  interval: 1m
+  input_series:
+  - series: demos_watch_endpoint_up{job="demos-network-watcher",instance="watcher:9465",endpoint="down.example"}
+    values: 0+0x20
+  - series: demos_watch_endpoint_up{job="demos-network-watcher",instance="watcher:9465",endpoint="up.example"}
+    values: 1+0x20
+  alert_rule_test:
+  - eval_time: 4m45s
+    alertname: RpcEndpointDown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: RpcEndpointDown
+    exp_alerts:
+    - exp_labels:
+        job: demos-network-watcher
+        instance: watcher:9465
+        endpoint: down.example
+        severity: warning
+      exp_annotations:
+        summary: Public RPC endpoint is unavailable
+        description: Endpoint down.example failed its head read.
+- name: RpcEndpointBehind duration and healthy boundary
+  interval: 1m
+  input_series:
+  - series: demos_watch_head_max{job="demos-network-watcher",instance="watcher:9465"}
+    values: 100+0x20
+  - series: demos_watch_endpoint_head{job="demos-network-watcher",instance="watcher:9465",endpoint="behind.example"}
+    values: 89+0x20
+  - series: demos_watch_endpoint_head{job="demos-network-watcher",instance="watcher:9465",endpoint="boundary.example"}
+    values: 90+0x20
+  - series: demos_watch_endpoint_head{job="demos-network-watcher",instance="watcher:9465",endpoint="current.example"}
+    values: 100+0x20
+  alert_rule_test:
+  - eval_time: 4m45s
+    alertname: RpcEndpointBehind
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: RpcEndpointBehind
+    exp_alerts:
+    - exp_labels:
+        job: demos-network-watcher
+        instance: watcher:9465
+        endpoint: behind.example
+        severity: warning
+      exp_annotations:
+        summary: Public RPC endpoint is behind the network
+        description: Endpoint behind.example is 11 blocks behind the highest reachable head.
+- name: absent observations do not invent alerts
+  alert_rule_test:
+  - eval_time: 1h
+    alertname: NetworkHeadStalled
+    exp_alerts: []
+  - eval_time: 1h
+    alertname: ChainForkAcrossEndpoints
+    exp_alerts: []
+  - eval_time: 1h
+    alertname: SignerCountLow
+    exp_alerts: []
+  - eval_time: 1h
+    alertname: ValidatorNotSigning
+    exp_alerts: []
+  - eval_time: 1h
+    alertname: RpcEndpointDown
+    exp_alerts: []
+  - eval_time: 1h
+    alertname: RpcEndpointBehind
+    exp_alerts: []
