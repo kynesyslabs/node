@@ -81,26 +81,22 @@ export { checkTimestampNotAhead } from "./timestampBound"
 // Verified separately from the quorum tally, so a garbage entry under our key
 // can never read as our signature, however the tally is computed. Under
 // commitLock the signature that can sit in a block is our precommit. Under
-// canonicalSigners the tally counts our key in any case, so every spelling
-// of it in the map is tried; before it only the exact key is.
-async function carriesOurSignature(block: Block): Promise<boolean> {
+// canonicalSigners the tally counts our key in any case but tries one
+// spelling of it, so the signature it counted for us is the one verified
+// here, and no other: one verify, however many spellings the map holds.
+// When it counted none, or before the fork, the exact key is looked up.
+async function carriesOurSignature(
+    block: Block,
+    counted: Map<string, string>,
+): Promise<boolean> {
     // null until the keypair is loaded
     const ownKey = getSharedState.publicKeyHex
-    const signatures = block.validation_data?.signatures
-    const keys =
+    const countedOurs =
         isForkActive("canonicalSigners", block.number) &&
         typeof ownKey === "string"
-            ? Object.keys(signatures ?? {}).filter(
-                  key => key.toLowerCase() === ownKey.toLowerCase(),
-              )
-            : [ownKey]
-    for (const key of keys) {
-        if (await verifiesAsOurs(block, signatures?.[key])) return true
-    }
-    return false
-}
-
-async function verifiesAsOurs(block: Block, ours: unknown): Promise<boolean> {
+            ? counted.get(ownKey.toLowerCase())
+            : undefined
+    const ours = countedOurs ?? block.validation_data?.signatures?.[ownKey]
     if (typeof ours !== "string") return false
     const message = certificateMessageOf(block)
     if (message === null) return false
@@ -449,14 +445,15 @@ export async function verifyBlock(
         return aheadVerdict
     }
 
-    const quorum = await checkSignerQuorum(block)
-    if (!quorum.valid) {
+    const tally = await tallySigners(block)
+    const quorum = tallyQuorum(tally)
+    if (quorum.valid === false || tally.valid === false) {
         return quorum
     }
 
     // After the quorum so a peer replaying one stray signature of ours on an
     // unaccepted block cannot stop this node from signing.
-    if (await carriesOurSignature(block)) {
+    if (await carriesOurSignature(block, tally.counted)) {
         // Under commitLock the signing record keeps the round of each
         // precommit, so that is the time the record is compared against.
         checkOwnSignature({

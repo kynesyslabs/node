@@ -183,7 +183,18 @@ describe("verifyBlock with the node's own pool signature", () => {
 
 describe("the signing halt for our key in another case", () => {
     const upper = (id: string) => "0x" + id.slice(2).toUpperCase()
+    // Spellings of `id`, each with one more hex letter upper-cased
+    const spellings = (id: string) =>
+        [...id.slice(2)].flatMap((c, i) =>
+            /[a-f]/.test(c)
+                ? ["0x" + id.slice(2, i + 3).toUpperCase() + id.slice(i + 3)]
+                : [],
+        )
+    const flipped = (sig: string) =>
+        sig.slice(0, -2) + (sig.slice(-2) === "00" ? "01" : "00")
     let others: Signer[] = []
+    // A fifth member, enough with `others` for a quorum without us
+    let spare: Signer
     let dir: string
 
     beforeEach(async () => {
@@ -191,7 +202,9 @@ describe("the signing halt for our key in another case", () => {
         chain.peerlist = [...signers.map(s => s.identity), node.identity]
         resetPoolCache()
         const committee = await getBoundCommittee(9)
-        others = signers.filter(s => committee.includes(s.identity)).slice(0, 4)
+        const members = signers.filter(s => committee.includes(s.identity))
+        others = members.slice(0, 4)
+        spare = members[4]
         dir = fs.mkdtempSync(path.join(os.tmpdir(), "demos-own-key-"))
         sharedState.identityFile = path.join(dir, ".demos_identity")
         sharedState.genesisBlockHash = "genesis-a"
@@ -239,6 +252,54 @@ describe("the signing halt for our key in another case", () => {
         sharedState.forkConfig.canonicalSigners.activationHeight = null
         expect((await verifyBlock(await signedUnder(upper(node.identity)))).valid).toBe(false)
         expect(signingHaltReason()).toBeNull()
+    })
+
+    it("stops signing on the one of many spellings the quorum counted, verifying it once", async () => {
+        const [counted, ...rest] = spellings(node.identity)
+        expect(rest.length).toBeGreaterThan(8)
+        const block = await signedUnder(counted)
+        for (const key of rest) {
+            block.validation_data.signatures[key] = flipped(block.validation_data.signatures[counted])
+        }
+        const ours = node.identity.slice(2).toLowerCase()
+        const verify = jest.spyOn(validatorPool, "verify")
+        try {
+            expect(await verifyBlock(block)).toEqual({ valid: true })
+            const underOurKey = verify.mock.calls.filter(
+                ([req]) => Buffer.from(req.publicKey as Uint8Array).toString("hex") === ours,
+            )
+            // The quorum tally's one verify, and the own-key check's one
+            expect(underOurKey).toHaveLength(2)
+        } finally {
+            verify.mockRestore()
+        }
+        expect(signingHaltReason()).toContain("another process")
+        expect(fs.existsSync(signingHaltMarkerPath(sharedState.identityFile))).toBe(true)
+    })
+
+    it("follows the quorum when a garbage spelling of our key comes first", async () => {
+        const [garbage, valid] = spellings(node.identity)
+        const block = await signedUnder(garbage)
+        const ours = block.validation_data.signatures[garbage]
+        block.validation_data.signatures[garbage] = flipped(ours)
+        block.validation_data.signatures[valid] = ours
+        // Only the first spelling is tried, so our identity does not count
+        const short = await verifyBlock(block)
+        expect(short.valid).toBe(false)
+        expect(short.reason).toContain("4 of a bound committee of 7")
+
+        block.validation_data.signatures[spare.identity] = await spare.sign(block.hash)
+        expect(await verifyBlock(block)).toEqual({ valid: true })
+        expect(signingHaltReason()).toBeNull()
+    })
+
+    it("stops signing on the counted spelling when the exact key after it is garbage", async () => {
+        const block = await signedUnder(upper(node.identity))
+        block.validation_data.signatures[node.identity] = flipped(
+            block.validation_data.signatures[upper(node.identity)],
+        )
+        expect(await verifyBlock(block)).toEqual({ valid: true })
+        expect(signingHaltReason()).toContain("another process")
     })
 })
 

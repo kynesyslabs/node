@@ -18,6 +18,8 @@ let pool: string[] | Error = []
 let committee: string[] | Error = []
 let networkNow = 2000
 let verifyingSigners: Set<string> = new Set()
+// The key of every signature verify, in call order
+let verifiedKeys: string[] = []
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -97,10 +99,11 @@ jest.mock("./txValidatorPool", () => ({
                 publicKey: Uint8Array
                 signature: Uint8Array
             }) => {
+                const hex = Buffer.from(publicKey).toString("hex")
+                verifiedKeys.push(hex)
                 if (Buffer.from(signature).toString("hex") === FORGED) {
                     return false
                 }
-                const hex = Buffer.from(publicKey).toString("hex")
                 return verifyingSigners.has(hex)
             },
         }),
@@ -155,6 +158,7 @@ beforeEach(() => {
     pool = [A, B, C, D]
     networkNow = 2000
     verifyingSigners = new Set([A, B, C, D])
+    verifiedKeys = []
     getSharedState.forkConfig.quorumParity.activationHeight = null
     getSharedState.forkConfig.committeeBinding.activationHeight = null
     getSharedState.forkConfig.canonicalSigners.activationHeight = null
@@ -370,6 +374,12 @@ describe("verifyBlock", () => {
         const ownCheck = { number: 10, hash: "valid-hash", timestamp: 1500 }
         const signed = (signatures: Record<string, string>) =>
             makeBlock({ validation_data: { signatures } })
+        // Twenty spellings of A, each with one more letter upper-cased
+        const spellingsOfA = Array.from(
+            { length: 20 },
+            (_, i) => A.slice(0, i + 1).toUpperCase() + A.slice(i + 1),
+        )
+        const verifiesOfA = () => verifiedKeys.filter(key => key === A).length
 
         beforeEach(() => {
             getSharedState.forkConfig.canonicalSigners.activationHeight = 0
@@ -381,14 +391,59 @@ describe("verifyBlock", () => {
             expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
         })
 
-        it("checks the other spelling when the exact key's signature does not verify", async () => {
+        it("checks the one spelling the quorum counted among many, with one verify", async () => {
+            const block = signed({
+                ...Object.fromEntries(
+                    spellingsOfA.map((key, i) => [key, i === 0 ? "s1" : FORGED]),
+                ),
+                [B]: "s2",
+                [C]: "s3",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledTimes(1)
+            expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+            // The quorum tally's one verify, and the own-key check's one
+            expect(verifiesOfA()).toBe(2)
+        })
+
+        it("verifies none of the spellings the quorum skipped", async () => {
+            const block = signed({
+                ...Object.fromEntries(
+                    spellingsOfA.map((key, i) => [key, i < 19 ? FORGED : "s1"]),
+                ),
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+            // The quorum tally tried the first spelling; the exact key is absent
+            expect(verifiesOfA()).toBe(1)
+        })
+
+        it("does not check a later spelling the quorum did not count", async () => {
             const block = signed({
                 [A]: FORGED,
                 [A.toUpperCase()]: "s1",
                 [B]: "s2",
                 [C]: "s3",
-                [D]: "s4",
             })
+            // Our first spelling does not verify, so our identity does not count
+            expect((await verifyBlock(block)).valid).toBe(false)
+
+            block.validation_data.signatures[D] = "s4"
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
+        it("checks the counted spelling, not the garbage exact key after it", async () => {
+            const block = signed({
+                [A.toUpperCase()]: "s1",
+                [A]: FORGED,
+                [B]: "s2",
+                [C]: "s3",
+            })
+            // Valid only because our upper-case spelling counted
             expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
         })
