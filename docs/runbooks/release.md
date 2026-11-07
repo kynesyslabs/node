@@ -39,11 +39,14 @@ key in the OpenSSH allowed-signers format:
 release@kynesyslabs.com namespaces="git" ssh-ed25519 AAAA...
 ```
 
-A signer configures git once:
+A signer configures git once, in the checkout used to tag:
 
 ```bash
 git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/<key>.pub
+git fetch --tags origin stabilisation &&
+git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers &&
+git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers
 ```
 
 Keep the private key off the validators and out of CI. How a holder
@@ -90,6 +93,18 @@ The `Release` workflow then:
 Publish the draft after the validators have confirmed the digest they run.
 
 ## What a validator runs
+
+First verify and check out the release tag, so the compose file, scripts and
+parameter sheet match the image:
+
+```bash
+git fetch --tags origin stabilisation &&
+git merge-base --is-ancestor v1.0.0-rc.1 origin/stabilisation &&
+git verify-tag v1.0.0-rc.1 &&
+git checkout v1.0.0-rc.1
+```
+
+If this chain stops, do not continue the upgrade.
 
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
 and digest, copied from `checksums.txt`. If the release changes

@@ -431,21 +431,31 @@ docker volume inspect demos_node_state
 Your `.demos_identity` is the private key — losing it means losing your node's network identity. The same volume holds the signing state files (`.demos_identity.signed.json`, `.commitlock.json`, `.prevote.json` and others listed in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files"), which must be backed up and restored together with the key, as one copy taken while the node is stopped. Back up the whole `demos_node_state` volume, encrypted, and keep the backup off this host:
 
 ```bash
+export GPG_TTY=$(tty)    # let pinentry use this terminal
 out="node-state-$(date +%F-%H%M%S).tar.gz.gpg"
 if docker compose stop node; then
-  ( set -o pipefail
+  if ( set -o pipefail
     docker run --rm -v demos_node_state:/src:ro alpine tar czf - -C /src . \
-      | gpg --symmetric --cipher-algo AES256 -o "$out"
-  ) || { echo "backup FAILED; removing $out" >&2; rm -f "$out"; }
-  docker compose up -d --no-build    # a source build: ./run --docker -d
+      | gpg --symmetric --no-symkey-cache --cipher-algo AES256 -o "$out"
+  ) && gpg --decrypt "$out" > /dev/null; then
+    docker compose up -d --no-build    # a source build: ./run --docker -d
+  else
+    echo "backup FAILED; removing $out" >&2
+    rm -f "$out"
+    docker compose up -d --no-build    # a source build: ./run --docker -d
+    false
+  fi
 else
   echo "the node did not stop; no backup taken" >&2
+  false
 fi
 ```
 
 A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup.
 
-`gpg` asks for a passphrase; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
+`tty` must print a `/dev/pts/...` path, so use an interactive SSH session (`ssh -t`); if `gpg` still cannot ask, add `--pinentry-mode loopback`, and never pass the passphrase on the command line or in a file. If GnuPG older than 2.2.7 rejects `--no-symkey-cache`, drop it and run `gpgconf --reload gpg-agent` before the decrypt check.
+
+`gpg` asks for a passphrase and asks again for the decrypt check; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
 
 Restoring is not the reverse of this: an old copy can make the key vote against a vote it already cast. Follow the restore rules in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md) (newest complete copy, network head above the key's last possible vote, never two hosts running the key).
 
