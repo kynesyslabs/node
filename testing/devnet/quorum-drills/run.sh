@@ -703,13 +703,14 @@ expect_stall() { # $1 phase name, $2 height at the fault
 }
 
 # Stops node $1 once a round past the current head has started on node $2,
-# within ROUND_START_WAIT_S. Each log read is bounded (bdc, bdocker). A lookup
+# within ROUND_START_WAIT_S (60 s, or 3 rounds if longer: the node logs the line
+# once per round). Each log read is bounded (bdc, bdocker). A lookup
 # or log read that fails or does not answer, or no round start in time, ends
 # the drill as ERROR before node $1 is stopped (round_start_error): a stop not
 # seen mid-round is not the drill. The ROUND_START_WAIT_S deadline is checked
 # before each docker logs read, not after it: a read that starts before the
 # deadline and returns after it with a round start in it still stops node $1
-ROUND_START_WAIT_S=60
+ROUND_START_WAIT_S=$(( 3 * ${CONSENSUS_TIME:-0} > 60 ? 3 * ${CONSENSUS_TIME:-0} : 60 ))
 stop_mid_round() {
     local victim="$1" watcher="$2" h since line="" deadline cid rc
     h=$(read_head "${watcher}") || read_error "stop node-${victim}"

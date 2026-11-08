@@ -447,6 +447,8 @@ echo "== stop_mid_round: no round start seen (a read that fails or stalls, or no
 for f in stop_mid_round round_start_error; do source <(fn_src "${f}"); done
 source <(grep -E '^(ROUND_START_WAIT_S=|event\(\) )' "${RUN_SH}")
 check "run.sh waits up to 60 s for a round start" test "${ROUND_START_WAIT_S:-unset}" = 60
+check "run.sh waits 3 rounds (180 s) for a round start when CONSENSUS_TIME=60" \
+    bash -c 'CONSENSUS_TIME=60; source <(grep -E "^ROUND_START_WAIT_S=" "$1"); test "${ROUND_START_WAIT_S:-unset}" = 180' _ "${RUN_SH}"
 smr_case() { # $1 name: 13 nodes up, node-1 (the watcher) at head 25 and its log $2
     gate_case "$1" PASS; UP=(); for i in $(seq 1 13); do UP[i]=1; done
     EVENTS="${LOG_DIR}/events.log"; : > "${EVENTS}"; : > "${FAKE_DOCKER_LOG}"; printf "$2" > "${FAKE}/nodelog.1"

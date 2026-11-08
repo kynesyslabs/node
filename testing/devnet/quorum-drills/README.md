@@ -706,7 +706,7 @@ unreadable node (`ERROR` or `ABORT`, exit 2, in the other scenarios; `-1`,
 no answer, for the judge of the `halt-*` and `ride-*` drills), a log-line
 count `ERROR`, exit 2, the restart counts `ABORT`, exit 2, and a
 `stop_mid_round` whose container lookup or log read fails or does not
-answer, or that sees no round start within `ROUND_START_WAIT_S` (60 s),
+answer, or that sees no round start within `ROUND_START_WAIT_S` (60 s, or 3 rounds if longer),
 `ERROR`, exit 2, before it stops the node (`stop node-N: round start unseen
 on node-1 (why)`): a stop not seen mid-round is not the drill. The
 `ROUND_START_WAIT_S` deadline is checked before each `docker logs` read, not
