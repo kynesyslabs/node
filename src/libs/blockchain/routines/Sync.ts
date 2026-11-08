@@ -62,6 +62,7 @@ import {
 } from "@/libs/l2ps/L2PSConcurrentSync"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import Mempool from "../mempool"
 import Datasource from "@/model/datasource"
 import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
@@ -1243,7 +1244,7 @@ async function applyVerifiedBlock(
         // Not the peer's fault: the caller ends the round and retries
         if (e instanceof SignatureCheckUnavailableError) throw e
         throw new SyncBlockRejectedError(
-            e instanceof Error ? e.message : String(e),
+            e instanceof Error ? e.message : getErrorMessage(e),
         )
     }
     await verifyBlockTransactions(block, txs)
