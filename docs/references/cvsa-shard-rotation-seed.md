@@ -179,7 +179,19 @@ Two selection rules exist, chosen by the `committeeBinding` fork
 - With `committeeBinding`: the committee is the first `shardSize` entries
   of the pinned ranking of the pool, computed from chain data only
   (`getBoundCommittee`, `getShard.ts:346-359`; `drawBoundCommittee`, lines
-  329-335). Offline members stay in the committee and count as missing
+  329-335). Which chain data depends on `finalityProofs`. Once it is active
+  for the block, the staked set is read from the stored validator-set
+  snapshot, so the same committee can be recomputed later
+  (`getShard.ts:83-101`; `validatorSetAt`, `validatorSet.ts:100-103`).
+  Before it, the staked set is read from the live validators table
+  (`getShard.ts:86-88`; `GCR.getGCRValidatorsAtBlock`, `gcr.ts:226-251`).
+  That read filters on `valid_at <= block` and the current status `"2"`
+  (`gcr.ts:269-280`), and a validator that has requested an unstake is set
+  to status `"3"` (`GCRValidatorStakeRoutines.ts:211`;
+  `staking/constants.ts:17-19`). So before `finalityProofs`, recomputing the
+  committee for an older height with this rule uses the table as it is now,
+  and can give a different pool than the one used at that height if stakes
+  or unstakes have been applied since. Offline members stay in the committee and count as missing
   votes: the same liveness test is applied, but only to decide which
   committee members are reachable (`liveBoundMembers`, lines 464-489). If
   the pool holds fewer identities than the quorum and the staked set is
@@ -248,6 +260,10 @@ Tests that exercise this code exist (`boundCommittee.test.ts` and
 - `src/libs/consensus/v2/routines/getShard.ts` (58-69, 83-101, 107-158,
   165-201, 203-244, 251-335, 338-341, 346-359, 386, 393-424, 431-438, 464-489)
 - `src/libs/consensus/v2/routines/poolRules.ts` (37-56, 64-71)
+- `src/libs/blockchain/finality/validatorSet.ts` (1-13, 100-103)
+- `src/libs/blockchain/gcr/gcr.ts` (226-251, 269-280)
+- `src/libs/blockchain/gcr/gcr_routines/GCRValidatorStakeRoutines.ts` (211)
+- `src/features/staking/constants.ts` (17-19)
 - `src/libs/consensus/v2/PoRBFT.ts` (847-860)
 - `src/libs/consensus/v2/types/secretaryManager.ts` (219-263)
 - `src/libs/consensus/v2/types/shardTypes.ts` (5)
