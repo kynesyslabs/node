@@ -687,6 +687,30 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
 }
 
 /**
+ * Handles an error thrown while verifying or applying a synced block.
+ *
+ * @returns false when the block was refused or cannot be checked yet
+ * @throws the original error when it is not a block refusal
+ */
+function handleApplyError(error: unknown, block: Block, peer: Peer): false {
+    if (error instanceof SignatureCheckUnavailableError) {
+        log.warning(
+            `[syncBlock] Not applying block ${block.number} yet, its signatures could not be checked here: ${error.message}`,
+        )
+        return false
+    }
+    if (error instanceof SyncBlockRejectedError) {
+        log.error(
+            `[syncBlock] Rejecting synced block ${block.number} (${block.hash}) from ${peer?.identity ?? "unknown peer"}: ${error.message}`,
+        )
+        // A pushed block can arrive from a sender we no longer list
+        if (peer?.identity) cooldownPeer(peer.identity, error.message)
+        return false
+    }
+    throw error
+}
+
+/**
  * Given a block and a peer, saves the block into the database, downloads the transactions
  * from the peer and updates the GCR and transaction tables.
  *
@@ -742,21 +766,7 @@ export async function syncBlock(
         await verifyBlockAttrs(block, txs)
         await applyVerifiedBlock(block, txs)
     } catch (error) {
-        if (error instanceof SignatureCheckUnavailableError) {
-            log.warning(
-                `[syncBlock] Not applying block ${block.number} yet, its signatures could not be checked here: ${error.message}`,
-            )
-            return false
-        }
-        if (error instanceof SyncBlockRejectedError) {
-            log.error(
-                `[syncBlock] Rejecting synced block ${block.number} (${block.hash}) from ${peer?.identity ?? "unknown peer"}: ${error.message}`,
-            )
-            // A pushed block can arrive from a sender we no longer list
-            if (peer?.identity) cooldownPeer(peer.identity, error.message)
-            return false
-        }
-        throw error
+        return handleApplyError(error, block, peer)
     }
     log.debug("Block inserted successfully")
     log.debug(
