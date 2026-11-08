@@ -119,12 +119,15 @@ async function carriesOurSignature(
  * lowercase, and a member whose key appears in two cases counts once, under
  * its lowercase identity with its first signature in map order, if that verifies.
  * Without it they compare as written, as they always have.
+ * The keys whose verify could not run (the verifier threw) are added to
+ * `unverified`: they are not counted, but that is this node's failure.
  */
 export async function countedSignatures(
     signedMessage: string,
     signatures: Record<string, unknown>,
     eligible: Set<string>,
     canonical = false,
+    unverified?: string[],
 ): Promise<Map<string, string>> {
     const message = new TextEncoder().encode(signedMessage)
     const members = canonical
@@ -147,11 +150,22 @@ export async function countedSignatures(
                 if (tried.has(identity)) return null
                 tried.add(identity)
             }
+            // A signature that is not hex is the block's fault; a verify that
+            // throws after it is ours, and `unverified` tells the caller.
+            let signatureBytes: Uint8Array
+            try {
+                signatureBytes = hexToUint8Array(signature as string)
+            } catch (e) {
+                log.error(
+                    `[verifyBlock] signature verify threw for ${key}: ${getErrorMessage(e)}`,
+                )
+                return null
+            }
             try {
                 const ok = await TxValidatorPool.getInstance().verify({
                     algorithm: getSharedState.signingAlgorithm,
                     message,
-                    signature: hexToUint8Array(signature as string),
+                    signature: signatureBytes,
                     publicKey: hexToUint8Array(identity),
                 })
                 return ok ? identity : null
@@ -159,6 +173,7 @@ export async function countedSignatures(
                 log.error(
                     `[verifyBlock] signature verify threw for ${key}: ${getErrorMessage(e)}`,
                 )
+                unverified?.push(key)
                 return null
             }
         }),
@@ -202,11 +217,24 @@ interface SignedBlock {
     } | null
 }
 
+/**
+ * A check of a block's signatures that could not run here: the signer set was
+ * unreadable or a verify threw. It says nothing about the block, so a caller
+ * retries later instead of rejecting what it was served.
+ */
+export class SignatureCheckUnavailableError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "SignatureCheckUnavailableError"
+    }
+}
+
 type SignerTally =
-    | { valid: false; reason: string }
+    | { valid: false; reason: string; unavailable?: true }
     | {
           valid: true
           counted: Map<string, string>
+          unverified: string[]
           poolSize: number
           bound: boolean
           threshold: number
@@ -233,6 +261,7 @@ async function tallySigners(block: SignedBlock): Promise<SignerTally> {
         return {
             valid: false,
             reason: `could not resolve ${signerSet}: ${getErrorMessage(e)}`,
+            unavailable: true,
         }
     }
     const pool = rule.members
@@ -266,16 +295,25 @@ async function tallySigners(block: SignedBlock): Promise<SignerTally> {
 
     // Verify each signature over the recomputed hash (or its precommit message)
     const canonical = isForkActive("canonicalSigners", block.number)
+    const unverified: string[] = []
     const counted = await countedSignatures(
         message,
         signatures,
         poolIdentities,
         canonical,
+        unverified,
     )
     const poolSize = canonical
         ? new Set(pool.map(id => id.toLowerCase())).size
         : pool.length
-    return { valid: true, counted, poolSize, bound, threshold: rule.threshold }
+    return {
+        valid: true,
+        counted,
+        unverified,
+        poolSize,
+        bound,
+        threshold: rule.threshold,
+    }
 }
 
 /** Whether `block` carries a verified signer quorum from the signers its height admits. */
@@ -337,6 +375,8 @@ export async function verifyBlockCertificate(
  * when the counted signatures fall short of the quorum verifyBlock requires
  * (this tally verifies again, and a verify that fails now must not store a
  * certificate the block's own check would reject)
+ * @throws SignatureCheckUnavailableError instead when the shortfall is this
+ * node's: the signer set could not be read or a verify did not run
  */
 export async function withCountedSignatures<T extends SignedBlock>(
     block: T,
@@ -344,9 +384,15 @@ export async function withCountedSignatures<T extends SignedBlock>(
     const tally = await tallySigners(block)
     const quorum = tallyQuorum(tally)
     if (quorum.valid === false || tally.valid === false) {
-        throw new Error(
-            `cannot rebuild the signatures of block ${block.number}: ${quorum.reason}`,
-        )
+        const why = `cannot rebuild the signatures of block ${block.number}: ${quorum.reason}`
+        // Below quorum with a verify that never ran is not the block's fault
+        const local =
+            tally.valid === false
+                ? tally.unavailable === true
+                : tally.unverified.length > 0
+        throw local
+            ? new SignatureCheckUnavailableError(why)
+            : new Error(why)
     }
     const validationData = {
         ...block.validation_data,

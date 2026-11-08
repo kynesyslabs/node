@@ -29,6 +29,7 @@ mock.module("src/utilities/logger", () => ({
     },
 }))
 
+const { default: log } = await import("src/utilities/logger")
 const { default: chain } = await import("../chain")
 const { default: handleGCR } = await import("../gcr/handleGCR")
 const { default: gcr } = await import("../gcr/gcr")
@@ -401,15 +402,45 @@ describe("withCountedSignatures", () => {
         expect(Object.keys(stored.validation_data.signatures)).toHaveLength(3)
     })
 
-    it("fails closed when the signer set cannot be resolved", async () => {
+    it("fails closed when the signer set cannot be resolved, as a failure of this node", async () => {
         validatorSet = []
         process.env.DEMOS_REQUIRE_VALIDATORS = "true"
         try {
             const block = await signedBy(makeBlock(), members.slice(0, 3))
-            await expect(verification.withCountedSignatures(block)).rejects.toThrow()
+            await expect(verification.withCountedSignatures(block)).rejects.toBeInstanceOf(
+                verification.SignatureCheckUnavailableError,
+            )
         } finally {
             delete process.env.DEMOS_REQUIRE_VALIDATORS
         }
+    })
+
+    it("fails a verifier that threw as this node's failure, and one that said no as the block's", async () => {
+        const block = await signedBy(makeBlock(), members.slice(0, 3))
+        const pool = txValidatorPool.getInstance()
+        const threw = spyOn(pool, "verify").mockRejectedValue(new Error("worker crashed"))
+        try {
+            await expect(verification.withCountedSignatures(block)).rejects.toBeInstanceOf(
+                verification.SignatureCheckUnavailableError,
+            )
+        } finally {
+            threw.mockRestore()
+        }
+        const refused = spyOn(pool, "verify").mockResolvedValue(false)
+        try {
+            const error = await verification.withCountedSignatures(block).catch((e: unknown) => e)
+            expect(error).toBeInstanceOf(Error)
+            expect(error).not.toBeInstanceOf(verification.SignatureCheckUnavailableError)
+        } finally {
+            refused.mockRestore()
+        }
+    })
+
+    it("fails a block short of its quorum without a verifier failure as the block's", async () => {
+        const block = await signedBy(makeBlock(), members.slice(0, 2))
+        const error = await verification.withCountedSignatures(block).catch((e: unknown) => e)
+        expect(error).toBeInstanceOf(Error)
+        expect(error).not.toBeInstanceOf(verification.SignatureCheckUnavailableError)
     })
 
     it("fails closed on a block without a signature map", async () => {
@@ -419,22 +450,65 @@ describe("withCountedSignatures", () => {
     })
 })
 
+const cooledDown = (identity: string) =>
+    (log.warning as any).mock.calls.some((c: unknown[]) =>
+        String(c[0]).includes(`cooling down peer ${identity}`),
+    )
+
+/**
+ * The first quorum's worth of verifies (verifyBlock) are the real ones; the
+ * next ones (the tally sync stores) fail as `later` says.
+ */
+function failSecondTally(later: () => Promise<boolean>) {
+    const pool = txValidatorPool.getInstance()
+    const real = pool.verify.bind(pool)
+    const state = { calls: 0 }
+    const verify = spyOn(pool, "verify").mockImplementation((async (request: any) => {
+        if (++state.calls > members.length - 1) return later()
+        return real(request)
+    }) as any)
+    return { state, verify }
+}
+
 describe("a second tally that falls below quorum", () => {
+    it("does not cool the peer down when the verifier failed here", async () => {
+        const block = await signedBy(makeBlock(), members.slice(0, 3))
+        ;(log.warning as any).mockClear()
+        const { verify } = failSecondTally(async () => {
+            throw new Error("validator request timed out")
+        })
+        try {
+            expect(await syncBlock(block, servingPeer())).toBe(false)
+            expect(cooledDown("peer-1")).toBe(false)
+            expect(insertBlock).not.toHaveBeenCalled()
+        } finally {
+            verify.mockRestore()
+        }
+    })
+
+    it("cools the peer down when the verifier ran and the signatures do not count", async () => {
+        const block = await signedBy(makeBlock(), members.slice(0, 3))
+        ;(log.warning as any).mockClear()
+        const { verify } = failSecondTally(async () => false)
+        try {
+            expect(await syncBlock(block, servingPeer())).toBe(false)
+            expect(cooledDown("peer-1")).toBe(true)
+            expect(insertBlock).not.toHaveBeenCalled()
+        } finally {
+            verify.mockRestore()
+        }
+    })
+
     it("does not store the block, so sync retries it", async () => {
         const block = await signedBy(makeBlock(), members.slice(0, 3))
-        const pool = txValidatorPool.getInstance()
-        const real = pool.verify.bind(pool)
-        // The first quorum's worth of verifies (verifyBlock) succeed; the
-        // next ones (the tally sync stores) fail as a validator worker timeout does
-        let calls = 0
-        const verify = spyOn(pool, "verify").mockImplementation((async (request: any) => {
-            if (++calls > members.length - 1) throw new Error("validator request timed out")
-            return real(request)
-        }) as any)
+        // A validator worker timeout in the tally sync stores
+        const { state, verify } = failSecondTally(async () => {
+            throw new Error("validator request timed out")
+        })
 
         try {
             expect(await syncBlock(block, servingPeer())).toBe(false)
-            expect(calls).toBeGreaterThan(members.length - 1)
+            expect(state.calls).toBeGreaterThan(members.length - 1)
             // Nothing was stored, so no block with fewer signatures than the quorum exists
             for (const [stored] of insertBlock.mock.calls) {
                 expect(Object.keys(stored.validation_data.signatures).length).toBeGreaterThanOrEqual(3)

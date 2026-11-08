@@ -23,6 +23,22 @@ function toSeconds(value: unknown): number | null {
 }
 
 /**
+ * Under canonicalSigners a member counts once however many spellings of its
+ * key the stored map holds, and a producer that has not rebuilt its
+ * certificate can store two: the first spelling in map order is kept, the
+ * one the quorum count tries.
+ */
+function oncePerSigner<T>(height: number, signatures: Record<string, T>): Record<string, T> {
+    if (!isForkActive("canonicalSigners", height)) return signatures
+    const first = new Map<string, [string, T]>()
+    for (const [key, signature] of Object.entries(signatures)) {
+        const identity = key.toLowerCase()
+        if (!first.has(identity)) first.set(identity, [key, signature])
+    }
+    return Object.fromEntries(first.values())
+}
+
+/**
  * False before the first sync, while two or more blocks behind, and while a
  * validator peer credibly claims a higher block: a head that is final here
  * can still be well behind the network's. A failed check counts as behind.
@@ -100,7 +116,8 @@ async function headSigners(block: { number: number; hash: string }): Promise<Hea
  * node could not read its head. The body keeps `nodeSynced` in every case,
  * because SDK clients read only the body.
  *
- * `signatures` are the block's stored validator signatures and
+ * `signatures` are the block's stored validator signatures (under
+ * canonicalSigners one per signer, and `signatureCount` counts those) and
  * `signedMessage` is the exact text each of them signs, so a client can
  * verify them, not just count them. `committee` is who may sign it and
  * `threshold` how many of them must, as this node counts them (under
@@ -137,7 +154,10 @@ export default async function getFinalizedHead(): Promise<RPCResponse> {
 
         const nodeSynced = await isNodeSynced()
         const seconds = toSeconds(block.content?.timestamp as unknown)
-        const signatures = block.validation_data?.signatures ?? {}
+        const signatures = oncePerSigner(
+            block.number,
+            block.validation_data?.signatures ?? {},
+        )
         const round = block.validation_data?.round
         const signers = await headSigners(block)
         return {

@@ -20,6 +20,7 @@ import Chain from "../chain"
 import log from "src/utilities/logger"
 import {
     type BlockVerification,
+    SignatureCheckUnavailableError,
     verifyBlock,
     verifyBlockCertificate,
     withCountedSignatures,
@@ -740,6 +741,12 @@ export async function syncBlock(
         await verifyBlockAttrs(block, txs)
         await applyVerifiedBlock(block, txs)
     } catch (error) {
+        if (error instanceof SignatureCheckUnavailableError) {
+            log.warning(
+                `[syncBlock] Not applying block ${block.number} yet, its signatures could not be checked here: ${error.message}`,
+            )
+            return false
+        }
         if (error instanceof SyncBlockRejectedError) {
             log.error(
                 `[syncBlock] Rejecting synced block ${block.number} (${block.hash}) from ${peer?.identity ?? "unknown peer"}: ${error.message}`,
@@ -1221,6 +1228,8 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
  * The block is stored with only the signatures its quorum counted.
  *
  * @throws SyncBlockRejectedError when the block must not be applied
+ * @throws SignatureCheckUnavailableError when its signatures could not be
+ *   checked here again: no peer is at fault, the round ends and retries
  */
 async function applyVerifiedBlock(
     block: Block,
@@ -1231,6 +1240,8 @@ async function applyVerifiedBlock(
     try {
         certified = await withCountedSignatures(block)
     } catch (e) {
+        // Not the peer's fault: the caller ends the round and retries
+        if (e instanceof SignatureCheckUnavailableError) throw e
         throw new SyncBlockRejectedError(
             e instanceof Error ? e.message : String(e),
         )
@@ -1683,6 +1694,13 @@ async function requestBlocks(): Promise<boolean> {
                 `[requestBlocks] Batch sync completed. Current block: ${getSharedState.lastBlockNumber}`,
             )
         } catch (error) {
+            // Neither cooled nor discredited: the peer served nothing wrong
+            if (error instanceof SignatureCheckUnavailableError) {
+                log.warning(
+                    `[requestBlocks] Ending this sync round, a block's signatures could not be checked here: ${error.message}`,
+                )
+                return false
+            }
             handleError(error, "SYNC", { source: "block download" })
             // Handle chain head reached
             if (error instanceof BlockNotFoundError) {
