@@ -114,6 +114,7 @@ fi
 if [[ ! "${LABEL}" =~ ^[A-Za-z0-9_-]+$ ]]; then
     echo "label must match [A-Za-z0-9_-]+" >&2; exit 2
 fi
+[[ "${CONSENSUS_TIME}" =~ ^[1-9][0-9]*$ ]] || { echo "CONSENSUS_TIME must be a whole number of seconds" >&2; exit 2; }
 if [ -n "${SRC_TREE}" ]; then
     SRC_TREE="$(cd "${SRC_TREE}" 2>/dev/null && pwd)" || { echo "--src: no such dir" >&2; exit 2; }
     [ -f "${SRC_TREE}/src/index.ts" ] || { echo "--src: ${SRC_TREE}/src/index.ts not found" >&2; exit 2; }

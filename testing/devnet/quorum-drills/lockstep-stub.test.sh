@@ -1041,6 +1041,16 @@ for sc in halt-n10s10 halt-n13s10 ride-n13s10; do
         _ "${OUT}" "${WORK}/run-top.docker.log"
 done
 
+echo "== CONSENSUS_TIME that is not a whole number of seconds: exit 2 before any docker call"
+for ct in 10s 08 10.5 0 -5; do
+    : > "${WORK}/run-top.docker.log"
+    OUT=$(STUB_LOG="${WORK}/run-top.docker.log" PATH="${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/runs" CONSENSUS_TIME="${ct}" \
+        timeout 60 bash "${RUN_SH}" floor badtime 2>&1; echo "rc=$?")
+    check "CONSENSUS_TIME='${ct}': exit 2, says why, no docker call" \
+        bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "CONSENSUS_TIME must be a whole number of seconds" <<< "$1" && [ ! -s "$2" ]' \
+        _ "${OUT}" "${WORK}/run-top.docker.log"
+done
+
 echo "== two runs started in the same second with the same options: a run dir and a compose project each"
 # The run id's time is one fixed second (a stub date); each run stops at node-1 (the stub's SIGTERM)
 mkdir -p "${WORK}/datebin"

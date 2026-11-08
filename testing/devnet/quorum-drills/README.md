@@ -683,7 +683,8 @@ drills also leave `drill-input.json` (what the run observed),
 
 ## Tuning
 
-`CONSENSUS_TIME` (10), `GENESIS_DELAY` (60 + 25 s per node),
+`CONSENSUS_TIME` (10, a whole number of seconds, 1 or more, no leading zero:
+`10s`, `08` and `10.5` are refused with exit 2 before any docker call), `GENESIS_DELAY` (60 + 25 s per node),
 `LOCKSTEP_TIMEOUT` (420), `PROGRESS_BLOCKS` (3), `PROGRESS_TIMEOUT` (180),
 `STALL_WINDOW` (120), `PARTITION_TIME` (120), `SETTLE_TIMEOUT` (300),
 `READ_TIMEOUT` (8, the curl timeout in seconds of the one retry after an
