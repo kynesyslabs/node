@@ -109,7 +109,9 @@ git verify-tag v1.0.0-rc.1 &&
 git checkout v1.0.0-rc.1
 ```
 
-If this chain stops, do not continue the upgrade.
+If this chain stops, do not continue the upgrade. A good signature from a key
+you do not recognise is a failure; compare the signer and fingerprint with the
+published list (see `INSTALL.md` step 1).
 
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
 and digest, copied from `checksums.txt`. If the release changes
@@ -160,8 +162,8 @@ the same for every release. A node started with migrations still pending
 refuses to boot and names the command.
 Procedure, including the backup: [database-migrations.md](database-migrations.md).
 
-A bare-metal validator (`./run`) checks out the tag instead and verifies it
-locally before starting:
+A bare-metal validator (`./run`) runs the same verify-and-checkout chain, then
+starts `./run`:
 
 ```bash
 git fetch --tags origin stabilisation &&
