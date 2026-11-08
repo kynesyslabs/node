@@ -213,7 +213,7 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
   - The node uses the host clock and no longer corrects it from NTP servers.
     Keep host NTP running (chrony or systemd-timesyncd). With `PROD=true` a
     node refuses to boot when at least two NTP servers agree that the host
-    clock is further off than `BLOCK_TIMESTAMP_TOLERANCE`.
+    clock is more than 5 s ahead or behind.
   - A balance edit larger than the balance fails on every node. Before, a node
     with `PROD=false` clamped the balance to 0 instead.
   - Mainnet validators append `docs/mainnet/parameters.env` to `.env`, and

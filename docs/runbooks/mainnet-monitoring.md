@@ -108,8 +108,8 @@ the median of the answers within 2 s of each other, when at least two agree.
 
 Limits: members refuse to sign a block stamped more than 5 s ahead of their
 clock, and every node rejects a block more than `BLOCK_TIMESTAMP_TOLERANCE`
-(60 s) in its future. With `PROD=true` a node whose host is off by more than
-that tolerance, by two or more agreeing servers, refuses to start.
+(60 s) in its future. With `PROD=true` a node whose host is more than 5 s
+ahead or behind, by two or more agreeing servers, refuses to start.
 
 When `ClockOffset` fires, on the validator: `chronyc tracking` (or
 `timedatectl timesync-status`) shows the source and the offset. Fix the time
