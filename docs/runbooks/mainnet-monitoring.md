@@ -72,7 +72,9 @@ do not depend on the working directory.
    Compose fails at interpolation and starts nothing, including Alertmanager,
    and the published default `demos` is refused. Keep `PROMETHEUS_RETENTION`
    at `7d` or longer (default `15d`) so the latched alerts retain their evidence.
-4. `docker compose -f monitoring/docker-compose.yml up -d`. Alertmanager listens on
+4. `docker compose -f monitoring/docker-compose.yml up -d`. Then
+   `curl -s http://127.0.0.1:9091/api/v1/status/flags | jq -r '.data["storage.tsdb.retention.time"]'`
+   must print `7d` or longer. Alertmanager listens on
    `127.0.0.1:9093` only. Then send a test alert to each receiver and confirm
    that a person sees it (the Slack message, the page, and the heartbeat at the
    dead-man service): the heartbeat does not test the `slack` or `paging`
@@ -216,7 +218,9 @@ remove the flag after the last one.
    `docker network inspect <network-name> --format '{{range .Containers}}{{println .Name .IPv4Address}}{{end}}'`.
    The monitoring compose network includes Prometheus, Alertmanager, Grafana
    and, with the `full` profile, node-exporter. **Continue only if every attached
-   container is trusted; otherwise stop and do not enable the admin API.**
+   container is trusted and none forwards outside requests to Prometheus (for
+   example a reverse proxy with a `/prometheus` route); otherwise stop and do
+   not enable the admin API.**
    Do not rely on a firewall rule such as `ufw deny 9091` for a non-loopback
    bind: Docker publishes ports through its own iptables rules, which ufw and
    plain INPUT rules do not filter, so the port would stay open unless the rule
