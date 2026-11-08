@@ -346,17 +346,17 @@ The wiped database has no schema and `./run` does not create it. Wait until this
 docker exec postgres_<PG_PORT> sh -c 'exec pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 ```
 
-Only if parts 1 and 2 both succeeded, check that the database is empty (the count must be `0`; any other number means the wipe did not work, and so does a failing `psql`, whatever it printed), migrate, and start. `migration:run` reads the connection settings from the environment or `.env`, so the command pins all five to the container's values (the same ones `scripts/run` pins) and cannot reach a different database than the emptiness check. `./run -d <PG_PORT>` passes the port; without `-d` it defaults to 5332:
+Only if parts 1 and 2 both succeeded, check that the database is empty (the count must be `0`; any other number means the wipe did not work, and so does a failing `psql`, whatever it printed), migrate, and start. `migration:run` and the node read the connection settings from the environment or `.env`, so both commands pin all five to the container's values (the same ones `scripts/run` pins for migrations) and cannot reach a different database than the emptiness check. `./run -d <PG_PORT>` passes the port; without `-d` it defaults to 5332:
 
 ```bash
-tables=$(docker exec postgres_<PG_PORT> sh -c 'exec psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"') &&
+tables=$(docker exec -e PGCONNECT_TIMEOUT=10 -e PGOPTIONS="-c statement_timeout=20000" postgres_<PG_PORT> sh -c 'exec timeout 30 psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"') &&
 echo "tables: $tables" &&
 test "$tables" = 0 &&
 PG_HOST=localhost PG_PORT=<PG_PORT> PG_USER=demosuser PG_PASSWORD=demospassword PG_DATABASE=demos bun run migration:run &&
-./run -d <PG_PORT>
+PG_HOST=localhost PG_PORT=<PG_PORT> PG_USER=demosuser PG_PASSWORD=demospassword PG_DATABASE=demos ./run -d <PG_PORT>
 ```
 
-If `migration:run` succeeded and only `./run` failed (for example the Node check on a Bun-only host), run `./run -d <PG_PORT>` again and do not paste part 3 again: the count is then non-zero because the migration created the tables.
+If `migration:run` succeeded and only `./run` failed (for example the Node check on a Bun-only host), run `PG_HOST=localhost PG_PORT=<PG_PORT> PG_USER=demosuser PG_PASSWORD=demospassword PG_DATABASE=demos ./run -d <PG_PORT>` again and do not paste part 3 again: the count is then non-zero because the migration created the tables.
 
 Both paths leave `data/snapshot/` untouched. The genesis builder picks it up again on the fresh boot.
 
