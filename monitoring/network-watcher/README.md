@@ -17,7 +17,7 @@ curl http://localhost:9465/metrics
 | Environment | Default | Meaning |
 | --- | --- | --- |
 | `WATCH_RPC_URLS` | required | Comma-separated HTTP(S) RPC endpoints |
-| `WATCH_POLL_SECONDS` | 15 | Delay between completed polls (1–3600 seconds) |
+| `WATCH_POLL_SECONDS` | 15 | Delay between completed polls (1–120 seconds: the advance time moves only when a poll runs, and `NetworkHeadStalled` fires 300 seconds after it) |
 | `WATCH_PORT` | 9465 | Metrics HTTP listener port |
 | `WATCH_SIGN_WINDOW` | 20 | Complete recent block window (1–20 blocks) |
 
@@ -25,7 +25,7 @@ Every request has an 8-second deadline. Heads and comparison blocks are requeste
 concurrently across endpoints. Errors, HTTP failures, bad JSON, invalid response shapes,
 and unsupported RPCs increment `demos_watch_poll_errors_total{endpoint}`, and so does
 each size bound: a response over 4 MiB (a declared `Content-Length` is refused before
-reading; an undeclared body is read within the deadline, then refused), a block with more
+reading; an undeclared body is streamed and cancelled once it passes 4 MiB), a block with more
 than 1000 signatures, a validator list with more than 1000 entries (the signer union is
 used instead), and a signer union over 1000 identities (that endpoint's window is not
 exported; the next endpoint is tried). Unsupported `getFinalizedHead` and
@@ -42,7 +42,14 @@ is tried if that history fails. No incomplete window is exported. Validator iden
 labels retain keys up to 128 characters, otherwise use the complete SHA-256 digest.
 `validator_last_signed_height` remembers the last observed signing height while an
 identity stays in the set; zero means not observed since startup. Departed series are
-removed. No signatures are cryptographically verified: these are public RPC observations.
+removed from the watcher's output; Prometheus keeps them until head compaction. No
+signatures are cryptographically verified: these are public RPC observations.
+
+Every listed endpoint is trusted for validator labels. The validator list and signer keys
+come unverified from the endpoint that supplies the window, and the 1000 caps bound one
+poll, not the change between polls: a hostile or buggy endpoint can add up to 1000 new
+identities (2 series each) to Prometheus every poll. The cap is not lower because the
+mainnet validator count is not known yet. List only endpoints you trust with that.
 
 Window blocks are kept per endpoint and reused while the fresh comparison block's hash
 chain (`content.previousHash`) still reaches them; a broken chain drops them and counts
@@ -78,7 +85,9 @@ the moment quorum was reached (`commitLock/precommit.ts:417-419,489-519`,
 from the comparison block. The stall timer restarts whenever the highest reachable head
 exceeds the previous poll's highest head (not an all-time peak, so one inflated head or
 a chain reset cannot hold `NetworkHeadStalled` on); it starts on the first successful
-observation, and an entirely unreachable network starts it on the first poll. An
+observation, and an entirely unreachable network starts it on the first poll. An advance
+is any rise of the highest reachable head over the previous poll, so a highest endpoint
+that drops out and returns during a stall counts as one. An
 endpoint that keeps reporting an inflated head still holds `head_max` up, and
 `RpcEndpointBehind` then fires for every honest endpoint.
 Losing all endpoints preserves the last advance time and drops signer observations.

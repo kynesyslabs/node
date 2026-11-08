@@ -98,6 +98,20 @@ for (const bad of ["json", "http", "envelope", "head", "block", "declared size",
     expect(w.endpoints[1]!.up).toBe(1)
     expect(line(w, "head_max")).toEndWith(" 30")
 })
+test("an undeclared chunked body over 4 MiB is cancelled while streaming, not buffered whole", async () => {
+    let sent = 0, cancelled = false
+    const chunked = () => new Response(new ReadableStream({
+        pull(c) { if (sent >= 32 << 20) return c.close(); sent += 1 << 20; c.enqueue(new Uint8Array(1 << 20)) },
+        cancel() { cancelled = true },
+    }))
+    const { fetcher } = stub({ change: (host, method) => host === "bad.test" && method === "getLastBlockNumber" ? chunked() : undefined })
+    const w = new Watcher(["https://bad.test", "https://good.test"], 3, fetcher)
+    await w.poll(1000)
+    expect(cancelled).toBe(true)
+    expect(sent).toBeLessThanOrEqual(6 << 20)
+    expect(w.endpoints[0]!.up).toBe(0)
+    expect(w.endpoints[1]!.up).toBe(1)
+})
 test("request abort deadline contains a hanging endpoint", async () => {
     const { fetcher } = stub()
     const w = new Watcher(["https://hang.test", "https://good.test"], 3, async (url, init) => {

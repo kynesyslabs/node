@@ -4,7 +4,9 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>
 type Block = { number: number; hash: string; previous?: unknown; timestamp: number; signers: string[] }
 type Endpoint = { url: string; genesis: string; host: string; errors: number; up: number; head?: Block; shard?: number
     unsupported: Map<string, number>; blocks: Map<number, Block> }
-// Bounds on what one endpoint can make the watcher parse, compute or label.
+// Bounds on what one endpoint can make the watcher parse, compute or label in one poll. They do not bound
+// churn: validator labels come unverified from the window endpoint, so every listed endpoint is trusted for
+// them (up to 1000 new identities x 2 series per poll); the cap stays loose until the validator count is known.
 const MAX_IDENTITIES = 1000
 const MAX_BODY = 4 * 1024 * 1024
 const RETRY_UNSUPPORTED_SECONDS = 600
@@ -66,9 +68,14 @@ export class Watcher {
             ...init, signal: AbortSignal.timeout(this.timeout), redirect: "error",
         })
         if (!reply.ok || Number(reply.headers.get("content-length")) > MAX_BODY) throw Error("HTTP")
-        const text = await reply.text()
-        if (text.length > MAX_BODY) throw Error("body size")
-        return JSON.parse(text)
+        // Count bytes as they arrive, so an undeclared (chunked) body is never buffered past the cap.
+        const reader = reply.body!.getReader(), decoder = new TextDecoder()
+        let text = "", size = 0
+        for (let r = await reader.read(); !r.done; r = await reader.read()) {
+            if ((size += r.value.byteLength) > MAX_BODY) { await reader.cancel(); throw Error("body size") }
+            text += decoder.decode(r.value, { stream: true })
+        }
+        return JSON.parse(text + decoder.decode())
     }
     async rpc(e: Endpoint, message: string, data = {}): Promise<any> {
         if ((e.unsupported.get(message) ?? 0) > this.now) return undefined
@@ -184,7 +191,7 @@ if (import.meta.main) {
         return n
     }
     const watcher = new Watcher((process.env.WATCH_RPC_URLS ?? "").split(",").map(s => s.trim()).filter(Boolean), integer("WATCH_SIGN_WINDOW", 20, 20))
-    const poll = integer("WATCH_POLL_SECONDS", 15, 3600)
+    const poll = integer("WATCH_POLL_SECONDS", 15, 120)
     Bun.serve({ port: integer("WATCH_PORT", 9465, 65535), fetch: request => new URL(request.url).pathname === "/metrics"
         ? new Response(watcher.metrics(), { headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" } })
         : new Response("Not found", { status: 404 }) })
