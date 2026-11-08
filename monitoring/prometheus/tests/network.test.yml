@@ -146,7 +146,10 @@ tests:
         severity: warning
       exp_annotations:
         summary: Public RPC endpoint is behind the network
-        description: Endpoint behind.example is 11 blocks behind the highest reachable head.
+        description: Endpoint behind.example is 11 blocks behind the highest reachable head. The lowest reachable endpoint
+          sets the height of the fork comparison and the signer window, so fork, signer and validator checks describe a
+          block at least two below this endpoint's head, and a fork on this endpoint within two blocks of its head is not
+          seen. Fix it or remove it from WATCH_RPC_URLS.
 - name: absent observations do not invent alerts
   alert_rule_test:
   - eval_time: 1h

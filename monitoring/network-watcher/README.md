@@ -70,8 +70,10 @@ comparison height. Otherwise the union of signers in the window supplies the set
 mode every listed identity signed at least once in the window by construction, so
 `ValidatorNotSigning` cannot catch a validator that was silent for the whole window;
 only the RPC set can name it. Even with the RPC set, an eligible validator may not be
-selected into a committee during the window: `ValidatorNotSigning` is an investigation
-signal, not proof of failure.
+selected into a committee during the window. Under commitLock the stored certificate
+holds only the precommits present when quorum was reached, so a validator whose
+precommit usually arrives late can show zero signatures in the window while it signs
+every block. `ValidatorNotSigning` is an investigation signal, not proof of failure.
 
 The actual producer quorum is `floor(2 * shardSize / 3) + 1`
 (`src/libs/consensus/v2/quorum.ts:10-11,19-26`), using genesis committee size, not
@@ -114,8 +116,12 @@ for it because that target is also down whenever the profile is off.
 
 This service cannot diagnose causes or distinguish a stalled/forked network from a
 faulty or isolated single RPC. A fork needs at least two successful comparison reads;
-`fork_detected=0` with fewer is no evidence of agreement. Local resource use, validator
-peer connectivity, mempools, and unpublished/private forks are outside its view.
+`fork_detected=0` with fewer is no evidence of agreement. The lowest reachable endpoint
+sets the height of the fork comparison and the signer window, so while one endpoint is
+behind or stuck, fork, signer and validator checks describe that old height, and a fork
+on that endpoint within two blocks of its head is not seen. Fix that endpoint or remove
+it from `WATCH_RPC_URLS`. Local resource use, validator peer connectivity, mempools, and
+unpublished/private forks are outside its view.
 
 Run the standalone Bun tests from this directory (the repository root Bun config
 preloads unrelated node code): `bun test index.test.ts`. Run all rule tests with

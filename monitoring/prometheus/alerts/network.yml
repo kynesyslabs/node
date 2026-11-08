@@ -48,4 +48,4 @@ groups:
           severity: warning
         annotations:
           summary: Public RPC endpoint is behind the network
-          description: "Endpoint {{ $labels.endpoint }} is {{ $value }} blocks behind the highest reachable head."
+          description: "Endpoint {{ $labels.endpoint }} is {{ $value }} blocks behind the highest reachable head. The lowest reachable endpoint sets the height of the fork comparison and the signer window, so fork, signer and validator checks describe a block at least two below this endpoint's head, and a fork on this endpoint within two blocks of its head is not seen. Fix it or remove it from WATCH_RPC_URLS."
