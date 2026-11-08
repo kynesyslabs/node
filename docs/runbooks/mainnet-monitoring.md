@@ -72,11 +72,15 @@ do not depend on the working directory.
    Compose fails at interpolation and starts nothing, including Alertmanager,
    and the published default `demos` is refused. Keep `PROMETHEUS_RETENTION`
    at `7d` or longer (default `15d`) so the latched alerts retain their evidence.
-4. `docker compose -f monitoring/docker-compose.yml up -d`. Then
-   `curl -s http://127.0.0.1:9091/api/v1/status/flags | jq -r '.data["storage.tsdb.retention.time"]'`
+4. `docker compose -f monitoring/docker-compose.yml up -d`. Then read the
+   published Prometheus address with `prom=$(docker port demos-prometheus 9090)`
+   (`127.0.0.1:9091` by default; it follows `MONITORING_BIND` and
+   `PROMETHEUS_PORT`), and in the same shell
+   `curl -s "http://$prom/api/v1/status/flags" | jq -r '.data["storage.tsdb.retention.time"]'`
    must print a duration of at least 7 days (`15d` by default; Prometheus
-   prints `7d` as `1w` and `14d` as `2w`). Alertmanager listens on
-   `127.0.0.1:9093` only. Then send a test alert to each receiver and confirm
+   prints `7d` as `1w` and `14d` as `2w`). Alertmanager is published on
+   `127.0.0.1` only, on `ALERTMANAGER_PORT` (`9093` by default). Then send a
+   test alert to each receiver and confirm
    that a person sees it (the Slack message, the page, and the heartbeat at the
    dead-man service): the heartbeat does not test the `slack` or `paging`
    webhooks, and a placeholder URL left in a secret file is not detected at
@@ -233,8 +237,9 @@ remove the flag after the last one.
      `up -d`, not `restart`: `restart` keeps the old flags. The data volume
      is kept, so the latch survives the recreate.
    - Delete (`curl` needs `-g` and `--data-urlencode` because of the `{}` and
-     `"` in the selector):
-     `curl -g -X POST http://127.0.0.1:9091/api/v1/admin/tsdb/delete_series --data-urlencode 'match[]=demos:conflicting_block:increase10m{instance="validator-2"}'`.
+     `"` in the selector), with `prom=$(docker port demos-prometheus 9090)` set
+     first in the same shell as in setup step 4:
+     `curl -g -X POST "http://$prom/api/v1/admin/tsdb/delete_series" --data-urlencode 'match[]=demos:conflicting_block:increase10m{instance="validator-2"}'`.
      The series name is the one in the table below for the alert. The counter
      itself is not touched, so the evidence stays in the TSDB. The alert
      clears within about a minute.
@@ -302,13 +307,15 @@ them.
 
 ## Testing the routing
 
-First confirm Prometheus sees Alertmanager: `curl -s 127.0.0.1:9091/api/v1/alertmanagers`
+First confirm Prometheus sees Alertmanager: with `prom=$(docker port demos-prometheus 9090)`
+set as in setup step 4, `curl -s "http://$prom/api/v1/alertmanagers"`
 lists it under `activeAlertmanagers`.
 
 Send a synthetic alert straight to Alertmanager, from the monitoring host:
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:9093/api/v2/alerts \
+am=$(docker port demos-alertmanager 9093)
+curl -fsS -X POST "http://$am/api/v2/alerts" \
   -H 'Content-Type: application/json' \
   -d '[{"labels":{"alertname":"RoutingTest","severity":"critical","instance":"test"},
         "annotations":{"summary":"Routing test","description":"Synthetic alert, ignore."}}]'
@@ -329,5 +336,5 @@ was sent (`resolve_timeout` in `monitoring/alertmanager/alertmanager.yml`) and
 sends the resolved message. A silence would hold that message back and the test
 page would stay open in the pager.
 
-To check a rule itself, query Prometheus (`:9091`) for its expression, for
+To check a rule itself, query Prometheus (`$prom`, `127.0.0.1:9091` by default) for its expression, for
 example `demos_consensus_abstaining`, and look at Alerts in the UI.
