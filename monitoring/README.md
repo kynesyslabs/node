@@ -60,7 +60,7 @@ Create a `.env` file in the monitoring directory or export these variables:
 | Variable                 | Default                 | Description                                                  |
 | ------------------------ | ----------------------- | ------------------------------------------------------------ |
 | `PROMETHEUS_PORT`        | `9091`                  | Prometheus server external port (not the node metrics port!) |
-| `PROMETHEUS_RETENTION`   | `15d`                   | Data retention period                                        |
+| `PROMETHEUS_RETENTION`   | `15d`                   | Data retention period; minimum `7d` for the consensus alert latch |
 | `GRAFANA_PORT`           | `3000`                  | Grafana external port                                        |
 | `GRAFANA_ADMIN_USER`     | `admin`                 | Grafana admin username                                       |
 | `GRAFANA_ADMIN_PASSWORD` | _(required)_            | Grafana admin password; compose refuses to start without it, or with `demos` |

@@ -70,7 +70,8 @@ do not depend on the working directory.
    `echo "GRAFANA_ADMIN_PASSWORD=<a strong password>" >> monitoring/.env`) or in
    the environment of the shell that runs `up`. It is required: without it
    Compose fails at interpolation and starts nothing, including Alertmanager,
-   and the published default `demos` is refused.
+   and the published default `demos` is refused. Keep `PROMETHEUS_RETENTION`
+   at `7d` or longer (default `15d`) so the latched alerts retain their evidence.
 4. `docker compose -f monitoring/docker-compose.yml up -d`. Alertmanager listens on
    `127.0.0.1:9093` only. Then send a test alert to each receiver and confirm
    that a person sees it (the Slack message, the page, and the heartbeat at the
@@ -158,13 +159,15 @@ The burst size is `increase()` of the counter over 10 minutes, plus one case
 `increase()` cannot see: when the first sample Prometheus holds for a counter is
 already 1 or more (an event between node start and the first scrape, on a node new
 to Prometheus or unscraped for over 15 minutes), the rule records the counter
-itself, but only while the series has no sample from 10 minutes earlier and
+itself, but only while the series has no sample available at the 10 minute offset and
 `demos_process_start_time_seconds` is under 15 minutes old. Counters restart at 0
-with the process, so that value is an event of the new process. An event on a node
-that was not restarted and was not scraped at the time is not seen (it looks like
-an old counter value), and neither is one on a restarted node that Prometheus
-first reaches more than 15 minutes after the start. Check such a node's log and
-`/metrics` by hand after a long outage.
+with the process, so that value is an event of the new process. With samples
+before and after an increment in the same 10 minute range, `increase()` normally
+detects an event between scrapes. Without that baseline, an already-positive
+first value is covered only by the recent-start case above: an older process
+returning after a long scrape gap, or one first scraped 15 minutes or more after
+restart, is not covered by that case. Check such a node's log and `/metrics` by
+hand after a long outage.
 `BlockHashMismatch` is not latched: its counter rises once per disagreeing peer
 per round, so a single round with a lagging mempool can reach the threshold, and
 that must clear by itself.
@@ -195,7 +198,9 @@ remove the flag after the last one.
    **Security: Prometheus has no authentication.** The port line in
    `monitoring/docker-compose.yml` is
    `"${MONITORING_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9091}:9090"`, so it is on
-   loopback unless `MONITORING_BIND` is set. `--web.enable-admin-api` opens
+   loopback unless `MONITORING_BIND` is set. This limits only the published host
+   port; containers on its Docker networks can still reach `prometheus:9090`.
+   `--web.enable-admin-api` opens
    unauthenticated delete, snapshot and tombstone-cleaning APIs to anyone who
    can reach that port. So **before enabling the flag**, check that
    `MONITORING_BIND` is unset or a loopback address. Read the resolved
@@ -205,6 +210,13 @@ remove the flag after the last one.
    be `127.0.0.1` (and `published` is the host port, `9091` by default) before
    you enable the admin API. Do not grep for `9090`: that matches only the
    container-side `target` line, and `host_ip` is on a different line.
+   Also **before enabling the flag**, list the running Prometheus container's
+   networks with `docker inspect demos-prometheus --format '{{range $name, $network := .NetworkSettings.Networks}}{{println $name}}{{end}}'`.
+   For each network name, list its attached containers with
+   `docker network inspect <network-name> --format '{{range .Containers}}{{println .Name .IPv4Address}}{{end}}'`.
+   The monitoring compose network includes Prometheus, Alertmanager, Grafana
+   and, with the `full` profile, node-exporter. **Continue only if every attached
+   container is trusted; otherwise stop and do not enable the admin API.**
    Do not rely on a firewall rule such as `ufw deny 9091` for a non-loopback
    bind: Docker publishes ports through its own iptables rules, which ufw and
    plain INPUT rules do not filter, so the port would stay open unless the rule
@@ -240,7 +252,10 @@ remove the flag after the last one.
 The latch lives only in the Prometheus data. Retention must be at least 7 days
 (`PROMETHEUS_RETENTION`, 15 days by default) and the Prometheus data volume
 (`prometheus_data`) must persist; a shorter retention shortens the latch, and a
-wiped volume loses it.
+wiped volume loses it. Check the running Prometheus value at
+`/api/v1/status/flags` (`storage.tsdb.retention.time`); the offline
+`scripts/check-monitoring.sh` checks rules and routing, not the deployed
+retention or Compose environment files.
 
 | Alert | Recorded series to delete |
 |-------|---------------------------|

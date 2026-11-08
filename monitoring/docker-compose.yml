@@ -19,6 +19,7 @@ services:
         command:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus
+            # Minimum 7d: the consensus alert latch needs seven days of recorded samples.
             - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
             - --web.console.libraries=/etc/prometheus/console_libraries
             - --web.console.templates=/etc/prometheus/consoles
