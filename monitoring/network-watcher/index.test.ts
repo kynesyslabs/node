@@ -2,8 +2,8 @@ import { expect, test } from "bun:test"
 import { block, fork, signerWindow, validatorLabel, Watcher } from "./index"
 
 const reply = (response: unknown, result = 200) => Response.json({ result, response })
-const stored = (number: number, hash = `hash-${number}`, signers = ["a", ...(number % 2 ? [] : ["b"])]) => ({
-    number, hash, content: { timestamp: 1_800_000_000_000 },
+const stored = (number: number, hash = `hash-${number}`, signers = ["a", ...(number % 2 ? [] : ["b"])], previousHash = `hash-${number - 1}`) => ({
+    number, hash, content: { timestamp: 1_800_000_000_000, previousHash },
     validation_data: { signatures: Object.fromEntries(signers.map(v => [v, "signature"])) },
 })
 function stub(options: { heads?: Record<string, number>; sets?: unknown; change?: (host: string, message: string, data: any) => Response | undefined } = {}) {
@@ -80,11 +80,13 @@ test("malformed validator set counts an error and uses signers", async () => {
     expect(w.metrics()).toContain('validator_set_source{source="signers"} 1')
     expect(w.endpoints[0]!.errors).toBe(2)
 })
-for (const bad of ["json", "http", "envelope", "head", "block"]) test(`bad ${bad} reply leaves other endpoint working`, async () => {
+for (const bad of ["json", "http", "envelope", "head", "block", "declared size", "body size"]) test(`bad ${bad} reply leaves other endpoint working`, async () => {
     const { fetcher } = stub({ change: (host, method) => {
         if (host !== "bad.test") return
         if (bad === "json") return new Response("{")
         if (bad === "http") return new Response("unavailable", { status: 503 })
+        if (bad === "declared size" && method === "getLastBlockNumber") return new Response('{"result":200,"response":30}', { headers: { "content-length": String(4 * 1024 * 1024 + 1) } })
+        if (bad === "body size" && method === "getLastBlockNumber") return Response.json({ result: 200, response: 30, pad: "x".repeat(4 * 1024 * 1024) })
         if (bad === "envelope") return Response.json(null)
         if (bad === "head" && method === "getLastBlockNumber") return reply("30")
         if (bad === "block" && method === "getBlockByNumber") return reply({ number: 30 })
@@ -173,4 +175,85 @@ test("scrapes retain the previous complete poll while the next poll is pending",
     expect(w.metrics()).toBe(before)
     release!()
     await poll
+})
+test("one inflated head or a chain reset does not latch the stall timer", async () => {
+    const heads: Record<string, number> = { "one.test": 9_000_000, "two.test": 100 }
+    const w = new Watcher(["https://one.test", "https://two.test"], 3, stub({ heads }).fetcher)
+    await w.poll(1000)
+    heads["one.test"] = heads["two.test"] = 105
+    await w.poll(1100)
+    heads["two.test"] = 110
+    await w.poll(1200)
+    expect(w.lastAdvance).toBe(1200)
+    const reset: Record<string, number> = { "one.test": 500 }
+    const r = new Watcher(["https://one.test"], 3, stub({ heads: reset }).fetcher)
+    await r.poll(1000)
+    reset["one.test"] = 5
+    await r.poll(1100)
+    expect(r.lastAdvance).toBe(1000)
+    reset["one.test"] = 35
+    await r.poll(1200)
+    expect(r.lastAdvance).toBe(1200)
+})
+test("oversized signature maps, validator lists and signer unions are rejected and counted", async () => {
+    const many = (n: number, prefix = "v") => Array.from({ length: n }, (_, k) => `${prefix}${k}`)
+    expect(block(stored(10, "h", many(1000)), 10).signers).toHaveLength(1000)
+    expect(() => block(stored(10, "h", many(1001)), 10)).toThrow()
+    const sets = { blockNumber: 28, validators: many(1001).map(identity => ({ identity, status: "2", validAt: 0 })) }
+    const listed = new Watcher(["https://one.test"], 3, stub({ sets }).fetcher)
+    await listed.poll()
+    expect(listed.metrics()).toContain('validator_set_source{source="signers"} 1')
+    expect(listed.endpoints[0]!.errors).toBe(2)
+    const union = new Watcher(["https://one.test"], 3, stub({ change: (_, method, data) => method === "getBlockByNumber"
+        ? reply(stored(data.blockNumber, undefined, many(1000, `${data.blockNumber}-`))) : undefined }).fetcher)
+    await union.poll()
+    expect(union.metrics()).not.toContain("validator_signed_in_window")
+    expect(union.endpoints[0]!.errors).toBe(3)
+})
+test("window blocks are reused while their hash chain links; a replaced chain is refetched", async () => {
+    let head = 30
+    let chain = "hash"
+    const { calls, fetcher } = stub({ change: (_, method, data) => {
+        if (method === "getLastBlockNumber") return reply(head)
+        if (method === "getBlockByNumber") return reply(stored(data.blockNumber, `${chain}-${data.blockNumber}`, undefined, `${chain}-${data.blockNumber - 1}`))
+    } })
+    const reads = () => calls.splice(0).filter(c => c.message === "getBlockByNumber").map(c => c.data.blockNumber)
+    const w = new Watcher(["https://one.test"], 3, fetcher)
+    await w.poll(1000)
+    expect(reads()).toEqual([30, 28, 27, 26])
+    head = 31
+    await w.poll(1100)
+    expect(reads()).toEqual([31, 29])
+    expect(w.metrics()).toContain('validator_signed_in_window{validator="a"} 3')
+    chain = "new"
+    await w.poll(1200)
+    expect(reads()).toEqual([31, 29])
+    expect(w.metrics()).not.toContain("validator_signed_in_window")
+    expect(w.endpoints[0]!.errors).toBe(3)
+    await w.poll(1300)
+    expect(reads()).toEqual([31, 29, 28, 27])
+    expect(w.metrics()).toContain('validator_signed_in_window{validator="a"} 3')
+})
+test("an unsupported RPC is retried after ten minutes", async () => {
+    let supported = false
+    const { calls, fetcher } = stub({ change: (_, method) => method !== "getValidatorSet" ? undefined : supported
+        ? reply({ blockNumber: 28, validators: [{ identity: "a", status: "2", validAt: 0 }] }) : reply({ error: "Unknown message" }, 404) })
+    const w = new Watcher(["https://one.test"], 3, fetcher)
+    const asked = () => calls.filter(c => c.message === "getValidatorSet").length
+    await w.poll(1000)
+    supported = true
+    await w.poll(1599)
+    expect(asked()).toBe(1)
+    expect(w.metrics()).toContain('validator_set_source{source="signers"} 1')
+    await w.poll(1600)
+    expect(asked()).toBe(2)
+    expect(w.metrics()).toContain('validator_set_source{source="rpc"} 1')
+})
+test("genesis is read under the configured URL path, keeping its query", async () => {
+    const urls: string[] = []
+    const { fetcher } = stub()
+    const w = new Watcher(["https://one.test/rpc?key=k"], 3, (url, init) => { if (!init?.method) urls.push(url); return fetcher(url, init) })
+    await w.poll()
+    expect(urls).toEqual(["https://one.test/rpc/genesis?key=k"])
+    expect(line(w, "signature_threshold")).toEndWith(" 7")
 })

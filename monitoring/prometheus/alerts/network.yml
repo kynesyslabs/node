@@ -18,13 +18,13 @@ groups:
           summary: Public RPC endpoints disagree on a block
           description: "{{ $labels.instance }} observed different hashes at the same height, two blocks behind the lowest reachable head."
       - alert: SignerCountLow
-        expr: demos_watch_block_signers <= demos_watch_signature_threshold + 1
+        expr: demos_watch_block_signers < demos_watch_signature_threshold
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: Block signatures are close to quorum
-          description: "{{ $labels.instance }} observed {{ $value }} signatures; at most one above the genesis committee quorum."
+          summary: Block signatures are below quorum
+          description: "{{ $labels.instance }} observed {{ $value }} signatures, below the genesis committee quorum."
       - alert: ValidatorNotSigning
         expr: demos_watch_validator_signed_in_window == 0
         for: 10m

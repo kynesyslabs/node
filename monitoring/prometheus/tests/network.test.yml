@@ -50,13 +50,13 @@ tests:
 - name: SignerCountLow duration and healthy boundary
   interval: 1m
   input_series:
-  - series: demos_watch_block_signers{job="demos-network-watcher",instance="watcher:9465",case="low"}
-    values: 8+0x20
-  - series: demos_watch_signature_threshold{job="demos-network-watcher",instance="watcher:9465",case="low"}
+  - series: demos_watch_block_signers{job="demos-network-watcher",instance="watcher:9465",case="quorum"}
     values: 7+0x20
-  - series: demos_watch_block_signers{job="demos-network-watcher",instance="watcher:9465",case="healthy"}
-    values: 9+0x20
-  - series: demos_watch_signature_threshold{job="demos-network-watcher",instance="watcher:9465",case="healthy"}
+  - series: demos_watch_signature_threshold{job="demos-network-watcher",instance="watcher:9465",case="quorum"}
+    values: 7+0x20
+  - series: demos_watch_block_signers{job="demos-network-watcher",instance="watcher:9465",case="close"}
+    values: 8+0x20
+  - series: demos_watch_signature_threshold{job="demos-network-watcher",instance="watcher:9465",case="close"}
     values: 7+0x20
   - series: demos_watch_block_signers{job="demos-network-watcher",instance="watcher:9465",case="below"}
     values: 6+0x20
@@ -72,19 +72,11 @@ tests:
     - exp_labels:
         job: demos-network-watcher
         instance: watcher:9465
-        case: low
-        severity: critical
-      exp_annotations:
-        summary: Block signatures are close to quorum
-        description: watcher:9465 observed 8 signatures; at most one above the genesis committee quorum.
-    - exp_labels:
-        job: demos-network-watcher
-        instance: watcher:9465
         case: below
         severity: critical
       exp_annotations:
-        summary: Block signatures are close to quorum
-        description: watcher:9465 observed 6 signatures; at most one above the genesis committee quorum.
+        summary: Block signatures are below quorum
+        description: watcher:9465 observed 6 signatures, below the genesis committee quorum.
 - name: ValidatorNotSigning duration and healthy boundary
   interval: 1m
   input_series:
