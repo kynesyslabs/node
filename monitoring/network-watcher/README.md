@@ -94,7 +94,8 @@ endpoint that keeps reporting an inflated head still holds `head_max` up, and
 `RpcEndpointBehind` then fires for every honest endpoint.
 Losing all endpoints preserves the last advance time and drops signer observations.
 
-In the monitoring stack:
+From `monitoring/` (the profile exists only in `monitoring/docker-compose.yml`; from the
+repo root, add `-f monitoring/docker-compose.yml`):
 
 ```sh
 WATCH_RPC_URLS=https://rpc-a.example,https://rpc-b.example,https://rpc-c.example \
@@ -104,9 +105,11 @@ WATCH_RPC_URLS=https://rpc-a.example,https://rpc-b.example,https://rpc-c.example
 The optional service uses internal port 9465, scraped by `demos-network-watcher`.
 Compose fixes the container port to match Prometheus; direct execution accepts
 `WATCH_PORT`. The default stack does not start the watcher. The configured optional
-scrape target is down until the profile is enabled. Alerts use existing critical/warning
-Alertmanager routes; `alertmanager.yml` is unchanged. The listener serves `/metrics`
-and returns 404 elsewhere; restrict direct-run listener access using the host firewall.
+scrape target is down until the profile is enabled. The root `docker-compose.yml`
+`monitoring` profile loads the same `prometheus.yml`, so this target is always down
+there; that fires no alert. Alerts use existing critical/warning Alertmanager routes;
+`alertmanager.yml` is unchanged. The listener serves `/metrics` and returns 404
+elsewhere; restrict direct-run listener access using the host firewall.
 
 A dead or crash-looping watcher raises no alert: every rule reads `demos_watch_*`
 series, and those are simply absent then. An empty `WATCH_RPC_URLS`, for example, makes
