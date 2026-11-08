@@ -47,6 +47,14 @@ chain still makes blocks; a 4th stops it until one comes back.
 5. Mainnet validators run with `DEMOS_REQUIRE_VALIDATORS=true`. Under
    docker compose it goes in `.env`; the shipped `docker-compose.yml`
    passes it to the node container.
+   Keep `PROD=true` and `DEBUG_ASSERTIONS_ENABLED=false` in the effective
+   environment: the shared config loader refuses to start a production node
+   with debug assertions enabled (`true` or `1`), since an assertion can exit
+   the process during consensus. This applies to fresh installs and upgrades,
+   through Docker, bare metal and `bun run start:bun`. Before upgrading a
+   running validator, remove any shell override and set the flag to `false`
+   in `.env`; recreate the Docker node container to apply the changed
+   environment, or restart the bare-metal/Bun process.
 
 6. Before T-0 no operator or provider holds more than a third of the first
    committee's votes (one validator, one vote), and every launch validator's

@@ -623,6 +623,7 @@ run_production_checks() {
 	check_ntp_egress
 	check_genesis_pin EXPECTED_GENESIS_HASH
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
+	check_unset DEBUG_ASSERTIONS_ENABLED "debug assertions can exit during consensus"
 	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
 	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
 	check_unset DEMOS_IDENTITY_TAKEOVER "set it for the one takeover start only (docs/runbooks/validator-key.md)"
@@ -655,8 +656,9 @@ OPTIONS:
     --production    Mainnet validator host checks only: every value in the
                     mainnet parameter sheet (PROD, DEMOS_REQUIRE_VALIDATORS,
                     mismatch policy, block timing, fees, stake floor, ZK points),
-                    clock sync, outbound NTP, genesis pins, and one-start
-                    switches left set; one PASS/WARN/FAIL line each, exit 1 on any FAIL
+                    clock sync, outbound NTP, genesis pins, debug assertions,
+                    and one-start switches left set; one PASS/WARN/FAIL line
+                    each, exit 1 on any FAIL
     --parameters FILE
                     With --production: the parameter sheet to compare with
                     (default: docs/mainnet/parameters.env in this checkout)

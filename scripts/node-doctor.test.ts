@@ -51,6 +51,32 @@ function writeSheet(name: string, body: string): string {
 const line = (lines: string[], key: string) =>
     lines.find(l => l.startsWith(`PASS ${key}:`) || l.startsWith(`FAIL ${key}:`))
 
+it("runs the production debug assertion guard test in the consensus suite", () => {
+    const suite = fs.readFileSync(path.join(repo, "scripts/test-consensus.sh"), "utf8")
+    expect(/^\s*src\/config\/loader\.debugAssertions\.test\.ts$/m.test(suite)).toBe(true)
+})
+
+it("lists debug assertions in the install guide's production doctor checklist", () => {
+    const guide = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+    const checklist = guide.match(/^A validator never leaves these set in `.env`:.*$/m)?.[0]
+    expect(checklist).toContain("DEBUG_ASSERTIONS_ENABLED")
+})
+
+it("lists every production doctor unset check in both operator checklists", () => {
+    const script = fs.readFileSync(doctor, "utf8")
+    const keys = [...script.matchAll(/^\s*check_unset ([A-Z_]+) /gm)].map(m => m[1])
+    expect(keys.length).toBeGreaterThan(0)
+
+    const install = fs.readFileSync(path.join(repo, "INSTALL.md"), "utf8")
+    const installList = install.match(/^A validator never leaves these set in `.env`:.*$/m)?.[0]
+    const parameters = fs.readFileSync(path.join(repo, "docs/mainnet/parameters.md"), "utf8")
+    const mainnetList = parameters.split("### Must stay unset\n")[1]?.split("\n### ")[0]
+    for (const key of keys) {
+        expect(installList).toContain(`\`${key}\``)
+        expect(mainnetList).toContain(`\`${key}\``)
+    }
+})
+
 describe("node-doctor --production against the parameter sheet", () => {
     it("passes every published value when the node runs exactly the sheet", () => {
         const sheet = readSheet(path.join(repo, "docs/mainnet/parameters.env"))
@@ -77,6 +103,16 @@ describe("node-doctor --production against the parameter sheet", () => {
         const { lines } = run({ PROD: "1" }, "--parameters", sheet)
         expect(line(lines, "PROD")).toStartWith("FAIL PROD: is '1'")
     }, 60_000)
+
+    it("refuses debug assertions in the effective production environment", () => {
+        for (const value of ["true", "1"]) {
+            const { status, lines } = run({ DEBUG_ASSERTIONS_ENABLED: value })
+            expect(status).toBe(1)
+            expect(line(lines, "DEBUG_ASSERTIONS_ENABLED")).toStartWith(
+                "FAIL DEBUG_ASSERTIONS_ENABLED: is set",
+            )
+        }
+    }, 120_000)
 
     it("compares a published genesis pin, case and 0x aside", () => {
         const pin = "ab".repeat(32)
