@@ -695,9 +695,9 @@ has a 10 s connect timeout, a 20 s `statement_timeout` and a 30 s outer
 rewrite too), the postgres container is looked up
 (`docker compose ps`) within `LOG_READ_TIMEOUT_S` (60 s); a lookup that fails,
 finds no container or gets no answer is a failed read. A read that fails or
-times out ends the `halt-*` and `ride-*` runs as `ABORT`, exit 2. Every other
-docker call a check reads is bounded by `LOG_READ_TIMEOUT_S` as well, so a
-stalled Docker daemon ends the read and not the run: the node container
+times out ends the `halt-*` and `ride-*` runs as `ABORT`, exit 2. The docker
+reads a check makes that are listed here are bounded by `LOG_READ_TIMEOUT_S`
+as well, so a stalled Docker daemon ends the read and not the run: the node container
 lookups and the `docker exec` of every head and block read (`cid_of`, `rpc`),
 `serving`, the log reads of `stop_mid_round` and of the log-line counts
 (`grep_logs`), the restart counts and the bring-up snapshot (`docker stats`,
@@ -713,7 +713,10 @@ on node-1 (why)`): a stop not seen mid-round is not the drill. The
 `ROUND_START_WAIT_S` deadline is checked before each `docker logs` read, not
 after it: a read that starts before the deadline and returns after it with a
 round start in it still leads to the stop. The snapshot
-only notes the call in `03-bringup.log`. For the
+only notes the call in `03-bringup.log`. Two docker calls are still not
+bounded and a stalled daemon can hang the run there: the bring-up
+`docker compose exec -T postgres pg_isready` loop and its `ABORT` check, and
+the `docker inspect` of each container's IP before the `partition` drill. For the
 `halt-*` and `ride-*` drills:
 `BASELINE_HEIGHT` (6), `SETTLE_ROUNDS` (2), `HALT_ROUNDS` (12),
 `RECOVERY_BLOCKS` (3), `RECOVERY_TIMEOUT` (300), `RIDE_BLOCKS` (5),
