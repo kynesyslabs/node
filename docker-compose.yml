@@ -336,7 +336,9 @@ services:
       # port where nothing is listening.
       - "${RPC_PORT:-53550}:${RPC_PORT:-53550}"
       - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
-      - "${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
+      # SDK clients can use Caddy /signaling/ with the proxy profile. Direct
+      # public WebSocket access requires RPC_SIGNALING_BIND=0.0.0.0.
+      - "${RPC_SIGNALING_BIND:-127.0.0.1}:${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
       # Gossip sidecar (libp2p TCP). Peers dial EXPOSED_URL's host on this
       # port, so it is published 1:1 like RPC_PORT.
       - "${GOSSIP_PORT:-9095}:${GOSSIP_PORT:-9095}"

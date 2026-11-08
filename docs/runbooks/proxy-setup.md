@@ -220,8 +220,11 @@ Grafana keeps redirecting to the stopped proxy while `GRAFANA_ROOT_URL`
 points there with `GRAFANA_SERVE_FROM_SUB_PATH=true`; with both removed it
 falls back to `http://localhost:3000` at the root path.
 
-After that, host ports `53550 53551 3005 9090 3000 9091 7047` work direct
+After that, host ports `53550 53551 9090 3000 9091 7047` work direct
 again, next to `9095` (gossip), which stays published in both modes.
+Signaling port 3005 stays on 127.0.0.1 unless `RPC_SIGNALING_BIND=0.0.0.0`
+is set before recreating the node container. External SDK clients can use
+the Caddy route or an explicitly published signaling port.
 
 ## Related
 
