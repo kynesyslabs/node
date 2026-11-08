@@ -74,7 +74,8 @@ do not depend on the working directory.
    at `7d` or longer (default `15d`) so the latched alerts retain their evidence.
 4. `docker compose -f monitoring/docker-compose.yml up -d`. Then
    `curl -s http://127.0.0.1:9091/api/v1/status/flags | jq -r '.data["storage.tsdb.retention.time"]'`
-   must print `7d` or longer. Alertmanager listens on
+   must print a duration of at least 7 days (`15d` by default; Prometheus
+   prints `7d` as `1w` and `14d` as `2w`). Alertmanager listens on
    `127.0.0.1:9093` only. Then send a test alert to each receiver and confirm
    that a person sees it (the Slack message, the page, and the heartbeat at the
    dead-man service): the heartbeat does not test the `slack` or `paging`
