@@ -13,7 +13,7 @@ import log from "src/utilities/logger"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
-import HandleGCR from "../blockchain/gcr/handleGCR"
+import HandleGCR, { withDerivedFeeEdits } from "../blockchain/gcr/handleGCR"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import {
@@ -407,10 +407,11 @@ export async function handleExecuteTransaction(
 
     // Only if the transaction is valid we add it to the mempool
     if (result.success) {
-        const entities = await HandleGCR.prepareEntities([queriedTx])
+        const simulatedTx = withDerivedFeeEdits(queriedTx)
+        const entities = await HandleGCR.prepareEntities([simulatedTx])
         const simulateResult = await HandleGCR.applyTransaction(
             entities,
-            queriedTx,
+            simulatedTx,
             false,
             true,
         )

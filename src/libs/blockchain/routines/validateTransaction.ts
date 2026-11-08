@@ -23,11 +23,12 @@ import { signValidityData } from "../validation/validityData"
 import { checkTxAdmissible } from "../validation/txAdmission"
 import { clientTxTypeRefusal } from "../validation/txTypes"
 import { isForkActive } from "@/forks"
+import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import { normalizePubkey } from "../gcr/handleGCR"
-import { expectsNonceEdit } from "../validation/editBinding"
+import { derivedGasEdit, expectsNonceEdit } from "../validation/editBinding"
 import {
     nativeSendRefusal,
     nonCanonicalAddressRefusal,
@@ -40,6 +41,11 @@ export async function confirmTransaction(
     tx: Transaction, // Must contain a tx property being a Transaction object
     sender: string,
 ): Promise<ValidityData> {
+    // Only the node may supply a fee quote, including on early refusals.
+    if (tx.attrs && typeof tx.attrs === "object" && "total_fee" in tx.attrs) {
+        delete tx.attrs.total_fee
+    }
+
     // Getting the current block number
     const getLastBlockNumberStart = Date.now()
     const referenceBlock = await Chain.getLastBlockNumber()
@@ -257,6 +263,45 @@ export async function confirmTransaction(
             "[Tx Validation] [TYPE DISPATCH] " + dispatchResult.message + "\n"
         validityData = await signValidityData(validityData)
         return validityData
+    }
+
+    // transaction_fee is signed and covers distribution only. Native sends
+    // also carry the SDK gas edit; quote both without rewriting signed content.
+    if (
+        tx.content.type === "native" &&
+        (tx.content.data?.[1] as { nativeOperation?: string } | undefined)?.nativeOperation === "send"
+    ) {
+        const gas = await derivedGasEdit(
+            "native",
+            tx.content.from,
+            isForkActive("osDenomination", referenceBlock),
+        )
+        let total = BigInt(gas?.type === "balance" ? gas.amount : 0)
+        if (isForkActive("gasFeeSeparation", referenceBlock)) {
+            const fee = tx.content.transaction_fee
+            total += BigInt(fee.network_fee ?? 0) +
+                BigInt(fee.rpc_fee ?? 0) + BigInt(fee.additional_fee ?? 0)
+        }
+        tx.attrs = {
+            reference_block: referenceBlock,
+            total_fee: total.toString(),
+        }
+        // The amount and fee pass their individual checks above, but apply
+        // debits both. Refuse an unaffordable send before it can be submitted.
+        const sendAmount = canonicalizeAmountToOs(
+            tx.content.amount,
+            isForkActive("osDenomination", referenceBlock),
+        )
+        const from = typeof tx.content.from === "string"
+            ? tx.content.from : forgeToHex(tx.content.from)
+        const balance = await GCR.getAccountBalance(from)
+        if (balance < sendAmount + total) {
+            validityData.data.valid = false
+            validityData.data.message =
+                `[Tx Validation] [BALANCE ERROR] Insufficient balance for native send: amount ${sendAmount} plus quoted total fee ${total} exceeds balance ${balance}\n`
+            validityData = await signValidityData(validityData)
+            return validityData
+        }
     }
 
     validityData = await signValidityData(validityData)

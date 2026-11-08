@@ -223,10 +223,13 @@ export async function applyGasFeeSeparation(
             }`,
         }
     }
-    if (senderBalance < BigInt(breakdown.total)) {
+    const totalFee = BigInt(breakdown.total) *
+        ((tx.content.type as string) === "native" &&
+        isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0) ? 1_000_000_000n : 1n)
+    if (senderBalance < totalFee) {
         return {
             ok: false,
-            message: `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`,
+            message: `sender balance ${senderBalance.toString()} < total fee ${totalFee}`,
         }
     }
 

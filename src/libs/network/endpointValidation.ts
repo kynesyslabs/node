@@ -33,7 +33,6 @@ export async function handleValidateTransaction(
         log.only(
             `[handleValidateTransaction] Transaction confirmed in ${handleConfirmTransactionEnd - handleConfirmTransactionStart}ms`,
         )
-
         const handleGcrEditsStart = Date.now()
         const gcrEdits = await generateGcrEdits(tx)
         gcrEdits.forEach((edit: GCREdit) => {
@@ -133,6 +132,8 @@ export async function handleValidateTransaction(
             )
             throw new Error("GCREdit mismatch")
         }
+
+        if (!validationData.data.valid) return validationData
 
         const totalFee = gcrEdits
             .filter(
