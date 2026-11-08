@@ -460,9 +460,10 @@ The block cannot clean up after an interrupt: if you press Ctrl-C at a passphras
 GnuPG older than 2.2.7 rejects `--no-symkey-cache`, so the block fails, removes the file and restarts the node. On such a host, delete `--no-symkey-cache` from both `gpg` commands and paste the block again. Its decrypt check then reads the passphrase from the agent's cache, so right after it, in the same shell, flush the cache and check the file with the passphrase typed again:
 
 ```bash
-gpgconf --reload gpg-agent
-gpg --decrypt "$out" > /dev/null || { echo "backup FAILED; removing $out" >&2; rm -f "$out"; }
-gpgconf --reload gpg-agent
+gpgconf --reload gpg-agent &&
+gpg --decrypt "$out" > /dev/null &&
+gpgconf --reload gpg-agent ||
+{ echo "backup FAILED; removing $out" >&2; rm -f "$out"; false; }
 ```
 
 `gpg` asks for a passphrase and asks again for the decrypt check; store it apart from the backup. Move the `.gpg` file off the host and delete the local copy. Never keep an unencrypted copy of this volume.
