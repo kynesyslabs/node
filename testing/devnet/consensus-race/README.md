@@ -77,7 +77,7 @@ Everything goes to `runs/<UTC time>-<mode>-<label>/` (gitignored, mode 700):
 timestamped line per rule change and tally, `node-N.log` (full container
 logs, collected at teardown), `verdict.json`, and `run.log` with the whole
 run. `runs/results.tsv` collects one row per run. The node runs as the
-image's user (uid 1000 in the release image), not the host user, so the
+image's user (root in the default devnet image), not the host user, so the
 files in `inputs/` are 644 and its dirs 755; the run dir is made 700 before
 any key is written, which keeps other host users out. Before bring-up a
 throwaway container reads them as the image's user and copies the identity
@@ -89,11 +89,14 @@ into `/app/state`, a tmpfs mounted with the nodes' options; the run aborts
 The compose project is unique per run (`crace-<run id>`), there are no
 `container_name`s, no published ports (the harness uses `docker exec`), and
 postgres and the nodes' state dirs are on tmpfs: no named volumes. Docker
-creates a tmpfs root-owned, and the node runs as the image's user (uid 1000
-in the release image), so `run.sh` reads that uid and gid from the image
-(`id -u`, `id -g` in a throwaway container; the preflight aborts if it
-cannot) and the compose file mounts `/app/state` as
-`/app/state:uid=<uid>,gid=<gid>,mode=0700`, as `../quorum-drills/` does.
+creates a tmpfs root-owned, and consensus-race runs devnet-style images
+(built from `../Dockerfile`, which sets no `USER`, so root by default). The
+tmpfs owner and the readable inputs follow the image's own uid and gid, so
+`run.sh` reads them from the image (`id -u`, `id -g` in a throwaway
+container; the preflight aborts if it cannot) and the compose file mounts
+`/app/state` as `/app/state:uid=<uid>,gid=<gid>,mode=0700`, as
+`../quorum-drills/` does. For a root image nothing changes; a non-root devnet
+image, or a userns-remapped or rootless Docker daemon, also works.
 Memory caps: 2 GB per node (`NODE_MEM`), 1 GB postgres, 64 MB per sidecar. A trap
 collects logs, removes the sidecars and runs `docker compose down -v` on any
 exit, including Ctrl-C. Only containers the run started are touched.

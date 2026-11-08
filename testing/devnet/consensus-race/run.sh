@@ -130,10 +130,12 @@ for img in "${IMAGE}" "${NETSHOOT_IMAGE}" postgres:16-alpine; do
     docker image inspect "${img}" >/dev/null 2>&1 || abort_pre "image ${img} is not present locally"
 done
 IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
-# The image's user (uid 1000 in the release image, root in the devnet image),
-# read from the image as ../quorum-drills/run.sh does: the node tmpfs is
-# mounted owned by it (docker-compose.race.yml), since Docker creates it
-# root-owned and a node running as uid 1000 could not write its state there
+# The image's user (root in the default devnet image; this harness runs
+# devnet-style images only), read from the image as ../quorum-drills/run.sh
+# does: the node tmpfs is mounted owned by it (docker-compose.race.yml), since
+# Docker creates it root-owned and a non-root node could not write its state
+# there. A non-root devnet image, or a userns-remapped or rootless daemon, also
+# works; for a root image nothing changes
 IMAGE_UID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE}" -u 2>/dev/null)
 IMAGE_GID=$(docker run --rm --network none --memory 64m --entrypoint id "${IMAGE}" -g 2>/dev/null)
 [[ "${IMAGE_UID}" =~ ^[0-9]+$ && "${IMAGE_GID}" =~ ^[0-9]+$ ]] ||
@@ -177,8 +179,8 @@ PY
 } > "${LOG_DIR}/${step}.log" 2>&1 || { say "ABORT: generating inputs failed (see ${step}.log)"; exit 2; }
 # Once, after everything is written, so the modes do not depend on the umask:
 # 644 files in a 755 inputs/ under the 0700 run dir, as ../quorum-drills/ does.
-# The node runs as the image's user (uid 1000 in the release image), not the
-# host user, and these are throwaway devnet keys
+# The node runs as the image's user (root by default, or whatever uid the
+# devnet-style image sets), not the host user, and these are throwaway devnet keys
 python3 -I "${HERE}/../quorum-drills/drill_inputs.py" readable --dir "${RUN_DIR}/inputs" >> "${LOG_DIR}/${step}.log" 2>&1 ||
     { say "ABORT: making the inputs readable failed (see ${step}.log)"; exit 2; }
 # Read them as that user before bring-up: a throwaway container, no network,
