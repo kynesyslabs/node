@@ -101,12 +101,14 @@ First verify and check out the release tag, so the compose file, scripts and
 parameter sheet match the image:
 
 ```bash
+TAG=v1.0.0-rc.1
+
 git fetch --tags origin stabilisation &&
 git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers &&
 git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers &&
-git merge-base --is-ancestor v1.0.0-rc.1 origin/stabilisation &&
-git verify-tag v1.0.0-rc.1 &&
-git checkout v1.0.0-rc.1
+git merge-base --is-ancestor "$TAG" origin/stabilisation &&
+git verify-tag "$TAG" &&
+git checkout "$TAG"
 ```
 
 If this chain stops, do not continue the upgrade. A good signature from a key

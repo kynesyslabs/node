@@ -455,7 +455,7 @@ A copy taken while the node runs can hold a signing state older than the key's l
 
 The block cannot clean up after an interrupt: if you press Ctrl-C at a passphrase prompt or the SSH session drops, it stops where it is and can leave the node stopped. Then run `docker compose up -d --no-build` (a source build: `./run --docker -d`) and delete this run's `node-state-*.gpg` file, which the block did not finish checking.
 
-`GPG_TTY` lets `gpg` ask for the passphrase on this terminal, so `tty` must print a `/dev/pts/...` path: use an interactive SSH session (`ssh -t`); if `gpg` still cannot ask, add `--pinentry-mode loopback`, and never pass the passphrase on the command line or in a file.
+`GPG_TTY` lets `gpg` ask for the passphrase on this terminal, so `tty` must print a terminal path (not `not a tty`): use an interactive SSH session (`ssh -t`); if `gpg` still cannot ask, add `--pinentry-mode loopback`, and never pass the passphrase on the command line or in a file.
 
 GnuPG older than 2.2.7 rejects `--no-symkey-cache`, so the block fails, removes the file and restarts the node. On such a host, delete `--no-symkey-cache` from both `gpg` commands and paste the block again. Its decrypt check then reads the passphrase from the agent's cache, so right after it, in the same shell, flush the cache and check the file with the passphrase typed again:
 
