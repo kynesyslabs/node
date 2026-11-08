@@ -46,7 +46,7 @@ const { verifyAdmissionEdits, verifyRpcEdits } = await import("@/libs/blockchain
 const { PEER, SENDER, demos, onTheWire } = await import("@/libs/blockchain/validation/editBinding.fixtures")
 const { DEFAULT_FORK_CONFIG, cloneDefaultForkConfig } = await import("./forkConfig")
 const { loadForkConfigFromGenesis } = await import("./loadForkConfig")
-const { TOKEN_STAKING_REFUSAL, tokenStakingOpen, tokenStakingRefusal } = await import("./tokenStakingGate")
+const { TOKEN_STAKING_REFUSAL, carriesTokenStaking, isTokenStakingEdit, tokenStakingOpen, tokenStakingRefusal } = await import("./tokenStakingGate")
 const { forkScheduleDigest } = await import("@/libs/peer/routines/forkScheduleAgreement")
 const { getSharedState } = await import("@/utilities/sharedState")
 const { DEFAULT_MIN_VALIDATOR_STAKE } = await import("@/features/staking/constants")
@@ -83,6 +83,20 @@ const readJson = (path: string) => {
     const parsed = JSON.parse(readFileSync(path, "utf8"))
     return typeof parsed === "string" ? JSON.parse(parsed) : parsed
 }
+
+describe("token staking type checks", () => {
+    it("ignores non-string edit types", () => {
+        for (const type of [{}, 1, null]) {
+            expect(isTokenStakingEdit({ type, operation: "stake" })).toBe(false)
+        }
+    })
+
+    it("ignores non-string transaction types", () => {
+        for (const type of [{}, 1, null]) {
+            expect(carriesTokenStaking({ content: { type, gcr_edits: [] } })).toBe(false)
+        }
+    })
+})
 
 describe("token staking fork config", () => {
     it("leaves both forks unscheduled by default, so staking stays open", () => {

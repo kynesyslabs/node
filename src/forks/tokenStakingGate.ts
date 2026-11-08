@@ -27,7 +27,7 @@ function contentOf(tx: TxView): Record<string, unknown> {
 export function isTokenStakingEdit(edit: unknown): boolean {
     if (!edit || typeof edit !== "object") return false
     const { type, operation, isRollback } = edit as Record<string, unknown>
-    if (String(type) !== "validatorStake") return false
+    if (type !== "validatorStake") return false
     return (
         operation === "stake" ||
         operation === "unstake" ||
@@ -38,7 +38,7 @@ export function isTokenStakingEdit(edit: unknown): boolean {
 /** Whether a transaction is a stake or unstake, or carries an edit that is one. */
 export function carriesTokenStaking(tx: TxView): boolean {
     const content = contentOf(tx)
-    if (TOKEN_STAKING_TYPES.has(String(content.type))) return true
+    if (typeof content.type === "string" && TOKEN_STAKING_TYPES.has(content.type)) return true
     const edits = content.gcr_edits
     return Array.isArray(edits) && edits.some(isTokenStakingEdit)
 }

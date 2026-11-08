@@ -63,6 +63,30 @@ async function stakingOpen(): Promise<boolean> {
 
 type StakeTxResult = { valid: boolean; message: string }
 
+function parseStakeTx(tx: Transaction):
+    | { valid: true; payload: ValidatorStakePayload; sender: string; amount: bigint }
+    | { valid: false; result: StakeTxResult } {
+    const payload = extractStakePayload(tx)
+    if (!payload) {
+        return { valid: false, result: { valid: false, message: "Missing stake payload" } }
+    }
+
+    const sender = requireSender(tx)
+    if (!sender) return { valid: false, result: { valid: false, message: "Missing sender" } }
+
+    let amount: bigint
+    try {
+        amount = BigInt(payload.amount)
+    } catch {
+        return { valid: false, result: { valid: false, message: "Invalid stake amount encoding" } }
+    }
+    if (amount <= 0n) {
+        return { valid: false, result: { valid: false, message: "Stake amount must be positive" } }
+    }
+
+    return { valid: true, payload, sender, amount }
+}
+
 export default class ValidatorsManagement {
     // ------------------------------------------------------------------
     // Tx validation entry points
@@ -78,23 +102,9 @@ export default class ValidatorsManagement {
         if (!(await stakingOpen())) {
             return { valid: false, message: TOKEN_STAKING_REFUSAL }
         }
-        const payload = extractStakePayload(tx)
-        if (!payload) {
-            return { valid: false, message: "Missing stake payload" }
-        }
-
-        const sender = requireSender(tx)
-        if (!sender) return { valid: false, message: "Missing sender" }
-
-        let amount: bigint
-        try {
-            amount = BigInt(payload.amount)
-        } catch {
-            return { valid: false, message: "Invalid stake amount encoding" }
-        }
-        if (amount <= 0n) {
-            return { valid: false, message: "Stake amount must be positive" }
-        }
+        const parsed = parseStakeTx(tx)
+        if (parsed.valid === false) return parsed.result
+        const { payload, sender, amount } = parsed
 
         const existing = await GCR.getGCRValidatorStatus(sender)
         const bonding = await stakeChecksActive()
