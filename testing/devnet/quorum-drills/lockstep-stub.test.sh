@@ -445,8 +445,10 @@ check "a count whose grep refuses the pattern, on short logs: a failed read too 
 
 echo "== stop_mid_round: no round start seen (a read that fails or stalls, or none in time) is ERROR, exit 2, and no node is stopped"
 for f in stop_mid_round round_start_error; do source <(fn_src "${f}"); done
-source <(grep -E '^(ROUND_START_WAIT_S=|event\(\) )' "${RUN_SH}")
-check "run.sh waits up to 60 s for a round start" test "${ROUND_START_WAIT_S:-unset}" = 60
+source <(grep -E '^event\(\) ' "${RUN_SH}")
+# run.sh's value with CONSENSUS_TIME unset, whatever the caller exports; the checks below use it
+ROUND_START_WAIT_S=$(bash -c 'unset CONSENSUS_TIME; source <(grep -E "^ROUND_START_WAIT_S=" "$1"); echo "${ROUND_START_WAIT_S:-unset}"' _ "${RUN_SH}")
+check "run.sh waits up to 60 s for a round start" test "${ROUND_START_WAIT_S}" = 60
 check "run.sh waits 3 rounds (180 s) for a round start when CONSENSUS_TIME=60" \
     bash -c 'CONSENSUS_TIME=60; source <(grep -E "^ROUND_START_WAIT_S=" "$1"); test "${ROUND_START_WAIT_S:-unset}" = 180' _ "${RUN_SH}"
 smr_case() { # $1 name: 13 nodes up, node-1 (the watcher) at head 25 and its log $2
