@@ -119,8 +119,9 @@ async function carriesOurSignature(
  * lowercase, and a member whose key appears in two cases counts once, under
  * its lowercase identity with its first signature in map order, if that verifies.
  * Without it they compare as written, as they always have.
- * The keys whose verify could not run (the verifier threw) are added to
- * `unverified`: they are not counted, but that is this node's failure.
+ * The keys whose verify threw are added to `unverified`: they are not counted.
+ * A peer can cause a throw (a 3-byte signature); withCountedSignatures treats
+ * one in its tally as this node's failure, see there.
  */
 export async function countedSignatures(
     signedMessage: string,
@@ -150,14 +151,15 @@ export async function countedSignatures(
                 if (tried.has(identity)) return null
                 tried.add(identity)
             }
-            // A signature that is not hex is the block's fault; a verify that
-            // throws after it is ours, and `unverified` tells the caller.
+            // A signature that is not hex is the block's fault and is not
+            // reported in `unverified`; a verify that throws is, and the caller
+            // decides whose failure it is.
             let signatureBytes: Uint8Array
             try {
                 signatureBytes = hexToUint8Array(signature as string)
             } catch (e) {
                 log.error(
-                    `[verifyBlock] signature verify threw for ${key}: ${getErrorMessage(e)}`,
+                    `[verifyBlock] signature for ${key} is not hex: ${getErrorMessage(e)}`,
                 )
                 return null
             }
@@ -219,8 +221,9 @@ interface SignedBlock {
 
 /**
  * A check of a block's signatures that could not run here: the signer set was
- * unreadable or a verify threw. It says nothing about the block, so a caller
- * retries later instead of rejecting what it was served.
+ * unreadable or a verify threw in the second tally (withCountedSignatures),
+ * after the first had passed on the same block. It says nothing about the
+ * block, so a caller retries later instead of rejecting what it was served.
  */
 export class SignatureCheckUnavailableError extends Error {
     constructor(message: string) {
@@ -376,7 +379,9 @@ export async function verifyBlockCertificate(
  * (this tally verifies again, and a verify that fails now must not store a
  * certificate the block's own check would reject)
  * @throws SignatureCheckUnavailableError instead when the shortfall is this
- * node's: the signer set could not be read or a verify did not run
+ * node's: the signer set could not be read or a verify threw. A throw here
+ * is treated as ours because the first tally on this block object has
+ * already passed, so a peer-caused throw would have failed that one.
  */
 export async function withCountedSignatures<T extends SignedBlock>(
     block: T,
