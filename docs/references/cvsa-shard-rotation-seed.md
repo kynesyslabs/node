@@ -160,9 +160,9 @@ The pseudorandom step is in `src/libs/consensus/v2/routines/getShard.ts`.
    only if it is an online candidate.
 4. Size. The shard is the first `shardSize` entries. `shardSize` is read
    from the stored genesis block (`properties.shardSize`, an integer from 3
-   to 100: `src/libs/consensus/genesisShardSize.ts:19-21, 63-84`) and pinned on the shared state
-   (`sharedState.ts:121-140`). The repository's genesis files set 10
-   (`docs/mainnet/genesis.template.json:6`, `data/genesis.json:6`); the
+   to 100: `src/libs/consensus/genesisShardSize.ts:19-21, 63-84`) and pinned on
+   the shared state (`sharedState.ts:121-140`). The repository's genesis files
+   set 10 (`docs/mainnet/genesis.template.json:6`, `data/genesis.json:6`); the
    value a running network uses is not determined from the code.
 
 Two selection rules exist, chosen by the `committeeBinding` fork
@@ -184,15 +184,15 @@ Two selection rules exist, chosen by the `committeeBinding` fork
   (`getShard.ts:83-101`; `validatorSetAt`, `validatorSet.ts:100-103`).
   Before it, it is the live validators table (`getShard.ts:86-88`;
   `GCR.getGCRValidatorsAtBlock`, `gcr.ts:226-251`), filtered on
-  `valid_at <= block` and status `"2"` (`gcr.ts:269-280`). Offline members stay in the committee and count as missing
-  votes: the same liveness test is applied, but only to decide which
-  committee members are reachable (`liveBoundMembers`, lines 464-489). If
-  the pool holds fewer identities than the quorum and the staked set is
-  larger than the pool, the whole staked set is used instead
-  (`getBoundPool`, lines 286-310; `boundPoolFrom`, `poolRules.ts:64-71`).
-  When the pool is below the quorum but the staked set is not larger, the
-  pool is kept. The staked set here comes from the same
-  `poolValidatorAddresses` as in step 1.
+  `valid_at <= n` (the parent) and status `"2"` (`gcr.ts:269-280`). Offline
+  members stay in the committee and count as missing votes: the same liveness
+  test is applied, but only to decide which committee members are reachable
+  (`liveBoundMembers`, lines 464-489). If the pool holds fewer identities
+  than the quorum and the staked set is larger than the pool, the whole
+  staked set is used instead (`getBoundPool`, lines 286-310;
+  `boundPoolFrom`, `poolRules.ts:64-71`). When the pool is below the quorum
+  but the staked set is not larger, the pool is kept. The staked set here
+  comes from the same `poolValidatorAddresses` as in step 1.
 
 The fork is dormant by default (`activationHeight: null`,
 `src/forks/forkConfig.ts:696`; description at lines 692-700); a chain
