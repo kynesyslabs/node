@@ -53,6 +53,17 @@ describe("metrics endpoint exposure", () => {
 })
 
 describe("block-stall alerting is loaded", () => {
+    it("runs these monitoring checks in the consensus suite", () => {
+        expect(read("scripts/test-consensus.sh")).toContain("testing/monitoring/metricsExposure.test.ts")
+    })
+
+    it("recognizes the temporary signing stop in both operator guides", () => {
+        for (const file of ["docs/runbooks/mainnet-monitoring.md", "monitoring/prometheus/alerts/consensus.yml"]) {
+            expect(read(file)).toMatch(/\[SIGNING\] stopped until this process exits:[^\n]*line with marker 0/)
+            expect(read(file)).toContain("implies no second key unless the ForeignSignature alert also fired")
+        }
+    })
+
     it("root compose Prometheus mounts the alert rules directory", () => {
         expect(read("docker-compose.yml")).toContain(
             "./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro",

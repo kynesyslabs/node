@@ -82,6 +82,17 @@ export async function getLastStoredBlock(): Promise<Blocks | null> {
         .getOne()
 }
 
+/** Read the durable chain height without loading the block payload. */
+export async function getLastStoredBlockNumber(): Promise<number> {
+    const block = await getBlocksRepo()
+        .createQueryBuilder("block")
+        .select("block.number")
+        .orderBy("block.number", "DESC")
+        .limit(1)
+        .getOne()
+    return block?.number ?? 0
+}
+
 export async function getLastBlockNumber(): Promise<number> {
     if (!getSharedState.lastBlockNumber) {
         const block = await getBlocksRepo()

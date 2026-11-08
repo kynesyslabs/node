@@ -31,6 +31,9 @@ mock.module("../gcr/gcr_routines/hashGCR", () => ({
     default: hashGCRTables,
 }))
 
+const gracefulShutdown = jest.fn(async (_signal: string, _exitCode?: number) => {})
+mock.module("src/index", () => ({ gracefulShutdown }))
+
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
     default: {
@@ -58,7 +61,16 @@ const { default: log } = await import("src/utilities/logger")
 const { default: PeerManager } = await import("@/libs/peer/PeerManager")
 const { BroadcastManager } = await import("@/libs/communications/broadcastManager")
 const { default: Mempool } = await import("../mempool")
-const { syncBlock, fastSync } = await import("./Sync")
+const { CommittedBlockFollowUpError } = await import("../committedBlockError")
+const { signingHaltReason, __resetSigningHalt } = await import(
+    "@/libs/identity/signingRecord"
+)
+const {
+    syncBlock,
+    fastSync,
+    waitForInFlightBlockApply,
+    assertNoUnreconciledGcrState,
+} = await import("./Sync")
 
 const HEIGHT = 12
 const NATIVE_HASHES = { native_subnets_txs: "subnets", native_tlsnotary: "tls" }
@@ -149,6 +161,9 @@ const chainIdAtStart = getSharedState.chainId
 afterEach(() => {
     getSharedState.forkConfig = structuredClone(forkConfigAtStart)
     getSharedState.chainId = chainIdAtStart
+    getSharedState.runMainLoop = true
+    getSharedState.isShuttingDown = false
+    __resetSigningHalt()
 })
 
 beforeEach(() => {
@@ -161,6 +176,8 @@ beforeEach(() => {
 
     spyOn(Chain, "getBlockByNumber").mockResolvedValue(null as any)
     spyOn(Chain, "getLastBlockNumber").mockResolvedValue(HEIGHT - 1)
+    spyOn(Chain, "getLastStoredBlockNumber").mockResolvedValue(HEIGHT - 1)
+    spyOn(queryBuilder, "getRawOne").mockResolvedValue({ max: null })
     spyOn(Chain, "getExistingTransactionHashes").mockResolvedValue(new Set())
     spyOn(Chain, "checkTxExists").mockResolvedValue(false)
     spyOn(GCR, "getAccountNonces").mockImplementation((async (
@@ -185,6 +202,28 @@ beforeEach(() => {
 
     getSharedState.lastBlockNumber = HEIGHT - 1
     getSharedState.referenceBlockRoom = 1
+    getSharedState.runMainLoop = true
+})
+
+describe("GCR drift check during shutdown", () => {
+    it("refuses pushed blocks and drift checks before touching state", async () => {
+        getSharedState.runMainLoop = false
+        const db = spyOn(Datasource, "getInstance")
+        expect(await syncBlock(makeBlock([]), servingPeer([]))).toBe(false)
+        await expect(assertNoUnreconciledGcrState()).rejects.toThrow("during shutdown")
+        expect(db).not.toHaveBeenCalled()
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(insertBlock).not.toHaveBeenCalled()
+        expect(deleteAssignedTxsForBlock).not.toHaveBeenCalled()
+    })
+
+    it("uses the committed block height when memory is one block behind", async () => {
+        spyOn(Chain, "getLastStoredBlockNumber").mockResolvedValue(HEIGHT)
+        spyOn(queryBuilder, "getRawOne").mockResolvedValue({ max: HEIGHT })
+        await assertNoUnreconciledGcrState()
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(deleteAssignedTxsForBlock).not.toHaveBeenCalled()
+    })
 })
 
 describe("syncBlock verification", () => {
@@ -452,12 +491,17 @@ describe("fast sync under finalityProofs", () => {
 
     describe("when the batch ends at the block", () => {
         const batchSizeAtStart = getSharedState.batchSyncBlockSize
+        const validChild = async (tx: any, block: any) => [childOf(block, await confirmedRoot(tx))]
         afterEach(() => {
             getSharedState.batchSyncBlockSize = batchSizeAtStart
         })
 
         /** Serves `block` as a one-block batch and `child` when asked for the block after it. */
-        async function syncLastOfBatch(childResponse: (tx: any, block: any) => Promise<any[]>) {
+        async function syncLastOfBatch(
+            childResponse: (tx: any, block: any) => Promise<any[]>,
+            insertFailure?: Error,
+            stopDuringApply = false,
+        ) {
             getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
             getSharedState.batchSyncBlockSize = 1
             const tx = makeTx(alice)
@@ -474,7 +518,16 @@ describe("fast sync under finalityProofs", () => {
             spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
             spyOn(Chain, "getTransactionsFromHashes").mockResolvedValue([])
             applyResult({ successfulTxs: [tx.hash] })
+            if (stopDuringApply) applyTransactions.mockImplementationOnce((async () => {
+                getSharedState.runMainLoop = false
+                getSharedState.isShuttingDown = true
+                return { successfulTxs: [tx.hash], failedTxs: [], skippedTxs: [], pending: PENDING }
+            }) as any)
             insertBlock.mockImplementation((async (inserted: any) => {
+                if (insertFailure) {
+                    getSharedState.fastSyncAborted = true
+                    throw insertFailure
+                }
                 getSharedState.lastBlockNumber = inserted.number
                 return {}
             }) as any)
@@ -587,6 +640,33 @@ describe("fast sync under finalityProofs", () => {
             expect(insertBlock).toHaveBeenCalledTimes(1)
             expect((insertBlock.mock.calls[0][0] as any).number).toBe(HEIGHT)
         })
+
+        it("does not cool down the peer when local follow-up fails after commit", async () => {
+            ;(log.warning as any).mockClear()
+            gracefulShutdown.mockClear()
+            await syncLastOfBatch(
+                validChild, new CommittedBlockFollowUpError(HEIGHT, new Error("side effect failed")))
+            await new Promise(resolve => setTimeout(resolve, 0))
+            expect(insertBlock).toHaveBeenCalledTimes(1)
+            expect(gracefulShutdown).toHaveBeenCalledWith("committed_block_follow_up", 1)
+            expect((log.warning as any).mock.calls.some((call: unknown[]) =>
+                String(call[0]).includes("cooling down peer peer-1"),
+            )).toBe(false)
+        })
+
+        it("does not blame a peer when shutdown refuses a block during apply", async () => {
+            const handleError = spyOn(await import("@/errors"), "handleError")
+            ;(log.warning as any).mockClear()
+            try {
+                await syncLastOfBatch(validChild, undefined, true)
+                expect(handleError).not.toHaveBeenCalled()
+                expect((log.warning as any).mock.calls.some((call: unknown[]) =>
+                    String(call[0]).includes("cooling down peer peer-1"),
+                )).toBe(false)
+            } finally {
+                handleError.mockRestore()
+            }
+        })
     })
 })
 
@@ -697,6 +777,32 @@ describe("rejection handling", () => {
         expect(applyTransactions.mock.calls.filter(call => call[1] === true)).toHaveLength(0)
         expect(deleteAssignedTxsForBlock).not.toHaveBeenCalled()
         expect(getSharedState.syncStatus).toBe(false)
+    })
+
+    it("shuts down gracefully, with signing stopped, when the block committed but its follow-up failed", async () => {
+        const tx = makeTx(alice)
+        applyResult({ successfulTxs: [tx.hash] })
+        insertBlock.mockRejectedValue(
+            new CommittedBlockFollowUpError(HEIGHT, new Error("side effect failed")),
+        )
+        const exit = spyOn(process, "exit").mockImplementation((() => {
+            throw new Error("process.exit called")
+        }) as never)
+
+        try {
+            const failure = await syncBlock(makeBlock([tx]), servingPeer([tx])).catch(e => e)
+            // The shutdown is reached through a dynamic import
+            await new Promise(resolve => setTimeout(resolve, 0))
+
+            expect(exit).not.toHaveBeenCalled()
+            expect(failure).toBeInstanceOf(CommittedBlockFollowUpError)
+            expect(signingHaltReason()).toContain(`Block ${HEIGHT} committed`)
+            expect(gracefulShutdown).toHaveBeenCalledWith("committed_block_follow_up", 1)
+            await waitForInFlightBlockApply()
+            expect(getSharedState.syncStatus).toBe(false)
+        } finally {
+            exit.mockRestore()
+        }
     })
 
     it("leaves state alone when a throwing apply had assigned nothing", async () => {

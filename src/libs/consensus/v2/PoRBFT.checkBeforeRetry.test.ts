@@ -9,6 +9,7 @@ import { afterAll, afterEach, describe, expect, it, mock, spyOn } from "bun:test
 const reached: string[] = []
 let adoptAnswer = false
 let adoptThrows = false
+let shutdownDuringAdoption = false
 let undoFails = false
 let latchedDrift: number | null = null
 let durableDrift = false
@@ -49,6 +50,10 @@ mock.module("./routines/committedBlock", () => ({
             throw new Error(`rollback of block ${height} failed`)
         }
         if (adoptThrows) throw new Error("block 6 bodies missing from a")
+        if (shutdownDuringAdoption) {
+            getSharedState.runMainLoop = false
+            throw new Error("block apply refused during shutdown")
+        }
         return adoptAnswer
     },
     recordFailedRound: (height: number, members: string[]) => {
@@ -78,6 +83,7 @@ afterEach(() => {
     recorded.length = 0
     adoptAnswer = false
     adoptThrows = false
+    shutdownDuringAdoption = false
     undoFails = false
     latchedDrift = null
     durableDrift = false
@@ -85,9 +91,27 @@ afterEach(() => {
     // set after syncStatus, whose setter counts a successful fast sync
     getSharedState.fastSyncCount = 0
     getSharedState.inConsensusLoop = false
+    getSharedState.runMainLoop = true
 })
 
 describe("check before retry", () => {
+    it("stops before forming a shard when shutdown refuses a retry adoption", async () => {
+        shutdownDuringAdoption = true
+        const logSpy = spyOn(log, "error")
+        const height = getSharedState.lastBlockNumber + 1
+        await consensusRoutine()
+        expect(reached).toEqual([
+            "fastSync",
+            "waitForPeerStatus",
+            `adoptBeforeRetry:${height}`,
+        ])
+        expect(getSharedState.inConsensusLoop).toBe(false)
+        expect(logSpy.mock.calls.some(([message]) =>
+            String(message).includes("deciding on our own round"),
+        )).toBe(false)
+        logSpy.mockRestore()
+    }, 30000)
+
     it("ends the round without building a block when a member's block was adopted", async () => {
         adoptAnswer = true
         const height = getSharedState.lastBlockNumber + 1

@@ -67,7 +67,10 @@ import { getLastBlockSigners } from "../chainBlocks"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import Hashing from "@/libs/crypto/hashing"
-import { CommittedBlockFollowUpError } from "src/libs/blockchain/committedBlockError"
+import {
+    CommittedBlockFollowUpError,
+    stopAfterCommittedBlockFailure,
+} from "src/libs/blockchain/committedBlockError"
 import {
     applyWithSyncedNonceTrace,
     debugAssertionsEnabled,
@@ -700,6 +703,7 @@ export async function syncBlock(
     peer: Peer,
     fetchDeadline?: number,
 ) {
+    if (!getSharedState.runMainLoop) return false
     let exists = await Chain.getBlockByNumber(block.number)
     if (exists) {
         log.debug("Block already exists, skipping ...")
@@ -1072,6 +1076,9 @@ export function unreconciledGcrBlockNumber(): number | null {
  * chain tip can only mean its block never landed.
  */
 export async function assertNoUnreconciledGcrState(): Promise<void> {
+    if (!getSharedState.runMainLoop) {
+        throw new Error("[applySyncedBlock] refusing GCR state check during shutdown")
+    }
     if (unreconciledGcrBlock !== null) {
         throw new Error(
             "[applySyncedBlock] refusing to apply further blocks: GCR state for block " +
@@ -1083,7 +1090,10 @@ export async function assertNoUnreconciledGcrState(): Promise<void> {
     const orphanedBlock = await findOrphanedGcrBlock()
     if (orphanedBlock === null) return
 
-    const tip = await Chain.getLastBlockNumber()
+    const tip = await Chain.getLastStoredBlockNumber()
+    if (!getSharedState.runMainLoop) {
+        throw new Error("[applySyncedBlock] refusing GCR rollback during shutdown")
+    }
     getSharedState.syncStatus = false
     log.warning(
         `[applySyncedBlock] GCR state for block ${orphanedBlock} exists but the block does not (chain tip is ${tip}); rolling it back`,
@@ -1106,6 +1116,7 @@ export async function assertNoUnreconciledGcrState(): Promise<void> {
  * changed in either case.
  */
 export async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
+    if (!getSharedState.runMainLoop) return false
     const db = await Datasource.getInstance()
     const repo = db.getDataSource().getRepository(GCRAssignedTx)
     const rows = await repo
@@ -1159,6 +1170,9 @@ export async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
     const pending = rollback.pending
     await HandleGCR.gcrWriteMutex.runExclusive(() =>
         db.getDataSource().transaction(async em => {
+            if (!getSharedState.runMainLoop) {
+                throw new Error("[applySyncedBlock] refusing GCR rollback during shutdown")
+            }
             await pending.write(em)
             for (const block of blocks) {
                 await HandleGCR.deleteAssignedTxsForBlock(block, em)
@@ -1179,7 +1193,7 @@ export async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
  */
 async function findOrphanedGcrBlock(): Promise<number | null> {
     try {
-        const tip = await Chain.getLastBlockNumber()
+        const tip = await Chain.getLastStoredBlockNumber()
         const db = await Datasource.getInstance()
         const repo = db.getDataSource().getRepository(GCRAssignedTx)
         const highest = await repo
@@ -1225,11 +1239,17 @@ async function applyVerifiedBlock(
     txs: Transaction[],
     next?: Block,
 ): Promise<void> {
+    if (!getSharedState.runMainLoop) {
+        throw new Error("[applySyncedBlock] refusing block apply during shutdown")
+    }
     await verifyBlockTransactions(block, txs)
     await verifyNativeTablesHashes(block)
     const plan = await planBlockOutcome(block, txs)
 
     await trackBlockApply(async () => {
+        if (!getSharedState.runMainLoop) {
+            throw new Error("[applySyncedBlock] refusing GCR apply during shutdown")
+        }
         const outcome = await applyBlockEdits(plan.toApply, block, {
             defer: true,
         })
@@ -1247,6 +1267,9 @@ async function applyVerifiedBlock(
         // Rejects only what this peer served: the caller cools it down and
         // syncs the block from another one.
         await checkResultsAgainstNextBlock(block, txs, next)
+        if (!getSharedState.runMainLoop) {
+            throw new Error("[applySyncedBlock] refusing block insert during shutdown")
+        }
         await insertBlockOrHalt(block, txs, outcome.pending)
     })
 }
@@ -1270,10 +1293,11 @@ async function insertBlockOrHalt(
                 `${e instanceof Error ? e.message : String(e)}`,
         )
         // Disk may hold the block while memory does not: sync skips a stored
-        // block, so only a restart derives memory from disk again.
+        // block, so only a restart derives memory from disk again. The throw
+        // ends this apply, which the shutdown waits for.
         if (e instanceof CommittedBlockFollowUpError) {
-            log.error(`[applySyncedBlock] ${e.message}; exiting`)
-            process.exit(1)
+            log.error(`[applySyncedBlock] ${e.message}; shutting down`)
+            stopAfterCommittedBlockFailure(e)
         }
         throw e
     }
@@ -1456,7 +1480,7 @@ async function batchDownloadBlocks(
         )
     }
     for (const [index, block] of ordered.entries()) {
-        if (getSharedState.isShuttingDown) {
+        if (!getSharedState.runMainLoop || getSharedState.isShuttingDown) {
             log.info(
                 `[batchDownloadBlocks] Shutdown in progress, stopping before block ${block.number}`,
             )
@@ -1654,6 +1678,7 @@ async function requestBlocks(): Promise<boolean> {
         try {
             // Download batch of blocks
             const ok = await batchDownloadBlocks(peer, startBlock, endBlock)
+            if (!getSharedState.runMainLoop) return false
             if (!ok) {
                 discreditAdvertisedHeight(peer)
                 seenPeers.add(peer.identity)
@@ -1673,6 +1698,8 @@ async function requestBlocks(): Promise<boolean> {
                 `[requestBlocks] Batch sync completed. Current block: ${getSharedState.lastBlockNumber}`,
             )
         } catch (error) {
+            if (error instanceof CommittedBlockFollowUpError) return false
+            if (!getSharedState.runMainLoop) return false
             handleError(error, "SYNC", { source: "block download" })
             // Handle chain head reached
             if (error instanceof BlockNotFoundError) {

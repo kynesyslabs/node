@@ -24,6 +24,7 @@ SUITE_FILES=(
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
+    src/libs/blockchain/chainBlocks.storedHead.test.ts
     src/libs/blockchain/chainTransactions.status.test.ts
     src/libs/blockchain/finality/commitments.test.ts
     src/libs/blockchain/finality/requesterFixtures.test.ts
@@ -94,7 +95,9 @@ SUITE_FILES=(
     src/model/datasource.test.ts
     src/model/dbPreflight.test.ts
     src/utilities/nodeVersion.test.ts
+    src/utilities/shutdownExitStatus.test.ts
     src/utilities/tui/CategorizedLogger.level.test.ts
+    testing/monitoring/metricsExposure.test.ts
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/disableForkMachineryFlag.test.ts
     testing/forks/loadForkConfig.test.ts
