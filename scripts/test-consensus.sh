@@ -129,7 +129,7 @@ count=0
 while IFS= read -r file; do
     count=$((count + 1))
     echo "::group::$file ($(runner_for "$file"))"
-    if [ "$(runner_for "$file")" = jest ]; then
+    if [[ "$(runner_for "$file")" = jest ]]; then
         npx jest --maxWorkers=1 "$file" < /dev/null
     else
         bun test "./$file" < /dev/null

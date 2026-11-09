@@ -62,7 +62,7 @@ describe("block-stall alerting is loaded", () => {
         for (const file of ["docs/runbooks/mainnet-monitoring.md", "monitoring/prometheus/alerts/consensus.yml"]) {
             expect(read(file)).toContain(guidance)
             expect(read(file)).not.toContain("implies no second key")
-            expect(read(file)).toContain("For any other stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again.")
+            expect(read(file)).toContain("If the log line names identity-lock loss, no marker is written; check for other copies of the key before restarting. For a foreign-signature stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again.")
         }
     })
 

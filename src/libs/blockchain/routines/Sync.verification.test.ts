@@ -67,6 +67,7 @@ const { signingHaltReason, __resetSigningHalt } = await import(
 )
 const {
     syncBlock,
+    syncBlockIfRunning,
     fastSync,
     waitForInFlightBlockApply,
     assertNoUnreconciledGcrState,
@@ -209,7 +210,7 @@ describe("GCR drift check during shutdown", () => {
     it("refuses pushed blocks and drift checks before touching state", async () => {
         getSharedState.runMainLoop = false
         const db = spyOn(Datasource, "getInstance")
-        expect(await syncBlock(makeBlock([]), servingPeer([]))).toBe(false)
+        expect(await syncBlockIfRunning(makeBlock([]), servingPeer([]))).toBe(false)
         await expect(assertNoUnreconciledGcrState()).rejects.toThrow("during shutdown")
         expect(db).not.toHaveBeenCalled()
         expect(applyTransactions).not.toHaveBeenCalled()

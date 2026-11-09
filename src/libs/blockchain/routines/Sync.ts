@@ -686,6 +686,15 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
     return applied
 }
 
+export async function syncBlockIfRunning(
+    block: Block,
+    peer: Peer,
+    fetchDeadline?: number,
+) {
+    if (!getSharedState.runMainLoop) return false
+    return syncBlock(block, peer, fetchDeadline)
+}
+
 /**
  * Given a block and a peer, saves the block into the database, downloads the transactions
  * from the peer and updates the GCR and transaction tables.
@@ -699,15 +708,6 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
  *     is abandoned; it is never reached once GCR edits start applying.
  */
 export async function syncBlock(
-    block: Block,
-    peer: Peer,
-    fetchDeadline?: number,
-) {
-    if (!getSharedState.runMainLoop) return false
-    return syncBlockWhileRunning(block, peer, fetchDeadline)
-}
-
-async function syncBlockWhileRunning(
     block: Block,
     peer: Peer,
     fetchDeadline?: number,
@@ -1408,6 +1408,110 @@ function batchDownloadIsStopping(): boolean {
     return !getSharedState.runMainLoop || getSharedState.isShuttingDown
 }
 
+async function recoverRejectedBatchBlock(
+    block: Block,
+    peer: Peer,
+    verdict: Awaited<ReturnType<typeof verifySyncedBlock>>,
+): Promise<never> {
+    log.error(
+        `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}): ${verdict.reason}`,
+    )
+
+    const recovered = await resolveForkedBlock(
+        block.number,
+        block.hash,
+        new Set([peer.identity]),
+    )
+
+    if (!recovered) {
+        throw new ForkedPeerError(
+            `No valid variant found for forked block ${block.number}`,
+            null,
+        )
+    }
+
+    try {
+        const child = await fetchChildBlock(
+            recovered.peer,
+            recovered.block,
+        )
+        // Without its child the block is synced on the next round
+        // from the recovery source, together with the child
+        if (child !== null) {
+            await applySyncedBlock(
+                recovered.block,
+                recovered.txs,
+                child,
+            )
+        }
+    } catch (error) {
+        if (!(error instanceof SyncBlockRejectedError)) throw error
+        log.error(
+            `[batchDownloadBlocks] Recovered block ${block.number} from ${recovered.peer.identity} rejected: ${error.message}`,
+        )
+        cooldownPeer(recovered.peer.identity, error.message)
+        throw new ForkedPeerError(
+            `Recovered variant of block ${block.number} was rejected`,
+            null,
+        )
+    }
+
+    // The rest of this batch builds on the rejected hash;
+    // abandon it and continue from the recovery source
+    throw new ForkedPeerError(
+        `Recovered forked block ${block.number} from ${recovered.peer.identity}`,
+        recovered.peer,
+    )
+}
+
+async function processBatchBlock(
+    block: Block,
+    index: number,
+    sorted: Block[],
+    tailChild: Block | null | undefined,
+    txMap: Record<string, Transaction>,
+    peer: Peer,
+): Promise<boolean> {
+    if (batchDownloadIsStopping()) {
+        log.info(
+            `[batchDownloadBlocks] Shutdown in progress, stopping before block ${block.number}`,
+        )
+        return false
+    }
+
+    const blockTxs = block.content.ordered_transactions
+        .map(txHash => txMap[txHash])
+        .filter(tx => !!tx)
+
+    // Hash + signature quorum on EACH historical block before insert
+    // (height-stable signer set).
+    const verdict = await verifySyncedBlock(block, peer)
+    if (!verdict.valid) {
+        await recoverRejectedBatchBlock(block, peer, verdict)
+    }
+
+    let inserted: boolean
+    try {
+        inserted = await applySyncedBlock(
+            block,
+            blockTxs,
+            sorted[index + 1] ?? tailChild,
+        )
+    } catch (error) {
+        if (!(error instanceof SyncBlockRejectedError)) throw error
+        log.error(
+            `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}) from ${peer.identity}: ${error.message}`,
+        )
+        // The caller rotates to the next peer on a false return
+        cooldownPeer(peer.identity, error.message)
+        return false
+    }
+    if (!inserted) {
+        return false
+    }
+    return true
+}
+
 async function batchDownloadBlocks(
     peer: Peer,
     startBlock: number,
@@ -1492,89 +1596,7 @@ async function batchDownloadBlocks(
         )
     }
     for (const [index, block] of ordered.entries()) {
-        if (batchDownloadIsStopping()) {
-            log.info(
-                `[batchDownloadBlocks] Shutdown in progress, stopping before block ${block.number}`,
-            )
-            return false
-        }
-
-        const blockTxs = block.content.ordered_transactions
-            .map(txHash => txMap[txHash])
-            .filter(tx => !!tx)
-
-        // Hash + signature quorum on EACH historical block before insert
-        // (height-stable signer set).
-        const verdict = await verifySyncedBlock(block, peer)
-        if (!verdict.valid) {
-            log.error(
-                `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}): ${verdict.reason}`,
-            )
-
-            const recovered = await resolveForkedBlock(
-                block.number,
-                block.hash,
-                new Set([peer.identity]),
-            )
-
-            if (!recovered) {
-                throw new ForkedPeerError(
-                    `No valid variant found for forked block ${block.number}`,
-                    null,
-                )
-            }
-
-            try {
-                const child = await fetchChildBlock(
-                    recovered.peer,
-                    recovered.block,
-                )
-                // Without its child the block is synced on the next round
-                // from the recovery source, together with the child
-                if (child !== null) {
-                    await applySyncedBlock(
-                        recovered.block,
-                        recovered.txs,
-                        child,
-                    )
-                }
-            } catch (error) {
-                if (!(error instanceof SyncBlockRejectedError)) throw error
-                log.error(
-                    `[batchDownloadBlocks] Recovered block ${block.number} from ${recovered.peer.identity} rejected: ${error.message}`,
-                )
-                cooldownPeer(recovered.peer.identity, error.message)
-                throw new ForkedPeerError(
-                    `Recovered variant of block ${block.number} was rejected`,
-                    null,
-                )
-            }
-
-            // The rest of this batch builds on the rejected hash;
-            // abandon it and continue from the recovery source
-            throw new ForkedPeerError(
-                `Recovered forked block ${block.number} from ${recovered.peer.identity}`,
-                recovered.peer,
-            )
-        }
-
-        let inserted: boolean
-        try {
-            inserted = await applySyncedBlock(
-                block,
-                blockTxs,
-                sorted[index + 1] ?? tailChild,
-            )
-        } catch (error) {
-            if (!(error instanceof SyncBlockRejectedError)) throw error
-            log.error(
-                `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}) from ${peer.identity}: ${error.message}`,
-            )
-            // The caller rotates to the next peer on a false return
-            cooldownPeer(peer.identity, error.message)
-            return false
-        }
-        if (!inserted) {
+        if (!await processBatchBlock(block, index, sorted, tailChild, txMap, peer)) {
             return false
         }
     }
@@ -1605,7 +1627,7 @@ async function waitForNextBlock() {
         )
         log.debug("[waitForNextBlock] Block received: " + newBlock.number)
 
-        return await syncBlock(newBlock as Block, peer)
+        return await syncBlockIfRunning(newBlock as Block, peer)
     } catch (error) {
         if (error instanceof TimeoutError) {
             log.error("[waitForNextBlock] Timeout waiting for next block")
