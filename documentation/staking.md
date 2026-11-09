@@ -40,14 +40,15 @@ bun install
 Pull the latest changes by running the following commands in the node source directory:
 
 ```sh
-git restore .
-
 git checkout stabilisation
 
 git pull
 
 bun install
 ```
+
+If the checkout has local changes, stop and review them before updating; do
+not discard them as part of the staking procedure.
 
 For a node to participate in the consensus, they need to stake DEM. Get your node public key by running the following command:
 
@@ -59,19 +60,23 @@ Head over to https://faucet.demos.sh and paste your public key to get 2400 DEM.
 
 ## Staking
 
-Update your node's `demos_peerlist.json` to look like this:
+Obtain the current network RPC from the network coordinator. The RPC submits
+the stake transaction; it is not the public URL that other validators use to
+reach your node.
 
-```json
-{
-    "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156":"http://node3.demos.sh:53550"
-}
+Run the following command in the node source folder, passing both URLs
+explicitly:
+
+```bash
+bun run validator:stake \
+  --rpc <network-rpc> \
+  --connection-url http://<your-ipaddress>:53550
 ```
 
-Run the following command in the node source folder to stake the DEM you acquired:
-
-```sh
-bun run validator:stake
-```
+The command does not need `demos_peerlist.json` when `--rpc` is supplied. It
+never advertises the network RPC as your validator endpoint. If
+`--connection-url` is omitted, the command uses `EXPOSED_URL` and otherwise
+fails before creating a transaction.
 
 ## Starting your node
 
@@ -98,7 +103,9 @@ After your node is up and running (wait for debug prints), open `http://<your-ip
 You can customize the amount (in DEM) using the `--amount` flag:
 
 ```sh
-bun run validator:stake --amount 1200
+bun run validator:stake --amount 1200 \
+  --rpc <network-rpc> \
+  --connection-url http://<your-ipaddress>:53550
 ```
 
 To run the node later on without deleting the database:
