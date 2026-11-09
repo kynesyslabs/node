@@ -146,37 +146,12 @@ async function signWithNativeSendFeeQuote(
     return signValidityData(validityData)
 }
 
-export async function confirmTransaction(
-    tx: Transaction, // Must contain a tx property being a Transaction object
+async function checkAdmissionAndStructure(
+    tx: Transaction,
     sender: string,
-): Promise<ValidityData> {
-    stripClientFeeQuote(tx)
-
-    // Getting the current block number
-    const getLastBlockNumberStart = Date.now()
-    const referenceBlock = await Chain.getLastBlockNumber()
-    const getLastBlockNumberEnd = Date.now()
-    log.only(
-        `[confirmTransaction] Get last block number in ${getLastBlockNumberEnd - getLastBlockNumberStart}ms`,
-    )
-
-    // REVIEW Below: if this does not work, use ValidityData interface and fill manually
-    let validityData: ValidityData = {
-        data: {
-            valid: false,
-            reference_block: referenceBlock,
-            message:
-                "[Native Tx Validation] [NOT PROCESSED] Transaction yet to be processed\n",
-            gas_operation: null,
-            transaction: tx,
-        },
-        signature: null,
-        rpc_public_key: {
-            type: getSharedState.signingAlgorithm,
-            data: getSharedState.publicKeyHex,
-        },
-    }
-
+    referenceBlock: number,
+    validityData: ValidityData,
+): Promise<ValidityData | null> {
     const admission = await checkTxAdmissible(tx, {
         head: referenceBlock,
         checkMempool: true,
@@ -229,6 +204,14 @@ export async function confirmTransaction(
         return validityData
     }
 
+    return null
+}
+
+async function checkNonceAndEdit(
+    tx: Transaction,
+    referenceBlock: number,
+    validityData: ValidityData,
+): Promise<ValidityData | null> {
     // Check nonce > current nonce
     const currentNonce = await GCR.getAccountNonce(
         normalizePubkey(tx.content.from_ed25519_address || tx.content.from),
@@ -280,6 +263,13 @@ export async function confirmTransaction(
         }
     }
 
+    return null
+}
+
+async function checkAmountBalance(
+    tx: Transaction,
+    validityData: ValidityData,
+): Promise<ValidityData | null> {
     let txAmount: bigint
 
     try {
@@ -309,6 +299,51 @@ export async function confirmTransaction(
             return validityData
         }
     }
+
+    return null
+}
+
+export async function confirmTransaction(
+    tx: Transaction, // Must contain a tx property being a Transaction object
+    sender: string,
+): Promise<ValidityData> {
+    stripClientFeeQuote(tx)
+
+    // Getting the current block number
+    const getLastBlockNumberStart = Date.now()
+    const referenceBlock = await Chain.getLastBlockNumber()
+    const getLastBlockNumberEnd = Date.now()
+    log.only(
+        `[confirmTransaction] Get last block number in ${getLastBlockNumberEnd - getLastBlockNumberStart}ms`,
+    )
+
+    // REVIEW Below: if this does not work, use ValidityData interface and fill manually
+    let validityData: ValidityData = {
+        data: {
+            valid: false,
+            reference_block: referenceBlock,
+            message:
+                "[Native Tx Validation] [NOT PROCESSED] Transaction yet to be processed\n",
+            gas_operation: null,
+            transaction: tx,
+        },
+        signature: null,
+        rpc_public_key: {
+            type: getSharedState.signingAlgorithm,
+            data: getSharedState.publicKeyHex,
+        },
+    }
+
+    const admissionRefusal = await checkAdmissionAndStructure(
+        tx, sender, referenceBlock, validityData,
+    )
+    if (admissionRefusal) return admissionRefusal
+
+    const nonceRefusal = await checkNonceAndEdit(tx, referenceBlock, validityData)
+    if (nonceRefusal) return nonceRefusal
+
+    const amountRefusal = await checkAmountBalance(tx, validityData)
+    if (amountRefusal) return amountRefusal
 
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
