@@ -53,6 +53,24 @@ function requiresAmountOnlyBalanceCheck(tx: Transaction, amount: bigint): boolea
     return amount > 0n && !isNativeSend(tx)
 }
 
+async function amountOnlyBalanceError(
+    tx: Transaction,
+    amount: bigint,
+): Promise<string | null> {
+    if (!requiresAmountOnlyBalanceCheck(tx, amount)) return null
+
+    const from =
+        typeof tx.content.from === "string"
+            ? tx.content.from
+            : forgeToHex(tx.content.from)
+
+    const fromBalance = await GCR.getAccountBalance(from)
+    if (fromBalance < amount) {
+        return `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${amount} but have ${fromBalance}\n`
+    }
+    return null
+}
+
 async function nativeSendBalanceError(
     tx: Transaction,
     sendAmount: bigint,
@@ -273,19 +291,12 @@ export async function confirmTransaction(
         return validityData
     }
 
-    if (requiresAmountOnlyBalanceCheck(tx, txAmount)) {
-        const from =
-            typeof tx.content.from === "string"
-                ? tx.content.from
-                : forgeToHex(tx.content.from)
-
-        const fromBalance = await GCR.getAccountBalance(from)
-        if (fromBalance < txAmount) {
-            validityData.data.message = `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${txAmount} but have ${fromBalance}\n`
-            validityData.data.valid = false
-            validityData = await signValidityData(validityData)
-            return validityData
-        }
+    const amountBalanceError = await amountOnlyBalanceError(tx, txAmount)
+    if (amountBalanceError) {
+        validityData.data.message = amountBalanceError
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
     }
 
     // For L2PS encrypted transactions, decrypt inner tx and check balance
