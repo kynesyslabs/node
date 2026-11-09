@@ -61,6 +61,7 @@ describe("block-stall alerting is loaded", () => {
         for (const file of ["docs/runbooks/mainnet-monitoring.md", "monitoring/prometheus/alerts/consensus.yml"]) {
             expect(read(file)).toMatch(/\[SIGNING\] stopped until this process exits:[^\n]*line with marker 0/)
             expect(read(file)).toContain("implies no second key unless the ForeignSignature alert also fired")
+            expect(read(file)).toContain("For any other stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again.")
         }
     })
 

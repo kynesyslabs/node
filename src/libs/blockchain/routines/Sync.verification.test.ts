@@ -501,6 +501,7 @@ describe("fast sync under finalityProofs", () => {
             childResponse: (tx: any, block: any) => Promise<any[]>,
             insertFailure?: Error,
             stopDuringApply = false,
+            stopBeforeBatchLoop = false,
         ) {
             getSharedState.forkConfig.finalityProofs.activationHeight = HEIGHT + 1
             getSharedState.batchSyncBlockSize = 1
@@ -511,6 +512,7 @@ describe("fast sync under finalityProofs", () => {
             peer.longCall = jest.fn(async (request: any) => {
                 const { start, limit } = request.params[0].data
                 const asksForChild = start === HEIGHT + 1 && limit === 1
+                if (asksForChild && stopBeforeBatchLoop) getSharedState.runMainLoop = false
                 return { result: 200, response: clone(asksForChild ? served : [block]) }
             })
             spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([peer])
@@ -541,6 +543,16 @@ describe("fast sync under finalityProofs", () => {
             await syncLastOfBatch(async (tx, block) => [childOf(block, await confirmedRoot(tx))])
 
             expect((insertBlock.mock.calls[0][0] as any).number).toBe(HEIGHT)
+        })
+
+        it("stops before processing a fetched batch when the main loop stops", async () => {
+            await syncLastOfBatch(validChild, undefined, false, true)
+
+            expect(applyTransactions).not.toHaveBeenCalled()
+            expect(insertBlock).not.toHaveBeenCalled()
+            expect(log.info).toHaveBeenCalledWith(
+                `[batchDownloadBlocks] Shutdown in progress, stopping before block ${HEIGHT}`,
+            )
         })
 
         it("stores nothing when the fetched next block contradicts its results", async () => {

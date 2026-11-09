@@ -704,6 +704,14 @@ export async function syncBlock(
     fetchDeadline?: number,
 ) {
     if (!getSharedState.runMainLoop) return false
+    return syncBlockWhileRunning(block, peer, fetchDeadline)
+}
+
+async function syncBlockWhileRunning(
+    block: Block,
+    peer: Peer,
+    fetchDeadline?: number,
+) {
     let exists = await Chain.getBlockByNumber(block.number)
     if (exists) {
         log.debug("Block already exists, skipping ...")
@@ -1396,6 +1404,10 @@ async function fetchChildBlock(
  * @param endBlock - The last block number to download (inclusive)
  * @returns True if all blocks were downloaded and processed successfully
  */
+function batchDownloadIsStopping(): boolean {
+    return !getSharedState.runMainLoop || getSharedState.isShuttingDown
+}
+
 async function batchDownloadBlocks(
     peer: Peer,
     startBlock: number,
@@ -1480,7 +1492,7 @@ async function batchDownloadBlocks(
         )
     }
     for (const [index, block] of ordered.entries()) {
-        if (!getSharedState.runMainLoop || getSharedState.isShuttingDown) {
+        if (batchDownloadIsStopping()) {
             log.info(
                 `[batchDownloadBlocks] Shutdown in progress, stopping before block ${block.number}`,
             )

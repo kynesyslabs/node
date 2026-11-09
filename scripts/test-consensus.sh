@@ -140,7 +140,13 @@ while IFS= read -r file; do
         failed+=("$file")
         echo "::error file=$file::test file failed"
     fi
-done < <({ find "${SUITE_DIRS[@]}" -name '*.test.ts'; printf '%s\n' "${SUITE_FILES[@]}"; } | sort -u)
+done < <(
+    if [ "$#" -gt 0 ]; then
+        printf '%s\n' "$@"
+    else
+        { find "${SUITE_DIRS[@]}" -name '*.test.ts'; printf '%s\n' "${SUITE_FILES[@]}"; } | sort -u
+    fi
+)
 
 echo "consensus suites: $count files, ${#failed[@]} failed"
 if [ "$count" -eq 0 ]; then
