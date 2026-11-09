@@ -52,9 +52,9 @@ mock.module("@/libs/consensus/v2/routines/getShard", () => ({
     pinnedShardIdentities: () => [],
     rankPool: (_seed: string, pool: string[]) => pool,
     drawLiveShard: (_seed: string, pool: string[]) => pool,
-    readActiveValidatorAddresses: async () => [],
+    readActiveValidatorAddresses: async () => new Set<string>(),
     getBoundPool: async () => [],
-    pinRankedPool: () => "",
+    pinRankedPool: (ranked: string[]) => ranked,
     drawBoundCommittee: () => [],
     __resetValidatorCache: () => undefined,
 }))
