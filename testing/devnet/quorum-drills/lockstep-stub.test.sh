@@ -149,6 +149,36 @@ check "returns 0" has "rc=0 h=25"
 check "finishes in under 8 s (more than 4 reads at a time)" test "${ms}" -lt 8000
 check "takes at least 2 s (one head round, one hash round)" test "${ms}" -ge 2000
 
+echo "== partition fork scan: an unread hash at a height every node holds is ERROR, above the lowest head it is left out"
+# run.sh's own fork_scan and read_error; heights 23..26, the lowest head 25. A subshell
+# so that read_error's exit ends the case: OUT is its output, then rc=
+source <(region 'fork_scan() {' 'scenario_partition() {')
+source <(region 'read_error() {' '# A node log whose matching')
+fs_case() { new_case "$1" 25 25 25 26 26 26; PHASES="${WORK}/${CASE}/phases.tsv"; RESULT=""; DETAIL=""; }
+fs_scan() {
+    OUT=$( ( write_verdict() { echo "VERDICT ${RESULT}: ${DETAIL}"; }
+        fork_scan 23 26 25; echo "scan done conflicts=[${FORK_CONFLICTS}]" ) 2>&1; echo "rc=$?")
+    echo "${OUT}" | tail -2 | cut -c1-200 | sed 's/^/    | /'
+}
+reads_of() { grep -c "^hash n$1 $2\$" "${FAKE}/calls"; } # hash reads of node $1 at height $2
+fs_case fs_same; fs_scan
+check "all hashes read, all equal: no fork" has "scan done conflicts=\[\]"
+check "all hashes read, all equal: rc=0" has "rc=0"
+check "a node is read once per height (n1 at 23, n6 at 26)" test "$(reads_of 1 23)$(reads_of 6 26)" = 11
+fs_case fs_fork; echo 0xfork > "${FAKE}/hash.3.24"; fs_scan
+check "two hashes at 24 (<= the lowest head): fork at 24 and no other height" has "scan done conflicts=\[ 24\]"
+check "two hashes at 24: rc=0 (a fork is a result, not an error)" has "rc=0"
+fs_case fs_gap; echo empty > "${FAKE}/hash.4.24"; fs_scan
+check "n4's hash at 24 (<= the lowest head) unread: exit 2, the scan does not finish" bash -c '! grep -q "scan done" <<< "$1" && grep -q "^rc=2$" <<< "$1"' _ "${OUT}"
+check "n4's hash at 24 unread: VERDICT ERROR, phase healed" bash -c 'grep -q "VERDICT ERROR: healed: node unreadable" <<< "$1" && grep -q "^healed" "$2"' _ "${OUT}" "${PHASES}"
+fs_case fs_gap_timeout; echo timeout > "${FAKE}/hash.2.23"; fs_scan
+check "n2's hash at 23 times out: exit 2, ERROR" bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "VERDICT ERROR" <<< "$1"' _ "${OUT}"
+fs_case fs_above; echo empty > "${FAKE}/hash.1.26"; fs_scan
+check "n1's hash at 26 (above the lowest head) unread: left out, no fork" has "scan done conflicts=\[\]"
+check "n1's hash at 26 unread: rc=0" has "rc=0"
+fs_case fs_above_fork; echo empty > "${FAKE}/hash.1.26"; echo 0xfork > "${FAKE}/hash.5.26"; echo 0xother > "${FAKE}/hash.6.26"; fs_scan
+check "n1 unread at 26, n5 and n6 differ there: fork at 26 still found" has "scan done conflicts=\[ 26\]"
+
 echo "== database reads (psql_node, block_rows) are bounded; a timed-out read is a failure, not an empty result"
 fn_src() { # $1 function name: its definition, from `name() {` to the first line that is `}`
     awk -v a="$1() {" 'index($0, a) == 1 { on = 1 } on { print } on && /^}/ { exit }' "${RUN_SH}"

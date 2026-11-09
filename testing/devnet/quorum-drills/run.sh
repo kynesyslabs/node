@@ -1252,6 +1252,22 @@ print(f"UPDATE blocks SET content = $qdrill${text}$qdrill$::json WHERE number = 
 }
 
 sidecar() { echo "${PROJECT}-fault-$1"; }
+# Heights $1..$2: FORK_CONFLICTS lists those where the running nodes hold two hashes.
+# Every node holds every height <= $3 (the lowest head), so a hash unread there is
+# an unreadable node (read_error), not an absent block: it could hide a fork.
+fork_scan() {
+    local hh i h seen n
+    FORK_CONFLICTS=""
+    for hh in $(seq "$1" "$2"); do
+        seen=""; n=0
+        for i in $(running); do
+            h=$(hash_at "${i}" "${hh}")
+            if [ -n "${h}" ]; then seen="${seen}${h}"$'\n'; n=$((n + 1)); fi
+        done
+        if [ "${hh}" -le "$3" ] && [ "${n}" -lt "$(live_count)" ]; then read_error healed; fi
+        if [ "$(printf '%s' "${seen}" | sort -u | grep -c .)" -gt 1 ]; then FORK_CONFLICTS="${FORK_CONFLICTS} ${hh}"; fi
+    done
+}
 scenario_partition() {
     lockstep_or_abort 3
     local i j ip groupA="1 2 3" groupB="4 5 6" h0 a_max b_max
@@ -1302,10 +1318,8 @@ scenario_partition() {
     local hmin=999999 hh conflicts="" seen
     for i in $(running); do hh=$(read_head "${i}") || read_error healed; [ "${hh}" -lt "${hmin}" ] && hmin="${hh}"; done
     local hmax_all=$(( top > hmin ? top : hmin ))
-    for hh in $(seq "${h0}" "${hmax_all}"); do
-        seen=$(for i in $(running); do hash_at "${i}" "${hh}"; done | grep . | sort -u | wc -l)
-        [ "${seen}" -gt 1 ] && conflicts="${conflicts} ${hh}"
-    done
+    fork_scan "${h0}" "${hmax_all}" "${hmin}"
+    conflicts="${FORK_CONFLICTS}"
     local fork=no; [ -n "${conflicts}" ] && fork=yes
     say "heights ${h0}..${hmax_all}: fork=${fork}${conflicts:+ at${conflicts}}; final heads $(heads_line)"
     grep_logs '\[FORK\]' | head -3 | cut -c1-260 | sed 's/^/    /' | tee -a "${LOG_DIR}/run.log"

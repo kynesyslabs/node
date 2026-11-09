@@ -712,7 +712,10 @@ answer, or that sees no round start within `ROUND_START_WAIT_S` (60 s, or 3 roun
 on node-1 (why)`): a stop not seen mid-round is not the drill. The
 `ROUND_START_WAIT_S` deadline is checked before each `docker logs` read, not
 after it: a read that starts before the deadline and returns after it with a
-round start in it still leads to the stop. The snapshot
+round start in it still leads to the stop. In the `partition` fork scan, a
+block hash that cannot be read at a height every running node holds (up to the
+lowest head) ends the run as `ERROR`, exit 2; above the lowest head a node may
+not hold the block yet, and a missing hash is left out. The snapshot
 only notes the call in `03-bringup.log`. Two docker calls are still not
 bounded and a stalled daemon can hang the run there: the bring-up
 `docker compose exec -T postgres pg_isready` loop and its `ABORT` check, and
