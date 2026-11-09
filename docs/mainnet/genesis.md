@@ -99,6 +99,10 @@ what a validator would hit on this file, and the same checks fail
 - a validator `connection_url` in that set that is not an http(s) URL with a
   host (and, if it names a port, one in 1-65535). Each one is exactly the
   `EXPOSED_URL` that operator runs with, port included; peers dial it.
+  A validator without a URL is not reported, because the node accepts it:
+  `null` in either list, and a missing or empty URL in a `validators.jsonl`
+  row (a genesis `validators` entry without one is refused at boot). Before
+  publishing, check separately that every launch validator has a URL.
 
 What each value covers, how they are published, the 24 h rule and the
 height-1 check after launch are in [genesis-hash.md](genesis-hash.md).

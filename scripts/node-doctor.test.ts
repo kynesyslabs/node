@@ -368,6 +368,22 @@ describe("node-doctor --production genesis file", () => {
         )
     })
 
+    it("reads valid_at 0.0 as the node does, as the integer 0", () => {
+        // JSON.stringify writes 0, so the file is written by hand: the node parses 0.0 to 0
+        const lines = many(7).map(v => JSON.stringify(v).replace('"valid_at":0', '"valid_at":0.0'))
+        lines[6] = lines[6].replace('"valid_at":0.0', '"valid_at":1.0')
+        expect(lines[0]).toContain('"valid_at":0.0')
+        const file = path.join(dir, "genesis.json")
+        fs.writeFileSync(file, `{"properties":{"id":4242,"shardSize":7},"validators":[${lines.join(",")}]}`)
+        const parsed = JSON.parse(fs.readFileSync(file, "utf8")).validators
+        expect(parsed.filter((v: { valid_at: number }) => Number.isInteger(v.valid_at) && v.valid_at <= 0)).toHaveLength(6)
+        const { lines: out, fails } = check({ DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(out, "genesis validators")).toBe(
+            'PASS genesis validators: 6 in the genesis validators (of 7 listed; only status "2" with valid_at 0 vote from block 1), quorum 5',
+        )
+        expect(fails).toBe(0)
+    })
+
     it("checks the URLs of the snapshot's validators when the snapshot owns the set", () => {
         const rows: Record<string, unknown>[] = many(7)
         rows[2] = validator(3, "http://45.13.233.189:65550")

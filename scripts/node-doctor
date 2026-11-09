@@ -761,6 +761,9 @@ def main():
         if not isinstance(v, dict):
             return False
         at = v.get("valid_at")
+        # JSON 0.0 is the integer 0 to the node (JavaScript numbers); Python reads a float
+        if isinstance(at, float) and at.is_integer():
+            at = int(at)
         return v.get("status") == "2" and isinstance(at, int) and not isinstance(at, bool) and at <= 0
 
     count = sum(1 for v in rows if active(v))
