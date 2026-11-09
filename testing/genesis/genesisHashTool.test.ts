@@ -15,6 +15,7 @@ import { SHARD_SIZE_MAX, SHARD_SIZE_MIN } from "src/libs/consensus/genesisShardS
 import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import {
     connectionUrlProblem,
+    genesisNetworkFindings,
     genesisNetworkProblems,
     genesisValues,
     parseArgs,
@@ -237,6 +238,8 @@ describe("genesis-hash tool", () => {
             expect(snapshotValidatorRows(dir)).toBeNull()
             writeFileSync(join(dir, "manifest.json"), JSON.stringify({ files: { "validators.jsonl": { rows: 9 } } }))
             expect(snapshotValidatorRows(dir)).toBe(9)
+            writeFileSync(join(dir, "manifest.json"), "{ not json")
+            expect(snapshotValidatorRows(dir)).toBeNull()
         })
 
         it("reports a validator URL no peer can dial", () => {
@@ -276,6 +279,47 @@ describe("genesis-hash tool", () => {
             const help = Bun.spawnSync(["bun", "scripts/genesis-hash.ts", "--help"], { stdout: "pipe", stderr: "pipe" })
             expect(help.exitCode).toBe(0)
             expect(help.stdout.toString()).toContain("usage: bun scripts/genesis-hash.ts --genesis FILE")
+        }, 60_000)
+
+        it("--allow-unforgeable turns only the quorum finding into a warning", () => {
+            const unforgeable = network(10, many(4))
+            expect(genesisNetworkFindings(unforgeable).problems).toEqual([])
+            expect(genesisNetworkFindings(unforgeable).unforgeable[0]).toStartWith(
+                "4 validators in genesis validators, below the quorum of 7",
+            )
+            expect(parseArgs(["--genesis", "g.json", "--allow-unforgeable"], {}).allowUnforgeable).toBe(true)
+            expect(parseArgs(["--genesis", "g.json"], {}).allowUnforgeable).toBe(false)
+
+            const env = { ...process.env, DEMOS_SNAPSHOT_DIR: "" }
+            const file = writeGenesis(unforgeable)
+            const strict = Bun.spawnSync(["bun", "scripts/genesis-hash.ts", "--genesis", file, "--json"], {
+                stdout: "pipe",
+                stderr: "pipe",
+                env,
+            })
+            expect(strict.exitCode).toBe(1)
+            const allowed = Bun.spawnSync(
+                ["bun", "scripts/genesis-hash.ts", "--genesis", file, "--json", "--allow-unforgeable"],
+                { stdout: "pipe", stderr: "pipe", env },
+            )
+            expect(allowed.exitCode).toBe(0)
+            const out = JSON.parse(allowed.stdout.toString().slice(allowed.stdout.toString().indexOf("{")))
+            expect(out.problems).toEqual([])
+            expect(out.warnings).toHaveLength(1)
+            expect(out.warnings[0]).toStartWith("4 validators in genesis validators, below the quorum of 7")
+
+            // What a node refuses stays a problem under the flag
+            const refused = network(1, many(4))
+            refused.validators[0] = validator(1, "http://45.13.233.189:65550")
+            const bad = Bun.spawnSync(
+                ["bun", "scripts/genesis-hash.ts", "--genesis", writeGenesis(refused), "--allow-unforgeable"],
+                { stdout: "pipe", stderr: "pipe", env },
+            )
+            expect(bad.exitCode).toBe(1)
+            const text = bad.stdout.toString()
+            expect(text).toContain("problem: ")
+            expect(text).toContain("a node refuses this genesis at boot")
+            expect(text).toContain("port 65550 is outside 1-65535")
         }, 60_000)
 
         it("reads the snapshot from DEMOS_SNAPSHOT_DIR when --snapshot is not given", () => {

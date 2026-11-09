@@ -101,8 +101,8 @@ that fails them:
   image and the files mounted as in INSTALL.md ("Run a released image", steps
   3 and 4) exits 0 and prints no `problem:` line. It reports a `shardSize`
   outside 3-100, fewer validators than the quorum of `shardSize` (2/3 + 1),
-  and a validator `connection_url` that is not an http(s) URL with a port in
-  1-65535.
+  and a validator `connection_url` that is not an http(s) URL with a host
+  (and, if it names a port, one in 1-65535).
 - every validator `connection_url` in the genesis is exactly the
   `EXPOSED_URL` that operator sent, port included.
 

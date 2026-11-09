@@ -180,7 +180,7 @@ TLSNOTARY_ENABLED=true
 
 - **`EXPOSED_URL`** is the address peers and clients reach this node's RPC at. Its port is the `RPC_PORT` you publish (change both together; a port forwarded by NAT or served by a proxy is the outside one), and it must be exactly the `connection_url` the network's genesis lists for your key: the release owner builds the genesis from the URL you sent, and clients read it from there (`getValidatorSet`). If the two differ, send the release owner the right URL before launch rather than editing the genesis.
 - **`COMPOSE_PROFILES`.** Block production needs neither TLSNotary nor monitoring. `tlsnotary` runs the notary sidecar for SDK clients that attest HTTPS responses; without it, set `COMPOSE_PROFILES=` and `TLSNOTARY_ENABLED=false`. `monitoring` adds Prometheus and Grafana and does not start without `GRAFANA_ADMIN_PASSWORD` (any strong password other than `demos`); a validator that runs it sets both. Leave out `reaper` (it mounts the Docker socket) and `neo4j`.
-- **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) and the advertised proxy port (`TLSNOTARY_PROXY_PORT`) are published on every interface, and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback only. A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: OmniProtocol dials a peer at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting).
+- **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) is published on every interface. The node service publishes the advertised proxy port (`TLSNOTARY_PROXY_PORT`) on every interface and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback whatever the profiles, so those ports must be free on the host even with TLSNotary off (nothing answers on them then). A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: OmniProtocol dials a peer at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting).
 - **Ports.** Every published port and the variable that moves it are in [Network Exposure](#network-exposure). Check that each one is free (`ss -ltn`) before the first start.
 - **Another install on this host** also sets `INSTANCE_SUFFIX` and `COMPOSE_PROJECT_NAME` and moves every port: see [More than one install on a host](#more-than-one-install-on-a-host).
 
@@ -270,7 +270,7 @@ The helper is the Postgres image the stack already uses, pinned by digest, so no
 ./scripts/node-doctor --production --env-from compose
 ```
 
-It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, the mounted genesis file, one-start switches left set) and exits 1 on any FAIL. It reads the values and mounts the node container will get from `docker compose config`, so run it from the checkout with `.env` and the override in place. `--env-from compose` makes it fail rather than fall back to `.env` when it cannot read the compose settings. The genesis lines fail when `/app/data/genesis.json` is not mounted from the host, when `properties.shardSize` is outside the range the node accepts, when the genesis (or the snapshot's `validators.jsonl`) lists fewer validators than the quorum of `shardSize` (2/3 + 1: 7 of 10), and on a validator `connection_url` that is not an http(s) URL with a port in 1-65535. Fix every FAIL, and check every WARN by hand, before the next step.
+It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, the mounted genesis file, one-start switches left set) and exits 1 on any FAIL. It reads the values and mounts the node container will get from `docker compose config`, so run it from the checkout with `.env` and the override in place. `--env-from compose` makes it fail rather than fall back to `.env` when it cannot read the compose settings. The genesis lines fail when `/app/data/genesis.json` is not mounted from the host, when `properties.shardSize` is outside the range the node accepts, when the genesis (or the snapshot's `validators.jsonl`) lists fewer validators than the quorum of `shardSize` (2/3 + 1: 7 of 10), and on a validator `connection_url` that is not an http(s) URL with a host (and, if it names a port, one in 1-65535). Fix every FAIL, and check every WARN by hand, before the next step.
 
 **8. Create the database schema and start without building.**
 
@@ -290,13 +290,14 @@ while :; do
   state=$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$NODE_CONTAINER")
   case "$state" in
     "running healthy") echo "node healthy"; break ;;
+    "running unhealthy") echo "node runs but its health check fails: see docker compose logs node" >&2; break ;;
     running*) sleep 10 ;;
     *) echo "node is $state: see docker compose logs node" >&2; break ;;
   esac
 done
 ```
 
-It must print `node healthy`. Anything else means the node stopped: `docker compose logs --tail 50 node` names the reason (a genesis it refuses, a missing key or schema), and steps 9 and 10 have nothing to inspect until it runs.
+It must print `node healthy`. Anything else means the node stopped or fails its health check: `docker compose logs --tail 50 node` names the reason (a genesis it refuses, a missing key or schema), and steps 9 and 10 have nothing to inspect until it runs.
 
 **9. Confirm the digest you run** and post it on the release thread:
 
@@ -356,7 +357,7 @@ Leave `PG_HOST=postgres` and `TLSNOTARY_HOST=tlsnotary` exactly as shipped — t
 
 A fresh node joins no network by itself: it starts from the genesis bundled in the image (the testnet's) and knows no peer. To participate in the actual Demos testnet/mainnet, you must do **three things** before the node's first start. A validator does them as part of [Run a released image](#run-a-released-image-validators) (steps 3, 4 and 6); a source build does them here.
 
-A node forges only while at least the quorum of the genesis `shardSize` (2/3 + 1: 7 of 10, 3 of 3) of its validators are online. A genesis that lists fewer validators than that never gets past block 0, and a single validator forges on its own only with a genesis made for it; `genesis-hash.ts` and `node-doctor --production` report such a genesis before the start.
+A node forges only while at least the quorum of the genesis `shardSize` (2/3 + 1: 7 of 10, 3 of 3) of its validators are online. A genesis that lists fewer validators than that never gets past block 0. The smallest `shardSize` a node accepts is 3, with a quorum of 3, so a network of fewer than 3 validators never forges: a rehearsal needs at least 3 validators at `shardSize` 3. `genesis-hash.ts` and `node-doctor --production` report such a genesis before the start.
 
 **1. Set `EXPOSED_URL` to your reachable address.**
 
@@ -451,7 +452,7 @@ When running on a VPS or any machine you want peers to connect to, you must allo
 | 9095 | `GOSSIP_PORT` | TCP | Gossip; peers dial `EXPOSED_URL`'s host on this port |
 | 3005 | `RPC_SIGNALING_PORT` | TCP | WebRTC signaling for instant-messaging clients; consensus does not use it. Published on every interface |
 | 7047 | `TLSNOTARY_PORT` | TCP | TLSNotary notary, published on every interface whenever the `tlsnotary` profile is on |
-| 55688 | `TLSNOTARY_PROXY_PORT` | TCP | TLSNotary WebSocket proxy port the node advertises (published with TLSNotary on) |
+| 55688 | `TLSNOTARY_PROXY_PORT` | TCP | TLSNotary WebSocket proxy port the node advertises. The node service always publishes it, so it must be free even with TLSNotary off; it answers only with TLSNotary on |
 | 123 | | UDP, outbound | NTP: the host's time service, and the node's clock offset check (see [Clock](#clock)) |
 
 These are published on loopback (or the interface the `*_BIND` variable names), or not at all, and should NOT be exposed publicly:
@@ -465,7 +466,7 @@ These are published on loopback (or the interface the `*_BIND` variable names), 
 | 9091 | `PROMETHEUS_PORT` | Prometheus (`monitoring` profile), on `MONITORING_BIND` (loopback) |
 | 3000 | `GRAFANA_PORT` | Grafana (`monitoring` profile), on `MONITORING_BIND` (loopback); only public if you want a public dashboard |
 | 9100 | `NODE_EXPORTER_PORT` | node-exporter (`full` profile), on `MONITORING_BIND` (loopback) |
-| 55000-55063 | `TLSNOTARY_PROXY_PORT_MIN`, `TLSNOTARY_PROXY_PORT_MAX` | TLSNotary per-session proxies, on loopback only, for a reverse proxy on this host (`/tlsn/<port>/`). The compose file publishes this window; bare metal (no Docker) uses 55000-57000 unless the same variables say otherwise |
+| 55000-55063 | `TLSNOTARY_PROXY_PORT_MIN`, `TLSNOTARY_PROXY_PORT_MAX` | TLSNotary per-session proxies, on loopback only, for a reverse proxy on this host (`/tlsn/<port>/`). The node service always publishes this window, so it must be free even with TLSNotary off; bare metal (no Docker) uses 55000-57000 unless the same variables say otherwise |
 | 7474, 7687 | `NEO4J_HTTP_PORT`, `NEO4J_BOLT_PORT` | Neo4j (`neo4j` profile), published on every interface: keep the profile off on a validator |
 | 80, 443 | | Caddy (`proxy` profile): fixed ports, so only one install per host can run that profile |
 
@@ -481,7 +482,7 @@ sudo ufw allow 55688/tcp comment "Demos TLSNotary proxy"
 sudo ufw enable
 ```
 
-`ufw` allows outbound traffic by default, so NTP needs no rule unless your provider's firewall blocks it. Docker publishes container ports through its own iptables rules, ahead of `ufw`: a port published on every interface is reachable whatever `ufw` says, so the loopback bindings in `docker-compose.yml` and the profiles you leave off are what keep a port private. To not expose TLSNotary at all, leave the `tlsnotary` profile off and set `TLSNOTARY_ENABLED=false`.
+`ufw` allows outbound traffic by default, so NTP needs no rule unless your provider's firewall blocks it. Docker publishes container ports through its own iptables rules, ahead of `ufw`: a port published on every interface is reachable whatever `ufw` says, so the loopback bindings in `docker-compose.yml` and the profiles you leave off are what keep a port private. To not expose TLSNotary at all, leave the `tlsnotary` profile off and set `TLSNOTARY_ENABLED=false`: `TLSNOTARY_PROXY_PORT` stays published by the node service, but nothing answers on it.
 
 If you're behind NAT (home server, dev box, etc.), forward the RPC, OmniProtocol and gossip ports from your router to this host. TLSNotary forwarding is optional — only needed if you want peers to use *your* notary container.
 
@@ -493,7 +494,7 @@ Each install is its own clone in its own directory with its own `.env`. Two inst
 
 - **`INSTANCE_SUFFIX`** (for example `_b`) is appended to every container, network and volume name: `demos-node_b`, `demos-network_b`, `demos_node_state_b`, `demos_pgdata_b` and so on. Without it the second install would use the first one's volumes, key included.
 - **`COMPOSE_PROJECT_NAME`** (for example `demos-b`) keeps the two projects apart for `docker compose ps`, `down`, `down -v` and the volume labels; without it both checkouts named `node` are one project.
-- **Ports.** Give the second install its own value for every published port of the tables above: `RPC_PORT`, `OMNI_PORT`, `GOSSIP_PORT`, `RPC_SIGNALING_PORT`, `L2PS_MESSAGING_PORT`, `METRICS_HOST_PORT`, `TLSNOTARY_PORT`, `TLSNOTARY_PROXY_PORT`, `TLSNOTARY_PROXY_PORT_MIN` and `TLSNOTARY_PROXY_PORT_MAX` (a window of its own), and with the `monitoring` profile `PROMETHEUS_PORT` and `GRAFANA_PORT` (or leave `monitoring` to one install). Only one install can run the `proxy` profile. `EXPOSED_URL` takes the new `RPC_PORT`. Check each port is free with `ss -ltn` before the first start.
+- **Ports.** Give the second install its own value for every published port of the tables above, the TLSNotary proxy ports included even when TLSNotary is off (the node service publishes them unconditionally): `RPC_PORT`, `OMNI_PORT`, `GOSSIP_PORT`, `RPC_SIGNALING_PORT`, `L2PS_MESSAGING_PORT`, `METRICS_HOST_PORT`, `TLSNOTARY_PORT`, `TLSNOTARY_PROXY_PORT`, `TLSNOTARY_PROXY_PORT_MIN` and `TLSNOTARY_PROXY_PORT_MAX` (a window of its own), and with the `monitoring` profile `PROMETHEUS_PORT` and `GRAFANA_PORT` (or leave `monitoring` to one install). Only one install can run the `proxy` profile. `EXPOSED_URL` takes the new `RPC_PORT`. Check each port is free with `ss -ltn` before the first start.
 
 ```env
 INSTANCE_SUFFIX=_b

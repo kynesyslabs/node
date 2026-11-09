@@ -7,6 +7,10 @@
  * --snapshot defaults to DEMOS_SNAPSHOT_DIR when that is set, as the node's
  * own snapshot lookup does (so it works unchanged inside the node container).
  *
+ * --allow-unforgeable lists a genesis with fewer validators than the quorum
+ * of its shardSize under `warnings` instead of `problems`. It is for test
+ * harnesses whose nodes boot but never forge; a launch genesis never uses it.
+ *
  * Prints:
  *   - genesisBlockHash: the hash of block 0 a node builds from this file and
  *     serves at /genesisBlock: the --genesis-hash of launch-go-no-go.ts and
@@ -42,10 +46,17 @@ import { forkScheduleDigest } from "src/libs/peer/routines/forkScheduleAgreement
 import { loadForkConfigFromGenesis } from "src/forks"
 import { getSharedState } from "src/utilities/sharedState"
 
-export const USAGE = "usage: bun scripts/genesis-hash.ts --genesis FILE [--snapshot DIR] [--json]"
+export const USAGE =
+    "usage: bun scripts/genesis-hash.ts --genesis FILE [--snapshot DIR] [--json] [--allow-unforgeable]"
 
 export function parseArgs(argv: string[], env: Record<string, string | undefined> = process.env) {
-    const args = { genesis: null as string | null, snapshot: null as string | null, json: false, help: false }
+    const args = {
+        genesis: null as string | null,
+        snapshot: null as string | null,
+        json: false,
+        allowUnforgeable: false,
+        help: false,
+    }
     for (let i = 0; i < argv.length; i++) {
         const value = () => {
             const v = argv[++i]
@@ -56,6 +67,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
             case "--genesis": args.genesis = value(); break
             case "--snapshot": args.snapshot = value(); break
             case "--json": args.json = true; break
+            case "--allow-unforgeable": args.allowUnforgeable = true; break
             case "-h":
             case "--help": args.help = true; return args
             default: throw new Error(`unknown argument ${argv[i]}`)
@@ -125,8 +137,14 @@ export async function verifiedSnapshot(
 export function snapshotValidatorRows(snapshotDir: string): number | null {
     const manifestFile = path.join(snapshotDir, "manifest.json")
     if (!fs.existsSync(manifestFile)) return null
-    const rows = JSON.parse(fs.readFileSync(manifestFile, "utf8"))?.files?.["validators.jsonl"]?.rows
-    return Number.isInteger(rows) ? rows : null
+    let rows: unknown
+    try {
+        rows = JSON.parse(fs.readFileSync(manifestFile, "utf8"))?.files?.["validators.jsonl"]?.rows
+    } catch {
+        // An unreadable manifest is reported by the snapshot verification
+        return null
+    }
+    return Number.isInteger(rows) ? (rows as number) : null
 }
 
 const URL_PORT = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*:(\d+)(?:[/?#]|$)/i
@@ -156,10 +174,18 @@ export function connectionUrlProblem(url: unknown): string | null {
  * node boots and never forges block 1) and validator URLs no peer can dial.
  * node-doctor --production makes the same checks on the mounted file.
  *
+ * `unforgeable` holds the quorum finding alone: a node accepts such a genesis,
+ * so a harness that only boots nodes (and never forges) may accept it on
+ * purpose with --allow-unforgeable. Everything a node refuses is a problem.
+ *
  * @param snapshotRows validators.jsonl rows of the snapshot, when it has one
  */
-export function genesisNetworkProblems(genesis: unknown, snapshotRows: number | null = null): string[] {
+export function genesisNetworkFindings(
+    genesis: unknown,
+    snapshotRows: number | null = null,
+): { problems: string[]; unforgeable: string[] } {
     const problems: string[] = []
+    const unforgeable: string[] = []
     let shardSize: number | null = null
     try {
         shardSize = readGenesisShardSize(genesis)
@@ -175,7 +201,7 @@ export function genesisNetworkProblems(genesis: unknown, snapshotRows: number | 
                 ? [snapshotRows, "the snapshot's validators.jsonl"]
                 : [validators.length, "genesis validators"]
         if (count < quorum) {
-            problems.push(
+            unforgeable.push(
                 `${count} validators in ${source}, below the quorum of ${quorum} (2/3 + 1 of shardSize ${shardSize}): ` +
                     "a node boots on this genesis but no block after block 0 can be forged",
             )
@@ -191,7 +217,13 @@ export function genesisNetworkProblems(genesis: unknown, snapshotRows: number | 
             )
         }
     })
-    return problems
+    return { problems, unforgeable }
+}
+
+/** All network findings as problems: what a launch genesis must not have. */
+export function genesisNetworkProblems(genesis: unknown, snapshotRows: number | null = null): string[] {
+    const { problems, unforgeable } = genesisNetworkFindings(genesis, snapshotRows)
+    return [...problems, ...unforgeable]
 }
 
 /** The file as the node reads data/genesis.json: a JSON string holding JSON is parsed again. */
@@ -280,6 +312,8 @@ async function main(): Promise<number> {
     if (args.help) {
         console.log(USAGE)
         console.log("  --snapshot defaults to DEMOS_SNAPSHOT_DIR when it is set")
+        console.log("  --allow-unforgeable reports fewer validators than the quorum as a warning, not a")
+        console.log("    problem; for test harnesses that boot nodes without forging, never for a launch")
         return 0
     }
 
@@ -293,11 +327,13 @@ async function main(): Promise<number> {
     const snapshot = args.snapshot ? await verifiedSnapshot(args.snapshot) : null
     const result = genesisValues(genesis, manifestSha256, snapshot?.forkState ?? null)
     result.problems.push(...(snapshot?.problems ?? []))
-    result.problems.push(
-        ...genesisNetworkProblems(genesis, args.snapshot ? snapshotValidatorRows(args.snapshot) : null),
-    )
+    const network = genesisNetworkFindings(genesis, args.snapshot ? snapshotValidatorRows(args.snapshot) : null)
+    result.problems.push(...network.problems)
+    const warnings: string[] = []
+    if (args.allowUnforgeable) warnings.push(...network.unforgeable)
+    else result.problems.push(...network.unforgeable)
     if (args.json) {
-        console.log(JSON.stringify(result, null, 2))
+        console.log(JSON.stringify({ ...result, warnings }, null, 2))
     } else {
         const blockHash = result.genesisBlockHash ?? "(cannot be known before launch; see the problems below)"
         console.log(`genesis block hash: ${blockHash}`)
@@ -310,6 +346,7 @@ async function main(): Promise<number> {
         console.log(`fork schedule digest: ${result.forkScheduleDigest} (chain id ${result.chainId})`)
         console.log(`snapshot manifest sha256: ${result.snapshotManifestSha256 ?? "(no snapshot given)"}`)
         if (args.snapshot) console.log(`snapshot directory: ${args.snapshot}`)
+        for (const w of warnings) console.log(`warning: ${w}`)
         for (const p of result.problems) console.log(`problem: ${p}`)
     }
     return result.problems.length === 0 ? 0 : 1
