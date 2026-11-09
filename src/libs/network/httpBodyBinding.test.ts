@@ -36,6 +36,17 @@ const sharedState: Record<string, any> = {
 }
 
 mockCore(sharedState, { asInstance: true })
+// Without Postgres the datasource retries for about half a minute; fail at
+// once so a handler that reaches the database answers within the test timeout.
+jest.mock("src/model/datasource", () => ({
+    __esModule: true,
+    dataSource: {},
+    default: {
+        getInstance: async () => {
+            throw new Error("no database in this test")
+        },
+    },
+}))
 jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
     __esModule: true,
     default: {
