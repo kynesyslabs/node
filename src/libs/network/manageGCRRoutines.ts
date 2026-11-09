@@ -3,7 +3,7 @@ import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import { emptyResponse } from "./server_rpc"
 import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
-import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { readGCRForUser } from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
 import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityProvider"
@@ -15,6 +15,15 @@ import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { getSharedState } from "@/utilities/sharedState"
 import { syncLock } from "../blockchain/routines/Sync"
+
+/** An account's identities for a read: nothing is created for an unknown address. */
+async function readIdentities(
+    address: string,
+    key?: "web2" | "xm" | "ud",
+): Promise<any> {
+    const { identities } = await readGCRForUser(address)
+    return key ? identities[key] : identities
+}
 
 interface GCRRoutinePayload {
     method: string
@@ -40,28 +49,19 @@ export default async function manageGCRRoutines(
             break
 
         case "getIdentities":
-            response.response = await IdentityManager.getIdentities(params[0])
+            response.response = await readIdentities(params[0])
             break
 
         case "getWeb2Identities":
-            response.response = await IdentityManager.getIdentities(
-                params[0],
-                "web2",
-            )
+            response.response = await readIdentities(params[0], "web2")
             break
 
         case "getXmIdentities":
-            response.response = await IdentityManager.getIdentities(
-                params[0],
-                "xm",
-            )
+            response.response = await readIdentities(params[0], "xm")
             break
 
         case "getUDIdentities":
-            response.response = await IdentityManager.getIdentities(
-                params[0],
-                "ud",
-            )
+            response.response = await readIdentities(params[0], "ud")
             break
 
         case "getPoints":
@@ -73,9 +73,9 @@ export default async function manageGCRRoutines(
             break
 
         case "getReferralInfo": {
-            // Stored on purpose: validateReferralCode looks the code up in
-            // the table, so a code shown before the owner's first tx must exist.
-            const account = await ensureGCRForUser(params[0])
+            // The code is derived from the address, so an unknown address
+            // gets the one its account will have without a row being stored.
+            const account = await readGCRForUser(params[0])
             response.response = account.referralInfo
             break
         }

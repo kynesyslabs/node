@@ -45,6 +45,33 @@ describe.skipIf(!posix)("restrictIdentityFileMode", () => {
         expect(fs.statSync(file).mode & 0o777).toBe(0o600)
     })
 
+    it("refuses when the mode cannot be corrected and refusal is asked for", () => {
+        fs.chmodSync(file, 0o644)
+        const chmod = jest.spyOn(fs, "chmodSync").mockImplementation(() => {
+            throw new Error("EROFS: read-only file system")
+        })
+        try {
+            expect(() =>
+                restrictIdentityFileMode(file, { refuseOpen: true }),
+            ).toThrow(/readable by other users.*chmod 600/s)
+        } finally {
+            chmod.mockRestore()
+        }
+    })
+
+    it("only warns about an uncorrectable mode without refusal", () => {
+        fs.chmodSync(file, 0o644)
+        const chmod = jest.spyOn(fs, "chmodSync").mockImplementation(() => {
+            throw new Error("EROFS: read-only file system")
+        })
+        try {
+            expect(restrictIdentityFileMode(file)).toBe(false)
+            expect(warning).toHaveBeenCalledTimes(1)
+        } finally {
+            chmod.mockRestore()
+        }
+    })
+
     it("leaves an owner-only file alone and stays quiet", () => {
         fs.chmodSync(file, 0o400)
         expect(restrictIdentityFileMode(file)).toBe(false)

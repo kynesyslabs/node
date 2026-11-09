@@ -16,6 +16,7 @@ const {
     chooseSenderOverflow,
     chooseVictims,
     getMempoolLimits,
+    holdSendersToCap,
     splitMergeBatches,
     txStoredBytes,
     txTotalFee,
@@ -312,8 +313,64 @@ describe("chooseSenderOverflow", () => {
         expect(evict).toEqual([])
     })
 
+    it("ranks an unsafe integer nonce as its stored decimal text ranks", () => {
+        // A pooled row's nonce comes back as the JSON text Postgres holds, so
+        // the same tx must rank the same whether it arrives or is held.
+        const big = 2 ** 53 + 2
+        const higher = slot("0xhigher", "s", "9007199254740996")
+        const arriving = chooseSenderOverflow([higher], [slot("0xbig", "s", big)], 1)
+        const held = chooseSenderOverflow([slot("0xbig", "s", String(big))], [higher], 1)
+        expect([...arriving.refuse, ...arriving.evict]).toEqual(["0xhigher"])
+        expect([...held.refuse, ...held.evict]).toEqual(["0xhigher"])
+    })
+
     it("ranks an unreadable nonce last", () => {
         const { refuse } = chooseSenderOverflow([], [slot("0xbad", "s", "x"), slot("0xok", "s", 9)], 1)
         expect([...refuse]).toEqual(["0xbad"])
+    })
+
+    it("never refuses or evicts a kept tx, and chooses the rest as without it", () => {
+        const held = [slot("0xh1", "s", 1), slot("0xkept", "s", 9)]
+        const incoming = [slot("0xi0", "s", 0), slot("0xi5", "s", 5)]
+        const without = chooseSenderOverflow(held, incoming, 2)
+        expect([...without.refuse]).toEqual(["0xi5"])
+        expect(without.evict).toEqual(["0xkept"])
+        const { refuse, evict } = chooseSenderOverflow(held, incoming, 2, new Set(["0xkept"]))
+        expect([...refuse]).toEqual(["0xi5"])
+        expect(evict).toEqual([])
+    })
+
+    it("gives a kept tx that ranks inside the cap no slot of the others", () => {
+        const held = [
+            ...Array.from({ length: 63 }, (_, i) => slot(`0xh${i + 10}`, "s", i + 10)),
+            slot("0xkept", "s", 5),
+        ]
+        const incoming = [slot("0xi1", "s", 1)]
+        const without = chooseSenderOverflow(held.filter(s => s.hash !== "0xkept"), incoming, 64)
+        expect(without.refuse.size).toBe(0)
+        expect(without.evict).toEqual([])
+        const { refuse, evict } = chooseSenderOverflow(held, incoming, 64, new Set(["0xkept"]))
+        expect(refuse.size).toBe(0)
+        expect(evict).toEqual([])
+    })
+})
+
+describe("holdSendersToCap", () => {
+    const tx = (hash: string, from: unknown, nonce: unknown) => ({ hash, content: { from, nonce } })
+
+    it("keeps each sender's lowest nonces up to the cap, in the order given", () => {
+        const txs = [tx("0xc", "S", 3), tx("0xo", "other", 1), tx("0xa", "s", 1), tx("0xb", "s", 2)]
+        expect(holdSendersToCap(txs, 2).map(t => t.hash)).toEqual(["0xo", "0xa", "0xb"])
+    })
+
+    it("is what the merge keeps of the same txs", () => {
+        const txs = Array.from({ length: 9 }, (_, i) => tx(`0x${i}`, "s", (i * 7) % 5))
+        const { refuse } = chooseSenderOverflow([], txs.map(t => ({ hash: t.hash, sender: "s", nonce: t.content.nonce })), 4)
+        expect(holdSendersToCap(txs, 4).map(t => t.hash)).toEqual(txs.map(t => t.hash).filter(h => !refuse.has(h)))
+    })
+
+    it("passes a tx without a readable sender through", () => {
+        const txs = [tx("0xn", undefined, 1), tx("0xa", "s", 1), tx("0xb", "s", 2)]
+        expect(holdSendersToCap(txs, 1).map(t => t.hash)).toEqual(["0xn", "0xa"])
     })
 })

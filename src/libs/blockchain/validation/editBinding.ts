@@ -175,7 +175,8 @@ export async function editBindingState(): Promise<EditBindingState> {
 
 /**
  * The reads admission makes that do not depend on the transaction: the fork
- * state at the tip and, for fee-free messages, the validators staked there.
+ * state at the tip, for fee-free messages the validators staked there, and
+ * under `feeBinding` a refresh of network parameters a failed read left stale.
  * A batch (the consensus merge) shares one instance, so each is read once per
  * batch rather than once per transaction; the validator set only when a
  * message needs it. A failed read refuses every transaction that needs it,
@@ -185,17 +186,23 @@ export async function editBindingState(): Promise<EditBindingState> {
 export interface AdmissionReads {
     state(): Promise<EditBindingState>
     validators(): Promise<ReadonlySet<string>>
+    parameters(): Promise<void>
 }
 
 export function admissionReads(): AdmissionReads {
     let state: Promise<EditBindingState> | undefined
     let validators: Promise<ReadonlySet<string>> | undefined
+    let parameters: Promise<void> | undefined
     const reads: AdmissionReads = {
         state: () => (state ??= readState("fork state", editBindingState)),
         validators: () =>
             (validators ??= reads
                 .state()
                 .then(s => readState("validator set", () => validatorKeysAt(s.tip)))),
+        parameters: () =>
+            (parameters ??= readState("network parameters", () =>
+                ensureNetworkParametersCurrent(),
+            )),
     }
     return reads
 }
@@ -213,11 +220,7 @@ export async function loadAdmissionReads(
     reads: AdmissionReads,
 ): Promise<void> {
     const { messageBinding, feeBound } = await reads.state()
-    if (feeBound && txs.length > 0) {
-        await readState("network parameters", () =>
-            ensureNetworkParametersCurrent(),
-        )
-    }
+    if (feeBound && txs.length > 0) await reads.parameters()
     if (messageBinding && txs.some(isNodeMessage)) await reads.validators()
 }
 
@@ -581,6 +584,10 @@ export async function verifyAdmissionEdits(
         if (governanceRefusal) return refuse(governanceRefusal)
         const stakingRefusal = tokenStakingRefusal(tx, state.stakingOpen)
         if (stakingRefusal) return refuse(stakingRefusal)
+        // A fee judged on parameters a failed read left behind a governance
+        // change would refuse what every peer accepts. A batch loaded them
+        // first; a single intake refuses until they can be read.
+        if (state.feeBound) await reads.parameters()
         const valueRefusal = await valueRulesRefusal(tx, state)
         if (valueRefusal) return refuse(valueRefusal)
         const verdict = active
@@ -632,6 +639,7 @@ export async function verifyRpcEdits(tx: Transaction): Promise<EditVerdict> {
         const stakingRefusal = tokenStakingRefusal(tx, state.stakingOpen)
         if (stakingRefusal) return refuse(stakingRefusal)
         if (active) return await verifyAdmissionEdits(tx)
+        if (state.feeBound) await ensureNetworkParametersCurrent()
         const valueRefusal = await valueRulesRefusal(tx, state)
         if (valueRefusal) return refuse(valueRefusal)
         return nonceBound ? verifyNonceEditBinding(tx) : OK

@@ -176,6 +176,26 @@ export function lockAt(
     return lock
 }
 
+/**
+ * The txs of the block that binds this validator at `height`: kept in the
+ * pool so the block can be rebuilt and served to members rebuilding it.
+ * Empty when no lock binds the height, or when the lock cannot be read; the
+ * consensus round reports and acts on an unreadable lock itself.
+ */
+export function lockedTransactionHashes(
+    identityFile: string,
+    genesisHash: string | null,
+    height: number,
+): Set<string> {
+    if (!genesisHash) return new Set()
+    try {
+        const lock = lockAt(identityFile, genesisHash, height)
+        return new Set(lock?.inputs.orderedTransactions ?? [])
+    } catch {
+        return new Set()
+    }
+}
+
 export function writeCommitLock(identityFile: string, lock: CommitLock): void {
     if (!isValidLock(lock)) {
         throw new CommitLockError(

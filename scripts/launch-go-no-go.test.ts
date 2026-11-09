@@ -637,6 +637,20 @@ describe("checkLaunch", () => {
         })
     })
 
+    it("draws the first committee under the genesis schedule of unpinnedCommittee", () => {
+        // A pinned identity in a mainnet genesis is NO-GO anyway; the committee
+        // reported beside that verdict must still be the node's
+        const pinned = PINNED_SHARD_IDENTITIES[1]
+        const all = [...launchSet(14).map(address => ({ address, status: "2", valid_at: 0 })), { address: pinned, status: "2", valid_at: 0 }]
+        const unpinned = checkLaunch({ ...base, genesis: genesisFile(all), blockZero: blockZero(all) })
+        const pinnedForks = { ...mainnetForks(), unpinnedCommittee: { activationHeight: null } }
+        const legacy = checkLaunch({ ...base, genesis: genesisFile(all, pinnedForks), blockZero: blockZero(all) })
+        expect(legacy.committee[0]).toBe(pinned)
+        expect(unpinned.committee[0]).not.toBe(pinned)
+        expect(unpinned.go).toBe(false)
+        expect(unpinned.reasons.join("\n")).toContain(`launch validator is a pinned committee identity: ${pinned}`)
+    })
+
     it("carries the validator set's reasons and warnings into the decision", () => {
         const d = checkLaunch({
             ...base,
