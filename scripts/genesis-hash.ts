@@ -129,22 +129,52 @@ export async function verifiedSnapshot(
     }
 }
 
+/** The validator set block 0 seeds, and where it comes from. */
+export interface ValidatorSet {
+    source: "genesis validators" | "the snapshot's validators.jsonl"
+    rows: unknown[]
+}
+
 /**
- * Rows of the snapshot's validators.jsonl, or null when the manifest lists
- * none: a node seeds its validator set from that file when the snapshot
- * carries it, and from genesis `validators` otherwise.
+ * The rows of the snapshot's validators.jsonl, or null when the manifest
+ * lists no such file: block 0 seeds its validator set from that file when
+ * the snapshot carries one (restoreGenesisState), and from genesis
+ * `validators` otherwise. Throws when the listed file cannot be read.
  */
-export function snapshotValidatorRows(snapshotDir: string): number | null {
+export function snapshotValidators(snapshotDir: string): unknown[] | null {
     const manifestFile = path.join(snapshotDir, "manifest.json")
     if (!fs.existsSync(manifestFile)) return null
-    let rows: unknown
+    let listed: unknown
     try {
-        rows = JSON.parse(fs.readFileSync(manifestFile, "utf8"))?.files?.["validators.jsonl"]?.rows
+        listed = JSON.parse(fs.readFileSync(manifestFile, "utf8"))?.files?.["validators.jsonl"]
     } catch {
         // An unreadable manifest is reported by the snapshot verification
         return null
     }
-    return Number.isInteger(rows) ? (rows as number) : null
+    if (listed === undefined) return null
+    const rows: unknown[] = []
+    fs.readFileSync(path.join(snapshotDir, "validators.jsonl"), "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+            if (line.length === 0) return
+            try {
+                rows.push(JSON.parse(line))
+            } catch {
+                throw new Error(`validators.jsonl line ${i + 1} is not JSON`)
+            }
+        })
+    return rows
+}
+
+/**
+ * Whether a validator row votes from block 1: the committee for block 1 is
+ * drawn from the rows with status "2" and valid_at <= 0
+ * (GCR.findValidatorsAtBlock at block 0). A null valid_at never matches there.
+ */
+export function activeAtBlockZero(row: unknown): boolean {
+    if (!row || typeof row !== "object") return false
+    const { status, valid_at } = row as { status?: unknown; valid_at?: unknown }
+    return status === "2" && typeof valid_at === "number" && Number.isInteger(valid_at) && valid_at <= 0
 }
 
 const URL_PORT = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*:(\d+)(?:[/?#]|$)/i
@@ -170,19 +200,21 @@ export function connectionUrlProblem(url: unknown): string | null {
 
 /**
  * What a pinned hash does not catch about the network a genesis starts: a
- * shardSize the node refuses at boot, fewer validators than the quorum (the
- * node boots and never forges block 1) and validator URLs no peer can dial.
- * node-doctor --production makes the same checks on the mounted file.
+ * shardSize the node refuses at boot, fewer validators active at block 0
+ * than the quorum (the node boots and never forges block 1) and validator
+ * URLs no peer can dial. node-doctor --production makes the same checks on
+ * the mounted file.
  *
  * `unforgeable` holds the quorum finding alone: a node accepts such a genesis,
  * so a harness that only boots nodes (and never forges) may accept it on
  * purpose with --allow-unforgeable. Everything a node refuses is a problem.
  *
- * @param snapshotRows validators.jsonl rows of the snapshot, when it has one
+ * @param snapshotRows the snapshot's validators.jsonl rows, when it has one:
+ *   they are the set block 0 seeds, in place of genesis `validators`
  */
 export function genesisNetworkFindings(
     genesis: unknown,
-    snapshotRows: number | null = null,
+    snapshotRows: unknown[] | null = null,
 ): { problems: string[]; unforgeable: string[] } {
     const problems: string[] = []
     const unforgeable: string[] = []
@@ -193,27 +225,42 @@ export function genesisNetworkFindings(
         problems.push(`${(e as Error).message}: a node refuses this genesis at boot`)
     }
     const raw = genesis && typeof genesis === "object" ? (genesis as { validators?: unknown }).validators : undefined
-    const validators = Array.isArray(raw) ? raw : []
+    const set: ValidatorSet =
+        snapshotRows !== null
+            ? { source: "the snapshot's validators.jsonl", rows: snapshotRows }
+            : { source: "genesis validators", rows: Array.isArray(raw) ? raw : [] }
     if (shardSize !== null) {
         const quorum = quorumThreshold(shardSize)
-        const [count, source] =
-            snapshotRows !== null
-                ? [snapshotRows, "the snapshot's validators.jsonl"]
-                : [validators.length, "genesis validators"]
-        if (count < quorum) {
+        const active = set.rows.filter(activeAtBlockZero).length
+        if (active < quorum) {
+            const inactive =
+                active < set.rows.length
+                    ? ` (of ${set.rows.length} listed; only status "2" with valid_at 0 vote from block 1)`
+                    : ""
             unforgeable.push(
-                `${count} validators in ${source}, below the quorum of ${quorum} (2/3 + 1 of shardSize ${shardSize}): ` +
-                    "a node boots on this genesis but no block after block 0 can be forged",
+                `${active} validators in ${set.source}${inactive}, below the quorum of ${quorum} ` +
+                    `(2/3 + 1 of shardSize ${shardSize}): a node boots on this genesis but no block after block 0 can be forged`,
             )
         }
     }
-    validators.forEach((v, i) => {
+    set.rows.forEach((v, i) => {
         if (!v || typeof v !== "object") return
         const entry = v as { address?: unknown; connection_url?: unknown }
-        const problem = connectionUrlProblem(entry.connection_url === undefined ? "" : entry.connection_url)
+        // The genesis seed refuses a missing or empty URL; the snapshot loader
+        // restores a row without one (null, missing or "") as it is
+        const url =
+            snapshotRows !== null
+                ? entry.connection_url === undefined || entry.connection_url === ""
+                    ? null
+                    : entry.connection_url
+                : entry.connection_url === undefined
+                  ? ""
+                  : entry.connection_url
+        const problem = connectionUrlProblem(url)
         if (problem) {
+            const where = snapshotRows !== null ? `validators.jsonl row ${i + 1}` : `validators[${i}]`
             problems.push(
-                `validators[${i}] (${String(entry.address)}) connection_url ${JSON.stringify(entry.connection_url)} ${problem}`,
+                `${where} (${String(entry.address)}) connection_url ${JSON.stringify(entry.connection_url)} ${problem}`,
             )
         }
     })
@@ -221,7 +268,7 @@ export function genesisNetworkFindings(
 }
 
 /** All network findings as problems: what a launch genesis must not have. */
-export function genesisNetworkProblems(genesis: unknown, snapshotRows: number | null = null): string[] {
+export function genesisNetworkProblems(genesis: unknown, snapshotRows: unknown[] | null = null): string[] {
     const { problems, unforgeable } = genesisNetworkFindings(genesis, snapshotRows)
     return [...problems, ...unforgeable]
 }
@@ -327,7 +374,13 @@ async function main(): Promise<number> {
     const snapshot = args.snapshot ? await verifiedSnapshot(args.snapshot) : null
     const result = genesisValues(genesis, manifestSha256, snapshot?.forkState ?? null)
     result.problems.push(...(snapshot?.problems ?? []))
-    const network = genesisNetworkFindings(genesis, args.snapshot ? snapshotValidatorRows(args.snapshot) : null)
+    let snapshotRows: unknown[] | null = null
+    try {
+        snapshotRows = args.snapshot ? snapshotValidators(args.snapshot) : null
+    } catch (e) {
+        result.problems.push(`the snapshot's validator set cannot be read: ${(e as Error).message}`)
+    }
+    const network = genesisNetworkFindings(genesis, snapshotRows)
     result.problems.push(...network.problems)
     const warnings: string[] = []
     if (args.allowUnforgeable) warnings.push(...network.unforgeable)

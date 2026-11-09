@@ -626,8 +626,8 @@ GENESIS_SHARD_SIZE_MAX=100
 
 # The genesis checks a node only makes at boot, or never: a pinned hash
 # accepts a file the node then refuses (shardSize out of range), or one it
-# boots on but can never forge a block with (fewer validators than the
-# quorum). Reads the host file the node container mounts (compose) or
+# boots on but can never forge a block with (fewer validators active at
+# block 0 than the quorum). Reads the host file the node container mounts (compose) or
 # DEMOS_GENESIS_FILE (bare metal). Prints LEVEL<TAB>item<TAB>detail lines.
 read -r -d '' GENESIS_CHECK_PY <<'PY'
 import json, os, re, sys
@@ -736,37 +736,62 @@ def main():
         out("PASS", "genesis shardSize", str(shard))
 
     validators = genesis.get("validators")
-    validators = validators if isinstance(validators, list) else []
-    count, source = len(validators), "the genesis validators"
+    rows = validators if isinstance(validators, list) else []
+    source, from_snapshot = "the genesis validators", False
     manifest_file = os.path.join(snapshot_dir, "manifest.json") if snapshot_dir else None
+    listed = None
     if manifest_file and os.path.isfile(manifest_file):
         try:
             with open(manifest_file, encoding="utf-8") as f:
-                entry = (json.load(f).get("files") or {}).get("validators.jsonl")
-            # The node seeds the validator set from the snapshot when it carries one
-            if isinstance(entry, dict) and isinstance(entry.get("rows"), int):
-                count, source = entry["rows"], "the snapshot's validators.jsonl"
+                listed = (json.load(f).get("files") or {}).get("validators.jsonl")
         except (OSError, ValueError, AttributeError):
-            pass
+            listed = None
+    if listed is not None:
+        # Block 0 seeds the validator set from the snapshot when it carries one
+        try:
+            with open(os.path.join(snapshot_dir, "validators.jsonl"), encoding="utf-8") as f:
+                rows = [json.loads(line) for line in f.read().split("\n") if line]
+        except (OSError, ValueError) as e:
+            out("FAIL", "genesis validators", "the snapshot's validators.jsonl cannot be read: " + str(e))
+            return
+        source, from_snapshot = "the snapshot's validators.jsonl", True
+
+    def active(v):
+        # The committee of block 1 is drawn from status "2" rows with valid_at <= 0
+        if not isinstance(v, dict):
+            return False
+        at = v.get("valid_at")
+        return v.get("status") == "2" and isinstance(at, int) and not isinstance(at, bool) and at <= 0
+
+    count = sum(1 for v in rows if active(v))
     if shard is not None:
         quorum = shard * 2 // 3 + 1
+        listed_note = "" if count == len(rows) else \
+            " (of %d listed; only status \"2\" with valid_at 0 vote from block 1)" % len(rows)
         if count < quorum:
-            out("FAIL", "genesis validators", "%d in %s, below the quorum of %d (2/3 + 1 of shardSize %d): "
-                "the node boots but no block after block 0 can be forged" % (count, source, quorum, shard))
+            out("FAIL", "genesis validators", "%d in %s%s, below the quorum of %d (2/3 + 1 of shardSize %d): "
+                "the node boots but no block after block 0 can be forged" % (count, source, listed_note, quorum, shard))
         else:
-            out("PASS", "genesis validators", "%d in %s, quorum %d" % (count, source, quorum))
+            out("PASS", "genesis validators", "%d in %s%s, quorum %d" % (count, source, listed_note, quorum))
 
     bad = 0
-    for i, v in enumerate(validators):
+    for i, v in enumerate(rows):
         if not isinstance(v, dict):
             continue
-        problem = url_problem(v.get("connection_url", ""))
+        url = v.get("connection_url")
+        if from_snapshot:
+            # The snapshot loader restores a row without a URL as it is
+            url = None if url in (None, "") else url
+        elif "connection_url" not in v:
+            url = ""
+        problem = url_problem(url)
         if problem:
             bad += 1
-            out("FAIL", "genesis connection_url", "validators[%d] (%s) %s %s" % (
-                i, v.get("address"), json.dumps(v.get("connection_url")), problem))
+            where = ("validators.jsonl row %d" % (i + 1)) if from_snapshot else ("validators[%d]" % i)
+            out("FAIL", "genesis connection_url", "%s (%s) %s %s" % (
+                where, v.get("address"), json.dumps(v.get("connection_url")), problem))
     if bad == 0:
-        out("PASS", "genesis connection_url", "%d validators" % len(validators))
+        out("PASS", "genesis connection_url", "%d validators in %s" % (len(rows), source))
 
 
 try:

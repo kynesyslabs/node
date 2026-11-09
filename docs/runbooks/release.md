@@ -100,7 +100,8 @@ that fails them:
   /app/data/genesis.json --snapshot /app/mainnet-snapshot` with the release
   image and the files mounted as in INSTALL.md ("Run a released image", steps
   3 and 4) exits 0 and prints no `problem:` line. It reports a `shardSize`
-  outside 3-100, fewer validators than the quorum of `shardSize` (2/3 + 1),
+  outside 3-100, fewer validators active at block 0 (status `"2"`, `valid_at`
+  0) than the quorum of `shardSize` (2/3 + 1),
   and a validator `connection_url` that is not an http(s) URL with a host
   (and, if it names a port, one in 1-65535).
 - every validator `connection_url` in the genesis is exactly the
@@ -116,7 +117,11 @@ The announcement then carries:
 3. for a new network or a reissued genesis: `genesis.json`, `snapshot.tar`
    and a `SHA256SUMS` covering both, and the four values a validator compares
    (genesis hash, genesis block hash, fork schedule digest with chain id,
-   snapshot manifest sha256);
+   snapshot manifest sha256), attached to that release when it is published
+   ([../mainnet/genesis-hash.md](../mainnet/genesis-hash.md), "Publication").
+   Any other release links that published release and repeats the four
+   values, so a validator installing for the first time from a later release
+   finds the network's files and checks them the same way;
 4. the peer list: one `public key -> EXPOSED_URL` line per validator, the
    same URLs as the genesis;
 5. whether `docs/mainnet/parameters.env` changed and whether the release adds

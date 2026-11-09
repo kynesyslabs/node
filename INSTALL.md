@@ -154,11 +154,14 @@ It must print `on stabilisation`, then `Good "git" signature for <email> with ED
 
 To see every listed key with its fingerprint: `while read -r who _ type key; do printf '%s ' "$who"; echo "$type $key" | ssh-keygen -lf -; done < "$SIGNERS"`. A good signature from a key you cannot match to a published fingerprint is a failure. The checkout leaves a detached `HEAD`, which is expected.
 
-**2. Check the release files.** Keep everything the announcement ships in `mainnet/` inside the checkout (git ignores that directory):
+**2. Check the release files.** Keep them in `mainnet/` inside the checkout (git ignores that directory). They come from two places:
+
+- `checksums.txt` belongs to the release you install: take it from that release's announcement (the release stays a draft until the validators confirm the digest).
+- `genesis.json`, `snapshot.tar`, `SHA256SUMS` and the genesis record (the four values of step 4) belong to the network and stay the same from release to release until a genesis is reissued. They are assets of the network's launch release on GitHub (the published release of the launch tag, or of the release that last reissued the genesis), and the same record is pinned in the validator channels outside GitHub ([docs/mainnet/genesis-hash.md](docs/mainnet/genesis-hash.md), "Publication"). A first install from a later release takes them from there, not from the later announcement, and compares the record in at least two of those channels.
 
 ```bash
 mkdir -p mainnet
-# copy checksums.txt, genesis.json, snapshot.tar and SHA256SUMS from the announcement into mainnet/
+# copy checksums.txt (this release) and genesis.json, snapshot.tar, SHA256SUMS (the network's launch release) into mainnet/
 [ "$(sed -n 's/^commit: //p' mainnet/checksums.txt)" = "$(git rev-parse HEAD)" ] && echo "commit matches"
 (cd mainnet && sha256sum -c SHA256SUMS) &&
 tar -xf mainnet/snapshot.tar -C mainnet &&
@@ -235,7 +238,7 @@ The script must exit 0 and print no `problem:` line, and these four values must 
 | `fork schedule digest: ... (chain id N)` | fork schedule digest and chain id |
 | `snapshot manifest sha256: ...` | snapshot manifest sha256 (also checked in step 2) |
 
-A `problem:` line names what a node would refuse in these files, or why it could never forge on them: a `shardSize` outside the range the node accepts, fewer validators than the quorum of `shardSize`, a validator URL no peer can dial. Report it on the release thread; the release owner reissues the genesis. Then copy the two `EXPECTED_...` lines into `.env`.
+A `problem:` line names what a node would refuse in these files, or why it could never forge on them: a `shardSize` outside the range the node accepts, fewer validators active at block 0 (status `"2"`, `valid_at` 0) than the quorum of `shardSize`, a validator URL no peer can dial. Report it on the release thread; the release owner reissues the genesis. Then copy the two `EXPECTED_...` lines into `.env`.
 
 This `run` also creates the install's volumes, labelled as this compose project, so `docker compose down -v` removes them later.
 
@@ -270,7 +273,7 @@ The helper is the Postgres image the stack already uses, pinned by digest, so no
 ./scripts/node-doctor --production --env-from compose
 ```
 
-It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, the mounted genesis file, one-start switches left set) and exits 1 on any FAIL. It reads the values and mounts the node container will get from `docker compose config`, so run it from the checkout with `.env` and the override in place. `--env-from compose` makes it fail rather than fall back to `.env` when it cannot read the compose settings. The genesis lines fail when `/app/data/genesis.json` is not mounted from the host, when `properties.shardSize` is outside the range the node accepts, when the genesis (or the snapshot's `validators.jsonl`) lists fewer validators than the quorum of `shardSize` (2/3 + 1: 7 of 10), and on a validator `connection_url` that is not an http(s) URL with a host (and, if it names a port, one in 1-65535). Fix every FAIL, and check every WARN by hand, before the next step.
+It prints one PASS, WARN or FAIL line per item (every value in `docs/mainnet/parameters.env`, clock sync, outbound NTP, genesis pins, the mounted genesis file, one-start switches left set) and exits 1 on any FAIL. It reads the values and mounts the node container will get from `docker compose config`, so run it from the checkout with `.env` and the override in place. `--env-from compose` makes it fail rather than fall back to `.env` when it cannot read the compose settings. The genesis lines fail when `/app/data/genesis.json` is not mounted from the host, when `properties.shardSize` is outside the range the node accepts, when the validator set block 0 seeds (the snapshot's `validators.jsonl` when it has one, otherwise the genesis `validators`) holds fewer validators active at block 0 (status `"2"`, `valid_at` 0) than the quorum of `shardSize` (2/3 + 1: 7 of 10), and on a validator `connection_url` of that set that is not an http(s) URL with a host (and, if it names a port, one in 1-65535). Fix every FAIL, and check every WARN by hand, before the next step.
 
 **8. Create the database schema and start without building.**
 
@@ -357,7 +360,7 @@ Leave `PG_HOST=postgres` and `TLSNOTARY_HOST=tlsnotary` exactly as shipped — t
 
 A fresh node joins no network by itself: it starts from the genesis bundled in the image (the testnet's) and knows no peer. To participate in the actual Demos testnet/mainnet, you must do **three things** before the node's first start. A validator does them as part of [Run a released image](#run-a-released-image-validators) (steps 3, 4 and 6); a source build does them here.
 
-A node forges only while at least the quorum of the genesis `shardSize` (2/3 + 1: 7 of 10, 3 of 3) of its validators are online. A genesis that lists fewer validators than that never gets past block 0. The smallest `shardSize` a node accepts is 3, with a quorum of 3, so a network of fewer than 3 validators never forges: a rehearsal needs at least 3 validators at `shardSize` 3. `genesis-hash.ts` and `node-doctor --production` report such a genesis before the start.
+A node forges only while at least the quorum of the genesis `shardSize` (2/3 + 1: 7 of 10, 3 of 3) of its validators are online. A genesis whose validator set has fewer validators active at block 0 than that never gets past block 0. The smallest `shardSize` a node accepts is 3, with a quorum of 3, so a network of fewer than 3 validators never forges: a rehearsal needs at least 3 validators at `shardSize` 3. `genesis-hash.ts` and `node-doctor --production` report such a genesis before the start.
 
 **1. Set `EXPOSED_URL` to your reachable address.**
 
@@ -376,7 +379,7 @@ If running behind NAT, port-forward `RPC_PORT` (53550), `OMNI_PORT` (53551) and 
 
 **2. Provide a bootstrap peer list.**
 
-The node persists its peer list in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's `EXPOSED_URL`; an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key out: the node adds itself. On a validator network list every other validator.
+The node persists its peer list in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's full `EXPOSED_URL`, exactly as announced, port included (a peer may publish another `RPC_PORT` than 53550); an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key out: the node adds itself. On a validator network list every other validator.
 
 Run this from the checkout, with `STATE_VOLUME` and `HELPER_IMAGE` set as in [step 3](#run-a-released-image-validators) of the released-image install (a source build sets them the same way):
 
@@ -384,8 +387,8 @@ Run this from the checkout, with `STATE_VOLUME` and `HELPER_IMAGE` set as in [st
 # This install's own file, outside the checkout
 install -d -m 700 "$HOME/demos-peers$SUFFIX"
 cat > "$HOME/demos-peers$SUFFIX/demos_peerlist.json" <<EOF
-{"0x<peer 1 public key>": "http://<peer 1 EXPOSED_URL host>:53550",
- "0x<peer 2 public key>": "http://<peer 2 EXPOSED_URL host>:53550"}
+{"0x<peer 1 public key>": "<peer 1 EXPOSED_URL, e.g. http://203.0.113.10:53550>",
+ "0x<peer 2 public key>": "<peer 2 EXPOSED_URL, e.g. http://node2.example.com:54550>"}
 EOF
 
 docker compose create --no-build node &&   # makes sure compose owns the volumes

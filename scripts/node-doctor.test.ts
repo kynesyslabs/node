@@ -297,7 +297,7 @@ describe("node-doctor --production genesis file", () => {
             `PASS genesis file: ${file}`,
             "PASS genesis shardSize: 10",
             "PASS genesis validators: 7 in the genesis validators, quorum 7",
-            "PASS genesis connection_url: 7 validators",
+            "PASS genesis connection_url: 7 validators in the genesis validators",
         ])
         expect(fails).toBe(0)
     })
@@ -327,12 +327,60 @@ describe("node-doctor --production genesis file", () => {
         }
     })
 
+    function writeSnapshotValidators(rows: unknown[]) {
+        fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ files: { "validators.jsonl": { rows: rows.length } } }))
+        fs.writeFileSync(path.join(dir, "validators.jsonl"), rows.map(r => JSON.stringify(r)).join("\n") + "\n")
+    }
+
     it("counts the snapshot's validators.jsonl when the snapshot carries one", () => {
         const file = writeGenesis(10, many(1))
-        fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ files: { "validators.jsonl": { rows: 7 } } }))
+        writeSnapshotValidators(many(7))
         const { lines, fails } = check({ DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir })
         expect(lineOf(lines, "genesis validators")).toBe("PASS genesis validators: 7 in the snapshot's validators.jsonl, quorum 7")
+        expect(lineOf(lines, "genesis connection_url")).toBe(
+            "PASS genesis connection_url: 7 validators in the snapshot's validators.jsonl",
+        )
         expect(fails).toBe(0)
+
+        fs.writeFileSync(path.join(dir, "validators.jsonl"), "{ not json\n")
+        const broken = check({ DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(broken.lines, "genesis validators")).toStartWith(
+            "FAIL genesis validators: the snapshot's validators.jsonl cannot be read",
+        )
+    })
+
+    it("counts only the validators active at block 0, as the committee of block 1 is drawn", () => {
+        const rows: Record<string, unknown>[] = many(7)
+        rows[4] = { ...rows[4], valid_at: null }
+        rows[5] = { ...rows[5], valid_at: 1 }
+        rows[6] = { ...rows[6], status: "1" }
+        const expected =
+            '4 in %s (of 7 listed; only status "2" with valid_at 0 vote from block 1), below the quorum of 7 ' +
+            "(2/3 + 1 of shardSize 10): the node boots but no block after block 0 can be forged"
+        const fromGenesis = check({ DEMOS_GENESIS_FILE: writeGenesis(10, rows), DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(fromGenesis.lines, "genesis validators")).toBe(
+            "FAIL genesis validators: " + expected.replace("%s", "the genesis validators"),
+        )
+        writeSnapshotValidators(rows)
+        const fromSnapshot = check({ DEMOS_GENESIS_FILE: writeGenesis(10, many(7)), DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(fromSnapshot.lines, "genesis validators")).toBe(
+            "FAIL genesis validators: " + expected.replace("%s", "the snapshot's validators.jsonl"),
+        )
+    })
+
+    it("checks the URLs of the snapshot's validators when the snapshot owns the set", () => {
+        const rows: Record<string, unknown>[] = many(7)
+        rows[2] = validator(3, "http://45.13.233.189:65550")
+        rows[3] = validator(4, "")
+        rows[4] = validator(5, null)
+        const { connection_url: _, ...noUrl } = validator(6)
+        rows[5] = noUrl
+        writeSnapshotValidators(rows)
+        const { lines, fails } = check({ DEMOS_GENESIS_FILE: writeGenesis(10, []), DEMOS_SNAPSHOT_DIR: dir })
+        expect(lines.filter(l => l.startsWith("FAIL genesis connection_url:"))).toEqual([
+            `FAIL genesis connection_url: validators.jsonl row 3 (${validator(3).address}) "http://45.13.233.189:65550" port 65550 is outside 1-65535`,
+        ])
+        expect(fails).toBe(1)
     })
 
     it("fails a validator URL no peer can dial", () => {

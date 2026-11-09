@@ -20,7 +20,8 @@ import {
     genesisValues,
     parseArgs,
     readGenesisFile,
-    snapshotValidatorRows,
+    snapshotValidators,
+    activeAtBlockZero,
     verifiedSnapshot,
 } from "../../scripts/genesis-hash"
 
@@ -228,18 +229,55 @@ describe("genesis-hash tool", () => {
         })
 
         it("counts the snapshot's validators when the snapshot carries them, as the node seeds them", () => {
-            expect(genesisNetworkProblems(network(10, many(1)), 7)).toEqual([])
-            expect(genesisNetworkProblems(network(10, many(10)), 6)[0]).toStartWith(
+            expect(genesisNetworkProblems(network(10, many(1)), many(7))).toEqual([])
+            expect(genesisNetworkProblems(network(10, many(10)), many(6))[0]).toStartWith(
                 "6 validators in the snapshot's validators.jsonl, below the quorum of 7",
             )
             const dir = mkdtempSync(join(tmpdir(), "genesis-hash-rows-"))
-            expect(snapshotValidatorRows(dir)).toBeNull()
+            expect(snapshotValidators(dir)).toBeNull()
             writeFileSync(join(dir, "manifest.json"), JSON.stringify({ files: { "gcr_main.jsonl": { rows: 3 } } }))
-            expect(snapshotValidatorRows(dir)).toBeNull()
-            writeFileSync(join(dir, "manifest.json"), JSON.stringify({ files: { "validators.jsonl": { rows: 9 } } }))
-            expect(snapshotValidatorRows(dir)).toBe(9)
+            expect(snapshotValidators(dir)).toBeNull()
+            writeFileSync(join(dir, "manifest.json"), JSON.stringify({ files: { "validators.jsonl": { rows: 2 } } }))
+            writeFileSync(join(dir, "validators.jsonl"), many(2).map(v => JSON.stringify(v)).join("\n") + "\n")
+            expect(snapshotValidators(dir)).toEqual(many(2))
+            writeFileSync(join(dir, "validators.jsonl"), "{ not json\n")
+            expect(() => snapshotValidators(dir)).toThrow("validators.jsonl line 1 is not JSON")
             writeFileSync(join(dir, "manifest.json"), "{ not json")
-            expect(snapshotValidatorRows(dir)).toBeNull()
+            expect(snapshotValidators(dir)).toBeNull()
+        })
+
+        it("counts only the validators active at block 0, as the committee of block 1 is drawn", () => {
+            expect(activeAtBlockZero(validator(1))).toBe(true)
+            expect(activeAtBlockZero({ ...validator(1), valid_at: 1 })).toBe(false)
+            expect(activeAtBlockZero({ ...validator(1), valid_at: null })).toBe(false)
+            expect(activeAtBlockZero({ ...validator(1), status: "1" })).toBe(false)
+            expect(activeAtBlockZero({ ...validator(1), status: 2 })).toBe(false)
+
+            // Seven rows, one of them not yet valid and one unstaking: five vote, quorum is 7
+            const rows = many(7)
+            rows[5] = { ...rows[5], valid_at: 1 }
+            rows[6] = { ...rows[6], status: "1" }
+            for (const problems of [genesisNetworkProblems(network(10, rows)), genesisNetworkProblems(network(10, []), rows)]) {
+                expect(problems).toHaveLength(1)
+                expect(problems[0]).toContain('5 validators in')
+                expect(problems[0]).toContain('(of 7 listed; only status "2" with valid_at 0 vote from block 1), below the quorum of 7')
+            }
+        })
+
+        it("checks the URLs of the set block 0 seeds", () => {
+            // The snapshot owns the set: its URLs are checked, the genesis list is not used
+            const rows = many(7)
+            rows[2] = validator(3, "http://45.13.233.189:65550")
+            const { connection_url: _, ...noUrl } = validator(4)
+            rows[3] = noUrl
+            rows[4] = validator(5, "")
+            rows[5] = validator(6, null)
+            rows[6] = validator(7, "not a url")
+            const problems = genesisNetworkProblems(network(10, []), rows)
+            expect(problems).toEqual([
+                `validators.jsonl row 3 (${validator(3).address}) connection_url "http://45.13.233.189:65550" port 65550 is outside 1-65535`,
+                `validators.jsonl row 7 (${validator(7).address}) connection_url "not a url" is not a valid URL`,
+            ])
         })
 
         it("reports a validator URL no peer can dial", () => {
