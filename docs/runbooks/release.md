@@ -89,13 +89,50 @@ The `Release` workflow then:
 
 Publish the draft after the validators have confirmed the digest they run.
 
+## Announcing a release
+
+The draft release is visible only to repository members, so a validator
+installs from the announcement alone. Before posting it, run the checks a
+validator will run, on the files you are about to send, and post nothing
+that fails them:
+
+- `docker compose run --rm --no-deps node bun scripts/genesis-hash.ts --genesis
+  /app/data/genesis.json --snapshot /app/mainnet-snapshot` with the release
+  image and the files mounted as in INSTALL.md ("Run a released image", steps
+  3 and 4) exits 0 and prints no `problem:` line. It reports a `shardSize`
+  outside 3-100, fewer validators than the quorum of `shardSize` (2/3 + 1),
+  and a validator `connection_url` that is not an http(s) URL with a port in
+  1-65535.
+- every validator `connection_url` in the genesis is exactly the
+  `EXPOSED_URL` that operator sent, port included.
+
+The announcement then carries:
+
+1. the tag, and the full `checksums.txt` (tag, commit, image digest, source
+   sha256) pasted or attached, since the draft cannot be downloaded;
+2. each signer's email and `SHA256:` fingerprint
+   ([release-signing-key.md](release-signing-key.md), "Publish the
+   fingerprint");
+3. for a new network or a reissued genesis: `genesis.json`, `snapshot.tar`
+   and a `SHA256SUMS` covering both, and the four values a validator compares
+   (genesis hash, genesis block hash, fork schedule digest with chain id,
+   snapshot manifest sha256);
+4. the peer list: one `public key -> EXPOSED_URL` line per validator, the
+   same URLs as the genesis;
+5. whether `docs/mainnet/parameters.env` changed and whether the release adds
+   a migration.
+
+A reissued genesis is a new chain: say so, and point the validators at
+INSTALL.md, "After the genesis is reissued".
+
 ## What a validator runs
 
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
 and digest, copied from `checksums.txt`. If the release changes
 `docs/mainnet/parameters.env`, the announcement says so and every validator
 updates the same lines in `.env` before restarting; `node-doctor --production`
-fails until they match.
+fails until they match. `SUFFIX` is the install's `INSTANCE_SUFFIX`, empty
+on a host with one install (INSTALL.md, "Run a released image", step 3).
 
 ```
 IMAGE_NAME=ghcr.io/kynesyslabs/node
@@ -106,7 +143,7 @@ IMAGE_TAG=v1.0.0-rc.1@sha256:<digest from checksums.txt>
 ./scripts/node-doctor --production &&
 docker compose pull node &&
 docker compose up -d --wait postgres &&
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:show
+docker compose run --rm --no-deps --name "demos-migrate$SUFFIX" node bun run migration:show
 ```
 
 `migration:show` is read-only; each `[ ]` line is a pending migration. If it
@@ -117,7 +154,7 @@ block above ended without an error:
 ```bash
 ./scripts/node-doctor --production &&
 docker compose stop reaper node &&
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:run &&
+docker compose run --rm --no-deps --name "demos-migrate$SUFFIX" node bun run migration:run &&
 docker compose up -d --no-build &&
 docker image inspect --format '{{index .RepoDigests 0}}' \
   "$(docker inspect --format '{{.Image}}' "$(docker compose ps -q node)")"
@@ -145,8 +182,9 @@ locally before starting:
 
 ```bash
 git fetch --tags origin stabilisation &&
-git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers &&
-git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS" &&
 git merge-base --is-ancestor v1.0.0-rc.1 origin/stabilisation &&
 git verify-tag v1.0.0-rc.1 &&
 git checkout v1.0.0-rc.1 &&

@@ -87,6 +87,18 @@ bun scripts/genesis-hash.ts --genesis mainnet/genesis.json --snapshot mainnet/sn
 sha256sum mainnet/genesis.json
 ```
 
+It must exit 0 and print no `problem:` line. Besides the hashes, it reports
+what a validator would hit on this file, and the same checks fail
+`node-doctor --production` on the validators' hosts:
+
+- `properties.shardSize` outside 3-100: the node refuses the genesis at boot;
+- fewer validators (in `validators`, or in the snapshot's `validators.jsonl`
+  when it has one) than the quorum of `shardSize`, 2/3 + 1: the node boots
+  but no block after block 0 can be forged;
+- a validator `connection_url` that is not an http(s) URL with a host and a
+  port in 1-65535. Each one is exactly the `EXPOSED_URL` that operator runs
+  with, port included; peers dial it.
+
 What each value covers, how they are published, the 24 h rule and the
 height-1 check after launch are in [genesis-hash.md](genesis-hash.md).
 

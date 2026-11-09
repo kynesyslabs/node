@@ -38,10 +38,30 @@ ssh-keygen -lf ~/.ssh/demos_release_<name>.pub
 # 256 SHA256:... <name> demos release (ED25519)
 ```
 
-Publish that fingerprint outside GitHub as well (the team's announcement
-channel, the same place the genesis hash is published). Validators compare the
-fingerprint there with the key in `allowed_signers`, so someone who can push to
-the repository cannot quietly swap a key.
+### Publish the fingerprint
+
+Publish your email address (the principal of your `allowed_signers` line) and
+that `SHA256:...` fingerprint outside GitHub: in the team's announcement
+channel, the same place the genesis hash is published, and again in every
+release announcement whose tag you signed, for example:
+
+```
+Signed by: <email>, ED25519 key SHA256:<fingerprint>
+```
+
+A validator compares both against what `git verify-tag` prints
+(INSTALL.md, "Run a released image", step 1), and the key list against the
+listing below, so someone who can push to the repository cannot quietly swap a
+key. Give the full fingerprint as `ssh-keygen -lf` prints it, never a link to
+the repository or a shortened form, and no URL other than the channel the
+validators already know.
+
+To list every key in the file with its fingerprint (the principal first):
+
+```bash
+git show origin/stabilisation:.github/allowed_signers |
+  while read -r who _ type key; do printf '%s ' "$who"; echo "$type $key" | ssh-keygen -lf -; done
+```
 
 ## 2. Add the public key to `.github/allowed_signers`
 
@@ -96,14 +116,19 @@ Anyone can check a tag the way the release workflow does:
 
 ```bash
 git fetch --tags origin stabilisation
-git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers"
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS"
 git merge-base --is-ancestor v1.0.0 origin/stabilisation && echo "on stabilisation"
-git -c gpg.ssh.allowedSignersFile=$HOME/demos-allowed-signers verify-tag v1.0.0
+git -c gpg.ssh.allowedSignersFile="$SIGNERS" verify-tag v1.0.0
 ```
+
+The list goes into the clone's own `.git`, so two checkouts on one host never
+read each other's copy.
 
 `git verify-tag` prints `Good "git" signature for <email> with ED25519 key
 SHA256:...`. Check both parts: the email must be one of the agreed holders and
-the fingerprint must match the one that holder published. "Good signature"
+the fingerprint must match the one that holder published
+([Publish the fingerprint](#publish-the-fingerprint)). "Good signature"
 alone only says some listed key signed it.
 
 ## How the release workflow checks the tag
