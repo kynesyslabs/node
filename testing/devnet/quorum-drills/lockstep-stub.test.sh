@@ -203,7 +203,7 @@ mkdir -p "${WORK}/bin"
 # last lines with --tail; no file: an empty log), after sleeping the seconds in
 # FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists.
 # A fake log holds no NUL byte: the fake reads it into a bash variable, which would
-# cut it off at a NUL or drop it.
+# cut the log off at its first NUL (--tail all) or drop the NUL bytes (--tail N).
 # Cut off by its reader, it exits 141 as if it died of SIGPIPE, as the docker CLI
 # does whether SIGPIPE is ignored or not: a Go program that gets EPIPE on stdout
 # raises SIGPIPE with its default action. The fake's printf dies of SIGPIPE, or
@@ -236,8 +236,8 @@ case "$1" in
         # The log is taken into a variable first, then written by bash's own printf:
         # no cat or tail faces the reader, so what happens when it stops reading
         # does not depend on the coreutils on the PATH (GNU cat fails on EPIPE; uutils
-        # cat 0.12.0, which the ubuntu-26.04 CI runner appears to run, exits 0 without
-        # a word)
+        # cat 0.12.0 exits 0 without a word, and the cat of the ubuntu-26.04 CI runner
+        # appears to behave the same)
         if [ "${tail}" = all ]; then
             IFS= read -r -d '' out < "${FAKE}/nodelog.${n}"
         else
