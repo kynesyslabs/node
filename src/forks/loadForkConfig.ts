@@ -23,6 +23,8 @@ import type {
     CanonicalAddressesConfig,
     FeeBindingConfig,
     BlockCapsConfig,
+    TelegramSenderBindingConfig,
+    XmRemoveCanonicalConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     UnpinnedCommitteeConfig,
@@ -412,6 +414,14 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.unpinnedCommittee =
                 config as UnpinnedCommitteeConfig
             return
+        case "telegramSenderBinding":
+            getSharedState.forkConfig.telegramSenderBinding =
+                config as TelegramSenderBindingConfig
+            return
+        case "xmRemoveCanonical":
+            getSharedState.forkConfig.xmRemoveCanonical =
+                config as XmRemoveCanonicalConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -567,6 +577,10 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as BlockCapsConfig
         case "unpinnedCommittee":
             return base as UnpinnedCommitteeConfig
+        case "telegramSenderBinding":
+            return base as TelegramSenderBindingConfig
+        case "xmRemoveCanonical":
+            return base as XmRemoveCanonicalConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

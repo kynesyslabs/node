@@ -313,6 +313,17 @@ describe("chooseSenderOverflow", () => {
         expect(evict).toEqual([])
     })
 
+    it("ranks an unsafe integer nonce as its stored decimal text ranks", () => {
+        // A pooled row's nonce comes back as the JSON text Postgres holds, so
+        // the same tx must rank the same whether it arrives or is held.
+        const big = 2 ** 53 + 2
+        const higher = slot("0xhigher", "s", "9007199254740996")
+        const arriving = chooseSenderOverflow([higher], [slot("0xbig", "s", big)], 1)
+        const held = chooseSenderOverflow([slot("0xbig", "s", String(big))], [higher], 1)
+        expect([...arriving.refuse, ...arriving.evict]).toEqual(["0xhigher"])
+        expect([...held.refuse, ...held.evict]).toEqual(["0xhigher"])
+    })
+
     it("ranks an unreadable nonce last", () => {
         const { refuse } = chooseSenderOverflow([], [slot("0xbad", "s", "x"), slot("0xok", "s", 9)], 1)
         expect([...refuse]).toEqual(["0xbad"])
@@ -326,6 +337,20 @@ describe("chooseSenderOverflow", () => {
         expect(without.evict).toEqual(["0xkept"])
         const { refuse, evict } = chooseSenderOverflow(held, incoming, 2, new Set(["0xkept"]))
         expect([...refuse]).toEqual(["0xi5"])
+        expect(evict).toEqual([])
+    })
+
+    it("gives a kept tx that ranks inside the cap no slot of the others", () => {
+        const held = [
+            ...Array.from({ length: 63 }, (_, i) => slot(`0xh${i + 10}`, "s", i + 10)),
+            slot("0xkept", "s", 5),
+        ]
+        const incoming = [slot("0xi1", "s", 1)]
+        const without = chooseSenderOverflow(held.filter(s => s.hash !== "0xkept"), incoming, 64)
+        expect(without.refuse.size).toBe(0)
+        expect(without.evict).toEqual([])
+        const { refuse, evict } = chooseSenderOverflow(held, incoming, 64, new Set(["0xkept"]))
+        expect(refuse.size).toBe(0)
         expect(evict).toEqual([])
     })
 })

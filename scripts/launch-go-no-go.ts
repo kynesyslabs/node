@@ -178,6 +178,8 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "feeBinding",
     "blockCaps",
     "unpinnedCommittee",
+    "telegramSenderBinding",
+    "xmRemoveCanonical",
 ]
 
 /**

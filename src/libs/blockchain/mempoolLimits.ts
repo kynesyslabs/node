@@ -304,8 +304,10 @@ export interface SenderSlot {
 }
 
 function slotNonce(value: unknown): bigint | null {
-    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
-        return BigInt(value)
+    // Through its decimal text, as a pooled row's nonce reads back, so an
+    // unsafe integer ranks the same arriving as held.
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+        return slotNonce(String(value))
     }
     if (typeof value === "string" && /^\d{1,20}$/.test(value)) {
         return BigInt(value)
@@ -354,10 +356,10 @@ export function chooseSenderOverflow(
     const refuse = new Set<string>()
     const evict: string[] = []
     for (const list of bySender.values()) {
-        if (list.length <= maxPerSender) continue
-        list.sort((a, b) => compareSlots(a.slot, b.slot))
-        for (const { slot, held: isHeld } of list.slice(maxPerSender)) {
-            if (keep.has(slot.hash)) continue
+        const ranked = list.filter(entry => !keep.has(entry.slot.hash))
+        if (ranked.length <= maxPerSender) continue
+        ranked.sort((a, b) => compareSlots(a.slot, b.slot))
+        for (const { slot, held: isHeld } of ranked.slice(maxPerSender)) {
             if (isHeld) evict.push(slot.hash)
             else refuse.add(slot.hash)
         }
