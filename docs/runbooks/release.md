@@ -187,8 +187,10 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
 - From the first release after `v1.0.0-rc.5`, peer-to-peer auth changes on the
   wire and every node of a network must be upgraded together (mainnet starts
   on this release). Omni requests are signed with mode `0x06`, which covers the
-  network's genesis hash, the opcode, the sequence, the timestamp and the
-  payload hash, and each signed message is accepted once per process: the
+  network's genesis hash, the identity of the node the request is sent to, the
+  opcode, the sequence, the timestamp and the payload hash, so a node cannot
+  pass a request it received on to another node as its sender. Each signed
+  message is accepted once per process: the
   record of accepted messages is kept in memory and is lost on a restart, so a
   frame captured before a node restarts can be accepted once more while its
   timestamp is still inside the 5-minute clock-skew window. A frame signed on

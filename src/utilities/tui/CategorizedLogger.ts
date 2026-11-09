@@ -7,11 +7,42 @@
 
 import { EventEmitter } from "events"
 import fs from "fs"
+import os from "os"
 import path from "path"
 import { Config } from "src/config"
 
 // Capture original console.error at module initialization to avoid TUI interception/recursion
 const originalConsoleError = console.error.bind(console)
+
+/**
+ * A logs directory left by an older release keeps the mode it was created
+ * with; make it owner-only. Directories that are not the node's own (the
+ * working directory, home, the temp dir, the root) are left as they are.
+ */
+function restrictLogsDir(dir: string): void {
+    if (process.platform === "win32") return
+    // chmod follows symlinks, so compare the directories they lead to.
+    const real = (d: string) => {
+        try {
+            return fs.realpathSync(d)
+        } catch {
+            return path.resolve(d)
+        }
+    }
+    const resolved = real(dir)
+    const shared = [process.cwd(), os.homedir(), os.tmpdir(), path.parse(resolved).root]
+    if (shared.some(d => real(d) === resolved)) return
+    try {
+        if ((fs.statSync(resolved).mode & 0o077) !== 0) {
+            fs.chmodSync(resolved, 0o700)
+        }
+    } catch (err) {
+        originalConsoleError(
+            `Could not make the logs directory ${resolved} owner-only; other users may read the logs:`,
+            err,
+        )
+    }
+}
 
 // SECTION Types and Interfaces
 
@@ -289,9 +320,11 @@ export class CategorizedLogger extends EventEmitter {
             this.config.logsDir = `${this.config.logsDir}_${suffix}`
         }
 
-        // Create directory if it doesn't exist
+        // Logs carry peer addresses and request details: owner-only.
         if (!fs.existsSync(this.config.logsDir)) {
-            fs.mkdirSync(this.config.logsDir, { recursive: true })
+            fs.mkdirSync(this.config.logsDir, { recursive: true, mode: 0o700 })
+        } else {
+            restrictLogsDir(this.config.logsDir)
         }
 
         this.logsInitialized = true
@@ -477,7 +510,7 @@ export class CategorizedLogger extends EventEmitter {
 
         if (!stream || stream.destroyed) {
             const filepath = path.join(this.config.logsDir, filename)
-            stream = fs.createWriteStream(filepath, { flags: "a" })
+            stream = fs.createWriteStream(filepath, { flags: "a", mode: 0o600 })
 
             // Handle stream errors to prevent crashes
             stream.on("error", err => {

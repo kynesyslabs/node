@@ -20,9 +20,11 @@ jest.mock("src/utilities/logger", () => ({
         custom: jest.fn(),
     },
 }))
+const SELF = "0x" + "5e".repeat(32)
 jest.mock("src/utilities/sharedState", () => ({
     getSharedState: {
         genesisBlockHash: "d5".repeat(32),
+        publicKeyHex: SELF,
         getConnectionString: async () => "",
         version: "test",
         getInfo: async () => ({}),
@@ -98,14 +100,14 @@ let sequence = 100
 function frame(
     opcode: number,
     payload: Buffer,
-    sign?: { claims: Keys; signer: Keys },
+    sign?: { claims: Keys; signer: Keys; recipient?: string },
 ): Buffer {
     const seq = sequence++
     const header = { version: 1, opcode, sequence: seq, payloadLength: payload.length }
     if (!sign) return MessageFramer.encodeMessage(header, payload)
 
     const timestamp = Date.now()
-    const data = timestampedSignedData("d5".repeat(32), header.opcode, seq, timestamp, payload)
+    const data = timestampedSignedData("d5".repeat(32), sign.recipient ?? SELF, header.opcode, seq, timestamp, payload)
     const signature = forge.pki.ed25519.sign({
         message: data,
         privateKey: sign.signer.privateKey as forge.pki.ed25519.NativeBuffer,
@@ -242,6 +244,29 @@ for (const kind of connections) {
             expect(consensusCalls).toEqual([
                 { sender: idOf(peer), payload: expect.anything() },
             ])
+        })
+
+        it("does not adopt a sender's identity from a frame it signed for another node", async () => {
+            // The node the sender talked to replays the frame to us.
+            const validator = newKeys()
+            const socket = new FakeSocket()
+            const conn = kind.make(socket)
+            const authenticated = jest.fn()
+            conn.on("authenticated", authenticated)
+
+            const status = await exchange(
+                socket,
+                frame(OmniOpcode.NODE_CALL, greenlight(), {
+                    claims: validator,
+                    signer: validator,
+                    recipient: "0x" + "0f".repeat(32),
+                }),
+            ).catch(() => undefined)
+
+            expect(status).not.toBe(200)
+            expect(authenticated).not.toHaveBeenCalled()
+            expect(kind.identity(conn)).not.toBe(idOf(validator))
+            expect(consensusCalls).toHaveLength(0)
         })
 
         it("still verifies each sender-bound message on its own after authentication", async () => {
