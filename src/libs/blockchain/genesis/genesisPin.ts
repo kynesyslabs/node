@@ -15,6 +15,7 @@ KyneSys Labs: https://www.kynesys.xyz/
  * acts on the problems returned. See docs/design/genesis-enforcement.md.
  */
 
+import { DEFAULT_FORK_CONFIG, NON_MAINNET_CHAIN_IDS } from "@/forks/forkConfig"
 import { hashGenesisCore, hashGenesisData } from "./normalizeGenesisForHash"
 
 const SHA256_HEX = /^[0-9a-f]{64}$/
@@ -52,18 +53,58 @@ function isTrue(raw: string | undefined): boolean {
     return v === "true" || v === "1" || v === "yes"
 }
 
-/** A production node runs with a pinned genesis unless the operator opted out by name. */
+/**
+ * True for a chain id that is neither the testnet's nor a devnet's: mainnet,
+ * or a network run like it. A genesis without an id is not one, since
+ * signatureDomain cannot run without it.
+ */
+export function isMainnetChainId(chainId: unknown): boolean {
+    return (
+        typeof chainId === "number" &&
+        Number.isInteger(chainId) &&
+        !NON_MAINNET_CHAIN_IDS.includes(chainId)
+    )
+}
+
+/**
+ * A production node, and any node on a mainnet chain id, runs with a pinned
+ * genesis. Only a production node on a test network may opt out by name: a
+ * bare-metal install runs as development, so NODE_ENV alone would let a
+ * mainnet validator boot on whatever genesis file it holds.
+ */
 export function pinRequirementProblem(
     pin: string,
     env: Record<string, string | undefined>,
+    chainId?: unknown,
 ): string | null {
     if (pin !== "") return null
+    if (isMainnetChainId(chainId)) {
+        return (
+            `EXPECTED_GENESIS_HASH is not set and the genesis has chain id ${String(chainId)}, ` +
+            "which is not a test network's. A node on it must pin the published genesis hash; " +
+            "DEMOS_ALLOW_UNPINNED_GENESIS does not apply"
+        )
+    }
     if (env.NODE_ENV !== "production") return null
     if (isTrue(env.DEMOS_ALLOW_UNPINNED_GENESIS)) return null
     return (
         "EXPECTED_GENESIS_HASH is not set. A production node must pin the genesis it joins: " +
         "set it to the published genesis hash, or set DEMOS_ALLOW_UNPINNED_GENESIS=true " +
         "on a network that has none"
+    )
+}
+
+/**
+ * A node on a mainnet chain id runs with PROD=true. PROD=false relaxes the
+ * double-sign record, the boot clock check, peer and proxy checks, which is
+ * acceptable on a test network only.
+ */
+export function devModeProblem(prod: boolean, chainId: unknown): string | null {
+    if (prod || !isMainnetChainId(chainId)) return null
+    return (
+        `PROD is not true and the genesis has chain id ${String(chainId)}, which is not a test ` +
+        "network's. Development mode relaxes the double-sign protection and other checks; " +
+        "set PROD=true"
     )
 }
 
@@ -140,6 +181,34 @@ export function genesisTimestampProblem(genesisData: unknown): string | null {
     return null
 }
 
+/**
+ * One problem per address that `balances` names more than once. Every path
+ * that applies the list keeps the last entry, so a repeated allocation would
+ * silently replace the one the reviewers read first.
+ */
+export function duplicateBalanceProblems(balances: unknown): string[] {
+    if (!Array.isArray(balances)) return []
+    const seen = new Map<string, number[]>()
+    balances.forEach((entry, i) => {
+        const address = Array.isArray(entry) ? entry[0] : undefined
+        if (typeof address !== "string") return
+        // Case-folded: the legacy path keys accounts by the exact string, and
+        // two spellings of one key would be two credits nobody reviewed as such
+        const key = address.trim().toLowerCase()
+        seen.set(key, [...(seen.get(key) ?? []), i])
+    })
+    const problems: string[] = []
+    for (const [address, entries] of seen) {
+        if (entries.length > 1) {
+            problems.push(
+                `genesis balances name ${address} ${entries.length} times (entries ${entries.join(", ")}); ` +
+                    "each address may appear once",
+            )
+        }
+    }
+    return problems
+}
+
 export interface FreshGenesisInput {
     /** The genesis file as read. */
     genesisData: unknown
@@ -151,6 +220,8 @@ export interface FreshGenesisInput {
     snapshotManifestHash: string | null
     /** identityCarryover is scheduled at height 0. */
     carryoverAtGenesis?: boolean
+    /** Normalized EXPECTED_GENESIS_BLOCK_HASH, "" when none. */
+    blockPin?: string
 }
 
 /**
@@ -159,7 +230,9 @@ export interface FreshGenesisInput {
  * boot finds a block 0 and trusts it.
  */
 export function freshGenesisProblems(input: FreshGenesisInput): string[] {
-    const problems: string[] = []
+    const problems: string[] = duplicateBalanceProblems(
+        (input.genesisData as Record<string, unknown> | null)?.balances,
+    )
     const declared = declaredManifestHash(input.genesisData)
 
     if (declared !== null) {
@@ -180,6 +253,20 @@ export function freshGenesisProblems(input: FreshGenesisInput): string[] {
         problems.push(
             "identityCarryover is active at genesis but the genesis does not declare " +
                 "snapshot.manifestSha256",
+        )
+    }
+
+    // Block 0 commits to the genesis file, and through it to a declared
+    // manifest only: a block pin alone does not bind an undeclared snapshot.
+    if (
+        declared === null &&
+        input.snapshotManifestHash !== null &&
+        input.pin === "" &&
+        (input.blockPin ?? "") !== ""
+    ) {
+        problems.push(
+            "a snapshot is present but the genesis does not declare snapshot.manifestSha256, " +
+                "so EXPECTED_GENESIS_BLOCK_HASH does not bind it",
         )
     }
 
@@ -205,6 +292,94 @@ export function freshGenesisProblems(input: FreshGenesisInput): string[] {
     return problems
 }
 
+export interface GenesisScheduleInput {
+    /** The genesis file as read, or null when there is none. */
+    fileGenesisData: unknown
+    /** Block 0's genesis on a restart. */
+    storedGenesisData?: unknown
+    /** Normalized pins, "" when none. */
+    pin: string
+    blockPin: string
+}
+
+const KNOWN_FORKS = Object.keys(DEFAULT_FORK_CONFIG)
+
+function declaresHeight(forks: Record<string, unknown>, name: string): boolean {
+    const entry = forks[name]
+    return (
+        Object.hasOwn(forks, name) &&
+        entry !== null &&
+        typeof entry === "object" &&
+        Object.hasOwn(entry, "activationHeight")
+    )
+}
+
+/**
+ * Problems with the fork schedule a node is about to run. A missing file or
+ * `forks` field, or an undeclared fork, takes this build's defaults, which can
+ * change between releases while the network's schedule cannot. On a test
+ * network without pins that stays allowed; a pinned node must have a file
+ * and a schedule, and a mainnet chain id must declare every fork this build
+ * knows.
+ */
+export function genesisScheduleProblems(input: GenesisScheduleInput): string[] {
+    const mainnet =
+        isMainnetChainId(chainIdOf(input.fileGenesisData)) ||
+        isMainnetChainId(chainIdOf(input.storedGenesisData))
+    const pinned = input.pin !== "" || input.blockPin !== ""
+    if (!mainnet && !pinned) return []
+
+    const why = mainnet ? "the chain id is not a test network's" : "the genesis is pinned"
+    if (input.fileGenesisData === null || input.fileGenesisData === undefined) {
+        return [
+            `no genesis file, and ${why}: the node would run with this build's default ` +
+                "fork schedule instead of the network's. Mount the network's genesis file",
+        ]
+    }
+    const forks = (input.fileGenesisData as Record<string, unknown>).forks
+    if (forks === null || typeof forks !== "object" || Array.isArray(forks)) {
+        return [
+            `the genesis declares no fork schedule (forks), and ${why}: the node would run ` +
+                "with this build's defaults",
+        ]
+    }
+    if (!mainnet) return []
+    const undeclared = KNOWN_FORKS.filter(
+        name => !declaresHeight(forks as Record<string, unknown>, name),
+    )
+    if (undeclared.length === 0) return []
+    return [
+        `the genesis does not declare ${undeclared.join(", ")}: on a mainnet chain id every ` +
+            "fork this build knows needs an activationHeight (a height or null), or it takes " +
+            "this build's default" +
+            (undeclared.includes("gasFeeSeparation")
+                ? "; gasFeeSeparation would pay the treasury share to the built-in address"
+                : ""),
+    ]
+}
+
+/**
+ * The warning for a genesis that leaves gasFeeSeparation to the default, which
+ * is scheduled with a treasury address the code names, not the network.
+ */
+export function defaultTreasuryWarning(genesisData: unknown): string | null {
+    const forks = (genesisData as Record<string, unknown> | null)?.forks
+    if (
+        forks !== null &&
+        typeof forks === "object" &&
+        declaresHeight(forks as Record<string, unknown>, "gasFeeSeparation")
+    ) {
+        return null
+    }
+    const fallback = DEFAULT_FORK_CONFIG.gasFeeSeparation
+    if (fallback.activationHeight === null) return null
+    return (
+        "the genesis does not declare gasFeeSeparation: it runs from height " +
+        `${fallback.activationHeight} with the built-in treasury ${fallback.treasuryAddress}. ` +
+        "Declare it with the network's treasuryAddress"
+    )
+}
+
 export interface RestartGenesisInput {
     /** The genesis data stored in block 0. */
     storedGenesisData: unknown
@@ -213,7 +388,8 @@ export interface RestartGenesisInput {
     pin: string
 }
 
-function chainIdOf(genesisData: unknown): unknown {
+/** `properties.id` of a genesis, or undefined. */
+export function chainIdOf(genesisData: unknown): unknown {
     if (genesisData === null || typeof genesisData !== "object") return undefined
     const props = (genesisData as Record<string, unknown>).properties
     if (props === null || typeof props !== "object") return undefined

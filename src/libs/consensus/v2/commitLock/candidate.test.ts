@@ -46,13 +46,15 @@ interface Tx {
 
 const mempool = new Map<string, Tx>()
 const received: Tx[][] = []
+const receiveOptions: unknown[] = []
 jest.mock("src/libs/blockchain/mempool", () => ({
     __esModule: true,
     default: {
         getTransactionsByHashes: async (hashes: string[]) =>
             hashes.filter(h => mempool.has(h)).map(h => structuredClone(mempool.get(h))),
-        receive: async (txs: Tx[]) => {
+        receive: async (txs: Tx[], _returnDiff?: boolean, options?: unknown) => {
             received.push(txs)
+            receiveOptions.push(options)
             for (const tx of txs) mempool.set(tx.hash, structuredClone(tx))
             return { success: true, mempool: [] }
         },
@@ -126,6 +128,7 @@ beforeEach(() => {
     sharedState.identityFile = path.join(dir, ".demos_identity")
     mempool.clear()
     received.length = 0
+    receiveOptions.length = 0
     for (const k of Object.keys(nonces)) delete nonces[k]
     fetched.locks = []
     fetched.committed = []
@@ -334,6 +337,8 @@ describe("rebuilding a block's transactions", () => {
         const rebuilt = await rebuildTransactions(10, inputs(["t1", "t2"]), [source as any])
         expect(calls).toEqual([["t2"]])
         expect(received[0].map(t => t.hash)).toEqual(["t2"])
+        // Restored as a block's txs: the per-sender cap may have pushed them out.
+        expect(receiveOptions[0]).toEqual({ rebuild: true })
         expect(rebuilt?.txs.map(t => t.hash)).toEqual(["t1", "t2"])
     })
 

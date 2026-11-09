@@ -91,6 +91,18 @@ export class SignatureVerifier {
             }
         }
 
+        // 2c. Frames are signed for their recipient; without our own
+        // identity we cannot tell one sent to us from one replayed to us.
+        if (
+            auth.signatureMode === SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH &&
+            !getSharedState.publicKeyHex
+        ) {
+            return {
+                valid: false,
+                error: "Own identity not known yet; cannot verify recipient-bound auth",
+            }
+        }
+
         // 3. Build data to verify based on signature mode
         const dataToVerify = this.buildSignatureData(
             auth.signatureMode,
@@ -201,6 +213,7 @@ export class SignatureVerifier {
             case SignatureMode.SIGN_TIMESTAMPED_PAYLOAD_HASH:
                 return timestampedSignedData(
                     getSharedState.genesisBlockHash as string,
+                    getSharedState.publicKeyHex as string,
                     header.opcode,
                     header.sequence,
                     timestamp,

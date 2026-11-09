@@ -50,6 +50,7 @@ import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import { Identities } from "@kynesyslabs/demosdk/abstraction"
 import type { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import Mempool from "./mempool"
+import { verifyRpcEdits } from "./validation/editBinding"
 import { OS, PEER, SENDER, VICTIM, chainIs, demos, onTheWire, viaConfirm } from "./validation/editBinding.fixtures"
 
 const identities = new Identities()
@@ -208,5 +209,51 @@ describe("Mempool.receive", () => {
         const bad = await forged("vote", forgeries[1][2])
         await Mempool.receive([row(bad), row(honest)], false)
         expect(inserted.map(r => r.hash)).toEqual([honest.hash])
+    })
+})
+
+describe("single intake under feeBinding", () => {
+    // Gossip and RPC take one tx at a time; with no batch to fail, the tx is
+    // refused instead of judged on fees a failed read may have left stale.
+    for (const editBinding of [0, null] as const) {
+        const label = editBinding === null ? " before editBinding" : ""
+        it(`refuses a gossiped tx while the parameters cannot be refreshed${label}`, async () => {
+            chainIs(true, editBinding)
+            getSharedState.forkConfig.feeBinding.activationHeight = 0
+            parametersReadable = false
+            parameterRefreshes = 0
+            try {
+                const honest = onTheWire(await builders.unstake())
+                const out = await Mempool.ingestGossiped(validity(honest))
+                expect(out.accepted).toBe(false)
+                expect(out.reason).toContain("network parameters")
+                expect(parameterRefreshes).toBe(1)
+            } finally {
+                parametersReadable = true
+            }
+        })
+
+        it(`refuses an RPC tx while the parameters cannot be refreshed${label}`, async () => {
+            chainIs(true, editBinding)
+            getSharedState.forkConfig.feeBinding.activationHeight = 0
+            parametersReadable = false
+            try {
+                const honest = onTheWire(await builders.unstake())
+                const verdict = await verifyRpcEdits(honest)
+                expect(verdict.ok).toBe(false)
+                expect((verdict as { reason: string }).reason).toContain("connection reset")
+            } finally {
+                parametersReadable = true
+            }
+        })
+    }
+
+    it("admits once the parameters are read again", async () => {
+        getSharedState.forkConfig.feeBinding.activationHeight = 0
+        parameterRefreshes = 0
+        const honest = onTheWire(await builders.unstake())
+        expect(await Mempool.ingestGossiped(validity(honest))).toMatchObject({ accepted: true })
+        expect((await verifyRpcEdits(honest)).ok).toBe(true)
+        expect(parameterRefreshes).toBe(2)
     })
 })
