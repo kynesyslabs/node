@@ -58,9 +58,10 @@ describe("block-stall alerting is loaded", () => {
     })
 
     it("recognizes the temporary signing stop in both operator guides", () => {
+        const guidance = "A `[SIGNING] stopped until this process exits:` line with marker 0 means the node is exiting to resync from disk after a block commit it could not confirm; signing resumes on restart. This stop does not show whether another copy of the key is running, so check that as usual before restarting."
         for (const file of ["docs/runbooks/mainnet-monitoring.md", "monitoring/prometheus/alerts/consensus.yml"]) {
-            expect(read(file)).toMatch(/\[SIGNING\] stopped until this process exits:[^\n]*line with marker 0/)
-            expect(read(file)).toContain("implies no second key unless the ForeignSignature alert also fired")
+            expect(read(file)).toContain(guidance)
+            expect(read(file)).not.toContain("implies no second key")
             expect(read(file)).toContain("For any other stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again.")
         }
     })
