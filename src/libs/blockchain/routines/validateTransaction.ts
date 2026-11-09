@@ -27,7 +27,7 @@ import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
-import { normalizePubkey } from "../gcr/handleGCR"
+import { normalizePubkey, withDerivedFeeEdits } from "../gcr/handleGCR"
 import { derivedGasEdit, expectsNonceEdit } from "../validation/editBinding"
 import {
     nativeSendRefusal,
@@ -44,16 +44,52 @@ function stripClientFeeQuote(tx: Transaction): void {
     }
 }
 
+function isNativeSend(tx: Transaction): boolean {
+    return tx.content.type === "native" &&
+        (tx.content.data?.[1] as { nativeOperation?: string } | undefined)?.nativeOperation === "send"
+}
+
+function requiresAmountOnlyBalanceCheck(tx: Transaction, amount: bigint): boolean {
+    return amount > 0n && !isNativeSend(tx)
+}
+
+async function nativeSendBalanceError(
+    tx: Transaction,
+    sendAmount: bigint,
+    total: bigint,
+): Promise<string | null> {
+    // Apply prepends the derived distribution edits to the signed send and
+    // SDK gas edits. Their account fields can name different payers.
+    const debits = new Map<string, bigint>()
+    for (const edit of withDerivedFeeEdits(tx).content.gcr_edits ?? []) {
+        if (edit.type !== "balance" || edit.operation !== "remove") continue
+        const account = normalizePubkey(edit.account)
+        debits.set(account, (debits.get(account) ?? 0n) + BigInt(edit.amount))
+    }
+    const signers = new Set([normalizePubkey(tx.content.from)])
+    if (tx.content.from_ed25519_address) {
+        signers.add(normalizePubkey(tx.content.from_ed25519_address))
+    }
+    // Only the signing accounts' balances are read.
+    if (debits.size > 2 || [...debits.keys()].some(account => !signers.has(account))) {
+        return "[Tx Validation] [BALANCE ERROR] debit from an account that does not sign this transaction\n"
+    }
+    for (const [account, required] of debits) {
+        const balance = await GCR.getAccountBalance(account)
+        if (balance < required) {
+            return `[Tx Validation] [BALANCE ERROR] Insufficient balance for native send: amount ${sendAmount} plus quoted total fee ${total}; account ${account} required ${required} exceeds balance ${balance}\n`
+        }
+    }
+    return null
+}
+
 async function quoteNativeSendFee(
     tx: Transaction,
     referenceBlock: number,
 ): Promise<string | null> {
     // transaction_fee is signed and covers distribution only. Native sends
     // also carry the SDK gas edit; quote both without rewriting signed content.
-    if (
-        tx.content.type !== "native" ||
-        (tx.content.data?.[1] as { nativeOperation?: string } | undefined)?.nativeOperation !== "send"
-    ) return null
+    if (!isNativeSend(tx)) return null
 
     const gas = await derivedGasEdit(
         "native",
@@ -70,19 +106,13 @@ async function quoteNativeSendFee(
         reference_block: referenceBlock,
         total_fee: total.toString(),
     }
-    // The amount and fee pass their individual checks above, but apply
-    // debits both. Refuse an unaffordable send before it can be submitted.
+    // Apply debits each payer's send, gas, and distribution edits together.
+    // Check the signed amount edit here before submission.
     const sendAmount = canonicalizeAmountToOs(
         tx.content.amount,
         isForkActive("osDenomination", referenceBlock),
     )
-    const from = typeof tx.content.from === "string"
-        ? tx.content.from : forgeToHex(tx.content.from)
-    const balance = await GCR.getAccountBalance(from)
-    if (balance < sendAmount + total) {
-        return `[Tx Validation] [BALANCE ERROR] Insufficient balance for native send: amount ${sendAmount} plus quoted total fee ${total} exceeds balance ${balance}\n`
-    }
-    return null
+    return nativeSendBalanceError(tx, sendAmount, total)
 }
 
 async function signWithNativeSendFeeQuote(
@@ -243,7 +273,7 @@ export async function confirmTransaction(
         return validityData
     }
 
-    if (txAmount > 0n) {
+    if (requiresAmountOnlyBalanceCheck(tx, txAmount)) {
         const from =
             typeof tx.content.from === "string"
                 ? tx.content.from
@@ -278,9 +308,8 @@ export async function confirmTransaction(
     // Post-fork the validating node computes the per-component fee
     // breakdown, stamps its own pubkey as `transaction_fee.rpc_address`
     // (so peers know where to route the rpc_fee share), checks the
-    // sender can cover the total, and prepends the fee-distribution
-    // GCREdits onto `tx.content.gcr_edits` so they apply before any
-    // tx-level edits.
+    // fee payer can cover the distribution fee. The fee edits are derived
+    // at apply and are checked with the signed edits by the quote above.
     //
     // Pre-fork: legacy path is preserved (the dead-code `defineGas`
     // function below is the historical placeholder). No edits emitted

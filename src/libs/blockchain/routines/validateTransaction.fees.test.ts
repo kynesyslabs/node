@@ -15,7 +15,10 @@ mock.module("src/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
     default: {
         getAccountNonce: async () => 7,
-        getAccountBalance: async (address: string) => balance(address),
+        getAccountBalance: async (address: string) => {
+            balanceReads.push(address)
+            return balance(address)
+        },
     },
 }))
 mock.module("src/libs/blockchain/validation/txAdmission", () => ({
@@ -39,9 +42,10 @@ import type { GCREntityCaches } from "../gcr/handleGCR"
 
 const { confirmTransaction } = await import("./validateTransaction")
 const { handleValidateTransaction } = await import("../../network/endpointValidation")
-const { default: HandleGCR } = await import("../gcr/handleGCR")
+const { default: HandleGCR, withDerivedFeeEdits } = await import("../gcr/handleGCR")
 const BURN = "0x" + "00".repeat(32)
 const TREASURY = "0x" + "f7".repeat(32)
+const PQC = "0x" + "ab".repeat(32)
 const saved = {
     forkConfig: getSharedState.forkConfig,
     lastBlockNumber: getSharedState.lastBlockNumber,
@@ -59,12 +63,14 @@ const original = {
 }
 const sdkParameters = demos._getNetworkParametersCached
 let caches: GCREntityCaches
-const balance = (key: string): bigint => caches.accounts.get(key)!.balance
+const balanceReads: string[] = []
+const balance = (key: string): bigint => caches.accounts.get(key)?.balance ?? 0n
 const quote = (tx: Transaction): bigint => BigInt((tx.attrs as typeof tx.attrs & { total_fee: string }).total_fee)
 const pay = async (amount: bigint) => onTheWire(await DemosTransactions.pay(PEER, amount, demos))
 const confirm = async (tx: Transaction) => (await confirmTransaction(tx as never, SENDER)).data
 
 beforeEach(() => {
+    balanceReads.length = 0
     getSharedState.PROD = true
     getSharedState.networkFee = 1
     getSharedState.rpcFee = 1
@@ -83,7 +89,7 @@ beforeEach(() => {
         specialOps: { burnPct: 25, rpcPct: 50, treasuryPct: 25 },
     }
     caches = {
-        accounts: new Map([SENDER, PEER, BURN, TREASURY].map(pubkey => [
+        accounts: new Map([SENDER, PEER, BURN, TREASURY, PQC].map(pubkey => [
             pubkey, { pubkey, balance: 0n, nonce: 7 } as any,
         ])),
         storagePrograms: new Map(), tlsNotaries: new Map(),
@@ -103,6 +109,116 @@ afterEach(() => {
 afterAll(() => mock.restore())
 
 describe("native send confirmation fee quote", () => {
+    it("accepts a linked signer when each account covers its own debits", async () => {
+        chainIs(true, null)
+        getSharedState.forkConfig.gasFeeSeparation.activationHeight = 0
+        caches.accounts.get(SENDER)!.balance = 100n * OS
+        caches.accounts.get(PQC)!.balance = 2n * OS
+        const tx = await pay(98n * OS)
+        tx.content.from = PQC
+        tx.content.from_ed25519_address = SENDER
+
+        const removes = tx.content.gcr_edits.filter(edit =>
+            edit.type === "balance" && edit.operation === "remove")
+        expect(removes.map(edit => edit.account)).toEqual([SENDER, SENDER])
+        expect(BigInt(removes[0].amount)).toBe(98n * OS)
+        expect(removes.reduce((sum, edit) => sum + BigInt(edit.amount), 0n)).toBe(99n * OS)
+        const appliedRemoves = withDerivedFeeEdits(tx).content.gcr_edits.filter(edit =>
+            edit.type === "balance" && edit.operation === "remove")
+        expect(appliedRemoves.map(edit => edit.account)).toEqual([PQC, PQC, SENDER, SENDER])
+        expect(appliedRemoves.slice(0, 2).reduce((sum, edit) =>
+            sum + BigInt(edit.amount), 0n)).toBe(2n * OS)
+        expect((await confirm(tx)).valid).toBe(true)
+        expect(quote(tx)).toBe(3n * OS)
+        expect(balanceReads.slice(1)).toEqual([PQC, SENDER])
+    })
+
+    it("refuses a linked signer when the send and gas account falls short", async () => {
+        chainIs(true, null)
+        getSharedState.forkConfig.gasFeeSeparation.activationHeight = 0
+        caches.accounts.get(SENDER)!.balance = 98n * OS
+        caches.accounts.get(PQC)!.balance = 101n * OS
+        const tx = await pay(98n * OS)
+        tx.content.from = PQC
+        tx.content.from_ed25519_address = SENDER
+
+        const verdict = await confirm(tx)
+        expect(verdict.valid).toBe(false)
+        expect(verdict.message).toContain(SENDER)
+        expect(verdict.message).toContain(`required ${99n * OS}`)
+        expect(verdict.message).toContain(`balance ${98n * OS}`)
+        expect(quote(tx)).toBe(3n * OS)
+        expect(balanceReads.slice(1)).toEqual([PQC, SENDER])
+    })
+
+    it("reads only the signing accounts' balances for native sends", async () => {
+        chainIs(true, null)
+        getSharedState.forkConfig.gasFeeSeparation.activationHeight = null
+        caches.accounts.get(SENDER)!.balance = 100n * OS
+        const tx = await pay(1n * OS)
+
+        expect((await confirm(tx)).valid).toBe(true)
+        expect(balanceReads).toEqual([SENDER])
+    })
+
+    it("reads only the signing accounts' balances for submitted edits", async () => {
+        chainIs(true, null)
+        getSharedState.forkConfig.gasFeeSeparation.activationHeight = null
+        caches.accounts.get(SENDER)!.balance = 100n * OS
+        const tx = await pay(1n * OS)
+        const balanceEdit = tx.content.gcr_edits.find(edit => edit.type === "balance")!
+        for (let i = 0; i < 1000; i++) {
+            tx.content.gcr_edits.push({
+                ...balanceEdit,
+                operation: "remove",
+                account: "0x" + (i + 1).toString(16).padStart(64, "0"),
+                amount: "0",
+            } as typeof balanceEdit)
+        }
+
+        const verdict = await confirm(tx)
+        expect(verdict.valid).toBe(false)
+        expect(verdict.message).toContain("debit from an account that does not sign this transaction")
+        expect(balanceReads).toEqual([])
+
+        const rpc = await handleValidateTransaction(tx, SENDER)
+        expect(rpc.data.valid).toBe(false)
+        expect(rpc.data.message).toBe("GCREdit mismatch")
+        expect(balanceReads).toEqual([])
+    })
+
+    it("refuses a native send when its amount payer cannot cover the amount", async () => {
+        chainIs(true, null)
+        getSharedState.forkConfig.gasFeeSeparation.activationHeight = 0
+        caches.accounts.get(SENDER)!.balance = 97n * OS
+        caches.accounts.get(PQC)!.balance = 2n * OS
+        const tx = await pay(98n * OS)
+        tx.content.from = PQC
+        tx.content.from_ed25519_address = SENDER
+
+        const verdict = await confirm(tx)
+        expect(verdict.valid).toBe(false)
+        expect(verdict.message).toContain(SENDER)
+        expect(verdict.message).toContain(`required ${99n * OS}`)
+        expect(verdict.message).toContain(`balance ${97n * OS}`)
+        expect(quote(tx)).toBe(3n * OS)
+    })
+
+    it("retains the amount-only balance refusal for non-native transactions", async () => {
+        chainIs(true, null)
+        caches.accounts.get(SENDER)!.balance = 1n * OS
+        const payment = onTheWire(await demos.sign(await new D402Client(demos).createPayment({
+            recipient: PEER, amount: "100000000", resourceId: "res-1", description: "d",
+        } as never))) as Transaction
+        payment.content.amount = (2n * OS).toString()
+
+        const verdict = await confirm(payment)
+        expect(verdict.valid).toBe(false)
+        expect(verdict.message).toBe(
+            `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${2n * OS} but have ${1n * OS}\n`,
+        )
+    })
+
     it("documents the shipped SDK fee report and cap gap", async () => {
         const doc = await Bun.file("docs/native-send-fee-quote.md").text()
         expect(doc).toContain("gross fee (excluding the amount)")
