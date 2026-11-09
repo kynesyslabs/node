@@ -109,6 +109,25 @@ export function devModeProblem(prod: boolean, chainId: unknown): string | null {
 }
 
 /**
+ * A node on a mainnet chain id runs with DEMOS_REQUIRE_VALIDATORS=true. Without
+ * it the shard selection and the peerlist merge fall back to every online peer
+ * when the validator set is empty, which is acceptable on a test network only.
+ * `requireValidators` is the value those paths read: the variable is exactly
+ * "true".
+ */
+export function requireValidatorsProblem(
+    requireValidators: boolean,
+    chainId: unknown,
+): string | null {
+    if (requireValidators || !isMainnetChainId(chainId)) return null
+    return (
+        `DEMOS_REQUIRE_VALIDATORS is not true and the genesis has chain id ${String(chainId)}, ` +
+        "which is not a test network's. Without it a node that cannot read the validator set " +
+        "uses every online peer as the committee; set DEMOS_REQUIRE_VALIDATORS=true"
+    )
+}
+
+/**
  * The warning for a node that runs without a pin and was not told that is
  * intended. Outside production nothing refuses such a node (a bare-metal
  * install runs as development), so the operator must at least see it.

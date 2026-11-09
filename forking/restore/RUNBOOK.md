@@ -168,7 +168,7 @@ echo "${DEMOS_REQUIRE_VALIDATORS:-unset}"
 | validators table has ACTIVE rows | normal — shard is intersection of online + validators | same |
 | validators table empty OR all non-ACTIVE | loud warning + fall back to all online peers (legacy) | throws Error, consensus crashes |
 
-Set `DEMOS_REQUIRE_VALIDATORS=true` in production environments (e.g. compose `.env`). Operators booting fresh dev chains without baked validators keep the lenient default.
+Set `DEMOS_REQUIRE_VALIDATORS=true` in production environments (e.g. compose `.env`). Operators booting fresh dev chains without baked validators keep the lenient default. A node whose genesis has a mainnet chain id (not 1 or 1337) refuses to start without it.
 
 ---
 

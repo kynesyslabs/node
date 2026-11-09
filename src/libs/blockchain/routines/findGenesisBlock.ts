@@ -31,6 +31,7 @@ import {
     parseGenesisPin,
     parseStoredGenesisData,
     pinRequirementProblem,
+    requireValidatorsProblem,
     restartGenesisProblems,
     unpinnedWarning,
 } from "@/libs/blockchain/genesis/genesisPin"
@@ -137,6 +138,11 @@ function applyRecoveryData(genesisData, recoveryGenesis) {
     genesisData["balances"] = Object.entries(finalBalances)
 }
 
+/** Read as getShard and peerlistMerge read it: only the exact string "true" switches it on. */
+function requireValidatorsEnabled(): boolean {
+    return process.env.DEMOS_REQUIRE_VALIDATORS === "true"
+}
+
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
     // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
@@ -166,6 +172,8 @@ export default async function findGenesisBlock() {
     if (pinProblem) refuse([pinProblem])
     const modeProblem = devModeProblem(Config.getInstance().core.prod, fileChainId)
     if (modeProblem) refuse([modeProblem])
+    const validatorsProblem = requireValidatorsProblem(requireValidatorsEnabled(), fileChainId)
+    if (validatorsProblem) refuse([validatorsProblem])
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
@@ -182,6 +190,11 @@ export default async function findGenesisBlock() {
         if (storedPinProblem) refuse([storedPinProblem])
         const storedModeProblem = devModeProblem(Config.getInstance().core.prod, chainIdOf(stored))
         if (storedModeProblem) refuse([storedModeProblem])
+        const storedValidatorsProblem = requireValidatorsProblem(
+            requireValidatorsEnabled(),
+            chainIdOf(stored),
+        )
+        if (storedValidatorsProblem) refuse([storedValidatorsProblem])
         refuse(
             genesisScheduleProblems({
                 fileGenesisData: hasGenesisFile ? readGenesisFile() : null,
