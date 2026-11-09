@@ -4,6 +4,9 @@
  *
  *   bun scripts/genesis-hash.ts --genesis mainnet/genesis.json [--snapshot DIR] [--json]
  *
+ * --snapshot defaults to DEMOS_SNAPSHOT_DIR when that is set, as the node's
+ * own snapshot lookup does (so it works unchanged inside the node container).
+ *
  * Prints:
  *   - genesisBlockHash: the hash of block 0 a node builds from this file and
  *     serves at /genesisBlock: the --genesis-hash of launch-go-no-go.ts and
@@ -19,7 +22,8 @@
  *     snapshot.manifestSha256 when the network starts from that snapshot.
  *
  * Exit codes: 0 when a node with this pin would accept the files, 1 when it
- * would refuse them (the problems are listed), 2 on bad input.
+ * would refuse them or could never forge a block on them (the problems are
+ * listed), 2 on bad input.
  */
 
 import { createHash } from "node:crypto"
@@ -32,12 +36,16 @@ import { genesisBalancesProblems } from "src/libs/blockchain/genesis/mergeGenesi
 import { genesisForkProblems } from "src/libs/blockchain/genesis/applyForksAtGenesis"
 import { type ForkStateEntry, verifySnapshot } from "src/libs/blockchain/genesis/verifySnapshot"
 import { readGenesisSudoPubkey } from "src/libs/consensus/genesisSudoPubkey"
+import { readGenesisShardSize } from "src/libs/consensus/genesisShardSize"
+import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import { forkScheduleDigest } from "src/libs/peer/routines/forkScheduleAgreement"
 import { loadForkConfigFromGenesis } from "src/forks"
 import { getSharedState } from "src/utilities/sharedState"
 
-function parseArgs(argv: string[]) {
-    const args = { genesis: null as string | null, snapshot: null as string | null, json: false }
+export const USAGE = "usage: bun scripts/genesis-hash.ts --genesis FILE [--snapshot DIR] [--json]"
+
+export function parseArgs(argv: string[], env: Record<string, string | undefined> = process.env) {
+    const args = { genesis: null as string | null, snapshot: null as string | null, json: false, help: false }
     for (let i = 0; i < argv.length; i++) {
         const value = () => {
             const v = argv[++i]
@@ -48,10 +56,14 @@ function parseArgs(argv: string[]) {
             case "--genesis": args.genesis = value(); break
             case "--snapshot": args.snapshot = value(); break
             case "--json": args.json = true; break
+            case "-h":
+            case "--help": args.help = true; return args
             default: throw new Error(`unknown argument ${argv[i]}`)
         }
     }
     if (!args.genesis) throw new Error("--genesis is required")
+    // The directory a node started with this environment reads its snapshot from
+    if (args.snapshot === null && env.DEMOS_SNAPSHOT_DIR) args.snapshot = env.DEMOS_SNAPSHOT_DIR
     return args
 }
 
@@ -103,6 +115,83 @@ export async function verifiedSnapshot(
             problems: [`a node would refuse the snapshot at boot: ${(e as Error).message}`],
         }
     }
+}
+
+/**
+ * Rows of the snapshot's validators.jsonl, or null when the manifest lists
+ * none: a node seeds its validator set from that file when the snapshot
+ * carries it, and from genesis `validators` otherwise.
+ */
+export function snapshotValidatorRows(snapshotDir: string): number | null {
+    const manifestFile = path.join(snapshotDir, "manifest.json")
+    if (!fs.existsSync(manifestFile)) return null
+    const rows = JSON.parse(fs.readFileSync(manifestFile, "utf8"))?.files?.["validators.jsonl"]?.rows
+    return Number.isInteger(rows) ? rows : null
+}
+
+const URL_PORT = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*:(\d+)(?:[/?#]|$)/i
+
+/** Why a validator's connection_url is unusable, or null. null itself is allowed, as the seed allows it. */
+export function connectionUrlProblem(url: unknown): string | null {
+    if (url === null) return null
+    if (typeof url !== "string" || url === "") return "must be null or a non-empty string"
+    const port = URL_PORT.exec(url)?.[1]
+    if (port !== undefined && (Number(port) < 1 || Number(port) > 65535)) {
+        return `port ${port} is outside 1-65535`
+    }
+    let parsed: URL
+    try {
+        parsed = new URL(url)
+    } catch {
+        return "is not a valid URL"
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "is not an http or https URL"
+    if (parsed.hostname === "") return "has no host"
+    return null
+}
+
+/**
+ * What a pinned hash does not catch about the network a genesis starts: a
+ * shardSize the node refuses at boot, fewer validators than the quorum (the
+ * node boots and never forges block 1) and validator URLs no peer can dial.
+ * node-doctor --production makes the same checks on the mounted file.
+ *
+ * @param snapshotRows validators.jsonl rows of the snapshot, when it has one
+ */
+export function genesisNetworkProblems(genesis: unknown, snapshotRows: number | null = null): string[] {
+    const problems: string[] = []
+    let shardSize: number | null = null
+    try {
+        shardSize = readGenesisShardSize(genesis)
+    } catch (e) {
+        problems.push(`${(e as Error).message}: a node refuses this genesis at boot`)
+    }
+    const raw = genesis && typeof genesis === "object" ? (genesis as { validators?: unknown }).validators : undefined
+    const validators = Array.isArray(raw) ? raw : []
+    if (shardSize !== null) {
+        const quorum = quorumThreshold(shardSize)
+        const [count, source] =
+            snapshotRows !== null
+                ? [snapshotRows, "the snapshot's validators.jsonl"]
+                : [validators.length, "genesis validators"]
+        if (count < quorum) {
+            problems.push(
+                `${count} validators in ${source}, below the quorum of ${quorum} (2/3 + 1 of shardSize ${shardSize}): ` +
+                    "a node boots on this genesis but no block after block 0 can be forged",
+            )
+        }
+    }
+    validators.forEach((v, i) => {
+        if (!v || typeof v !== "object") return
+        const entry = v as { address?: unknown; connection_url?: unknown }
+        const problem = connectionUrlProblem(entry.connection_url === undefined ? "" : entry.connection_url)
+        if (problem) {
+            problems.push(
+                `validators[${i}] (${String(entry.address)}) connection_url ${JSON.stringify(entry.connection_url)} ${problem}`,
+            )
+        }
+    })
+    return problems
 }
 
 /** The file as the node reads data/genesis.json: a JSON string holding JSON is parsed again. */
@@ -185,8 +274,13 @@ async function main(): Promise<number> {
     try {
         args = parseArgs(process.argv.slice(2))
     } catch (e) {
-        console.error(`${(e as Error).message}\nusage: bun scripts/genesis-hash.ts --genesis FILE [--snapshot DIR] [--json]`)
+        console.error(`${(e as Error).message}\n${USAGE}`)
         return 2
+    }
+    if (args.help) {
+        console.log(USAGE)
+        console.log("  --snapshot defaults to DEMOS_SNAPSHOT_DIR when it is set")
+        return 0
     }
 
     const genesis = readGenesisFile(args.genesis)
@@ -199,6 +293,9 @@ async function main(): Promise<number> {
     const snapshot = args.snapshot ? await verifiedSnapshot(args.snapshot) : null
     const result = genesisValues(genesis, manifestSha256, snapshot?.forkState ?? null)
     result.problems.push(...(snapshot?.problems ?? []))
+    result.problems.push(
+        ...genesisNetworkProblems(genesis, args.snapshot ? snapshotValidatorRows(args.snapshot) : null),
+    )
     if (args.json) {
         console.log(JSON.stringify(result, null, 2))
     } else {
@@ -212,6 +309,7 @@ async function main(): Promise<number> {
         console.log(`EXPECTED_GENESIS_HASH=${result.genesisDataHash}`)
         console.log(`fork schedule digest: ${result.forkScheduleDigest} (chain id ${result.chainId})`)
         console.log(`snapshot manifest sha256: ${result.snapshotManifestSha256 ?? "(no snapshot given)"}`)
+        if (args.snapshot) console.log(`snapshot directory: ${args.snapshot}`)
         for (const p of result.problems) console.log(`problem: ${p}`)
     }
     return result.problems.length === 0 ? 0 : 1
