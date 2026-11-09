@@ -37,14 +37,72 @@ import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
-export async function confirmTransaction(
-    tx: Transaction, // Must contain a tx property being a Transaction object
-    sender: string,
-): Promise<ValidityData> {
+function stripClientFeeQuote(tx: Transaction): void {
     // Only the node may supply a fee quote, including on early refusals.
     if (tx.attrs && typeof tx.attrs === "object" && "total_fee" in tx.attrs) {
         delete tx.attrs.total_fee
     }
+}
+
+async function quoteNativeSendFee(
+    tx: Transaction,
+    referenceBlock: number,
+): Promise<string | null> {
+    // transaction_fee is signed and covers distribution only. Native sends
+    // also carry the SDK gas edit; quote both without rewriting signed content.
+    if (
+        tx.content.type !== "native" ||
+        (tx.content.data?.[1] as { nativeOperation?: string } | undefined)?.nativeOperation !== "send"
+    ) return null
+
+    const gas = await derivedGasEdit(
+        "native",
+        tx.content.from,
+        isForkActive("osDenomination", referenceBlock),
+    )
+    let total = BigInt(gas?.type === "balance" ? gas.amount : 0)
+    if (isForkActive("gasFeeSeparation", referenceBlock)) {
+        const fee = tx.content.transaction_fee
+        total += BigInt(fee.network_fee ?? 0) +
+            BigInt(fee.rpc_fee ?? 0) + BigInt(fee.additional_fee ?? 0)
+    }
+    tx.attrs = {
+        reference_block: referenceBlock,
+        total_fee: total.toString(),
+    }
+    // The amount and fee pass their individual checks above, but apply
+    // debits both. Refuse an unaffordable send before it can be submitted.
+    const sendAmount = canonicalizeAmountToOs(
+        tx.content.amount,
+        isForkActive("osDenomination", referenceBlock),
+    )
+    const from = typeof tx.content.from === "string"
+        ? tx.content.from : forgeToHex(tx.content.from)
+    const balance = await GCR.getAccountBalance(from)
+    if (balance < sendAmount + total) {
+        return `[Tx Validation] [BALANCE ERROR] Insufficient balance for native send: amount ${sendAmount} plus quoted total fee ${total} exceeds balance ${balance}\n`
+    }
+    return null
+}
+
+async function signWithNativeSendFeeQuote(
+    tx: Transaction,
+    referenceBlock: number,
+    validityData: ValidityData,
+): Promise<ValidityData> {
+    const nativeSendFeeError = await quoteNativeSendFee(tx, referenceBlock)
+    if (nativeSendFeeError) {
+        validityData.data.valid = false
+        validityData.data.message = nativeSendFeeError
+    }
+    return signValidityData(validityData)
+}
+
+export async function confirmTransaction(
+    tx: Transaction, // Must contain a tx property being a Transaction object
+    sender: string,
+): Promise<ValidityData> {
+    stripClientFeeQuote(tx)
 
     // Getting the current block number
     const getLastBlockNumberStart = Date.now()
@@ -265,47 +323,7 @@ export async function confirmTransaction(
         return validityData
     }
 
-    // transaction_fee is signed and covers distribution only. Native sends
-    // also carry the SDK gas edit; quote both without rewriting signed content.
-    if (
-        tx.content.type === "native" &&
-        (tx.content.data?.[1] as { nativeOperation?: string } | undefined)?.nativeOperation === "send"
-    ) {
-        const gas = await derivedGasEdit(
-            "native",
-            tx.content.from,
-            isForkActive("osDenomination", referenceBlock),
-        )
-        let total = BigInt(gas?.type === "balance" ? gas.amount : 0)
-        if (isForkActive("gasFeeSeparation", referenceBlock)) {
-            const fee = tx.content.transaction_fee
-            total += BigInt(fee.network_fee ?? 0) +
-                BigInt(fee.rpc_fee ?? 0) + BigInt(fee.additional_fee ?? 0)
-        }
-        tx.attrs = {
-            reference_block: referenceBlock,
-            total_fee: total.toString(),
-        }
-        // The amount and fee pass their individual checks above, but apply
-        // debits both. Refuse an unaffordable send before it can be submitted.
-        const sendAmount = canonicalizeAmountToOs(
-            tx.content.amount,
-            isForkActive("osDenomination", referenceBlock),
-        )
-        const from = typeof tx.content.from === "string"
-            ? tx.content.from : forgeToHex(tx.content.from)
-        const balance = await GCR.getAccountBalance(from)
-        if (balance < sendAmount + total) {
-            validityData.data.valid = false
-            validityData.data.message =
-                `[Tx Validation] [BALANCE ERROR] Insufficient balance for native send: amount ${sendAmount} plus quoted total fee ${total} exceeds balance ${balance}\n`
-            validityData = await signValidityData(validityData)
-            return validityData
-        }
-    }
-
-    validityData = await signValidityData(validityData)
-    return validityData
+    return await signWithNativeSendFeeQuote(tx, referenceBlock, validityData)
 }
 
 async function runTypeDispatcher(

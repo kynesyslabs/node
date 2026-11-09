@@ -88,6 +88,51 @@ export type ApplyGasFeeSeparationTx = Pick<
     "content" | "hash"
 >
 
+function feeInLedgerUnits(tx: ApplyGasFeeSeparationTx, total: number): bigint {
+    return BigInt(total) *
+        ((tx.content.type as string) === "native" &&
+        isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0) ? 1_000_000_000n : 1n)
+}
+
+function invalidBreakdownMessage(breakdown: FeeBreakdown): string | null {
+    const components: Array<[keyof FeeBreakdown, number]> = [
+        ["network_fee", breakdown.network_fee],
+        ["rpc_fee", breakdown.rpc_fee],
+        ["additional_fee", breakdown.additional_fee],
+        ["total", breakdown.total],
+    ]
+    for (const [name, value] of components) {
+        if (
+            !Number.isFinite(value) ||
+            !Number.isInteger(value) ||
+            value < 0
+        ) {
+            return `calculateFeeBreakdown produced an invalid ${name}: ${value} (must be a non-negative integer; full breakdown: network_fee=${breakdown.network_fee}, rpc_fee=${breakdown.rpc_fee}, additional_fee=${breakdown.additional_fee}, total=${breakdown.total})`
+        }
+    }
+    return null
+}
+
+async function feeBalanceError(
+    tx: ApplyGasFeeSeparationTx,
+    senderAddress: string,
+    total: number,
+): Promise<string | null> {
+    let senderBalance: bigint
+    try {
+        senderBalance = await GCR.getAccountBalance(senderAddress)
+    } catch (e) {
+        return `failed to read sender balance: ${
+            e instanceof Error ? e.message : stringifyNonError(e)
+        }`
+    }
+    const totalFee = feeInLedgerUnits(tx, total)
+    if (senderBalance < totalFee) {
+        return `sender balance ${senderBalance.toString()} < total fee ${totalFee}`
+    }
+    return null
+}
+
 export async function applyGasFeeSeparation(
     tx: ApplyGasFeeSeparationTx,
 ): Promise<ApplyGasFeeSeparationResult> {
@@ -129,24 +174,8 @@ export async function applyGasFeeSeparation(
     // validator-side consensus disagreement. Validate each component
     // here so the tx is rejected at the RPC boundary with an
     // actionable per-component message instead.
-    const components: Array<[keyof FeeBreakdown, number]> = [
-        ["network_fee", breakdown.network_fee],
-        ["rpc_fee", breakdown.rpc_fee],
-        ["additional_fee", breakdown.additional_fee],
-        ["total", breakdown.total],
-    ]
-    for (const [name, value] of components) {
-        if (
-            !Number.isFinite(value) ||
-            !Number.isInteger(value) ||
-            value < 0
-        ) {
-            return {
-                ok: false,
-                message: `calculateFeeBreakdown produced an invalid ${name}: ${value} (must be a non-negative integer; full breakdown: network_fee=${breakdown.network_fee}, rpc_fee=${breakdown.rpc_fee}, additional_fee=${breakdown.additional_fee}, total=${breakdown.total})`,
-            }
-        }
-    }
+    const breakdownError = invalidBreakdownMessage(breakdown)
+    if (breakdownError) return { ok: false, message: breakdownError }
 
     // Epic #21 #204: do NOT mutate tx.content. Stamping transaction_fee
     // and prepending fee edits AFTER the SDK signed the tx broke
@@ -212,26 +241,8 @@ export async function applyGasFeeSeparation(
     // made devnet/staging diverge from PROD validation semantics.
     // Devnet uses a funded-genesis fixture, so unfunded broadcasts
     // are no longer needed for local testing.
-    let senderBalance: bigint
-    try {
-        senderBalance = await GCR.getAccountBalance(senderAddress)
-    } catch (e) {
-        return {
-            ok: false,
-            message: `failed to read sender balance: ${
-                e instanceof Error ? e.message : stringifyNonError(e)
-            }`,
-        }
-    }
-    const totalFee = BigInt(breakdown.total) *
-        ((tx.content.type as string) === "native" &&
-        isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0) ? 1_000_000_000n : 1n)
-    if (senderBalance < totalFee) {
-        return {
-            ok: false,
-            message: `sender balance ${senderBalance.toString()} < total fee ${totalFee}`,
-        }
-    }
+    const balanceError = await feeBalanceError(tx, senderAddress, breakdown.total)
+    if (balanceError) return { ok: false, message: balanceError }
 
     // Epic #21 #204: fee edits are NO LONGER prepended here. They are
     // derived at apply (deriveFeeEdits in handleGCR) from the SDK-shipped
