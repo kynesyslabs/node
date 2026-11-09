@@ -141,7 +141,7 @@ while IFS= read -r file; do
         echo "::error file=$file::test file failed"
     fi
 done < <(
-    if [ "$#" -gt 0 ]; then
+    if [[ "$#" -gt 0 ]]; then
         printf '%s\n' "$@"
     else
         { find "${SUITE_DIRS[@]}" -name '*.test.ts'; printf '%s\n' "${SUITE_FILES[@]}"; } | sort -u
