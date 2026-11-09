@@ -601,6 +601,12 @@ describe("checkLaunch", () => {
         expect(KNOWN_FORKS).toContain("networkGovernance")
     })
 
+    it("launches with token staking off: the gate at block 0, tokenStaking left for a later upgrade", () => {
+        expect(MAINNET_FORKS).toContain("tokenStakingGate")
+        expect(LAUNCH_DORMANT_FORKS).toContain("tokenStaking")
+        expect(MAINNET_FORKS).not.toContain("tokenStaking")
+    })
+
     it("is NO-GO without a genesis file, whose forks and validators it cannot check", () => {
         const d = checkLaunch({ ...base, genesis: null, blockZero: null, launchValidators: launch })
         expect(d.go).toBe(false)

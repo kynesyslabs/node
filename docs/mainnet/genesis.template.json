@@ -70,6 +70,9 @@
     "xmRemoveCanonical": {
       "activationHeight": 0
     },
+    "tokenStakingGate": {
+      "activationHeight": 0
+    },
     "gasFeeSeparation": {
       "activationHeight": "FILL: 0 or null",
       "treasuryAddress": "FILL: lowercase 0x + 64 hex treasury account, required whether the height is 0 or null"
@@ -87,6 +90,9 @@
       "activationHeight": null
     },
     "networkGovernance": {
+      "activationHeight": null
+    },
+    "tokenStaking": {
       "activationHeight": null
     }
   },

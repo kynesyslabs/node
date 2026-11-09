@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
     KNOWN_FORKS,
+    LAUNCH_DORMANT_FORKS,
     LAUNCH_SHARD_SIZE,
     MAINNET_FORKS,
     NON_MAINNET_CHAIN_IDS,
@@ -137,6 +138,8 @@ describe("mainnet genesis template", () => {
         // refuses it on the mainnet-shaped chain id
         const knownPy = /^KNOWN_FORKS = \[([^\]]*)\]/m.exec(py)?.[1].split(",").map(s => s.trim().replace(/"/g, ""))
         expect(knownPy).toEqual([...KNOWN_FORKS])
+        const dormantPy = /^LAUNCH_DORMANT_FORKS = \[([^\]]*)\]/m.exec(py)?.[1].split(",").map(s => s.trim().replace(/"/g, ""))
+        expect(dormantPy).toEqual([...LAUNCH_DORMANT_FORKS])
     })
 })
 

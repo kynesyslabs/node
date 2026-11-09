@@ -311,6 +311,38 @@ export type IdentityCarryoverConfig = BaseForkConfig
 export type StakeApplyChecksConfig = BaseForkConfig
 
 /**
+ * `tokenStakingGate` fork: the validator set is the genesis list until
+ * `tokenStaking` opens token staking. A `validatorStake` or
+ * `validatorUnstake` transaction, and a `validatorStake` edit that stakes,
+ * unstakes or is an exit flagged `isRollback` in a transaction of any type,
+ * is refused at RPC intake, at pool admission and at apply.
+ *
+ * It refuses what a chain without it accepts, so it is the fork that is
+ * scheduled, not the one that opens staking: a genesis that leaves it out
+ * keeps staking open, and a build that does not know it refuses to boot on
+ * a genesis that schedules it instead of applying stakes its peers refuse.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before. A mainnet genesis
+ * sets 0. No payload beyond the base.
+ */
+export type TokenStakingGateConfig = BaseForkConfig
+
+/**
+ * `tokenStaking` fork: token staking opens by network upgrade. From its
+ * activation height a stake or unstake is judged by the staking rules again,
+ * as on a chain without `tokenStakingGate`; without that gate it changes
+ * nothing.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`) and at launch: a
+ * mainnet genesis leaves it null, and a later height-pinned activation turns
+ * token staking on. No payload beyond the base.
+ */
+export type TokenStakingConfig = BaseForkConfig
+
+/**
  * `nativeSendBinding` fork: a native send pays the recipient and the amount
  * its signed body names. The payment is applied from the native payload's
  * args, while explorers, receipts and the RPC balance check read
@@ -515,6 +547,8 @@ export type ForkConfig =
     | CanonicalAddressesConfig
     | FeeBindingConfig
     | BlockCapsConfig
+    | TokenStakingGateConfig
+    | TokenStakingConfig
     | TelegramSenderBindingConfig
     | XmRemoveCanonicalConfig
 
@@ -548,6 +582,8 @@ export type ForkName =
     | "canonicalAddresses"
     | "feeBinding"
     | "blockCaps"
+    | "tokenStakingGate"
+    | "tokenStaking"
     | "telegramSenderBinding"
     | "xmRemoveCanonical"
 
@@ -580,6 +616,8 @@ export interface ForkConfigByName {
     canonicalAddresses: CanonicalAddressesConfig
     feeBinding: FeeBindingConfig
     blockCaps: BlockCapsConfig
+    tokenStakingGate: TokenStakingGateConfig
+    tokenStaking: TokenStakingConfig
     telegramSenderBinding: TelegramSenderBindingConfig
     xmRemoveCanonical: XmRemoveCanonicalConfig
 }
@@ -842,6 +880,23 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A block takes a bounded, deterministic share of the pool by tx count and " +
             "content bytes, and the mempool merge holds each sender to the admission cap.",
     },
+    tokenStakingGate: {
+        // Dormant by default: it refuses stakes a running chain accepts, and a
+        // missing genesis entry hydrates from here, so a running chain keeps
+        // staking open. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Validators come from the genesis list: validatorStake and validatorUnstake " +
+            "are refused until tokenStaking opens token staking.",
+    },
+    tokenStaking: {
+        // Dormant by default and at launch: token staking opens by a later
+        // height-pinned activation. Changes nothing without tokenStakingGate.
+        activationHeight: null,
+        description:
+            "Token staking opens by network upgrade: validatorStake and validatorUnstake " +
+            "are admitted and applied again under tokenStakingGate.",
+    },
     unpinnedCommittee: {
         // Dormant by default: a missing genesis entry hydrates from here, and
         // the testnet's committees still put the pinned identities first. A
@@ -902,6 +957,8 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         canonicalAddresses: { ...DEFAULT_FORK_CONFIG.canonicalAddresses },
         feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
         blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
+        tokenStakingGate: { ...DEFAULT_FORK_CONFIG.tokenStakingGate },
+        tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
         telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
         xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
     }

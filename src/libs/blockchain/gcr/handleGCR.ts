@@ -43,6 +43,7 @@ import {
     carriesGovernance,
     governanceGateRefusal,
 } from "@/forks/governanceGate"
+import { tokenStakingRefusal } from "@/forks/tokenStakingGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import {
@@ -1934,12 +1935,12 @@ export default class HandleGCR {
      * The transactions of a block refused before apply: those of a type the
      * node does not implement (`txTypeAllowList` fork), a fee-free message
      * not signed by a staked validator (`instantMessagingBinding`), those the
-     * `networkGovernance` rule or a value rule (`nativeSendBinding`,
-     * `canonicalAddresses`, `feeBinding`) refuses, whether or not
-     * `editBinding` is active, and those whose shipped edits are not the ones
-     * their signed body implies (`editBinding` fork). Apply runs the shipped
-     * edits as they are, so a block must never reach it with edits nobody
-     * derived.
+     * `networkGovernance` or `tokenStakingGate` rule or a value rule
+     * (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`) refuses,
+     * whether or not `editBinding` is active, and those whose shipped edits
+     * are not the ones their signed body implies (`editBinding` fork). Apply
+     * runs the shipped edits as they are, so a block must never reach it with
+     * edits nobody derived.
      *
      * Judged on the transactions as received, before the node derives fee
      * edits or drops the edits of types that do not mutate entities, and not
@@ -1980,12 +1981,14 @@ export default class HandleGCR {
             typeAllowList,
             messageBinding,
             stakeChecks,
+            stakingOpen,
             tip,
         } = state
         for (const tx of txs) {
             const reason =
                 (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
                 governanceGateRefusal(tx, governance) ??
+                tokenStakingRefusal(tx, stakingOpen) ??
                 (stakeChecks ? stakeSenderRefusal(tx) : null)
             if (reason) {
                 refuse(tx, reason)
