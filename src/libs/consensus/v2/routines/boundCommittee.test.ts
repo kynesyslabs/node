@@ -114,6 +114,7 @@ const {
     getBoundPool,
     getEligiblePool,
     pinRankedPool,
+    pinnedShardIdentities,
     rankPool,
 } = await import("./getShard")
 const { default: getCommonValidatorSeed } = await import("./getCommonValidatorSeed")
@@ -296,5 +297,55 @@ describe("getShard under committeeBinding", () => {
             .slice(0, 4)
         expect(shard).toEqual(expected)
         expect(shard).toHaveLength(4)
+    })
+})
+
+describe("unpinnedCommittee", () => {
+    const pool = Array.from({ length: 11 }, (_, i) => V(i + 1))
+    const withPins = [...pool, ...PINNED_SHARD_IDENTITIES]
+
+    it("drops the pins from the committee of its activation height on", () => {
+        sharedState.forkConfig = {
+            committeeBinding: { activationHeight: 0 },
+            unpinnedCommittee: { activationHeight: 50 },
+        }
+        expect(pinnedShardIdentities(49)).toEqual(PINNED_SHARD_IDENTITIES)
+        expect(pinnedShardIdentities(50)).toEqual([])
+    })
+
+    it("keeps the pins while it is not scheduled, as the testnet runs today", () => {
+        expect(pinnedShardIdentities(1_000_000)).toEqual(PINNED_SHARD_IDENTITIES)
+    })
+
+    it("draws the bound committee by the seed alone once active", async () => {
+        committedPeerlist = withPins
+        validatorAddresses = [...withPins]
+        const pinned = await getBoundCommittee(100, "seed")
+        expect(pinned.slice(0, 3)).toEqual([...PINNED_SHARD_IDENTITIES])
+
+        resetPoolCache()
+        sharedState.forkConfig = {
+            committeeBinding: { activationHeight: 0 },
+            unpinnedCommittee: { activationHeight: 101 },
+        }
+        const unpinned = await getBoundCommittee(100, "seed")
+        expect(unpinned).toEqual(rankPool("seed", await getBoundPool(100)).slice(0, 4))
+        // The pins change who sits on the testnet's committees
+        expect(unpinned).not.toEqual(pinned)
+    })
+
+    it("stops seating online pins in the legacy committee once active", async () => {
+        sharedState.forkConfig = {}
+        committedPeerlist = withPins
+        validatorAddresses = [...withPins]
+        onlinePeers = withPins.filter(id => id !== SELF).map(id => onlinePeer(id))
+        const pinned = ids(await getShard("seed", 100))
+        expect(pinned.slice(0, 3)).toEqual([...PINNED_SHARD_IDENTITIES])
+
+        resetPoolCache()
+        sharedState.forkConfig = { unpinnedCommittee: { activationHeight: 0 } }
+        const unpinned = ids(await getShard("seed", 100))
+        expect(unpinned).toEqual(rankPool("seed", await getEligiblePool(100)).slice(0, 4))
+        expect(unpinned).not.toEqual(pinned)
     })
 })

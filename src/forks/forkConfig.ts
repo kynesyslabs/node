@@ -255,6 +255,19 @@ export type CommitLockConfig = BaseForkConfig
 export type FinalityProofsConfig = BaseForkConfig
 
 /**
+ * `unpinnedCommittee` fork: no identity is guaranteed a committee seat. The
+ * three validator keys in `PINNED_SHARD_IDENTITIES` stop being moved to the
+ * front of the committee (and so to the secretary seat) whenever they are
+ * eligible; every member is drawn by the seed alone.
+ *
+ * Activation at H applies to the committee of block H and later. Dormant by
+ * default (`activationHeight: null`): the testnet's committees, and so its
+ * signatures, depend on the pins. A chain launched from genesis with this
+ * build sets 0. No payload beyond the base.
+ */
+export type UnpinnedCommitteeConfig = BaseForkConfig
+
+/**
  * `identityCarryover` fork: a chain whose genesis carries user data over
  * from another network (identities, points, referrals) without its money.
  *
@@ -350,6 +363,36 @@ export type CanonicalAddressesConfig = BaseForkConfig
  * the base.
  */
 export type FeeBindingConfig = BaseForkConfig
+
+/**
+ * `telegramSenderBinding` fork: a Telegram identity attestation must have
+ * been made for the account that submits it. The user's challenge
+ * signature inside the attestation (`payload.public_key`) has to be the
+ * transaction sender's key.
+ *
+ * Before it, any account could submit an attestation the bot issued to
+ * someone else (they are public once linked) and link that Telegram
+ * account to itself. Judged when the proof is verified, both at
+ * admission and at apply, at the tip, so a block applied on tip H or later
+ * refuses a foreign attestation. Dormant by default; a mainnet genesis sets
+ * 0. No payload beyond the base.
+ */
+export type TelegramSenderBindingConfig = BaseForkConfig
+
+/**
+ * `xmRemoveCanonical` fork: removing a cross-chain (xm) identity finds the
+ * stored entry by the chain's canonical address form, the same comparison
+ * admission uses for duplicates, instead of the client's `isEVM` flag and
+ * the raw `targetAddress`.
+ *
+ * Before it, a remove compared the raw address unless the request said
+ * isEVM, so it missed an entry stored lower-cased or under its
+ * displayAddress, and a request claiming isEVM on a case-sensitive chain
+ * lower-cased both sides and could take an entry that differs from the
+ * named one only in case. An apply-time rule, judged at the tip.
+ * Dormant by default; a mainnet genesis sets 0. No payload beyond the base.
+ */
+export type XmRemoveCanonicalConfig = BaseForkConfig
 
 /**
  * `networkGovernance` fork: admits and applies the two network-upgrade
@@ -481,6 +524,7 @@ export type ForkConfig =
     | CommitteeBindingConfig
     | CommitLockConfig
     | FinalityProofsConfig
+    | UnpinnedCommitteeConfig
     | IdentityCarryoverConfig
     | NetworkGovernanceConfig
     | TxTypeAllowListConfig
@@ -490,6 +534,8 @@ export type ForkConfig =
     | FeeBindingConfig
     | BlockCapsConfig
     | CanonicalSignersConfig
+    | TelegramSenderBindingConfig
+    | XmRemoveCanonicalConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -511,6 +557,7 @@ export type ForkName =
     | "committeeBinding"
     | "commitLock"
     | "finalityProofs"
+    | "unpinnedCommittee"
     | "identityCarryover"
     | "stakeApplyChecks"
     | "networkGovernance"
@@ -521,6 +568,8 @@ export type ForkName =
     | "feeBinding"
     | "blockCaps"
     | "canonicalSigners"
+    | "telegramSenderBinding"
+    | "xmRemoveCanonical"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -541,6 +590,7 @@ export interface ForkConfigByName {
     committeeBinding: CommitteeBindingConfig
     commitLock: CommitLockConfig
     finalityProofs: FinalityProofsConfig
+    unpinnedCommittee: UnpinnedCommitteeConfig
     identityCarryover: IdentityCarryoverConfig
     stakeApplyChecks: StakeApplyChecksConfig
     networkGovernance: NetworkGovernanceConfig
@@ -551,6 +601,8 @@ export interface ForkConfigByName {
     feeBinding: FeeBindingConfig
     blockCaps: BlockCapsConfig
     canonicalSigners: CanonicalSignersConfig
+    telegramSenderBinding: TelegramSenderBindingConfig
+    xmRemoveCanonical: XmRemoveCanonicalConfig
 }
 
 /**
@@ -821,6 +873,32 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A block's signatures match its signer set by lowercase identity, and a key " +
             "written in two cases counts once.",
     },
+    unpinnedCommittee: {
+        // Dormant by default: a missing genesis entry hydrates from here, and
+        // the testnet's committees still put the pinned identities first. A
+        // chain launched from genesis with this build sets 0.
+        activationHeight: null,
+        description:
+            "No identity is guaranteed a committee seat: the pinned validator keys are " +
+            "drawn by the seed like every other member.",
+    },
+    telegramSenderBinding: {
+        // Dormant by default: it changes which identity edits a block
+        // applies, and a missing genesis entry hydrates from here. A mainnet
+        // genesis sets 0.
+        activationHeight: null,
+        description:
+            "A Telegram identity attestation links only to the account whose key " +
+            "signed its challenge, the transaction sender.",
+    },
+    xmRemoveCanonical: {
+        // Dormant by default: it changes which entry an xm remove takes, and a
+        // missing genesis entry hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "An xm identity remove finds the stored entry by the chain's canonical " +
+            "address form, as admission compares them.",
+    },
 }
 
 /**
@@ -845,6 +923,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         committeeBinding: { ...DEFAULT_FORK_CONFIG.committeeBinding },
         commitLock: { ...DEFAULT_FORK_CONFIG.commitLock },
         finalityProofs: { ...DEFAULT_FORK_CONFIG.finalityProofs },
+        unpinnedCommittee: { ...DEFAULT_FORK_CONFIG.unpinnedCommittee },
         identityCarryover: { ...DEFAULT_FORK_CONFIG.identityCarryover },
         stakeApplyChecks: { ...DEFAULT_FORK_CONFIG.stakeApplyChecks },
         networkGovernance: { ...DEFAULT_FORK_CONFIG.networkGovernance },
@@ -855,5 +934,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
         blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
         canonicalSigners: { ...DEFAULT_FORK_CONFIG.canonicalSigners },
+        telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
+        xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
     }
 }

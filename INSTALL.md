@@ -233,7 +233,7 @@ It must print `parameters match`. Any other output is a key the container lacks 
 | `TLSNOTARY_SIGNING_KEY` | _(empty)_ | **Leave empty in docker mode (the default).** The TLSNotary sidecar manages its own key. Only set this if you've switched `TLSNOTARY_MODE` to `ffi` (in-process Rust binding). |
 | `RPC_PORT` | `53550` | Host-mapped port for the node RPC. Change if 53550 is taken. |
 | `EXPOSED_URL` | `http://localhost:53550` | Public URL advertised to peers. Set to your public IP/domain when running on a VPS. |
-| `EXPECTED_GENESIS_HASH` | _(empty)_ | The network's published genesis hash. Required in the image (`NODE_ENV=production`) unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; see "Pin the network's genesis" below. |
+| `EXPECTED_GENESIS_HASH` | _(empty)_ | The network's published genesis hash. Required on mainnet in every mode, and in the image (`NODE_ENV=production`) unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; see "Pin the network's genesis" below. |
 | `EXPECTED_GENESIS_BLOCK_HASH` | _(empty)_ | The network's published block 0 hash. Optional; when set, the node refuses any other block 0. |
 | `DEMOS_REQUIRE_VALIDATORS` | _(empty)_ | `true` on mainnet validators: with no active validators in the database the node refuses to run consensus instead of using every online peer as the committee. |
 | `PROD` | `false` | `true` on validators. The node then refuses to start with a loopback or missing `EXPOSED_URL`, without the commit it was built from, or without its identity file (it never creates a new key on its own; see [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Production refusals"). |

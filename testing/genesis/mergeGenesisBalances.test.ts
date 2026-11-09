@@ -7,7 +7,7 @@
  *  - balance coercion: string, number, bigint
  *  - rejects fractional, NaN, negative balances
  *  - rejects malformed entry shapes
- *  - dedup last-wins on duplicate pubkey
+ *  - a duplicate pubkey is refused
  *  - UPDATE path: existing row → balance overwritten, other fields preserved
  *  - INSERT path: missing row → fresh row with default columns
  *  - mixed batch: counts (updated, inserted, total) are correct
@@ -165,14 +165,18 @@ describe("mergeGenesisBalances", () => {
         expect(rows.get("0xaa00000000000000000000000000000000000000000000000000000000000001")?.balance).toBe(99n)
     })
 
-    it("dedup: last-wins on duplicate pubkey", async () => {
+    it("refuses a duplicate pubkey before writing anything", async () => {
         const { em, rows } = makeMockEm()
-        const r = await mergeGenesisBalances(em, [
+        const balances = [
             ["0xaa00000000000000000000000000000000000000000000000000000000000001", "1"],
+            ["0xaa00000000000000000000000000000000000000000000000000000000000002", "5"],
             ["0xaa00000000000000000000000000000000000000000000000000000000000001", "999"],
-        ])
-        expect(r.total).toBe(1)
-        expect(rows.get("0xaa00000000000000000000000000000000000000000000000000000000000001")?.balance).toBe(999n)
+        ]
+        await expect(mergeGenesisBalances(em, balances)).rejects.toThrow(
+            /name 0xaa0+1 2 times \(entries 0, 2\)/,
+        )
+        expect(rows.size).toBe(0)
+        expect(genesisBalancesProblems(balances).join()).toContain("2 times")
     })
 
     it("UPDATE path: existing row → balance overwritten, identity preserved", async () => {

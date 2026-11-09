@@ -58,6 +58,7 @@ jest.mock("./getShard", () => ({
     getEligiblePool: async () => [OUR_KEY, OTHER],
     getBoundCommittee: async () => committee,
     pinShardIdentities: () => "",
+    pinnedShardIdentities: () => [],
     drawLiveShard: (_seed: string, pool: string[], isLive: (id: string) => boolean, size: number) =>
         pool.filter(isLive).slice(0, size),
 }))
