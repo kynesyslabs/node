@@ -4,7 +4,8 @@
  * src/libs/blockchain/genesis/genesisPin.ts): a missing genesis file, a missing
  * `forks` field or an undeclared fork must not fall back to the build's
  * defaults on a pinned node or a mainnet chain id; and devModeProblem, which
- * refuses PROD=false on a mainnet chain id.
+ * refuses PROD=false on a mainnet chain id; and xffModeProblem, which refuses
+ * XFF_MODE=legacy on one.
  */
 
 import { describe, it, expect } from "bun:test"
@@ -14,6 +15,7 @@ import {
     defaultTreasuryWarning,
     devModeProblem,
     genesisScheduleProblems,
+    xffModeProblem,
 } from "src/libs/blockchain/genesis/genesisPin"
 
 const PIN = "ab".repeat(32)
@@ -137,6 +139,27 @@ describe("devModeProblem", () => {
         expect(devModeProblem(true, 4242)).toBeNull()
         for (const id of [1, 1337, undefined]) {
             expect(devModeProblem(false, id)).toBeNull()
+        }
+    })
+})
+
+describe("xffModeProblem", () => {
+    it("refuses XFF_MODE=legacy on a mainnet chain id, naming the mode, the reason and the fix", () => {
+        const problem = xffModeProblem("legacy", 4242)
+        expect(problem).toContain("XFF_MODE=legacy")
+        expect(problem).toContain("choose the IP")
+        expect(problem).toContain("XFF_MODE=strict with TRUSTED_PROXIES")
+        expect(problem).toContain("4242")
+    })
+
+    it("allows legacy on the testnet and the devnet", () => {
+        expect(xffModeProblem("legacy", 1)).toBeNull()
+        expect(xffModeProblem("legacy", 1337)).toBeNull()
+    })
+
+    it("allows strict, off, unset and empty on a mainnet chain id", () => {
+        for (const mode of ["strict", "off", undefined, null, ""]) {
+            expect(xffModeProblem(mode, 4242)).toBeNull()
         }
     })
 })

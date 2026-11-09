@@ -109,6 +109,25 @@ export function devModeProblem(prod: boolean, chainId: unknown): string | null {
 }
 
 /**
+ * A node on a mainnet chain id does not run XFF_MODE=legacy. Legacy trusts
+ * X-Forwarded-For and X-Real-IP from any client, so a client chooses the IP its
+ * per-IP rate limits are counted under. It is never derived from
+ * TRUSTED_PROXIES, so only an explicit setting reaches it; "" is unset.
+ */
+export function xffModeProblem(
+    xffMode: string | undefined | null,
+    chainId: unknown,
+): string | null {
+    if (xffMode !== "legacy" || !isMainnetChainId(chainId)) return null
+    return (
+        `XFF_MODE=legacy and the genesis has chain id ${String(chainId)}, which is not a test ` +
+        "network's. Legacy trusts proxy headers (X-Forwarded-For, X-Real-IP) from any client, so a " +
+        "client can choose the IP the per-IP rate limits are counted under; " +
+        "set XFF_MODE=strict with TRUSTED_PROXIES, or leave XFF_MODE unset"
+    )
+}
+
+/**
  * The warning for a node that runs without a pin and was not told that is
  * intended. Outside production nothing refuses such a node (a bare-metal
  * install runs as development), so the operator must at least see it.

@@ -33,7 +33,9 @@ import {
     pinRequirementProblem,
     restartGenesisProblems,
     unpinnedWarning,
+    xffModeProblem,
 } from "@/libs/blockchain/genesis/genesisPin"
+import { explicitXffMode } from "@/libs/network/middleware/rateLimiter"
 import {
     acceptSchedule,
     parseOverrideDigest,
@@ -137,6 +139,11 @@ function applyRecoveryData(genesisData, recoveryGenesis) {
     genesisData["balances"] = Object.entries(finalBalances)
 }
 
+/** The XFF mode the rate limiter will run with when it is set explicitly. */
+function configuredXffMode(): string | undefined {
+    return explicitXffMode(Config.getInstance().core.xffMode)
+}
+
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
     // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
@@ -166,6 +173,8 @@ export default async function findGenesisBlock() {
     if (pinProblem) refuse([pinProblem])
     const modeProblem = devModeProblem(Config.getInstance().core.prod, fileChainId)
     if (modeProblem) refuse([modeProblem])
+    const xffProblem = xffModeProblem(configuredXffMode(), fileChainId)
+    if (xffProblem) refuse([xffProblem])
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
@@ -182,6 +191,8 @@ export default async function findGenesisBlock() {
         if (storedPinProblem) refuse([storedPinProblem])
         const storedModeProblem = devModeProblem(Config.getInstance().core.prod, chainIdOf(stored))
         if (storedModeProblem) refuse([storedModeProblem])
+        const storedXffProblem = xffModeProblem(configuredXffMode(), chainIdOf(stored))
+        if (storedXffProblem) refuse([storedXffProblem])
         refuse(
             genesisScheduleProblems({
                 fileGenesisData: hasGenesisFile ? readGenesisFile() : null,

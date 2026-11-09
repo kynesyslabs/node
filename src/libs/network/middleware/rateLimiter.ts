@@ -260,6 +260,25 @@ function resolveXffMode(
     return hasTrustedList ? "strict" : "off"
 }
 
+/**
+ * The XFF mode an operator asked for, or undefined when none was: the config
+ * value first, then the XFF_MODE env override. Empty means unset. The
+ * constructor and the boot check (xffModeProblem) both read the mode here. A
+ * value that is not one of the three modes is ignored by `resolveXffMode`, so
+ * it is not returned.
+ */
+export function explicitXffMode(
+    configValue?: string | null,
+    env: Record<string, string | undefined> = process.env,
+): XffMode | undefined {
+    const configMode =
+        configValue && configValue.length > 0 ? configValue : undefined
+    const mode = configMode ?? env.XFF_MODE
+    return mode === "off" || mode === "strict" || mode === "legacy"
+        ? mode
+        : undefined
+}
+
 export class RateLimiter {
     public ipRequests = new Map<string, RateLimitData>()
     public config: RateLimitConfig
@@ -308,15 +327,10 @@ export class RateLimiter {
             : []
         this.trustedProxies = parseTrustedProxies(fromConfig ?? fromEnv)
 
-        // Config may pass "" to mean "auto" — coerce to undefined so the
-        // env-var override is consulted next.
-        const configMode =
-            config.xffMode && config.xffMode.length > 0
-                ? (config.xffMode as XffMode)
-                : undefined
-        const envOverride = process.env.XFF_MODE as XffMode | undefined
+        // Config may pass "" to mean "auto" — explicitXffMode coerces it to
+        // unset so the env-var override is consulted next.
         this.xffMode = resolveXffMode(
-            configMode ?? envOverride,
+            explicitXffMode(config.xffMode),
             this.trustedProxies.length > 0,
         )
 
