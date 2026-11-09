@@ -204,9 +204,9 @@ mkdir -p "${WORK}/bin"
 # FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists.
 # Cut off by its reader, it exits 141 as if it died of SIGPIPE, as the docker CLI
 # does whether SIGPIPE is ignored or not: a Go program that gets EPIPE on stdout
-# raises SIGPIPE with its default action. Its cat dies of SIGPIPE, or where
-# SIGPIPE is ignored fails with "Broken pipe", and in bash a SIGPIPE that came
-# in ignored cannot be unignored, so the fake exits 141 instead of raising it
+# raises SIGPIPE with its default action. The fake's printf dies of SIGPIPE, or
+# where SIGPIPE is ignored fails with EPIPE, and in bash a SIGPIPE that came in
+# ignored cannot be unignored, so the fake exits 141 instead of raising it
 cat > "${WORK}/bin/docker" <<'FAKEDOCKER'
 #!/usr/bin/env bash
 echo "$*" >> "${FAKE_DOCKER_LOG}"
@@ -231,9 +231,18 @@ case "$1" in
         [ -e "${FAKE}/nodelog.${n}.hang" ] && sleep "$(cat "${FAKE}/nodelog.${n}.hang")"
         [ -e "${FAKE}/nodelog.${n}.fail" ] && { echo "Error response from daemon: stub: cannot read the log of cid${n}" >&2; exit 1; }
         [ -e "${FAKE}/nodelog.${n}" ] || exit 0
-        # cat's stdout to the reader, its stderr into err
-        { err=$(if [ "${tail}" = all ]; then LC_ALL=C cat "${FAKE}/nodelog.${n}"; else LC_ALL=C tail -n "${tail}" "${FAKE}/nodelog.${n}"; fi 2>&1 >&3 3>&-); rc=$?; } 3>&1
-        case "${rc}:${err}" in 141:* | *"Broken pipe"*) exit 141 ;; esac
+        # The log is taken into a variable first, then written by bash's own printf:
+        # no cat or tail faces the reader, so what happens when it stops reading
+        # does not depend on the coreutils on the PATH (GNU cat fails on EPIPE, the
+        # uutils cat of Ubuntu 26.04 exits 0 without a word)
+        if [ "${tail}" = all ]; then
+            IFS= read -r -d '' out < "${FAKE}/nodelog.${n}"
+        else
+            out=$(LC_ALL=C tail -n "${tail}" "${FAKE}/nodelog.${n}"; echo x); out=${out%x}
+        fi
+        # printf is killed by SIGPIPE where it is not ignored, and where it is ignored
+        # fails with EPIPE: docker's 141 then
+        printf '%s' "${out}" 2> /dev/null || exit 141
         exit 0 ;;
 esac
 case "${FAKE_DB:-rows}" in
