@@ -31,7 +31,7 @@ go() {
     : > "${CDIR}/calls.log"
     (
         base_env
-        export FAKE_DIR="${CDIR}" RUNS_DIR="${CDIR}/runs"
+        export FAKE_DIR="${CDIR}" RUNS_DIR="${CDIR}/runs" LOCK_DIR="${CDIR}"
         for kv in "$@"; do export "${kv?}"; done
         timeout 300 "${DRILL}/run.sh" > "${CDIR}/out.txt" 2>&1 < /dev/null
     )
@@ -90,6 +90,7 @@ if sel smoke-pass; then
     no_out 'PHASE A ' "any drill phase (backup)"
     torn_down
     want_out 'left over in demos-faketest after teardown: 0 containers, 0 volumes, 0 networks' "teardown's leftover counts"
+    if [ "$(cat "${CDIR}/lock-at-down" 2> /dev/null)" = held ]; then ok "the project lock is still held at compose down"; else bad "the project lock was not held at compose down"; fi
     if jq -e '.cleanup == "done, nothing of demos-faketest left"' "${CDIR}"/runs/*/timings.json > /dev/null \
         && grep -q '^- cleanup: done, nothing of demos-faketest left$' "${CDIR}"/runs/*/timings.md; then
         ok "cleanup done in timings.json and timings.md"
@@ -237,7 +238,8 @@ if sel full-rejoin; then
     want_out 'CHECK PASS: restored head >= pre-wipe head' "head after restore"
     want_out 'RESULT PASS: rejoin drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
-    want_out 'left on the state volume: node.identity node.identity.prevote.json node.identity.signed.json' "wipe kept only identity and signing state"
+    want_out 'left on the state volume: node.identity node.identity.commitlock.json node.identity.prevote.json node.identity.signed.json' "wipe kept only identity and signing state"
+    want_out 'CHECK PASS: signing state unchanged or advanced, never older \(.*\.commitlock\.json=advanced .*\.prevote\.json=advanced .*\.signed\.json=advanced ' "every signing file advanced by (height, round)"
     # Call order of the restore: pg_restore, then the migration of node 4's database, then node 4's start
     read -r o_r o_m o_u <<< "$(awk '/pg_restore -U/ && !r { r = NR }
         r && !m && /run --rm --no-deps -T -e PG_HOST=pg-4 .*migrate/ { m = NR }
@@ -307,6 +309,34 @@ if sel wipe-leftover; then
     want_rc 2
     want_out 'could not clear the non-identity state' "the failed wipe stops the run"
     if [ "$(grep -cE 'up -d --no-deps --pull never node-4$' "${CDIR}/calls.log")" = 1 ]; then ok "node-4 never restarted after the failed wipe"; else bad "node-4 start count is not 1"; fi
+    torn_down
+fi
+if sel wipe-drop; then
+    # a wipe that also removes a signing state file: caught before node X starts again
+    go wipe-drop FAKE_WIPE_DROP=node.identity.prevote.json
+    want_rc 2
+    want_out "the wipe changed or removed node 4's identity or signing state files: node.identity.prevote.json \(sums.stop, sums.wiped\)" "the removed file named"
+    if [ "$(grep -cE 'up -d --no-deps --pull never node-4$' "${CDIR}/calls.log")" = 1 ]; then ok "node-4 never restarted after the changed signing state"; else bad "node-4 start count is not 1"; fi
+    no_call 'pg_restore -U' "pg_restore (the run stops in phase B)"
+    torn_down
+fi
+
+# ── signing state files older than at stop ──────────────────────────────
+if sel signing-older; then
+    # the commit lock one height below its at-stop value after the restart
+    go signing-older-lock FAKE_OLDER_RECORD=commitlock:height
+    want_rc 1
+    want_out 'CHECK FAIL: signing state unchanged or advanced, never older \( node.identity.commitlock.json is older than at stop: [0-9]+/[0-9]+ -> [0-9]+/[0-9]+ \(height/round\)' "an older commit lock fails the check"
+    no_out 'CHECK PASS: signing state' "a PASS of the signing state check"
+    # the prevote record one round below its at-stop value, at the same height
+    go signing-older-prevote FAKE_OLDER_RECORD=prevote:round
+    want_rc 1
+    want_out 'CHECK FAIL: signing state unchanged or advanced, never older \( node.identity.prevote.json is older than at stop: ' "an older prevote round fails the check"
+    if grep -qE 'prevote.json is older than at stop: ([0-9]+)/[0-9]+ -> \1/[0-9]+ ' "${CDIR}/out.txt"; then ok "same height at stop and after, lower round"; else bad "the prevote case is not at the same height"; fi
+    # the commit lock equal to its at-stop value: unchanged, not advanced, and no failure
+    go signing-same-lock FAKE_OLDER_RECORD=commitlock:same
+    want_rc 0
+    want_out 'CHECK PASS: signing state unchanged or advanced, never older \(.*\.commitlock\.json=unchanged [0-9]+/[0-9]+ ' "an equal commit lock is unchanged"
     torn_down
 fi
 
@@ -393,6 +423,78 @@ if sel teardown-fail; then
     if jq -e '.result == "FAIL" and (.cleanup | startswith("FAILED"))' "${CDIR}"/runs/*/timings.json > /dev/null; then
         ok "FAIL result with the cleanup failure marked"
     else bad "timings.json: result/cleanup not FAIL/FAILED"; fi
+fi
+
+# ── the stall checks when head reads fail ───────────────────────────────
+stall_of() { # monitor file, from, to: run.sh's own monitor_stats and stall_verdict (run.sh cannot be sourced: it runs the drill)
+    (
+        # shellcheck disable=SC1090
+        source <(sed -n '/^monitor_stats() {/,/^}/p; /^stall_verdict() {/,/^}/p' "${DRILL}/run.sh")
+        MON_FILE="$1" STALL_LIMIT=90
+        stall_verdict "$2" "$3"
+        echo "${STALL_RESULT}: ${STALL_DETAIL}"
+    ) > "${CDIR}/out.txt" 2>&1
+}
+if sel monitor-stats; then
+    CASE=monitor-stats
+    CDIR="${WORK}/monitor-stats"
+    mkdir -p "${CDIR}"
+    # head 10 read at 0 s, every read from 5 to 115 s failed, head 11 read at 120 s; STALL_LIMIT 90
+    { printf '0\t10\n'; for t in $(seq 5 5 115); do printf '%s\t\n' "${t}"; done; printf '120\t11\n'; } > "${CDIR}/blind.tsv"
+    stall_of "${CDIR}/blind.tsv" 0 120
+    want_out '^FAIL: no head read for 120s, more than 90s: a stall in that time cannot be ruled out; longest gap 120s' "heads at 0 and 120 s, failed reads between: FAIL with the reason"
+    no_out '^PASS' "PASS"
+    # a read every 5 s, the head rising every 10 s
+    for t in $(seq 0 5 120); do printf '%s\t%s\n' "${t}" $((t / 10)); done > "${CDIR}/steady.tsv"
+    stall_of "${CDIR}/steady.tsv" 0 120
+    want_out '^PASS: longest gap 10s, longest without a head read 5s ' "steady reads and rises: PASS"
+fi
+if sel monitor-blind; then
+    # no node answers its head for 8 s from the restore's pg_restore (STALL_LIMIT=4 here)
+    go monitor-blind FAKE_READ_OUTAGE=8 STALL_LIMIT=4
+    want_rc 1
+    want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; no head read for [0-9]+s, more than 4s: a stall in that time cannot be ruled out' "rejoin: FAIL naming the missing reads"
+    no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
+    torn_down
+    go monitor-blind-isolated VARIANT=isolated FAKE_READ_OUTAGE=8 STALL_LIMIT=4
+    want_rc 1
+    want_out 'CHECK FAIL: the validators kept forging during the drill \(no head read for [0-9]+s, more than 4s: a stall in that time cannot be ruled out' "isolated: FAIL naming the missing reads"
+    no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
+    torn_down
+fi
+
+# ── one run per project, a new OUT_DIR per run ──────────────────────────
+if sel project-lock; then
+    # the lock of demos-faketest held here, as by a run that has not finished its teardown
+    mkdir -p "${WORK}/project-lock"
+    exec 8>> "${WORK}/project-lock/demos-faketest.lock"
+    flock -n 8
+    go project-lock SMOKE=1
+    want_rc 2
+    want_out "another run of PROJECT demos-faketest holds ${CDIR}/demos-faketest.lock" "the refusal names the lock"
+    if [ ! -s "${CDIR}/calls.log" ]; then ok "docker never called"; else bad "docker was called"; fi
+    if [ -z "$(ls -A "${CDIR}/runs")" ]; then ok "no run dir written"; else bad "a run dir was written"; fi
+    # another project, its lock in the same dir, runs meanwhile
+    go project-lock-other SMOKE=1 LOCK_DIR="${WORK}/project-lock" PROJECT=demos-faketest2
+    want_rc 0
+    exec 8>&-
+fi
+if sel out-dir-used; then
+    # an OUT_DIR that holds an earlier run's checks.tsv
+    d="${WORK}/out-dir-used/earlier"
+    mkdir -p "${d}"
+    printf 'earlier\tPASS\tkept\n' > "${d}/checks.tsv"
+    go out-dir-used SMOKE=1 OUT_DIR="${d}"
+    want_rc 2
+    want_out "OUT_DIR ${d} exists and is not an empty directory" "the refusal names OUT_DIR"
+    if [ "$(ls -A "${d}")" = checks.tsv ] && [ "$(cat "${d}/checks.tsv")" = "$(printf 'earlier\tPASS\tkept')" ]; then
+        ok "the earlier checks.tsv untouched, nothing added"
+    else bad "OUT_DIR was written to"; fi
+    if [ ! -s "${CDIR}/calls.log" ]; then ok "docker never called"; else bad "docker was called"; fi
+    # an existing empty OUT_DIR is used
+    mkdir -p "${WORK}/out-dir-empty/new"
+    go out-dir-empty SMOKE=1 OUT_DIR="${WORK}/out-dir-empty/new"
+    want_rc 0
 fi
 
 echo

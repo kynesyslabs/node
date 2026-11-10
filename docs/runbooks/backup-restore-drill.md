@@ -153,9 +153,10 @@ Output). A run that exits 1 or 2 keeps that code when the teardown fails too.
 | `NODE_IMAGE` | `demos-node:candidate-5979a716` | prebuilt node image |
 | `PG_IMAGE` | `postgres:16-alpine` | postgres and helper image |
 | `BASE_PORT` | `65000` | host ports `BASE_PORT+1..+5`, 127.0.0.1 |
-| `PROJECT` | `demos-bkdrill` | compose project; must start with `demos-`; the run aborts if a container or volume of that project, or a volume with any name the compose file declares (labelled or not), already exists |
+| `PROJECT` | `demos-bkdrill` | compose project; must start with `demos-`; the run aborts if a container or volume of that project, or a volume with any name the compose file declares (labelled or not), already exists. One run per project at a time: each run holds the lock `$LOCK_DIR/<project>.lock` (`flock`) from before its first check until its teardown has ended, and a second run of the same project exits 2 before it writes anything |
 | `VARIANT` | `rejoin` | `rejoin` or `isolated` |
-| `OUT_DIR` | `testing/devnet/backup-restore-drill/runs/<UTC>-bkdrill-<variant>` | everything the run writes (mode 700, gitignored) |
+| `OUT_DIR` | `testing/devnet/backup-restore-drill/runs/<UTC>-bkdrill-<variant>` | everything the run writes (mode 700, gitignored). Must be new or empty: one that holds anything is refused with exit 2 before anything is written |
+| `LOCK_DIR` | `/tmp` | where the per-project lock file lives; `/tmp`, so runs from any checkout or `OUT_DIR` on the host see the same lock (the empty file stays) |
 | `X_NODE` | `4` | the drilled validator (2..4; 1 is the peerlist anchor) |
 | `SHARD_SIZE` | `4` | genesis shardSize; q = floor(2 * shardSize / 3) + 1 |
 | `H0` | `5` | all four nodes must reach this height before the backup |
@@ -164,7 +165,7 @@ Output). A run that exits 1 or 2 keeps that code when the teardown fails too.
 | `CPU_SHARES` | `256` | compose `cpu_shares` (default weight is 1024): containers yield to other work under contention |
 | `LOAD_MAX` / `LOAD_WAIT_MAX` | `18` / `1800` | start only when the 1-minute load is below `LOAD_MAX`; give up after `LOAD_WAIT_MAX` s |
 | `STOP_GRACE` | `10` | seconds `compose stop` waits before killing node X |
-| `STALL_LIMIT` | `90` | longest allowed gap, in seconds, between head increases on the other nodes |
+| `STALL_LIMIT` | `90` | longest allowed gap, in seconds, between head increases on the other nodes, and longest allowed time without a successful head read |
 | `BRINGUP_TIMEOUT`, `SERVE_TIMEOUT`, `REJOIN_TIMEOUT`, `SIGN_TIMEOUT` | `900`, `240`, `420`, `300` | step timeouts in seconds |
 | `MIGRATE_CMD` | `bun run migration:run` | the one command that applies pending migrations, run in a one-off container of `NODE_IMAGE` (see below) |
 | `MIGRATE_REQUIRED` | `1` | a failing migration on the restored database aborts the drill |
@@ -253,7 +254,9 @@ a read-only mount that the script's `mv` could not move), TLSNotary is off, and
    `IDENTITY_FILE` is `/app/state/node.identity`). If the delete fails, or
    the state volume then holds anything whose name does not start with
    `node.identity`, the run stops with exit 2 before node X is started
-   again. The wipe uses no `--reset`, no reset-node script and no `down -v`;
+   again. So it does if the identity and signing state files, hashed again
+   after the wipe, are not the same names with the same SHA-256 as at stop.
+   The wipe uses no `--reset`, no reset-node script and no `down -v`;
    `down -v` runs only at teardown, on the drill's own project (see Output).
 
    **Drill volumes only.** A validator's state volume holds `.demos_identity*`
@@ -288,11 +291,11 @@ Each is printed PASS, FAIL or INFO, and written to `timings.md` and
 | restored head >= pre-wipe head | head after the rejoin >= head read from the database at stop |
 | block hash at pre-wipe heights | node X's hash at the step-2 height and the at-stop height equals each other node's, and equals what was recorded |
 | identity file checksum | identical at step 2, at stop, and after the rejoin |
-| signing state | every signing file present at stop still exists; `.signed.json` and `.prevote.json` heights never lower. The detail says per file `unchanged` or `advanced` |
+| signing state | every signing file present at stop still exists, and `.signed.json`, `.commitlock.json` and `.prevote.json` are never older than at stop, by height, then round (`timestamp` in `.signed.json`, `round` in the other two). The detail gives each one's height/round at stop and after: `advanced` only when strictly newer, `unchanged` when equal; an older one, or one without a height and round, fails the check |
 | no halt marker | no `*.halted` on the state volume, no foreign-signature line in node X's log |
 | signing floor | the `Restart signing floor` line is in node X's log, read to its end (INFO if the line is missing) |
 | node X signs | see D above |
-| other nodes never stalled | with the devnet's quorum (below), the longest gap between head increases while node X was down is at most `STALL_LIMIT` |
+| other nodes never stalled | with the devnet's quorum (below), the longest gap between head increases while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows equal; same table set |
 | schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations` |
 | one instance of the key | asserted before the single start; the run dies if it does not hold |
@@ -357,8 +360,12 @@ migrate step on the restored database (after `pg_restore` and before node X
 starts; a failure or a timeout stops the run with exit 2 and node X is not
 started), a volume that exists before the run under a name the compose file
 declares (exit 2, no `up`, no `down`, the volume untouched), a dump that
-cannot be read to its end (exit 2 in phase A, nothing wiped), a wipe that fails
-or leaves an entry (exit 2, node X not started again), a teardown whose `down`
+cannot be read to its end (exit 2 in phase A, nothing wiped), a wipe that fails,
+leaves an entry or removes a signing state file (exit 2, node X not started
+again), a commit lock or prevote record older than at stop (the signing state
+check fails), head reads that fail for longer than `STALL_LIMIT` (the stall
+checks of both variants fail), a second run of a project whose lock is held and
+an `OUT_DIR` that is not empty (exit 2, nothing written), a teardown whose `down`
 fails or leaves a volume (exit 3 after a pass, the failure in `timings.json`
 and `timings.md`), and a full `rejoin` and `isolated` run. It needs no Docker and tests
 the script's own logic only; it says nothing about what a real image, volume

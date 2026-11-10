@@ -14,6 +14,7 @@ FAKE_MISSING_IMAGES, FAKE_MIGRATE_FAIL, FAKE_MIGRATE_HANG (a postgres service
 name: compose run against it sleeps 120 s; with FAKE_MIGRATE_IGNORE_TERM it
 ignores SIGTERM), FAKE_WIPE_CHANGES_OWNER, FAKE_WIPE_LEAVE (a state volume
 entry the wipe does not remove), FAKE_WIPE_FAIL (the wipe exits 1),
+FAKE_WIPE_DROP (a node.identity* file the wipe removes too),
 FAKE_DUMP_CUT (the dump ends after its table of contents: reading the whole
 archive fails),
 FAKE_DOWN_FAIL (compose down removes nothing and exits 1), FAKE_DOWN_LEAVE
@@ -21,9 +22,19 @@ FAKE_DOWN_FAIL (compose down removes nothing and exits 1), FAKE_DOWN_LEAVE
 FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3), FAKE_NO_FLOOR_LOG (a starting
 node does not log the restart signing floor), FAKE_LOG_FILL (lines `docker logs`
 prints after a container's log, 0; a reader that stops early kills it with
-SIGPIPE, as it does the docker CLI). Every call is appended to
-$FAKE_DIR/calls.log.
+SIGPIPE, as it does the docker CLI), FAKE_READ_OUTAGE (seconds from the
+restore's pg_restore during which no node answers its head), FAKE_OLDER_RECORD
+(<file>:<how>, file signed|commitlock|prevote: once its node is restarted that
+record is one height below its at-stop value (how=height), one round below at
+the same height (round), or equal to it (same)). Every call is appended to
+$FAKE_DIR/calls.log; compose down writes to $FAKE_DIR/lock-at-down whether
+$LOCK_DIR/<project>.lock is held at that moment.
+
+The signing state files hold (height, round): the head while their node runs,
+else the head at its stop; the round is ROUND0 + 10 * height, as .timestamp in
+.signed.json and .round in .commitlock.json and .prevote.json.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -35,6 +46,8 @@ import time
 D = os.environ["FAKE_DIR"]
 SF = os.path.join(D, "state.json")
 RATE = float(os.environ.get("FAKE_RATE", "3"))
+ROUND0 = 1700000000
+RECORDS = ("signed", "commitlock", "prevote")
 
 
 def envlist(k):
@@ -57,6 +70,21 @@ def save(st):
 
 def head(st):
     return 0 if not st["t0"] else int((time.time() - st["t0"]) * RATE)
+
+
+def running_on(st, sv):
+    return any(c["state"] == "running" and sv in c["volumes"] for c in st["containers"].values())
+
+
+def record(st, vol, sv, kind):
+    """The JSON of a signing state file (kind signed|commitlock|prevote)."""
+    h = head(st) if running_on(st, sv) else vol["frozen_head"]
+    r = ROUND0 + 10 * h
+    want, _, how = os.environ.get("FAKE_OLDER_RECORD", "").partition(":")
+    if want == kind and running_on(st, sv) and "stop_head" in vol:
+        s = vol["stop_head"]
+        h, r = {"height": (s - 1, ROUND0 + 10 * (s - 1)), "round": (s, ROUND0 + 10 * s - 1), "same": (s, ROUND0 + 10 * s)}[how]
+    return {"height": h, ("timestamp" if kind == "signed" else "round"): r, "hash": f"hash{h}"}
 
 
 def out(s=""):
@@ -115,7 +143,7 @@ def start_container(st, compose, project, svc, c):
             c["logs"].append("cp: cannot create regular file '/app/state/node.identity': Permission denied")
             return
         if any(v.endswith(":/app/keys/node.identity:ro") for v in compose["services"][svc]["volumes"]):
-            for fn in ("node.identity", "node.identity.signed.json", "node.identity.prevote.json"):
+            for fn in ["node.identity"] + [f"node.identity.{k}.json" for k in RECORDS]:
                 if fn not in vol["files"]:
                     vol["files"].append(fn)
         for fn in ("extra.dat", "demos_peerlist.json"):
@@ -212,6 +240,7 @@ def compose_cmd(a):
                         if p == "/app/state":
                             st["volumes"][vname(project, sv)]["frozen"] = True
                             st["volumes"][vname(project, sv)]["frozen_head"] = head(st)
+                            st["volumes"][vname(project, sv)]["stop_head"] = st["volumes"][vname(project, sv)]["frozen_head"]
         save(st)
         out()
     if cmd == "rm":
@@ -220,6 +249,18 @@ def compose_cmd(a):
         save(st)
         out()
     if cmd == "down":
+        # is the run's project lock still held while it tears down? (a new open file
+        # description of the lock file conflicts with the run's own)
+        lock = os.path.join(os.environ.get("LOCK_DIR", "/nonexistent"), f"{project}.lock")
+        if os.path.exists(lock):
+            with open(lock, "a") as lf:
+                try:
+                    fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    held = "free"
+                except BlockingIOError:
+                    held = "held"
+            with open(os.path.join(D, "lock-at-down"), "a") as f:
+                f.write(held + "\n")
         if os.environ.get("FAKE_DOWN_FAIL"):
             fail("Error response from daemon: fake down failure")
         keep = os.environ.get("FAKE_DOWN_LEAVE")
@@ -300,7 +341,8 @@ def run_cmd(a):
         save(st)
         out()
     if "rm -rf" in script and "node.identity*" in script:
-        vol["files"] = [x for x in vol["files"] if x.startswith("node.identity") or x == os.environ.get("FAKE_WIPE_LEAVE")]
+        vol["files"] = [x for x in vol["files"] if (x.startswith("node.identity") and x != os.environ.get("FAKE_WIPE_DROP"))
+                        or x == os.environ.get("FAKE_WIPE_LEAVE")]
         if os.environ.get("FAKE_WIPE_CHANGES_OWNER"):
             vol["owner"] = "0"
         save(st)
@@ -321,22 +363,17 @@ def run_cmd(a):
     m = re.search(r"cat /s/node\.identity\.(\w+)\.json", script)
     if m:
         if f"node.identity.{m.group(1)}.json" in vol["files"]:
-            running = any(c["state"] == "running" and sv in c["volumes"] for c in st["containers"].values())
-            print(json.dumps({"height": head(st) if running else vol["frozen_head"]}))
+            print(json.dumps(record(st, vol, sv, m.group(1))))
         sys.exit(0)
     if "sha256sum /s/node.identity" in script:
         if "node.identity" in vol["files"]:
             print(hashlib.sha256(b"identity-" + sv.encode()).hexdigest())
         sys.exit(0)
     if "sha256sum" in script and "node.identity*" in script:
-        running = any(c["state"] == "running" and sv in c["volumes"] for c in st["containers"].values())
         for x in sorted(vol["files"]):
             if x.startswith("node.identity"):
-                body = x
-                if x.endswith(".json"):
-                    body += str(head(st) if running else vol["frozen_head"])
-                else:
-                    body = "identity-" + sv
+                kind = x[len("node.identity."):-len(".json")] if x.endswith(".json") else ""
+                body = x + json.dumps(record(st, vol, sv, kind)) if kind in RECORDS else "identity-" + sv
                 print(f"{hashlib.sha256(body.encode()).hexdigest()}  {x}")
         sys.exit(0)
     out()
@@ -367,6 +404,8 @@ def exec_cmd(a):
         d = json.loads(body)["params"][0]
         h = 0 if svc in envlist("FAKE_BEHIND") else head(st)
         if d["message"] == "getLastBlockNumber":
+            if time.time() < st.get("outage_until", 0):
+                fail("curl: (28) Operation timed out", 28)
             out(json.dumps({"result": 200, "response": h}))
         bn = d["data"]["blockNumber"]
         out(json.dumps({"result": 200, "response": {"hash": f"hash{bn}", "number": bn, "content": {"timestamp": time.time()}, "validation_data": {"signatures": {}}}}))
@@ -417,6 +456,8 @@ def exec_cmd(a):
             if not m:
                 fail("pg_restore: not a dump", 1)
             pg["db"], pg["frozen"], pg["frozen_head"] = "restored", True, int(m.group(1))
+            if os.environ.get("FAKE_READ_OUTAGE"):
+                st["outage_until"] = time.time() + float(os.environ["FAKE_READ_OUTAGE"])
             save(st)
             out()
     out()

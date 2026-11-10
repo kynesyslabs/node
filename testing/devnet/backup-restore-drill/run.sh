@@ -89,6 +89,9 @@ ISO_NODE="${ISO_NODE:-1}"
 KEEP_KEYS="${KEEP_KEYS:-0}"
 IDENTITY_GEN="${IDENTITY_GEN:-auto}"
 RUNS_DIR="${RUNS_DIR:-${HERE}/runs}"
+# Where the per-PROJECT lock file lives: /tmp, which every run on this host sees,
+# whatever its checkout or OUT_DIR (the projects share the host's Docker daemon)
+LOCK_DIR="${LOCK_DIR:-/tmp}"
 SMOKE="${SMOKE:-0}"
 SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-300}"
 SMOKE_HEAD="${SMOKE_HEAD:-2}"
@@ -102,7 +105,7 @@ usage() {
     sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: NODE_IMAGE PG_IMAGE BASE_PORT PROJECT VARIANT OUT_DIR SHARD_SIZE H0 CONSENSUS_TIME"
     echo "             NODE_MEM PG_MEM CPU_SHARES LOAD_MAX LOAD_WAIT_MAX STOP_GRACE STALL_LIMIT"
-    echo "             MIGRATE_CMD MIGRATE_REQUIRED MIGRATE_TIMEOUT FORK_SET ISO_NODE KEEP_KEYS IDENTITY_GEN RUNS_DIR"
+    echo "             MIGRATE_CMD MIGRATE_REQUIRED MIGRATE_TIMEOUT FORK_SET ISO_NODE KEEP_KEYS IDENTITY_GEN RUNS_DIR LOCK_DIR"
     echo "             SMOKE SMOKE_TIMEOUT SMOKE_HEAD GOSSIP_ENABLED ALLOW_GOSSIP_OFF FIX_OWNERSHIP (README.md)"
 }
 case "${1:-}" in
@@ -144,6 +147,23 @@ EXPECT_PAUSE=0
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-bkdrill-${VARIANT}"
 if [ "${SMOKE}" = 1 ]; then RUN_ID="${RUN_ID%-"${VARIANT}"}-smoke"; fi
 OUT_DIR="${OUT_DIR:-${RUNS_DIR}/${RUN_ID}}"
+# A retry must not overwrite an earlier run's results: OUT_DIR has to be new or empty
+# (the default is a new timestamped dir), checked before anything is written. A dir
+# that cannot be listed counts as not empty
+if [ -e "${OUT_DIR}" ] && { [ ! -d "${OUT_DIR}" ] || [ -n "$(ls -A -- "${OUT_DIR}" 2>&1)" ]; }; then
+    cfg_err "OUT_DIR ${OUT_DIR} exists and is not an empty directory; it may hold an earlier run's results. Nothing was written. Use a new OUT_DIR, or leave it unset for a new timestamped dir under ${RUNS_DIR}"
+fi
+# One run per PROJECT at a time: two runs of one project would share its containers
+# and volumes, and either teardown would delete the other's. The lock is taken before
+# any check of the project's resources and held on fd 9 until this process exits,
+# after teardown; a second run exits 2 here, before it writes anything
+LOCK_FILE="${LOCK_DIR}/${PROJECT}.lock"
+command -v flock > /dev/null 2>&1 || cfg_err "flock not found (util-linux); it keeps two runs of one PROJECT apart"
+exec 9>> "${LOCK_FILE}" || cfg_err "cannot open the lock file ${LOCK_FILE}"
+if ! flock -n 9; then
+    echo "another run of PROJECT ${PROJECT} holds ${LOCK_FILE}: it has not finished its teardown. Nothing was done; wait for it to end, or use another PROJECT" >&2
+    exit 2
+fi
 LOG_DIR="${OUT_DIR}/logs"
 IN="${OUT_DIR}/inputs"
 BACKUP_DIR="${OUT_DIR}/backup"
@@ -388,6 +408,29 @@ state_sums() {
 record_height() { # $1 signed|prevote
     xstate_ro "cat /s/node.identity.${1}.json 2>/dev/null; true" | jq -r '.height // empty' 2>/dev/null || true
 }
+# "height round" of a signing state file, empty when it is absent or lacks either;
+# never the rest of it. The node orders each by height, then round: the round is
+# .timestamp in the signing record (src/libs/identity/signingRecord.ts: "a round is
+# identified by (height, timestamp)") and .round in the commit lock (judgeLock in
+# src/libs/consensus/v2/commitLock/lockStore.ts) and in the prevote record
+# (prevoteRefusal in prevoteRecord.ts there)
+record_pos() { # $1 signed|commitlock|prevote
+    local field=round
+    if [ "$1" = signed ]; then field=timestamp; fi
+    xstate_ro "cat /s/node.identity.${1}.json 2>/dev/null; true" |
+        jq -r --arg f "${field}" 'select((.height | type) == "number" and (.[$f] | type) == "number") | "\(.height) \(.[$f])"' 2>/dev/null || true
+}
+# How the "height round" $2 stands to $1: newer, equal or older (height first, then
+# round); unknown when either is missing
+pos_order() {
+    awk -v a="$1" -v b="$2" 'BEGIN {
+        if (split(a, x, " ") != 2 || split(b, y, " ") != 2) r = "unknown"
+        else if (x[1] + 0 != y[1] + 0) r = (y[1] + 0 > x[1] + 0) ? "newer" : "older"
+        else if (x[2] + 0 != y[2] + 0) r = (y[2] + 0 > x[2] + 0) ? "newer" : "older"
+        else r = "equal"
+        print r
+    }'
+}
 sum_of() { awk -v n="$2" '$2 == n { print $1 }' "$1"; }
 short() { printf '%s' "${1:0:12}"; }
 state_names() { xstate_ro 'ls -A /s; true'; }
@@ -474,6 +517,8 @@ MON_FILE="${LOG_DIR}/monitor.tsv"
 start_monitor() { # nodes to watch
     : > "${MON_FILE}"
     (
+        # not a holder of the project lock: a sleep left behind when it is killed must not keep it
+        exec 9>&-
         set +e
         while :; do
             printf '%s\t%s\n' "$(date +%s)" "$(max_head_of "$@")" >> "${MON_FILE}"
@@ -482,17 +527,44 @@ start_monitor() { # nodes to watch
     ) &
     MON_PID=$!
 }
-# "maxgap first last samples unreadable" between two unix times
+# "maxgap first last samples unreadable blind" between two unix times. maxgap: the
+# longest time the head was not seen to rise, from the window's start, measured up to
+# the sample that sees it rise (before that sample becomes the new start) and, last,
+# up to the window's end. blind: the longest time without a successful read, from the
+# window's start, between reads, and up to its end
 monitor_stats() {
     awk -F'\t' -v from="$1" -v to="$2" '
+        BEGIN { last = from; lastread = from }
         $1 >= from && $1 <= to {
             if ($2 ~ /^[0-9]+$/) {
-                if (!seen) { first = $2; best = $2; last = $1; seen = 1 }
-                else if ($2 > best) { best = $2; last = $1 }
-                gap = $1 - last; if (gap > maxgap) maxgap = gap; n++
+                if ($1 - lastread > blind) blind = $1 - lastread
+                lastread = $1
+                if (!seen) { first = $2; best = $2; seen = 1 }
+                else if ($2 > best) { if ($1 - last > maxgap) maxgap = $1 - last; best = $2; last = $1 }
+                n++
             } else { unread++ }
         }
-        END { printf "%d %d %d %d %d", maxgap + 0, first + 0, best + 0, n + 0, unread + 0 }' "${MON_FILE}"
+        END {
+            if (to - last > maxgap) maxgap = to - last
+            if (to - lastread > blind) blind = to - lastread
+            printf "%d %d %d %d %d %d", maxgap + 0, first + 0, best + 0, n + 0, unread + 0, blind + 0
+        }' "${MON_FILE}"
+}
+# The verdict of the "kept forging" checks on the window [$1, $2]: STALL_RESULT (PASS
+# or FAIL), STALL_DETAIL, and monitor_stats' numbers. No head read for longer than
+# STALL_LIMIT is a FAIL, whatever the heads around the hole: the chain may have
+# stalled in it, and the run cannot show it did not
+stall_verdict() {
+    read -r maxgap first last samples unread blind <<< "$(monitor_stats "$1" "$2")"
+    STALL_DETAIL="longest gap ${maxgap}s, longest without a head read ${blind}s (limit ${STALL_LIMIT}s), head ${first} -> ${last}, ${samples} samples, ${unread} unreadable"
+    if [ "${blind}" -gt "${STALL_LIMIT}" ]; then
+        STALL_RESULT=FAIL
+        STALL_DETAIL="no head read for ${blind}s, more than ${STALL_LIMIT}s: a stall in that time cannot be ruled out; ${STALL_DETAIL}"
+    elif [ "${samples}" -gt 0 ] && [ "${maxgap}" -le "${STALL_LIMIT}" ] && [ "${unread}" -le $((samples / 2)) ]; then
+        STALL_RESULT=PASS
+    else
+        STALL_RESULT=FAIL
+    fi
 }
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -922,7 +994,9 @@ if [ "${VARIANT}" = rejoin ]; then
     state_sums > "${OUT_DIR}/sums.stop"
     state_owners > "${OUT_DIR}/own.before"
     H_SIGNED_STOP="$(record_height signed)"
-    H_PREVOTE_STOP="$(record_height prevote)"
+    # Height and round of each signing state file at rest; the files after the rejoin are compared with these
+    declare -A POS_STOP=() POS_END=()
+    for rec in signed commitlock prevote; do POS_STOP[${rec}]="$(record_pos "${rec}")"; done
     META[head_at_stop]="${H_STOP}"
     META[signing_record_height_at_stop]="${H_SIGNED_STOP:-none}"
     say "stopped: pre-wipe head ${H_STOP}; signing record height ${H_SIGNED_STOP:-none}"
@@ -942,6 +1016,11 @@ if [ "${VARIANT}" = rejoin ]; then
     say "left on the state volume: $(printf '%s' "${left}" | tr '\n' ' ')"
     stray="$(printf '%s\n' "${left}" | grep -v -e '^node\.identity' -e '^$' | tr '\n' ' ' || true)"
     [ -z "${stray}" ] || die "the wipe left more than node.identity* on node ${X_NODE}'s state volume: ${stray% }"
+    # Node X restarts from the identity and signing state files it stopped with: the
+    # same names and bytes as at stop, checked before it can start again
+    state_sums > "${OUT_DIR}/sums.wiped"
+    wipe_changed="$({ grep -Fxv -f "${OUT_DIR}/sums.wiped" "${OUT_DIR}/sums.stop"; grep -Fxv -f "${OUT_DIR}/sums.stop" "${OUT_DIR}/sums.wiped"; } | awk '{ print $2 }' | sort -u | tr '\n' ' ' || true)"
+    [ -z "${wipe_changed}" ] || die "the wipe changed or removed node ${X_NODE}'s identity or signing state files: ${wipe_changed% } (sums.stop, sums.wiped)"
     # The state volume is kept and only emptied (as root, rm only: nothing is created on
     # it), so its owner must be what it was. The volumes recreated below, the database
     # and the backup staging one, belong to postgres, not to uid 1000. Whatever the
@@ -1061,8 +1140,7 @@ if [ "${VARIANT}" = rejoin ]; then
     # ═════════════════════════════════════════════════════════════════════
     step 09-checks
     state_sums > "${OUT_DIR}/sums.end"
-    H_SIGNED_END="$(record_height signed)"
-    H_PREVOTE_END="$(record_height prevote)"
+    for rec in signed commitlock prevote; do POS_END[${rec}]="$(record_pos "${rec}")"; done
     HX_END="$(read_head "${X_NODE}" || true)"
 
     # 1. head
@@ -1096,7 +1174,8 @@ if [ "${VARIANT}" = rejoin ]; then
     else
         check "identity file checksum identical (step 2, at stop, after rejoin)" FAIL "step2=$(short "${IDENT_SUM_2}") stop=$(short "${ident_stop}") end=$(short "${ident_end}")"
     fi
-    # 4. signing state: still there, never older, state which
+    # 4. signing state: still there; the signing record, the commit lock and the prevote
+    # record never older than at stop by (height, round); state which
     bad=""
     desc=""
     while read -r _ name; do
@@ -1105,20 +1184,29 @@ if [ "${VARIANT}" = rejoin ]; then
         s_end="$(sum_of "${OUT_DIR}/sums.end" "${name}")"
         if [ -z "${s_end}" ]; then
             bad="${bad} ${name} is gone"
-        elif [ "${s_end}" = "${s_stop}" ]; then
-            desc="${desc} ${name#node.identity}=unchanged"
-        else
-            desc="${desc} ${name#node.identity}=advanced"
+            continue
         fi
+        case "${name}" in
+            node.identity.signed.json | node.identity.commitlock.json | node.identity.prevote.json)
+                rec="${name#node.identity.}"
+                rec="${rec%.json}"
+                # "height/round" for the detail
+                p_stop="${POS_STOP[${rec}]/ //}"
+                p_end="${POS_END[${rec}]/ //}"
+                case "$(pos_order "${POS_STOP[${rec}]}" "${POS_END[${rec}]}")" in
+                    newer) desc="${desc} ${name#node.identity}=advanced ${p_stop} -> ${p_end}" ;;
+                    equal) desc="${desc} ${name#node.identity}=unchanged ${p_end}" ;;
+                    older) bad="${bad} ${name} is older than at stop: ${p_stop} -> ${p_end} (height/round)" ;;
+                    *) bad="${bad} ${name} has no height and round to compare: ${p_stop:-none} at stop, ${p_end:-none} after" ;;
+                esac
+                ;;
+            *)
+                if [ "${s_end}" = "${s_stop}" ]; then desc="${desc} ${name#node.identity}=unchanged"; else desc="${desc} ${name#node.identity}=changed"; fi
+                ;;
+        esac
     done < "${OUT_DIR}/sums.stop"
-    if is_num "${H_SIGNED_STOP}"; then
-        if ! is_num "${H_SIGNED_END}" || [ "${H_SIGNED_END}" -lt "${H_SIGNED_STOP}" ]; then bad="${bad} signing record height went back ${H_SIGNED_STOP} -> ${H_SIGNED_END:-?}"; fi
-    fi
-    if is_num "${H_PREVOTE_STOP}"; then
-        if ! is_num "${H_PREVOTE_END}" || [ "${H_PREVOTE_END}" -lt "${H_PREVOTE_STOP}" ]; then bad="${bad} prevote record height went back ${H_PREVOTE_STOP} -> ${H_PREVOTE_END:-?}"; fi
-    fi
     if [ -z "${bad}" ]; then
-        check "signing state unchanged or advanced, never older" PASS "signing record height ${H_SIGNED_STOP:-none} -> ${H_SIGNED_END:-none};${desc}"
+        check "signing state unchanged or advanced, never older" PASS "height/round at stop -> after the rejoin:${desc}"
     else
         check "signing state unchanged or advanced, never older" FAIL "${bad};${desc}"
     fi
@@ -1145,13 +1233,11 @@ if [ "${VARIANT}" = rejoin ]; then
     # 6. signing again
     if [ "${SIGNED}" = 1 ]; then check "node ${X_NODE} signs after the restart" PASS "${SIGN_EVIDENCE}"; fi
     # 7. the other nodes never stalled
-    read -r maxgap first last samples unread <<< "$(monitor_stats "${T_STOP}" "${T_END}")"
+    stall_verdict "${T_STOP}" "${T_END}"
     if [ "${EXPECT_PAUSE}" = 1 ]; then
-        check "other nodes kept forging while node ${X_NODE} was down" INFO "EXPECTED PAUSE: ${LIVE_OTHERS} live < q=${Q} (shardSize ${SHARD_SIZE}); observed longest gap ${maxgap}s, head ${first} -> ${last}, ${samples} samples, ${unread} unreadable"
-    elif [ "${samples}" -gt 0 ] && [ "${maxgap}" -le "${STALL_LIMIT}" ] && [ "${unread}" -le $((samples / 2)) ]; then
-        check "other nodes never stalled while node ${X_NODE} was down" PASS "q=${Q}, ${LIVE_OTHERS} live; longest gap ${maxgap}s <= ${STALL_LIMIT}s, head ${first} -> ${last}, ${samples} samples"
+        check "other nodes kept forging while node ${X_NODE} was down" INFO "EXPECTED PAUSE: ${LIVE_OTHERS} live < q=${Q} (shardSize ${SHARD_SIZE}); observed ${STALL_DETAIL}"
     else
-        check "other nodes never stalled while node ${X_NODE} was down" FAIL "q=${Q}, ${LIVE_OTHERS} live; longest gap ${maxgap}s (limit ${STALL_LIMIT}s), head ${first} -> ${last}, ${samples} samples, ${unread} unreadable"
+        check "other nodes never stalled while node ${X_NODE} was down" "${STALL_RESULT}" "q=${Q}, ${LIVE_OTHERS} live; ${STALL_DETAIL}"
     fi
     META[outage_others_head]="${first} -> ${last}, longest gap ${maxgap}s"
     # 8. the restored database against the dump, and the schema against the image
@@ -1235,12 +1321,8 @@ else
     fi
     stop_monitor
     T_END="$(date +%s)"
-    read -r maxgap first last samples unread <<< "$(monitor_stats "${T_DRILL_START}" "${T_END}")"
-    if [ "${samples}" -gt 0 ] && [ "${maxgap}" -le "${STALL_LIMIT}" ]; then
-        check "the validators kept forging during the drill" PASS "longest gap ${maxgap}s <= ${STALL_LIMIT}s, head ${first} -> ${last}"
-    else
-        check "the validators kept forging during the drill" FAIL "longest gap ${maxgap}s (limit ${STALL_LIMIT}s), ${samples} samples, ${unread} unreadable"
-    fi
+    stall_verdict "${T_DRILL_START}" "${T_END}"
+    check "the validators kept forging during the drill" "${STALL_RESULT}" "${STALL_DETAIL}"
     if [ "$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}" | wc -l)" = 1 ]; then
         check "node ${X_NODE} untouched and the only holder of its key" PASS "one node-${X_NODE} container, never stopped"
     else
