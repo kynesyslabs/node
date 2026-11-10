@@ -14,11 +14,13 @@ const PTAU_POWER: Record<BatchSize, number> = { 5: 16, 10: 17 }
 const PTAU_MIN_BYTES = 1_000_000
 
 // The committed verification keys only match files from the Hermez ceremony,
-// and the hosts serving them can disappear. Each one is tried in turn and the
-// list can be replaced with --ptau-url, so a dead host never blocks the setup.
+// and the hosts serving them can disappear: the original Google Cloud and S3
+// buckets answered 403 on 2026-11-10. circom.info is the mirror the snarkjs README
+// links to. Each host is tried in turn and the list can be replaced with
+// --ptau-url, so a dead host never blocks the setup.
 export const PTAU_BASE_URLS = [
+    "https://circom.info",
     "https://storage.googleapis.com/zkevm/ptau",
-    "https://hermez.s3-eu-west-1.amazonaws.com",
 ]
 
 export interface BatchArtifacts {
