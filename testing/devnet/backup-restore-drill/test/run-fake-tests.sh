@@ -236,6 +236,7 @@ if sel full-rejoin; then
     want_out 'CHECK PASS: node 4 signs after the restart' "node 4 signs"
     want_out 'CHECK PASS: restart signing floor logged before signing' "the floor line in node 4's log"
     want_out 'CHECK PASS: restored head >= pre-wipe head' "head after restore"
+    want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "the other nodes' head rose: stall check PASS"
     want_out 'RESULT PASS: rejoin drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
     want_out 'left on the state volume: node.identity node.identity.commitlock.json node.identity.prevote.json node.identity.signed.json' "wipe kept only identity and signing state"
@@ -254,6 +255,7 @@ fi
 if sel full-isolated; then
     go full-isolated VARIANT=isolated
     want_rc 0
+    want_out 'CHECK PASS: the validators kept forging during the drill' "the validators' head rose: stall check PASS"
     want_out 'RESULT PASS: isolated drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
     torn_down
@@ -448,6 +450,15 @@ if sel monitor-stats; then
     for t in $(seq 0 5 120); do printf '%s\t%s\n' "${t}" $((t / 10)); done > "${CDIR}/steady.tsv"
     stall_of "${CDIR}/steady.tsv" 0 120
     want_out '^PASS: longest gap 10s, longest without a head read 5s ' "steady reads and rises: PASS"
+    # five reads of head 5 over 20 s, well within STALL_LIMIT: no new block, so FAIL
+    for t in 0 5 10 15 20; do printf '%s\t5\n' "${t}"; done > "${CDIR}/flat.tsv"
+    stall_of "${CDIR}/flat.tsv" 0 20
+    want_out '^FAIL: no new block on the watched validators between 0 and 20 .*head 5 -> 5, 5 samples, 0 unreadable' "five reads of one head: FAIL with the reason"
+    no_out '^PASS' "PASS"
+    # the same five reads, the head rising from 5 to 7
+    for t in 0 5 10 15 20; do printf '%s\t%s\n' "${t}" $((5 + t / 10)); done > "${CDIR}/rising.tsv"
+    stall_of "${CDIR}/rising.tsv" 0 20
+    want_out '^PASS: longest gap 10s, .*head 5 -> 7, 5 samples' "five reads, the head rising: PASS"
 fi
 if sel monitor-blind; then
     # no node answers its head for 8 s from the restore's pg_restore (STALL_LIMIT=4 here)
@@ -472,10 +483,12 @@ if sel monitor-slowest; then
     want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "rejoin, no fault, the same settings: PASS"
     go monitor-slowest-control-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6
     want_out 'CHECK PASS: the validators kept forging during the drill' "isolated, no fault, the same settings: PASS"
-    # rejoin watches nodes 1-3: only node 3 rises
+    # rejoin watches nodes 1-3: only node 3 rises. Its window starts just after the pg_dump,
+    # so the lowest head rises in it only if a read from just before the dump falls in its
+    # first second; without one the reason starts with "no new block", the gap follows
     go monitor-slowest-stuck STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2
     want_rc 1
-    want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; longest gap ([6-9]|[1-9][0-9]+)s' "rejoin, two of three stuck: FAIL on the gap"
+    want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; (no new block on the watched validators between [0-9]+ and [0-9]+[^;]*; )?longest gap ([6-9]|[1-9][0-9]+)s' "rejoin, two of three stuck: FAIL on the gap"
     no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
     go monitor-slowest-silent STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_SILENT=node-1
     want_rc 1
@@ -490,6 +503,32 @@ if sel monitor-slowest; then
     want_rc 1
     want_out 'CHECK FAIL: the validators kept forging during the drill \(no head read for ([6-9]|[1-9][0-9]+)s, more than 3s' "isolated, one of four silent: FAIL naming the missing reads"
     no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
+fi
+# Every watched validator stops at head 5, the height the drill waits for (FAKE_STUCK_AT),
+# so no new block in either variant's window. The restore's 6 s pg_restore
+# (FAKE_SLOW_RESTORE) gives the window five reads or more; with the default STALL_LIMIT
+# (90) it is still far shorter than the limit. The controls show the same settings
+# without the fault pass
+only_stall_fail() {
+    local n
+    n="$(grep -c 'CHECK FAIL' "${CDIR}/out.txt")"
+    if [ "${n}" = 1 ]; then ok "the stall check is the only failed check"; else bad "${n} failed checks, wanted 1 (the stall check)"; fi
+}
+if sel monitor-flat; then
+    go monitor-flat-control FAKE_SLOW_RESTORE=6
+    want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "rejoin, no fault, the same settings: PASS"
+    go monitor-flat-control-isolated VARIANT=isolated FAKE_SLOW_RESTORE=6
+    want_out 'CHECK PASS: the validators kept forging during the drill' "isolated, no fault, the same settings: PASS"
+    go monitor-flat FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3 FAKE_STUCK_AT=5
+    want_rc 1
+    want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; no new block on the watched validators between [0-9]+ and [0-9]+ .*head 5 -> 5, ([5-9]|[1-9][0-9]+) samples, 0 unreadable' "rejoin, nodes 1-3 at one head: FAIL naming the window"
+    no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
+    only_stall_fail
+    go monitor-flat-isolated VARIANT=isolated FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3,node-4 FAKE_STUCK_AT=5
+    want_rc 1
+    want_out 'CHECK FAIL: the validators kept forging during the drill \(no new block on the watched validators between [0-9]+ and [0-9]+ .*head 5 -> 5, ([5-9]|[1-9][0-9]+) samples, 0 unreadable' "isolated, nodes 1-4 at one head: FAIL naming the window"
+    no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
+    only_stall_fail
 fi
 
 # ── one run per project, a new OUT_DIR per run ──────────────────────────

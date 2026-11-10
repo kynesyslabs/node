@@ -295,7 +295,7 @@ Each is printed PASS, FAIL or INFO, and written to `timings.md` and
 | no halt marker | no `*.halted` on the state volume, no foreign-signature line in node X's log |
 | signing floor | the `Restart signing floor` line is in node X's log, read to its end (INFO if the line is missing) |
 | node X signs | see D above |
-| other nodes never stalled | every 5 s the run reads the head of each watched node (the other nodes in `rejoin`, all four validators in `isolated`) and keeps the lowest; a head read in which one of them does not answer counts as failed. So the slowest validator decides, and one node rising alone does not pass. With the devnet's quorum (below), the longest gap between increases of that head while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
+| other nodes never stalled | every 5 s the run reads the head of each watched node (the other nodes in `rejoin`, all four validators in `isolated`) and keeps the lowest; a head read in which one of them does not answer counts as failed. So the slowest validator decides, and one node rising alone does not pass. With the devnet's quorum (below), the longest gap between increases of that head while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. It also needs at least one new block on every watched validator: the lowest head at the window's last successful read must be above the lowest at its first, however short the window; a window without one fails with "no new block on the watched validators between `<t0>` and `<t1>`" (unix times, as in `logs/monitor.tsv`). No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows equal; same table set |
 | schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations` |
 | one instance of the key | asserted before the single start; the run dies if it does not hold |
@@ -366,7 +366,8 @@ leaves an entry or removes a signing state file (exit 2, node X not started
 again), a commit lock or prevote record older than at stop (the signing state
 check fails), head reads that fail for longer than `STALL_LIMIT`, and watched
 nodes that stay at one head, or one that does not answer, while another keeps
-rising, for longer than `STALL_LIMIT` (the stall checks of both variants fail;
+rising, for longer than `STALL_LIMIT`, and every watched node at one head for a
+whole window shorter than `STALL_LIMIT` (the stall checks of both variants fail;
 with the same settings and no fault they pass), a second run of a project whose
 lock is held and an `OUT_DIR` that already exists, empty or not (exit 2, nothing
 written), the project in the default `OUT_DIR` name, a teardown whose `down`

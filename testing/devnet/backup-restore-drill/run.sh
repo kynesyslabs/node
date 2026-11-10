@@ -535,7 +535,8 @@ start_monitor() { # nodes to watch
     ) &
     MON_PID=$!
 }
-# "maxgap first last samples unreadable blind" between two unix times. maxgap: the
+# "maxgap first last samples unreadable blind" between two unix times. first, last:
+# the heads of the window's first and last successful reads. maxgap: the
 # longest time the head was not seen to rise, from the window's start, measured up to
 # the sample that sees it rise (before that sample becomes the new start) and, last,
 # up to the window's end. blind: the longest time without a successful read, from the
@@ -547,6 +548,7 @@ monitor_stats() {
             if ($2 ~ /^[0-9]+$/) {
                 if ($1 - lastread > blind) blind = $1 - lastread
                 lastread = $1
+                lasthead = $2
                 if (!seen) { first = $2; best = $2; seen = 1 }
                 else if ($2 > best) { if ($1 - last > maxgap) maxgap = $1 - last; best = $2; last = $1 }
                 n++
@@ -555,19 +557,24 @@ monitor_stats() {
         END {
             if (to - last > maxgap) maxgap = to - last
             if (to - lastread > blind) blind = to - lastread
-            printf "%d %d %d %d %d %d", maxgap + 0, first + 0, best + 0, n + 0, unread + 0, blind + 0
+            printf "%d %d %d %d %d %d", maxgap + 0, first + 0, lasthead + 0, n + 0, unread + 0, blind + 0
         }' "${MON_FILE}"
 }
 # The verdict of the "kept forging" checks on the window [$1, $2]: STALL_RESULT (PASS
 # or FAIL), STALL_DETAIL, and monitor_stats' numbers. No head read for longer than
 # STALL_LIMIT is a FAIL, whatever the heads around the hole: the chain may have
-# stalled in it, and the run cannot show it did not
+# stalled in it, and the run cannot show it did not. A window whose last successful
+# read is not above its first is a FAIL too, however short: reads of one head show
+# no new block on the slowest watched validator, only that it answered
 stall_verdict() {
     read -r maxgap first last samples unread blind <<< "$(monitor_stats "$1" "$2")"
     STALL_DETAIL="longest gap ${maxgap}s, longest without a head read ${blind}s (limit ${STALL_LIMIT}s), head ${first} -> ${last}, ${samples} samples, ${unread} unreadable"
     if [ "${blind}" -gt "${STALL_LIMIT}" ]; then
         STALL_RESULT=FAIL
         STALL_DETAIL="no head read for ${blind}s, more than ${STALL_LIMIT}s: a stall in that time cannot be ruled out; ${STALL_DETAIL}"
+    elif [ "${last}" -le "${first}" ]; then
+        STALL_RESULT=FAIL
+        STALL_DETAIL="no new block on the watched validators between ${1} and ${2} (unix times, as in logs/monitor.tsv); ${STALL_DETAIL}"
     elif [ "${samples}" -gt 0 ] && [ "${maxgap}" -le "${STALL_LIMIT}" ] && [ "${unread}" -le $((samples / 2)) ]; then
         STALL_RESULT=PASS
     else
