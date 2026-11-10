@@ -30,4 +30,17 @@ export class Validators {
     @Column("integer", { name: "unstake_available_at", nullable: true })
     @Index()
     unstake_available_at: number | null
+
+    /** Mint of the node NFT backing this seat. */
+    @Column("text", { name: "nft_mint", nullable: true })
+    @Index()
+    nft_mint: string | null
+
+    /** Solana wallet that held the NFT when the seat was taken. */
+    @Column("text", { name: "nft_owner", nullable: true })
+    nft_owner: string | null
+
+    /** Signature of the Solana proof transaction the wallet signed. */
+    @Column("text", { name: "nft_proof_tx", nullable: true })
+    nft_proof_tx: string | null
 }

@@ -995,6 +995,39 @@ export default class Mempool {
             validTransactions.push(...editVerifiedTransactions)
         }
 
+        // Staking policy is judged again here by every node that merges the
+        // tx, not only by the RPC node that admitted it, so a seat needs a
+        // voting quorum to agree the NFT proof holds. A tx no Solana
+        // endpoint could answer for is left out and comes back at the next
+        // merge; one a healthy endpoint rejected is dropped.
+        {
+            const { isStakingTxType } = await import("src/features/staking/types")
+            const policyVerified: Transaction[] = []
+            for (const tx of validTransactions) {
+                if (!isStakingTxType(tx.content?.type ?? "")) {
+                    policyVerified.push(tx)
+                    continue
+                }
+                const { handleStakingTx } = await import(
+                    "src/libs/network/routines/transactions/handleStakingTx"
+                )
+                const verdict = await handleStakingTx(tx)
+                if (verdict.success) {
+                    policyVerified.push(tx)
+                } else if (verdict.unreachable) {
+                    log.warning(
+                        `[Mempool.receive] Leaving out tx ${tx.hash} for now: ${verdict.message}`,
+                    )
+                } else {
+                    log.error(
+                        `[Mempool.receive] Rejecting tx ${tx.hash}: ${verdict.message}`,
+                    )
+                }
+            }
+            validTransactions.length = 0
+            validTransactions.push(...policyVerified)
+        }
+
         // Proofs are checked concurrently so that provider latency is paid
         // once per merge rather than once per identity transaction.
         {

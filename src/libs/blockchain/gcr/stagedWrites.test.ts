@@ -61,6 +61,18 @@ const datasourceModule = () => ({
 mock.module("src/model/datasource", datasourceModule)
 mock.module("@/model/datasource", datasourceModule)
 
+// These edits exercise staging, not the seat rules: no NFT and no minimum.
+const policyModule = () => ({
+    __esModule: true,
+    isNftGatingEnabled: () => false,
+    isAllowlistedMint: () => true,
+})
+mock.module("src/features/staking/nftAllowlist", policyModule)
+mock.module("@/features/staking/nftAllowlist", policyModule)
+const minStakeModule = () => ({ __esModule: true, getMinValidatorStake: () => 1n })
+mock.module("src/features/staking/minStake", minStakeModule)
+mock.module("@/features/staking/minStake", minStakeModule)
+
 const { default: HandleGCR } = await import("./handleGCR")
 const { default: Chain } = await import("../chain")
 const { StateReadError } = await import("./stateReadError")

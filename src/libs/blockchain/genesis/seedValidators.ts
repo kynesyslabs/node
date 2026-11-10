@@ -17,6 +17,7 @@ import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
 import { Validators } from "src/model/entities/Validators"
+import { nftExemptSeeds, seededNftReasons } from "src/features/staking/seedNft"
 
 // Matches `0x` followed by exactly 64 hex characters.
 const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/
@@ -28,6 +29,12 @@ export interface GenesisValidatorSeed {
     staked_amount: string
     first_seen: number
     valid_at: number
+    /** The node NFT backing the seat; required when NFT gating is on. */
+    nft_mint?: string | null
+    nft_owner?: string | null
+    nft_proof_tx?: string | null
+    /** Test networks only: the seat holds without an NFT. Refused for mainnet by launch-go-no-go. */
+    nft_exempt?: boolean | null
 }
 
 /**
@@ -114,6 +121,13 @@ export async function seedValidators(
 
     // Per-row validation — throws immediately on the first offending row.
     validators.forEach((v, i) => validateSeed(v, i))
+    const nftReasons = seededNftReasons(validators, "genesis.validators")
+    if (nftReasons.length > 0) {
+        throw new Error(`[GENESIS][VALIDATORS] ${nftReasons.join("; ")}`)
+    }
+    for (const address of nftExemptSeeds(validators)) {
+        log.warning(`[GENESIS][VALIDATORS] ${address} is seated without an NFT (nft_exempt); test networks only`)
+    }
 
     // Pre-flight: validators table must be empty at seed time.
     const countRows: Array<{ count: string }> = await em.query(
@@ -146,6 +160,9 @@ export async function seedValidators(
             valid_at: v.valid_at,
             unstake_requested_at: null,
             unstake_available_at: null,
+            nft_mint: v.nft_mint ?? null,
+            nft_owner: v.nft_owner ?? null,
+            nft_proof_tx: v.nft_proof_tx ?? null,
         }))
 
         await em.insert(Validators, batch)

@@ -1,57 +1,97 @@
 {
-  "properties": {
-      "id": 1,
-      "name": "DEMOS",
-      "currency": "DEM",
-      "shardSize": 10
-  },
-  "mutables": {
-      "minBlocksForValidationOnlineStatus": 4
-  },
-  "forks": {
-      "osDenomination": {
-          "activationHeight": 0
-      },
-      "gasFeeSeparation": {
-          "activationHeight": null,
-          "treasuryAddress": "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23"
-      }
-  },
-  "balances": [],
-  "timestamp": "1692734616",
-  "status": "confirmed",
-  "validators": [
-      {
-          "address": "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82",
-          "status": "2",
-          "connection_url": "https://node2.demos.sh",
-          "staked_amount": "1000000000000000000",
-          "first_seen": 0,
-          "valid_at": 0
-      },
-      {
-          "address": "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156",
-          "status": "2",
-          "connection_url": "https://node3.demos.sh",
-          "staked_amount": "1000000000000000000",
-          "first_seen": 0,
-          "valid_at": 0
-      },
-      {
-          "address": "0x62f54cefb244538498b18687dbbb7faeb607b9ea51e8d9bcb952fd038b89ece9",
-          "status": "2",
-          "connection_url": null,
-          "staked_amount": "1000000000000000000",
-          "first_seen": 0,
-          "valid_at": 0
-      },
-      {
-          "address": "0xe6313748a6bbd8e0ebdb578ca0df5f050711819c8dba291930969f72a7f5cdac",
-          "status": "2",
-          "connection_url": null,
-          "staked_amount": "1000000000000000000",
-          "first_seen": 0,
-          "valid_at": 0
-      }
-  ]
+    "properties": {
+        "id": 1,
+        "name": "DEMOS",
+        "currency": "DEM",
+        "shardSize": 4
+    },
+    "mutables": {
+        "minBlocksForValidationOnlineStatus": 4
+    },
+    "forks": {
+        "osDenomination": {
+            "activationHeight": 0
+        },
+        "gasFeeSeparation": {
+            "activationHeight": null,
+            "treasuryAddress": "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23"
+        }
+    },
+    "balances": [],
+    "timestamp": "1692734616",
+    "status": "confirmed",
+    "validators": [
+        {
+            "address": "0x556e3da072adfea631d39afdaf468d25ab48a7a568db9e9a84544ef37e50a3d8",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_exempt": true
+        },
+        {
+            "address": "0xbf24a1c455b0cccbc5e7175860a2f6ee35dfbcba3555e6a00c3e4d002a36a34c",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_exempt": true
+        },
+        {
+            "address": "0x412bee5548b43bc0a23429c06946c1eb990d900f6c0ed5c3ad001481e7f7a8ef",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_exempt": true
+        },
+        {
+            "address": "0x680464e81ff8a088611d91eb97c40326dc3d8981bd29cf2721b47daa60f56274",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_exempt": true
+        },
+        {
+            "address": "0x08fd313a1e2e0b6318bba6e51789870758134a4526af0b493a46745f77ddc59a",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_exempt": true
+        },
+        {
+            "address": "0x373cfaebf4a4e9fba6ecd51084aaf278e0d4257278112df6d72ea66663d69c97",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_exempt": true
+        },
+        {
+            "address": "0xc7e28c4758b25275371c81fa009dd0e4bb7340cebb211751a20c2e7b4ecc856d",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_exempt": true
+        },
+        {
+            "address": "0x96ef5e7822af1c5f3d4454a3aad66bdc70eaba46e74cff7931662f87e200093c",
+            "status": "2",
+            "connection_url": null,
+            "staked_amount": "1000000000000",
+            "first_seen": 0,
+            "valid_at": 0,
+            "nft_exempt": true
+        }
+    ]
 }

@@ -621,9 +621,18 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
  * fork block (mainnetForkReasons), a chain id another Demos network uses,
  * or a committee size other than the one the launch was drilled with.
  */
-export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: unknown } | null): string[] {
+export function mainnetGenesisReasons(
+    genesis: { forks?: unknown; properties?: unknown; validators?: unknown } | null,
+): string[] {
     const reasons = mainnetForkReasons(genesis)
     if (!genesis) return reasons
+    const exempt = nftExemptEntries(genesis.validators)
+    if (exempt.length > 0) {
+        reasons.push(
+            `${exempt.length} genesis validators are nft_exempt (${exempt.join(", ")}); ` +
+                "every mainnet seat needs its NFT",
+        )
+    }
     const properties = (genesis.properties ?? {}) as Record<string, unknown>
     const chainId = properties.id
     if (typeof chainId !== "number" || !Number.isInteger(chainId)) {
@@ -647,6 +656,14 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
         reasons.push(`genesis still holds template FILL values at ${markers.join(", ")}`)
     }
     return reasons
+}
+
+/** The addresses of genesis validator entries seated without an NFT. */
+function nftExemptEntries(validators: unknown): string[] {
+    if (!Array.isArray(validators)) return []
+    return validators
+        .filter(v => v && typeof v === "object" && (v as { nft_exempt?: unknown }).nft_exempt === true)
+        .map(v => String((v as { address?: unknown }).address ?? "?"))
 }
 
 function templateMarkers(value: unknown, at = "genesis"): string[] {

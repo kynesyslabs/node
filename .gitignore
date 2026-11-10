@@ -17,6 +17,7 @@ output/
 # is NOT committed — see entry near the bottom.
 data/*
 !data/snapshot/
+!data/nft-allowlist.json
 docker_data/
 postgres_*/
 neo4j_data/

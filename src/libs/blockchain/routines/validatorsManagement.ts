@@ -11,43 +11,36 @@ import Transaction from "../transaction"
 import { calculateFeeBreakdown } from "./calculateCurrentGas"
 import { requireSender } from "src/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
-import { getSharedState } from "src/utilities/sharedState"
+import { getMinValidatorStake } from "src/features/staking/minStake"
 import type {
     ValidatorStakePayload,
+    ValidatorChallengePayload,
+    ValidatorNftProof,
     GCREditValidatorStake,
 } from "src/features/staking/types"
+import { isAllowlistedMint, isNftGatingEnabled } from "src/features/staking/nftAllowlist"
 import {
-    DEFAULT_MIN_VALIDATOR_STAKE,
+    verifyChallengeEvidence,
+    verifyProofSupersedes,
+    verifyCurrentOwner,
+    verifyNftProof,
+    type SolanaCheck,
+} from "src/features/staking/solanaProof"
+import {
     UNSTAKE_LOCK_BLOCKS,
     VALIDATOR_STATUS_ACTIVE,
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
 } from "src/features/staking/constants"
 
-/**
- * Current minimum stake required to register as a validator.
- *
- * Prefers the governance-driven value in `sharedState.networkParameters`;
- * falls back to the Phase-0 default when governance has not loaded yet
- * (e.g. during bootstrap before `loadNetworkParameters()` completes).
- */
-export function getMinValidatorStake(): bigint {
-    const governed = (
-        getSharedState.networkParameters as {
-            minValidatorStake?: string
-        } | null
-    )?.minValidatorStake
-    if (typeof governed === "string" && governed.length > 0) {
-        try {
-            return BigInt(governed)
-        } catch {
-            /* fall through */
-        }
-    }
-    return BigInt(DEFAULT_MIN_VALIDATOR_STAKE)
-}
+export { getMinValidatorStake }
 
-type StakeTxResult = { valid: boolean; message: string }
+/**
+ * `unreachable` marks a verdict that no Solana endpoint could answer: the
+ * tx is neither accepted nor known bad, and a consensus caller leaves it
+ * out of its candidate without treating it as invalid.
+ */
+export type StakeTxResult = { valid: boolean; message: string; unreachable?: boolean }
 
 export default class ValidatorsManagement {
     // ------------------------------------------------------------------
@@ -107,8 +100,11 @@ export default class ValidatorsManagement {
             }
         }
 
-        if (!existing) {
-            // New validator registration
+        const entering =
+            !existing || existing.status === VALIDATOR_STATUS_EXITED
+
+        if (entering) {
+            // New validator registration, or re-entry after an exit
             if (amount < min) {
                 return {
                     valid: false,
@@ -121,7 +117,13 @@ export default class ValidatorsManagement {
                     message: "connectionUrl required for first stake",
                 }
             }
-            return { valid: true, message: "Validator entrance valid" }
+            const nft = await ValidatorsManagement.checkEntranceNft(
+                payload.nft,
+                sender,
+                tx.content.timestamp,
+            )
+            if (!nft.valid) return nft
+            return { valid: true, message: `Validator entrance valid (${nft.message})` }
         }
 
         if (
@@ -133,7 +135,90 @@ export default class ValidatorsManagement {
                 message: `Validator not eligible for stake top-up (status=${existing.status})`,
             }
         }
+        if (payload.nft !== undefined && payload.nft.mint !== existing.nft_mint) {
+            return {
+                valid: false,
+                message: "A top-up cannot change the NFT backing the seat",
+            }
+        }
         return { valid: true, message: "Validator stake increase valid" }
+    }
+
+    /**
+     * The NFT rules for a stake that takes a seat: a proof is present, its
+     * mint is allowlisted and free, the proof checks out on Solana, and the
+     * wallet still holds the NFT.
+     */
+    static async checkEntranceNft(
+        nft: ValidatorNftProof | undefined,
+        sender: string,
+        txTimestampMs: number,
+    ): Promise<StakeTxResult> {
+        if (!isNftGatingEnabled()) {
+            return { valid: true, message: "NFT gating disabled" }
+        }
+        if (nft === undefined) {
+            return {
+                valid: false,
+                message: "An allowlisted node NFT proof is required to become a validator",
+            }
+        }
+        if (!isAllowlistedMint(nft.mint)) {
+            return { valid: false, message: `NFT ${nft.mint} is not eligible` }
+        }
+        const validator = sender.startsWith("0x") ? sender : `0x${sender}`
+        const proof = await verifyNftProof(nft, validator, txTimestampMs)
+        if (proof.status !== "valid") return fromCheck(proof, "NFT proof")
+        const owner = await verifyCurrentOwner(nft.mint, nft.owner)
+        if (owner.status !== "valid") return fromCheck(owner, "NFT ownership")
+        // Another seat backed by this mint is evicted when the stake applies;
+        // the new proof must be later than the one that seat was taken with.
+        const holder = await GCR.getGCRValidatorByMint(nft.mint)
+        if (holder && holder.address !== sender) {
+            if (holder.nft_proof_tx) {
+                const order = await verifyProofSupersedes(proof.slot, holder.nft_proof_tx)
+                if (order.status !== "valid") return fromCheck(order, "NFT proof")
+            }
+            return { valid: true, message: `NFT proof valid; evicts ${holder.address}` }
+        }
+        return { valid: true, message: "NFT proof valid" }
+    }
+
+    /**
+     * Validate a `validatorChallenge` tx: the target holds a seat backed by
+     * an NFT, and the evidence is a finalized transfer of that NFT out of
+     * the recorded wallet after the proof.
+     */
+    static async manageValidatorChallengeTx(
+        tx: Transaction,
+    ): Promise<StakeTxResult> {
+        const sender = requireSender(tx)
+        if (!sender) return { valid: false, message: "Missing sender" }
+        const payload = extractChallengePayload(tx)
+        if (!payload) {
+            return { valid: false, message: "Missing challenge payload" }
+        }
+        const target = await GCR.getGCRValidatorStatus(payload.validator)
+        if (!target) return { valid: false, message: "Challenged validator not found" }
+        if (
+            target.status !== VALIDATOR_STATUS_ACTIVE &&
+            target.status !== VALIDATOR_STATUS_UNSTAKING
+        ) {
+            return {
+                valid: false,
+                message: `Challenged validator holds no seat (status=${target.status})`,
+            }
+        }
+        if (!target.nft_mint || !target.nft_owner || !target.nft_proof_tx) {
+            return { valid: false, message: "Challenged validator has no NFT on record" }
+        }
+        const evidence = await verifyChallengeEvidence(payload.evidenceTx, {
+            mint: target.nft_mint,
+            owner: target.nft_owner,
+            proofTx: target.nft_proof_tx,
+        })
+        if (evidence.status !== "valid") return fromCheck(evidence, "Challenge evidence")
+        return { valid: true, message: "Challenge valid" }
     }
 
     /**
@@ -277,17 +362,58 @@ export default class ValidatorsManagement {
     }
 }
 
+/** A tx verdict from a Solana check, keeping "unreachable" distinct from "invalid". */
+function fromCheck(check: SolanaCheck, what: string): StakeTxResult {
+    if (check.status === "unreachable") {
+        return {
+            valid: false,
+            unreachable: true,
+            message: `${what} could not be verified: ${check.reason}`,
+        }
+    }
+    if (check.status === "invalid") {
+        return { valid: false, message: `${what} rejected: ${check.reason}` }
+    }
+    return { valid: true, message: `${what} valid` }
+}
+
 /** Pull the `ValidatorStakePayload` out of a tx, or return null if malformed. */
 function extractStakePayload(tx: Transaction): ValidatorStakePayload | null {
     const data = tx.content?.data as unknown as [string, unknown] | undefined
     if (!Array.isArray(data) || data.length < 2) return null
     const payload = data[1]
     if (!payload || typeof payload !== "object") return null
-    const { amount, connectionUrl } = payload as Partial<ValidatorStakePayload>
+    const { amount, connectionUrl, nft } = payload as Partial<ValidatorStakePayload>
     if (typeof amount !== "string") return null
-    return {
+    const out: ValidatorStakePayload = {
         amount,
         connectionUrl: typeof connectionUrl === "string" ? connectionUrl : "",
     }
+    if (nft !== undefined) {
+        if (
+            nft === null ||
+            typeof nft !== "object" ||
+            typeof nft.mint !== "string" ||
+            typeof nft.owner !== "string" ||
+            typeof nft.proofTx !== "string"
+        ) {
+            return null
+        }
+        out.nft = { mint: nft.mint, owner: nft.owner, proofTx: nft.proofTx }
+    }
+    return out
+}
+
+/** Pull the `ValidatorChallengePayload` out of a tx, or return null if malformed. */
+function extractChallengePayload(
+    tx: Transaction,
+): ValidatorChallengePayload | null {
+    const data = tx.content?.data as unknown as [string, unknown] | undefined
+    if (!Array.isArray(data) || data.length < 2) return null
+    const payload = data[1]
+    if (!payload || typeof payload !== "object") return null
+    const { validator, evidenceTx } = payload as Partial<ValidatorChallengePayload>
+    if (typeof validator !== "string" || typeof evidenceTx !== "string") return null
+    return { validator: validator.toLowerCase(), evidenceTx }
 }
 

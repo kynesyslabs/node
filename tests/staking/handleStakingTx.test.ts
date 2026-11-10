@@ -24,6 +24,7 @@ jest.mock("@/libs/blockchain/routines/validatorsManagement", () => ({
         manageValidatorStakeTx: jest.fn(),
         manageValidatorUnstakeTx: jest.fn(),
         manageValidatorExitTx: jest.fn(),
+        manageValidatorChallengeTx: jest.fn(),
         buildStakeEdit: jest.fn(
             (account: string, amount: string, url: string, txhash: string) => ({
                 type: "validatorStake",
@@ -121,6 +122,19 @@ describe("handleStakingTx dispatcher", () => {
         const r = await handleStakingTx(tx("validatorExit"))
         expect(r.success).toBe(true)
         expect(r.message).toBe("exit ok")
+    })
+
+    it("routes validatorChallenge to manageValidatorChallengeTx and keeps the unreachable flag", async () => {
+        (
+            ValidatorsManagement.manageValidatorChallengeTx as jest.Mock
+        ).mockResolvedValue({ valid: false, message: "no answer", unreachable: true } as never)
+
+        const r = await handleStakingTx(tx("validatorChallenge"))
+        expect(r.success).toBe(false)
+        expect(r.unreachable).toBe(true)
+        expect(
+            ValidatorsManagement.manageValidatorChallengeTx,
+        ).toHaveBeenCalledTimes(1)
     })
 
     it("bubbles validation failure from the underlying manager", async () => {

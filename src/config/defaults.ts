@@ -60,6 +60,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         networkFee: 1,
         burnFee: 1,
         minValidatorStake: demToOs(1000).toString(),
+        validatorNftRequired: true,
         identityFile: ".demos_identity",
         peerListFile: "demos_peerlist.json",
         exposedUrl: "", // calculated from serverPort if empty
@@ -69,7 +70,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         consensusTime: 0,
         blockTimestampMinDelta: 1,
         blockTimestampTolerance: 60,
-        logLevel: "info",
+        logLevel: "debug",
         whitelistedIPs: [],
         whitelistedKeys: [],
         trustedProxies: [],

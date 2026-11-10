@@ -28,6 +28,7 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     default: {
         getGCRValidatorStatus: jest.fn(),
         getGCRValidatorsAtBlock: jest.fn(),
+        getGCRValidatorByMint: jest.fn(),
     },
 }))
 
@@ -188,5 +189,46 @@ describe("validatorHandlers.getStakedAmount", () => {
     it("rejects a missing address", async () => {
         const r = await validatorHandlers.getStakedAmount({}, emptyResponse())
         expect(r.result).toBe(400)
+    })
+})
+
+describe("validatorHandlers.getValidatorByMint", () => {
+    beforeEach(() => jest.clearAllMocks())
+    const MINT = "HXm39mBbPzpFLnQcR6bgo6Jw6dXDYbQ5Lf1Vx2h4Th8B"
+
+    it("returns the seat a mint backs", async () => {
+        (GCR.getGCRValidatorByMint as jest.Mock).mockResolvedValue(
+            validatorRow({ nft_mint: MINT, nft_owner: "owner", nft_proof_tx: "sig" }) as never,
+        )
+        const r = await validatorHandlers.getValidatorByMint({ mint: MINT }, emptyResponse())
+        expect(GCR.getGCRValidatorByMint).toHaveBeenCalledWith(MINT)
+        expect(r.response).toMatchObject({
+            address: "aabbcc",
+            status: "2",
+            nftMint: MINT,
+            nftOwner: "owner",
+            nftProofTx: "sig",
+        })
+    })
+
+    it("returns null for a free mint", async () => {
+        (GCR.getGCRValidatorByMint as jest.Mock).mockResolvedValue(null as never)
+        const r = await validatorHandlers.getValidatorByMint(MINT, emptyResponse())
+        expect(r.response).toBeNull()
+    })
+
+    it("rejects a missing or malformed mint", async () => {
+        for (const data of [{}, { mint: "" }, { mint: "0xnotbase58" }, 42]) {
+            const r = await validatorHandlers.getValidatorByMint(data, emptyResponse())
+            expect(r.result).toBe(400)
+            expect((r.response as { error?: string }).error).toMatch(/mint/)
+        }
+        expect(GCR.getGCRValidatorByMint).not.toHaveBeenCalled()
+    })
+
+    it("returns a 500 on repository error", async () => {
+        (GCR.getGCRValidatorByMint as jest.Mock).mockRejectedValue(new Error("boom") as never)
+        const r = await validatorHandlers.getValidatorByMint({ mint: MINT }, emptyResponse())
+        expect(r.result).toBe(500)
     })
 })

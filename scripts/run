@@ -11,8 +11,8 @@ EXTERNAL_DB=false
 # The launcher starts the checked-out release as is. Pulling is opt-in
 # (-U) so a validator never picks up origin's head by accident.
 GIT_PULL=false
-TLSNOTARY_DISABLED=false
-MONITORING_DISABLED=false
+TLSNOTARY_DISABLED=true
+MONITORING_DISABLED=true
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)

@@ -7,6 +7,20 @@ import {
     jest,
 } from "@jest/globals"
 
+// NFT gating is off for the legacy lifecycle rules; the NFT suites turn it on.
+jest.mock("@/features/staking/nftAllowlist", () => ({
+    __esModule: true,
+    isNftGatingEnabled: jest.fn(() => false),
+    isAllowlistedMint: jest.fn(() => true),
+}))
+
+jest.mock("@/features/staking/solanaProof", () => ({
+    __esModule: true,
+    verifyNftProof: jest.fn(async () => ({ status: "valid", slot: 1 })),
+    verifyCurrentOwner: jest.fn(async () => ({ status: "valid", slot: 1 })),
+    verifyChallengeEvidence: jest.fn(async () => ({ status: "valid", slot: 2 })),
+}))
+
 jest.mock("@/utilities/logger", () => ({
     __esModule: true,
     default: {
@@ -197,16 +211,21 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
         expect(r.valid).toBe(true)
     })
 
-    it("rejects a stake coming from an exited validator", async () => {
+    it("treats a stake from an exited validator as a new entrance", async () => {
         jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_EXITED,
+            staked_amount: "0",
         } as never)
-        const r = await ValidatorsManagement.manageValidatorStakeTx(
+        const below = await ValidatorsManagement.manageValidatorStakeTx(
+            stakeTx("100"),
+        )
+        expect(below.valid).toBe(false)
+        expect(below.message).toContain("below minimum")
+        const atMin = await ValidatorsManagement.manageValidatorStakeTx(
             stakeTx(MIN_STAKE),
         )
-        expect(r.valid).toBe(false)
-        expect(r.message).toContain("not eligible")
+        expect(atMin.valid).toBe(true)
     })
 
     // CR-5 regression: stake-increase eligibility is an explicit allow-list

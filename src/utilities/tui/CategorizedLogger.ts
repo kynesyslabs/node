@@ -242,7 +242,7 @@ export class CategorizedLogger extends EventEmitter {
             minLevel:
                 config.minLevel ??
                 (Config.getInstance().core.logLevel as LogLevel) ??
-                "info",
+                "debug",
             enabledCategories: config.enabledCategories ?? [],
             maxFileSize: config.maxFileSize ?? DEFAULT_MAX_FILE_SIZE,
             maxTotalSize: config.maxTotalSize ?? DEFAULT_MAX_TOTAL_SIZE,

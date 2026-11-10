@@ -215,7 +215,10 @@ const SQL_VALIDATORS = `SELECT json_build_object(
   'first_seen', first_seen,
   'valid_at', valid_at,
   'unstake_requested_at', unstake_requested_at,
-  'unstake_available_at', unstake_available_at
+  'unstake_available_at', unstake_available_at,
+  'nft_mint', nft_mint,
+  'nft_owner', nft_owner,
+  'nft_proof_tx', nft_proof_tx
 ) FROM validators ORDER BY address`
 
 const SQL_FORK_STATE = `SELECT json_build_object(

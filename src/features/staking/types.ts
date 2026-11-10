@@ -6,6 +6,8 @@ export type {
     ValidatorStakePayload,
     ValidatorUnstakePayload,
     ValidatorExitPayload,
+    ValidatorChallengePayload,
+    ValidatorNftProof,
 } from "@kynesyslabs/demosdk/types"
 
 export type { GCREditValidatorStake } from "@kynesyslabs/demosdk/types"
@@ -15,11 +17,13 @@ export type StakingTxType =
     | "validatorStake"
     | "validatorUnstake"
     | "validatorExit"
+    | "validatorChallenge"
 
 export const STAKING_TX_TYPES: readonly StakingTxType[] = [
     "validatorStake",
     "validatorUnstake",
     "validatorExit",
+    "validatorChallenge",
 ] as const
 
 export function isStakingTxType(value: string): value is StakingTxType {

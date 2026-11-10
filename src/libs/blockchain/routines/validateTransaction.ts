@@ -242,7 +242,8 @@ async function runTypeDispatcher(
     if (
         type === "validatorStake" ||
         type === "validatorUnstake" ||
-        type === "validatorExit"
+        type === "validatorExit" ||
+        type === "validatorChallenge"
     ) {
         const { handleStakingTx } =
             await import("@/libs/network/routines/transactions/handleStakingTx")

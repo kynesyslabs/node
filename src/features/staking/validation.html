@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demos Node NFT Proof</title>
+<!--
+  Served by the node at /staking/validation while it holds no seat. The node
+  injects its own address and relay paths in a <script id="node-config"> block.
+
+  The proof is one Solana transaction signed by the wallet that holds the node
+  NFT: a TransferChecked of the NFT (amount 1) from its own token account to
+  itself, plus a memo "demos-validator:<node address>". The wallet only signs;
+  the node checks the bytes, records them on Demos as a crosschainOperation,
+  and the anchor node sends them to Solana.
+
+  Wallets are discovered through the Wallet Standard (Phantom, Solflare,
+  Backpack, MetaMask, Coinbase Wallet, OKX, Trust, Bitget, Ledger, ...) with a
+  fallback to the legacy window.solana provider.
+-->
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --line: #ddd; --accent: #5b3df5;
+    --ok: #157347; --warn: #b45309; --err: #b91c1c; --panel: #f6f6f8; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111114; --fg: #ececf1; --muted: #9a9aa6; --line: #2b2b33; --accent: #9d8cff;
+      --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --panel: #1a1a20;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px 64px; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 24px; }
+  section { border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; background: var(--panel); }
+  section h2 { font-size: 15px; margin: 0 0 12px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input, select { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: 14px var(--mono); }
+  input[readonly] { color: var(--muted); }
+  button { padding: 9px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; font: 600 14px system-ui, sans-serif; cursor: pointer; margin: 6px 6px 0 0; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .wallets { display: flex; flex-wrap: wrap; gap: 8px; }
+  .wallets button { display: flex; align-items: center; gap: 8px; margin: 0; }
+  .wallets img { width: 20px; height: 20px; border-radius: 4px; }
+  .status { margin-top: 12px; font-family: var(--mono); font-size: 13px; white-space: pre-wrap; word-break: break-all; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); } .muted { color: var(--muted); }
+  code, pre { font-family: var(--mono); font-size: 13px; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; }
+  details { margin-top: 10px; } summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .hint { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Demos Node NFT Proof</h1>
+  <p class="lead">Your wallet signs one transaction linking the node NFT to this validator.</p>
+
+  <section>
+    <h2>1. Node</h2>
+    <label for="demos">Validator address</label>
+    <input id="demos" readonly autocomplete="off" spellcheck="false">
+    <div id="nodeStatus" class="status"></div>
+  </section>
+
+  <section>
+    <h2>2. Wallet</h2>
+    <div id="wallets" class="wallets"><span class="muted">Looking for wallets…</span></div>
+    <div id="walletStatus" class="status"></div>
+  </section>
+
+  <section>
+    <h2>3. NFT</h2>
+    <label for="nfts">Node NFT</label>
+    <select id="nfts" disabled><option value="">connect a wallet first</option></select>
+    <label for="mint">or mint address</label>
+    <input id="mint" placeholder="base58 mint" autocomplete="off" spellcheck="false">
+    <div id="nftStatus" class="status"></div>
+  </section>
+
+  <section>
+    <h2>4. Sign</h2>
+    <button id="sign" disabled>Sign proof</button>
+    <div id="signStatus" class="status"></div>
+    <div id="result" hidden>
+      <pre id="hashes"></pre>
+      <pre id="command"></pre>
+      <button id="copy" class="secondary">Copy command</button>
+    </div>
+  </section>
+</main>
+
+<script src="https://unpkg.com/@solana/web3.js@1.98.4/lib/index.iife.min.js"></script>
+<script>
+(() => {
+  const { Connection, PublicKey, Transaction, TransactionInstruction } = solanaWeb3;
+
+  const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+  const TOKEN_2022_PROGRAM = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+  const MEMO_PROGRAM = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+  const MEMO_PREFIX = "demos-validator:";
+  const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+  const DEMOS_ADDRESS = /^0x[0-9a-f]{64}$/;
+  const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  const POLL_MS = 5000;
+  const FINALITY_TIMEOUT_MS = 180000;
+
+  const el = id => document.getElementById(id);
+  const set = (id, text, cls) => { const n = el(id); n.textContent = text; n.className = `status ${cls || ""}`; };
+  const msg = e => (e && e.message ? e.message : String(e));
+
+  // ---------- node config, injected by the server ----------
+  // Solana reads go through the node's relay, Solana sends through its submit route.
+  let config = null;
+  try {
+    const raw = el("node-config");
+    config = raw ? JSON.parse(raw.textContent) : null;
+  } catch (e) { console.error(e); }
+
+  if (!config || !DEMOS_ADDRESS.test(config.demosAddress || "")) {
+    config = null;
+    set("nodeStatus", "This page has to be opened from your node at http://<node>:<rpc port>/staking/validation; it carries no node config.", "err");
+  } else {
+    el("demos").value = config.demosAddress;
+    config.rpcUrl = new URL(config.rpcUrl, location.href).toString();
+    config.submitUrl = new URL(config.submitUrl, location.href).toString();
+  }
+
+  // ---------- wallet discovery (Wallet Standard, plus legacy window.solana) ----------
+  const wallets = new Map();           // name -> adapter
+  let active = null;                   // { name, address, signOnly }
+
+  function isSolanaWallet(w) {
+    return Array.isArray(w.chains) && w.chains.some(c => c.startsWith("solana:")) &&
+      w.features && w.features["standard:connect"];
+  }
+
+  function standardAdapter(w) {
+    return {
+      name: w.name,
+      icon: w.icon,
+      async connect() {
+        const { accounts } = await w.features["standard:connect"].connect();
+        const account = accounts.find(a => a.chains.some(c => c.startsWith("solana:"))) || accounts[0];
+        if (!account) throw new Error("the wallet returned no Solana account");
+        const chain = pickChain(account.chains, w.chains);
+        const st = w.features["solana:signTransaction"];
+        if (!st) throw new Error(`${w.name} does not offer signTransaction; the node has to send the proof itself`);
+        return {
+          address: account.address,
+          async signOnly(tx) {
+            const bytes = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+            const [{ signedTransaction }] = await st.signTransaction({ account, transaction: bytes, chain });
+            return signedTransaction;
+          },
+        };
+      },
+    };
+  }
+
+  // Wallet Standard names mainnet "solana:mainnet"; MetaMask lists CAIP-2 ids
+  // keyed by genesis hash. Use whichever the account advertises.
+  function pickChain(accountChains, walletChains) {
+    const chains = [...(accountChains || []), ...(walletChains || [])];
+    if (chains.includes("solana:mainnet")) return "solana:mainnet";
+    const caip = chains.find(c => c.startsWith(`solana:${MAINNET_GENESIS}`));
+    if (caip) return caip;
+    const dev = chains.find(c => c === "solana:devnet" || c === "solana:testnet" || c === "solana:localnet");
+    if (dev) throw new Error(`${dev} only; switch the wallet to mainnet`);
+    return "solana:mainnet";
+  }
+
+  function legacyAdapter(provider, name) {
+    return {
+      name,
+      icon: null,
+      async connect() {
+        const res = await provider.connect();
+        const pk = (res && res.publicKey) || provider.publicKey;
+        if (!pk) throw new Error("the wallet returned no public key");
+        if (!provider.signTransaction) throw new Error(`${name} does not offer signTransaction`);
+        return {
+          address: pk.toString(),
+          async signOnly(tx) {
+            const signed = await provider.signTransaction(tx);
+            return signed.serialize();
+          },
+        };
+      },
+    };
+  }
+
+  function addWallet(adapter) {
+    if (wallets.has(adapter.name)) return;
+    wallets.set(adapter.name, adapter);
+    renderWallets();
+  }
+
+  function renderWallets() {
+    const box = el("wallets");
+    box.innerHTML = "";
+    if (wallets.size === 0) {
+      box.innerHTML = '<span class="muted">No Solana wallet found. Install Phantom, Solflare, Backpack, MetaMask or another Wallet Standard wallet and reload.</span>';
+      return;
+    }
+    for (const [name, adapter] of wallets) {
+      const b = document.createElement("button");
+      b.className = active && active.name === name ? "" : "secondary";
+      if (adapter.icon) { const img = document.createElement("img"); img.src = adapter.icon; img.alt = ""; b.appendChild(img); }
+      b.appendChild(document.createTextNode(name));
+      b.onclick = () => connectWallet(adapter);
+      box.appendChild(b);
+    }
+  }
+
+  function discoverWallets() {
+    const api = Object.freeze({ register: (...ws) => { ws.filter(isSolanaWallet).forEach(w => addWallet(standardAdapter(w))); } });
+    window.addEventListener("wallet-standard:register-wallet", ({ detail: callback }) => { try { callback(api); } catch (e) { console.error(e); } });
+    window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: api }));
+    // Older wallets inject a provider instead of registering.
+    setTimeout(() => {
+      const legacy = (window.phantom && window.phantom.solana) || window.solflare || window.backpack || window.solana;
+      if (legacy && wallets.size === 0) {
+        const name = legacy.isPhantom ? "Phantom" : legacy.isSolflare ? "Solflare" : legacy.isBackpack ? "Backpack" : "Injected wallet";
+        addWallet(legacyAdapter(legacy, name));
+      }
+      if (wallets.size === 0) renderWallets();
+    }, 400);
+  }
+
+  async function connectWallet(adapter) {
+    set("walletStatus", `Connecting to ${adapter.name}…`);
+    try {
+      const session = await adapter.connect();
+      active = { name: adapter.name, ...session };
+      set("walletStatus", `Connected: ${active.address}`, "ok");
+      renderWallets();
+      await listNfts();
+    } catch (e) {
+      active = null;
+      set("walletStatus", `Could not connect: ${msg(e)}`, "err");
+    }
+    updateSignButton();
+  }
+
+  // ---------- NFTs in the wallet ----------
+  let tokenAccounts = new Map();       // mint -> { account, programId }
+
+  async function listNfts() {
+    const select = el("nfts");
+    select.disabled = true;
+    select.innerHTML = '<option value="">loading…</option>';
+    tokenAccounts = new Map();
+    try {
+      const owner = new PublicKey(active.address);
+      const found = [];
+      for (const programId of [TOKEN_PROGRAM, TOKEN_2022_PROGRAM]) {
+        const res = await connection().getParsedTokenAccountsByOwner(owner, { programId });
+        for (const { pubkey, account } of res.value) {
+          const info = account.data.parsed.info;
+          if (info.tokenAmount.decimals === 0 && info.tokenAmount.amount === "1") {
+            tokenAccounts.set(info.mint, { account: pubkey, programId });
+            found.push(info.mint);
+          }
+        }
+      }
+      select.innerHTML = found.length
+        ? '<option value="">pick a mint</option>' + found.map(m => `<option value="${m}">${m}</option>`).join("")
+        : '<option value="">no NFTs (amount 1, 0 decimals) in this wallet</option>';
+      select.disabled = found.length === 0;
+      if (found.length === 1) {
+        select.value = found[0];
+        el("mint").value = found[0];
+      }
+      set("nftStatus", "");
+    } catch (e) {
+      select.innerHTML = '<option value="">could not list tokens</option>';
+      set("nftStatus", `Token lookup failed: ${rpcFailure(e)}. You can still type the mint.`, "warn");
+    }
+    updateSignButton();
+  }
+
+  el("nfts").addEventListener("change", () => { el("mint").value = el("nfts").value; updateSignButton(); });
+  el("mint").addEventListener("input", updateSignButton);
+
+  function inputs() {
+    return { demos: el("demos").value.trim().toLowerCase(), mint: el("mint").value.trim() };
+  }
+
+  function updateSignButton() {
+    const { demos, mint } = inputs();
+    el("sign").disabled = !(config && active && DEMOS_ADDRESS.test(demos) && BASE58.test(mint));
+  }
+
+  // ---------- Solana reads, through the node's relay ----------
+  let conn = null;
+  function connection() {
+    if (!conn) conn = new Connection(config.rpcUrl, "confirmed");
+    return conn;
+  }
+
+  // web3.js folds the HTTP status into the error text; make the node's
+  // answers readable.
+  function rpcFailure(e) {
+    const text = msg(e);
+    if (/429/.test(text)) return "the node's hourly Solana budget is spent; try again later";
+    if (/404/.test(text)) return "the node already holds a seat, so the page is closed";
+    if (/503/.test(text)) return "the node cannot reach its anchor node";
+    return text;
+  }
+
+  // ---------- proof transaction ----------
+  function transferCheckedSelf(tokenAccount, mint, owner, programId) {
+    const data = new Uint8Array(10);
+    data[0] = 12;                                   // TransferChecked
+    data[1] = 1;                                    // amount = 1, u64 little-endian
+    data[9] = 0;                                    // decimals
+    return new TransactionInstruction({
+      programId,
+      keys: [
+        { pubkey: tokenAccount, isSigner: false, isWritable: true },
+        { pubkey: mint, isSigner: false, isWritable: false },
+        { pubkey: tokenAccount, isSigner: false, isWritable: true },
+        { pubkey: owner, isSigner: true, isWritable: false },
+      ],
+      data,
+    });
+  }
+
+  function memo(owner, text) {
+    return new TransactionInstruction({
+      programId: MEMO_PROGRAM,
+      keys: [{ pubkey: owner, isSigner: true, isWritable: false }],
+      data: new TextEncoder().encode(text),
+    });
+  }
+
+  async function resolveTokenAccount(owner, mint) {
+    const cached = tokenAccounts.get(mint.toBase58());
+    if (cached) return cached;
+    for (const programId of [TOKEN_PROGRAM, TOKEN_2022_PROGRAM]) {
+      const res = await connection().getParsedTokenAccountsByOwner(owner, { mint });
+      const hit = res.value.find(v => v.account.owner.equals(programId) && v.account.data.parsed.info.tokenAmount.amount === "1");
+      if (hit) return { account: hit.pubkey, programId };
+    }
+    throw new Error("this wallet holds no token account with 1 unit of that mint");
+  }
+
+  async function submitProof(bytes) {
+    const base64 = btoa(String.fromCharCode(...bytes));
+    const res = await fetch(config.submitUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transaction: base64 }),
+    });
+    let out = null;
+    try { out = await res.json(); } catch { out = null; }
+    if (!res.ok) {
+      const detail = out && out.error ? out.error : `HTTP ${res.status}`;
+      if (res.status === 429) throw new Error(`${detail}; try again in ${Math.ceil((out.retryAfterSeconds || 60) / 60)} min`);
+      if (res.status === 404) throw new Error("the node already holds a seat, so the page is closed");
+      throw new Error(detail);
+    }
+    return out;
+  }
+
+  async function waitFinalized(signature, lastValidBlockHeight) {
+    const started = Date.now();
+    while (Date.now() - started < FINALITY_TIMEOUT_MS) {
+      const { value: [status] } = await connection().getSignatureStatuses([signature]);
+      if (status) {
+        if (status.err) throw new Error(`transaction failed on chain: ${JSON.stringify(status.err)}`);
+        if (status.confirmationStatus === "finalized") return;
+        set("signStatus", `Sent ${signature}\nWaiting for finality (${status.confirmationStatus})…`);
+      } else {
+        const height = await connection().getBlockHeight();
+        if (height > lastValidBlockHeight) throw new Error("the blockhash expired before the transaction landed; sign again");
+      }
+      await new Promise(r => setTimeout(r, POLL_MS));
+    }
+    throw new Error("still not finalized after three minutes; check the signature on an explorer");
+  }
+
+  el("sign").addEventListener("click", async () => {
+    const { demos, mint: mintText } = inputs();
+    const btn = el("sign");
+    btn.disabled = true;
+    el("result").hidden = true;
+    try {
+      const owner = new PublicKey(active.address);
+      const mint = new PublicKey(mintText);
+      set("signStatus", "Looking up the token account…");
+      const { account, programId } = await resolveTokenAccount(owner, mint);
+
+      set("signStatus", "Building the transaction…");
+      const { blockhash, lastValidBlockHeight } = await connection().getLatestBlockhash("finalized");
+      const tx = new Transaction({ feePayer: owner, blockhash, lastValidBlockHeight });
+      tx.add(transferCheckedSelf(account, mint, owner, programId), memo(owner, MEMO_PREFIX + demos));
+
+      set("signStatus", `Approve the transaction in ${active.name}…`);
+      const bytes = await active.signOnly(tx);
+
+      set("signStatus", "Sending the signed proof to the node…");
+      const out = await submitProof(bytes);
+      set("signStatus", `Recorded on Demos as ${out.demosTxHash}\nSolana ${out.solanaSignature}\nWaiting for finality…`);
+      await waitFinalized(out.solanaSignature, lastValidBlockHeight);
+
+      set("signStatus", `Finalized ${out.solanaSignature}`, "ok");
+      el("hashes").textContent = `Solana signature: ${out.solanaSignature}\nDemos tx hash:    ${out.demosTxHash}`
+        + (out.evicts ? `\nStaking will close the seat of ${out.evicts}` : "");
+      el("command").textContent = `bun run validator:stake --amount 1000 --nft-proof ${out.solanaSignature}`;
+      el("result").hidden = false;
+    } catch (e) {
+      set("signStatus", `Failed: ${rpcFailure(e)}`, "err");
+    }
+    updateSignButton();
+  });
+
+  el("copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(el("command").textContent); el("copy").textContent = "Copied"; }
+    catch { el("copy").textContent = "Select and copy manually"; }
+  });
+
+  discoverWallets();
+})();
+</script>
+</body>
+</html>

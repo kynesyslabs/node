@@ -16,6 +16,20 @@ import {
     jest,
 } from "@jest/globals"
 
+// NFT gating is off for the legacy lifecycle rules; the NFT suites turn it on.
+jest.mock("@/features/staking/nftAllowlist", () => ({
+    __esModule: true,
+    isNftGatingEnabled: jest.fn(() => false),
+    isAllowlistedMint: jest.fn(() => true),
+}))
+
+jest.mock("@/features/staking/solanaProof", () => ({
+    __esModule: true,
+    verifyNftProof: jest.fn(async () => ({ status: "valid", slot: 1 })),
+    verifyCurrentOwner: jest.fn(async () => ({ status: "valid", slot: 1 })),
+    verifyChallengeEvidence: jest.fn(async () => ({ status: "valid", slot: 2 })),
+}))
+
 jest.mock("@/utilities/logger", () => ({
     __esModule: true,
     default: {

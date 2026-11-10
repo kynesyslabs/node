@@ -331,10 +331,17 @@ export function verifySenderBinding(tx: Transaction): EditVerdict {
     for (const edit of edits) {
         const type = String(edit.type)
         switch (type) {
+            case "validatorStake":
+                // A challenge evicts another validator's seat; the evidence
+                // it carries is what vouches for it, not the sender.
+                if (edit.operation === "evict") break
+                if (account === "" || edit.account !== account) {
+                    return refuse(`${type} edit acts on another account than the sender`)
+                }
+                break
             case "nonce":
             case "networkUpgrade":
             case "networkUpgradeVote":
-            case "validatorStake":
             case "tlsnotary":
                 if (account === "" || edit.account !== account) {
                     return refuse(`${type} edit acts on another account than the sender`)

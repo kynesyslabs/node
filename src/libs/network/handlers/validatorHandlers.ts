@@ -70,6 +70,44 @@ export const validatorHandlers: Record<string, NodeCallHandler> = {
         response.response = (validator.staked_amount ?? "0").toString()
         return response
     },
+
+    /**
+     * The seat an NFT mint currently backs, active or unstaking, or null when
+     * the mint is free. Read from the chain head, so a node that is not yet
+     * synced asks an anchor node before building a proof.
+     */
+    getValidatorByMint: async (data, response) => {
+        const mint = extractMint(data)
+        if (!mint) {
+            response.result = 400
+            response.response = { error: "mint required" }
+            return response
+        }
+        try {
+            const holder = await GCR.getGCRValidatorByMint(mint)
+            response.response = holder ? serializeValidator(holder) : null
+        } catch (e) {
+            log.error(
+                "validatorHandlers",
+                `getValidatorByMint error: ${(e as Error)?.message}`,
+            )
+            response.result = 500
+            response.response = { error: "failed to load validator" }
+        }
+        return response
+    },
+}
+
+function extractMint(data: unknown): string | null {
+    const candidate =
+        typeof data === "string"
+            ? data
+            : data && typeof data === "object"
+              ? (data as { mint?: unknown }).mint
+              : null
+    if (typeof candidate !== "string") return null
+    const trimmed = candidate.trim()
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed) ? trimmed : null
 }
 
 function extractAddress(data: unknown): string | null {
@@ -104,5 +142,8 @@ function serializeValidator(v: Validators) {
         validAt: v.valid_at,
         unstakeRequestedAt: v.unstake_requested_at,
         unstakeAvailableAt: v.unstake_available_at,
+        nftMint: v.nft_mint ?? null,
+        nftOwner: v.nft_owner ?? null,
+        nftProofTx: v.nft_proof_tx ?? null,
     }
 }

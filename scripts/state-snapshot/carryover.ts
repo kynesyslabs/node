@@ -50,6 +50,11 @@ export type LaunchValidatorRow = {
     valid_at: number
     unstake_requested_at: null
     unstake_available_at: null
+    nft_mint: string | null
+    nft_owner: string | null
+    nft_proof_tx: string | null
+    /** Test networks only; written only when true. */
+    nft_exempt?: true
 }
 
 export type CarryoverResult = {
@@ -117,6 +122,17 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
                 throw new Error(`${where} (${address}): ${name} must be a non-negative integer`)
             }
         }
+        const nft: Record<string, string | null> = {}
+        for (const name of ["nft_mint", "nft_owner", "nft_proof_tx"] as const) {
+            const value = v[name]
+            if (value !== undefined && value !== null && (typeof value !== "string" || value === "")) {
+                throw new Error(`${where} (${address}): ${name} must be null or a non-empty string`)
+            }
+            nft[name] = typeof value === "string" ? value : null
+        }
+        if (v.nft_exempt !== undefined && v.nft_exempt !== null && typeof v.nft_exempt !== "boolean") {
+            throw new Error(`${where} (${address}): nft_exempt must be a boolean`)
+        }
         // Field order matches the exporter's validators.jsonl.
         return {
             address,
@@ -127,6 +143,10 @@ export function launchValidatorRows(list: unknown): LaunchValidatorRow[] {
             valid_at: validAt as number,
             unstake_requested_at: null,
             unstake_available_at: null,
+            nft_mint: nft.nft_mint,
+            nft_owner: nft.nft_owner,
+            nft_proof_tx: nft.nft_proof_tx,
+            ...(v.nft_exempt === true ? { nft_exempt: true as const } : {}),
         }
     })
     return rows.sort((a, b) => compareCodeUnits(a.address, b.address))

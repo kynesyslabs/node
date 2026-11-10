@@ -13,6 +13,8 @@ import {
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
 } from "src/features/staking/constants"
+import { isAllowlistedMint, isNftGatingEnabled } from "src/features/staking/nftAllowlist"
+import { getMinValidatorStake } from "src/features/staking/minStake"
 
 /**
  * Applies a GCREditValidatorStake against the Validators table.
@@ -86,6 +88,8 @@ export default class GCRValidatorStakeRoutines {
                     resolvedBlock,
                     stakeEdit.isRollback === true,
                 )
+            case "evict":
+                return applyEvict(resolvedRepo, existing)
             default:
                 return { success: false, message: `Unknown op: ${operation}` }
         }
@@ -102,7 +106,57 @@ function invertOperation(
     // ↔ exit so re-applying the same edit is idempotent.
     if (op === "stake") return "exit"
     if (op === "exit") return "stake"
+    if (op === "evict") return "stake"
     return op
+}
+
+/** Whether a row still holds its NFT's seat. */
+function holdsSeat(row: Validators | null): boolean {
+    return (
+        row !== null &&
+        (row.status === VALIDATOR_STATUS_ACTIVE ||
+            row.status === VALIDATOR_STATUS_UNSTAKING)
+    )
+}
+
+/**
+ * The NFT rules every node applies when a stake takes a seat: a proof is
+ * recorded and its mint is allowlisted. Another seat backed by the same
+ * mint, including one staged earlier in the same block, is evicted: the
+ * proof was signed by the wallet that holds the NFT now, which is the
+ * authority over the seat.
+ */
+async function takeSeatNft(
+    repo: Repository<Validators>,
+    account: string,
+    edit: GCREditValidatorStake,
+): Promise<GCRResult | null> {
+    if (!isNftGatingEnabled()) return null
+    const nft = edit.nft
+    if (!nft || !nft.mint || !nft.owner || !nft.proofTx) {
+        return { success: false, message: "Validator entrance requires an NFT proof" }
+    }
+    if (!isAllowlistedMint(nft.mint)) {
+        return { success: false, message: `NFT ${nft.mint} is not eligible` }
+    }
+    const holders = await repo.findBy({ nft_mint: nft.mint })
+    for (const other of holders) {
+        if (!holdsSeat(other) || other.address === account) continue
+        closeSeat(other)
+        await repo.save(other)
+        log.info(
+            "VALIDATORS",
+            `[evict] ${other.address} evicted: NFT ${nft.mint} rebound to ${account}`,
+        )
+    }
+    return null
+}
+
+function closeSeat(row: Validators): void {
+    row.status = VALIDATOR_STATUS_EXITED
+    row.staked_amount = "0"
+    row.unstake_requested_at = null
+    row.unstake_available_at = null
 }
 
 async function applyStake(
@@ -122,6 +176,19 @@ async function applyStake(
         return { success: false, message: "Stake must be positive" }
     }
 
+    const entering = !existing || existing.status === VALIDATOR_STATUS_EXITED
+    if (entering && !edit.isRollback) {
+        const min = getMinValidatorStake()
+        if (amount < min) {
+            return {
+                success: false,
+                message: `Initial stake ${amount} below minimum ${min}`,
+            }
+        }
+        const refused = await takeSeatNft(repo, account, edit)
+        if (refused) return refused
+    }
+
     if (!existing) {
         const row = repo.create({
             address: account,
@@ -132,6 +199,9 @@ async function applyStake(
             valid_at: currentBlock,
             unstake_requested_at: null,
             unstake_available_at: null,
+            nft_mint: edit.nft?.mint ?? null,
+            nft_owner: edit.nft?.owner ?? null,
+            nft_proof_tx: edit.nft?.proofTx ?? null,
         })
         await repo.save(row)
         log.info(
@@ -139,6 +209,14 @@ async function applyStake(
             `[stake] ${account} entered as validator with ${amount}`,
         )
         return { success: true, message: "Validator entered" }
+    }
+
+    if (entering && edit.nft) {
+        // Re-entry after an exit takes the seat with the new proof.
+        existing.nft_mint = edit.nft.mint
+        existing.nft_owner = edit.nft.owner
+        existing.nft_proof_tx = edit.nft.proofTx
+        existing.valid_at = currentBlock
     }
 
     let prev: bigint
@@ -221,4 +299,24 @@ async function applyExit(
     await repo.save(existing)
     log.info("VALIDATORS", `[exit] ${existing.address} exited`)
     return { success: true, message: "Validator exited" }
+}
+
+/** A challenge proved the NFT left its wallet: the seat is closed at once. */
+async function applyEvict(
+    repo: Repository<Validators>,
+    existing: Validators | null,
+): Promise<GCRResult> {
+    if (!existing) {
+        return { success: false, message: "Validator not found" }
+    }
+    if (!holdsSeat(existing)) {
+        return {
+            success: false,
+            message: `Cannot evict — holds no seat (status=${existing.status})`,
+        }
+    }
+    closeSeat(existing)
+    await repo.save(existing)
+    log.info("VALIDATORS", `[evict] ${existing.address} evicted`)
+    return { success: true, message: "Validator evicted" }
 }

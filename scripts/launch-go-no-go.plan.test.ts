@@ -147,6 +147,19 @@ describe("mainnetGenesisReasons", () => {
         expect(mainnetGenesisReasons(readTemplate()).join("\n")).toContain("template FILL values")
     })
 
+    it("refuses a validator seated without an NFT", () => {
+        const g = filledTemplate()
+        g.validators[2].nft_exempt = true
+        g.validators[5].nft_exempt = true
+        const reasons = mainnetGenesisReasons(g).join("\n")
+        expect(reasons).toContain("2 genesis validators are nft_exempt")
+        expect(reasons).toContain(id(2))
+        expect(reasons).toContain(id(5))
+        g.validators[2].nft_exempt = false
+        delete g.validators[5].nft_exempt
+        expect(mainnetGenesisReasons(g).join("\n")).not.toContain("nft_exempt")
+    })
+
     it("refuses the testnet and devnet chain ids, and a missing one", () => {
         for (const chainId of NON_MAINNET_CHAIN_IDS) {
             const g = filledTemplate()

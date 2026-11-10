@@ -60,6 +60,8 @@ import Mempool from "../mempool"
 import Datasource from "@/model/datasource"
 import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
 import { getLastBlockSigners } from "../chainBlocks"
+import { stillStakedSigners } from "./waitTargets"
+import { getStakedSet } from "src/libs/consensus/stakedSet"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import Hashing from "@/libs/crypto/hashing"
@@ -2085,12 +2087,21 @@ export async function waitForPeerStatus(
 
     if (lastBlockSignersOnly) {
         const signers = await getLastBlockSigners()
-        const others = signers.filter(id => id !== selfId)
-        if (others.length === 0) {
-            log.debug("[waitForPeerStatus] No prior signers, skipping")
+        const { wait, dropped } = stillStakedSigners(
+            signers,
+            await getStakedSet(),
+            selfId,
+        )
+        if (dropped.length > 0) {
+            log.debug(
+                `[waitForPeerStatus] Not waiting on ${dropped.length} signer(s) no longer staked: ${dropped.join(", ")}`,
+            )
+        }
+        if (wait.length === 0) {
+            log.debug("[waitForPeerStatus] No staked prior signers, skipping")
             return true
         }
-        signerIds = new Set(others)
+        signerIds = new Set(wait)
         log.only(
             "[waitForPeerStatus] Last block signers: " +
                 JSON.stringify(Array.from(signerIds), null, 2),

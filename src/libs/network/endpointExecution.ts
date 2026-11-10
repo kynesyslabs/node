@@ -332,6 +332,7 @@ export async function handleExecuteTransaction(
         case "validatorStake":
         case "validatorUnstake":
         case "validatorExit":
+        case "validatorChallenge":
         case "networkUpgrade":
         case "networkUpgradeVote": {
             // No-op — dispatcher already ran in confirmTransaction.

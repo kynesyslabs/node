@@ -3,9 +3,11 @@ import ValidatorsManagement from "@/libs/blockchain/routines/validatorsManagemen
 import { requireSender } from "@/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
 
-interface StakingTxResult {
+export interface StakingTxResult {
     success: boolean
     message: string
+    /** No Solana endpoint answered; the tx is undecided rather than bad. */
+    unreachable?: boolean
 }
 
 /**
@@ -44,7 +46,11 @@ export async function handleStakingTx(
             log.debug(
                 `[handleStakingTx] validatorStake ${tx.hash ?? ""} → ${r.valid}: ${r.message}`,
             )
-            return { success: r.valid, message: r.message }
+            return { success: r.valid, message: r.message, unreachable: r.unreachable }
+        }
+        case "validatorChallenge": {
+            const r = await ValidatorsManagement.manageValidatorChallengeTx(nodeTx)
+            return { success: r.valid, message: r.message, unreachable: r.unreachable }
         }
         case "validatorUnstake": {
             const r = await ValidatorsManagement.manageValidatorUnstakeTx(

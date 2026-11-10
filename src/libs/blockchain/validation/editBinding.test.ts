@@ -306,6 +306,11 @@ describe("sender binding", () => {
         })
     }
 
+    it("lets a challenge evict another validator: the evidence vouches for it, not the sender", () => {
+        const evict = { type: "validatorStake", account: VICTIM, operation: "evict", amount: "0", evidenceTx: "sig" }
+        expect(verifySenderBinding(sender({ type: "validatorChallenge", gcr_edits: [evict] })).ok).toBe(true)
+    })
+
     it("leaves balance edits alone: paying another account is what a transfer is", () => {
         const tx = sender({ gcr_edits: [{ type: "balance", operation: "add", account: VICTIM, amount: "1" }] })
         expect(verifySenderBinding(tx).ok).toBe(true)

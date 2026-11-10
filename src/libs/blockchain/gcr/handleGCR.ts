@@ -2326,6 +2326,25 @@ export default class HandleGCR {
                         return row
                     }
                 }
+                if (property === "findBy") {
+                    // Rows holding a mint: the ones this block already
+                    // staged first, then the database, deduplicated by
+                    // address so a staged row shadows its stored version.
+                    return async (where: { nft_mint: string }) => {
+                        const byAddress = new Map<string, Validators>()
+                        for (const row of await repo.findBy(where)) {
+                            if (row.address) byAddress.set(row.address, row)
+                        }
+                        for (const row of cache.values()) {
+                            if (row && row.address && row.nft_mint === where.nft_mint) {
+                                byAddress.set(row.address, row)
+                            } else if (row && row.address) {
+                                byAddress.delete(row.address)
+                            }
+                        }
+                        return [...byAddress.values()]
+                    }
+                }
                 return Reflect.get(target, property, receiver)
             },
         })
