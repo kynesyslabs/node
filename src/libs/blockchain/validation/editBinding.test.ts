@@ -307,7 +307,7 @@ describe("sender binding", () => {
     }
 
     it("lets a challenge evict another validator: the evidence vouches for it, not the sender", () => {
-        const evict = { type: "validatorStake", account: VICTIM, operation: "evict", amount: "0", evidenceTx: "sig" }
+        const evict = { type: "validatorStake", account: VICTIM, operation: "evict", amount: "0", evidenceTx: "sig", proofTx: "sig" }
         expect(verifySenderBinding(sender({ type: "validatorChallenge", gcr_edits: [evict] })).ok).toBe(true)
     })
 

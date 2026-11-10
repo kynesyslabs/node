@@ -38,10 +38,6 @@ export async function handleStakingTx(
 
     switch (type) {
         case "validatorStake": {
-            const payload = extractStakePayload(tx)
-            if (!payload) {
-                return { success: false, message: "Missing stake payload" }
-            }
             const r = await ValidatorsManagement.manageValidatorStakeTx(nodeTx)
             log.debug(
                 `[handleStakingTx] validatorStake ${tx.hash ?? ""} → ${r.valid}: ${r.message}`,
@@ -69,18 +65,3 @@ export async function handleStakingTx(
             }
     }
 }
-
-function extractStakePayload(
-    tx: Transaction,
-): { amount: string; connectionUrl: string } | null {
-    const data = tx.content?.data as unknown as [string, unknown] | undefined
-    if (!Array.isArray(data) || data.length < 2) return null
-    const p = data[1] as { amount?: unknown; connectionUrl?: unknown } | null
-    if (!p || typeof p.amount !== "string") return null
-    return {
-        amount: p.amount,
-        connectionUrl:
-            typeof p.connectionUrl === "string" ? p.connectionUrl : "",
-    }
-}
-

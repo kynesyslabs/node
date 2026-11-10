@@ -45,7 +45,7 @@ type InspectedProof =
     | { status: "unreachable"; reason: string }
     | { status: "valid"; slot: number; named: string; blockTime: number | null }
 
-/** Inspections by signature; transport failures are never cached. */
+/** Inspections by signature, mint and owner; transport failures are never cached. */
 const proofCache = new Map<string, InspectedProof>()
 
 export function resetSolanaProofCacheForTesting(): void {
@@ -106,12 +106,16 @@ export function balanceOf(
 async function fetchParsed(
     signature: string,
     what: string,
-): Promise<ParsedTransactionWithMeta | null> {
-    return withSolana(what, (connection: Connection) =>
-        connection.getParsedTransaction(signature, {
+): Promise<ParsedTransactionWithMeta> {
+    // An endpoint with pruned history answers null; the next one is asked.
+    return withSolana(what, async (connection: Connection) => {
+        const tx = await connection.getParsedTransaction(signature, {
             commitment: "finalized",
             maxSupportedTransactionVersion: 0,
-        }),
+        })
+        if (tx === null) throw new Error("not found")
+        return tx
+    }
     )
 }
 
@@ -128,10 +132,11 @@ export async function verifyNftProof(
     for (const key of ["mint", "owner", "proofTx"] as const) {
         if (!BASE58.test(proof[key])) return invalid(`nft.${key} is not base58`)
     }
-    const cached = proofCache.get(proof.proofTx)
+    const cacheKey = `${proof.proofTx}:${proof.mint}:${proof.owner}`
+    const cached = proofCache.get(cacheKey)
     const inspected = cached ?? (await inspectProof(proof))
     if (inspected.status === "unreachable") return inspected
-    if (cached === undefined) proofCache.set(proof.proofTx, inspected)
+    if (cached === undefined) proofCache.set(cacheKey, inspected)
     if (inspected.status === "invalid") return inspected
 
     const expected = validatorAddress.toLowerCase()
@@ -152,14 +157,11 @@ export async function verifyNftProof(
 
 /** The rules on the proof transaction itself, independent of who stakes with it. */
 async function inspectProof(proof: ValidatorNftProof): Promise<InspectedProof> {
-    let tx: ParsedTransactionWithMeta | null
+    let tx: ParsedTransactionWithMeta
     try {
         tx = await fetchParsed(proof.proofTx, "getParsedTransaction(proof)")
     } catch (e) {
         return unreachable(e)
-    }
-    if (tx === null) {
-        return { status: "unreachable", reason: "proof transaction not found at any endpoint" }
     }
     if (tx.meta === null || tx.meta === undefined) return invalid("proof has no metadata")
     if (tx.meta.err !== null) return invalid("proof transaction failed on Solana")
@@ -218,19 +220,13 @@ export async function verifyChallengeEvidence(
     recorded: ValidatorNftProof,
 ): Promise<SolanaCheck> {
     if (!BASE58.test(evidenceTx)) return invalid("evidenceTx is not base58")
-    let proof: ParsedTransactionWithMeta | null
-    let evidence: ParsedTransactionWithMeta | null
+    let proof: ParsedTransactionWithMeta
+    let evidence: ParsedTransactionWithMeta
     try {
         proof = await fetchParsed(recorded.proofTx, "getParsedTransaction(proof)")
         evidence = await fetchParsed(evidenceTx, "getParsedTransaction(evidence)")
     } catch (e) {
         return unreachable(e)
-    }
-    if (proof === null) {
-        return { status: "unreachable", reason: "recorded proof not found at any endpoint" }
-    }
-    if (evidence === null) {
-        return { status: "unreachable", reason: "evidence transaction not found at any endpoint" }
     }
     if (evidence.meta === null || evidence.meta === undefined) {
         return invalid("evidence has no metadata")
@@ -254,14 +250,11 @@ export async function verifyProofSupersedes(
     recordedProofTx: string,
 ): Promise<SolanaCheck> {
     if (!BASE58.test(recordedProofTx)) return invalid("recorded proof is not base58")
-    let recorded: ParsedTransactionWithMeta | null
+    let recorded: ParsedTransactionWithMeta
     try {
         recorded = await fetchParsed(recordedProofTx, "getParsedTransaction(recorded proof)")
     } catch (e) {
         return unreachable(e)
-    }
-    if (recorded === null) {
-        return { status: "unreachable", reason: "recorded proof not found at any endpoint" }
     }
     if (newSlot <= recorded.slot) {
         return invalid(`proof at slot ${newSlot} is not later than the seat's proof at slot ${recorded.slot}`)

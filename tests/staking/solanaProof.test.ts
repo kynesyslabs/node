@@ -147,6 +147,17 @@ describe("verifyNftProof", () => {
         expect(connection.getParsedTransaction).toHaveBeenCalledTimes(2)
     })
 
+    it("does not serve a cached verdict for the same signature under another mint or owner", async () => {
+        expect((await verifyNftProof({ mint: MINT, owner: OWNER, proofTx: SIG }, VALIDATOR, STAKE_TS)).status).toBe("valid")
+        const otherMint = await verifyNftProof({ mint: BUYER, owner: OWNER, proofTx: SIG }, VALIDATOR, STAKE_TS)
+        expect((otherMint as { reason: string }).reason).toContain("does not leave")
+        const otherOwner = await verifyNftProof({ mint: MINT, owner: BUYER, proofTx: SIG }, VALIDATOR, STAKE_TS)
+        expect((otherOwner as { reason: string }).reason).toContain("not signed")
+        // A wrong claim cached as invalid must not block the true one.
+        expect((await verifyNftProof({ mint: MINT, owner: OWNER, proofTx: SIG }, VALIDATOR, STAKE_TS)).status).toBe("valid")
+        expect(connection.getParsedTransaction).toHaveBeenCalledTimes(3)
+    })
+
     it("rejects malformed fields before touching the chain", async () => {
         const r = await verifyNftProof({ mint: "0OIl", owner: OWNER, proofTx: SIG }, VALIDATOR, STAKE_TS)
         expect(r.status).toBe("invalid")

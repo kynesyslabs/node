@@ -79,6 +79,7 @@ const MINT = "7M7TxyCHoX3jmUNh68QxWWnUSbxJwEUTJoN5dHxTctGH"
 const MINT2 = "2edqWDWbFkTjkcTb4zzj3PwQBHJeXbFuiAynm4bj46yP"
 const OWNER = "35MxXW1w6WodorZqZxoZVpXaukNo2n6q2T8zwgamPL3e"
 const SIG = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
+const SIG2 = "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM9hxRbmg6uMLCpjxvBuHFTaN8wPBaDJVHxuN6Lw6dZZMCt"
 
 const row = (address: string, over: Partial<Row> = {}): Row => ({
     address,
@@ -175,14 +176,38 @@ describe("a stake that takes a seat", () => {
     })
 })
 
+describe("after an eviction earlier in the block", () => {
+    const evicted = () => {
+        const r = repo([row(B)])
+        return Routines.apply(stake(A) as any, r as any, 100).then(() => r)
+    }
+
+    it("a top-up admitted while the seat was held cannot reopen it", async () => {
+        const r = await evicted()
+        const topUp = await Routines.apply(stake(B, { nft: undefined }) as any, r as any, 100)
+        expect(topUp.success).toBe(false)
+        expect(topUp.message).toContain("requires an NFT proof")
+        expect(r.rows.get(B)?.status).toBe(VALIDATOR_STATUS_EXITED)
+    })
+
+    it("an unstake admitted while the seat was held cannot revive it", async () => {
+        const r = await evicted()
+        const unstake = await Routines.apply(stake(B, { operation: "unstake", amount: "0", nft: undefined }) as any, r as any, 100)
+        expect(unstake.success).toBe(false)
+        expect(unstake.message).toContain("not active")
+        expect(r.rows.get(B)).toMatchObject({ status: VALIDATOR_STATUS_EXITED, unstake_requested_at: null })
+    })
+})
+
 describe("evicting a seat", () => {
-    const evict = (account: string) => ({
+    const evict = (account: string, proofTx = SIG) => ({
         type: "validatorStake",
         isRollback: false,
         account,
         operation: "evict",
         amount: "0",
         evidenceTx: SIG,
+        proofTx,
         txhash: "0xtx",
     })
 
@@ -201,5 +226,13 @@ describe("evicting a seat", () => {
         expect((await Routines.apply(evict(A) as any, repo() as any, 100)).message).toContain("not found")
         const exited = repo([row(A, { status: VALIDATOR_STATUS_EXITED })])
         expect((await Routines.apply(evict(A) as any, exited as any, 100)).message).toContain("holds no seat")
+    })
+
+    it("refuses when the seat was retaken with another proof since the challenge was judged", async () => {
+        const r = repo([row(A, { nft_proof_tx: SIG2 })])
+        const out = await Routines.apply(evict(A) as any, r as any, 100)
+        expect(out.success).toBe(false)
+        expect(out.message).toContain("rests on")
+        expect(r.rows.get(A)?.status).toBe(VALIDATOR_STATUS_ACTIVE)
     })
 })

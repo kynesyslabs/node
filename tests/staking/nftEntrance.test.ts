@@ -73,6 +73,7 @@ const MINT = "7M7TxyCHoX3jmUNh68QxWWnUSbxJwEUTJoN5dHxTctGH"
 const MINT2 = "2edqWDWbFkTjkcTb4zzj3PwQBHJeXbFuiAynm4bj46yP"
 const OWNER = "35MxXW1w6WodorZqZxoZVpXaukNo2n6q2T8zwgamPL3e"
 const SIG = "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW"
+const SIG2 = "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM9hxRbmg6uMLCpjxvBuHFTaN8wPBaDJVHxuN6Lw6dZZMCt"
 const MIN = DEFAULT_MIN_VALIDATOR_STAKE.toString()
 const nft = { mint: MINT, owner: OWNER, proofTx: SIG }
 
@@ -89,13 +90,13 @@ function stakeTx(payload: Record<string, unknown>) {
     } as any
 }
 
-function challengeTx(validator: string, evidenceTx = SIG) {
+function challengeTx(validator: string, evidenceTx = SIG, proofTx = SIG) {
     return {
         content: {
             type: "validatorChallenge",
             from: OTHER,
             from_ed25519_address: OTHER,
-            data: ["validatorChallenge", { validator, evidenceTx }],
+            data: ["validatorChallenge", { validator, evidenceTx, proofTx }],
         },
         hash: "0xchallenge",
     } as any
@@ -214,13 +215,12 @@ describe("topping up", () => {
         expect(solana.proof).not.toHaveBeenCalled()
     })
 
-    it("cannot switch the seat to another NFT", async () => {
+    it("refuses any proof, even for the seat's own mint, since it would go unchecked", async () => {
         jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
-        const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx({ amount: "1", nft: { ...nft, mint: MINT2 } }),
-        )
+        const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ amount: "1", nft }))
         expect(r.valid).toBe(false)
-        expect(r.message).toContain("cannot change the NFT")
+        expect(r.message).toContain("cannot carry an NFT proof")
+        expect(solana.proof).not.toHaveBeenCalled()
     })
 })
 
@@ -248,6 +248,14 @@ describe("challenging a seat", () => {
 
         jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat({ nft_mint: null }) as never)
         expect((await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER))).message).toContain("no NFT on record")
+    })
+
+    it("rejects a challenge judged against a proof the seat no longer rests on", async () => {
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
+        const r = await ValidatorsManagement.manageValidatorChallengeTx(challengeTx(SENDER, SIG, SIG2))
+        expect(r.valid).toBe(false)
+        expect(r.message).toContain("rests on")
+        expect(solana.evidence).not.toHaveBeenCalled()
     })
 
     it("rejects bad evidence and flags unanswered evidence as unreachable", async () => {

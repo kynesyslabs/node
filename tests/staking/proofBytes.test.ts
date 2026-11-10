@@ -20,7 +20,6 @@ import {
     decodeProofTransaction,
     normalizeDemosAddress,
     proofXmScript,
-    signatureOfXmScript,
     transferCheckedData,
 } from "@/features/staking/proofBytes"
 
@@ -197,9 +196,6 @@ describe("proofXmScript", () => {
         expect(operation.chain).toBe("solana")
         expect(operation.rpc).toBe("")
         expect(operation.task.type).toBe("pay")
-        const roundTripped = JSON.parse(JSON.stringify(script))
-        expect(signatureOfXmScript(roundTripped)).toBe(bs58.encode(tx.signature as Buffer))
-        expect(signatureOfXmScript({ operations: {}, operations_order: [] } as never)).toBeNull()
         expect(new PublicKey(decodeOk(bytes).owner).equals(owner.publicKey)).toBe(true)
     })
 })

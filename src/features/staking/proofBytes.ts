@@ -210,15 +210,3 @@ export function proofXmScript(bytes: Uint8Array): XMScript {
         operations_order: [id],
     } as unknown as XMScript
 }
-
-/** The Solana signature a `crosschainOperation` records, read from its payload. */
-export function signatureOfXmScript(script: XMScript): string | null {
-    const operation = Object.values(script.operations ?? {})[0] as
-        | { task?: { signedPayloads?: unknown[] } }
-        | undefined
-    const payload = operation?.task?.signedPayloads?.[0]
-    if (!payload || typeof payload !== "object") return null
-    const bytes = Uint8Array.from(Object.values(payload as Record<string, number>))
-    const decoded = decodeProofTransaction(bytes)
-    return decoded.ok ? decoded.proof.signature : null
-}

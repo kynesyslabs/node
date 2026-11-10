@@ -56,9 +56,11 @@ export default class GCRValidatorStakeRoutines {
                   ).toString("hex"),
         )
 
-        const operation = stakeEdit.isRollback
-            ? invertOperation(stakeEdit.operation)
-            : stakeEdit.operation
+        // A failed transaction restores the validators cache from the
+        // snapshot taken before it, so there is nothing to undo here.
+        if (stakeEdit.isRollback) {
+            return { success: true, message: "Restored by snapshot" }
+        }
 
         const resolvedRepo =
             repo ??
@@ -70,7 +72,7 @@ export default class GCRValidatorStakeRoutines {
 
         const existing = await resolvedRepo.findOneBy({ address: account })
 
-        switch (operation) {
+        switch (stakeEdit.operation) {
             case "stake":
                 return applyStake(
                     resolvedRepo,
@@ -82,32 +84,13 @@ export default class GCRValidatorStakeRoutines {
             case "unstake":
                 return applyUnstake(resolvedRepo, existing, resolvedBlock)
             case "exit":
-                return applyExit(
-                    resolvedRepo,
-                    existing,
-                    resolvedBlock,
-                    stakeEdit.isRollback === true,
-                )
+                return applyExit(resolvedRepo, existing, resolvedBlock)
             case "evict":
-                return applyEvict(resolvedRepo, existing)
+                return applyEvict(resolvedRepo, existing, stakeEdit)
             default:
-                return { success: false, message: `Unknown op: ${operation}` }
+                return { success: false, message: `Unknown op: ${stakeEdit.operation}` }
         }
     }
-}
-
-function invertOperation(
-    op: GCREditValidatorStake["operation"],
-): GCREditValidatorStake["operation"] {
-    // Rollback semantics for validator state are inherently lossy (we can
-    // reverse the delta but not reconstruct the exact prior state). For
-    // Phase 0 the chain does not trigger validator-edit rollbacks outside
-    // of failed simulation, so logging is sufficient. We still invert stake
-    // ↔ exit so re-applying the same edit is idempotent.
-    if (op === "stake") return "exit"
-    if (op === "exit") return "stake"
-    if (op === "evict") return "stake"
-    return op
 }
 
 /** Whether a row still holds its NFT's seat. */
@@ -177,7 +160,7 @@ async function applyStake(
     }
 
     const entering = !existing || existing.status === VALIDATOR_STATUS_EXITED
-    if (entering && !edit.isRollback) {
+    if (entering) {
         const min = getMinValidatorStake()
         if (amount < min) {
             return {
@@ -254,6 +237,14 @@ async function applyUnstake(
     if (!existing) {
         return { success: false, message: "Validator not found" }
     }
+    // Admission saw an active seat; an eviction earlier in the block may
+    // have closed it since, and unstaking must not reopen it.
+    if (existing.status !== VALIDATOR_STATUS_ACTIVE) {
+        return {
+            success: false,
+            message: `Cannot unstake — not active (status=${existing.status})`,
+        }
+    }
     existing.unstake_requested_at = currentBlock
     existing.unstake_available_at = currentBlock + UNSTAKE_LOCK_BLOCKS
     existing.status = VALIDATOR_STATUS_UNSTAKING
@@ -269,29 +260,24 @@ async function applyExit(
     repo: Repository<Validators>,
     existing: Validators | null,
     currentBlock: number,
-    isRollback: boolean,
 ): Promise<GCRResult> {
     if (!existing) {
         return { success: false, message: "Validator not found" }
     }
-    // Lifecycle invariants only apply to user-initiated exits. Rollback
-    // path (stake → exit inversion) bypasses them by design.
-    if (!isRollback) {
-        if (existing.status !== VALIDATOR_STATUS_UNSTAKING) {
-            return {
-                success: false,
-                message: `Cannot exit — must be UNSTAKING (status=${existing.status})`,
-            }
+    if (existing.status !== VALIDATOR_STATUS_UNSTAKING) {
+        return {
+            success: false,
+            message: `Cannot exit — must be UNSTAKING (status=${existing.status})`,
         }
-        if (
-            existing.unstake_available_at === null ||
-            existing.unstake_available_at === undefined ||
-            currentBlock < existing.unstake_available_at
-        ) {
-            return {
-                success: false,
-                message: `Lock not elapsed: ${currentBlock} < ${existing.unstake_available_at}`,
-            }
+    }
+    if (
+        existing.unstake_available_at === null ||
+        existing.unstake_available_at === undefined ||
+        currentBlock < existing.unstake_available_at
+    ) {
+        return {
+            success: false,
+            message: `Lock not elapsed: ${currentBlock} < ${existing.unstake_available_at}`,
         }
     }
     existing.status = VALIDATOR_STATUS_EXITED
@@ -301,10 +287,14 @@ async function applyExit(
     return { success: true, message: "Validator exited" }
 }
 
-/** A challenge proved the NFT left its wallet: the seat is closed at once. */
+/**
+ * A challenge proved the NFT left its wallet: the seat is closed at once,
+ * unless it was retaken with another proof since the challenge was judged.
+ */
 async function applyEvict(
     repo: Repository<Validators>,
     existing: Validators | null,
+    edit: GCREditValidatorStake,
 ): Promise<GCRResult> {
     if (!existing) {
         return { success: false, message: "Validator not found" }
@@ -313,6 +303,12 @@ async function applyEvict(
         return {
             success: false,
             message: `Cannot evict — holds no seat (status=${existing.status})`,
+        }
+    }
+    if (existing.nft_proof_tx !== edit.proofTx) {
+        return {
+            success: false,
+            message: `Cannot evict — seat rests on proof ${existing.nft_proof_tx}, not ${edit.proofTx}`,
         }
     }
     closeSeat(existing)

@@ -3,20 +3,16 @@
 // lives in endpointExecution.ts; this module owns the validation rules that
 // sit between the tx and the GCR edits that mutate the Validators table.
 
-import forge from "node-forge"
-
 import Chain from "src/libs/blockchain/chain"
 import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 import { calculateFeeBreakdown } from "./calculateCurrentGas"
 import { requireSender } from "src/libs/network/utils/txHelpers"
-import log from "src/utilities/logger"
 import { getMinValidatorStake } from "src/features/staking/minStake"
 import type {
     ValidatorStakePayload,
     ValidatorChallengePayload,
     ValidatorNftProof,
-    GCREditValidatorStake,
 } from "src/features/staking/types"
 import { isAllowlistedMint, isNftGatingEnabled } from "src/features/staking/nftAllowlist"
 import {
@@ -27,7 +23,6 @@ import {
     type SolanaCheck,
 } from "src/features/staking/solanaProof"
 import {
-    UNSTAKE_LOCK_BLOCKS,
     VALIDATOR_STATUS_ACTIVE,
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
@@ -135,10 +130,12 @@ export default class ValidatorsManagement {
                 message: `Validator not eligible for stake top-up (status=${existing.status})`,
             }
         }
-        if (payload.nft !== undefined && payload.nft.mint !== existing.nft_mint) {
+        // A proof on a top-up is never checked against Solana, and the apply
+        // step treats any exited row as an entrance, so one must not ride in.
+        if (payload.nft !== undefined) {
             return {
                 valid: false,
-                message: "A top-up cannot change the NFT backing the seat",
+                message: "A top-up cannot carry an NFT proof",
             }
         }
         return { valid: true, message: "Validator stake increase valid" }
@@ -211,6 +208,12 @@ export default class ValidatorsManagement {
         }
         if (!target.nft_mint || !target.nft_owner || !target.nft_proof_tx) {
             return { valid: false, message: "Challenged validator has no NFT on record" }
+        }
+        if (payload.proofTx !== target.nft_proof_tx) {
+            return {
+                valid: false,
+                message: `Challenge names proof ${payload.proofTx}, but the seat rests on ${target.nft_proof_tx}`,
+            }
         }
         const evidence = await verifyChallengeEvidence(payload.evidenceTx, {
             mint: target.nft_mint,
@@ -286,80 +289,6 @@ export default class ValidatorsManagement {
         }
         return { valid: true, message: "Exit valid" }
     }
-
-    // ------------------------------------------------------------------
-    // GCR-edit builders — invoked from the tx-derivation stage so the edit
-    // is embedded in the signed transaction and applied atomically at
-    // confirmation time.
-    // ------------------------------------------------------------------
-
-    static buildStakeEdit(
-        account: string,
-        amount: string,
-        connectionUrl: string,
-        txhash: string,
-    ): GCREditValidatorStake {
-        return {
-            type: "validatorStake",
-            isRollback: false,
-            account,
-            operation: "stake",
-            amount,
-            connectionUrl,
-            txhash,
-        }
-    }
-
-    static buildUnstakeEdit(
-        account: string,
-        txhash: string,
-    ): GCREditValidatorStake {
-        return {
-            type: "validatorStake",
-            isRollback: false,
-            account,
-            operation: "unstake",
-            amount: "0",
-            txhash,
-        }
-    }
-
-    static buildExitEdit(
-        account: string,
-        txhash: string,
-    ): GCREditValidatorStake {
-        return {
-            type: "validatorStake",
-            isRollback: false,
-            account,
-            operation: "exit",
-            amount: "0",
-            txhash,
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Observational helpers preserved from the old API
-    // ------------------------------------------------------------------
-
-    static async isValidatorActive(publicKey: forge.pki.ed25519.BinaryBuffer) {
-        const hexKey = Buffer.from(publicKey as Uint8Array).toString("hex")
-        const validator = await GCR.getGCRValidatorStatus(hexKey)
-        if (!validator) return false
-        return validator.status === VALIDATOR_STATUS_ACTIVE
-    }
-
-    static async manageValidatorOnlineStatus(
-        publicKey: forge.pki.ed25519.BinaryBuffer,
-    ) {
-        const hexKey = Buffer.from(publicKey as Uint8Array).toString("hex")
-        const validator = await GCR.getGCRValidatorStatus(hexKey)
-        if (!validator) return
-        log.debug(
-            `[Validators] online-status probe for ${hexKey} (url=${validator.connection_url})`,
-        )
-        // TODO: connection test (legacy TODO carried over).
-    }
 }
 
 /** A tx verdict from a Solana check, keeping "unreachable" distinct from "invalid". */
@@ -412,8 +341,10 @@ function extractChallengePayload(
     if (!Array.isArray(data) || data.length < 2) return null
     const payload = data[1]
     if (!payload || typeof payload !== "object") return null
-    const { validator, evidenceTx } = payload as Partial<ValidatorChallengePayload>
-    if (typeof validator !== "string" || typeof evidenceTx !== "string") return null
-    return { validator: validator.toLowerCase(), evidenceTx }
+    const { validator, evidenceTx, proofTx } = payload as Partial<ValidatorChallengePayload>
+    if (typeof validator !== "string" || typeof evidenceTx !== "string" || typeof proofTx !== "string") {
+        return null
+    }
+    return { validator: validator.toLowerCase(), evidenceTx, proofTx }
 }
 

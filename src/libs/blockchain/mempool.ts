@@ -1002,17 +1002,20 @@ export default class Mempool {
         // merge; one a healthy endpoint rejected is dropped.
         {
             const { isStakingTxType } = await import("src/features/staking/types")
+            const { handleStakingTx } = await import(
+                "src/libs/network/routines/transactions/handleStakingTx"
+            )
+            // Solana is asked for every staking tx at once, so a batch of
+            // unanswerable proofs costs one timeout, not one per tx.
+            const verdicts = await Promise.all(
+                validTransactions.map(tx =>
+                    isStakingTxType(tx.content?.type ?? "") ? handleStakingTx(tx) : null,
+                ),
+            )
             const policyVerified: Transaction[] = []
-            for (const tx of validTransactions) {
-                if (!isStakingTxType(tx.content?.type ?? "")) {
-                    policyVerified.push(tx)
-                    continue
-                }
-                const { handleStakingTx } = await import(
-                    "src/libs/network/routines/transactions/handleStakingTx"
-                )
-                const verdict = await handleStakingTx(tx)
-                if (verdict.success) {
+            verdicts.forEach((verdict, i) => {
+                const tx = validTransactions[i]
+                if (verdict === null || verdict.success) {
                     policyVerified.push(tx)
                 } else if (verdict.unreachable) {
                     log.warning(
@@ -1023,7 +1026,7 @@ export default class Mempool {
                         `[Mempool.receive] Rejecting tx ${tx.hash}: ${verdict.message}`,
                     )
                 }
-            }
+            })
             validTransactions.length = 0
             validTransactions.push(...policyVerified)
         }

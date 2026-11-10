@@ -464,7 +464,9 @@ async function cmdChallenge(): Promise<void> {
         exitWith("usage: validator challenge --validator <0x...> --transfer <solana signature>")
     }
     const demos = await connect()
-    const tx = await DemosTransactions.challengeValidator(validator.toLowerCase(), transfer, demos)
+    const info = (await demos.getValidatorInfo(validator.toLowerCase())) as { nftProofTx?: string | null } | null
+    if (!info?.nftProofTx) exitWith(`${validator} holds no seat backed by an NFT proof`)
+    const tx = await DemosTransactions.challengeValidator(validator.toLowerCase(), transfer, info.nftProofTx, demos)
     await submit(demos, tx, `Challenging ${validator}`)
 }
 

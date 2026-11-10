@@ -246,6 +246,18 @@ describe("GCRValidatorStakeRoutines", () => {
             expect(r.success).toBe(false)
             expect(r.message).toContain("not found")
         })
+
+        it("fails unless the seat is active", async () => {
+            const repo = createMockRepo(validatorRow({ status: VALIDATOR_STATUS_EXITED, staked_amount: "0" }))
+            const r = await GCRValidatorStakeRoutines.apply(
+                stakeEdit({ operation: "unstake", amount: "0" }) as any,
+                repo as any,
+                100,
+            )
+            expect(r.success).toBe(false)
+            expect(r.message).toContain("not active")
+            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_EXITED)
+        })
     })
 
     describe("exit", () => {
@@ -268,8 +280,8 @@ describe("GCRValidatorStakeRoutines", () => {
         })
     })
 
-    describe("rollback inversion", () => {
-        it("rolls back a stake by exiting the validator", async () => {
+    describe("rollback", () => {
+        it("touches nothing: the snapshot taken before the transaction restores the table", async () => {
             const existing = validatorRow({ staked_amount: "50" })
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
@@ -278,8 +290,8 @@ describe("GCRValidatorStakeRoutines", () => {
                 100,
             )
             expect(r.success).toBe(true)
-            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_EXITED)
-            expect(repo.state.row?.staked_amount).toBe("0")
+            expect(repo.state.row?.staked_amount).toBe("50")
+            expect(repo.save).not.toHaveBeenCalled()
         })
     })
 })

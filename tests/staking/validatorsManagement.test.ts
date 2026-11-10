@@ -457,32 +457,3 @@ describe("ValidatorsManagement.manageValidatorExitTx", () => {
         expect(r.message).toContain("Not a validator")
     })
 })
-
-describe("ValidatorsManagement edit builders", () => {
-    it("buildStakeEdit emits a well-formed GCREditValidatorStake", () => {
-        const edit = ValidatorsManagement.buildStakeEdit(
-            "abc",
-            "42",
-            "https://v.example",
-            "0xtx",
-        )
-        expect(edit).toEqual({
-            type: "validatorStake",
-            isRollback: false,
-            account: "abc",
-            operation: "stake",
-            amount: "42",
-            connectionUrl: "https://v.example",
-            txhash: "0xtx",
-        })
-    })
-
-    it("buildUnstakeEdit and buildExitEdit set the correct operation", () => {
-        expect(
-            ValidatorsManagement.buildUnstakeEdit("abc", "0xtx").operation,
-        ).toBe("unstake")
-        expect(
-            ValidatorsManagement.buildExitEdit("abc", "0xtx").operation,
-        ).toBe("exit")
-    })
-})
