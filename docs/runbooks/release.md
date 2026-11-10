@@ -284,11 +284,12 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     procedure covers such a chain; the release supports chains without them
     (mainnet from genesis, the rc.6 test network). rc.6 validators still
     confirm proofs made with the development key, so no client may submit an
-    identity attestation from the start of the upgrade until every validator
-    runs rc.7. Before upgrading each validator, wait until it is at the
-    network's current tip (a node that is behind has not seen later blocks),
-    then run the check for its install; after the last validator, run it once
-    more on every validator. The result must be 0:
+    identity attestation from the start of the upgrade until the final checks
+    pass. Before upgrading each validator, wait until it is at the network's
+    current tip (a node that is behind has not seen later blocks), then run
+    the check for its install; after the last validator, run it once more on
+    every validator, and resume attestations only when all of these return 0.
+    The result must be 0:
     - Docker stack (`./run --docker`): query the instance's own database
       container, which uses the database's own user and name, so custom
       `PG_USER` and `PG_DATABASE` work. The container is `demos-postgres`
