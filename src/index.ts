@@ -55,7 +55,10 @@ import {
     holdSigningUntilRestartFloor,
     reportSigningHaltMarker,
 } from "./libs/identity/signingRecord"
-import { armRestartSigningFloor } from "./libs/consensus/v2/commitLock/restartFloor"
+import {
+    armRestartSigningFloor,
+    waitForRestartSigningFloor,
+} from "./libs/consensus/v2/commitLock/restartFloor"
 import {
     assertIdentityNotLive,
     IdentityLiveError,
@@ -636,6 +639,9 @@ async function preMainLoop() {
     // Prime the node's own role before anything role-gated starts.
     invalidateStakedSet()
     await getStakedSet()
+
+    // Peers start a round as soon as they see this node.
+    await waitForRestartSigningFloor(getNetworkTimestamp)
 
     await startInboundServers()
 
