@@ -46,8 +46,10 @@ The current code does not give them one. Checked on `stabilisation` at
    node's main thread, and a batch without a valid proof never enters a block.
 
 What stays public is the net change per touched account in a batch, because
-it moves a public L1 balance. A batch with one transfer therefore reveals that
-transfer. Hiding amounts from L1 entirely needs subnet-held balances with only
+it moves a public L1 balance, and each transfer's signer and nonce, which
+validators need to check the signature and freshness. A batch with one
+transfer therefore reveals that transfer, and in any batch an observer can
+count a signer's transfers and follow their nonce order. Hiding amounts from L1 entirely needs subnet-held balances with only
 deposits and withdrawals on L1 (option C in DEM-816); that is a later, larger
 change and this design does not close it off.
 
@@ -88,8 +90,11 @@ of its sender and receiver among the M accounts.
 
 Constraints, per transfer:
 
-- `Poseidon(from, to, amount, nonce, salt)` equals its public commitment, with
-  the public nonce;
+- `Poseidon(from, to, amount, nonce, salt)` equals commitment i, with the
+  public nonce, and the Poseidon hash over the N commitments so computed
+  equals the public commitments hash. Validators compute that hash from the
+  transaction's `commitments`, so the proof covers exactly the signed
+  transfers;
 - `from` equals the commitment's public signer, so a member cannot sign a
   commitment that debits another account;
 - `from` and `to` equal the accounts at the given indices (selector over M);
@@ -99,7 +104,9 @@ Constraints, per transfer:
 - the running sender balance does not go below zero, applied in batch order.
 
 And for the whole batch: each account's balance after the last transfer minus
-its balance before equals its public net change.
+its balance before equals its public net change. The M addresses are strictly
+increasing, which the circuit checks and validators check before verifying,
+so one account cannot appear twice with the same balance spent from each.
 
 Balances before the batch are public L1 state, so validators supply them from
 their own GCR instead of trusting the prover: the working state after every

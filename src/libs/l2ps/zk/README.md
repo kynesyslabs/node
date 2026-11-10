@@ -40,15 +40,20 @@ integrity check on the download.
 Batch proofs are off by default, even when the keys are present: validators do
 not check them yet (`docs/design/l2ps-zk-settlement.md`), and each proof takes
 a core for seconds. The proof inputs are also placeholders: the aggregator
-uses neutral balances and the batch hash as the initial root, so a proof shows
-only that each amount fits in 64 bits, not that the batch's transfers are
-correct. The settlement design replaces them with the real balances.
+uses neutral balances and the batch hash as the initial root, and the circuit
+does not bind its amounts to the batch (a missing or invalid amount becomes 0,
+a fractional one is truncated). A proof therefore only bounds the prover's
+inputs; it says nothing about the batch's transfers. The settlement design
+replaces this with inputs bound to the signed transfers and real balances.
 
-To turn them on, add `L2PS_ZK_ENABLED=true` to the node's `.env` (Docker) or
-deployment environment, or export it before starting from a shell, then
-restart the node:
+To turn them on, add `L2PS_ZK_ENABLED=true` to the node's `.env` or
+deployment environment, or export it before starting from a shell. With
+Docker Compose, recreate the container so it reads the new environment
+(`docker compose restart` keeps the old one):
 
 ```bash
+docker compose up -d --no-deps node
+# or, for a shell start:
 export L2PS_ZK_ENABLED=true
 ```
 
