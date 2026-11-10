@@ -274,6 +274,17 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     [Changing the schedule](fork-schedule-policy.md#changing-the-schedule): a
     height more than 50 blocks ahead, with every validator on the new genesis
     before the window opens.
+- From `v1.0.0-rc.7`:
+  - Identity proofs verify with the final key of the identity ceremony
+    (kynesyslabs/zk_ceremony, drand round 6629366 beacon). Proofs made with an
+    earlier development key are refused; clients need `@kynesyslabs/demosdk`
+    4.0.20 or later.
+  - L2PS batch proofs are off unless `L2PS_ZK_ENABLED=true`. Before, the
+    aggregator proved whenever the keys were present. The image now ships the
+    batch_5 and batch_10 proving keys. Validators do not check batch proofs
+    yet, so turning them on changes no consensus result.
+  - The ZK merkle-proof and nullifier routes accept canonical decimal as well
+    as hex.
 
 ## Known limits
 
