@@ -56,6 +56,13 @@ COPY tsconfig.json bunfig.toml ormconfig.json ./
 # node_modules never ship (only dist/ is used at runtime).
 RUN cd sidecar && bun install --frozen-lockfile && bun build.mjs && rm -rf node_modules
 
+# L2PS batch proving keys (about 90 MB). Not committed: they derive
+# deterministically from the public Hermez Powers of Tau, and the build fails
+# unless the derived verification keys equal the committed ones, so a swapped
+# or corrupted download cannot produce keys peers would reject. The Powers of
+# Tau files are only inputs and are dropped from the image.
+RUN bun scripts/build-l2ps-zk-keys.ts && rm -rf src/libs/l2ps/zk/ptau
+
 # Patch falcon-sign so uncaught WASM exceptions are logged before rethrow.
 # Mirrors scripts/run::patch_falcon_sign. Idempotent and tolerant of a
 # missing target file (some dependency configurations omit it).
