@@ -213,6 +213,8 @@ function makeTx(over: {
         content: {
             type: over.type ?? "native",
             from: over.from ?? `0xsender${seq}`,
+            to: "0x" + "cd".repeat(32),
+            amount: 0,
             timestamp: "ts" in over ? over.ts : NOW,
             nonce: over.nonce,
             transaction_fee: {
@@ -430,7 +432,13 @@ describe("lifetime", () => {
     })
 
     it("refuses a missing, fractional or non-numeric timestamp with a clear reason", async () => {
-        for (const ts of [undefined, 1.5, "1800000000000", 0, -5]) {
+        // One the `transactions` row cannot hold is refused first by the
+        // row check, with the reason the merge gives.
+        for (const ts of [undefined, 1.5]) {
+            const refused = await gossip(makeTx({ ts }))
+            expect(refused.error).toBe("Transaction timestamp is not an int8 Postgres reads")
+        }
+        for (const ts of ["1800000000000", 0, -5]) {
             const refused = await gossip(makeTx({ ts }))
             expect(refused.error).toMatch(/positive whole number of milliseconds/)
         }

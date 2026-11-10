@@ -1,6 +1,7 @@
 import Transaction from "src/libs/blockchain/transaction"
 import getCommonValidatorSeed from "./routines/getCommonValidatorSeed"
 import Mempool from "src/libs/blockchain/mempool"
+import { transactionRowRefusal } from "src/libs/blockchain/validation/postgresStorable"
 import { holdSendersToCap } from "src/libs/blockchain/mempoolLimits"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
@@ -888,7 +889,7 @@ async function initializeShard(blockRef: number): Promise<Peer[]> {
  * @param shard - The shard members
  * @returns The ordered transactions
  */
-async function mergeAndOrderMempools(
+export async function mergeAndOrderMempools(
     shard: Peer[],
     blockRef: number,
 ): Promise<{ txs: MempoolTransaction[]; peerlist: string[] }> {
@@ -898,10 +899,39 @@ async function mergeAndOrderMempools(
     // relay txs, our locked block's txs) is left out of the round, so the
     // round's pool is the one peers holding the same txs keep.
     const capped = blockCapsActive(blockRef)
+    const refusedHashes = new Set<string>()
     const preMempool = await Mempool.lock.runExclusive(async () => {
-        if (capped) await Mempool.capPoolSenders(blockRef)
         const pool = await Mempool.getMempool(blockRef)
-        return capped ? holdSendersToCap(pool) : pool
+        const valid: typeof pool = []
+        const refused: Array<{ hash: string; reason: string }> = []
+        for (const tx of pool) {
+            const reason = transactionRowRefusal(tx)
+            if (reason) {
+                refused.push({ hash: tx.hash, reason })
+                refusedHashes.add(tx.hash)
+            } else valid.push(tx)
+        }
+        let cleanupFailed = false
+        if (refused.length > 0) {
+            try {
+                await Mempool.removeTransactionsByHashes([...refusedHashes])
+            } catch (error) {
+                cleanupFailed = true
+                log.warning(
+                    `[mergeAndOrderMempools] Pool row cleanup failed for ${refused.length} row(s): ${error instanceof Error ? error.message : String(error)}`,
+                )
+            }
+            for (const { hash, reason } of refused) {
+                log.warning(
+                    `[mergeAndOrderMempools] Dropped pooled transaction ${hash}: ${reason}`,
+                )
+            }
+        }
+        if (!capped) return valid
+        if (!cleanupFailed) await Mempool.capPoolSenders(blockRef)
+        return holdSendersToCap(
+            (await Mempool.getMempool(blockRef)).filter(tx => !refusedHashes.has(tx.hash)),
+        )
     })
 
     log.only(`[mergeAndOrderMempools] Pre mempool: ${preMempool.length} txs`)
@@ -937,7 +967,9 @@ async function mergeAndOrderMempools(
         `[mergeAndOrderMempools] Merged peerlist: ${mergedPeerlist.length} validators`,
     )
 
-    const postPool = await Mempool.getMempool(blockRef)
+    const postPool = (await Mempool.getMempool(blockRef)).filter(
+        tx => !refusedHashes.has(tx.hash),
+    )
     const postMempool = capped ? holdSendersToCap(postPool) : postPool
     log.only(`[mergeAndOrderMempools] Post mempool: ${postMempool.length} txs`)
     const preChecked = new Set(preHashes)

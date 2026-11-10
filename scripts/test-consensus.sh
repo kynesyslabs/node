@@ -21,6 +21,7 @@ SUITE_FILES=(
     src/config/loader.gossip.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
+    src/features/InstantMessagingProtocol/signalingServer/signalingServer.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
     src/libs/blockchain/blockCommitOutcome.test.ts
     src/libs/blockchain/blockRowStorable.test.ts
@@ -49,6 +50,7 @@ SUITE_FILES=(
     src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/mempool.editBinding.test.ts
     src/libs/blockchain/mempool.receive.test.ts
+    src/libs/blockchain/mempool.rowLimits.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
@@ -56,6 +58,7 @@ SUITE_FILES=(
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/blockchain/routines/validateTransaction.valueRules.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
+    src/libs/consensus/v2/PoRBFT.mempoolRowCleanup.test.ts
     src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
     src/libs/crypto/canonicalJson.test.ts
     src/libs/debug/nonceTrace.test.ts

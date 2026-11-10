@@ -76,6 +76,11 @@ import log from "@/utilities/logger"
 import { handleError } from "@/errors"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import {
+    INDEX_KEY_MAX_BYTES,
+    fitsIndexKey,
+    isKeyStorable,
+} from "@/libs/blockchain/validation/postgresStorable"
+import {
     serializeTransactionContent,
     txSignaturePreimageForPendingBlock,
 } from "@/forks"
@@ -97,6 +102,11 @@ export class SignalingServer {
     // REVIEW: PR Fix #2 - Add mutex for thread-safe count management
     private readonly countMutex: Mutex = new Mutex()
     private readonly MAX_OFFLINE_MESSAGES_PER_SENDER = 100
+    /**
+     * UTF-8 bytes a target ID may hold. It becomes the `to` of the message's
+     * transaction and keys an `offline_messages` row, both b-tree indexed.
+     */
+    private readonly MAX_TARGET_ID_BYTES = INDEX_KEY_MAX_BYTES
 
     /**
      * Creates a new signaling server instance
@@ -140,6 +150,29 @@ export class SignalingServer {
                     timestamp: new Date().toISOString(),
                 },
             }),
+        )
+    }
+
+    /**
+     * Whether a target ID is storable within MAX_TARGET_ID_BYTES
+     * @param targetId - The target ID as the client sent it
+     */
+    private isValidTargetId(targetId: unknown): targetId is string {
+        return (
+            isKeyStorable(targetId) &&
+            fitsIndexKey(targetId, this.MAX_TARGET_ID_BYTES)
+        )
+    }
+
+    /**
+     * Sends the error for a target ID isValidTargetId refuses
+     * @param ws - The WebSocket that sent the target ID
+     */
+    private sendTargetIdError(ws: WebSocket) {
+        this.sendError(
+            ws,
+            ImErrorType.INVALID_MESSAGE,
+            `Target ID must be a storable string of at most ${this.MAX_TARGET_ID_BYTES} bytes`,
         )
     }
 
@@ -233,6 +266,10 @@ export class SignalingServer {
                         )
                         return
                     }
+                    if (!this.isValidTargetId(data.payload.targetId)) {
+                        this.sendTargetIdError(ws)
+                        return
+                    }
                     // REVIEW: PR Fix - Await async method to catch errors
                     await this.handlePeerMessage(ws, data.payload)
                     break
@@ -243,6 +280,10 @@ export class SignalingServer {
                             ImErrorType.INVALID_MESSAGE,
                             "Missing target ID",
                         )
+                        return
+                    }
+                    if (!this.isValidTargetId(data.payload.targetId)) {
+                        this.sendTargetIdError(ws)
                         return
                     }
                     this.handlePublicKeyRequest(ws, data.payload.targetId)

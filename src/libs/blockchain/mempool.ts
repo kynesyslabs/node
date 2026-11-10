@@ -19,7 +19,10 @@ import {
 } from "./validation/editBinding"
 import { checkTxAdmissible } from "./validation/txAdmission"
 import { clientTxTypeRefusal } from "./validation/txTypes"
-import { admissionRefusal } from "./validation/postgresStorable"
+import {
+    admissionRefusal,
+    transactionRowRefusal,
+} from "./validation/postgresStorable"
 import {
     IDENTITY_ADMISSION_TIMEOUT_MS,
     checkIdentityAdmission,
@@ -603,7 +606,10 @@ export default class Mempool {
     ) {
         // The node builds some transactions itself from user input (instant
         // messages, L2PS batches); they enter here without passing admission.
-        const unstorable = admissionRefusal(transaction)
+        // Their row is held to the limits the merge and the block re-check
+        // apply, so the pool holds only what its peers take.
+        const unstorable =
+            admissionRefusal(transaction) ?? transactionRowRefusal(transaction)
         if (unstorable !== null) {
             return { confirmationBlock: null, error: unstorable }
         }
