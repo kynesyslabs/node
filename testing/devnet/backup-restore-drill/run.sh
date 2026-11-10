@@ -323,15 +323,17 @@ rpc() { # $1 node, $2 JSON body
     docker exec "${cid}" curl -sS -m4 -X POST -H 'Content-Type: application/json' \
         -d "$2" "http://localhost:$(port_of "$1")/" 2>/dev/null
 }
+# The reads below fail (status not 0) when the read fails or gives nothing: no head
+# number, no block, no hash. A caller that goes on records that as unreadable
 head_of() {
     rpc "$1" '{"method":"nodeCall","params":[{"message":"getLastBlockNumber","data":{},"muid":null}]}' |
-        jq -r 'select(.result == 200) | .response' 2>/dev/null || true
+        jq -er 'select(.result == 200) | .response | tostring | select(test("^[0-9]+$"))' 2>/dev/null
 }
 block_at() { # $1 node, $2 height -> the block's JSON
     rpc "$1" "{\"method\":\"nodeCall\",\"params\":[{\"message\":\"getBlockByNumber\",\"data\":{\"blockNumber\":$2},\"muid\":null}]}" |
-        jq -c 'select(.result == 200) | .response' 2>/dev/null || true
+        jq -ec 'select(.result == 200) | .response | objects' 2>/dev/null
 }
-hash_at() { block_at "$1" "$2" | jq -r '.hash // empty' 2>/dev/null || true; }
+hash_at() { block_at "$1" "$2" | jq -er '.hash | strings | select(length > 0)' 2>/dev/null; }
 serving() {
     local cid="${CID[$1]:-}"
     [ -n "${cid}" ] || return 1
@@ -388,6 +390,22 @@ span_head_of() { # "lowest<TAB>highest" head of the given nodes, empty if any do
     done
     printf '%s\t%s\n' "${lo}" "${hi}"
 }
+# One chain above a height: every given node answers its head, the lowest of them is
+# above $1, and all give the same block hash at it. Prints that block, or what is not
+# so and then returns 1
+same_chain() { # $1 floor, rest: nodes, the one to compare first
+    local floor="$1" lo i h ref=""
+    shift
+    lo="$(min_head_of "$@")"
+    is_num "${lo}" || { echo "a head of nodes $* unreadable"; return 1; }
+    [ "${lo}" -gt "${floor}" ] || { echo "the highest height all of nodes $* have, ${lo}, is not above ${floor}"; return 1; }
+    for i in "$@"; do
+        h="$(hash_at "${i}" "${lo}")" || { echo "no hash of block ${lo} on node ${i}"; return 1; }
+        ref="${ref:-${h}}"
+        [ "${h}" = "${ref}" ] || { echo "block ${lo} is ${h:0:12}.. on node ${i}, ${ref:0:12}.. on node $1"; return 1; }
+    done
+    echo "block ${lo} ${ref:0:12}.. on nodes $*"
+}
 
 # ── helpers: containers and volumes ─────────────────────────────────────
 pgx() { # $1 postgres name (1..N|iso), rest: command in its container, stdin passes through
@@ -417,15 +435,12 @@ helper() {
 xstate_ro() { helper "$1" -v "$(vol "state-${X_NODE}"):/s:ro" "${PG_IMAGE}"; }
 # Hash of every identity / signing state file, one "hash  name" line each. The
 # short-lived .lock files change every beat and are left out. Never prints contents.
+# Fails when one cannot be hashed
 state_sums() {
-    xstate_ro 'cd /s && for f in node.identity*; do [ -f "$f" ] || continue; case "$f" in *.lock) continue ;; esac; sha256sum "$f"; done; true' | sort -k2
+    xstate_ro 'cd /s || exit 1; for f in node.identity*; do [ -f "$f" ] || continue; case "$f" in *.lock) continue ;; esac; sha256sum "$f" || exit 1; done' | sort -k2
 }
-# A numeric field of a signing record file ("signed" or "prevote"): height only, never the rest
-record_height() { # $1 signed|prevote
-    xstate_ro "cat /s/node.identity.${1}.json 2>/dev/null; true" | jq -r '.height // empty' 2>/dev/null || true
-}
-# "height round" of a signing state file, empty when it is absent or lacks either;
-# never the rest of it. The node orders each by height, then round: the round is
+# "height round" of a signing state file, never the rest of it; fails when the file is
+# absent, cannot be read or lacks either. The node orders each by height, then round: the round is
 # .timestamp in the signing record (src/libs/identity/signingRecord.ts: "a round is
 # identified by (height, timestamp)") and .round in the commit lock (judgeLock in
 # src/libs/consensus/v2/commitLock/lockStore.ts) and in the prevote record
@@ -433,8 +448,8 @@ record_height() { # $1 signed|prevote
 record_pos() { # $1 signed|commitlock|prevote
     local field=round
     if [ "$1" = signed ]; then field=timestamp; fi
-    xstate_ro "cat /s/node.identity.${1}.json 2>/dev/null; true" |
-        jq -r --arg f "${field}" 'select((.height | type) == "number" and (.[$f] | type) == "number") | "\(.height) \(.[$f])"' 2>/dev/null || true
+    xstate_ro "cat /s/node.identity.${1}.json 2>/dev/null" |
+        jq -er --arg f "${field}" 'select((.height | type) == "number" and (.[$f] | type) == "number") | "\(.height) \(.[$f])"' 2>/dev/null
 }
 # How the "height round" $2 stands to $1: newer, equal or older (height first, then
 # round); unknown when either is missing
@@ -449,22 +464,23 @@ pos_order() {
 }
 sum_of() { awk -v n="$2" '$2 == n { print $1 }' "$1"; }
 short() { printf '%s' "${1:0:12}"; }
-state_names() { xstate_ro 'ls -A /s; true'; }
+sha_ok() { [[ "${1:-}" =~ ^[0-9a-f]{64}$ ]]; }
+state_names() { xstate_ro 'ls -A /s'; }
 # "uid:gid mode name" of the state dir (.) and the identity files: the wipe, which runs as root, must leave them as the node's uid 1000 had them
-state_owners() { xstate_ro 'cd /s && stat -c "%u:%g %a %n" . node.identity* 2>/dev/null; true' | sort; }
+state_owners() { xstate_ro 'cd /s && stat -c "%u:%g %a %n" . node.identity*' | sort; }
 # No container, running or not, may hold the drilled node's state volume or be its node service
 assert_x_not_running() {
     local running holders
-    running="$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}")"
+    running="$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}")" || die "cannot list the node-${X_NODE} containers"
     [ -z "${running}" ] || die "node-${X_NODE} is still running; refusing to touch its key"
-    holders="$(docker ps -q --filter "volume=$(vol "state-${X_NODE}")")"
+    holders="$(docker ps -q --filter "volume=$(vol "state-${X_NODE}")")" || die "cannot list the containers on node ${X_NODE}'s state volume"
     [ -z "${holders}" ] || die "a container still holds the state volume of node ${X_NODE}"
 }
 assert_single_x() {
     local n
-    n="$(docker ps -q --filter "volume=$(vol "state-${X_NODE}")" | wc -l)"
+    n="$(docker ps -q --filter "volume=$(vol "state-${X_NODE}")" | wc -l)" || die "cannot list the containers on node ${X_NODE}'s state volume"
     [ "${n}" = 1 ] || die "expected exactly one container on node ${X_NODE}'s state volume, found ${n}"
-    n="$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}" | wc -l)"
+    n="$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}" | wc -l)" || die "cannot list the node-${X_NODE} containers"
     [ "${n}" = 1 ] || die "expected exactly one node-${X_NODE} container, found ${n}"
 }
 
@@ -519,7 +535,7 @@ check_restored_stats() {
     for t in fork_state migrations; do
         a="$(stat_of "${BACKUP_DIR}/stats.after.txt" "${t}")"
         r="$(stat_of "${file}" "${t}")"
-        if [ -n "${a}" ] && [ "${r}" != "${a}" ]; then bad="${bad} ${t}=${r:-?} != dump ${a}"; fi
+        if [ -z "${a}" ] || [ "${r}" != "${a}" ]; then bad="${bad} ${t}=${r:-?} != dump ${a:-?}"; fi
     done
     if [ "$(cut -d'|' -f1 "${BACKUP_DIR}/stats.after.txt" | tr '\n' ' ')" != "$(cut -d'|' -f1 "${file}" | tr '\n' ' ')" ]; then
         bad="${bad} table set differs from the dump's"
@@ -656,8 +672,8 @@ PG_IMAGE_ID="$(docker image inspect "${PG_IMAGE}" --format '{{.Id}}')"
 META[node_image_id]="${NODE_IMAGE_ID:7:12}"
 META[pg_image_id]="${PG_IMAGE_ID:7:12}"
 say "images: node ${NODE_IMAGE} (${NODE_IMAGE_ID:7:12}), postgres ${PG_IMAGE} (${PG_IMAGE_ID:7:12}); no other image is used"
-MIGRATION_FILES="$(docker run --rm --entrypoint sh "${NODE_IMAGE}" -c 'ls src/migrations 2>/dev/null | grep -cE "[.](ts|js)$" || true')"
-is_num "${MIGRATION_FILES}" || MIGRATION_FILES=0
+# A failed count, or a count of none (grep -c then exits 1), is "unreadable": the schema check fails on it
+MIGRATION_FILES="$(docker run --rm --entrypoint sh "${NODE_IMAGE}" -c 'ls src/migrations | grep -cE "[.](ts|js)$"')" || MIGRATION_FILES=unreadable
 META[migration_files_in_image]="${MIGRATION_FILES}"
 say "migration files in the node image: ${MIGRATION_FILES}"
 if [ "${EXPECT_PAUSE}" = 1 ]; then
@@ -771,7 +787,8 @@ step 02b-node-checks
 # counts is what the generated compose file gives each node.
 node_services="$(jq -r '.services | keys[] | select(startswith("node-"))' "${OUT_DIR}/compose.yml")" || abort_pre "cannot read ${OUT_DIR}/compose.yml"
 [ -n "${node_services}" ] || abort_pre "no node service in the generated compose file"
-gossip_off="$(jq -r '.services | to_entries[] | select(.key | startswith("node-")) | select((.value.environment.GOSSIP_ENABLED // "unset") != "true") | "\(.key)=\(.value.environment.GOSSIP_ENABLED // "unset")"' "${OUT_DIR}/compose.yml" | tr '\n' ' ')"
+gossip_off="$(jq -r '.services | to_entries[] | select(.key | startswith("node-")) | select((.value.environment.GOSSIP_ENABLED // "unset") != "true") | "\(.key)=\(.value.environment.GOSSIP_ENABLED // "unset")"' "${OUT_DIR}/compose.yml" | tr '\n' ' ')" \
+    || abort_pre "cannot read ${OUT_DIR}/compose.yml"
 if [ -z "${gossip_off}" ]; then
     # The sidecar is spawned as `node` from the same login shell the nodes start in
     docker run --rm --network none --entrypoint bash "${NODE_IMAGE}" -lc 'command -v node' >> "${STEP_LOG}" 2>&1 \
@@ -820,6 +837,7 @@ jq -r --argjson svcs "$(printf '%s\n' "${NODE_SVCS[@]}" | jq -Rn '[inputs]')" '
         | "vol\t\(.[0])\t\(.[1])\t\($svc)"),
       ((.tmpfs // [])[] | "tmpfs\t\(.)\t\(split(":")[0])\t\($svc)")' "${OUT_DIR}/compose.yml" | sort -u > "${OUT_DIR}/writable-mounts.tsv" \
     || abort_pre "cannot list the node mounts from the compose file"
+[ -s "${OUT_DIR}/writable-mounts.tsv" ] || abort_pre "no read-write volume or tmpfs of a node service in the compose file to probe"
 unwritable=()
 fixed=()
 mounted_paths=" "
@@ -849,7 +867,7 @@ done < "${OUT_DIR}/writable-mounts.tsv"
 img_dirs="$({
     docker image inspect "${NODE_IMAGE}" --format '{{json .Config.Volumes}}' | jq -r '(. // {}) | keys[]'
     docker image inspect "${NODE_IMAGE}" --format '{{.Config.WorkingDir}}'
-} | grep . | sort -u)" || img_dirs=""
+} | grep . | sort -u)" || abort_pre "cannot read the declared volumes and the working directory of ${NODE_IMAGE} to probe them"
 for d in ${img_dirs}; do
     case "${mounted_paths}" in *" ${d} "*) continue ;; esac
     if probe_write "${d}" >> "${STEP_LOG}" 2>&1; then
@@ -897,7 +915,7 @@ if [ "${SMOKE}" = 1 ]; then
         all=1
         for i in $(seq 1 "${N}"); do
             [ -z "${SMOKE_WHY[${i}]:-}" ] || continue
-            h="$(head_of "${i}")"
+            h="$(head_of "${i}")" || h=unreadable
             if is_num "${h}"; then SMOKE_HEADS[${i}]="${h}"; else SMOKE_HEADS[${i}]=""; fi
             if ! is_num "${h}" || [ "${h}" -lt "${SMOKE_HEAD}" ]; then all=0; fi
         done
@@ -961,17 +979,17 @@ while :; do
     sleep 5
 done
 H_REC="$(read_head "${X_NODE}")" || die "node ${X_NODE} does not answer its head"
-HASH_REC="$(hash_at "${X_NODE}" "${H_REC}")"
-[ -n "${HASH_REC}" ] || die "node ${X_NODE} has no hash at its head ${H_REC}"
-state_sums > "${OUT_DIR}/sums.step2"
-H_SIGNED_2="$(record_height signed)"
+HASH_REC="$(hash_at "${X_NODE}" "${H_REC}")" || die "node ${X_NODE} has no hash at its head ${H_REC}"
+state_sums > "${OUT_DIR}/sums.step2" || die "cannot hash node ${X_NODE}'s identity and signing state files"
+# For the record only (the checks compare the files at stop and after the rejoin)
+H_SIGNED_2="$(record_pos signed)" || H_SIGNED_2=none
 IDENT_SUM_2="$(sum_of "${OUT_DIR}/sums.step2" node.identity)"
-[ -n "${IDENT_SUM_2}" ] || die "no identity file in node ${X_NODE}'s state volume"
+sha_ok "${IDENT_SUM_2}" || die "no identity file hashed in node ${X_NODE}'s state volume"
 META[head_recorded]="${H_REC}"
 META[hash_recorded]="${HASH_REC}"
-META[signing_record_height_step2]="${H_SIGNED_2:-none}"
+META[signing_record_height_step2]="${H_SIGNED_2%% *}"
 META[state_files_step2]="$(awk '{ printf "%s ", $2 }' "${OUT_DIR}/sums.step2")"
-say "step 2: node ${X_NODE} head ${H_REC} hash ${HASH_REC:0:16}..; identity sha ${IDENT_SUM_2:0:12}..; signing record height ${H_SIGNED_2:-none}; state files: $(awk '{ printf "%s ", $2 }' "${OUT_DIR}/sums.step2")"
+say "step 2: node ${X_NODE} head ${H_REC} hash ${HASH_REC:0:16}..; identity sha ${IDENT_SUM_2:0:12}..; signing record height ${H_SIGNED_2%% *}; state files: $(awk '{ printf "%s ", $2 }' "${OUT_DIR}/sums.step2")"
 T_DRILL_START="$(date +%s)"
 if [ "${VARIANT}" = rejoin ]; then start_monitor "${OTHERS[@]}"; else start_monitor "${ALL_NODES[@]}"; fi
 
@@ -1025,18 +1043,20 @@ if [ "${VARIANT}" = rejoin ]; then
     say "node-${X_NODE} exit code $(docker inspect -f '{{.State.ExitCode}}' "${XNODE_CID}" 2>/dev/null || echo '?') (137 means it ignored SIGTERM and was killed after the grace period)"
     docker logs "${XNODE_CID}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > "${LOG_DIR}/node-${X_NODE}.pre-wipe.log"
     # Node stopped, database still up: the true pre-wipe head, and the signing state at rest
-    H_STOP="$(psql_q "${X_NODE}" 'SELECT max(number) FROM blocks')"
-    is_num "${H_STOP}" || die "cannot read node ${X_NODE}'s head from its database"
-    HASH_STOP="$(psql_q "${X_NODE}" "SELECT hash FROM blocks WHERE number = ${H_STOP}")"
-    state_sums > "${OUT_DIR}/sums.stop"
-    state_owners > "${OUT_DIR}/own.before"
-    H_SIGNED_STOP="$(record_height signed)"
+    H_STOP="$(psql_q "${X_NODE}" 'SELECT max(number) FROM blocks')" && is_num "${H_STOP}" || die "cannot read node ${X_NODE}'s head from its database"
+    HASH_STOP="$(psql_q "${X_NODE}" "SELECT hash FROM blocks WHERE number = ${H_STOP}")" && [ -n "${HASH_STOP}" ] || die "cannot read node ${X_NODE}'s block hash at ${H_STOP} from its database"
+    # The baseline of the wipe's comparison and of the checks: every file hashed, the identity among them
+    state_sums > "${OUT_DIR}/sums.stop" || die "cannot hash node ${X_NODE}'s identity and signing state files at stop"
+    sha_ok "$(sum_of "${OUT_DIR}/sums.stop" node.identity)" || die "no identity file hashed in node ${X_NODE}'s state volume at stop"
+    own_read=ok
+    state_owners > "${OUT_DIR}/own.before" || own_read="failed at stop"
     # Height and round of each signing state file at rest; the files after the rejoin are compared with these
     declare -A POS_STOP=() POS_END=()
-    for rec in signed commitlock prevote; do POS_STOP[${rec}]="$(record_pos "${rec}")"; done
+    for rec in signed commitlock prevote; do POS_STOP[${rec}]="$(record_pos "${rec}")" || POS_STOP[${rec}]=unreadable; done
+    H_SIGNED_STOP="${POS_STOP[signed]%% *}"
     META[head_at_stop]="${H_STOP}"
-    META[signing_record_height_at_stop]="${H_SIGNED_STOP:-none}"
-    say "stopped: pre-wipe head ${H_STOP}; signing record height ${H_SIGNED_STOP:-none}"
+    META[signing_record_height_at_stop]="${H_SIGNED_STOP}"
+    say "stopped: pre-wipe head ${H_STOP}; signing record height ${H_SIGNED_STOP}"
     # Remove node X's containers (and their anonymous volumes), its database and its backup staging.
     # The state volume stays; only what is not identity or signing state leaves it.
     dc rm -f -v "node-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "could not remove node-${X_NODE}"
@@ -1051,23 +1071,24 @@ if [ "${VARIANT}" = rejoin ]; then
     # Whatever the exit status said, only node.identity* may be left before node X starts again
     left="$(xstate_ro 'ls -A /s')" || die "cannot list node ${X_NODE}'s state volume after the wipe"
     say "left on the state volume: $(printf '%s' "${left}" | tr '\n' ' ')"
-    stray="$(printf '%s\n' "${left}" | grep -v -e '^node\.identity' -e '^$' | tr '\n' ' ' || true)"
+    stray="$(printf '%s\n' "${left}" | awk '!/^node\.identity/ && NF { printf "%s ", $0 }')"
     [ -z "${stray}" ] || die "the wipe left more than node.identity* on node ${X_NODE}'s state volume: ${stray% }"
     # Node X restarts from the identity and signing state files it stopped with: the
     # same names and bytes as at stop, checked before it can start again
-    state_sums > "${OUT_DIR}/sums.wiped"
-    wipe_changed="$({ grep -Fxv -f "${OUT_DIR}/sums.wiped" "${OUT_DIR}/sums.stop"; grep -Fxv -f "${OUT_DIR}/sums.stop" "${OUT_DIR}/sums.wiped"; } | awk '{ print $2 }' | sort -u | tr '\n' ' ' || true)"
+    state_sums > "${OUT_DIR}/sums.wiped" || die "cannot hash node ${X_NODE}'s identity and signing state files after the wipe"
+    # The lines in one list only: a file changed, added or removed
+    wipe_changed="$(sort "${OUT_DIR}/sums.stop" "${OUT_DIR}/sums.wiped" | uniq -u | awk '{ print $2 }' | sort -u | tr '\n' ' ')"
     [ -z "${wipe_changed}" ] || die "the wipe changed or removed node ${X_NODE}'s identity or signing state files: ${wipe_changed% } (sums.stop, sums.wiped)"
     # The state volume is kept and only emptied (as root, rm only: nothing is created on
     # it), so its owner must be what it was. The volumes recreated below, the database
     # and the backup staging one, belong to postgres, not to uid 1000. Whatever the
     # restarted node writes to /app/state has to work as uid 1000, so prove that now.
-    state_owners > "${OUT_DIR}/own.after"
-    own_changed="$(grep -Fxv -f "${OUT_DIR}/own.before" "${OUT_DIR}/own.after" || true)"
-    if [ -z "${own_changed}" ] && grep -q ' \.$' "${OUT_DIR}/own.before" && grep -q ' \.$' "${OUT_DIR}/own.after"; then
+    state_owners > "${OUT_DIR}/own.after" || own_read="failed after the wipe"
+    own_changed="$(sort "${OUT_DIR}/own.before" "${OUT_DIR}/own.after" | uniq -u | tr '\n' ';')"
+    if [ "${own_read}" = ok ] && [ -z "${own_changed}" ] && grep -q ' \.$' "${OUT_DIR}/own.after" && grep -q ' node\.identity$' "${OUT_DIR}/own.after"; then
         check "the wipe kept the ownership of the state volume" PASS "owner and mode of the state dir and the identity files unchanged ($(grep ' \.$' "${OUT_DIR}/own.after" | cut -d' ' -f1,2))"
     else
-        check "the wipe kept the ownership of the state volume" FAIL "changed or missing: $(printf '%s' "${own_changed:-no state dir line}" | tr '\n' ';')"
+        check "the wipe kept the ownership of the state volume" FAIL "changed or missing: ${own_changed:-no state dir or identity file line}; reading the owners ${own_read}"
     fi
     x_opts=(-v "$(vol "state-${X_NODE}"):/app/state")
     if ! probe_write /app/state "${x_opts[@]}" >> "${STEP_LOG}" 2>&1; then
@@ -1104,12 +1125,22 @@ if [ "${VARIANT}" = rejoin ]; then
         say "WARNING: migrations failed, continuing (MIGRATE_REQUIRED=0)"
     fi
     stats_of "${X_NODE}" > "${OUT_DIR}/stats.migrated.txt"
+    # The restored database against the dump, and the schema against the image: checked
+    # here, where they are read
+    check_restored_stats "restore" "${OUT_DIR}/stats.restored.txt"
+    mig_rows="$(stat_of "${OUT_DIR}/stats.migrated.txt" migrations)"
+    if is_num "${MIGRATION_FILES}" && [ "${MIGRATION_FILES}" -gt 0 ] && [ "${mig_rows}" = "${MIGRATION_FILES}" ]; then
+        check "schema at the image's head after the manual migration" PASS "migrations table ${mig_rows} rows = ${MIGRATION_FILES} files in src/migrations"
+    else
+        check "schema at the image's head after the manual migration" FAIL "migrations table ${mig_rows:-none} rows vs ${MIGRATION_FILES} files in the image (migrated=${MIGRATED})"
+    fi
     # One instance only: the node is removed, no other container holds its volume
     assert_x_not_running
     T_X_START="$(date +%s)"
     dc up -d --no-deps --pull never "node-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "node-${X_NODE} did not start"
     refresh_cid "${X_NODE}"
     assert_single_x
+    check "one instance of the key at a time" PASS "node ${X_NODE} was removed and its volume had no holder before the single start (asserted)"
     wait_serve "${X_NODE}" "${SERVE_TIMEOUT}" || die "restored node-${X_NODE} did not serve within ${SERVE_TIMEOUT}s (see node-${X_NODE}.log)"
     phase_end C "restore: start postgres, pg_restore, migrations, start node (until it serves)"
     T_C_END="$(now)"
@@ -1119,20 +1150,23 @@ if [ "${VARIANT}" = rejoin ]; then
     # ═════════════════════════════════════════════════════════════════════
     step 08-rejoin
     PH_T0="${T_C_END}"
-    say "waiting for node ${X_NODE} to come within 2 blocks of the others"
+    # Rejoined: within 2 blocks of the highest other node, and on the others' chain: at the
+    # highest height all of them and node X have, above the pre-wipe head, one block hash
+    say "waiting for node ${X_NODE} to come within 2 blocks of the others, on their chain"
     deadline=$((SECONDS + REJOIN_TIMEOUT))
     SYNCED=0
     while [ "${SECONDS}" -lt "${deadline}" ]; do
-        hx="$(head_of "${X_NODE}")"
+        chain=""
+        hx="$(head_of "${X_NODE}")" || hx=unreadable
         ho="$(max_head_of "${OTHERS[@]}")"
-        if is_num "${hx}" && is_num "${ho}" && [ "${hx}" -ge $((ho - 2)) ]; then SYNCED=1; break; fi
+        if is_num "${hx}" && is_num "${ho}" && [ "${hx}" -ge $((ho - 2)) ] && chain="$(same_chain "${H_STOP}" "${X_NODE}" "${OTHERS[@]}")"; then SYNCED=1; break; fi
         sleep 3
     done
     if [ "${SYNCED}" = 1 ]; then
-        phase_end D1 "rejoin: node head within 2 blocks of the others (from node serving)"
+        phase_end D1 "rejoin: node head within 2 blocks of the others, on their chain (from node serving)"
     else
-        say "node ${X_NODE} did not come within 2 blocks in ${REJOIN_TIMEOUT}s (x=${hx:-?} others=${ho:-?})"
-        check "node ${X_NODE} rejoins (head within 2 blocks)" FAIL "head ${hx:-?} vs others ${ho:-?} after ${REJOIN_TIMEOUT}s"
+        say "node ${X_NODE} did not come within 2 blocks on the others' chain in ${REJOIN_TIMEOUT}s (x=${hx} others=${ho:-unreadable})"
+        check "node ${X_NODE} rejoins (head within 2 blocks, on the others' chain)" FAIL "head ${hx} vs others ${ho:-unreadable} after ${REJOIN_TIMEOUT}s${chain:+; ${chain}}"
     fi
     # Signing: the signing record moves past its at-stop value (it is written before a
     # signature leaves the node), or a block after the restart carries node X's signature
@@ -1141,19 +1175,17 @@ if [ "${VARIANT}" = rejoin ]; then
     if [ "${SYNCED}" = 1 ]; then
         deadline=$((SECONDS + SIGN_TIMEOUT))
         while [ "${SECONDS}" -lt "${deadline}" ]; do
-            hs="$(record_height signed)"
-            if is_num "${hs}" && is_num "${H_SIGNED_STOP}" && [ "${hs}" -gt "${H_SIGNED_STOP}" ]; then
+            if hs="$(record_pos signed)" && is_num "${H_SIGNED_STOP}" && [ "${hs%% *}" -gt "${H_SIGNED_STOP}" ]; then
                 SIGNED=1
-                SIGN_EVIDENCE="signing record advanced ${H_SIGNED_STOP} -> ${hs}"
+                SIGN_EVIDENCE="signing record advanced ${H_SIGNED_STOP} -> ${hs%% *}"
                 break
             fi
-            hx="$(head_of "${X_NODE}")"
-            if is_num "${hx}"; then
+            if hx="$(head_of "${X_NODE}")"; then
                 for h in $(seq "${hx}" -1 $((hx > 5 ? hx - 5 : 1))); do
                     if [ "$(block_at "${X_NODE}" "${h}" | jq -r --arg pk "${PUB[${X_NODE}]}" --argjson t "${T_X_START}" '
                         def n: (. | ascii_downcase | ltrimstr("0x"));
                         (.content.timestamp // 0 | tonumber | if . > 100000000000 then . / 1000 else . end) as $ts
-                        | if $ts >= $t and (((.validation_data.signatures // {}) | keys | map(n) | index($pk | n)) != null) then "yes" else "no" end' 2>/dev/null || true)" = yes ]; then
+                        | if $ts >= $t and (((.validation_data.signatures // {}) | keys | map(n) | index($pk | n)) != null) then "yes" else "no" end' 2>/dev/null)" = yes ]; then
                         SIGNED=1
                         SIGN_EVIDENCE="block ${h} carries node ${X_NODE}'s signature"
                         break 2
@@ -1178,38 +1210,40 @@ if [ "${VARIANT}" = rejoin ]; then
     # 9. checks
     # ═════════════════════════════════════════════════════════════════════
     step 09-checks
-    state_sums > "${OUT_DIR}/sums.end"
-    for rec in signed commitlock prevote; do POS_END[${rec}]="$(record_pos "${rec}")"; done
-    HX_END="$(read_head "${X_NODE}" || true)"
+    # Each check below passes only on evidence read here or before: a read that fails or
+    # gives nothing fails the check that needs it
+    end_read=ok
+    state_sums > "${OUT_DIR}/sums.end" || end_read="; cannot hash the state files after the rejoin"
+    for rec in signed commitlock prevote; do POS_END[${rec}]="$(record_pos "${rec}")" || POS_END[${rec}]=unreadable; done
+    HX_END="$(read_head "${X_NODE}")" || HX_END=unreadable
     HO_END="$(max_head_of "${OTHERS[@]}")"
 
     # 1. head
     if is_num "${HX_END}" && [ "${HX_END}" -ge "${H_STOP}" ]; then
         check "restored head >= pre-wipe head" PASS "head ${HX_END} >= ${H_STOP} (pre-wipe), ${H_REC} (step 2)"
     else
-        check "restored head >= pre-wipe head" FAIL "head ${HX_END:-?} < ${H_STOP}"
+        check "restored head >= pre-wipe head" FAIL "head ${HX_END} < ${H_STOP}"
     fi
-    # still within 2 blocks of the others now that D is over, not only once during it
+    # still within 2 blocks of the others now that D is over, not only once during it, and on their chain
     if [ "${SYNCED}" = 1 ]; then
-        if is_num "${HX_END}" && is_num "${HO_END}" && [ "${HX_END}" -ge $((HO_END - 2)) ]; then
-            check "node ${X_NODE} within 2 blocks of the others at the end of D" PASS "head ${HX_END} vs others ${HO_END}"
+        chain=""
+        if is_num "${HX_END}" && is_num "${HO_END}" && [ "${HX_END}" -ge $((HO_END - 2)) ] && chain="$(same_chain "${H_STOP}" "${X_NODE}" "${OTHERS[@]}")"; then
+            check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" PASS "head ${HX_END} vs others ${HO_END}; ${chain}"
         else
-            check "node ${X_NODE} within 2 blocks of the others at the end of D" FAIL "head ${HX_END:-?} vs others ${HO_END:-?}: it came within 2 blocks during D, then fell behind"
+            check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" FAIL "head ${HX_END} vs others ${HO_END:-unreadable}: ${chain:-it came within 2 blocks during D, then fell behind}"
         fi
     fi
-    # 2. hashes at the pre-wipe heights equal the others'
+    # 2. hashes at the pre-wipe heights: each node's, node X's too, is the one recorded at
+    # step 2 (H_REC) and read from node X's database at stop (H_STOP)
     bad=""
-    for h in "${H_REC}" "${H_STOP}"; do
-        hx_hash="$(hash_at "${X_NODE}" "${h}")"
-        [ -n "${hx_hash}" ] || bad="${bad} node${X_NODE}@${h}=none"
-        for o in "${OTHERS[@]}"; do
-            oh="$(hash_at "${o}" "${h}")"
-            [ -n "${oh}" ] && [ "${oh}" = "${hx_hash}" ] || bad="${bad} node${o}@${h}=${oh:0:10}!=${hx_hash:0:10}"
+    agree=0
+    for hh in "${H_REC} ${HASH_REC}" "${H_STOP} ${HASH_STOP}"; do
+        for i in "${X_NODE}" "${OTHERS[@]}"; do
+            got="$(hash_at "${i}" "${hh%% *}")" || got=none
+            if [ "${got}" = "${hh#* }" ]; then agree=$((agree + 1)); else bad="${bad} node${i}@${hh%% *}=${got:0:10}!=${hh#* }"; fi
         done
     done
-    [ "$(hash_at "${X_NODE}" "${H_REC}")" = "${HASH_REC}" ] || bad="${bad} hash@${H_REC} differs from the recorded one"
-    [ "$(hash_at "${X_NODE}" "${H_STOP}")" = "${HASH_STOP}" ] || bad="${bad} hash@${H_STOP} differs from the DB's at stop"
-    if [ -z "${bad}" ]; then
+    if [ "${agree}" = $((2 * N)) ]; then
         check "block hash at pre-wipe heights equals the other nodes'" PASS "heights ${H_REC} and ${H_STOP}, all ${N} nodes agree"
     else
         check "block hash at pre-wipe heights equals the other nodes'" FAIL "${bad}"
@@ -1217,19 +1251,26 @@ if [ "${VARIANT}" = rejoin ]; then
     # 3. identity file identical
     ident_stop="$(sum_of "${OUT_DIR}/sums.stop" node.identity)"
     ident_end="$(sum_of "${OUT_DIR}/sums.end" node.identity)"
-    if [ -n "${ident_end}" ] && [ "${ident_end}" = "${IDENT_SUM_2}" ] && [ "${ident_stop}" = "${IDENT_SUM_2}" ]; then
+    if [ "${end_read}" = ok ] && sha_ok "${IDENT_SUM_2}" && [ "${ident_end}" = "${IDENT_SUM_2}" ] && [ "${ident_stop}" = "${IDENT_SUM_2}" ]; then
         check "identity file checksum identical (step 2, at stop, after rejoin)" PASS "sha256 ${IDENT_SUM_2:0:12}.."
     else
-        check "identity file checksum identical (step 2, at stop, after rejoin)" FAIL "step2=$(short "${IDENT_SUM_2}") stop=$(short "${ident_stop}") end=$(short "${ident_end}")"
+        check "identity file checksum identical (step 2, at stop, after rejoin)" FAIL "step2=$(short "${IDENT_SUM_2}") stop=$(short "${ident_stop}") end=$(short "${ident_end}")${end_read#ok}"
     fi
-    # 4. signing state: still there; the signing record, the commit lock and the prevote
-    # record never older than at stop by (height, round); state which
-    bad=""
+    # 4. signing state: every file there at stop, and each signing record, commit lock and
+    # prevote record there at step 2, is still there; those three never older than at stop
+    # by (height, round), and at least one of them compared; state which
+    bad="${end_read#ok}"
     desc=""
-    while read -r _ name; do
-        [ "${name}" = node.identity ] && continue
+    nrec=0
+    names="$(awk 'FILENAME ~ /stop$/ || $2 ~ /^node\.identity\.(signed|commitlock|prevote)\.json$/ { print $2 }' "${OUT_DIR}/sums.step2" "${OUT_DIR}/sums.stop" | sort -u)"
+    while read -r name; do
+        case "${name}" in "" | node.identity) continue ;; esac
         s_stop="$(sum_of "${OUT_DIR}/sums.stop" "${name}")"
         s_end="$(sum_of "${OUT_DIR}/sums.end" "${name}")"
+        if [ -z "${s_stop}" ]; then
+            bad="${bad} ${name} was there at step 2, not at stop"
+            continue
+        fi
         if [ -z "${s_end}" ]; then
             bad="${bad} ${name} is gone"
             continue
@@ -1242,8 +1283,8 @@ if [ "${VARIANT}" = rejoin ]; then
                 p_stop="${POS_STOP[${rec}]/ //}"
                 p_end="${POS_END[${rec}]/ //}"
                 case "$(pos_order "${POS_STOP[${rec}]}" "${POS_END[${rec}]}")" in
-                    newer) desc="${desc} ${name#node.identity}=advanced ${p_stop} -> ${p_end}" ;;
-                    equal) desc="${desc} ${name#node.identity}=unchanged ${p_end}" ;;
+                    newer) desc="${desc} ${name#node.identity}=advanced ${p_stop} -> ${p_end}"; nrec=$((nrec + 1)) ;;
+                    equal) desc="${desc} ${name#node.identity}=unchanged ${p_end}"; nrec=$((nrec + 1)) ;;
                     older) bad="${bad} ${name} is older than at stop: ${p_stop} -> ${p_end} (height/round)" ;;
                     *) bad="${bad} ${name} has no height and round to compare: ${p_stop:-none} at stop, ${p_end:-none} after" ;;
                 esac
@@ -1252,33 +1293,36 @@ if [ "${VARIANT}" = rejoin ]; then
                 if [ "${s_end}" = "${s_stop}" ]; then desc="${desc} ${name#node.identity}=unchanged"; else desc="${desc} ${name#node.identity}=changed"; fi
                 ;;
         esac
-    done < "${OUT_DIR}/sums.stop"
-    if [ -z "${bad}" ]; then
+    done <<< "${names}"
+    if [ -z "${bad}" ] && [ "${nrec}" -gt 0 ]; then
         check "signing state unchanged or advanced, never older" PASS "height/round at stop -> after the rejoin:${desc}"
     else
-        check "signing state unchanged or advanced, never older" FAIL "${bad};${desc}"
+        check "signing state unchanged or advanced, never older" FAIL "${bad:- no signing record, commit lock or prevote record to compare};${desc}"
     fi
-    # 5. no halt marker, no foreign signature
-    names_end="$(state_names | tr '\n' ' ')"
-    # the count below reads 0 from a log docker cannot give, so the read itself is checked
+    # 5. no halt marker, no foreign signature. The state volume's listing must be read and
+    # hold the identity; node X's log, read once to a file, must be read and not empty
+    names_ok=1
+    names_end="$(state_names | tr '\n' ' ')" || names_ok=0
+    xlog="${LOG_DIR}/node-${X_NODE}.at-checks.log"
     x_log_ok=1
-    docker logs "${CID[${X_NODE}]}" > /dev/null 2>&1 || x_log_ok=0
-    foreign_now="$(docker logs "${CID[${X_NODE}]}" 2>&1 | grep -aEc 'another process is signing|foreign signature' || true)"
-    case "${names_end}" in
-        *.halted*) check "no halt marker, no foreign-signature log" FAIL "a .halted marker is on the state volume" ;;
-        *)
-            if [ "${x_log_ok}" = 0 ]; then
-                check "no halt marker, no foreign-signature log" FAIL "docker logs cannot read node ${X_NODE}'s log, so a foreign-signature line cannot be ruled out"
-            elif [ "${foreign_now:-0}" != 0 ]; then
-                check "no halt marker, no foreign-signature log" FAIL "${foreign_now} foreign-signature lines after the restart"
-            else
-                check "no halt marker, no foreign-signature log" PASS "none (state volume: ${names_end})"
-            fi
-            ;;
-    esac
-    # counted, not grep -q: grep -q exits at the match, docker logs then dies of SIGPIPE and pipefail reads that as absent
-    floor_lines="$(docker logs "${CID[${X_NODE}]}" 2>&1 | grep -ac 'Restart signing floor' || true)"
-    if [ "${floor_lines:-0}" != 0 ]; then
+    docker logs "${CID[${X_NODE}]}" > "${xlog}" 2>&1 || x_log_ok=0
+    [ -s "${xlog}" ] || x_log_ok=0
+    foreign_now="$(awk '/another process is signing|foreign signature/ { n++ } END { print n + 0 }' "${xlog}")" || x_log_ok=0
+    floor_lines="$(awk '/Restart signing floor/ { n++ } END { print n + 0 }' "${xlog}")" || x_log_ok=0
+    if [ "${names_ok}" = 0 ] || [[ " ${names_end}" != *" node.identity "* ]]; then
+        check "no halt marker, no foreign-signature log" FAIL "cannot list node ${X_NODE}'s state volume, or no node.identity in the list (${names_end:-nothing listed})"
+    elif [[ "${names_end}" == *.halted* ]]; then
+        check "no halt marker, no foreign-signature log" FAIL "a .halted marker is on the state volume"
+    elif [ "${x_log_ok}" = 0 ]; then
+        check "no halt marker, no foreign-signature log" FAIL "docker logs cannot read node ${X_NODE}'s log, or it is empty, so a foreign-signature line cannot be ruled out"
+    elif [ "${foreign_now}" != 0 ]; then
+        check "no halt marker, no foreign-signature log" FAIL "${foreign_now} foreign-signature lines after the restart"
+    else
+        check "no halt marker, no foreign-signature log" PASS "none (state volume: ${names_end})"
+    fi
+    if [ "${x_log_ok}" = 0 ]; then
+        check "restart signing floor logged before signing" FAIL "docker logs cannot read node ${X_NODE}'s log, or it is empty: the line cannot be looked for"
+    elif [ "${floor_lines}" -gt 0 ]; then
         check "restart signing floor logged before signing" PASS "[SIGNING] Restart signing floor line present"
     else
         check "restart signing floor logged before signing" INFO "the [SIGNING] Restart signing floor line is missing from node ${X_NODE}'s log"
@@ -1293,15 +1337,7 @@ if [ "${VARIANT}" = rejoin ]; then
         check "other nodes never stalled while node ${X_NODE} was down" "${STALL_RESULT}" "q=${Q}, ${LIVE_OTHERS} live; ${STALL_DETAIL}"
     fi
     META[outage_others_head]="${first} -> ${last}, longest gap ${maxgap}s"
-    # 8. the restored database against the dump, and the schema against the image
-    check_restored_stats "restore" "${OUT_DIR}/stats.restored.txt"
-    mig_rows="$(stat_of "${OUT_DIR}/stats.migrated.txt" migrations)"
-    if [ "${MIGRATION_FILES}" != 0 ] && [ "${mig_rows}" = "${MIGRATION_FILES}" ]; then
-        check "schema at the image's head after the manual migration" PASS "migrations table ${mig_rows} rows = ${MIGRATION_FILES} files in src/migrations"
-    else
-        check "schema at the image's head after the manual migration" FAIL "migrations table ${mig_rows:-none} rows vs ${MIGRATION_FILES} files in the image (migrated=${MIGRATED})"
-    fi
-    check "one instance of the key at a time" PASS "node ${X_NODE} was removed and its volume had no holder before the single start (asserted)"
+    # 8. the restored counts, the schema and the one instance of the key: checked in phase C
 else
     # ═════════════════════════════════════════════════════════════════════
     # Variant: restore into a new, isolated, non-signing node
@@ -1323,7 +1359,7 @@ else
     phase_end IC "isolated restore: start postgres, pg_restore, migrations"
     check_restored_stats "isolated restore" "${OUT_DIR}/stats.restored.txt"
     mig_rows="$(stat_of "${OUT_DIR}/stats.migrated.txt" migrations)"
-    if [ "${MIGRATION_FILES}" != 0 ] && [ "${mig_rows}" = "${MIGRATION_FILES}" ]; then
+    if is_num "${MIGRATION_FILES}" && [ "${MIGRATION_FILES}" -gt 0 ] && [ "${mig_rows}" = "${MIGRATION_FILES}" ]; then
         check "schema at the image's head after the manual migration" PASS "migrations table ${mig_rows} rows = ${MIGRATION_FILES} files"
     else
         check "schema at the image's head after the manual migration" FAIL "migrations table ${mig_rows:-none} rows vs ${MIGRATION_FILES} files (migrated=${MIGRATED})"
@@ -1334,12 +1370,12 @@ else
     else
         check "isolated DB reaches the dump's head" FAIL "max block ${DB_HEAD:-?} < ${H_DUMP_BEFORE}"
     fi
-    nethash="$(hash_at "${OTHERS[0]}" "${DB_HEAD}")"
-    dbhash="$(psql_q iso "SELECT hash FROM blocks WHERE number = ${DB_HEAD}")"
-    if [ -n "${nethash}" ] && [ "${nethash}" = "${dbhash}" ]; then
+    nethash=""
+    dbhash=""
+    if is_num "${DB_HEAD}" && nethash="$(hash_at "${OTHERS[0]}" "${DB_HEAD}")" && dbhash="$(psql_q iso "SELECT hash FROM blocks WHERE number = ${DB_HEAD}")" && [ "${nethash}" = "${dbhash}" ]; then
         check "isolated DB's head block hash equals the network's" PASS "height ${DB_HEAD}"
     else
-        check "isolated DB's head block hash equals the network's" FAIL "db ${dbhash:0:12} net ${nethash:0:12}"
+        check "isolated DB's head block hash equals the network's" FAIL "db $(short "${dbhash:-none}") net $(short "${nethash:-none}")"
     fi
     if [ "${ISO_NODE}" = 1 ]; then
         step 07-isolated-node
@@ -1349,29 +1385,36 @@ else
         wait_serve iso "${SERVE_TIMEOUT}" || die "node-iso did not serve within ${SERVE_TIMEOUT}s (see node-iso.log)"
         deadline=$((SECONDS + REJOIN_TIMEOUT))
         ISO_OK=0
+        # Caught up: at or above the DB head, within 2 blocks of the highest validator, and on
+        # their chain: at the highest height node-iso and all of them have, above the DB head, one block hash
         while [ "${SECONDS}" -lt "${deadline}" ]; do
-            hi="$(head_of iso)"
+            chain=""
+            hi="$(head_of iso)" || hi=unreadable
             ho="$(max_head_of "${ALL_NODES[@]}")"
-            if is_num "${hi}" && is_num "${DB_HEAD}" && [ "${hi}" -ge "${DB_HEAD}" ] && is_num "${ho}" && [ "${hi}" -ge $((ho - 2)) ]; then ISO_OK=1; break; fi
+            if is_num "${hi}" && is_num "${DB_HEAD}" && [ "${hi}" -ge "${DB_HEAD}" ] && is_num "${ho}" && [ "${hi}" -ge $((ho - 2)) ] \
+                && chain="$(same_chain "${DB_HEAD}" iso "${ALL_NODES[@]}")"; then ISO_OK=1; break; fi
             sleep 3
         done
         if [ "${ISO_OK}" = 1 ]; then
-            phase_end ID "isolated node: serving and within 2 blocks of the network"
-            check "isolated node reaches the expected head" PASS "head ${hi} >= DB head ${DB_HEAD}, network ${ho}"
+            phase_end ID "isolated node: serving and within 2 blocks of the network, on its chain"
+            check "isolated node reaches the expected head, on the validators' chain" PASS "head ${hi} >= DB head ${DB_HEAD}, network ${ho}; ${chain}"
         else
-            check "isolated node reaches the expected head" FAIL "head ${hi:-?} vs DB head ${DB_HEAD}, network ${ho:-?} after ${REJOIN_TIMEOUT}s"
+            check "isolated node reaches the expected head, on the validators' chain" FAIL "head ${hi} vs DB head ${DB_HEAD}, network ${ho:-unreadable} after ${REJOIN_TIMEOUT}s${chain:+; ${chain}}"
         fi
-        # Node X's key never went anywhere: no mount of it, and a different identity
-        mounts_iso="$(docker inspect -f '{{range .Mounts}}{{.Source}} {{.Name}}{{"\n"}}{{end}}' "${CID[iso]}")"
-        iso_sum="$(helper 'sha256sum /s/node.identity 2>/dev/null | cut -d" " -f1; true' -v "$(vol state-iso):/s:ro" "${PG_IMAGE}")" || iso_sum=unreadable
-        if echo "${mounts_iso}" | grep -qE "node${X_NODE}\.identity|state-${X_NODE}"; then
+        # Node X's key never went anywhere: node-iso's own state volume among its mounts and
+        # none of node X's, and a different identity, both identities read as a sha256
+        mounts_iso="$(docker inspect -f '{{range .Mounts}}{{.Source}} {{.Name}}{{"\n"}}{{end}}' "${CID[iso]}")" || mounts_iso=unreadable
+        iso_sum="$(helper 's="$(sha256sum /s/node.identity)" && echo "${s%% *}"' -v "$(vol state-iso):/s:ro" "${PG_IMAGE}")" || iso_sum=unreadable
+        if ! awk -v v="$(vol state-iso)" '$NF == v { f = 1 } END { exit !f }' <<< "${mounts_iso}"; then
+            check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "cannot read node-iso's mounts, or its own state volume is not among them"
+        elif grep -qE "node${X_NODE}\.identity|state-${X_NODE}" <<< "${mounts_iso}"; then
             check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "its mounts include node ${X_NODE}'s identity or state volume"
-        elif [ "${iso_sum}" = unreadable ]; then
-            check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "cannot read node-iso's identity file from its state volume to compare it"
-        elif [ -n "${iso_sum}" ] && [ "${iso_sum}" = "${IDENT_SUM_2}" ]; then
+        elif ! sha_ok "${iso_sum}" || ! sha_ok "${IDENT_SUM_2}"; then
+            check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "cannot read node-iso's identity file from its state volume as a sha256 to compare it (node-iso: ${iso_sum:-nothing}, node ${X_NODE} at step 2: $(short "${IDENT_SUM_2:-nothing}"))"
+        elif [ "${iso_sum}" = "${IDENT_SUM_2}" ]; then
             check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "same identity file hash"
         else
-            check "isolated node holds no copy of node ${X_NODE}'s key" PASS "no identity mounted, own state volume, different identity"
+            check "isolated node holds no copy of node ${X_NODE}'s key" PASS "own state volume mounted, no identity or state volume of node ${X_NODE}, different identity (sha256 $(short "${iso_sum}").. vs $(short "${IDENT_SUM_2}")..)"
         fi
     fi
     stop_monitor

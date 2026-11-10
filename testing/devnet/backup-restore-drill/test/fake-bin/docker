@@ -43,15 +43,25 @@ file), FAKE_HALT_MARKER / FAKE_FOREIGN_LOG (such a node writes a .halted marker 
 logs a foreign-signature line), FAKE_LOGS_FAIL (`docker logs` of such a node
 fails), FAKE_ISO_KEY_OF (a volume name: node-iso's state volume holds a copy of
 that volume's identity file), FAKE_ISO_UNREADABLE (reading node-iso's identity
-file fails), FAKE_EXTRA_HOLDER (a volume name: from the backup's pg_dump on, a
+file fails: `empty` prints nothing and exits 0, as `sha256sum` of a missing file
+piped into `cut` does; any other value is a daemon error, exit 125),
+FAKE_EXTRA_HOLDER (a volume name: from the backup's pg_dump on, a
 running container that is no node holds it), FAKE_CP_CORRUPT (the dump copied to
-the host differs from the one hashed). Every call is appended to
+the host differs from the one hashed), FAKE_FORK (node services that answer each
+block above their node's head at its stop, or else above their restored
+database's head, with another hash: a fork after those heights), FAKE_STATE_LOST
+(a node.identity* file that is gone from the drilled node's state volume from the
+backup's pg_dump on, before its stop), FAKE_EMPTY_READS (once the drilled node
+started again, or node-iso, first answers its RPC, every read prints nothing and
+exits 0: node RPC, commands in postgres containers, helper scripts, `docker logs`,
+`docker inspect` and `docker ps` of running containers). Every call is appended to
 $FAKE_DIR/calls.log; compose down writes to $FAKE_DIR/lock-at-down whether
 $LOCK_DIR/<project>.lock is held at that moment.
 
 The signing state files hold (height, round): the head while their node runs,
 else the head at its stop; the round is ROUND0 + 10 * height, as .timestamp in
-.signed.json and .round in .commitlock.json and .prevote.json.
+.signed.json and .round in .commitlock.json and .prevote.json. A node without an
+identity mounted (node-iso) makes a node.identity of its own and no signing state.
 """
 import fcntl
 import hashlib
@@ -161,10 +171,10 @@ def start_container(st, compose, project, svc, c):
             c["state"] = "exited"
             c["logs"].append("cp: cannot create regular file '/app/state/node.identity': Permission denied")
             return
-        if any(v.endswith(":/app/keys/node.identity:ro") for v in compose["services"][svc]["volumes"]):
-            for fn in ["node.identity"] + [f"node.identity.{k}.json" for k in RECORDS]:
-                if fn not in vol["files"]:
-                    vol["files"].append(fn)
+        keyed = any(v.endswith(":/app/keys/node.identity:ro") for v in compose["services"][svc]["volumes"])
+        for fn in ["node.identity"] + ([f"node.identity.{k}.json" for k in RECORDS] if keyed else []):
+            if fn not in vol["files"]:
+                vol["files"].append(fn)
         for fn in ("extra.dat", "demos_peerlist.json"):
             if fn not in vol["files"]:
                 vol["files"].append(fn)
@@ -344,6 +354,8 @@ def run_cmd(a):
         out()
     script = args[1]
     pos = args[3:]
+    if st.get("empty"):
+        sys.exit(0)
     if "src/migrations" in script:
         out(os.environ.get("FAKE_MIGRATION_FILES", "3"))
     if "uid 1000 cannot read" in script:
@@ -392,10 +404,12 @@ def run_cmd(a):
                 if c["state"] == "running" and sv in c["volumes"]:
                     c["signed_seen"] = True
             save(st)
-        if f"node.identity.{m.group(1)}.json" in vol["files"]:
-            print(json.dumps(record(st, vol, sv, m.group(1))))
-        sys.exit(0)
+        if f"node.identity.{m.group(1)}.json" not in vol["files"]:
+            fail(f"cat: can't open '/s/node.identity.{m.group(1)}.json': No such file or directory")
+        out(json.dumps(record(st, vol, sv, m.group(1))))
     if "sha256sum /s/node.identity" in script:
+        if os.environ.get("FAKE_ISO_UNREADABLE") == "empty":
+            sys.exit(0)
         if os.environ.get("FAKE_ISO_UNREADABLE"):
             fail("docker: Error response from daemon: fake read failure", 125)
         if os.environ.get("FAKE_ISO_KEY_OF"):
@@ -426,6 +440,8 @@ def exec_cmd(a):
     c = st["containers"].get(cid)
     if not c or c["state"] != "running":
         fail("Error response from daemon: container is not running", 1)
+    if st.get("empty"):
+        sys.exit(0)
     svc, project = c["service"], c["project"]
     if svc.startswith("node-"):
         if cmd[0] != "curl":
@@ -434,6 +450,9 @@ def exec_cmd(a):
             fail("", 7)
         body = cmd[cmd.index("-d") + 1] if "-d" in cmd else None
         if body is None:
+            if os.environ.get("FAKE_EMPTY_READS") and (c.get("restarted") or svc == "node-iso"):
+                st["empty"] = True
+                save(st)
             sys.stdout.write("Hello World!")
             sys.exit(0)
         d = json.loads(body)["params"][0]
@@ -458,6 +477,11 @@ def exec_cmd(a):
             out(json.dumps({"result": 200, "response": h}))
         bn = d["data"]["blockNumber"]
         bh = f"other{bn}" if svc in envlist("FAKE_OTHER_HASH") else f"hash{bn}"
+        if svc in envlist("FAKE_FORK"):
+            sv, pg = (st["volumes"].get(vname(project, f"{k}-{svc[5:]}"), {}) for k in ("state", "pgdata"))
+            floor = sv.get("stop_head", pg.get("frozen_head") if pg.get("db") == "restored" else None)
+            if floor is not None and bn > floor:
+                bh = f"fork{bn}"
         out(json.dumps({"result": 200, "response": {"hash": bh, "number": bn, "content": {"timestamp": time.time()}, "validation_data": {"signatures": {}}}}))
     n, pg, bk = pg_state(st, project, cid)
     if cmd[0] == "pg_isready":
@@ -496,6 +520,9 @@ def exec_cmd(a):
             if os.environ.get("FAKE_EXTRA_HOLDER"):
                 st["containers"][cid_of(project, "stray")] = {"service": "stray", "project": project, "state": "running",
                                                               "volumes": [vname(project, os.environ["FAKE_EXTRA_HOLDER"])]}
+            if os.environ.get("FAKE_STATE_LOST"):
+                xs = st["volumes"][vname(project, f"state-{n}")]
+                xs["files"] = [x for x in xs["files"] if x != os.environ["FAKE_STATE_LOST"]]
             save(st)
             out()
         if "pg_restore --file=/dev/null" in script:
@@ -542,6 +569,8 @@ def main():
             out("/app")
         out()
     elif cmd == "ps":
+        if st.get("empty") and "-aq" not in a:
+            sys.exit(0)
         flt = [a[i + 1] for i, x in enumerate(a) if x == "--filter"]
         for cid, c in sorted(st["containers"].items()):
             ok = "-aq" in a or c["state"] == "running"
@@ -597,6 +626,8 @@ def main():
         c = st["containers"].get(cid)
         if not c:
             fail("No such container", 1)
+        if st.get("empty"):
+            sys.exit(0)
         if os.environ.get("FAKE_LOGS_FAIL") and c.get("restarted"):
             fail("Error response from daemon: configured logging driver does not support reading", 1)
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
@@ -604,6 +635,13 @@ def main():
         out("\n".join(c.get("logs", []) + fill))
     elif cmd == "inspect":
         fmt = a[a.index("-f") + 1]
+        if st.get("empty"):
+            sys.exit(0)
+        if ".Mounts" in fmt:
+            c = st["containers"].get(a[-1])
+            if not c:
+                fail(f"Error: No such object: {a[-1]}", 1)
+            out("\n".join(f"/var/lib/docker/volumes/{v}/_data {v}" for v in c["volumes"]))
         out("0" if "ExitCode" in fmt else "")
     else:
         fail(f"fake docker: {cmd} not handled", 99)

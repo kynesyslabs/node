@@ -270,7 +270,10 @@ a read-only mount that the script's `mv` could not move), TLSNotary is off, and
    from the host copy, stats, migrations, assert again, start exactly one
    node X. Ends when its RPC serves.
 7. **D1 / D** rejoin: D1 is the time from "serving" until its head is within
-   2 blocks of the other three. D adds proof that it signs: its signing record
+   2 blocks of the other three and it is on their chain: at the highest height
+   all four have, above the pre-wipe head, all four give one block hash (a node
+   that matches the others up to its stop and forks after it never gets there).
+   D adds proof that it signs: its signing record
    height moves past the value at stop, or a block after the restart carries
    its signature. Row **ALL** is stop of node X to rejoined and signing (the
    outage as an operator sees it); like D1 and D, it is written only when node
@@ -285,23 +288,29 @@ set, on the restored database. Node X's key is never mounted anywhere else.
 ## Checks
 
 Each is printed PASS, FAIL or INFO, and written to `timings.md` and
-`timings.json`.
+`timings.json`. A check passes only on evidence the run has read: a read that
+fails, or that gives nothing (no head, no hash, no checksum, an empty log or
+listing), fails the check that needs it, with the reason; it is never skipped or
+turned into INFO. Before the wipe and the restart, such a read stops the run
+(exit 2) instead.
 
 | Check | Passes when |
 |---|---|
+| node X rejoins (head within 2 blocks, on the others' chain) | written only as a FAIL, when D1 is not reached in `REJOIN_TIMEOUT` (see D1 above) |
 | restored head >= pre-wipe head | head after the rejoin >= head read from the database at stop |
-| node X within 2 blocks of the others at the end of D | read again once D is over (only if D1 was reached): node X's head is still within 2 blocks of the highest other node's, not only once during D |
-| block hash at pre-wipe heights | node X's hash at the step-2 height and the at-stop height equals each other node's, and equals what was recorded |
-| identity file checksum | identical at step 2, at stop, and after the rejoin |
-| signing state | every signing file present at stop still exists, and `.signed.json`, `.commitlock.json` and `.prevote.json` are never older than at stop, by height, then round (`timestamp` in `.signed.json`, `round` in the other two). The detail gives each one's height/round at stop and after: `advanced` only when strictly newer, `unchanged` when equal; an older one, or one without a height and round, fails the check |
-| no halt marker | no `*.halted` on the state volume, no foreign-signature line in node X's log; a log `docker logs` cannot give (a logging driver without reads) fails it |
-| signing floor | the `Restart signing floor` line is in node X's log, read to its end (INFO if the line is missing) |
+| node X within 2 blocks of the others at the end of D, on their chain | read again once D is over (only if D1 was reached): node X's head is still within 2 blocks of the highest other node's, not only once during D, and node X and every other node give one non-empty block hash at the highest height all of them have, which must be above the pre-wipe head; no such height, or a head or hash that cannot be read, fails it |
+| block hash at pre-wipe heights | each node's hash, node X's too, at the step-2 height and the at-stop height equals the one recorded then (node X's at step 2, its database's at stop) |
+| identity file checksum | identical at step 2, at stop, and after the rejoin; the files after the rejoin must all have been hashed |
+| signing state | every signing file present at stop, and every `.signed.json`, `.commitlock.json` and `.prevote.json` present at step 2, still exists after the rejoin (one there at step 2 and not at stop fails it), and those three are never older than at stop, by height, then round (`timestamp` in `.signed.json`, `round` in the other two). At least one of the three must be compared, and a file that cannot be hashed after the rejoin fails it (at stop or after the wipe it stops the run). The detail gives each one's height/round at stop and after: `advanced` only when strictly newer, `unchanged` when equal; an older one, or one without a height and round, fails the check |
+| no halt marker | the state volume's listing is read and holds `node.identity`, with no `*.halted`; node X's log is read once and is not empty, with no foreign-signature line. A log `docker logs` cannot give (a logging driver without reads), or an empty one, fails it |
+| signing floor | the `Restart signing floor` line is in node X's log, read to its end; INFO if a log that was read lacks the line, FAIL if the log cannot be read or is empty |
 | node X signs | see D above |
 | other nodes never stalled | every 5 s the run reads the head of each watched node (the other nodes in `rejoin`, all four validators in `isolated`) and keeps the lowest and the highest; a head read in which one of them does not answer counts as failed. So the slowest validator decides, one node rising alone does not pass, and nor does a slow one catching up while the others make no new block. With the devnet's quorum (below), the longest gap between increases of the lowest head, or of the highest, while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. It also needs at least one new block on every watched validator: the lowest head at the window's last successful read must be above the highest at its first, however short the window; a window without one fails with "no new block on the watched validators between `<t0>` and `<t1>`" (unix times, as in `logs/monitor.tsv`). No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
-| restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows equal; same table set |
-| schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations` |
-| one instance of the key | asserted before the single start; the run dies if it does not hold |
-| isolated node holds no copy of node X's key | (`isolated`) no mount of node X's identity or state volume, and the identity file on node-iso's state volume, read, is not node X's; one that cannot be read fails it |
+| restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows in the dump's counts and equal; same table set. Written after the restore's migration, before node X starts again |
+| schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations`, of which there must be at least one counted |
+| one instance of the key | asserted before the single start (a `docker ps` listing that fails stops the run); written after it |
+| isolated node reaches the expected head, on the validators' chain | (`isolated`, `ISO_NODE=1`) within `REJOIN_TIMEOUT`, node-iso's head is at or above the restored database's head and within 2 blocks of the highest validator's, and node-iso and every validator give one non-empty block hash at the highest height all of them have, which must be above the database's head |
+| isolated node holds no copy of node X's key | (`isolated`) node-iso's mounts are read and include its own state volume and no identity or state volume of node X, and the identity file on node-iso's state volume, read as a SHA-256 (64 hex), differs from node X's step-2 one; an identity that cannot be read, or a read that gives no SHA-256, fails it |
 | node X untouched and the only holder of its key | (`isolated`) the one running node X container is the one started at bring-up, and the only container on its state volume |
 | gossip enabled on every node | `GOSSIP_ENABLED=true` in the generated compose file (INFO when `ALLOW_GOSSIP_OFF=1` lets it be off) |
 | node state is writable by uid 1000 | the probes of "Writable state" above (a failure stops the run before it starts) |
@@ -382,8 +391,13 @@ cannot read, a second container on node X's state volume (the run stops before
 node X starts again; in `isolated` the holder check fails), a dump copy that
 fails its hash (exit 2 in phase A2), and in `isolated` a restored database
 without the dump's head, another hash at its head, a node-iso that stays behind,
-and a node-iso identity that is node X's or cannot be read (each fails its own
-check, and only it), the default `OUT_DIR` of a run started in the same second
+and a node-iso identity that is node X's, cannot be read, or is read as nothing
+with exit 0 (each fails its own check, and only it), a node X or a node-iso that
+matches the validators up to its stop (its restored database's head) and forks
+after it (the rejoin or catch-up check fails), a signing file gone from the state
+volume before the stop (the signing state check fails), every read giving nothing
+with exit 0 once the restarted node X or node-iso serves (every check written from
+then on fails, exit 1), the default `OUT_DIR` of a run started in the same second
 as another of the project, a second run of a project whose
 lock is held and an `OUT_DIR` that already exists, empty or not (exit 2, nothing
 written), the project in the default `OUT_DIR` name, a teardown whose `down`

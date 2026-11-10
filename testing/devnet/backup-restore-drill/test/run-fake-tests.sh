@@ -54,6 +54,21 @@ one_fail() { # $1 regex of the check that must be the run's only failed one
     if [ "${n}" = 1 ] && grep -qE -- "CHECK FAIL: $1" "${CDIR}/out.txt"; then ok "the only failed check: $1"; else bad "${n} failed checks, wanted only /$1/"; fi
 }
 no_all_row() { if grep -q '^ALL' "${CDIR}"/runs/*/phases.tsv; then bad "an ALL row (stopped until rejoined and signing)"; else ok "no ALL row"; fi; }
+only_fails_among() { # regexes: the first is a failed check, and every failed check is one of them
+    local alt
+    alt="$(IFS='|'; echo "$*")"
+    if grep -qE -- "CHECK FAIL: $1" "${CDIR}/out.txt" && ! grep 'CHECK FAIL' "${CDIR}/out.txt" | grep -qvE -- "CHECK FAIL: (${alt})"; then
+        ok "/$1/ failed, and no check outside /${alt}/"
+    else bad "/$1/ did not fail, or another check failed: $(grep -o 'CHECK FAIL: [^(]*' "${CDIR}/out.txt" | tr '\n' ';')"; fi
+}
+# Every check written from $1 (a regex of an output line) on is a FAIL, and there is one
+no_pass_after() {
+    local rows
+    rows="$(awk -v m="$1" '$0 ~ m { s = 1 } s && /CHECK (PASS|INFO)/' "${CDIR}/out.txt")"
+    if grep -qE -- "$1" "${CDIR}/out.txt" && [ -z "${rows}" ] && awk -v m="$1" '$0 ~ m { s = 1 } s && /CHECK FAIL/ { f = 1 } END { exit !f }' "${CDIR}/out.txt"; then
+        ok "every check from /$1/ on is a FAIL"
+    else bad "a check from /$1/ on is not a FAIL, or none is written: $(printf '%s' "${rows}" | tr '\n' ';')"; fi
+}
 
 # ── gen-compose.py: the gossip default, on its own ──────────────────────
 gen() { # GOSSIP value or "unset" -> the value in the compose file, or the error
@@ -245,7 +260,8 @@ if sel full-rejoin; then
     want_out 'CHECK PASS: restart signing floor logged before signing' "the floor line in node 4's log"
     want_out 'CHECK PASS: restored head >= pre-wipe head' "head after restore"
     want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "the other nodes' head rose: stall check PASS"
-    want_out 'CHECK PASS: node 4 within 2 blocks of the others at the end of D' "still within 2 blocks after D"
+    want_out 'CHECK PASS: node 4 within 2 blocks of the others at the end of D, on their chain \(head [0-9]+ vs others [0-9]+; block ([0-9]+) hash\1\.\. on nodes 4 1 2 3\)' "still within 2 blocks after D, one hash on all four"
+    want_out "CHECK PASS: identity file checksum identical .*\(sha256 [0-9a-f]{12}\.\.\)" "the identity check names the hash"
     if grep -q '^ALL' "${CDIR}"/runs/*/phases.tsv; then ok "an ALL row (rejoined and signing)"; else bad "no ALL row"; fi
     want_out 'RESULT PASS: rejoin drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
@@ -266,7 +282,8 @@ if sel full-isolated; then
     go full-isolated VARIANT=isolated
     want_rc 0
     want_out 'CHECK PASS: the validators kept forging during the drill' "the validators' head rose: stall check PASS"
-    want_out "CHECK PASS: isolated node holds no copy of node 4's key" "node-iso holds no copy of the key"
+    want_out "CHECK PASS: isolated node holds no copy of node 4's key \(own state volume mounted, no identity or state volume of node 4, different identity \(sha256 [0-9a-f]{12}\.\. vs [0-9a-f]{12}\.\.\)\)" "node-iso holds no copy of the key"
+    want_out "CHECK PASS: isolated node reaches the expected head, on the validators' chain \(head [0-9]+ >= DB head [0-9]+, network [0-9]+; block ([0-9]+) hash\1\.\. on nodes iso 1 2 3 4\)" "node-iso caught up, one hash on it and the four validators"
     want_out 'CHECK PASS: node 4 untouched and the only holder of its key \(one node-4 container, the one started at bring-up, and the only container on its state volume\)' "node 4 the one holder"
     want_out 'RESULT PASS: isolated drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
@@ -362,6 +379,16 @@ if sel signing-older; then
     want_out 'CHECK PASS: signing state unchanged or advanced, never older \(.*\.commitlock\.json=unchanged [0-9]+/[0-9]+ ' "an equal commit lock is unchanged"
     torn_down
 fi
+if sel signing-lost; then
+    # r6 F2: the prevote record is gone from node 4's state volume from the backup on, before
+    # the stop: the at-stop list lacks it, the restarted node writes a new one
+    go signing-lost-before-stop FAKE_STATE_LOST=node.identity.prevote.json
+    want_rc 1
+    want_out 'CHECK FAIL: signing state unchanged or advanced, never older \( node.identity.prevote.json was there at step 2, not at stop' "a signing file lost before the stop: FAIL"
+    no_out 'CHECK PASS: signing state' "a PASS of the signing state check"
+    one_fail 'signing state unchanged or advanced'
+    torn_down
+fi
 
 # ── the manual migration of the restored database ───────────────────────
 node4_starts() { grep -cE 'up -d --no-deps --pull never node-4$' "${CDIR}/calls.log"; }
@@ -404,7 +431,7 @@ if sel rejoin-never; then
     # node 4 starts again at head 0 and never comes within 2 blocks
     go rejoin-never FAKE_REJOIN_LAG=100000 REJOIN_TIMEOUT=5
     want_rc 1
-    want_out 'CHECK FAIL: node 4 rejoins \(head within 2 blocks\) \(head 0 vs others [0-9]+ after 5s\)' "the rejoin fails"
+    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(head 0 vs others [0-9]+ after 5s\)" "the rejoin fails"
     want_out 'CHECK FAIL: restored head >= pre-wipe head \(head 0 < [0-9]+\)' "the restored head fails"
     no_out 'CHECK PASS: (restored head|node 4 (rejoins|signs|within))' "a PASS of the head, rejoin or signing checks"
     no_out 'PHASE D1? ' "a D1 or D phase row"
@@ -416,7 +443,7 @@ if sel rejoin-falls-behind; then
     go rejoin-falls-behind FAKE_REJOIN_LAG=9:signed FAKE_SLOW_RESTORE=6
     want_rc 1
     want_out 'PHASE D rejoin: head within 2 blocks and node signing' "phase D reached"
-    want_out 'CHECK FAIL: node 4 within 2 blocks of the others at the end of D \(head [0-9]+ vs others [0-9]+: ' "behind at the end of D: FAIL"
+    want_out 'CHECK FAIL: node 4 within 2 blocks of the others at the end of D, on their chain \(head [0-9]+ vs others [0-9]+: it came within 2 blocks during D, then fell behind\)' "behind at the end of D: FAIL"
     no_out 'RESULT PASS' "RESULT PASS"
     one_fail 'node 4 within 2 blocks of the others at the end of D'
     torn_down
@@ -449,11 +476,25 @@ if sel rejoin-counts; then
     torn_down
 fi
 if sel rejoin-hash; then
-    # node 2 has other blocks at the pre-wipe heights
-    go rejoin-hash FAKE_OTHER_HASH=node-2
+    # node 2 has other blocks at every height: at the pre-wipe ones, and at the one the rejoin compares
+    go rejoin-hash FAKE_OTHER_HASH=node-2 REJOIN_TIMEOUT=8
     want_rc 1
     want_out "CHECK FAIL: block hash at pre-wipe heights equals the other nodes' \( node2@[0-9]+=other[0-9]+!=hash[0-9]+" "another node's hash differs: FAIL"
-    one_fail 'block hash at pre-wipe heights'
+    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(head [0-9]+ vs others [0-9]+ after 8s; block ([0-9]+) is other\1\.\. on node 2, hash\1\.\. on node 4\)" "the rejoin fails on node 2's hash"
+    only_fails_among 'block hash at pre-wipe heights' 'node 4 rejoins'
+    torn_down
+fi
+if sel rejoin-fork; then
+    # r6 F1: node 4 agrees with the others up to its head at the stop, then answers every later
+    # block with another hash. The pre-wipe heights match; a height above them does not
+    go rejoin-fork FAKE_FORK=node-4 REJOIN_TIMEOUT=8
+    want_rc 1
+    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(head [0-9]+ vs others [0-9]+ after 8s; block ([0-9]+) is hash\1\.\. on node 1, fork\1\.\. on node 4\)" "a fork after the stop: the rejoin fails"
+    want_out "CHECK PASS: block hash at pre-wipe heights equals the other nodes'" "the pre-wipe heights still match (the fork starts above them)"
+    no_out 'CHECK PASS: node 4 (rejoins|within 2 blocks)' "a PASS of the rejoin checks"
+    no_out 'PHASE D1? ' "a D1 or D phase row"
+    no_all_row
+    one_fail 'node 4 rejoins'
     torn_down
 fi
 if sel rejoin-schema; then
@@ -480,7 +521,8 @@ if sel rejoin-halt; then
     want_rc 1
     want_out "CHECK FAIL: no halt marker, no foreign-signature log \(docker logs cannot read node 4's log" "an unreadable log: FAIL"
     no_out 'CHECK PASS: no halt marker' "a PASS of the halt and foreign-signature check"
-    one_fail 'no halt marker'
+    want_out "CHECK FAIL: restart signing floor logged before signing \(docker logs cannot read node 4's log, or it is empty" "the floor line cannot be looked for: FAIL, not INFO"
+    only_fails_among 'no halt marker' 'restart signing floor'
     torn_down
 fi
 if sel rejoin-holder; then
@@ -504,11 +546,24 @@ if sel iso-counts; then
     torn_down
 fi
 if sel iso-hash; then
-    # node 1, the network's source for the hash, has another block at the DB's head
-    go iso-hash VARIANT=isolated FAKE_OTHER_HASH=node-1
+    # node 1, the network's source for the hash, has another block at the DB's head, and at
+    # the height node-iso's catch-up compares
+    go iso-hash VARIANT=isolated FAKE_OTHER_HASH=node-1 REJOIN_TIMEOUT=8
     want_rc 1
     want_out "CHECK FAIL: isolated DB's head block hash equals the network's \(db hash[0-9]+ net other[0-9]+\)" "another hash: FAIL"
-    one_fail "isolated DB's head block hash"
+    want_out "CHECK FAIL: isolated node reaches the expected head, on the validators' chain \(.*; block ([0-9]+) is other\1\.\. on node 1, hash\1\.\. on node iso\)" "the catch-up fails on node 1's hash"
+    only_fails_among "isolated DB's head block hash" 'isolated node reaches the expected head'
+    torn_down
+fi
+if sel iso-fork; then
+    # r6 F1: node-iso agrees with the validators up to its restored database's head, then
+    # answers every later block with another hash
+    go iso-fork VARIANT=isolated FAKE_FORK=node-iso REJOIN_TIMEOUT=8
+    want_rc 1
+    want_out "CHECK FAIL: isolated node reaches the expected head, on the validators' chain \(head [0-9]+ vs DB head [0-9]+, network [0-9]+ after 8s; block ([0-9]+) is hash\1\.\. on node 1, fork\1\.\. on node iso\)" "a fork after the DB head: the catch-up fails"
+    want_out "CHECK PASS: isolated DB's head block hash equals the network's" "the DB head itself still matches"
+    no_out 'PHASE ID ' "a phase ID row"
+    one_fail 'isolated node reaches the expected head'
     torn_down
 fi
 if sel iso-schema; then
@@ -522,7 +577,7 @@ if sel iso-behind; then
     # node-iso serves but stays at head 0
     go iso-behind VARIANT=isolated FAKE_BEHIND=node-iso REJOIN_TIMEOUT=5
     want_rc 1
-    want_out 'CHECK FAIL: isolated node reaches the expected head \(head 0 vs DB head [0-9]+, network [0-9]+ after 5s\)' "node-iso behind: FAIL"
+    want_out "CHECK FAIL: isolated node reaches the expected head, on the validators' chain \(head 0 vs DB head [0-9]+, network [0-9]+ after 5s\)" "node-iso behind: FAIL"
     no_out 'PHASE ID ' "a phase ID row"
     one_fail 'isolated node reaches the expected head'
     torn_down
@@ -534,10 +589,20 @@ if sel iso-key; then
     want_out "CHECK FAIL: isolated node holds no copy of node 4's key \(same identity file hash\)" "a copy of the key: FAIL"
     one_fail 'isolated node holds no copy'
     torn_down
-    # node-iso's state volume cannot be read: its identity is not known to differ
+    # node-iso's state volume cannot be read (the daemon fails the helper): its identity is not known to differ
     go iso-key-unreadable VARIANT=isolated FAKE_ISO_UNREADABLE=1
     want_rc 1
     want_out "CHECK FAIL: isolated node holds no copy of node 4's key \(cannot read node-iso's identity file" "an unreadable identity: FAIL"
+    no_out 'CHECK PASS: isolated node holds no copy' "a PASS of the key check"
+    one_fail 'isolated node holds no copy'
+    torn_down
+fi
+if sel iso-key-empty; then
+    # r6 F3: the read of node-iso's identity prints nothing and exits 0, as sha256sum of a
+    # missing file piped into cut does
+    go iso-key-empty VARIANT=isolated FAKE_ISO_UNREADABLE=empty
+    want_rc 1
+    want_out "CHECK FAIL: isolated node holds no copy of node 4's key \(cannot read node-iso's identity file .*\(node-iso: nothing, " "an empty identity read: FAIL"
     no_out 'CHECK PASS: isolated node holds no copy' "a PASS of the key check"
     one_fail 'isolated node holds no copy'
     torn_down
@@ -549,6 +614,32 @@ if sel iso-holder; then
     want_out 'CHECK FAIL: node 4 untouched and the only holder of its key \(' "a second holder of the state volume: FAIL"
     no_out 'CHECK PASS: node 4 untouched' "a PASS of the holder check"
     one_fail 'node 4 untouched and the only holder of its key'
+    torn_down
+fi
+
+# ── every read empty ────────────────────────────────────────────────────
+if sel empty-reads; then
+    # Once the restarted node 4 first answers its RPC, every read prints nothing and exits 0:
+    # node RPC, psql, the state volume helpers, docker logs, inspect and ps. Every check
+    # written from then on reads its evidence then: each must fail, and the run exit 1
+    go empty-reads FAKE_EMPTY_READS=1 REJOIN_TIMEOUT=8 STALL_LIMIT=4
+    want_rc 1
+    no_pass_after 'PHASE C '
+    for c in "node 4 rejoins" "restored head >= pre-wipe head" "block hash at pre-wipe heights" "identity file checksum identical" \
+        "signing state unchanged or advanced" "no halt marker" "restart signing floor" "other nodes never stalled"; do
+        want_out "CHECK FAIL: ${c}" "${c}: FAIL"
+    done
+    no_out 'RESULT PASS' "RESULT PASS"
+    no_all_row
+    torn_down
+    # the same from node-iso's first answer on
+    go empty-reads-isolated VARIANT=isolated FAKE_EMPTY_READS=1 REJOIN_TIMEOUT=8 STALL_LIMIT=4
+    want_rc 1
+    no_pass_after '── 07-isolated-node'
+    for c in "isolated node reaches the expected head" "isolated node holds no copy" "the validators kept forging" "node 4 untouched"; do
+        want_out "CHECK FAIL: ${c}" "${c}: FAIL"
+    done
+    no_out 'RESULT PASS' "RESULT PASS"
     torn_down
 fi
 
@@ -693,22 +784,22 @@ if sel monitor-slowest; then
     # rejoin watches nodes 1-3: only node 3 rises. Its window starts just after the pg_dump,
     # so the lowest head rises in it only if a read from just before the dump falls in its
     # first second; without one the reason starts with "no new block", the gap follows
-    go monitor-slowest-stuck STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2
+    go monitor-slowest-stuck STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2 REJOIN_TIMEOUT=10
     want_rc 1
     want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; (no new block on the watched validators between [0-9]+ and [0-9]+[^;]*; )?longest gap ([6-9]|[1-9][0-9]+)s' "rejoin, two of three stuck: FAIL on the gap"
     no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
-    go monitor-slowest-silent STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_SILENT=node-1
+    go monitor-slowest-silent STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_SILENT=node-1 REJOIN_TIMEOUT=10
     want_rc 1
     want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; no head read for ([6-9]|[1-9][0-9]+)s, more than 3s' "rejoin, one of three silent: FAIL naming the missing reads"
     no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
     # isolated watches nodes 1-4: only node 4 rises. The lowest head at the end is the stuck
     # nodes' head at the pg_dump, which the highest at the window's first read may reach:
     # then the reason starts with "no new block", the gap follows
-    go monitor-slowest-stuck-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3
+    go monitor-slowest-stuck-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3 REJOIN_TIMEOUT=10
     want_rc 1
     want_out 'CHECK FAIL: the validators kept forging during the drill \((no new block on the watched validators between [0-9]+ and [0-9]+[^;]*; )?longest gap ([6-9]|[1-9][0-9]+)s' "isolated, three of four stuck: FAIL on the gap"
     no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
-    go monitor-slowest-silent-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_SILENT=node-1
+    go monitor-slowest-silent-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_SILENT=node-1 REJOIN_TIMEOUT=10
     want_rc 1
     want_out 'CHECK FAIL: the validators kept forging during the drill \(no head read for ([6-9]|[1-9][0-9]+)s, more than 3s' "isolated, one of four silent: FAIL naming the missing reads"
     no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
@@ -717,42 +808,39 @@ fi
 # so no new block in either variant's window. The restore's 6 s pg_restore
 # (FAKE_SLOW_RESTORE) gives the window five reads or more; with the default STALL_LIMIT
 # (90) it is still far shorter than the limit. The controls show the same settings
-# without the fault pass
-only_stall_fail() {
-    local n
-    n="$(grep -c 'CHECK FAIL' "${CDIR}/out.txt")"
-    if [ "${n}" = 1 ]; then ok "the stall check is the only failed check"; else bad "${n} failed checks, wanted 1 (the stall check)"; fi
-}
+# without the fault pass. Validators stuck below node 4's head at its stop (or the
+# restored database's head) have no common height above it, so the rejoin (catch-up)
+# check, which needs one, fails too: the stall check and it are the only failed checks
 if sel monitor-flat; then
     go monitor-flat-control FAKE_SLOW_RESTORE=6
     want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "rejoin, no fault, the same settings: PASS"
     go monitor-flat-control-isolated VARIANT=isolated FAKE_SLOW_RESTORE=6
     want_out 'CHECK PASS: the validators kept forging during the drill' "isolated, no fault, the same settings: PASS"
-    go monitor-flat FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3 FAKE_STUCK_AT=5
+    go monitor-flat FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3 FAKE_STUCK_AT=5 REJOIN_TIMEOUT=10
     want_rc 1
     want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; no new block on the watched validators between [0-9]+ and [0-9]+ .*head 5 -> 5, ([5-9]|[1-9][0-9]+) samples, 0 unreadable' "rejoin, nodes 1-3 at one head: FAIL naming the window"
     no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
-    only_stall_fail
-    go monitor-flat-isolated VARIANT=isolated FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3,node-4 FAKE_STUCK_AT=5
+    only_fails_among 'other nodes never stalled' 'node 4 rejoins'
+    go monitor-flat-isolated VARIANT=isolated FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3,node-4 FAKE_STUCK_AT=5 REJOIN_TIMEOUT=10
     want_rc 1
     want_out 'CHECK FAIL: the validators kept forging during the drill \(no new block on the watched validators between [0-9]+ and [0-9]+ .*head 5 -> 5, ([5-9]|[1-9][0-9]+) samples, 0 unreadable' "isolated, nodes 1-4 at one head: FAIL naming the window"
     no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
-    only_stall_fail
+    only_fails_among 'the validators kept forging' 'isolated node reaches the expected head'
 fi
 # A watched node 60 blocks behind (20 s) catches up while the others stay at the head they had
 # at the backup's pg_dump (FAKE_CATCHUP, FAKE_STUCK): the lowest head keeps rising through both
 # variants' windows after the dump, but no new block is made. Same settings as monitor-slowest
 if sel monitor-catchup; then
-    go monitor-catchup STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2 FAKE_CATCHUP=node-3:60
+    go monitor-catchup STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2 FAKE_CATCHUP=node-3:60 REJOIN_TIMEOUT=10
     want_rc 1
     want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; (no new block on the watched validators|longest gap)' "rejoin, a node catching up, no new block: FAIL"
     no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
-    only_stall_fail
-    go monitor-catchup-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-4 FAKE_CATCHUP=node-3:60
+    only_fails_among 'other nodes never stalled' 'node 4 rejoins'
+    go monitor-catchup-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-4 FAKE_CATCHUP=node-3:60 REJOIN_TIMEOUT=10
     want_rc 1
     want_out 'CHECK FAIL: the validators kept forging during the drill \((no new block on the watched validators|longest gap)' "isolated, a node catching up, no new block: FAIL"
     no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
-    only_stall_fail
+    only_fails_among 'the validators kept forging' 'isolated node reaches the expected head'
 fi
 
 # ── one run per project, a new OUT_DIR per run ──────────────────────────
