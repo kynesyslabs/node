@@ -233,6 +233,7 @@ if sel full-rejoin; then
     want_rc 0
     want_out 'CHECK PASS: the wipe kept the ownership of the state volume' "ownership preserved by the wipe"
     want_out 'CHECK PASS: node 4 signs after the restart' "node 4 signs"
+    want_out 'CHECK PASS: restart signing floor logged before signing' "the floor line in node 4's log"
     want_out 'CHECK PASS: restored head >= pre-wipe head' "head after restore"
     want_out 'RESULT PASS: rejoin drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
@@ -253,6 +254,20 @@ if sel full-isolated; then
     want_rc 0
     want_out 'RESULT PASS: isolated drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
+    torn_down
+fi
+if sel floor-log; then
+    # the floor line early in node 4's log, then 5000 more lines (more than a pipe holds): a
+    # reader that stops at the match kills docker logs with SIGPIPE, which must not read as absent
+    go floor-log-long FAKE_LOG_FILL=5000
+    want_rc 0
+    want_out 'CHECK PASS: restart signing floor logged before signing' "the floor line found ahead of 5000 more lines"
+    torn_down
+    # the same long log without the line: INFO, saying the line is missing
+    go floor-log-missing FAKE_LOG_FILL=5000 FAKE_NO_FLOOR_LOG=1
+    want_rc 0
+    want_out "CHECK INFO: restart signing floor logged before signing \(the \[SIGNING\] Restart signing floor line is missing from node 4's log\)" "INFO naming the missing line"
+    no_out 'wording may differ' "the old 'wording may differ' detail"
     torn_down
 fi
 if sel dump-cut; then

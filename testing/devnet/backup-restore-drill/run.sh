@@ -1135,10 +1135,12 @@ if [ "${VARIANT}" = rejoin ]; then
             fi
             ;;
     esac
-    if docker logs "${CID[${X_NODE}]}" 2>&1 | grep -aq 'Restart signing floor'; then
+    # counted, not grep -q: grep -q exits at the match, docker logs then dies of SIGPIPE and pipefail reads that as absent
+    floor_lines="$(docker logs "${CID[${X_NODE}]}" 2>&1 | grep -ac 'Restart signing floor' || true)"
+    if [ "${floor_lines:-0}" != 0 ]; then
         check "restart signing floor logged before signing" PASS "[SIGNING] Restart signing floor line present"
     else
-        check "restart signing floor logged before signing" INFO "line not found in the node log (wording may differ)"
+        check "restart signing floor logged before signing" INFO "the [SIGNING] Restart signing floor line is missing from node ${X_NODE}'s log"
     fi
     # 6. signing again
     if [ "${SIGNED}" = 1 ]; then check "node ${X_NODE} signs after the restart" PASS "${SIGN_EVIDENCE}"; fi

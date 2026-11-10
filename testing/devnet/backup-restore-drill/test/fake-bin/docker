@@ -18,7 +18,10 @@ FAKE_DUMP_CUT (the dump ends after its table of contents: reading the whole
 archive fails),
 FAKE_DOWN_FAIL (compose down removes nothing and exits 1), FAKE_DOWN_LEAVE
 (compose down exits 0 but leaves the volumes whose name contains it),
-FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3). Every call is appended to
+FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3), FAKE_NO_FLOOR_LOG (a starting
+node does not log the restart signing floor), FAKE_LOG_FILL (lines `docker logs`
+prints after a container's log, 0; a reader that stops early kills it with
+SIGPIPE, as it does the docker CLI). Every call is appended to
 $FAKE_DIR/calls.log.
 """
 import hashlib
@@ -127,9 +130,9 @@ def start_container(st, compose, project, svc, c):
                 pg["db"] = "chain"
         if not st["t0"]:
             st["t0"] = time.time()
-        if c.get("starts", 0) >= 1:
-            c["logs"].append("[SIGNING] Restart signing floor 42")
-        c["starts"] = c.get("starts", 0) + 1
+        # every boot of a real node logs it (src/index.ts), a container recreated after `compose rm` too
+        if not os.environ.get("FAKE_NO_FLOOR_LOG"):
+            c["logs"].append("[SIGNING] Restart signing floor: only rounds after 42 are signed")
 
 
 def compose_cmd(a):
@@ -497,7 +500,9 @@ def main():
         c = st["containers"].get(cid)
         if not c:
             fail("No such container", 1)
-        out("\n".join(c.get("logs", [])))
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+        fill = [f"[fake] {c['service']} log line {k}" for k in range(int(os.environ.get("FAKE_LOG_FILL", "0")))]
+        out("\n".join(c.get("logs", []) + fill))
     elif cmd == "inspect":
         fmt = a[a.index("-f") + 1]
         out("0" if "ExitCode" in fmt else "")

@@ -290,7 +290,7 @@ Each is printed PASS, FAIL or INFO, and written to `timings.md` and
 | identity file checksum | identical at step 2, at stop, and after the rejoin |
 | signing state | every signing file present at stop still exists; `.signed.json` and `.prevote.json` heights never lower. The detail says per file `unchanged` or `advanced` |
 | no halt marker | no `*.halted` on the state volume, no foreign-signature line in node X's log |
-| signing floor | the `Restart signing floor` log line is present (INFO if the wording differs) |
+| signing floor | the `Restart signing floor` line is in node X's log, read to its end (INFO if the line is missing) |
 | node X signs | see D above |
 | other nodes never stalled | with the devnet's quorum (below), the longest gap between head increases while node X was down is at most `STALL_LIMIT` |
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows equal; same table set |
