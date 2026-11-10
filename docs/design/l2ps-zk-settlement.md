@@ -49,7 +49,11 @@ What stays public is the net change per touched account in a batch, because
 it moves a public L1 balance, and each transfer's signer and nonce, which
 validators need to check the signature and freshness. A batch with one
 transfer therefore reveals that transfer, and in any batch an observer can
-count a signer's transfers and follow their nonce order. Hiding amounts from L1 entirely needs subnet-held balances with only
+count a signer's transfers and follow their nonce order. Larger batches hide
+only what the net changes cannot separate: when each signer sends once and the
+amounts differ (−4 and −9 out, +4 and +9 in), every transfer can still be
+matched. Amount privacy on L1 holds only for transfers that net out against
+others in the same batch. Hiding amounts from L1 entirely needs subnet-held balances with only
 deposits and withdrawals on L1 (option C in DEM-816); that is a later, larger
 change and this design does not close it off.
 
@@ -74,12 +78,21 @@ The `l2psBatch` transaction gains, inside its signed content:
 
 - `commitments`: the `c` of each transfer, in batch order.
 - `settlement`: the net change per touched account, sorted by address, each a
-  signed integer in OS.
+  signed integer in OS with magnitude below 2^128, sent as a sign and a
+  magnitude. Validators reject any value outside that range before turning it
+  into field elements, and apply the same signed integer they verified, so a
+  field wrap (a 1 OS debit read as a credit of p − 1) cannot pass.
 - `proof`: the PLONK proof and its public signals.
 
 ### Circuit
 
-`L2PSSettlement(N, M)`, N transfers and M touched accounts, M ≤ 2N.
+`L2PSSettlement(N, M)`, up to N transfers and up to M touched accounts,
+M = 2N. A batch with fewer fills the tail with inactive slots: each slot has a
+public `active` flag, active slots come first, an inactive account slot has
+address, balance and change 0 and is never indexed by a transfer, and an
+inactive transfer slot has commitment 0 and touches no account. The strict
+address order applies to active slots only, so one circuit serves every batch
+up to its size.
 
 Public inputs: a Poseidon hash over the N commitments, each commitment's
 signer and nonce, the M account addresses, their balances before the batch

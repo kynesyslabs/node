@@ -48,12 +48,14 @@ replaces this with inputs bound to the signed transfers and real balances.
 
 To turn them on, add `L2PS_ZK_ENABLED=true` to the node's `.env` or
 deployment environment, or export it before starting from a shell. With
-Docker Compose, recreate the container so it reads the new environment
-(`docker compose restart` keeps the old one):
+Docker, recreate the container so it reads the new environment
+(`docker compose restart` keeps the old one) by running the command that
+started the node again, for example `./run --docker --proxy`. A bare
+`docker compose up` without the same compose files drops overrides such as
+the proxy, which publishes RPC directly.
 
 ```bash
-docker compose up -d --no-deps node
-# or, for a shell start:
+# shell start:
 export L2PS_ZK_ENABLED=true
 ```
 
