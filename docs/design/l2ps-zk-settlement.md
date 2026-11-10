@@ -79,15 +79,19 @@ The `l2psBatch` transaction gains, inside its signed content:
 
 `L2PSSettlement(N, M)`, N transfers and M touched accounts, M ≤ 2N.
 
-Public inputs: a Poseidon hash over the N commitments, the M account
-addresses, their balances before the batch and their net changes.
+Public inputs: a Poseidon hash over the N commitments, each commitment's
+signer and nonce, the M account addresses, their balances before the batch
+and their net changes.
 
-Private inputs: each transfer's `from`, `to`, `amount`, `nonce`, `salt`, and
-the index of its sender and receiver among the M accounts.
+Private inputs: each transfer's `from`, `to`, `amount`, `salt`, and the index
+of its sender and receiver among the M accounts.
 
 Constraints, per transfer:
 
-- `Poseidon(from, to, amount, nonce, salt)` equals its public commitment;
+- `Poseidon(from, to, amount, nonce, salt)` equals its public commitment, with
+  the public nonce;
+- `from` equals the commitment's public signer, so a member cannot sign a
+  commitment that debits another account;
 - `from` and `to` equal the accounts at the given indices (selector over M);
 - the amount and the running balances are range-checked to 128 bits. 64 bits
   covers about 1.8 × 10^10 DEM at 10^9 OS per DEM, which a treasury account
@@ -98,8 +102,9 @@ And for the whole batch: each account's balance after the last transfer minus
 its balance before equals its public net change.
 
 Balances before the batch are public L1 state, so validators supply them from
-their own GCR instead of trusting the prover. That makes the proof binding to
-the state the block is applied on.
+their own GCR instead of trusting the prover: the working state after every
+earlier transaction in the block, L1 transfers and earlier batches included.
+Two batches proven against the same parent balance cannot then both spend it.
 
 Estimated size for N = 10: 30-40K PLONK constraints, against 24,263 for the
 current `batch_10`. Proving time scales about linearly (15.3 s for 24K at 1.5
@@ -110,10 +115,12 @@ estimate to confirm on the first build.
 
 For each `l2psBatch` in a block, once `l2psSettlement` is active:
 
-1. Each commitment's signature verifies against its `from` and is fresh
-   (nonce rule as for L1 transfers).
+1. Each commitment's signature verifies against its public signer, and its
+   public nonce is fresh (nonce rule as for L1 transfers). The circuit ties
+   both to the commitment, so a replay with another nonce needs a commitment
+   the signer never signed.
 2. The public inputs are rebuilt from the transaction and the validator's own
-   balances at the parent state, never taken from the transaction.
+   working state at that transaction, never taken from the transaction.
 3. The PLONK proof verifies against the committed key (about 50 ms).
 4. The settlement is applied in block apply, in transaction order, by every
    validator and by Sync. A batch that fails any step makes the block invalid.
@@ -127,8 +134,10 @@ about 1 s to block validation.
 ### Proving (subnet member nodes)
 
 - The aggregator decrypts the batch (it is a member), builds the witness from
-  the real transfers and the parent-state balances, and proves in a
-  subprocess.
+  the real transfers and the touched balances at its current tip, and proves
+  in a subprocess. If any of those balances changes before the batch is
+  included, validation fails and the batch goes back to the L2PS mempool to be
+  proven again; an account that is busy on L1 can delay its subnet's batches.
 - No main-thread fallback. A batch that cannot be proved stays in the L2PS
   mempool and is retried; it never goes out without a proof.
 - Throughput is about one core per 0.5 transfer/s. A configurable pool of
