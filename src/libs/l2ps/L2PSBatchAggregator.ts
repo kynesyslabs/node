@@ -145,8 +145,14 @@ export class L2PSBatchAggregator {
         this.isRunning = true
         this.isAggregating = false
 
-        // Initialize ZK Prover (optional - gracefully degrades if keys not available)
-        await this.initializeZkProver()
+        // Off unless L2PS_ZK_ENABLED=true: the image ships the proving keys, and
+        // a proof costs a core for seconds per batch while validators do not
+        // check it yet (docs/design/l2ps-zk-settlement.md).
+        if (this.zkEnabled) {
+            await this.initializeZkProver()
+        } else {
+            log.info("[L2PS Batch Aggregator] ZK batch proofs are off (L2PS_ZK_ENABLED is not true)")
+        }
 
         // Reset statistics using helper method
         this.stats = this.createInitialStats()
