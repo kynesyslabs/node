@@ -20,7 +20,7 @@
 # The node-state volumes must be writable by uid 1000 (FIX_OWNERSHIP=1 chowns
 # this drill's own volumes to 1000:1000 instead of stopping).
 #
-# Phases timed: A backup, A2 copy off the volume, B wipe, C restore, D rejoin.
+# Phases timed: A backup, A2 copy the dump to the host, B wipe, C restore, D rejoin.
 # Everything lives in $OUT_DIR (mode 700, gitignored under runs/). On exit,
 # teardown runs compose down -v on the project (default demos-bkdrill) and
 # checks that nothing of it is left.
@@ -895,11 +895,11 @@ say "dump ${DUMP_BYTES} bytes, head window ${H_DUMP_BEFORE}..${H_DUMP_AFTER}"
 # Copy off the node's volume to the host (models "copied off the host")
 phase_begin
 XPG_CID="$(dc ps -q "pg-${X_NODE}")"
-docker cp "${XPG_CID}:/backup/." "${BACKUP_DIR}/" >> "${STEP_LOG}" 2>&1 || die "copy off the volume failed"
+docker cp "${XPG_CID}:/backup/." "${BACKUP_DIR}/" >> "${STEP_LOG}" 2>&1 || die "copying the dump to the host failed"
 chmod -R go-rwx "${BACKUP_DIR}"
 (cd "${BACKUP_DIR}" && sha256sum -c "${DUMP_NAME}.sha256") >> "${STEP_LOG}" 2>&1 || die "the copy on the host does not match its sha256"
 DUMP_FILE="${BACKUP_DIR}/${DUMP_NAME}"
-phase_end A2 "copy off the node volume to the host dir + sha256 check"
+phase_end A2 "copy the dump to the host dir + sha256 check"
 
 # ═════════════════════════════════════════════════════════════════════════
 if [ "${VARIANT}" = rejoin ]; then
