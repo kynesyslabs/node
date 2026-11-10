@@ -40,18 +40,27 @@
 #     `down`, `down -t 0` and `down --volumes=false` are unchanged, and the
 #     last volume setting decides (`-v --volumes=false` does not ask)
 #   - reset-node stops before it deletes anything while a container of this
-#     checkout runs (also one labelled with a link to it) or the identity lock
-#     counts (on this host: a fresh heartbeat, or for a lock without one a
-#     live pid; a lock from another host whatever its age), also when the lock
-#     sits next to the target of a linked identity and readlink -f is missing;
+#     checkout runs (also one labelled with a link to it), a bun process works
+#     in it (with /proc; not one that started reset-node, nor one in a sibling
+#     directory) or the identity lock counts (on this host: a fresh heartbeat,
+#     or for a lock without one a live pid; a lock from another host whatever
+#     its age), also when the lock sits next to the target of a linked
+#     identity and readlink -f is missing, and for the lock of the
+#     IDENTITY_FILE of its environment or of the checkout's .env (quoted, with
+#     a comment; no other line of .env is printed; one that does not exist has
+#     no lock);
 #     it stops when that link cannot be followed, the lock's directory cannot
 #     be searched or the lock cannot be read in full (mode 000, a failed read,
 #     empty, no pid or hostname, cut off before its closing brace) or no
 #     temporary file can be made for the container list, and goes on
-#     (checking the lock only) when docker is missing, unreachable or gives no
-#     answer within 10s; it checks again after the prompt (a lock taken while
-#     it waits) and before the removal (a container started after the backup,
-#     whose backups it then names and keeps)
+#     (checking the processes and locks only) when docker is missing,
+#     unreachable or gives no answer within 10s; it checks again after the
+#     prompt (a lock taken or an identity file made while it waits) and
+#     before the removal (a container started after the backup, whose backups
+#     it then names and keeps)
+#   - reset-node stops before the prompt when the IDENTITY_FILE of its
+#     environment, other than .demos_identity, or one of its signing files is
+#     in the checkout, and goes on when they are outside it
 #
 # Usage:
 #   scripts/launcher-wipe-guard.test.sh                 # the scripts next to this file
@@ -523,6 +532,10 @@ grep -qE 'docker compose .*up' "$ST/calls.log" 2>/dev/null && { FAIL=$((FAIL + 1
 echo "# scripts/reset-node (scripts from: $SRC)"
 
 RESET_SIGNING=(.demos_identity.signed.json .demos_identity.signed.json.halted .demos_identity.commitlock.json .demos_identity.prevote.json)
+# What reset-node says whenever it stops before it deletes anything
+NOTHING_DELETED="Nothing was deleted"
+# Only the cases below that set it give reset-node an IDENTITY_FILE
+unset IDENTITY_FILE
 
 # A node checkout with an identity and every signing-state file. git clone
 # makes an empty checkout (or fails with STUB_FAIL_CLONE=1, or first deletes
@@ -754,6 +767,103 @@ grep -q '^readlink -f' "$W/readlink.log" 2>/dev/null && grep -q '^readlink [^-]'
 linked_identity_world
 reset_check "reset-node: readlink -f fails, relative link chain, no lock -> proceeds" ok -y
 
+# The lock next to the IDENTITY_FILE of reset-node's environment or of the
+# checkout's .env counts too; .env is read for that key only
+validator_key_world() {
+    new_reset_world
+    echo validator.key >"$W/node/validator.key"
+    write_lock "$DEAD_PID" "$THIS_HOST" "$(($(date +%s) * 1000))" "$W/node/validator.key.lock"
+}
+validator_key_world
+IDENTITY_FILE=validator.key reset_check "reset-node: IDENTITY_FILE in the environment, fresh lock next to it -> refuses, deletes nothing" fail -y
+expect_untouched "reset-node with IDENTITY_FILE in the environment"
+case "$LAST_OUT" in *"Identity lock $W/node/validator.key.lock is held"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the lock of the IDENTITY_FILE of its environment";; esac
+
+validator_key_world
+printf 'ENV_CANARY=do-not-print\nIDENTITY_FILE="validator.key" # the validator key\n' >"$W/node/.env"
+reset_check "reset-node: .env sets IDENTITY_FILE (quoted, with a comment), fresh lock next to it -> refuses, deletes nothing" fail -y
+expect_untouched "reset-node with IDENTITY_FILE in .env"
+case "$LAST_OUT" in *"Identity lock $W/node/validator.key.lock is held"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the lock of the IDENTITY_FILE of .env";; esac
+case "$LAST_OUT" in *do-not-print*) FAIL=$((FAIL + 1)); echo "FAIL - reset-node printed another line of .env";; esac
+
+validator_key_world
+printf 'ENV_CANARY=do-not-print\n# IDENTITY_FILE=validator.key\n' >"$W/node/.env"
+reset_check "reset-node: .env without IDENTITY_FILE, lock next to an unconfigured file -> proceeds" ok -y
+
+new_reset_world
+write_lock "$DEAD_PID" "$THIS_HOST" "$(($(date +%s) * 1000))" "$W/node/missing.key.lock"
+IDENTITY_FILE=missing.key reset_check "reset-node: IDENTITY_FILE names a file that does not exist -> proceeds" ok -y
+
+# The reset keeps only .demos_identity and its files: another configured
+# identity, or a signing file of it, in the checkout stops it before the prompt
+KEEPS_ONLY="The reset keeps only .demos_identity and its files"
+new_reset_world
+echo validator.key >"$W/node/validator.key"
+IDENTITY_FILE=validator.key reset_check "reset-node: IDENTITY_FILE in the checkout, no lock -> refuses before the prompt, deletes nothing" fail </dev/null
+expect_untouched "reset-node with IDENTITY_FILE in the checkout"
+[[ -f "$W/node/validator.key" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node removed the IDENTITY_FILE in the checkout"; }
+case "$LAST_OUT" in *"$W/node/validator.key (of IDENTITY_FILE=validator.key) is in this checkout"*"$KEEPS_ONLY"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the IDENTITY_FILE in the checkout";; esac
+case "$LAST_OUT" in *"WARNING: This will delete"*) FAIL=$((FAIL + 1)); echo "FAIL - reset-node prompted with the IDENTITY_FILE in the checkout";; esac
+
+new_reset_world
+echo record >"$W/node/validator.key.signed.json"
+IDENTITY_FILE=validator.key reset_check "reset-node: only the signing record of IDENTITY_FILE in the checkout -> refuses, deletes nothing" fail -y
+expect_untouched "reset-node with the signing record of IDENTITY_FILE in the checkout"
+case "$LAST_OUT" in *"$W/node/validator.key.signed.json (of IDENTITY_FILE=validator.key) is in this checkout"*"$KEEPS_ONLY"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the signing record of IDENTITY_FILE";; esac
+case "$LAST_OUT" in *"$W/node/validator.key "*) FAIL=$((FAIL + 1)); echo "FAIL - reset-node named an IDENTITY_FILE that does not exist";; esac
+
+new_reset_world
+mkdir -p "$W/keys"
+echo validator.key >"$W/keys/validator.key"
+echo record >"$W/keys/validator.key.signed.json"
+IDENTITY_FILE="$W/keys/validator.key" reset_check "reset-node: IDENTITY_FILE and its signing record outside the checkout -> proceeds" ok -y
+[[ -f "$W/keys/validator.key" && -f "$W/keys/validator.key.signed.json" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node touched the IDENTITY_FILE outside the checkout"; }
+
+new_reset_world
+IDENTITY_FILE=.demos_identity reset_check "reset-node: IDENTITY_FILE=.demos_identity -> proceeds, keeps it and its files" ok -y
+for f in .demos_identity "${RESET_SIGNING[@]}"; do
+    [[ -f "$W/node/$f" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node with IDENTITY_FILE=.demos_identity dropped $f"; }
+done
+
+# A node started from this checkout without docker or a lock: a bun or node
+# process working in it (here sleep, copied under the name bun). reset-node
+# and the processes that started it do not count
+start_fake_bun() {
+    mkdir -p "$W/fake" "$1"
+    cp "$REAL_SLEEP" "$W/fake/bun"
+    (cd "$1" && exec "$W/fake/bun" 60) &
+    FAKE_BUN=$!
+    local i
+    for ((i = 0; i < 50; i++)); do
+        [[ "$(ps -o comm= -p "$FAKE_BUN" 2>/dev/null)" == *bun ]] && break
+        "$REAL_SLEEP" 0.1
+    done
+}
+stop_fake_bun() { kill "$FAKE_BUN" 2>/dev/null; wait "$FAKE_BUN" 2>/dev/null; }
+if [[ -e "/proc/$$/cwd" ]]; then
+    new_reset_world
+    start_fake_bun "$W/node"
+    reset_check "reset-node: a bun process works in this checkout -> refuses, deletes nothing" fail -y
+    stop_fake_bun
+    expect_untouched "reset-node with a bun process in this checkout"
+    case "$LAST_OUT" in *"Process $FAKE_BUN (bun) is running in this checkout: $W/node"*"Stop what is named above"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the bun process in this checkout";; esac
+
+    # bash copied under the name bun runs reset-node from the checkout
+    new_reset_world
+    mkdir -p "$W/fake"
+    cp "$(command -v bash)" "$W/fake/bun"
+    out="$(cd "$W/node" && env PATH="$W/bin:$PATH" STUB_REAL_MV="$(command -v mv)" STUB_RESET_DIR="$W" \
+        timeout 60 "$W/fake/bun" -c '"$0" -y; exit $?' "$W/reset-node" 2>&1)"
+    rc=$?
+    reset_result "reset-node: started by a bun process working in this checkout -> proceeds" ok "$rc" "$out"
+else
+    echo "skip - reset-node with a bun process in this checkout: no /proc on this host"
+fi
+new_reset_world
+start_fake_bun "$W/node-old"
+reset_check "reset-node: a bun process works outside this checkout (a sibling with the same prefix) -> proceeds" ok -y
+stop_fake_bun
+
 # A link that cannot be followed hides where the lock is: refuse
 new_reset_world
 rm -f "$W/node/.demos_identity"
@@ -762,14 +872,15 @@ ln -s .demos_identity "$W/node/loop-b"
 reset_check "reset-node: .demos_identity is a link loop -> refuses, deletes nothing" fail -y
 [[ -f "$W/node/package.json" && -L "$W/node/.demos_identity" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node with a link loop: the node directory was changed"; }
 if compgen -G "$W/*.backup" >/dev/null; then FAIL=$((FAIL + 1)); echo "FAIL - reset-node with a link loop: backups were made"; fi
-case "$LAST_OUT" in *".demos_identity is a link that cannot be followed"*"Nothing was deleted"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not say the identity link cannot be followed";; esac
+case "$LAST_OUT" in *".demos_identity is a link that cannot be followed"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not say the identity link cannot be followed";; esac
 
 # A lock that gives neither pid nor host may still be held (another user's
 # node writes it 0600; a starting node creates it before it writes it): refuse
 expect_unread_lock() {
-    expect_untouched "$1"
-    [[ -e "$W/node/.demos_identity.lock" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - $1: the lock was removed"; }
-    case "$LAST_OUT" in *"Could not read the identity lock $W/node/.demos_identity.lock"*"If no node uses this checkout, remove the lock file and run reset-node again. Nothing was deleted."*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - $1: reset-node did not name the lock it could not read";; esac
+    local what="$1"
+    expect_untouched "$what"
+    [[ -e "$W/node/.demos_identity.lock" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - $what: the lock was removed"; }
+    case "$LAST_OUT" in *"Could not read the identity lock $W/node/.demos_identity.lock"*"If no node uses this checkout, remove the lock file and run reset-node again. $NOTHING_DELETED."*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - $what: reset-node did not name the lock it could not read";; esac
 }
 # each lock below would let the reset go on if it were read
 new_reset_world
@@ -796,7 +907,7 @@ else
     reset_check "reset-node: fresh lock in a directory it cannot search (mode 000) -> refuses, deletes nothing" fail -y
     chmod 700 "$W/state"
     expect_untouched "reset-node with a lock in a directory it cannot search"
-    case "$LAST_OUT" in *"Cannot look for the identity lock $W/state/.demos_identity.lock: $W/state cannot be searched"*"Nothing was deleted"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the directory it cannot search";; esac
+    case "$LAST_OUT" in *"Cannot look for the identity lock $W/state/.demos_identity.lock: $W/state cannot be searched"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the directory it cannot search";; esac
 fi
 chmod 700 "$W/state"
 
@@ -868,7 +979,7 @@ if [[ -s "$W/docker.pid" ]] && kill -0 "$(cat "$W/docker.pid")" 2>/dev/null; the
 new_reset_world
 TMPDIR="$W/missing" reset_check "reset-node: no temporary file for the container list -> refuses, deletes nothing" fail -y
 expect_untouched "reset-node without a temporary file"
-case "$LAST_OUT" in *"Could not create a temporary file in $W/missing"*"Nothing was deleted"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not say it could not create a temporary file";; esac
+case "$LAST_OUT" in *"Could not create a temporary file in $W/missing"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not say it could not create a temporary file";; esac
 
 # A node that starts after the first check (a supervisor restarting it while
 # the prompt waits, a container coming up after the backup): reset-node checks
@@ -882,8 +993,13 @@ new_reset_world
 reset_prompt_check "reset-node: a node takes the identity lock while the prompt waits, y typed -> refuses, deletes nothing" fail write_fresh_lock
 expect_untouched "reset-node with a lock taken while the prompt waits"
 [[ -f "$W/node/.demos_identity.lock" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node removed the lock taken while the prompt waited"; }
-case "$LAST_OUT" in *"WARNING: This will delete"*"Identity lock $W/node/.demos_identity.lock is held"*"Nothing was deleted"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the lock taken while the prompt waited";; esac
+case "$LAST_OUT" in *"WARNING: This will delete"*"Identity lock $W/node/.demos_identity.lock is held"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the lock taken while the prompt waited";; esac
 case "$LAST_OUT" in *"Removing old node directory"*) FAIL=$((FAIL + 1)); echo "FAIL - reset-node went on to the removal with the lock held";; esac
+
+new_reset_world
+IDENTITY_FILE=validator.key reset_prompt_check "reset-node: the IDENTITY_FILE is made in the checkout while the prompt waits, y typed -> refuses, deletes nothing" fail touch "$W/node/validator.key"
+expect_untouched "reset-node with an IDENTITY_FILE made while the prompt waits"
+case "$LAST_OUT" in *"WARNING: This will delete"*"$W/node/validator.key (of IDENTITY_FILE=validator.key) is in this checkout"*"$KEEPS_ONLY"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the IDENTITY_FILE made while the prompt waited";; esac
 
 new_reset_world
 export STUB_PS="demos-node $W/node\n" STUB_PS_FROM=2
@@ -902,7 +1018,7 @@ unset STUB_PS STUB_PS_FROM
 for f in .demos_identity "${RESET_SIGNING[@]}"; do
     [[ -f "$W/$f.backup" ]] || { FAIL=$((FAIL + 1)); echo "FAIL - reset-node with a container started after the backup: no backup of $f left"; }
 done
-case "$LAST_OUT" in *"Container demos-node of this checkout"*"Nothing was deleted"*"backups made so far are left in place"*"$W/.demos_identity.commitlock.json.backup"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not say where the backups made before the refusal are";; esac
+case "$LAST_OUT" in *"Container demos-node of this checkout"*"$NOTHING_DELETED"*"backups made so far are left in place"*"$W/.demos_identity.commitlock.json.backup"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not say where the backups made before the refusal are";; esac
 
 new_reset_world
 rm -f "$W/bin/docker"

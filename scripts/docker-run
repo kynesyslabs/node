@@ -432,8 +432,9 @@ confirm_volume_delete() {
 # Compose parses flags with pflag, and the last volume setting wins:
 # `--volumes=<bool>` and `-v=<bool>` go through strconv.ParseBool, so
 # 0 f F false FALSE False set it false. Every other --volumes spelling sets
-# it, and so does any short flag group with a v (-v, -vt 0 and -vt0 are
-# -v -t 0; -tv is refused by compose anyway). Prints true, false or nothing.
+# it or is refused by compose, and so does any short flag group with a v (-v,
+# -vt 0 and -vt0 are -v -t 0; -tv is refused by compose anyway). Prints true,
+# false or nothing.
 volume_setting() {
     case "$1" in
         --volumes=*|-v=*)
