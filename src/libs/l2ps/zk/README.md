@@ -35,15 +35,27 @@ circom.info) and writes about 90 MB of proving keys. The build fails unless
 the derived verification keys equal the committed ones, which is also the
 integrity check on the download.
 
-### 2. Usage
+### 2. Turn proofs on
 
-The `L2PSBatchAggregator` automatically uses ZK proofs when keys are available:
+Batch proofs are off by default, even when the keys are present: validators do
+not check them yet (`docs/design/l2ps-zk-settlement.md`), and each proof takes
+a core for seconds. To turn them on, set this in the node's environment and
+restart it:
+
+```bash
+L2PS_ZK_ENABLED=true
+```
+
+### 3. Usage
+
+With `L2PS_ZK_ENABLED=true`, the `L2PSBatchAggregator` starts the prover when
+it starts, and its batches carry a `zk_proof`. If the prover cannot start (for
+example, the keys are missing), batches go out without proofs and the next
+start tries again:
 
 ```typescript
-// Automatic integration - just start the aggregator
 const aggregator = L2PSBatchAggregator.getInstance()
 await aggregator.start()
-// Batches will include zk_proof field when keys are available
 ```
 
 Manual usage:

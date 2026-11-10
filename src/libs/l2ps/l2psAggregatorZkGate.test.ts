@@ -5,14 +5,16 @@
 
 import { afterEach, describe, expect, it, jest, mock } from "bun:test"
 
-const initialize = jest.fn(async () => undefined)
+const initialize = jest.fn<() => Promise<void>>(async () => undefined)
 const constructed = jest.fn()
+const terminate = jest.fn(async () => undefined)
 mock.module("@/libs/l2ps/zk/L2PSBatchProver", () => ({
     L2PSBatchProver: class {
         constructor() {
             constructed()
         }
         initialize = initialize
+        terminate = terminate
     },
 }))
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({
@@ -40,21 +42,38 @@ afterEach(async () => {
     await aggregator.stop()
     constructed.mockClear()
     initialize.mockClear()
+    terminate.mockClear()
 })
 
 describe("L2PS batch proofs gate", () => {
     it("is off by default and never starts the prover", async () => {
-        expect(aggregator.zkEnabled).toBe(false)
+        expect(aggregator.zkRequested).toBe(false)
         await aggregator.start()
         expect(constructed).not.toHaveBeenCalled()
         expect(aggregator.zkProver).toBeNull()
     })
 
     it("starts the prover when enabled", async () => {
-        aggregator.zkEnabled = true
+        aggregator.zkRequested = true
         await aggregator.start()
         expect(constructed).toHaveBeenCalledTimes(1)
         expect(initialize).toHaveBeenCalledTimes(1)
+        expect(aggregator.zkEnabled).toBe(true)
+        await aggregator.stop()
+        expect(terminate).toHaveBeenCalledTimes(1)
+        expect(aggregator.zkProver).toBeNull()
+    })
+
+    it("retries a failed prover setup on the next start", async () => {
+        aggregator.zkRequested = true
+        initialize.mockImplementationOnce(async () => {
+            throw new Error("keys missing")
+        })
+        await aggregator.start()
+        expect(aggregator.zkEnabled).toBe(false)
+        await aggregator.stop()
+        await aggregator.start()
+        expect(initialize).toHaveBeenCalledTimes(2)
         expect(aggregator.zkEnabled).toBe(true)
     })
 })
