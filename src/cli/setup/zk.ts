@@ -73,7 +73,7 @@ export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
  * make this validator reject proofs its peers accept. Changing the key means
  * changing this digest in the same commit; a test fails when they disagree.
  */
-export const IDENTITY_CIRCUIT_DIGEST = "246abe5d7da79c64925375dd3e7360e82fa38e93a657132351e93461b407d622"
+export const IDENTITY_CIRCUIT_DIGEST = "34e842bb8aa62c57022ba3ee4e5e6836c1ea853239ceef7e8d7f1555af707737"
 
 /**
  * A key rotation done on purpose (`zk:setup`, `zk:ceremony`) rewrites the
