@@ -22,7 +22,7 @@ built-in values or `docker-compose.yml` drift apart.
 ## How the values reach the node
 
 1. Copy every `KEY=value` line of `parameters.env` into `.env` (INSTALL.md,
-   "Run a released image", step 2). Set them explicitly even where they equal
+   "Run a released image", step 3). Set them explicitly even where they equal
    the node's built-in value, so a later change of a default can never move a
    validator off the sheet without anyone noticing.
 2. Docker passes only the variables that `docker-compose.yml` lists under the
