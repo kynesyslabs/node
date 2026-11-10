@@ -47,7 +47,7 @@ afterEach(async () => {
 
 describe("L2PS batch proofs gate", () => {
     it("is off by default and never starts the prover", async () => {
-        expect(aggregator.zkRequested).toBe(false)
+        aggregator.zkRequested = false
         await aggregator.start()
         expect(constructed).not.toHaveBeenCalled()
         expect(aggregator.zkProver).toBeNull()

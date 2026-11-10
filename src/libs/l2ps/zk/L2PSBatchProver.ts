@@ -310,6 +310,9 @@ export class L2PSBatchProver {
             this.childProcess.kill()
             this.childProcess = null
             this.processReady = false
+            // The exit handler ignores a child that is no longer current, so
+            // an in-flight proof would otherwise wait out its 120 s timeout.
+            this.failPendingRequests(new Error("L2PS prover terminated"))
             log.info("[L2PSBatchProver] Subprocess terminated")
         }
     }

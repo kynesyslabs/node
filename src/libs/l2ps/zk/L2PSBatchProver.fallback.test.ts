@@ -90,6 +90,19 @@ describe("L2PSBatchProver subprocess lifecycle", () => {
         expect(prover.childProcess).toBeNull()
     })
 
+    it("fails a proof in flight when the prover is terminated", async () => {
+        const prover = new L2PSBatchProver("/nonexistent") as any
+        const starting = prover.initializeSubprocess()
+        const child = spawned.at(-1)!
+        child.ready()
+        await starting
+
+        const request = prover.subprocessRequest("prove", {})
+        await prover.terminate()
+        expect(child.kill).toHaveBeenCalled()
+        await expect(request).rejects.toThrow("terminated")
+    })
+
     it("spawns once for concurrent restarts and ignores output from a replaced child", async () => {
         const prover = new L2PSBatchProver("/nonexistent") as any
         const before = spawned.length

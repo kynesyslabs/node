@@ -39,19 +39,26 @@ integrity check on the download.
 
 Batch proofs are off by default, even when the keys are present: validators do
 not check them yet (`docs/design/l2ps-zk-settlement.md`), and each proof takes
-a core for seconds. To turn them on, set this in the node's environment and
-restart it:
+a core for seconds. The proof inputs are also placeholders: the aggregator
+uses neutral balances and the batch hash as the initial root, so a proof shows
+only that each amount fits in 64 bits, not that the batch's transfers are
+correct. The settlement design replaces them with the real balances.
+
+To turn them on, add `L2PS_ZK_ENABLED=true` to the node's `.env` (Docker) or
+deployment environment, or export it before starting from a shell, then
+restart the node:
 
 ```bash
-L2PS_ZK_ENABLED=true
+export L2PS_ZK_ENABLED=true
 ```
 
 ### 3. Usage
 
 With `L2PS_ZK_ENABLED=true`, the `L2PSBatchAggregator` starts the prover when
-it starts, and its batches carry a `zk_proof`. If the prover cannot start (for
-example, the keys are missing), batches go out without proofs and the next
-start tries again:
+it starts, and its batches carry a `zk_proof`. A batch still goes out without
+a proof when the prover cannot start (for example, the keys are missing; the
+next start tries again) or when a proof fails after startup (the subprocess
+exits, or the proof does not verify locally):
 
 ```typescript
 const aggregator = L2PSBatchAggregator.getInstance()
