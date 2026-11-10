@@ -143,6 +143,20 @@ function requireValidatorsEnabled(): boolean {
     return process.env.DEMOS_REQUIRE_VALIDATORS === "true"
 }
 
+/** The genesis file's data when there is a file, else `fallback`. */
+function genesisFileOr<T>(hasGenesisFile: boolean, fallback: T) {
+    return hasGenesisFile ? readGenesisFile() : fallback
+}
+
+/** Every boot setting the chain id requires and this node lacks, in one list. */
+function bootSettingProblems(pin: string, chainId: unknown): string[] {
+    return [
+        pinRequirementProblem(pin, process.env, chainId),
+        devModeProblem(Config.getInstance().core.prod, chainId),
+        requireValidatorsProblem(requireValidatorsEnabled(), chainId),
+    ].filter((problem): problem is string => problem !== null)
+}
+
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
     // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
@@ -168,12 +182,7 @@ export default async function findGenesisBlock() {
         "EXPECTED_GENESIS_BLOCK_HASH",
     )
     const fileChainId = hasGenesisFile ? chainIdOf(readGenesisFile()) : undefined
-    const pinProblem = pinRequirementProblem(pin, process.env, fileChainId)
-    if (pinProblem) refuse([pinProblem])
-    const modeProblem = devModeProblem(Config.getInstance().core.prod, fileChainId)
-    if (modeProblem) refuse([modeProblem])
-    const validatorsProblem = requireValidatorsProblem(requireValidatorsEnabled(), fileChainId)
-    if (validatorsProblem) refuse([validatorsProblem])
+    refuse(bootSettingProblems(pin, fileChainId))
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
@@ -186,24 +195,16 @@ export default async function findGenesisBlock() {
             | undefined
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
         // Without a file only block 0 says which chain this is
-        const storedPinProblem = pinRequirementProblem(pin, process.env, chainIdOf(stored))
-        if (storedPinProblem) refuse([storedPinProblem])
-        const storedModeProblem = devModeProblem(Config.getInstance().core.prod, chainIdOf(stored))
-        if (storedModeProblem) refuse([storedModeProblem])
-        const storedValidatorsProblem = requireValidatorsProblem(
-            requireValidatorsEnabled(),
-            chainIdOf(stored),
-        )
-        if (storedValidatorsProblem) refuse([storedValidatorsProblem])
+        refuse(bootSettingProblems(pin, chainIdOf(stored)))
         refuse(
             genesisScheduleProblems({
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : null,
+                fileGenesisData: genesisFileOr(hasGenesisFile, null),
                 storedGenesisData: stored,
                 pin,
                 blockPin,
             }),
         )
-        warnDefaultTreasury(hasGenesisFile ? readGenesisFile() : stored)
+        warnDefaultTreasury(genesisFileOr(hasGenesisFile, stored))
         // Without a file the fork loader never ran, so its chain id check did not either
         if (!hasGenesisFile && isForkMachineryDisabled()) {
             refuseDisabledForkMachineryOutsideTestChains(stored)
@@ -213,7 +214,7 @@ export default async function findGenesisBlock() {
                 storedGenesisData: stored,
                 // Without a file only the pin can be checked; the schedule check
                 // below still sees the defaults this node would run with.
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : stored,
+                fileGenesisData: genesisFileOr(hasGenesisFile, stored),
                 pin,
             }),
         )

@@ -120,8 +120,12 @@ export function requireValidatorsProblem(
     chainId: unknown,
 ): string | null {
     if (requireValidators || !isMainnetChainId(chainId)) return null
+    const shown =
+        typeof chainId === "number" || typeof chainId === "string"
+            ? String(chainId)
+            : JSON.stringify(chainId)
     return (
-        `DEMOS_REQUIRE_VALIDATORS is not true and the genesis has chain id ${String(chainId)}, ` +
+        `DEMOS_REQUIRE_VALIDATORS is not true and the genesis has chain id ${shown}, ` +
         "which is not a test network's. Without it a node that cannot read the validator set " +
         "uses every online peer as the committee; set DEMOS_REQUIRE_VALIDATORS=true"
     )

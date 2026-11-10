@@ -121,6 +121,22 @@ describe("findGenesisBlock and DEMOS_REQUIRE_VALIDATORS", () => {
         expect(await bootMessage(4242)).not.toContain(REFUSAL)
     })
 
+    it("reports every missing setting of a mainnet chain id in one refusal", async () => {
+        delete process.env.DEMOS_REQUIRE_VALIDATORS
+        const { Config } = await import("src/config")
+        // The loaded config is frozen; rebuild it with PROD off, then put it back
+        process.env.PROD = "false"
+        Config.resetInstance()
+        try {
+            const message = await bootMessage(4242)
+            expect(message).toContain("PROD is not true")
+            expect(message).toContain(REFUSAL)
+        } finally {
+            process.env.PROD = "true"
+            Config.resetInstance()
+        }
+    })
+
     it("does not apply the check to the testnet or the devnet", async () => {
         delete process.env.DEMOS_REQUIRE_VALIDATORS
         for (const id of [1, 1337]) {
