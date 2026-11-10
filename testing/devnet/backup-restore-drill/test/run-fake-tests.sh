@@ -89,6 +89,11 @@ if sel smoke-pass; then
     no_call 'compose.* run --rm --no-deps -T -e PG_HOST=pg-iso' "the isolated node's migration"
     no_out 'PHASE A ' "any drill phase (backup)"
     torn_down
+    want_out 'left over in demos-faketest after teardown: 0 containers, 0 volumes, 0 networks' "teardown's leftover counts"
+    if jq -e '.cleanup == "done, nothing of demos-faketest left"' "${CDIR}"/runs/*/timings.json > /dev/null \
+        && grep -q '^- cleanup: done, nothing of demos-faketest left$' "${CDIR}"/runs/*/timings.md; then
+        ok "cleanup done in timings.json and timings.md"
+    else bad "timings.json/md do not say the cleanup was done"; fi
     no_call ' up .*node-iso' "up of node-iso (smoke is the 4 validators only)"
     # the node env really carries GOSSIP_ENABLED=true (the default, nothing set by the caller)
     if jq -e '[.services | to_entries[] | select(.key | startswith("node-")) | .value.environment.GOSSIP_ENABLED] | all(. == "true")' "${CDIR}"/runs/*/compose.yml > /dev/null; then
@@ -262,6 +267,21 @@ if sel wipe-owner; then
     want_out 'CHECK FAIL: the wipe kept the ownership' "the change is still reported"
     want_rc 1
 fi
+if sel wipe-leftover; then
+    # an entry the wipe could not remove, the wipe itself exiting 0: the listing catches it
+    go wipe-leftover FAKE_WIPE_LEAVE=extra.dat
+    want_rc 2
+    want_out "the wipe left more than node.identity\* on node 4's state volume: extra.dat$" "the leftover entry named"
+    if [ "$(grep -cE 'up -d --no-deps --pull never node-4$' "${CDIR}/calls.log")" = 1 ]; then ok "node-4 never restarted after the leftover"; else bad "node-4 start count is not 1"; fi
+    no_call 'pg_restore -U' "pg_restore (the run stops in phase B)"
+    torn_down
+    # the same, the wipe exiting 1
+    go wipe-fail FAKE_WIPE_LEAVE=extra.dat FAKE_WIPE_FAIL=1
+    want_rc 2
+    want_out 'could not clear the non-identity state' "the failed wipe stops the run"
+    if [ "$(grep -cE 'up -d --no-deps --pull never node-4$' "${CDIR}/calls.log")" = 1 ]; then ok "node-4 never restarted after the failed wipe"; else bad "node-4 start count is not 1"; fi
+    torn_down
+fi
 
 # ── the manual migration of the restored database ───────────────────────
 node4_starts() { grep -cE 'up -d --no-deps --pull never node-4$' "${CDIR}/calls.log"; }
@@ -290,6 +310,62 @@ if sel migrate-timeout; then
     go migrate-timeout-invalid SMOKE=1 MIGRATE_TIMEOUT=0
     want_rc 2
     want_out 'MIGRATE_TIMEOUT must be at least 1' "timeout 0 (no limit) refused"
+fi
+
+# ── volumes that exist before the run ───────────────────────────────────
+seed_vols() { # case name, volume names: volumes without the compose labels, there before the run
+    local d="${WORK}/$1"
+    shift
+    mkdir -p "${d}"
+    printf '%s\n' "$@" | jq -Rn '{containers: {}, t0: null, volumes: ([inputs | {key: ., value: {owner: "1000", project: "",
+        files: ["keep.me"], db: "empty", frozen: false, frozen_head: 0, dump_head: 0}}] | from_entries)}' > "${d}/state.json"
+}
+still_there() { if jq -e --arg v "$1" '.volumes[$v].files == ["keep.me"]' "${CDIR}/state.json" > /dev/null; then ok "$1 still there, untouched"; else bad "$1 gone or changed"; fi; }
+if sel existing-volume; then
+    seed_vols existing-volume demos-faketest_state-4
+    go existing-volume
+    want_rc 2
+    want_out 'already exist: demos-faketest_state-4\. ' "the existing volume named"
+    no_call 'compose .* up ' "compose up"
+    no_call 'compose .* down' "compose down"
+    still_there demos-faketest_state-4
+    if jq -e '.cleanup == "not needed, the compose project was never created"' "${CDIR}"/runs/*/timings.json > /dev/null; then
+        ok "timings.json: no cleanup needed"
+    else bad "timings.json cleanup is not 'not needed'"; fi
+    # every name found is listed; the isolated node's volumes are declared in every variant
+    seed_vols existing-volumes-iso demos-faketest_pgdata-1 demos-faketest_backup-4 demos-faketest_state-iso
+    go existing-volumes-iso
+    want_rc 2
+    for v in pgdata-1 backup-4 state-iso; do want_out "already exist: [^.]*demos-faketest_${v}[ .]" "${v} named"; done
+    no_call 'compose .* (up|down) ' "compose up or down"
+    # exact names only: a volume whose name merely starts like one is not refused
+    seed_vols existing-volume-other demos-faketest_state-44
+    go existing-volume-other SMOKE=1
+    want_rc 0
+    still_there demos-faketest_state-44
+fi
+
+# ── teardown that fails or leaves something ─────────────────────────────
+if sel teardown-fail; then
+    go teardown-fail SMOKE=1 FAKE_DOWN_FAIL=1
+    want_out 'SMOKE PASS' "the smoke check itself passed"
+    want_rc 3
+    want_out 'CLEANUP FAILED: compose down -v exited 1 \(logs/teardown.log\); left over: [1-9][0-9]* containers, [1-9][0-9]* volumes' "the failure and what is left"
+    want_out 'check and remove by hand: docker ps -a, docker volume ls and docker network ls' "what to check"
+    if jq -e '.result == "PASS" and (.cleanup | startswith("FAILED: compose down -v exited 1"))' "${CDIR}"/runs/*/timings.json > /dev/null \
+        && grep -q '^- cleanup: \*\*FAILED\*\*: compose down -v exited 1' "${CDIR}"/runs/*/timings.md; then
+        ok "timings.json and timings.md mark the cleanup failure"
+    else bad "the cleanup failure is not in timings.json/md"; fi
+    # down exits 0 but a volume is left
+    go teardown-leave SMOKE=1 FAKE_DOWN_LEAVE=state-2
+    want_rc 3
+    want_out 'CLEANUP FAILED: left over: 0 containers, 1 volumes, 0 networks$' "the leftover volume counted"
+    # a failed run keeps its exit code; the cleanup failure is still marked
+    go teardown-fail-after-fail SMOKE=1 SMOKE_TIMEOUT=8 FAKE_BEHIND=node-2 FAKE_DOWN_FAIL=1
+    want_rc 1
+    if jq -e '.result == "FAIL" and (.cleanup | startswith("FAILED"))' "${CDIR}"/runs/*/timings.json > /dev/null; then
+        ok "FAIL result with the cleanup failure marked"
+    else bad "timings.json: result/cleanup not FAIL/FAILED"; fi
 fi
 
 echo

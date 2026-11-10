@@ -21,10 +21,12 @@
 # this drill's own volumes to 1000:1000 instead of stopping).
 #
 # Phases timed: A backup, A2 copy off the volume, B wipe, C restore, D rejoin.
-# Everything lives in $OUT_DIR (mode 700, gitignored under runs/) and the
-# compose project (default demos-bkdrill) is removed on exit.
+# Everything lives in $OUT_DIR (mode 700, gitignored under runs/). On exit,
+# teardown runs compose down -v on the project (default demos-bkdrill) and
+# checks that nothing of it is left.
 # Exit codes: 0 every check passed, 1 a check failed, 2 the drill could not be
-# carried out (preflight, boot, timeout).
+# carried out (preflight, boot, timeout), 3 every check passed but the teardown
+# failed or left something (timings.md says what).
 
 # SC2016: the single-quoted scripts are run by sh inside a container, on purpose.
 # SC2329: teardown is the EXIT trap. SC2094: sum_of only reads the files the loops read.
@@ -97,7 +99,7 @@ ALLOW_GOSSIP_OFF="${ALLOW_GOSSIP_OFF:-0}"
 FIX_OWNERSHIP="${FIX_OWNERSHIP:-0}"
 
 usage() {
-    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: NODE_IMAGE PG_IMAGE BASE_PORT PROJECT VARIANT OUT_DIR SHARD_SIZE H0 CONSENSUS_TIME"
     echo "             NODE_MEM PG_MEM CPU_SHARES LOAD_MAX LOAD_WAIT_MAX STOP_GRACE STALL_LIMIT"
     echo "             MIGRATE_CMD MIGRATE_REQUIRED MIGRATE_TIMEOUT FORK_SET ISO_NODE KEEP_KEYS IDENTITY_GEN RUNS_DIR"
@@ -186,6 +188,8 @@ check() { # name, PASS|FAIL|INFO, detail
 
 RESULT=""
 REPORT_WRITTEN=0
+# What teardown did; it rewrites the report with this once it has run
+CLEANUP="not run yet"
 declare -A META
 write_report() {
     local res="${RESULT:-ABORTED}" phases checks
@@ -196,14 +200,15 @@ write_report() {
     jq -n --arg run "${RUN_ID}" --arg variant "${VARIANT}" --arg project "${PROJECT}" --arg result "${res}" \
         --arg image "${NODE_IMAGE}" --arg pgImage "${PG_IMAGE}" --argjson n "${N}" --argjson shardSize "${SHARD_SIZE}" \
         --argjson q "${Q}" --argjson xNode "${X_NODE}" --argjson expectPause "${EXPECT_PAUSE}" --arg forkSet "${FORK_SET}" \
-        --argjson phases "${phases}" --argjson checks "${checks}" --argjson meta "${meta}" \
-        '{run: $run, variant: $variant, project: $project, result: $result, image: $image, pgImage: $pgImage,
+        --argjson phases "${phases}" --argjson checks "${checks}" --argjson meta "${meta}" --arg cleanup "${CLEANUP}" \
+        '{run: $run, variant: $variant, project: $project, result: $result, cleanup: $cleanup, image: $image, pgImage: $pgImage,
           forkSet: $forkSet, validators: $n, shardSize: $shardSize, q: $q, drilledNode: $xNode,
           expectChainPauseWhileDown: ($expectPause == 1), phases: $phases, checks: $checks, meta: $meta}' > "${OUT_DIR}/timings.json"
     {
         echo "# Backup / wipe / restore drill ${RUN_ID}"
         echo
         echo "- result: **${res}**; variant \`${VARIANT}\`; node ${X_NODE} of ${N}; shardSize ${SHARD_SIZE}, q ${Q}; fork set \`${FORK_SET}\`"
+        echo "- cleanup: ${CLEANUP/#FAILED/**FAILED**}"
         echo "- images: node \`${NODE_IMAGE}\`, postgres \`${PG_IMAGE}\`"
         for k in $(printf '%s\n' "${!META[@]}" | sort); do echo "- ${k}: ${META[${k}]}"; done
         echo
@@ -244,11 +249,29 @@ teardown() {
         say "tearing down ${PROJECT} (compose down -v for this project only)"
         # Helper containers carry this label so an interrupted one cannot pin a volume
         docker ps -aq --filter "label=demos.drill.helper=${PROJECT}" | xargs -r docker rm -f > /dev/null 2>&1
-        dc down -v --remove-orphans > "${LOG_DIR}/teardown.log" 2>&1
-        say "left over in ${PROJECT} after teardown: $(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT}" | wc -l) containers, $(docker volume ls -q --filter "label=com.docker.compose.project=${PROJECT}" | wc -l) volumes"
+        local errs="" left_c left_v left_n nc nv nn
+        dc down -v --remove-orphans > "${LOG_DIR}/teardown.log" 2>&1 || errs="compose down -v exited $? (logs/teardown.log); "
+        # A failed listing counts as a failure, not as nothing left
+        left_c="$(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT}")" || errs+="cannot list containers; "
+        left_v="$(docker volume ls -q --filter "label=com.docker.compose.project=${PROJECT}")" || errs+="cannot list volumes; "
+        left_n="$(docker network ls -q --filter "label=com.docker.compose.project=${PROJECT}")" || errs+="cannot list networks; "
+        nc="$(printf '%s' "${left_c}" | grep -c .)"
+        nv="$(printf '%s' "${left_v}" | grep -c .)"
+        nn="$(printf '%s' "${left_n}" | grep -c .)"
+        say "left over in ${PROJECT} after teardown: ${nc} containers, ${nv} volumes, ${nn} networks"
+        if [ $((nc + nv + nn)) -gt 0 ]; then errs+="left over: ${nc} containers, ${nv} volumes, ${nn} networks; "; fi
+        if [ -z "${errs}" ]; then
+            CLEANUP="done, nothing of ${PROJECT} left"
+        else
+            CLEANUP="FAILED: ${errs%; }"
+            say "CLEANUP FAILED: ${errs%; }"
+            say "check and remove by hand: docker ps -a, docker volume ls and docker network ls, each with --filter label=com.docker.compose.project=${PROJECT}"
+            if [ "${rc}" = 0 ]; then rc=3; fi
+        fi
     else
-        [ "${REPORT_WRITTEN}" = 1 ] || write_report
+        CLEANUP="not needed, the compose project was never created"
     fi
+    write_report
     if [ "${KEEP_KEYS}" != 1 ]; then
         # Throwaway devnet keys: the identity inputs go; dump, logs and timings stay
         rm -f "${IN}"/node*.identity "${IN}"/gen-identity.ts
@@ -509,6 +532,7 @@ swapping="$(vmstat 1 4 | tail -3 | awk '$7 + $8 > 0 {n++} END {print (n == 3) ? 
 say "preflight: load ${load1}, disk ${disk_gb}G free, ${avail_mb}M RAM available (need ${need_mb}M)"
 
 # Own project only: nothing of this name may exist, so down -v can only remove what this run made
+# (the exact volume names the compose file declares are checked once it is generated, in 02-inputs)
 [ -z "$(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT}")" ] || abort_pre "containers of project ${PROJECT} already exist"
 [ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=${PROJECT}")" ] || abort_pre "volumes of project ${PROJECT} already exist"
 if command -v ss > /dev/null 2>&1; then
@@ -619,6 +643,17 @@ if ! docker run --rm --user 1000 --entrypoint sh "${mounts[@]}" "${NODE_IMAGE}" 
     abort_pre "the image user (uid 1000) cannot read the mounted inputs under ${IN} (see 02-inputs.log); check umask and the chmod of the run dir"
 fi
 dc config -q >> "${STEP_LOG}" 2>&1 || abort_pre "the generated compose file is not valid (see 02-inputs.log)"
+# Compose uses a volume that already has the name of one it declares, labelled or
+# not, and teardown's down -v deletes it: no such name may exist before the first up
+decl_vols="$(jq -r --arg p "${PROJECT}" '(.volumes // {}) | to_entries[] | .value.name // "\($p)_\(.key)"' "${OUT_DIR}/compose.yml")" \
+    || abort_pre "cannot read the volumes of ${OUT_DIR}/compose.yml"
+[ -n "${decl_vols}" ] || abort_pre "no named volume in the generated compose file"
+all_vols="$(docker volume ls -q)" || abort_pre "cannot list the docker volumes"
+taken=""
+while IFS= read -r v; do
+    if grep -Fxq -- "${v}" <<< "${all_vols}"; then taken+="${v} "; fi
+done <<< "${decl_vols}"
+[ -z "${taken}" ] || abort_pre "volumes with the names the compose file declares already exist: ${taken% }. This run would use them and its teardown would delete them; no container or volume was created. Use another PROJECT, or find out what they hold before removing them"
 say "inputs ready, genesis in ${GENESIS_DELAY}s"
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -898,10 +933,13 @@ if [ "${VARIANT}" = rejoin ]; then
     docker volume rm "$(vol "pgdata-${X_NODE}")" "$(vol "backup-${X_NODE}")" >> "${STEP_LOG}" 2>&1 || die "could not remove the database volumes"
     # node.identity* is this drill's IDENTITY_FILE (gen-compose.py), not the file
     # names on a validator's state volume (.demos_identity*): drill volumes only
-    helper 'cd /s && find . -mindepth 1 -maxdepth 1 ! -name "node.identity*" -exec rm -rf {} +; true' \
-        -v "$(vol "state-${X_NODE}"):/s" "${PG_IMAGE}" >> "${STEP_LOG}" 2>&1 || die "could not clear the non-identity state"
-    left="$(state_names | tr '\n' ' ')"
-    say "left on the state volume: ${left}"
+    helper 'cd /s && find . -mindepth 1 -maxdepth 1 ! -name "node.identity*" -exec rm -rf {} +' \
+        -v "$(vol "state-${X_NODE}"):/s" "${PG_IMAGE}" >> "${STEP_LOG}" 2>&1 || die "could not clear the non-identity state (see 06-wipe.log)"
+    # Whatever the exit status said, only node.identity* may be left before node X starts again
+    left="$(xstate_ro 'ls -A /s')" || die "cannot list node ${X_NODE}'s state volume after the wipe"
+    say "left on the state volume: $(printf '%s' "${left}" | tr '\n' ' ')"
+    stray="$(printf '%s\n' "${left}" | grep -v -e '^node\.identity' -e '^$' | tr '\n' ' ' || true)"
+    [ -z "${stray}" ] || die "the wipe left more than node.identity* on node ${X_NODE}'s state volume: ${stray% }"
     # The state volume is kept and only emptied (as root, rm only: nothing is created on
     # it), so its owner must be what it was. The volumes recreated below, the database
     # and the backup staging one, belong to postgres, not to uid 1000. Whatever the

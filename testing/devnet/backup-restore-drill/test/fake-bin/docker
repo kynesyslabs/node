@@ -2,8 +2,9 @@
 """A fake `docker` for testing run.sh without Docker. It keeps containers and
 volumes in $FAKE_DIR/state.json and answers only what run.sh asks: compose
 up/stop/rm/ps/run/down, exec (curl RPC, psql, pg_*), run (probes and helpers),
-cp, logs, inspect, ps, volume. The chain is a clock: head = (now - first node
-start) * FAKE_RATE.
+cp, logs, inspect, ps, volume, network (it has none). The chain is a clock:
+head = (now - first node start) * FAKE_RATE. A volume a test puts in
+state.json beforehand with project "" is one without the compose labels.
 
 Knobs (environment): FAKE_RATE (blocks per second, 3), FAKE_ROOT_VOLS (volume
 names containing one of these are created root-owned), FAKE_UNWRITABLE_PATHS
@@ -11,7 +12,10 @@ names containing one of these are created root-owned), FAKE_UNWRITABLE_PATHS
 services that never answer / stay at head 0), FAKE_NO_NODE, FAKE_UNREADABLE,
 FAKE_MISSING_IMAGES, FAKE_MIGRATE_FAIL, FAKE_MIGRATE_HANG (a postgres service
 name: compose run against it sleeps 120 s; with FAKE_MIGRATE_IGNORE_TERM it
-ignores SIGTERM), FAKE_WIPE_CHANGES_OWNER,
+ignores SIGTERM), FAKE_WIPE_CHANGES_OWNER, FAKE_WIPE_LEAVE (a state volume
+entry the wipe does not remove), FAKE_WIPE_FAIL (the wipe exits 1),
+FAKE_DOWN_FAIL (compose down removes nothing and exits 1), FAKE_DOWN_LEAVE
+(compose down exits 0 but leaves the volumes whose name contains it),
 FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3). Every call is appended to
 $FAKE_DIR/calls.log.
 """
@@ -211,9 +215,12 @@ def compose_cmd(a):
         save(st)
         out()
     if cmd == "down":
+        if os.environ.get("FAKE_DOWN_FAIL"):
+            fail("Error response from daemon: fake down failure")
+        keep = os.environ.get("FAKE_DOWN_LEAVE")
         for cid in [k for k, c in st["containers"].items() if c["project"] == project]:
             del st["containers"][cid]
-        for v in [k for k, x in st["volumes"].items() if x["project"] == project]:
+        for v in [k for k, x in st["volumes"].items() if x["project"] == project and not (keep and keep in k)]:
             del st["volumes"][v]
         save(st)
         out()
@@ -288,10 +295,12 @@ def run_cmd(a):
         save(st)
         out()
     if "rm -rf" in script and "node.identity*" in script:
-        vol["files"] = [x for x in vol["files"] if x.startswith("node.identity")]
+        vol["files"] = [x for x in vol["files"] if x.startswith("node.identity") or x == os.environ.get("FAKE_WIPE_LEAVE")]
         if os.environ.get("FAKE_WIPE_CHANGES_OWNER"):
             vol["owner"] = "0"
         save(st)
+        if os.environ.get("FAKE_WIPE_FAIL"):
+            fail(f"rm: can't remove '{os.environ.get('FAKE_WIPE_LEAVE', 'x')}': Operation not permitted")
         out()
     if "stat -c" in script:
         o = vol["owner"]
@@ -448,9 +457,10 @@ def main():
     elif cmd == "volume":
         sub = a[1]
         if sub == "ls":
-            ff = a[a.index("--filter") + 1].split("=", 2)[2]
+            # no filter: every volume; else the project label filter
+            ff = a[a.index("--filter") + 1].split("=", 2)[2] if "--filter" in a else None
             for v, x in sorted(st["volumes"].items()):
-                if x["project"] == ff:
+                if ff is None or x["project"] == ff:
                     print(v)
             sys.exit(0)
         if sub == "rm":
@@ -463,6 +473,8 @@ def main():
             if v is None:
                 fail("No such volume", 1)
             out(v["project"])
+    elif cmd == "network" and a[1] == "ls":
+        sys.exit(0)
     elif cmd == "rm":
         out()
     elif cmd == "cp":

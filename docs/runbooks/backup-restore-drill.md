@@ -126,7 +126,9 @@ started under `nice` by hand; wrap it in `nohup`/`tmux` if the SSH session may
 drop (the run time has not been measured: genesis delay alone is 160 s).
 
 Exit codes: 0 every check passed, 1 a check failed, 2 the drill could not be
-carried out (preflight, boot, timeout, a step that must work failed).
+carried out (preflight, boot, timeout, a step that must work failed), 3 every
+check passed but the teardown failed or left something of the project (see
+Output). A run that exits 1 or 2 keeps that code when the teardown fails too.
 
 ## Environment
 
@@ -135,7 +137,7 @@ carried out (preflight, boot, timeout, a step that must work failed).
 | `NODE_IMAGE` | `demos-node:candidate-5979a716` | prebuilt node image |
 | `PG_IMAGE` | `postgres:16-alpine` | postgres and helper image |
 | `BASE_PORT` | `65000` | host ports `BASE_PORT+1..+5`, 127.0.0.1 |
-| `PROJECT` | `demos-bkdrill` | compose project; must start with `demos-`; the run aborts if anything of that name exists |
+| `PROJECT` | `demos-bkdrill` | compose project; must start with `demos-`; the run aborts if a container or volume of that project, or a volume with any name the compose file declares (labelled or not), already exists |
 | `VARIANT` | `rejoin` | `rejoin` or `isolated` |
 | `OUT_DIR` | `testing/devnet/backup-restore-drill/runs/<UTC>-bkdrill-<variant>` | everything the run writes (mode 700, gitignored) |
 | `X_NODE` | `4` | the drilled validator (2..4; 1 is the peerlist anchor) |
@@ -172,7 +174,8 @@ until every node answers RPC with a head of at least `SMOKE_HEAD`. It then
 prints `SMOKE PASS` or `SMOKE FAIL`, tears the project down and exits: 0 pass,
 1 a node did not make it (each node gets a row; a failing one names its log,
 `logs/node-N.log` in the run dir, written at teardown, and the last 15 lines are
-printed), 2 the preflight or a postgres failed. No backup, wipe or restore
+printed), 2 the preflight or a postgres failed, 3 pass but the teardown failed
+(see Output). No backup, wipe or restore
 runs, and there is no isolated node. Genesis is set `GENESIS_DELAY` (160 s by
 default) after the inputs are made and the cap counts from the first node
 start; none of this has been timed on Docker yet, so if a healthy host needs
@@ -205,6 +208,13 @@ run on Docker; the reasoning is in `gen-compose.py` above `START_SCRIPT`.
 1. Preflight: tools, load wait, disk, RAM, no swapping, project name unused,
    ports free, images local, uid-1000 readability of the inputs, gossip on
    (and `node` in the image), uid-1000 writability of the node state.
+   "Project name unused" means no container or volume carries the project's
+   compose label and, before the first `compose up`, no volume exists with
+   any of the exact names the generated compose file declares
+   (`<project>_state-4`, `<project>_pgdata-1`, ...), whatever its labels.
+   Compose would use such a volume and teardown's `down -v` would delete it,
+   so the run names the ones it found and exits 2 without creating any
+   container or volume.
 2. Bring-up: postgres x4, migrations on each database (manual step, see
    below), nodes one at a time, wait until every node is at height `H0`.
    Record node X's head height and block hash, and the SHA-256 of its identity
@@ -222,14 +232,18 @@ run on Docker; the reasoning is in `gen-compose.py` above `START_SCRIPT`.
    hash the signing state at rest, remove the node container, the postgres
    container, the database volume and the staging volume, and delete
    everything on the state volume except `node.identity*` (the drill's
-   `IDENTITY_FILE` is `/app/state/node.identity`). The wipe uses no `--reset`,
-   no reset-node script and no `down -v`; `down -v` runs only at teardown, on
-   the drill's own project (see Output).
+   `IDENTITY_FILE` is `/app/state/node.identity`). If the delete fails, or
+   the state volume then holds anything whose name does not start with
+   `node.identity`, the run stops with exit 2 before node X is started
+   again. The wipe uses no `--reset`, no reset-node script and no `down -v`;
+   `down -v` runs only at teardown, on the drill's own project (see Output).
 
    **Drill volumes only.** A validator's state volume holds `.demos_identity*`
-   files, which this wipe would delete. To reset a validator use
+   files, which this wipe would delete. On a bare-metal install use
    `scripts/reset-node` (it keeps the signing record unless
-   `--wipe-signing-state`), and never run `down -v` on a validator's project.
+   `--wipe-signing-state`). On Docker, never delete the state volume's
+   `.demos_identity*` files and never run `down -v` on a validator's project;
+   see `validator-key.md`.
 6. **C** restore: assert no container holds node X's state volume, start an
    empty postgres, `pg_restore --no-owner --exit-on-error` of the whole dump
    from the host copy, stats, migrations, assert again, start exactly one
@@ -288,11 +302,32 @@ In `$OUT_DIR`: `timings.md` and `timings.json` (phases, checks, run metadata),
 `logs/run.log` and one log per step, `logs/node-N.log` (and
 `node-4.pre-wipe.log`), `logs/monitor.tsv` (the other nodes' head every 5 s),
 `backup/` (dump, SHA-256, before/after counts), `phases.tsv`, `checks.tsv`.
-The `demos-bkdrill` compose project is removed on exit, including on Ctrl-C or
-an error (`compose down -v` for that project only, plus helper containers that
-carry the label `demos.drill.helper=<project>`). This removes the drill's own
-volumes, node X's state volume with its throwaway key included; the run aborts
-at preflight if any container or volume of that project already exists.
+On exit, including on Ctrl-C or an error, teardown tries to remove the
+`demos-bkdrill` compose project: it removes the helper containers that carry
+the label `demos.drill.helper=<project>` and runs `compose down -v` for that
+project only. When it works, this removes the drill's own volumes, node X's
+state volume with its throwaway key included. Preflight refuses to start when
+a volume with one of the declared names already exists (step 1), so the named
+volumes `down -v` deletes are ones this run created.
+
+Teardown then lists the containers, volumes and networks that still carry the
+label `com.docker.compose.project=<project>` and prints the counts. If
+`down -v` exits non-zero, a listing fails, or anything is left, it prints
+`CLEANUP FAILED` with the reason, writes the same as `cleanup` in
+`timings.json` and as `cleanup: **FAILED**` in `timings.md` (`result` keeps
+the drill's own verdict), and exits 3 instead of 0. Then check, with Docker
+working again (`demos-bkdrill` or your `PROJECT`):
+
+```bash
+docker ps -a --filter label=com.docker.compose.project=demos-bkdrill
+docker volume ls --filter label=com.docker.compose.project=demos-bkdrill
+docker network ls --filter label=com.docker.compose.project=demos-bkdrill
+```
+
+and read `logs/teardown.log`. Teardown's own command can be run again by hand:
+`docker compose -f $OUT_DIR/compose.yml -p demos-bkdrill down -v --remove-orphans`.
+A next run on the same project refuses to start while a container or volume of
+it is left.
 
 ## Testing the script itself
 
@@ -302,7 +337,11 @@ unwritable volumes (fail fast, `FIX_OWNERSHIP=1`), `SMOKE=1` pass and fail,
 the fork set `gen-inputs.py` gets (default `launch`, `FORK_SET=devnet`), the
 migrate step on the restored database (after `pg_restore` and before node X
 starts; a failure or a timeout stops the run with exit 2 and node X is not
-started), and a full `rejoin` and `isolated` run. It needs no Docker and tests
+started), a volume that exists before the run under a name the compose file
+declares (exit 2, no `up`, no `down`, the volume untouched), a wipe that fails
+or leaves an entry (exit 2, node X not started again), a teardown whose `down`
+fails or leaves a volume (exit 3 after a pass, the failure in `timings.json`
+and `timings.md`), and a full `rejoin` and `isolated` run. It needs no Docker and tests
 the script's own logic only; it says nothing about what a real image, volume
 or postgres does.
 
