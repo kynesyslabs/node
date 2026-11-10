@@ -165,7 +165,7 @@ Output). A run that exits 1 or 2 keeps that code when the teardown fails too.
 | `CPU_SHARES` | `256` | compose `cpu_shares` (default weight is 1024): containers yield to other work under contention |
 | `LOAD_MAX` / `LOAD_WAIT_MAX` | `18` / `1800` | start only when the 1-minute load is below `LOAD_MAX`; give up after `LOAD_WAIT_MAX` s |
 | `STOP_GRACE` | `10` | seconds `compose stop` waits before killing node X |
-| `STALL_LIMIT` | `90` | longest allowed gap, in seconds, between increases of the lowest head among the watched nodes, and longest allowed time without a head read in which all of them answered |
+| `STALL_LIMIT` | `90` | longest allowed gap, in seconds, between increases of the lowest head among the watched nodes, or of the highest, and longest allowed time without a head read in which all of them answered |
 | `BRINGUP_TIMEOUT`, `SERVE_TIMEOUT`, `REJOIN_TIMEOUT`, `SIGN_TIMEOUT` | `900`, `240`, `420`, `300` | step timeouts in seconds |
 | `MIGRATE_CMD` | `bun run migration:run` | the one command that applies pending migrations, run in a one-off container of `NODE_IMAGE` (see below) |
 | `MIGRATE_REQUIRED` | `1` | a failing migration on the restored database aborts the drill |
@@ -273,7 +273,8 @@ a read-only mount that the script's `mv` could not move), TLSNotary is off, and
    2 blocks of the other three. D adds proof that it signs: its signing record
    height moves past the value at stop, or a block after the restart carries
    its signature. Row **ALL** is stop of node X to rejoined and signing (the
-   outage as an operator sees it).
+   outage as an operator sees it); like D1 and D, it is written only when node
+   X got there.
 8. Checks (below), the timings table, teardown.
 
 `VARIANT=isolated` runs 1 to 4, leaves node X running, restores the dump into
@@ -289,16 +290,19 @@ Each is printed PASS, FAIL or INFO, and written to `timings.md` and
 | Check | Passes when |
 |---|---|
 | restored head >= pre-wipe head | head after the rejoin >= head read from the database at stop |
+| node X within 2 blocks of the others at the end of D | read again once D is over (only if D1 was reached): node X's head is still within 2 blocks of the highest other node's, not only once during D |
 | block hash at pre-wipe heights | node X's hash at the step-2 height and the at-stop height equals each other node's, and equals what was recorded |
 | identity file checksum | identical at step 2, at stop, and after the rejoin |
 | signing state | every signing file present at stop still exists, and `.signed.json`, `.commitlock.json` and `.prevote.json` are never older than at stop, by height, then round (`timestamp` in `.signed.json`, `round` in the other two). The detail gives each one's height/round at stop and after: `advanced` only when strictly newer, `unchanged` when equal; an older one, or one without a height and round, fails the check |
-| no halt marker | no `*.halted` on the state volume, no foreign-signature line in node X's log |
+| no halt marker | no `*.halted` on the state volume, no foreign-signature line in node X's log; a log `docker logs` cannot give (a logging driver without reads) fails it |
 | signing floor | the `Restart signing floor` line is in node X's log, read to its end (INFO if the line is missing) |
 | node X signs | see D above |
-| other nodes never stalled | every 5 s the run reads the head of each watched node (the other nodes in `rejoin`, all four validators in `isolated`) and keeps the lowest; a head read in which one of them does not answer counts as failed. So the slowest validator decides, and one node rising alone does not pass. With the devnet's quorum (below), the longest gap between increases of that head while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. It also needs at least one new block on every watched validator: the lowest head at the window's last successful read must be above the lowest at its first, however short the window; a window without one fails with "no new block on the watched validators between `<t0>` and `<t1>`" (unix times, as in `logs/monitor.tsv`). No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
+| other nodes never stalled | every 5 s the run reads the head of each watched node (the other nodes in `rejoin`, all four validators in `isolated`) and keeps the lowest and the highest; a head read in which one of them does not answer counts as failed. So the slowest validator decides, one node rising alone does not pass, and nor does a slow one catching up while the others make no new block. With the devnet's quorum (below), the longest gap between increases of the lowest head, or of the highest, while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. It also needs at least one new block on every watched validator: the lowest head at the window's last successful read must be above the highest at its first, however short the window; a window without one fails with "no new block on the watched validators between `<t0>` and `<t1>`" (unix times, as in `logs/monitor.tsv`). No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows equal; same table set |
 | schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations` |
 | one instance of the key | asserted before the single start; the run dies if it does not hold |
+| isolated node holds no copy of node X's key | (`isolated`) no mount of node X's identity or state volume, and the identity file on node-iso's state volume, read, is not node X's; one that cannot be read fails it |
+| node X untouched and the only holder of its key | (`isolated`) the one running node X container is the one started at bring-up, and the only container on its state volume |
 | gossip enabled on every node | `GOSSIP_ENABLED=true` in the generated compose file (INFO when `ALLOW_GOSSIP_OFF=1` lets it be off) |
 | node state is writable by uid 1000 | the probes of "Writable state" above (a failure stops the run before it starts) |
 | the wipe kept the ownership of the state volume | owner and mode of the state dir and identity files equal before and after the wipe |
@@ -321,8 +325,8 @@ The script detects `live others < q` and reports the check as INFO
 
 In `$OUT_DIR`: `timings.md` and `timings.json` (phases, checks, run metadata),
 `logs/run.log` and one log per step, `logs/node-N.log` (and
-`node-4.pre-wipe.log`), `logs/monitor.tsv` (every 5 s, the lowest head of the
-watched nodes; empty when one of them did not answer),
+`node-4.pre-wipe.log`), `logs/monitor.tsv` (every 5 s, the lowest and the
+highest head of the watched nodes; empty when one of them did not answer),
 `backup/` (dump, SHA-256, before/after counts), `phases.tsv`, `checks.tsv`.
 On exit, including on Ctrl-C or an error, teardown tries to remove the
 `demos-bkdrill` compose project: it removes the helper containers that carry
@@ -366,13 +370,25 @@ leaves an entry or removes a signing state file (exit 2, node X not started
 again), a commit lock or prevote record older than at stop (the signing state
 check fails), head reads that fail for longer than `STALL_LIMIT`, and watched
 nodes that stay at one head, or one that does not answer, while another keeps
-rising, for longer than `STALL_LIMIT`, and every watched node at one head for a
-whole window shorter than `STALL_LIMIT` (the stall checks of both variants fail;
-with the same settings and no fault they pass), a second run of a project whose
+rising, for longer than `STALL_LIMIT`, every watched node at one head for a
+whole window shorter than `STALL_LIMIT`, and a lagging watched node catching up
+while the others make no new block (the stall checks of both variants fail;
+with the same settings and no fault they pass), more than half the head reads
+failed, a node X that never comes within 2 blocks, falls behind again after
+signing, or never signs (no D or ALL row), a changed identity file, a restored
+row count outside the dump's window, another node's block hash, migrations short
+of the image's, a halt marker, a foreign-signature line or a log `docker logs`
+cannot read, a second container on node X's state volume (the run stops before
+node X starts again; in `isolated` the holder check fails), a dump copy that
+fails its hash (exit 2 in phase A2), and in `isolated` a restored database
+without the dump's head, another hash at its head, a node-iso that stays behind,
+and a node-iso identity that is node X's or cannot be read (each fails its own
+check, and only it), the default `OUT_DIR` of a run started in the same second
+as another of the project, a second run of a project whose
 lock is held and an `OUT_DIR` that already exists, empty or not (exit 2, nothing
 written), the project in the default `OUT_DIR` name, a teardown whose `down`
 fails or leaves a volume (exit 3 after a pass, the failure in `timings.json`
-and `timings.md`), and a full `rejoin` and `isolated` run. It needs no Docker and tests
+and `timings.md`; the full drill too), and a full `rejoin` and `isolated` run. It needs no Docker and tests
 the script's own logic only; it says nothing about what a real image, volume
 or postgres does.
 

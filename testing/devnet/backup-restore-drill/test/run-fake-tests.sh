@@ -48,6 +48,12 @@ torn_down() {
     if [ "$(jq '[.containers | length, (.volumes | length)] | add' "${CDIR}/state.json")" = 0 ]; then ok "teardown left no container or volume"; else bad "containers or volumes left in the fake"; fi
 }
 sel() { [ -z "${ONLY}" ] || [[ "$1" == "${ONLY}"* ]]; }
+one_fail() { # $1 regex of the check that must be the run's only failed one
+    local n
+    n="$(grep -c 'CHECK FAIL' "${CDIR}/out.txt")"
+    if [ "${n}" = 1 ] && grep -qE -- "CHECK FAIL: $1" "${CDIR}/out.txt"; then ok "the only failed check: $1"; else bad "${n} failed checks, wanted only /$1/"; fi
+}
+no_all_row() { if grep -q '^ALL' "${CDIR}"/runs/*/phases.tsv; then bad "an ALL row (stopped until rejoined and signing)"; else ok "no ALL row"; fi; }
 
 # ── gen-compose.py: the gossip default, on its own ──────────────────────
 gen() { # GOSSIP value or "unset" -> the value in the compose file, or the error
@@ -85,6 +91,7 @@ if sel smoke-pass; then
     want_out 'CHECK PASS: gossip enabled on every node' "gossip check"
     want_out 'CHECK PASS: node state is writable by uid 1000' "writability check"
     want_out 'CHECK PASS: smoke: node 4 serves RPC at head >= 2' "node 4 line"
+    want_out 'PHASE S smoke: up to every node serving at head >= 2: ' "the phase row says every node got there"
     want_call 'up --no-start' "up --no-start (volumes created by compose)"
     no_call 'compose.* run --rm --no-deps -T -e PG_HOST=pg-iso' "the isolated node's migration"
     no_out 'PHASE A ' "any drill phase (backup)"
@@ -134,6 +141,7 @@ if sel smoke-behind; then
     want_out 'SMOKE FAIL' "SMOKE FAIL"
     want_out 'CHECK FAIL: smoke: node 2 .*serves RPC but head 0 < 2.*node-2.log' "node 2 failure with its log hint"
     want_out 'CHECK PASS: smoke: node 1 ' "node 1 still reported PASS"
+    no_out 'PHASE S smoke: up to every node serving' "a phase row saying every node got there"
     torn_down
 fi
 if sel smoke-noserve; then
@@ -237,6 +245,8 @@ if sel full-rejoin; then
     want_out 'CHECK PASS: restart signing floor logged before signing' "the floor line in node 4's log"
     want_out 'CHECK PASS: restored head >= pre-wipe head' "head after restore"
     want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "the other nodes' head rose: stall check PASS"
+    want_out 'CHECK PASS: node 4 within 2 blocks of the others at the end of D' "still within 2 blocks after D"
+    if grep -q '^ALL' "${CDIR}"/runs/*/phases.tsv; then ok "an ALL row (rejoined and signing)"; else bad "no ALL row"; fi
     want_out 'RESULT PASS: rejoin drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
     want_out 'left on the state volume: node.identity node.identity.commitlock.json node.identity.prevote.json node.identity.signed.json' "wipe kept only identity and signing state"
@@ -256,6 +266,8 @@ if sel full-isolated; then
     go full-isolated VARIANT=isolated
     want_rc 0
     want_out 'CHECK PASS: the validators kept forging during the drill' "the validators' head rose: stall check PASS"
+    want_out "CHECK PASS: isolated node holds no copy of node 4's key" "node-iso holds no copy of the key"
+    want_out 'CHECK PASS: node 4 untouched and the only holder of its key \(one node-4 container, the one started at bring-up, and the only container on its state volume\)' "node 4 the one holder"
     want_out 'RESULT PASS: isolated drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
     torn_down
@@ -280,10 +292,18 @@ if sel dump-cut; then
     want_rc 2
     want_call 'pg_restore --file=/dev/null node4\.dump' "the whole-archive read of the dump"
     want_out 'the dump is empty or cannot be read to its end' "the failed read stops the run"
+    no_out 'PHASE A ' "a phase A row"
     no_call 'stop -t [0-9]+ node-4$' "the stop of node-4 (the run stops in phase A)"
     no_call 'volume rm' "volume rm (no database wiped)"
     no_call 'find \. -mindepth 1' "the state wipe"
     no_call 'pg_restore -U' "pg_restore"
+    torn_down
+    # the copy on the host is not the dump that was hashed: the run stops in phase A2
+    go dump-cp-corrupt FAKE_CP_CORRUPT=1
+    want_rc 2
+    want_out 'the copy on the host does not match its sha256' "the failed check stops the run"
+    no_out 'PHASE A2 ' "a phase A2 row"
+    no_call 'stop -t [0-9]+ node-4$' "the stop of node-4"
     torn_down
 fi
 if sel wipe-owner; then
@@ -305,6 +325,7 @@ if sel wipe-leftover; then
     want_out "the wipe left more than node.identity\* on node 4's state volume: extra.dat$" "the leftover entry named"
     if [ "$(grep -cE 'up -d --no-deps --pull never node-4$' "${CDIR}/calls.log")" = 1 ]; then ok "node-4 never restarted after the leftover"; else bad "node-4 start count is not 1"; fi
     no_call 'pg_restore -U' "pg_restore (the run stops in phase B)"
+    no_out 'PHASE B ' "a phase B row"
     torn_down
     # the same, the wipe exiting 1
     go wipe-fail FAKE_WIPE_LEAVE=extra.dat FAKE_WIPE_FAIL=1
@@ -350,6 +371,13 @@ if sel migrate-fail; then
     want_out "WARNING: migrations on node 4's database failed" "bring-up only warns"
     want_out 'migrations failed on the restored database' "the restore stops on it"
     if [ "$(node4_starts)" = 1 ]; then ok "node-4 not started after the failed migration"; else bad "node-4 start count $(node4_starts), wanted 1 (bring-up only)"; fi
+    no_out 'PHASE C ' "a phase C row"
+    torn_down
+    go migrate-fail-isolated VARIANT=isolated FAKE_MIGRATE_FAIL=1
+    want_rc 2
+    want_out 'migrations failed on the isolated database' "the isolated restore stops on it"
+    no_out 'PHASE IC ' "a phase IC row"
+    no_call 'up -d --no-deps --pull never node-iso' "the start of node-iso"
     torn_down
 fi
 if sel migrate-timeout; then
@@ -369,6 +397,159 @@ if sel migrate-timeout; then
     go migrate-timeout-invalid SMOKE=1 MIGRATE_TIMEOUT=0
     want_rc 2
     want_out 'MIGRATE_TIMEOUT must be at least 1' "timeout 0 (no limit) refused"
+fi
+
+# ── what the rejoin checks refuse: one fault each, the full drill otherwise ──
+if sel rejoin-never; then
+    # node 4 starts again at head 0 and never comes within 2 blocks
+    go rejoin-never FAKE_REJOIN_LAG=100000 REJOIN_TIMEOUT=5
+    want_rc 1
+    want_out 'CHECK FAIL: node 4 rejoins \(head within 2 blocks\) \(head 0 vs others [0-9]+ after 5s\)' "the rejoin fails"
+    want_out 'CHECK FAIL: restored head >= pre-wipe head \(head 0 < [0-9]+\)' "the restored head fails"
+    no_out 'CHECK PASS: (restored head|node 4 (rejoins|signs|within))' "a PASS of the head, rejoin or signing checks"
+    no_out 'PHASE D1? ' "a D1 or D phase row"
+    no_all_row
+    torn_down
+fi
+if sel rejoin-falls-behind; then
+    # node 4 comes within 2 blocks and signs (phase D), then falls 9 blocks behind before the checks
+    go rejoin-falls-behind FAKE_REJOIN_LAG=9:signed FAKE_SLOW_RESTORE=6
+    want_rc 1
+    want_out 'PHASE D rejoin: head within 2 blocks and node signing' "phase D reached"
+    want_out 'CHECK FAIL: node 4 within 2 blocks of the others at the end of D \(head [0-9]+ vs others [0-9]+: ' "behind at the end of D: FAIL"
+    no_out 'RESULT PASS' "RESULT PASS"
+    one_fail 'node 4 within 2 blocks of the others at the end of D'
+    torn_down
+fi
+if sel rejoin-nosign; then
+    # node 4 rejoins, but its signing record stays at its at-stop value and no block carries its signature
+    go rejoin-nosign FAKE_OLDER_RECORD=signed:same SIGN_TIMEOUT=5
+    want_rc 1
+    want_out 'CHECK FAIL: node 4 signs after the restart \(no signing within 5s of syncing\)' "no signing: FAIL"
+    no_out 'CHECK PASS: node 4 signs' "a PASS of the signing check"
+    no_out 'PHASE D ' "a D phase row"
+    no_all_row
+    one_fail 'node 4 signs after the restart'
+    torn_down
+fi
+if sel rejoin-identity; then
+    # node 4's identity file after the restart is not the one it stopped with
+    go rejoin-identity FAKE_IDENTITY_CHANGED=1
+    want_rc 1
+    want_out 'CHECK FAIL: identity file checksum identical \(step 2, at stop, after rejoin\) \(step2=([0-9a-f]{12}) stop=\1 end=[0-9a-f]{12}\)' "a changed identity file: FAIL"
+    one_fail 'identity file checksum identical'
+    torn_down
+fi
+if sel rejoin-counts; then
+    # the restored database holds no transactions
+    go rejoin-counts FAKE_RESTORE_SHORT=transactions
+    want_rc 1
+    want_out 'CHECK FAIL: restore: restored counts match the dump \( transactions=0 not in \[[0-9]+,[0-9]+\]' "a row count outside the dump's window: FAIL"
+    one_fail 'restore: restored counts match the dump'
+    torn_down
+fi
+if sel rejoin-hash; then
+    # node 2 has other blocks at the pre-wipe heights
+    go rejoin-hash FAKE_OTHER_HASH=node-2
+    want_rc 1
+    want_out "CHECK FAIL: block hash at pre-wipe heights equals the other nodes' \( node2@[0-9]+=other[0-9]+!=hash[0-9]+" "another node's hash differs: FAIL"
+    one_fail 'block hash at pre-wipe heights'
+    torn_down
+fi
+if sel rejoin-schema; then
+    # 4 migration files in the image, 3 rows in the restored database's migrations table
+    go rejoin-schema FAKE_MIGRATION_FILES=4
+    want_rc 1
+    want_out "CHECK FAIL: schema at the image's head after the manual migration \(migrations table 3 rows vs 4 files in the image \(migrated=1\)\)" "migrations short of the image's head: FAIL"
+    one_fail "schema at the image's head"
+    torn_down
+fi
+if sel rejoin-halt; then
+    go rejoin-halt FAKE_HALT_MARKER=1
+    want_rc 1
+    want_out 'CHECK FAIL: no halt marker, no foreign-signature log \(a .halted marker is on the state volume\)' "a halt marker: FAIL"
+    one_fail 'no halt marker'
+    torn_down
+    go rejoin-foreign FAKE_FOREIGN_LOG=1
+    want_rc 1
+    want_out 'CHECK FAIL: no halt marker, no foreign-signature log \(1 foreign-signature lines after the restart\)' "a foreign-signature line: FAIL"
+    one_fail 'no halt marker'
+    torn_down
+    # docker logs cannot read node 4's log (a logging driver without reads): no line can be ruled out
+    go rejoin-log-unreadable FAKE_LOGS_FAIL=1
+    want_rc 1
+    want_out "CHECK FAIL: no halt marker, no foreign-signature log \(docker logs cannot read node 4's log" "an unreadable log: FAIL"
+    no_out 'CHECK PASS: no halt marker' "a PASS of the halt and foreign-signature check"
+    one_fail 'no halt marker'
+    torn_down
+fi
+if sel rejoin-holder; then
+    # from the backup on, a container that is not node 4 holds node 4's state volume
+    go rejoin-holder FAKE_EXTRA_HOLDER=state-4
+    want_rc 2
+    want_out 'a container still holds the state volume of node 4' "the run stops before node 4 starts again"
+    if [ "$(node4_starts)" = 1 ]; then ok "node-4 not started again"; else bad "node-4 start count $(node4_starts), wanted 1 (bring-up only)"; fi
+    no_out 'CHECK PASS: one instance of the key at a time' "a PASS of the one-instance check"
+    torn_down
+fi
+
+# ── what the isolated variant's checks refuse ───────────────────────────
+if sel iso-counts; then
+    # the restored database has no blocks: the counts and the head both fail
+    go iso-counts VARIANT=isolated FAKE_RESTORE_SHORT=max_block
+    want_rc 1
+    want_out 'CHECK FAIL: isolated restore: restored counts match the dump \( max_block=0 not in \[[0-9]+,[0-9]+\]' "a head outside the dump's window: FAIL"
+    want_out "CHECK FAIL: isolated DB reaches the dump's head \(max block 0 < [0-9]+\)" "the DB head below the dump's: FAIL"
+    no_out "CHECK PASS: isolated (restore: restored counts|DB reaches)" "a PASS of either"
+    torn_down
+fi
+if sel iso-hash; then
+    # node 1, the network's source for the hash, has another block at the DB's head
+    go iso-hash VARIANT=isolated FAKE_OTHER_HASH=node-1
+    want_rc 1
+    want_out "CHECK FAIL: isolated DB's head block hash equals the network's \(db hash[0-9]+ net other[0-9]+\)" "another hash: FAIL"
+    one_fail "isolated DB's head block hash"
+    torn_down
+fi
+if sel iso-schema; then
+    go iso-schema VARIANT=isolated FAKE_MIGRATION_FILES=4
+    want_rc 1
+    want_out "CHECK FAIL: schema at the image's head after the manual migration \(migrations table 3 rows vs 4 files \(migrated=1\)\)" "migrations short of the image's head: FAIL"
+    one_fail "schema at the image's head"
+    torn_down
+fi
+if sel iso-behind; then
+    # node-iso serves but stays at head 0
+    go iso-behind VARIANT=isolated FAKE_BEHIND=node-iso REJOIN_TIMEOUT=5
+    want_rc 1
+    want_out 'CHECK FAIL: isolated node reaches the expected head \(head 0 vs DB head [0-9]+, network [0-9]+ after 5s\)' "node-iso behind: FAIL"
+    no_out 'PHASE ID ' "a phase ID row"
+    one_fail 'isolated node reaches the expected head'
+    torn_down
+fi
+if sel iso-key; then
+    # node-iso's state volume holds a copy of node 4's identity file
+    go iso-key VARIANT=isolated FAKE_ISO_KEY_OF=state-4
+    want_rc 1
+    want_out "CHECK FAIL: isolated node holds no copy of node 4's key \(same identity file hash\)" "a copy of the key: FAIL"
+    one_fail 'isolated node holds no copy'
+    torn_down
+    # node-iso's state volume cannot be read: its identity is not known to differ
+    go iso-key-unreadable VARIANT=isolated FAKE_ISO_UNREADABLE=1
+    want_rc 1
+    want_out "CHECK FAIL: isolated node holds no copy of node 4's key \(cannot read node-iso's identity file" "an unreadable identity: FAIL"
+    no_out 'CHECK PASS: isolated node holds no copy' "a PASS of the key check"
+    one_fail 'isolated node holds no copy'
+    torn_down
+fi
+if sel iso-holder; then
+    # from the backup on, a container that is not node 4 holds node 4's state volume
+    go iso-holder VARIANT=isolated FAKE_EXTRA_HOLDER=state-4
+    want_rc 1
+    want_out 'CHECK FAIL: node 4 untouched and the only holder of its key \(' "a second holder of the state volume: FAIL"
+    no_out 'CHECK PASS: node 4 untouched' "a PASS of the holder check"
+    one_fail 'node 4 untouched and the only holder of its key'
+    torn_down
 fi
 
 # ── volumes that exist before the run ───────────────────────────────────
@@ -425,6 +606,14 @@ if sel teardown-fail; then
     if jq -e '.result == "FAIL" and (.cleanup | startswith("FAILED"))' "${CDIR}"/runs/*/timings.json > /dev/null; then
         ok "FAIL result with the cleanup failure marked"
     else bad "timings.json: result/cleanup not FAIL/FAILED"; fi
+    # the full drill: every check passes, the teardown fails, the exit is 3, not 0
+    go teardown-fail-full FAKE_DOWN_FAIL=1
+    want_out 'RESULT PASS: rejoin drill' "the drill's own checks passed"
+    want_rc 3
+    want_out 'CLEANUP FAILED: compose down -v exited 1' "the cleanup failure"
+    if jq -e '.result == "PASS" and (.cleanup | startswith("FAILED: compose down -v exited 1"))' "${CDIR}"/runs/*/timings.json > /dev/null; then
+        ok "timings.json marks the cleanup failure"
+    else bad "the cleanup failure is not in timings.json"; fi
 fi
 
 # ── the stall checks when head reads fail ───────────────────────────────
@@ -459,6 +648,24 @@ if sel monitor-stats; then
     for t in 0 5 10 15 20; do printf '%s\t%s\n' "${t}" $((5 + t / 10)); done > "${CDIR}/rising.tsv"
     stall_of "${CDIR}/rising.tsv" 0 20
     want_out '^PASS: longest gap 10s, .*head 5 -> 7, 5 samples' "five reads, the head rising: PASS"
+    # a read every 15 s, every read between failed: 8 of 13 reads failed, no hole above the limit
+    for t in $(seq 0 5 60); do if [ $((t % 15)) = 0 ]; then printf '%s\t%s\n' "${t}" $((10 + t / 15)); else printf '%s\t\n' "${t}"; fi; done > "${CDIR}/sparse.tsv"
+    stall_of "${CDIR}/sparse.tsv" 0 60
+    want_out '^FAIL: longest gap 15s, longest without a head read 15s \(limit 90s\), head 10 -> 14, 5 samples, 8 unreadable' "more than half the reads failed: FAIL"
+    no_out '^PASS' "PASS"
+    # as the run writes them: the lowest and the highest head of the watched nodes. The
+    # lowest rises from 1 to 5, the highest stays at 5: a node catching up, no new block
+    for t in 0 5 10 15 20; do printf '%s\t%s\t5\n' "${t}" $((1 + t / 5)); done > "${CDIR}/catchup.tsv"
+    stall_of "${CDIR}/catchup.tsv" 0 20
+    want_out '^FAIL: no new block on the watched validators between 0 and 20 .*head 1 -> 5, 5 samples, 0 unreadable, highest head at the first read 5' "the lowest head catching up with a flat highest: FAIL"
+    no_out '^PASS' "PASS"
+    # the highest head flat for 105 s while the lowest rises to it, then both rise: FAIL on the
+    # highest head's gap, though the lowest ends above the highest's first read
+    { for t in $(seq 0 5 100); do printf '%s\t%s\t10\n' "${t}" $((t / 10)); done
+        for t in 105 110 115 120; do printf '%s\t%s\t%s\n' "${t}" $(((t - 100) / 5 + 9)) $(((t - 100) / 5 + 10)); done; } > "${CDIR}/stall-hidden.tsv"
+    stall_of "${CDIR}/stall-hidden.tsv" 0 120
+    want_out '^FAIL: longest gap 105s, longest without a head read 5s \(limit 90s\), head 0 -> 13, 25 samples, 0 unreadable, highest head at the first read 10' "the highest head flat longer than the limit: FAIL"
+    no_out '^PASS' "PASS"
 fi
 if sel monitor-blind; then
     # no node answers its head for 8 s from the restore's pg_restore (STALL_LIMIT=4 here)
@@ -494,10 +701,12 @@ if sel monitor-slowest; then
     want_rc 1
     want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; no head read for ([6-9]|[1-9][0-9]+)s, more than 3s' "rejoin, one of three silent: FAIL naming the missing reads"
     no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
-    # isolated watches nodes 1-4: only node 4 rises
+    # isolated watches nodes 1-4: only node 4 rises. The lowest head at the end is the stuck
+    # nodes' head at the pg_dump, which the highest at the window's first read may reach:
+    # then the reason starts with "no new block", the gap follows
     go monitor-slowest-stuck-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3
     want_rc 1
-    want_out 'CHECK FAIL: the validators kept forging during the drill \(longest gap ([6-9]|[1-9][0-9]+)s' "isolated, three of four stuck: FAIL on the gap"
+    want_out 'CHECK FAIL: the validators kept forging during the drill \((no new block on the watched validators between [0-9]+ and [0-9]+[^;]*; )?longest gap ([6-9]|[1-9][0-9]+)s' "isolated, three of four stuck: FAIL on the gap"
     no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
     go monitor-slowest-silent-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_SILENT=node-1
     want_rc 1
@@ -527,6 +736,21 @@ if sel monitor-flat; then
     go monitor-flat-isolated VARIANT=isolated FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3,node-4 FAKE_STUCK_AT=5
     want_rc 1
     want_out 'CHECK FAIL: the validators kept forging during the drill \(no new block on the watched validators between [0-9]+ and [0-9]+ .*head 5 -> 5, ([5-9]|[1-9][0-9]+) samples, 0 unreadable' "isolated, nodes 1-4 at one head: FAIL naming the window"
+    no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
+    only_stall_fail
+fi
+# A watched node 60 blocks behind (20 s) catches up while the others stay at the head they had
+# at the backup's pg_dump (FAKE_CATCHUP, FAKE_STUCK): the lowest head keeps rising through both
+# variants' windows after the dump, but no new block is made. Same settings as monitor-slowest
+if sel monitor-catchup; then
+    go monitor-catchup STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2 FAKE_CATCHUP=node-3:60
+    want_rc 1
+    want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; (no new block on the watched validators|longest gap)' "rejoin, a node catching up, no new block: FAIL"
+    no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
+    only_stall_fail
+    go monitor-catchup-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-4 FAKE_CATCHUP=node-3:60
+    want_rc 1
+    want_out 'CHECK FAIL: the validators kept forging during the drill \((no new block on the watched validators|longest gap)' "isolated, a node catching up, no new block: FAIL"
     no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
     only_stall_fail
 fi
@@ -572,6 +796,24 @@ if sel out-dir-used; then
     if [ -z "$(ls -A "${d}")" ]; then ok "the empty OUT_DIR is still empty"; else bad "OUT_DIR was written to"; fi
     if [ ! -s "${CDIR}/calls.log" ]; then ok "docker never called"; else bad "docker was called"; fi
     if [ ! -e "${CDIR}/demos-faketest.lock" ]; then ok "no lock file written"; else bad "the lock file was written"; fi
+fi
+if sel out-dir-same-second; then
+    # two runs of one PROJECT started in the same second get the same default OUT_DIR: here
+    # that of each of the next 10 seconds already holds another run's checks.tsv
+    d="${WORK}/out-dir-same-second/runs"
+    mkdir -p "${d}"
+    s0="$(date -u +%s)"
+    for k in $(seq 0 10); do
+        mkdir -p "${d}/$(date -u -d "@$((s0 + k))" +%Y%m%dT%H%M%SZ)-demos-faketest-bkdrill-smoke"
+        printf 'other\tPASS\tkept\n' > "${d}/$(date -u -d "@$((s0 + k))" +%Y%m%dT%H%M%SZ)-demos-faketest-bkdrill-smoke/checks.tsv"
+    done
+    go out-dir-same-second SMOKE=1
+    want_rc 2
+    want_out "OUT_DIR ${d}/[0-9]{8}T[0-9]{6}Z-demos-faketest-bkdrill-smoke already exists" "the second run is refused"
+    if [ "$(cat "${d}"/*/checks.tsv | sort -u)" = "$(printf 'other\tPASS\tkept')" ] && [ "$(ls -A "${d}"/* | grep -cv -e checks.tsv -e '^$' -e ':$')" = 0 ]; then
+        ok "the other run's dirs untouched, nothing added"
+    else bad "another run's OUT_DIR was written to"; fi
+    if [ ! -s "${CDIR}/calls.log" ]; then ok "docker never called"; else bad "docker was called"; fi
 fi
 
 echo

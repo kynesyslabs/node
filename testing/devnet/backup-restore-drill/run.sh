@@ -378,6 +378,16 @@ min_head_of() { # empty if any does not answer
     done
     echo "${m}"
 }
+span_head_of() { # "lowest<TAB>highest" head of the given nodes, empty if any does not answer
+    local i h lo="" hi=""
+    for i in "$@"; do
+        h="$(head_of "${i}")"
+        is_num "${h}" || { echo ""; return 0; }
+        if [ -z "${lo}" ] || [ "${h}" -lt "${lo}" ]; then lo="${h}"; fi
+        if [ -z "${hi}" ] || [ "${h}" -gt "${hi}" ]; then hi="${h}"; fi
+    done
+    printf '%s\t%s\n' "${lo}" "${hi}"
+}
 
 # ── helpers: containers and volumes ─────────────────────────────────────
 pgx() { # $1 postgres name (1..N|iso), rest: command in its container, stdin passes through
@@ -526,53 +536,61 @@ start_monitor() { # nodes to watch
         # not a holder of the project lock: a sleep left behind when it is killed must not keep it
         exec 9>&-
         set +e
-        # The slowest watched node's head, empty (a missed read) when one of them does
-        # not answer: one node that keeps rising alone must not pass for the chain
+        # The slowest and the furthest watched node's heads, empty (a missed read) when one
+        # of them does not answer: one node that keeps rising alone must not pass for the
+        # chain, nor one that catches up while the others make no new block
         while :; do
-            printf '%s\t%s\n' "$(date +%s)" "$(min_head_of "$@")" >> "${MON_FILE}"
+            printf '%s\t%s\n' "$(date +%s)" "$(span_head_of "$@")" >> "${MON_FILE}"
             sleep 5
         done
     ) &
     MON_PID=$!
 }
-# "maxgap first last samples unreadable blind" between two unix times. first, last:
-# the heads of the window's first and last successful reads. maxgap: the
-# longest time the head was not seen to rise, from the window's start, measured up to
-# the sample that sees it rise (before that sample becomes the new start) and, last,
-# up to the window's end. blind: the longest time without a successful read, from the
-# window's start, between reads, and up to its end
+# "maxgap first last samples unreadable blind top" between two unix times. first, last:
+# the lowest heads of the window's first and last successful reads; top: the highest
+# head of its first (a line without one, as before it was recorded, counts its lowest).
+# maxgap: the longest time the lowest or the highest head was not seen to rise, from
+# the window's start, measured up to the sample that sees it rise (before that sample
+# becomes the new start) and, last, up to the window's end. blind: the longest time
+# without a successful read, from the window's start, between reads, and up to its end
 monitor_stats() {
     awk -F'\t' -v from="$1" -v to="$2" '
-        BEGIN { last = from; lastread = from }
+        BEGIN { last = from; lastread = from; lasthi = from }
         $1 >= from && $1 <= to {
             if ($2 ~ /^[0-9]+$/) {
+                hi = ($3 ~ /^[0-9]+$/) ? $3 : $2
                 if ($1 - lastread > blind) blind = $1 - lastread
                 lastread = $1
                 lasthead = $2
-                if (!seen) { first = $2; best = $2; seen = 1 }
-                else if ($2 > best) { if ($1 - last > maxgap) maxgap = $1 - last; best = $2; last = $1 }
+                if (!seen) { first = $2; best = $2; top = hi; besthi = hi; seen = 1 }
+                else {
+                    if ($2 > best) { if ($1 - last > maxgap) maxgap = $1 - last; best = $2; last = $1 }
+                    if (hi > besthi) { if ($1 - lasthi > maxgap) maxgap = $1 - lasthi; besthi = hi; lasthi = $1 }
+                }
                 n++
             } else { unread++ }
         }
         END {
             if (to - last > maxgap) maxgap = to - last
+            if (to - lasthi > maxgap) maxgap = to - lasthi
             if (to - lastread > blind) blind = to - lastread
-            printf "%d %d %d %d %d %d", maxgap + 0, first + 0, lasthead + 0, n + 0, unread + 0, blind + 0
+            printf "%d %d %d %d %d %d %d", maxgap + 0, first + 0, lasthead + 0, n + 0, unread + 0, blind + 0, top + 0
         }' "${MON_FILE}"
 }
 # The verdict of the "kept forging" checks on the window [$1, $2]: STALL_RESULT (PASS
 # or FAIL), STALL_DETAIL, and monitor_stats' numbers. No head read for longer than
 # STALL_LIMIT is a FAIL, whatever the heads around the hole: the chain may have
-# stalled in it, and the run cannot show it did not. A window whose last successful
-# read is not above its first is a FAIL too, however short: reads of one head show
-# no new block on the slowest watched validator, only that it answered
+# stalled in it, and the run cannot show it did not. A window whose lowest head at its
+# last successful read is not above the highest at its first is a FAIL too, however
+# short: then no watched validator is shown a block that none of them had at the
+# start, only that they answered, or that a slow one caught up
 stall_verdict() {
-    read -r maxgap first last samples unread blind <<< "$(monitor_stats "$1" "$2")"
-    STALL_DETAIL="longest gap ${maxgap}s, longest without a head read ${blind}s (limit ${STALL_LIMIT}s), head ${first} -> ${last}, ${samples} samples, ${unread} unreadable"
+    read -r maxgap first last samples unread blind top <<< "$(monitor_stats "$1" "$2")"
+    STALL_DETAIL="longest gap ${maxgap}s, longest without a head read ${blind}s (limit ${STALL_LIMIT}s), head ${first} -> ${last}, ${samples} samples, ${unread} unreadable, highest head at the first read ${top}"
     if [ "${blind}" -gt "${STALL_LIMIT}" ]; then
         STALL_RESULT=FAIL
         STALL_DETAIL="no head read for ${blind}s, more than ${STALL_LIMIT}s: a stall in that time cannot be ruled out; ${STALL_DETAIL}"
-    elif [ "${last}" -le "${first}" ]; then
+    elif [ "${last}" -le "${top}" ]; then
         STALL_RESULT=FAIL
         STALL_DETAIL="no new block on the watched validators between ${1} and ${2} (unix times, as in logs/monitor.tsv); ${STALL_DETAIL}"
     elif [ "${samples}" -gt 0 ] && [ "${maxgap}" -le "${STALL_LIMIT}" ] && [ "${unread}" -le $((samples / 2)) ]; then
@@ -887,7 +905,11 @@ if [ "${SMOKE}" = 1 ]; then
         if [ "${SECONDS}" -ge "${smoke_deadline}" ]; then break; fi
         sleep 3
     done
-    phase_end S "smoke: up to every node serving at head >= ${SMOKE_HEAD}"
+    if [ "${all}" = 1 ] && [ "${#SMOKE_WHY[@]}" = 0 ]; then
+        phase_end S "smoke: up to every node serving at head >= ${SMOKE_HEAD}"
+    else
+        phase_end S "smoke: waited for every node serving at head >= ${SMOKE_HEAD}, not all got there"
+    fi
     smoke_ok=1
     for i in $(seq 1 "${N}"); do
         if [ -n "${SMOKE_WHY[${i}]:-}" ]; then why="${SMOKE_WHY[${i}]}"
@@ -1147,7 +1169,9 @@ if [ "${VARIANT}" = rejoin ]; then
         fi
     fi
     T_END="$(date +%s)"
-    printf 'ALL\toutage: node %s stopped until rejoined and signing\t%s\n' "${X_NODE}" "$(awk -v a="${T_B0}" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }')" >> "${PHASES}"
+    if [ "${SIGNED}" = 1 ]; then
+        printf 'ALL\toutage: node %s stopped until rejoined and signing\t%s\n' "${X_NODE}" "$(awk -v a="${T_B0}" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }')" >> "${PHASES}"
+    fi
     stop_monitor
 
     # ═════════════════════════════════════════════════════════════════════
@@ -1157,12 +1181,21 @@ if [ "${VARIANT}" = rejoin ]; then
     state_sums > "${OUT_DIR}/sums.end"
     for rec in signed commitlock prevote; do POS_END[${rec}]="$(record_pos "${rec}")"; done
     HX_END="$(read_head "${X_NODE}" || true)"
+    HO_END="$(max_head_of "${OTHERS[@]}")"
 
     # 1. head
     if is_num "${HX_END}" && [ "${HX_END}" -ge "${H_STOP}" ]; then
         check "restored head >= pre-wipe head" PASS "head ${HX_END} >= ${H_STOP} (pre-wipe), ${H_REC} (step 2)"
     else
         check "restored head >= pre-wipe head" FAIL "head ${HX_END:-?} < ${H_STOP}"
+    fi
+    # still within 2 blocks of the others now that D is over, not only once during it
+    if [ "${SYNCED}" = 1 ]; then
+        if is_num "${HX_END}" && is_num "${HO_END}" && [ "${HX_END}" -ge $((HO_END - 2)) ]; then
+            check "node ${X_NODE} within 2 blocks of the others at the end of D" PASS "head ${HX_END} vs others ${HO_END}"
+        else
+            check "node ${X_NODE} within 2 blocks of the others at the end of D" FAIL "head ${HX_END:-?} vs others ${HO_END:-?}: it came within 2 blocks during D, then fell behind"
+        fi
     fi
     # 2. hashes at the pre-wipe heights equal the others'
     bad=""
@@ -1227,11 +1260,16 @@ if [ "${VARIANT}" = rejoin ]; then
     fi
     # 5. no halt marker, no foreign signature
     names_end="$(state_names | tr '\n' ' ')"
+    # the count below reads 0 from a log docker cannot give, so the read itself is checked
+    x_log_ok=1
+    docker logs "${CID[${X_NODE}]}" > /dev/null 2>&1 || x_log_ok=0
     foreign_now="$(docker logs "${CID[${X_NODE}]}" 2>&1 | grep -aEc 'another process is signing|foreign signature' || true)"
     case "${names_end}" in
         *.halted*) check "no halt marker, no foreign-signature log" FAIL "a .halted marker is on the state volume" ;;
         *)
-            if [ "${foreign_now:-0}" != 0 ]; then
+            if [ "${x_log_ok}" = 0 ]; then
+                check "no halt marker, no foreign-signature log" FAIL "docker logs cannot read node ${X_NODE}'s log, so a foreign-signature line cannot be ruled out"
+            elif [ "${foreign_now:-0}" != 0 ]; then
                 check "no halt marker, no foreign-signature log" FAIL "${foreign_now} foreign-signature lines after the restart"
             else
                 check "no halt marker, no foreign-signature log" PASS "none (state volume: ${names_end})"
@@ -1325,9 +1363,11 @@ else
         fi
         # Node X's key never went anywhere: no mount of it, and a different identity
         mounts_iso="$(docker inspect -f '{{range .Mounts}}{{.Source}} {{.Name}}{{"\n"}}{{end}}' "${CID[iso]}")"
-        iso_sum="$(helper 'sha256sum /s/node.identity 2>/dev/null | cut -d" " -f1; true' -v "$(vol state-iso):/s:ro" "${PG_IMAGE}" || true)"
+        iso_sum="$(helper 'sha256sum /s/node.identity 2>/dev/null | cut -d" " -f1; true' -v "$(vol state-iso):/s:ro" "${PG_IMAGE}")" || iso_sum=unreadable
         if echo "${mounts_iso}" | grep -qE "node${X_NODE}\.identity|state-${X_NODE}"; then
             check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "its mounts include node ${X_NODE}'s identity or state volume"
+        elif [ "${iso_sum}" = unreadable ]; then
+            check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "cannot read node-iso's identity file from its state volume to compare it"
         elif [ -n "${iso_sum}" ] && [ "${iso_sum}" = "${IDENT_SUM_2}" ]; then
             check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "same identity file hash"
         else
@@ -1338,10 +1378,15 @@ else
     T_END="$(date +%s)"
     stall_verdict "${T_DRILL_START}" "${T_END}"
     check "the validators kept forging during the drill" "${STALL_RESULT}" "${STALL_DETAIL}"
-    if [ "$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}" | wc -l)" = 1 ]; then
-        check "node ${X_NODE} untouched and the only holder of its key" PASS "one node-${X_NODE} container, never stopped"
+    # The running node-X containers, and the containers on its state volume, must both be
+    # just the one started at bring-up (ids cut to 12: docker ps and compose ps differ)
+    x_cid="${CID[${X_NODE}]:0:12}"
+    x_svc="$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}" | cut -c1-12 | tr '\n' ' ')" || x_svc="cannot list "
+    x_holders="$(docker ps -q --filter "volume=$(vol "state-${X_NODE}")" | cut -c1-12 | tr '\n' ' ')" || x_holders="cannot list "
+    if [ -n "${x_cid}" ] && [ "${x_svc}" = "${x_cid} " ] && [ "${x_holders}" = "${x_cid} " ]; then
+        check "node ${X_NODE} untouched and the only holder of its key" PASS "one node-${X_NODE} container, the one started at bring-up, and the only container on its state volume"
     else
-        check "node ${X_NODE} untouched and the only holder of its key" FAIL "unexpected number of node-${X_NODE} containers"
+        check "node ${X_NODE} untouched and the only holder of its key" FAIL "node-${X_NODE} containers: ${x_svc:-none }; on its state volume: ${x_holders:-none }; started at bring-up: ${x_cid:-?}"
     fi
 fi
 
