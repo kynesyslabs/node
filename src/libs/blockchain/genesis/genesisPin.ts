@@ -119,12 +119,36 @@ export function xffModeProblem(
     chainId: unknown,
 ): string | null {
     if (xffMode !== "legacy" || !isMainnetChainId(chainId)) return null
+    const shown =
+        typeof chainId === "number" || typeof chainId === "string"
+            ? chainId
+            : JSON.stringify(chainId)
     return (
-        `XFF_MODE=legacy and the genesis has chain id ${String(chainId)}, which is not a test ` +
+        `XFF_MODE=legacy and the genesis has chain id ${shown}, which is not a test ` +
         "network's. Legacy trusts proxy headers (X-Forwarded-For, X-Real-IP) from any client, so a " +
         "client can choose the IP the per-IP rate limits are counted under; " +
         "set XFF_MODE=strict with TRUSTED_PROXIES, or leave XFF_MODE unset"
     )
+}
+
+/**
+ * Every refusal of the settings this node booted with, judged against the
+ * chain id of its genesis, in the order the checks run. Empty when none apply.
+ */
+export function bootSettingProblems(
+    pin: string,
+    chainId: unknown,
+    settings: {
+        env: Record<string, string | undefined>
+        prod: boolean
+        xffMode: string | undefined | null
+    },
+): string[] {
+    return [
+        pinRequirementProblem(pin, settings.env, chainId),
+        devModeProblem(settings.prod, chainId),
+        xffModeProblem(settings.xffMode, chainId),
+    ].filter((problem): problem is string => problem !== null)
 }
 
 /**

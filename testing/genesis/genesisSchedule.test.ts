@@ -12,9 +12,11 @@ import { describe, it, expect } from "bun:test"
 import { readFileSync } from "node:fs"
 import { DEFAULT_FORK_CONFIG } from "src/forks/forkConfig"
 import {
+    bootSettingProblems,
     defaultTreasuryWarning,
     devModeProblem,
     genesisScheduleProblems,
+    pinRequirementProblem,
     xffModeProblem,
 } from "src/libs/blockchain/genesis/genesisPin"
 
@@ -161,5 +163,24 @@ describe("xffModeProblem", () => {
         for (const mode of ["strict", "off", undefined, null, ""]) {
             expect(xffModeProblem(mode, 4242)).toBeNull()
         }
+    })
+})
+
+describe("bootSettingProblems", () => {
+    const settings = { env: {}, prod: true, xffMode: undefined }
+
+    it("gives every refusal of a mainnet chain id in one list, in check order", () => {
+        const problems = bootSettingProblems("", 4242, { ...settings, prod: false })
+        expect(problems).toEqual([
+            pinRequirementProblem("", {}, 4242)!,
+            devModeProblem(false, 4242)!,
+        ])
+        expect(problems[0]).toContain("EXPECTED_GENESIS_HASH is not set")
+        expect(problems[1]).toContain("set PROD=true")
+    })
+
+    it("is empty when the settings are fine or the chain id is a test network's", () => {
+        expect(bootSettingProblems(PIN, 4242, settings)).toEqual([])
+        expect(bootSettingProblems("", 1337, { ...settings, prod: false, xffMode: "legacy" })).toEqual([])
     })
 })

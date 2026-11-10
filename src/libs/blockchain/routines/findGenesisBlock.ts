@@ -23,17 +23,15 @@ import {
 import {
     GenesisRefusal,
     blockPinProblem,
+    bootSettingProblems as settingProblems,
     chainIdOf,
     defaultTreasuryWarning,
-    devModeProblem,
     genesisScheduleProblems,
     freshGenesisProblems,
     parseGenesisPin,
     parseStoredGenesisData,
-    pinRequirementProblem,
     restartGenesisProblems,
     unpinnedWarning,
-    xffModeProblem,
 } from "@/libs/blockchain/genesis/genesisPin"
 import { explicitXffMode } from "@/libs/network/middleware/rateLimiter"
 import {
@@ -118,6 +116,11 @@ function loadForkConfigFromGenesisFile() {
     }
 }
 
+/** The genesis file's data when there is a file (read at the call), else the fallback. */
+function genesisFileOr<T>(hasGenesisFile: boolean, fallback: T) {
+    return hasGenesisFile ? readGenesisFile() : fallback
+}
+
 /** Overlay a recovery export's users and genesis balances onto the genesis data. */
 function applyRecoveryData(genesisData, recoveryGenesis) {
     const finalBalances = {}
@@ -142,6 +145,15 @@ function applyRecoveryData(genesisData, recoveryGenesis) {
 /** The XFF mode the rate limiter will run with when it is set explicitly. */
 function configuredXffMode(): string | undefined {
     return explicitXffMode(Config.getInstance().core.xffMode)
+}
+
+/** Every refusal of this node's pin, PROD and XFF_MODE settings for a genesis with this chain id. */
+function bootSettingProblems(pin: string, chainId: unknown): string[] {
+    return settingProblems(pin, chainId, {
+        env: process.env,
+        prod: Config.getInstance().core.prod,
+        xffMode: configuredXffMode(),
+    })
 }
 
 export default async function findGenesisBlock() {
@@ -169,12 +181,7 @@ export default async function findGenesisBlock() {
         "EXPECTED_GENESIS_BLOCK_HASH",
     )
     const fileChainId = hasGenesisFile ? chainIdOf(readGenesisFile()) : undefined
-    const pinProblem = pinRequirementProblem(pin, process.env, fileChainId)
-    if (pinProblem) refuse([pinProblem])
-    const modeProblem = devModeProblem(Config.getInstance().core.prod, fileChainId)
-    if (modeProblem) refuse([modeProblem])
-    const xffProblem = xffModeProblem(configuredXffMode(), fileChainId)
-    if (xffProblem) refuse([xffProblem])
+    refuse(bootSettingProblems(pin, fileChainId))
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
@@ -187,21 +194,16 @@ export default async function findGenesisBlock() {
             | undefined
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
         // Without a file only block 0 says which chain this is
-        const storedPinProblem = pinRequirementProblem(pin, process.env, chainIdOf(stored))
-        if (storedPinProblem) refuse([storedPinProblem])
-        const storedModeProblem = devModeProblem(Config.getInstance().core.prod, chainIdOf(stored))
-        if (storedModeProblem) refuse([storedModeProblem])
-        const storedXffProblem = xffModeProblem(configuredXffMode(), chainIdOf(stored))
-        if (storedXffProblem) refuse([storedXffProblem])
+        refuse(bootSettingProblems(pin, chainIdOf(stored)))
         refuse(
             genesisScheduleProblems({
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : null,
+                fileGenesisData: genesisFileOr(hasGenesisFile, null),
                 storedGenesisData: stored,
                 pin,
                 blockPin,
             }),
         )
-        warnDefaultTreasury(hasGenesisFile ? readGenesisFile() : stored)
+        warnDefaultTreasury(genesisFileOr(hasGenesisFile, stored))
         // Without a file the fork loader never ran, so its chain id check did not either
         if (!hasGenesisFile && isForkMachineryDisabled()) {
             refuseDisabledForkMachineryOutsideTestChains(stored)
@@ -211,7 +213,7 @@ export default async function findGenesisBlock() {
                 storedGenesisData: stored,
                 // Without a file only the pin can be checked; the schedule check
                 // below still sees the defaults this node would run with.
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : stored,
+                fileGenesisData: genesisFileOr(hasGenesisFile, stored),
                 pin,
             }),
         )
