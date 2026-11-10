@@ -116,11 +116,6 @@ function loadForkConfigFromGenesisFile() {
     }
 }
 
-/** The genesis file's data when there is a file (read at the call), else the fallback. */
-function genesisFileOr<T>(hasGenesisFile: boolean, fallback: T) {
-    return hasGenesisFile ? readGenesisFile() : fallback
-}
-
 /** Overlay a recovery export's users and genesis balances onto the genesis data. */
 function applyRecoveryData(genesisData, recoveryGenesis) {
     const finalBalances = {}
@@ -180,8 +175,8 @@ export default async function findGenesisBlock() {
         Config.getInstance().core.expectedGenesisBlockHash,
         "EXPECTED_GENESIS_BLOCK_HASH",
     )
-    const fileChainId = hasGenesisFile ? chainIdOf(readGenesisFile()) : undefined
-    refuse(bootSettingProblems(pin, fileChainId))
+    const fileGenesis = hasGenesisFile ? readGenesisFile() : null
+    refuse(bootSettingProblems(pin, chainIdOf(fileGenesis)))
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
@@ -195,15 +190,18 @@ export default async function findGenesisBlock() {
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
         // Without a file only block 0 says which chain this is
         refuse(bootSettingProblems(pin, chainIdOf(stored)))
+        // Without a file only the pin can be checked; the schedule check
+        // still sees the defaults this node would run with.
+        const fileOrStored = fileGenesis ?? stored
         refuse(
             genesisScheduleProblems({
-                fileGenesisData: genesisFileOr(hasGenesisFile, null),
+                fileGenesisData: fileGenesis,
                 storedGenesisData: stored,
                 pin,
                 blockPin,
             }),
         )
-        warnDefaultTreasury(genesisFileOr(hasGenesisFile, stored))
+        warnDefaultTreasury(fileOrStored)
         // Without a file the fork loader never ran, so its chain id check did not either
         if (!hasGenesisFile && isForkMachineryDisabled()) {
             refuseDisabledForkMachineryOutsideTestChains(stored)
@@ -211,9 +209,7 @@ export default async function findGenesisBlock() {
         refuse(
             restartGenesisProblems({
                 storedGenesisData: stored,
-                // Without a file only the pin can be checked; the schedule check
-                // below still sees the defaults this node would run with.
-                fileGenesisData: genesisFileOr(hasGenesisFile, stored),
+                fileGenesisData: fileOrStored,
                 pin,
             }),
         )
