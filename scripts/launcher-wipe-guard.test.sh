@@ -826,43 +826,73 @@ for f in .demos_identity "${RESET_SIGNING[@]}"; do
 done
 
 # A node started from this checkout without docker or a lock: a bun or node
-# process working in it (here sleep, copied under the name bun). reset-node
-# and the processes that started it do not count
+# process working in it (here a shell script named bun that sleeps: a copy of
+# sleep would not do, as a multi-call coreutils refuses to run as bun).
+# reset-node and the processes that started it do not count. A case fails
+# when its fake bun is not running before and after reset-node, so a process
+# that never started (or ended early) cannot make it pass
+fake_bun_runs() {
+    local stat comm
+    kill -0 "$FAKE_BUN" 2>/dev/null || return 1
+    read -r stat comm < <(ps -o stat= -o comm= -p "$FAKE_BUN" 2>/dev/null)
+    [[ "$stat" != Z* && "${comm##*/}" == bun ]]
+}
+kill_fake_bun() { kill "$FAKE_BUN" 2>/dev/null; wait "$FAKE_BUN" 2>/dev/null; }
+# start_fake_bun DIR NAME: returns 1, failing NAME, if it is not running
 start_fake_bun() {
     mkdir -p "$W/fake" "$1"
-    cp "$REAL_SLEEP" "$W/fake/bun"
+    cat >"$W/fake/bun" <<'EOF'
+#!/bin/sh
+# Stays alive under the name bun (no exec) in the directory it was started
+# in; ends its sleep when it is stopped
+sleep "$1" &
+trap 'kill $!' TERM
+wait
+EOF
+    chmod +x "$W/fake/bun"
     (cd "$1" && exec "$W/fake/bun" 60) &
     FAKE_BUN=$!
     local i
     for ((i = 0; i < 50; i++)); do
-        [[ "$(ps -o comm= -p "$FAKE_BUN" 2>/dev/null)" == *bun ]] && break
+        fake_bun_runs && return 0
         "$REAL_SLEEP" 0.1
     done
+    kill_fake_bun
+    FAIL=$((FAIL + 1))
+    echo "FAIL - $2: the fake bun process is not running"
+    return 1
 }
-stop_fake_bun() { kill "$FAKE_BUN" 2>/dev/null; wait "$FAKE_BUN" 2>/dev/null; }
+# stop_fake_bun NAME: fails NAME if the fake bun ended before it was stopped
+stop_fake_bun() {
+    fake_bun_runs || { FAIL=$((FAIL + 1)); echo "FAIL - $1: the fake bun process ended before it was stopped"; }
+    kill_fake_bun
+}
 if [[ -e "/proc/$$/cwd" ]]; then
     new_reset_world
-    start_fake_bun "$W/node"
-    reset_check "reset-node: a bun process works in this checkout -> refuses, deletes nothing" fail -y
-    stop_fake_bun
-    expect_untouched "reset-node with a bun process in this checkout"
-    case "$LAST_OUT" in *"Process $FAKE_BUN (bun) is running in this checkout: $W/node"*"Stop what is named above"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the bun process in this checkout";; esac
+    if start_fake_bun "$W/node" "reset-node with a bun process in this checkout"; then
+        reset_check "reset-node: a bun process works in this checkout -> refuses, deletes nothing" fail -y
+        stop_fake_bun "reset-node with a bun process in this checkout"
+        expect_untouched "reset-node with a bun process in this checkout"
+        case "$LAST_OUT" in *"Process $FAKE_BUN (bun) is running in this checkout: $W/node"*"Stop what is named above"*"$NOTHING_DELETED"*) ;; *) FAIL=$((FAIL + 1)); echo "FAIL - reset-node did not name the bun process in this checkout";; esac
+    fi
 
-    # bash copied under the name bun runs reset-node from the checkout
+    # bash copied under the name bun runs reset-node from the checkout; it
+    # stops if it does not run under the name bun
     new_reset_world
     mkdir -p "$W/fake"
     cp "$(command -v bash)" "$W/fake/bun"
     out="$(cd "$W/node" && env PATH="$W/bin:$PATH" STUB_REAL_MV="$(command -v mv)" STUB_RESET_DIR="$W" \
-        timeout 60 "$W/fake/bun" -c '"$0" -y; exit $?' "$W/reset-node" 2>&1)"
+        timeout 60 "$W/fake/bun" -c 'c="$(ps -o comm= -p $$)"; [[ "${c##*/}" == bun ]] || { echo "the fake bun process runs as ${c:-nothing}"; exit 99; }; "$0" -y; exit $?' "$W/reset-node" 2>&1)"
     rc=$?
     reset_result "reset-node: started by a bun process working in this checkout -> proceeds" ok "$rc" "$out"
 else
     echo "skip - reset-node with a bun process in this checkout: no /proc on this host"
 fi
 new_reset_world
-start_fake_bun "$W/node-old"
-reset_check "reset-node: a bun process works outside this checkout (a sibling with the same prefix) -> proceeds" ok -y
-stop_fake_bun
+if start_fake_bun "$W/node-old" "reset-node with a bun process outside this checkout"; then
+    reset_check "reset-node: a bun process works outside this checkout (a sibling with the same prefix) -> proceeds" ok -y
+    stop_fake_bun "reset-node with a bun process outside this checkout"
+fi
 
 # A link that cannot be followed hides where the lock is: refuse
 new_reset_world
