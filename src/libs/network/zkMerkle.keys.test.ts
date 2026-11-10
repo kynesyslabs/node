@@ -23,6 +23,21 @@ describe("ZK route keys", () => {
         expect(nullifierStorageKey(`0x${hex}`)).toBe(decimal)
     })
 
+    it("reads a 64-digit nullifier as the decimal the proof stores", () => {
+        const digits = "1".repeat(64)
+        expect(nullifierStorageKey(digits)).toBe(digits)
+        expect(nullifierStorageKey(`0x${digits}`)).toBe(BigInt(`0x${digits}`).toString())
+    })
+
+    it("looks a 64-digit commitment up in both readings, decimal first", () => {
+        const digits = "1".repeat(64)
+        expect(commitmentLookupKeys(digits)).toEqual([
+            digits,
+            BigInt(digits).toString(16).padStart(64, "0"),
+            BigInt(`0x${digits}`).toString(),
+        ])
+    })
+
     it("refuses anything that is not a field-sized number", () => {
         for (const bad of ["", "0123", "1".repeat(79), "0x1234", "abc", `${decimal}'--`]) {
             expect(commitmentLookupKeys(bad)).toBeNull()

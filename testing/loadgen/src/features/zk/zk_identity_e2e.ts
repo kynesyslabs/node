@@ -3,6 +3,7 @@
 // must apply the attestation, while a forged proof and a replay of the same
 // nullifier are refused. Confirm checks only the signature; the proof is
 // checked when the transaction is broadcast and again when its block applies.
+import { randomBytes } from "node:crypto"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex, zK } from "@kynesyslabs/demosdk/encryption"
 import { envInt, sleep } from "../../framework/common"
@@ -75,7 +76,7 @@ export async function runZkIdentityE2e() {
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
   const owner = uint8ArrayToHex(publicKey as Uint8Array)
 
-  const tag = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+  const tag = `${Date.now().toString(36)}${randomBytes(4).toString("hex")}`
   const provider = process.env.ZK_PROVIDER ?? "github"
   const identity = new zK.identity.ZKIdentity(`${provider}:loadgen-${tag}`)
   const commitment = identity.getCommitment()

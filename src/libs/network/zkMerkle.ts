@@ -6,29 +6,36 @@ import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier"
 import { jsonResponse } from "./bunServer"
 import type { BunServer } from "./bunServer"
 
-const HEX_FIELD = /^(0x)?[0-9a-fA-F]{64}$/
+const PREFIXED_HEX = /^0x[0-9a-fA-F]{64}$/
+const BARE_HEX = /^[0-9a-fA-F]{64}$/
 const DECIMAL_FIELD = /^(0|[1-9]\d{0,77})$/
 
 /**
  * The forms a commitment can be stored under. A commitment keeps the form it
- * was registered in (the SDK registers canonical decimal), so a lookup tries
- * the given form first and the other one second.
+ * was registered in (the SDK registers canonical decimal). A bare 64-digit
+ * value reads as either form, so every reading is tried, decimal first.
  */
 export function commitmentLookupKeys(value: string): string[] | null {
-    if (HEX_FIELD.test(value)) {
-        const hex = value.toLowerCase().replace(/^0x/, "")
-        return [hex, BigInt(`0x${hex}`).toString()]
-    }
+    const keys: string[] = []
     if (DECIMAL_FIELD.test(value)) {
-        return [value, BigInt(value).toString(16).padStart(64, "0")]
+        keys.push(value, BigInt(value).toString(16).padStart(64, "0"))
     }
-    return null
+    if (PREFIXED_HEX.test(value) || BARE_HEX.test(value)) {
+        const hex = value.toLowerCase().replace(/^0x/, "")
+        keys.push(hex, BigInt(`0x${hex}`).toString())
+    }
+    return keys.length > 0 ? [...new Set(keys)] : null
 }
 
-/** Nullifiers are stored as the proof's first public signal: canonical decimal. */
+/**
+ * Nullifiers are stored as the proof's first public signal: canonical decimal.
+ * A bare 64-digit value is therefore decimal; hex needs 0x or a letter.
+ */
 export function nullifierStorageKey(value: string): string | null {
-    if (HEX_FIELD.test(value)) return BigInt(`0x${value.replace(/^0x/, "")}`).toString()
     if (DECIMAL_FIELD.test(value)) return value
+    if (PREFIXED_HEX.test(value) || BARE_HEX.test(value)) {
+        return BigInt(`0x${value.replace(/^0x/, "")}`).toString()
+    }
     return null
 }
 
