@@ -74,6 +74,7 @@ export class L2PSBatchProver {
     /** Child process for non-blocking proof generation */
     private childProcess: ChildProcess | null = null
     private processReady = false
+    private spawning: Promise<void> | null = null
     private readonly pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }> = new Map()
     private requestCounter = 0
     private responseBuffer = ""
@@ -115,9 +116,28 @@ export class L2PSBatchProver {
     }
 
     /**
-     * Initialize child process for proof generation
+     * Start the child process that proves. One spawn at a time: a second
+     * caller waits for the spawn in progress.
      */
-    private async initializeSubprocess(): Promise<void> {
+    private initializeSubprocess(): Promise<void> {
+        this.spawning ??= this.spawnSubprocess().finally(() => {
+            this.spawning = null
+        })
+        return this.spawning
+    }
+
+    private failPendingRequests(error: Error): void {
+        for (const [id, pending] of this.pendingRequests) {
+            pending.reject(error)
+            this.pendingRequests.delete(id)
+        }
+    }
+
+    private async spawnSubprocess(): Promise<void> {
+        this.childProcess?.kill()
+        this.childProcess = null
+        this.processReady = false
+        this.responseBuffer = ""
         return new Promise((resolve) => {
             try {
                 const processPath = path.join(__dirname, "zkProofProcess.ts")
@@ -137,30 +157,28 @@ export class L2PSBatchProver {
                 this.childProcess = child
 
                 // Handle stdout - responses from child process
-                this.childProcess.stdout?.on("data", (data: Buffer) => {
+                child.stdout?.on("data", (data: Buffer) => {
+                    if (this.childProcess !== child) return
                     this.responseBuffer += data.toString()
                     this.processResponseBuffer()
                 })
 
                 // Handle stderr - log errors
-                this.childProcess.stderr?.on("data", (data: Buffer) => {
+                child.stderr?.on("data", (data: Buffer) => {
                     const msg = data.toString().trim()
                     if (msg) {
                         log.debug(`[L2PSBatchProver] Process stderr: ${msg}`)
                     }
                 })
 
-                this.childProcess.on("error", (error) => {
+                child.on("error", (error) => {
                     log.error(`[L2PSBatchProver] Process error: ${error.message}`)
+                    if (this.childProcess !== child) return
                     this.processReady = false
-                    // Reject all pending requests
-                    for (const [id, pending] of this.pendingRequests) {
-                        pending.reject(error)
-                        this.pendingRequests.delete(id)
-                    }
+                    this.failPendingRequests(error)
                 })
 
-                this.childProcess.on("exit", (code) => {
+                child.on("exit", (code, signal) => {
                     if (code !== 0 && code !== null) {
                         log.error(`[L2PSBatchProver] Process exited with code ${code}`)
                     }
@@ -168,6 +186,8 @@ export class L2PSBatchProver {
                     if (this.childProcess !== child) return
                     this.processReady = false
                     this.childProcess = null
+                    // A proof in flight fails now instead of at its 120 s timeout.
+                    this.failPendingRequests(new Error(`L2PS prover subprocess exited (code ${code}, signal ${signal})`))
                 })
 
                 // Wait for ready signal. A subprocess that never comes up is
@@ -176,8 +196,8 @@ export class L2PSBatchProver {
                 const readyTimeout = setTimeout(() => {
                     if (!this.processReady) {
                         log.error("[L2PSBatchProver] Prover subprocess did not start within 15s; proofs are unavailable until it does")
-                        this.childProcess?.kill()
-                        this.childProcess = null
+                        child.kill()
+                        if (this.childProcess === child) this.childProcess = null
                         resolve()
                     }
                 }, 15000)
@@ -191,7 +211,12 @@ export class L2PSBatchProver {
                         resolve()
                     }
                 }
-                this.pendingRequests.set("__ready__", { resolve: checkReady, reject: () => { } })
+                // A child that dies before it is ready ends the wait at once.
+                const notReady = () => {
+                    clearTimeout(readyTimeout)
+                    resolve()
+                }
+                this.pendingRequests.set("__ready__", { resolve: checkReady, reject: notReady })
 
             } catch (error) {
                 log.error(`[L2PSBatchProver] Failed to spawn the prover subprocess: ${error instanceof Error ? error.message : String(error)}`)
