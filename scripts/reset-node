@@ -29,6 +29,13 @@ PEERLIST_FILE="demos_peerlist.json"
 # Written next to the identity; without them a restarted validator could sign
 # a height it already signed
 SIGNING_FILES=("${IDENTITY_FILE}.signed.json" "${IDENTITY_FILE}.signed.json.halted" "${IDENTITY_FILE}.commitlock.json" "${IDENTITY_FILE}.prevote.json")
+# A running node keeps <identity>.lock next to the real identity file and
+# rewrites it every 5s (src/libs/identity/identityLock.ts); as the node does,
+# the guard treats a lock of this host whose heartbeat is older than this as
+# stale
+LOCK_STALE_MS=20000
+# How long docker gets to list the running containers
+DOCKER_QUERY_S=10
 
 # ============================================================================
 # Helper Functions
@@ -48,6 +55,164 @@ print_error() {
 
 print_warning() {
 	echo -e "${YELLOW}⚠${NC} $1"
+}
+
+# Prints the file the node locks: the identity file, or the end of its chain
+# of links with each relative target taken from the link's directory, as
+# resolveWriteTarget (src/libs/identity/signingRecord.ts) does. Fails when a
+# link cannot be read or the chain does not end within 40 links.
+resolve_identity() {
+	local current target hops=0
+	if current="$(readlink -f "${IDENTITY_FILE}" 2>/dev/null)" && [[ -n "${current}" ]]; then
+		echo "${current}"
+		return 0
+	fi
+	# readlink -f is missing on older macOS: follow the links one by one
+	current="$(pwd)/${IDENTITY_FILE}"
+	while [[ -L "${current}" ]]; do
+		((hops++ < 40)) || return 1
+		target="$(readlink "${current}")" || return 1
+		[[ "${target}" == /* ]] || target="$(dirname "${current}")/${target}"
+		current="${target}"
+	done
+	echo "${current}"
+}
+
+# Prints the running containers as "<name> <compose working dir>" lines, by way
+# of the file OUT, which it removes; fails if docker fails or gives no answer
+# within DOCKER_QUERY_S (a stalled daemon or context), killing it then (a
+# read-only query). A file, so a child of docker left holding its output
+# cannot keep reset-node waiting either.
+list_containers() {
+	local out="$1" pid deadline=$((SECONDS + DOCKER_QUERY_S)) status
+	docker ps --format '{{.Names}} {{.Label "com.docker.compose.project.working_dir"}}' >"${out}" 2>/dev/null &
+	pid=$!
+	while kill -0 "${pid}" 2>/dev/null; do
+		if ((SECONDS >= deadline)); then
+			kill -KILL "${pid}" 2>/dev/null
+			break
+		fi
+		sleep 0.1
+	done
+	wait "${pid}" 2>/dev/null && cat "${out}"
+	status=$?
+	rm -f "${out}"
+	return "${status}"
+}
+
+# Names what still runs from this checkout (a container of its compose stacks,
+# or a node process holding the identity lock); returns 1 if anything does.
+# Returns 2 only when it cannot make a temporary file for the container list,
+# the identity is a link it cannot follow, or the lock's directory cannot be
+# searched or the lock read in full. With docker missing, failing or silent
+# for DOCKER_QUERY_S it checks the lock only.
+check_node_stopped() {
+	local running=0 here here_p names name dir dir_p out
+	here="$(pwd)"
+	here_p="$(pwd -P)"
+	if ! command -v docker >/dev/null 2>&1; then
+		print_warning "docker is not installed; checking for a local node process only"
+	elif ! out="$(mktemp "${TMPDIR:-/tmp}/reset-node.XXXXXX")"; then
+		print_error "Could not create a temporary file in ${TMPDIR:-/tmp} for the list of running containers"
+		echo "    Set TMPDIR to a writable directory, then run reset-node again. Nothing was deleted."
+		return 2
+	elif ! names="$(list_containers "${out}")"; then
+		print_warning "docker is not reachable; checking for a local node process only"
+	else
+		while read -r name dir; do
+			case "${dir}" in
+			"${here}" | "${here}"/* | "${here_p}" | "${here_p}"/*) ;;
+			/*)
+				# The label is the path compose ran from, which may reach
+				# this checkout through a link: its real path counts too
+				dir_p="$(cd "${dir}" 2>/dev/null && pwd -P)" || continue
+				[[ "${dir_p}" == "${here_p}" || "${dir_p}" == "${here_p}"/* ]] || continue
+				;;
+			*) continue ;;
+			esac
+			print_error "Container ${name} of this checkout is running"
+			running=1
+		done <<<"${names}"
+	fi
+
+	local identity lock lock_dir body pid host beat age age_ms held="" this_host
+	if ! identity="$(resolve_identity)"; then
+		print_error "${IDENTITY_FILE} is a link that cannot be followed (unreadable, a loop, or more than 40 links), so the identity lock next to its target cannot be checked"
+		echo "    Point ${IDENTITY_FILE} at the identity file, then run reset-node again. Nothing was deleted."
+		return 2
+	fi
+	lock="${identity}.lock"
+	# A lock in a directory this user cannot search would look absent: the
+	# nearest directory on its path that exists must be searchable (one that
+	# does not exist holds no lock)
+	lock_dir="$(dirname "${lock}")"
+	while [[ ! -e "${lock_dir}" ]]; do lock_dir="$(dirname "${lock_dir}")"; done
+	if [[ ! -x "${lock_dir}" ]]; then
+		print_error "Cannot look for the identity lock ${lock}: ${lock_dir} cannot be searched by this user, so reset-node cannot tell whether a node is using this checkout"
+		echo "    Run reset-node as a user who can search ${lock_dir}. Nothing was deleted."
+		return 2
+	fi
+	# The name os.hostname() gives the node; $HOSTNAME can come from the environment
+	this_host="$(uname -n)"
+	if [[ -f "${lock}" ]]; then
+		# A read that fails counts as an empty lock, whatever it printed
+		body="$(cat "${lock}" 2>/dev/null)" || body=""
+		body="${body#"${body%%[![:space:]]*}"}"
+		body="${body%"${body##*[![:space:]]}"}"
+		pid="$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' <<<"${body}")"
+		host="$(sed -n 's/.*"hostname":"\([^"]*\)".*/\1/p' <<<"${body}")"
+		# A node of another user writes the lock 0600, and a starting node
+		# creates it before it writes it: only a whole object, {...}, with
+		# both pid and hostname is a node lock; anything else may still be held
+		if [[ "${body}" != "{"*"}" || -z "${pid}" || -z "${host}" ]]; then
+			print_error "Could not read the identity lock ${lock} (unreadable, empty, partly written, or not a node lock), so reset-node cannot tell whether a node is using this checkout"
+			echo "    If no node uses this checkout, remove the lock file and run reset-node again. Nothing was deleted."
+			return 2
+		fi
+		beat="$(sed -n 's/.*"heartbeat":\([0-9][0-9]*\).*/\1/p' <<<"${body}")"
+		age="no heartbeat"
+		if [[ -n "${beat}" ]]; then
+			age_ms=$(($(date +%s) * 1000 - beat))
+			age="heartbeat $((age_ms > 0 ? age_ms / 1000 : 0))s ago"
+		fi
+		# As the node judges it (identityLock.ts acquireIdentityLock). Clocks
+		# of two hosts can differ, so the node watches a lock from another
+		# host for changes instead of trusting its age (:228-256, :345-355,
+		# :362-376); here such a lock always counts. On this host a lock with
+		# a heartbeat is held only while the heartbeat is fresh, whatever its
+		# pid, and one without (a node from before the heartbeat) while its
+		# pid is alive
+		if [[ -n "${host}" && "${host}" != "${this_host}" ]]; then
+			print_error "Identity lock ${lock} was written on another host, ${host} (pid ${pid:-?}, ${age}${beat:+ by the local clock}); a lock from another host counts whatever its age"
+			echo "    If no node on ${host} uses this checkout, remove the lock file and run reset-node again: ${lock}"
+			running=1
+		elif [[ -n "${beat}" ]]; then
+			((age_ms < LOCK_STALE_MS)) && held="${age}"
+		elif [[ -n "${pid}" && "${host}" == "${this_host}" ]] && ps -p "${pid}" >/dev/null 2>&1; then
+			held="no heartbeat (older node version), pid alive on this host"
+		fi
+		if [[ -n "${held}" ]]; then
+			print_error "Identity lock ${lock} is held by pid ${pid:-?} on ${host:-?}: ${held}"
+			echo "    If no node is running, the lock is left over and can be removed: ${lock}"
+			running=1
+		fi
+	fi
+	return "${running}"
+}
+
+# Exits unless check_node_stopped finds nothing using this checkout; the
+# backups already made, given as arguments, are named and left in place
+require_node_stopped() {
+	check_node_stopped
+	case $? in
+	0) return 0 ;;
+	1) echo "    Stop the node first, then run reset-node again. Nothing was deleted." ;;
+	esac
+	if (($# > 0)); then
+		echo "    The backups made so far are left in place:"
+		printf '      %s\n' "$@"
+	fi
+	exit 1
 }
 
 show_help() {
@@ -74,6 +239,17 @@ DESCRIPTION:
     - .demos_identity.signed.json, .demos_identity.commitlock.json,
       .demos_identity.prevote.json (the double-sign protection; dropped
       only with --wipe-signing-state)
+
+    Before it changes anything, reset-node checks the running containers
+    of this checkout that docker lists within 10 seconds (the
+    ./scripts/docker-run stack, the postgres container of ./run) and the
+    identity lock next to .demos_identity or its link target. It stops if
+    it finds such a container, a lock a node on this host still holds,
+    any lock written on another host, a lock it cannot read in full or
+    whose directory it cannot search, or a .demos_identity link it cannot
+    follow. It checks again after the confirmation, before the backup,
+    and once more just before it removes the directory; the backups
+    already made are then left in place.
 
     What happens:
     1. Backs up identity and peerlist to parent directory
@@ -130,6 +306,8 @@ main() {
 		echo "    Please run this script from inside the 'node' directory"
 		exit 1
 	fi
+
+	require_node_stopped
 
 	# Get current directory name and parent
 	local node_dir=$(basename "$(pwd)")
@@ -194,17 +372,26 @@ main() {
 
 	echo ""
 
+	# A supervisor can start the node while the prompt waits, and a node that
+	# signs after the backup would be restored behind its last signature: check
+	# again before the backup and again before the removal
+	require_node_stopped
+
 	# Step 1: Backup identity, peerlist and signing state
 	print_step "Backing up identity files..."
 
+	local backups=()
 	for f in "${preserve[@]}"; do
 		if cp "${f}" "${parent_dir}/${f}.backup"; then
+			backups+=("${parent_dir}/${f}.backup")
 			print_success "Backed up ${f}"
 		else
 			print_error "Failed to backup ${f}"
 			exit 1
 		fi
 	done
+
+	require_node_stopped "${backups[@]}"
 
 	# Step 2: Move to parent and remove node directory
 	print_step "Removing old node directory..."

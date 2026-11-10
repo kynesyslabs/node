@@ -508,6 +508,8 @@ docker compose down -v
 
 This deletes your identity, chain data, Prometheus history, Grafana dashboards — everything. Only do this if you actually want to start from scratch.
 
+Through the launcher, `./run --docker down -v` (or `./scripts/docker-run down -v`, also as `--volumes` or in a flag group such as `-vt 0`; as in compose, the last of these settings counts, so a later `--volumes=false` turns it off) first lists the stack's declared named volumes (the ten `demos_*` ones) and asks you to type `delete`; `down -v` also removes the anonymous volumes attached to the containers, which are not listed. Where there is no terminal (scripts, CI) it stops unless you add `--yes-delete-volumes`.
+
 ### Troubleshooting
 
 **TLSNotary feature not initializing**
