@@ -52,8 +52,45 @@ case has no restore path by design (`validator-key.md`).
   stops with a clear message if that fails. The identities are throwaway
   devnet keys, are deleted at the end (`KEEP_KEYS=1` keeps them), and are never
   printed.
+- Writable state: the same user (uid 1000) writes the node-state volumes, so
+  they must be owned by it; a root-owned named volume or tmpfs makes the node
+  die with `cp: cannot create ... Permission denied`. Before anything timed
+  starts, the script creates the volumes (`compose up --no-start`), then runs
+  `docker run --user 1000 -v <volume>:<path in the node> --entrypoint sh
+  NODE_IMAGE -c 'touch .../.w && rm .../.w'` for each named volume and tmpfs
+  the node services mount read-write (the state volumes, `/app/state`), and
+  for the image's own writable directories (its declared volumes, `/app/data`
+  and `/app/logs`, and its working directory). The probe mounts the volume
+  where the node gets it, so a new volume takes the owner of that directory in
+  the image, as in the real run. If any probe fails the script stops with the
+  list, before any node starts, and changes nothing. `FIX_OWNERSHIP=1` is the
+  opt-in: it chowns `1000:1000` (recursively) only the volumes of this compose
+  project (`${PROJECT}_*`, checked by label) that failed, and probes again. The
+  wipe (phase B) runs as root and only deletes; it never creates anything on
+  the state volume. It records owner and mode of the state dir and the
+  identity files before and after (check "the wipe kept the ownership of the
+  state volume") and probes uid-1000 writability of the state volume again
+  before the restart. The postgres and backup-staging volumes are postgres's,
+  not uid 1000's, and are not probed.
+- Gossip: on every node, by default (`GOSSIP_ENABLED=true` in the generated
+  compose file). A validator with gossip off never catches up after a restart
+  (it logs "already synced" while behind), which would wreck the restore
+  timings, so the script refuses to start without it: it reads the generated
+  compose file, and if any node has `GOSSIP_ENABLED` other than `true` it stops
+  and says why, unless `ALLOW_GOSSIP_OFF=1`. A deliberate negative run is
+  `GOSSIP_ENABLED=false ALLOW_GOSSIP_OFF=1` (a warning, and an INFO row in the
+  checks). With gossip on, the image must have `node` (>= 20) on the PATH of a
+  login shell, because the gossip sidecar is spawned as `node`; the script
+  checks that too.
 
 ## Invocation
+
+Smoke check, minutes: run this before the full drill (see below).
+
+```
+NODE_IMAGE=<local image> BASE_PORT=65000 SMOKE=1 \
+  testing/devnet/backup-restore-drill/run.sh
+```
 
 Wipe and rejoin (the main drill):
 
@@ -102,6 +139,28 @@ carried out (preflight, boot, timeout, a step that must work failed).
 | `ISO_NODE` | `1` | in `isolated`, also start a non-signing node on the restored database |
 | `KEEP_KEYS` | `0` | `1` keeps the identity inputs and the state copy after the run |
 | `IDENTITY_GEN` | `auto` | `host` (bun on the host), `image` (inside `NODE_IMAGE`), or `auto` |
+| `GOSSIP_ENABLED` | `true` | `true` or `false`, for every node; `false` is refused unless `ALLOW_GOSSIP_OFF=1` |
+| `ALLOW_GOSSIP_OFF` | `0` | `1` lets a run with gossip off start (a negative run); it warns and records an INFO row |
+| `FIX_OWNERSHIP` | `0` | `1` chowns `1000:1000` the drill's own volumes (`${PROJECT}_*`) the uid-1000 probe found unwritable, instead of stopping |
+| `SMOKE` | `0` | `1` runs the startup check only (below) |
+| `SMOKE_TIMEOUT` / `SMOKE_HEAD` | `300` / `2` | smoke: seconds to wait, from the first node start, for every node to serve RPC at head >= `SMOKE_HEAD` |
+
+## Smoke check (`SMOKE=1`)
+
+The seconds-to-minutes startup check to run before the full drill, on the same
+image and host. It runs the preflight (tools, load wait, disk and RAM, images
+local, the uid-1000 read check of the inputs, the gossip check, the uid-1000
+write check of the node state), starts the 4 postgres, applies the migrations,
+starts the 4 nodes one at a time, and waits (cap `SMOKE_TIMEOUT`, 5 minutes)
+until every node answers RPC with a head of at least `SMOKE_HEAD`. It then
+prints `SMOKE PASS` or `SMOKE FAIL`, tears the project down and exits: 0 pass,
+1 a node did not make it (each node gets a row; a failing one names its log,
+`logs/node-N.log` in the run dir, written at teardown, and the last 15 lines are
+printed), 2 the preflight or a postgres failed. No backup, wipe or restore
+runs, and there is no isolated node. Genesis is set `GENESIS_DELAY` (160 s by
+default) after the inputs are made and the cap counts from the first node
+start; none of this has been timed on Docker yet, so if a healthy host needs
+more than 5 minutes, raise `SMOKE_TIMEOUT`.
 
 ## What it does
 
@@ -111,8 +170,24 @@ Genesis, peerlist and fork schedule come from `quorum-drills/gen-inputs.py`
 unchanged; only the compose file is different (persistent volumes instead of
 tmpfs, one postgres per node, an isolated node, a one-off `migrate` service).
 
+How a node is started: through the image's own start command, without its
+entrypoint script. The release image has `ENTRYPOINT
+scripts/docker-entrypoint.sh` and `CMD bun -r tsconfig-paths/register
+src/index.ts -- --no-tui`; the compose file replaces the entrypoint with a
+short shell that makes `/app/state`, puts the identity on the state volume if
+it is not there, uses `./testing/devnet/run-devnet` when the image has it (the
+devnet image's entrypoint), and else `exec`s that same CMD. What
+`docker-entrypoint.sh` would add (symlinks for `.demos_identity`,
+`demos_peerlist.json`, `.tlsnotary-key`, `output/`, and the signing record when
+`IDENTITY_FILE` is outside the state dir) is not needed here: `IDENTITY_FILE`
+is on the state volume with its signing record, the peerlist is only read (from
+a read-only mount that the script's `mv` could not move), TLSNotary is off, and
+`output/` is written only by the backup utility. Read from the sources, not
+run on Docker; the reasoning is in `gen-compose.py` above `START_SCRIPT`.
+
 1. Preflight: tools, load wait, disk, RAM, no swapping, project name unused,
-   ports free, images local, uid-1000 readability of the inputs.
+   ports free, images local, uid-1000 readability of the inputs, gossip on
+   (and `node` in the image), uid-1000 writability of the node state.
 2. Bring-up: postgres x4, migrations on each database (manual step, see
    below), nodes one at a time, wait until every node is at height `H0`.
    Record node X's head height and block hash, and the SHA-256 of its identity
@@ -165,6 +240,9 @@ Each is printed PASS, FAIL or INFO, and written to `timings.md` and
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows equal; same table set |
 | schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations` |
 | one instance of the key | asserted before the single start; the run dies if it does not hold |
+| gossip enabled on every node | `GOSSIP_ENABLED=true` in the generated compose file (INFO when `ALLOW_GOSSIP_OFF=1` lets it be off) |
+| node state is writable by uid 1000 | the probes of "Writable state" above (a failure stops the run before it starts) |
+| the wipe kept the ownership of the state volume | owner and mode of the state dir and identity files equal before and after the wipe |
 
 ### Quorum
 
@@ -189,6 +267,15 @@ In `$OUT_DIR`: `timings.md` and `timings.json` (phases, checks, run metadata),
 The `demos-bkdrill` compose project is removed on exit, including on Ctrl-C or
 an error (`compose down -v` for that project only, plus helper containers that
 carry the label `demos.drill.helper=<project>`).
+
+## Testing the script itself
+
+`testing/devnet/backup-restore-drill/test/run-fake-tests.sh` runs `run.sh`
+against a fake `docker` (`test/fake-bin/`): the gossip default and refusal,
+unwritable volumes (fail fast, `FIX_OWNERSHIP=1`), `SMOKE=1` pass and fail, and
+a full `rejoin` and `isolated` run. It needs no Docker and tests the script's
+own logic only; it says nothing about what a real image, volume or postgres
+does.
 
 ## Manual migrations
 

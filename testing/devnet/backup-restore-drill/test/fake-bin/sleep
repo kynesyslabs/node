@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fake sleep: the drill's waits shortened (FAKE_SLEEP_DIV, default 10) so the fake runs take seconds
+exec /bin/sleep "$(awk -v s="$1" -v d="${FAKE_SLEEP_DIV:-10}" 'BEGIN { printf "%.3f", s / d }')"

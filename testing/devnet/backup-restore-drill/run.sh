@@ -10,6 +10,15 @@
 #                           restore the dump, restart it, time the rejoin.
 # VARIANT=isolated          back up node 4 (it keeps running) and restore the
 #                           dump into a new non-signing node with no identity.
+# SMOKE=1                   startup check only, run it before the full drill:
+#                           the same preflight (images, load wait, uid-1000
+#                           read and write checks, gossip check), bring up the
+#                           4 nodes, wait until each serves RPC at head >= 2
+#                           (cap 5 minutes), print PASS/FAIL, tear down.
+#
+# Gossip is on by default. GOSSIP_ENABLED=false needs ALLOW_GOSSIP_OFF=1.
+# The node-state volumes must be writable by uid 1000 (FIX_OWNERSHIP=1 chowns
+# this drill's own volumes to 1000:1000 instead of stopping).
 #
 # Phases timed: A backup, A2 copy off the volume, B wipe, C restore, D rejoin.
 # Everything lives in $OUT_DIR (mode 700, gitignored under runs/) and the
@@ -71,12 +80,21 @@ ISO_NODE="${ISO_NODE:-1}"
 KEEP_KEYS="${KEEP_KEYS:-0}"
 IDENTITY_GEN="${IDENTITY_GEN:-auto}"
 RUNS_DIR="${RUNS_DIR:-${HERE}/runs}"
+SMOKE="${SMOKE:-0}"
+SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-300}"
+SMOKE_HEAD="${SMOKE_HEAD:-2}"
+# Gossip: on unless GOSSIP_ENABLED=false (gen-compose.py reads it from the
+# environment too); off is refused without ALLOW_GOSSIP_OFF=1
+GOSSIP_ENABLED="${GOSSIP_ENABLED:-true}"
+ALLOW_GOSSIP_OFF="${ALLOW_GOSSIP_OFF:-0}"
+FIX_OWNERSHIP="${FIX_OWNERSHIP:-0}"
 
 usage() {
-    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: NODE_IMAGE PG_IMAGE BASE_PORT PROJECT VARIANT OUT_DIR SHARD_SIZE H0 CONSENSUS_TIME"
     echo "             NODE_MEM PG_MEM CPU_SHARES LOAD_MAX LOAD_WAIT_MAX STOP_GRACE STALL_LIMIT"
-    echo "             MIGRATE_CMD MIGRATE_REQUIRED ISO_NODE KEEP_KEYS IDENTITY_GEN RUNS_DIR (README.md)"
+    echo "             MIGRATE_CMD MIGRATE_REQUIRED ISO_NODE KEEP_KEYS IDENTITY_GEN RUNS_DIR"
+    echo "             SMOKE SMOKE_TIMEOUT SMOKE_HEAD GOSSIP_ENABLED ALLOW_GOSSIP_OFF FIX_OWNERSHIP (README.md)"
 }
 case "${1:-}" in
     -h | --help) usage; exit 0 ;;
@@ -89,9 +107,14 @@ is_num() { [[ "${1:-}" =~ ^[0-9]+$ ]]; }
 # ── configuration checks ────────────────────────────────────────────────
 cfg_err() { echo "config: $*" >&2; exit 2; }
 for v in BASE_PORT X_NODE SHARD_SIZE H0 CONSENSUS_TIME CPU_SHARES NODE_EST_MB HEADROOM_MB MIN_DISK_GB LOAD_MAX \
-    LOAD_WAIT_MAX LOAD_POLL GENESIS_DELAY BRINGUP_TIMEOUT SERVE_TIMEOUT REJOIN_TIMEOUT SIGN_TIMEOUT STOP_GRACE STALL_LIMIT; do
+    LOAD_WAIT_MAX LOAD_POLL GENESIS_DELAY BRINGUP_TIMEOUT SERVE_TIMEOUT REJOIN_TIMEOUT SIGN_TIMEOUT STOP_GRACE STALL_LIMIT \
+    SMOKE_TIMEOUT SMOKE_HEAD; do
     is_num "${!v}" || cfg_err "${v} must be a whole number, got '${!v}'"
 done
+for v in SMOKE ALLOW_GOSSIP_OFF FIX_OWNERSHIP; do
+    case "${!v}" in 0 | 1) ;; *) cfg_err "${v} must be 0 or 1, got '${!v}'" ;; esac
+done
+case "${GOSSIP_ENABLED}" in true | false) ;; *) cfg_err "GOSSIP_ENABLED must be true or false, got '${GOSSIP_ENABLED}'" ;; esac
 [[ "${PROJECT}" =~ ^demos-[a-z0-9][a-z0-9_-]*$ ]] || cfg_err "PROJECT must match demos-[a-z0-9_-]+ (got '${PROJECT}')"
 case "${VARIANT}" in rejoin | isolated) ;; *) cfg_err "VARIANT must be rejoin or isolated" ;; esac
 # Node 1 is the peerlist anchor every other node learns the mesh from
@@ -107,6 +130,7 @@ EXPECT_PAUSE=0
 [ "${LIVE_OTHERS}" -lt "${Q}" ] && EXPECT_PAUSE=1
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-bkdrill-${VARIANT}"
+if [ "${SMOKE}" = 1 ]; then RUN_ID="${RUN_ID%-"${VARIANT}"}-smoke"; fi
 OUT_DIR="${OUT_DIR:-${RUNS_DIR}/${RUN_ID}}"
 LOG_DIR="${OUT_DIR}/logs"
 IN="${OUT_DIR}/inputs"
@@ -334,6 +358,8 @@ record_height() { # $1 signed|prevote
 sum_of() { awk -v n="$2" '$2 == n { print $1 }' "$1"; }
 short() { printf '%s' "${1:0:12}"; }
 state_names() { xstate_ro 'ls -A /s; true'; }
+# "uid:gid mode name" of the state dir (.) and the identity files: the wipe, which runs as root, must leave them as the node's uid 1000 had them
+state_owners() { xstate_ro 'cd /s && stat -c "%u:%g %a %n" . node.identity* 2>/dev/null; true' | sort; }
 # No container, running or not, may hold the drilled node's state volume or be its node service
 assert_x_not_running() {
     local running holders
@@ -563,6 +589,173 @@ dc config -q >> "${STEP_LOG}" 2>&1 || abort_pre "the generated compose file is n
 say "inputs ready, genesis in ${GENESIS_DELAY}s"
 
 # ═════════════════════════════════════════════════════════════════════════
+# 2b. what the nodes need before anything timed starts: gossip, writable state
+# ═════════════════════════════════════════════════════════════════════════
+step 02b-node-checks
+
+# Gossip. A validator with gossip off never catches up after a restart (it says
+# "already synced" while behind), which would wreck the restore timings. What
+# counts is what the generated compose file gives each node.
+node_services="$(jq -r '.services | keys[] | select(startswith("node-"))' "${OUT_DIR}/compose.yml")" || abort_pre "cannot read ${OUT_DIR}/compose.yml"
+[ -n "${node_services}" ] || abort_pre "no node service in the generated compose file"
+gossip_off="$(jq -r '.services | to_entries[] | select(.key | startswith("node-")) | select((.value.environment.GOSSIP_ENABLED // "unset") != "true") | "\(.key)=\(.value.environment.GOSSIP_ENABLED // "unset")"' "${OUT_DIR}/compose.yml" | tr '\n' ' ')"
+if [ -z "${gossip_off}" ]; then
+    # The sidecar is spawned as `node` from the same login shell the nodes start in
+    docker run --rm --network none --entrypoint bash "${NODE_IMAGE}" -lc 'command -v node' >> "${STEP_LOG}" 2>&1 \
+        || abort_pre "gossip is on but ${NODE_IMAGE} has no \`node\` on the PATH of a login shell: the gossip sidecar needs Node >= 20 (see 02b-node-checks.log)"
+    META[gossip]="enabled on every node"
+    check "gossip enabled on every node" PASS "GOSSIP_ENABLED=true in the compose file; node found in the image"
+elif [ "${ALLOW_GOSSIP_OFF}" = 1 ]; then
+    say "WARNING: gossip is not enabled (${gossip_off}) and ALLOW_GOSSIP_OFF=1: going on. A node with gossip off does not catch up after a restart, so the rejoin and restore timings mean nothing"
+    META[gossip]="OFF (${gossip_off}), ALLOW_GOSSIP_OFF=1"
+    check "gossip enabled on every node" INFO "OFF on purpose (ALLOW_GOSSIP_OFF=1): ${gossip_off}"
+else
+    abort_pre "gossip is not enabled on every node (${gossip_off}). A validator with gossip off never catches up after a restart (it says 'already synced' while behind), so the timings would be wrong. Unset GOSSIP_ENABLED (the default is true); for a deliberate negative run set GOSSIP_ENABLED=false ALLOW_GOSSIP_OFF=1"
+fi
+
+# State writability. The image user is uid 1000: a named volume or tmpfs the node
+# writes to has to be writable by it, else the node dies with `cp: cannot create
+# ... Permission denied`. Volumes are created by compose (up --no-start), so they
+# carry the compose labels and the project's teardown removes them; each one is then
+# probed as uid 1000 at the very path the node gets it (a new volume takes the
+# owner of that directory in the image).
+NODE_SVCS=()
+for i in $(seq 1 "${N}"); do NODE_SVCS+=("node-${i}"); done
+if [ "${VARIANT}" = isolated ] && [ "${ISO_NODE}" = 1 ] && [ "${SMOKE}" != 1 ]; then NODE_SVCS+=(node-iso); fi
+STARTED_STACK=1
+dc up --no-start --pull never "${NODE_SVCS[@]}" >> "${STEP_LOG}" 2>&1 || abort_pre "could not create the containers and volumes (see 02b-node-checks.log)"
+
+probe_write() { # $1 path in the container, rest: docker run options mounting it; can uid 1000 create and delete a file there?
+    local p="$1"
+    shift
+    docker run --rm --user 1000 --network none --label "demos.drill.helper=${PROJECT}" "$@" --entrypoint sh "${NODE_IMAGE}" \
+        -c 'touch "$1/.w" && rm -f "$1/.w"' sh "${p}" < /dev/null
+}
+# Only a volume of this compose project is ever touched, and only with FIX_OWNERSHIP=1
+fix_owner() { # $1 full volume name
+    local owner
+    owner="$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}' "$1" 2> /dev/null)" || return 1
+    [ "${owner}" = "${PROJECT}" ] || return 1
+    say "FIX_OWNERSHIP=1: chown -R 1000:1000 on volume $1"
+    helper 'chown -R 1000:1000 /x' -v "$1:/x" "${PG_IMAGE}" >> "${STEP_LOG}" 2>&1
+}
+# "kind  source  path  service": named volumes mounted read-write and tmpfs of the node services
+jq -r --argjson svcs "$(printf '%s\n' "${NODE_SVCS[@]}" | jq -Rn '[inputs]')" '
+    .services | to_entries[] | select(.key as $k | $svcs | index($k)) | .key as $svc | .value
+    | ((.volumes // [])[] | select(type == "string") | split(":")
+        | select((.[0] | test("^[A-Za-z0-9][A-Za-z0-9_.-]*$")) and ((.[2] // "") | split(",") | index("ro") | not))
+        | "vol\t\(.[0])\t\(.[1])\t\($svc)"),
+      ((.tmpfs // [])[] | "tmpfs\t\(.)\t\(split(":")[0])\t\($svc)")' "${OUT_DIR}/compose.yml" | sort -u > "${OUT_DIR}/writable-mounts.tsv" \
+    || abort_pre "cannot list the node mounts from the compose file"
+unwritable=()
+fixed=()
+mounted_paths=" "
+while IFS=$'\t' read -r kind src path svc; do
+    mounted_paths="${mounted_paths}${path} "
+    if [ "${kind}" = vol ]; then
+        full="$(vol "${src}")"
+        what="volume ${full} at ${path} (${svc})"
+        opts=(-v "${full}:${path}")
+    else
+        full=""
+        what="tmpfs ${src} (${svc})"
+        opts=(--tmpfs "${src}")
+    fi
+    if probe_write "${path}" "${opts[@]}" >> "${STEP_LOG}" 2>&1; then
+        say "uid 1000 can write: ${what}"
+    elif [ "${kind}" = vol ] && [ "${FIX_OWNERSHIP}" = 1 ] && fix_owner "${full}" && probe_write "${path}" "${opts[@]}" >> "${STEP_LOG}" 2>&1; then
+        say "uid 1000 can write after the chown: ${what}"
+        fixed+=("${full}")
+    else
+        say "uid 1000 CANNOT write: ${what}"
+        unwritable+=("${what}")
+    fi
+done < "${OUT_DIR}/writable-mounts.tsv"
+# What the image itself declares as volumes, and its working directory (the node
+# writes there too: gossip key, logs): not mounted by compose, docker makes them
+img_dirs="$({
+    docker image inspect "${NODE_IMAGE}" --format '{{json .Config.Volumes}}' | jq -r '(. // {}) | keys[]'
+    docker image inspect "${NODE_IMAGE}" --format '{{.Config.WorkingDir}}'
+} | grep . | sort -u)" || img_dirs=""
+for d in ${img_dirs}; do
+    case "${mounted_paths}" in *" ${d} "*) continue ;; esac
+    if probe_write "${d}" >> "${STEP_LOG}" 2>&1; then
+        say "uid 1000 can write: ${d} (from the image)"
+    else
+        say "uid 1000 CANNOT write: ${d} (from the image)"
+        unwritable+=("${d} in the image (not a mount of this compose file: it is the image's own directory or declared volume)")
+    fi
+done
+if [ "${#unwritable[@]}" -gt 0 ]; then
+    tail -n 6 "${STEP_LOG}" >&2
+    abort_pre "the node image user (uid 1000) cannot write to: $(printf '%s; ' "${unwritable[@]}")the node would fail with 'Permission denied' as soon as it writes its state. Nothing was changed. Set FIX_OWNERSHIP=1 to chown 1000:1000 this drill's own volumes (${PROJECT}_*), or fix the owner of the directory in the image (see 02b-node-checks.log)"
+fi
+if [ "${#fixed[@]}" -gt 0 ]; then META[ownership_fixed]="${fixed[*]} (FIX_OWNERSHIP=1)"; fi
+check "node state is writable by uid 1000" PASS "$(wc -l < "${OUT_DIR}/writable-mounts.tsv") mounts and the image's own directories probed${fixed[0]:+; chowned: ${fixed[*]}}"
+
+# ═════════════════════════════════════════════════════════════════════════
+# SMOKE=1: the startup check, then out
+# ═════════════════════════════════════════════════════════════════════════
+if [ "${SMOKE}" = 1 ]; then
+    step 03-smoke
+    META[mode]="SMOKE=1 (startup check only)"
+    phase_begin
+    dc up -d --pull never pg-1 pg-2 pg-3 pg-4 >> "${STEP_LOG}" 2>&1 || die "postgres did not start"
+    for i in $(seq 1 "${N}"); do wait_pg "${i}" 120 || die "pg-${i} not ready within 120s"; done
+    for i in $(seq 1 "${N}"); do
+        run_migrations "${i}" || say "WARNING: migrations on node ${i}'s database failed (see 03-smoke.log); continuing"
+    done
+    # The cap counts from the first node start. Nodes start one at a time (a
+    # simultaneous join races the committee freeze); a node that does not serve
+    # in time is recorded and the rest still start
+    smoke_deadline=$((SECONDS + SMOKE_TIMEOUT))
+    declare -A SMOKE_WHY=() SMOKE_HEADS=()
+    for i in $(seq 1 "${N}"); do
+        if dc up -d --no-deps --pull never "node-${i}" >> "${STEP_LOG}" 2>&1; then
+            refresh_cid "${i}"
+        else
+            SMOKE_WHY[${i}]="docker compose up failed"
+            continue
+        fi
+        if [ "${i}" -lt "${N}" ]; then sleep 4; fi
+    done
+    say "waiting up to ${SMOKE_TIMEOUT}s for every node to serve RPC at head >= ${SMOKE_HEAD}"
+    while :; do
+        all=1
+        for i in $(seq 1 "${N}"); do
+            [ -z "${SMOKE_WHY[${i}]:-}" ] || continue
+            h="$(head_of "${i}")"
+            if is_num "${h}"; then SMOKE_HEADS[${i}]="${h}"; else SMOKE_HEADS[${i}]=""; fi
+            if ! is_num "${h}" || [ "${h}" -lt "${SMOKE_HEAD}" ]; then all=0; fi
+        done
+        if [ "${all}" = 1 ] && [ "${#SMOKE_WHY[@]}" = 0 ]; then break; fi
+        if [ "${SECONDS}" -ge "${smoke_deadline}" ]; then break; fi
+        sleep 3
+    done
+    phase_end S "smoke: up to every node serving at head >= ${SMOKE_HEAD}"
+    smoke_ok=1
+    for i in $(seq 1 "${N}"); do
+        if [ -n "${SMOKE_WHY[${i}]:-}" ]; then why="${SMOKE_WHY[${i}]}"
+        elif serving "${i}" && [ -n "${SMOKE_HEADS[${i}]:-}" ] && [ "${SMOKE_HEADS[${i}]}" -ge "${SMOKE_HEAD}" ]; then why=""
+        elif serving "${i}"; then why="serves RPC but head ${SMOKE_HEADS[${i}]:-unreadable} < ${SMOKE_HEAD}"
+        else why="does not serve RPC"; fi
+        if [ -z "${why}" ]; then
+            check "smoke: node ${i} serves RPC at head >= ${SMOKE_HEAD}" PASS "head ${SMOKE_HEADS[${i}]}"
+        else
+            smoke_ok=0
+            check "smoke: node ${i} serves RPC at head >= ${SMOKE_HEAD}" FAIL "${why}; log: ${LOG_DIR}/node-${i}.log (written at teardown), live: docker compose -p ${PROJECT} -f ${OUT_DIR}/compose.yml logs node-${i}"
+            say "last lines of node-${i}:"
+            { docker logs --tail 15 "${CID[${i}]:-none}" 2>&1 || true; } | sed 's/\x1b\[[0-9;]*m//g; s/^/    /' | tee -a "${STEP_LOG}"
+        fi
+    done
+    if [ "${smoke_ok}" = 1 ]; then RESULT=PASS; else RESULT=FAIL; fi
+    write_report
+    say "SMOKE ${RESULT}: $(awk -F'\t' '$1 == "S" { print $3 }' "${PHASES}")s; tearing down, reports in ${OUT_DIR}/timings.md"
+    if [ "${RESULT}" = PASS ]; then exit 0; fi
+    exit 1
+fi
+
+# ═════════════════════════════════════════════════════════════════════════
 # 3. bring-up
 # ═════════════════════════════════════════════════════════════════════════
 step 03-bringup
@@ -658,6 +851,7 @@ if [ "${VARIANT}" = rejoin ]; then
     is_num "${H_STOP}" || die "cannot read node ${X_NODE}'s head from its database"
     HASH_STOP="$(psql_q "${X_NODE}" "SELECT hash FROM blocks WHERE number = ${H_STOP}")"
     state_sums > "${OUT_DIR}/sums.stop"
+    state_owners > "${OUT_DIR}/own.before"
     H_SIGNED_STOP="$(record_height signed)"
     H_PREVOTE_STOP="$(record_height prevote)"
     META[head_at_stop]="${H_STOP}"
@@ -674,6 +868,25 @@ if [ "${VARIANT}" = rejoin ]; then
         -v "$(vol "state-${X_NODE}"):/s" "${PG_IMAGE}" >> "${STEP_LOG}" 2>&1 || die "could not clear the non-identity state"
     left="$(state_names | tr '\n' ' ')"
     say "left on the state volume: ${left}"
+    # The state volume is kept and only emptied (as root, rm only: nothing is created on
+    # it), so its owner must be what it was. The volumes recreated below, the database
+    # and the backup staging one, belong to postgres, not to uid 1000. Whatever the
+    # restarted node writes to /app/state has to work as uid 1000, so prove that now.
+    state_owners > "${OUT_DIR}/own.after"
+    own_changed="$(grep -Fxv -f "${OUT_DIR}/own.before" "${OUT_DIR}/own.after" || true)"
+    if [ -z "${own_changed}" ] && grep -q ' \.$' "${OUT_DIR}/own.before" && grep -q ' \.$' "${OUT_DIR}/own.after"; then
+        check "the wipe kept the ownership of the state volume" PASS "owner and mode of the state dir and the identity files unchanged ($(grep ' \.$' "${OUT_DIR}/own.after" | cut -d' ' -f1,2))"
+    else
+        check "the wipe kept the ownership of the state volume" FAIL "changed or missing: $(printf '%s' "${own_changed:-no state dir line}" | tr '\n' ';')"
+    fi
+    x_opts=(-v "$(vol "state-${X_NODE}"):/app/state")
+    if ! probe_write /app/state "${x_opts[@]}" >> "${STEP_LOG}" 2>&1; then
+        if [ "${FIX_OWNERSHIP}" = 1 ] && fix_owner "$(vol "state-${X_NODE}")" && probe_write /app/state "${x_opts[@]}" >> "${STEP_LOG}" 2>&1; then
+            say "FIX_OWNERSHIP=1: node ${X_NODE}'s state volume was chowned back to 1000:1000"
+        else
+            die "after the wipe uid 1000 cannot write node ${X_NODE}'s state volume ($(vol "state-${X_NODE}")); the restarted node would fail with 'Permission denied' (see 06-wipe.log)"
+        fi
+    fi
     assert_x_not_running
     phase_end B "wipe: stop node, remove its database volume and non-identity state, keep identity + signing state"
 

@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+"""A fake `docker` for testing run.sh without Docker. It keeps containers and
+volumes in $FAKE_DIR/state.json and answers only what run.sh asks: compose
+up/stop/rm/ps/run/down, exec (curl RPC, psql, pg_*), run (probes and helpers),
+cp, logs, inspect, ps, volume. The chain is a clock: head = (now - first node
+start) * FAKE_RATE.
+
+Knobs (environment): FAKE_RATE (blocks per second, 3), FAKE_ROOT_VOLS (volume
+names containing one of these are created root-owned), FAKE_UNWRITABLE_PATHS
+(image dirs uid 1000 cannot write), FAKE_NEVER_SERVE / FAKE_BEHIND (node
+services that never answer / stay at head 0), FAKE_NO_NODE, FAKE_UNREADABLE,
+FAKE_MISSING_IMAGES, FAKE_MIGRATE_FAIL, FAKE_WIPE_CHANGES_OWNER,
+FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3). Every call is appended to
+$FAKE_DIR/calls.log.
+"""
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+
+D = os.environ["FAKE_DIR"]
+SF = os.path.join(D, "state.json")
+RATE = float(os.environ.get("FAKE_RATE", "3"))
+
+
+def envlist(k):
+    return [x for x in os.environ.get(k, "").split(",") if x]
+
+
+def load():
+    if not os.path.exists(SF):
+        return {"volumes": {}, "containers": {}, "t0": None}
+    with open(SF) as f:
+        return json.load(f)
+
+
+def save(st):
+    tmp = SF + f".{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(st, f)
+    os.replace(tmp, SF)
+
+
+def head(st):
+    return 0 if not st["t0"] else int((time.time() - st["t0"]) * RATE)
+
+
+def out(s=""):
+    print(s)
+    sys.exit(0)
+
+
+def fail(msg="", rc=1):
+    if msg:
+        print(msg, file=sys.stderr)
+    sys.exit(rc)
+
+
+with open(os.path.join(D, "calls.log"), "a") as f:
+    f.write(" ".join(sys.argv[1:])[:300].replace("\n", " ") + "\n")
+
+a = sys.argv[1:]
+st = load()
+
+
+def new_volume(full, project):
+    if full in st["volumes"]:
+        return
+    owner = "0" if any(x in full for x in envlist("FAKE_ROOT_VOLS")) else "1000"
+    st["volumes"][full] = {"owner": owner, "project": project, "files": [], "db": "empty", "frozen": False,
+                           "frozen_head": 0, "dump_head": 0}
+
+
+def vname(project, short):
+    return f"{project}_{short}"
+
+
+def cid_of(project, svc, n=1):
+    return hashlib.sha1(f"{project}/{svc}/{n}".encode()).hexdigest()[:12]
+
+
+def svc_vols(compose, svc):
+    res = []
+    for v in compose["services"][svc].get("volumes", []):
+        parts = v.split(":")
+        if re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", parts[0]):
+            res.append((parts[0], parts[1]))
+    return res
+
+
+def start_container(st, compose, project, svc, c):
+    c["state"] = "running"
+    c["started"] = time.time()
+    c["logs"] = c.get("logs", []) + [f"[fake] {svc} starting"]
+    if svc.startswith("node-"):
+        n = svc[5:]
+        sv = [vname(project, s) for s, p in svc_vols(compose, svc) if p == "/app/state"][0]
+        vol = st["volumes"][sv]
+        if vol["owner"] != "1000":
+            c["state"] = "exited"
+            c["logs"].append("cp: cannot create regular file '/app/state/node.identity': Permission denied")
+            return
+        if any(v.endswith(":/app/keys/node.identity:ro") for v in compose["services"][svc]["volumes"]):
+            for fn in ("node.identity", "node.identity.signed.json", "node.identity.prevote.json"):
+                if fn not in vol["files"]:
+                    vol["files"].append(fn)
+        for fn in ("extra.dat", "demos_peerlist.json"):
+            if fn not in vol["files"]:
+                vol["files"].append(fn)
+        vol["frozen"] = False
+        pg = st["volumes"].get(vname(project, f"pgdata-{n}"))
+        if pg is not None:
+            if pg["db"] != "empty" and pg["frozen"]:
+                pg["frozen"] = False
+            if pg["db"] == "empty":
+                pg["db"] = "chain"
+        if not st["t0"]:
+            st["t0"] = time.time()
+        if c.get("starts", 0) >= 1:
+            c["logs"].append("[SIGNING] Restart signing floor 42")
+        c["starts"] = c.get("starts", 0) + 1
+
+
+def compose_cmd(a):
+    if a[1] == "version":
+        out("Docker Compose version v2.fake")
+    f = a[a.index("-f") + 1]
+    project = a[a.index("-p") + 1]
+    rest = a[a.index("-p") + 2:]
+    cmd = rest[0]
+    args = rest[1:]
+    if cmd == "version":
+        out("Docker Compose version v2.fake")
+    with open(f) as fh:
+        compose = json.load(fh)
+    if cmd == "config":
+        # test hook: a tmpfs on node-1, as a compose file that has one would
+        if os.environ.get("FAKE_ADD_TMPFS"):
+            compose["services"]["node-1"]["tmpfs"] = [os.environ["FAKE_ADD_TMPFS"]]
+            with open(f, "w") as fh:
+                json.dump(compose, fh)
+        out()
+    svcs = []
+    flags = set()
+    i = 0
+    while i < len(args):
+        x = args[i]
+        if x in ("--pull", "-t", "-e"):
+            i += 2
+            continue
+        if x.startswith("-"):
+            flags.add(x)
+        else:
+            svcs.append(x)
+        i += 1
+    if cmd == "up":
+        todo = []
+        for s in svcs:
+            if "--no-deps" not in flags:
+                for dep in compose["services"][s].get("depends_on", {}):
+                    if dep not in todo:
+                        todo.append(dep)
+            todo.append(s)
+        for s in todo:
+            for short, _ in svc_vols(compose, s):
+                new_volume(vname(project, short), project)
+            cid = cid_of(project, s)
+            c = st["containers"].setdefault(cid, {"service": s, "project": project, "state": "created", "volumes": [vname(project, v) for v, _ in svc_vols(compose, s)]})
+            if "--no-start" not in flags and c["state"] != "running":
+                start_container(st, compose, project, s, c)
+        save(st)
+        out()
+    if cmd == "run":
+        if os.environ.get("FAKE_MIGRATE_FAIL"):
+            fail("migration failed")
+        out("migrations applied")
+    if cmd == "ps":
+        for cid, c in sorted(st["containers"].items()):
+            if c["project"] == project and c["service"] in svcs and ("-aq" in flags or c["state"] == "running"):
+                print(cid)
+        sys.exit(0)
+    if cmd == "stop":
+        for cid, c in st["containers"].items():
+            if c["project"] == project and c["service"] in svcs and c["state"] == "running":
+                c["state"] = "exited"
+                s = c["service"]
+                if s.startswith("node-"):
+                    n = s[5:]
+                    pg = st["volumes"].get(vname(project, f"pgdata-{n}"))
+                    if pg is not None and pg["db"] != "empty":
+                        pg["frozen"] = True
+                        pg["frozen_head"] = head(st)
+                    for sv, p in svc_vols(compose, s):
+                        if p == "/app/state":
+                            st["volumes"][vname(project, sv)]["frozen"] = True
+                            st["volumes"][vname(project, sv)]["frozen_head"] = head(st)
+        save(st)
+        out()
+    if cmd == "rm":
+        for cid in [k for k, c in st["containers"].items() if c["project"] == project and c["service"] in svcs]:
+            del st["containers"][cid]
+        save(st)
+        out()
+    if cmd == "down":
+        for cid in [k for k, c in st["containers"].items() if c["project"] == project]:
+            del st["containers"][cid]
+        for v in [k for k, x in st["volumes"].items() if x["project"] == project]:
+            del st["volumes"][v]
+        save(st)
+        out()
+    fail(f"fake docker: compose {cmd} not handled", 99)
+
+
+def mounts_of(opts):
+    vols = {}
+    tmpfs = {}
+    for k, v in opts:
+        if k == "-v":
+            src, dst = v.split(":")[0:2]
+            vols[dst] = src
+        elif k == "--tmpfs":
+            tmpfs[v.split(":")[0]] = v
+    return vols, tmpfs
+
+
+def run_cmd(a):
+    opts = []
+    i = 0
+    entry = None
+    user = None
+    while i < len(a):
+        x = a[i]
+        if x in ("--rm", "-i", "-t"):
+            i += 1
+        elif x in ("--user", "--network", "--label", "-v", "--tmpfs", "-e", "--name"):
+            opts.append((x, a[i + 1]))
+            if x == "--user":
+                user = a[i + 1]
+            i += 2
+        elif x == "--entrypoint":
+            entry = a[i + 1]
+            i += 2
+        else:
+            break
+    image = a[i]
+    args = a[i + 1:]
+    vols, tmpfs = mounts_of(opts)
+    if image in envlist("FAKE_MISSING_IMAGES"):
+        fail("Unable to find image locally", 125)
+    if entry == "bun":
+        out("MNEMONIC: " + " ".join(hashlib.sha1(os.urandom(8)).hexdigest()[:6] for _ in range(12)) + "\nPUBKEY: 0x" + hashlib.sha256(os.urandom(8)).hexdigest())
+    if entry == "bash":
+        if os.environ.get("FAKE_NO_NODE"):
+            fail("", 1)
+        out("/usr/local/bin/node")
+    if entry != "sh" or args[:1] != ["-c"]:
+        out()
+    script = args[1]
+    pos = args[3:]
+    if "src/migrations" in script:
+        out(os.environ.get("FAKE_MIGRATION_FILES", "3"))
+    if "uid 1000 cannot read" in script:
+        fail("uid 1000 cannot read /in/peerlist.json" if os.environ.get("FAKE_UNREADABLE") else "", 1 if os.environ.get("FAKE_UNREADABLE") else 0)
+    if 'touch "$1/.w"' in script:
+        p = pos[0]
+        if p in tmpfs:
+            ok = "uid=1000" in tmpfs[p]
+        elif p in vols:
+            ok = st["volumes"][vols[p]]["owner"] == "1000"
+        else:
+            ok = p not in envlist("FAKE_UNWRITABLE_PATHS")
+        if user != "1000" or ok:
+            out()
+        fail(f"touch: {p}/.w: Permission denied")
+    sv = vols.get("/x") or vols.get("/s") or vols.get("/b")
+    vol = st["volumes"].get(sv) if sv else None
+    if "chown -R 1000:1000" in script:
+        vol["owner"] = "1000"
+        save(st)
+        out()
+    if "rm -rf" in script and "node.identity*" in script:
+        vol["files"] = [x for x in vol["files"] if x.startswith("node.identity")]
+        if os.environ.get("FAKE_WIPE_CHANGES_OWNER"):
+            vol["owner"] = "0"
+        save(st)
+        out()
+    if "stat -c" in script:
+        o = vol["owner"]
+        print(f"{o}:{o} 755 .")
+        for x in vol["files"]:
+            if x.startswith("node.identity"):
+                print(f"{o}:{o} 600 {x}")
+        sys.exit(0)
+    if "ls -A /s" in script:
+        for x in sorted(vol["files"]):
+            print(x)
+        sys.exit(0)
+    m = re.search(r"cat /s/node\.identity\.(\w+)\.json", script)
+    if m:
+        if f"node.identity.{m.group(1)}.json" in vol["files"]:
+            running = any(c["state"] == "running" and sv in c["volumes"] for c in st["containers"].values())
+            print(json.dumps({"height": head(st) if running else vol["frozen_head"]}))
+        sys.exit(0)
+    if "sha256sum /s/node.identity" in script:
+        if "node.identity" in vol["files"]:
+            print(hashlib.sha256(b"identity-" + sv.encode()).hexdigest())
+        sys.exit(0)
+    if "sha256sum" in script and "node.identity*" in script:
+        running = any(c["state"] == "running" and sv in c["volumes"] for c in st["containers"].values())
+        for x in sorted(vol["files"]):
+            if x.startswith("node.identity"):
+                body = x
+                if x.endswith(".json"):
+                    body += str(head(st) if running else vol["frozen_head"])
+                else:
+                    body = "identity-" + sv
+                print(f"{hashlib.sha256(body.encode()).hexdigest()}  {x}")
+        sys.exit(0)
+    out()
+
+
+def pg_state(st, project, cid):
+    c = st["containers"][cid]
+    n = c["service"][3:]
+    return n, st["volumes"][vname(project, f"pgdata-{n}")], st["volumes"].get(vname(project, f"backup-{n}"))
+
+
+def exec_cmd(a):
+    a = [x for x in a if x != "-i"]
+    cid, cmd = a[0], a[1:]
+    c = st["containers"].get(cid)
+    if not c or c["state"] != "running":
+        fail("Error response from daemon: container is not running", 1)
+    svc, project = c["service"], c["project"]
+    if svc.startswith("node-"):
+        if cmd[0] != "curl":
+            out()
+        if svc in envlist("FAKE_NEVER_SERVE"):
+            fail("", 7)
+        body = cmd[cmd.index("-d") + 1] if "-d" in cmd else None
+        if body is None:
+            sys.stdout.write("Hello World!")
+            sys.exit(0)
+        d = json.loads(body)["params"][0]
+        h = 0 if svc in envlist("FAKE_BEHIND") else head(st)
+        if d["message"] == "getLastBlockNumber":
+            out(json.dumps({"result": 200, "response": h}))
+        bn = d["data"]["blockNumber"]
+        out(json.dumps({"result": 200, "response": {"hash": f"hash{bn}", "number": bn, "content": {"timestamp": time.time()}, "validation_data": {"signatures": {}}}}))
+    n, pg, bk = pg_state(st, project, cid)
+    if cmd[0] == "pg_isready":
+        out()
+    dbhead = pg["frozen_head"] if pg["frozen"] else head(st)
+    if cmd[0] == "psql":
+        if pg["db"] == "empty":
+            if "-f" in cmd:
+                sys.stdin.read()
+                sys.exit(0)
+            q = cmd[cmd.index("-tAc") + 1]
+            out("0" if "pg_tables" in q else ("1" if "select 1" in q else ""))
+        if "-f" in cmd:
+            sys.stdin.read()
+            for line in (f"max_block|{dbhead}", f"blocks|{dbhead + 1}", "fork_state|1", "migrations|3", f"transactions|{dbhead * 2}"):
+                print(line)
+            sys.exit(0)
+        q = cmd[cmd.index("-tAc") + 1]
+        m = re.search(r"WHERE number = (\d+)", q)
+        if m:
+            out(f"hash{m.group(1)}")
+        if "max(number)" in q:
+            out(str(dbhead))
+        out("4" if "pg_tables" in q else "1")
+    if cmd[0] == "stat":
+        out("4096")
+    if cmd[0] == "sh":
+        script = cmd[2]
+        if "pg_dump" in script:
+            nm = re.search(r"/backup/(\S+)", script).group(1)
+            pg["dump_head"] = dbhead
+            bk["files"] = [nm]
+            bk["dump"] = f"DUMP-head-{dbhead}\n"
+            save(st)
+            out()
+        if "pg_restore --list" in script:
+            nm = re.search(r"pg_restore --list (\S+)", script).group(1)
+            bk["files"].append(nm + ".sha256")
+            save(st)
+            out()
+        if "pg_restore -U" in script:
+            data = sys.stdin.read()
+            m = re.search(r"DUMP-head-(\d+)", data)
+            if not m:
+                fail("pg_restore: not a dump", 1)
+            pg["db"], pg["frozen"], pg["frozen_head"] = "restored", True, int(m.group(1))
+            save(st)
+            out()
+    out()
+
+
+def main():
+    cmd = a[0]
+    if cmd == "compose":
+        compose_cmd(a)
+    elif cmd == "info":
+        out()
+    elif cmd == "run":
+        run_cmd(a[1:])
+    elif cmd == "exec":
+        exec_cmd(a[1:])
+    elif cmd == "image":
+        img = a[2]
+        if img in envlist("FAKE_MISSING_IMAGES"):
+            fail("Error: No such image", 1)
+        fmt = a[a.index("--format") + 1] if "--format" in a else ""
+        if ".Id" in fmt:
+            out("sha256:" + hashlib.sha256(img.encode()).hexdigest())
+        if "Config.Volumes" in fmt:
+            out("null" if os.environ.get("FAKE_NO_IMG_VOLUMES") else '{"/app/data":{},"/app/logs":{},"/app/state":{}}')
+        if "WorkingDir" in fmt:
+            out("/app")
+        out()
+    elif cmd == "ps":
+        flt = [a[i + 1] for i, x in enumerate(a) if x == "--filter"]
+        for cid, c in sorted(st["containers"].items()):
+            ok = "-aq" in a or c["state"] == "running"
+            for ff in flt:
+                k, _, v = ff.partition("=")
+                if k == "label" and v.startswith("com.docker.compose.project="):
+                    ok = ok and c["project"] == v.split("=", 1)[1]
+                elif k == "label" and v.startswith("com.docker.compose.service="):
+                    ok = ok and c["service"] == v.split("=", 1)[1]
+                elif k == "label":
+                    ok = False
+                elif k == "volume":
+                    ok = ok and ff.split("=", 1)[1] in c["volumes"]
+            if ok:
+                print(cid)
+        sys.exit(0)
+    elif cmd == "volume":
+        sub = a[1]
+        if sub == "ls":
+            ff = a[a.index("--filter") + 1].split("=", 2)[2]
+            for v, x in sorted(st["volumes"].items()):
+                if x["project"] == ff:
+                    print(v)
+            sys.exit(0)
+        if sub == "rm":
+            for v in a[2:]:
+                st["volumes"].pop(v, None)
+            save(st)
+            out()
+        if sub == "inspect":
+            v = st["volumes"].get(a[-1])
+            if v is None:
+                fail("No such volume", 1)
+            out(v["project"])
+    elif cmd == "rm":
+        out()
+    elif cmd == "cp":
+        src, dest = a[1], a[2]
+        cid = src.split(":")[0]
+        c = st["containers"][cid]
+        bk = st["volumes"][vname(c["project"], "backup-" + c["service"][3:])]
+        nm = bk["files"][0]
+        with open(os.path.join(dest, nm), "w") as f:
+            f.write(bk["dump"])
+        with open(os.path.join(dest, nm + ".sha256"), "w") as f:
+            f.write(hashlib.sha256(bk["dump"].encode()).hexdigest() + "  " + nm + "\n")
+        out()
+    elif cmd == "logs":
+        cid = a[-1]
+        c = st["containers"].get(cid)
+        if not c:
+            fail("No such container", 1)
+        out("\n".join(c.get("logs", [])))
+    elif cmd == "inspect":
+        fmt = a[a.index("-f") + 1]
+        out("0" if "ExitCode" in fmt else "")
+    else:
+        fail(f"fake docker: {cmd} not handled", 99)
+
+
+main()

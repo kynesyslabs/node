@@ -50,9 +50,24 @@ ISO_PORT = port(n + 1)
 
 # Identity into the state volume only when it is not there yet: a wiped and
 # restored node keeps the identity (and signing state) already on the volume.
-# The image's own entrypoint is replaced, as in quorum-drills; the devnet
-# image ships ./testing/devnet/run-devnet, the release image does not and
-# starts the node directly, with bun as PID 1.
+#
+# The node is started the way the image starts it, minus the entrypoint's
+# symlinks. The devnet image's ENTRYPOINT is ./testing/devnet/run-devnet (used
+# below when present). The release image has ENTRYPOINT
+# /app/scripts/docker-entrypoint.sh and CMD `bun -r tsconfig-paths/register
+# src/index.ts -- --no-tui`; the last line below is that CMD, word for word.
+# What docker-entrypoint.sh would add, and why none of it is needed here:
+# - mkdir of /app/state and /app/logs: /app/state is made below, /app/logs is
+#   in the image;
+# - symlinks /app/.demos_identity, /app/<IDENTITY_FILE>.signed.json: IDENTITY_FILE
+#   is /app/state/node.identity, so the identity, its .signed.json, .lock and
+#   .halted already sit on the volume and the script itself skips that case;
+# - symlink /app/demos_peerlist.json -> state: the node only reads the peerlist
+#   (PeerManager.ts), from a read-only bind mount; the script's `mv` of that
+#   bind-mounted file to the volume would most likely fail (not run on Docker);
+# - /app/.tlsnotary-key: TLSNOTARY_ENABLED is false;
+# - /app/output -> state/output: only the backupAndRestore utility writes there.
+# So the entrypoint is bypassed on purpose, as in quorum-drills, with bun as PID 1.
 START_SCRIPT = (
     "set -e; mkdir -p /app/state; "
     "if [ -f /app/keys/node.identity ] && [ ! -f /app/state/node.identity ]; then "
@@ -60,6 +75,14 @@ START_SCRIPT = (
     "if [ -x ./testing/devnet/run-devnet ]; then exec ./testing/devnet/run-devnet < /dev/null; fi; "
     "exec bun -r tsconfig-paths/register src/index.ts -- --no-tui < /dev/null"
 )
+
+# Gossip is on unless GOSSIP_ENABLED=false is set on purpose (a negative run;
+# run.sh then refuses to start without ALLOW_GOSSIP_OFF=1). A validator with
+# gossip off never catches up after a restart: it says "already synced" while
+# behind, which would wreck the restore timings.
+gossip = os.environ.get("GOSSIP_ENABLED", "").strip().lower() or "true"
+if gossip not in ("true", "false"):
+    raise SystemExit(f"GOSSIP_ENABLED must be true or false, got '{os.environ['GOSSIP_ENABLED']}'")
 
 node_env = {
     "NODE_ENV": "development",
@@ -71,7 +94,7 @@ node_env = {
     "CONSENSUS_TIME": str(a.consensus_time),
     "OMNI_MODE": "HTTP_ONLY",
     "TLSNOTARY_ENABLED": "false",
-    "GOSSIP_ENABLED": "true" if os.environ.get("GOSSIP_ENABLED") == "true" else "false",
+    "GOSSIP_ENABLED": gossip,
     "IDENTITY_FILE": "/app/state/node.identity",
     "PEER_LIST_FILE": "demos_peerlist.json",
 }
