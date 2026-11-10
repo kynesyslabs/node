@@ -278,7 +278,13 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
   - Identity proofs verify with the final key of the identity ceremony
     (kynesyslabs/zk_ceremony, drand round 6629366 beacon). Proofs made with an
     earlier development key are refused; clients need `@kynesyslabs/demosdk`
-    4.0.20 or later.
+    4.0.20 or later. Block apply and sync verify each attestation again with
+    the key in the image, so a chain that already holds attestations made
+    under an earlier key cannot be replayed or synced by rc.7. No supported
+    procedure covers such a chain; the release supports chains without them
+    (mainnet from genesis, the rc.6 test network). Check before upgrading,
+    from the install's checkout; the result must be 0:
+    `docker compose exec postgres psql -U demosuser -d demos -At -c "SELECT count(*) FROM used_nullifiers"`
   - L2PS batch proofs are off unless `L2PS_ZK_ENABLED=true`. Before, the
     aggregator proved whenever the keys were present. The image now ships the
     batch_5 and batch_10 proving keys. Validators do not check batch proofs
