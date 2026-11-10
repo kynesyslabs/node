@@ -6,6 +6,32 @@ import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier"
 import { jsonResponse } from "./bunServer"
 import type { BunServer } from "./bunServer"
 
+const HEX_FIELD = /^(0x)?[0-9a-fA-F]{64}$/
+const DECIMAL_FIELD = /^(0|[1-9]\d{0,77})$/
+
+/**
+ * The forms a commitment can be stored under. A commitment keeps the form it
+ * was registered in (the SDK registers canonical decimal), so a lookup tries
+ * the given form first and the other one second.
+ */
+export function commitmentLookupKeys(value: string): string[] | null {
+    if (HEX_FIELD.test(value)) {
+        const hex = value.toLowerCase().replace(/^0x/, "")
+        return [hex, BigInt(`0x${hex}`).toString()]
+    }
+    if (DECIMAL_FIELD.test(value)) {
+        return [value, BigInt(value).toString(16).padStart(64, "0")]
+    }
+    return null
+}
+
+/** Nullifiers are stored as the proof's first public signal: canonical decimal. */
+export function nullifierStorageKey(value: string): string | null {
+    if (HEX_FIELD.test(value)) return BigInt(`0x${value.replace(/^0x/, "")}`).toString()
+    if (DECIMAL_FIELD.test(value)) return value
+    return null
+}
+
 // ZK Merkle tree configuration constants
 const ZK_MERKLE_TREE_DEPTH = 20
 const ZK_MERKLE_TREE_ID = "global"
@@ -137,12 +163,17 @@ export function registerZkRoutes(server: BunServer): void {
                 return jsonResponse({ error: "Commitment hash required" }, 400)
             }
 
-            if (!/^0x[0-9a-fA-F]{64}$/.test(commitment)) {
-                return jsonResponse({ error: "Invalid commitment format" }, 400)
+            const keys = commitmentLookupKeys(commitment)
+            if (!keys) {
+                return jsonResponse({ error: "Invalid commitment format: 64 hex digits or canonical decimal" }, 400)
             }
 
             const merkleManager = await getFreshMerkleTreeManager()
-            const proof = await merkleManager.getProofForCommitment(commitment)
+            let proof = null
+            for (const key of keys) {
+                proof = await merkleManager.getProofForCommitment(key)
+                if (proof) break
+            }
 
             if (!proof) {
                 return jsonResponse(
@@ -168,14 +199,13 @@ export function registerZkRoutes(server: BunServer): void {
 
     server.get("/zk/nullifier/:hash", async req => {
         try {
-            const nullifierHash = req.params.hash
-
-            if (!nullifierHash) {
+            if (!req.params.hash) {
                 return jsonResponse({ error: "Nullifier hash required" }, 400)
             }
 
-            if (!/^0x[0-9a-fA-F]{64}$/.test(nullifierHash)) {
-                return jsonResponse({ error: "Invalid nullifier hash format" }, 400)
+            const nullifierHash = nullifierStorageKey(req.params.hash)
+            if (!nullifierHash) {
+                return jsonResponse({ error: "Invalid nullifier hash format: 64 hex digits or canonical decimal" }, 400)
             }
 
             const db = await Datasource.getInstance()
