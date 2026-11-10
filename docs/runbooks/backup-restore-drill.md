@@ -51,9 +51,16 @@ It does not show:
      digest-pinned form used by `docker-compose.yml` to match production). It
      is also the image of the one-off helper containers (busybox `sh`,
      `sha256sum`, `tar`).
-- Outbound UDP 123 from containers: the node refuses to start without two NTP
-  readings (`validator-key.md`). If the first node does not serve, look here
-  first.
+- Outbound UDP 123 from containers: lets each node measure its clock offset at
+  start; it is not needed to start. At start the node asks four public NTP
+  servers (`checkClockAtBoot` in `src/libs/utils/clockProbe.ts`). If none
+  answers, or fewer than two agree within 2 s of each other, it logs the
+  warning `[CLOCK] Host clock offset not measured` and starts on the host
+  clock. It refuses to start only when two or more agreeing servers put the
+  host clock more than 5 s (`COSIGN_TIMESTAMP_MAX_LEAD_SECONDS`) ahead or
+  behind, and only with `PROD=true`; the drill nodes run without it, so they
+  log that as an error and start anyway. If a node does not serve, read its
+  log first: `logs/node-N.log` in the run dir (written at teardown).
 - Host ports `BASE_PORT+1 .. BASE_PORT+5` free, on 127.0.0.1 only. Default
   `BASE_PORT=65000`; the script refuses a range touching 640xx or 643xx.
 - Disk and RAM: the same preflight as `quorum-drills/run.sh` (10 GB disk,
