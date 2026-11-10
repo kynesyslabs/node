@@ -59,14 +59,14 @@ export async function runZkIdentityE2e() {
   maybeSilenceConsole()
   const rpcUrls = getZkTargets()
   if (rpcUrls.length === 0) throw new Error("zk_identity_e2e requires at least one RPC target")
+  await Promise.all(rpcUrls.map(rpcUrl => waitForRpcReady(rpcUrl, envInt("WAIT_FOR_RPC_SEC", 120))))
+  await Promise.all(rpcUrls.map(rpcUrl => waitForTxReady(rpcUrl, envInt("WAIT_FOR_TX_SEC", 120))))
   const health = await getHealthyZkTargets(rpcUrls)
   if (health.healthyRpcUrls.length !== rpcUrls.length) {
     throw new Error(`zk_identity_e2e needs every target healthy: ${JSON.stringify(health.probes)}`)
   }
   const run = getRunConfig()
   const timeoutSec = envInt("ZK_E2E_TIMEOUT_SEC", 180)
-  await Promise.all(rpcUrls.map(rpcUrl => waitForRpcReady(rpcUrl, envInt("WAIT_FOR_RPC_SEC", 120))))
-  await Promise.all(rpcUrls.map(rpcUrl => waitForTxReady(rpcUrl, envInt("WAIT_FOR_TX_SEC", 120))))
 
   const wallets = await readWalletMnemonics()
   if (wallets.length === 0) throw new Error("zk_identity_e2e requires a wallet mnemonic")

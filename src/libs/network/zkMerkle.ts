@@ -3,6 +3,7 @@ import Datasource from "@/model/datasource"
 import { MerkleTreeManager } from "@/features/zk/merkle/MerkleTreeManager"
 import { getCurrentMerkleTreeState } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
 import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier"
+import { canonicalFieldElement } from "@/features/zk/proof/publicSignals"
 import { jsonResponse } from "./bunServer"
 import type { BunServer } from "./bunServer"
 
@@ -28,13 +29,14 @@ export function commitmentLookupKeys(value: string): string[] | null {
 }
 
 /**
- * Nullifiers are stored as the proof's first public signal: canonical decimal.
+ * Nullifiers are stored as the proof's first public signal, reduced to the
+ * field: canonical decimal.
  * A bare 64-digit value is therefore decimal; hex needs 0x or a letter.
  */
 export function nullifierStorageKey(value: string): string | null {
-    if (DECIMAL_FIELD.test(value)) return value
+    if (DECIMAL_FIELD.test(value)) return canonicalFieldElement(value)
     if (PREFIXED_HEX.test(value) || BARE_HEX.test(value)) {
-        return BigInt(`0x${value.replace(/^0x/, "")}`).toString()
+        return canonicalFieldElement(`0x${value.replace(/^0x/, "")}`)
     }
     return null
 }

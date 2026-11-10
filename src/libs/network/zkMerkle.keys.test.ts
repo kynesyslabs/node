@@ -38,6 +38,12 @@ describe("ZK route keys", () => {
         ])
     })
 
+    it("reduces a nullifier to the field, as the verifier stores it", () => {
+        const order = BigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617")
+        expect(nullifierStorageKey(`0x${(order + 1n).toString(16)}`)).toBe("1")
+        expect(nullifierStorageKey((order + 1n).toString())).toBe("1")
+    })
+
     it("refuses anything that is not a field-sized number", () => {
         for (const bad of ["", "0123", "1".repeat(79), "0x1234", "abc", `${decimal}'--`]) {
             expect(commitmentLookupKeys(bad)).toBeNull()
