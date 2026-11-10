@@ -35,7 +35,7 @@ function getNpx(): string {
 const KEYS_DIR = "src/features/zk/keys"
 const CIRCUITS_DIR = "src/features/zk/circuits"
 const PTAU_FILE = "powersOfTau28_hez_final_14.ptau"
-const PTAU_URL = "https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_14.ptau"
+const PTAU_URL = "https://circom.info/powersOfTau28_hez_final_14.ptau"
 // REVIEW: SHA-256 checksum of the official Powers of Tau file for supply chain security
 const PTAU_SHA256 = "489be9e5ac65d524f7b1685baac8a183c6e77924fdb73d2b8105e335f277895d"
 

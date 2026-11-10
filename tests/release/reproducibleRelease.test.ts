@@ -172,11 +172,18 @@ describe("release policy (Gate 3 G3-4): validators run identical, pinned code", 
     })
 
     it("every base image in the release Dockerfile is pinned by @sha256 digest", () => {
+        // A FROM naming an earlier stage builds on that stage's pinned image.
+        const stages = new Set(
+            [...read("Dockerfile").matchAll(/^\s*FROM\s+\S+\s+AS\s+(\S+)/gim)].map(m => m[1].toLowerCase()),
+        )
         const undigested = offendingLines(
             ["Dockerfile"],
             /^\s*FROM\s+/i,
             /@sha256:[0-9a-f]{64}/,
-        )
+        ).filter(line => {
+            const image = line.match(/FROM\s+(?:--\S+\s+)*(\S+)/i)?.[1]
+            return !image || !stages.has(image.toLowerCase())
+        })
         expect(undigested).toEqual([]) // tags like :1.3-debian or :1-slim are mutable
     })
 

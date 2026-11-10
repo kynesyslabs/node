@@ -104,6 +104,7 @@ import { runZkCommitmentSmoke } from "./features/zk/zk_commitment_smoke"
 import { runZkAttestationSmoke } from "./features/zk/zk_attestation_smoke"
 import { runZkMerkleInclusion } from "./features/zk/zk_merkle_inclusion"
 import { runZkProofLoadgen } from "./features/zk/zk_proof_loadgen"
+import { runZkIdentityE2e } from "./features/zk/zk_identity_e2e"
 import { runTlsNotaryRoutesSmoke } from "./features/tlsnotary/tlsnotary_routes_smoke"
 import { runTlsNotaryVerifyRejects } from "./features/tlsnotary/tlsnotary_verify_rejects"
 import { installGlobalFetchTimeout } from "./framework/common"
@@ -219,6 +220,7 @@ registerScenario("zk_commitment_smoke", runZkCommitmentSmoke)
 registerScenario("zk_attestation_smoke", runZkAttestationSmoke)
 registerScenario("zk_merkle_inclusion", runZkMerkleInclusion)
 registerScenario("zk_proof_loadgen", runZkProofLoadgen)
+registerScenario("zk_identity_e2e", runZkIdentityE2e)
 registerScenario("tlsnotary_routes_smoke", runTlsNotaryRoutesSmoke)
 registerScenario("tlsnotary_verify_rejects", runTlsNotaryVerifyRejects)
 if (scenario === "__list__") {
