@@ -392,7 +392,9 @@ export async function runL2psZkSetup(
         const committedVkey = path.join(out, "verification_key.json")
         const abandon = () => fs.rmSync(staging, { recursive: true, force: true })
         try {
-            const steps: Array<[string, string, string[]]> = [
+            // Each step names the file it must leave behind: the snarkjs CLI
+            // run by Bun instead of Node.js exits 0 without writing anything.
+            const steps: Array<[string, string, string[], string]> = [
                 [
                     `Compiling ${name}`,
                     circom2,
@@ -406,23 +408,32 @@ export async function runL2psZkSetup(
                         "-l",
                         circomlib,
                     ],
+                    r1cs,
                 ],
                 [
                     `Generating the proving key for ${name}`,
                     snarkjs,
                     ["plonk", "setup", r1cs, ptau, zkeyNew],
+                    zkeyNew,
                 ],
                 [
                     `Exporting the verification key for ${name}`,
                     snarkjs,
                     ["zkey", "export", "verificationkey", zkeyNew, generatedVkey],
+                    generatedVkey,
                 ],
             ]
-            for (const [label, cmd, args] of steps) {
+            for (const [label, cmd, args, output] of steps) {
                 say(`${label}...`)
                 const code = await runner.exec(cmd, args, root)
                 if (code !== 0) {
                     messages.push(`${label} failed (exit code ${code})`)
+                    return { ok: false, messages }
+                }
+                if (!nonEmptyFile(output)) {
+                    messages.push(
+                        `${label} exited without writing ${path.relative(root, output)}; circom2 and snarkjs need Node.js on PATH`,
+                    )
                     return { ok: false, messages }
                 }
             }
