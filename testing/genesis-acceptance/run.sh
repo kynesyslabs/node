@@ -290,7 +290,7 @@ start_node() { # $1 scenario id, $2 db, $3 state volume, $4 genesis file, $5 pin
         -e GOSSIP_ENABLED=false -e OMNI_ENABLED=false -e OMNI_MODE=HTTP_ONLY \
         -e L2PS_MESSAGING_ENABLED=false -e L2PS_ZK_ENABLED=false \
         -e DEMOS_SKIP_SETUP_CHECK=true -e LOG_LEVEL=info \
-        -e PROD=true -e EXPOSED_URL="${exposed_url}" \
+        -e PROD=true -e DEMOS_REQUIRE_VALIDATORS=true -e EXPOSED_URL="${exposed_url}" \
         "${pin_env[@]}" "${snap_env[@]}" "$@" \
         -v "${vol}:/app/state" \
         -v "${gen}:/app/data/genesis.json:ro" \
@@ -497,10 +497,12 @@ record s01 fresh-correct "boots, both pins + mainnet forks active" "${OBSERVED}"
 S01_PASS=${VERDICT}
 
 # ── 2-5. fresh refusals ─────────────────────────────────────────────────
-fresh_refused s02 fresh-genesis-1byte "${FIX}/onebyte.json" "${PIN}"
+NEEDLE='data/genesis.json hashes to [0-9a-f]{64}, EXPECTED_GENESIS_HASH is' \
+    fresh_refused s02 fresh-genesis-1byte "${FIX}/onebyte.json" "${PIN}"
 fresh_refused s03 fresh-no-pin "${FIX}/launch.json" -
 fresh_refused s04 fresh-bad-pin-format "${FIX}/launch.json" "${BAD_PIN}"
-fresh_refused s05 fresh-snapshot-changed "${FIX}/launch.json" "${PIN}" \
+NEEDLE='snapshot manifest hashes to [0-9a-f]{64}, genesis declares' \
+    fresh_refused s05 fresh-snapshot-changed "${FIX}/launch.json" "${PIN}" \
     -v "${RID}-snap-ws:/app/snapshot-ws:ro" -e DEMOS_SNAPSHOT_DIR=/app/snapshot-ws
 
 # ── 6. restart-same ─────────────────────────────────────────────────────

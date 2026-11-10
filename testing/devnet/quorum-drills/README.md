@@ -77,7 +77,7 @@ database:
   (`src/libs/blockchain/routines/findGenesisBlock.ts:219-227`,
   `src/libs/blockchain/genesis/genesisPin.ts:165-184`). The snapshot is loaded
   and verified file by file
-  (`src/libs/blockchain/genesis/loadSnapshot.ts:431`) and
+  (`src/libs/blockchain/genesis/loadSnapshot.ts:454`) and
   `assertCarryoverSnapshot` checks it before the database transaction opens
   (`src/libs/blockchain/genesis/restoreGenesisState.ts:71-73`).
 - **Every restart.** The node reads the stored block 0, and if it schedules
@@ -87,7 +87,7 @@ database:
   differs from the snapshot
   (`src/libs/blockchain/routines/findGenesisBlock.ts:188-199`,
   `src/libs/blockchain/genesis/verifyImportedIdentities.ts:40-77`,
-  `src/libs/blockchain/genesis/loadSnapshot.ts:528-562`).
+  `src/libs/blockchain/genesis/loadSnapshot.ts:555-589`).
   A restart does not re-hash the other snapshot files.
 
 The drills **do not cover any of this**: they run the legacy genesis path with
@@ -232,7 +232,7 @@ there and needs nothing):
   Postgres' `validator_set_snapshots`, not a file, so the empty
   `data/snapshot` mount does not matter. Block 0's row is written at boot:
   with no snapshot manifest `loadSnapshot` is unavailable
-  (`src/libs/blockchain/genesis/loadSnapshot.ts:445-451`),
+  (`src/libs/blockchain/genesis/loadSnapshot.ts:468-474`),
   `restoreGenesisState` returns false
   (`src/libs/blockchain/genesis/restoreGenesisState.ts:58-66`; with
   `identityCarryover` off, as in the drills, it neither refuses nor restores),

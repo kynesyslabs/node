@@ -120,7 +120,7 @@ each validator to report this digest.
 ### Snapshot manifest sha256
 
 `snapshotManifestHash` is the SHA-256 of the raw `manifest.json` bytes
-(`src/libs/blockchain/genesis/loadSnapshot.ts:509-514`; the tool's copy is
+(`src/libs/blockchain/genesis/loadSnapshot.ts:536-541`; the tool's copy is
 `scripts/genesis-hash.ts`, `snapshotManifestSha256`). The genesis binds it as
 `snapshot.manifestSha256` (`genesisPin.ts:106-120`). A node refuses a snapshot
 that hashes differently, and a pinned genesis that binds no snapshot while one
