@@ -1,0 +1,972 @@
+#!/usr/bin/env bash
+# Timed backup / wipe / restore drill on a throwaway 4-validator devnet
+# (mainnet-launch #16, G16-b). Configuration is by environment, see README.md
+# and docs/runbooks/backup-restore-drill.md.
+#
+#   NODE_IMAGE=<prebuilt local image> BASE_PORT=65000 testing/devnet/backup-restore-drill/run.sh
+#
+# VARIANT=rejoin (default)  back up node 4, wipe its database and non-identity
+#                           state while KEEPING its identity and signing state,
+#                           restore the dump, restart it, time the rejoin.
+# VARIANT=isolated          back up node 4 (it keeps running) and restore the
+#                           dump into a new non-signing node with no identity.
+#
+# Phases timed: A backup, A2 copy off the volume, B wipe, C restore, D rejoin.
+# Everything lives in $OUT_DIR (mode 700, gitignored under runs/) and the
+# compose project (default demos-bkdrill) is removed on exit.
+# Exit codes: 0 every check passed, 1 a check failed, 2 the drill could not be
+# carried out (preflight, boot, timeout).
+
+# SC2016: the single-quoted scripts are run by sh inside a container, on purpose.
+# SC2329: teardown is the EXIT trap. SC2094: sum_of only reads the files the loops read.
+# shellcheck disable=SC2016,SC2329,SC2094
+set -euo pipefail
+
+# Everything runs at nice 10 (this script and the docker CLI it starts; the
+# containers themselves are dockerd's children, they get cpu_shares instead)
+if [ -z "${BKDRILL_NICED:-}" ]; then
+    command -v nice >/dev/null 2>&1 || { echo "nice not found" >&2; exit 2; }
+    BKDRILL_NICED=1 exec nice -n 10 bash "${BASH_SOURCE[0]}" "$@"
+fi
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${HERE}/../../.." && pwd)"
+
+NODE_IMAGE="${NODE_IMAGE:-demos-node:candidate-5979a716}"
+PG_IMAGE="${PG_IMAGE:-postgres:16-alpine}"
+BASE_PORT="${BASE_PORT:-65000}"
+PROJECT="${PROJECT:-demos-bkdrill}"
+VARIANT="${VARIANT:-rejoin}"
+N=4
+X_NODE="${X_NODE:-4}"
+# q = floor(2 * shardSize / 3) + 1. 4 validators at shardSize 4: q = 3, so the
+# 3 others keep forging while node X is down. Set SHARD_SIZE=5 for q = 4
+# (4-of-4): the chain then pauses while X is down, which is reported as
+# expected, not as a failure.
+SHARD_SIZE="${SHARD_SIZE:-4}"
+H0="${H0:-5}"
+CONSENSUS_TIME="${CONSENSUS_TIME:-10}"
+NODE_MEM="${NODE_MEM:-1800m}"
+PG_MEM="${PG_MEM:-512m}"
+CPU_SHARES="${CPU_SHARES:-256}"
+NODE_EST_MB="${NODE_EST_MB:-1100}"
+HEADROOM_MB="${HEADROOM_MB:-3072}"
+MIN_DISK_GB="${MIN_DISK_GB:-10}"
+LOAD_MAX="${LOAD_MAX:-18}"
+LOAD_WAIT_MAX="${LOAD_WAIT_MAX:-1800}"
+LOAD_POLL="${LOAD_POLL:-20}"
+GENESIS_DELAY="${GENESIS_DELAY:-$((60 + N * 25))}"
+BRINGUP_TIMEOUT="${BRINGUP_TIMEOUT:-900}"
+SERVE_TIMEOUT="${SERVE_TIMEOUT:-240}"
+REJOIN_TIMEOUT="${REJOIN_TIMEOUT:-420}"
+SIGN_TIMEOUT="${SIGN_TIMEOUT:-300}"
+STOP_GRACE="${STOP_GRACE:-10}"
+STALL_LIMIT="${STALL_LIMIT:-90}"
+# The one command that applies pending migrations (docs/runbooks/database-
+# migrations.md). It runs in a one-off container of NODE_IMAGE against one
+# database, with PG_HOST / PG_DATABASE set by this script.
+MIGRATE_CMD="${MIGRATE_CMD:-bun run migration:run}"
+MIGRATE_REQUIRED="${MIGRATE_REQUIRED:-1}"
+ISO_NODE="${ISO_NODE:-1}"
+KEEP_KEYS="${KEEP_KEYS:-0}"
+IDENTITY_GEN="${IDENTITY_GEN:-auto}"
+RUNS_DIR="${RUNS_DIR:-${HERE}/runs}"
+
+usage() {
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    echo "Environment: NODE_IMAGE PG_IMAGE BASE_PORT PROJECT VARIANT OUT_DIR SHARD_SIZE H0 CONSENSUS_TIME"
+    echo "             NODE_MEM PG_MEM CPU_SHARES LOAD_MAX LOAD_WAIT_MAX STOP_GRACE STALL_LIMIT"
+    echo "             MIGRATE_CMD MIGRATE_REQUIRED ISO_NODE KEEP_KEYS IDENTITY_GEN RUNS_DIR (README.md)"
+}
+case "${1:-}" in
+    -h | --help) usage; exit 0 ;;
+    "") ;;
+    *) echo "unknown argument $1 (configuration is by environment)" >&2; usage >&2; exit 2 ;;
+esac
+
+is_num() { [[ "${1:-}" =~ ^[0-9]+$ ]]; }
+
+# ── configuration checks ────────────────────────────────────────────────
+cfg_err() { echo "config: $*" >&2; exit 2; }
+for v in BASE_PORT X_NODE SHARD_SIZE H0 CONSENSUS_TIME CPU_SHARES NODE_EST_MB HEADROOM_MB MIN_DISK_GB LOAD_MAX \
+    LOAD_WAIT_MAX LOAD_POLL GENESIS_DELAY BRINGUP_TIMEOUT SERVE_TIMEOUT REJOIN_TIMEOUT SIGN_TIMEOUT STOP_GRACE STALL_LIMIT; do
+    is_num "${!v}" || cfg_err "${v} must be a whole number, got '${!v}'"
+done
+[[ "${PROJECT}" =~ ^demos-[a-z0-9][a-z0-9_-]*$ ]] || cfg_err "PROJECT must match demos-[a-z0-9_-]+ (got '${PROJECT}')"
+case "${VARIANT}" in rejoin | isolated) ;; *) cfg_err "VARIANT must be rejoin or isolated" ;; esac
+# Node 1 is the peerlist anchor every other node learns the mesh from
+{ [ "${X_NODE}" -ge 2 ] && [ "${X_NODE}" -le "${N}" ]; } || cfg_err "X_NODE must be 2..${N} (node 1 is the peerlist anchor)"
+# The ports used are BASE_PORT+1 .. BASE_PORT+N+1; 640xx and 643xx belong to the other drills
+if [ "${BASE_PORT}" -lt 1024 ] || [ $((BASE_PORT + N + 1)) -gt 65535 ]; then cfg_err "BASE_PORT out of range"; fi
+if [ "${BASE_PORT}" -le 64099 ] && [ $((BASE_PORT + N + 1)) -ge 64000 ]; then cfg_err "BASE_PORT overlaps 640xx"; fi
+if [ "${BASE_PORT}" -le 64399 ] && [ $((BASE_PORT + N + 1)) -ge 64300 ]; then cfg_err "BASE_PORT overlaps 643xx"; fi
+Q=$((SHARD_SIZE * 2 / 3 + 1))
+[ "${Q}" -le "${N}" ] || cfg_err "shardSize ${SHARD_SIZE} needs q=${Q} signers but only ${N} validators exist: the chain would never forge"
+LIVE_OTHERS=$((N - 1))
+EXPECT_PAUSE=0
+[ "${LIVE_OTHERS}" -lt "${Q}" ] && EXPECT_PAUSE=1
+
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-bkdrill-${VARIANT}"
+OUT_DIR="${OUT_DIR:-${RUNS_DIR}/${RUN_ID}}"
+LOG_DIR="${OUT_DIR}/logs"
+IN="${OUT_DIR}/inputs"
+BACKUP_DIR="${OUT_DIR}/backup"
+mkdir -p "${LOG_DIR}" "${IN}/empty-snapshot" "${BACKUP_DIR}"
+chmod 700 "${OUT_DIR}" "${BACKUP_DIR}"
+PHASES="${OUT_DIR}/phases.tsv"
+CHECKS="${OUT_DIR}/checks.tsv"
+: > "${PHASES}"
+: > "${CHECKS}"
+
+STEP_LOG="${LOG_DIR}/run.log"
+say() {
+    local m
+    m="[bkdrill $(date -u +%H:%M:%S)] $*"
+    echo "${m}" | tee -a "${LOG_DIR}/run.log"
+    if [ "${STEP_LOG}" != "${LOG_DIR}/run.log" ]; then echo "${m}" >> "${STEP_LOG}"; fi
+    return 0
+}
+step() { STEP_LOG="${LOG_DIR}/$1.log"; say "── $1"; }
+
+dc() { docker compose -f "${OUT_DIR}/compose.yml" -p "${PROJECT}" "$@"; }
+vol() { echo "${PROJECT}_$1"; }
+
+# ── timing and verdict bookkeeping ──────────────────────────────────────
+now() { date +%s.%N; }
+since() { awk -v a="$1" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }'; }
+PH_T0=0
+phase_begin() { PH_T0="$(now)"; }
+phase_end() { # id, name
+    local s
+    s="$(since "${PH_T0}")"
+    printf '%s\t%s\t%s\n' "$1" "$2" "${s}" >> "${PHASES}"
+    say "PHASE ${1} ${2}: ${s}s"
+}
+ANY_FAIL=0
+check() { # name, PASS|FAIL|INFO, detail
+    printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "${CHECKS}"
+    say "CHECK ${2}: ${1} (${3})"
+    if [ "$2" = FAIL ]; then ANY_FAIL=1; fi
+    return 0
+}
+
+RESULT=""
+REPORT_WRITTEN=0
+declare -A META
+write_report() {
+    local res="${RESULT:-ABORTED}" phases checks
+    phases="$(jq -Rn '[inputs | split("\t") | {id: .[0], name: .[1], seconds: (.[2] | tonumber)}]' < "${PHASES}")"
+    checks="$(jq -Rn '[inputs | split("\t") | {name: .[0], result: .[1], detail: .[2]}]' < "${CHECKS}")"
+    local meta='{}' k
+    for k in "${!META[@]}"; do meta="$(jq -c --arg k "${k}" --arg v "${META[${k}]}" '. + {($k): $v}' <<< "${meta}")"; done
+    jq -n --arg run "${RUN_ID}" --arg variant "${VARIANT}" --arg project "${PROJECT}" --arg result "${res}" \
+        --arg image "${NODE_IMAGE}" --arg pgImage "${PG_IMAGE}" --argjson n "${N}" --argjson shardSize "${SHARD_SIZE}" \
+        --argjson q "${Q}" --argjson xNode "${X_NODE}" --argjson expectPause "${EXPECT_PAUSE}" \
+        --argjson phases "${phases}" --argjson checks "${checks}" --argjson meta "${meta}" \
+        '{run: $run, variant: $variant, project: $project, result: $result, image: $image, pgImage: $pgImage,
+          validators: $n, shardSize: $shardSize, q: $q, drilledNode: $xNode, expectChainPauseWhileDown: ($expectPause == 1),
+          phases: $phases, checks: $checks, meta: $meta}' > "${OUT_DIR}/timings.json"
+    {
+        echo "# Backup / wipe / restore drill ${RUN_ID}"
+        echo
+        echo "- result: **${res}**; variant \`${VARIANT}\`; node ${X_NODE} of ${N}; shardSize ${SHARD_SIZE}, q ${Q}"
+        echo "- images: node \`${NODE_IMAGE}\`, postgres \`${PG_IMAGE}\`"
+        for k in $(printf '%s\n' "${!META[@]}" | sort); do echo "- ${k}: ${META[${k}]}"; done
+        echo
+        echo "| Phase | What | Seconds |"
+        echo "|---|---|---|"
+        awk -F'\t' '{ printf "| %s | %s | %s |\n", $1, $2, $3 }' "${PHASES}"
+        echo
+        echo "| Check | Result | Detail |"
+        echo "|---|---|---|"
+        awk -F'\t' '{ printf "| %s | %s | %s |\n", $1, $2, $3 }' "${CHECKS}"
+    } > "${OUT_DIR}/timings.md"
+    REPORT_WRITTEN=1
+}
+
+# ── teardown ────────────────────────────────────────────────────────────
+STARTED_STACK=0
+MON_PID=""
+stop_monitor() {
+    if [ -n "${MON_PID}" ]; then
+        kill "${MON_PID}" 2>/dev/null || true
+        wait "${MON_PID}" 2>/dev/null || true
+        MON_PID=""
+    fi
+}
+teardown() {
+    local rc=$?
+    trap - EXIT INT TERM
+    set +e
+    stop_monitor
+    if [ "${STARTED_STACK}" = 1 ]; then
+        say "collecting container logs"
+        local i cid
+        for i in $(seq 1 "${N}") iso; do
+            cid="$(dc ps -aq "node-${i}" 2>/dev/null)"
+            if [ -n "${cid}" ]; then docker logs "${cid}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > "${LOG_DIR}/node-${i}.log"; fi
+        done
+        [ "${REPORT_WRITTEN}" = 1 ] || write_report
+        say "tearing down ${PROJECT} (compose down -v for this project only)"
+        # Helper containers carry this label so an interrupted one cannot pin a volume
+        docker ps -aq --filter "label=demos.drill.helper=${PROJECT}" | xargs -r docker rm -f > /dev/null 2>&1
+        dc down -v --remove-orphans > "${LOG_DIR}/teardown.log" 2>&1
+        say "left over in ${PROJECT} after teardown: $(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT}" | wc -l) containers, $(docker volume ls -q --filter "label=com.docker.compose.project=${PROJECT}" | wc -l) volumes"
+    else
+        [ "${REPORT_WRITTEN}" = 1 ] || write_report
+    fi
+    if [ "${KEEP_KEYS}" != 1 ]; then
+        # Throwaway devnet keys: the identity inputs and the state copy go; dump, logs and timings stay
+        rm -f "${IN}"/node*.identity "${IN}"/gen-identity.ts
+        rm -rf "${BACKUP_DIR}/state" "${OUT_DIR}/state-sums"
+    fi
+    say "run dir: ${OUT_DIR}"
+    exit "${rc}"
+}
+trap teardown EXIT
+trap 'exit 130' INT TERM
+
+die() { say "ERROR: $*"; RESULT=ERROR; exit 2; }
+abort_pre() { say "ABORT: $*"; RESULT=ERROR; exit 2; }
+
+# ── helpers: ports, rpc, heads ──────────────────────────────────────────
+port_of() { if [ "$1" = iso ]; then echo $((53549 + 2 * (N + 1))); else echo $((53549 + 2 * $1)); fi; }
+db_of() { if [ "$1" = iso ]; then echo nodeiso_db; else echo "node$1_db"; fi; }
+declare -A CID PUB
+refresh_cid() { CID[$1]="$(dc ps -q "node-$1" 2>/dev/null || true)"; }
+rpc() { # $1 node, $2 JSON body
+    local cid="${CID[$1]:-}"
+    [ -n "${cid}" ] || return 1
+    docker exec "${cid}" curl -sS -m4 -X POST -H 'Content-Type: application/json' \
+        -d "$2" "http://localhost:$(port_of "$1")/" 2>/dev/null
+}
+head_of() {
+    rpc "$1" '{"method":"nodeCall","params":[{"message":"getLastBlockNumber","data":{},"muid":null}]}' |
+        jq -r 'select(.result == 200) | .response' 2>/dev/null || true
+}
+block_at() { # $1 node, $2 height -> the block's JSON
+    rpc "$1" "{\"method\":\"nodeCall\",\"params\":[{\"message\":\"getBlockByNumber\",\"data\":{\"blockNumber\":$2},\"muid\":null}]}" |
+        jq -c 'select(.result == 200) | .response' 2>/dev/null || true
+}
+hash_at() { block_at "$1" "$2" | jq -r '.hash // empty' 2>/dev/null || true; }
+serving() {
+    local cid="${CID[$1]:-}"
+    [ -n "${cid}" ] || return 1
+    docker exec "${cid}" curl -sS -m3 "http://localhost:$(port_of "$1")/" 2>/dev/null | grep -q Hello
+}
+wait_serve() { # $1 node, $2 timeout
+    local deadline=$((SECONDS + $2))
+    while [ "${SECONDS}" -lt "${deadline}" ]; do
+        if serving "$1"; then return 0; fi
+        sleep 3
+    done
+    return 1
+}
+read_head() { # retried so one slow answer is not a failed read
+    local k h
+    for k in 1 2 3; do
+        h="$(head_of "$1")"
+        if is_num "${h}"; then echo "${h}"; return 0; fi
+        sleep 1
+    done
+    return 1
+}
+OTHERS=()
+ALL_NODES=()
+for i in $(seq 1 "${N}"); do
+    ALL_NODES+=("${i}")
+    if [ "${i}" != "${X_NODE}" ]; then OTHERS+=("${i}"); fi
+done
+# Highest head among the given nodes that answer; empty when none does
+max_head_of() {
+    local i h m=""
+    for i in "$@"; do
+        h="$(head_of "${i}")"
+        if is_num "${h}" && { [ -z "${m}" ] || [ "${h}" -gt "${m}" ]; }; then m="${h}"; fi
+    done
+    echo "${m}"
+}
+min_head_of() { # empty if any does not answer
+    local i h m=""
+    for i in "$@"; do
+        h="$(head_of "${i}")"
+        is_num "${h}" || { echo ""; return 0; }
+        if [ -z "${m}" ] || [ "${h}" -lt "${m}" ]; then m="${h}"; fi
+    done
+    echo "${m}"
+}
+
+# ── helpers: containers and volumes ─────────────────────────────────────
+pgx() { # $1 postgres name (1..N|iso), rest: command in its container, stdin passes through
+    local cid
+    cid="$(dc ps -q "pg-$1" 2>/dev/null)"
+    [ -n "${cid}" ] || return 1
+    shift
+    docker exec -i "${cid}" "$@"
+}
+psql_q() { pgx "$1" psql -U demosuser -d "$(db_of "$1")" -tAc "$2"; }
+wait_pg() { # $1 name, $2 timeout. TCP on 127.0.0.1: the init-time server listens on the socket only
+    local deadline=$((SECONDS + $2)) cid
+    while [ "${SECONDS}" -lt "${deadline}" ]; do
+        cid="$(dc ps -q "pg-$1" 2>/dev/null)"
+        if [ -n "${cid}" ] && docker exec "${cid}" pg_isready -h 127.0.0.1 -U demosuser -d "$(db_of "$1")" > /dev/null 2>&1; then return 0; fi
+        sleep 2
+    done
+    return 1
+}
+# One-off root shell on PG_IMAGE (busybox), no network, labelled for teardown.
+# $1 script, rest: docker run options before it (volumes)
+helper() {
+    local script="$1"
+    shift
+    docker run --rm --user 0 --network none --label "demos.drill.helper=${PROJECT}" --entrypoint sh "$@" -c "${script}" sh
+}
+xstate_ro() { helper "$1" -v "$(vol "state-${X_NODE}"):/s:ro" "${PG_IMAGE}"; }
+# Hash of every identity / signing state file, one "hash  name" line each. The
+# short-lived .lock files change every beat and are left out. Never prints contents.
+state_sums() {
+    xstate_ro 'cd /s && for f in node.identity*; do [ -f "$f" ] || continue; case "$f" in *.lock) continue ;; esac; sha256sum "$f"; done; true' | sort -k2
+}
+# A numeric field of a signing record file ("signed" or "prevote"): height only, never the rest
+record_height() { # $1 signed|prevote
+    xstate_ro "cat /s/node.identity.${1}.json 2>/dev/null; true" | jq -r '.height // empty' 2>/dev/null || true
+}
+sum_of() { awk -v n="$2" '$2 == n { print $1 }' "$1"; }
+short() { printf '%s' "${1:0:12}"; }
+state_names() { xstate_ro 'ls -A /s; true'; }
+# No container, running or not, may hold the drilled node's state volume or be its node service
+assert_x_not_running() {
+    local running holders
+    running="$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}")"
+    [ -z "${running}" ] || die "node-${X_NODE} is still running; refusing to touch its key"
+    holders="$(docker ps -q --filter "volume=$(vol "state-${X_NODE}")")"
+    [ -z "${holders}" ] || die "a container still holds the state volume of node ${X_NODE}"
+}
+assert_single_x() {
+    local n
+    n="$(docker ps -q --filter "volume=$(vol "state-${X_NODE}")" | wc -l)"
+    [ "${n}" = 1 ] || die "expected exactly one container on node ${X_NODE}'s state volume, found ${n}"
+    n="$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}" | wc -l)"
+    [ "${n}" = 1 ] || die "expected exactly one node-${X_NODE} container, found ${n}"
+}
+
+run_migrations() { # $1 name; the manual step of docs/runbooks/database-migrations.md
+    say "migrations on $(db_of "$1"): ${MIGRATE_CMD}"
+    dc run --rm --no-deps -T -e "PG_HOST=pg-$1" -e "PG_DATABASE=$(db_of "$1")" migrate >> "${STEP_LOG}" 2>&1
+}
+
+start_node() { # $1 name
+    dc up -d --no-deps --pull never "node-$1" >> "${STEP_LOG}" 2>&1 || return 1
+    refresh_cid "$1"
+    wait_serve "$1" "${SERVE_TIMEOUT}"
+}
+
+# Counts of every public table plus the head, sorted "name|count" lines
+STATS_SQL="${IN}/stats.sql"
+cat > "${STATS_SQL}" << 'SQL'
+SELECT 'max_block|' || coalesce(max(number)::text, 'none') FROM blocks;
+SELECT format('SELECT %L || ''|'' || count(*) FROM %I', tablename, tablename)
+  FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename
+\gexec
+SQL
+stats_of() { # $1 postgres name
+    pgx "$1" psql -U demosuser -d "$(db_of "$1")" -tA -f - < "${STATS_SQL}" | sort
+}
+stat_of() { awk -F'|' -v k="$2" '$1 == k { print $2 }' "$1"; }
+in_range() { is_num "$1" && is_num "$2" && is_num "$3" && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
+
+# The restored database against the counts taken before and after the dump.
+# $1 label, $2 restored stats file. blocks and transactions only grow, so the
+# restored count must sit between the two; fork_state and migrations must match.
+check_restored_stats() {
+    local label="$1" file="$2" t b a r bad="" detail
+    for t in max_block blocks transactions; do
+        b="$(stat_of "${BACKUP_DIR}/stats.before.txt" "${t}")"
+        a="$(stat_of "${BACKUP_DIR}/stats.after.txt" "${t}")"
+        r="$(stat_of "${file}" "${t}")"
+        in_range "${r}" "${b}" "${a}" || bad="${bad} ${t}=${r:-?} not in [${b:-?},${a:-?}]"
+    done
+    for t in fork_state migrations; do
+        a="$(stat_of "${BACKUP_DIR}/stats.after.txt" "${t}")"
+        r="$(stat_of "${file}" "${t}")"
+        if [ -n "${a}" ] && [ "${r}" != "${a}" ]; then bad="${bad} ${t}=${r:-?} != dump ${a}"; fi
+    done
+    if [ "$(cut -d'|' -f1 "${BACKUP_DIR}/stats.after.txt" | tr '\n' ' ')" != "$(cut -d'|' -f1 "${file}" | tr '\n' ' ')" ]; then
+        bad="${bad} table set differs from the dump's"
+    fi
+    detail="max_block $(stat_of "${file}" max_block) (dump window $(stat_of "${BACKUP_DIR}/stats.before.txt" max_block)..$(stat_of "${BACKUP_DIR}/stats.after.txt" max_block)), blocks $(stat_of "${file}" blocks), transactions $(stat_of "${file}" transactions)"
+    if [ -z "${bad}" ]; then check "${label}: restored counts match the dump" PASS "${detail}"; else check "${label}: restored counts match the dump" FAIL "${bad}; ${detail}"; fi
+}
+
+# ── monitor: does the chain keep moving while node X is down? ───────────
+MON_FILE="${LOG_DIR}/monitor.tsv"
+start_monitor() { # nodes to watch
+    : > "${MON_FILE}"
+    (
+        set +e
+        while :; do
+            printf '%s\t%s\n' "$(date +%s)" "$(max_head_of "$@")" >> "${MON_FILE}"
+            sleep 5
+        done
+    ) &
+    MON_PID=$!
+}
+# "maxgap first last samples unreadable" between two unix times
+monitor_stats() {
+    awk -F'\t' -v from="$1" -v to="$2" '
+        $1 >= from && $1 <= to {
+            if ($2 ~ /^[0-9]+$/) {
+                if (!seen) { first = $2; best = $2; last = $1; seen = 1 }
+                else if ($2 > best) { best = $2; last = $1 }
+                gap = $1 - last; if (gap > maxgap) maxgap = gap; n++
+            } else { unread++ }
+        }
+        END { printf "%d %d %d %d %d", maxgap + 0, first + 0, best + 0, n + 0, unread + 0 }' "${MON_FILE}"
+}
+
+# ═════════════════════════════════════════════════════════════════════════
+# 1. preflight
+# ═════════════════════════════════════════════════════════════════════════
+step 01-preflight
+say "variant=${VARIANT} project=${PROJECT} node=${X_NODE} N=${N} shardSize=${SHARD_SIZE} q=${Q} base_port=${BASE_PORT} out=${OUT_DIR}"
+META[run_dir]="${OUT_DIR}"
+for tool in docker jq python3 awk sort vmstat free df nproc xargs; do command -v "${tool}" > /dev/null 2>&1 || abort_pre "${tool} not found"; done
+docker compose version >> "${STEP_LOG}" 2>&1 || abort_pre "docker compose (v2) is not available"
+docker info > /dev/null 2>&1 || abort_pre "cannot talk to the docker daemon"
+
+# Wait for a quiet host: the 1-minute load must be under LOAD_MAX (quorum-drills
+# only aborts above the core count; this waits instead, up to LOAD_WAIT_MAX)
+load_deadline=$((SECONDS + LOAD_WAIT_MAX))
+while :; do
+    load1="$(cut -d' ' -f1 /proc/loadavg)"
+    if awk -v l="${load1}" -v m="${LOAD_MAX}" 'BEGIN { exit !(l < m) }'; then break; fi
+    [ "${SECONDS}" -lt "${load_deadline}" ] || abort_pre "load ${load1} still >= ${LOAD_MAX} after ${LOAD_WAIT_MAX}s"
+    say "waiting for the host: load1 ${load1} >= ${LOAD_MAX} ($((load_deadline - SECONDS))s left)"
+    sleep "${LOAD_POLL}"
+done
+{
+    df -h /
+    free -m
+    echo "nproc $(nproc)"
+    uptime
+    vmstat 1 5
+} >> "${STEP_LOG}" 2>&1
+disk_gb="$(df -BG --output=avail / | tail -1 | tr -dc '0-9')"
+avail_mb="$(free -m | awk '/^Mem:/{print $7}')"
+need_mb=$((N * NODE_EST_MB + N * 150 + 256 + HEADROOM_MB))
+[ "${disk_gb:-0}" -ge "${MIN_DISK_GB}" ] || abort_pre "free disk ${disk_gb}G < ${MIN_DISK_GB}G"
+[ "${avail_mb:-0}" -ge "${need_mb}" ] || abort_pre "available RAM ${avail_mb}M < ${need_mb}M for ${N} nodes"
+swapping="$(vmstat 1 4 | tail -3 | awk '$7 + $8 > 0 {n++} END {print (n == 3) ? 1 : 0}')"
+[ "${swapping}" = 0 ] || abort_pre "the host is actively swapping"
+say "preflight: load ${load1}, disk ${disk_gb}G free, ${avail_mb}M RAM available (need ${need_mb}M)"
+
+# Own project only: nothing of this name may exist, so down -v can only remove what this run made
+[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT}")" ] || abort_pre "containers of project ${PROJECT} already exist"
+[ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=${PROJECT}")" ] || abort_pre "volumes of project ${PROJECT} already exist"
+if command -v ss > /dev/null 2>&1; then
+    for p in $(seq $((BASE_PORT + 1)) $((BASE_PORT + N + 1))); do
+        if ss -Hltn "sport = :${p}" | grep -q .; then abort_pre "host port ${p} is in use"; fi
+    done
+else
+    say "WARNING: ss not found, host ports not checked"
+fi
+# Images: both must be local, nothing is pulled or built
+for img in "${NODE_IMAGE}" "${PG_IMAGE}"; do
+    docker image inspect "${img}" > /dev/null 2>&1 || abort_pre "image ${img} is not present locally (this drill never pulls or builds)"
+done
+NODE_IMAGE_ID="$(docker image inspect "${NODE_IMAGE}" --format '{{.Id}}')"
+PG_IMAGE_ID="$(docker image inspect "${PG_IMAGE}" --format '{{.Id}}')"
+META[node_image_id]="${NODE_IMAGE_ID:7:12}"
+META[pg_image_id]="${PG_IMAGE_ID:7:12}"
+say "images: node ${NODE_IMAGE} (${NODE_IMAGE_ID:7:12}), postgres ${PG_IMAGE} (${PG_IMAGE_ID:7:12}); no other image is used"
+MIGRATION_FILES="$(docker run --rm --entrypoint sh "${NODE_IMAGE}" -c 'ls src/migrations 2>/dev/null | grep -cE "[.](ts|js)$" || true')"
+is_num "${MIGRATION_FILES}" || MIGRATION_FILES=0
+META[migration_files_in_image]="${MIGRATION_FILES}"
+say "migration files in the node image: ${MIGRATION_FILES}"
+if [ "${EXPECT_PAUSE}" = 1 ]; then
+    say "NOTE: ${LIVE_OTHERS} live validators < q=${Q}: the chain is EXPECTED to pause while node ${X_NODE} is down"
+fi
+
+# ═════════════════════════════════════════════════════════════════════════
+# 2. inputs
+# ═════════════════════════════════════════════════════════════════════════
+step 02-inputs
+GENESIS_TS=$(($(date -u +%s) + GENESIS_DELAY))
+gen_identity() {
+    local mode="${IDENTITY_GEN}"
+    if [ "${mode}" = auto ]; then
+        if command -v bun > /dev/null 2>&1 && [ -d "${REPO_ROOT}/node_modules" ]; then mode=host; else mode=image; fi
+    fi
+    if [ "${mode}" = host ]; then
+        (cd "${REPO_ROOT}" && bun testing/devnet/scripts/generate-identity-helper.ts)
+    else
+        # Same helper, run in the node image (its node_modules); copied under inputs/
+        # and made readable for the image user
+        cp "${REPO_ROOT}/testing/devnet/scripts/generate-identity-helper.ts" "${IN}/gen-identity.ts"
+        chmod 644 "${IN}/gen-identity.ts"
+        docker run --rm --entrypoint bun -v "${IN}/gen-identity.ts:/app/.gen-identity.ts:ro" "${NODE_IMAGE}" /app/.gen-identity.ts
+    fi
+}
+make_inputs() { # explicit returns: set -e does not apply inside a function used in a || list
+    local i out
+    for i in $(seq 1 "${N}"); do
+        out="$(gen_identity)" || return 1
+        echo "${out}" | grep '^MNEMONIC:' | cut -d: -f2- | tr -d '\n' > "${IN}/node${i}.identity" || return 1
+        echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${IN}/pub${i}" || return 1
+    done
+    out=""
+    # Genesis, peerlist and the fork schedule exactly as the quorum drills make them
+    python3 "${REPO_ROOT}/testing/devnet/quorum-drills/gen-inputs.py" --run-dir "${OUT_DIR}" --repo "${REPO_ROOT}" \
+        --nodes "${N}" --shard-size "${SHARD_SIZE}" --binding on --genesis-ts "${GENESIS_TS}" \
+        --image "${NODE_IMAGE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}" || return 1
+    rm -rf "${IN}/pg-init"
+    cp -R "${REPO_ROOT}/testing/devnet/l2ps" "${IN}/l2ps" || return 1
+    # Overwrites the compose.yml gen-inputs.py wrote (tmpfs state, one shared postgres)
+    python3 "${HERE}/gen-compose.py" --run-dir "${OUT_DIR}" --nodes "${N}" --image "${NODE_IMAGE}" --pg-image "${PG_IMAGE}" \
+        --node-mem "${NODE_MEM}" --pg-mem "${PG_MEM}" --consensus-time "${CONSENSUS_TIME}" --base-port "${BASE_PORT}" \
+        --cpu-shares "${CPU_SHARES}" --x-node "${X_NODE}" --migrate-cmd "${MIGRATE_CMD}" || return 1
+}
+make_inputs >> "${STEP_LOG}" 2>&1 || abort_pre "generating inputs failed (see 02-inputs.log)"
+for i in $(seq 1 "${N}"); do PUB[${i}]="$(tr '[:upper:]' '[:lower:]' < "${IN}/pub${i}")"; done
+
+# host3 runs with umask 0077 and the release image runs as uid 1000: everything a
+# container reads from the 700 run dir has to be readable by that uid, whoever
+# owns the file. The identities are throwaway devnet keys; the run dir keeps them
+# private, and teardown deletes them (KEEP_KEYS=1 keeps them).
+find "${IN}" -type d -exec chmod 755 {} +
+find "${IN}" -type f -exec chmod 644 {} +
+mounts=()
+paths=()
+for i in $(seq 1 "${N}"); do
+    mounts+=(-v "${IN}/node${i}.identity:/in/node${i}.identity:ro")
+    paths+=("/in/node${i}.identity")
+done
+mounts+=(-v "${IN}/peerlist.json:/in/peerlist.json:ro" -v "${IN}/genesis.json:/in/genesis.json:ro"
+    -v "${IN}/empty-snapshot:/in/empty-snapshot:ro" -v "${IN}/l2ps:/in/l2ps:ro")
+paths+=(/in/peerlist.json /in/genesis.json /in/empty-snapshot /in/l2ps)
+say "checking the image user (uid 1000) can read the mounted inputs"
+if ! docker run --rm --user 1000 --entrypoint sh "${mounts[@]}" "${NODE_IMAGE}" -c '
+    rc=0
+    for p in "$@"; do
+        if [ -d "$p" ]; then
+            { test -r "$p" && test -x "$p" && ls "$p" > /dev/null; } || { echo "uid 1000 cannot read directory $p"; rc=1; }
+            for f in $(find "$p" -type f 2> /dev/null); do test -r "$f" || { echo "uid 1000 cannot read $f"; rc=1; }; done
+        else
+            test -r "$p" || { echo "uid 1000 cannot read $p"; rc=1; }
+        fi
+    done
+    exit $rc' sh "${paths[@]}" >> "${STEP_LOG}" 2>&1; then
+    tail -n 8 "${STEP_LOG}" >&2
+    abort_pre "the image user (uid 1000) cannot read the mounted inputs under ${IN} (see 02-inputs.log); check umask and the chmod of the run dir"
+fi
+dc config -q >> "${STEP_LOG}" 2>&1 || abort_pre "the generated compose file is not valid (see 02-inputs.log)"
+say "inputs ready, genesis in ${GENESIS_DELAY}s"
+
+# ═════════════════════════════════════════════════════════════════════════
+# 3. bring-up
+# ═════════════════════════════════════════════════════════════════════════
+step 03-bringup
+STARTED_STACK=1
+dc up -d --pull never pg-1 pg-2 pg-3 pg-4 >> "${STEP_LOG}" 2>&1 || die "postgres did not start"
+for i in $(seq 1 "${N}"); do wait_pg "${i}" 120 || die "pg-${i} not ready within 120s"; done
+for i in $(seq 1 "${N}"); do
+    # The manual step. A node image that still migrates at boot (migrationsRun true)
+    # does not need it, so a failure here is a warning; one that does not will fail below
+    run_migrations "${i}" || say "WARNING: migrations on node ${i}'s database failed (see 03-bringup.log); continuing"
+done
+for i in $(seq 1 "${N}"); do
+    start_node "${i}" || die "node-${i} did not serve within ${SERVE_TIMEOUT}s (see node logs; with migrationsRun false the migrations above must have worked)"
+    say "node-${i} serving"
+    # One node at a time: a simultaneous join races the committee freeze
+    if [ "${i}" -lt "${N}" ]; then sleep 4; fi
+done
+
+step 04-reach-height
+say "waiting for every node at height >= ${H0}"
+deadline=$((SECONDS + BRINGUP_TIMEOUT))
+while :; do
+    m="$(min_head_of "${ALL_NODES[@]}")"
+    if is_num "${m}" && [ "${m}" -ge "${H0}" ]; then break; fi
+    [ "${SECONDS}" -lt "${deadline}" ] || die "the nodes did not all reach height ${H0} within ${BRINGUP_TIMEOUT}s (min head '${m}')"
+    sleep 5
+done
+H_REC="$(read_head "${X_NODE}")" || die "node ${X_NODE} does not answer its head"
+HASH_REC="$(hash_at "${X_NODE}" "${H_REC}")"
+[ -n "${HASH_REC}" ] || die "node ${X_NODE} has no hash at its head ${H_REC}"
+state_sums > "${OUT_DIR}/sums.step2"
+H_SIGNED_2="$(record_height signed)"
+IDENT_SUM_2="$(sum_of "${OUT_DIR}/sums.step2" node.identity)"
+[ -n "${IDENT_SUM_2}" ] || die "no identity file in node ${X_NODE}'s state volume"
+META[head_recorded]="${H_REC}"
+META[hash_recorded]="${HASH_REC}"
+META[signing_record_height_step2]="${H_SIGNED_2:-none}"
+META[state_files_step2]="$(awk '{ printf "%s ", $2 }' "${OUT_DIR}/sums.step2")"
+say "step 2: node ${X_NODE} head ${H_REC} hash ${HASH_REC:0:16}..; identity sha ${IDENT_SUM_2:0:12}..; signing record height ${H_SIGNED_2:-none}; state files: $(awk '{ printf "%s ", $2 }' "${OUT_DIR}/sums.step2")"
+T_DRILL_START="$(date +%s)"
+if [ "${VARIANT}" = rejoin ]; then start_monitor "${OTHERS[@]}"; else start_monitor "${ALL_NODES[@]}"; fi
+
+# ═════════════════════════════════════════════════════════════════════════
+# 5. phase A: backup (node X keeps running)
+# ═════════════════════════════════════════════════════════════════════════
+step 05-backup
+phase_begin
+psql_q "${X_NODE}" 'select 1' > /dev/null || die "cannot query pg-${X_NODE}"
+stats_of "${X_NODE}" > "${BACKUP_DIR}/stats.before.txt"
+DUMP_NAME="node${X_NODE}.dump"
+pgx "${X_NODE}" sh -c "pg_dump -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Fc -f /backup/${DUMP_NAME}" >> "${STEP_LOG}" 2>&1 || die "pg_dump failed"
+stats_of "${X_NODE}" > "${BACKUP_DIR}/stats.after.txt"
+# The dump has to be readable and not empty before it counts as a backup
+pgx "${X_NODE}" sh -c "cd /backup && pg_restore --list ${DUMP_NAME} > /dev/null && test -s ${DUMP_NAME} && sha256sum ${DUMP_NAME} > ${DUMP_NAME}.sha256" >> "${STEP_LOG}" 2>&1 \
+    || die "the dump is unreadable or empty (pg_restore --list failed)"
+DUMP_BYTES="$(pgx "${X_NODE}" stat -c %s "/backup/${DUMP_NAME}")"
+# Identity and signing state, live: a copy of this kind is only a safety net, see the
+# runbook. The restore below never uses it; the originals stay on the volume
+helper 'mkdir -p /b/state && cd /s && for f in node.identity*; do [ -f "$f" ] || continue; case "$f" in *.lock) continue ;; esac; cp -p "$f" /b/state/; done; true' \
+    -v "$(vol "state-${X_NODE}"):/s:ro" -v "$(vol "backup-${X_NODE}"):/b" "${PG_IMAGE}" >> "${STEP_LOG}" 2>&1 || die "copy of identity and signing state failed"
+phase_end A "backup: pg_dump -Fc + verify + identity and signing state copy"
+META[dump_bytes]="${DUMP_BYTES}"
+H_DUMP_BEFORE="$(stat_of "${BACKUP_DIR}/stats.before.txt" max_block)"
+H_DUMP_AFTER="$(stat_of "${BACKUP_DIR}/stats.after.txt" max_block)"
+META[dump_head_window]="${H_DUMP_BEFORE}..${H_DUMP_AFTER}"
+say "dump ${DUMP_BYTES} bytes, head window ${H_DUMP_BEFORE}..${H_DUMP_AFTER}"
+
+# Copy off the node's volume to the host (models "copied off the host")
+phase_begin
+XPG_CID="$(dc ps -q "pg-${X_NODE}")"
+docker cp "${XPG_CID}:/backup/." "${BACKUP_DIR}/" >> "${STEP_LOG}" 2>&1 || die "copy off the volume failed"
+chmod -R go-rwx "${BACKUP_DIR}"
+(cd "${BACKUP_DIR}" && sha256sum -c "${DUMP_NAME}.sha256") >> "${STEP_LOG}" 2>&1 || die "the copy on the host does not match its sha256"
+DUMP_FILE="${BACKUP_DIR}/${DUMP_NAME}"
+phase_end A2 "copy off the node volume to the host dir + sha256 check"
+
+# ═════════════════════════════════════════════════════════════════════════
+if [ "${VARIANT}" = rejoin ]; then
+    # ═════════════════════════════════════════════════════════════════════
+    # 6. phase B: wipe node X, keep identity and signing state
+    # ═════════════════════════════════════════════════════════════════════
+    step 06-wipe
+    T_B0="$(now)"
+    T_STOP="$(date +%s)"
+    phase_begin
+    say "stopping node-${X_NODE} (grace ${STOP_GRACE}s); chain head on the others: $(max_head_of "${OTHERS[@]}")"
+    dc stop -t "${STOP_GRACE}" "node-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "could not stop node-${X_NODE}"
+    XNODE_CID="${CID[${X_NODE}]}"
+    say "node-${X_NODE} exit code $(docker inspect -f '{{.State.ExitCode}}' "${XNODE_CID}" 2>/dev/null || echo '?') (137 means it ignored SIGTERM and was killed after the grace period)"
+    docker logs "${XNODE_CID}" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' > "${LOG_DIR}/node-${X_NODE}.pre-wipe.log"
+    # Node stopped, database still up: the true pre-wipe head, and the signing state at rest
+    H_STOP="$(psql_q "${X_NODE}" 'SELECT max(number) FROM blocks')"
+    is_num "${H_STOP}" || die "cannot read node ${X_NODE}'s head from its database"
+    HASH_STOP="$(psql_q "${X_NODE}" "SELECT hash FROM blocks WHERE number = ${H_STOP}")"
+    state_sums > "${OUT_DIR}/sums.stop"
+    H_SIGNED_STOP="$(record_height signed)"
+    H_PREVOTE_STOP="$(record_height prevote)"
+    META[head_at_stop]="${H_STOP}"
+    META[signing_record_height_at_stop]="${H_SIGNED_STOP:-none}"
+    say "stopped: pre-wipe head ${H_STOP}; signing record height ${H_SIGNED_STOP:-none}"
+    # Remove node X's containers (and their anonymous volumes), its database and its backup staging.
+    # The state volume stays; only what is not identity or signing state leaves it.
+    dc rm -f -v "node-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "could not remove node-${X_NODE}"
+    CID[${X_NODE}]=""
+    dc stop "pg-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "could not stop pg-${X_NODE}"
+    dc rm -f -v "pg-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "could not remove pg-${X_NODE}"
+    docker volume rm "$(vol "pgdata-${X_NODE}")" "$(vol "backup-${X_NODE}")" >> "${STEP_LOG}" 2>&1 || die "could not remove the database volumes"
+    helper 'cd /s && find . -mindepth 1 -maxdepth 1 ! -name "node.identity*" -exec rm -rf {} +; true' \
+        -v "$(vol "state-${X_NODE}"):/s" "${PG_IMAGE}" >> "${STEP_LOG}" 2>&1 || die "could not clear the non-identity state"
+    left="$(state_names | tr '\n' ' ')"
+    say "left on the state volume: ${left}"
+    assert_x_not_running
+    phase_end B "wipe: stop node, remove its database volume and non-identity state, keep identity + signing state"
+
+    # ═════════════════════════════════════════════════════════════════════
+    # 7. phase C: restore
+    # ═════════════════════════════════════════════════════════════════════
+    step 07-restore
+    phase_begin
+    assert_x_not_running
+    (cd "${BACKUP_DIR}" && sha256sum -c "${DUMP_NAME}.sha256") >> "${STEP_LOG}" 2>&1 || die "the dump on the host fails its sha256 before restore"
+    dc up -d --no-deps --pull never "pg-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "pg-${X_NODE} did not start"
+    wait_pg "${X_NODE}" 120 || die "pg-${X_NODE} not ready within 120s"
+    tables="$(psql_q "${X_NODE}" "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
+    [ "${tables}" = 0 ] || die "the new database is not empty (${tables} tables): the wipe did not work"
+    # Whole dump, never single tables (forking/restore/RUNBOOK.md)
+    pgx "${X_NODE}" sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < "${DUMP_FILE}" >> "${STEP_LOG}" 2>&1 \
+        || die "pg_restore failed"
+    stats_of "${X_NODE}" > "${OUT_DIR}/stats.restored.txt"
+    if run_migrations "${X_NODE}"; then
+        MIGRATED=1
+    else
+        MIGRATED=0
+        tail -n 15 "${STEP_LOG}" | sed 's/^/    /' >&2
+        if [ "${MIGRATE_REQUIRED}" = 1 ]; then die "migrations failed on the restored database (MIGRATE_CMD='${MIGRATE_CMD}'; see 07-restore.log)"; fi
+        say "WARNING: migrations failed, continuing (MIGRATE_REQUIRED=0)"
+    fi
+    stats_of "${X_NODE}" > "${OUT_DIR}/stats.migrated.txt"
+    # One instance only: the node is removed, no other container holds its volume
+    assert_x_not_running
+    T_X_START="$(date +%s)"
+    dc up -d --no-deps --pull never "node-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "node-${X_NODE} did not start"
+    refresh_cid "${X_NODE}"
+    assert_single_x
+    wait_serve "${X_NODE}" "${SERVE_TIMEOUT}" || die "restored node-${X_NODE} did not serve within ${SERVE_TIMEOUT}s (see node-${X_NODE}.log)"
+    phase_end C "restore: start postgres, pg_restore, migrations, start node (until it serves)"
+    T_C_END="$(now)"
+
+    # ═════════════════════════════════════════════════════════════════════
+    # 8. phase D: rejoin
+    # ═════════════════════════════════════════════════════════════════════
+    step 08-rejoin
+    PH_T0="${T_C_END}"
+    say "waiting for node ${X_NODE} to come within 2 blocks of the others"
+    deadline=$((SECONDS + REJOIN_TIMEOUT))
+    SYNCED=0
+    while [ "${SECONDS}" -lt "${deadline}" ]; do
+        hx="$(head_of "${X_NODE}")"
+        ho="$(max_head_of "${OTHERS[@]}")"
+        if is_num "${hx}" && is_num "${ho}" && [ "${hx}" -ge $((ho - 2)) ]; then SYNCED=1; break; fi
+        sleep 3
+    done
+    if [ "${SYNCED}" = 1 ]; then
+        phase_end D1 "rejoin: node head within 2 blocks of the others (from node serving)"
+    else
+        say "node ${X_NODE} did not come within 2 blocks in ${REJOIN_TIMEOUT}s (x=${hx:-?} others=${ho:-?})"
+        check "node ${X_NODE} rejoins (head within 2 blocks)" FAIL "head ${hx:-?} vs others ${ho:-?} after ${REJOIN_TIMEOUT}s"
+    fi
+    # Signing: the signing record moves past its at-stop value (it is written before a
+    # signature leaves the node), or a block after the restart carries node X's signature
+    SIGNED=0
+    SIGN_EVIDENCE=""
+    if [ "${SYNCED}" = 1 ]; then
+        deadline=$((SECONDS + SIGN_TIMEOUT))
+        while [ "${SECONDS}" -lt "${deadline}" ]; do
+            hs="$(record_height signed)"
+            if is_num "${hs}" && is_num "${H_SIGNED_STOP}" && [ "${hs}" -gt "${H_SIGNED_STOP}" ]; then
+                SIGNED=1
+                SIGN_EVIDENCE="signing record advanced ${H_SIGNED_STOP} -> ${hs}"
+                break
+            fi
+            hx="$(head_of "${X_NODE}")"
+            if is_num "${hx}"; then
+                for h in $(seq "${hx}" -1 $((hx > 5 ? hx - 5 : 1))); do
+                    if [ "$(block_at "${X_NODE}" "${h}" | jq -r --arg pk "${PUB[${X_NODE}]}" --argjson t "${T_X_START}" '
+                        def n: (. | ascii_downcase | ltrimstr("0x"));
+                        (.content.timestamp // 0 | tonumber | if . > 100000000000 then . / 1000 else . end) as $ts
+                        | if $ts >= $t and (((.validation_data.signatures // {}) | keys | map(n) | index($pk | n)) != null) then "yes" else "no" end' 2>/dev/null || true)" = yes ]; then
+                        SIGNED=1
+                        SIGN_EVIDENCE="block ${h} carries node ${X_NODE}'s signature"
+                        break 2
+                    fi
+                done
+            fi
+            sleep 5
+        done
+        if [ "${SIGNED}" = 1 ]; then
+            phase_end D "rejoin: head within 2 blocks and node signing (from node serving)"
+        else
+            check "node ${X_NODE} signs after the restart" FAIL "no signing within ${SIGN_TIMEOUT}s of syncing"
+        fi
+    fi
+    T_END="$(date +%s)"
+    printf 'ALL\toutage: node %s stopped until rejoined and signing\t%s\n' "${X_NODE}" "$(awk -v a="${T_B0}" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }')" >> "${PHASES}"
+    stop_monitor
+
+    # ═════════════════════════════════════════════════════════════════════
+    # 9. checks
+    # ═════════════════════════════════════════════════════════════════════
+    step 09-checks
+    state_sums > "${OUT_DIR}/sums.end"
+    H_SIGNED_END="$(record_height signed)"
+    H_PREVOTE_END="$(record_height prevote)"
+    HX_END="$(read_head "${X_NODE}" || true)"
+
+    # 1. head
+    if is_num "${HX_END}" && [ "${HX_END}" -ge "${H_STOP}" ]; then
+        check "restored head >= pre-wipe head" PASS "head ${HX_END} >= ${H_STOP} (pre-wipe), ${H_REC} (step 2)"
+    else
+        check "restored head >= pre-wipe head" FAIL "head ${HX_END:-?} < ${H_STOP}"
+    fi
+    # 2. hashes at the pre-wipe heights equal the others'
+    bad=""
+    for h in "${H_REC}" "${H_STOP}"; do
+        hx_hash="$(hash_at "${X_NODE}" "${h}")"
+        [ -n "${hx_hash}" ] || bad="${bad} node${X_NODE}@${h}=none"
+        for o in "${OTHERS[@]}"; do
+            oh="$(hash_at "${o}" "${h}")"
+            [ -n "${oh}" ] && [ "${oh}" = "${hx_hash}" ] || bad="${bad} node${o}@${h}=${oh:0:10}!=${hx_hash:0:10}"
+        done
+    done
+    [ "$(hash_at "${X_NODE}" "${H_REC}")" = "${HASH_REC}" ] || bad="${bad} hash@${H_REC} differs from the recorded one"
+    [ "$(hash_at "${X_NODE}" "${H_STOP}")" = "${HASH_STOP}" ] || bad="${bad} hash@${H_STOP} differs from the DB's at stop"
+    if [ -z "${bad}" ]; then
+        check "block hash at pre-wipe heights equals the other nodes'" PASS "heights ${H_REC} and ${H_STOP}, all ${N} nodes agree"
+    else
+        check "block hash at pre-wipe heights equals the other nodes'" FAIL "${bad}"
+    fi
+    # 3. identity file identical
+    ident_stop="$(sum_of "${OUT_DIR}/sums.stop" node.identity)"
+    ident_end="$(sum_of "${OUT_DIR}/sums.end" node.identity)"
+    if [ -n "${ident_end}" ] && [ "${ident_end}" = "${IDENT_SUM_2}" ] && [ "${ident_stop}" = "${IDENT_SUM_2}" ]; then
+        check "identity file checksum identical (step 2, at stop, after rejoin)" PASS "sha256 ${IDENT_SUM_2:0:12}.."
+    else
+        check "identity file checksum identical (step 2, at stop, after rejoin)" FAIL "step2=$(short "${IDENT_SUM_2}") stop=$(short "${ident_stop}") end=$(short "${ident_end}")"
+    fi
+    # 4. signing state: still there, never older, state which
+    bad=""
+    desc=""
+    while read -r _ name; do
+        [ "${name}" = node.identity ] && continue
+        s_stop="$(sum_of "${OUT_DIR}/sums.stop" "${name}")"
+        s_end="$(sum_of "${OUT_DIR}/sums.end" "${name}")"
+        if [ -z "${s_end}" ]; then
+            bad="${bad} ${name} is gone"
+        elif [ "${s_end}" = "${s_stop}" ]; then
+            desc="${desc} ${name#node.identity}=unchanged"
+        else
+            desc="${desc} ${name#node.identity}=advanced"
+        fi
+    done < "${OUT_DIR}/sums.stop"
+    if is_num "${H_SIGNED_STOP}"; then
+        if ! is_num "${H_SIGNED_END}" || [ "${H_SIGNED_END}" -lt "${H_SIGNED_STOP}" ]; then bad="${bad} signing record height went back ${H_SIGNED_STOP} -> ${H_SIGNED_END:-?}"; fi
+    fi
+    if is_num "${H_PREVOTE_STOP}"; then
+        if ! is_num "${H_PREVOTE_END}" || [ "${H_PREVOTE_END}" -lt "${H_PREVOTE_STOP}" ]; then bad="${bad} prevote record height went back ${H_PREVOTE_STOP} -> ${H_PREVOTE_END:-?}"; fi
+    fi
+    if [ -z "${bad}" ]; then
+        check "signing state unchanged or advanced, never older" PASS "signing record height ${H_SIGNED_STOP:-none} -> ${H_SIGNED_END:-none};${desc}"
+    else
+        check "signing state unchanged or advanced, never older" FAIL "${bad};${desc}"
+    fi
+    # 5. no halt marker, no foreign signature
+    names_end="$(state_names | tr '\n' ' ')"
+    foreign_now="$(docker logs "${CID[${X_NODE}]}" 2>&1 | grep -aEc 'another process is signing|foreign signature' || true)"
+    case "${names_end}" in
+        *.halted*) check "no halt marker, no foreign-signature log" FAIL "a .halted marker is on the state volume" ;;
+        *)
+            if [ "${foreign_now:-0}" != 0 ]; then
+                check "no halt marker, no foreign-signature log" FAIL "${foreign_now} foreign-signature lines after the restart"
+            else
+                check "no halt marker, no foreign-signature log" PASS "none (state volume: ${names_end})"
+            fi
+            ;;
+    esac
+    if docker logs "${CID[${X_NODE}]}" 2>&1 | grep -aq 'Restart signing floor'; then
+        check "restart signing floor logged before signing" PASS "[SIGNING] Restart signing floor line present"
+    else
+        check "restart signing floor logged before signing" INFO "line not found in the node log (wording may differ)"
+    fi
+    # 6. signing again
+    if [ "${SIGNED}" = 1 ]; then check "node ${X_NODE} signs after the restart" PASS "${SIGN_EVIDENCE}"; fi
+    # 7. the other nodes never stalled
+    read -r maxgap first last samples unread <<< "$(monitor_stats "${T_STOP}" "${T_END}")"
+    if [ "${EXPECT_PAUSE}" = 1 ]; then
+        check "other nodes kept forging while node ${X_NODE} was down" INFO "EXPECTED PAUSE: ${LIVE_OTHERS} live < q=${Q} (shardSize ${SHARD_SIZE}); observed longest gap ${maxgap}s, head ${first} -> ${last}, ${samples} samples, ${unread} unreadable"
+    elif [ "${samples}" -gt 0 ] && [ "${maxgap}" -le "${STALL_LIMIT}" ] && [ "${unread}" -le $((samples / 2)) ]; then
+        check "other nodes never stalled while node ${X_NODE} was down" PASS "q=${Q}, ${LIVE_OTHERS} live; longest gap ${maxgap}s <= ${STALL_LIMIT}s, head ${first} -> ${last}, ${samples} samples"
+    else
+        check "other nodes never stalled while node ${X_NODE} was down" FAIL "q=${Q}, ${LIVE_OTHERS} live; longest gap ${maxgap}s (limit ${STALL_LIMIT}s), head ${first} -> ${last}, ${samples} samples, ${unread} unreadable"
+    fi
+    META[outage_others_head]="${first} -> ${last}, longest gap ${maxgap}s"
+    # 8. the restored database against the dump, and the schema against the image
+    check_restored_stats "restore" "${OUT_DIR}/stats.restored.txt"
+    mig_rows="$(stat_of "${OUT_DIR}/stats.migrated.txt" migrations)"
+    if [ "${MIGRATION_FILES}" != 0 ] && [ "${mig_rows}" = "${MIGRATION_FILES}" ]; then
+        check "schema at the image's head after the manual migration" PASS "migrations table ${mig_rows} rows = ${MIGRATION_FILES} files in src/migrations"
+    else
+        check "schema at the image's head after the manual migration" FAIL "migrations table ${mig_rows:-none} rows vs ${MIGRATION_FILES} files in the image (migrated=${MIGRATED})"
+    fi
+    check "one instance of the key at a time" PASS "node ${X_NODE} was removed and its volume had no holder before the single start (asserted)"
+else
+    # ═════════════════════════════════════════════════════════════════════
+    # Variant: restore into a new, isolated, non-signing node
+    # ═════════════════════════════════════════════════════════════════════
+    step 06-isolated-restore
+    phase_begin
+    dc up -d --no-deps --pull never pg-iso >> "${STEP_LOG}" 2>&1 || die "pg-iso did not start"
+    wait_pg iso 120 || die "pg-iso not ready within 120s"
+    tables="$(psql_q iso "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
+    [ "${tables}" = 0 ] || die "the isolated database is not empty"
+    pgx iso sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < "${DUMP_FILE}" >> "${STEP_LOG}" 2>&1 \
+        || die "pg_restore into the isolated database failed"
+    stats_of iso > "${OUT_DIR}/stats.restored.txt"
+    if run_migrations iso; then MIGRATED=1; else
+        MIGRATED=0
+        if [ "${MIGRATE_REQUIRED}" = 1 ]; then die "migrations failed on the isolated database (see 06-isolated-restore.log)"; fi
+    fi
+    stats_of iso > "${OUT_DIR}/stats.migrated.txt"
+    phase_end IC "isolated restore: start postgres, pg_restore, migrations"
+    check_restored_stats "isolated restore" "${OUT_DIR}/stats.restored.txt"
+    mig_rows="$(stat_of "${OUT_DIR}/stats.migrated.txt" migrations)"
+    if [ "${MIGRATION_FILES}" != 0 ] && [ "${mig_rows}" = "${MIGRATION_FILES}" ]; then
+        check "schema at the image's head after the manual migration" PASS "migrations table ${mig_rows} rows = ${MIGRATION_FILES} files"
+    else
+        check "schema at the image's head after the manual migration" FAIL "migrations table ${mig_rows:-none} rows vs ${MIGRATION_FILES} files (migrated=${MIGRATED})"
+    fi
+    DB_HEAD="$(stat_of "${OUT_DIR}/stats.restored.txt" max_block)"
+    if is_num "${DB_HEAD}" && [ "${DB_HEAD}" -ge "${H_DUMP_BEFORE}" ]; then
+        check "isolated DB reaches the dump's head" PASS "max block ${DB_HEAD} (dump window ${H_DUMP_BEFORE}..${H_DUMP_AFTER})"
+    else
+        check "isolated DB reaches the dump's head" FAIL "max block ${DB_HEAD:-?} < ${H_DUMP_BEFORE}"
+    fi
+    nethash="$(hash_at "${OTHERS[0]}" "${DB_HEAD}")"
+    dbhash="$(psql_q iso "SELECT hash FROM blocks WHERE number = ${DB_HEAD}")"
+    if [ -n "${nethash}" ] && [ "${nethash}" = "${dbhash}" ]; then
+        check "isolated DB's head block hash equals the network's" PASS "height ${DB_HEAD}"
+    else
+        check "isolated DB's head block hash equals the network's" FAIL "db ${dbhash:0:12} net ${nethash:0:12}"
+    fi
+    if [ "${ISO_NODE}" = 1 ]; then
+        step 07-isolated-node
+        phase_begin
+        dc up -d --no-deps --pull never node-iso >> "${STEP_LOG}" 2>&1 || die "node-iso did not start"
+        refresh_cid iso
+        wait_serve iso "${SERVE_TIMEOUT}" || die "node-iso did not serve within ${SERVE_TIMEOUT}s (see node-iso.log)"
+        deadline=$((SECONDS + REJOIN_TIMEOUT))
+        ISO_OK=0
+        while [ "${SECONDS}" -lt "${deadline}" ]; do
+            hi="$(head_of iso)"
+            ho="$(max_head_of "${ALL_NODES[@]}")"
+            if is_num "${hi}" && is_num "${DB_HEAD}" && [ "${hi}" -ge "${DB_HEAD}" ] && is_num "${ho}" && [ "${hi}" -ge $((ho - 2)) ]; then ISO_OK=1; break; fi
+            sleep 3
+        done
+        if [ "${ISO_OK}" = 1 ]; then
+            phase_end ID "isolated node: serving and within 2 blocks of the network"
+            check "isolated node reaches the expected head" PASS "head ${hi} >= DB head ${DB_HEAD}, network ${ho}"
+        else
+            check "isolated node reaches the expected head" FAIL "head ${hi:-?} vs DB head ${DB_HEAD}, network ${ho:-?} after ${REJOIN_TIMEOUT}s"
+        fi
+        # Node X's key never went anywhere: no mount of it, and a different identity
+        mounts_iso="$(docker inspect -f '{{range .Mounts}}{{.Source}} {{.Name}}{{"\n"}}{{end}}' "${CID[iso]}")"
+        iso_sum="$(helper 'sha256sum /s/node.identity 2>/dev/null | cut -d" " -f1; true' -v "$(vol state-iso):/s:ro" "${PG_IMAGE}" || true)"
+        if echo "${mounts_iso}" | grep -qE "node${X_NODE}\.identity|state-${X_NODE}"; then
+            check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "its mounts include node ${X_NODE}'s identity or state volume"
+        elif [ -n "${iso_sum}" ] && [ "${iso_sum}" = "${IDENT_SUM_2}" ]; then
+            check "isolated node holds no copy of node ${X_NODE}'s key" FAIL "same identity file hash"
+        else
+            check "isolated node holds no copy of node ${X_NODE}'s key" PASS "no identity mounted, own state volume, different identity"
+        fi
+    fi
+    stop_monitor
+    T_END="$(date +%s)"
+    read -r maxgap first last samples unread <<< "$(monitor_stats "${T_DRILL_START}" "${T_END}")"
+    if [ "${samples}" -gt 0 ] && [ "${maxgap}" -le "${STALL_LIMIT}" ]; then
+        check "the validators kept forging during the drill" PASS "longest gap ${maxgap}s <= ${STALL_LIMIT}s, head ${first} -> ${last}"
+    else
+        check "the validators kept forging during the drill" FAIL "longest gap ${maxgap}s (limit ${STALL_LIMIT}s), ${samples} samples, ${unread} unreadable"
+    fi
+    if [ "$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}" | wc -l)" = 1 ]; then
+        check "node ${X_NODE} untouched and the only holder of its key" PASS "one node-${X_NODE} container, never stopped"
+    else
+        check "node ${X_NODE} untouched and the only holder of its key" FAIL "unexpected number of node-${X_NODE} containers"
+    fi
+fi
+
+# ═════════════════════════════════════════════════════════════════════════
+# 10. report
+# ═════════════════════════════════════════════════════════════════════════
+step 10-report
+if [ "${ANY_FAIL}" = 1 ]; then RESULT=FAIL; else RESULT=PASS; fi
+write_report
+echo
+tee -a "${LOG_DIR}/run.log" < "${OUT_DIR}/timings.md"
+say "RESULT ${RESULT}: ${VARIANT} drill, timings in ${OUT_DIR}/timings.md and timings.json"
+if [ "${RESULT}" = PASS ]; then exit 0; fi
+exit 1
