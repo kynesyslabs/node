@@ -274,6 +274,38 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     [Changing the schedule](fork-schedule-policy.md#changing-the-schedule): a
     height more than 50 blocks ahead, with every validator on the new genesis
     before the window opens.
+- From `v1.0.0-rc.7`:
+  - Identity proofs verify with the final key of the identity ceremony
+    (kynesyslabs/zk_ceremony, drand round 6629366 beacon). Proofs made with an
+    earlier development key are refused; clients need `@kynesyslabs/demosdk`
+    4.0.20 or later. Block apply and sync verify each attestation again with
+    the key in the image, so a chain that already holds attestations made
+    under an earlier key cannot be replayed or synced by rc.7. No supported
+    procedure covers such a chain; the release supports chains without them
+    (mainnet from genesis, the rc.6 test network). rc.6 validators still
+    confirm proofs made with the development key, so no client may submit an
+    identity attestation from the start of the upgrade until the final checks
+    pass. Before upgrading each validator, wait until it is at the network's
+    current tip (a node that is behind has not seen later blocks), then run
+    the check for its install; after the last validator, run it once more on
+    every validator, and resume attestations only when all of these return 0.
+    The result must be 0:
+    - Docker stack (`./run --docker`): query the instance's own database
+      container, which uses the database's own user and name, so custom
+      `PG_USER` and `PG_DATABASE` work. The container is `demos-postgres`
+      followed by the instance's `INSTANCE_SUFFIX` (empty by default,
+      `_<port>` for `--port <port>`), or `demos-postgres-devnet` for
+      `--devnet`; `docker ps` lists it:
+      `docker exec <container> sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -c "SELECT count(*) FROM used_nullifiers"'`
+    - `./run` install: `docker exec postgres_<PG_PORT> psql -U demosuser -d demos -At -c "SELECT count(*) FROM used_nullifiers"`
+    - External database: the same query with the node's `PG_*` connection
+      settings.
+  - L2PS batch proofs are off unless `L2PS_ZK_ENABLED=true`. Before, the
+    aggregator proved whenever the keys were present. The image now ships the
+    batch_5 and batch_10 proving keys. Validators do not check batch proofs
+    yet, so turning them on changes no consensus result.
+  - The ZK merkle-proof and nullifier routes accept canonical decimal as well
+    as hex.
 
 ## Known limits
 
