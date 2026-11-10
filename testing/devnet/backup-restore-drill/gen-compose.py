@@ -173,7 +173,7 @@ def node(name, i, rpc_port, host_port, db, with_identity):
 
 for i in range(1, n + 1):
     # The backup staging volume exists on the node being drilled only: it is
-    # "the node's own volume" the dump and the state copy are written to
+    # "the node's own volume" the dump is written to
     extra = [f"backup-{i}:/backup"] if i == a.x_node else []
     postgres(str(i), f"node{i}_db", extra)
     node(str(i), i, port(i), a.base_port + i, f"node{i}_db", True)

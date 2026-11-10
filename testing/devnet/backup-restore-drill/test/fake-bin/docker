@@ -9,7 +9,9 @@ Knobs (environment): FAKE_RATE (blocks per second, 3), FAKE_ROOT_VOLS (volume
 names containing one of these are created root-owned), FAKE_UNWRITABLE_PATHS
 (image dirs uid 1000 cannot write), FAKE_NEVER_SERVE / FAKE_BEHIND (node
 services that never answer / stay at head 0), FAKE_NO_NODE, FAKE_UNREADABLE,
-FAKE_MISSING_IMAGES, FAKE_MIGRATE_FAIL, FAKE_WIPE_CHANGES_OWNER,
+FAKE_MISSING_IMAGES, FAKE_MIGRATE_FAIL, FAKE_MIGRATE_HANG (a postgres service
+name: compose run against it sleeps 120 s; with FAKE_MIGRATE_IGNORE_TERM it
+ignores SIGTERM), FAKE_WIPE_CHANGES_OWNER,
 FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3). Every call is appended to
 $FAKE_DIR/calls.log.
 """
@@ -17,6 +19,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import sys
 import time
 
@@ -173,6 +176,10 @@ def compose_cmd(a):
         save(st)
         out()
     if cmd == "run":
+        if f"PG_HOST={os.environ.get('FAKE_MIGRATE_HANG')}" in args:
+            if os.environ.get("FAKE_MIGRATE_IGNORE_TERM"):
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            time.sleep(120)
         if os.environ.get("FAKE_MIGRATE_FAIL"):
             fail("migration failed")
         out("migrations applied")

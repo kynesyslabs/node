@@ -76,6 +76,13 @@ STALL_LIMIT="${STALL_LIMIT:-90}"
 # database, with PG_HOST / PG_DATABASE set by this script.
 MIGRATE_CMD="${MIGRATE_CMD:-bun run migration:run}"
 MIGRATE_REQUIRED="${MIGRATE_REQUIRED:-1}"
+# Seconds one migrate run may take before it is stopped and counts as failed
+MIGRATE_TIMEOUT="${MIGRATE_TIMEOUT:-300}"
+# The genesis fork schedule, passed to quorum-drills/gen-inputs.py --fork-set:
+# "launch" is the set docs/mainnet/genesis.template.json activates at height 0,
+# without the forks the drills cannot run (drill_inputs.py
+# LAUNCH_EXCLUDED_FORKS); "devnet" is that of testing/devnet/genesis.devnet.json
+FORK_SET="${FORK_SET:-launch}"
 ISO_NODE="${ISO_NODE:-1}"
 KEEP_KEYS="${KEEP_KEYS:-0}"
 IDENTITY_GEN="${IDENTITY_GEN:-auto}"
@@ -93,7 +100,7 @@ usage() {
     sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
     echo "Environment: NODE_IMAGE PG_IMAGE BASE_PORT PROJECT VARIANT OUT_DIR SHARD_SIZE H0 CONSENSUS_TIME"
     echo "             NODE_MEM PG_MEM CPU_SHARES LOAD_MAX LOAD_WAIT_MAX STOP_GRACE STALL_LIMIT"
-    echo "             MIGRATE_CMD MIGRATE_REQUIRED ISO_NODE KEEP_KEYS IDENTITY_GEN RUNS_DIR"
+    echo "             MIGRATE_CMD MIGRATE_REQUIRED MIGRATE_TIMEOUT FORK_SET ISO_NODE KEEP_KEYS IDENTITY_GEN RUNS_DIR"
     echo "             SMOKE SMOKE_TIMEOUT SMOKE_HEAD GOSSIP_ENABLED ALLOW_GOSSIP_OFF FIX_OWNERSHIP (README.md)"
 }
 case "${1:-}" in
@@ -108,9 +115,12 @@ is_num() { [[ "${1:-}" =~ ^[0-9]+$ ]]; }
 cfg_err() { echo "config: $*" >&2; exit 2; }
 for v in BASE_PORT X_NODE SHARD_SIZE H0 CONSENSUS_TIME CPU_SHARES NODE_EST_MB HEADROOM_MB MIN_DISK_GB LOAD_MAX \
     LOAD_WAIT_MAX LOAD_POLL GENESIS_DELAY BRINGUP_TIMEOUT SERVE_TIMEOUT REJOIN_TIMEOUT SIGN_TIMEOUT STOP_GRACE STALL_LIMIT \
-    SMOKE_TIMEOUT SMOKE_HEAD; do
+    SMOKE_TIMEOUT SMOKE_HEAD MIGRATE_TIMEOUT; do
     is_num "${!v}" || cfg_err "${v} must be a whole number, got '${!v}'"
 done
+# timeout 0 would mean no limit
+[ "${MIGRATE_TIMEOUT}" -ge 1 ] || cfg_err "MIGRATE_TIMEOUT must be at least 1"
+case "${FORK_SET}" in launch | devnet) ;; *) cfg_err "FORK_SET must be launch or devnet, got '${FORK_SET}'" ;; esac
 for v in SMOKE ALLOW_GOSSIP_OFF FIX_OWNERSHIP; do
     case "${!v}" in 0 | 1) ;; *) cfg_err "${v} must be 0 or 1, got '${!v}'" ;; esac
 done
@@ -185,15 +195,15 @@ write_report() {
     for k in "${!META[@]}"; do meta="$(jq -c --arg k "${k}" --arg v "${META[${k}]}" '. + {($k): $v}' <<< "${meta}")"; done
     jq -n --arg run "${RUN_ID}" --arg variant "${VARIANT}" --arg project "${PROJECT}" --arg result "${res}" \
         --arg image "${NODE_IMAGE}" --arg pgImage "${PG_IMAGE}" --argjson n "${N}" --argjson shardSize "${SHARD_SIZE}" \
-        --argjson q "${Q}" --argjson xNode "${X_NODE}" --argjson expectPause "${EXPECT_PAUSE}" \
+        --argjson q "${Q}" --argjson xNode "${X_NODE}" --argjson expectPause "${EXPECT_PAUSE}" --arg forkSet "${FORK_SET}" \
         --argjson phases "${phases}" --argjson checks "${checks}" --argjson meta "${meta}" \
         '{run: $run, variant: $variant, project: $project, result: $result, image: $image, pgImage: $pgImage,
-          validators: $n, shardSize: $shardSize, q: $q, drilledNode: $xNode, expectChainPauseWhileDown: ($expectPause == 1),
-          phases: $phases, checks: $checks, meta: $meta}' > "${OUT_DIR}/timings.json"
+          forkSet: $forkSet, validators: $n, shardSize: $shardSize, q: $q, drilledNode: $xNode,
+          expectChainPauseWhileDown: ($expectPause == 1), phases: $phases, checks: $checks, meta: $meta}' > "${OUT_DIR}/timings.json"
     {
         echo "# Backup / wipe / restore drill ${RUN_ID}"
         echo
-        echo "- result: **${res}**; variant \`${VARIANT}\`; node ${X_NODE} of ${N}; shardSize ${SHARD_SIZE}, q ${Q}"
+        echo "- result: **${res}**; variant \`${VARIANT}\`; node ${X_NODE} of ${N}; shardSize ${SHARD_SIZE}, q ${Q}; fork set \`${FORK_SET}\`"
         echo "- images: node \`${NODE_IMAGE}\`, postgres \`${PG_IMAGE}\`"
         for k in $(printf '%s\n' "${!META[@]}" | sort); do echo "- ${k}: ${META[${k}]}"; done
         echo
@@ -240,9 +250,9 @@ teardown() {
         [ "${REPORT_WRITTEN}" = 1 ] || write_report
     fi
     if [ "${KEEP_KEYS}" != 1 ]; then
-        # Throwaway devnet keys: the identity inputs and the state copy go; dump, logs and timings stay
+        # Throwaway devnet keys: the identity inputs go; dump, logs and timings stay
         rm -f "${IN}"/node*.identity "${IN}"/gen-identity.ts
-        rm -rf "${BACKUP_DIR}/state" "${OUT_DIR}/state-sums"
+        rm -rf "${OUT_DIR}/state-sums"
     fi
     say "run dir: ${OUT_DIR}"
     exit "${rc}"
@@ -377,8 +387,20 @@ assert_single_x() {
 }
 
 run_migrations() { # $1 name; the manual step of docs/runbooks/database-migrations.md
+    local rc=0 t0="${SECONDS}"
     say "migrations on $(db_of "$1"): ${MIGRATE_CMD}"
-    dc run --rm --no-deps -T -e "PG_HOST=pg-$1" -e "PG_DATABASE=$(db_of "$1")" migrate >> "${STEP_LOG}" 2>&1
+    # Bounded, as in quorum-drills/run.sh: a hung migration must not hang the
+    # drill. docker compose is spelled out because timeout cannot run the dc
+    # function. -k: if compose outlives the TERM (it may pass it on to the
+    # container and keep waiting), it is killed 10 s later, exit 137 instead of
+    # 124. timeout runs its command in a process group of its own, where a read
+    # from the terminal would stop it, so stdin is /dev/null.
+    timeout -k 10 "${MIGRATE_TIMEOUT}" docker compose -f "${OUT_DIR}/compose.yml" -p "${PROJECT}" \
+        run --rm --no-deps -T -e "PG_HOST=pg-$1" -e "PG_DATABASE=$(db_of "$1")" migrate < /dev/null >> "${STEP_LOG}" 2>&1 || rc=$?
+    if [ "${rc}" = 124 ] || { [ "${rc}" = 137 ] && [ $((SECONDS - t0)) -ge "${MIGRATE_TIMEOUT}" ]; }; then
+        say "migrations on $(db_of "$1") timed out after ${MIGRATE_TIMEOUT}s and were stopped (MIGRATE_CMD='${MIGRATE_CMD}')"
+    fi
+    return "${rc}"
 }
 
 start_node() { # $1 name
@@ -454,9 +476,9 @@ monitor_stats() {
 # 1. preflight
 # ═════════════════════════════════════════════════════════════════════════
 step 01-preflight
-say "variant=${VARIANT} project=${PROJECT} node=${X_NODE} N=${N} shardSize=${SHARD_SIZE} q=${Q} base_port=${BASE_PORT} out=${OUT_DIR}"
+say "variant=${VARIANT} fork_set=${FORK_SET} project=${PROJECT} node=${X_NODE} N=${N} shardSize=${SHARD_SIZE} q=${Q} base_port=${BASE_PORT} out=${OUT_DIR}"
 META[run_dir]="${OUT_DIR}"
-for tool in docker jq python3 awk sort vmstat free df nproc xargs; do command -v "${tool}" > /dev/null 2>&1 || abort_pre "${tool} not found"; done
+for tool in docker jq python3 awk sort vmstat free df nproc xargs timeout; do command -v "${tool}" > /dev/null 2>&1 || abort_pre "${tool} not found"; done
 docker compose version >> "${STEP_LOG}" 2>&1 || abort_pre "docker compose (v2) is not available"
 docker info > /dev/null 2>&1 || abort_pre "cannot talk to the docker daemon"
 
@@ -541,9 +563,9 @@ make_inputs() { # explicit returns: set -e does not apply inside a function used
         echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${IN}/pub${i}" || return 1
     done
     out=""
-    # Genesis, peerlist and the fork schedule exactly as the quorum drills make them
+    # Genesis, peerlist and the fork schedule (FORK_SET) exactly as the quorum drills make them
     python3 "${REPO_ROOT}/testing/devnet/quorum-drills/gen-inputs.py" --run-dir "${OUT_DIR}" --repo "${REPO_ROOT}" \
-        --nodes "${N}" --shard-size "${SHARD_SIZE}" --binding on --genesis-ts "${GENESIS_TS}" \
+        --nodes "${N}" --shard-size "${SHARD_SIZE}" --binding on --fork-set "${FORK_SET}" --genesis-ts "${GENESIS_TS}" \
         --image "${NODE_IMAGE}" --node-mem "${NODE_MEM}" --consensus-time "${CONSENSUS_TIME}" || return 1
     rm -rf "${IN}/pg-init"
     cp -R "${REPO_ROOT}/testing/devnet/l2ps" "${IN}/l2ps" || return 1
@@ -554,6 +576,17 @@ make_inputs() { # explicit returns: set -e does not apply inside a function used
 }
 make_inputs >> "${STEP_LOG}" 2>&1 || abort_pre "generating inputs failed (see 02-inputs.log)"
 for i in $(seq 1 "${N}"); do PUB[${i}]="$(tr '[:upper:]' '[:lower:]' < "${IN}/pub${i}")"; done
+# The forks as they are in the genesis the nodes get, and for "launch" the ones left out
+FORKS="$(jq -r '[.forks | to_entries[] | "\(.key)@\(.value.activationHeight)"] | join(", ")' "${IN}/genesis.json")" \
+    || abort_pre "cannot read the forks of ${IN}/genesis.json"
+META[forks]="${FORKS}"
+excluded_note=""
+if [ "${FORK_SET}" = launch ]; then
+    META[forks_excluded]="$(jq -r 'to_entries | map("\(.key) (\(.value))") | join(", ") | if . == "" then "none" else . end' "${IN}/launch-excluded.json")" \
+        || abort_pre "no excluded-forks list in ${IN}/launch-excluded.json"
+    excluded_note="; excluded: ${META[forks_excluded]}"
+fi
+say "forks (${FORK_SET}): ${FORKS}${excluded_note}"
 
 # host3 runs with umask 0077 and the release image runs as uid 1000: everything a
 # container reads from the 700 run dir has to be readable by that uid, whoever
@@ -812,11 +845,10 @@ stats_of "${X_NODE}" > "${BACKUP_DIR}/stats.after.txt"
 pgx "${X_NODE}" sh -c "cd /backup && pg_restore --list ${DUMP_NAME} > /dev/null && test -s ${DUMP_NAME} && sha256sum ${DUMP_NAME} > ${DUMP_NAME}.sha256" >> "${STEP_LOG}" 2>&1 \
     || die "the dump is unreadable or empty (pg_restore --list failed)"
 DUMP_BYTES="$(pgx "${X_NODE}" stat -c %s "/backup/${DUMP_NAME}")"
-# Identity and signing state, live: a copy of this kind is only a safety net, see the
-# runbook. The restore below never uses it; the originals stay on the volume
-helper 'mkdir -p /b/state && cd /s && for f in node.identity*; do [ -f "$f" ] || continue; case "$f" in *.lock) continue ;; esac; cp -p "$f" /b/state/; done; true' \
-    -v "$(vol "state-${X_NODE}"):/s:ro" -v "$(vol "backup-${X_NODE}"):/b" "${PG_IMAGE}" >> "${STEP_LOG}" 2>&1 || die "copy of identity and signing state failed"
-phase_end A "backup: pg_dump -Fc + verify + identity and signing state copy"
+# The database only: the identity and signing state stay on node X's state
+# volume and are not copied (a copy taken while the node runs is not a valid
+# signing-state backup)
+phase_end A "backup: pg_dump -Fc + verify"
 META[dump_bytes]="${DUMP_BYTES}"
 H_DUMP_BEFORE="$(stat_of "${BACKUP_DIR}/stats.before.txt" max_block)"
 H_DUMP_AFTER="$(stat_of "${BACKUP_DIR}/stats.after.txt" max_block)"
@@ -864,6 +896,8 @@ if [ "${VARIANT}" = rejoin ]; then
     dc stop "pg-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "could not stop pg-${X_NODE}"
     dc rm -f -v "pg-${X_NODE}" >> "${STEP_LOG}" 2>&1 || die "could not remove pg-${X_NODE}"
     docker volume rm "$(vol "pgdata-${X_NODE}")" "$(vol "backup-${X_NODE}")" >> "${STEP_LOG}" 2>&1 || die "could not remove the database volumes"
+    # node.identity* is this drill's IDENTITY_FILE (gen-compose.py), not the file
+    # names on a validator's state volume (.demos_identity*): drill volumes only
     helper 'cd /s && find . -mindepth 1 -maxdepth 1 ! -name "node.identity*" -exec rm -rf {} +; true' \
         -v "$(vol "state-${X_NODE}"):/s" "${PG_IMAGE}" >> "${STEP_LOG}" 2>&1 || die "could not clear the non-identity state"
     left="$(state_names | tr '\n' ' ')"

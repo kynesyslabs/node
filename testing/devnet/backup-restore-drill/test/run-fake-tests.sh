@@ -94,6 +94,33 @@ if sel smoke-pass; then
     if jq -e '[.services | to_entries[] | select(.key | startswith("node-")) | .value.environment.GOSSIP_ENABLED] | all(. == "true")' "${CDIR}"/runs/*/compose.yml > /dev/null; then
         ok "smoke compose file: GOSSIP_ENABLED true on every node (default)"
     else bad "smoke compose file has gossip not true"; fi
+    # FORK_SET unset: the real gen-inputs.py got --fork-set launch
+    want_out 'fork_set=launch ' "the fork set at the start of the run"
+    want_out 'forks \(launch\): .*unpinnedCommittee@0.*; excluded: identityCarryover' "the launch forks and the excluded one"
+    if jq -e '.forks.unpinnedCommittee.activationHeight == 0' "${CDIR}"/runs/*/inputs/genesis.json > /dev/null \
+        && grep -q 'launch fork set (docs/mainnet/genesis.template.json)' "${CDIR}"/runs/*/logs/02-inputs.log; then
+        ok "default FORK_SET: gen-inputs.py wrote the launch fork set"
+    else bad "default FORK_SET did not give the launch fork set"; fi
+    if jq -e '.forkSet == "launch"' "${CDIR}"/runs/*/timings.json > /dev/null && grep -q 'fork set `launch`' "${CDIR}"/runs/*/timings.md; then
+        ok "fork set in timings.json and timings.md"
+    else bad "fork set missing from the summary"; fi
+fi
+if sel fork-set-devnet; then
+    go fork-set-devnet SMOKE=1 FORK_SET=devnet
+    want_rc 0
+    want_out 'fork_set=devnet ' "the fork set at the start of the run"
+    want_out 'forks \(devnet\): .*quorumParity@0' "the devnet forks"
+    if jq -e '(.forks | has("unpinnedCommittee") | not) and .forks.committeeBinding.activationHeight == 0' "${CDIR}"/runs/*/inputs/genesis.json > /dev/null \
+        && ! grep -q 'launch fork set' "${CDIR}"/runs/*/logs/02-inputs.log && [ -z "$(find "${CDIR}/runs" -name launch-excluded.json)" ]; then
+        ok "FORK_SET=devnet reaches gen-inputs.py: genesis.devnet.json's forks, no launch set"
+    else bad "FORK_SET=devnet did not reach gen-inputs.py"; fi
+    if jq -e '.forkSet == "devnet"' "${CDIR}"/runs/*/timings.json > /dev/null; then ok "fork set devnet in timings.json"; else bad "timings.json fork set is not devnet"; fi
+fi
+if sel fork-set-invalid; then
+    go fork-set-invalid SMOKE=1 FORK_SET=mainnet
+    want_rc 2
+    want_out "FORK_SET must be launch or devnet, got 'mainnet'" "config error"
+    no_call 'compose' "compose (nothing ran)"
 fi
 if sel smoke-behind; then
     go smoke-behind SMOKE=1 SMOKE_TIMEOUT=8 FAKE_BEHIND=node-2
@@ -205,6 +232,15 @@ if sel full-rejoin; then
     want_out 'RESULT PASS: rejoin drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
     want_out 'left on the state volume: node.identity node.identity.prevote.json node.identity.signed.json' "wipe kept only identity and signing state"
+    # Call order of the restore: pg_restore, then the migration of node 4's database, then node 4's start
+    read -r o_r o_m o_u <<< "$(awk '/pg_restore -U/ && !r { r = NR }
+        r && !m && /run --rm --no-deps -T -e PG_HOST=pg-4 .*migrate/ { m = NR }
+        r && !u && /up -d --no-deps --pull never node-4$/ { u = NR }
+        END { print r + 0, m + 0, u + 0 }' "${CDIR}/calls.log")"
+    if [ "${o_r}" -gt 0 ] && [ "${o_m}" -gt "${o_r}" ] && [ "${o_u}" -gt "${o_m}" ]; then
+        ok "migrate runs after pg_restore and before node-4 starts (calls ${o_r} < ${o_m} < ${o_u})"
+    else bad "restore call order pg_restore/migrate/node-4 start: ${o_r} ${o_m} ${o_u}"; fi
+    no_call 'state-4:/s:ro -v [^ ]*backup-4:' "a helper with node 4's state volume and the backup volume (no state copy)"
     torn_down
 fi
 if sel full-isolated; then
@@ -225,6 +261,35 @@ if sel wipe-owner; then
     want_out "state volume was chowned back to 1000:1000" "opt-in fix after the wipe"
     want_out 'CHECK FAIL: the wipe kept the ownership' "the change is still reported"
     want_rc 1
+fi
+
+# ── the manual migration of the restored database ───────────────────────
+node4_starts() { grep -cE 'up -d --no-deps --pull never node-4$' "${CDIR}/calls.log"; }
+if sel migrate-fail; then
+    go migrate-fail FAKE_MIGRATE_FAIL=1
+    want_rc 2
+    want_out "WARNING: migrations on node 4's database failed" "bring-up only warns"
+    want_out 'migrations failed on the restored database' "the restore stops on it"
+    if [ "$(node4_starts)" = 1 ]; then ok "node-4 not started after the failed migration"; else bad "node-4 start count $(node4_starts), wanted 1 (bring-up only)"; fi
+    torn_down
+fi
+if sel migrate-timeout; then
+    go migrate-timeout FAKE_MIGRATE_HANG=pg-4 MIGRATE_TIMEOUT=2
+    want_rc 2
+    want_out 'migrations on node4_db timed out after 2s and were stopped' "the timeout is named"
+    no_out 'migrations on node1_db timed out' "a timeout on a database that did not hang"
+    want_out 'migrations failed on the restored database' "the restore stops on it"
+    if [ "$(node4_starts)" = 1 ]; then ok "node-4 not started after the timed-out migration"; else bad "node-4 start count $(node4_starts), wanted 1 (bring-up only)"; fi
+    torn_down
+    # compose ignores the TERM: killed 10 s later (exit 137), still reported as a timeout
+    go migrate-timeout-kill FAKE_MIGRATE_HANG=pg-4 FAKE_MIGRATE_IGNORE_TERM=1 MIGRATE_TIMEOUT=2
+    want_rc 2
+    want_out 'migrations on node4_db timed out after 2s and were stopped' "the timeout is named after the kill"
+    if [ "$(node4_starts)" = 1 ]; then ok "node-4 not started after the killed migration"; else bad "node-4 start count $(node4_starts), wanted 1 (bring-up only)"; fi
+    torn_down
+    go migrate-timeout-invalid SMOKE=1 MIGRATE_TIMEOUT=0
+    want_rc 2
+    want_out 'MIGRATE_TIMEOUT must be at least 1' "timeout 0 (no limit) refused"
 fi
 
 echo

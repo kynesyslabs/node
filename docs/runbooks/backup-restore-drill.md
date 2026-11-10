@@ -19,10 +19,24 @@ Script: `testing/devnet/backup-restore-drill/run.sh`
 
 It shows that a `pg_dump -Fc` of a validator's database restores into an empty
 database, that the validator rejoins from it with its identity and signing
-state untouched, and how many seconds each step takes. It does not show that
-the production `docker-compose.yml` volumes behave the same (this drill has
-its own compose file), and it does not cover losing the identity volume: that
-case has no restore path by design (`validator-key.md`).
+state untouched, and how many seconds each step takes. By default the devnet
+runs the launch fork set (`FORK_SET=launch`): the forks
+`docs/mainnet/genesis.template.json` activates at height 0, without
+`identityCarryover` (it needs a genesis snapshot, which the drill does not
+have). `FORK_SET=devnet` runs the forks of `testing/devnet/genesis.devnet.json`
+instead. The fork set and every fork's height are logged at the start of the
+run and written to `timings.md` and `timings.json`; a result holds for that
+fork set only.
+
+It does not show:
+
+- that the production `docker-compose.yml` volumes behave the same (this drill
+  has its own compose file);
+- losing the identity volume: not covered by this drill; see
+  `validator-key.md`, section "Signing state files";
+- the production start guards: the drill nodes run with `NODE_ENV=development`,
+  without `PROD=true` and without `DEMOS_REQUIRE_VALIDATORS`, so those guards
+  are not exercised.
 
 ## Before you run it (host3)
 
@@ -136,8 +150,10 @@ carried out (preflight, boot, timeout, a step that must work failed).
 | `BRINGUP_TIMEOUT`, `SERVE_TIMEOUT`, `REJOIN_TIMEOUT`, `SIGN_TIMEOUT` | `900`, `240`, `420`, `300` | step timeouts in seconds |
 | `MIGRATE_CMD` | `bun run migration:run` | the one command that applies pending migrations, run in a one-off container of `NODE_IMAGE` (see below) |
 | `MIGRATE_REQUIRED` | `1` | a failing migration on the restored database aborts the drill |
+| `MIGRATE_TIMEOUT` | `300` | seconds one migrate run may take; then it is stopped, logged as timed out, and counts as failed |
+| `FORK_SET` | `launch` | genesis fork schedule, passed to `quorum-drills/gen-inputs.py --fork-set`: `launch` (the forks `docs/mainnet/genesis.template.json` activates at 0, without `identityCarryover`) or `devnet` (those of `testing/devnet/genesis.devnet.json`); logged at the start, in `timings.md` and in `timings.json` |
 | `ISO_NODE` | `1` | in `isolated`, also start a non-signing node on the restored database |
-| `KEEP_KEYS` | `0` | `1` keeps the identity inputs and the state copy after the run |
+| `KEEP_KEYS` | `0` | `1` keeps the identity inputs after the run |
 | `IDENTITY_GEN` | `auto` | `host` (bun on the host), `image` (inside `NODE_IMAGE`), or `auto` |
 | `GOSSIP_ENABLED` | `true` | `true` or `false`, for every node; `false` is refused unless `ALLOW_GOSSIP_OFF=1` |
 | `ALLOW_GOSSIP_OFF` | `0` | `1` lets a run with gossip off start (a negative run); it warns and records an INFO row |
@@ -166,9 +182,10 @@ more than 5 minutes, raise `SMOKE_TIMEOUT`.
 
 Devnet: 4 validators, each with its own postgres (data in a named volume) and
 its own state volume at `/app/state` holding the identity and signing state.
-Genesis, peerlist and fork schedule come from `quorum-drills/gen-inputs.py`
-unchanged; only the compose file is different (persistent volumes instead of
-tmpfs, one postgres per node, an isolated node, a one-off `migrate` service).
+Genesis, peerlist and fork schedule (`--fork-set`, from `FORK_SET`) come from
+`quorum-drills/gen-inputs.py` unchanged; only the compose file is different
+(persistent volumes instead of tmpfs, one postgres per node, an isolated node,
+a one-off `migrate` service).
 
 How a node is started: through the image's own start command, without its
 entrypoint script. The release image has `ENTRYPOINT
@@ -196,16 +213,23 @@ run on Docker; the reasoning is in `gen-compose.py` above `START_SCRIPT`.
    Only hashes and heights are printed; no file content is.
 3. **A** backup: stats, `pg_dump -Fc` inside node X's postgres container into
    a staging volume, stats again, `pg_restore --list` and `sha256sum` on the
-   dump, and a copy of the identity and signing state files into the same
-   volume. The state copy is taken live: it is a safety net only and is never
-   restored from.
+   dump. The database only: the identity and signing state files are not
+   copied, they stay on node X's state volume, which the wipe keeps. Backing
+   them up is `validator-key.md`, section "Signing state files".
 4. **A2** copy the staging volume to `$OUT_DIR/backup/` on the host
    (`docker cp`), check the SHA-256 there.
 5. **B** wipe (`rejoin`): stop node X, read its true head from its database,
    hash the signing state at rest, remove the node container, the postgres
    container, the database volume and the staging volume, and delete
-   everything on the state volume except `node.identity*`. No `--reset`, no
-   reset-node script, no `down -v`.
+   everything on the state volume except `node.identity*` (the drill's
+   `IDENTITY_FILE` is `/app/state/node.identity`). The wipe uses no `--reset`,
+   no reset-node script and no `down -v`; `down -v` runs only at teardown, on
+   the drill's own project (see Output).
+
+   **Drill volumes only.** A validator's state volume holds `.demos_identity*`
+   files, which this wipe would delete. To reset a validator use
+   `scripts/reset-node` (it keeps the signing record unless
+   `--wipe-signing-state`), and never run `down -v` on a validator's project.
 6. **C** restore: assert no container holds node X's state volume, start an
    empty postgres, `pg_restore --no-owner --exit-on-error` of the whole dump
    from the host copy, stats, migrations, assert again, start exactly one
@@ -266,16 +290,21 @@ In `$OUT_DIR`: `timings.md` and `timings.json` (phases, checks, run metadata),
 `backup/` (dump, SHA-256, before/after counts), `phases.tsv`, `checks.tsv`.
 The `demos-bkdrill` compose project is removed on exit, including on Ctrl-C or
 an error (`compose down -v` for that project only, plus helper containers that
-carry the label `demos.drill.helper=<project>`).
+carry the label `demos.drill.helper=<project>`). This removes the drill's own
+volumes, node X's state volume with its throwaway key included; the run aborts
+at preflight if any container or volume of that project already exists.
 
 ## Testing the script itself
 
 `testing/devnet/backup-restore-drill/test/run-fake-tests.sh` runs `run.sh`
 against a fake `docker` (`test/fake-bin/`): the gossip default and refusal,
-unwritable volumes (fail fast, `FIX_OWNERSHIP=1`), `SMOKE=1` pass and fail, and
-a full `rejoin` and `isolated` run. It needs no Docker and tests the script's
-own logic only; it says nothing about what a real image, volume or postgres
-does.
+unwritable volumes (fail fast, `FIX_OWNERSHIP=1`), `SMOKE=1` pass and fail,
+the fork set `gen-inputs.py` gets (default `launch`, `FORK_SET=devnet`), the
+migrate step on the restored database (after `pg_restore` and before node X
+starts; a failure or a timeout stops the run with exit 2 and node X is not
+started), and a full `rejoin` and `isolated` run. It needs no Docker and tests
+the script's own logic only; it says nothing about what a real image, volume
+or postgres does.
 
 ## Manual migrations
 
@@ -287,7 +316,21 @@ starts. It runs `MIGRATE_CMD` in a one-off container of `NODE_IMAGE`, with
 `bun run migration:run`, is the repo script (`package.json`); set `MIGRATE_CMD`
 to whatever the migrations runbook settles on. At bring-up a failing migration
 is a warning (a node that still migrates at boot does not need it); on the
-restored database it is fatal unless `MIGRATE_REQUIRED=0`.
+restored database it is fatal unless `MIGRATE_REQUIRED=0`. Each run is stopped
+after `MIGRATE_TIMEOUT` seconds (300 by default; `timeout -k 10`: TERM, then
+KILL 10 s later), logged as `migrations on <database> timed out`, and counts
+as a failed migration.
+
+The default command has not been run against the default image. The first
+real run on the chosen image must show the migrate step passing: no
+`WARNING: migrations on node N's database failed` line in `logs/run.log`, and
+the check "schema at the image's head" PASS. If it fails, set `MIGRATE_CMD` to
+a command the image can run, for example the TypeORM CLI form that
+`quorum-drills/run.sh` uses:
+
+```
+MIGRATE_CMD='bun -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d ./src/model/datasource.ts'
+```
 
 ## Things to read in the result
 
