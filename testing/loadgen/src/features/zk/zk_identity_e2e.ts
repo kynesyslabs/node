@@ -1,7 +1,8 @@
 // A real identity attestation through the network: the SDK registers a
 // commitment, proves membership with the ceremony's final key, and every node
 // must apply the attestation, while a forged proof and a replay of the same
-// nullifier are refused at confirm.
+// nullifier are refused. Confirm checks only the signature; the proof is
+// checked when the transaction is broadcast and again when its block applies.
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex, zK } from "@kynesyslabs/demosdk/encryption"
 import { envInt, sleep } from "../../framework/common"
@@ -42,7 +43,16 @@ async function submitIdentity(demos: Demos, owner: string, data: unknown, broadc
   return { validity, broadcast: await (demos as any).broadcast(validity) }
 }
 
-const brief = (r: any) => ({ result: r?.result ?? null, message: r?.response?.message ?? r?.response ?? null })
+// Refused for the stated reason, not for an unrelated error such as a nonce clash.
+const refusedFor = (r: { validity: any; broadcast: any }, reason: RegExp) =>
+  r.validity?.result === 200 && r.broadcast?.result !== 200 && reason.test(String(r.broadcast?.extra?.message ?? ""))
+
+const text = (v: unknown) => (typeof v === "string" ? v : null)
+const brief = (r: any) => ({
+  result: r?.result ?? null,
+  message: text(r?.response?.message) ?? text(r?.response?.data?.message) ?? text(r?.response),
+  extra: text(r?.extra?.message),
+})
 
 export async function runZkIdentityE2e() {
   maybeSilenceConsole()
@@ -108,13 +118,14 @@ export async function runZkIdentityE2e() {
   checks.sdk_proved = attestation !== null
   checks.sdk_verified = attestation !== null && (await zK.identity.ZKIdentity.verifyAttestation(attestation))
 
-  // 3. A proof for another context must not pass confirm.
+  // 3. The proof bound to another context must be refused. Public signals are
+  // [nullifier, context, merkle_root].
   let forged: any = null
   if (attestation) {
     const signals = [...attestation.public_signals]
-    signals[2] = (BigInt(signals[2]) + 1n).toString()
-    forged = await submitIdentity(demos, owner, { method: "zk_attestationadd", context: "zk", payload: [{ ...attestation, public_signals: signals }] }, false)
-    checks.forged_proof_refused = forged.validity?.result !== 200
+    signals[1] = (BigInt(signals[1]) + 1n).toString()
+    forged = await submitIdentity(demos, owner, { method: "zk_attestationadd", context: "zk", payload: [{ ...attestation, public_signals: signals }] }, true)
+    checks.forged_proof_refused = refusedFor(forged, /proof failed/i)
   }
 
   // 4. The real attestation is applied on every node.
@@ -137,8 +148,8 @@ export async function runZkIdentityE2e() {
   // 5. The same nullifier cannot be spent twice.
   let replay: any = null
   if (applied.ok) {
-    replay = await submitIdentity(demos, owner, { method: "zk_attestationadd", context: "zk", payload: [attestation] }, false)
-    checks.replay_refused = replay.validity?.result !== 200
+    replay = await submitIdentity(demos, owner, { method: "zk_attestationadd", context: "zk", payload: [attestation] }, true)
+    checks.replay_refused = refusedFor(replay, /nullifier already used/i)
   }
 
   const expected = [
@@ -164,9 +175,9 @@ export async function runZkIdentityE2e() {
     timings: { commitmentToTreeMs: inTree.ms, proveMs, attestationToNullifierMs: applied.ms },
     proveError,
     commit: { validity: brief(commit.validity), broadcast: brief(commit.broadcast) },
-    forged: forged && brief(forged.validity),
+    forged: forged && { validity: brief(forged.validity), broadcast: brief(forged.broadcast) },
     attest: attest && { validity: brief(attest.validity), broadcast: brief(attest.broadcast) },
-    replay: replay && brief(replay.validity),
+    replay: replay && { validity: brief(replay.validity), broadcast: brief(replay.broadcast) },
     roots: roots.results.map((r: any, i) => ({ rpcUrl: rpcUrls[i], rootHash: r.json?.rootHash, leafCount: r.json?.leafCount })),
     timestamp: new Date().toISOString(),
   }
