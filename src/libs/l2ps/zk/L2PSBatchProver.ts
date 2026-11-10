@@ -130,10 +130,11 @@ export class L2PSBatchProver {
 
                 log.debug(`[L2PSBatchProver] Spawning: ${runtime} ${args.join(" ")}`)
 
-                this.childProcess = spawn(runtime, args, {
+                const child = spawn(runtime, args, {
                     stdio: ["pipe", "pipe", "pipe"],
                     cwd: process.cwd(),
                 })
+                this.childProcess = child
 
                 // Handle stdout - responses from child process
                 this.childProcess.stdout?.on("data", (data: Buffer) => {
@@ -163,15 +164,20 @@ export class L2PSBatchProver {
                     if (code !== 0 && code !== null) {
                         log.error(`[L2PSBatchProver] Process exited with code ${code}`)
                     }
+                    // A replaced child exiting late must not mark its successor down.
+                    if (this.childProcess !== child) return
                     this.processReady = false
                     this.childProcess = null
                 })
 
-                // Wait for ready signal
+                // Wait for ready signal. A subprocess that never comes up is
+                // not replaced by the main thread: a proof there blocks the
+                // node's event loop, consensus included, for its whole length.
                 const readyTimeout = setTimeout(() => {
                     if (!this.processReady) {
-                        log.warning("[L2PSBatchProver] Process initialization timeout, using main thread")
-                        this.useSubprocess = false
+                        log.error("[L2PSBatchProver] Prover subprocess did not start within 15s; proofs are unavailable until it does")
+                        this.childProcess?.kill()
+                        this.childProcess = null
                         resolve()
                     }
                 }, 15000)
@@ -188,9 +194,8 @@ export class L2PSBatchProver {
                 this.pendingRequests.set("__ready__", { resolve: checkReady, reject: () => { } })
 
             } catch (error) {
-                log.warning(`[L2PSBatchProver] Failed to spawn subprocess: ${error instanceof Error ? error.message : String(error)}`)
-                this.useSubprocess = false
-                resolve() // Continue without subprocess
+                log.error(`[L2PSBatchProver] Failed to spawn the prover subprocess: ${error instanceof Error ? error.message : String(error)}`)
+                resolve()
             }
         })
     }
@@ -419,8 +424,13 @@ export class L2PSBatchProver {
 
         const startTime = Date.now()
 
-        // Try subprocess first (non-blocking)
-        if (this.useSubprocess && this.processReady) {
+        if (this.useSubprocess) {
+            // A subprocess that exited (crash, OOM kill) is started again
+            // once per proof instead of falling back to the main thread.
+            if (!this.processReady) await this.initializeSubprocess()
+            if (!this.processReady) {
+                throw new Error("L2PS prover subprocess is unavailable")
+            }
             try {
                 log.debug(`[L2PSBatchProver] Generating proof in subprocess (${txCount} transactions)...`)
 
@@ -457,12 +467,16 @@ export class L2PSBatchProver {
                     totalVolume: BigInt(result.totalVolume),
                 }
             } catch (error) {
-                log.warning(`[L2PSBatchProver] Subprocess failed, falling back to main thread: ${error instanceof Error ? error.message : String(error)}`)
-                // Fall through to main thread execution
+                // A timed-out child may still be computing; restart it so the
+                // next proof does not queue behind a stuck one.
+                this.childProcess?.kill()
+                this.childProcess = null
+                this.processReady = false
+                throw new Error(`L2PS prover subprocess failed: ${error instanceof Error ? error.message : String(error)}`)
             }
         }
 
-        // Fallback to main thread (blocking)
+        // Only when L2PS_ZK_USE_MAIN_THREAD asks for it; blocks the event loop.
         return this.generateProofMainThread(input, startTime)
     }
 
