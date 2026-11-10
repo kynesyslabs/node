@@ -282,13 +282,20 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     the key in the image, so a chain that already holds attestations made
     under an earlier key cannot be replayed or synced by rc.7. No supported
     procedure covers such a chain; the release supports chains without them
-    (mainnet from genesis, the rc.6 test network). Before upgrading, wait
-    until the validator is at the network's current tip (a node that is behind
-    has not seen later blocks), then run the check for its install; the result
-    must be 0:
-    - Docker stack, from the install's checkout (uses the database's own
-      user and name, so custom `PG_USER` and `PG_DATABASE` work):
-      `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -c "SELECT count(*) FROM used_nullifiers"'`
+    (mainnet from genesis, the rc.6 test network). rc.6 validators still
+    confirm proofs made with the development key, so no client may submit an
+    identity attestation from the start of the upgrade until every validator
+    runs rc.7. Before upgrading each validator, wait until it is at the
+    network's current tip (a node that is behind has not seen later blocks),
+    then run the check for its install; after the last validator, run it once
+    more on every validator. The result must be 0:
+    - Docker stack (`./run --docker`): query the instance's own database
+      container, which uses the database's own user and name, so custom
+      `PG_USER` and `PG_DATABASE` work. The container is `demos-postgres`
+      followed by the instance's `INSTANCE_SUFFIX` (empty by default,
+      `_<port>` for `--port <port>`), or `demos-postgres-devnet` for
+      `--devnet`; `docker ps` lists it:
+      `docker exec <container> sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -c "SELECT count(*) FROM used_nullifiers"'`
     - `./run` install: `docker exec postgres_<PG_PORT> psql -U demosuser -d demos -At -c "SELECT count(*) FROM used_nullifiers"`
     - External database: the same query with the node's `PG_*` connection
       settings.
