@@ -23,7 +23,10 @@ FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3), FAKE_NO_FLOOR_LOG (a starting
 node does not log the restart signing floor), FAKE_LOG_FILL (lines `docker logs`
 prints after a container's log, 0; a reader that stops early kills it with
 SIGPIPE, as it does the docker CLI), FAKE_READ_OUTAGE (seconds from the
-restore's pg_restore during which no node answers its head), FAKE_OLDER_RECORD
+restore's pg_restore during which no node answers its head), FAKE_STUCK /
+FAKE_SILENT (node services that, from the backup's pg_dump to the end of the
+run, answer the head they had then / do not answer their head),
+FAKE_SLOW_RESTORE (seconds the restore's pg_restore takes, 0), FAKE_OLDER_RECORD
 (<file>:<how>, file signed|commitlock|prevote: once its node is restarted that
 record is one height below its at-stop value (how=height), one round below at
 the same height (round), or equal to it (same)). Every call is appended to
@@ -406,6 +409,10 @@ def exec_cmd(a):
         if d["message"] == "getLastBlockNumber":
             if time.time() < st.get("outage_until", 0):
                 fail("curl: (28) Operation timed out", 28)
+            if "head_at_dump" in st and svc in envlist("FAKE_SILENT"):
+                fail("curl: (28) Operation timed out", 28)
+            if "head_at_dump" in st and svc in envlist("FAKE_STUCK"):
+                h = st["head_at_dump"]
             out(json.dumps({"result": 200, "response": h}))
         bn = d["data"]["blockNumber"]
         out(json.dumps({"result": 200, "response": {"hash": f"hash{bn}", "number": bn, "content": {"timestamp": time.time()}, "validation_data": {"signatures": {}}}}))
@@ -439,6 +446,7 @@ def exec_cmd(a):
         if "pg_dump" in script:
             nm = re.search(r"/backup/(\S+)", script).group(1)
             pg["dump_head"] = dbhead
+            st.setdefault("head_at_dump", head(st))
             bk["files"] = [nm]
             bk["dump"] = f"DUMP-head-{dbhead}\n"
             save(st)
@@ -452,6 +460,7 @@ def exec_cmd(a):
             out()
         if "pg_restore -U" in script:
             data = sys.stdin.read()
+            time.sleep(float(os.environ.get("FAKE_SLOW_RESTORE", "0")))
             m = re.search(r"DUMP-head-(\d+)", data)
             if not m:
                 fail("pg_restore: not a dump", 1)

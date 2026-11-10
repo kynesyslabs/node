@@ -462,6 +462,35 @@ if sel monitor-blind; then
     no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
     torn_down
 fi
+# The slowest watched node decides: from the backup's pg_dump to the end of the run, the
+# other watched nodes stay at one head (FAKE_STUCK) or one does not answer (FAKE_SILENT)
+# while the rest keep rising. The restore's pg_restore takes 6 s (FAKE_SLOW_RESTORE), so
+# that lasts more than STALL_LIMIT=3 inside both variants' windows; the fake's samples
+# are about 1 s apart, and the controls show the same settings pass without the fault
+if sel monitor-slowest; then
+    go monitor-slowest-control STALL_LIMIT=3 FAKE_SLOW_RESTORE=6
+    want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "rejoin, no fault, the same settings: PASS"
+    go monitor-slowest-control-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6
+    want_out 'CHECK PASS: the validators kept forging during the drill' "isolated, no fault, the same settings: PASS"
+    # rejoin watches nodes 1-3: only node 3 rises
+    go monitor-slowest-stuck STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2
+    want_rc 1
+    want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; longest gap ([6-9]|[1-9][0-9]+)s' "rejoin, two of three stuck: FAIL on the gap"
+    no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
+    go monitor-slowest-silent STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_SILENT=node-1
+    want_rc 1
+    want_out 'CHECK FAIL: other nodes never stalled while node 4 was down \(q=3, 3 live; no head read for ([6-9]|[1-9][0-9]+)s, more than 3s' "rejoin, one of three silent: FAIL naming the missing reads"
+    no_out 'CHECK PASS: other nodes never stalled' "a PASS of the stall check"
+    # isolated watches nodes 1-4: only node 4 rises
+    go monitor-slowest-stuck-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_STUCK=node-1,node-2,node-3
+    want_rc 1
+    want_out 'CHECK FAIL: the validators kept forging during the drill \(longest gap ([6-9]|[1-9][0-9]+)s' "isolated, three of four stuck: FAIL on the gap"
+    no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
+    go monitor-slowest-silent-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_SILENT=node-1
+    want_rc 1
+    want_out 'CHECK FAIL: the validators kept forging during the drill \(no head read for ([6-9]|[1-9][0-9]+)s, more than 3s' "isolated, one of four silent: FAIL naming the missing reads"
+    no_out 'CHECK PASS: the validators kept forging' "a PASS of the stall check"
+fi
 
 # ── one run per project, a new OUT_DIR per run ──────────────────────────
 if sel project-lock; then
@@ -477,6 +506,10 @@ if sel project-lock; then
     # another project, its lock in the same dir, runs meanwhile
     go project-lock-other SMOKE=1 LOCK_DIR="${WORK}/project-lock" PROJECT=demos-faketest2
     want_rc 0
+    # the default run dir is named after the project too
+    if ls "${CDIR}/runs" | grep -qE '^[0-9]{8}T[0-9]{6}Z-demos-faketest2-bkdrill-smoke$'; then
+        ok "the default OUT_DIR name holds PROJECT"
+    else bad "default OUT_DIR name without PROJECT: $(ls "${CDIR}/runs")"; fi
     exec 8>&-
 fi
 if sel out-dir-used; then
@@ -486,15 +519,20 @@ if sel out-dir-used; then
     printf 'earlier\tPASS\tkept\n' > "${d}/checks.tsv"
     go out-dir-used SMOKE=1 OUT_DIR="${d}"
     want_rc 2
-    want_out "OUT_DIR ${d} exists and is not an empty directory" "the refusal names OUT_DIR"
+    want_out "OUT_DIR ${d} already exists" "the refusal names OUT_DIR"
     if [ "$(ls -A "${d}")" = checks.tsv ] && [ "$(cat "${d}/checks.tsv")" = "$(printf 'earlier\tPASS\tkept')" ]; then
         ok "the earlier checks.tsv untouched, nothing added"
     else bad "OUT_DIR was written to"; fi
     if [ ! -s "${CDIR}/calls.log" ]; then ok "docker never called"; else bad "docker was called"; fi
-    # an existing empty OUT_DIR is used
-    mkdir -p "${WORK}/out-dir-empty/new"
-    go out-dir-empty SMOKE=1 OUT_DIR="${WORK}/out-dir-empty/new"
-    want_rc 0
+    # an existing empty OUT_DIR is refused too: it may be another run's, just created
+    d="${WORK}/out-dir-empty/new"
+    mkdir -p "${d}"
+    go out-dir-empty SMOKE=1 OUT_DIR="${d}"
+    want_rc 2
+    want_out "OUT_DIR ${d} already exists; every run needs a new dir, so an existing one is refused even when empty" "the refusal names OUT_DIR"
+    if [ -z "$(ls -A "${d}")" ]; then ok "the empty OUT_DIR is still empty"; else bad "OUT_DIR was written to"; fi
+    if [ ! -s "${CDIR}/calls.log" ]; then ok "docker never called"; else bad "docker was called"; fi
+    if [ ! -e "${CDIR}/demos-faketest.lock" ]; then ok "no lock file written"; else bad "the lock file was written"; fi
 fi
 
 echo

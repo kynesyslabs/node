@@ -144,25 +144,31 @@ LIVE_OTHERS=$((N - 1))
 EXPECT_PAUSE=0
 [ "${LIVE_OTHERS}" -lt "${Q}" ] && EXPECT_PAUSE=1
 
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-bkdrill-${VARIANT}"
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${PROJECT}-bkdrill-${VARIANT}"
 if [ "${SMOKE}" = 1 ]; then RUN_ID="${RUN_ID%-"${VARIANT}"}-smoke"; fi
 OUT_DIR="${OUT_DIR:-${RUNS_DIR}/${RUN_ID}}"
-# A retry must not overwrite an earlier run's results: OUT_DIR has to be new or empty
-# (the default is a new timestamped dir), checked before anything is written. A dir
-# that cannot be listed counts as not empty
-if [ -e "${OUT_DIR}" ] && { [ ! -d "${OUT_DIR}" ] || [ -n "$(ls -A -- "${OUT_DIR}" 2>&1)" ]; }; then
-    cfg_err "OUT_DIR ${OUT_DIR} exists and is not an empty directory; it may hold an earlier run's results. Nothing was written. Use a new OUT_DIR, or leave it unset for a new timestamped dir under ${RUNS_DIR}"
+command -v flock > /dev/null 2>&1 || cfg_err "flock not found (util-linux); it keeps two runs of one PROJECT apart"
+# Each run writes only to a dir it created itself, so neither a retry nor a run started
+# at the same time (another PROJECT, or the same explicit OUT_DIR) can overwrite its
+# results. OUT_DIR is reserved by a plain mkdir, which fails when it exists, before
+# anything is written; an existing dir is refused even when empty
+mkdir -p -- "$(dirname -- "${OUT_DIR}")" || cfg_err "cannot create the parent dir of OUT_DIR ${OUT_DIR}"
+if ! mkdir_err="$(mkdir -- "${OUT_DIR}" 2>&1)"; then
+    if [ -e "${OUT_DIR}" ] || [ -L "${OUT_DIR}" ]; then
+        cfg_err "OUT_DIR ${OUT_DIR} already exists; every run needs a new dir, so an existing one is refused even when empty (it may hold an earlier run's results, or be another run's). Nothing was written. Use a new OUT_DIR, or leave it unset for a new timestamped dir under ${RUNS_DIR}"
+    fi
+    cfg_err "cannot create OUT_DIR ${OUT_DIR}: ${mkdir_err}"
 fi
 # One run per PROJECT at a time: two runs of one project would share its containers
 # and volumes, and either teardown would delete the other's. The lock is taken before
 # any check of the project's resources and held on fd 9 until this process exits,
-# after teardown; a second run exits 2 here, before it writes anything
+# after teardown; a second run exits 2 here, before it writes anything (the empty
+# OUT_DIR it has just created is removed again)
 LOCK_FILE="${LOCK_DIR}/${PROJECT}.lock"
-command -v flock > /dev/null 2>&1 || cfg_err "flock not found (util-linux); it keeps two runs of one PROJECT apart"
-exec 9>> "${LOCK_FILE}" || cfg_err "cannot open the lock file ${LOCK_FILE}"
+lock_err() { rmdir -- "${OUT_DIR}" 2> /dev/null || true; echo "$*" >&2; exit 2; }
+exec 9>> "${LOCK_FILE}" || lock_err "config: cannot open the lock file ${LOCK_FILE}"
 if ! flock -n 9; then
-    echo "another run of PROJECT ${PROJECT} holds ${LOCK_FILE}: it has not finished its teardown. Nothing was done; wait for it to end, or use another PROJECT" >&2
-    exit 2
+    lock_err "another run of PROJECT ${PROJECT} holds ${LOCK_FILE}: it has not finished its teardown. Nothing was done; wait for it to end, or use another PROJECT"
 fi
 LOG_DIR="${OUT_DIR}/logs"
 IN="${OUT_DIR}/inputs"
@@ -520,8 +526,10 @@ start_monitor() { # nodes to watch
         # not a holder of the project lock: a sleep left behind when it is killed must not keep it
         exec 9>&-
         set +e
+        # The slowest watched node's head, empty (a missed read) when one of them does
+        # not answer: one node that keeps rising alone must not pass for the chain
         while :; do
-            printf '%s\t%s\n' "$(date +%s)" "$(max_head_of "$@")" >> "${MON_FILE}"
+            printf '%s\t%s\n' "$(date +%s)" "$(min_head_of "$@")" >> "${MON_FILE}"
             sleep 5
         done
     ) &

@@ -155,7 +155,7 @@ Output). A run that exits 1 or 2 keeps that code when the teardown fails too.
 | `BASE_PORT` | `65000` | host ports `BASE_PORT+1..+5`, 127.0.0.1 |
 | `PROJECT` | `demos-bkdrill` | compose project; must start with `demos-`; the run aborts if a container or volume of that project, or a volume with any name the compose file declares (labelled or not), already exists. One run per project at a time: each run holds the lock `$LOCK_DIR/<project>.lock` (`flock`) from before its first check until its teardown has ended, and a second run of the same project exits 2 before it writes anything |
 | `VARIANT` | `rejoin` | `rejoin` or `isolated` |
-| `OUT_DIR` | `testing/devnet/backup-restore-drill/runs/<UTC>-bkdrill-<variant>` | everything the run writes (mode 700, gitignored). Must be new or empty: one that holds anything is refused with exit 2 before anything is written |
+| `OUT_DIR` | `testing/devnet/backup-restore-drill/runs/<UTC>-<project>-bkdrill-<variant>` | everything the run writes (mode 700, gitignored). Must not exist yet: the run creates it with a plain `mkdir` before it writes anything, and one that already exists, even an empty one, is refused with exit 2 and nothing written (it may hold an earlier run's results, or be another run's). The default name holds the project, so runs of different projects started in the same second get different dirs |
 | `LOCK_DIR` | `/tmp` | where the per-project lock file lives; `/tmp`, so runs from any checkout or `OUT_DIR` on the host see the same lock (the empty file stays) |
 | `X_NODE` | `4` | the drilled validator (2..4; 1 is the peerlist anchor) |
 | `SHARD_SIZE` | `4` | genesis shardSize; q = floor(2 * shardSize / 3) + 1 |
@@ -165,7 +165,7 @@ Output). A run that exits 1 or 2 keeps that code when the teardown fails too.
 | `CPU_SHARES` | `256` | compose `cpu_shares` (default weight is 1024): containers yield to other work under contention |
 | `LOAD_MAX` / `LOAD_WAIT_MAX` | `18` / `1800` | start only when the 1-minute load is below `LOAD_MAX`; give up after `LOAD_WAIT_MAX` s |
 | `STOP_GRACE` | `10` | seconds `compose stop` waits before killing node X |
-| `STALL_LIMIT` | `90` | longest allowed gap, in seconds, between head increases on the other nodes, and longest allowed time without a successful head read |
+| `STALL_LIMIT` | `90` | longest allowed gap, in seconds, between increases of the lowest head among the watched nodes, and longest allowed time without a head read in which all of them answered |
 | `BRINGUP_TIMEOUT`, `SERVE_TIMEOUT`, `REJOIN_TIMEOUT`, `SIGN_TIMEOUT` | `900`, `240`, `420`, `300` | step timeouts in seconds |
 | `MIGRATE_CMD` | `bun run migration:run` | the one command that applies pending migrations, run in a one-off container of `NODE_IMAGE` (see below) |
 | `MIGRATE_REQUIRED` | `1` | a failing migration on the restored database aborts the drill |
@@ -295,7 +295,7 @@ Each is printed PASS, FAIL or INFO, and written to `timings.md` and
 | no halt marker | no `*.halted` on the state volume, no foreign-signature line in node X's log |
 | signing floor | the `Restart signing floor` line is in node X's log, read to its end (INFO if the line is missing) |
 | node X signs | see D above |
-| other nodes never stalled | with the devnet's quorum (below), the longest gap between head increases while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
+| other nodes never stalled | every 5 s the run reads the head of each watched node (the other nodes in `rejoin`, all four validators in `isolated`) and keeps the lowest; a head read in which one of them does not answer counts as failed. So the slowest validator decides, and one node rising alone does not pass. With the devnet's quorum (below), the longest gap between increases of that head while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows equal; same table set |
 | schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations` |
 | one instance of the key | asserted before the single start; the run dies if it does not hold |
@@ -321,7 +321,8 @@ The script detects `live others < q` and reports the check as INFO
 
 In `$OUT_DIR`: `timings.md` and `timings.json` (phases, checks, run metadata),
 `logs/run.log` and one log per step, `logs/node-N.log` (and
-`node-4.pre-wipe.log`), `logs/monitor.tsv` (the other nodes' head every 5 s),
+`node-4.pre-wipe.log`), `logs/monitor.tsv` (every 5 s, the lowest head of the
+watched nodes; empty when one of them did not answer),
 `backup/` (dump, SHA-256, before/after counts), `phases.tsv`, `checks.tsv`.
 On exit, including on Ctrl-C or an error, teardown tries to remove the
 `demos-bkdrill` compose project: it removes the helper containers that carry
@@ -363,9 +364,12 @@ declares (exit 2, no `up`, no `down`, the volume untouched), a dump that
 cannot be read to its end (exit 2 in phase A, nothing wiped), a wipe that fails,
 leaves an entry or removes a signing state file (exit 2, node X not started
 again), a commit lock or prevote record older than at stop (the signing state
-check fails), head reads that fail for longer than `STALL_LIMIT` (the stall
-checks of both variants fail), a second run of a project whose lock is held and
-an `OUT_DIR` that is not empty (exit 2, nothing written), a teardown whose `down`
+check fails), head reads that fail for longer than `STALL_LIMIT`, and watched
+nodes that stay at one head, or one that does not answer, while another keeps
+rising, for longer than `STALL_LIMIT` (the stall checks of both variants fail;
+with the same settings and no fault they pass), a second run of a project whose
+lock is held and an `OUT_DIR` that already exists, empty or not (exit 2, nothing
+written), the project in the default `OUT_DIR` name, a teardown whose `down`
 fails or leaves a volume (exit 3 after a pass, the failure in `timings.json`
 and `timings.md`), and a full `rejoin` and `isolated` run. It needs no Docker and tests
 the script's own logic only; it says nothing about what a real image, volume
