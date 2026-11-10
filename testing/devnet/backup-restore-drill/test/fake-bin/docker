@@ -14,6 +14,8 @@ FAKE_MISSING_IMAGES, FAKE_MIGRATE_FAIL, FAKE_MIGRATE_HANG (a postgres service
 name: compose run against it sleeps 120 s; with FAKE_MIGRATE_IGNORE_TERM it
 ignores SIGTERM), FAKE_WIPE_CHANGES_OWNER, FAKE_WIPE_LEAVE (a state volume
 entry the wipe does not remove), FAKE_WIPE_FAIL (the wipe exits 1),
+FAKE_DUMP_CUT (the dump ends after its table of contents: reading the whole
+archive fails),
 FAKE_DOWN_FAIL (compose down removes nothing and exits 1), FAKE_DOWN_LEAVE
 (compose down exits 0 but leaves the volumes whose name contains it),
 FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3). Every call is appended to
@@ -399,8 +401,10 @@ def exec_cmd(a):
             bk["dump"] = f"DUMP-head-{dbhead}\n"
             save(st)
             out()
-        if "pg_restore --list" in script:
-            nm = re.search(r"pg_restore --list (\S+)", script).group(1)
+        if "pg_restore --file=/dev/null" in script:
+            nm = re.search(r"pg_restore --file=/dev/null (\S+)", script).group(1)
+            if os.environ.get("FAKE_DUMP_CUT"):
+                fail("pg_restore: error: could not read from input file: end of file")
             bk["files"].append(nm + ".sha256")
             save(st)
             out()

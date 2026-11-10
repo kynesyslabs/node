@@ -36,7 +36,16 @@ It does not show:
   `validator-key.md`, section "Signing state files";
 - the production start guards: the drill nodes run with `NODE_ENV=development`,
   without `PROD=true` and without `DEMOS_REQUIRE_VALIDATORS`, so those guards
-  are not exercised.
+  are not exercised;
+- a bare-metal `./run` node with the launcher's own Postgres container
+  (`postgres_<PG_PORT>`, `database-migrations.md`): the drill only uses its own
+  compose project;
+- an external database: every dump and restore runs as the Postgres image's
+  superuser (`demosuser`), and the restore uses `--no-owner`, so a database
+  user without superuser rights is not tried;
+- a restore across a schema change: the same `NODE_IMAGE` makes the dump and
+  migrates the restored database, so that migration has nothing to apply and
+  the check "schema at the image's head" passes by construction.
 
 ## Before you run it (host3)
 
@@ -130,7 +139,7 @@ NODE_IMAGE=<local image> BASE_PORT=65000 VARIANT=isolated \
 The script re-executes itself under `nice -n 10`, and waits until the 1-minute
 load is under 18 (up to 30 minutes, then exits 2). It does not need to be
 started under `nice` by hand; wrap it in `nohup`/`tmux` if the SSH session may
-drop (the run time has not been measured: genesis delay alone is 160 s).
+drop (genesis delay alone is 160 s).
 
 Exit codes: 0 every check passed, 1 a check failed, 2 the drill could not be
 carried out (preflight, boot, timeout, a step that must work failed), 3 every
@@ -185,8 +194,7 @@ printed), 2 the preflight or a postgres failed, 3 pass but the teardown failed
 (see Output). No backup, wipe or restore
 runs, and there is no isolated node. Genesis is set `GENESIS_DELAY` (160 s by
 default) after the inputs are made and the cap counts from the first node
-start; none of this has been timed on Docker yet, so if a healthy host needs
-more than 5 minutes, raise `SMOKE_TIMEOUT`.
+start; if a host needs more than 5 minutes, raise `SMOKE_TIMEOUT`.
 
 ## What it does
 
@@ -209,8 +217,8 @@ devnet image's entrypoint), and else `exec`s that same CMD. What
 `IDENTITY_FILE` is outside the state dir) is not needed here: `IDENTITY_FILE`
 is on the state volume with its signing record, the peerlist is only read (from
 a read-only mount that the script's `mv` could not move), TLSNotary is off, and
-`output/` is written only by the backup utility. Read from the sources, not
-run on Docker; the reasoning is in `gen-compose.py` above `START_SCRIPT`.
+`output/` is written only by the backup utility. The reasoning is in
+`gen-compose.py` above `START_SCRIPT`.
 
 1. Preflight: tools, load wait, disk, RAM, no swapping, project name unused,
    ports free, images local, uid-1000 readability of the inputs, gossip on
@@ -229,8 +237,11 @@ run on Docker; the reasoning is in `gen-compose.py` above `START_SCRIPT`.
    `.commitlock.json`, `.prevote.json`; the `.lock` beat file is left out).
    Only hashes and heights are printed; no file content is.
 3. **A** backup: stats, `pg_dump -Fc` inside node X's postgres container into
-   a staging volume, stats again, `pg_restore --list` and `sha256sum` on the
-   dump. The database only: the identity and signing state files are not
+   a staging volume, stats again, `test -s`, `pg_restore --file=/dev/null`
+   (reads the whole archive, as `database-migrations.md` step 1 requires;
+   `--list` reads only the table of contents) and `sha256sum` on the dump. If
+   the dump is empty or cannot be read to its end, the run exits 2 before the
+   wipe. The database only: the identity and signing state files are not
    copied, they stay on node X's state volume, which the wipe keeps. Backing
    them up is `validator-key.md`, section "Signing state files".
 4. **A2** copy the staging volume to `$OUT_DIR/backup/` on the host
@@ -345,7 +356,8 @@ the fork set `gen-inputs.py` gets (default `launch`, `FORK_SET=devnet`), the
 migrate step on the restored database (after `pg_restore` and before node X
 starts; a failure or a timeout stops the run with exit 2 and node X is not
 started), a volume that exists before the run under a name the compose file
-declares (exit 2, no `up`, no `down`, the volume untouched), a wipe that fails
+declares (exit 2, no `up`, no `down`, the volume untouched), a dump that
+cannot be read to its end (exit 2 in phase A, nothing wiped), a wipe that fails
 or leaves an entry (exit 2, node X not started again), a teardown whose `down`
 fails or leaves a volume (exit 3 after a pass, the failure in `timings.json`
 and `timings.md`), and a full `rejoin` and `isolated` run. It needs no Docker and tests
@@ -361,7 +373,8 @@ starts. It runs `MIGRATE_CMD` in a one-off container of `NODE_IMAGE`, with
 `PG_HOST` and `PG_DATABASE` pointed at that database. The default,
 `bun run migration:run`, is the repo script (`package.json`); set `MIGRATE_CMD`
 to whatever the migrations runbook settles on. At bring-up a failing migration
-is a warning (a node that still migrates at boot does not need it); on the
+is a warning (only a `run-devnet` image migrates at start; a release node
+does not, and refuses pending migrations, so it fails the serve wait); on the
 restored database it is fatal unless `MIGRATE_REQUIRED=0`. Each run is stopped
 after `MIGRATE_TIMEOUT` seconds (300 by default; `timeout -k 10`: TERM, then
 KILL 10 s later), logged as `migrations on <database> timed out`, and counts
@@ -386,8 +399,11 @@ MIGRATE_CMD='bun -r tsconfig-paths/register ./node_modules/typeorm/cli.js migrat
   code, and 137 means it was killed after the grace period. With the release
   image the script starts the node directly, as PID 1.
 - After a stop that was not clean, the identity lock (`node.identity.lock`) is
-  replaced after a 10 to 25 second watch (`validator-key.md`); that time is
-  inside C or D.
+  left behind. The drill pins each node's hostname (`gen-compose.py`), so its
+  own stale lock is replaced at once (`src/libs/identity/identityLock.ts`, a
+  lock from the same hostname with no heartbeat for 20 s); a production
+  container recreated with a new hostname watches it 10 to 25 s first
+  (`validator-key.md`), which these timings do not include.
 - The restore is a head start. The node still has to sync the blocks produced
   while it was down; D1 is that time.
 - A dump, however fresh, may be older than the head the node had: compare

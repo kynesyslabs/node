@@ -64,7 +64,8 @@ ISO_PORT = port(n + 1)
 #   .halted already sit on the volume and the script itself skips that case;
 # - symlink /app/demos_peerlist.json -> state: the node only reads the peerlist
 #   (PeerManager.ts), from a read-only bind mount; the script's `mv` of that
-#   bind-mounted file to the volume would most likely fail (not run on Docker);
+#   bind-mounted file to the volume would most likely fail (not tried: the
+#   drill never runs the entrypoint);
 # - /app/.tlsnotary-key: TLSNOTARY_ENABLED is false;
 # - /app/output -> state/output: only the backupAndRestore utility writes there.
 # So the entrypoint is bypassed on purpose, as in quorum-drills, with bun as PID 1.

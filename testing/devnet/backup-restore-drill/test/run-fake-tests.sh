@@ -255,6 +255,18 @@ if sel full-isolated; then
     no_out 'CHECK FAIL' "any failed check"
     torn_down
 fi
+if sel dump-cut; then
+    # a dump that ends after its table of contents: the whole-archive read fails in phase A, before any wipe
+    go dump-cut FAKE_DUMP_CUT=1
+    want_rc 2
+    want_call 'pg_restore --file=/dev/null node4\.dump' "the whole-archive read of the dump"
+    want_out 'the dump is empty or cannot be read to its end' "the failed read stops the run"
+    no_call 'stop -t [0-9]+ node-4$' "the stop of node-4 (the run stops in phase A)"
+    no_call 'volume rm' "volume rm (no database wiped)"
+    no_call 'find \. -mindepth 1' "the state wipe"
+    no_call 'pg_restore -U' "pg_restore"
+    torn_down
+fi
 if sel wipe-owner; then
     go wipe-owner FAKE_WIPE_CHANGES_OWNER=1
     want_rc 2

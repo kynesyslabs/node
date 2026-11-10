@@ -831,8 +831,8 @@ STARTED_STACK=1
 dc up -d --pull never pg-1 pg-2 pg-3 pg-4 >> "${STEP_LOG}" 2>&1 || die "postgres did not start"
 for i in $(seq 1 "${N}"); do wait_pg "${i}" 120 || die "pg-${i} not ready within 120s"; done
 for i in $(seq 1 "${N}"); do
-    # The manual step. A node image that still migrates at boot (migrationsRun true)
-    # does not need it, so a failure here is a warning; one that does not will fail below
+    # The manual step. Only a run-devnet image migrates at start, so a failure here is a
+    # warning; a release node never migrates at boot and will fail the serve wait below
     run_migrations "${i}" || say "WARNING: migrations on node ${i}'s database failed (see 03-bringup.log); continuing"
 done
 for i in $(seq 1 "${N}"); do
@@ -876,9 +876,11 @@ stats_of "${X_NODE}" > "${BACKUP_DIR}/stats.before.txt"
 DUMP_NAME="node${X_NODE}.dump"
 pgx "${X_NODE}" sh -c "pg_dump -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Fc -f /backup/${DUMP_NAME}" >> "${STEP_LOG}" 2>&1 || die "pg_dump failed"
 stats_of "${X_NODE}" > "${BACKUP_DIR}/stats.after.txt"
-# The dump has to be readable and not empty before it counts as a backup
-pgx "${X_NODE}" sh -c "cd /backup && pg_restore --list ${DUMP_NAME} > /dev/null && test -s ${DUMP_NAME} && sha256sum ${DUMP_NAME} > ${DUMP_NAME}.sha256" >> "${STEP_LOG}" 2>&1 \
-    || die "the dump is unreadable or empty (pg_restore --list failed)"
+# The dump has to be not empty and readable to its end before it counts as a backup,
+# and before the wipe. pg_restore --list reads only the table of contents, so a dump
+# cut short after it would pass (docs/runbooks/database-migrations.md, step 1)
+pgx "${X_NODE}" sh -c "cd /backup && test -s ${DUMP_NAME} && pg_restore --file=/dev/null ${DUMP_NAME} && sha256sum ${DUMP_NAME} > ${DUMP_NAME}.sha256" >> "${STEP_LOG}" 2>&1 \
+    || die "the dump is empty or cannot be read to its end (test -s or pg_restore --file=/dev/null failed)"
 DUMP_BYTES="$(pgx "${X_NODE}" stat -c %s "/backup/${DUMP_NAME}")"
 # The database only: the identity and signing state stay on node X's state
 # volume and are not copied (a copy taken while the node runs is not a valid
@@ -973,7 +975,7 @@ if [ "${VARIANT}" = rejoin ]; then
     wait_pg "${X_NODE}" 120 || die "pg-${X_NODE} not ready within 120s"
     tables="$(psql_q "${X_NODE}" "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
     [ "${tables}" = 0 ] || die "the new database is not empty (${tables} tables): the wipe did not work"
-    # Whole dump, never single tables (forking/restore/RUNBOOK.md)
+    # The whole dump into an empty database (docs/runbooks/database-migrations.md, "Roll back")
     pgx "${X_NODE}" sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < "${DUMP_FILE}" >> "${STEP_LOG}" 2>&1 \
         || die "pg_restore failed"
     stats_of "${X_NODE}" > "${OUT_DIR}/stats.restored.txt"
