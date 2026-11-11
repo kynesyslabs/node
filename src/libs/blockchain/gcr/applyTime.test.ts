@@ -5,19 +5,10 @@
  */
 
 import { describe, expect, it, mock } from "bun:test"
+import { mockDatasource, mockLogger, mockXmLocalSdk } from "@/utilities/testSupport/coreMocks"
 
-const fakeDataSource = { getRepository: () => ({ findOne: async () => null }) }
-const datasourceModule = () => ({
-    __esModule: true,
-    dataSource: fakeDataSource,
-    default: { getInstance: async () => ({ getDataSource: () => fakeDataSource }) },
-})
-mock.module("src/model/datasource", datasourceModule)
-mock.module("@/model/datasource", datasourceModule)
-mock.module("@/utilities/logger", () => ({
-    __esModule: true,
-    default: { debug: () => {}, info: () => {}, warn: () => {}, warning: () => {}, error: () => {}, only: () => {} },
-}))
+mockDatasource({ findOne: async () => null })
+mockLogger()
 
 const { applyTime, bindApplyTime, withBlockTime } = await import("./applyTime")
 const { default: HandleGCR } = await import("./handleGCR")

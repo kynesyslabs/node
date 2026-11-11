@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from "bun:test"
+import { mockDatasource, mockLogger, mockXmLocalSdk } from "@/utilities/testSupport/coreMocks"
 
 /**
  * The nullifier covers the context, and the prover picks the context. A
@@ -6,18 +7,8 @@ import { describe, expect, it, mock } from "bun:test"
  * number of attestation awards; under the fixed launch context it has one.
  */
 
-const fakeDataSource = { getRepository: () => ({ findOne: async () => null }) }
-const datasourceModule = () => ({
-    __esModule: true,
-    dataSource: fakeDataSource,
-    default: { getInstance: async () => ({ getDataSource: () => fakeDataSource }) },
-})
-mock.module("src/model/datasource", datasourceModule)
-mock.module("@/model/datasource", datasourceModule)
-mock.module("@/utilities/logger", () => ({
-    __esModule: true,
-    default: { debug: () => {}, info: () => {}, warn: () => {}, warning: () => {}, error: () => {}, only: () => {} },
-}))
+mockDatasource({ findOne: async () => null })
+mockLogger()
 
 const { ProofVerifier } = await import("@/features/zk/proof/ProofVerifier")
 // Stands in for a proof that verifies: the context rule is what is under test.

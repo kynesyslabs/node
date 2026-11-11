@@ -6,23 +6,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
-import { dirname, join } from "node:path"
+import { mockDatasource, mockLogger, mockXmLocalSdk } from "@/utilities/testSupport/coreMocks"
 
-// The package barrel loads the Tron module, which does not initialise under
-// bun test; the chain modules are loaded one by one instead.
-const LOCALSDK = dirname(require.resolve("@kynesyslabs/demosdk/xm-localsdk"))
-const localsdk = (file: string) => require(join(LOCALSDK, file))
-mock.module("@kynesyslabs/demosdk/xm-localsdk", () => ({
-    XRPL: localsdk("xrp.js").XRPL,
-    EVM: localsdk("evm.js").EVM,
-    IBC: localsdk("ibc.js").IBC,
-    TON: localsdk("ton.js").TON,
-    SOLANA: localsdk("solana.js").SOLANA,
-    MULTIVERSX: localsdk("multiversx.js").MULTIVERSX,
-    NEAR: localsdk("near.js").NEAR,
-    BTC: localsdk("btc.js").BTC,
-    APTOS: localsdk("aptos.js").APTOS,
-}))
+mockXmLocalSdk()
 
 const SENDER = "0x" + "5e".repeat(32)
 const WALLET = "0x" + "ab".repeat(20)
@@ -36,13 +22,7 @@ const account = {
     },
 }
 const repository = { findOne: async () => structuredClone(account) }
-const datasource = {
-    __esModule: true,
-    default: { getInstance: async () => ({ getDataSource: () => ({ getRepository: () => repository }) }) },
-    dataSource: { getRepository: () => repository },
-}
-mock.module("src/model/datasource", () => datasource)
-mock.module("@/model/datasource", () => datasource)
+mockDatasource(repository)
 
 const { default: manageGCRRoutines } = await import("@/libs/network/manageGCRRoutines")
 const IdentityManager = (await import("@/libs/blockchain/gcr/gcr_routines/identityManager")).default

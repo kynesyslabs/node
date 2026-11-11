@@ -6,7 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
-import { dirname, join } from "node:path"
+import { mockDatasource, mockLogger, mockXmLocalSdk } from "@/utilities/testSupport/coreMocks"
 
 const ACCOUNT = "0x" + "4a".repeat(32)
 let stored: any
@@ -20,32 +20,9 @@ const repository = {
     find: async () => [],
     save,
 }
-const datasource = () => ({
-    __esModule: true,
-    dataSource: { getRepository: () => repository },
-    default: { getInstance: async () => ({ getDataSource: () => ({ getRepository: () => repository }) }) },
-})
-mock.module("src/model/datasource", datasource)
-mock.module("@/model/datasource", datasource)
-mock.module("@/utilities/logger", () => ({
-    __esModule: true,
-    default: { debug: () => {}, info: () => {}, warn: () => {}, warning: () => {}, error: () => {}, only: () => {} },
-}))
-// The package barrel loads the Tron module, which does not initialise under
-// bun test; the chain modules are loaded one by one instead.
-const LOCALSDK = dirname(require.resolve("@kynesyslabs/demosdk/xm-localsdk"))
-const localsdk = (file: string) => require(join(LOCALSDK, file))
-mock.module("@kynesyslabs/demosdk/xm-localsdk", () => ({
-    XRPL: localsdk("xrp.js").XRPL,
-    EVM: localsdk("evm.js").EVM,
-    IBC: localsdk("ibc.js").IBC,
-    TON: localsdk("ton.js").TON,
-    SOLANA: localsdk("solana.js").SOLANA,
-    MULTIVERSX: localsdk("multiversx.js").MULTIVERSX,
-    NEAR: localsdk("near.js").NEAR,
-    BTC: localsdk("btc.js").BTC,
-    APTOS: localsdk("aptos.js").APTOS,
-}))
+mockDatasource(repository)
+mockLogger()
+mockXmLocalSdk()
 
 // handleGCR first: it closes the import cycle PointSystem is part of.
 const { default: HandleGCR } = await import("@/libs/blockchain/gcr/handleGCR")
