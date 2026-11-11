@@ -24,6 +24,7 @@ import {
     SETTLEMENT_DEFERRED_TTL_BLOCKS,
     SettlementAggregator,
     type SettlementDeps,
+    type SubmitResult,
 } from "./settlement/aggregator"
 import { openSettlementTransfer } from "./settlement/transfer"
 import { readTipAccounts } from "./settlement/tipState"
@@ -231,6 +232,10 @@ export class L2PSBatchAggregator {
         log.info("[L2PS Batch Aggregator] Stopping batch aggregation service")
 
         this.isRunning = false
+        // A cycle can outlast the wait below by a proof time: closing the
+        // loop first keeps it from starting a proof on a pool about to close,
+        // or from counting the proofs that close cuts short against transfers.
+        this.settlement?.close()
 
         // Clear the interval
         if (this.intervalId) {
@@ -255,6 +260,8 @@ export class L2PSBatchAggregator {
         await prover?.terminate()
         // Settlement provers would otherwise outlive the service as well.
         await closeSettlementProverPool()
+        // A restart recovers its batches in flight from the rows.
+        this.settlement = null
 
         log.info("[L2PS Batch Aggregator] Stopped successfully")
         this.logStatistics()
@@ -740,6 +747,13 @@ export class L2PSBatchAggregator {
      * @returns the batch transaction's hash, or null when it was not submitted
      */
     private async submitBatchToMempool(batchPayload: L2PSBatchPayload): Promise<string | null> {
+        const sent = await this.sendBatch(batchPayload)
+        return sent.ok ? sent.l1TxHash : null
+    }
+
+    /** Submits the batch, telling a refusal no retry can change from one that may pass later. */
+    private async sendBatch(batchPayload: L2PSBatchPayload): Promise<SubmitResult> {
+        const refused = (reason: string, permanent = false): SubmitResult => ({ ok: false, permanent, reason })
         try {
             const sharedState = getSharedState
 
@@ -747,7 +761,7 @@ export class L2PSBatchAggregator {
             if (this.zkEnabled && batchPayload.zk_proof) {
                 if (!this.zkProver) {
                     log.error("[L2PS Batch Aggregator] ZK proof provided but zkProver is not initialized")
-                    return null
+                    return refused("zkProver is not initialized")
                 }
 
                 const { proof, publicSignals, batchSize, finalStateRoot, totalVolume } = batchPayload.zk_proof
@@ -759,7 +773,7 @@ export class L2PSBatchAggregator {
                     totalVolumeBigInt = BigInt(totalVolume)
                 } catch {
                     log.error("[L2PS Batch Aggregator] Invalid BigInt values in ZK proof")
-                    return null
+                    return refused("invalid BigInt values in ZK proof", true)
                 }
 
                 const isValid = await this.zkProver.verifyProof({
@@ -772,14 +786,14 @@ export class L2PSBatchAggregator {
                 })
                 if (!isValid) {
                     log.error(`[L2PS Batch Aggregator] Rejecting batch ${batchPayload.batch_hash.substring(0, 16)}...: invalid ZK proof`)
-                    return null
+                    return refused("invalid ZK proof", true)
                 }
             }
 
             // Use keypair.publicKey (set by loadIdentity) instead of identity.ed25519
             if (!sharedState.keypair?.publicKey) {
                 log.error("[L2PS Batch Aggregator] Node keypair not loaded yet")
-                return null
+                return refused("node keypair not loaded yet")
             }
 
             // Get node's public key as hex string for 'from' field
@@ -838,16 +852,22 @@ export class L2PSBatchAggregator {
                 extra: null, // Optional field
             }
 
+            const unfit = Mempool.permanentRefusal(batchTransaction as any)
+            if (unfit !== null) {
+                log.error(`[L2PS Batch Aggregator] Failed to add batch to mempool: ${unfit}`)
+                return refused(unfit, true)
+            }
+
             // Submit to main mempool
             const result = await Mempool.addTransaction(batchTransaction as any)
 
             if (result.error) {
                 log.error(`[L2PS Batch Aggregator] Failed to add batch to mempool: ${result.error}`)
-                return null
+                return refused(result.error)
             }
 
             log.info(`[L2PS Batch Aggregator] Batch ${batchPayload.batch_hash.substring(0, 16)}... submitted to mempool (block ${result.confirmationBlock})`)
-            return hash
+            return { ok: true, l1TxHash: hash }
 
         } catch (error: unknown) {
             const message = getErrorMessage(error)
@@ -855,7 +875,7 @@ export class L2PSBatchAggregator {
             if (error instanceof Error && error.stack) {
                 log.debug(`[L2PS Batch Aggregator] Stack trace: ${error.stack}`)
             }
-            return null
+            return refused(message)
         }
     }
 
@@ -884,7 +904,7 @@ export class L2PSBatchAggregator {
             plan: planSettlement,
             prove: proveSettlement,
             submit: async (l2psUid, record, rows) =>
-                this.submitBatchToMempool(await this.createBatchPayload(l2psUid, rows, record)),
+                this.sendBatch(await this.createBatchPayload(l2psUid, rows, record)),
             status: hash => Chain.getTransactionStatus(hash),
             setRows: async (hashes, status) => {
                 await L2PSMempool.updateStatusBatch(hashes, status)

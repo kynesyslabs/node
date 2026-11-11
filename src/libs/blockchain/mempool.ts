@@ -331,6 +331,14 @@ export default class Mempool {
         return oversizeTxRefusal(tx, isForkActive("osDenomination", pendingHeight()))
     }
 
+    /**
+     * Why the pool would refuse this transaction whatever it holds and
+     * however often it is offered: unstorable, or larger than a block.
+     */
+    public static permanentRefusal(tx: Transaction): string | null {
+        return admissionRefusal(tx) ?? this.blockSizeRefusal(tx)
+    }
+
     /** Every row's eviction ranking inputs. Only read when the pool is full. */
     public static async listEvictionCandidates(): Promise<EvictionCandidate[]> {
         const rows = await this.repo.query(
@@ -605,13 +613,9 @@ export default class Mempool {
     ) {
         // The node builds some transactions itself from user input (instant
         // messages, L2PS batches); they enter here without passing admission.
-        const unstorable = admissionRefusal(transaction)
-        if (unstorable !== null) {
-            return { confirmationBlock: null, error: unstorable }
-        }
-        const oversize = this.blockSizeRefusal(transaction)
-        if (oversize !== null) {
-            return { confirmationBlock: null, error: oversize }
+        const unfit = this.permanentRefusal(transaction)
+        if (unfit !== null) {
+            return { confirmationBlock: null, error: unfit }
         }
 
         const txExists = await Chain.checkTxExists(transaction.hash)
@@ -1066,7 +1070,7 @@ export default class Mempool {
         // first, since the chain lookup below queries by the hash.
         const unseenCandidates = incoming.filter(tx => {
             if (existingHashes[tx.hash]) return false
-            const unstorable = admissionRefusal(tx) ?? this.blockSizeRefusal(tx)
+            const unstorable = this.permanentRefusal(tx)
             if (unstorable !== null) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${String(tx?.hash).slice(0, 80)}: ${unstorable}`,

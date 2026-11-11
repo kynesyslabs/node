@@ -88,4 +88,16 @@ describe("L2PS batch proofs gate", () => {
         await expect(pool.probe()).rejects.toThrow("closed")
         expect(settlementProverPool()).not.toBe(pool)
     })
+
+    it("closes the settlement loop before it waits for the cycle, and a restart gets a new loop", async () => {
+        aggregator.zkRequested = false
+        await aggregator.start()
+        const loop = aggregator.settlementLoop()
+
+        await aggregator.stop()
+
+        expect(loop.closed).toBe(true)
+        expect(await loop.cycle()).toEqual({ submitted: 0, transfers: 0 })
+        expect(aggregator.settlement).toBeNull()
+    })
 })

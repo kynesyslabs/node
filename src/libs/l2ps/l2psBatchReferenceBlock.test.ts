@@ -29,6 +29,7 @@ mock.module("@/libs/blockchain/validation/txValidatorPool", () => ({
 mock.module("@/libs/blockchain/mempool", () => ({
     __esModule: true,
     default: {
+        permanentRefusal: () => null,
         addTransaction: async (tx: unknown) => {
             added.push(tx)
             return { confirmationBlock: TIP + 1, error: null }

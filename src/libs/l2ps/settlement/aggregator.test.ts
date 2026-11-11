@@ -52,8 +52,10 @@ let proverFails: boolean
 /** Transfers the prover cannot build a witness for. */
 let poisoned: Set<string>
 let submitRefuses: boolean
-/** Subnets whose batches the mempool refuses. */
+/** Subnets whose batches the mempool refuses for good. */
 let refusedSubnets: Set<string>
+/** Subnets whose batches the mempool refuses for now (pool full). */
+let busySubnets: Set<string>
 let minimumFee: bigint
 
 /** A planner that takes transfers in order while the sender can pay and the nonce is next. */
@@ -97,11 +99,12 @@ function deps(): SettlementDeps {
             return { proof: { id: `proof${proveCalls}` }, publicSignals: [] }
         },
         submit: async (_uid, record, batchRows) => {
-            if (submitRefuses || refusedSubnets.has(_uid)) return null
+            if (submitRefuses || refusedSubnets.has(_uid)) return { ok: false, permanent: true, reason: "unstorable" }
+            if (busySubnets.has(_uid)) return { ok: false, permanent: false, reason: "mempool full" }
             const l1 = `l1_${submitted.length + 1}`
             submitted.push({ l1, record, rows: batchRows.map(r => r.hash) })
             statuses.set(l1, { state: "pending" })
-            return l1
+            return { ok: true, l1TxHash: l1 }
         },
         status: async hash => statuses.get(hash) ?? { state: "unknown" },
         setRows: async (hashes, status) => {
@@ -167,6 +170,7 @@ beforeEach(() => {
     poisoned = new Set()
     submitRefuses = false
     refusedSubnets = new Set()
+    busySubnets = new Set()
     minimumFee = FEE
 })
 
@@ -337,7 +341,7 @@ describe("SettlementAggregator", () => {
         const disjoint = pay(DAVE, "0x" + "ee".repeat(32), 1n, 1n)
         for (const t of [...many, overlap, disjoint]) queue(t)
 
-        await new SettlementAggregator(deps(), LIMITS).cycle()
+        await new SettlementAggregator(deps(), { ...LIMITS, provers: 2 }).cycle()
 
         expect(submitted).toHaveLength(2)
         expect(submitted[0].rows).toEqual(many.map(t => t.txHash))
@@ -429,7 +433,7 @@ describe("SettlementAggregator", () => {
 
         it("is isolated after two failed proofs, so the transfers batched with it settle, and is then dropped", async () => {
             poisoned.add(poison.txHash)
-            const agg = new SettlementAggregator(deps(), LIMITS)
+            const agg = new SettlementAggregator(deps(), { ...LIMITS, provers: 3 })
 
             await agg.cycle()
             now += 5_000
@@ -451,7 +455,7 @@ describe("SettlementAggregator", () => {
         })
 
         it("is isolated after its batch failed on L1 twice, and dropped once others land while it fails alone", async () => {
-            const agg = new SettlementAggregator(deps(), LIMITS)
+            const agg = new SettlementAggregator(deps(), { ...LIMITS, provers: 3 })
             const failLast = async () => {
                 statuses.set(submitted[submitted.length - 1].l1, { state: "failed", blockNumber: head + 1, code: "TX_FAILED" })
                 head += 1
@@ -496,7 +500,7 @@ describe("SettlementAggregator", () => {
         queue(broken, L2PS_STATUS.EXECUTED, innerTx(broken), "subnet_broken")
         queue(fine)
         poisoned.add(broken.txHash)
-        const agg = new SettlementAggregator(deps(), LIMITS)
+        const agg = new SettlementAggregator(deps(), { ...LIMITS, provers: 2 })
 
         await agg.cycle()
 
@@ -513,7 +517,7 @@ describe("parallel provers", () => {
         expect(cond()).toBe(true)
     }
 
-    it("proves disjoint batches at once, up to the prover count, and submits them in plan order", async () => {
+    it("proves every batch of the cycle at once and submits them in plan order", async () => {
         tip.set(DAVE.account, { balance: 100n, nonce: 0n })
         tip.set(EVE.account, { balance: 100n, nonce: 0n })
         const full = (from: typeof ALICE, to: string, first: bigint) =>
@@ -531,19 +535,20 @@ describe("parallel provers", () => {
             active--
             return { proof: { id: p.transfers[0].txHash }, publicSignals: [] }
         }
-        const agg = new SettlementAggregator(d, { ...LIMITS, provers: 2 })
+        const agg = new SettlementAggregator(d, { ...LIMITS, provers: 3 })
 
         const cycle = agg.cycle()
-        await settle(() => gates.length === 2)
-        expect(active).toBe(2)
-        // The second proof finishes first, the first last.
-        gates[1]()
         await settle(() => gates.length === 3)
+        expect(active).toBe(3)
+        // The last proof finishes first, the first last.
         gates[2]()
+        gates[1]()
+        await settle(() => active === 1)
+        expect(submitted).toHaveLength(0)
         gates[0]()
         expect(await cycle).toEqual({ submitted: 3, transfers: 2 * SETTLEMENT_TRANSFERS + 1 })
 
-        expect(most).toBe(2)
+        expect(most).toBe(3)
         expect(submitted.map(s => s.rows)).toEqual(batches.map(b => b.map(t => t.txHash)))
     })
 
@@ -558,13 +563,13 @@ describe("parallel provers", () => {
             await new Promise<void>(resolve => gates.push(resolve))
             return { proof: { id: p.transfers[0].txHash }, publicSignals: [] }
         }
-        const agg = new SettlementAggregator(d, LIMITS)
+        const agg = new SettlementAggregator(d, { ...LIMITS, provers: 2 })
 
         const cycle = agg.cycle()
-        await settle(() => gates.length === 1)
-        gates[0]()
         await settle(() => gates.length === 2)
-        // One prover: the first batch is out before the second is proved.
+        gates[0]()
+        await settle(() => submitted.length === 1)
+        // The first batch is out while the second is still proving.
         expect(submitted.map(s => s.rows)).toEqual([first.map(t => t.txHash)])
         gates[1]()
         await cycle
@@ -596,7 +601,7 @@ describe("a batch the mempool refuses", () => {
         queue(refused, L2PS_STATUS.EXECUTED, innerTx(refused), "subnet_a")
         queue(fine, L2PS_STATUS.EXECUTED, innerTx(fine), "subnet_b")
         refusedSubnets.add("subnet_a")
-        const agg = new SettlementAggregator(deps(), LIMITS)
+        const agg = new SettlementAggregator(deps(), { ...LIMITS, provers: 2 })
 
         await agg.cycle()
         expect(statusOf(fine)).toBe(L2PS_STATUS.BATCHED)
@@ -605,9 +610,180 @@ describe("a batch the mempool refuses", () => {
 
         await agg.cycle()
         expect(proveCalls).toBe(2)
+        expect(agg.failuresOf(refused.txHash)).toEqual({ group: 1, alone: 0 })
         now += LIMITS.proverBackoffMs
         await agg.cycle()
         expect(proveCalls).toBe(3)
+    })
+
+    it("backs off without counting it against the transfers when the refusal is for now only", async () => {
+        const ts = [pay(ALICE, "0x" + "e8".repeat(32), 1n, 5n), pay(BOB, "0x" + "e9".repeat(32), 1n, 1n)]
+        for (const t of ts) queue(t)
+        busySubnets.add(UID)
+        const sizes: number[] = []
+        const d = deps()
+        const prove = d.prove
+        d.prove = async p => {
+            sizes.push(p.transfers.length)
+            return prove(p)
+        }
+        const agg = new SettlementAggregator(d, LIMITS)
+
+        for (let i = 0; i < 4; i++) {
+            await agg.cycle()
+            now += LIMITS.proverBackoffMaxMs
+        }
+
+        // Never isolated: every attempt still carries both transfers.
+        expect(sizes).toEqual([2, 2, 2, 2])
+        expect(ts.map(t => agg.failuresOf(t.txHash))).toEqual([undefined, undefined])
+        busySubnets.clear()
+        await agg.cycle()
+        expect(ts.map(statusOf)).toEqual([L2PS_STATUS.BATCHED, L2PS_STATUS.BATCHED])
+    })
+})
+
+describe("a submission that throws", () => {
+    const sink = (b: string) => "0x" + b.repeat(32)
+
+    it("fails only its own batch, and the other proofs of the cycle still go out", async () => {
+        const broken = pay(ALICE, sink("f1"), 1n, 5n)
+        const fine = pay(BOB, sink("f2"), 1n, 1n)
+        queue(broken, L2PS_STATUS.EXECUTED, innerTx(broken), "subnet_a")
+        queue(fine, L2PS_STATUS.EXECUTED, innerTx(fine), "subnet_b")
+        const d = deps()
+        const submit = d.submit
+        d.submit = async (uid, record, batchRows) => {
+            if (uid === "subnet_a") throw new Error("database unavailable")
+            return submit(uid, record, batchRows)
+        }
+        const agg = new SettlementAggregator(d, { ...LIMITS, provers: 2 })
+
+        expect(await agg.cycle()).toEqual({ submitted: 1, transfers: 1 })
+        expect(statusOf(fine)).toBe(L2PS_STATUS.BATCHED)
+        expect(statusOf(broken)).toBe(L2PS_STATUS.EXECUTED)
+        expect(agg.failuresOf(broken.txHash)).toBeUndefined()
+
+        // The subnet backs off.
+        await agg.cycle()
+        expect(proveCalls).toBe(2)
+    })
+
+    it("follows a batch the mempool took even when marking its rows fails", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        queue(t)
+        const d = deps()
+        const setRows = d.setRows
+        let down = true
+        d.setRows = async (hashes, status) => {
+            if (down && status === L2PS_STATUS.BATCHED) throw new Error("database unavailable")
+            return setRows(hashes, status)
+        }
+        const agg = new SettlementAggregator(d, LIMITS)
+
+        expect(await agg.cycle()).toEqual({ submitted: 1, transfers: 1 })
+        expect(agg.inFlightBatches().has("l1_1")).toBe(true)
+        down = false
+
+        // Its accounts stay locked: the row still reads queued, but is not proved again.
+        await agg.cycle()
+        expect(proveCalls).toBe(1)
+        statuses.set("l1_1", { state: "included", blockNumber: head + 1 })
+        head += 1
+        await agg.cycle()
+        expect(statusOf(t)).toBe(L2PS_STATUS.CONFIRMED)
+    })
+})
+
+describe("planning per cycle", () => {
+    const sink = (b: string) => "0x" + b.repeat(32)
+
+    it("plans no more batches than there are provers, so none waits on a stale tip", async () => {
+        tip.set(DAVE.account, { balance: 100n, nonce: 0n })
+        const full = Array.from({ length: SETTLEMENT_TRANSFERS }, (_, i) => pay(ALICE, BOB.account, 1n, 5n + BigInt(i)))
+        const other = pay(DAVE, sink("a1"), 1n, 1n)
+        for (const t of [...full, other]) queue(t)
+        const agg = new SettlementAggregator(deps(), LIMITS)
+
+        await agg.cycle()
+        expect(proveCalls).toBe(1)
+        expect(submitted.map(s => s.rows)).toEqual([full.map(t => t.txHash)])
+
+        await agg.cycle()
+        expect(submitted.map(s => s.rows)).toEqual([full.map(t => t.txHash), [other.txHash]])
+    })
+
+    it("does not count an L1 failure against the transfers when the tip moved under the batch", async () => {
+        const ts = [pay(ALICE, sink("a2"), 1n, 5n), pay(BOB, sink("a3"), 1n, 1n)]
+        for (const t of ts) queue(t)
+        const agg = new SettlementAggregator(deps(), LIMITS)
+        for (let i = 0; i < 3; i++) {
+            await agg.cycle()
+            statuses.set(submitted[submitted.length - 1].l1, { state: "failed", blockNumber: head + 1, code: "TX_EXECUTE_FAILED" })
+            // Another L1 transaction paid Alice in the same block.
+            const alice = tip.get(ALICE.account)!
+            tip.set(ALICE.account, { ...alice, balance: alice.balance + 1n })
+            head += 1
+        }
+        await agg.cycle()
+
+        expect(submitted.map(s => s.rows.length)).toEqual([2, 2, 2, 2])
+        expect(ts.map(t => agg.failuresOf(t.txHash))).toEqual([undefined, undefined])
+    })
+
+    it("moves the first subnet each cycle, so a shared account is not always claimed by the same subnet", async () => {
+        const a1 = pay(ALICE, BOB.account, 1n, 5n)
+        const b1 = pay(BOB, CAROL.account, 1n, 1n)
+        queue(a1, L2PS_STATUS.EXECUTED, innerTx(a1), "subnet_a")
+        queue(b1, L2PS_STATUS.EXECUTED, innerTx(b1), "subnet_b")
+        const agg = new SettlementAggregator(deps(), { ...LIMITS, provers: 4 })
+
+        await agg.cycle()
+        expect(submitted.map(s => s.rows)).toEqual([[a1.txHash]])
+
+        // subnet_a has another transfer over Bob by the time the first lands.
+        const a2 = pay(ALICE, BOB.account, 1n, 6n)
+        queue(a2, L2PS_STATUS.EXECUTED, innerTx(a2), "subnet_a")
+        statuses.set("l1_1", { state: "included", blockNumber: head + 1 })
+        head += 2
+        tip.set(ALICE.account, { balance: 96n, nonce: 5n })
+        tip.set(BOB.account, { balance: 51n, nonce: 0n })
+        await agg.cycle()
+
+        expect(statusOf(b1)).toBe(L2PS_STATUS.BATCHED)
+        expect(statusOf(a2)).toBe(L2PS_STATUS.EXECUTED)
+    })
+})
+
+describe("closing the loop", () => {
+    it("submits nothing and counts nothing against the transfers once closed mid-proof", async () => {
+        tip.set(DAVE.account, { balance: 100n, nonce: 0n })
+        const ts = [pay(ALICE, BOB.account, 1n, 5n), pay(DAVE, "0x" + "c1".repeat(32), 1n, 1n)]
+        const full = Array.from({ length: SETTLEMENT_TRANSFERS - 1 }, (_, i) => pay(ALICE, BOB.account, 1n, 6n + BigInt(i)))
+        for (const t of [ts[0], ...full, ts[1]]) queue(t)
+        const gates: ((error?: Error) => void)[] = []
+        const d = deps()
+        d.prove = async () => {
+            proveCalls++
+            await new Promise<void>((resolve, reject) => gates.push(e => (e ? reject(e) : resolve())))
+            return { proof: { id: "late" }, publicSignals: [] }
+        }
+        const agg = new SettlementAggregator(d, { ...LIMITS, provers: 2 })
+
+        const cycle = agg.cycle()
+        for (let i = 0; i < 200 && gates.length < 2; i++) await new Promise(r => setTimeout(r, 0))
+        expect(gates).toHaveLength(2)
+        agg.close()
+        // One proof finishes, the pool kills the other.
+        gates[0]()
+        gates[1](new Error("settlement prover pool terminated"))
+        await cycle
+
+        expect(submitted).toHaveLength(0)
+        expect([ts[0], ts[1]].map(t => agg.failuresOf(t.txHash))).toEqual([undefined, undefined])
+        expect(loud.join("\n")).not.toContain("next settlement attempt")
+        await agg.cycle()
+        expect(proveCalls).toBe(2)
     })
 })
 

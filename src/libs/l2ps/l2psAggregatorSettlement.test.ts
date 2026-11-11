@@ -13,6 +13,8 @@ const cleanupBatchedWithoutEdits = jest.fn(async (..._args: unknown[]) => 0)
 const getExecutedSubnets = jest.fn(async () => [] as string[])
 const constructed = jest.fn()
 const added: any[] = []
+let unfit: string | null = null
+let poolError: string | null = null
 
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
@@ -42,7 +44,9 @@ mock.module("@/libs/blockchain/validation/txValidatorPool", () => ({
 mock.module("@/libs/blockchain/mempool", () => ({
     __esModule: true,
     default: {
+        permanentRefusal: () => unfit,
         addTransaction: async (tx: unknown) => {
+            if (poolError) return { confirmationBlock: null, error: poolError }
             added.push(tx)
             return { confirmationBlock: 541, error: null }
         },
@@ -80,6 +84,8 @@ beforeEach(() => {
     getSharedState.lastBlockNumber = 541
     ;(getSharedState as any).keypair = { publicKey: new Uint8Array(32).fill(7), privateKey: new Uint8Array(64).fill(9) }
     added.length = 0
+    unfit = null
+    poolError = null
     cleanupBatchedWithoutEdits.mockClear()
     getExecutedSubnets.mockClear()
     constructed.mockClear()
@@ -128,5 +134,22 @@ describe("L2PSBatchAggregator under l2psSettlement", () => {
         expect(added[0].reference_block).toBe(541)
         expect(added[0].content.data).toEqual(["l2psBatch", payload])
         expect(added[0].content.transaction_fee.network_fee).toBe(0)
+    })
+
+    it("tells a refusal no retry can change from one that may pass later", async () => {
+        const rows = [{ hash: "a".repeat(64), original_hash: "b".repeat(64), encrypted_tx: { content: {} } }]
+        const payload = await aggregator.createBatchPayload("subnet", rows, record)
+
+        unfit = "transaction is larger than a block"
+        expect(await aggregator.sendBatch(payload)).toEqual({ ok: false, permanent: true, reason: unfit })
+        expect(added).toHaveLength(0)
+
+        unfit = null
+        poolError = "mempool is full"
+        expect(await aggregator.sendBatch(payload)).toEqual({ ok: false, permanent: false, reason: poolError })
+
+        poolError = null
+        const sent = await aggregator.sendBatch(payload)
+        expect(sent).toEqual({ ok: true, l1TxHash: added[0].hash })
     })
 })
