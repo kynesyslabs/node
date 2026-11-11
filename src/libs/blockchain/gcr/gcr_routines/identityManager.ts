@@ -1,5 +1,5 @@
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import ensureGCRForUser from "./ensureGCRForUser"
+import { readGCRForUser } from "./ensureGCRForUser"
 import log from "src/utilities/logger"
 import {
     InferFromWritePayload,
@@ -110,7 +110,7 @@ export default class IdentityManager {
         twitterAccountConnected: boolean
     }> {
         // INFO: Check if the user has a Twitter account
-        const account = await ensureGCRForUser(sender)
+        const account = await readGCRForUser(sender)
         const twitterAccounts = account.identities.web2["twitter"] || []
         let twitterAccountConnected = false
 
@@ -657,7 +657,9 @@ export default class IdentityManager {
         address: string,
         key?: "xm" | "web2" | "pqc" | "ud" | "nomis" | "humanpassport" | "ethos",
     ): Promise<any> {
-        const gcr = await ensureGCRForUser(address)
+        // Admission and reads land here; a stored row may only come from
+        // block apply, or nodes would hold different account sets.
+        const gcr = await readGCRForUser(address)
         if (key) {
             return gcr.identities[key]
         }

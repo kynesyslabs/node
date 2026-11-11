@@ -1,5 +1,5 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { readGCRForUser } from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 import {
     EthosWalletIdentity,
     SavedEthosIdentity,
@@ -23,7 +23,7 @@ export class EthosIdentityProvider {
         const subchain = options.subchain || "mainnet"
         const normalizedWallet = this.normalizeAddress(walletAddress, chain)
 
-        const account = await ensureGCRForUser(pubkey)
+        const account = await readGCRForUser(pubkey)
 
         this.assertWalletLinked(account, chain, subchain, normalizedWallet)
 
@@ -56,7 +56,7 @@ export class EthosIdentityProvider {
     static async listIdentities(
         pubkey: string,
     ): Promise<EthosIdentitySummary[]> {
-        const account = await ensureGCRForUser(pubkey)
+        const account = await readGCRForUser(pubkey)
         return this.flattenIdentities(account)
     }
 

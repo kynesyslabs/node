@@ -1,15 +1,19 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../../handleGCR"
 import { Repository } from "typeorm"
-import ensureGCRForUser from "../ensureGCRForUser"
 import { safeGCRSave } from "./utils"
 
+/**
+ * The award goes on the account the block's edits are applied to, which
+ * commits with the block. Fetching the row again created it outside the
+ * block's transaction and left the award on a copy nobody saved.
+ */
 export async function applyAwardPoints(
     editOperation: any,
     accountGCR: GCRMain,
 ): Promise<GCRResult> {
-    const { account: address, amount, date } = editOperation
-    const account = await ensureGCRForUser(address)
+    const { amount, date } = editOperation
+    const account = accountGCR
 
     const challengeEntry = {
         date,

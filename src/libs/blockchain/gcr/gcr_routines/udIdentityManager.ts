@@ -2,7 +2,7 @@ import { ethers, namehash, JsonRpcProvider, verifyMessage } from "ethers"
 
 import log from "@/utilities/logger"
 import IdentityManager from "./identityManager"
-import ensureGCRForUser from "./ensureGCRForUser"
+import { readGCRForUser } from "./ensureGCRForUser"
 import { detectSignatureType } from "./signatureDetector"
 import { SolanaDomainResolver } from "./udSolanaResolverHelper"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
@@ -672,7 +672,7 @@ export class UDIdentityManager {
      * @returns Array of saved UD identities
      */
     static async getUdIdentities(address: string): Promise<SavedUdIdentity[]> {
-        const gcr = await ensureGCRForUser(address)
+        const gcr = await readGCRForUser(address)
         // REVIEW: Defensive initialization for backward compatibility
         return gcr.identities.ud || []
     }
@@ -685,7 +685,7 @@ export class UDIdentityManager {
      * @returns Identities object or specific identity type
      */
     static async getIdentities(address: string, key?: string): Promise<any> {
-        const gcr = await ensureGCRForUser(address)
+        const gcr = await readGCRForUser(address)
         if (key) {
             return gcr.identities[key]
         }
