@@ -116,8 +116,15 @@ export async function processPayload(
                 payload.params,
                 sender,
             )
-            log.info(`[RPC Call] Merged mempool from: ${sender}`)
-            log.info(JSON.stringify(res))
+            // Hashes only: the full response carries every mempool tx, and an
+            // L2PS entry node must not write tx payloads to INFO logs.
+            const merged = (res?.response as { txs?: { hash?: string }[] } | undefined)?.txs
+            log.info(
+                `[RPC Call] Merged mempool from: ${sender} (result ${res?.result}, ${Array.isArray(merged) ? merged.length : 0} txs)`,
+            )
+            if (Array.isArray(merged) && merged.length > 0) {
+                log.debug(`[RPC Call] Mempool merge tx hashes: ${merged.map(tx => tx?.hash).join(",")}`)
+            }
             return res
         }
         case "peerlist":

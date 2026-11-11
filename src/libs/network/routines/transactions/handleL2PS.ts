@@ -192,7 +192,9 @@ export default async function handleL2PS(
         // against OS-unit balance was a silent no-op post-fork.
         const balanceError = await checkInnerTxBalance(decryptedTx)
         if (balanceError) {
-            log.error(`[handleL2PS] Balance pre-check failed: ${balanceError}`)
+            // The reason carries the amount, which only subnet members may see.
+            log.info(`[handleL2PS] Balance pre-check refused ${l2psTx.hash}`)
+            log.debug(`[handleL2PS] Balance pre-check refused ${l2psTx.hash}: ${balanceError}`)
             return createErrorResponse(response, 400, balanceError)
         }
         return await processValidL2PSTransaction(
