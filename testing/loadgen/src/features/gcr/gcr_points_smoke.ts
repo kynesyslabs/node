@@ -26,9 +26,10 @@ function readTotalPoints(value: any): number | null {
 
 /**
  * Sudo methods take only the body-bound auth form, which signs the exact
- * request body, so the headers are built for `body` and nothing else.
+ * request body and names the receiving node, so the headers are built for
+ * `body` posted to `rpcUrl` and nothing else. Null when no sudo key is set.
  */
-async function maybeBuildSudoHeaders(body: string): Promise<Record<string, string> | null> {
+export async function buildSudoHeaders(body: string, rpcUrl: string): Promise<Record<string, string> | null> {
   const explicitMnemonic = (process.env.SUDO_MNEMONIC ?? "").trim()
   const walletFile = (process.env.SUDO_WALLET_FILE ?? "").trim()
   let mnemonic = explicitMnemonic
@@ -40,7 +41,6 @@ async function maybeBuildSudoHeaders(body: string): Promise<Record<string, strin
 
   if (!mnemonic) return null
 
-  const rpcUrl = normalizeRpcUrl((process.env.SUDO_RPC_URL ?? process.env.TARGETS?.split(",")[0] ?? "http://node-1:53551").trim())
   const demos = new Demos()
   await demos.connect(rpcUrl)
   await demos.connectWallet(mnemonic, { algorithm: "ed25519" })
@@ -116,10 +116,11 @@ export async function runGcrPointsSmoke() {
     params: [{ message: [{ address: recipientAddress, points: pointsDelta }] }],
   }
   // rpcPost sends JSON.stringify(awardRequest), the bytes signed here.
-  const sudoHeaders = await maybeBuildSudoHeaders(JSON.stringify(awardRequest))
+  const sudoHeaders = await buildSudoHeaders(JSON.stringify(awardRequest), rpcBootstrap)
   const awardRes = await rpcPost(rpcBootstrap, awardRequest, sudoHeaders ? { headers: sudoHeaders } : {})
   const awardJson = awardRes.json
-  const unauthorized = awardJson?.result === 401
+  // Skipped only without a sudo key; a signed call refused is a failure.
+  const unauthorized = !sudoHeaders && awardJson?.result === 401
 
   const settled = unauthorized
     ? { ok: true, attempts: 0, probes: before }

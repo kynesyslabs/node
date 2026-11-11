@@ -9,7 +9,8 @@
  * the exact body, the timestamp, the network's genesis hash and the public
  * key of the node called, so the call is refused by every other node; SDK
  * `demos.call` sends the older form and is refused with 401. Call each node
- * separately.
+ * separately. A remote node needs https; SUDO_CALL_ALLOW_HTTP=1 allows plain
+ * http to one, for a network path the operator trusts.
  *
  * Examples:
  *   --method rate-limit/unblock --params '["203.0.113.4"]'
@@ -41,11 +42,26 @@ function parseArgs(argv: string[]) {
     return args
 }
 
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
+
+/**
+ * Why `rpcUrl` may not carry a sudo call, or null. Over plain http to
+ * another host an observer reads the call and the answer, which for
+ * getCampaignData is data only the sudo key may see.
+ */
+export function cleartextRefusal(rpcUrl: string, allowHttp: boolean): string | null {
+    const url = new URL(rpcUrl)
+    if (url.protocol === "https:" || allowHttp || LOCAL_HOSTS.has(url.hostname)) return null
+    return `${rpcUrl} is plain http to a remote node: use https, or set SUDO_CALL_ALLOW_HTTP=1 for a trusted path`
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2))
     if (!SUDO_METHODS.has(args.method)) {
         throw new Error(`${args.method} is not a sudo method (${[...SUDO_METHODS].join(", ")})`)
     }
+    const refusal = cleartextRefusal(args.rpc, process.env.SUDO_CALL_ALLOW_HTTP === "1")
+    if (refusal) throw new Error(refusal)
     const mnemonic = (
         args["mnemonic-file"] ? readFileSync(args["mnemonic-file"], "utf8") : process.env.SUDO_MNEMONIC ?? ""
     ).trim()
@@ -75,8 +91,10 @@ async function main() {
 }
 
 if (import.meta.main) {
-    main().catch(error => {
+    try {
+        await main()
+    } catch (error) {
         console.error(error instanceof Error ? error.message : error)
         process.exit(2)
-    })
+    }
 }
