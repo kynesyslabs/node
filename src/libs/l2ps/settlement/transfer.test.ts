@@ -60,7 +60,7 @@ describe("openSettlementTransfer", () => {
         delete (old.content.data[1] as any).settlement
         const out = openSettlementTransfer(old, "enc")
         expect(out.ok).toBe(false)
-        if (out.ok) return
+        if (out.ok !== false) return
         expect(out.reason).toContain("old-format L2PS transfer")
         expect(out.reason).toContain("update the SDK")
     })

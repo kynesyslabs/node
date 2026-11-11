@@ -39,7 +39,7 @@ const t2 = signedTransfer({ from: ALICE, to: BOB.account, amount: 1n, fee: 2n, n
 
 function parsed(record = recordOf([t1, t2])) {
     const out = parseSettlement(batchTx(record))
-    if (!out.ok) throw new Error(out.reason)
+    if (out.ok === false) throw new Error(out.reason)
     return out.value
 }
 
