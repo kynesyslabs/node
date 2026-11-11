@@ -412,7 +412,7 @@
       set("signStatus", `Finalized ${out.solanaSignature}`, "ok");
       el("hashes").textContent = `Solana signature: ${out.solanaSignature}\nDemos tx hash:    ${out.demosTxHash}`
         + (out.evicts ? `\nStaking will close the seat of ${out.evicts}` : "");
-      el("command").textContent = `bun run validator:stake --amount 1000 --nft-proof ${out.solanaSignature}`;
+      el("command").textContent = `bun run validator:stake --nft-proof ${out.solanaSignature}`;
       el("result").hidden = false;
     } catch (e) {
       set("signStatus", `Failed: ${rpcFailure(e)}`, "err");
@@ -420,9 +420,17 @@
     updateSignButton();
   });
 
-  el("copy").addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(el("command").textContent); el("copy").textContent = "Copied"; }
-    catch { el("copy").textContent = "Select and copy manually"; }
+  // navigator.clipboard exists only on https or localhost; the page is
+  // usually opened over plain http, where execCommand still copies.
+  el("copy").addEventListener("click", () => {
+    const range = document.createRange();
+    range.selectNodeContents(el("command"));
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch {}
+    el("copy").textContent = copied ? "Copied" : "Select and copy manually";
   });
 
   discoverWallets();

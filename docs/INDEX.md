@@ -33,3 +33,4 @@ Structured, discoverable documentation for the Demos Network node.
 | `runbooks/health-endpoint.md` | runbook | 2026-05-14 | active |
 | `runbooks/dormant-mode.md` | runbook | 2026-05-14 | active |
 | `runbooks/database-migrations.md` | runbook | 2026-11-04 | active |
+| `runbooks/validator-staking.md` | runbook | 2026-11-11 | active |

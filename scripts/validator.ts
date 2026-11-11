@@ -1,4 +1,5 @@
 /* eslint-disable no-console */
+import "dotenv/config"
 import { existsSync, readFileSync } from "node:fs"
 
 import {
@@ -10,6 +11,7 @@ import {
 import { demToOs } from "@kynesyslabs/demosdk/utils"
 import { Demos, DemosTransactions, prepareXMPayload } from "@kynesyslabs/demosdk/websdk"
 
+import { parseNodeUrl } from "../src/config/nodeUrl"
 import {
     MEMO_PROGRAM_IDS,
     PROOF_MEMO_PREFIX,
@@ -383,11 +385,19 @@ async function cmdNftProof(): Promise<void> {
     }
     const signature = await sendNftProof(keypair, new PublicKey(mint), demosAddress, demos)
     console.log("Stake with:")
-    console.log(`  bun run validator:stake --amount <DEM> --nft-proof ${signature}`)
+    console.log(`  bun run validator:stake --nft-proof ${signature}`)
 }
 
 async function cmdStake(): Promise<void> {
-    const { amountDem, rpc, flags } = globalThis.validatorCtx
+    const { amountDem, flags } = globalThis.validatorCtx
+
+    // The seat records this node's public URL, not the node the tx goes through.
+    const connectionUrl = process.env.EXPOSED_URL?.trim() ?? ""
+    if (!parseNodeUrl(connectionUrl)) {
+        exitWith(
+            `EXPOSED_URL in .env is "${connectionUrl}"; the stake records it as this validator's connection URL and it must be http(s)://host:port`,
+        )
+    }
 
     let amountOs: string
     try {
@@ -437,9 +447,6 @@ async function cmdStake(): Promise<void> {
         console.log(yellow("No --nft-proof given: this only works as a top-up of an existing seat.\n"))
     }
 
-    // The validator's public endpoint. Reuse the configured RPC so local and
-    // devnet stacks work without an extra flag.
-    const connectionUrl = rpc
     const tx = await DemosTransactions.stake(amountOs, connectionUrl, demos, { nft })
     await submit(demos, tx, `Staking ${amountDem} DEM`)
 }
