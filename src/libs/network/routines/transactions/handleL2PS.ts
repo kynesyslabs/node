@@ -161,22 +161,16 @@ async function queuedTransfersOf(
     const queued: QueuedTransfer[] = []
     for (const row of rows) {
         if (row.encrypted_hash === transfer.txHash || !row.encrypted_payload) continue
-        if (!instances.has(row.l2ps_uid)) {
-            instances.set(row.l2ps_uid, await getL2PSInstance(row.l2ps_uid).catch(() => null))
-        }
+        // A row that can still settle but cannot be opened here would go
+        // uncounted; the sender is refused until it settles or is dropped.
+        if (!instances.has(row.l2ps_uid)) instances.set(row.l2ps_uid, await getL2PSInstance(row.l2ps_uid))
         const instance = instances.get(row.l2ps_uid)
-        if (!instance) continue
-        let inner: unknown
-        try {
-            inner = await instance.decryptTx(row.encrypted_payload as unknown as L2PSTransaction)
-        } catch {
-            continue
-        }
+        if (!instance) throw new Error(`subnet ${row.l2ps_uid} of a queued transfer is not loaded`)
+        const inner = await instance.decryptTx(row.encrypted_payload as unknown as L2PSTransaction)
         const opened = openSettlementTransfer(inner as never, row.encrypted_hash ?? "")
-        if (opened.ok) {
-            const { nonce, amount, fee } = opened.transfer
-            queued.push({ nonce, amount, fee })
-        }
+        if (opened.ok === false) throw new Error(`a queued transfer does not open: ${opened.reason}`)
+        const { nonce, amount, fee } = opened.transfer
+        queued.push({ nonce, amount, fee })
     }
     return queued
 }

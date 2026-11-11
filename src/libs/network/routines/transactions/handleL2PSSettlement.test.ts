@@ -312,6 +312,19 @@ describe("handleL2PS under l2psSettlement", () => {
         expect(JSON.stringify(response)).toContain("already queued")
     })
 
+    it("refuses the sender while a queued transfer that can still settle cannot be opened here", async () => {
+        queued(transfer({ nonce: 5n, amount: 1n }))
+        decrypted(transfer({ nonce: 6n }))
+        const open = decryptTx.getMockImplementation()!
+        decryptTx.mockImplementation(async (envelope: any) => {
+            if (envelope?.__inner) throw new Error("subnet key reloading")
+            return open(envelope)
+        })
+        const response = await handleL2PS(tx)
+        expect(response.result).toBe(400)
+        expect(JSON.stringify(response)).toContain("could not read")
+    })
+
     it("refuses a transfer the balance covers only without the sender's queued transfers", async () => {
         // 100 OS: two queued transfers take 2 x (45 + 3), this one needs 5 + 3 more.
         queued(transfer({ nonce: 5n, amount: 45n * OS }))
