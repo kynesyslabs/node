@@ -272,6 +272,12 @@ export async function verifySignature(
  * Calls that name this node (sudo calls) are dated at most a few seconds
  * ahead, which closes that gap; peer requests keep the wide window and are
  * only refused when dated before the start.
+ *
+ * Peer requests take the start as uptime, so a clock set back does not cut
+ * the node off. A sudo call takes the later of that and the start as the
+ * wall clock read it: with the clock set back, a call run by the previous
+ * process would otherwise fit again, so sudo calls wait until the clock
+ * passes the old reading.
  */
 function restartReplayError(ts: number, audienceBound: boolean, now = Date.now()): string | null {
     const startedAt = processStartMs(now)
@@ -282,8 +288,11 @@ function restartReplayError(ts: number, audienceBound: boolean, now = Date.now()
     if (ts > now + AUDIENCE_FUTURE_SLACK_MS) {
         return "Auth timestamp is ahead of this node's clock"
     }
-    if (ts <= startedAt + AUDIENCE_FUTURE_SLACK_MS) {
-        return "Auth timestamp too close to this node's start; sign the call again"
+    const sudoStart = Math.max(startedAt, PROCESS_START_MS)
+    if (ts <= sudoStart + AUDIENCE_FUTURE_SLACK_MS) {
+        return now < PROCESS_START_MS
+            ? `This node's clock was set back after it started; sudo calls resume after ${new Date(sudoStart + AUDIENCE_FUTURE_SLACK_MS).toISOString()}`
+            : "Auth timestamp too close to this node's start; sign the call again"
     }
     return null
 }

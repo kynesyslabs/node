@@ -358,12 +358,33 @@ describe("sudo methods", () => {
         expect(res.status).toBe(200)
     })
 
-    it("accepts a fresh call after the clock is set back past the node's start", async () => {
-        setSystemTime(new Date(NOW - 10 * 60_000))
-        try {
+    describe("after the clock is set back past the node's start", () => {
+        beforeAll(() => setSystemTime(new Date(NOW - 10 * 60_000)))
+        afterAll(() => setSystemTime(new Date(NOW)))
+
+        it("still accepts fresh peer requests", async () => {
+            const { body, headers } = await capture(hello("http://me.example:53550"))
+            const res = await deliver(body, headers)
+            expect(res.status).toBe(200)
+        })
+
+        it("refuses sudo calls, which its replay memory could not tell from ones run before a restart", async () => {
             const body = JSON.stringify(award)
             const res = await deliver(body, await operatorHeaders(body))
-            expect(res.status).toBe(200)
+            expect(res.status).toBe(401)
+            expect(dispatched).toEqual([])
+        })
+    })
+
+    it("refuses a sudo call accepted just before a restart, replayed once the clock is set back", async () => {
+        // Accepted at S - 1 s by the old process; this one started at S and,
+        // a minute later, has its clock set back by that minute.
+        setSystemTime(new Date(PROCESS_START_MS))
+        try {
+            const body = JSON.stringify(award)
+            const res = await deliver(body, await operatorHeaders(body, OUR_KEY, PROCESS_START_MS - 1_000))
+            expect(res.status).toBe(401)
+            expect(dispatched).toEqual([])
         } finally {
             setSystemTime(new Date(NOW))
         }
