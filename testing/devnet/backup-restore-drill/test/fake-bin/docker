@@ -19,7 +19,9 @@ FAKE_DUMP_CUT (the dump ends after its table of contents: reading the whole
 archive fails),
 FAKE_DOWN_FAIL (compose down removes nothing and exits 1), FAKE_DOWN_LEAVE
 (compose down exits 0 but leaves the volumes whose name contains it),
-FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3), FAKE_NO_FLOOR_LOG (a starting
+FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3; `none`: the count prints 0 and
+exits 1, as `grep -c` does on a src/migrations with no .ts or .js file in it,
+or none at all), FAKE_NO_FLOOR_LOG (a starting
 node does not log the restart signing floor), FAKE_LOG_FILL (lines `docker logs`
 prints after a container's log, 0; a reader that stops early kills it with
 SIGPIPE, as it does the docker CLI), FAKE_READ_OUTAGE (seconds from the
@@ -38,8 +40,12 @@ started again after its stop trails the chain by that many blocks, from its star
 or with :signed from the first read of its signing record after it), FAKE_OTHER_HASH
 (node services that answer every block with another hash), FAKE_RESTORE_SHORT (a
 stats row, e.g. transactions or max_block, that is 0 in a restored database),
-FAKE_IDENTITY_CHANGED (a node started again after its stop has another identity
-file), FAKE_HALT_MARKER / FAKE_FOREIGN_LOG (such a node writes a .halted marker /
+FAKE_STATS_ERROR (<row>:<when>: the statistics query fails on that row's table
+in the drilled node's database before the backup's pg_dump (when=before), after it
+(after), or in a restored database (restored); psql then prints the other rows and
+exits 0, or with ON_ERROR_STOP=1 stops there, exit 3), FAKE_IDENTITY_CHANGED
+(a node started again after its stop has another identity file),
+FAKE_HALT_MARKER / FAKE_FOREIGN_LOG (such a node writes a .halted marker /
 logs a foreign-signature line), FAKE_LOGS_FAIL (`docker logs` of such a node
 fails), FAKE_ISO_KEY_OF (a volume name: node-iso's state volume holds a copy of
 that volume's identity file), FAKE_ISO_UNREADABLE (reading node-iso's identity
@@ -361,6 +367,9 @@ def run_cmd(a):
     if st.get("empty"):
         sys.exit(0)
     if "src/migrations" in script:
+        if os.environ.get("FAKE_MIGRATION_FILES") == "none":
+            print("0")
+            sys.exit(1)
         out(os.environ.get("FAKE_MIGRATION_FILES", "3"))
     if "uid 1000 cannot read" in script:
         fail("uid 1000 cannot read /in/peerlist.json" if os.environ.get("FAKE_UNREADABLE") else "", 1 if os.environ.get("FAKE_UNREADABLE") else 0)
@@ -504,8 +513,15 @@ def exec_cmd(a):
             out("0" if "pg_tables" in q else ("1" if "select 1" in q else ""))
         if "-f" in cmd:
             sys.stdin.read()
+            erow, _, ewhen = os.environ.get("FAKE_STATS_ERROR", "").partition(":")
+            when = "restored" if pg["db"] == "restored" else ("after" if "head_at_dump" in st else "before")
             for line in (f"max_block|{dbhead}", f"blocks|{dbhead + 1}", "fork_state|1", "migrations|3", f"transactions|{dbhead * 2}"):
                 k = line.split("|")[0]
+                if k == erow and ewhen == when:
+                    print(f"psql:<stdin>:4: ERROR:  permission denied for table {k}", file=sys.stderr)
+                    if "ON_ERROR_STOP=1" in cmd:
+                        sys.exit(3)
+                    continue
                 print(f"{k}|0" if pg["db"] == "restored" and k == os.environ.get("FAKE_RESTORE_SHORT") else line)
             sys.exit(0)
         q = cmd[cmd.index("-tAc") + 1]

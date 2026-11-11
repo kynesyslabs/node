@@ -243,7 +243,10 @@ a read-only mount that the script's `mv` could not move), TLSNotary is off, and
    so the run names the ones it found and exits 2 without creating any
    container or volume. A `docker ps` or `docker volume ls` listing of the
    project that fails (exit status not 0) shows nothing about what exists: the
-   run names the command and exits 2 the same way.
+   run names the command and exits 2 the same way. The count of migration
+   files in the image's `src/migrations`, which the schema check compares with
+   after the wipe, has to succeed and be at least 1; else the run prints its
+   exit status and output and exits 2 the same way.
 2. Bring-up: postgres x4, migrations on each database (manual step, see
    below), nodes one at a time, wait until every node is at height `H0`.
    Record node X's head height and block hash, and the SHA-256 of its identity
@@ -255,8 +258,12 @@ a read-only mount that the script's `mv` could not move), TLSNotary is off, and
    (reads the whole archive, as `database-migrations.md` step 1 requires;
    `--list` reads only the table of contents) and `sha256sum` on the dump. If
    the dump is empty or cannot be read to its end, the run exits 2 before the
-   wipe. The database only: the identity and signing state files are not
-   copied, they stay on node X's state volume, which the wipe keeps. Backing
+   wipe. The stats run with `ON_ERROR_STOP=1`; if either snapshot's query
+   fails, or lacks a numeric `max_block`, `blocks`, `transactions`,
+   `fork_state` or `migrations` row (what the restore is checked against), the
+   run names them and exits 2 before the wipe. The database only: the
+   identity and signing state files are not copied, they stay on node X's
+   state volume, which the wipe keeps. Backing
    them up is `validator-key.md`, section "Signing state files".
 4. **A2** copy the staging volume to `$OUT_DIR/backup/` on the host
    (`docker cp`), check the SHA-256 there.
@@ -322,7 +329,7 @@ node X stopped or restarted during the isolated drill".
 | node X signs | see D above |
 | other nodes never stalled | every 5 s the run reads the head of each watched node (the other nodes in `rejoin`, all four validators in `isolated`) and keeps the lowest and the highest; a head read in which one of them does not answer counts as failed. So the slowest validator decides, one node rising alone does not pass, and nor does a slow one catching up while the others make no new block. With the devnet's quorum (below), the longest gap between increases of the lowest head, or of the highest, while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. It also needs at least one new block on every watched validator: the lowest head at the window's last successful read must be above the highest at its first, however short the window; a window without one fails with "no new block on the watched validators between `<t0>` and `<t1>`" (unix times, as in `logs/monitor.tsv`). No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows in the dump's counts and equal; same table set. Written after the restore's migration, before node X starts again |
-| schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations`, of which there must be at least one counted |
+| schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations`, of which there must be at least one counted (preflight stops with exit 2 otherwise) |
 | one instance of the key | asserted before the single start (a `docker ps` listing that fails stops the run); written after it |
 | isolated node reaches the expected head, on the validators' chain | (`isolated`, `ISO_NODE=1`) within `REJOIN_TIMEOUT`, node-iso's head is at or above the restored database's head and within 2 blocks of the highest validator's, and node-iso and every validator give one non-empty block hash at the highest height all of them have, which must be above the database's head |
 | isolated node holds no copy of node X's key | (`isolated`) node-iso's mounts are read and include its own state volume and no identity or state volume of node X, and the identity file on node-iso's state volume, read as a SHA-256 (64 hex), differs from node X's step-2 one; an identity that cannot be read, or a read that gives no SHA-256, fails it |
@@ -399,7 +406,11 @@ declares (exit 2, no `up`, no `down`, the volume untouched), a `docker ps` or
 naming the command, no `up`, no `down`, the project's container or volume
 left in place), an owner read of node X's state dir that fails at stop or
 after the wipe (exit 2, before the wipe or before the restore), a dump that
-cannot be read to its end (exit 2 in phase A, nothing wiped), a wipe that fails,
+cannot be read to its end (exit 2 in phase A, nothing wiped), an SQL error in
+the stats of either backup snapshot (exit 2 in phase A naming the missing rows,
+nothing wiped; in a restored database the restore's checks fail instead), a
+migration file count that fails or is 0 (exit 2 in preflight, nothing
+created), a wipe that fails,
 leaves an entry or removes a signing state file (exit 2, node X not started
 again), a commit lock or prevote record older than at stop (the signing state
 check fails), head reads that fail for longer than `STALL_LIMIT`, and watched

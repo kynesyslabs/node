@@ -328,6 +328,37 @@ if sel dump-cut; then
     no_call 'stop -t [0-9]+ node-4$' "the stop of node-4"
     torn_down
 fi
+not_wiped() { # nothing of node 4 removed: the run stopped before phase B
+    no_call 'stop -t [0-9]+ node-4$' "the stop of node-4"
+    no_call 'rm -f -v (node|pg)-4' "the removal of node-4 or pg-4"
+    no_call 'volume rm' "volume rm (no database wiped)"
+    no_call 'find \. -mindepth 1' "the state wipe"
+    no_out 'PHASE B ' "a phase B row"
+}
+if sel stats-error; then
+    # r8 F1: the statistics query fails on fork_state, mid-file, in the snapshot taken before the
+    # backup's pg_dump. psql stops there; the rows from it on are missing, and the restore would be
+    # checked against them: the run stops in phase A with the rows named, before anything is removed
+    go stats-error-before FAKE_STATS_ERROR=fork_state:before
+    want_rc 2
+    want_out "ERROR: the statistics of node 4's database for the backup \(stats\.before\.txt\) are incomplete: psql exit 3; no count of: fork_state migrations transactions\." "the missing rows named"
+    no_call 'pg_dump' "pg_dump (the run stops at the first snapshot)"
+    not_wiped
+    torn_down
+    # the same in the snapshot taken after the pg_dump
+    go stats-error-after FAKE_STATS_ERROR=transactions:after
+    want_rc 2
+    want_out "ERROR: the statistics of node 4's database for the backup \(stats\.after\.txt\) are incomplete: psql exit 3; no count of: transactions\." "the missing row named"
+    not_wiped
+    torn_down
+    # in the restored database the run goes on: the rows left out fail the restore's checks
+    go stats-error-restored FAKE_STATS_ERROR=fork_state:restored
+    want_rc 1
+    want_out 'CHECK FAIL: restore: restored counts match the dump \(.* fork_state=\? != dump 1' "the missing restored row: FAIL"
+    only_fails_among 'restore: restored counts match the dump' "schema at the image's head"
+    want_out 'RESULT FAIL: rejoin drill' "result FAIL"
+    torn_down
+fi
 if sel wipe-owner; then
     go wipe-owner FAKE_WIPE_CHANGES_OWNER=1
     want_rc 2
@@ -448,6 +479,21 @@ if sel migrate-timeout; then
     go migrate-timeout-invalid SMOKE=1 MIGRATE_TIMEOUT=0
     want_rc 2
     want_out 'MIGRATE_TIMEOUT must be at least 1' "timeout 0 (no limit) refused"
+fi
+if sel migration-count; then
+    # r8 F2: the count of the image's migration files prints 0 and exits 1 (grep -c, no match), or
+    # prints 0 and exits 0. The schema check after the wipe compares with it: preflight stops
+    # before anything is created. Each: FAKE_MIGRATION_FILES, the count's exit code, what it printed
+    for c in "none 1 0" "0 0 0"; do
+        read -r v code printed <<< "${c}"
+        go "migration-count-${v}" FAKE_MIGRATION_FILES="${v}"
+        want_rc 2
+        want_out "ABORT: counting the migration files in [^ ]+ exited ${code}, printed '${printed}'" "the failed or zero count named"
+        no_call 'compose .* (up|down) ' "compose up or down"
+        if jq -e '.cleanup == "not needed, the compose project was never created"' "${CDIR}"/runs/*/timings.json > /dev/null; then
+            ok "timings.json: no cleanup needed"
+        else bad "timings.json cleanup is not 'not needed'"; fi
+    done
 fi
 
 # ── what the rejoin checks refuse: one fault each, the full drill otherwise ──

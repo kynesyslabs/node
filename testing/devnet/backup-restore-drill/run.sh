@@ -515,11 +515,31 @@ SELECT format('SELECT %L || ''|'' || count(*) FROM %I', tablename, tablename)
   FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename
 \gexec
 SQL
-stats_of() { # $1 postgres name
-    pgx "$1" psql -U demosuser -d "$(db_of "$1")" -tA -f - < "${STATS_SQL}" | sort
+stats_of() { # $1 postgres name. An SQL error stops psql there, exit 3, the rows after it missing
+    pgx "$1" psql -U demosuser -d "$(db_of "$1")" -v ON_ERROR_STOP=1 -tA -f - < "${STATS_SQL}" | sort
 }
 stat_of() { awk -F'|' -v k="$2" '$1 == k { print $2 }' "$1"; }
 in_range() { is_num "$1" && is_num "$2" && is_num "$3" && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
+# One of the backup's two snapshots of node X's counts, $1 the file in BACKUP_DIR. The restore
+# is checked against them: a failed query, or a row check_restored_stats reads that is missing
+# or not a number, stops the run here, before phase B removes anything
+backup_stats() {
+    local rc=0 t v missing=""
+    stats_of "${X_NODE}" > "${BACKUP_DIR}/$1" || rc=$?
+    for t in blocks fork_state max_block migrations transactions; do
+        v="$(stat_of "${BACKUP_DIR}/$1" "${t}")"
+        is_num "${v}" || missing="${missing} ${t}${v:+=${v}}"
+    done
+    [ "${rc}" = 0 ] && [ -z "${missing}" ] \
+        || die "the statistics of node ${X_NODE}'s database for the backup ($1) are incomplete: psql exit ${rc}; no count of:${missing:- (none missing)}. The restore is checked against them; nothing was removed"
+}
+# A restored database's counts: an SQL error (exit 3) leaves its rows out of the file, and the
+# checks fail on them; any other failure is returned
+restored_stats_of() { # $1 postgres name
+    local rc=0
+    stats_of "$1" || rc=$?
+    [ "${rc}" = 3 ] || return "${rc}"
+}
 
 # The restored database against the counts taken before and after the dump.
 # $1 label, $2 restored stats file. blocks and transactions only grow, so the
@@ -677,8 +697,12 @@ PG_IMAGE_ID="$(docker image inspect "${PG_IMAGE}" --format '{{.Id}}')"
 META[node_image_id]="${NODE_IMAGE_ID:7:12}"
 META[pg_image_id]="${PG_IMAGE_ID:7:12}"
 say "images: node ${NODE_IMAGE} (${NODE_IMAGE_ID:7:12}), postgres ${PG_IMAGE} (${PG_IMAGE_ID:7:12}); no other image is used"
-# A failed count, or a count of none (grep -c then exits 1), is "unreadable": the schema check fails on it
-MIGRATION_FILES="$(docker run --rm --entrypoint sh "${NODE_IMAGE}" -c 'ls src/migrations | grep -cE "[.](ts|js)$"')" || MIGRATION_FILES=unreadable
+# The schema check compares the restored database with this count, after the wipe: a failed count,
+# or a count of none (grep -c then exits 1), stops the run here, before anything is created
+mig_rc=0
+MIGRATION_FILES="$(docker run --rm --entrypoint sh "${NODE_IMAGE}" -c 'ls src/migrations | grep -cE "[.](ts|js)$"')" || mig_rc=$?
+[ "${mig_rc}" = 0 ] && is_num "${MIGRATION_FILES}" && [ "${MIGRATION_FILES}" -gt 0 ] \
+    || abort_pre "counting the migration files in ${NODE_IMAGE} exited ${mig_rc}, printed '${MIGRATION_FILES}': the schema check after the restore needs a count of at least 1. No container or volume was created"
 META[migration_files_in_image]="${MIGRATION_FILES}"
 say "migration files in the node image: ${MIGRATION_FILES}"
 if [ "${EXPECT_PAUSE}" = 1 ]; then
@@ -1008,10 +1032,10 @@ if [ "${VARIANT}" = rejoin ]; then start_monitor "${OTHERS[@]}"; else start_moni
 step 05-backup
 phase_begin
 psql_q "${X_NODE}" 'select 1' > /dev/null || die "cannot query pg-${X_NODE}"
-stats_of "${X_NODE}" > "${BACKUP_DIR}/stats.before.txt"
+backup_stats stats.before.txt
 DUMP_NAME="node${X_NODE}.dump"
 pgx "${X_NODE}" sh -c "pg_dump -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Fc -f /backup/${DUMP_NAME}" >> "${STEP_LOG}" 2>&1 || die "pg_dump failed"
-stats_of "${X_NODE}" > "${BACKUP_DIR}/stats.after.txt"
+backup_stats stats.after.txt
 # The dump has to be not empty and readable to its end before it counts as a backup,
 # and before the wipe. pg_restore --list reads only the table of contents, so a dump
 # cut short after it would pass (docs/runbooks/database-migrations.md, step 1)
@@ -1127,7 +1151,7 @@ if [ "${VARIANT}" = rejoin ]; then
     # The whole dump into an empty database (docs/runbooks/database-migrations.md, "Roll back")
     pgx "${X_NODE}" sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < "${DUMP_FILE}" >> "${STEP_LOG}" 2>&1 \
         || die "pg_restore failed"
-    stats_of "${X_NODE}" > "${OUT_DIR}/stats.restored.txt"
+    restored_stats_of "${X_NODE}" > "${OUT_DIR}/stats.restored.txt"
     if run_migrations "${X_NODE}"; then
         MIGRATED=1
     else
@@ -1136,7 +1160,7 @@ if [ "${VARIANT}" = rejoin ]; then
         if [ "${MIGRATE_REQUIRED}" = 1 ]; then die "migrations failed on the restored database (MIGRATE_CMD='${MIGRATE_CMD}'; see 07-restore.log)"; fi
         say "WARNING: migrations failed, continuing (MIGRATE_REQUIRED=0)"
     fi
-    stats_of "${X_NODE}" > "${OUT_DIR}/stats.migrated.txt"
+    restored_stats_of "${X_NODE}" > "${OUT_DIR}/stats.migrated.txt"
     # The restored database against the dump, and the schema against the image: checked
     # here, where they are read
     check_restored_stats "restore" "${OUT_DIR}/stats.restored.txt"
@@ -1362,12 +1386,12 @@ else
     [ "${tables}" = 0 ] || die "the isolated database is not empty"
     pgx iso sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < "${DUMP_FILE}" >> "${STEP_LOG}" 2>&1 \
         || die "pg_restore into the isolated database failed"
-    stats_of iso > "${OUT_DIR}/stats.restored.txt"
+    restored_stats_of iso > "${OUT_DIR}/stats.restored.txt"
     if run_migrations iso; then MIGRATED=1; else
         MIGRATED=0
         if [ "${MIGRATE_REQUIRED}" = 1 ]; then die "migrations failed on the isolated database (see 06-isolated-restore.log)"; fi
     fi
-    stats_of iso > "${OUT_DIR}/stats.migrated.txt"
+    restored_stats_of iso > "${OUT_DIR}/stats.migrated.txt"
     phase_end IC "isolated restore: start postgres, pg_restore, migrations"
     check_restored_stats "isolated restore" "${OUT_DIR}/stats.restored.txt"
     mig_rows="$(stat_of "${OUT_DIR}/stats.migrated.txt" migrations)"
