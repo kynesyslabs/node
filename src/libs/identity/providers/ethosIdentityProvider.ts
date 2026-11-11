@@ -27,17 +27,9 @@ export class EthosIdentityProvider {
 
         this.assertWalletLinked(account, chain, subchain, normalizedWallet)
 
-        const existing = this.getExistingIdentity(
-            account,
-            chain,
-            subchain,
-            normalizedWallet,
-        )
-
-        if (existing) {
-            return existing
-        }
-
+        // Always the live score, even for a wallet already linked: a wallet
+        // signs this into its assign, and admission compares it with what
+        // Ethos reports now, so a stored score could never pass a refresh.
         const apiClient = EthosApiClient.getInstance()
         const payload = await apiClient.getScore(normalizedWallet)
 
@@ -109,19 +101,5 @@ export class EthosIdentityProvider {
         }
 
         return address.trim()
-    }
-
-    private static getExistingIdentity(
-        account: GCRMain,
-        chain: string,
-        subchain: string,
-        walletAddress: string,
-    ): SavedEthosIdentity | undefined {
-        const ethosIdentities = account.identities?.ethos || {}
-        const normalizedWallet = this.normalizeAddress(walletAddress, chain)
-        return ethosIdentities?.[chain]?.[subchain]?.find(identity => {
-            const storedAddress = this.normalizeAddress(identity.address, chain)
-            return storedAddress === normalizedWallet
-        })
     }
 }

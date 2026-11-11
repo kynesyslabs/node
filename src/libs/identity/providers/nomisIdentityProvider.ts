@@ -34,17 +34,9 @@ export class NomisIdentityProvider {
 
         this.assertWalletLinked(account, chain, subchain, normalizedWallet)
 
-        const existing = this.getExistingIdentity(
-            account,
-            chain,
-            subchain,
-            normalizedWallet,
-        )
-
-        if (existing) {
-            return existing
-        }
-
+        // Always the live score, even for a wallet already linked: a wallet
+        // signs this into its assign, and admission compares it with what
+        // Nomis reports now, so a stored score could never pass a refresh.
         const apiClient = NomisApiClient.getInstance()
         const payload = await apiClient.getWalletScore(
             normalizedWallet,
@@ -138,19 +130,5 @@ export class NomisIdentityProvider {
         }
 
         return address.trim()
-    }
-
-    private static getExistingIdentity(
-        account: GCRMain,
-        chain: string,
-        subchain: string,
-        walletAddress: string,
-    ): SavedNomisIdentity | undefined {
-        const nomisIdentities = account.identities?.nomis || {}
-        const normalizedWallet = this.normalizeAddress(walletAddress, chain)
-        return nomisIdentities?.[chain]?.[subchain]?.find(identity => {
-            const storedAddress = this.normalizeAddress(identity.address, chain)
-            return storedAddress === normalizedWallet
-        })
     }
 }
