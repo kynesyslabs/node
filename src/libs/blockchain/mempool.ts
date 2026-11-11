@@ -1155,6 +1155,9 @@ export default class Mempool {
         // standard check never accepts. Judged here by the rule block and
         // sync verification apply, every member pools a peer's batch; refused,
         // only its producer forms a block with it and no block is agreed on.
+        // Not behind l2psSettlement: what a member pools is no apply rule,
+        // and block and Sync verification judge relay txs this way on both
+        // sides of the fork, so the old refusal stalled pre-fork batches too.
         const standardTxs = unseenTransactions.filter(tx => !isSystemRelayTx(tx))
         const standardResults = await TxValidatorPool.getInstance().validate(
             standardTxs,
