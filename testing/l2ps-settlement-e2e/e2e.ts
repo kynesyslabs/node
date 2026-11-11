@@ -259,7 +259,10 @@ await step("02-failures", async () => {
     const sends: SendResult[] = []
     const refused = async (tag: string, s: SendResult, pattern: RegExp, what: string) => {
         sends.push(s)
-        check(`02.${tag}`, `${what} is refused at admission`, !s.accepted && pattern.test(s.message), `${s.stage}: ${s.message.slice(0, 300)}`)
+        // A node's answer only: an SDK build error can match the same words
+        // without the transfer ever reaching admission.
+        const answered = s.stage === "confirm" || s.stage === "broadcast"
+        check(`02.${tag}`, `${what} is refused at admission`, !s.accepted && answered && pattern.test(s.message), `${s.stage}: ${s.message.slice(0, 300)}`)
     }
     const fr = W.fr.address
     await refused("badsig", await send("bad-signature", "fsig", n1, { to: fr, amount: DEM, chainId: chainId + 1 }), /signature/i,
@@ -349,6 +352,14 @@ await step("03-restart", async () => {
     const killedAt = await tip(n1)
     const killed = compose(["kill", "node-2"])
     say(`node-2 killed at height ${killedAt}: ${killed.out.slice(0, 200)}`)
+    // A node-2 that is still up would let every check below pass without
+    // the restart they are about.
+    let down = killed.ok
+    for (const t0 = Date.now(); down && Date.now() - t0 < 30_000 && (await tip(n2)) >= 0; ) await sleep(1000)
+    down = down && (await tip(n2)) < 0
+    if (!check("03.killed", "node-2 is down before the restart is measured", down, killed.out.slice(0, 200))) {
+        throw new Error("node-2 could not be stopped")
+    }
     const others = NODES.filter(n => n !== n2)
     const during = await waitBlocks(4, others, 240_000)
     check("03.liveness", "the other 3 validators keep producing blocks while node-2 is down", during.every(t => t >= killedAt + 4),
