@@ -181,6 +181,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "telegramSenderBinding",
     "xmRemoveCanonical",
     "tokenStakingGate",
+    "l2psSettlement",
 ]
 
 /**

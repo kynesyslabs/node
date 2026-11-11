@@ -27,6 +27,7 @@ import type {
     TokenStakingConfig,
     TelegramSenderBindingConfig,
     XmRemoveCanonicalConfig,
+    L2psSettlementConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     UnpinnedCommitteeConfig,
@@ -431,6 +432,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.xmRemoveCanonical =
                 config as XmRemoveCanonicalConfig
             return
+        case "l2psSettlement":
+            getSharedState.forkConfig.l2psSettlement =
+                config as L2psSettlementConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -594,6 +599,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as TelegramSenderBindingConfig
         case "xmRemoveCanonical":
             return base as XmRemoveCanonicalConfig
+        case "l2psSettlement":
+            return base as L2psSettlementConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
