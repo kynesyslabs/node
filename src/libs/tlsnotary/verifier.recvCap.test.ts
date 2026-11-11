@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test"
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test"
 
 const sharedState: {
     forkConfig: Record<string, { activationHeight: number | null }>
@@ -55,8 +55,8 @@ beforeEach(() => {
 })
 
 describe("TLSN revealedRecv size cap", () => {
-    it("matches the notary's default cap on received data", () => {
-        expect(MAX_REVEALED_RECV_BYTES).toBe(65536)
+    it("matches the upstream notary-server default cap on received data", () => {
+        expect(MAX_REVEALED_RECV_BYTES).toBe(16384)
     })
 
     it("uses the mocked shared state (fork refusal when scheduled)", async () => {
@@ -83,14 +83,33 @@ describe("TLSN revealedRecv size cap", () => {
         expect(result.message).toContain(OVERSIZED_MESSAGE)
     })
 
-    it("refuses an oversized payload before element checks and hashing", async () => {
+    it("refuses an oversized payload before hashing it", async () => {
+        // Valid bytes and a correct hash, so only the size gate can refuse.
+        // The hash is computed before the spy is installed.
+        const claim = claimFor(
+            githubResponse("victim", "1234", MAX_REVEALED_RECV_BYTES + 1),
+            "victim",
+            "1234",
+        )
+        const hashSpy = spyOn(Hashing, "sha256Bytes")
+        try {
+            const result = await verifyTLSNProof(claim)
+
+            expect(result.success).toBe(false)
+            expect(result.message).toContain(OVERSIZED_MESSAGE)
+            expect(hashSpy).not.toHaveBeenCalled()
+        } finally {
+            hashSpy.mockRestore()
+        }
+    })
+
+    it("reports the size refusal for an oversized payload with an out-of-range element", async () => {
         const claim = claimFor(
             new Uint8Array(MAX_REVEALED_RECV_BYTES + 1),
             "victim",
             "1234",
-        ) as unknown as { revealedRecv: number[]; recvHash: string }
+        ) as unknown as { revealedRecv: number[] }
         claim.revealedRecv[0] = 256
-        claim.recvHash = "00".repeat(32)
 
         const result = await verifyTLSNProof(claim as never)
 

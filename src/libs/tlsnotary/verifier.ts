@@ -93,13 +93,15 @@ function isHex(value: string): boolean {
 /**
  * Largest `revealedRecv` accepted, in bytes. The JSON scans below are
  * quadratic in their input and run at admission and in block apply, so the
- * size is refused before anything reads the bytes. 65536 is the notary's
- * default cap on received data (`DEFAULT_MAX_RECV_DATA` in
- * `src/features/tlsnotary/constants.ts`), so a disclosed response does not
- * normally exceed it. It is a fixed literal, not `TLSNOTARY_MAX_RECV_DATA`,
- * because validators must agree on it.
+ * size is refused before anything reads the bytes. 16384 is the upstream
+ * notary-server default `max_recv_data`, which the default docker mode
+ * keeps (`tlsnotary/docker-compose.yml` overrides only the sent limit).
+ * Notary settings do not bound this input anyway: a claimant can submit any
+ * bytes. A genuine ffi-mode proof over 16384 bytes (`DEFAULT_MAX_RECV_DATA`
+ * is 65536 there) is refused. It is a fixed literal, not
+ * `TLSNOTARY_MAX_RECV_DATA`, because validators must agree on it.
  */
-export const MAX_REVEALED_RECV_BYTES = 65536
+export const MAX_REVEALED_RECV_BYTES = 16384
 
 function isOversizedRevealedRecv(revealedRecv: number[]): boolean {
     return (
