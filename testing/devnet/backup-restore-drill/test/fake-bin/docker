@@ -3,7 +3,10 @@
 volumes in $FAKE_DIR/state.json and answers only what run.sh asks: compose
 up/stop/rm/ps/run/down, exec (curl RPC, psql, pg_*), run (probes and helpers),
 cp, logs, inspect, ps, volume, network (it has none). The chain is a clock:
-head = (now - first node start) * FAKE_RATE. A volume a test puts in
+head = (now - first node start) * FAKE_RATE, until the drilled node starts again
+after the restore, or node-iso starts: from then on it stays at the head it had
+then, so reads made one after another agree however long they take
+(FAKE_KEEP_RISING: it keeps rising). A volume a test puts in
 state.json beforehand with project "" is one without the compose labels.
 
 Knobs (environment): FAKE_RATE (blocks per second, 3), FAKE_ROOT_VOLS (volume
@@ -64,7 +67,10 @@ exits 0: node RPC, commands in postgres containers, helper scripts, `docker logs
 `docker ps` / `docker volume ls` filtered on the compose project label print
 nothing and exit 1, as with a daemon that does not answer), FAKE_OWNER_READ_FAIL
 (n: the n-th read of a state dir's owners, `stat -c` in a helper, fails with
-exit 125). Every call is appended to
+exit 125), FAKE_FLAKY_AHEAD (<blocks>:<service>[,...]: once the drilled node,
+started again, answered a head read, those node services do not answer a head
+read made while it has answered an odd number of them, and answer the others
+that many blocks above the chain head). Every call is appended to
 $FAKE_DIR/calls.log; compose down writes to $FAKE_DIR/lock-at-down whether
 $LOCK_DIR/<project>.lock is held at that moment.
 
@@ -108,6 +114,8 @@ def save(st):
 
 
 def head(st):
+    if "still_at" in st:
+        return st["still_at"]
     return 0 if not st["t0"] else int((time.time() - st["t0"]) * RATE)
 
 
@@ -190,6 +198,8 @@ def start_container(st, compose, project, svc, c):
                 vol["files"].append(fn)
         # started again after its stop (the drilled node after the restore)
         c["restarted"] = "stop_head" in vol
+        if (c["restarted"] or svc == "node-iso") and not os.environ.get("FAKE_KEEP_RISING") and "still_at" not in st:
+            st["still_at"] = head(st)
         if c["restarted"] and os.environ.get("FAKE_HALT_MARKER"):
             vol["files"].append("node.identity.signed.json.halted")
         if c["restarted"] and os.environ.get("FAKE_FOREIGN_LOG"):
@@ -491,6 +501,14 @@ def exec_cmd(a):
             lag, _, when = os.environ.get("FAKE_REJOIN_LAG", "").partition(":")
             if lag and c.get("restarted") and (when != "signed" or c.get("signed_seen")):
                 h = max(0, h - int(lag))
+            ahead, _, flaky = os.environ.get("FAKE_FLAKY_AHEAD", "").partition(":")
+            if ahead and c.get("restarted"):
+                st["x_reads"] = st.get("x_reads", 0) + 1
+                save(st)
+            elif ahead and svc in flaky.split(",") and "x_reads" in st:
+                if st["x_reads"] % 2:
+                    fail("curl: (28) Operation timed out", 28)
+                h += int(ahead)
             out(json.dumps({"result": 200, "response": h}))
         bn = d["data"]["blockNumber"]
         bh = f"other{bn}" if svc in envlist("FAKE_OTHER_HASH") else f"hash{bn}"

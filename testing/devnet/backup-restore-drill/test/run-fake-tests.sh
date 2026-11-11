@@ -286,7 +286,7 @@ if sel full-isolated; then
     want_rc 0
     want_out 'CHECK PASS: the validators kept forging during the drill' "the validators' head rose: stall check PASS"
     want_out "CHECK PASS: isolated node holds no copy of node 4's key \(own state volume mounted, no identity or state volume of node 4, different identity \(sha256 [0-9a-f]{12}\.\. vs [0-9a-f]{12}\.\.\)\)" "node-iso holds no copy of the key"
-    want_out "CHECK PASS: isolated node reaches the expected head, on the validators' chain \(head [0-9]+ >= DB head [0-9]+, network [0-9]+; block ([0-9]+) hash\1\.\. on nodes iso 1 2 3 4\)" "node-iso caught up, one hash on it and the four validators"
+    want_out "CHECK PASS: isolated node reaches the expected head, on the validators' chain \(DB head [0-9]+; head [0-9]+ vs others [0-9]+; block ([0-9]+) hash\1\.\. on nodes iso 1 2 3 4\)" "node-iso caught up, one hash on it and the four validators"
     want_out "CHECK PASS: node 4's key is held by only the one container on its state volume \(one running node-4 container, the one started at bring-up, and the only running container on its state volume\)" "node 4's key: one holder"
     want_out 'CHECK INFO: whether node 4 stopped or restarted during the isolated drill \(not shown: ' "the stop or restart row is INFO"
     no_out 'untouched' "an 'untouched' row"
@@ -501,7 +501,7 @@ if sel rejoin-never; then
     # node 4 starts again at head 0 and never comes within 2 blocks
     go rejoin-never FAKE_REJOIN_LAG=100000 REJOIN_TIMEOUT=5
     want_rc 1
-    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(head 0 vs others [0-9]+ after 5s\)" "the rejoin fails"
+    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(after 5s: head 0 vs others [0-9]+; node 4 more than 2 blocks behind\)" "the rejoin fails"
     want_out 'CHECK FAIL: restored head >= pre-wipe head \(head 0 < [0-9]+\)' "the restored head fails"
     no_out 'CHECK PASS: (restored head|node 4 (rejoins|signs|within))' "a PASS of the head, rejoin or signing checks"
     no_out 'PHASE D1? ' "a D1 or D phase row"
@@ -513,9 +513,22 @@ if sel rejoin-falls-behind; then
     go rejoin-falls-behind FAKE_REJOIN_LAG=9:signed FAKE_SLOW_RESTORE=6
     want_rc 1
     want_out 'PHASE D rejoin: head within 2 blocks and node signing' "phase D reached"
-    want_out 'CHECK FAIL: node 4 within 2 blocks of the others at the end of D, on their chain \(head [0-9]+ vs others [0-9]+: it came within 2 blocks during D, then fell behind\)' "behind at the end of D: FAIL"
+    want_out 'CHECK FAIL: node 4 within 2 blocks of the others at the end of D, on their chain \(head [0-9]+ vs others [0-9]+; node 4 more than 2 blocks behind; it came within 2 blocks during D\)' "behind at the end of D: FAIL"
     no_out 'RESULT PASS' "RESULT PASS"
     one_fail 'node 4 within 2 blocks of the others at the end of D'
+    torn_down
+fi
+if sel rejoin-hidden-ahead; then
+    # r9 F1: node 4 and node 1 at one head; nodes 2 and 3 do not answer one read and answer
+    # the next 900 blocks above it. A gap judged on the heads that answered, then one hash
+    # at the lowest head of a later read, would pass node 4 900 blocks behind
+    go rejoin-hidden-ahead FAKE_FLAKY_AHEAD=900:node-2,node-3 REJOIN_TIMEOUT=6
+    want_rc 1
+    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(after 6s: head ([0-9]+) vs others (\1; no head read from node 2 3|[0-9]+; node 4 more than 2 blocks behind)\)" "the rejoin fails: heads not read, or 900 blocks behind"
+    no_out 'CHECK PASS: node 4 (rejoins|within 2 blocks)' "a PASS of the rejoin checks"
+    no_out 'PHASE D1? ' "a D1 or D phase row"
+    no_out 'RESULT PASS' "RESULT PASS"
+    no_all_row
     torn_down
 fi
 if sel rejoin-nosign; then
@@ -550,7 +563,7 @@ if sel rejoin-hash; then
     go rejoin-hash FAKE_OTHER_HASH=node-2 REJOIN_TIMEOUT=8
     want_rc 1
     want_out "CHECK FAIL: block hash at pre-wipe heights equals the other nodes' \( node2@[0-9]+=other[0-9]+!=hash[0-9]+" "another node's hash differs: FAIL"
-    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(head [0-9]+ vs others [0-9]+ after 8s; block ([0-9]+) is other\1\.\. on node 2, hash\1\.\. on node 4\)" "the rejoin fails on node 2's hash"
+    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(after 8s: head [0-9]+ vs others [0-9]+; block ([0-9]+) is other\1\.\. on node 2, hash\1\.\. on node 4\)" "the rejoin fails on node 2's hash"
     only_fails_among 'block hash at pre-wipe heights' 'node 4 rejoins'
     torn_down
 fi
@@ -559,7 +572,7 @@ if sel rejoin-fork; then
     # block with another hash. The pre-wipe heights match; a height above them does not
     go rejoin-fork FAKE_FORK=node-4 REJOIN_TIMEOUT=8
     want_rc 1
-    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(head [0-9]+ vs others [0-9]+ after 8s; block ([0-9]+) is hash\1\.\. on node 1, fork\1\.\. on node 4\)" "a fork after the stop: the rejoin fails"
+    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(after 8s: head [0-9]+ vs others [0-9]+; block ([0-9]+) is hash\1\.\. on node 1, fork\1\.\. on node 4\)" "a fork after the stop: the rejoin fails"
     want_out "CHECK PASS: block hash at pre-wipe heights equals the other nodes'" "the pre-wipe heights still match (the fork starts above them)"
     no_out 'CHECK PASS: node 4 (rejoins|within 2 blocks)' "a PASS of the rejoin checks"
     no_out 'PHASE D1? ' "a D1 or D phase row"
@@ -630,7 +643,7 @@ if sel iso-fork; then
     # answers every later block with another hash
     go iso-fork VARIANT=isolated FAKE_FORK=node-iso REJOIN_TIMEOUT=8
     want_rc 1
-    want_out "CHECK FAIL: isolated node reaches the expected head, on the validators' chain \(head [0-9]+ vs DB head [0-9]+, network [0-9]+ after 8s; block ([0-9]+) is hash\1\.\. on node 1, fork\1\.\. on node iso\)" "a fork after the DB head: the catch-up fails"
+    want_out "CHECK FAIL: isolated node reaches the expected head, on the validators' chain \(DB head [0-9]+ after 8s: head [0-9]+ vs others [0-9]+; block ([0-9]+) is hash\1\.\. on node 1, fork\1\.\. on node iso\)" "a fork after the DB head: the catch-up fails"
     want_out "CHECK PASS: isolated DB's head block hash equals the network's" "the DB head itself still matches"
     no_out 'PHASE ID ' "a phase ID row"
     one_fail 'isolated node reaches the expected head'
@@ -647,7 +660,7 @@ if sel iso-behind; then
     # node-iso serves but stays at head 0
     go iso-behind VARIANT=isolated FAKE_BEHIND=node-iso REJOIN_TIMEOUT=5
     want_rc 1
-    want_out "CHECK FAIL: isolated node reaches the expected head, on the validators' chain \(head 0 vs DB head [0-9]+, network [0-9]+ after 5s\)" "node-iso behind: FAIL"
+    want_out "CHECK FAIL: isolated node reaches the expected head, on the validators' chain \(DB head [0-9]+ after 5s: head 0 vs others [0-9]+; node iso more than 2 blocks behind\)" "node-iso behind: FAIL"
     no_out 'PHASE ID ' "a phase ID row"
     one_fail 'isolated node reaches the expected head'
     torn_down
@@ -872,11 +885,13 @@ fi
 # other watched nodes stay at one head (FAKE_STUCK) or one does not answer (FAKE_SILENT)
 # while the rest keep rising. The restore's pg_restore takes 6 s (FAKE_SLOW_RESTORE), so
 # that lasts more than STALL_LIMIT=3 inside both variants' windows; the fake's samples
-# are about 1 s apart, and the controls show the same settings pass without the fault
+# are about 1 s apart, and the controls show the same settings pass without the fault. In
+# the controls the chain keeps rising after node 4 or node-iso starts (FAKE_KEEP_RISING):
+# their windows run on after it, longer than 3 s on a loaded host
 if sel monitor-slowest; then
-    go monitor-slowest-control STALL_LIMIT=3 FAKE_SLOW_RESTORE=6
+    go monitor-slowest-control STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_KEEP_RISING=1
     want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "rejoin, no fault, the same settings: PASS"
-    go monitor-slowest-control-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6
+    go monitor-slowest-control-isolated VARIANT=isolated STALL_LIMIT=3 FAKE_SLOW_RESTORE=6 FAKE_KEEP_RISING=1
     want_out 'CHECK PASS: the validators kept forging during the drill' "isolated, no fault, the same settings: PASS"
     # rejoin watches nodes 1-3: only node 3 rises. Its window starts just after the pg_dump,
     # so the lowest head rises in it only if a read from just before the dump falls in its

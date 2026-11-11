@@ -293,6 +293,9 @@ a read-only mount that the script's `mv` could not move), TLSNotary is off, and
    2 blocks of the other three and it is on their chain: at the highest height
    all four have, above the pre-wipe head, all four give one block hash (a node
    that matches the others up to its stop and forks after it never gets there).
+   Each try reads all four heads again, one read each, and judges the gap and
+   the height from those reads only: a head one of them does not answer fails
+   that try, it is never left out.
    D adds proof that it signs: its signing record
    height moves past the value at stop, or a block after the restart carries
    its signature. Row **ALL** is stop of node X to rejoined and signing (the
@@ -320,7 +323,7 @@ node X stopped or restarted during the isolated drill".
 |---|---|
 | node X rejoins (head within 2 blocks, on the others' chain) | written only as a FAIL, when D1 is not reached in `REJOIN_TIMEOUT` (see D1 above) |
 | restored head >= pre-wipe head | head after the rejoin >= head read from the database at stop |
-| node X within 2 blocks of the others at the end of D, on their chain | read again once D is over (only if D1 was reached): node X's head is still within 2 blocks of the highest other node's, not only once during D, and node X and every other node give one non-empty block hash at the highest height all of them have, which must be above the pre-wipe head; no such height, or a head or hash that cannot be read, fails it |
+| node X within 2 blocks of the others at the end of D, on their chain | read again once D is over (only if D1 was reached), one head read of each of the four, judged on those reads only: node X's head is still within 2 blocks of the highest other node's, not only once during D, and node X and every other node give one non-empty block hash at the highest height all of them have, which must be above the pre-wipe head; no such height, or a head or hash that cannot be read, fails it |
 | block hash at pre-wipe heights | each node's hash, node X's too, at the step-2 height and the at-stop height equals the one recorded then (node X's at step 2, its database's at stop) |
 | identity file checksum | identical at step 2, at stop, and after the rejoin; the files after the rejoin must all have been hashed |
 | signing state | every signing file present at stop, and every `.signed.json`, `.commitlock.json` and `.prevote.json` present at step 2, still exists after the rejoin (one there at step 2 and not at stop fails it), and those three are never older than at stop, by height, then round (`timestamp` in `.signed.json`, `round` in the other two). At least one of the three must be compared, and a file that cannot be hashed after the rejoin fails it (at stop or after the wipe it stops the run). The detail gives each one's height/round at stop and after: `advanced` only when strictly newer, `unchanged` when equal; an older one, or one without a height and round, fails the check |
@@ -331,7 +334,7 @@ node X stopped or restarted during the isolated drill".
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows in the dump's counts and equal; same table set. Written after the restore's migration, before node X starts again |
 | schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations`, of which there must be at least one counted (preflight stops with exit 2 otherwise) |
 | one instance of the key | asserted before the single start (a `docker ps` listing that fails stops the run); written after it |
-| isolated node reaches the expected head, on the validators' chain | (`isolated`, `ISO_NODE=1`) within `REJOIN_TIMEOUT`, node-iso's head is at or above the restored database's head and within 2 blocks of the highest validator's, and node-iso and every validator give one non-empty block hash at the highest height all of them have, which must be above the database's head |
+| isolated node reaches the expected head, on the validators' chain | (`isolated`, `ISO_NODE=1`) within `REJOIN_TIMEOUT`, in one try that reads the heads of node-iso and of every validator once each, every one of them answers, node-iso's head is within 2 blocks of the highest validator's, and node-iso and every validator give one non-empty block hash at the highest height all of them have, which must be above the database's head |
 | isolated node holds no copy of node X's key | (`isolated`) node-iso's mounts are read and include its own state volume and no identity or state volume of node X, and the identity file on node-iso's state volume, read as a SHA-256 (64 hex), differs from node X's step-2 one; an identity that cannot be read, or a read that gives no SHA-256, fails it |
 | node X's key is held by only the one container on its state volume | (`isolated`) the running node X containers and the running containers on its state volume are both listed (a listing that fails fails it), and each list is exactly the container started at bring-up |
 | whether node X stopped or restarted during the isolated drill | INFO only: the node X container running at the end and the one started at bring-up. A restart in place (`restart: unless-stopped`) keeps the container id, so the drill does not show that node X never stopped |
@@ -420,7 +423,9 @@ whole window shorter than `STALL_LIMIT`, and a lagging watched node catching up
 while the others make no new block (the stall checks of both variants fail;
 with the same settings and no fault they pass), more than half the head reads
 failed, a node X that never comes within 2 blocks, falls behind again after
-signing, or never signs (no D or ALL row), a changed identity file, a restored
+signing, or never signs (no D or ALL row), a node X at the head of one other node
+while the two others do not answer one read and answer the next 900 blocks
+above it (the rejoin check fails, no D1 row), a changed identity file, a restored
 row count outside the dump's window, another node's block hash, migrations short
 of the image's, a halt marker, a foreign-signature line or a log `docker logs`
 cannot read, a second container on node X's state volume (the run stops before

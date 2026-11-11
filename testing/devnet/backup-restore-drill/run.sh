@@ -390,21 +390,29 @@ span_head_of() { # "lowest<TAB>highest" head of the given nodes, empty if any do
     done
     printf '%s\t%s\n' "${lo}" "${hi}"
 }
-# One chain above a height: every given node answers its head, the lowest of them is
-# above $1, and all give the same block hash at it. Prints that block, or what is not
-# so and then returns 1
-same_chain() { # $1 floor, rest: nodes, the one to compare first
-    local floor="$1" lo i h ref=""
+# Caught up, on one chain, from the heads read here, one read per node: every given node
+# answers (a head not read fails it, never skipped), the first is within 2 blocks of the
+# highest of the others, the lowest of all is above $1, and all give the same block hash
+# at it. Prints the heads and that block, or the heads and what is not so, then returns 1
+same_chain() { # $1 floor, rest: nodes, the one judged first
+    local floor="$1" i h hx="" ho="" lo="" miss="" ref="" heads
     shift
-    lo="$(min_head_of "$@")"
-    is_num "${lo}" || { echo "a head of nodes $* unreadable"; return 1; }
-    [ "${lo}" -gt "${floor}" ] || { echo "the highest height all of nodes $* have, ${lo}, is not above ${floor}"; return 1; }
     for i in "$@"; do
-        h="$(hash_at "${i}" "${lo}")" || { echo "no hash of block ${lo} on node ${i}"; return 1; }
-        ref="${ref:-${h}}"
-        [ "${h}" = "${ref}" ] || { echo "block ${lo} is ${h:0:12}.. on node ${i}, ${ref:0:12}.. on node $1"; return 1; }
+        h="$(head_of "${i}")" || h=""
+        if ! is_num "${h}"; then miss="${miss} ${i}"; continue; fi
+        if [ "${i}" = "$1" ]; then hx="${h}"; elif [ -z "${ho}" ] || [ "${h}" -gt "${ho}" ]; then ho="${h}"; fi
+        if [ -z "${lo}" ] || [ "${h}" -lt "${lo}" ]; then lo="${h}"; fi
     done
-    echo "block ${lo} ${ref:0:12}.. on nodes $*"
+    heads="head ${hx:-unreadable} vs others ${ho:-unreadable}"
+    [ -z "${miss}" ] || { echo "${heads}; no head read from node${miss}"; return 1; }
+    is_num "${ho}" && [ "${hx}" -ge $((ho - 2)) ] || { echo "${heads}; node $1 more than 2 blocks behind"; return 1; }
+    [ "${lo}" -gt "${floor}" ] || { echo "${heads}; the highest height all of nodes $* have, ${lo}, is not above ${floor}"; return 1; }
+    for i in "$@"; do
+        h="$(hash_at "${i}" "${lo}")" || { echo "${heads}; no hash of block ${lo} on node ${i}"; return 1; }
+        ref="${ref:-${h}}"
+        [ "${h}" = "${ref}" ] || { echo "${heads}; block ${lo} is ${h:0:12}.. on node ${i}, ${ref:0:12}.. on node $1"; return 1; }
+    done
+    echo "${heads}; block ${lo} ${ref:0:12}.. on nodes $*"
 }
 
 # ── helpers: containers and volumes ─────────────────────────────────────
@@ -1187,22 +1195,21 @@ if [ "${VARIANT}" = rejoin ]; then
     step 08-rejoin
     PH_T0="${T_C_END}"
     # Rejoined: within 2 blocks of the highest other node, and on the others' chain: at the
-    # highest height all of them and node X have, above the pre-wipe head, one block hash
+    # highest height all of them and node X have, above the pre-wipe head, one block hash.
+    # Each try reads every head again (same_chain); one that is not read fails the try
     say "waiting for node ${X_NODE} to come within 2 blocks of the others, on their chain"
     deadline=$((SECONDS + REJOIN_TIMEOUT))
     SYNCED=0
+    chain=""
     while [ "${SECONDS}" -lt "${deadline}" ]; do
-        chain=""
-        hx="$(head_of "${X_NODE}")" || hx=unreadable
-        ho="$(max_head_of "${OTHERS[@]}")"
-        if is_num "${hx}" && is_num "${ho}" && [ "${hx}" -ge $((ho - 2)) ] && chain="$(same_chain "${H_STOP}" "${X_NODE}" "${OTHERS[@]}")"; then SYNCED=1; break; fi
+        if chain="$(same_chain "${H_STOP}" "${X_NODE}" "${OTHERS[@]}")"; then SYNCED=1; break; fi
         sleep 3
     done
     if [ "${SYNCED}" = 1 ]; then
         phase_end D1 "rejoin: node head within 2 blocks of the others, on their chain (from node serving)"
     else
-        say "node ${X_NODE} did not come within 2 blocks on the others' chain in ${REJOIN_TIMEOUT}s (x=${hx} others=${ho:-unreadable})"
-        check "node ${X_NODE} rejoins (head within 2 blocks, on the others' chain)" FAIL "head ${hx} vs others ${ho:-unreadable} after ${REJOIN_TIMEOUT}s${chain:+; ${chain}}"
+        say "node ${X_NODE} did not come within 2 blocks on the others' chain in ${REJOIN_TIMEOUT}s (${chain:-no try})"
+        check "node ${X_NODE} rejoins (head within 2 blocks, on the others' chain)" FAIL "after ${REJOIN_TIMEOUT}s: ${chain:-no try}"
     fi
     # Signing: the signing record moves past its at-stop value (it is written before a
     # signature leaves the node), or a block after the restart carries node X's signature
@@ -1252,7 +1259,6 @@ if [ "${VARIANT}" = rejoin ]; then
     state_sums > "${OUT_DIR}/sums.end" || end_read="; cannot hash the state files after the rejoin"
     for rec in signed commitlock prevote; do POS_END[${rec}]="$(record_pos "${rec}")" || POS_END[${rec}]=unreadable; done
     HX_END="$(read_head "${X_NODE}")" || HX_END=unreadable
-    HO_END="$(max_head_of "${OTHERS[@]}")"
 
     # 1. head
     if is_num "${HX_END}" && [ "${HX_END}" -ge "${H_STOP}" ]; then
@@ -1260,13 +1266,13 @@ if [ "${VARIANT}" = rejoin ]; then
     else
         check "restored head >= pre-wipe head" FAIL "head ${HX_END} < ${H_STOP}"
     fi
-    # still within 2 blocks of the others now that D is over, not only once during it, and on their chain
+    # still within 2 blocks of the others now that D is over, not only once during it, and on
+    # their chain, from heads all read again in same_chain
     if [ "${SYNCED}" = 1 ]; then
-        chain=""
-        if is_num "${HX_END}" && is_num "${HO_END}" && [ "${HX_END}" -ge $((HO_END - 2)) ] && chain="$(same_chain "${H_STOP}" "${X_NODE}" "${OTHERS[@]}")"; then
-            check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" PASS "head ${HX_END} vs others ${HO_END}; ${chain}"
+        if chain="$(same_chain "${H_STOP}" "${X_NODE}" "${OTHERS[@]}")"; then
+            check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" PASS "${chain}"
         else
-            check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" FAIL "head ${HX_END} vs others ${HO_END:-unreadable}: ${chain:-it came within 2 blocks during D, then fell behind}"
+            check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" FAIL "${chain}; it came within 2 blocks during D"
         fi
     fi
     # 2. hashes at the pre-wipe heights: each node's, node X's too, is the one recorded at
@@ -1421,21 +1427,19 @@ else
         wait_serve iso "${SERVE_TIMEOUT}" || die "node-iso did not serve within ${SERVE_TIMEOUT}s (see node-iso.log)"
         deadline=$((SECONDS + REJOIN_TIMEOUT))
         ISO_OK=0
-        # Caught up: at or above the DB head, within 2 blocks of the highest validator, and on
-        # their chain: at the highest height node-iso and all of them have, above the DB head, one block hash
+        # Caught up: within 2 blocks of the highest validator, and on their chain: at the highest
+        # height node-iso and all of them have, above the DB head, one block hash. Each try reads
+        # every head again (same_chain); one that is not read fails the try
+        chain=""
         while [ "${SECONDS}" -lt "${deadline}" ]; do
-            chain=""
-            hi="$(head_of iso)" || hi=unreadable
-            ho="$(max_head_of "${ALL_NODES[@]}")"
-            if is_num "${hi}" && is_num "${DB_HEAD}" && [ "${hi}" -ge "${DB_HEAD}" ] && is_num "${ho}" && [ "${hi}" -ge $((ho - 2)) ] \
-                && chain="$(same_chain "${DB_HEAD}" iso "${ALL_NODES[@]}")"; then ISO_OK=1; break; fi
+            if is_num "${DB_HEAD}" && chain="$(same_chain "${DB_HEAD}" iso "${ALL_NODES[@]}")"; then ISO_OK=1; break; fi
             sleep 3
         done
         if [ "${ISO_OK}" = 1 ]; then
             phase_end ID "isolated node: serving and within 2 blocks of the network, on its chain"
-            check "isolated node reaches the expected head, on the validators' chain" PASS "head ${hi} >= DB head ${DB_HEAD}, network ${ho}; ${chain}"
+            check "isolated node reaches the expected head, on the validators' chain" PASS "DB head ${DB_HEAD}; ${chain}"
         else
-            check "isolated node reaches the expected head, on the validators' chain" FAIL "head ${hi} vs DB head ${DB_HEAD}, network ${ho:-unreadable} after ${REJOIN_TIMEOUT}s${chain:+; ${chain}}"
+            check "isolated node reaches the expected head, on the validators' chain" FAIL "DB head ${DB_HEAD:-unreadable} after ${REJOIN_TIMEOUT}s${chain:+: ${chain}}"
         fi
         # Node X's key never went anywhere: node-iso's own state volume among its mounts and
         # none of node X's, and a different identity, both identities read as a sha256
