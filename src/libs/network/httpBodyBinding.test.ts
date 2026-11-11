@@ -113,6 +113,7 @@ BunServer.prototype.start = function () {
 const { serverRpcBun } = await import("./server_rpc")
 const { default: Peer } = await import("src/libs/peer/Peer")
 const Hashing = (await import("src/libs/crypto/hashing")).default
+const { bodyBoundAuthHeaders } = await import("./peerHttpAuth")
 
 const server: any = await serverRpcBun()
 const fakeServer = { requestIP: () => ({ address: "198.51.100.7" }) }
@@ -218,5 +219,76 @@ describe("peer HTTP auth", () => {
         const reply = await peer.httpCall(hello("http://me.example:53550") as any, true)
         expect(captured).toBeNull()
         expect(reply.result).not.toBe(200)
+    })
+
+    it("refuses an exact replay of a peer request", async () => {
+        const { body, headers } = await capture(hello("http://me.example:53550"))
+        const first = await deliver(body, headers)
+        const replay = await deliver(body, headers)
+        expect(first.status).toBe(200)
+        expect(replay.status).toBe(401)
+        expect(dispatched).toHaveLength(1)
+    })
+
+    it("signs two identical requests sent in the same millisecond apart", async () => {
+        const now = Date.now
+        Date.now = () => 1_700_000_000_000 + (now() % 1)
+        try {
+            const a = await capture(hello("http://me.example:53550"))
+            const b = await capture(hello("http://me.example:53550"))
+            expect(a.headers.timestamp).not.toBe(b.headers.timestamp)
+        } finally {
+            Date.now = now
+        }
+    })
+})
+
+describe("sudo methods", () => {
+    const award = { method: "awardPoints", params: [{ message: [{ address: SENDER, points: 1 }] }] }
+    const sign = async (message: Uint8Array) =>
+        new Uint8Array(forge.pki.ed25519.sign({ message: Buffer.from(message), privateKey: pair.privateKey }))
+    const operatorHeaders = (body: string) =>
+        bodyBoundAuthHeaders({ genesisHash: OUR_GENESIS, identity: IDENTITY, body, sign })
+
+    for (const method of ["rate-limit/unblock", "getCampaignData", "awardPoints"]) {
+        it(`refuses ${method} signed in the old form, which leaves the body unsigned`, async () => {
+            const timestamp = String(Date.now())
+            const signature = Buffer.from(
+                forge.pki.ed25519.sign({
+                    message: Buffer.from(Hashing.sha256(`${IDENTITY}:${timestamp}`)),
+                    privateKey: pair.privateKey,
+                }),
+            ).toString("hex")
+            const body = JSON.stringify({ method, params: [] })
+            const res = await deliver(body, { identity: IDENTITY, signature, timestamp })
+            expect(res.status).toBe(401)
+            expect(dispatched).toEqual([])
+        })
+    }
+
+    it("delivers a sudo call the operator tooling signs", async () => {
+        const body = JSON.stringify(award)
+        const res = await deliver(body, await operatorHeaders(body))
+        expect(res.status).toBe(200)
+        expect(dispatched).toEqual([{ method: "awardPoints", sender: SENDER, params: award.params }])
+    })
+
+    it("refuses captured sudo headers on a swapped body", async () => {
+        const headers = await operatorHeaders(JSON.stringify(award))
+        const swapped = JSON.stringify({
+            method: "awardPoints",
+            params: [{ message: [{ address: "0x" + "ab".repeat(32), points: 1_000_000 }] }],
+        })
+        const res = await deliver(swapped, headers)
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("refuses an exact replay of a sudo call", async () => {
+        const body = JSON.stringify(award)
+        const headers = await operatorHeaders(body)
+        expect((await deliver(body, headers)).status).toBe(200)
+        expect((await deliver(body, headers)).status).toBe(401)
+        expect(dispatched).toHaveLength(1)
     })
 })

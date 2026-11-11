@@ -1,13 +1,15 @@
 ## Protected Endpoints
 
-All protected endpoints require transmissions to be coming from a sudo keypair. Connect an authorized mnemonic as shown before proceeding:
+All protected endpoints require transmissions to be coming from the genesis sudo keypair, signed in the body-bound auth form: the signature covers the network's genesis hash, the timestamp and the SHA-256 of the exact request body, and each signed request is accepted once. A request in the older `identity:timestamp` form (what SDK `demos.call` sends) is refused with 401, since its headers could carry another body.
 
-```ts
-const demos = new Demos()
+Use the operator script, which signs that form:
 
-await demos.connect("https://demosnode.discus.sh")
-await demos.connectWallet("authorized mnemonic here")
+```sh
+SUDO_MNEMONIC="authorized mnemonic here" bun scripts/sudo-call.ts \
+    --rpc https://demosnode.discus.sh --method getCampaignData
 ```
+
+The `params` of each call below go in `--params` as JSON. The SDK snippets show the payload shapes only.
 
 ### Unblocking an IP address
 

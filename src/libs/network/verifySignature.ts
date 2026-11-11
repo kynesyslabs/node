@@ -11,6 +11,7 @@ import log from "src/utilities/logger"
 import Hashing from "src/libs/crypto/hashing"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { httpAuthMessage } from "./peerHttpAuth"
+import { SeenAuthMessages } from "./authReplayCache"
 import { getSharedState } from "src/utilities/sharedState"
 
 /**
@@ -18,6 +19,12 @@ import { getSharedState } from "src/utilities/sharedState"
  * only replayable within this window, not forever.
  */
 const AUTH_TIMESTAMP_MAX_AGE_MS = 5 * 60 * 1000
+
+/**
+ * Body-bound requests accepted within the timestamp window; a repeat is a
+ * replay. Sized well above what honest peers send in one window.
+ */
+export const seenAuthMessages = new SeenAuthMessages(200_000)
 
 export interface VerificationResult {
     /**
@@ -155,6 +162,24 @@ export async function verifySignature(
         } as Ed25519SignedObject
 
         const isValid = await TxValidatorPool.getInstance().verify(signatureObj)
+
+        if (
+            isValid &&
+            bodyBound &&
+            !seenAuthMessages.claim(
+                authMessage,
+                Number(timestamp) + AUTH_TIMESTAMP_MAX_AGE_MS,
+            )
+        ) {
+            log.debug(`[verifySignature] Replayed request from: ${identity}`)
+            return {
+                valid: false,
+                identity,
+                publicKey: publicKeyHex,
+                algorithm,
+                error: "Replayed request",
+            }
+        }
 
         if (isValid) {
             return {

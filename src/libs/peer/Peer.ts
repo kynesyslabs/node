@@ -9,7 +9,11 @@ import PeerManager from "./PeerManager"
 import { sleep } from "@kynesyslabs/demosdk/utils"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import Hashing from "../crypto/hashing"
-import { BODY_HASH_HEADER, httpAuthMessage } from "../network/peerHttpAuth"
+import {
+    BODY_HASH_HEADER,
+    httpAuthMessage,
+    nextAuthTimestamp,
+} from "../network/peerHttpAuth"
 
 export interface SyncData {
     status: boolean
@@ -303,7 +307,7 @@ export default class Peer {
         timeoutMs = DEFAULT_RPC_TIMEOUT_MS,
         { offlineOnTimeout = true }: { offlineOnTimeout?: boolean } = {},
     ): Promise<RPCResponse> {
-        const timestamp = Date.now()
+        const timestamp = nextAuthTimestamp()
         const timestampReadable = new Date(timestamp).toISOString()
         log.info(
             `[RPC Call] [${request.method}] [${timestampReadable}] Making RPC call to: ${this.connection.string}`,
