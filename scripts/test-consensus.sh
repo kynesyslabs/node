@@ -110,6 +110,20 @@ SUITE_FILES=(
     testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
     tests/web2/proxy.test.ts
+    # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)
+    src/features/incentive/pointsApplyPure.test.ts
+    src/libs/blockchain/gcr/applyTime.test.ts
+    src/libs/blockchain/gcr/gcr_routines/identityManager.xmBinding.test.ts
+    src/libs/blockchain/gcr/gcr_routines/noAccountRowsOutsideApply.test.ts
+    src/libs/blockchain/gcr/gcr_routines/routines/scoreIdentityRoutines.test.ts
+    src/libs/blockchain/gcr/gcr_routines/routines/zkAttestationContext.test.ts
+    src/libs/blockchain/genesis/genesisSeedingTime.test.ts
+    src/libs/identity/providers/scoreRefresh.test.ts
+    src/libs/network/authReplayCache.test.ts
+    src/libs/network/httpBodyBinding.test.ts
+    src/libs/network/manageGCRRoutines.humanPassportClaim.test.ts
+    src/libs/network/manageGCRRoutines.readOnly.test.ts
+    src/libs/omniprotocol/protocol/noConsensusStateWrites.test.ts
 )
 
 runner_for() {
