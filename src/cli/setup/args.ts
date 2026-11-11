@@ -113,7 +113,7 @@ L2PS
 
 ZK
   --zk / --no-zk          Use ZK proofs for L2PS batches.
-  --zk-generate           Build the missing proving keys (about 200 MB download, several minutes).
+  --zk-generate           Build the missing proving keys (about 225 MB download, several minutes).
                           With --yes nothing is downloaded unless this is given; L2PS_ZK_ENABLED
                           is only switched on once the keys exist.
   --ptau-url <base>       Mirror of the Hermez Powers of Tau files, if the default hosts are down.

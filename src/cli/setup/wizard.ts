@@ -47,6 +47,7 @@ import {
 } from "./validate"
 import {
     inspectBatchArtifacts,
+    inspectSettlementArtifacts,
     inspectIdentityKey,
     missingZkTools,
     runL2psZkSetup,
@@ -750,7 +751,7 @@ async function wantsGeneration(deps: WizardDeps): Promise<boolean> {
     if (!prompter) return false
     return confirm(
         prompter,
-        "Build the batch proving keys now? (about 200 MB download, several minutes, around 2 GB of memory)",
+        "Build the L2PS proving keys now? (about 225 MB download, several minutes, about 2 GB of disk and 3.5 GB of memory)",
         true,
         say,
     )
@@ -817,6 +818,8 @@ async function zkSection(
             ? `  L2PS batch proofs: keys ready for batches of up to ${ready.join(" and ")}.`
             : "  L2PS batch proofs: keys not built yet.",
     )
+    const settlementReady = inspectSettlementArtifacts(ctx.codeRoot).complete
+    say(`  L2PS settlement proofs: ${settlementReady ? "keys ready." : "keys not built yet."}`)
 
     const currentlyOn = parseBoolFlag(ctx.env[EnvKey.L2PS_ZK_ENABLED]) === true
     const want = await wantsZk(deps, state, currentlyOn || ready.length > 0)
@@ -841,15 +844,16 @@ async function zkSection(
 
     // Requiring proofs before the keys exist would only make the node complain
     // at every start, so the switch is flipped last.
-    if (batches.every(b => b.complete)) {
-        say("  All batch keys are in place.")
+    // A member proves its subnet's settlements, so its keys count as well.
+    if (batches.every(b => b.complete) && settlementReady) {
+        say("  All batch and settlement keys are in place.")
         wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
         return
     }
     const noTools = missingToolsMessage(ctx.codeRoot)
     if (noTools !== undefined) return refuseBuild(deps, result, noTools)
     if (!(await wantsGeneration(deps))) {
-        say("  The batch keys are not built, and building them downloads about 200 MB.")
+        say("  The proving keys are not built, and building them downloads about 225 MB.")
         say("  Build them with: bun run setup --only zk --zk --zk-generate")
         say(ZK_UNTOUCHED)
         return
@@ -863,7 +867,11 @@ async function zkSection(
     if (readOnly !== undefined) return refuseBuild(deps, result, readOnly)
     // A failed run never enables proofs, whatever files happen to be on disk.
     const built = await buildBatchKeys(deps, result)
-    if (built && inspectBatchArtifacts(ctx.codeRoot).every(b => b.complete)) {
+    if (
+        built &&
+        inspectBatchArtifacts(ctx.codeRoot).every(b => b.complete) &&
+        inspectSettlementArtifacts(ctx.codeRoot).complete
+    ) {
         wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
     } else {
         say(ZK_UNTOUCHED)

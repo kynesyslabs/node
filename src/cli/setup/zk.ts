@@ -3,14 +3,33 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { L2PS_ZK_DIR, ZK_IDENTITY_VKEY } from "./context"
 import { rawBatchVkeyProblem, nonEmptyFile } from "../../libs/l2ps/zk/batchArtifacts"
+import { SETTLEMENT_CIRCUIT, SETTLEMENT_KEYS_SUBDIR } from "../../libs/l2ps/zk/settlementArtifacts"
 import { sameJson } from "./l2ps"
 import { displaySafe, trimTrailingSlashes } from "./validate"
 
 export const BATCH_SIZES = [5, 10] as const
 export type BatchSize = (typeof BATCH_SIZES)[number]
 
-// Power of Tau file per circuit size; same pairing as setup_all_batches.sh.
-const PTAU_POWER: Record<BatchSize, number> = { 5: 16, 10: 17 }
+/** The settlement circuit, built next to the batch sizes. */
+export const SETTLEMENT_TARGET = "settlement"
+export type ZkTarget = BatchSize | typeof SETTLEMENT_TARGET
+export const ZK_TARGETS: readonly ZkTarget[] = [...BATCH_SIZES, SETTLEMENT_TARGET]
+
+// Power of Tau file per circuit; same pairing as setup_all_batches.sh for the
+// batches. The settlement circuit has 55,860 PLONK constraints, under 2^16.
+const PTAU_POWER: Record<ZkTarget, number> = { 5: 16, 10: 17, [SETTLEMENT_TARGET]: 16 }
+
+interface CircuitBuild {
+    /** batch_5, batch_10, settlement_10: the keys directory and the label in messages. */
+    label: string
+    /** Circuit file name without extension, also the zkey and wasm name. */
+    name: string
+}
+
+function circuitBuild(target: ZkTarget): CircuitBuild {
+    if (target === SETTLEMENT_TARGET) return { label: SETTLEMENT_KEYS_SUBDIR, name: SETTLEMENT_CIRCUIT }
+    return { label: `batch_${target}`, name: `l2ps_batch_${target}` }
+}
 const PTAU_MIN_BYTES = 1_000_000
 
 // The committed verification keys only match files from the Hermez ceremony,
@@ -41,8 +60,9 @@ export interface IdentityKeyState {
     pinnedByOperator?: boolean
 }
 
-const batchDir = (root: string, size: BatchSize) =>
-    path.join(root, L2PS_ZK_DIR, "keys", `batch_${size}`)
+const keysDirOf = (root: string, target: ZkTarget) =>
+    path.join(root, L2PS_ZK_DIR, "keys", circuitBuild(target).label)
+const batchDir = (root: string, size: BatchSize) => keysDirOf(root, size)
 
 /** Why a batch verification key cannot verify a proof, cleaned for the terminal, or undefined when it can. */
 export function batchVkeyProblem(file: string): string | undefined {
@@ -51,6 +71,25 @@ export function batchVkeyProblem(file: string): string | undefined {
 }
 
 /** Same files the prover needs at proof time: zkey + wasm, and the vkey to verify. */
+export interface SettlementArtifacts {
+    zkey: boolean
+    wasm: boolean
+    vkey: boolean
+    vkeyProblem?: string
+    complete: boolean
+}
+
+/** What a subnet member needs to prove settlements: zkey + wasm, and the committed vkey. */
+export function inspectSettlementArtifacts(root: string): SettlementArtifacts {
+    const dir = keysDirOf(root, SETTLEMENT_TARGET)
+    const zkey = nonEmptyFile(path.join(dir, `${SETTLEMENT_CIRCUIT}.zkey`))
+    const wasm = nonEmptyFile(path.join(dir, `${SETTLEMENT_CIRCUIT}_js`, `${SETTLEMENT_CIRCUIT}.wasm`))
+    const vkeyFile = path.join(dir, "verification_key.json")
+    const vkeyProblem = fs.existsSync(vkeyFile) ? batchVkeyProblem(vkeyFile) : undefined
+    const vkey = fs.existsSync(vkeyFile) && vkeyProblem === undefined
+    return { zkey, wasm, vkey, vkeyProblem, complete: zkey && wasm && vkey }
+}
+
 export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
     return BATCH_SIZES.map(size => {
         const dir = batchDir(root, size)
@@ -236,8 +275,8 @@ export async function downloadWithFetch(
     }
 }
 
-function vkeyParses(root: string, size: BatchSize): boolean {
-    const file = path.join(batchDir(root, size), "verification_key.json")
+function vkeyParses(root: string, target: ZkTarget): boolean {
+    const file = path.join(keysDirOf(root, target), "verification_key.json")
     return fs.existsSync(file) && batchVkeyProblem(file) === undefined
 }
 
@@ -308,8 +347,9 @@ export function swapIntoPlace(
 }
 
 /**
- * Builds the L2PS batch circuits (compile, PLONK setup, vkey export) with the
- * circom2 and snarkjs already in node_modules, so no native circom is needed.
+ * Builds the L2PS batch circuits and the settlement circuit (compile, PLONK
+ * setup, vkey export) with the circom2 and snarkjs already in node_modules, so
+ * no native circom is needed.
  * The vkey it derives must equal the committed one: peers verify our proofs
  * with that file, so a mismatch is reported instead of overwriting it.
  */
@@ -317,13 +357,13 @@ export async function runL2psZkSetup(
     root: string,
     runner: ZkRunner,
     say: (line: string) => void,
-    sizes: readonly BatchSize[] = BATCH_SIZES,
+    sizes: readonly ZkTarget[] = ZK_TARGETS,
     ptauBaseUrls: readonly string[] = PTAU_BASE_URLS,
 ): Promise<ZkSetupResult> {
     const messages: string[] = []
     const unknown = sizes.filter(size => PTAU_POWER[size] === undefined)
     if (unknown.length > 0) {
-        messages.push(`No circuit is configured for a batch of ${unknown.join(", ")}; the setup knows ${BATCH_SIZES.join(" and ")}.`)
+        messages.push(`No circuit is configured for ${unknown.join(", ")}; the setup knows batches of ${BATCH_SIZES.join(" and ")} and ${SETTLEMENT_TARGET}.`)
         return { ok: false, messages }
     }
     const zkDir = path.join(root, L2PS_ZK_DIR)
@@ -335,10 +375,14 @@ export async function runL2psZkSetup(
 
     const existing = inspectBatchArtifacts(root)
     for (const size of sizes) {
-        const have = existing.find(b => b.size === size)
-        if (have?.complete && vkeyParses(root, size)) {
-            say(`batch_${size} is already built, skipping`)
-            messages.push(`batch_${size}: already built`)
+        const { label, name } = circuitBuild(size)
+        const complete =
+            size === SETTLEMENT_TARGET
+                ? inspectSettlementArtifacts(root).complete
+                : existing.find(b => b.size === size)?.complete === true
+        if (complete && vkeyParses(root, size)) {
+            say(`${label} is already built, skipping`)
+            messages.push(`${label}: already built`)
             continue
         }
         const power = PTAU_POWER[size]
@@ -374,8 +418,7 @@ export async function runL2psZkSetup(
             say(`${ptauName} already downloaded`)
         }
 
-        const name = `l2ps_batch_${size}`
-        const out = batchDir(root, size)
+        const out = keysDirOf(root, size)
         fs.mkdirSync(out, { recursive: true })
         // Everything is built in a staging directory and moved into place only
         // after the whole batch succeeded and its verification key matched. A
@@ -443,7 +486,7 @@ export async function runL2psZkSetup(
                 // missing or corrupt copy is a broken checkout, not something to
                 // replace with a locally generated key that nobody else holds.
                 messages.push(
-                    `batch_${size}: the committed verification key is missing or unreadable; restore ${path.relative(root, committedVkey)} from the repository and run the setup again`,
+                    `${label}: the committed verification key is missing or unreadable; restore ${path.relative(root, committedVkey)} from the repository and run the setup again`,
                 )
                 return { ok: false, messages }
             }
@@ -457,7 +500,7 @@ export async function runL2psZkSetup(
                 // Proofs from this key would be rejected by peers; whatever was
                 // there before stays untouched.
                 messages.push(
-                    `batch_${size}: the verification key built here differs from the committed one, so proofs from it would be rejected by peers. The new proving key was discarded. Update the repository (git pull) and run the setup again.`,
+                    `${label}: the verification key built here differs from the committed one, so proofs from it would be rejected by peers. The new proving key was discarded. Update the repository (git pull) and run the setup again.`,
                 )
                 return { ok: false, messages }
             }
@@ -466,7 +509,7 @@ export async function runL2psZkSetup(
             // Whatever ended the batch, a staging directory must not outlive it.
             abandon()
         }
-        messages.push(`batch_${size}: ready`)
+        messages.push(`${label}: ready`)
     }
     return { ok: true, messages }
 }
