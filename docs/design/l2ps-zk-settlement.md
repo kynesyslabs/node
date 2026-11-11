@@ -164,6 +164,36 @@ about 1 s to block validation.
   prover subprocesses scales it per node; a native PLONK prover is the next
   step if one core per subnet is not enough.
 
+### Admission and the queue (subnet member nodes)
+
+A member admits a transfer only if a batch could still place it, and the
+aggregator keeps transfers it cannot place from crowding out the rest. The
+bounds are constants in the code, not configuration, so every member admits
+and expires the same transfers.
+
+- Nonce: above the sender's L1 account nonce and at most `MAX_NONCE_AHEAD`
+  = 20 (two full batches) past it, and not a nonce this member already holds
+  unsettled for the sender. So a sender has at most 20 unsettled transfers on
+  one member.
+- Balance: the sender's tip balance covers `amount + fee` of this transfer
+  plus every unsettled transfer this member holds for it (amounts and nonces
+  from the history, fees from the stored envelopes).
+- Deferred: when the planner can place none of the transfers left in a
+  cycle, they become `deferred`. Deferred rows are read in a window of their
+  own next to the window of fresh rows, so they never keep fresh transfers
+  from being read; each re-deferral moves a row to the back. A deferred
+  transfer settles as soon as a batch can place it, and fails with a history
+  reason `SETTLEMENT_DEFERRED_TTL_BLOCKS` = 300 blocks (about 35 minutes)
+  after admission. The backlog cap counts deferred rows.
+- Blame: a transfer whose batch failed twice, at proving or on L1, is proved
+  alone from then on, so the transfers batched with it settle without it.
+  One that also fails twice alone is dropped with a reason, but only once
+  another proof (for proving failures) or another batch (for L1 failures)
+  has worked since its first failure alone; a prover or verifier that fails
+  everything drops nothing. A transfer whose account keeps moving on L1
+  between proving and inclusion can be dropped this way and is signed again.
+- The prover back-off is per subnet; other subnets keep settling.
+
 ### Fork
 
 `l2psSettlement`, added the same way as the other forks (`ForkName`,
@@ -257,7 +287,11 @@ transaction (included as failed, no edits), never the block, because every
 validator reaches the same verdict:
 
 1. structure and limits; changes sorted and unique; every signer and
-   every receiver-side account named in `changes`;
+   every receiver-side account named in `changes`; the fee distribution
+   credits exactly the fees (a fee floor that is not an amount, or a
+   distribution that credits less, fails every batch of the block, not the
+   block); every `changes` account, a zero delta included, is loaded and
+   orders the batch with the block's other transactions over it;
 2. each signature over its message; per-signer nonces consecutive from the
    working-state nonce + 1; each fee at least the native transfer fee;
 3. public signals from the working state; PLONK verify against the
