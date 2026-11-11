@@ -1,7 +1,7 @@
 # L2PS settlement with validator-checked zero-knowledge proofs
 
 Status: in implementation. Ships behind a new `l2psSettlement` fork, active
-from mainnet block 0. The binding formats are in "Interface v1" below.
+from mainnet block 0. The binding formats are in "Interface v1" and "Interface v1.1" below.
 
 ## Problem
 
@@ -94,9 +94,10 @@ inactive transfer slot has commitment 0 and touches no account. The strict
 address order applies to active slots only, so one circuit serves every batch
 up to its size.
 
-Public inputs: a Poseidon hash over the N commitments, each commitment's
+The statement: a Poseidon hash over the N commitments, each commitment's
 signer and nonce, the M account addresses, their balances before the batch
-and their net changes.
+and their net changes. Its one public input is a hash of the statement
+("Interface v1.1"), which every validator computes from its own values.
 
 Private inputs: each transfer's `from`, `to`, `amount`, `salt`, and the index
 of its sender and receiver among the M accounts.
@@ -126,32 +127,59 @@ their own GCR instead of trusting the prover: the working state after every
 earlier transaction in the block, L1 transfers and earlier batches included.
 Two batches proven against the same parent balance cannot then both spend it.
 
-Measured for N = 10, M = 20 (`l2ps_settlement_10.circom`, first build
-2026-11-11, 32-core host, other load present):
+Measured for N = 9, M = 18 (`l2ps_settlement.circom`, Interface v1.1,
+2026-11-11, 32-core host shared with other load):
 
 | | |
 |---|---|
-| R1CS | 20,867 non-linear + 9,707 linear constraints, 30,327 wires |
-| PLONK | 55,860 constraints, domain 2^16 (Hermez ptau 16) |
-| Proving key | 1.88 GB zkey (171 public signals each carry a Lagrange polynomial of about 10.5 MB), 4.4 MB wasm |
-| Key build | about 23 s and 3.3 GB for the PLONK setup; byte-identical zkey, wasm and vkey on a second build |
-| Proof | 44-59 s per batch in the prover subprocess (Bun, one core, first proof includes the subprocess start), whatever the number of transfers; peak about 4 GB (5.5 GB without the GC hint the pool sets) |
-| Verify | 13-20 ms warm, 35 ms worst seen; the first call also builds the curve once per process |
+| R1CS | 18,642 non-linear + 17,482 linear constraints, 35,931 wires, 1 public input |
+| PLONK | 65,388 constraints, domain 2^16 (Hermez ptau 16), 148 rows to spare |
+| Proving key | 101 MB zkey, 4.0 MB wasm |
+| Key build | about 5 s and 3.3 GB for the PLONK setup; byte-identical zkey from the setup path and a separate manual build |
+| Proof | 33-40 s per batch in the prover subprocess (Bun, one core), whatever the number of transfers; peak 1.0 GB (1.3 GB without the GC hint the pool sets) |
+| Verify | 16 ms median, 17 ms worst of 20 warm runs; the first call also builds the curve once per process |
 
-Witness generation alone takes about 60 ms. Node.js proves the same batch in
-77 s single-threaded (1.9 GB) or 43 s with snarkjs worker threads (4 GB,
-under two cores busy), so Bun single-threaded stays the prover runtime.
+Batch size options, measured the same way (time per proof in the Bun
+prover subprocess, one core):
 
-Range checks: amounts, fees, balances before and net change magnitudes are
-range-checked to 128 bits inside the circuit, public ones included, so the
-balance arithmetic cannot wrap whatever public signals a verifier is given.
-Account limbs and nonces only enter hashes and equalities and are bounded by
-the verifier (`verifySettlementProof` rejects any public signal outside its
-declared range, which also rules out aliases at or above the field order);
-checking them in the circuit would cross 2^16 rows and double the proving
-time. The account ordering keeps accounts unique for any limb values (the
-argument is in the circuit). Every active account must be touched by an
-active transfer, so the account list is exactly the touched set.
+| Option | PLONK rows | Domain | zkey | Proof | Peak | Transfers/s per core |
+|---|---|---|---|---|---|---|
+| v1: N = 10, 171 public inputs | 55,860 | 2^16 | 1.88 GB | 44-59 s | 4 GB | 0.2 |
+| v1.1: N = 7 | 58,955 (before the trims below) | 2^16 | 101 MB | 33 s | 1.0 GB | 0.21 |
+| **v1.1: N = 9** | 65,388 | 2^16 | 101 MB | 33-40 s | 1.0 GB | **0.24** |
+| v1.1: N = 10 | 74,821 | 2^17 | 201 MB | 74 s | about 1.7 GB | 0.14 |
+| v1.1: N = 14 | 106,953 | 2^17 | 203 MB | 73 s | 1.75 GB | 0.19 |
+| v1.1: N = 24, 32 | about 222,000 and 312,000 | 2^18, 2^19 | not built | | | |
+
+Proving time follows the domain, not the number of transfers, so the batch
+is the largest N that fits a domain. N = 9 is the largest at 2^16; at 2^17
+the largest is N = 16 (the commitments hash, `Poseidon_N`, stops at 16
+inputs in circomlib and poseidon-lite), which proves twice as long for at
+most 16/9 the transfers. N = 32 would need another commitments hash (an
+Interface v1 change), a 2^19 domain and about 8 times the proving time per
+proof. With 4 GB of prover memory a node runs four N = 9 provers for about
+0.95 transfers/s; v1 ran one for 0.2.
+
+Multi-threaded proving: snarkjs worker threads never finish under Bun (no
+proof after 150 s at 1% CPU). Under Node.js the N = 9 batch proves in 28 s
+with worker threads (2.6 GB, 2.3 cores busy) against 46 s single-threaded
+(0.6 GB): 1.4 times faster per proof but 0.14 transfers/s per core against
+Bun's 0.24, so the pool scales with single-threaded Bun processes. Witness
+generation alone takes about 60 ms.
+
+Range checks: witness values (amount, fee, nonce) and every running balance
+are range-checked inside the circuit, so the balance arithmetic cannot wrap.
+Balances before, net change magnitudes and account limbs are hashed as whole
+field elements, so they are exactly the verifier's values, and the verifier
+accepts none outside its declared range (`verifySettlementProof` rejects any
+public signal outside it, which also rules out aliases at or above the field
+order, and `settlementPublicHash` refuses to hash one). The circuit alone
+accepts a magnitude or a balance of p - x; the tests show both, and that no
+verifier hashes them. Checking them in the circuit as well would cross 2^16
+rows and double the proving time. The account ordering keeps accounts unique
+for any limb values (the argument is in the circuit). Every active account
+must be touched by an active transfer, so the account list is exactly the
+touched set.
 
 ### Validation (every validator, block and Sync)
 
@@ -163,7 +191,8 @@ For each `l2psBatch` in a block, once `l2psSettlement` is active:
    the signer never signed.
 2. The public inputs are rebuilt from the transaction and the validator's own
    working state at that transaction, never taken from the transaction.
-3. The PLONK proof verifies against the committed key (about 50 ms).
+3. The PLONK proof verifies against the committed key, with the hash of the
+   rebuilt signals as its public input (about 20 ms).
 4. The settlement is applied in block apply, in transaction order, by every
    validator and by Sync. A batch that fails any step makes the block invalid.
 
@@ -182,8 +211,8 @@ about 1 s to block validation.
   proven again; an account that is busy on L1 can delay its subnet's batches.
 - No main-thread fallback. A batch that cannot be proved stays in the L2PS
   mempool and is retried; it never goes out without a proof.
-- Throughput is about one core and 4 GB per 0.2 transfer/s (a full batch of
-  10 in about 50 s). A configurable pool of prover subprocesses
+- Throughput is about one core and 1 GB per 0.24 transfer/s (a full batch of
+  9 in about 38 s). A configurable pool of prover subprocesses
   (`L2PS_SETTLEMENT_PROVERS`) scales it per node; a native PLONK prover is
   the next step if one core per subnet is not enough.
 
@@ -204,7 +233,8 @@ tests the same file.
 
 ### Encoding
 
-- Sizes: N = 10 transfer slots, M = 20 account slots per proof.
+- Sizes: N = 9 transfer slots, M = 18 account slots per proof
+  (`SETTLEMENT_TRANSFERS`; see "Circuit" for why 9).
 - Account: `0x` + 64 lowercase hex. In the circuit it is two 128-bit limbs,
   `hi` = first 16 bytes, `lo` = last 16 bytes, both big-endian.
 - Amount, fee, balance and net change magnitude: below 2^128. Nonce: below
@@ -215,7 +245,8 @@ tests the same file.
   `l2ps-settlement:v1:<chainId>:<l2psUid>:<c as 0x + 64 hex>`, ed25519 by
   the sender's account key. It cannot be read as a transaction preimage
   (`demos-tx:v1:`) or a personal message.
-- Commitments hash: `Poseidon10(c_0 .. c_9)`, inactive slots 0.
+- Commitments hash: `Poseidon_N(c_0 .. c_(N-1))` (Poseidon9 for N = 9),
+  inactive slots 0.
 - Nonce: the sender's L1 account nonce. The transfers of one signer in a
   batch carry consecutive nonces from the account's nonce + 1, in batch
   order, and settlement spends them. An L1 transaction that takes a nonce
@@ -224,7 +255,7 @@ tests the same file.
   sender pays `amount + fee`. The fee is distributed as an L1 native fee
   (`generateFeeDistributionEdits`, network fee = `fee`).
 
-### Public signals (171)
+### Public signals (1 + 5N + 6M = 154)
 
     commitmentsHash,
     transferActive[N], signerHi[N], signerLo[N], nonce[N], fee[N],
@@ -240,9 +271,10 @@ Private per transfer slot: `toHi`, `toLo`, `amount`, `salt`, `senderIndex`,
 Circuit constraints, in addition to "Circuit" above:
 - `transferActive` and `accountActive` are bits and non-increasing (active
   prefix); an inactive slot has every public value 0 and touches nothing;
-- signer limbs equal the sender account's limbs at `senderIndex`, the
-  receiver's at `receiverIndex`, indices below M and pointing at active
-  accounts;
+- the commitment opens with the sender account's limbs at `senderIndex`
+  and the receiver's at `receiverIndex`, indices below M and pointing at
+  active accounts; the signer is bound to the sender through the public
+  hash (Interface v1.1);
 - running balances in batch order: the sender is debited `amount + fee`,
   then the receiver credited `amount`; every running balance stays in
   [0, 2^128);
@@ -283,8 +315,9 @@ validator reaches the same verdict:
    every receiver-side account named in `changes`;
 2. each signature over its message; per-signer nonces consecutive from the
    working-state nonce + 1; each fee at least the native transfer fee;
-3. public signals from the working state; PLONK verify against the
-   committed key `src/libs/l2ps/zk/keys/settlement_10/verification_key.json`;
+3. public signals from the working state; PLONK verify, with their
+   `settlementPublicHash` as the one public input, against the committed key
+   `src/libs/l2ps/zk/keys/settlement/verification_key.json`;
 4. apply each delta, add the transfer count to each signer's nonce, credit
    each fee's distribution edits without their sender debit (the delta
    already holds it).
@@ -292,6 +325,53 @@ validator reaches the same verdict:
 The local `l2ps_proofs` path (`L2PSConsensus.applyPendingProofs`) and
 `L2PSProofManager.createProof` stop when the fork is active, and members
 refuse old-format transfers at admission.
+
+## Interface v1.1
+
+Replaces the public signal list of v1 as the circuit's public input; the
+encoding above, the transaction and `settlementPublicSignals` are unchanged.
+Node code: `settlementPublicHash` in `encoding.ts`; the circuit computes the
+same value from its inputs and checks it against its one public input.
+
+The circuit takes the v1 signals as private inputs except `signerHi` and
+`signerLo`: it opens each commitment with the limbs of the account at
+`senderIndex`. The verifier rebuilds the v1 signals as before, range-checks
+them, and computes:
+
+1. For each transfer slot i: if active, `senderIndex_i` = the slot of the
+   active account whose `(hi, lo)` equals the signer's; no such account
+   rejects the statement. If idle, the signer limbs must be 0 (else reject)
+   and `senderIndex_i` = 0.
+2. Packed elements, in order (2 + N + 4M = 83 for N = 9):
+   - `commitmentsHash`;
+   - per transfer i: `fee_i + nonce_i * 2^128 + senderIndex_i * 2^192 +
+     transferActive_i * 2^200`;
+   - per account j: `accountHi_j`, `accountLo_j`, `balanceBefore_j`,
+     `deltaMagnitude_j`;
+   - `sum_j (accountActive_j * 4^j + deltaNegative_j * 2 * 4^j)`.
+3. Sponge: `h = 0`; for each chunk of 7 elements, the last padded with
+   zeros: `h = Poseidon8(h, e_7k, .., e_7k+6)` (circomlib Poseidon,
+   poseidon-lite). `publicHash` is the final `h`.
+
+The packing is injective on range-checked values: fee < 2^128 and nonce <
+2^64 are range-checked in the circuit, `senderIndex` < M <= 126 by its
+selector, the flags are bits, and everything else is a whole element. Each
+value of the statement therefore changes the hash; the tests change every
+one of the 154 signals in turn and check that the proof fails or the
+statement is refused.
+
+Why packed Poseidon8 rather than one element per signal: absorbing the 154
+signals one by one costs about 45,000 PLONK rows with Poseidon8 (294 per
+element) or 54,000 with Poseidon16 (328 per element, 15 per chunk), which
+would put N = 9 at 2^17 and double its proving time. Packed, the hash costs about 24,700 rows
+for N = 9. One public input instead of 154 shrinks the proving key from
+1.88 GB to 101 MB (PLONK keeps a Lagrange polynomial per public input) and
+the prover's memory from 4 GB to 1 GB.
+
+Example (pinned in `encoding.test.ts`): transfers A -> B (10, fee 1, nonce
+3, salt 9) and C -> A (4, fee 2, nonce 7, salt 8), A = 0x11..11, B =
+0x22..22, C = 0x33..33, balances before A 100, B 0, C 50, deltas -7, +10,
+-6: `publicHash = 0x06e69393040f0b0be0b77a589cb51dc8d89beb42f28b4a26eec431cb8b544c27`.
 
 ## Launch stance
 
@@ -302,7 +382,7 @@ are refused from the start, so DEM-816 never exists on mainnet.
 
 | Step | Work | Estimate |
 |------|------|----------|
-| 1 | Circuit `L2PSSettlement(10, 20)`, witness builder, constraint and proving-time check against the budget | 2 days |
+| 1 | Circuit `L2PSSettlement(9, 18)`, witness builder, constraint and proving-time check against the budget | 2 days |
 | 2 | SDK: transfer commitment, signature domain, encrypted payload carries the salt | 1 day |
 | 3 | Aggregator: settlement record, real witness, no fallback, prover pool | 2 days |
 | 4 | Validation and apply in block and Sync behind the fork, remove the local apply path | 2 days |
