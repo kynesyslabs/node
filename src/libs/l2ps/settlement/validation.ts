@@ -114,7 +114,14 @@ export function parseSettlement(tx: {
         return refuse("l2psBatch carries no settlement record (old format)")
     }
     if (record.version !== SETTLEMENT_VERSION) {
-        return refuse(`unsupported settlement version ${String(record.version)}`)
+        // Only a primitive is named: String() throws on an object whose
+        // toString is not callable, and the record comes off the wire.
+        const version = record.version
+        const shown =
+            version === null || (typeof version !== "object" && typeof version !== "function")
+                ? String(version)
+                : typeof version
+        return refuse(`unsupported settlement version ${shown}`)
     }
     const { transfers, changes, proof } = record
     if (!Array.isArray(transfers) || transfers.length === 0 || transfers.length > SETTLEMENT_TRANSFERS) {

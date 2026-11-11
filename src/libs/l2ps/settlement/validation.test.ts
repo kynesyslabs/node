@@ -96,6 +96,12 @@ describe("parseSettlement", () => {
         record.version = 2
         expect(parseSettlement(batchTx(record))).toMatchObject({ ok: false, reason: "unsupported settlement version 2" })
     })
+
+    it("refuses a version no string can be made of, instead of throwing", () => {
+        const record = recordOf([t1]) as any
+        record.version = JSON.parse('{"toString": null}')
+        expect(parseSettlement(batchTx(record))).toMatchObject({ ok: false, reason: "unsupported settlement version object" })
+    })
 })
 
 describe("settlementNonceRefusal", () => {
