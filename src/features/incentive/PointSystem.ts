@@ -2,11 +2,10 @@ import log from "@/utilities/logger"
 import { Referrals } from "./referrals"
 import Datasource from "../../model/datasource"
 import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
-import { RPCResponse, Web2GCRData } from "@kynesyslabs/demosdk/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
-import { Twitter } from "@/libs/identity/tools/twitter"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
@@ -294,7 +293,11 @@ export class PointSystem {
     }
 
     /**
-     * Add points to the GCR for a user
+     * Add points to the GCR for a user.
+     *
+     * Runs in block apply on every node, a syncing one included, so it reads
+     * nothing but the chain: asking an outside service (the Twitter follow
+     * check this used to make) gives nodes different points for one block.
      */
     private async addPointsToGCR(
         userId: string,
@@ -309,7 +312,6 @@ export class PointSystem {
             | "humanPassport",
         platform: string,
         referralCode?: string,
-        twitterUserId?: string,
     ): Promise<void> {
         const db = await Datasource.getInstance()
         const account = await ensureGCRForUser(userId)
@@ -415,34 +417,6 @@ export class PointSystem {
                 referralCode,
                 gcrMainRepository,
             )
-        }
-
-        const shouldCheckFollow =
-            type === "socialAccounts" &&
-            platform === "twitter" &&
-            points > 0 &&
-            twitterUserId
-
-        if (shouldCheckFollow) {
-            const twitter = Twitter.getInstance()
-            const twitterUser = (account.identities.web2["twitter"] || []).find(
-                (twitterIdentity: Web2GCRData["data"]) =>
-                    sameLinkedUserId(twitterIdentity.userId, twitterUserId),
-            )
-
-            if (twitterUser && twitterUser.username) {
-                const isFollowingDemos = await twitter.checkFollow(
-                    twitterUser.username,
-                )
-                if (
-                    isFollowingDemos &&
-                    (account.points.breakdown.demosFollow || 0) <= 0
-                ) {
-                    account.points.breakdown.demosFollow =
-                        pointValues.FOLLOW_DEMOS
-                    account.points.totalPoints += pointValues.FOLLOW_DEMOS
-                }
-            }
         }
 
         await gcrMainRepository.save(account)
@@ -613,7 +587,6 @@ export class PointSystem {
                 "socialAccounts",
                 "twitter",
                 referralCode,
-                twitterUserId,
             )
 
             const updatedPoints = await this.getUserPointsInternal(userId)
