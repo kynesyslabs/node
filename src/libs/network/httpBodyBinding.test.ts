@@ -5,7 +5,7 @@
  * the real auth middleware and the real RPC route.
  */
 
-import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { afterAll, beforeAll, beforeEach, describe, expect, it, jest, setSystemTime } from "bun:test"
 import forge from "node-forge"
 import { mockCore } from "src/utilities/testSupport/coreMocks"
 
@@ -115,6 +115,7 @@ const { serverRpcBun } = await import("./server_rpc")
 const { default: Peer } = await import("src/libs/peer/Peer")
 const Hashing = (await import("src/libs/crypto/hashing")).default
 const { bodyBoundAuthHeaders } = await import("./peerHttpAuth")
+const { PROCESS_START_MS, seenAuthMessages } = await import("./verifySignature")
 
 const server: any = await serverRpcBun()
 const fakeServer = { requestIP: () => ({ address: "198.51.100.7" }) }
@@ -245,6 +246,12 @@ describe("peer HTTP auth", () => {
 })
 
 describe("sudo methods", () => {
+    // Sudo calls dated within a few seconds of the node's start are refused,
+    // so these run on a clock well past it.
+    const NOW = PROCESS_START_MS + 60_000
+    beforeAll(() => setSystemTime(new Date(NOW)))
+    afterAll(() => setSystemTime())
+
     const award = { method: "awardPoints", params: [{ message: [{ address: SENDER, points: 1 }] }] }
     const sign = async (message: Uint8Array) =>
         new Uint8Array(forge.pki.ed25519.sign({ message: Buffer.from(message), privateKey: pair.privateKey }))
@@ -317,9 +324,30 @@ describe("sudo methods", () => {
 
     it("refuses a sudo call signed before this node started, which its replay memory never saw", async () => {
         const body = JSON.stringify(award)
-        const res = await deliver(body, await operatorHeaders(body, OUR_KEY, Date.now() - 60_000))
+        const res = await deliver(body, await operatorHeaders(body, OUR_KEY, PROCESS_START_MS - 60_000))
         expect(res.status).toBe(401)
         expect(dispatched).toEqual([])
+    })
+
+    it("refuses a sudo call dated ahead of this node's clock", async () => {
+        const body = JSON.stringify(award)
+        const res = await deliver(body, await operatorHeaders(body, OUR_KEY, NOW + 60_000))
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("refuses a sudo call this node could have accepted before a restart, which its replay memory lost", async () => {
+        const body = JSON.stringify(award)
+        const res = await deliver(body, await operatorHeaders(body, OUR_KEY, PROCESS_START_MS + 1_000))
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("accepts a sudo call dated a little ahead, for an operator clock slightly fast", async () => {
+        seenAuthMessages.clear()
+        const body = JSON.stringify(award)
+        const res = await deliver(body, await operatorHeaders(body, OUR_KEY, NOW + 1_000))
+        expect(res.status).toBe(200)
     })
 
     it("refuses an exact replay of a sudo call", async () => {

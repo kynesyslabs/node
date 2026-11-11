@@ -32,8 +32,15 @@ export const seenAuthMessages = new SeenAuthMessages(200_000)
  * signed before then are refused; the slack covers a peer clock a little
  * behind ours.
  */
-const PROCESS_START_MS = Date.now()
+export const PROCESS_START_MS = Date.now()
 export const RESTART_CLOCK_SLACK_MS = 2_000
+
+/**
+ * How far ahead of our clock a call that names this node may be dated.
+ * Such a call accepted before a restart is dated earlier than the restart
+ * plus this slack, so one dated no later than that is refused after it.
+ */
+export const AUDIENCE_FUTURE_SLACK_MS = 5_000
 
 export interface VerificationResult {
     /**
@@ -152,9 +159,7 @@ export async function verifySignature(
     if (requireTimestampBinding || bodyBound) {
         const timestampError =
             checkAuthTimestamp(timestamp) ??
-            (bodyBound && Number(timestamp) < PROCESS_START_MS - RESTART_CLOCK_SLACK_MS
-                ? "Auth timestamp predates this node's start"
-                : null)
+            (bodyBound ? restartReplayError(Number(timestamp), audienceBound) : null)
         if (timestampError) {
             return {
                 valid: false,
@@ -248,6 +253,27 @@ export async function verifySignature(
             error: `Verification error: ${error}`,
         }
     }
+}
+
+/**
+ * Why a body-bound request may be one this node accepted before it last
+ * started, which the replay memory, empty since then, cannot recognise.
+ * Calls that name this node (sudo calls) are dated at most a few seconds
+ * ahead, which closes that gap; peer requests keep the wide window and are
+ * only refused when dated before the start.
+ */
+function restartReplayError(ts: number, audienceBound: boolean, now = Date.now()): string | null {
+    if (ts < PROCESS_START_MS - RESTART_CLOCK_SLACK_MS) {
+        return "Auth timestamp predates this node's start"
+    }
+    if (!audienceBound) return null
+    if (ts > now + AUDIENCE_FUTURE_SLACK_MS) {
+        return "Auth timestamp is ahead of this node's clock"
+    }
+    if (ts <= PROCESS_START_MS + AUDIENCE_FUTURE_SLACK_MS) {
+        return "Auth timestamp too close to this node's start; sign the call again"
+    }
+    return null
 }
 
 /** Why a timestamp-bound auth header's timestamp is refused, or null if fresh. */
