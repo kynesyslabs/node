@@ -144,7 +144,13 @@ export default class Peer {
         log.debug(
             "[PEER] Testing connection to peer: " + this.connection.string,
         )
-        const response = await this.call({ method: "ping", params: [] })
+        let response = await this.call({ method: "ping", params: [] })
+        // A ping a failed Omni connect cut short proves nothing either way.
+        // That failure put the peer on HTTP for the cooldown, so one more
+        // ping gets the whole budget.
+        if (response.extra?.inconclusive === true) {
+            response = await this.call({ method: "ping", params: [] })
+        }
         log.debug(
             "[PEER] [PING] Response: " +
                 response.result +
@@ -271,10 +277,18 @@ export default class Peer {
                     options?.timeoutMs,
                 )
             } catch (error) {
+                // The adapter falls back to HTTP itself where nothing was
+                // sent; an error escaping it may follow a delivered request,
+                // which an HTTP resend would deliver twice.
                 log.error(
-                    `[Peer] OmniProtocol adaptCall failed, falling back to HTTP: ${error}`,
+                    `[Peer] OmniProtocol adaptCall failed for ${this.identity}: ${error}`,
                 )
-                // Fall through to HTTP call below
+                return {
+                    result: 500,
+                    response: "OmniProtocol call failed",
+                    require_reply: false,
+                    extra: { transport: "omni" },
+                }
             }
         }
 
@@ -287,6 +301,7 @@ export default class Peer {
         request: RPCRequest,
         isAuthenticated = true,
         timeoutMs = DEFAULT_RPC_TIMEOUT_MS,
+        { offlineOnTimeout = true }: { offlineOnTimeout?: boolean } = {},
     ): Promise<RPCResponse> {
         const timestamp = Date.now()
         const timestampReadable = new Date(timestamp).toISOString()
@@ -400,7 +415,9 @@ export default class Peer {
                 log.warn(
                     `[RPC Call] [${method}] [${timestampReadable}] Request timeout/aborted to: ${connectionUrl}`,
                 )
-                PeerManager.markPeerOffline(this)
+                if (offlineOnTimeout) {
+                    PeerManager.markPeerOffline(this)
+                }
 
                 return {
                     result: 504,
@@ -409,6 +426,8 @@ export default class Peer {
                     extra: {
                         code: error.code || "ETIMEDOUT",
                         url: connectionUrl,
+                        // Tells liveness checks this proves nothing either
+                        ...(offlineOnTimeout ? {} : { inconclusive: true }),
                     },
                 }
             }

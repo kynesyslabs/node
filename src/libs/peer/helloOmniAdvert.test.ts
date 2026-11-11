@@ -177,3 +177,26 @@ describe("our hello reply", () => {
         expect(response.extra.omni).toBeUndefined()
     })
 })
+
+describe("a hello that timed out", () => {
+    const timedOut = (extra: Record<string, unknown>): any => ({
+        result: 504,
+        response: "Request timeout",
+        require_reply: false,
+        extra,
+    })
+
+    it("takes the peer offline after a full budget", async () => {
+        const markPeerOffline = jest.spyOn(PeerManager, "markPeerOffline")
+        await fromAlice(timedOut({ code: "ETIMEDOUT" }))
+        expect(markPeerOffline).toHaveBeenCalledTimes(1)
+        markPeerOffline.mockRestore()
+    })
+
+    it("does not when a failed Omni connect cut its budget short", async () => {
+        const markPeerOffline = jest.spyOn(PeerManager, "markPeerOffline")
+        await fromAlice(timedOut({ code: "ETIMEDOUT", inconclusive: true }))
+        expect(markPeerOffline).not.toHaveBeenCalled()
+        markPeerOffline.mockRestore()
+    })
+})

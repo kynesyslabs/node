@@ -52,13 +52,22 @@ at another service on the host that proved the URL.
 
 ### Failures
 
+One call has one deadline, its timeout, across connect, send and any HTTP
+fallback.
+
 - Connect failure (port closed, filtered, refused): fall back to HTTP for
-  that call with what is left of its timeout (a 504 if nothing is left), and
-  keep the peer on HTTP for a cooldown that starts at 60 s and doubles with
-  each failure in a row, up to 10 minutes. An Omni answer resets it; a
-  repeated hello with the same advert does not. The connect timeout is
-  capped at the call's own timeout, so a dead advertised port costs at most
-  one call timeout per cooldown, and no fallback outlives the caller.
+  that call with what is left of its timeout, or answer 504 if less than
+  500 ms is left (`MIN_HTTP_FALLBACK_MS`), and keep the peer on HTTP for a
+  cooldown that starts at 60 s and doubles with each failure in a row, up
+  to 10 minutes. An Omni answer resets it; a repeated hello with the same
+  advert does not. The connect timeout is capped at the call's own timeout,
+  so a dead advertised port costs at most one call timeout per cooldown,
+  and no fallback outlives the caller. A timeout of that shortened fallback,
+  or the 504 when it is skipped, is marked `extra.inconclusive`: the peer
+  never had the whole budget, so it is not taken offline for it.
+- The time a connect took, our own or one we joined, comes off the
+  request's timeout before it is sent; with nothing left it is not sent
+  (504) and the connection stays in the pool.
 - No answer within the call's timeout on a live connection: a 504, as HTTP
   reports it. The connection stays open: the request's entry is dropped and
   a late answer is ignored by its sequence number, while the other requests
@@ -80,8 +89,20 @@ at another service on the host that proved the URL.
   socket each beyond the per-peer cap, which the receiver would close again.
   Each call waits for it only within its own timeout (a 504, no HTTP resend,
   no cooldown); the connect carries on for the call that started it.
+- An error escaping the Omni adapter answers 500 without an HTTP resend:
+  the adapter falls back by itself where nothing was sent.
 - Calls that ask for `protocol: "http"` stay on HTTP. Only Sync does, for
   block replies: Omni frames are capped at 10 MB, block batches are not.
+
+### Peer liveness
+
+A peer leaves the online table only on evidence that it is down: an HTTP
+call that got its whole budget and timed out, a refused connection or an
+invalid URL, a hello without a usable reply, or a quiet peer that does not
+answer its ping (`checkOfflinePeers`). An Omni request timeout, a lost Omni
+connection, an unreadable Omni answer and an inconclusive timeout are not
+evidence. A hello or ping with an inconclusive answer does not count it; the
+ping asks once more, now over HTTP with the whole budget.
 
 ### Server side
 

@@ -807,7 +807,9 @@ export default class PeerManager {
             peerman.removeOnlinePeer(peer.identity)
             peerman.removeOfflinePeer(peer.identity)
             return { peers: [], verdict: "other-genesis" }
-        } else {
+        } else if (response.extra?.inconclusive !== true) {
+            // A timeout on a budget a failed Omni connect cut short is no
+            // sign the peer is down; it is retried at the next hello.
             PeerManager.markPeerOffline(peer)
         }
 

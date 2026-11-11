@@ -13,6 +13,7 @@ const sharedState: Record<string, any> = {
     omniConfig: { port: 0, rateLimit: { enabled: false } },
     isOmniProtocolEnabled: true,
     omniAdapter: null,
+    keypair: { publicKey: new Uint8Array(32) },
 }
 mockCore(sharedState)
 
@@ -22,6 +23,7 @@ const { default: Peer, DEFAULT_RPC_TIMEOUT_MS } = await import(
     "src/libs/peer/Peer"
 )
 const { default: PeerManager } = await import("src/libs/peer/PeerManager")
+const { default: axios } = await import("axios")
 
 const PEER = "0x" + "ab".repeat(32)
 const URL_A = "http://10.0.0.9:53550"
@@ -130,9 +132,14 @@ describe("a request timeout on a live Omni connection", () => {
         expect(response.result).toBe(200)
         expect(peer.httpCall).toHaveBeenCalledTimes(1)
         expect(adapter.shouldUseOmni(PEER, URL_A)).toBe(false)
+        // What the connect left of the budget, and its timeout proves nothing
+        const [, , budget, flags] = peer.httpCall.mock.calls[0] as any[]
+        expect(budget).toBeGreaterThan(0)
+        expect(budget).toBeLessThanOrEqual(DEFAULT_RPC_TIMEOUT_MS)
+        expect(flags).toEqual({ offlineOnTimeout: false })
     })
 
-    it("a connect that used up the call's budget is not retried over HTTP", async () => {
+    it("a connect that left too little of the call's budget is not retried over HTTP", async () => {
         const adapter = preferred()
         adapter.recordOmniEndpoint(PEER, URL_A, 63551)
         ;(adapter as any).connectionPool = {
@@ -146,9 +153,10 @@ describe("a request timeout on a live Omni connection", () => {
             peer,
             { method: "mempool", params: [] },
             true,
-            30,
+            300,
         )
         expect(response.result).toBe(504)
+        expect(response.extra.inconclusive).toBe(true)
         expect(peer.httpCall).not.toHaveBeenCalled()
         expect(adapter.shouldUseOmni(PEER, URL_A)).toBe(false)
     })
@@ -188,6 +196,73 @@ describe("per-call timeout", () => {
             timeoutMs: 10_000,
         })
         expect((adaptCall.mock.calls[0] as unknown[])[3]).toBe(10_000)
+        sharedState.omniAdapter = null
+    })
+})
+
+describe("an HTTP timeout", () => {
+    async function timedOut(flags?: { offlineOnTimeout: boolean }) {
+        const post = jest.spyOn(axios, "post").mockImplementation(async () => {
+            throw Object.assign(new Error("timeout"), {
+                isAxiosError: true,
+                code: "ECONNABORTED",
+            })
+        })
+        const markPeerOffline = jest
+            .spyOn(PeerManager, "markPeerOffline")
+            .mockImplementation(() => undefined)
+        const peer = new Peer(URL_A, PEER)
+        const response = await peer.httpCall(
+            { method: "ping", params: [] },
+            false,
+            100,
+            flags,
+        )
+        const marked = markPeerOffline.mock.calls.length
+        post.mockRestore()
+        markPeerOffline.mockRestore()
+        return { response, marked }
+    }
+
+    it("on a full budget takes the peer offline", async () => {
+        const { response, marked } = await timedOut()
+        expect(response.result).toBe(504)
+        expect(marked).toBe(1)
+    })
+
+    it("on a budget an Omni connect cut short does not", async () => {
+        const { response, marked } = await timedOut({ offlineOnTimeout: false })
+        expect(response.result).toBe(504)
+        expect(response.extra.inconclusive).toBe(true)
+        expect(marked).toBe(0)
+    })
+})
+
+describe("a liveness ping", () => {
+    it("asks again when a failed Omni connect cut the first one short", async () => {
+        const peer = new Peer(URL_A, PEER)
+        const answers = [
+            { result: 504, response: "", require_reply: false, extra: { inconclusive: true } },
+            { result: 200, response: "pong", require_reply: false, extra: null },
+        ]
+        peer.call = jest.fn(async () => answers.shift()) as any
+        expect(await peer.connect()).toBe(true)
+    })
+})
+
+describe("an error escaping the Omni adapter", () => {
+    it("is not resent over HTTP", async () => {
+        sharedState.omniAdapter = {
+            adaptCall: jest.fn(async () => {
+                throw new Error("after send")
+            }),
+        }
+        const peer = new Peer(URL_A, PEER)
+        const httpCall = jest.fn()
+        peer.httpCall = httpCall as any
+        const response = await peer.call({ method: "ping", params: [] })
+        expect(response.result).toBe(500)
+        expect(httpCall).not.toHaveBeenCalled()
         sharedState.omniAdapter = null
     })
 })

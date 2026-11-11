@@ -154,6 +154,13 @@ export const DEFAULT_HTTP_FALLBACK_COOLDOWN_MS = 60_000
 /** Ceiling of the cooldown, which doubles with each failure in a row (10 minutes) */
 export const MAX_HTTP_FALLBACK_COOLDOWN_MS = 600_000
 
+/**
+ * Least time left of a call for its HTTP fallback after a failed Omni
+ * connect. A healthy peer under client load can need a few hundred ms over
+ * HTTP; a shorter fallback would only add load to its RPC port and fail.
+ */
+export const MIN_HTTP_FALLBACK_MS = 500
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Protocol Config Defaults (types/config.ts - ProtocolRuntimeConfig)
 // ─────────────────────────────────────────────────────────────────────────────

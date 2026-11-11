@@ -18,16 +18,25 @@ import {
 } from "../serialization/control"
 import { OmniOpcode } from "../protocol/opcodes"
 import { ConnectionLostError, RequestTimeoutError } from "../types/errors"
+import { MIN_HTTP_FALLBACK_MS } from "../constants"
 import { getSharedState } from "@/utilities/sharedState"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 export type AdapterOptions = BaseAdapterOptions
 
-const omniTimeout = (): RPCResponse => ({
+/**
+ * A 504 for an Omni call. `inconclusive` when the peer never had the call's
+ * whole budget to answer in, so the timeout says nothing about the peer.
+ */
+const omniTimeout = (inconclusive = false): RPCResponse => ({
     result: 504,
     response: "Request timeout",
     require_reply: false,
-    extra: { code: "ETIMEDOUT", transport: "omni" },
+    extra: {
+        code: "ETIMEDOUT",
+        transport: "omni",
+        ...(inconclusive ? { inconclusive: true } : {}),
+    },
 })
 
 export class PeerOmniAdapter extends BaseOmniAdapter {
@@ -216,11 +225,15 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
         // budget: a full fresh timeout would outlive callers that stop
         // waiting at that budget, such as the mempool merge.
         const remainingMs = deadline - Date.now()
-        if (remainingMs <= 0) {
-            return omniTimeout()
+        if (remainingMs < MIN_HTTP_FALLBACK_MS) {
+            return omniTimeout(true)
         }
-        // Use httpCall directly to avoid recursion through call()
-        return peer.httpCall(request, isAuthenticated, remainingMs)
+        // Use httpCall directly to avoid recursion through call(). A timeout
+        // on a budget the connect already cut short says nothing about the
+        // peer, so it does not take the peer offline.
+        return peer.httpCall(request, isAuthenticated, remainingMs, {
+            offlineOnTimeout: false,
+        })
     }
 
     /**
