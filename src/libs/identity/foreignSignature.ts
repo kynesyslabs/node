@@ -76,6 +76,28 @@ export function judgeOwnSignature(
     }
 }
 
+// A validator resyncing without its record sees our key on every block it
+// ever signed, so the no-record warning is logged at the 1st, 10th, 100th,
+// ... occurrence per identity file, each line naming the latest block.
+const noRecordSeen = new Map<string, number>()
+
+function isPowerOfTen(n: number): boolean {
+    while (n >= 10 && n % 10 === 0) n /= 10
+    return n === 1
+}
+
+function warnNoRecord(identityFile: string, reason: string): void {
+    const count = (noRecordSeen.get(identityFile) ?? 0) + 1
+    noRecordSeen.set(identityFile, count)
+    if (count === 1) {
+        log.warning(`[SIGNING] ${reason}`)
+    } else if (isPowerOfTen(count)) {
+        log.warning(
+            `[SIGNING] ${reason} (${count} occurrences so far; only the 1st, 10th, 100th, ... are logged)`,
+        )
+    }
+}
+
 function countForeignSignature(): void {
     try {
         getMetricsService().incrementCounter("foreign_signature_total")
@@ -118,7 +140,9 @@ export function checkOwnSignature(block: SignedBlock): OwnSignatureVerdict {
         genesisHash,
         signedByThisProcess,
     )
-    if (verdict.kind === "ambiguous") {
+    if (verdict.kind === "ambiguous" && !record) {
+        warnNoRecord(identityFile, verdict.reason)
+    } else if (verdict.kind === "ambiguous") {
         log.warning(`[SIGNING] ${verdict.reason}`)
     } else if (verdict.kind === "foreign") {
         countForeignSignature()
