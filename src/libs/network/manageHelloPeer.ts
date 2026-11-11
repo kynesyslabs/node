@@ -86,6 +86,28 @@ async function signedOmniAdvert(nonce: string | undefined) {
     }
 }
 
+const signingStopped = () =>
+    signingStopState(getSharedState.identityFile).stopped
+
+/**
+ * The signed part of our reply. Signing can stop while the signatures are
+ * made; a reply signed as an active node after that would let a caller move
+ * our key's URL to this copy, which refuses to vote. A stop is not undone
+ * while we run, so one re-sign as standby is enough.
+ */
+async function signedHelloProof(nonce: string | undefined) {
+    const standby = signingStopped()
+    const proof = {
+        ...(standby ? { standby: true } : {}),
+        ...(nonce ? await signHelloResponse(nonce, standby) : {}),
+        ...(await signedOmniAdvert(nonce)),
+    }
+    if (!standby && signingStopped()) {
+        return signedHelloProof(nonce)
+    }
+    return proof
+}
+
 function gossipAdvert() {
     const multiaddr = GossipManager.isEnabled()
         ? GossipManager.getInstance().getListenAddr()
@@ -300,18 +322,13 @@ export async function manageHelloPeer(
 
     // INFO: Return a list of all our connected peers
 
-    const standby = signingStopState(getSharedState.identityFile).stopped
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
         ...(callerKnownAt ? { callerKnownAt } : {}),
-        ...(standby ? { standby: true } : {}),
-        ...(content.nonce
-            ? await signHelloResponse(content.nonce, standby)
-            : {}),
+        ...(await signedHelloProof(content.nonce)),
         ...gossipAdvert(),
-        ...(await signedOmniAdvert(content.nonce)),
         syncData: peerManager.ourSyncData,
         genesisHash: ourGenesis,
         peerlist: peerManager

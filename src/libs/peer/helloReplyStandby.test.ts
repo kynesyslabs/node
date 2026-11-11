@@ -31,8 +31,14 @@ mockCore(sharedState)
 // The "signature" is the signed message itself: verification then checks
 // exactly which message was signed. Hello requests are not under test here.
 const decoder = new TextDecoder()
+// Runs while a signature is pending, as a block received meanwhile would
+let whileSigning: (() => void) | null = null
 mockHelloDeps({
-    sign: async (_alg, message) => ({ signature: new Uint8Array(message) }),
+    sign: async (_alg, message) => {
+        whileSigning?.()
+        await Promise.resolve()
+        return { signature: new Uint8Array(message) }
+    },
     verify: async input => {
         const text = decoder.decode(input.message)
         if (!text.startsWith("DEMOS_PEER_AUTH_V1:")) return true
@@ -81,7 +87,10 @@ beforeEach(() => {
     seed(BOB, BOB_URL)
 })
 
-afterEach(() => __resetSigningHalt())
+afterEach(() => {
+    whileSigning = null
+    __resetSigningHalt()
+})
 
 describe("the standby flag in a hello reply", () => {
     it("verifies as sent by a copy that stopped signing", async () => {
@@ -103,6 +112,13 @@ describe("the standby flag in a hello reply", () => {
         expect(reply.extra.standby).toBeUndefined()
         reply.extra.standby = true
         expect(await verify(reply)).toBe("invalid")
+    })
+
+    it("is set when signing stops while the reply is being signed", async () => {
+        whileSigning = () => haltSigning("test: stopped mid-reply")
+        const reply = await replyToBob()
+        expect(reply.extra.standby).toBe(true)
+        expect(await verify(reply)).toBe("verified")
     })
 
     it("leaves a signing node's reply in the form older nodes verify", async () => {
