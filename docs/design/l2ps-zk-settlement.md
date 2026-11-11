@@ -200,7 +200,10 @@ For each `l2psBatch` in a block, once `l2psSettlement` is active:
    `SettlementVerifierFault`, which block apply rethrows: a local fault
    never becomes a failed-batch verdict.
 4. The settlement is applied in block apply, in transaction order, by every
-   validator and by Sync. A batch that fails any step makes the block invalid.
+   validator and by Sync. A batch that fails any step is included as failed,
+   with no edits, and the block stays valid (see Apply): every validator
+   reaches the same verdict. Only a verifier fault (step 3) stops block
+   apply.
 
 The local `l2ps_proofs` application path is removed once the fork is active.
 That closes DEM-816.
@@ -221,15 +224,28 @@ about 1 s to block validation.
   9 in about 38 s). A pool of prover subprocesses (`L2PS_SETTLEMENT_PROVERS`,
   1 to 16, default 1) scales it per node; a native PLONK prover is the next
   step if that is not enough.
-- Parallel proving: a cycle first plans all its batches, across every subnet
-  the node is a member of, each on accounts that no batch in flight or
-  planned before it in the cycle names (sender, receiver or change), so every
-  batch binds tip balances no other unsettled batch moves. It then proves up
-  to `L2PS_SETTLEMENT_PROVERS` of them at once and submits them in plan
-  order, so the same queue and tip give the same batches in the same order
-  however the proofs interleave. Subnets are visited in uid order.
-- A batch the mempool refuses counts like a failed proof: the subnet backs
-  off and its transfers are blamed; other subnets go on.
+- Parallel proving: a cycle plans at most `L2PS_SETTLEMENT_PROVERS` batches,
+  across every subnet the node is a member of, each on accounts that no
+  batch in flight or planned before it in the cycle names (sender, receiver
+  or change), so every batch binds tip balances no other unsettled batch
+  moves. It proves them all at once and submits each in plan order as soon
+  as it and the batches before it are proved, so the same queue and tip give
+  the same batches in the same order however the proofs interleave. No batch
+  waits for a prover after it is planned: its tip is never older than one
+  proof. Subnets are visited in uid order from a starting subnet that moves
+  by one each cycle, so subnets that share an account take turns at it.
+- A batch the mempool refuses backs its subnet off; other subnets go on. Its
+  transfers are counted towards isolation only when no retry can change the
+  refusal (unstorable, larger than a block), never for a full pool or a
+  database error. A submission that throws fails only its batch; a batch the
+  mempool took is followed to the end even when marking its rows fails.
+- An L1 failure counts towards isolation only when the batch's accounts are
+  still at the balances and nonces it was proved on: a failed settlement
+  edits none of them, so any change came from another transaction and made
+  the proof stale. Unknown (a batch from before a restart) counts as moved.
+- Stopping the service closes the loop before it waits for the cycle: no
+  proof starts and no batch goes out after that, and proofs the closing pool
+  cuts short count against nothing.
 
 ### Admission and the queue (subnet member nodes)
 
@@ -243,9 +259,11 @@ and expires the same transfers.
   unsettled for the sender. So a sender has at most 18 unsettled transfers on
   one member.
 - Size: the stored envelope (the outer L2PS transaction as JSON) is at most
-  `SETTLEMENT_ENVELOPE_MAX_BYTES` = 174,762 bytes, so a full batch of 9 in
+  `SETTLEMENT_ENVELOPE_MAX_BYTES` = 174,506 bytes, so a full batch of 9
+  rows (each envelope with its about 180-byte row wrapper, 256 reserved) in
   base64 stays within half of an empty block (4 MiB); a larger one would
-  make every batch it joins too big for the mempool.
+  make every batch it joins too big for the mempool. It is checked before
+  the subnet lookup, the backlog read and the decrypt.
 - Balance: the sender's tip balance covers `amount + fee` of this transfer
   plus every unsettled transfer this member holds for it (amounts and nonces
   from the history, fees from the stored envelopes).
@@ -272,7 +290,8 @@ and expires the same transfers.
   mempool after the cleanup age; the history keeps their reason.
 - Boot: once the fork is scheduled (any activation height), every node loads
   the verification key at start and a subnet member also checks its proving
-  key and circuit and starts one prover; a node that fails either exits.
+  key and circuit and starts one prover; a node that fails either exits
+  before it serves RPC, contacts peers, syncs or joins consensus.
 
 ### Fork
 

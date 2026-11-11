@@ -21,7 +21,7 @@ export interface RawSettlementProof {
 }
 
 export interface SettlementProverPoolOptions {
-    /** Subprocesses proving in parallel; each takes a core and about 4 GB while it proves. */
+    /** Subprocesses proving in parallel; each takes a core and about 1 GB while it proves. */
     size?: number
     zkeyPath?: string
     wasmPath?: string

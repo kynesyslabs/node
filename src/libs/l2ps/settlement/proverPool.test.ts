@@ -1,5 +1,5 @@
 /**
- * The settlement prover pool. Proving takes about a minute and 4 GB per
+ * The settlement prover pool. Proving takes about 40 s and 1 GB per
  * batch, so the proving tests run only with L2PS_SETTLEMENT_PROVE_TESTS=1 and
  * the keys built (bun run setup --only zk --zk --zk-generate).
  */
