@@ -547,6 +547,30 @@ describe("parallel provers", () => {
         expect(submitted.map(s => s.rows)).toEqual(batches.map(b => b.map(t => t.txHash)))
     })
 
+    it("submits each batch as soon as it and the batches before it are proved", async () => {
+        tip.set(DAVE.account, { balance: 100n, nonce: 0n })
+        const first = Array.from({ length: SETTLEMENT_TRANSFERS }, (_, i) => pay(ALICE, BOB.account, 1n, 5n + BigInt(i)))
+        const second = pay(DAVE, sink("d3"), 1n, 1n)
+        for (const t of [...first, second]) queue(t)
+        const gates: (() => void)[] = []
+        const d = deps()
+        d.prove = async p => {
+            await new Promise<void>(resolve => gates.push(resolve))
+            return { proof: { id: p.transfers[0].txHash }, publicSignals: [] }
+        }
+        const agg = new SettlementAggregator(d, LIMITS)
+
+        const cycle = agg.cycle()
+        await settle(() => gates.length === 1)
+        gates[0]()
+        await settle(() => gates.length === 2)
+        // One prover: the first batch is out before the second is proved.
+        expect(submitted.map(s => s.rows)).toEqual([first.map(t => t.txHash)])
+        gates[1]()
+        await cycle
+        expect(submitted).toHaveLength(2)
+    })
+
     it("never plans two batches over one account in a cycle, across subnets too", async () => {
         const first = pay(ALICE, BOB.account, 1n, 5n)
         const second = pay(BOB, CAROL.account, 1n, 1n)

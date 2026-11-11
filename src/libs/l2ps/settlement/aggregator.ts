@@ -215,12 +215,14 @@ export class SettlementAggregator {
             planned.push(...(await this.planSubnet(l2psUid, claimed)))
         }
 
-        const outcomes = await this.proveAll(planned)
+        const outcomes = this.proveAll(planned)
         const done = { submitted: 0, transfers: 0 }
         const failed = new Set<string>()
         const worked = new Set<string>()
         for (const [i, batch] of planned.entries()) {
-            const outcome = outcomes[i]
+            // Each batch goes out once it and every batch planned before it
+            // are proved, while the later ones keep proving.
+            const outcome = await outcomes[i]
             const { l2psUid, plan } = batch
             const hashes = plan.transfers.map(t => t.txHash)
             if (outcome.ok === false) {
@@ -282,25 +284,34 @@ export class SettlementAggregator {
         return done
     }
 
-    /** Proves the batches, up to `provers` at once; outcomes in plan order. */
-    private async proveAll(batches: PlannedBatch[]): Promise<ProveOutcome[]> {
-        const outcomes: ProveOutcome[] = new Array(batches.length)
-        let next = 0
-        const lane = async () => {
-            while (next < batches.length) {
-                const i = next++
-                const since = this.deps.now()
-                try {
-                    const proof = await this.deps.prove(batches[i].plan)
-                    outcomes[i] = { ok: true, proof, ms: this.deps.now() - since }
-                } catch (error) {
-                    outcomes[i] = { ok: false, error }
-                }
+    /** Starts proving the batches, up to `provers` at once and in plan order; one outcome per batch. */
+    private proveAll(batches: PlannedBatch[]): Promise<ProveOutcome>[] {
+        let free = Math.max(1, Math.floor(this.limits.provers))
+        const waiting: (() => void)[] = []
+        const acquire = (): Promise<void> => {
+            if (free > 0) {
+                free--
+                return Promise.resolve()
             }
+            return new Promise(resolve => waiting.push(resolve))
         }
-        const lanes = Math.min(Math.max(1, Math.floor(this.limits.provers)), batches.length)
-        await Promise.all(Array.from({ length: lanes }, lane))
-        return outcomes
+        const release = () => {
+            const next = waiting.shift()
+            if (next) next()
+            else free++
+        }
+        return batches.map(async batch => {
+            await acquire()
+            const since = this.deps.now()
+            try {
+                const proof = await this.deps.prove(batch.plan)
+                return { ok: true as const, proof, ms: this.deps.now() - since }
+            } catch (error) {
+                return { ok: false as const, error }
+            } finally {
+                release()
+            }
+        })
     }
 
     /**
