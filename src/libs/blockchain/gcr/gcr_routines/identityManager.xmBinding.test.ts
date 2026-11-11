@@ -647,7 +647,7 @@ describe("IdentityManager.verifyHumanPassportPayload: signed score against the p
             SENDER,
         )
         expect(r.success).toBe(false)
-        expect(r.message).toContain("getHumanPassportScore")
+        expect(r.message).toContain("getHumanPassportClaim")
         expect(provider).not.toHaveBeenCalled()
     })
 

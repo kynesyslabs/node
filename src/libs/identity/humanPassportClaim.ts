@@ -3,7 +3,7 @@ import type { SavedHumanPassportIdentity } from "@/model/entities/types/Identity
 /**
  * What a Human Passport identity assign signs. `score` and `threshold` are
  * the values Human Passport reported to the client (the node's
- * `getHumanPassportScore` routine returns them); admission checks them
+ * `getHumanPassportClaim` routine returns the whole claim); admission checks them
  * against the provider and apply stores them as signed. The optional fields
  * are checked and stored when sent.
  */
@@ -41,7 +41,7 @@ export function humanPassportRecord(
     }
     const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v)
     if (!finite(c.score) || !finite(c.threshold) || c.threshold <= 0) {
-        return "score and threshold are required: send the values getHumanPassportScore returns"
+        return "score and threshold are required: send the claim getHumanPassportClaim returns"
     }
     if (c.score < c.threshold) {
         return `score ${c.score} is below the threshold ${c.threshold}`

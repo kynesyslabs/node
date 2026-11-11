@@ -189,6 +189,30 @@ export default async function manageGCRRoutines(
             break
         }
 
+        case "getHumanPassportClaim": {
+            const options = params[0]
+            const address =
+                typeof options === "string" ? options : options?.address
+            if (typeof address !== "string" || !address) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "address is required" }
+                break
+            }
+            try {
+                response.response =
+                    await IdentityManager.getHumanPassportClaim(address)
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
         case "getHumanPassportIdentities": {
             try {
                 response.response =

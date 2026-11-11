@@ -777,31 +777,22 @@ export default class IdentityManager {
     }
 
     /**
-     * Get Human Passport score for an address (fetches from API)
+     * The Human Passport claim a wallet signs into an identity assign, as
+     * Human Passport reports it now. Admission compares every one of these
+     * fields with the provider, so a wallet must send them all; the score
+     * alone cannot build an admissible claim. The fetch refreshes the
+     * provider cache that this node's admission reads next.
      */
-    static async getHumanPassportScore(address: string): Promise<{
-        address: string
-        score: number
-        passingScore: boolean
-        threshold: number
-        stamps: string[]
-        lastScoreTimestamp: string
-        expirationTimestamp: string | null
-    } | null> {
-        try {
-            const provider = HumanPassportProvider.getInstance()
-            const verification = await provider.verifyAddress(address)
-            return {
-                address: verification.address,
-                score: verification.score,
-                passingScore: verification.passingScore,
-                threshold: verification.threshold,
-                stamps: verification.stamps,
-                lastScoreTimestamp: verification.lastScoreTimestamp,
-                expirationTimestamp: verification.expirationTimestamp,
-            }
-        } catch {
-            return null
+    static async getHumanPassportClaim(address: string): Promise<HumanPassportClaim> {
+        const v = await HumanPassportProvider.getInstance().verifyAddress(address, true)
+        return {
+            address: v.address,
+            verificationMethod: "api",
+            score: v.score,
+            threshold: v.threshold,
+            stamps: v.stamps,
+            lastScoreTimestamp: v.lastScoreTimestamp,
+            expirationTimestamp: v.expirationTimestamp,
         }
     }
 }
