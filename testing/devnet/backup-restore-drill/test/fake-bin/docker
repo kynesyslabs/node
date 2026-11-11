@@ -54,7 +54,11 @@ database's head, with another hash: a fork after those heights), FAKE_STATE_LOST
 backup's pg_dump on, before its stop), FAKE_EMPTY_READS (once the drilled node
 started again, or node-iso, first answers its RPC, every read prints nothing and
 exits 0: node RPC, commands in postgres containers, helper scripts, `docker logs`,
-`docker inspect` and `docker ps` of running containers). Every call is appended to
+`docker inspect` and `docker ps` of running containers), FAKE_LIST_FAIL (ps,volume:
+`docker ps` / `docker volume ls` filtered on the compose project label print
+nothing and exit 1, as with a daemon that does not answer), FAKE_OWNER_READ_FAIL
+(n: the n-th read of a state dir's owners, `stat -c` in a helper, fails with
+exit 125). Every call is appended to
 $FAKE_DIR/calls.log; compose down writes to $FAKE_DIR/lock-at-down whether
 $LOCK_DIR/<project>.lock is held at that moment.
 
@@ -387,6 +391,10 @@ def run_cmd(a):
             fail(f"rm: can't remove '{os.environ.get('FAKE_WIPE_LEAVE', 'x')}': Operation not permitted")
         out()
     if "stat -c" in script:
+        st["owner_reads"] = st.get("owner_reads", 0) + 1
+        save(st)
+        if str(st["owner_reads"]) == os.environ.get("FAKE_OWNER_READ_FAIL"):
+            fail("docker: Error response from daemon: fake read failure", 125)
         o = vol["owner"]
         print(f"{o}:{o} 755 .")
         for x in vol["files"]:
@@ -572,6 +580,8 @@ def main():
         if st.get("empty") and "-aq" not in a:
             sys.exit(0)
         flt = [a[i + 1] for i, x in enumerate(a) if x == "--filter"]
+        if "ps" in envlist("FAKE_LIST_FAIL") and any(ff.startswith("label=com.docker.compose.project=") for ff in flt):
+            fail("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", 1)
         for cid, c in sorted(st["containers"].items()):
             ok = "-aq" in a or c["state"] == "running"
             for ff in flt:
@@ -592,6 +602,8 @@ def main():
         if sub == "ls":
             # no filter: every volume; else the project label filter
             ff = a[a.index("--filter") + 1].split("=", 2)[2] if "--filter" in a else None
+            if ff is not None and "volume" in envlist("FAKE_LIST_FAIL"):
+                fail("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", 1)
             for v, x in sorted(st["volumes"].items()):
                 if ff is None or x["project"] == ff:
                     print(v)

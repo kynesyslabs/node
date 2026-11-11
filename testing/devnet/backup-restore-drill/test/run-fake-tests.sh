@@ -61,10 +61,12 @@ only_fails_among() { # regexes: the first is a failed check, and every failed ch
         ok "/$1/ failed, and no check outside /${alt}/"
     else bad "/$1/ did not fail, or another check failed: $(grep -o 'CHECK FAIL: [^(]*' "${CDIR}/out.txt" | tr '\n' ';')"; fi
 }
-# Every check written from $1 (a regex of an output line) on is a FAIL, and there is one
+# Every check written from $1 (a regex of an output line) on is a FAIL, and there is one;
+# $2, if given: a regex of INFO rows that may be among them (rows that claim nothing)
 no_pass_after() {
     local rows
     rows="$(awk -v m="$1" '$0 ~ m { s = 1 } s && /CHECK (PASS|INFO)/' "${CDIR}/out.txt")"
+    if [ -n "${2:-}" ]; then rows="$(printf '%s\n' "${rows}" | grep -vE -- "CHECK INFO: $2")"; fi
     if grep -qE -- "$1" "${CDIR}/out.txt" && [ -z "${rows}" ] && awk -v m="$1" '$0 ~ m { s = 1 } s && /CHECK FAIL/ { f = 1 } END { exit !f }' "${CDIR}/out.txt"; then
         ok "every check from /$1/ on is a FAIL"
     else bad "a check from /$1/ on is not a FAIL, or none is written: $(printf '%s' "${rows}" | tr '\n' ';')"; fi
@@ -104,7 +106,8 @@ if sel smoke-pass; then
     want_rc 0
     want_out 'SMOKE PASS' "SMOKE PASS"
     want_out 'CHECK PASS: gossip enabled on every node' "gossip check"
-    want_out 'CHECK PASS: node state is writable by uid 1000' "writability check"
+    want_out 'CHECK INFO: uid 1000 write probe of the node state \(not a check: .* in these image directories: /app /app/data /app/logs; ' "the write probe is INFO and lists what it probed"
+    no_out 'CHECK PASS: node state is writable' "a PASS of the write probe"
     want_out 'CHECK PASS: smoke: node 4 serves RPC at head >= 2' "node 4 line"
     want_out 'PHASE S smoke: up to every node serving at head >= 2: ' "the phase row says every node got there"
     want_call 'up --no-start' "up --no-start (volumes created by compose)"
@@ -284,7 +287,9 @@ if sel full-isolated; then
     want_out 'CHECK PASS: the validators kept forging during the drill' "the validators' head rose: stall check PASS"
     want_out "CHECK PASS: isolated node holds no copy of node 4's key \(own state volume mounted, no identity or state volume of node 4, different identity \(sha256 [0-9a-f]{12}\.\. vs [0-9a-f]{12}\.\.\)\)" "node-iso holds no copy of the key"
     want_out "CHECK PASS: isolated node reaches the expected head, on the validators' chain \(head [0-9]+ >= DB head [0-9]+, network [0-9]+; block ([0-9]+) hash\1\.\. on nodes iso 1 2 3 4\)" "node-iso caught up, one hash on it and the four validators"
-    want_out 'CHECK PASS: node 4 untouched and the only holder of its key \(one node-4 container, the one started at bring-up, and the only container on its state volume\)' "node 4 the one holder"
+    want_out "CHECK PASS: node 4's key is held by only the one container on its state volume \(one running node-4 container, the one started at bring-up, and the only running container on its state volume\)" "node 4's key: one holder"
+    want_out 'CHECK INFO: whether node 4 stopped or restarted during the isolated drill \(not shown: ' "the stop or restart row is INFO"
+    no_out 'untouched' "an 'untouched' row"
     want_out 'RESULT PASS: isolated drill' "result PASS"
     no_out 'CHECK FAIL' "any failed check"
     torn_down
@@ -334,6 +339,25 @@ if sel wipe-owner; then
     want_out "state volume was chowned back to 1000:1000" "opt-in fix after the wipe"
     want_out 'CHECK FAIL: the wipe kept the ownership' "the change is still reported"
     want_rc 1
+fi
+if sel wipe-owner-unreadable; then
+    # the owner read at stop fails: exit 2 before node 4, its database or its state is removed
+    go wipe-owner-unreadable-stop FAKE_OWNER_READ_FAIL=1
+    want_rc 2
+    want_out "cannot read the owner and mode of node 4's state dir and identity files at stop" "the failed read stops the run"
+    no_call 'rm -f -v node-4' "the removal of node-4"
+    no_call 'volume rm' "volume rm (no database wiped)"
+    no_call 'find \. -mindepth 1' "the state wipe"
+    no_out 'PHASE B ' "a phase B row"
+    torn_down
+    # the owner read after the wipe fails: exit 2 before the restore and node 4's start
+    go wipe-owner-unreadable-wiped FAKE_OWNER_READ_FAIL=2
+    want_rc 2
+    want_out "cannot read the owner and mode of node 4's state dir and identity files after the wipe" "the failed read stops the run"
+    no_call 'pg_restore -U' "pg_restore"
+    if [ "$(grep -cE 'up -d --no-deps --pull never node-4$' "${CDIR}/calls.log")" = 1 ]; then ok "node-4 never started again after the wipe"; else bad "node-4 start count is not 1"; fi
+    no_out 'CHECK (PASS|FAIL): the wipe kept the ownership' "an ownership check row"
+    torn_down
 fi
 if sel wipe-leftover; then
     # an entry the wipe could not remove, the wipe itself exiting 0: the listing catches it
@@ -611,9 +635,9 @@ if sel iso-holder; then
     # from the backup on, a container that is not node 4 holds node 4's state volume
     go iso-holder VARIANT=isolated FAKE_EXTRA_HOLDER=state-4
     want_rc 1
-    want_out 'CHECK FAIL: node 4 untouched and the only holder of its key \(' "a second holder of the state volume: FAIL"
-    no_out 'CHECK PASS: node 4 untouched' "a PASS of the holder check"
-    one_fail 'node 4 untouched and the only holder of its key'
+    want_out "CHECK FAIL: node 4's key is held by only the one container on its state volume \(" "a second holder of the state volume: FAIL"
+    no_out "CHECK PASS: node 4's key is held" "a PASS of the holder check"
+    one_fail "node 4's key is held by only the one container on its state volume"
     torn_down
 fi
 
@@ -635,8 +659,8 @@ if sel empty-reads; then
     # the same from node-iso's first answer on
     go empty-reads-isolated VARIANT=isolated FAKE_EMPTY_READS=1 REJOIN_TIMEOUT=8 STALL_LIMIT=4
     want_rc 1
-    no_pass_after '── 07-isolated-node'
-    for c in "isolated node reaches the expected head" "isolated node holds no copy" "the validators kept forging" "node 4 untouched"; do
+    no_pass_after '── 07-isolated-node' 'whether node 4 stopped or restarted'
+    for c in "isolated node reaches the expected head" "isolated node holds no copy" "the validators kept forging" "node 4's key is held by only"; do
         want_out "CHECK FAIL: ${c}" "${c}: FAIL"
     done
     no_out 'RESULT PASS' "RESULT PASS"
@@ -674,6 +698,33 @@ if sel existing-volume; then
     go existing-volume-other SMOKE=1
     want_rc 0
     still_there demos-faketest_state-44
+fi
+seed_project() { # case name, container|volume: one of the project's own, there before the run
+    local d="${WORK}/$1"
+    mkdir -p "${d}"
+    if [ "$2" = container ]; then
+        jq -n '{containers: {"0ther0app000": {service: "other-app", project: "demos-faketest", state: "running", volumes: []}}, t0: null, volumes: {}}' > "${d}/state.json"
+    else
+        jq -n '{containers: {}, t0: null, volumes: {"demos-faketest_otherdata": {owner: "1000", project: "demos-faketest", files: ["keep.me"],
+            db: "empty", frozen: false, frozen_head: 0, dump_head: 0}}}' > "${d}/state.json"
+    fi
+}
+if sel existing-list-fail; then
+    # the listing of the project's containers fails (prints nothing, exit 1): it cannot show
+    # that none exists, so the run stops before anything is created and never runs down -v
+    seed_project existing-list-fail-ps container
+    go existing-list-fail-ps SMOKE=1 FAKE_LIST_FAIL=ps
+    want_rc 2
+    want_out '.docker ps -aq --filter label=com.docker.compose.project=demos-faketest. failed' "the failed command named"
+    no_call 'compose .* (up|down) ' "compose up or down"
+    if jq -e '.containers["0ther0app000"]' "${CDIR}/state.json" > /dev/null; then ok "the project's existing container still there"; else bad "the project's existing container removed"; fi
+    # the same for the listing of the project's volumes
+    seed_project existing-list-fail-volume volume
+    go existing-list-fail-volume SMOKE=1 FAKE_LIST_FAIL=volume
+    want_rc 2
+    want_out '.docker volume ls -q --filter label=com.docker.compose.project=demos-faketest. failed' "the failed command named"
+    no_call 'compose .* (up|down) ' "compose up or down"
+    still_there demos-faketest_otherdata
 fi
 
 # ── teardown that fails or leaves something ─────────────────────────────

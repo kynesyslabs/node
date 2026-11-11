@@ -93,14 +93,21 @@ It does not show:
   and `/app/logs`, and its working directory). The probe mounts the volume
   where the node gets it, so a new volume takes the owner of that directory in
   the image, as in the real run. If any probe fails the script stops with the
-  list, before any node starts, and changes nothing. `FIX_OWNERSHIP=1` is the
+  list, before any node starts, and changes nothing. If none fails, the
+  results get the INFO row "uid 1000 write probe of the node state", which
+  lists the image directories probed. It is not a check and shows nothing
+  beyond the paths probed: a path the node writes that is not listed was not
+  probed, and when the image's declared volumes cannot be read, only its
+  working directory is. `FIX_OWNERSHIP=1` is the
   opt-in: it chowns `1000:1000` (recursively) only the volumes of this compose
   project (`${PROJECT}_*`, checked by label) that failed, and probes again. The
   wipe (phase B) runs as root and only deletes; it never creates anything on
   the state volume. It records owner and mode of the state dir and the
   identity files before and after (check "the wipe kept the ownership of the
-  state volume") and probes uid-1000 writability of the state volume again
-  before the restart. The postgres and backup-staging volumes are postgres's,
+  state volume"; a read of them that fails stops the run with exit 2, at stop
+  before anything is removed, after the wipe before the restore) and probes
+  uid-1000 writability of the state volume again before the restart (a probe
+  that fails stops the run). The postgres and backup-staging volumes are postgres's,
   not uid 1000's, and are not probed.
 - Gossip: on every node, by default (`GOSSIP_ENABLED=true` in the generated
   compose file). A validator with gossip off never catches up after a restart
@@ -153,7 +160,7 @@ Output). A run that exits 1 or 2 keeps that code when the teardown fails too.
 | `NODE_IMAGE` | `demos-node:candidate-5979a716` | prebuilt node image |
 | `PG_IMAGE` | `postgres:16-alpine` | postgres and helper image |
 | `BASE_PORT` | `65000` | host ports `BASE_PORT+1..+5`, 127.0.0.1 |
-| `PROJECT` | `demos-bkdrill` | compose project; must start with `demos-`; the run aborts if a container or volume of that project, or a volume with any name the compose file declares (labelled or not), already exists. One run per project at a time: each run holds the lock `$LOCK_DIR/<project>.lock` (`flock`) from before its first check until its teardown has ended, and a second run of the same project exits 2 before it writes anything |
+| `PROJECT` | `demos-bkdrill` | compose project; must start with `demos-`; the run aborts if a container or volume of that project, or a volume with any name the compose file declares (labelled or not), already exists, or if listing them fails. One run per project at a time: each run holds the lock `$LOCK_DIR/<project>.lock` (`flock`) from before its first check until its teardown has ended, and a second run of the same project exits 2 before it writes anything |
 | `VARIANT` | `rejoin` | `rejoin` or `isolated` |
 | `OUT_DIR` | `testing/devnet/backup-restore-drill/runs/<UTC>-<project>-bkdrill-<variant>` | everything the run writes (mode 700, gitignored). Must not exist yet: the run creates it with a plain `mkdir` before it writes anything, and one that already exists, even an empty one, is refused with exit 2 and nothing written (it may hold an earlier run's results, or be another run's). The default name holds the project, so runs of different projects started in the same second get different dirs |
 | `LOCK_DIR` | `/tmp` | where the per-project lock file lives; `/tmp`, so runs from any checkout or `OUT_DIR` on the host see the same lock (the empty file stays) |
@@ -185,7 +192,7 @@ Output). A run that exits 1 or 2 keeps that code when the teardown fails too.
 The seconds-to-minutes startup check to run before the full drill, on the same
 image and host. It runs the preflight (tools, load wait, disk and RAM, images
 local, the uid-1000 read check of the inputs, the gossip check, the uid-1000
-write check of the node state), starts the 4 postgres, applies the migrations,
+write probe of the node state), starts the 4 postgres, applies the migrations,
 starts the 4 nodes one at a time, and waits (cap `SMOKE_TIMEOUT`, 5 minutes)
 until every node answers RPC with a head of at least `SMOKE_HEAD`. It then
 prints `SMOKE PASS` or `SMOKE FAIL`, tears the project down and exits: 0 pass,
@@ -223,14 +230,16 @@ a read-only mount that the script's `mv` could not move), TLSNotary is off, and
 
 1. Preflight: tools, load wait, disk, RAM, no swapping, project name unused,
    ports free, images local, uid-1000 readability of the inputs, gossip on
-   (and `node` in the image), uid-1000 writability of the node state.
+   (and `node` in the image), the uid-1000 write probe of the node state.
    "Project name unused" means no container or volume carries the project's
    compose label and, before the first `compose up`, no volume exists with
    any of the exact names the generated compose file declares
    (`<project>_state-4`, `<project>_pgdata-1`, ...), whatever its labels.
    Compose would use such a volume and teardown's `down -v` would delete it,
    so the run names the ones it found and exits 2 without creating any
-   container or volume.
+   container or volume. A `docker ps` or `docker volume ls` listing of the
+   project that fails (exit status not 0) shows nothing about what exists: the
+   run names the command and exits 2 the same way.
 2. Bring-up: postgres x4, migrations on each database (manual step, see
    below), nodes one at a time, wait until every node is at height `H0`.
    Record node X's head height and block hash, and the SHA-256 of its identity
@@ -292,7 +301,9 @@ Each is printed PASS, FAIL or INFO, and written to `timings.md` and
 fails, or that gives nothing (no head, no hash, no checksum, an empty log or
 listing), fails the check that needs it, with the reason; it is never skipped or
 turned into INFO. Before the wipe and the restart, such a read stops the run
-(exit 2) instead.
+(exit 2) instead. Two rows are INFO by design, never PASS or FAIL, and claim
+nothing: "uid 1000 write probe of the node state" and, in `isolated`, "whether
+node X stopped or restarted during the isolated drill".
 
 | Check | Passes when |
 |---|---|
@@ -311,10 +322,11 @@ turned into INFO. Before the wipe and the restart, such a read stops the run
 | one instance of the key | asserted before the single start (a `docker ps` listing that fails stops the run); written after it |
 | isolated node reaches the expected head, on the validators' chain | (`isolated`, `ISO_NODE=1`) within `REJOIN_TIMEOUT`, node-iso's head is at or above the restored database's head and within 2 blocks of the highest validator's, and node-iso and every validator give one non-empty block hash at the highest height all of them have, which must be above the database's head |
 | isolated node holds no copy of node X's key | (`isolated`) node-iso's mounts are read and include its own state volume and no identity or state volume of node X, and the identity file on node-iso's state volume, read as a SHA-256 (64 hex), differs from node X's step-2 one; an identity that cannot be read, or a read that gives no SHA-256, fails it |
-| node X untouched and the only holder of its key | (`isolated`) the one running node X container is the one started at bring-up, and the only container on its state volume |
+| node X's key is held by only the one container on its state volume | (`isolated`) the running node X containers and the running containers on its state volume are both listed (a listing that fails fails it), and each list is exactly the container started at bring-up |
+| whether node X stopped or restarted during the isolated drill | INFO only: the node X container running at the end and the one started at bring-up. A restart in place (`restart: unless-stopped`) keeps the container id, so the drill does not show that node X never stopped |
 | gossip enabled on every node | `GOSSIP_ENABLED=true` in the generated compose file (INFO when `ALLOW_GOSSIP_OFF=1` lets it be off) |
-| node state is writable by uid 1000 | the probes of "Writable state" above (a failure stops the run before it starts) |
-| the wipe kept the ownership of the state volume | owner and mode of the state dir and identity files equal before and after the wipe |
+| uid 1000 write probe of the node state | INFO only, not a check: what the probes of "Writable state" above covered (a probe that fails stops the run before it starts) |
+| the wipe kept the ownership of the state volume | owner and mode of the state dir and identity files equal before and after the wipe (a read of them that fails stops the run with exit 2: at stop before anything is removed, after the wipe before the restore) |
 
 ### Quorum
 
@@ -342,7 +354,8 @@ On exit, including on Ctrl-C or an error, teardown tries to remove the
 the label `demos.drill.helper=<project>` and runs `compose down -v` for that
 project only. When it works, this removes the drill's own volumes, node X's
 state volume with its throwaway key included. Preflight refuses to start when
-a volume with one of the declared names already exists (step 1), so the named
+a volume with one of the declared names already exists, or when the listing of
+the project's containers or volumes fails (step 1), so the named
 volumes `down -v` deletes are ones this run created.
 
 Teardown then lists the containers, volumes and networks that still carry the
@@ -373,7 +386,11 @@ the fork set `gen-inputs.py` gets (default `launch`, `FORK_SET=devnet`), the
 migrate step on the restored database (after `pg_restore` and before node X
 starts; a failure or a timeout stops the run with exit 2 and node X is not
 started), a volume that exists before the run under a name the compose file
-declares (exit 2, no `up`, no `down`, the volume untouched), a dump that
+declares (exit 2, no `up`, no `down`, the volume untouched), a `docker ps` or
+`docker volume ls` listing of the project that fails in preflight (exit 2
+naming the command, no `up`, no `down`, the project's container or volume
+left in place), an owner read of node X's state dir that fails at stop or
+after the wipe (exit 2, before the wipe or before the restore), a dump that
 cannot be read to its end (exit 2 in phase A, nothing wiped), a wipe that fails,
 leaves an entry or removes a signing state file (exit 2, node X not started
 again), a commit lock or prevote record older than at stop (the signing state

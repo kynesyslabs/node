@@ -653,9 +653,14 @@ swapping="$(vmstat 1 4 | tail -3 | awk '$7 + $8 > 0 {n++} END {print (n == 3) ? 
 say "preflight: load ${load1}, disk ${disk_gb}G free, ${avail_mb}M RAM available (need ${need_mb}M)"
 
 # Own project only: nothing of this name may exist, so down -v can only remove what this run made
-# (the exact volume names the compose file declares are checked once it is generated, in 02-inputs)
-[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT}")" ] || abort_pre "containers of project ${PROJECT} already exist"
-[ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=${PROJECT}")" ] || abort_pre "volumes of project ${PROJECT} already exist"
+# (the exact volume names the compose file declares are checked once it is generated, in 02-inputs).
+# A listing that fails shows nothing about what exists: it stops the run before anything is created
+existing="$(docker ps -aq --filter "label=com.docker.compose.project=${PROJECT}")" \
+    || abort_pre "\`docker ps -aq --filter label=com.docker.compose.project=${PROJECT}\` failed: cannot tell whether containers of project ${PROJECT} exist. No container or volume was created"
+[ -z "${existing}" ] || abort_pre "containers of project ${PROJECT} already exist"
+existing="$(docker volume ls -q --filter "label=com.docker.compose.project=${PROJECT}")" \
+    || abort_pre "\`docker volume ls -q --filter label=com.docker.compose.project=${PROJECT}\` failed: cannot tell whether volumes of project ${PROJECT} exist. No container or volume was created"
+[ -z "${existing}" ] || abort_pre "volumes of project ${PROJECT} already exist"
 if command -v ss > /dev/null 2>&1; then
     for p in $(seq $((BASE_PORT + 1)) $((BASE_PORT + N + 1))); do
         if ss -Hltn "sport = :${p}" | grep -q .; then abort_pre "host port ${p} is in use"; fi
@@ -868,10 +873,12 @@ img_dirs="$({
     docker image inspect "${NODE_IMAGE}" --format '{{json .Config.Volumes}}' | jq -r '(. // {}) | keys[]'
     docker image inspect "${NODE_IMAGE}" --format '{{.Config.WorkingDir}}'
 } | grep . | sort -u)" || abort_pre "cannot read the declared volumes and the working directory of ${NODE_IMAGE} to probe them"
+img_probed=()
 for d in ${img_dirs}; do
     case "${mounted_paths}" in *" ${d} "*) continue ;; esac
     if probe_write "${d}" >> "${STEP_LOG}" 2>&1; then
         say "uid 1000 can write: ${d} (from the image)"
+        img_probed+=("${d}")
     else
         say "uid 1000 CANNOT write: ${d} (from the image)"
         unwritable+=("${d} in the image (not a mount of this compose file: it is the image's own directory or declared volume)")
@@ -882,7 +889,9 @@ if [ "${#unwritable[@]}" -gt 0 ]; then
     abort_pre "the node image user (uid 1000) cannot write to: $(printf '%s; ' "${unwritable[@]}")the node would fail with 'Permission denied' as soon as it writes its state. Nothing was changed. Set FIX_OWNERSHIP=1 to chown 1000:1000 this drill's own volumes (${PROJECT}_*), or fix the owner of the directory in the image (see 02b-node-checks.log)"
 fi
 if [ "${#fixed[@]}" -gt 0 ]; then META[ownership_fixed]="${fixed[*]} (FIX_OWNERSHIP=1)"; fi
-check "node state is writable by uid 1000" PASS "$(wc -l < "${OUT_DIR}/writable-mounts.tsv") mounts and the image's own directories probed${fixed[0]:+; chowned: ${fixed[*]}}"
+# What was probed, not a claim that the node can write all it writes: a path not listed
+# (one the image declares but its read did not give, say) was not probed
+check "uid 1000 write probe of the node state" INFO "not a check: uid 1000 created and deleted a file in each of the $(wc -l < "${OUT_DIR}/writable-mounts.tsv") read-write mounts of the node services and in these image directories: ${img_probed[*]:-none}; a path not listed was not probed${fixed[0]:+; chowned: ${fixed[*]}}"
 
 # ═════════════════════════════════════════════════════════════════════════
 # SMOKE=1: the startup check, then out
@@ -1048,8 +1057,9 @@ if [ "${VARIANT}" = rejoin ]; then
     # The baseline of the wipe's comparison and of the checks: every file hashed, the identity among them
     state_sums > "${OUT_DIR}/sums.stop" || die "cannot hash node ${X_NODE}'s identity and signing state files at stop"
     sha_ok "$(sum_of "${OUT_DIR}/sums.stop" node.identity)" || die "no identity file hashed in node ${X_NODE}'s state volume at stop"
-    own_read=ok
-    state_owners > "${OUT_DIR}/own.before" || own_read="failed at stop"
+    # Nothing is removed on an ownership baseline the run could not read
+    state_owners > "${OUT_DIR}/own.before" && grep -q ' \.$' "${OUT_DIR}/own.before" \
+        || die "cannot read the owner and mode of node ${X_NODE}'s state dir and identity files at stop"
     # Height and round of each signing state file at rest; the files after the rejoin are compared with these
     declare -A POS_STOP=() POS_END=()
     for rec in signed commitlock prevote; do POS_STOP[${rec}]="$(record_pos "${rec}")" || POS_STOP[${rec}]=unreadable; done
@@ -1083,12 +1093,14 @@ if [ "${VARIANT}" = rejoin ]; then
     # it), so its owner must be what it was. The volumes recreated below, the database
     # and the backup staging one, belong to postgres, not to uid 1000. Whatever the
     # restarted node writes to /app/state has to work as uid 1000, so prove that now.
-    state_owners > "${OUT_DIR}/own.after" || own_read="failed after the wipe"
+    # An owner read that fails stops the run before the restore and the restart
+    state_owners > "${OUT_DIR}/own.after" && grep -q ' \.$' "${OUT_DIR}/own.after" \
+        || die "cannot read the owner and mode of node ${X_NODE}'s state dir and identity files after the wipe"
     own_changed="$(sort "${OUT_DIR}/own.before" "${OUT_DIR}/own.after" | uniq -u | tr '\n' ';')"
-    if [ "${own_read}" = ok ] && [ -z "${own_changed}" ] && grep -q ' \.$' "${OUT_DIR}/own.after" && grep -q ' node\.identity$' "${OUT_DIR}/own.after"; then
+    if [ -z "${own_changed}" ] && grep -q ' node\.identity$' "${OUT_DIR}/own.after"; then
         check "the wipe kept the ownership of the state volume" PASS "owner and mode of the state dir and the identity files unchanged ($(grep ' \.$' "${OUT_DIR}/own.after" | cut -d' ' -f1,2))"
     else
-        check "the wipe kept the ownership of the state volume" FAIL "changed or missing: ${own_changed:-no state dir or identity file line}; reading the owners ${own_read}"
+        check "the wipe kept the ownership of the state volume" FAIL "changed or missing: ${own_changed:-no identity file line}"
     fi
     x_opts=(-v "$(vol "state-${X_NODE}"):/app/state")
     if ! probe_write /app/state "${x_opts[@]}" >> "${STEP_LOG}" 2>&1; then
@@ -1427,10 +1439,13 @@ else
     x_svc="$(docker ps -q --filter "label=com.docker.compose.project=${PROJECT}" --filter "label=com.docker.compose.service=node-${X_NODE}" | cut -c1-12 | tr '\n' ' ')" || x_svc="cannot list "
     x_holders="$(docker ps -q --filter "volume=$(vol "state-${X_NODE}")" | cut -c1-12 | tr '\n' ' ')" || x_holders="cannot list "
     if [ -n "${x_cid}" ] && [ "${x_svc}" = "${x_cid} " ] && [ "${x_holders}" = "${x_cid} " ]; then
-        check "node ${X_NODE} untouched and the only holder of its key" PASS "one node-${X_NODE} container, the one started at bring-up, and the only container on its state volume"
+        check "node ${X_NODE}'s key is held by only the one container on its state volume" PASS "one running node-${X_NODE} container, the one started at bring-up, and the only running container on its state volume"
     else
-        check "node ${X_NODE} untouched and the only holder of its key" FAIL "node-${X_NODE} containers: ${x_svc:-none }; on its state volume: ${x_holders:-none }; started at bring-up: ${x_cid:-?}"
+        check "node ${X_NODE}'s key is held by only the one container on its state volume" FAIL "node-${X_NODE} containers: ${x_svc:-none }; on its state volume: ${x_holders:-none }; started at bring-up: ${x_cid:-?}"
     fi
+    # A restart in place (restart: unless-stopped) keeps the container id: the id shows
+    # nothing about whether node X stopped during the drill, so this is information only
+    check "whether node ${X_NODE} stopped or restarted during the isolated drill" INFO "not shown: a restart in place keeps the container id; node-${X_NODE} running at the end: ${x_svc:-none }; started at bring-up: ${x_cid:-?}"
 fi
 
 # ═════════════════════════════════════════════════════════════════════════

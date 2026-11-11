@@ -18,9 +18,11 @@ Before anything timed starts the script checks that:
 - gossip is on for every node. It is by default; `GOSSIP_ENABLED=false` is
   refused unless `ALLOW_GOSSIP_OFF=1` (a validator with gossip off never
   catches up after a restart, so the timings would mean nothing);
-- the image user (uid 1000) can read the inputs and write every volume or tmpfs
-  the nodes write to. A root-owned volume stops the run with a message;
-  `FIX_OWNERSHIP=1` chowns `1000:1000` only this drill's own volumes instead.
+- the image user (uid 1000) can read the inputs, and can write each read-write
+  volume and tmpfs of the node services and the image directories it probes (an
+  INFO row lists them; a path not listed was not probed). A root-owned volume
+  stops the run with a message; `FIX_OWNERSHIP=1` chowns `1000:1000` only this
+  drill's own volumes instead.
 
 Everything else (environment, phases, checks, caveats):
 [`docs/runbooks/backup-restore-drill.md`](../../../docs/runbooks/backup-restore-drill.md).
