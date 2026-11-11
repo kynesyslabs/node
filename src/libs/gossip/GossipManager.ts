@@ -1039,6 +1039,13 @@ export class GossipManager {
             this.getPeerId() ?? "",
             advertised ? [advertised] : (this.readyInfo?.addrs ?? []),
         )
+        // The build signs through a worker; a block received meanwhile can
+        // stop signing, and the finished record must not go out then.
+        if (signingStopState(getSharedState.identityFile).stopped) {
+            countPublishSkipped("signing_stopped")
+            this.logPublishSkipped(HEIGHTS_TOPIC, "block signing is stopped")
+            return false
+        }
         this.send({
             type: "publish",
             topic: HEIGHTS_TOPIC,

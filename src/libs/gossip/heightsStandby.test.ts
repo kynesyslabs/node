@@ -6,9 +6,15 @@ import { mockCore } from "src/utilities/testSupport/coreMocks"
 
 mockCore({ publicKeyHex: "00", exposedUrl: "" })
 const records = await import("./records")
+let buildGate: Promise<void> | null = null
+let buildStarted: (() => void) | null = null
 mock.module("./records", () => ({
     ...records,
-    buildHeightsRecord: async () => ({ height: 1, seq: 1 }),
+    buildHeightsRecord: async () => {
+        buildStarted?.()
+        if (buildGate) await buildGate
+        return { height: 1, seq: 1 }
+    },
 }))
 
 const { default: GossipManager } = await import("./GossipManager")
@@ -32,7 +38,11 @@ function fakeManager() {
     return { sent, publish }
 }
 
-afterEach(() => __resetSigningHalt())
+afterEach(() => {
+    buildGate = null
+    buildStarted = null
+    __resetSigningHalt()
+})
 
 describe("heights publishing", () => {
     it("publishes while the node signs", async () => {
@@ -45,6 +55,23 @@ describe("heights publishing", () => {
         const { sent, publish } = fakeManager()
         haltSigning("test: another process signs with this key")
         expect(await publish()).toBe(false)
+        expect(sent).toHaveLength(0)
+    })
+
+    it("drops a record whose build was pending when signing stopped", async () => {
+        const { sent, publish } = fakeManager()
+        let finishBuild!: () => void
+        buildGate = new Promise<void>(resolve => {
+            finishBuild = resolve
+        })
+        const started = new Promise<void>(resolve => {
+            buildStarted = resolve
+        })
+        const published = publish()
+        await started
+        haltSigning("test: a received block shows another copy signing")
+        finishBuild()
+        expect(await published).toBe(false)
         expect(sent).toHaveLength(0)
     })
 })
