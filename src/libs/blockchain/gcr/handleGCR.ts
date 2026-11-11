@@ -140,6 +140,7 @@ import {
     settlementBatchesOverCap,
     settlementChainId,
     settlementEdits,
+    settlementFeeCreditRefusal,
     settlementFeeRefusal,
     settlementSignatureRefusal,
     settlementStateRefusal,
@@ -2273,6 +2274,7 @@ export default class HandleGCR {
             }
             const reason =
                 settlementFeeRefusal(parsed.value, minimumFee) ??
+                settlementFeeCreditRefusal(parsed.value) ??
                 settlementSignatureRefusal(parsed.value, chainId)
             if (reason) {
                 refuse(tx, reason)

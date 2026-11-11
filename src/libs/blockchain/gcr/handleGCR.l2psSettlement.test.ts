@@ -304,6 +304,23 @@ describe("a failing settlement is included as failed with no edits", () => {
         await expectFailed(tx, "native transfer fee is not an amount")
     })
 
+    it("fee credits that would burn part of the fees: no distribution loaded", async () => {
+        ;(getSharedState as any).feeDistribution = null
+        await expectFailed(batch(proven([pay(ALICE, BOB.account, OS, 5n)], tipBalances())), "fee credits 0 do not add up")
+    })
+
+    it("fee credits that would burn part of the fees: every share zero", async () => {
+        const zero = { burnPct: 0, treasuryPct: 0 }
+        ;(getSharedState as any).feeDistribution = {
+            burnAddress: BURN,
+            treasuryAddress: TREASURY,
+            networkFee: zero,
+            additionalFee: zero,
+            specialOps: { burnPct: 0, rpcPct: 0, treasuryPct: 0 },
+        }
+        await expectFailed(batch(proven([pay(ALICE, BOB.account, OS, 5n)], tipBalances())), "do not add up to the fees")
+    })
+
     it("bad signature", async () => {
         const t = pay(ALICE, BOB.account, 1n * OS, 5n)
         t.signature = pay(BOB, BOB.account, 1n * OS, 5n).signature

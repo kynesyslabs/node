@@ -355,6 +355,13 @@ export function settlementEdits(settlement: ParsedSettlement, txHash: string): G
             isRollback: false,
         } as GCREdit)
     }
+    edits.push(...settlementFeeCredits(settlement, txHash))
+    return edits
+}
+
+/** Each fee's distribution credits, without the sender debit the signer's delta holds. */
+function settlementFeeCredits(settlement: ParsedSettlement, txHash: string): GCREdit[] {
+    const credits: GCREdit[] = []
     for (const t of settlement.transfers) {
         if (t.fee === 0n) continue
         const distribution = generateFeeDistributionEdits({
@@ -366,9 +373,23 @@ export function settlementEdits(settlement: ParsedSettlement, txHash: string): G
             txHash,
             isRollback: false,
         })
-        edits.push(...(distribution.filter(e => e.operation === "add") as GCREdit[]))
+        credits.push(...(distribution.filter(e => e.operation === "add") as GCREdit[]))
     }
-    return edits
+    return credits
+}
+
+/**
+ * The signers' deltas debit every fee, so credits that fall short of the fees
+ * (no distribution loaded, or all of its shares zero) would burn the rest
+ * without a trace.
+ */
+export function settlementFeeCreditRefusal(settlement: ParsedSettlement): string | null {
+    const fees = settlement.transfers.reduce((sum, t) => sum + t.fee, 0n)
+    const credited = settlementFeeCredits(settlement, "").reduce(
+        (sum, e) => sum + BigInt((e as unknown as { amount: number | string }).amount),
+        0n,
+    )
+    return credited === fees ? null : `fee credits ${credited} do not add up to the fees ${fees}`
 }
 
 /**
