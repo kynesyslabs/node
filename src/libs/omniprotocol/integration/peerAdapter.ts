@@ -17,7 +17,7 @@ import {
     decodeNodeCallResponse,
 } from "../serialization/control"
 import { OmniOpcode } from "../protocol/opcodes"
-import { RequestTimeoutError } from "../types/errors"
+import { ConnectionLostError, RequestTimeoutError } from "../types/errors"
 import { getSharedState } from "@/utilities/sharedState"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
@@ -103,6 +103,8 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
             // Decode response from binary NodeCall format
             const decoded = decodeNodeCallResponse(responseBuffer)
 
+            this.noteOmniAnswer(peer.identity)
+
             // Any answer proves the peer is alive, as on the HTTP path.
             if (!peer.isLocalNode) {
                 PeerManager.getInstance().updatePeerLastSeen(peer.identity)
@@ -128,6 +130,20 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                     response: "Request timeout",
                     require_reply: false,
                     extra: { code: "ETIMEDOUT", transport: "omni" },
+                }
+            }
+            // The connection was up, so Omni works for this peer; the peer
+            // may already have acted on the request, and resending it over
+            // HTTP could deliver it twice. The caller's retry reconnects.
+            if (error instanceof ConnectionLostError) {
+                log.warning(
+                    `[PeerOmniAdapter] [${request.method}] connection to ${peer.identity} lost: ${error.message}`,
+                )
+                return {
+                    result: 503,
+                    response: "Connection lost",
+                    require_reply: false,
+                    extra: { code: "ECONNRESET", transport: "omni" },
                 }
             }
             handleError(error, "NETWORK", {

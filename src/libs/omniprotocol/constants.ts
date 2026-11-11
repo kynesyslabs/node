@@ -151,6 +151,9 @@ export const DEFAULT_MIGRATION_FALLBACK_TIMEOUT_MS = 1_000
 /** How long a peer stays HTTP-only after an OmniProtocol failure (1 minute) */
 export const DEFAULT_HTTP_FALLBACK_COOLDOWN_MS = 60_000
 
+/** Ceiling of the cooldown, which doubles with each failure in a row (10 minutes) */
+export const MAX_HTTP_FALLBACK_COOLDOWN_MS = 600_000
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Protocol Config Defaults (types/config.ts - ProtocolRuntimeConfig)
 // ─────────────────────────────────────────────────────────────────────────────

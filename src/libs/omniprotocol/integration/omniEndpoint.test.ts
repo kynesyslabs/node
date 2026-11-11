@@ -158,3 +158,25 @@ describe("per-call timeout", () => {
         sharedState.omniAdapter = null
     })
 })
+
+describe("protocol option", () => {
+    it("keeps calls that ask for HTTP off Omni", async () => {
+        const adaptCall = jest.fn()
+        sharedState.omniAdapter = { adaptCall }
+        const peer = new Peer(URL_A, PEER)
+        const httpCall = jest.fn(async () => ({
+            result: 200,
+            response: "http",
+            require_reply: false,
+            extra: null,
+        }))
+        peer.httpCall = httpCall as any
+        await peer.longCall({ method: "nodeCall", params: [] }, true, {
+            protocol: "http",
+            retries: 1,
+        })
+        expect(adaptCall).not.toHaveBeenCalled()
+        expect(httpCall).toHaveBeenCalledTimes(1)
+        sharedState.omniAdapter = null
+    })
+})

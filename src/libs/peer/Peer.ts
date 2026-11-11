@@ -253,6 +253,11 @@ export default class Peer {
         //     return await this.httpCall(request, isAuthenticated)
         // }
 
+        // Sync asks for HTTP: block batches have no size bound, Omni frames do.
+        if (options?.protocol === "http") {
+            return await this.httpCall(request, isAuthenticated, options.timeoutMs)
+        }
+
         // Protocol is 'omni' (default): Check if OmniProtocol should be used for this peer
         if (
             getSharedState.isOmniProtocolEnabled &&

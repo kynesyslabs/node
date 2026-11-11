@@ -46,22 +46,36 @@ carries our signed auth block.
 
 ### Failures
 
-- Connect failure or a broken connection: as before, fall back to HTTP for
-  that call and keep the peer on HTTP for the cooldown (60 s).
+- Connect failure (port closed, filtered, refused): fall back to HTTP for
+  that call and keep the peer on HTTP for a cooldown that starts at 60 s and
+  doubles with each failure in a row, up to 10 minutes. An Omni answer resets
+  it; a repeated hello with the same advert does not. The connect timeout is
+  capped at the call's own timeout, so a dead advertised port costs at most
+  one call timeout per cooldown.
 - No answer within the call's timeout on a live connection: a 504, as HTTP
-  reports it. No HTTP resend (it would queue behind the client traffic and
-  double the wait) and no cooldown.
+  reports it. The connection stays open: the request's entry is dropped and
+  a late answer is ignored by its sequence number, while the other requests
+  on the connection carry on. No HTTP resend and no cooldown.
+- The connection drops with the request on it: a 503 and no HTTP resend, as
+  the peer may already have acted on the request. The caller's retry
+  reconnects over Omni.
 - The per-attempt timeout is one value for both transports
   (`CallOptions.timeoutMs`, default 3 s; Omni's was 30 s). Mempool merge
   gives one attempt its whole 10 s budget, so a receiver still validating a
   batch is not sent it again.
+- A burst of first calls to a peer shares one connect instead of opening a
+  socket each beyond the per-peer cap, which the receiver would close again.
+- Calls that ask for `protocol: "http"` stay on HTTP. Only Sync does, for
+  block replies: Omni frames are capped at 10 MB, block batches are not.
 
 ### Server side
 
-The Omni server answered the messages of one connection one after another.
-A merge batch being validated held back a consensus call from the same peer
-behind it. Messages now run side by side; answers carry the request's
-sequence number. Auth is per message, so nothing depends on order.
+The plain-TCP Omni server (`ConnectionPool.handleInboundSocket` and
+`PeerConnection`) already runs the messages of one connection side by side
+and answers each by sequence number, so a consensus call does not wait for a
+mempool merge from the same peer. Nothing changes there. The TLS server's
+older `InboundConnection` still runs them one after another; peers do not
+reach it, because a TLS node advertises no Omni port.
 
 ### Candidate not formed yet
 

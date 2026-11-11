@@ -115,16 +115,9 @@ export class InboundConnection extends EventEmitter {
 
         try {
             // Extract all complete messages
-            // Answers carry the request's sequence number, so messages run
-            // side by side: a consensus call must not wait for a mempool
-            // merge from the same peer to finish validating.
             let message = this.framer.extractMessage()
             while (message) {
-                this.handleMessage(message).catch(error =>
-                    handleError(error, "NETWORK", {
-                        source: "OmniProtocol InboundConnection.handleMessage",
-                    }),
-                )
+                await this.handleMessage(message)
                 message = this.framer.extractMessage()
             }
         } catch (error) {

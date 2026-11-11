@@ -60,6 +60,15 @@ export class RequestTimeoutError extends ConnectionTimeoutError {
     }
 }
 
+// An established connection went away with the request on it. The peer may
+// already have acted on the request, so it must not be resent elsewhere.
+export class ConnectionLostError extends ConnectionError {
+    constructor(message: string) {
+        super(message)
+        this.name = "ConnectionLostError"
+    }
+}
+
 export class AuthenticationError extends OmniProtocolError {
     constructor(message: string) {
         super(message, 0xf004)

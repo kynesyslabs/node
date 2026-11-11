@@ -20,6 +20,7 @@ import { ConnectionPool } from "../transport/ConnectionPool"
 import { OmniProtocolError } from "../types/errors"
 import { getNodePrivateKey, getNodePublicKey } from "./keys"
 import { RateLimiter } from "../ratelimit"
+import { MAX_HTTP_FALLBACK_COOLDOWN_MS } from "../constants"
 
 export interface BaseAdapterOptions {
     config?: OmniProtocolConfig
@@ -63,6 +64,8 @@ export abstract class BaseOmniAdapter {
     /** Peers answered over HTTP only, keyed by identity, until the given time. */
     private readonly httpOnlyUntil = new Map<string, number>()
     private readonly omniEndpoints = new Map<string, OmniEndpoint>()
+    /** Omni failures in a row per peer, since its last Omni answer. */
+    private readonly omniFailures = new Map<string, number>()
 
     constructor(options: BaseAdapterOptions = {}) {
         this.config = cloneConfig(options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG)
@@ -155,7 +158,14 @@ export abstract class BaseOmniAdapter {
             this.forgetOmniPeer(peerIdentity)
             return
         }
+        const known = this.omniEndpoints.get(peerIdentity)
         this.omniEndpoints.set(peerIdentity, { origin, port })
+        if (known?.origin === origin && known.port === port) {
+            // Hellos repeat: the same advert must not cut a backoff short.
+            this.config.migration.omniPeers.add(peerIdentity)
+            return
+        }
+        this.omniFailures.delete(peerIdentity)
         this.markOmniPeer(peerIdentity)
     }
 
@@ -181,10 +191,20 @@ export abstract class BaseOmniAdapter {
      * Its Omni capability is kept, so it is retried over Omni afterwards.
      */
     markHttpPeer(peerIdentity: string): void {
-        this.httpOnlyUntil.set(
-            peerIdentity,
-            Date.now() + this.config.migration.httpFallbackCooldown,
+        // An advertised port that stays unreachable costs a connect timeout
+        // per cooldown; doubling keeps that cost from recurring every minute.
+        const failures = (this.omniFailures.get(peerIdentity) ?? 0) + 1
+        this.omniFailures.set(peerIdentity, failures)
+        const cooldown = Math.min(
+            this.config.migration.httpFallbackCooldown * 2 ** (failures - 1),
+            MAX_HTTP_FALLBACK_COOLDOWN_MS,
         )
+        this.httpOnlyUntil.set(peerIdentity, Date.now() + cooldown)
+    }
+
+    /** The peer answered over Omni: the next failure starts a fresh backoff. */
+    noteOmniAnswer(peerIdentity: string): void {
+        this.omniFailures.delete(peerIdentity)
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
