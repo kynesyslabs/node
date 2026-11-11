@@ -20,7 +20,11 @@ import ParallelNetworks from "./parallelNetworks"
 import { EXPIRED_TX_DEEP_WINDOW_MULTIPLIER } from "@/libs/blockchain/referenceBlockWindow"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { SETTLEMENT_TRANSFERS } from "./settlement/encoding"
-import { SettlementAggregator, type SettlementDeps } from "./settlement/aggregator"
+import {
+    SETTLEMENT_DEFERRED_TTL_BLOCKS,
+    SettlementAggregator,
+    type SettlementDeps,
+} from "./settlement/aggregator"
 import { openSettlementTransfer } from "./settlement/transfer"
 import { readTipAccounts } from "./settlement/tipState"
 import { planSettlement } from "./settlement/planner"
@@ -906,6 +910,7 @@ export class L2PSBatchAggregator {
             queueWindow: 4 * SETTLEMENT_TRANSFERS * this.MAX_BATCHES_PER_CYCLE,
             expiryBlocks:
                 EXPIRED_TX_DEEP_WINDOW_MULTIPLIER * Math.max(getSharedState.referenceBlockRoom ?? 1, 1) + 1,
+            deferredTtlBlocks: SETTLEMENT_DEFERRED_TTL_BLOCKS,
             proverBackoffMs: 5_000,
             proverBackoffMaxMs: 300_000,
         })

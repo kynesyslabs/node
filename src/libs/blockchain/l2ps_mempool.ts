@@ -28,6 +28,11 @@ export const L2PS_STATUS = {
     BATCHED: "batched",
     /** Batch containing this transaction has been included in a block */
     CONFIRMED: "confirmed",
+    /**
+     * Executed, but no settlement batch can place it at the current tip; read
+     * apart from executed rows so it cannot starve them, and failed once old
+     */
+    DEFERRED: "deferred",
 } as const
 
 export type L2PSStatus = typeof L2PS_STATUS[keyof typeof L2PS_STATUS]

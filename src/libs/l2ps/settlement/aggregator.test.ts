@@ -36,6 +36,7 @@ interface Row {
     l2ps_uid: string
     encrypted_tx: unknown
     status: string
+    block_number: number
 }
 
 let rows: Map<string, Row>
@@ -98,7 +99,12 @@ function deps(): SettlementDeps {
         },
         status: async hash => statuses.get(hash) ?? { state: "unknown" },
         setRows: async (hashes, status) => {
-            for (const h of hashes) rows.get(h)!.status = status
+            // A status write also renews the row's timestamp, the queue order.
+            for (const h of hashes) {
+                const row = rows.get(h)!
+                rows.delete(h)
+                rows.set(h, { ...row, status })
+            }
         },
         history: async (hash, status, message, l1) => {
             history.push({ hash, status, message, l1 })
@@ -115,12 +121,20 @@ const LIMITS = {
     maxBatchesPerCycle: 3,
     queueWindow: 100,
     expiryBlocks: 6,
+    deferredTtlBlocks: 30,
     proverBackoffMs: 5_000,
     proverBackoffMaxMs: 60_000,
 }
 
 function queue(t: DecryptedTransfer, status: string = L2PS_STATUS.EXECUTED, inner: unknown = innerTx(t)) {
-    rows.set(t.txHash, { hash: t.txHash, original_hash: `orig_${t.txHash}`, l2ps_uid: UID, encrypted_tx: inner, status })
+    rows.set(t.txHash, {
+        hash: t.txHash,
+        original_hash: `orig_${t.txHash}`,
+        l2ps_uid: UID,
+        encrypted_tx: inner,
+        status,
+        block_number: head,
+    })
 }
 
 const pay = (from: typeof ALICE, to: string, amount: bigint, nonce: bigint) =>
@@ -347,5 +361,49 @@ describe("SettlementAggregator", () => {
         // The orphan went back to the queue and was batched again.
         expect(statusOf(orphan)).toBe(L2PS_STATUS.BATCHED)
         expect(submitted[0].rows).toEqual([orphan.txHash])
+    })
+    it("defers transfers it cannot place, so they never keep fresh ones out of the window", async () => {
+        // Nonce gaps no batch can ever fill, older than the payable transfer.
+        const stuck = Array.from({ length: 3 }, (_, i) => pay(BOB, CAROL.account, 1n, 5n + BigInt(i)))
+        for (const t of stuck) queue(t)
+        const fresh = pay(ALICE, CAROL.account, 1n, 5n)
+        queue(fresh)
+        const agg = new SettlementAggregator(deps(), { ...LIMITS, queueWindow: 3 })
+
+        await agg.cycle()
+        await agg.cycle()
+
+        expect(stuck.map(statusOf)).toEqual(stuck.map(() => L2PS_STATUS.DEFERRED))
+        expect(statusOf(fresh)).toBe(L2PS_STATUS.BATCHED)
+        expect(submitted.map(s => s.rows)).toEqual([[fresh.txHash]])
+    })
+
+    it("settles a deferred transfer once it can be placed", async () => {
+        const later = pay(BOB, CAROL.account, 1n, 2n)
+        queue(later)
+        const agg = new SettlementAggregator(deps(), LIMITS)
+        await agg.cycle()
+        expect(statusOf(later)).toBe(L2PS_STATUS.DEFERRED)
+
+        tip.set(BOB.account, { balance: 50n, nonce: 1n })
+        await agg.cycle()
+        expect(statusOf(later)).toBe(L2PS_STATUS.BATCHED)
+    })
+
+    it("fails a deferred transfer once its time to live has passed since admission", async () => {
+        const stuck = pay(BOB, CAROL.account, 1n, 9n)
+        queue(stuck)
+        const agg = new SettlementAggregator(deps(), LIMITS)
+        await agg.cycle()
+
+        head += LIMITS.deferredTtlBlocks
+        await agg.cycle()
+        expect(statusOf(stuck)).toBe(L2PS_STATUS.DEFERRED)
+
+        head += 1
+        await agg.cycle()
+        expect(statusOf(stuck)).toBe(L2PS_STATUS.FAILED)
+        expect(history.find(h => h.hash === stuck.txHash)).toMatchObject({ status: "failed" })
+        expect(history.find(h => h.hash === stuck.txHash)!.message).toContain("not settled within 30 blocks")
     })
 })

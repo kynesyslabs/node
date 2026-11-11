@@ -11,6 +11,9 @@
  *   stays queued; one whose nonce L1 has already spent, or whose signed fee is
  *   below the native transfer fee now, can never settle and is dropped with a
  *   history status, so no batch that apply must fail is proved again and again.
+ * - Transfers the planner cannot place at all are deferred: read in a window
+ *   of their own, so they never crowd fresh transfers out of the queue window,
+ *   and failed once SETTLEMENT_DEFERRED_TTL_BLOCKS have passed since admission.
  * - A batch L1 includes as failed, or that expires unseen, puts its transfers
  *   back in the queue to be planned and proved again. Re-sending a transfer is
  *   safe: whichever batch lands second fails on its spent nonce.
@@ -67,6 +70,13 @@ export interface SettlementDeps {
     now(): number
 }
 
+/**
+ * Blocks after admission a deferred transfer may wait for its balance or its
+ * nonce turn before it fails: about 35 minutes at 7 s blocks. A constant, so
+ * a sender sees the same deadline on every member.
+ */
+export const SETTLEMENT_DEFERRED_TTL_BLOCKS = 300
+
 export interface SettlementLimits {
     minBatchSize: number
     maxBatchesPerCycle: number
@@ -74,6 +84,8 @@ export interface SettlementLimits {
     queueWindow: number
     /** Blocks after which a batch the chain has not seen can no longer be included. */
     expiryBlocks: number
+    /** Blocks after admission a deferred transfer fails at. */
+    deferredTtlBlocks: number
     proverBackoffMs: number
     proverBackoffMaxMs: number
 }
@@ -134,7 +146,11 @@ export class SettlementAggregator {
         let transfers = 0
         if (this.deps.now() < this.proverPausedUntil) return { submitted, transfers }
 
-        for (const l2psUid of await this.deps.subnets(L2PS_STATUS.EXECUTED)) {
+        const subnets = new Set([
+            ...(await this.deps.subnets(L2PS_STATUS.EXECUTED)),
+            ...(await this.deps.subnets(L2PS_STATUS.DEFERRED)),
+        ])
+        for (const l2psUid of subnets) {
             const result = await this.settleSubnet(l2psUid)
             submitted += result.submitted
             transfers += result.transfers
@@ -258,7 +274,20 @@ export class SettlementAggregator {
         l2psUid: string,
     ): Promise<{ submitted: number; transfers: number; stop: boolean }> {
         const done = { submitted: 0, transfers: 0, stop: false }
-        const rows = await this.deps.rows(l2psUid, L2PS_STATUS.EXECUTED, this.limits.queueWindow)
+        const head = this.deps.head()
+        const parked: L2PSMempoolTx[] = []
+        for (const row of await this.deps.rows(l2psUid, L2PS_STATUS.DEFERRED, this.limits.queueWindow)) {
+            if (head - Number(row.block_number) > this.limits.deferredTtlBlocks) {
+                await this.drop(
+                    row,
+                    `not settled within ${this.limits.deferredTtlBlocks} blocks of admission; sign the transfer again`,
+                )
+            } else {
+                parked.push(row)
+            }
+        }
+        const fresh = await this.deps.rows(l2psUid, L2PS_STATUS.EXECUTED, this.limits.queueWindow)
+        const rows = [...fresh, ...parked]
         if (rows.length < this.limits.minBatchSize) return done
 
         const rowOf = new Map<string, L2PSMempoolTx>()
@@ -318,8 +347,15 @@ export class SettlementAggregator {
             if (candidates.length < this.limits.minBatchSize) break
             const plan = this.deps.plan(candidates, balances, nonces)
             if (plan.transfers.length === 0) {
+                // None of these can be placed at this tip. Deferring them (again)
+                // moves them behind the other deferred rows and out of the
+                // fresh window.
+                await this.deps.setRows(
+                    candidates.map(t => t.txHash),
+                    L2PS_STATUS.DEFERRED,
+                )
                 log.debug(
-                    `[L2PS Settlement] ${l2psUid}: nothing settles this cycle (${plan.deferred.length} deferred)`,
+                    `[L2PS Settlement] ${l2psUid}: nothing settles this cycle (${candidates.length} deferred)`,
                 )
                 break
             }
