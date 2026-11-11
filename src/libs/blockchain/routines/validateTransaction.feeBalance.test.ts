@@ -9,6 +9,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
 
 let balance = 0n
+/** Balances of accounts other than the sender's, by account. */
+const held = new Map<string, bigint>()
 const quiet = Object.fromEntries(
     ["debug", "info", "warning", "warn", "error", "only", "custom"].map(level => [level, () => {}]),
 )
@@ -21,7 +23,7 @@ mock.module("src/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
     default: {
         getAccountNonce: async () => 7,
-        getAccountBalance: async () => balance,
+        getAccountBalance: async (account: string) => held.get(account) ?? balance,
     },
 }))
 mock.module("src/libs/blockchain/validation/txAdmission", () => ({
@@ -37,6 +39,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { OS, PEER, SENDER, chainIs, demos, onTheWire } from "src/libs/blockchain/validation/editBinding.fixtures"
 
 const { confirmTransaction } = await import("./validateTransaction")
+const { applyGasFeeSeparation } = await import("./applyGasFeeSeparation")
 
 const AMOUNT = 3n * OS
 const FEE = 2n * OS // network_fee 1 DEM + rpc_fee 1 DEM
@@ -74,6 +77,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+    held.clear()
     Object.assign(getSharedState, saved)
     demos._getNetworkParametersCached = savedParams
 })
@@ -155,5 +159,42 @@ describe("confirm balance of a TLSNotary operation under gasFeeSeparation and fe
         expect((await confirm(store)).valid).toBe(false)
         balance = STORE_BURN + FEE
         expect((await confirm(store)).valid).toBe(true)
+    })
+})
+
+describe("ingress balance of a PQC-signed native transfer under gasFeeSeparation and feeBinding", () => {
+    beforeEach(() => forks(true))
+
+    // The fee edits debit `from`, the PQC key; the amount and the nonce are
+    // the ed25519 identity's. Signatures are not checked at this step.
+    const PQC = "0x" + "5c".repeat(32)
+    const pqcTransfer = async () => {
+        const tx = await transfer()
+        tx.content.from = PQC
+        return tx
+    }
+
+    it("checks the fee against `from` and the amount against the ed25519 account", async () => {
+        const tx = await pqcTransfer()
+        held.set(PQC, FEE)
+        balance = AMOUNT
+        expect(await applyGasFeeSeparation(tx)).toEqual({ ok: true })
+    })
+
+    it("refuses a `from` that cannot pay the fee, whatever the ed25519 account holds", async () => {
+        const tx = await pqcTransfer()
+        held.set(PQC, FEE - 1n)
+        balance = AMOUNT + FEE
+        expect(await applyGasFeeSeparation(tx)).toEqual({ ok: false, message: `sender balance ${FEE - 1n} < fee ${FEE}` })
+    })
+
+    it("refuses an ed25519 account that cannot pay the amount, whatever `from` holds", async () => {
+        const tx = await pqcTransfer()
+        held.set(PQC, AMOUNT + FEE)
+        balance = AMOUNT - 1n
+        expect(await applyGasFeeSeparation(tx)).toEqual({
+            ok: false,
+            message: `balance of ${SENDER} ${AMOUNT - 1n} < amount ${AMOUNT}`,
+        })
     })
 })

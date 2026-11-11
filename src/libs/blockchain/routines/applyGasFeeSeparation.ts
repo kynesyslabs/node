@@ -67,15 +67,17 @@ import { generateGcrEdits } from "@/libs/blockchain/validation/generateGcrEdits"
 
 /**
  * What the block debits the sender of a native transaction besides its fee
- * edits, in ledger units: the sender's debits among the edits regenerated
- * from the signed body, which the block binds the shipped edits to, less the
- * retired gas edit. A send debits its amount, a TLSNotary request or store
- * its special-operation burn.
+ * edits, in ledger units, and the account it debits: the sender's debits
+ * among the edits regenerated from the signed body, which the block binds the
+ * shipped edits to, less the retired gas edit. A send debits its amount, a
+ * TLSNotary request or store its special-operation burn. The sender is the
+ * account of the nonce edit, the ed25519 identity, which for a PQC-signed
+ * transaction is not the `from` the fee edits debit.
  */
 async function nativeSenderDebit(
     tx: ApplyGasFeeSeparationTx,
     postFork: boolean,
-): Promise<bigint> {
+): Promise<{ account: string; amount: bigint }> {
     const regenerated = withoutLegacyGas(await generateGcrEdits(tx as ITransaction))
     const serialised = denomination.serializeTransactionContent(
         { gcr_edits: regenerated } as never,
@@ -89,7 +91,7 @@ async function nativeSenderDebit(
         if (edit.account !== sender) continue
         debit += BigInt(edit.amount as string | number)
     }
-    return debit
+    return { account: typeof sender === "string" ? sender : "", amount: debit }
 }
 
 export type ApplyGasFeeSeparationResult =
@@ -141,6 +143,19 @@ function breakdownRefusal(breakdown: FeeBreakdown): string | null {
     return null
 }
 
+/** An account's balance, or why it could not be read. */
+async function readBalance(account: string): Promise<{ balance: bigint } | { error: string }> {
+    try {
+        return { balance: await GCR.getAccountBalance(account) }
+    } catch (e) {
+        return {
+            error: `failed to read sender balance: ${
+                e instanceof Error ? e.message : stringifyNonError(e)
+            }`,
+        }
+    }
+}
+
 /**
  * Why the sender cannot pay what the block will debit it, or null when it can.
  */
@@ -149,38 +164,52 @@ async function balanceRefusal(
     senderAddress: string,
     breakdown: FeeBreakdown,
 ): Promise<string | null> {
-    let senderBalance: bigint
+    const sender = await readBalance(senderAddress)
+    if ("error" in sender) return sender.error
+    if (legacyGasRetired(tx)) {
+        return retiredGasBalanceRefusal(tx, senderAddress, sender.balance, breakdown)
+    }
+    return sender.balance < BigInt(breakdown.total)
+        ? `sender balance ${sender.balance.toString()} < total fee ${breakdown.total}`
+        : null
+}
+
+/**
+ * Where the fee edits are the whole fee (legacyGasRetired), the block debits
+ * the fee and the transaction's own debits in ledger units and nothing else,
+ * so each account must hold what it is debited: the fee from `from`, the
+ * amount (a TLSNotary operation's burn) from the nonce-edit account, both
+ * from one account when they are the same. Before, the amount alone was
+ * checked, and the fee was compared as a DEM count against an OS balance.
+ */
+async function retiredGasBalanceRefusal(
+    tx: ApplyGasFeeSeparationTx,
+    senderAddress: string,
+    senderBalance: bigint,
+    breakdown: FeeBreakdown,
+): Promise<string | null> {
+    const postFork = isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0)
+    const fee = BigInt(breakdown.total) * (postFork ? 1_000_000_000n : 1n)
+    let debit: { account: string; amount: bigint }
     try {
-        senderBalance = await GCR.getAccountBalance(senderAddress)
+        debit = await nativeSenderDebit(tx, postFork)
     } catch (e) {
-        return `failed to read sender balance: ${
+        return `cannot compute what the block debits the sender: ${
             e instanceof Error ? e.message : stringifyNonError(e)
         }`
     }
-    // Where the fee edits are the whole fee (legacyGasRetired), the block
-    // debits the transaction's own debits and the fee in ledger units and
-    // nothing else, so the sender must hold exactly their sum. The amount
-    // alone was checked before, and the fee was compared as a DEM count
-    // against an OS balance; a TLSNotary request or store also burns its
-    // special-operation fee in the block.
-    if (legacyGasRetired(tx)) {
-        const postFork = isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0)
-        const unit = postFork ? 1_000_000_000n : 1n
-        let amount: bigint
-        try {
-            amount = await nativeSenderDebit(tx, postFork)
-        } catch (e) {
-            return `cannot compute what the block debits the sender: ${
-                e instanceof Error ? e.message : stringifyNonError(e)
-            }`
-        }
-        const fee = BigInt(breakdown.total) * unit
-        return senderBalance < amount + fee
-            ? `sender balance ${senderBalance.toString()} < amount ${amount.toString()} + fee ${fee.toString()}`
+    if (debit.amount === 0n || debit.account.toLowerCase() === senderAddress.toLowerCase()) {
+        return senderBalance < debit.amount + fee
+            ? `sender balance ${senderBalance.toString()} < amount ${debit.amount.toString()} + fee ${fee.toString()}`
             : null
     }
-    return senderBalance < BigInt(breakdown.total)
-        ? `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`
+    if (senderBalance < fee) {
+        return `sender balance ${senderBalance.toString()} < fee ${fee.toString()}`
+    }
+    const payer = await readBalance(debit.account)
+    if ("error" in payer) return payer.error
+    return payer.balance < debit.amount
+        ? `balance of ${debit.account} ${payer.balance.toString()} < amount ${debit.amount.toString()}`
         : null
 }
 
