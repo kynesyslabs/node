@@ -34,8 +34,17 @@ export function judgeOwnSignature(
     genesisHash: string | null,
     signedHere: (hash: string) => boolean,
 ): OwnSignatureVerdict {
-    // No record: a fresh node, or a chain signed before records existed.
-    if (!record) return { kind: "ours" }
+    const seen = `block ${block.number} (hash ${block.hash}, timestamp ${block.timestamp})`
+    // No record: a fresh node, a chain signed before records existed, or a
+    // record lost with its volume while another host runs the same key.
+    // Only the last is dangerous, and nothing here tells them apart.
+    if (!record) {
+        if (!genesisHash || signedHere(block.hash)) return { kind: "ours" }
+        return {
+            kind: "ambiguous",
+            reason: `our key signed ${seen} but this node holds no signing record`,
+        }
+    }
     // A record of another chain says nothing about this one.
     if (!genesisHash || record.genesisHash !== genesisHash) {
         return { kind: "ours" }
@@ -45,7 +54,6 @@ export function judgeOwnSignature(
     if (block.number === record.height && block.hash === record.hash) {
         return { kind: "ours" }
     }
-    const seen = `block ${block.number} (hash ${block.hash}, timestamp ${block.timestamp})`
     const last = `last recorded signature: height ${record.height}, timestamp ${record.timestamp}, hash ${record.hash}`
     if (block.number > record.height) {
         return {
