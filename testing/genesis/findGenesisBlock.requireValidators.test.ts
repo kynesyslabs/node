@@ -25,6 +25,8 @@ const SAVED_KEYS = [
     "DEMOS_GENESIS_FILE",
     "DEMOS_SNAPSHOT_DIR",
     "DEMOS_REQUIRE_VALIDATORS",
+    "DEMOS_ALLOW_UNPINNED_GENESIS",
+    "NODE_ENV",
 ]
 const saved = Object.fromEntries(SAVED_KEYS.map(k => [k, process.env[k]]))
 
@@ -160,6 +162,9 @@ describe("findGenesisBlock on a fresh start", () => {
         const { Config } = await import("src/config")
         // No pin, so the checks do not compare the file with a hash
         delete process.env.EXPECTED_GENESIS_HASH
+        // A production node refuses to start unpinned unless it opts out by name
+        const previousOptOut = process.env.DEMOS_ALLOW_UNPINNED_GENESIS
+        process.env.DEMOS_ALLOW_UNPINNED_GENESIS = "true"
         Config.resetInstance()
         try {
             writeGenesis(1)
@@ -168,6 +173,8 @@ describe("findGenesisBlock on a fresh start", () => {
             expect((generatedFrom as { properties: { id: number } }).properties.id).toBe(1)
         } finally {
             process.env.EXPECTED_GENESIS_HASH = "ab".repeat(32)
+            if (previousOptOut === undefined) delete process.env.DEMOS_ALLOW_UNPINNED_GENESIS
+            else process.env.DEMOS_ALLOW_UNPINNED_GENESIS = previousOptOut
             Config.resetInstance()
         }
     })
