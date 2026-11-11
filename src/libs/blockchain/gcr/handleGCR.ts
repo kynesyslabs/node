@@ -133,6 +133,18 @@ import {
     type ExecutionClock,
 } from "@/libs/atomic-work/executionClock"
 import { atomicWorkProfile } from "@/libs/atomic-work/profile"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
+import {
+    nativeTransferFeeOs,
+    parseSettlement,
+    settlementBatchesOverCap,
+    settlementChainId,
+    settlementEdits,
+    settlementFeeRefusal,
+    settlementSignatureRefusal,
+    settlementStateRefusal,
+    type ParsedSettlement,
+} from "@/libs/l2ps/settlement/validation"
 import {
     buildWorkReceipt,
     type AppliedStorageWrite,
@@ -558,6 +570,35 @@ export function withDerivedFeeEdits(tx: Transaction): Transaction {
             gcr_edits: [...feeEdits, ...edits.map(edit => structuredClone(edit))],
         },
     }) as Transaction
+}
+
+/**
+ * The settlement each derived `l2psBatch` copy applies, keyed by that copy:
+ * the copy exists only inside one applyTransactions call, and the signed tx
+ * the caller persists is never marked.
+ */
+const settlementOfTx = new WeakMap<Transaction, ParsedSettlement>()
+
+/**
+ * The batch with its settlement edits as `gcr_edits`, on a copy. The signed
+ * tx ships none (editBinding refuses one that does); carrying them on the copy
+ * lets prepareEntities load every settlement account and partitionIndependentTxs
+ * order the batch with every transaction touching one, so two batches over one
+ * account in a block see each other's effects.
+ */
+export function withSettlementEdits(
+    tx: Transaction,
+    settlement: ParsedSettlement | undefined,
+): Transaction {
+    if (!settlement) return tx
+    const copy = Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
+        content: {
+            ...tx.content,
+            gcr_edits: settlementEdits(settlement, tx.hash ?? ""),
+        },
+    }) as Transaction
+    settlementOfTx.set(copy, settlement)
+    return copy
 }
 
 /**
@@ -1005,6 +1046,11 @@ export default class HandleGCR {
         clock?: BlockClock,
         options: ApplyTransactionOptions = {},
     ): Promise<GCRApplyResult> {
+        const settlement = settlementOfTx.get(tx)
+        if (settlement && !isRollback && !simulate) {
+            return this.applySettlement(entities, tx, settlement, clock)
+        }
+
         const nonceEdit =
             options.nonceRule && !simulate && !isRollback
                 ? (tx.content.gcr_edits ?? []).find(
@@ -1079,6 +1125,35 @@ export default class HandleGCR {
             )
         }
         return { ...result, ...charged }
+    }
+
+    /**
+     * A settlement batch, judged on the working state the block's earlier
+     * transactions left (nonces, balances for the public signals, then the
+     * proof), and applied all or nothing. Every refusal fails the batch with
+     * no edits and never the block: every node reaches the same verdict. Its
+     * nonces are spent only when it applies, since nothing proves who would
+     * pay for a failed one.
+     */
+    private static async applySettlement(
+        entities: GCREntityCaches,
+        tx: Transaction,
+        settlement: ParsedSettlement,
+        clock?: BlockClock,
+    ): Promise<GCRApplyResult> {
+        const refusal = await settlementStateRefusal(settlement, entities.accounts)
+        if (refusal) {
+            log.error(`[applyTransaction] Refusing settlement ${tx.hash}: ${refusal}`)
+            return {
+                success: false,
+                entities,
+                message: refusal,
+                sideEffects: [],
+                deferredWrites: [],
+                appliedEditsCount: 0,
+            }
+        }
+        return this.applyTransactionEdits(entities, tx, false, false, clock)
     }
 
     /**
@@ -2116,6 +2191,70 @@ export default class HandleGCR {
         }
     }
 
+    /**
+     * The settlement records of a block's `l2psBatch` transactions under the
+     * `l2psSettlement` fork. The stateless checks of Interface v1 (structure,
+     * limits, signatures, fees, the per-block cap) run here, once per block,
+     * and a batch that fails one joins `refused`: it is included as failed
+     * with no edits. Rollback only re-derives the edits of what applied.
+     */
+    private static async prepareSettlements(
+        txs: Transaction[],
+        refused: Set<string>,
+        isRollback: boolean,
+        blockNumber?: number,
+    ): Promise<Map<string, ParsedSettlement>> {
+        const prepared = new Map<string, ParsedSettlement>()
+        const batches = txs.filter(tx => (tx.content?.type as string) === "l2psBatch")
+        if (batches.length === 0 || !l2psSettlementActive()) return prepared
+
+        const refuse = (tx: Transaction, reason: string) => {
+            log.error(
+                `[applyTransactions] Refusing settlement ${tx.hash}` +
+                    (blockNumber !== undefined ? ` of block ${blockNumber}` : "") +
+                    `: ${reason}`,
+            )
+            refused.add(tx.hash)
+        }
+
+        if (isRollback) {
+            for (const tx of batches) {
+                const parsed = parseSettlement(tx)
+                if (parsed.ok) prepared.set(tx.hash, parsed.value)
+            }
+            return prepared
+        }
+
+        // Counted over every batch of the block, refused or not, in canonical
+        // order: the same set forge selection counts.
+        const overCap = settlementBatchesOverCap(orderDeterministically(batches))
+        // Stale parameters would refuse correctly priced batches on this node alone.
+        await ensureNetworkParametersCurrent()
+        const minimumFee = await nativeTransferFeeOs()
+        const chainId = settlementChainId()
+        for (const tx of batches) {
+            if (refused.has(tx.hash)) continue
+            if (overCap.has(tx.hash)) {
+                refuse(tx, "over the per-block settlement batch cap")
+                continue
+            }
+            const parsed = parseSettlement(tx)
+            if (parsed.ok === false) {
+                refuse(tx, parsed.reason)
+                continue
+            }
+            const reason =
+                settlementFeeRefusal(parsed.value, minimumFee) ??
+                settlementSignatureRefusal(parsed.value, chainId)
+            if (reason) {
+                refuse(tx, reason)
+                continue
+            }
+            prepared.set(tx.hash, parsed.value)
+        }
+        return prepared
+    }
+
     static async applyTransactions(
         txs: Transaction[],
         isRollback: boolean,
@@ -2135,6 +2274,12 @@ export default class HandleGCR {
         if (nonceRule) {
             this.refuseUnboundNonceEdits(txs, refused, clock?.height)
         }
+        const settlements = await this.prepareSettlements(
+            txs,
+            refused,
+            isRollback,
+            clock?.height,
+        )
         const candidates =
             refused.size > 0 ? txs.filter(tx => !refused.has(tx.hash)) : txs
 
@@ -2253,6 +2398,11 @@ export default class HandleGCR {
         // forged-edit guard refused the tx it had just been sent. Rollback
         // derives too, because the stored tx no longer carries them.
         finalTxs = finalTxs.map(withDerivedFeeEdits)
+        if (settlements.size > 0) {
+            finalTxs = finalTxs.map(tx =>
+                withSettlementEdits(tx, settlements.get(tx.hash)),
+            )
+        }
 
         // A block touches each Work, slot and storage address from at most one
         // transaction; later ones are refused. Rollback depends on it: every

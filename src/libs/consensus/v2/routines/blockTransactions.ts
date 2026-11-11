@@ -5,6 +5,9 @@ import {
     type MempoolTransaction,
 } from "./mempoolFilters"
 import { DEFAULT_BLOCK_CAPS, selectBlockTransactions, type BlockCaps } from "./blockCaps"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
+import { settlementBatchesOverCap } from "@/libs/l2ps/settlement/validation"
+import { orderDeterministically } from "./deterministicOrder"
 
 export interface BlockTransactions {
     txs: MempoolTransaction[]
@@ -30,6 +33,21 @@ export interface BlockCapsOptions {
  * chain state, so every member holding the same pool forges the same block.
  */
 export async function judgeBlockTransactions(
+    merged: MempoolTransaction[],
+    height: number,
+    options: BlockCapsOptions,
+): Promise<BlockTransactions> {
+    const judged = await judgeWithinCaps(merged, height, options)
+    if (!l2psSettlementActive()) return judged
+    // Apply fails every settlement batch past the per-block cap, so forging
+    // leaves them pooled for a later block instead. A batch spends no
+    // account nonce, so leaving one out changes no other tx's verdict.
+    const over = settlementBatchesOverCap(orderDeterministically(judged.txs))
+    if (over.size === 0) return judged
+    return { ...judged, txs: judged.txs.filter(tx => !over.has(tx.hash)) }
+}
+
+async function judgeWithinCaps(
     merged: MempoolTransaction[],
     height: number,
     options: BlockCapsOptions,
