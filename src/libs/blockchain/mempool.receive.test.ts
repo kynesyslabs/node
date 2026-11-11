@@ -55,14 +55,29 @@ jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
             validate: jest.fn(async (txs: Array<{ hash: string }>) => {
                 // The verdict arrives after the call returns, as from a worker.
                 await new Promise(resolve => setTimeout(resolve, 1))
-                return txs.map(t =>
-                    badSignatures.has(t.hash)
+                return txs.map((t: any) =>
+                    // The standard rule hashes canonicalized content, which a
+                    // relay tx's raw-JSON hash never matches.
+                    t.content?.type === "l2psBatch"
+                        ? { valid: false, hash: t.hash, reason: "Transaction is not coherent" }
+                        : badSignatures.has(t.hash)
                         ? { valid: false, hash: t.hash, reason: "Invalid signature" }
                         : { valid: true, hash: t.hash },
                 )
             }),
         }),
     },
+}))
+
+let relayRefusals = new Map<string, string>()
+const verifySystemRelayTx = jest.fn(async (t: { hash: string }) =>
+    relayRefusals.has(t.hash)
+        ? { valid: false, hash: t.hash, reason: relayRefusals.get(t.hash) }
+        : { valid: true, hash: t.hash },
+)
+jest.mock("src/libs/blockchain/validation/systemRelayTx", () => ({
+    isSystemRelayTx: (t: any) => t?.content?.type === "l2psBatch",
+    verifySystemRelayTx,
 }))
 
 const editsVerdict: { ok: boolean; reason?: string } = { ok: true }
@@ -119,6 +134,8 @@ const tx = (hash: string, referenceBlock: number, status = "pending") =>
 function resetReceiveState() {
     onChainHashes = new Set()
     badSignatures = new Set()
+    relayRefusals = new Map()
+    verifySystemRelayTx.mockClear()
     insertedRows = []
     mempoolRows = []
     logError.mockClear()
@@ -542,5 +559,38 @@ describe("Mempool per-sender cap: what stays queued past it", () => {
         mempoolRows = own
         const reply = await Mempool.receive([])
         expect(reply.mempool.map(t => t.hash).sort()).toEqual(peerKeeps)
+    })
+})
+
+describe("Mempool.receive: system relay txs", () => {
+    beforeEach(resetReceiveState)
+
+    const batch = (hash: string) =>
+        ({ ...tx(hash, 100), content: { ...tx(hash, 100).content, type: "l2psBatch" } }) as any
+
+    it("admits a peer's l2psBatch that its producer's rule verifies", async () => {
+        // Every member forms the block from its own merged pool: a batch only
+        // its producer holds makes that member's candidate differ from all the
+        // others', and no block reaches agreement while it stays pooled.
+        await Mempool.receive([batch("0xbatch"), tx("0xa", 100)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xbatch", "0xa"])
+        expect(verifySystemRelayTx).toHaveBeenCalledTimes(1)
+    })
+
+    it("drops a relay tx its producer's rule refuses and keeps the rest", async () => {
+        relayRefusals = new Map([["0xforged", "Transaction is not coherent"]])
+        await Mempool.receive([batch("0xforged"), batch("0xbatch"), tx("0xa", 100)])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xbatch", "0xa"])
+        expect(
+            logError.mock.calls.some(c =>
+                String(c[0]).includes("Invalid tx 0xforged: Transaction is not coherent"),
+            ),
+        ).toBe(true)
+    })
+
+    it("still judges a standard tx by the standard rule", async () => {
+        badSignatures = new Set(["0xforged"])
+        await Mempool.receive([tx("0xforged", 100), batch("0xbatch")])
+        expect(insertedRows.map(r => r.hash)).toEqual(["0xbatch"])
     })
 })
