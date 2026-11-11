@@ -43,6 +43,7 @@ KyneSys Labs: https://www.kynesys.xyz/
  * an import that can be jest-mocked.
  */
 
+import { denomination } from "@kynesyslabs/demosdk"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import type { Transaction as ITransaction } from "@kynesyslabs/demosdk/types"
 import {
@@ -58,7 +59,36 @@ import {
     chargedFeeMismatch,
     legacyGasRetired,
     shippedFeeMismatch,
+    withoutLegacyGas,
 } from "@/libs/blockchain/validation/feeBinding"
+import { generateGcrEdits } from "@/libs/blockchain/validation/generateGcrEdits"
+
+/**
+ * What the block debits the sender of a native transaction besides its fee
+ * edits, in ledger units: the sender's debits among the edits regenerated
+ * from the signed body, which the block binds the shipped edits to, less the
+ * retired gas edit. A send debits its amount, a TLSNotary request or store
+ * its special-operation burn.
+ */
+async function nativeSenderDebit(
+    tx: ApplyGasFeeSeparationTx,
+    postFork: boolean,
+): Promise<bigint> {
+    const regenerated = withoutLegacyGas(await generateGcrEdits(tx as ITransaction))
+    const serialised = denomination.serializeTransactionContent(
+        { gcr_edits: regenerated } as never,
+        postFork,
+    )
+    const edits = (JSON.parse(serialised).gcr_edits ?? []) as Array<Record<string, unknown>>
+    const sender = edits.findLast(e => e.type === "nonce")?.account
+    let debit = 0n
+    for (const edit of edits) {
+        if (edit.type !== "balance" || edit.operation !== "remove") continue
+        if (edit.account !== sender) continue
+        debit += BigInt(edit.amount as string | number)
+    }
+    return debit
+}
 
 export type ApplyGasFeeSeparationResult =
     | { ok: true }
@@ -225,18 +255,24 @@ export async function applyGasFeeSeparation(
         }
     }
     // Where the fee edits are the whole fee (legacyGasRetired), the block
-    // debits the amount and the fee in ledger units and nothing else, so the
-    // sender must hold exactly their sum. The amount alone was checked before,
-    // and the fee was compared as a DEM count against an OS balance.
+    // debits the transaction's own debits and the fee in ledger units and
+    // nothing else, so the sender must hold exactly their sum. The amount
+    // alone was checked before, and the fee was compared as a DEM count
+    // against an OS balance; a TLSNotary request or store also burns its
+    // special-operation fee in the block.
     if (legacyGasRetired(tx)) {
-        const unit = isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0)
-            ? 1_000_000_000n
-            : 1n
+        const postFork = isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0)
+        const unit = postFork ? 1_000_000_000n : 1n
         let amount: bigint
         try {
-            amount = BigInt((tx.content.amount as unknown as string | number | bigint) ?? 0)
-        } catch {
-            return { ok: false, message: `invalid amount ${String(tx.content.amount)}` }
+            amount = await nativeSenderDebit(tx, postFork)
+        } catch (e) {
+            return {
+                ok: false,
+                message: `cannot compute what the block debits the sender: ${
+                    e instanceof Error ? e.message : stringifyNonError(e)
+                }`,
+            }
         }
         const fee = BigInt(breakdown.total) * unit
         if (senderBalance < amount + fee) {

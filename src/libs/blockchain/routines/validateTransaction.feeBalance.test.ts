@@ -113,3 +113,47 @@ describe("confirm balance without feeBinding, as before", () => {
         expect(data.valid).toBe(true)
     })
 })
+
+describe("confirm balance of a TLSNotary operation under gasFeeSeparation and feeBinding", () => {
+    beforeEach(() => forks(true))
+
+    /** A native TLSNotary operation built as the SDK's TLSNotaryService builds it. */
+    async function tlsn(nativeOperation: string, args: unknown[], amount: number) {
+        const tx = DemosTransactions.empty()
+        tx.content.to = SENDER
+        tx.content.nonce = 8
+        tx.content.amount = amount as never
+        tx.content.type = "native"
+        tx.content.timestamp = Date.now()
+        tx.content.data = ["native", { nativeOperation, args }] as never
+        return onTheWire(await demos.sign(tx)) as Transaction
+    }
+
+    // The block burns what the regenerated edits debit: 1 DEM for a request,
+    // 1 DEM plus 1 DEM per started KB of proof for a store.
+    const REQUEST_BURN = OS
+    const STORE_BURN = 4n * OS
+
+    it("requires the request burn on top of the fee", async () => {
+        const tx = await tlsn("tlsn_request", ["https://example.com"], 1)
+        balance = REQUEST_BURN + FEE
+        expect((await confirm(tx)).valid).toBe(true)
+
+        balance = REQUEST_BURN + FEE - 1n
+        const data = await confirm(tx)
+        expect(data.valid).toBe(false)
+        expect(data.message).toContain(`< amount ${REQUEST_BURN} + fee ${FEE}`)
+    })
+
+    it("counts the burn the block applies, not the amount the body names", async () => {
+        const request = await tlsn("tlsn_request", ["https://example.com"], 0)
+        balance = FEE
+        expect((await confirm(request)).valid).toBe(false)
+
+        const store = await tlsn("tlsn_store", ["token-1", "p".repeat(3000), "onchain"], 1)
+        balance = OS + FEE
+        expect((await confirm(store)).valid).toBe(false)
+        balance = STORE_BURN + FEE
+        expect((await confirm(store)).valid).toBe(true)
+    })
+})
