@@ -44,13 +44,21 @@ export const BODY_BOUND_METHODS: ReadonlySet<string> = new Set([
 let lastAuthTimestamp = 0
 
 /**
+ * How far the sequence may run ahead of the clock. Beyond it the clock was
+ * set back, and staying on the old sequence would sign timestamps that
+ * receivers refuse as future-dated until the clock catches up.
+ */
+const MAX_AUTH_TIMESTAMP_LEAD_MS = 60_000
+
+/**
  * A timestamp for a body-bound signature, strictly increasing within this
  * process. Two identical requests in the same millisecond would otherwise
  * carry the same signed message, and the receiver refuses the second as a
  * replay.
  */
 export function nextAuthTimestamp(now = Date.now()): number {
-    lastAuthTimestamp = Math.max(now, lastAuthTimestamp + 1)
+    const next = lastAuthTimestamp + 1
+    lastAuthTimestamp = next - now > MAX_AUTH_TIMESTAMP_LEAD_MS ? now : Math.max(now, next)
     return lastAuthTimestamp
 }
 

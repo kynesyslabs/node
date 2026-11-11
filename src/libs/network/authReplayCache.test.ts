@@ -29,4 +29,15 @@ describe("SeenAuthMessages", () => {
         expect(seen.claim("m999", 10_000, 1)).toBe(false)
         expect(seen.claim("m0", 10_000, 1)).toBe(true)
     })
+
+    it("drops every expired message before a live one when full", () => {
+        // Expiry follows the signer's timestamp, so a later claim can expire
+        // first and sit behind a live one at the head.
+        const seen = new SeenAuthMessages(3)
+        seen.claim("live", 1_000, 0)
+        seen.claim("b", 100, 0)
+        seen.claim("c", 100, 0)
+        expect(seen.claim("d", 1_000, 200)).toBe(true)
+        expect(seen.claim("live", 1_000, 200)).toBe(false)
+    })
 })

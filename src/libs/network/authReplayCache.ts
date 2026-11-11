@@ -26,6 +26,7 @@ export class SeenAuthMessages {
         const seenUntil = this.expiries.get(message)
         if (seenUntil !== undefined && seenUntil >= now) return false
         if (seenUntil !== undefined) this.expiries.delete(message)
+        if (this.expiries.size >= this.maxEntries) this.sweepExpired(now)
         while (this.expiries.size >= this.maxEntries) {
             const oldest = this.expiries.keys().next().value as string
             this.expiries.delete(oldest)
@@ -48,6 +49,14 @@ export class SeenAuthMessages {
         for (const [message, expiresAt] of this.expiries) {
             if (expiresAt >= now) return
             this.expiries.delete(message)
+        }
+    }
+
+    // Evicting a live entry reopens its replay, so every expired one goes
+    // first. A full scan, but only when the bound is hit.
+    private sweepExpired(now: number): void {
+        for (const [message, expiresAt] of this.expiries) {
+            if (expiresAt < now) this.expiries.delete(message)
         }
     }
 }
