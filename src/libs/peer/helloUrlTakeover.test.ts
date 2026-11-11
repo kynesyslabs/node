@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test"
 import { mockCore } from "src/utilities/testSupport/coreMocks"
-import { mockHelloDeps } from "src/libs/peer/testSupport/helloMocks"
+import { mockHelloDeps } from "./testSupport/helloMocks"
 
 const OUR_KEY = "0x" + "aa".repeat(32)
 const ALICE = "0x" + "a1".repeat(32)
@@ -25,6 +25,8 @@ const sharedState: Record<string, unknown> = {
     syncStatus: true,
     genesisBlockHash: GENESIS,
     getConsensusTime: () => 10,
+    markPeerOmniCapable: () => {},
+    forgetPeerOmni: () => {},
 }
 
 mockCore(sharedState)

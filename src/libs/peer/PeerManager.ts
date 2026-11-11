@@ -18,6 +18,7 @@ import { isLoopbackHost, parseNodeUrl } from "src/config"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import type { HelloPeerRequest } from "../network/manageHelloPeer"
 import {
+    helloOmniAdvertMessage,
     helloResponseMessage,
     standbyKeepsKnownUrl,
     URL_BOUND_TO_OTHER,
@@ -774,17 +775,7 @@ export default class PeerManager {
                 peer,
             )
 
-            if (typeof response.extra.gossip?.multiaddr === "string") {
-                void import("../gossip/GossipManager").then(
-                    ({ default: gossipManager }) => {
-                        if (gossipManager.isEnabled()) {
-                            gossipManager.getInstance().dial([
-                                response.extra.gossip.multiaddr,
-                            ])
-                        }
-                    },
-                )
-            }
+            PeerManager.dialAdvertisedGossip(response.extra.gossip)
 
             const knownUrl = (
                 peerman.getPeer(peer.identity) ??
@@ -804,6 +795,9 @@ export default class PeerManager {
             }
             peerman.addPeer(peer, verdict === "verified", verdict === "verified")
             peerman.removeOfflinePeer(peer.identity)
+            if (verdict === "verified") {
+                await PeerManager.noteOmniAdvert(peer, response.extra, nonce)
+            }
 
             return { peers: response.extra.peerlist || [], verdict }
         } else if (response.result === 409) {
@@ -813,11 +807,81 @@ export default class PeerManager {
             peerman.removeOnlinePeer(peer.identity)
             peerman.removeOfflinePeer(peer.identity)
             return { peers: [], verdict: "other-genesis" }
-        } else {
+        } else if (response.extra?.inconclusive !== true) {
+            // A timeout on a budget a failed Omni connect cut short is no
+            // sign the peer is down; it is retried at the next hello.
             PeerManager.markPeerOffline(peer)
         }
 
         return { peers: [], verdict: "unreachable" }
+    }
+
+    private static dialAdvertisedGossip(gossip: unknown): void {
+        const multiaddr = (gossip as { multiaddr?: unknown } | undefined)
+            ?.multiaddr
+        if (typeof multiaddr !== "string") {
+            return
+        }
+        void import("../gossip/GossipManager").then(
+            ({ default: gossipManager }) => {
+                if (gossipManager.isEnabled()) {
+                    gossipManager.getInstance().dial([multiaddr])
+                }
+            },
+        )
+    }
+
+    /**
+     * Only a verified reply may move a peer's calls to another port of its
+     * host. Nodes that predate the advert send none and stay on HTTP.
+     */
+    static async noteOmniAdvert(
+        peer: Peer,
+        extra: Record<string, any>,
+        nonce: string,
+    ): Promise<void> {
+        const port = await PeerManager.signedOmniPort(peer, extra, nonce)
+        if (port === null) {
+            getSharedState.forgetPeerOmni(peer.identity)
+            return
+        }
+        getSharedState.markPeerOmniCapable(
+            peer.identity,
+            peer.connection.string,
+            port,
+        )
+    }
+
+    /**
+     * The advertised port, if the peer signed it over our nonce and its URL.
+     * The hello signature does not cover it, so a port rewritten on the way
+     * would otherwise point our calls at another service on that host.
+     */
+    private static async signedOmniPort(
+        peer: Peer,
+        extra: Record<string, any>,
+        nonce: string,
+    ): Promise<number | null> {
+        const { port, signature } = extra.omni ?? {}
+        if (
+            typeof port !== "number" ||
+            typeof extra.url !== "string" ||
+            typeof signature?.type !== "string" ||
+            typeof signature.data !== "string"
+        ) {
+            return null
+        }
+        try {
+            const valid = await TxValidatorPool.getInstance().verify({
+                algorithm: signature.type,
+                message: helloOmniAdvertMessage(nonce, extra.url, port),
+                signature: hexToUint8Array(signature.data),
+                publicKey: hexToUint8Array(peer.identity),
+            })
+            return valid ? port : null
+        } catch {
+            return null
+        }
     }
 
     /**

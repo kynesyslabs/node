@@ -65,6 +65,7 @@ jest.mock("../blockchain/validation/txValidatorPool", () => ({
 }))
 jest.mock("../peer/helloAuth", () => ({
     helloResponseMessage: () => new Uint8Array(1),
+    helloOmniAdvertMessage: () => new Uint8Array(1),
     URL_BOUND_TO_OTHER: "URL already bound to another identity: ",
     standbyKeepsKnownUrl: () => false,
 }))

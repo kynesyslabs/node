@@ -13,6 +13,7 @@ import {
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import {
+    helloOmniAdvertMessage,
     helloResponseMessage,
     standbyKeepsKnownUrl,
     URL_BOUND_TO_OTHER,
@@ -57,6 +58,65 @@ async function signHelloResponse(nonce: string, standby = false) {
             type: getSharedState.signingAlgorithm,
             data: uint8ArrayToHex(signed.signature),
         },
+    }
+}
+
+/**
+ * Our Omni port, signed over the caller's nonce and our URL: a port
+ * rewritten on the way would otherwise send the caller's peer calls to
+ * another service on our host.
+ */
+async function signedOmniAdvert(nonce: string | undefined) {
+    const advert = getSharedState.omniAdvert
+    if (!advert || !nonce) {
+        return {}
+    }
+    const signed = await TxValidatorPool.getInstance().sign(
+        getSharedState.signingAlgorithm,
+        helloOmniAdvertMessage(nonce, getSharedState.exposedUrl, advert.port),
+    )
+    return {
+        omni: {
+            port: advert.port,
+            signature: {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signed.signature),
+            },
+        },
+    }
+}
+
+const signingStopped = () =>
+    signingStopState(getSharedState.identityFile).stopped
+
+/**
+ * The signed part of our reply. Signing can stop while the signatures are
+ * made; a reply signed as an active node after that would let a caller move
+ * our key's URL to this copy, which refuses to vote. A stop is not undone
+ * while we run, so one re-sign as standby is enough.
+ */
+async function signedHelloProof(nonce: string | undefined) {
+    const standby = signingStopped()
+    const proof = {
+        ...(standby ? { standby: true } : {}),
+        ...(nonce ? await signHelloResponse(nonce, standby) : {}),
+        ...(await signedOmniAdvert(nonce)),
+    }
+    if (!standby && signingStopped()) {
+        return signedHelloProof(nonce)
+    }
+    return proof
+}
+
+function gossipAdvert() {
+    const multiaddr = GossipManager.isEnabled()
+        ? GossipManager.getInstance().getListenAddr()
+        : null
+    if (!multiaddr) {
+        return {}
+    }
+    return {
+        gossip: { peerId: GossipManager.getInstance().getPeerId(), multiaddr },
     }
 }
 
@@ -262,28 +322,13 @@ export async function manageHelloPeer(
 
     // INFO: Return a list of all our connected peers
 
-    const gossipAddr = GossipManager.isEnabled()
-        ? GossipManager.getInstance().getListenAddr()
-        : null
-
-    const standby = signingStopState(getSharedState.identityFile).stopped
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
         ...(callerKnownAt ? { callerKnownAt } : {}),
-        ...(standby ? { standby: true } : {}),
-        ...(content.nonce
-            ? await signHelloResponse(content.nonce, standby)
-            : {}),
-        ...(gossipAddr
-            ? {
-                  gossip: {
-                      peerId: GossipManager.getInstance().getPeerId(),
-                      multiaddr: gossipAddr,
-                  },
-              }
-            : {}),
+        ...(await signedHelloProof(content.nonce)),
+        ...gossipAdvert(),
         syncData: peerManager.ourSyncData,
         genesisHash: ourGenesis,
         peerlist: peerManager
