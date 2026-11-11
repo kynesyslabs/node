@@ -42,16 +42,31 @@ interface IdentityAssignRequest {
     }
 }
 
+// Identity changes go through a signed transaction and block apply. This
+// opcode wrote any account's GCR_Main row directly: nothing tied the caller
+// to editOperation.account and the write skipped mempool and consensus.
+// Kept off until it has an owner check and a consensus path.
+const DIRECT_IDENTITY_ASSIGN_ENABLED = false
+
 /**
  * Handler for 0x41 GCR_IDENTITY_ASSIGN opcode
  *
- * Internal operation triggered by write transactions to assign/remove identities.
+ * Disabled: refuses every request with 403 (see DIRECT_IDENTITY_ASSIGN_ENABLED).
  * Uses GCRIdentityRoutines to apply identity changes (xm, web2, pqc, ud, nomis, ethos, tlsn).
  */
 export const handleIdentityAssign: OmniHandler<Buffer> = async ({
     message,
     context,
 }) => {
+    if (!DIRECT_IDENTITY_ASSIGN_ENABLED) {
+        return encodeResponse(
+            errorResponse(
+                403,
+                "gcr_identityAssign is disabled: submit a signed identity transaction instead",
+            ),
+        )
+    }
+
     if (
         !message.payload ||
         !Buffer.isBuffer(message.payload) ||
