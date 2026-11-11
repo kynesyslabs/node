@@ -6,7 +6,7 @@ import * as crypto from "node:crypto"
 import * as fs from "node:fs"
 import { getCurveFromName } from "ffjavascript"
 import { Config } from "src/config"
-import { plonkVerifyBun } from "../zk/BunPlonkWrapper"
+import { plonkVerifyBunStrict } from "../zk/BunPlonkWrapper"
 import { settlementFiles } from "../zk/settlementArtifacts"
 import { buildSettlementCircuitInput, PUBLIC_INPUT_LAYOUT } from "./circuitInput"
 import {
@@ -23,6 +23,19 @@ import type { SettlementPlan, SettlementProof, SettlementProofResult } from "./t
 export { buildSettlementCircuitInput } from "./circuitInput"
 
 export { FIELD_ORDER } from "./encoding"
+
+/**
+ * This node cannot judge a settlement proof: its verification key is missing
+ * or modified, its curve could not be built, or its verifier failed. Not a
+ * verdict on the proof, which may well be valid; a validator must not record
+ * the batch as failed because of it.
+ */
+export class SettlementVerifierFault extends Error {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, options)
+        this.name = "SettlementVerifierFault"
+    }
+}
 /** BN254 base field order: proof point coordinates live below it. */
 export const BASE_FIELD_ORDER = 21888242871839275222246405745257275088696311157297823662689037894645226208583n
 
@@ -107,11 +120,19 @@ const PROOF_KEYS = new Set<string>([...POINT_KEYS, ...SCALAR_KEYS, "protocol", "
 const canonicalBelow = (v: unknown, limit: bigint): boolean =>
     typeof v === "string" && DECIMAL.test(v) && BigInt(v) < limit
 
+// BN254 G1: y^2 = x^3 + 3 over the base field, cofactor 1, so a point on the
+// curve is in the group the pairing expects.
+const onCurve = (x: bigint, y: bigint): boolean =>
+    (y * y - x * x * x - 3n) % BASE_FIELD_ORDER === 0n
+
 /**
  * Why a proof JSON is not a well-formed snarkjs PLONK proof, or undefined.
  * The proof comes from a transaction, so its shape is checked before any
  * library parses it: canonical decimals only, scalars below the field order,
- * coordinates below the base field order, no extra fields.
+ * points as affine [x, y, "1"] on the curve (or infinity [0, 1, 0]) with
+ * coordinates below the base field order, no extra fields. One proof has one
+ * encoding, and nothing a transaction can put in a proof reaches the PLONK
+ * library unless the library takes it without throwing.
  */
 export function settlementProofProblem(proof: unknown): string | undefined {
     if (proof === null || typeof proof !== "object" || Array.isArray(proof)) return "proof is not an object"
@@ -120,8 +141,13 @@ export function settlementProofProblem(proof: unknown): string | undefined {
     if (p.protocol !== "plonk" || p.curve !== "bn128") return "proof is not a bn128 PLONK proof"
     for (const key of POINT_KEYS) {
         const point = p[key]
-        if (!Array.isArray(point) || (point.length !== 2 && point.length !== 3)) return `proof ${key} is not a point`
+        if (!Array.isArray(point) || point.length !== 3) return `proof ${key} is not a point`
         if (!point.every(c => canonicalBelow(c, BASE_FIELD_ORDER))) return `proof ${key} has a non-canonical coordinate`
+        // The library reads z != 1 as Jacobian coordinates, so one point would
+        // have many encodings; only affine [x, y, 1] and infinity [0, 1, 0].
+        const infinity = point[0] === "0" && point[1] === "1" && point[2] === "0"
+        if (point[2] !== "1" && !infinity) return `proof ${key} is not in affine form`
+        if (!infinity && !onCurve(BigInt(point[0]), BigInt(point[1]))) return `proof ${key} is not on the curve`
     }
     for (const key of SCALAR_KEYS) {
         if (!canonicalBelow(p[key], FIELD_ORDER)) return `proof ${key} is not a canonical scalar`
@@ -129,31 +155,59 @@ export function settlementProofProblem(proof: unknown): string | undefined {
     return undefined
 }
 
+/** Test seams: another key file or curve source than the node's own. */
+export interface SettlementVerifierDeps {
+    vkeyFile?: string
+    curve?: () => Promise<unknown>
+}
+
 /**
  * True when the proof shows that the public signals (built with
  * settlementPublicSignals from the validator's own state) are the result of
- * the committed transfers. False for any malformed or out-of-range input.
- * Throws only when this node's verification key is missing or modified: that
- * is a broken install, not a bad batch.
+ * the committed transfers.
+ *
+ * false: the proof is invalid on every honest node (signals out of range,
+ * malformed or non-canonical proof, a point off the curve, a failed pairing).
+ * Throws SettlementVerifierFault: this node cannot judge the proof (missing
+ * or modified verification key, curve not built, verifier error). A caller in
+ * block apply must not turn a fault into a failed-batch verdict.
  */
 export async function verifySettlementProof(
     publicSignals: bigint[],
     proof: SettlementProof,
+    deps: SettlementVerifierDeps = {},
 ): Promise<boolean> {
-    const vkey = loadSettlementVerificationKey()
+    let vkey: unknown
+    try {
+        vkey = loadSettlementVerificationKey(deps.vkeyFile)
+    } catch (error) {
+        throw new SettlementVerifierFault(`settlement verification key unusable: ${errorText(error)}`, { cause: error })
+    }
     if (publicSignalsProblem(publicSignals) !== undefined) return false
     if (settlementProofProblem(proof) !== undefined) return false
     const publicHash = statementHash(publicSignals)
     if (publicHash === undefined) return false
-    const run = verifying.then(async () =>
-        plonkVerifyBun(vkey, [publicHash.toString()], proof, undefined, await verifierCurve()),
-    )
+    const run = verifying.then(async () => {
+        let curve: unknown
+        try {
+            curve = await (deps.curve ?? verifierCurve)()
+        } catch (error) {
+            throw new SettlementVerifierFault(`bn128 curve unavailable: ${errorText(error)}`, { cause: error })
+        }
+        try {
+            return await plonkVerifyBunStrict(vkey, [publicHash.toString()], proof, curve)
+        } catch (error) {
+            throw new SettlementVerifierFault(`settlement verifier failed: ${errorText(error)}`, { cause: error })
+        }
+    })
     verifying = run.then(
         () => undefined,
         () => undefined,
     )
     return run
 }
+
+const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 // A signer that is not an account of the batch has no hash: no proof can
 // show such a statement.
@@ -162,7 +216,7 @@ function statementHash(publicSignals: bigint[]): bigint | undefined {
         return settlementPublicHash(publicSignals)
     } catch (error) {
         if (error instanceof SettlementEncodingError) return undefined
-        throw error
+        throw new SettlementVerifierFault(`settlement public hash failed: ${errorText(error)}`, { cause: error })
     }
 }
 

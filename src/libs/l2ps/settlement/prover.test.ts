@@ -25,12 +25,14 @@ import {
     FIELD_ORDER,
     loadSettlementVerificationKey,
     publicSignalsProblem,
+    SettlementVerifierFault,
     SETTLEMENT_VKEY_DIGEST,
     settlementProofProblem,
     verifySettlementProof,
     vkeyDigest,
 } from "./prover"
 import { settlementFiles } from "../zk/settlementArtifacts"
+import { plonkVerifyBun, plonkVerifyBunStrict } from "../zk/BunPlonkWrapper"
 
 const signals = () => fixture.publicSignals.map(BigInt)
 
@@ -245,6 +247,10 @@ describe("verifySettlementProof", () => {
             ["coordinate at the base field order", p => ({ ...p, A: [BASE_FIELD_ORDER.toString(), "1", "1"] })],
             ["number instead of string", p => ({ ...p, eval_b: 1 })],
             ["point of the wrong size", p => ({ ...p, Z: ["1"] })],
+            ["affine point without z", p => ({ ...p, A: (p.A as string[]).slice(0, 2) })],
+            ["z other than 1", p => ({ ...p, A: [...(p.A as string[]).slice(0, 2), "2"] })],
+            ["infinity written another way", p => ({ ...p, A: ["0", "2", "0"] })],
+            ["Jacobian re-encoding of A", p => ({ ...p, A: jacobian(p.A as string[], 2n) })],
         ]
         for (const [name, make] of cases) {
             const bad = make(proof())
@@ -258,9 +264,101 @@ describe("verifySettlementProof", () => {
         const swapped = { ...p, eval_a: p.eval_b, eval_b: p.eval_a }
         expect(await verifySettlementProof(signals(), swapped)).toBe(false)
         const offCurve = { ...p, A: ["1", "1", "1"] }
-        expect(settlementProofProblem(offCurve)).toBeUndefined()
+        expect(settlementProofProblem(offCurve)).toMatch(/not on the curve/)
         expect(await verifySettlementProof(signals(), offCurve)).toBe(false)
         const moved = { ...p, Wxi: p.Wxiw, Wxiw: p.Wxi }
         expect(await verifySettlementProof(signals(), moved)).toBe(false)
+    })
+})
+
+/** The same point in Jacobian coordinates with the given z: (x z^2, y z^3, z). */
+function jacobian(point: string[], z: bigint): string[] {
+    const q = BASE_FIELD_ORDER
+    const [x, y] = point.map(BigInt)
+    return [((x * z ** 2n) % q).toString(), ((y * z ** 3n) % q).toString(), z.toString()]
+}
+
+describe("proof encoding is canonical", () => {
+    it("the fixture writes every point as [x, y, \"1\"]", () => {
+        for (const key of ["A", "B", "C", "Z", "T1", "T2", "T3", "Wxi", "Wxiw"]) {
+            expect((fixture.proof as unknown as Record<string, string[]>)[key][2]).toBe("1")
+        }
+    })
+
+    it("a Jacobian re-encoding of a valid proof is refused, though the pairing would accept it", async () => {
+        const p = proof()
+        const reencoded = { ...p, A: jacobian(p.A as string[], 2n) }
+        const vkey = loadSettlementVerificationKey()
+        const hash = buildSettlementCircuitInput(plan()).publicHash.toString()
+        // The math alone would accept it: only the encoding rule refuses it.
+        expect(await plonkVerifyBun(vkey, [hash], reencoded)).toBe(true)
+        expect(settlementProofProblem(reencoded)).toMatch(/A/)
+        expect(await verifySettlementProof(signals(), reencoded)).toBe(false)
+    })
+
+    it("a point at infinity is well-formed and the proof fails, without a fault", async () => {
+        for (const key of ["A", "B", "C", "Z", "T1", "T2", "T3", "Wxi", "Wxiw"]) {
+            const bad = { ...proof(), [key]: ["0", "1", "0"] }
+            expect(settlementProofProblem(bad)).toBeUndefined()
+            expect(await verifySettlementProof(signals(), bad)).toBe(false)
+        }
+    })
+})
+
+describe("verifier faults are not verdicts", () => {
+    // false: the proof is invalid on every honest node. A throw
+    // (SettlementVerifierFault): this node cannot judge it.
+    it("a missing verification key throws a fault", async () => {
+        const missing = path.join(os.tmpdir(), "no-such-dir", "verification_key.json")
+        await expect(verifySettlementProof(signals(), proof(), { vkeyFile: missing })).rejects.toBeInstanceOf(
+            SettlementVerifierFault,
+        )
+    })
+
+    it("a modified verification key throws a fault, even for a malformed proof", async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "settlement-vkey-"))
+        try {
+            const file = path.join(dir, "verification_key.json")
+            const vkey = JSON.parse(fs.readFileSync(settlementFiles().vkey, "utf8"))
+            vkey.k1 = "5"
+            fs.writeFileSync(file, JSON.stringify(vkey))
+            await expect(verifySettlementProof(signals(), proof(), { vkeyFile: file })).rejects.toBeInstanceOf(
+                SettlementVerifierFault,
+            )
+            await expect(verifySettlementProof(signals(), {}, { vkeyFile: file })).rejects.toBeInstanceOf(
+                SettlementVerifierFault,
+            )
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
+    it("a curve that cannot be built throws a fault", async () => {
+        const curve = () => Promise.reject(new Error("out of memory"))
+        await expect(verifySettlementProof(signals(), proof(), { curve })).rejects.toBeInstanceOf(
+            SettlementVerifierFault,
+        )
+    })
+
+    it("an internal error in the verifier throws a fault", async () => {
+        const curve = () => Promise.resolve({})
+        await expect(verifySettlementProof(signals(), proof(), { curve })).rejects.toBeInstanceOf(
+            SettlementVerifierFault,
+        )
+    })
+
+    it("a fault does not change the next caller's verdict", async () => {
+        const curve = () => Promise.resolve({})
+        const faulted = verifySettlementProof(signals(), proof(), { curve })
+        const next = verifySettlementProof(signals(), proof())
+        await expect(faulted).rejects.toBeInstanceOf(SettlementVerifierFault)
+        expect(await next).toBe(true)
+    })
+
+    it("the strict PLONK verifier throws where the lenient one returns false", async () => {
+        const vkey = loadSettlementVerificationKey()
+        const hash = buildSettlementCircuitInput(plan()).publicHash.toString()
+        expect(await plonkVerifyBun(vkey, [hash], proof(), undefined, {})).toBe(false)
+        await expect(plonkVerifyBunStrict(vkey, [hash], proof(), {})).rejects.toThrow()
     })
 })
