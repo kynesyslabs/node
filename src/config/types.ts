@@ -81,6 +81,7 @@ export interface CoreConfig {
     mcpEnabled: boolean
     /** WebRTC signaling server for instant messaging; consensus does not use it. */
     signalingEnabled: boolean
+    signalingRegisterMode: "transitional" | "strict"
     restore: boolean
     /**
      * Full genesis data hash (sha256 hex) the operator expects the network to

@@ -192,6 +192,9 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.SIGNALING_ENABLED,
                 d.core.signalingEnabled,
             ),
+            signalingRegisterMode: parseSignalingRegisterMode(
+                envStr(EnvKey.SIGNALING_REGISTER_MODE, d.core.signalingRegisterMode),
+            ),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
             expectedGenesisHash: envStr(
                 EnvKey.EXPECTED_GENESIS_HASH,
@@ -571,6 +574,11 @@ export function loadConfig(): Readonly<AppConfig> {
     assertOutboundSane(config)
 
     return deepFreeze(config)
+}
+
+function parseSignalingRegisterMode(raw: string): "transitional" | "strict" {
+    if (raw === "transitional" || raw === "strict") return raw
+    throw new Error(`[config] SIGNALING_REGISTER_MODE must be "transitional" or "strict" (got "${raw}")`)
 }
 
 /**

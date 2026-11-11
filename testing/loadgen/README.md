@@ -77,6 +77,7 @@ Current registry includes families such as:
 - TLSNotary
 - Web2 / DAHR
 - IM
+- IM scenarios require a node that sends `register_challenge`; older nodes reject the `register_challenge` request.
 - FHE
 - incentives
 - MCP

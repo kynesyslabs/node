@@ -1,5 +1,6 @@
 import { deserializeUint8Array, serializeUint8Array } from "@kynesyslabs/demosdk/utils"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { clientIdFromSigningKey, registrationProofBytes } from "../../../src/features/InstantMessagingProtocol/signalingServer/types/IMMessage"
 import { envBool, envInt, logNonCriticalError, logNonCriticalErrorOnce, normalizeWsUrl, nowMs, sleep, splitCsv } from "./framework/common"
 import { percentile, ReservoirSampler } from "./framework/metrics"
 
@@ -97,24 +98,27 @@ export function generateClientId(): string {
   return "0x" + randomHex(32)
 }
 
-async function buildRegistrationProof(instanceId: string): Promise<{
+async function buildRegistrationProof(instanceId: string, challenge: string): Promise<{
+  clientId: string
   publicKeyBytes: Uint8Array
   verification: { algorithm: "ed25519"; serializedSignedData: string; serializedPublicKey: string; serializedMessage: string }
 }> {
   const uc = ucrypto.getInstance(instanceId)
   await uc.generateIdentity("ed25519")
-  const message = new TextEncoder().encode("im_perf_register:" + randomHex(16))
-  const signed = await uc.sign("ed25519", message)
-  const publicKeyBytes = new Uint8Array(signed.publicKey as any)
+  const identity = await uc.getIdentity("ed25519")
+  const publicKeyBytes = new Uint8Array(identity.publicKey as any)
+  const clientId = clientIdFromSigningKey(publicKeyBytes)
+  const signed = await uc.sign("ed25519", registrationProofBytes(clientId, publicKeyBytes, challenge))
   const signatureBytes = new Uint8Array(signed.signature as any)
 
   return {
+    clientId,
     publicKeyBytes,
     verification: {
       algorithm: "ed25519",
       serializedSignedData: serializeUint8Array(signatureBytes),
       serializedPublicKey: serializeUint8Array(publicKeyBytes),
-      serializedMessage: serializeUint8Array(message),
+      serializedMessage: serializeUint8Array(signed.message),
     },
   }
 }
@@ -122,8 +126,7 @@ async function buildRegistrationProof(instanceId: string): Promise<{
 export async function registerClient(params: RegisterClientParams): Promise<RegisteredClient> {
   const timeoutSec = Math.max(1, Math.floor(params.timeoutSec ?? envInt("IM_REGISTER_TIMEOUT_SEC", 30)))
   const wsUrl = normalizeWsUrl(params.wsUrl)
-
-  const { publicKeyBytes, verification } = await buildRegistrationProof(params.instanceId)
+  let clientId = params.clientId
 
   const ws = new WebSocket(wsUrl)
   ws.binaryType = "arraybuffer"
@@ -141,66 +144,103 @@ export async function registerClient(params: RegisterClientParams): Promise<Regi
     registerResolve = resolve
     registerReject = reject
   })
+  // Errors can arrive while we are still waiting for the challenge.
+  void registerPromise.catch(() => {})
+  let challengeResolve!: (challenge: string) => void
+  let challengeReject!: (err: any) => void
+  const challengePromise = new Promise<string>((resolve, reject) => {
+    challengeResolve = resolve
+    challengeReject = reject
+  })
+  void challengePromise.catch(() => {})
+
+  const close = () => {
+    try { ws.close() } catch (error) {
+      logNonCriticalError("im_shared.close", error, { clientId, wsUrl })
+    }
+  }
 
   ws.onopen = () => openResolve?.()
   ws.onerror = (e: any) => {
     openReject?.(e)
+    challengeReject(e)
     registerReject?.(e)
+  }
+  ws.onclose = () => {
+    const error = new Error(`WebSocket closed during registration: ${wsUrl}`)
+    openReject?.(error)
+    challengeReject(error)
+    registerReject?.(error)
   }
   ws.onmessage = (evt: MessageEvent) => {
     try {
       const raw = typeof evt.data === "string" ? evt.data : new TextDecoder().decode(evt.data as any)
       const msg = JSON.parse(raw)
-      if (msg?.type === "register" && msg?.payload?.success === true && msg?.payload?.clientId === params.clientId) {
+      if (msg?.type === "register_challenge" && typeof msg?.payload?.challenge === "string") {
+        challengeResolve(msg.payload.challenge)
+      }
+      if (msg?.type === "register" && msg?.payload?.success === true && msg?.payload?.clientId === clientId) {
         registerResolve?.()
       }
       if (msg?.type === "error") {
         // If registration fails, surface early.
         const details = msg?.payload?.details ?? JSON.stringify(msg?.payload ?? msg)
-        registerReject?.(new Error(`IM error: ${details}`))
+        const error = new Error(`IM error: ${details}`)
+        challengeReject(error)
+        registerReject?.(error)
       }
     } catch (error) {
       logNonCriticalError("im_shared.registerClient.onmessage", error, {
-        clientId: params.clientId,
+        clientId,
         wsUrl,
       })
     }
   }
 
-  await Promise.race([
-    openPromise,
-    sleep(timeoutSec * 1000).then(() => {
-      throw new Error(`WebSocket open timeout after ${timeoutSec}s: ${wsUrl}`)
-    }),
-  ])
+  try {
+    await Promise.race([
+      openPromise,
+      sleep(timeoutSec * 1000).then(() => {
+        throw new Error(`WebSocket open timeout after ${timeoutSec}s: ${wsUrl}`)
+      }),
+    ])
 
-  // Send register
-  ws.send(JSON.stringify({
-    type: "register",
-    payload: {
-      clientId: params.clientId,
-      publicKey: Array.from(publicKeyBytes),
-      verification,
-    },
-  }))
+    ws.send(JSON.stringify({ type: "register_challenge", payload: {} }))
+    const challenge = await Promise.race([
+      challengePromise,
+      sleep(timeoutSec * 1000).then(() => { throw new Error(`Register challenge timeout for ${clientId}`) }),
+    ])
+    const proof = await buildRegistrationProof(params.instanceId, challenge)
+    clientId = proof.clientId
+    const { publicKeyBytes, verification } = proof
 
-  await Promise.race([
-    registerPromise,
-    sleep(timeoutSec * 1000).then(() => {
-      throw new Error(`Register timeout after ${timeoutSec}s for ${params.clientId} at ${wsUrl}`)
-    }),
-  ])
+    // Send register
+    ws.send(JSON.stringify({
+      type: "register",
+      payload: {
+        clientId,
+        publicKey: Array.from(publicKeyBytes),
+        verification,
+      },
+    }))
 
-  return {
-    wsUrl,
-    clientId: params.clientId,
-    ws,
-    close: () => {
-      try { ws.close() } catch (error) {
-        logNonCriticalError("im_shared.close", error, { clientId: params.clientId, wsUrl })
-      }
-    },
-    sendRaw: (data: any) => ws.send(typeof data === "string" ? data : JSON.stringify(data)),
+    await Promise.race([
+      registerPromise,
+      sleep(timeoutSec * 1000).then(() => {
+        throw new Error(`Register timeout after ${timeoutSec}s for ${clientId} at ${wsUrl}`)
+      }),
+    ])
+
+    return {
+      wsUrl,
+      clientId,
+      ws,
+      close,
+      sendRaw: (data: any) => ws.send(typeof data === "string" ? data : JSON.stringify(data)),
+    }
+  } catch (error) {
+    close()
+    throw error
   }
 }
 

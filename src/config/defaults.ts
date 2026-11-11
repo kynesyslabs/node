@@ -91,6 +91,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         // On by default: compose publishes 3005 and the proxy routes
         // /signaling/ to it, so existing deployments expect it running.
         signalingEnabled: true,
+        signalingRegisterMode: "transitional",
         restore: false,
         expectedGenesisHash: "",
         expectedGenesisBlockHash: "",
