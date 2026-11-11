@@ -45,6 +45,7 @@ import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
+import { legacyGasRetired, withoutLegacyGas } from "./feeBinding"
 import log from "src/utilities/logger"
 
 /** JSON with object keys in code-unit order: key order is not part of an edit's meaning. */
@@ -148,8 +149,14 @@ export async function verifyGcrEditsMatch(
         JSON.stringify(tx.content.gcr_edits ?? []),
     )
 
-    // Regenerate the expected edit set from the signed body.
-    const regen = await generateGcrEdits(tx)
+    // Regenerate the expected edit set from the signed body. At apply the tx
+    // went through withDerivedFeeEdits, which leaves out the SDK gas edit
+    // once the fee edits replace it; the regen does the same.
+    const generated = await generateGcrEdits(tx)
+    const regen =
+        expectFeeEdits && legacyGasRetired(tx)
+            ? withoutLegacyGas(generated)
+            : generated
 
     // When gasFeeSeparation is active, confirmTransaction PREPENDS
     // node-computed fee-distribution edits onto tx.content.gcr_edits before the

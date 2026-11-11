@@ -154,3 +154,41 @@ export async function feeBindingRefusal(
     }
     return chargedFeeMismatch(fee, await calculateFeeBreakdown(tx), postFork)
 }
+
+/**
+ * Whether a native transaction is charged its bound `transaction_fee` and
+ * nothing else. Every SDK builder still ships the flat gas edit of the
+ * lump-sum fee model, a sender debit that no edit credits. Under
+ * `gasFeeSeparation` the derived fee edits are that fee, so applying the gas
+ * as well charged the sender twice and took the gas out of the total supply
+ * on every transfer. Gated on `feeBinding` too, read at the height the fee
+ * edits are derived at, so a chain that ran `gasFeeSeparation` without it
+ * replays the blocks it applied.
+ */
+export function legacyGasRetired(tx: Pick<Transaction, "content">): boolean {
+    if ((tx.content?.type as string) !== "native") return false
+    const height = getSharedState.lastBlockNumber ?? 0
+    return (
+        isForkActive("gasFeeSeparation", height) &&
+        isForkActive("feeBinding", height)
+    )
+}
+
+/**
+ * `edits` without the SDK gas edit: the debit of the nonce edit's account
+ * that the SDK places right before that trailing nonce edit. Edits of any
+ * other shape come back as the same array.
+ */
+export function withoutLegacyGas<T extends { type: string }>(edits: T[]): T[] {
+    const last = edits.length - 1
+    if (last < 1) return edits
+    const nonce = edits[last] as unknown as { type: string; account?: unknown }
+    const gas = edits[last - 1] as unknown as {
+        type: string
+        operation?: unknown
+        account?: unknown
+    }
+    if (nonce.type !== "nonce" || gas.type !== "balance") return edits
+    if (gas.operation !== "remove" || gas.account !== nonce.account) return edits
+    return [...edits.slice(0, last - 1), edits[last]]
+}

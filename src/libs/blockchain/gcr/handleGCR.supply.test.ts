@@ -1,0 +1,251 @@
+/**
+ * Total supply across the block apply of plain native transfers, each built
+ * and signed by the real SDK `pay` builder and sent through a JSON round trip
+ * as a peer receives it.
+ *
+ * Under `gasFeeSeparation` the fee edits split the fee between burn, treasury
+ * and the rpc share, so every debit has a credit. The SDK still ships the flat
+ * gas edit of the lump-sum model, a debit nothing credits; applied on top of
+ * the fee edits it charged the fee twice and removed 1 DEM of supply per
+ * transfer. Behind `feeBinding` the block leaves that gas edit out on every
+ * path that applies a block: forging, syncing a served block, rolling it back
+ * and charging a transaction that fails in it.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
+
+let tip = 100
+mock.module("src/libs/blockchain/chain", () => ({
+    __esModule: true,
+    default: {
+        getLastBlockNumber: async () => tip,
+        getExistingTransactionHashes: async () => new Set<string>(),
+    },
+}))
+mock.module("src/utilities/logger", () => ({
+    __esModule: true,
+    default: {
+        debug: () => {},
+        info: () => {},
+        warning: () => {},
+        error: () => {},
+        only: () => {},
+        custom: () => {},
+    },
+}))
+
+import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
+import type { Transaction } from "@kynesyslabs/demosdk/types"
+import { cloneDefaultForkConfig, type ForkConfigByName } from "@/forks/forkConfig"
+import { getSharedState } from "@/utilities/sharedState"
+import type { GCREntityCaches } from "./handleGCR"
+import { OS, PEER, SENDER, VICTIM, demos, onTheWire } from "@/libs/blockchain/validation/editBinding.fixtures"
+
+const { default: HandleGCR, withDerivedFeeEdits } = await import("./handleGCR")
+
+const TREASURY = "0x" + "f7".repeat(32)
+const BURN = "0x" + "00".repeat(32)
+const FEE = 2n * OS // network_fee 1 DEM + rpc_fee 1 DEM, the mainnet sheet
+
+let caches: GCREntityCaches
+const original = {
+    prepareEntities: HandleGCR.prepareEntities,
+    saveGCREditChanges: HandleGCR.saveGCREditChanges,
+    bulkUpdateAssignedTxs: HandleGCR.bulkUpdateAssignedTxs,
+}
+const savedState = {
+    forkConfig: getSharedState.forkConfig,
+    feeDistribution: getSharedState.feeDistribution,
+    networkFee: getSharedState.networkFee,
+    rpcFee: getSharedState.rpcFee,
+    additionalFee: getSharedState.additionalFee,
+    lastBlockNumber: getSharedState.lastBlockNumber,
+}
+const savedSdk = {
+    params: demos._getNetworkParametersCached,
+    nonce: demos.getAddressNonce,
+}
+
+function freshCaches(senderBalance: bigint): GCREntityCaches {
+    const row = (pubkey: string, balance: bigint, nonce = 0) => [pubkey, { pubkey, balance, nonce } as any] as const
+    return {
+        accounts: new Map([
+            row(SENDER, senderBalance, 7),
+            row(PEER, 0n),
+            row(VICTIM, 0n),
+            row(TREASURY, 0n),
+            row(BURN, 0n),
+        ]),
+        storagePrograms: new Map(),
+        tlsNotaries: new Map(),
+        atomicWorks: new Map(),
+        resourceSlots: new Map(),
+    }
+}
+
+/** The safety forks a mainnet genesis sets at 0, with the fee forks chosen. */
+function forks(rules: { gasFee: boolean; fee: boolean }) {
+    const config = cloneDefaultForkConfig() as ForkConfigByName & Record<string, { activationHeight: number | null }>
+    for (const name of ["osDenomination", "editBinding", "nonceIntegrity", "nativeSendBinding", "canonicalAddresses"]) {
+        config[name] = { ...config[name], activationHeight: 0 }
+    }
+    config.nonceEnforcement.activationHeight = null
+    config.gasFeeSeparation.activationHeight = rules.gasFee ? 0 : null
+    config.feeBinding = { activationHeight: rules.fee ? 0 : null }
+    getSharedState.forkConfig = config
+    getSharedState.lastBlockNumber = 100
+    tip = 100
+}
+
+const balanceOf = (key: string) => (caches.accounts.get(key) as any).balance as bigint
+const nonceOf = (key: string) => (caches.accounts.get(key) as any).nonce as number
+const supply = () => [...caches.accounts.values()].reduce((sum, row: any) => sum + BigInt(row.balance), 0n)
+const balances = () => new Map([...caches.accounts].map(([key, row]: [string, any]) => [key, BigInt(row.balance)]))
+
+/** Signed transfers from SENDER with nonces 8, 9, ..., as a peer receives them. */
+async function transfers(payments: Array<[string, bigint]>): Promise<Transaction[]> {
+    const out: Transaction[] = []
+    for (const [i, [to, amount]] of payments.entries()) {
+        demos.getAddressNonce = async () => 7 + i
+        out.push(onTheWire(await DemosTransactions.pay(to, amount, demos)))
+    }
+    return out
+}
+
+const block = (txs: Transaction[]) => HandleGCR.applyTransactions(txs, false, { height: 101, timestampSec: 1 })
+
+beforeEach(() => {
+    caches = freshCaches(100n * OS)
+    ;(HandleGCR as any).prepareEntities = async () => caches
+    ;(HandleGCR as any).saveGCREditChanges = async () => {}
+    ;(HandleGCR as any).bulkUpdateAssignedTxs = async () => {}
+    getSharedState.feeDistribution = {
+        burnAddress: BURN,
+        treasuryAddress: TREASURY,
+        networkFee: { burnPct: 50, treasuryPct: 50 },
+        additionalFee: { burnPct: 25, treasuryPct: 75 },
+        specialOps: { burnPct: 25, rpcPct: 50, treasuryPct: 25 },
+    }
+    getSharedState.networkFee = 1
+    getSharedState.rpcFee = 1
+    getSharedState.additionalFee = 0
+    demos._getNetworkParametersCached = async () => ({ networkFee: 1, rpcFee: 1 })
+})
+
+afterEach(() => {
+    Object.assign(getSharedState, savedState)
+    Object.assign(HandleGCR, original)
+    demos._getNetworkParametersCached = savedSdk.params
+    demos.getAddressNonce = savedSdk.nonce
+})
+
+describe("native transfers under gasFeeSeparation and feeBinding", () => {
+    beforeEach(() => forks({ gasFee: true, fee: true }))
+
+    it("ships the SDK gas edit, which the block does not apply", async () => {
+        const [tx] = await transfers([[PEER, 3n * OS]])
+        const signed = tx.content.gcr_edits
+        const gas = signed[signed.length - 2] as any
+        expect(gas).toMatchObject({ type: "balance", operation: "remove", account: SENDER })
+
+        const applied = withDerivedFeeEdits(tx).content.gcr_edits
+        expect(applied.slice(-3)).toEqual([signed[0], signed[1], signed[signed.length - 1]])
+        expect(tx.content.gcr_edits).toEqual(signed)
+    })
+
+    it("conserves total supply: the sender pays amount plus fee, and both are credited", async () => {
+        const before = supply()
+        const txs = await transfers([
+            [PEER, 3n * OS],
+            [VICTIM, 1n],
+            [PEER, 7n * OS],
+        ])
+
+        const out = await block(txs)
+
+        expect(out.failedTxs).toEqual([])
+        expect(out.successfulTxs).toEqual(txs.map(t => t.hash))
+        expect(supply()).toBe(before)
+        expect(balanceOf(SENDER)).toBe(100n * OS - (10n * OS + 1n) - 3n * FEE)
+        expect(balanceOf(PEER)).toBe(10n * OS)
+        expect(balanceOf(VICTIM)).toBe(1n)
+        // network_fee 50/50 burn and treasury; the rpc share has no operator
+        // named, so it folds into treasury.
+        expect(balanceOf(BURN)).toBe(3n * (OS / 2n))
+        expect(balanceOf(TREASURY)).toBe(3n * (OS / 2n + OS))
+        expect(nonceOf(SENDER)).toBe(10)
+    })
+
+    it("applies a served block the same on a syncing node", async () => {
+        const [tx] = await transfers([[PEER, 3n * OS]])
+        await block([tx])
+        const producer = balances()
+
+        caches = freshCaches(100n * OS)
+        const out = await block([onTheWire(tx)])
+        expect(out.failedTxs).toEqual([])
+        expect(balances()).toEqual(producer)
+    })
+
+    it("leaves the gas edit out of a row stored with its fee edits in front", async () => {
+        const [tx] = await transfers([[PEER, 3n * OS]])
+        const applied = withDerivedFeeEdits(onTheWire(tx)).content.gcr_edits
+        const storedRow = onTheWire(tx)
+        storedRow.content.gcr_edits = [...applied.slice(0, -3), ...storedRow.content.gcr_edits]
+
+        expect(withDerivedFeeEdits(storedRow).content.gcr_edits).toEqual(applied)
+    })
+
+    it("restores every balance when the block is rolled back", async () => {
+        const start = balances()
+        const txs = await transfers([
+            [PEER, 3n * OS],
+            [VICTIM, 2n * OS],
+        ])
+        await block(txs)
+
+        const out = await HandleGCR.applyTransactions([...txs].reverse(), true)
+
+        expect(out.failedTxs).toEqual([])
+        expect(balances()).toEqual(start)
+    })
+
+    it("charges a transfer that fails in the block its fee only, and conserves supply", async () => {
+        caches = freshCaches(10n * OS)
+        const before = supply()
+        const [tx] = await transfers([[PEER, 50n * OS]])
+
+        const out = await block([tx])
+
+        expect(out.failedTxs).toEqual([tx.hash])
+        expect(supply()).toBe(before)
+        expect(balanceOf(SENDER)).toBe(10n * OS - FEE)
+        expect(balanceOf(PEER)).toBe(0n)
+        expect(nonceOf(SENDER)).toBe(8)
+    })
+})
+
+describe("chains that keep the earlier charge, so their history replays as applied", () => {
+    it("still applies the gas edit under gasFeeSeparation without feeBinding", async () => {
+        forks({ gasFee: true, fee: false })
+        const before = supply()
+        const [tx] = await transfers([[PEER, 3n * OS]])
+
+        await block([tx])
+
+        expect(balanceOf(SENDER)).toBe(100n * OS - 3n * OS - FEE - OS)
+        expect(supply()).toBe(before - OS)
+    })
+
+    it("charges only the gas edit, credited to no account, without gasFeeSeparation", async () => {
+        forks({ gasFee: false, fee: true })
+        const before = supply()
+        const [tx] = await transfers([[PEER, 3n * OS]])
+
+        await block([tx])
+
+        expect(balanceOf(SENDER)).toBe(100n * OS - 3n * OS - OS)
+        expect(balanceOf(BURN) + balanceOf(TREASURY)).toBe(0n)
+        expect(supply()).toBe(before - OS)
+    })
+})

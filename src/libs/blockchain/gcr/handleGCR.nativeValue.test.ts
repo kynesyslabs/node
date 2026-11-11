@@ -362,8 +362,11 @@ describe("a native transfer that reaches a block with a fee the network does not
 
         expect(out.failedTxs).toEqual([])
         expect(balanceOf(PEER)).toBe(3n * OS)
-        expect(balanceOf(SENDER)).toBe(100n * OS - 3n * OS - OS - OS)
+        // The fee edits replace the SDK gas edit: the network fee once, split
+        // between burn and treasury, and nothing else.
+        expect(balanceOf(SENDER)).toBe(100n * OS - 3n * OS - OS)
         expect(balanceOf(TREASURY)).toBe(OS / 2n)
+        expect(balanceOf(BURN)).toBe(OS / 2n)
     })
 
     it("leaves a non-native transaction to the rules it had", async () => {

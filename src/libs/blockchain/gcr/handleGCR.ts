@@ -54,6 +54,10 @@ import {
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
 import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
+import {
+    legacyGasRetired,
+    withoutLegacyGas,
+} from "src/libs/blockchain/validation/feeBinding"
 import { ensureNetworkParametersCurrent } from "src/libs/blockchain/routines/loadNetworkParameters"
 import {
     blockTxTypeRefusal,
@@ -539,23 +543,31 @@ function sameFeeEdit(a: GCREdit, b: GCREdit): boolean {
  * A tx that already starts with exactly those edits is returned as is: rows
  * stored before the fee edits were kept off the persisted tx still carry
  * them, and peers serve those rows during sync.
+ *
+ * Where the fee edits replace the SDK's gas edit (`legacyGasRetired`), the
+ * copy leaves that gas edit out, so the sender pays the fee once and every
+ * debit has its credit.
  */
 export function withDerivedFeeEdits(tx: Transaction): Transaction {
     const feeEdits = deriveFeeEditsForApply(tx)
-    if (feeEdits.length === 0) return tx
+    const retireGas = legacyGasRetired(tx)
+    if (feeEdits.length === 0 && !retireGas) return tx
 
     const edits = tx.content.gcr_edits ?? []
     const alreadyCarried =
+        feeEdits.length > 0 &&
         edits.length >= feeEdits.length &&
         feeEdits.every((fee, i) => sameFeeEdit(fee, edits[i]))
-    if (alreadyCarried) return tx
+    const signed = alreadyCarried ? edits.slice(feeEdits.length) : edits
+    const kept = retireGas ? withoutLegacyGas(signed) : signed
+    if (kept === signed && (alreadyCarried || feeEdits.length === 0)) return tx
 
     // The edits are copied too, not just the array: apply writes into each
     // edit (its txhash), and those objects belong to the signed tx.
     return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
         content: {
             ...tx.content,
-            gcr_edits: [...feeEdits, ...edits.map(edit => structuredClone(edit))],
+            gcr_edits: [...feeEdits, ...kept.map(edit => structuredClone(edit))],
         },
     }) as Transaction
 }
@@ -1109,7 +1121,8 @@ export default class HandleGCR {
      * the gas out of while editBinding is dormant. Identity and d402
      * transactions pay no gas, and a Work replay pays nothing because the
      * Work it reads back already paid. A type's own debits (a storage burn,
-     * a stake) are never charged.
+     * a stake) are never charged. Where the fee edits replace the gas
+     * (`legacyGasRetired`), the gas is not charged on top of them.
      *
      * Copied, because a failed apply reverses the edits it ran in place.
      */
@@ -1133,6 +1146,7 @@ export default class HandleGCR {
             edits.length >= derived.length &&
             derived.every((d, i) => sameFeeEdit(d, edits[i]))
         if (carriesDerived) fee.push(...edits.slice(0, derived.length))
+        if (legacyGasRetired(tx)) return fee.map(e => structuredClone(e))
 
         const gas = await derivedGasEdit(
             tx.content.type as string,
