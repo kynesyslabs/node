@@ -24,6 +24,8 @@ const confirmTx = jest.fn(async (..._args: unknown[]) => ({ success: true }))
 const recordTransaction = jest.fn(async (..._args: unknown[]): Promise<void> => undefined)
 const updateTransactionStatus = jest.fn(async (..._args: unknown[]): Promise<void> => undefined)
 /** History rows of the sender's queued transfers; each envelope decrypts to `__inner`. */
+/** Queue rows no longer settleable (refused, or never marked executed). */
+let stranded = new Set<string>()
 let unsettled: { l2ps_uid: string; encrypted_hash: string; encrypted_payload: { __inner: unknown } }[] = []
 
 mock.module("src/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
@@ -42,6 +44,7 @@ mock.module("@/libs/blockchain/l2ps_mempool", () => ({
         existsByOriginalHash,
         updateStatus,
         updateGCREdits: async () => true,
+        getSettleableHashes: async (hashes: string[]) => new Set(hashes.filter(h => !stranded.has(h))),
     },
 }))
 mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
@@ -135,6 +138,7 @@ beforeEach(() => {
     getSharedState.additionalFee = 1
     tipAccounts = new Map([[ALICE.account, { balance: 100n * OS, nonce: 4n }]])
     unsettled = []
+    stranded = new Set()
     check.mockResolvedValue({ admitted: true, count: 1, cap: 50_000, retryAfterMs: 10_000 })
     claim.mockReturnValue(true)
     execute.mockReset()
@@ -280,6 +284,15 @@ describe("handleL2PS under l2psSettlement", () => {
         expect(response.result).toBe(400)
         expect(JSON.stringify(response)).toContain("already queued")
         expect(getL2PS.mock.calls.map(call => call[0])).toContain(OTHER)
+    })
+
+    it("counts no history row whose queue row can no longer settle, so a refused transfer frees its nonce", async () => {
+        const refused = transfer({ nonce: 5n, amount: 1n })
+        queued(refused)
+        stranded.add(refused.txHash)
+        decrypted(transfer({ nonce: 5n }))
+        const response = await handleL2PS(tx)
+        expect(response.result).toBe(200)
     })
 
     it("refuses a transfer the balance covers only without the sender's queued transfers", async () => {

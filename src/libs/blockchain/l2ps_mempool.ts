@@ -840,6 +840,23 @@ export default class L2PSMempool {
     }
 
     /**
+     * The hashes among `hashes` whose rows the settlement loop can still
+     * settle: executed, deferred or batched. Throws on a failed read.
+     */
+    public static async getSettleableHashes(hashes: string[]): Promise<Set<string>> {
+        if (hashes.length === 0) return new Set()
+        await this.ensureInitialized()
+        const rows = await this.repo.find({
+            where: {
+                hash: In(hashes),
+                status: In([L2PS_STATUS.EXECUTED, L2PS_STATUS.DEFERRED, L2PS_STATUS.BATCHED]),
+            },
+            select: { hash: true },
+        })
+        return new Set(rows.map(row => row.hash))
+    }
+
+    /**
      * Delete transactions by their hashes (for cleanup after confirmation)
      * 
      * @param hashes - Array of transaction hashes to delete

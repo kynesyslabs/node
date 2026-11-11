@@ -174,3 +174,23 @@ describe("setStatusBatch", () => {
         expect(await L2PSMempool.updateStatusBatch(["a"], "confirmed")).toBe(0)
     })
 })
+
+describe("getSettleableHashes", () => {
+    it("answers the rows the settlement loop can still settle, and throws on a failed read", async () => {
+        const finds: any[] = []
+        ;(L2PSMempool as any).repo = {
+            find: async (options: unknown) => (finds.push(options), [{ hash: "a" }]),
+        }
+        expect(await L2PSMempool.getSettleableHashes(["a", "b"])).toEqual(new Set(["a"]))
+        expect(JSON.stringify(finds[0].where.status)).toContain("deferred")
+        expect(await L2PSMempool.getSettleableHashes([])).toEqual(new Set())
+        expect(finds).toHaveLength(1)
+
+        ;(L2PSMempool as any).repo = {
+            find: async () => {
+                throw new Error("connection terminated")
+            },
+        }
+        await expect(L2PSMempool.getSettleableHashes(["a"])).rejects.toThrow("connection terminated")
+    })
+})

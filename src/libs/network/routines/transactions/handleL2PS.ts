@@ -148,10 +148,17 @@ async function queuedTransfersOf(
         accountNonce,
         Number(MAX_NONCE_AHEAD) + 1,
     )
+    // Only a transfer whose queue row can still settle holds a nonce: a
+    // history row left pending by a refusal whose cleanup failed would
+    // otherwise hold one for good.
+    const settleable = await L2PSMempool.getSettleableHashes(
+        rows.map(row => row.encrypted_hash).filter((hash): hash is string => !!hash),
+    )
     const instances = new Map<string, L2PS | null>([[l2psUid, l2psInstance]])
     const queued: QueuedTransfer[] = []
     for (const row of rows) {
         if (row.encrypted_hash === transfer.txHash || !row.encrypted_payload) continue
+        if (!settleable.has(row.encrypted_hash)) continue
         if (!instances.has(row.l2ps_uid)) {
             instances.set(row.l2ps_uid, await getL2PSInstance(row.l2ps_uid).catch(() => null))
         }
