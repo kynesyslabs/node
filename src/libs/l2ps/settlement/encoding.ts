@@ -2,13 +2,15 @@
  * L2PS settlement v1 encoding, shared by the circuit input builder, the
  * aggregator and block validation. The SDK mirrors commitment and message
  * byte for byte; `__fixtures__/settlementVectors.json` pins both sides.
- * Spec: docs/design/l2ps-zk-settlement.md, "Interface v1".
+ * Spec: docs/design/l2ps-zk-settlement.md, "Interface v1" and "Interface v1.1".
  */
-import { poseidon8 } from "poseidon-lite/poseidon8"
-import { poseidon10 } from "poseidon-lite/poseidon10"
+import * as poseidon from "poseidon-lite"
 
-/** Transfer slots per batch proof. */
-export const SETTLEMENT_TRANSFERS = 10
+/**
+ * Transfer slots per batch proof: the most that keep the circuit within 2^16
+ * PLONK constraints. Changing it means rebuilding the circuit and its key.
+ */
+export const SETTLEMENT_TRANSFERS = 9
 /** Account slots per batch proof: a sender and a receiver per transfer. */
 export const SETTLEMENT_ACCOUNTS = 2 * SETTLEMENT_TRANSFERS
 export const SETTLEMENT_VERSION = 1
@@ -18,6 +20,18 @@ export const SETTLEMENT_SIGNATURE_DOMAIN = "l2ps-settlement:v1:"
 export const AMOUNT_LIMIT = 1n << 128n
 export const NONCE_LIMIT = 1n << 64n
 export const SALT_BYTES = 31
+/** BN254 scalar field order: circuit values and hashes live below it. */
+export const FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n
+
+type PoseidonHash = (inputs: bigint[]) => bigint
+// Poseidon with exactly N inputs; poseidon-lite (like circomlib) stops at 16.
+const poseidonOfArity = (n: number): PoseidonHash => {
+    const hash = (poseidon as unknown as Record<string, PoseidonHash | undefined>)[`poseidon${n}`]
+    if (hash === undefined) throw new Error(`no Poseidon with ${n} inputs`)
+    return hash
+}
+const poseidon8 = poseidonOfArity(8)
+const slotsHash = poseidonOfArity(SETTLEMENT_TRANSFERS)
 
 const ACCOUNT = /^0x[0-9a-f]{64}$/
 const FIELD_HEX = /^0x[0-9a-f]{64}$/
@@ -134,7 +148,7 @@ export function commitmentsHash(commitments: bigint[]): bigint {
     }
     const slots = [...commitments]
     while (slots.length < SETTLEMENT_TRANSFERS) slots.push(0n)
-    return poseidon10(slots)
+    return slotsHash(slots)
 }
 
 export interface PublicTransfer {
@@ -213,3 +227,90 @@ export function settlementPublicSignals(
 
 /** Count of public signals: 1 + 5N + 6M. */
 export const SETTLEMENT_PUBLIC_SIGNALS = 1 + 5 * SETTLEMENT_TRANSFERS + 6 * SETTLEMENT_ACCOUNTS
+
+const HASH_CHUNK = 7
+const SIGNER_INDEX_SHIFT = 192n
+const TRANSFER_ACTIVE_SHIFT = 200n
+
+/**
+ * Interface v1.1: the circuit's only public input, a Poseidon sponge over the
+ * public signals of settlementPublicSignals. Each verifier computes it from
+ * its own signals, so it binds exactly the values Interface v1 exposed.
+ *
+ * The signals are packed into 2 + N + 4M field elements:
+ *   commitmentsHash,
+ *   per transfer: fee + nonce * 2^128 + senderIndex * 2^192 + transferActive * 2^200,
+ *   per account: hi, lo, balanceBefore, deltaMagnitude,
+ *   sum over accounts j of accountActive * 4^j + deltaNegative * 2 * 4^j,
+ * where senderIndex is the slot of the active account whose limbs are the
+ * signer's (0 for an idle transfer). They are absorbed 7 at a time,
+ * h = Poseidon8(h, e[7k], ..., e[7k + 6]) from h = 0, the last chunk padded
+ * with zeros; the result is the final h.
+ *
+ * Throws SettlementEncodingError for signals that are not a statement: a
+ * value out of its range, or a signer that is not an active account of the
+ * batch (or non-zero signer limbs on an idle transfer).
+ */
+export function settlementPublicHash(signals: readonly bigint[]): bigint {
+    const N = SETTLEMENT_TRANSFERS
+    const M = SETTLEMENT_ACCOUNTS
+    if (signals.length !== SETTLEMENT_PUBLIC_SIGNALS) {
+        throw new SettlementEncodingError(`expected ${SETTLEMENT_PUBLIC_SIGNALS} public signals, got ${signals.length}`)
+    }
+    let at = 0
+    const take = (count: number, limit: bigint): bigint[] => {
+        const part = signals.slice(at, at + count)
+        part.forEach((v, k) => {
+            if (typeof v !== "bigint" || v < 0n || v >= limit) {
+                throw new SettlementEncodingError(`public signal ${at + k} is out of range`)
+            }
+        })
+        at += count
+        return part
+    }
+    const [batchHash] = take(1, FIELD_ORDER)
+    const transferActive = take(N, 2n)
+    const signerHi = take(N, AMOUNT_LIMIT)
+    const signerLo = take(N, AMOUNT_LIMIT)
+    const nonce = take(N, NONCE_LIMIT)
+    const fee = take(N, AMOUNT_LIMIT)
+    const accountActive = take(M, 2n)
+    const accountHi = take(M, AMOUNT_LIMIT)
+    const accountLo = take(M, AMOUNT_LIMIT)
+    const balanceBefore = take(M, AMOUNT_LIMIT)
+    const deltaNegative = take(M, 2n)
+    const deltaMagnitude = take(M, AMOUNT_LIMIT)
+
+    const elements: bigint[] = [batchHash]
+    for (let i = 0; i < N; i++) {
+        let senderIndex = 0
+        if (transferActive[i] === 1n) {
+            senderIndex = accountHi.findIndex(
+                (hi, j) => accountActive[j] === 1n && hi === signerHi[i] && accountLo[j] === signerLo[i],
+            )
+            if (senderIndex < 0) {
+                throw new SettlementEncodingError(`the signer of transfer ${i} is not an account of the batch`)
+            }
+        } else if (signerHi[i] !== 0n || signerLo[i] !== 0n) {
+            throw new SettlementEncodingError(`idle transfer slot ${i} names a signer`)
+        }
+        elements.push(
+            fee[i] +
+                (nonce[i] << 128n) +
+                (BigInt(senderIndex) << SIGNER_INDEX_SHIFT) +
+                (transferActive[i] << TRANSFER_ACTIVE_SHIFT),
+        )
+    }
+    let flags = 0n
+    for (let j = 0; j < M; j++) {
+        elements.push(accountHi[j], accountLo[j], balanceBefore[j], deltaMagnitude[j])
+        flags += (accountActive[j] << BigInt(2 * j)) + (deltaNegative[j] << BigInt(2 * j + 1))
+    }
+    elements.push(flags)
+    while (elements.length % HASH_CHUNK !== 0) elements.push(0n)
+    let h = 0n
+    for (let k = 0; k < elements.length; k += HASH_CHUNK) {
+        h = poseidon8([h, ...elements.slice(k, k + HASH_CHUNK)])
+    }
+    return h
+}
