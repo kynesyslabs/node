@@ -260,7 +260,7 @@ if sel full-rejoin; then
     want_rc 0
     want_out 'CHECK PASS: the wipe kept the ownership of the state volume' "ownership preserved by the wipe"
     want_out 'CHECK PASS: node 4 signs after the restart' "node 4 signs"
-    want_out 'CHECK PASS: restart signing floor logged before signing' "the floor line in node 4's log"
+    want_out 'CHECK PASS: restart signing floor logged \(' "the floor line in node 4's log"
     want_out 'CHECK PASS: restored head >= pre-wipe head' "head after restore"
     want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "the other nodes' head rose: stall check PASS"
     want_out 'CHECK PASS: node 4 within 2 blocks of the others at the end of D, on their chain \(head [0-9]+ vs others [0-9]+; block ([0-9]+) hash\1\.\. on nodes 4 1 2 3\)' "still within 2 blocks after D, one hash on all four"
@@ -299,12 +299,12 @@ if sel floor-log; then
     # reader that stops at the match kills docker logs with SIGPIPE, which must not read as absent
     go floor-log-long FAKE_LOG_FILL=5000
     want_rc 0
-    want_out 'CHECK PASS: restart signing floor logged before signing' "the floor line found ahead of 5000 more lines"
+    want_out 'CHECK PASS: restart signing floor logged \(' "the floor line found ahead of 5000 more lines"
     torn_down
     # the same long log without the line: INFO, saying the line is missing
     go floor-log-missing FAKE_LOG_FILL=5000 FAKE_NO_FLOOR_LOG=1
     want_rc 0
-    want_out "CHECK INFO: restart signing floor logged before signing \(the \[SIGNING\] Restart signing floor line is missing from node 4's log\)" "INFO naming the missing line"
+    want_out "CHECK INFO: restart signing floor logged \(the \[SIGNING\] Restart signing floor line is missing from node 4's log\)" "INFO naming the missing line"
     no_out 'wording may differ' "the old 'wording may differ' detail"
     torn_down
 fi
@@ -545,7 +545,7 @@ if sel rejoin-halt; then
     want_rc 1
     want_out "CHECK FAIL: no halt marker, no foreign-signature log \(docker logs cannot read node 4's log" "an unreadable log: FAIL"
     no_out 'CHECK PASS: no halt marker' "a PASS of the halt and foreign-signature check"
-    want_out "CHECK FAIL: restart signing floor logged before signing \(docker logs cannot read node 4's log, or it is empty" "the floor line cannot be looked for: FAIL, not INFO"
+    want_out "CHECK FAIL: restart signing floor logged \(docker logs cannot read node 4's log, or it is empty" "the floor line cannot be looked for: FAIL, not INFO"
     only_fails_among 'no halt marker' 'restart signing floor'
     torn_down
 fi

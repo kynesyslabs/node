@@ -49,9 +49,13 @@ It does not show:
 
 ## Before you run it (host3)
 
-- `docker` with the compose v2 plugin, `jq`, `python3`, `awk`. `bun` on the
-  host is optional: without it the identities are generated inside the node
-  image (`IDENTITY_GEN=image`).
+- Linux (the load wait reads `/proc/loadavg`), `docker` with the compose v2
+  plugin, `jq`, `python3`, `awk`, `grep`, `sed`, GNU coreutils (among them
+  `nice`, `timeout`, `sort`, `nproc`, `df`, `date`, `sha256sum`), `find` and
+  `xargs` (findutils), `flock` (util-linux), and `free`, `vmstat` and `uptime`
+  (procps). `ss` (iproute2) is optional: without it the host ports are not
+  checked. `bun` on the host is optional: without it the identities are
+  generated inside the node image (`IDENTITY_GEN=image`).
 - The two images must already be on the host. The script never pulls and never
   builds. Images used, and no others:
   1. `NODE_IMAGE`: a prebuilt local node image (default
@@ -364,16 +368,20 @@ label `com.docker.compose.project=<project>` and prints the counts. If
 `CLEANUP FAILED` with the reason, writes the same as `cleanup` in
 `timings.json` and as `cleanup: **FAILED**` in `timings.md` (`result` keeps
 the drill's own verdict), and exits 3 instead of 0. Then check, with Docker
-working again (`demos-bkdrill` or your `PROJECT`):
+working again (`<project>` is the `PROJECT` the run used, `demos-bkdrill` by
+default):
 
 ```bash
-docker ps -a --filter label=com.docker.compose.project=demos-bkdrill
-docker volume ls --filter label=com.docker.compose.project=demos-bkdrill
-docker network ls --filter label=com.docker.compose.project=demos-bkdrill
+docker ps -a --filter label=com.docker.compose.project=<project>
+docker volume ls --filter label=com.docker.compose.project=<project>
+docker network ls --filter label=com.docker.compose.project=<project>
 ```
 
-and read `logs/teardown.log`. Teardown's own command can be run again by hand:
-`docker compose -f $OUT_DIR/compose.yml -p demos-bkdrill down -v --remove-orphans`.
+and read `logs/teardown.log`. Teardown's own command can be run again by hand,
+with `<OUT_DIR>` the run's directory:
+`docker compose -f <OUT_DIR>/compose.yml -p <project> down -v --remove-orphans`.
+Run it only on a drill project: `down -v` deletes the project's volumes, so
+never on a validator's project (see "Drill volumes only" in step 5 above).
 A next run on the same project refuses to start while a container or volume of
 it is left.
 
@@ -439,8 +447,7 @@ after `MIGRATE_TIMEOUT` seconds (300 by default; `timeout -k 10`: TERM, then
 KILL 10 s later), logged as `migrations on <database> timed out`, and counts
 as a failed migration.
 
-The default command has not been run against the default image. The first
-real run on the chosen image must show the migrate step passing: no
+On each run on a new image, the result must show the migrate step passing: no
 `WARNING: migrations on node N's database failed` line in `logs/run.log`, and
 the check "schema at the image's head" PASS. If it fails, set `MIGRATE_CMD` to
 a command the image can run, for example the TypeORM CLI form that

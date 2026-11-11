@@ -1333,11 +1333,11 @@ if [ "${VARIANT}" = rejoin ]; then
         check "no halt marker, no foreign-signature log" PASS "none (state volume: ${names_end})"
     fi
     if [ "${x_log_ok}" = 0 ]; then
-        check "restart signing floor logged before signing" FAIL "docker logs cannot read node ${X_NODE}'s log, or it is empty: the line cannot be looked for"
+        check "restart signing floor logged" FAIL "docker logs cannot read node ${X_NODE}'s log, or it is empty: the line cannot be looked for"
     elif [ "${floor_lines}" -gt 0 ]; then
-        check "restart signing floor logged before signing" PASS "[SIGNING] Restart signing floor line present"
+        check "restart signing floor logged" PASS "[SIGNING] Restart signing floor line present"
     else
-        check "restart signing floor logged before signing" INFO "the [SIGNING] Restart signing floor line is missing from node ${X_NODE}'s log"
+        check "restart signing floor logged" INFO "the [SIGNING] Restart signing floor line is missing from node ${X_NODE}'s log"
     fi
     # 6. signing again
     if [ "${SIGNED}" = 1 ]; then check "node ${X_NODE} signs after the restart" PASS "${SIGN_EVIDENCE}"; fi
