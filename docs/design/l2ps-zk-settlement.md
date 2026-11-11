@@ -1,7 +1,7 @@
 # L2PS settlement with validator-checked zero-knowledge proofs
 
-Status: design. Not implemented. Ships behind a new `l2psSettlement` fork,
-dormant at launch.
+Status: in implementation. Ships behind a new `l2psSettlement` fork, active
+from mainnet block 0. The binding formats are in "Interface v1" below.
 
 ## Problem
 
@@ -172,16 +172,108 @@ current behaviour is unchanged. After activation, an `l2psBatch` without a
 valid settlement is invalid, and old-format L2PS transfers are rejected at
 admission.
 
+## Interface v1
+
+Binding for the SDK, the circuit and the node. The node code is
+`src/libs/l2ps/settlement/encoding.ts`; `__fixtures__/settlementVectors.json`
+pins the commitment, the signed message and the signature, and the SDK
+tests the same file.
+
+### Encoding
+
+- Sizes: N = 10 transfer slots, M = 20 account slots per proof.
+- Account: `0x` + 64 lowercase hex. In the circuit it is two 128-bit limbs,
+  `hi` = first 16 bytes, `lo` = last 16 bytes, both big-endian.
+- Amount, fee, balance and net change magnitude: below 2^128. Nonce: below
+  2^64. Salt: 31 random bytes, below 2^248.
+- Commitment: `c = Poseidon8(from_hi, from_lo, to_hi, to_lo, amount, fee,
+  nonce, salt)`, circomlib Poseidon (poseidon-lite on both sides).
+- Signed message: UTF-8 of
+  `l2ps-settlement:v1:<chainId>:<l2psUid>:<c as 0x + 64 hex>`, ed25519 by
+  the sender's account key. It cannot be read as a transaction preimage
+  (`demos-tx:v1:`) or a personal message.
+- Commitments hash: `Poseidon10(c_0 .. c_9)`, inactive slots 0.
+- Nonce: the sender's L1 account nonce. The transfers of one signer in a
+  batch carry consecutive nonces from the account's nonce + 1, in batch
+  order, and settlement spends them. An L1 transaction that takes a nonce
+  first makes the transfer void; the subnet drops it.
+- Fee: per transfer, public, at least the node's native transfer fee. The
+  sender pays `amount + fee`. The fee is distributed as an L1 native fee
+  (`generateFeeDistributionEdits`, network fee = `fee`).
+
+### Public signals (171)
+
+    commitmentsHash,
+    transferActive[N], signerHi[N], signerLo[N], nonce[N], fee[N],
+    accountActive[M], accountHi[M], accountLo[M], balanceBefore[M],
+    deltaNegative[M], deltaMagnitude[M]
+
+Active slots come first and inactive slots are all zero. `delta` is the
+account's whole balance change, fees included, so `sum(delta) = -sum(fee)`.
+
+Private per transfer slot: `toHi`, `toLo`, `amount`, `salt`, `senderIndex`,
+`receiverIndex`.
+
+Circuit constraints, in addition to "Circuit" above:
+- `transferActive` and `accountActive` are bits and non-increasing (active
+  prefix); an inactive slot has every public value 0 and touches nothing;
+- signer limbs equal the sender account's limbs at `senderIndex`, the
+  receiver's at `receiverIndex`, indices below M and pointing at active
+  accounts;
+- running balances in batch order: the sender is debited `amount + fee`,
+  then the receiver credited `amount`; every running balance stays in
+  [0, 2^128);
+- `deltaNegative` is a bit, `deltaMagnitude` is below 2^128, magnitude 0
+  has `deltaNegative` 0, and `balanceAfter - balanceBefore` equals the signed
+  delta;
+- active accounts strictly increasing by `(hi, lo)`.
+
+### Transaction
+
+The `l2psBatch` payload (`data[1]`) gains, inside the signed content:
+
+    settlement: {
+      version: 1,
+      transfers: [{ commitment: "0x..", signer: "0x..", nonce: "<dec>",
+                    fee: "<dec>", signature: "0x.." }],      // batch order
+      changes:   [{ account: "0x..", delta: "<signed dec>" }], // sorted, unique
+      proof: <snarkjs PLONK proof JSON>
+    }
+
+Balances before are never in the transaction: each validator reads them from
+its working state at that transaction. Public signals are rebuilt, never
+read from the transaction.
+
+The encrypted inner transfer (SDK) is a native send whose `data[1]` carries
+`settlement: { fee, salt, commitment, signature }` and whose `content.nonce`
+is the settlement nonce. Members recompute `c` from the decrypted transfer
+and refuse a mismatch.
+
+### Apply
+
+With the fork active, an `l2psBatch` is applied in `HandleGCR.applyTransactions`
+(forge, block validation and Sync share it). Every check fails the
+transaction (included as failed, no edits), never the block, because every
+validator reaches the same verdict:
+
+1. structure and limits; changes sorted and unique; every signer and
+   every receiver-side account named in `changes`;
+2. each signature over its message; per-signer nonces consecutive from the
+   working-state nonce + 1; each fee at least the native transfer fee;
+3. public signals from the working state; PLONK verify against the
+   committed key `src/libs/l2ps/zk/keys/settlement_10/verification_key.json`;
+4. apply each delta, add the transfer count to each signer's nonce, credit
+   each fee's distribution edits without their sender debit (the delta
+   already holds it).
+
+The local `l2ps_proofs` path (`L2PSConsensus.applyPendingProofs`) and
+`L2PSProofManager.createProof` stop when the fork is active, and members
+refuse old-format transfers at admission.
+
 ## Launch stance
 
-Until the fork is active, L2PS batch proofs stay off
-(`L2PS_ZK_ENABLED=false`). The current proof shows nothing about the
-transfers, so turning it on would cost CPU and claim a guarantee that is not
-there. L2PS encryption works as before.
-
-DEM-816 needs its own launch decision before the fork exists: either L2PS
-transfers stop moving L1 balances until settlement ships (option 0 in
-DEM-816), or the divergence is accepted and documented for the launch window.
+`l2psSettlement` is active from mainnet block 0. Old-format L2PS transfers
+are refused from the start, so DEM-816 never exists on mainnet.
 
 ## Plan
 
