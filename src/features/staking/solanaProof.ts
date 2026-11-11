@@ -89,18 +89,19 @@ export function signedBy(tx: ParsedTransactionWithMeta, owner: string): boolean 
     )
 }
 
-/** The raw amount of `mint` held by `owner` in a balance list, "0" when absent. */
+/** The raw amount of `mint` held by `owner` across its token accounts in a balance list, "0" when absent. */
 export function balanceOf(
     balances: TokenBalance[] | null | undefined,
     mint: string,
     owner: string,
 ): string {
+    let total = 0n
     for (const balance of balances ?? []) {
         if (balance.mint === mint && balance.owner === owner) {
-            return balance.uiTokenAmount.amount
+            total += BigInt(balance.uiTokenAmount.amount)
         }
     }
-    return "0"
+    return total.toString()
 }
 
 async function fetchParsed(

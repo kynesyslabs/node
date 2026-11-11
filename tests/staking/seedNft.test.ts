@@ -88,7 +88,7 @@ describe("a seeded validator set checked against Solana", () => {
         verifyCurrentOwner.mockResolvedValue({ status: "valid", slot: 1 })
     })
 
-    it("passes when every proof checks out and the wallet still holds the NFT; the age bound is lifted", async () => {
+    it("passes when every proof checks out, with the age bound lifted and no ask about today's owner", async () => {
         await expect(verifySeededNfts([row()], "g")).resolves.toEqual([])
         expect(verifyNftProof).toHaveBeenCalledWith(
             { mint: MINT, owner: OWNER, proofTx: SIG },
@@ -96,13 +96,10 @@ describe("a seeded validator set checked against Solana", () => {
             expect.any(Number),
             Infinity,
         )
-        expect(verifyCurrentOwner).toHaveBeenCalledWith(MINT, OWNER)
+        expect(verifyCurrentOwner).not.toHaveBeenCalled()
     })
 
-    it("refuses a seat whose NFT has moved, or whose proof an endpoint rejects", async () => {
-        verifyCurrentOwner.mockResolvedValue({ status: "invalid", reason: "nft.owner no longer holds the NFT" })
-        const moved = await verifySeededNfts([row()], "g")
-        expect(moved[0]).toContain("no longer holds")
+    it("refuses a proof an endpoint rejects", async () => {
         verifyNftProof.mockResolvedValue({ status: "invalid", reason: "proof memo names 0xbb, not 0xaa" })
         const bad = await verifySeededNfts([row()], "g")
         expect(bad[0]).toContain("NFT proof invalid")

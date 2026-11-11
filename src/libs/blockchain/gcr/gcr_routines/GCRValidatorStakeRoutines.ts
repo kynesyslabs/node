@@ -57,9 +57,11 @@ export default class GCRValidatorStakeRoutines {
         )
 
         // A failed transaction restores the validators cache from the
-        // snapshot taken before it, so there is nothing to undo here.
+        // snapshot taken before it. A rollback here is an orphaned block
+        // being undone from its edits alone, and an exit or evict lost the
+        // amount and timestamps it closed, so the node resyncs instead.
         if (stakeEdit.isRollback) {
-            return { success: true, message: "Restored by snapshot" }
+            return { success: false, message: "validatorStake edits cannot be rolled back; resync the node" }
         }
 
         const resolvedRepo =

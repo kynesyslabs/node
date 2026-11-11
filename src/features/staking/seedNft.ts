@@ -1,5 +1,5 @@
 import { isAllowlistedMint } from "./nftAllowlist"
-import { verifyCurrentOwner, verifyNftProof } from "./solanaProof"
+import { verifyNftProof } from "./solanaProof"
 import { getMinValidatorStake } from "./minStake"
 import { VALIDATOR_STATUS_ACTIVE, VALIDATOR_STATUS_UNSTAKING } from "./constants"
 
@@ -100,10 +100,12 @@ export function seededNftReasons(
 }
 
 /**
- * The seeded-set rules, then the Solana side of every proof: the proof
- * checks out and the wallet still holds the NFT. Age is not checked, a
- * genesis proof is as old as the launch. An unreachable chain is a reason
- * too: a node that cannot verify its seats does not seat them.
+ * The seeded-set rules, then the Solana side of every proof: the signer
+ * held the NFT when it was made and bound this address. Whether the wallet
+ * still holds it is not asked; a seat that lost its NFT is challenged in a
+ * later block, and every node must be able to rebuild block 0. Age is not
+ * checked, a genesis proof is as old as the launch. An unreachable chain is
+ * a reason too: a node that cannot verify its seats does not seat them.
  */
 export async function verifySeededNfts(
     rows: readonly SeededValidatorNft[],
@@ -121,8 +123,6 @@ export async function verifySeededNfts(
         }
         const proof = await verifyNftProof(nft, row.address, Date.now(), Infinity)
         if (proof.status !== "valid") return `${where}: NFT proof ${proof.status}: ${proof.reason}`
-        const owner = await verifyCurrentOwner(nft.mint, nft.owner)
-        if (owner.status !== "valid") return `${where}: NFT ownership ${owner.status}: ${owner.reason}`
         return null
     })
     return (await Promise.all(checks)).filter((r): r is string => r !== null)

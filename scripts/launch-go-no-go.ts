@@ -23,7 +23,7 @@
  *
  * operators.json maps each validator identity to { operator, provider,
  * region }. Before any validator is up, --plan checks the genesis file and
- * that table alone, with no network:
+ * that table alone; its only network use is Solana, for the NFT proofs:
  *
  *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
  *       --snapshot mainnet/snapshot --operators operators.json
@@ -852,8 +852,9 @@ function usage(): string {
     return [
         "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE [options]",
         "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE",
-        "  --plan               check the genesis file and the launch validator table only, with no",
-        "                       network: one PASS/FAIL line per check, exit 0 when all pass",
+        "  --plan               check the genesis file and the launch validator table only; its only",
+        "                       network use is Solana, for the NFT proofs. One PASS/FAIL line per check,",
+        "                       exit 0 when all pass",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
         "                       (default with neither --genesis nor --snapshot: DEMOS_GENESIS_FILE and DEMOS_SNAPSHOT_DIR)",
         "  --snapshot DIR       the snapshot directory the validators boot with; its validators.jsonl,",

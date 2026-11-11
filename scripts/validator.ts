@@ -487,8 +487,8 @@ async function main(): Promise<void> {
     const command = positionals[0]
 
     const solanaRpc =
-        flags["solana-rpc"] ??
-        process.env.SOLANA_RPC?.split(",")[0]?.trim() ??
+        flags["solana-rpc"] ||
+        process.env.SOLANA_RPC?.split(",")[0]?.trim() ||
         (process.env.HELIUS_API_KEY
             ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
             : PUBLIC_SOLANA_RPC)

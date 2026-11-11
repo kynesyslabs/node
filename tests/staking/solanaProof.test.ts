@@ -217,6 +217,11 @@ describe("verifyChallengeEvidence", () => {
         expect((await verifyChallengeEvidence(SIG2, recorded)).status).toBe("invalid")
     })
 
+    it("rejects a move between two token accounts of the recorded wallet", async () => {
+        chain(parsedTx({ slot: 100 }), parsedTx({ slot: 200, pre: [[MINT, OWNER, "1"], [MINT, OWNER, "0"]], post: [[MINT, OWNER, "0"], [MINT, OWNER, "1"]], memos: [] }))
+        expect((await verifyChallengeEvidence(SIG2, recorded)).status).toBe("invalid")
+    })
+
     it("is unreachable when either transaction cannot be fetched", async () => {
         chain(null, parsedTx({ slot: 200 }))
         expect((await verifyChallengeEvidence(SIG2, recorded)).status).toBe("unreachable")

@@ -284,7 +284,7 @@ describe("GCRValidatorStakeRoutines", () => {
     })
 
     describe("rollback", () => {
-        it("touches nothing: the snapshot taken before the transaction restores the table", async () => {
+        it("refuses, so an orphaned block holding a stake sends the node to a resync", async () => {
             const existing = validatorRow({ staked_amount: "50" })
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
@@ -292,7 +292,8 @@ describe("GCRValidatorStakeRoutines", () => {
                 repo as any,
                 100,
             )
-            expect(r.success).toBe(true)
+            expect(r.success).toBe(false)
+            expect(r.message).toContain("resync")
             expect(repo.state.row?.staked_amount).toBe("50")
             expect(repo.save).not.toHaveBeenCalled()
         })
