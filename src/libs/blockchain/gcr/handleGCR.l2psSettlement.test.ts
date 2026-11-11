@@ -48,7 +48,7 @@ mock.module("@/libs/l2ps/settlement/prover", () => ({
 import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
-import { settlementPublicSignals } from "@/libs/l2ps/settlement/encoding"
+import { SETTLEMENT_ACCOUNTS, SETTLEMENT_TRANSFERS, settlementPublicSignals } from "@/libs/l2ps/settlement/encoding"
 import type { DecryptedTransfer, SettlementChange } from "@/libs/l2ps/settlement/types"
 import { parseSettlement } from "@/libs/l2ps/settlement/validation"
 import {
@@ -412,19 +412,19 @@ describe("a failing settlement is included as failed with no edits", () => {
         await expectFailed(tx, "old format")
     })
 
-    it("more than 10 transfers", async () => {
-        const ts = Array.from({ length: 11 }, (_, i) => pay(ALICE, BOB.account, 1n, 5n + BigInt(i)))
+    it(`more than ${SETTLEMENT_TRANSFERS} transfers`, async () => {
+        const ts = Array.from({ length: SETTLEMENT_TRANSFERS + 1 }, (_, i) => pay(ALICE, BOB.account, 1n, 5n + BigInt(i)))
         const record = recordOf(ts)
-        await expectFailed(batch(record), "1..10 transfers")
+        await expectFailed(batch(record), `1..${SETTLEMENT_TRANSFERS} transfers`)
     })
 
-    it("more than 20 changes", async () => {
+    it(`more than ${SETTLEMENT_ACCOUNTS} changes`, async () => {
         const ts = [pay(ALICE, BOB.account, OS, 5n)]
         const record = recordOf(ts)
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < SETTLEMENT_ACCOUNTS; i++) {
             record.changes.push({ account: "0x" + "ee".repeat(31) + i.toString(16).padStart(2, "0"), delta: "0" })
         }
-        await expectFailed(batch(record), "1..20 changes")
+        await expectFailed(batch(record), `1..${SETTLEMENT_ACCOUNTS} changes`)
     })
 })
 

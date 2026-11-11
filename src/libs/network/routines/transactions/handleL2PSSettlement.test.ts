@@ -81,6 +81,7 @@ const loudLogs = () =>
 import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import { innerTx, key, signedTransfer } from "@/libs/l2ps/settlement/__fixtures__/settlementKit"
+import { MAX_NONCE_AHEAD } from "@/libs/l2ps/settlement/transfer"
 
 const { default: handleL2PS } = await import("./handleL2PS")
 
@@ -218,13 +219,13 @@ describe("handleL2PS under l2psSettlement", () => {
     })
 
     it("refuses a nonce more than two batches past the account nonce", async () => {
-        decrypted(transfer({ nonce: 4n + 21n }))
+        decrypted(transfer({ nonce: 4n + MAX_NONCE_AHEAD + 1n }))
         const response = await handleL2PS(tx)
         expect(response.result).toBe(400)
-        expect(JSON.stringify(response)).toContain("more than 20 past the account nonce")
+        expect(JSON.stringify(response)).toContain(`more than ${MAX_NONCE_AHEAD} past the account nonce`)
         expect(addTransaction).not.toHaveBeenCalled()
 
-        decrypted(transfer({ nonce: 4n + 20n }))
+        decrypted(transfer({ nonce: 4n + MAX_NONCE_AHEAD }))
         expect((await handleL2PS(tx)).result).toBe(200)
     })
 

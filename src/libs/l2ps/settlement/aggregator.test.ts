@@ -17,7 +17,7 @@ mock.module("src/utilities/logger", () => ({
 
 import { L2PS_STATUS } from "@/libs/blockchain/l2ps_mempool"
 import type { TxStatus } from "@/libs/blockchain/chainTypes"
-import { fieldToHex } from "./encoding"
+import { SETTLEMENT_TRANSFERS, fieldToHex } from "./encoding"
 import { SettlementAggregator, type HistoryStatus, type SettlementDeps } from "./aggregator"
 import { openSettlementTransfer } from "./transfer"
 import type { DecryptedTransfer, SettlementPlan } from "./types"
@@ -63,7 +63,7 @@ function plan(transfers: DecryptedTransfer[], balances: Map<string, bigint>, non
     for (const t of transfers) {
         const nonce = next.get(t.from) ?? (nonces.get(t.from) ?? 0n) + 1n
         const cost = t.amount + t.fee
-        if (taken.length >= 10 || t.nonce !== nonce || (bal.get(t.from) ?? 0n) < cost) {
+        if (taken.length >= SETTLEMENT_TRANSFERS || t.nonce !== nonce || (bal.get(t.from) ?? 0n) < cost) {
             deferred.push({ transfer: t, reason: "not now" })
             continue
         }
@@ -327,7 +327,7 @@ describe("SettlementAggregator", () => {
     })
 
     it("plans a second batch in the same cycle only over accounts the first does not touch", async () => {
-        const many = Array.from({ length: 10 }, (_, i) => pay(ALICE, BOB.account, 1n, 5n + BigInt(i)))
+        const many = Array.from({ length: SETTLEMENT_TRANSFERS }, (_, i) => pay(ALICE, BOB.account, 1n, 5n + BigInt(i)))
         const overlap = pay(BOB, CAROL.account, 1n, 1n)
         tip.set(DAVE.account, { balance: 10n, nonce: 0n })
         const disjoint = pay(DAVE, "0x" + "ee".repeat(32), 1n, 1n)
