@@ -143,7 +143,7 @@ GENESIS_TS=$(( $(date -u +%s) + GENESIS_DELAY ))
         echo "${out}" | grep '^PUBKEY:' | cut -d: -f2- | tr -d '\n' > "${RUN_DIR}/inputs/pub${i}"
     done
     chmod 600 "${RUN_DIR}"/inputs/node*.identity
-    (cd "${HERE}" && bun wallets.ts "${RUN_DIR}/inputs")
+    (cd "${RUN_DIR}/inputs" && bun "${HERE}/wallets.ts")
     python3 - "${RUN_DIR}/inputs" "${REPO_ROOT}" "${GENESIS_TS}" <<'PY'
 import json, sys
 inputs, repo, genesis_ts = sys.argv[1], sys.argv[2], sys.argv[3]

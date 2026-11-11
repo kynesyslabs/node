@@ -4,10 +4,11 @@
  * SDK derive an ed25519 account from a mnemonic (as
  * testing/devnet/scripts/generate-identity-helper.ts does).
  *
- *   bun wallets.ts <inputs dir>
+ *   cd <inputs dir> && bun <harness>/wallets.ts
  *
- * Writes <inputs>/wallets.secret.json (mode 600: mnemonics) and
- * <inputs>/genesis-balances.json ([address, DEM] pairs run.sh adds to genesis).
+ * Writes wallets.secret.json (mode 600: mnemonics) and genesis-balances.json
+ * ([address, DEM] pairs run.sh adds to genesis) into the working directory,
+ * so no file path comes from the command line.
  * Batch sizes come from the node's settlement encoding, never assumed.
  */
 import { chmodSync, writeFileSync } from "node:fs"
@@ -86,9 +87,8 @@ async function derive(mnemonic: string): Promise<string> {
 }
 
 if (import.meta.main) {
-    const inputs = process.argv[2]
-    if (!inputs) {
-        console.error("usage: bun wallets.ts <inputs dir>")
+    if (process.argv.length > 2) {
+        console.error("usage: cd <inputs dir> && bun wallets.ts")
         process.exit(2)
     }
     const demos = new Demos()
@@ -101,7 +101,7 @@ if (import.meta.main) {
             wallets[spec.label] = { label: spec.label, address: "0x" + randomBytes(32).toString("hex"), fund: spec.fund.toString() }
         }
     }
-    const file = `${inputs}/wallets.secret.json`
+    const file = "wallets.secret.json"
     writeFileSync(file, JSON.stringify(wallets, null, 2), { mode: 0o600 })
     chmodSync(file, 0o600)
     // Genesis balances are DEM: the osDenomination migration at block 0 scales them to OS.
@@ -111,7 +111,7 @@ if (import.meta.main) {
             if (BigInt(w.fund) % DEM !== 0n) throw new Error(`${w.label}: genesis funds whole DEM only`)
             return [w.address, (BigInt(w.fund) / DEM).toString()]
         })
-    writeFileSync(`${inputs}/genesis-balances.json`, JSON.stringify(balances, null, 2))
+    writeFileSync("genesis-balances.json", JSON.stringify(balances, null, 2))
     console.log(`wallets: ${Object.keys(wallets).length} (${balances.length} funded at genesis), N=${SETTLEMENT_TRANSFERS}`)
     process.exit(0)
 }

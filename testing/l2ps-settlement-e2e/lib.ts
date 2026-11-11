@@ -5,7 +5,7 @@
  * `demos.sign`) and sent through `confirm` + `broadcast`; nothing here
  * assembles a transaction by hand.
  */
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { L2PS, buildSettledL2PSTransfer } from "@kynesyslabs/demosdk/l2ps"
@@ -105,8 +105,13 @@ export const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 // ---- docker -----------------------------------------------------------------
 
+// A fixed binary, not a PATH lookup: the harness holds devnet keys and wallet
+// mnemonics, so it must not run whatever "docker" a writable PATH entry offers.
+const DOCKER_BIN = ["/usr/bin/docker", "/usr/local/bin/docker", "/opt/homebrew/bin/docker"].find(p => existsSync(p))
+
 export function docker(args: string[], timeoutMs = 120_000): { ok: boolean; out: string } {
-    const r = spawnSync("docker", args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 512 * 1024 * 1024 })
+    if (!DOCKER_BIN) throw new Error("docker not found in /usr/bin, /usr/local/bin or /opt/homebrew/bin")
+    const r = spawnSync(DOCKER_BIN, args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 512 * 1024 * 1024 })
     return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() }
 }
 export const compose = (args: string[], timeoutMs?: number) => docker([...COMPOSE, ...args], timeoutMs)

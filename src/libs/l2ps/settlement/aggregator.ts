@@ -249,7 +249,8 @@ export class SettlementAggregator {
                 ...(await this.deps.subnets(L2PS_STATUS.EXECUTED)),
                 ...(await this.deps.subnets(L2PS_STATUS.DEFERRED)),
             ]),
-        ].sort()
+            // Code-unit order, not a locale's: every node plans the same order.
+        ].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
         const first = subnets.length > 0 ? this.cycles % subnets.length : 0
         this.cycles++
         const order = [...subnets.slice(first), ...subnets.slice(0, first)]
