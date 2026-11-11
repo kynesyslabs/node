@@ -48,7 +48,8 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import {
     legacyGasCredited,
     legacyGasRetired,
-    withLegacyGasCredit,
+    tlsnBurnCredited,
+    withTrailingDebitCredit,
     withoutLegacyGas,
 } from "./feeBinding"
 import log from "src/utilities/logger"
@@ -242,11 +243,12 @@ export async function verifyGcrEditsMatch(
 
     const normalise = wireShapeNormaliser(tx, await osDenominationActive())
 
-    // withDerivedFeeEdits credits a non-native gas edit from its shipped wire
-    // amount, so the regen credits its gas once it has that shape too.
+    // withDerivedFeeEdits credits a non-native gas edit or a TLSNotary burn
+    // from its shipped wire amount, so the regen credits it once it has that
+    // shape too.
     const normalisedRegen =
-        expectFeeEdits && legacyGasCredited(tx)
-            ? normalise(withLegacyGasCredit(normalise(regen), ""))
+        expectFeeEdits && (legacyGasCredited(tx) || tlsnBurnCredited(tx))
+            ? normalise(withTrailingDebitCredit(normalise(regen), ""))
             : normalise(regen)
     const regenEditsHash = digest(normalisedRegen)
 

@@ -26,7 +26,7 @@ import {
     calculateFeeBreakdown,
     type FeeBreakdown,
 } from "@/libs/blockchain/routines/calculateCurrentGas"
-import { generateGasCreditEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
+import { generateNetworkFeeCredits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import { getSharedState } from "@/utilities/sharedState"
 
 type ShippedFee = NonNullable<Transaction["content"]["transaction_fee"]>
@@ -196,20 +196,35 @@ export function legacyGasCredited(tx: Pick<Transaction, "content">): boolean {
 }
 
 /**
- * Where the SDK gas edit sits in `edits`: the debit of the nonce edit's
- * account right before that trailing nonce edit, or -1.
+ * Whether a native TLSNotary request or store has its burn credited. The SDK
+ * builds that burn as a sender debit that no edit credits; under the forks
+ * that retire the gas ({@link legacyGasRetired}) it gets credits routed like a
+ * network fee, as the gas of other types does, while the sender still pays
+ * it as signed.
  */
-function legacyGasIndex(edits: Array<{ type: string }>): number {
+export function tlsnBurnCredited(tx: Pick<Transaction, "content">): boolean {
+    if (!legacyGasRetired(tx)) return false
+    const data = tx.content?.data as unknown as [string, { nativeOperation?: unknown }] | undefined
+    const operation = data?.[1]?.nativeOperation
+    return operation === "tlsn_request" || operation === "tlsn_store"
+}
+
+/**
+ * Where the sender debit right before the trailing nonce edit sits in
+ * `edits`, or -1. In an SDK-built set that is the gas edit; once the gas is
+ * left out of a TLSNotary operation, it is the burn.
+ */
+function trailingDebitIndex(edits: Array<{ type: string }>): number {
     const last = edits.length - 1
     if (last < 1) return -1
     const nonce = edits[last] as unknown as { type: string; account?: unknown }
-    const gas = edits[last - 1] as unknown as {
+    const debit = edits[last - 1] as unknown as {
         type: string
         operation?: unknown
         account?: unknown
     }
-    if (nonce.type !== "nonce" || gas.type !== "balance") return -1
-    if (gas.operation !== "remove" || gas.account !== nonce.account) return -1
+    if (nonce.type !== "nonce" || debit.type !== "balance") return -1
+    if (debit.operation !== "remove" || debit.account !== nonce.account) return -1
     return last - 1
 }
 
@@ -218,33 +233,35 @@ function legacyGasIndex(edits: Array<{ type: string }>): number {
  * the same array.
  */
 export function withoutLegacyGas<T extends { type: string }>(edits: T[]): T[] {
-    const at = legacyGasIndex(edits)
+    const at = trailingDebitIndex(edits)
     if (at < 0) return edits
     return [...edits.slice(0, at), ...edits.slice(at + 1)]
 }
 
 /**
- * The credits for a gas debit, in the ledger units apply deducts it in, or
- * none for an amount apply could not deduct either.
+ * The credits for a signed sender debit, in the ledger units apply deducts
+ * it in, or none for an amount apply could not deduct either.
  */
-export function legacyGasCredits(gas: { amount?: unknown }, txHash: string): GCREditBalance[] {
-    const amount = Number(gas.amount)
+export function debitCredits(debit: { amount?: unknown }, txHash: string): GCREditBalance[] {
+    const amount = Number(debit.amount)
     if (!Number.isSafeInteger(amount) || amount <= 0) return []
-    return generateGasCreditEdits(amount, txHash, false)
+    return generateNetworkFeeCredits(amount, txHash, false)
 }
 
 /**
- * `edits` with the credits of the SDK gas edit placed right after it. A set
- * that already carries them has the credits, not the gas, before its nonce
- * edit, so it comes back as the same array, as does a set without the gas.
+ * `edits` with the credits of the sender debit right before the nonce edit
+ * placed right after that debit: the gas of a non-native transaction, or the
+ * burn of a TLSNotary operation whose gas was left out. A set that already
+ * carries them has a credit, not the debit, before its nonce edit, so it
+ * comes back as the same array, as does a set without such a debit.
  */
-export function withLegacyGasCredit<T extends { type: string }>(
+export function withTrailingDebitCredit<T extends { type: string }>(
     edits: T[],
     txHash: string,
 ): T[] {
-    const at = legacyGasIndex(edits)
+    const at = trailingDebitIndex(edits)
     if (at < 0) return edits
-    const credits = legacyGasCredits(edits[at] as unknown as { amount?: unknown }, txHash)
+    const credits = debitCredits(edits[at] as unknown as { amount?: unknown }, txHash)
     if (credits.length === 0) return edits
     return [
         ...edits.slice(0, at + 1),

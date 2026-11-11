@@ -411,3 +411,93 @@ describe("non-native transactions on chains without both fee forks", () => {
         })
     }
 })
+
+describe("TLSNotary operations under gasFeeSeparation and feeBinding", () => {
+    beforeEach(() => {
+        forks({ gasFee: true, fee: true })
+        getSharedState.forkConfig.nonceEnforcement.activationHeight = 0
+    })
+
+    /** A native TLSNotary operation from SENDER on nonce 8, built as the SDK's TLSNotaryService builds it. */
+    async function tlsn(nativeOperation: string, args: unknown[], amount: number): Promise<Transaction> {
+        demos.getAddressNonce = async () => 7
+        const tx = DemosTransactions.empty()
+        tx.content.to = SENDER
+        tx.content.nonce = 8
+        tx.content.amount = amount as never
+        tx.content.type = "native"
+        tx.content.timestamp = Date.now()
+        tx.content.data = ["native", { nativeOperation, args }] as never
+        return onTheWire(await demos.sign(tx)) as Transaction
+    }
+    const request = () => tlsn("tlsn_request", ["https://example.com"], 1)
+    // 3000 bytes of proof: 1 DEM plus 1 DEM for each of 3 started KB.
+    const store = () => tlsn("tlsn_store", ["token-1", "p".repeat(3000), "onchain"], 4)
+
+    for (const [name, build, burn] of [
+        ["request", request, OS],
+        ["store", store, 4n * OS],
+    ] as const) {
+        it(`credits the burn of a ${name} after it and conserves supply`, async () => {
+            const tx = await build()
+            const applied = withDerivedFeeEdits(tx).content.gcr_edits as any[]
+            expect(applied.slice(-4)).toEqual([
+                expect.objectContaining({ type: "balance", operation: "remove", account: SENDER, amount: String(burn) }),
+                expect.objectContaining({ type: "balance", operation: "add", account: BURN, amount: Number(burn / 2n) }),
+                expect.objectContaining({ type: "balance", operation: "add", account: TREASURY, amount: Number(burn / 2n) }),
+                expect.objectContaining({ type: "nonce" }),
+            ])
+            expect(withDerivedFeeEdits(withDerivedFeeEdits(tx)).content.gcr_edits).toEqual(applied)
+
+            const before = supply()
+            const out = await block([tx])
+
+            expect(out.failedTxs).toEqual([])
+            expect(supply()).toBe(before)
+            expect(balanceOf(SENDER)).toBe(100n * OS - burn - FEE)
+            // The network fee and the burn split 50/50; the rpc fee folds into treasury.
+            expect(balanceOf(BURN)).toBe(OS / 2n + burn / 2n)
+            expect(balanceOf(TREASURY)).toBe(OS / 2n + OS + burn / 2n)
+        })
+
+        it(`charges a ${name} that fails in the block its fee only, and conserves supply`, async () => {
+            caches = freshCaches(FEE + burn - 1n)
+            const before = supply()
+            const tx = await build()
+
+            const out = await block([tx])
+
+            expect(out.failedTxs).toEqual([tx.hash])
+            expect(supply()).toBe(before)
+            expect(balanceOf(SENDER)).toBe(burn - 1n)
+            expect(nonceOf(SENDER)).toBe(8)
+        })
+    }
+
+    it("applies a served block the same on a syncing node, and rolls it back", async () => {
+        const start = balances()
+        const tx = await store()
+        await block([tx])
+        const producer = balances()
+
+        caches = freshCaches(100n * OS)
+        const out = await block([onTheWire(tx)])
+        expect(out.failedTxs).toEqual([])
+        expect(balances()).toEqual(producer)
+
+        const back = await HandleGCR.applyTransactions([onTheWire(tx)], true)
+        expect(back.failedTxs).toEqual([])
+        expect(balances()).toEqual(start)
+    })
+
+    it("leaves the burn uncredited with feeBinding off, as applied before", async () => {
+        forks({ gasFee: true, fee: false })
+        const before = supply()
+        const tx = await request()
+
+        await block([tx])
+
+        // The gas is charged too on that chain, and neither is credited.
+        expect(supply()).toBe(before - 2n * OS)
+    })
+})

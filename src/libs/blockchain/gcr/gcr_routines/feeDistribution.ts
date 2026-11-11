@@ -219,12 +219,13 @@ function emitTwoRecipientSplit(
 }
 
 /**
- * The credits for a flat gas debit the sender signed and pays as is: routed
- * like a network fee, split between burn and treasury, with no sender debit
- * of their own. `amount` is in the ledger units apply deducts the debit in.
- * Empty when the distribution is not primed (see `requireFeeDistribution`).
+ * The credits for a debit the sender signed and pays as is (the flat gas of a
+ * non-native transaction, a TLSNotary burn): routed like a network fee, split
+ * between burn and treasury, with no sender debit of their own. `amount` is in
+ * the ledger units apply deducts the debit in. Empty when the distribution is
+ * not primed (see `requireFeeDistribution`).
  */
-export function generateGasCreditEdits(
+export function generateNetworkFeeCredits(
     amount: number,
     txHash: string,
     isRollback: boolean,

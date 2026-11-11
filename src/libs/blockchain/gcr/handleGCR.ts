@@ -55,10 +55,11 @@ import {
 } from "src/libs/blockchain/validation/editBinding"
 import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
 import {
+    debitCredits,
     legacyGasCredited,
-    legacyGasCredits,
     legacyGasRetired,
-    withLegacyGasCredit,
+    tlsnBurnCredited,
+    withTrailingDebitCredit,
     withoutLegacyGas,
 } from "src/libs/blockchain/validation/feeBinding"
 import { ensureNetworkParametersCurrent } from "src/libs/blockchain/routines/loadNetworkParameters"
@@ -550,12 +551,13 @@ function sameFeeEdit(a: GCREdit, b: GCREdit): boolean {
  * Where the fee edits replace the SDK's gas edit (`legacyGasRetired`), the
  * copy leaves that gas edit out, so the sender pays the fee once and every
  * debit has its credit. Where the gas is a non-native transaction's whole
- * fee (`legacyGasCredited`), the copy keeps it and credits it right after.
+ * fee (`legacyGasCredited`), the copy keeps it and credits it right after,
+ * and so it does for the burn of a TLSNotary operation (`tlsnBurnCredited`).
  */
 export function withDerivedFeeEdits(tx: Transaction): Transaction {
     if (legacyGasCredited(tx)) {
         const signed = tx.content.gcr_edits ?? []
-        const credited = withLegacyGasCredit(signed, tx.hash ?? "")
+        const credited = withTrailingDebitCredit(signed, tx.hash ?? "")
         if (credited === signed) return tx
         return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
             content: {
@@ -575,7 +577,10 @@ export function withDerivedFeeEdits(tx: Transaction): Transaction {
         edits.length >= feeEdits.length &&
         feeEdits.every((fee, i) => sameFeeEdit(fee, edits[i]))
     const signed = alreadyCarried ? edits.slice(feeEdits.length) : edits
-    const kept = retireGas ? withoutLegacyGas(signed) : signed
+    const withoutGas = retireGas ? withoutLegacyGas(signed) : signed
+    const kept = tlsnBurnCredited(tx)
+        ? withTrailingDebitCredit(withoutGas, tx.hash ?? "")
+        : withoutGas
     if (kept === signed && (alreadyCarried || feeEdits.length === 0)) return tx
 
     // The edits are copied too, not just the array: apply writes into each
@@ -1173,7 +1178,7 @@ export default class HandleGCR {
         if (gas) {
             fee.push(gas)
             if (legacyGasCredited(tx)) {
-                fee.push(...(legacyGasCredits(gas as GCREditBalance, tx.hash ?? "") as GCREdit[]))
+                fee.push(...(debitCredits(gas as GCREditBalance, tx.hash ?? "") as GCREdit[]))
             }
         }
         return fee.map(e => structuredClone(e))
