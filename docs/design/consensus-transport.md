@@ -36,6 +36,10 @@ spiked to 45-71 s. Two causes:
 - A verified reply without a validly signed advert (rc.7, Omni off, TLS, or
   a port that is not the one signed) drops the record.
   Unsigned replies never change it.
+- A verified advert that arrives before the Omni adapter is up (an inbound
+  hello answered with a hello back while the Omni server starts) is kept
+  and applied when the adapter starts; a later verified reply without a
+  valid advert drops it.
 - Calls to ourselves go to the loopback Omni port.
 - `OMNI_ONLY` keeps the RPC port + 1 fallback for peers without a record.
 

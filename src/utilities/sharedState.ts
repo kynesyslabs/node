@@ -241,6 +241,12 @@ export default class SharedState {
 
     // OmniProtocol adapter for peer communication
     private _omniAdapter: PeerOmniAdapter | null = null
+    // Verified Omni adverts seen before the adapter exists: an inbound hello
+    // can trigger a hello back while the Omni server is still starting.
+    private readonly pendingOmniEndpoints = new Map<
+        string,
+        { httpUrl: string; port: number }
+    >()
 
     // SECTION TLSNotary Proxy Manager State
     // Stores wstcp proxy processes and port pool for TLS attestation
@@ -600,6 +606,11 @@ export default class SharedState {
 
         this._omniAdapter = new PeerOmniAdapter()
         this._omniAdapter.migrationMode = mode
+        for (const [peerIdentity, { httpUrl, port }] of this
+            .pendingOmniEndpoints) {
+            this._omniAdapter.recordOmniEndpoint(peerIdentity, httpUrl, port)
+        }
+        this.pendingOmniEndpoints.clear()
         // Calls to ourselves take the loopback Omni port, off the RPC port
         // that client traffic can saturate.
         if (this.publicKeyHex && this.omniAdvert) {
@@ -656,11 +667,14 @@ export default class SharedState {
     ): void {
         if (this._omniAdapter) {
             this._omniAdapter.recordOmniEndpoint(peerIdentity, httpUrl, port)
+        } else {
+            this.pendingOmniEndpoints.set(peerIdentity, { httpUrl, port })
         }
     }
 
     /** A verified hello reply without an Omni advert: use HTTP again. */
     public forgetPeerOmni(peerIdentity: string): void {
+        this.pendingOmniEndpoints.delete(peerIdentity)
         if (this._omniAdapter) {
             this._omniAdapter.forgetOmniPeer(peerIdentity)
         }
