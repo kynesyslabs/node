@@ -25,9 +25,11 @@ import {
 } from "./types"
 import {
     ConnectionTimeoutError,
+    RequestTimeoutError,
     SigningError,
     InvalidAuthBlockFormatError,
     ConnectionError,
+    ConnectionLostError,
     OmniProtocolError,
 } from "../types/errors"
 import {
@@ -392,7 +394,7 @@ export class PeerConnection extends EventEmitter {
             const timeoutTimer = setTimeout(() => {
                 this.inFlightRequests.delete(sequence)
                 reject(
-                    new ConnectionTimeoutError(
+                    new RequestTimeoutError(
                         `Request timeout after ${timeout}ms`,
                     ),
                 )
@@ -509,7 +511,7 @@ export class PeerConnection extends EventEmitter {
             const timeoutTimer = setTimeout(() => {
                 this.inFlightRequests.delete(sequence)
                 reject(
-                    new ConnectionTimeoutError(
+                    new RequestTimeoutError(
                         `Request timeout after ${timeout}ms`,
                     ),
                 )
@@ -728,7 +730,7 @@ export class PeerConnection extends EventEmitter {
         // Reject all pending requests
         for (const [, pending] of this.inFlightRequests) {
             clearTimeout(pending.timer)
-            pending.reject(new Error("Connection closing"))
+            pending.reject(new ConnectionLostError("Connection closing"))
         }
         this.inFlightRequests.clear()
 
@@ -1043,7 +1045,7 @@ export class PeerConnection extends EventEmitter {
         // Reject all pending requests
         for (const [, pending] of this.inFlightRequests) {
             clearTimeout(pending.timer)
-            pending.reject(new Error("Connection closed"))
+            pending.reject(new ConnectionLostError("Connection closed"))
         }
         this.inFlightRequests.clear()
         this.framer.clear()

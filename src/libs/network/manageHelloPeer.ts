@@ -12,11 +12,17 @@ import {
 } from "@kynesyslabs/demosdk/encryption"
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
-import { helloResponseMessage, URL_BOUND_TO_OTHER } from "../peer/helloAuth"
+import {
+    helloOmniAdvertMessage,
+    helloResponseMessage,
+    standbyKeepsKnownUrl,
+    URL_BOUND_TO_OTHER,
+} from "../peer/helloAuth"
 import GossipManager from "../gossip/GossipManager"
 import { parseNodeUrl } from "src/config"
 import { reportTwin } from "../peer/identityLiveness"
 import { corroborateSyncData } from "../peer/syncClaims"
+import { signingStopState } from "../identity/signingRecord"
 
 const HELLO_PEERLIST_SAMPLE_SIZE = 32
 
@@ -31,17 +37,19 @@ export interface HelloPeerRequest {
     nonce?: string
     /** Hash of the caller's block 0. Absent from nodes that predate the check. */
     genesisHash?: string
+    /** The caller has stopped signing: it must not take over its key's URL. */
+    standby?: boolean
 }
 
 /**
  * Proof that the node answering this hello holds our key and serves the
  * URL we advertise. Bound to the caller's nonce so it cannot be replayed.
  */
-async function signHelloResponse(nonce: string) {
+async function signHelloResponse(nonce: string, standby = false) {
     const url = getSharedState.exposedUrl
     const signed = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
-        helloResponseMessage(nonce, url),
+        helloResponseMessage(nonce, url, standby),
     )
     return {
         identity: getSharedState.publicKeyHex,
@@ -50,6 +58,65 @@ async function signHelloResponse(nonce: string) {
             type: getSharedState.signingAlgorithm,
             data: uint8ArrayToHex(signed.signature),
         },
+    }
+}
+
+/**
+ * Our Omni port, signed over the caller's nonce and our URL: a port
+ * rewritten on the way would otherwise send the caller's peer calls to
+ * another service on our host.
+ */
+async function signedOmniAdvert(nonce: string | undefined) {
+    const advert = getSharedState.omniAdvert
+    if (!advert || !nonce) {
+        return {}
+    }
+    const signed = await TxValidatorPool.getInstance().sign(
+        getSharedState.signingAlgorithm,
+        helloOmniAdvertMessage(nonce, getSharedState.exposedUrl, advert.port),
+    )
+    return {
+        omni: {
+            port: advert.port,
+            signature: {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signed.signature),
+            },
+        },
+    }
+}
+
+const signingStopped = () =>
+    signingStopState(getSharedState.identityFile).stopped
+
+/**
+ * The signed part of our reply. Signing can stop while the signatures are
+ * made; a reply signed as an active node after that would let a caller move
+ * our key's URL to this copy, which refuses to vote. A stop is not undone
+ * while we run, so one re-sign as standby is enough.
+ */
+async function signedHelloProof(nonce: string | undefined) {
+    const standby = signingStopped()
+    const proof = {
+        ...(standby ? { standby: true } : {}),
+        ...(nonce ? await signHelloResponse(nonce, standby) : {}),
+        ...(await signedOmniAdvert(nonce)),
+    }
+    if (!standby && signingStopped()) {
+        return signedHelloProof(nonce)
+    }
+    return proof
+}
+
+function gossipAdvert() {
+    const multiaddr = GossipManager.isEnabled()
+        ? GossipManager.getInstance().getListenAddr()
+        : null
+    if (!multiaddr) {
+        return {}
+    }
+    return {
+        gossip: { peerId: GossipManager.getInstance().getPeerId(), multiaddr },
     }
 }
 
@@ -179,37 +246,54 @@ export async function manageHelloPeer(
             ? known.connection.string
             : undefined
 
+    // A copy that stopped signing leaves the entry with the copy that signs,
+    // also while that copy is listed offline: taking its place there would
+    // route the key's consensus calls to a node that refuses every vote.
+    const listed =
+        known ?? peerManager.getOfflinePeers()[peerObject.identity]
+    const standbyElsewhere = standbyKeepsKnownUrl(
+        listed?.connection.string,
+        content.url,
+        content.standby,
+    )
+
     if (known) {
-        // Known peer: the signed hello may update its URL and sync data
-        const [isAddedToPeerlist, message] = peerManager.addPeer(
-            peerObject,
-            true,
-        )
-        if (!isAddedToPeerlist) {
-            // The new URL is held by another identity: only dialing it can
-            // show the caller now serves it, so check before moving anything.
-            if (
-                message.startsWith(URL_BOUND_TO_OTHER) &&
-                !PeerManager.verifying.has(peerObject.identity)
-            ) {
-                void PeerManager.sayHelloToPeer(
-                    new Peer(peerObject.connection.string, peerObject.identity),
-                ).catch(error =>
-                    log.warning(
-                        `[Hello Peer Listener] Verifying ${peerObject.identity} @ ${peerObject.connection.string} failed: ${
-                            error instanceof Error ? error.message : String(error)
-                        }`,
-                    ),
-                )
+        if (!standbyElsewhere) {
+            // Known peer: the signed hello may update its URL and sync data
+            const [isAddedToPeerlist, message] = peerManager.addPeer(
+                peerObject,
+                true,
+            )
+            if (!isAddedToPeerlist) {
+                // The new URL is held by another identity: only dialing it
+                // can show the caller now serves it, so check before moving
+                // anything.
+                if (
+                    message.startsWith(URL_BOUND_TO_OTHER) &&
+                    !PeerManager.verifying.has(peerObject.identity)
+                ) {
+                    void PeerManager.sayHelloToPeer(
+                        new Peer(
+                            peerObject.connection.string,
+                            peerObject.identity,
+                        ),
+                    ).catch(error =>
+                        log.warning(
+                            `[Hello Peer Listener] Verifying ${peerObject.identity} @ ${peerObject.connection.string} failed: ${
+                                error instanceof Error ? error.message : String(error)
+                            }`,
+                        ),
+                    )
+                }
+                response.result = 400
+                response.response = false
+                response.extra = {
+                    msg: "Peer not added to peerlist: " + message,
+                }
+                return response
             }
-            response.result = 400
-            response.response = false
-            response.extra = {
-                msg: "Peer not added to peerlist: " + message,
-            }
-            return response
         }
-    } else {
+    } else if (!standbyElsewhere) {
         // Stranger: the caller proved it holds the key, not that the URL
         // reaches it. Hello back and let the verified reply add it.
         const [acceptable, message] = peerManager.canAddPeer(peerObject)
@@ -238,24 +322,13 @@ export async function manageHelloPeer(
 
     // INFO: Return a list of all our connected peers
 
-    const gossipAddr = GossipManager.isEnabled()
-        ? GossipManager.getInstance().getListenAddr()
-        : null
-
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
         ...(callerKnownAt ? { callerKnownAt } : {}),
-        ...(content.nonce ? await signHelloResponse(content.nonce) : {}),
-        ...(gossipAddr
-            ? {
-                  gossip: {
-                      peerId: GossipManager.getInstance().getPeerId(),
-                      multiaddr: gossipAddr,
-                  },
-              }
-            : {}),
+        ...(await signedHelloProof(content.nonce)),
+        ...gossipAdvert(),
         syncData: peerManager.ourSyncData,
         genesisHash: ourGenesis,
         peerlist: peerManager
