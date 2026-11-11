@@ -760,6 +760,98 @@ if sel empty-blocks; then
     empty_blocks_iso
 fi
 
+# ── block reads one block short ─────────────────────────────────────────
+# r11 F1: from the same point, every node answers a read of block N with block N-1
+# (FAKE_STALE_BLOCKS), all of them the same block: no block is the one asked for, so no
+# hash is read, and the rejoin and the catch-up checks fail as with no block at all
+if sel stale-blocks; then
+    go stale-blocks FAKE_STALE_BLOCKS=1 REJOIN_TIMEOUT=6
+    empty_blocks_rejoin
+    go stale-blocks-isolated VARIANT=isolated FAKE_STALE_BLOCKS=1 REJOIN_TIMEOUT=6
+    empty_blocks_iso
+fi
+
+# ── the chain reads on given answers ────────────────────────────────────
+# run.sh's own head_of, block_at, hash_at and same_chain (run.sh cannot be sourced: it runs
+# the drill), with rpc answering a head read from ${CDIR}/heads ("node head" lines) and a
+# read of a height from ${CDIR}/blocks ("node<TAB>height<TAB>block JSON" lines), so a read
+# can be answered with another block than the one asked for
+chain_of() { # the function and its arguments; prints PASS or FAIL: and what it printed
+    (
+        export PATH="${CHAIN_PATH}"
+        # shellcheck disable=SC1090
+        source <(sed -n '/^is_num() {/p; /^head_of() {/,/^}/p; /^block_at() {/,/^}/p; /^hash_at() {/,/^}/p; /^same_chain() {/,/^}/p' "${DRILL}/run.sh")
+        rpc() {
+            local n
+            n="$(jq -r '.params[0].data.blockNumber // empty' <<< "$2")"
+            if [ -z "${n}" ]; then
+                awk -v i="$1" '$1 == i { print "{\"result\":200,\"response\":" $2 "}"; f = 1 } END { exit !f }' "${CDIR}/heads"
+            else
+                awk -F'\t' -v i="$1" -v n="${n}" '$1 == i && $2 == n { print "{\"result\":200,\"response\":" $3 "}"; f = 1 } END { exit !f }' "${CDIR}/blocks"
+            fi
+        }
+        if r="$("$@")"; then echo "PASS: ${r}"; else echo "FAIL: ${r}"; fi
+    ) > "${CDIR}/out.txt" 2>&1
+}
+blk() { printf '%s\t%s\t{"number":%s,"hash":"%s"}\n' "$@" >> "${CDIR}/blocks"; } # node, height asked, number and hash answered
+chain_cases() { # $1 label, $2 PATH
+    local b i h
+    CASE="chain-reads$1"
+    CDIR="${WORK}/${CASE}"
+    mkdir -p "${CDIR}"
+    CHAIN_PATH="$2"
+    # A read of block 20 gives a hash only when the block answered is block 20: its number
+    # a JSON number equal to 20, its hash not empty
+    for b in '{"number":19,"hash":"hash19"}' '{"hash":"hash20"}' '{"number":"20","hash":"hash20"}' '{"number":null,"hash":"hash20"}' \
+        '{"number":20.5,"hash":"hash20"}' '{"number":20,"hash":""}' '{"number":20}'; do
+        printf '4\t20\t%s\n' "${b}" > "${CDIR}/blocks"
+        chain_of hash_at 4 20
+        want_out '^FAIL: $' "block 20 read as ${b}: a failed read"
+    done
+    : > "${CDIR}/blocks"
+    blk 4 20 20 hash20
+    chain_of hash_at 4 20
+    want_out '^PASS: hash20$' "block 20 read as itself: its hash"
+    # (a) r11 F1: every node at head 20 answers a read of height N with block N-1. All give
+    # one hash at "20", that of block 19
+    : > "${CDIR}/blocks"
+    for i in 4 1 2 3; do for h in $(seq 15 20); do blk "${i}" "${h}" $((h - 1)) "hash$((h - 1))"; done; done
+    printf '4 20\n1 20\n2 20\n3 20\n' > "${CDIR}/heads"
+    chain_of same_chain 17 4 1 2 3
+    want_out '^FAIL: head 20 vs others 20; no hash of block 20 on node 4$' "(a) block 19 answered for 20 on every node: not proven"
+    no_out '^PASS' "(a) PASS"
+    # (b) r11 F2: node 4 (judged) at 20, node 1 at 18, nodes 2 and 3 at 20, pre-wipe head 17;
+    # node 4's blocks 19 and 20 differ from the others'. All give one hash at 18
+    : > "${CDIR}/blocks"
+    for i in 4 1 2 3; do for h in $(seq 15 18); do blk "${i}" "${h}" "${h}" "hash${h}"; done; done
+    for h in 19 20; do blk 4 "${h}" "${h}" "fork${h}"; blk 2 "${h}" "${h}" "hash${h}"; blk 3 "${h}" "${h}" "hash${h}"; done
+    printf '4 20\n1 18\n2 20\n3 20\n' > "${CDIR}/heads"
+    chain_of same_chain 17 4 1 2 3
+    want_out "^FAIL: head 20 vs others 20; node 1 at 18, below node 4's head 20$" "(b) node 1 below node 4's head: not proven"
+    no_out '^PASS' "(b) PASS while node 1 is at 18"
+    # node 1 reaches 20, on the others' chain: the fork at 20 shows
+    for h in 19 20; do blk 1 "${h}" "${h}" "hash${h}"; done
+    printf '4 20\n1 20\n2 20\n3 20\n' > "${CDIR}/heads"
+    chain_of same_chain 17 4 1 2 3
+    want_out '^FAIL: head 20 vs others 20; block 20 is hash20\.\. on node 1, fork20\.\. on node 4$' "(b) node 1 at 20: the fork at 20 fails it"
+    no_out '^PASS' "(b) PASS once node 1 is at 20"
+    # control: the same heads, no fork: not proven while node 1 is at 18, PASS once it is at 20
+    : > "${CDIR}/blocks"
+    for i in 4 2 3; do for h in $(seq 15 20); do blk "${i}" "${h}" "${h}" "hash${h}"; done; done
+    for h in $(seq 15 18); do blk 1 "${h}" "${h}" "hash${h}"; done
+    printf '4 20\n1 18\n2 20\n3 20\n' > "${CDIR}/heads"
+    chain_of same_chain 17 4 1 2 3
+    want_out "^FAIL: head 20 vs others 20; node 1 at 18, below node 4's head 20$" "control: node 1 below node 4's head: not proven yet"
+    for h in 19 20; do blk 1 "${h}" "${h}" "hash${h}"; done
+    printf '4 20\n1 20\n2 20\n3 20\n' > "${CDIR}/heads"
+    chain_of same_chain 17 4 1 2 3
+    want_out '^PASS: head 20 vs others 20; block 20 hash20\.\. on nodes 4 1 2 3$' "control: node 1 at 20, one chain: PASS"
+}
+if sel chain-reads; then
+    chain_cases "" "${PATH}"
+    chain_cases -jq16 "${JQ16_PATH}"
+fi
+
 # ── volumes that exist before the run ───────────────────────────────────
 seed_vols() { # case name, volume names: volumes without the compose labels, there before the run
     local d="${WORK}/$1"

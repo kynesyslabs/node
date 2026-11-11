@@ -65,7 +65,8 @@ started again, or node-iso, first answers its RPC, every read prints nothing and
 exits 0: node RPC, commands in postgres containers, helper scripts, `docker logs`,
 `docker inspect` and `docker ps` of running containers), FAKE_EMPTY_BLOCKS (from
 the same point, every node answers a block read with nothing, exit 0, and its head
-as before), FAKE_LIST_FAIL (ps,volume:
+as before), FAKE_STALE_BLOCKS (from the same point, every node answers a read
+of block N with block N-1, its own number and hash), FAKE_LIST_FAIL (ps,volume:
 `docker ps` / `docker volume ls` filtered on the compose project label print
 nothing and exit 1, as with a daemon that does not answer), FAKE_OWNER_READ_FAIL
 (n: the n-th read of a state dir's owners, `stat -c` in a helper, fails with
@@ -485,6 +486,9 @@ def exec_cmd(a):
             if os.environ.get("FAKE_EMPTY_BLOCKS") and (c.get("restarted") or svc == "node-iso"):
                 st["empty_blocks"] = True
                 save(st)
+            if os.environ.get("FAKE_STALE_BLOCKS") and (c.get("restarted") or svc == "node-iso"):
+                st["stale_blocks"] = True
+                save(st)
             sys.stdout.write("Hello World!")
             sys.exit(0)
         d = json.loads(body)["params"][0]
@@ -518,7 +522,9 @@ def exec_cmd(a):
         if st.get("empty_blocks"):
             sys.exit(0)
         bn = d["data"]["blockNumber"]
-        bh = f"other{bn}" if svc in envlist("FAKE_OTHER_HASH") else f"hash{bn}"
+        if st.get("stale_blocks"):
+            bn = max(0, bn - 1)
+        bh =f"other{bn}" if svc in envlist("FAKE_OTHER_HASH") else f"hash{bn}"
         if svc in envlist("FAKE_FORK"):
             sv, pg = (st["volumes"].get(vname(project, f"{k}-{svc[5:]}"), {}) for k in ("state", "pgdata"))
             floor = sv.get("stop_head", pg.get("frozen_head") if pg.get("db") == "restored" else None)

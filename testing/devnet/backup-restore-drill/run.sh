@@ -324,14 +324,15 @@ rpc() { # $1 node, $2 JSON body
         -d "$2" "http://localhost:$(port_of "$1")/" 2>/dev/null
 }
 # The reads below fail (status not 0) when the read fails or gives nothing: no head
-# number, no block, no hash. A caller that goes on records that as unreadable
+# number, no block, no hash, or a block that is not the one asked for. A caller that goes
+# on records that as unreadable
 head_of() {
     rpc "$1" '{"method":"nodeCall","params":[{"message":"getLastBlockNumber","data":{},"muid":null}]}' |
         jq -er 'select(.result == 200) | .response | tostring | select(test("^[0-9]+$"))' 2>/dev/null
 }
-block_at() { # $1 node, $2 height -> the block's JSON
+block_at() { # $1 node, $2 height -> the block's JSON, only if its number is a JSON number equal to $2
     rpc "$1" "{\"method\":\"nodeCall\",\"params\":[{\"message\":\"getBlockByNumber\",\"data\":{\"blockNumber\":$2},\"muid\":null}]}" |
-        jq -ec 'select(.result == 200) | .response | objects' 2>/dev/null
+        jq -ec --argjson n "$2" 'select(.result == 200) | .response | objects | select((.number | type) == "number" and .number == $n)' 2>/dev/null
 }
 hash_at() { # fails on no output too: a jq before 1.7 exits 0 on no input, even with -e
     local h
@@ -397,28 +398,29 @@ span_head_of() { # "lowest<TAB>highest" head of the given nodes, empty if any do
 }
 # Caught up, on one chain, from the heads read here, one read per node: every given node
 # answers (a head not read fails it, never skipped), the first is within 2 blocks of the
-# highest of the others, the lowest of all is above $1, and all give the same non-empty
-# block hash at it. Prints the heads and that block, or the heads and what is not so, then
-# returns 1
+# highest of the others, its head is above $1, every other has reached that head, and all
+# give the same non-empty block hash at it. Prints the heads and that block, or the heads and
+# what is not so, then returns 1
 same_chain() { # $1 floor, rest: nodes, the one judged first
-    local floor="$1" i h hx="" ho="" lo="" miss="" ref="" heads
+    local floor="$1" i h hx="" ho="" miss="" below="" ref="" heads
     shift
     for i in "$@"; do
         h="$(head_of "${i}")" || h=""
         if ! is_num "${h}"; then miss="${miss} ${i}"; continue; fi
         if [ "${i}" = "$1" ]; then hx="${h}"; elif [ -z "${ho}" ] || [ "${h}" -gt "${ho}" ]; then ho="${h}"; fi
-        if [ -z "${lo}" ] || [ "${h}" -lt "${lo}" ]; then lo="${h}"; fi
+        if [ "${i}" != "$1" ] && is_num "${hx}" && [ "${h}" -lt "${hx}" ]; then below="${below} ${i} at ${h},"; fi
     done
     heads="head ${hx:-unreadable} vs others ${ho:-unreadable}"
     [ -z "${miss}" ] || { echo "${heads}; no head read from node${miss}"; return 1; }
     is_num "${ho}" && [ "${hx}" -ge $((ho - 2)) ] || { echo "${heads}; node $1 more than 2 blocks behind"; return 1; }
-    [ "${lo}" -gt "${floor}" ] || { echo "${heads}; the highest height all of nodes $* have, ${lo}, is not above ${floor}"; return 1; }
+    [ "${hx}" -gt "${floor}" ] || { echo "${heads}; node $1's head ${hx} is not above ${floor}"; return 1; }
+    [ -z "${below}" ] || { echo "${heads}; node${below} below node $1's head ${hx}"; return 1; }
     for i in "$@"; do
-        h="$(hash_at "${i}" "${lo}")" && [ -n "${h}" ] || { echo "${heads}; no hash of block ${lo} on node ${i}"; return 1; }
+        h="$(hash_at "${i}" "${hx}")" && [ -n "${h}" ] || { echo "${heads}; no hash of block ${hx} on node ${i}"; return 1; }
         ref="${ref:-${h}}"
-        [ "${h}" = "${ref}" ] || { echo "${heads}; block ${lo} is ${h:0:12}.. on node ${i}, ${ref:0:12}.. on node $1"; return 1; }
+        [ "${h}" = "${ref}" ] || { echo "${heads}; block ${hx} is ${h:0:12}.. on node ${i}, ${ref:0:12}.. on node $1"; return 1; }
     done
-    echo "${heads}; block ${lo} ${ref:0:12}.. on nodes $*"
+    echo "${heads}; block ${hx} ${ref:0:12}.. on nodes $*"
 }
 
 # ── helpers: containers and volumes ─────────────────────────────────────
@@ -1200,8 +1202,8 @@ if [ "${VARIANT}" = rejoin ]; then
     # ═════════════════════════════════════════════════════════════════════
     step 08-rejoin
     PH_T0="${T_C_END}"
-    # Rejoined: within 2 blocks of the highest other node, and on the others' chain: at the
-    # highest height all of them and node X have, above the pre-wipe head, one block hash.
+    # Rejoined: within 2 blocks of the highest other node, and on the others' chain: at node
+    # X's head, above the pre-wipe head, once every other node has reached it, one block hash.
     # Each try reads every head again (same_chain); one that is not read fails the try
     say "waiting for node ${X_NODE} to come within 2 blocks of the others, on their chain"
     deadline=$((SECONDS + REJOIN_TIMEOUT))
@@ -1273,7 +1275,7 @@ if [ "${VARIANT}" = rejoin ]; then
         check "restored head >= pre-wipe head" FAIL "head ${HX_END} < ${H_STOP}"
     fi
     # still within 2 blocks of the others now that D is over, not only once during it, and on
-    # their chain, from heads all read again in same_chain
+    # their chain at node X's head, from heads all read again in same_chain
     if [ "${SYNCED}" = 1 ]; then
         if chain="$(same_chain "${H_STOP}" "${X_NODE}" "${OTHERS[@]}")"; then
             check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" PASS "${chain}"
@@ -1433,9 +1435,9 @@ else
         wait_serve iso "${SERVE_TIMEOUT}" || die "node-iso did not serve within ${SERVE_TIMEOUT}s (see node-iso.log)"
         deadline=$((SECONDS + REJOIN_TIMEOUT))
         ISO_OK=0
-        # Caught up: within 2 blocks of the highest validator, and on their chain: at the highest
-        # height node-iso and all of them have, above the DB head, one block hash. Each try reads
-        # every head again (same_chain); one that is not read fails the try
+        # Caught up: within 2 blocks of the highest validator, and on their chain: at node-iso's
+        # head, above the DB head, once every validator has reached it, one block hash. Each try
+        # reads every head again (same_chain); one that is not read fails the try
         chain=""
         while [ "${SECONDS}" -lt "${deadline}" ]; do
             if is_num "${DB_HEAD}" && chain="$(same_chain "${DB_HEAD}" iso "${ALL_NODES[@]}")"; then ISO_OK=1; break; fi

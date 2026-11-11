@@ -290,12 +290,16 @@ a read-only mount that the script's `mv` could not move), TLSNotary is off, and
    from the host copy, stats, migrations, assert again, start exactly one
    node X. Ends when its RPC serves.
 7. **D1 / D** rejoin: D1 is the time from "serving" until its head is within
-   2 blocks of the other three and it is on their chain: at the highest height
-   all four have, above the pre-wipe head, all four give one block hash (a node
-   that matches the others up to its stop and forks after it never gets there).
-   Each try reads all four heads again, one read each, and judges the gap and
-   the height from those reads only: a head one of them does not answer fails
-   that try, it is never left out.
+   2 blocks of the other three and it is on their chain: node X's head is above
+   the pre-wipe head, each of the other three has reached it, and at node X's
+   head all four give one block hash (a node that matches the others up to its
+   stop and forks after it never gets there, even while another node lags below
+   the fork). Each try reads all four heads again, one read each, and judges the
+   gap and the height from those reads only: a head one of them does not answer
+   fails that try, it is never left out, and while another node is below node
+   X's head the try fails and the next one waits for it. A block read counts
+   only when the block answered is the one asked for (its `number` equals the
+   height); any other answer is a failed read.
    D adds proof that it signs: its signing record
    height moves past the value at stop, or a block after the restart carries
    its signature. Row **ALL** is stop of node X to rejoined and signing (the
@@ -313,7 +317,8 @@ set, on the restored database. Node X's key is never mounted anywhere else.
 Each is printed PASS, FAIL or INFO, and written to `timings.md` and
 `timings.json`. A check passes only on evidence the run has read: a read that
 fails, or that gives nothing (no head, no hash, no checksum, an empty log or
-listing), fails the check that needs it, with the reason; it is never skipped or
+listing, or a block other than the one asked for), fails the check that needs
+it, with the reason; it is never skipped or
 turned into INFO. Before the wipe and the restart, such a read stops the run
 (exit 2) instead. Two rows are INFO by design, never PASS or FAIL, and claim
 nothing: "uid 1000 write probe of the node state" and, in `isolated`, "whether
@@ -323,7 +328,7 @@ node X stopped or restarted during the isolated drill".
 |---|---|
 | node X rejoins (head within 2 blocks, on the others' chain) | written only as a FAIL, when D1 is not reached in `REJOIN_TIMEOUT` (see D1 above) |
 | restored head >= pre-wipe head | head after the rejoin >= head read from the database at stop |
-| node X within 2 blocks of the others at the end of D, on their chain | read again once D is over (only if D1 was reached), one head read of each of the four, judged on those reads only: node X's head is still within 2 blocks of the highest other node's, not only once during D, and node X and every other node give one non-empty block hash at the highest height all of them have, which must be above the pre-wipe head; no such height, or a head or hash that cannot be read, fails it |
+| node X within 2 blocks of the others at the end of D, on their chain | read again once D is over (only if D1 was reached), one head read of each of the four, judged on those reads only: node X's head is still within 2 blocks of the highest other node's, not only once during D, it is above the pre-wipe head, every other node has reached it, and node X and every other node give one non-empty block hash at node X's head; another node below node X's head, or a head or hash that cannot be read (a block read answered with another block than the one asked for counts as not read), fails it |
 | block hash at pre-wipe heights | each node's hash, node X's too, at the step-2 height and the at-stop height equals the one recorded then (node X's at step 2, its database's at stop) |
 | identity file checksum | identical at step 2, at stop, and after the rejoin; the files after the rejoin must all have been hashed |
 | signing state | every signing file present at stop, and every `.signed.json`, `.commitlock.json` and `.prevote.json` present at step 2, still exists after the rejoin (one there at step 2 and not at stop fails it), and those three are never older than at stop, by height, then round (`timestamp` in `.signed.json`, `round` in the other two). At least one of the three must be compared, and a file that cannot be hashed after the rejoin fails it (at stop or after the wipe it stops the run). The detail gives each one's height/round at stop and after: `advanced` only when strictly newer, `unchanged` when equal; an older one, or one without a height and round, fails the check |
@@ -334,7 +339,7 @@ node X stopped or restarted during the isolated drill".
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows in the dump's counts and equal; same table set. Written after the restore's migration, before node X starts again |
 | schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations`, of which there must be at least one counted (preflight stops with exit 2 otherwise) |
 | one instance of the key | asserted before the single start (a `docker ps` listing that fails stops the run); written after it |
-| isolated node reaches the expected head, on the validators' chain | (`isolated`, `ISO_NODE=1`) within `REJOIN_TIMEOUT`, in one try that reads the heads of node-iso and of every validator once each, every one of them answers, node-iso's head is within 2 blocks of the highest validator's, and node-iso and every validator give one non-empty block hash at the highest height all of them have, which must be above the database's head |
+| isolated node reaches the expected head, on the validators' chain | (`isolated`, `ISO_NODE=1`) within `REJOIN_TIMEOUT`, in one try that reads the heads of node-iso and of every validator once each, every one of them answers, node-iso's head is within 2 blocks of the highest validator's and above the database's head, every validator has reached it, and node-iso and every validator give one non-empty block hash at node-iso's head (a block read answered with another block than the one asked for counts as not read) |
 | isolated node holds no copy of node X's key | (`isolated`) node-iso's mounts are read and include its own state volume and no identity or state volume of node X, and the identity file on node-iso's state volume, read as a SHA-256 (64 hex), differs from node X's step-2 one; an identity that cannot be read, or a read that gives no SHA-256, fails it |
 | node X's key is held by only the one container on its state volume | (`isolated`) the running node X containers and the running containers on its state volume are both listed (a listing that fails fails it), and each list is exactly the container started at bring-up |
 | whether node X stopped or restarted during the isolated drill | INFO only: the node X container running at the end and the one started at bring-up. A restart in place (`restart: unless-stopped`) keeps the container id, so the drill does not show that node X never stopped |
@@ -442,7 +447,15 @@ with exit 0 once the restarted node X or node-iso serves (every check written fr
 then on fails, exit 1), block reads giving nothing with exit 0 from that point
 while heads are read, with the jq on `PATH` and with `test/jq-before-1.7/jq`,
 which exits 0 on no input as jq before 1.7 does (the rejoin or catch-up check
-fails), the default `OUT_DIR` of a run started in the same second
+fails), every node answering a block read from that point with the block below
+the one asked for (the same), and, on the script's own head, block and chain
+reads with given answers (with both jq), a block read answered with another
+block (another number, a number that is no JSON number, or none, or no hash: a
+failed read), every node answering block 19 for 20 (not passed), and node X at
+20, one other node at 18, two at 20, node X's blocks 19 and 20 differing from
+the others' (not passed while that node is at 18, failed once it reaches 20;
+without the fork, passed once it reaches 20), the default `OUT_DIR` of a run
+started in the same second
 as another of the project, a second run of a project whose
 lock is held and an `OUT_DIR` that already exists, empty or not (exit 2, nothing
 written), the project in the default `OUT_DIR` name, a teardown whose `down`
