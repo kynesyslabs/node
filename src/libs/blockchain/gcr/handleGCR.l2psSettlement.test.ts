@@ -50,6 +50,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import { settlementPublicSignals } from "@/libs/l2ps/settlement/encoding"
 import type { DecryptedTransfer, SettlementChange } from "@/libs/l2ps/settlement/types"
+import { parseSettlement } from "@/libs/l2ps/settlement/validation"
 import {
     batchTx,
     key,
@@ -59,7 +60,7 @@ import {
 } from "@/libs/l2ps/settlement/__fixtures__/settlementKit"
 import type { GCREntityCaches } from "./handleGCR"
 
-const { default: HandleGCR } = await import("./handleGCR")
+const { default: HandleGCR, withSettlementEdits } = await import("./handleGCR")
 
 const OS = 1_000_000_000n
 const FEE = 3n * OS
@@ -452,5 +453,87 @@ describe("before the fork", () => {
         await apply([tx])
 
         expect(snapshot()).toEqual(before)
+    })
+})
+
+describe("an account a settlement names with a zero delta", () => {
+    // The rows the database holds; prepareEntities loads only the accounts
+    // the block's transactions name, as it does on a node.
+    let db: Map<string, { balance: bigint; nonce: number }>
+    const originalLoad = (HandleGCR as any).loadGCRMainEntities
+    const clock = { height: 101, timestampSec: 1_800_000_000 }
+
+    beforeEach(() => {
+        getSharedState.networkFee = 0
+        getSharedState.rpcFee = 0
+        getSharedState.additionalFee = 0
+        db = new Map([
+            [ALICE.account, { balance: 100n * OS, nonce: 4 }],
+            [BOB.account, { balance: 10n * OS, nonce: 0 }],
+            [CAROL.account, { balance: 10n * OS, nonce: 0 }],
+        ])
+        ;(HandleGCR as any).prepareEntities = original.prepareEntities
+        ;(HandleGCR as any).loadGCRMainEntities = async (pubkeys: Set<string>) =>
+            new Map(
+                [...pubkeys].map(pubkey => {
+                    const row = db.get(pubkey) ?? { balance: 0n, nonce: 0 }
+                    return [pubkey, { pubkey, balance: row.balance, nonce: row.nonce } as any]
+                }),
+            )
+    })
+
+    afterEach(() => {
+        ;(HandleGCR as any).loadGCRMainEntities = originalLoad
+    })
+
+    /** The public signals the circuit binds for `transfers` planned on `balances`. */
+    const signalsOf = (transfers: DecryptedTransfer[], balances: Map<string, bigint>) =>
+        settlementPublicSignals(
+            transfers.map(t => ({ commitment: t.commitment, signer: t.from, nonce: t.nonce, fee: t.fee })),
+            netChanges(transfers).map(c => ({ account: c.account, balanceBefore: balances.get(c.account) ?? 0n, delta: c.delta })),
+        )
+    const dbBalances = () => new Map([...db].map(([k, v]) => [k, v.balance]))
+
+    it("is read at its real balance when nothing else in the block names it", async () => {
+        const zero = [pay(ALICE, BOB.account, 0n, 5n, 0n)]
+        const tx = batch(proven(zero, dbBalances()))
+
+        const out = await HandleGCR.applyTransactions([tx as any], false, clock, { defer: true })
+
+        expect(out.failedTxs).toEqual([])
+        expect(out.successfulTxs).toEqual([tx.hash])
+        expect(verified).toEqual([signalsOf(zero, dbBalances())])
+    })
+
+    it("gives the forging and the syncing path the same verdict and the balance the block's earlier transaction left", async () => {
+        // Another member node submits the second batch; its key sorts first,
+        // so its credit to Bob comes before the zero-amount transfer.
+        const other = Array.from({ length: 20 }, (_, i) => key(201 + i)).find(k => k.account < NODE.account)!
+        const credit = [pay(CAROL, BOB.account, 1n * OS, 1n, 0n)]
+        const zero = [pay(ALICE, BOB.account, 0n, 5n, 0n)]
+        const afterCredit = dbBalances()
+        afterCredit.set(CAROL.account, 9n * OS)
+        afterCredit.set(BOB.account, 11n * OS)
+        const y = batchTx(proven(credit, dbBalances()), { from: other.account, nonce: 1 })
+        const x = batch(proven(zero, afterCredit))
+        const block = orderDeterministically([x, y] as any[])
+        expect(block.map(t => t.hash)).toEqual([y.hash, x.hash])
+
+        // The batch reads Bob, so it is ordered with every transaction that writes him.
+        const derived = block.map(t => withSettlementEdits(t, parseSettlement(t).ok ? (parseSettlement(t) as any).value : undefined))
+        const groups = HandleGCR.partitionIndependentTxs(derived)
+        expect(groups).toHaveLength(1)
+
+        const forged = await HandleGCR.applyTransactions(block, false, clock, { defer: true })
+        const forgedSignals = [...verified]
+        verified.length = 0
+        const synced = await HandleGCR.applyTransactions(orderDeterministically([y, x] as any[]), false, clock)
+
+        expect(forged.failedTxs).toEqual([])
+        expect(forged.successfulTxs.sort()).toEqual([x.hash, y.hash].sort())
+        expect([...synced.successfulTxs].sort()).toEqual(forged.successfulTxs)
+        expect(synced.failedTxs).toEqual(forged.failedTxs)
+        expect(verified).toEqual(forgedSignals)
+        expect(forgedSignals).toContainEqual(signalsOf(zero, afterCredit))
     })
 })

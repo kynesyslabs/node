@@ -586,6 +586,16 @@ const settlementOfTx = new WeakMap<Transaction, ParsedSettlement>()
  * order the batch with every transaction touching one, so two batches over one
  * account in a block see each other's effects.
  */
+/**
+ * Every account a derived settlement copy reads, its zero-delta changes
+ * included: the proof binds each change's balance before, and a change with
+ * no edit would otherwise be neither loaded nor ordered with the block's
+ * other transactions over that account.
+ */
+function settlementAccounts(tx: Transaction): string[] {
+    return settlementOfTx.get(tx)?.changes.map(c => c.account) ?? []
+}
+
 export function withSettlementEdits(
     tx: Transaction,
     settlement: ParsedSettlement | undefined,
@@ -904,6 +914,9 @@ export default class HandleGCR {
                 affectedPubkeys.add(
                     normalizePubkey(tx.content.from_ed25519_address),
                 )
+            }
+            for (const account of settlementAccounts(tx)) {
+                affectedPubkeys.add(normalizePubkey(account))
             }
         }
 
@@ -1876,6 +1889,9 @@ export default class HandleGCR {
                 keys.push(
                     "acc:" + normalizePubkey(tx.content.from_ed25519_address),
                 )
+            }
+            for (const account of settlementAccounts(tx)) {
+                keys.push("acc:" + normalizePubkey(account))
             }
 
             for (const k of keys) addKey(k)
