@@ -81,7 +81,7 @@ const loudLogs = () =>
 import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import { innerTx, key, signedTransfer } from "@/libs/l2ps/settlement/__fixtures__/settlementKit"
-import { MAX_NONCE_AHEAD } from "@/libs/l2ps/settlement/transfer"
+import { MAX_NONCE_AHEAD, SETTLEMENT_ENVELOPE_MAX_BYTES } from "@/libs/l2ps/settlement/transfer"
 
 const { default: handleL2PS } = await import("./handleL2PS")
 
@@ -275,5 +275,21 @@ describe("handleL2PS under l2psSettlement", () => {
 
         expect(response.result).toBe(200)
         expect(execute).toHaveBeenCalledTimes(1)
+    })
+
+    it("refuses an envelope too large for any batch before it looks up, counts or decrypts anything", async () => {
+        decrypted(transfer())
+        decryptTx.mockClear()
+        getL2PS.mockClear()
+        check.mockClear()
+        const big = { ...tx, content: { ...tx.content, padding: "x".repeat(SETTLEMENT_ENVELOPE_MAX_BYTES) } }
+
+        const response = await handleL2PS(big)
+
+        expect(response.result).toBe(400)
+        expect(String(response.extra ?? response.response)).toContain("a settlement batch can carry")
+        expect(getL2PS).not.toHaveBeenCalled()
+        expect(check).not.toHaveBeenCalled()
+        expect(decryptTx).not.toHaveBeenCalled()
     })
 })

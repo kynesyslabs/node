@@ -224,6 +224,15 @@ export default async function handleL2PS(
         return createErrorResponse(response, 400, "Invalid L2PS transaction hash: expected 64 lower-case hex characters")
     }
 
+    // An envelope no batch can carry is refused before it costs a lookup,
+    // a backlog read or a decrypt.
+    if (l2psSettlementActive()) {
+        const oversize = envelopeSizeRefusal(l2psTx)
+        if (oversize) {
+            return createErrorResponse(response, 400, `Refused L2PS transfer: ${oversize}`)
+        }
+    }
+
     const payloadData = l2psTx.content.data[1]
     const l2psUid = payloadData.l2ps_uid
 
@@ -270,10 +279,6 @@ export default async function handleL2PS(
     }
 
     if (l2psSettlementActive()) {
-        const oversize = envelopeSizeRefusal(l2psTx)
-        if (oversize) {
-            return createErrorResponse(response, 400, `Refused L2PS transfer: ${oversize}`)
-        }
         const opened = openSettlementTransfer(decryptedTx, l2psTx.hash)
         if (opened.ok === false) {
             return createErrorResponse(response, 400, `Refused L2PS transfer: ${opened.reason}`)

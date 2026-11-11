@@ -154,6 +154,6 @@ describe("envelopeSizeRefusal", () => {
         }))
         // The aggregator embeds the rows as base64 JSON (createBatchPayload).
         const embedded = Buffer.from(JSON.stringify(rows)).toString("base64").length
-        expect(embedded).toBeLessThan(BLOCK_MAX_CONTENT_BYTES / 2 + 4096)
+        expect(embedded).toBeLessThanOrEqual(BLOCK_MAX_CONTENT_BYTES / 2)
     })
 })

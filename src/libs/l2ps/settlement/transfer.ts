@@ -181,15 +181,21 @@ export function transferAdmissionRefusal(
 export const MAX_NONCE_AHEAD = 2n * BigInt(SETTLEMENT_TRANSFERS)
 
 /**
+ * Bytes a batch row adds around its envelope: the row's hash and original
+ * hash with their JSON keys (about 180) and the array's separators.
+ */
+const BATCH_ROW_WRAPPER_BYTES = 256
+
+/**
  * Most bytes of a stored L2PS envelope (the outer transaction, as JSON) a
  * member admits for settlement. A batch carries up to SETTLEMENT_TRANSFERS
- * envelopes in base64, which grows them by a third, and is held to half of
- * an empty block so its record, proof and the block's other txs still fit.
- * A larger envelope would make every batch it joins too big for the mempool.
+ * rows, each an envelope in its row wrapper, as base64 JSON, which grows
+ * them by a third; a full batch of them stays within half of an empty block,
+ * so its record, proof and the block's other txs still fit. A larger
+ * envelope would make every batch it joins too big for the mempool.
  */
-export const SETTLEMENT_ENVELOPE_MAX_BYTES = Math.floor(
-    ((BLOCK_MAX_CONTENT_BYTES / 2) * 3) / 4 / SETTLEMENT_TRANSFERS,
-)
+export const SETTLEMENT_ENVELOPE_MAX_BYTES =
+    Math.floor(((BLOCK_MAX_CONTENT_BYTES / 2) * 3) / 4 / SETTLEMENT_TRANSFERS) - BATCH_ROW_WRAPPER_BYTES
 
 export function envelopeSizeRefusal(envelope: unknown): string | null {
     const bytes = Buffer.byteLength(JSON.stringify(envelope) ?? "")
