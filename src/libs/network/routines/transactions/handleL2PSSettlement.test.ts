@@ -55,9 +55,13 @@ mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
         execute,
         recordTransaction,
         updateTransactionStatus,
-        // As the query reads them: filtered by subnet only when given one.
-        getUnsettledBySender: async (...args: unknown[]) =>
-            unsettled.filter(row => args.length < 4 || row.l2ps_uid === args[0]),
+        // As the query reads them: one page, filtered by subnet only when
+        // given one (l2psUid, from, ...).
+        getUnsettledBySender: async (...args: unknown[]) => {
+            const byUid = typeof args[1] === "string"
+            const [limit, offset = 0] = (byUid ? args.slice(3) : args.slice(2)) as number[]
+            return unsettled.filter(row => !byUid || row.l2ps_uid === args[0]).slice(offset, offset + limit)
+        },
     },
 }))
 const checkInnerTxBalance = jest.fn(async (..._args: unknown[]): Promise<string | null> => null)
@@ -293,6 +297,19 @@ describe("handleL2PS under l2psSettlement", () => {
         decrypted(transfer({ nonce: 5n }))
         const response = await handleL2PS(tx)
         expect(response.result).toBe(200)
+    })
+
+    it("reads past history rows that can no longer settle, so they never hide a live one", async () => {
+        for (let i = 0n; i < 19n; i++) {
+            const dead = transfer({ nonce: 6n + i, amount: 1n })
+            queued(dead)
+            stranded.add(dead.txHash)
+        }
+        queued(transfer({ nonce: 5n, amount: 1n }))
+        decrypted(transfer({ nonce: 5n }))
+        const response = await handleL2PS(tx)
+        expect(response.result).toBe(400)
+        expect(JSON.stringify(response)).toContain("already queued")
     })
 
     it("refuses a transfer the balance covers only without the sender's queued transfers", async () => {

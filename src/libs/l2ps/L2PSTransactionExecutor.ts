@@ -728,6 +728,7 @@ export default class L2PSTransactionExecutor {
         from: string,
         accountNonce: bigint,
         limit: number,
+        offset = 0,
     ): Promise<L2PSTransaction[]> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -738,8 +739,9 @@ export default class L2PSTransactionExecutor {
                 status: In(["pending", "batched"]),
                 nonce: MoreThan(accountNonce.toString() as unknown as bigint),
             },
-            order: { nonce: "ASC" },
+            order: { nonce: "ASC", id: "ASC" },
             take: limit,
+            skip: offset,
         })
     }
 

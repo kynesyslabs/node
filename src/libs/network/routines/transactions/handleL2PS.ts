@@ -143,22 +143,24 @@ async function queuedTransfersOf(
     // Every subnet's: they all settle against the sender's one L1 nonce
     // and balance. Nonces past the account nonce are unique per sender, so
     // at most MAX_NONCE_AHEAD rows can be unsettled; one more shows a breach.
-    const rows = await L2PSTransactionExecutor.getUnsettledBySender(
-        transfer.from,
-        accountNonce,
-        Number(MAX_NONCE_AHEAD) + 1,
-    )
     // Only a transfer whose queue row can still settle holds a nonce: a
     // history row left pending by a refusal whose cleanup failed would
-    // otherwise hold one for good.
-    const settleable = await L2PSMempool.getSettleableHashes(
-        rows.map(row => row.encrypted_hash).filter((hash): hash is string => !!hash),
-    )
+    // otherwise hold one for good. Paged until that many live rows are
+    // read, so such rows never push live ones out of the window.
+    const window = Number(MAX_NONCE_AHEAD) + 1
+    const rows: Awaited<ReturnType<typeof L2PSTransactionExecutor.getUnsettledBySender>> = []
+    for (let offset = 0; rows.length < window; offset += window) {
+        const page = await L2PSTransactionExecutor.getUnsettledBySender(transfer.from, accountNonce, window, offset)
+        const settleable = await L2PSMempool.getSettleableHashes(
+            page.map(row => row.encrypted_hash).filter((hash): hash is string => !!hash),
+        )
+        rows.push(...page.filter(row => !!row.encrypted_hash && settleable.has(row.encrypted_hash)))
+        if (page.length < window) break
+    }
     const instances = new Map<string, L2PS | null>([[l2psUid, l2psInstance]])
     const queued: QueuedTransfer[] = []
     for (const row of rows) {
         if (row.encrypted_hash === transfer.txHash || !row.encrypted_payload) continue
-        if (!settleable.has(row.encrypted_hash)) continue
         if (!instances.has(row.l2ps_uid)) {
             instances.set(row.l2ps_uid, await getL2PSInstance(row.l2ps_uid).catch(() => null))
         }
