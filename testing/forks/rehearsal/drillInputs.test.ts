@@ -277,10 +277,11 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         for (const n of [
             "osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity",
             "quorumParity", "committeeBinding", "commitLock", "finalityProofs",
+            "web2ProofBinding", "tlsnProofEnforcement",
         ]) {
             expect(expected[n]).toBe(0)
         }
-        for (const n of ["gasFeeSeparation", "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "atomicWork", "networkGovernance"]) {
+        for (const n of ["gasFeeSeparation", "xmProofBinding", "atomicWork", "networkGovernance"]) {
             expect(expected[n]).toBeNull()
         }
     })
