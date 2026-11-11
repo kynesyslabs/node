@@ -33,6 +33,17 @@ export const seenAuthMessages = new SeenAuthMessages(200_000)
  * behind ours.
  */
 export const PROCESS_START_MS = Date.now()
+export const PROCESS_START_MONO_MS = performance.now()
+
+/**
+ * When this process started, on the wall clock as it reads now. Taken as
+ * uptime on the monotonic clock, so a clock set back after start moves the
+ * start back with it instead of refusing every fresh request until the wall
+ * clock catches up with the old reading.
+ */
+function processStartMs(now: number): number {
+    return now - (performance.now() - PROCESS_START_MONO_MS)
+}
 export const RESTART_CLOCK_SLACK_MS = 2_000
 
 /**
@@ -263,14 +274,15 @@ export async function verifySignature(
  * only refused when dated before the start.
  */
 function restartReplayError(ts: number, audienceBound: boolean, now = Date.now()): string | null {
-    if (ts < PROCESS_START_MS - RESTART_CLOCK_SLACK_MS) {
+    const startedAt = processStartMs(now)
+    if (ts < startedAt - RESTART_CLOCK_SLACK_MS) {
         return "Auth timestamp predates this node's start"
     }
     if (!audienceBound) return null
     if (ts > now + AUDIENCE_FUTURE_SLACK_MS) {
         return "Auth timestamp is ahead of this node's clock"
     }
-    if (ts <= PROCESS_START_MS + AUDIENCE_FUTURE_SLACK_MS) {
+    if (ts <= startedAt + AUDIENCE_FUTURE_SLACK_MS) {
         return "Auth timestamp too close to this node's start; sign the call again"
     }
     return null

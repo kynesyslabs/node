@@ -5,7 +5,7 @@
  * the real auth middleware and the real RPC route.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, jest, setSystemTime } from "bun:test"
+import { afterAll, beforeAll, beforeEach, describe, expect, it, jest, setSystemTime, spyOn } from "bun:test"
 import forge from "node-forge"
 import { mockCore } from "src/utilities/testSupport/coreMocks"
 
@@ -115,7 +115,7 @@ const { serverRpcBun } = await import("./server_rpc")
 const { default: Peer } = await import("src/libs/peer/Peer")
 const Hashing = (await import("src/libs/crypto/hashing")).default
 const { bodyBoundAuthHeaders } = await import("./peerHttpAuth")
-const { PROCESS_START_MS, seenAuthMessages } = await import("./verifySignature")
+const { PROCESS_START_MONO_MS, PROCESS_START_MS, seenAuthMessages } = await import("./verifySignature")
 
 const server: any = await serverRpcBun()
 const fakeServer = { requestIP: () => ({ address: "198.51.100.7" }) }
@@ -247,10 +247,18 @@ describe("peer HTTP auth", () => {
 
 describe("sudo methods", () => {
     // Sudo calls dated within a few seconds of the node's start are refused,
-    // so these run on a clock well past it.
-    const NOW = PROCESS_START_MS + 60_000
-    beforeAll(() => setSystemTime(new Date(NOW)))
-    afterAll(() => setSystemTime())
+    // so these run a minute after it, on both clocks.
+    const UPTIME = 60_000
+    const NOW = PROCESS_START_MS + UPTIME
+    let monotonic: ReturnType<typeof spyOn>
+    beforeAll(() => {
+        setSystemTime(new Date(NOW))
+        monotonic = spyOn(performance, "now").mockReturnValue(PROCESS_START_MONO_MS + UPTIME)
+    })
+    afterAll(() => {
+        setSystemTime()
+        monotonic.mockRestore()
+    })
 
     const award = { method: "awardPoints", params: [{ message: [{ address: SENDER, points: 1 }] }] }
     const sign = async (message: Uint8Array) =>
@@ -348,6 +356,17 @@ describe("sudo methods", () => {
         const body = JSON.stringify(award)
         const res = await deliver(body, await operatorHeaders(body, OUR_KEY, NOW + 1_000))
         expect(res.status).toBe(200)
+    })
+
+    it("accepts a fresh call after the clock is set back past the node's start", async () => {
+        setSystemTime(new Date(NOW - 10 * 60_000))
+        try {
+            const body = JSON.stringify(award)
+            const res = await deliver(body, await operatorHeaders(body))
+            expect(res.status).toBe(200)
+        } finally {
+            setSystemTime(new Date(NOW))
+        }
     })
 
     it("refuses an exact replay of a sudo call", async () => {
