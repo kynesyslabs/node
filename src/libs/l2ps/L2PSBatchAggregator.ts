@@ -920,6 +920,10 @@ export class L2PSBatchAggregator {
                 const record = await executor.getTransactionByHash(l2psUid, row.original_hash)
                 return record?.l1_batch_hash ?? null
             },
+            failedInHistory: async rowHashes => {
+                const executor = (await import("./L2PSTransactionExecutor")).default
+                return executor.getFailedByEncryptedHashes(rowHashes)
+            },
             head: () => getSharedState.lastBlockNumber ?? 0,
             now: () => Date.now(),
         }

@@ -120,6 +120,10 @@ function deps(): SettlementDeps {
             if (l1) historyBatch.set(hash, l1)
         },
         historyBatchHash: async (_uid, row: any) => historyBatch.get(row.hash) ?? null,
+        failedInHistory: async hashes => {
+            const last = new Map(history.map(h => [h.hash, h.status]))
+            return new Set(hashes.filter(h => last.get(h) === "failed"))
+        },
         head: () => head,
         now: () => now,
     }
@@ -799,6 +803,19 @@ describe("a terminal write that fails", () => {
         now += LIMITS.proverBackoffMaxMs
         await agg.cycle()
         expect(statusOf(stale)).toBe(L2PS_STATUS.FAILED)
+    })
+
+    it("never settles a transfer whose history reads failed, even when its row still reads queued after a restart", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        queue(t)
+        // The drop wrote the history, then the row write failed and the node restarted.
+        history.push({ hash: t.txHash, status: "failed", message: "dropped" })
+        const agg = new SettlementAggregator(deps(), LIMITS)
+
+        await agg.cycle()
+
+        expect(proveCalls).toBe(0)
+        expect(statusOf(t)).toBe(L2PS_STATUS.FAILED)
     })
 
     it("keeps a landed batch's rows batched until their history reads confirmed", async () => {

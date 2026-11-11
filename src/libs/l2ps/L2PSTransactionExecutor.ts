@@ -745,6 +745,18 @@ export default class L2PSTransactionExecutor {
         })
     }
 
+    /** The encrypted hashes among `hashes` whose history row reads failed. Throws on a failed read. */
+    static async getFailedByEncryptedHashes(hashes: string[]): Promise<Set<string>> {
+        if (hashes.length === 0) return new Set()
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const rows = await dsInstance.getDataSource().getRepository(L2PSTransaction).find({
+            where: { encrypted_hash: In(hashes), status: "failed" },
+            select: { encrypted_hash: true },
+        })
+        return new Set(rows.map(row => row.encrypted_hash))
+    }
+
     /**
      * Get transaction by hash
      */

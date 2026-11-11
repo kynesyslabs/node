@@ -94,6 +94,8 @@ export interface SettlementDeps {
     ): Promise<void>
     /** The L1 batch a history row was last batched into, for recovery after a restart. */
     historyBatchHash(l2psUid: string, row: L2PSMempoolTx): Promise<string | null>
+    /** The rows among `rowHashes` whose history already reads failed. */
+    failedInHistory(rowHashes: string[]): Promise<Set<string>>
     head(): number
     now(): number
 }
@@ -625,7 +627,14 @@ export class SettlementAggregator {
             }
         }
         const fresh = await this.deps.rows(l2psUid, L2PS_STATUS.EXECUTED, this.limits.queueWindow)
-        const rows = [...fresh, ...parked]
+        // A drop whose history was written but whose row was not: its
+        // sender was told it failed, so it must never settle, restart or not.
+        const failed = await this.deps.failedInHistory([...fresh, ...parked].map(row => row.hash))
+        for (const hash of failed) {
+            await this.deps.setRows([hash], L2PS_STATUS.FAILED)
+            this.blame.delete(hash)
+        }
+        const rows = [...fresh, ...parked].filter(row => !failed.has(row.hash))
         if (rows.length < this.limits.minBatchSize) return batches
 
         const rowOf = new Map<string, L2PSMempoolTx>()
