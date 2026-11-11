@@ -47,6 +47,9 @@ const { default: PeerManager } = await import("src/libs/peer/PeerManager")
 const { Peer } = await import("src/libs/peer")
 const { manageHelloPeer } = await import("src/libs/network/manageHelloPeer")
 
+const fromAlice = (response: any) =>
+    PeerManager.helloPeerCallback(response, new Peer(ALICE_URL, ALICE), NONCE)
+
 function seed(identity: string, url: string) {
     const peer = new Peer(url, identity)
     peer.sync = { status: true, block: 100, block_hash: "h100" }
@@ -88,9 +91,6 @@ function reply(extra: Record<string, unknown>, signed = true): any {
         },
     }
 }
-
-const fromAlice = (response: any) =>
-    PeerManager.helloPeerCallback(response, new Peer(ALICE_URL, ALICE), NONCE)
 
 beforeEach(() => {
     const manager = PeerManager.getInstance()
