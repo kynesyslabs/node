@@ -538,6 +538,41 @@ async function startInboundServers() {
 
 // ANCHOR Preparing the main loop
 // ! Simplify this too
+/**
+ * Loads the joined L2PS networks and, for a settlement member, checks that
+ * it can prove. Runs before the node serves or joins consensus: a member
+ * that cannot prove would admit transfers it never settles, and one that
+ * exits only after joining has already been counted in the validator set.
+ */
+async function loadL2PSNetworks() {
+    const bootTracker = getSharedState.bootTracker
+    bootTracker.start("l2ps.networks")
+    try {
+        await ParallelNetworks.getInstance().loadAllL2PS()
+        bootTracker.ready("l2ps.networks")
+        log.info(
+            `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
+        )
+    } catch (error) {
+        handleError(error, "CORE", {
+            source: ErrorSource.L2PS_NETWORK_LOADING,
+        })
+        bootTracker.fail("l2ps.networks", error)
+        subsystemError(getSharedState.subsystems, "l2ps", error)
+    }
+
+    const proverProblem = await settlementProverProblem({
+        scheduled: settlementScheduled(),
+        member: (getSharedState.l2psJoinedUids?.length ?? 0) > 0,
+        built: () => isSettlementBuilt(),
+        probe: () => settlementProverPool().probe(),
+    })
+    if (proverProblem) {
+        log.error(`[BOOT] Refusing to start: ${proverProblem}`)
+        process.exit(1)
+    }
+}
+
 async function preMainLoop() {
     // NOTE Overriding if necessary
     if (indexState.OVERRIDE_PORT) {
@@ -652,6 +687,10 @@ async function preMainLoop() {
     // Prime the node's own role before anything role-gated starts.
     invalidateStakedSet()
     await getStakedSet()
+
+    // After the first stake notice, which saw no joined network yet, so the
+    // L2PS services still start only once the node has synced.
+    await loadL2PSNetworks()
 
     await startInboundServers()
 
@@ -1349,34 +1388,6 @@ async function main() {
         bootTracker.start("main_loop")
         bootTracker.ready("main_loop")
         markSubsystem(getSharedState.subsystems, "main_loop", "running")
-
-        // Load L2PS networks configuration
-        bootTracker.start("l2ps.networks")
-        try {
-            await ParallelNetworks.getInstance().loadAllL2PS()
-            bootTracker.ready("l2ps.networks")
-            log.info(
-                `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
-            )
-        } catch (error) {
-            handleError(error, "CORE", {
-                source: ErrorSource.L2PS_NETWORK_LOADING,
-            })
-            bootTracker.fail("l2ps.networks", error)
-            subsystemError(getSharedState.subsystems, "l2ps", error)
-        }
-
-        // A member that cannot prove would admit transfers it never settles.
-        const proverProblem = await settlementProverProblem({
-            scheduled: settlementScheduled(),
-            member: (getSharedState.l2psJoinedUids?.length ?? 0) > 0,
-            built: () => isSettlementBuilt(),
-            probe: () => settlementProverPool().probe(),
-        })
-        if (proverProblem) {
-            log.error(`[BOOT] Refusing to start: ${proverProblem}`)
-            process.exit(1)
-        }
 
         // Start L2PS hash generation service (for L2PS participating nodes)
         // Note: l2psJoinedUids is populated during ParallelNetworks initialization

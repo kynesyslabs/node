@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
+import { readFileSync } from "node:fs"
+import * as path from "node:path"
 import { getSharedState } from "@/utilities/sharedState"
 import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { settlementProverProblem, settlementScheduled, settlementVerifierProblem } from "./bootCheck"
@@ -42,5 +44,28 @@ describe("settlement boot checks", () => {
         expect(await settlementProverProblem(dead)).toContain("prover does not start: settlement prover 0 exited")
         expect(await settlementProverProblem({ ...dead, built: () => false, member: false })).toBeNull()
         expect(await settlementProverProblem({ ...dead, scheduled: false })).toBeNull()
+    })
+})
+
+describe("boot order", () => {
+    // index.ts cannot be imported in a test (it boots the node), so the
+    // order is read from its source.
+    const source = readFileSync(path.join(import.meta.dir, "..", "..", "..", "index.ts"), "utf8")
+    const bodyOf = (name: string) => {
+        const start = source.indexOf(`async function ${name}()`)
+        expect(start).toBeGreaterThan(-1)
+        return source.slice(start, source.indexOf("\n}\n", start))
+    }
+
+    it("checks the settlement prover before the node serves or joins consensus", () => {
+        const pre = bodyOf("preMainLoop")
+        const load = pre.indexOf("await loadL2PSNetworks()")
+        expect(load).toBeGreaterThan(-1)
+        expect(load).toBeLessThan(pre.indexOf("await startInboundServers()"))
+        expect(load).toBeLessThan(pre.indexOf("await peerBootstrap("))
+        expect(bodyOf("loadL2PSNetworks")).toContain("settlementProverProblem(")
+        expect(source.split("settlementProverProblem(").length - 1).toBe(1)
+        expect(source.split("loadAllL2PS(").length - 1).toBe(1)
+        expect(source.indexOf("await preMainLoop()")).toBeLessThan(source.indexOf("        mainLoop()\n"))
     })
 })
