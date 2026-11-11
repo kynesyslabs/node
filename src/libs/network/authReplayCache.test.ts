@@ -40,4 +40,24 @@ describe("SeenAuthMessages", () => {
         expect(seen.claim("d", 1_000, 200)).toBe(true)
         expect(seen.claim("live", 1_000, 200)).toBe(false)
     })
+
+    it("evicts the entry closest to expiry when every entry is live", () => {
+        const seen = new SeenAuthMessages(3)
+        seen.claim("late", 9_000, 0)
+        seen.claim("soon", 1_000, 0)
+        seen.claim("mid", 5_000, 0)
+        expect(seen.claim("new", 9_000, 10)).toBe(true)
+        expect(seen.claim("late", 9_000, 10)).toBe(false)
+        expect(seen.claim("mid", 9_000, 10)).toBe(false)
+    })
+
+    it("stays fast when full of live entries", () => {
+        const seen = new SeenAuthMessages(50_000)
+        for (let i = 0; i < 50_000; i++) seen.claim(`live${i}`, 1_000_000 + i, 0)
+        const started = performance.now()
+        for (let i = 0; i < 2_000; i++) seen.claim(`new${i}`, 1_000_000, 1)
+        // A full scan per claim takes seconds here; ordered upkeep, milliseconds.
+        expect(performance.now() - started).toBeLessThan(500)
+        expect(seen.size).toBe(50_000)
+    })
 })
