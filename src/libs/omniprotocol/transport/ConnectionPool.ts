@@ -307,7 +307,10 @@ export class ConnectionPool extends EventEmitter {
         const connectKey = `${peerIdentity} ${connectionString}`
         const connecting = this.connecting.get(connectKey)
         if (connecting !== undefined) {
-            const connection = await connecting
+            const connection = await this.joinConnect(
+                connecting,
+                options.timeout,
+            )
             this.reserve(connection)
             return connection
         }
@@ -423,6 +426,37 @@ export class ConnectionPool extends EventEmitter {
         await connected
         this.reserve(connection)
         return connection
+    }
+
+    /**
+     * Wait for a connect another call started, within this call's own
+     * timeout: the connect runs on the starter's, possibly longer, budget.
+     * Giving up here leaves the connect running for the other callers.
+     */
+    private async joinConnect(
+        connecting: Promise<PeerConnection>,
+        timeout: number | undefined,
+    ): Promise<PeerConnection> {
+        if (timeout === undefined) {
+            return connecting
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const expired = new Promise<never>((_, reject) => {
+            timer = setTimeout(
+                () =>
+                    reject(
+                        new RequestTimeoutError(
+                            `No connection within ${timeout}ms`,
+                        ),
+                    ),
+                timeout,
+            )
+        })
+        try {
+            return await Promise.race([connecting, expired])
+        } finally {
+            clearTimeout(timer)
+        }
     }
 
     /**

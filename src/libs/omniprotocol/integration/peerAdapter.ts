@@ -23,6 +23,13 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 export type AdapterOptions = BaseAdapterOptions
 
+const omniTimeout = (): RPCResponse => ({
+    result: 504,
+    response: "Request timeout",
+    require_reply: false,
+    extra: { code: "ETIMEDOUT", transport: "omni" },
+})
+
 export class PeerOmniAdapter extends BaseOmniAdapter {
     constructor(options: AdapterOptions = {}) {
         super(options)
@@ -43,6 +50,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
             return peer.httpCall(request, isAuthenticated, timeoutMs)
         }
 
+        const deadline = Date.now() + timeoutMs
         let responseBuffer: Buffer | null
         try {
             responseBuffer = await this.sendNodeCall(
@@ -56,7 +64,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 peer,
                 request,
                 isAuthenticated,
-                timeoutMs,
+                { timeoutMs, deadline },
                 error,
             )
         }
@@ -158,7 +166,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
         peer: Peer,
         request: RPCRequest,
         isAuthenticated: boolean,
-        timeoutMs: number,
+        { timeoutMs, deadline }: { timeoutMs: number; deadline: number },
         error: unknown,
     ): RPCResponse | Promise<RPCResponse> {
         // A slow answer on a live connection is what HTTP reports as a 504.
@@ -170,12 +178,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
             log.warning(
                 `[PeerOmniAdapter] [${request.method}] no answer from ${peer.identity} within ${timeoutMs}ms`,
             )
-            return {
-                result: 504,
-                response: "Request timeout",
-                require_reply: false,
-                extra: { code: "ETIMEDOUT", transport: "omni" },
-            }
+            return omniTimeout()
         }
         // The connection was up, so Omni works for this peer; the peer may
         // already have acted on the request, and resending it over HTTP
@@ -209,8 +212,15 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
         // Mark peer as HTTP-only to avoid repeated TCP failures
         this.markHttpPeer(peer.identity)
 
+        // The fallback gets what the failed connect left of the call's
+        // budget: a full fresh timeout would outlive callers that stop
+        // waiting at that budget, such as the mempool merge.
+        const remainingMs = deadline - Date.now()
+        if (remainingMs <= 0) {
+            return omniTimeout()
+        }
         // Use httpCall directly to avoid recursion through call()
-        return peer.httpCall(request, isAuthenticated, timeoutMs)
+        return peer.httpCall(request, isAuthenticated, remainingMs)
     }
 
     /**

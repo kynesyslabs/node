@@ -51,8 +51,9 @@ export class ConnectionTimeoutError extends OmniProtocolError {
     }
 }
 
-// The connection is up but the answer did not come in time: the peer is slow,
-// not unreachable over Omni, so callers must not fall back to HTTP for it.
+// The answer did not come in time while the connection was up, or while a
+// connect another call started was still running: the peer is slow, not
+// unreachable over Omni, so callers must not fall back to HTTP for it.
 export class RequestTimeoutError extends ConnectionTimeoutError {
     constructor(message: string) {
         super(message)

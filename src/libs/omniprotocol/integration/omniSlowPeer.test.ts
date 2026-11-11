@@ -85,6 +85,7 @@ jest.mock("../transport/PeerConnection", () => {
 const { PeerOmniAdapter } = await import("./peerAdapter")
 const { ConnectionPool } = await import("../transport/ConnectionPool")
 const { DEFAULT_OMNIPROTOCOL_CONFIG } = await import("../types/config")
+const { RequestTimeoutError } = await import("../types/errors")
 
 const PEER = "0x" + "ab".repeat(32)
 const URL_A = "http://10.0.0.9:53550"
@@ -191,6 +192,29 @@ describe("connect", () => {
 
         expect(created).toBe(1)
         expect(new Set(connections).size).toBe(1)
+        await pool.shutdown?.()
+    })
+})
+
+describe("a shared connect", () => {
+    it("is waited for by each caller only within its own timeout", async () => {
+        const pool = new ConnectionPool()
+        let open!: () => void
+        connectGate = new Promise<void>(resolve => {
+            open = resolve
+        })
+        const address = "tcp://10.0.0.9:63551"
+        const starter = pool.acquire(PEER, address, { timeout: 1000 })
+        const joiner = pool.acquire(PEER, address, { timeout: 20 })
+
+        const late = new Promise(resolve => setTimeout(resolve, 200, "late"))
+        const outcome = await Promise.race([joiner.catch(e => e), late])
+        expect(outcome).toBeInstanceOf(RequestTimeoutError)
+
+        // The connect carries on for the call that started it
+        open()
+        expect(await starter).not.toBeNull()
+        expect(created).toBe(1)
         await pool.shutdown?.()
     })
 })

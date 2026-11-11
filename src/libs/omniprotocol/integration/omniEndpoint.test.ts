@@ -131,6 +131,27 @@ describe("a request timeout on a live Omni connection", () => {
         expect(peer.httpCall).toHaveBeenCalledTimes(1)
         expect(adapter.shouldUseOmni(PEER, URL_A)).toBe(false)
     })
+
+    it("a connect that used up the call's budget is not retried over HTTP", async () => {
+        const adapter = preferred()
+        adapter.recordOmniEndpoint(PEER, URL_A, 63551)
+        ;(adapter as any).connectionPool = {
+            sendAuthenticated: jest.fn(async () => {
+                await new Promise(resolve => setTimeout(resolve, 30))
+                throw new Error("Connection timeout after 30ms")
+            }),
+        }
+        const peer = fakePeer()
+        const response = await adapter.adaptCall(
+            peer,
+            { method: "mempool", params: [] },
+            true,
+            30,
+        )
+        expect(response.result).toBe(504)
+        expect(peer.httpCall).not.toHaveBeenCalled()
+        expect(adapter.shouldUseOmni(PEER, URL_A)).toBe(false)
+    })
 })
 
 describe("an answer that cannot be decoded", () => {

@@ -49,11 +49,12 @@ at another service on the host that proved the URL.
 ### Failures
 
 - Connect failure (port closed, filtered, refused): fall back to HTTP for
-  that call and keep the peer on HTTP for a cooldown that starts at 60 s and
-  doubles with each failure in a row, up to 10 minutes. An Omni answer resets
-  it; a repeated hello with the same advert does not. The connect timeout is
+  that call with what is left of its timeout (a 504 if nothing is left), and
+  keep the peer on HTTP for a cooldown that starts at 60 s and doubles with
+  each failure in a row, up to 10 minutes. An Omni answer resets it; a
+  repeated hello with the same advert does not. The connect timeout is
   capped at the call's own timeout, so a dead advertised port costs at most
-  one call timeout per cooldown.
+  one call timeout per cooldown, and no fallback outlives the caller.
 - No answer within the call's timeout on a live connection: a 504, as HTTP
   reports it. The connection stays open: the request's entry is dropped and
   a late answer is ignored by its sequence number, while the other requests
@@ -73,6 +74,8 @@ at another service on the host that proved the URL.
   the merge stopped waiting.
 - A burst of first calls to a peer shares one connect instead of opening a
   socket each beyond the per-peer cap, which the receiver would close again.
+  Each call waits for it only within its own timeout (a 504, no HTTP resend,
+  no cooldown); the connect carries on for the call that started it.
 - Calls that ask for `protocol: "http"` stay on HTTP. Only Sync does, for
   block replies: Omni frames are capped at 10 MB, block batches are not.
 
