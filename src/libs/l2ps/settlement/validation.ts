@@ -333,7 +333,8 @@ export async function settlementStateRefusal(
  * The edits a valid settlement applies: each change as a balance edit, each
  * signer's nonce moved by its transfer count, and each fee's distribution
  * credits without the sender debit, which the signer's delta already holds.
- * Derived from the transaction alone, so rollback derives the same edits.
+ * Derived from the transaction and the fee split live at apply, so an
+ * orphaned settlement is left for a resync rather than rebuilt for rollback.
  */
 export function settlementEdits(settlement: ParsedSettlement, txHash: string): GCREdit[] {
     const edits: GCREdit[] = []
