@@ -124,6 +124,10 @@ SUITE_FILES=(
     src/libs/network/manageGCRRoutines.humanPassportClaim.test.ts
     src/libs/network/manageGCRRoutines.readOnly.test.ts
     src/libs/omniprotocol/protocol/noConsensusStateWrites.test.ts
+    src/libs/l2ps/l2psApplyTime.test.ts
+    src/libs/network/peerHttpAuth.test.ts
+    scripts/sudo-call.test.ts
+    testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
 )
 
 runner_for() {
