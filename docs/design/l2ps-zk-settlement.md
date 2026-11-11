@@ -277,13 +277,13 @@ are refused from the start, so DEM-816 never exists on mainnet.
 
 ## Plan
 
-| Step | Work | Estimate |
-|------|------|----------|
-| 1 | Circuit `L2PSSettlement(10, 20)`, witness builder, constraint and proving-time check against the budget | 2 days |
-| 2 | SDK: transfer commitment, signature domain, encrypted payload carries the salt | 1 day |
-| 3 | Aggregator: settlement record, real witness, no fallback, prover pool | 2 days |
-| 4 | Validation and apply in block and Sync behind the fork, remove the local apply path | 2 days |
-| 5 | Tests: forged proof, wrong settlement, overdraft, replayed commitment, member not in subnet, Sync from scratch; DEM-816 divergence repro with `EXPECT=fixed` on a 4-validator devnet | 2 days |
-| 6 | Load: main-chain TPS, L2PS TPS, block times, time to GCR, proof time, on 3 hosts | 1 day |
+| Step | Work | Estimate | Status |
+|------|------|----------|--------|
+| 1 | Circuit `L2PSSettlement(10, 20)`, witness builder, constraint and proving-time check against the budget | 2 days | In progress (`feat/l2ps-settlement-circuit`) |
+| 2 | SDK: transfer commitment, signature domain, encrypted payload carries the salt | 1 day | Open |
+| 3 | Aggregator: settlement record, real witness, no fallback, prover pool | 2 days | Node side done: plan, prove in the subprocess, submit at the tip, follow each batch, re-plan a failed one; the planner and prover come with step 1 |
+| 4 | Validation and apply in block and Sync behind the fork, remove the local apply path | 2 days | Done: block apply and Sync share `HandleGCR.applyTransactions`; caps of 10 transfers, 20 changes and 20 batches per block; the local proof path and the hash update stop under the fork |
+| 5 | Tests: forged proof, wrong settlement, overdraft, replayed commitment, member not in subnet, Sync from scratch; DEM-816 divergence repro with `EXPECT=fixed` on a 4-validator devnet | 2 days | Unit tests done; the devnet repro waits for the real planner and prover |
+| 6 | Load: main-chain TPS, L2PS TPS, block times, time to GCR, proof time, on 3 hosts | 1 day | Open |
 
 About 10 working days in total, before review.
