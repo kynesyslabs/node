@@ -516,6 +516,14 @@ export default class L2PSConsensus {
                     amount: 0,
                     nonce: blockNumber,
                     timestamp: Date.now(),
+                    // Chain.insertTransaction stores the fee columns from
+                    // here; without it every insert threw on network_fee.
+                    transaction_fee: {
+                        network_fee: 0,
+                        rpc_fee: 0,
+                        additional_fee: 0,
+                        rpc_address: null,
+                    },
                     status: TRANSACTION_STATUS.CONFIRMED,
                     data: [
                         "l2psBatch",
