@@ -146,7 +146,9 @@ function performCalculations(curve: any, proof: any, publicSignals: any[], vk_ve
  * Verify a PLONK proof (Bun-compatible, single-threaded)
  * 
  * This is a direct port of snarkjs.plonk.verify with the only change being
- * the curve initialization uses singleThread: true
+ * the curve initialization uses singleThread: true. Any error, including one
+ * in this node's own verifier, reads as an invalid proof; callers that must
+ * tell the two apart use plonkVerifyBunStrict.
  */
 export async function plonkVerifyBun(
     _vk_verifier: any,
@@ -158,36 +160,8 @@ export async function plonkVerifyBun(
     let curve: any = null
     
     try {
-        const vk_verifier_raw = unstringifyBigInts(_vk_verifier)
-        const proofRaw = unstringifyBigInts(_proof)
-        const publicSignals = unstringifyBigInts(_publicSignals)
-
-        // Building the curve costs more than the verification itself; a caller
-        // verifying many proofs passes one it keeps (and never terminates it here).
-        curve = sharedCurve ?? await initializeCurve(vk_verifier_raw)
-        if (logger) logger.info("PLONK VERIFIER STARTED (Bun-compatible)")
-
-        const proof = fromObjectProof(curve, proofRaw)
-        const vk_verifier = fromObjectVk(curve, vk_verifier_raw)
-
-        if (!validateInputs(vk_verifier, publicSignals, proof, curve, logger)) {
-            return false
-        }
-
-        const { challenges, E, F } = performCalculations(curve, proof, publicSignals, vk_verifier, logger)
-
-        const res = await isValidPairing(curve, proof, challenges, vk_verifier, E, F)
-
-        if (logger) {
-            if (res) {
-                logger.info("OK!")
-            } else {
-                logger.warn("Invalid Proof")
-            }
-        }
-
-        return res
-
+        curve = sharedCurve ?? await initializeCurve(unstringifyBigInts(_vk_verifier))
+        return await verifyWithCurve(curve, _vk_verifier, _publicSignals, _proof, logger)
     } catch (error) {
         const message = getErrorMessage(error)
         log.error("[ZK] PLONK Verify error: " + message)
@@ -198,6 +172,56 @@ export async function plonkVerifyBun(
             await curve.terminate()
         }
     }
+}
+
+/**
+ * Like plonkVerifyBun with a curve the caller keeps, but an error is thrown,
+ * not read as an invalid proof. False means the proof fails the checks
+ * (malformed points, wrong signal count, failed pairing); a throw means this
+ * verifier could not run. The caller must give it a canonical proof: input
+ * that makes the library throw is then a fault of this node, not of the proof.
+ */
+export async function plonkVerifyBunStrict(
+    vkVerifier: any,
+    publicSignals: any[],
+    proof: any,
+    curve: any,
+): Promise<boolean> {
+    return verifyWithCurve(curve, vkVerifier, publicSignals, proof)
+}
+
+async function verifyWithCurve(
+    curve: any,
+    _vk_verifier: any,
+    _publicSignals: any[],
+    _proof: any,
+    logger?: any,
+): Promise<boolean> {
+    const vk_verifier_raw = unstringifyBigInts(_vk_verifier)
+    const proofRaw = unstringifyBigInts(_proof)
+    const publicSignals = unstringifyBigInts(_publicSignals)
+    if (logger) logger.info("PLONK VERIFIER STARTED (Bun-compatible)")
+
+    const proof = fromObjectProof(curve, proofRaw)
+    const vk_verifier = fromObjectVk(curve, vk_verifier_raw)
+
+    if (!validateInputs(vk_verifier, publicSignals, proof, curve, logger)) {
+        return false
+    }
+
+    const { challenges, E, F } = performCalculations(curve, proof, publicSignals, vk_verifier, logger)
+
+    const res = await isValidPairing(curve, proof, challenges, vk_verifier, E, F)
+
+    if (logger) {
+        if (res) {
+            logger.info("OK!")
+        } else {
+            logger.warn("Invalid Proof")
+        }
+    }
+
+    return res
 }
 
 function fromObjectProof(curve: any, proof: any) {
