@@ -40,6 +40,18 @@ RUN bun install --frozen-lockfile
 COPY sidecar/package.json sidecar/bun.lock ./sidecar/
 RUN cd sidecar && bun install --frozen-lockfile --ignore-scripts
 
+# L2PS batch and settlement proving keys, built as the release image builds
+# them (../../Dockerfile): .dockerignore keeps host copies out, and with the
+# l2psSettlement fork active a subnet member without the settlement zkey
+# cannot settle anything. Only the circuits and the setup code feed this
+# layer, so source edits elsewhere keep it cached.
+COPY src/libs/l2ps/zk/circuits/ ./src/libs/l2ps/zk/circuits/
+COPY src/libs/l2ps/zk/keys/ ./src/libs/l2ps/zk/keys/
+COPY src/libs/l2ps/zk/batchArtifacts.ts src/libs/l2ps/zk/settlementArtifacts.ts ./src/libs/l2ps/zk/
+COPY src/cli/setup/ ./src/cli/setup/
+COPY scripts/build-l2ps-zk-keys.ts ./scripts/
+RUN bun scripts/build-l2ps-zk-keys.ts && rm -rf src/libs/l2ps/zk/ptau
+
 # Now copy the rest of the repo
 COPY . .
 
