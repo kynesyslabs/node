@@ -4,8 +4,9 @@
  * a stopped copy take over the URL, adding it would block a real failover.
  */
 
-import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { mockCore } from "src/utilities/testSupport/coreMocks"
+import { mockHelloDeps } from "src/libs/peer/testSupport/helloMocks"
 
 const OUR_KEY = "0x" + "aa".repeat(32)
 const BOB = "0x" + "b0".repeat(32)
@@ -30,32 +31,14 @@ mockCore(sharedState)
 // The "signature" is the signed message itself: verification then checks
 // exactly which message was signed. Hello requests are not under test here.
 const decoder = new TextDecoder()
-jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
-    __esModule: true,
-    default: {
-        getInstance: () => ({
-            sign: async (_alg: string, message: Uint8Array) => ({
-                signature: new Uint8Array(message),
-            }),
-            verify: async (input: {
-                message: Uint8Array
-                signature: Uint8Array
-            }) => {
-                const text = decoder.decode(input.message)
-                if (!text.startsWith("DEMOS_PEER_AUTH_V1:")) return true
-                return text === decoder.decode(input.signature)
-            },
-        }),
+mockHelloDeps({
+    sign: async (_alg, message) => ({ signature: new Uint8Array(message) }),
+    verify: async input => {
+        const text = decoder.decode(input.message)
+        if (!text.startsWith("DEMOS_PEER_AUTH_V1:")) return true
+        return text === decoder.decode(input.signature)
     },
-}))
-jest.mock("src/libs/peer/syncClaims", () => ({
-    unknownSync: () => ({ status: false, block: null, block_hash: null }),
-    corroborateSyncData: async () => ({ status: false, block: null, block_hash: null }),
-}))
-jest.mock("src/libs/gossip/GossipManager", () => ({
-    __esModule: true,
-    default: { isEnabled: () => false },
-}))
+})
 
 const { default: PeerManager } = await import("src/libs/peer/PeerManager")
 const { Peer } = await import("src/libs/peer")
