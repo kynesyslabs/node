@@ -1,7 +1,8 @@
 /**
- * Witness input of L2PSSettlement(10, 20) from a settlement plan. The public
- * part comes from settlementPublicSignals, the same function validators use,
- * so prover and verifier cannot disagree on order or padding.
+ * Witness input of L2PSSettlement(N, M) from a settlement plan. The statement
+ * comes from settlementPublicSignals and its hash from settlementPublicHash,
+ * the same functions validators use, so prover and verifier cannot disagree
+ * on order, padding or packing.
  */
 import {
     SETTLEMENT_ACCOUNTS,
@@ -11,11 +12,16 @@ import {
     accountLimbs,
     compareAccounts,
     settlementCommitment,
+    settlementPublicHash,
     settlementPublicSignals,
 } from "./encoding"
 import type { SettlementPlan } from "./types"
 
-/** Circuit input names, in public signal order, with their slot counts. */
+/**
+ * Interface v1 signal names, in public signal order, with their slot counts.
+ * The circuit takes all of them except the signer limbs, which it reads from
+ * the sender's account slot.
+ */
 export const PUBLIC_INPUT_LAYOUT: ReadonlyArray<readonly [string, number]> = [
     ["commitmentsHash", 1],
     ["transferActive", SETTLEMENT_TRANSFERS],
@@ -35,9 +41,13 @@ export type SettlementCircuitInput = Record<string, string | string[]>
 
 export interface BuiltSettlementInput {
     input: SettlementCircuitInput
-    /** The 171 public signals the proof must verify against. */
+    /** The Interface v1 signals (1 + 5N + 6M) the proof must verify against. */
     publicSignals: bigint[]
+    /** settlementPublicHash of publicSignals: the circuit's one public input. */
+    publicHash: bigint
 }
+
+const SIGNER_LIMBS = new Set(["signerHi", "signerLo"])
 
 const pad = (xs: bigint[], n: number): bigint[] => [...xs, ...Array<bigint>(n - xs.length).fill(0n)]
 const dec = (xs: bigint[]): string[] => xs.map(x => x.toString())
@@ -106,9 +116,11 @@ export function buildSettlementCircuitInput(plan: SettlementPlan): BuiltSettleme
     let at = 0
     for (const [name, count] of PUBLIC_INPUT_LAYOUT) {
         const slice = publicSignals.slice(at, at + count)
-        input[name] = count === 1 ? slice[0].toString() : dec(slice)
+        if (!SIGNER_LIMBS.has(name)) input[name] = count === 1 ? slice[0].toString() : dec(slice)
         at += count
     }
+    const publicHash = settlementPublicHash(publicSignals)
+    input.publicHash = publicHash.toString()
 
     const N = SETTLEMENT_TRANSFERS
     const toLimbs = transfers.map(t => accountLimbs(t.to))
@@ -118,5 +130,5 @@ export function buildSettlementCircuitInput(plan: SettlementPlan): BuiltSettleme
     input.salt = dec(pad(transfers.map(t => t.salt), N))
     input.senderIndex = dec(pad(transfers.map(t => BigInt(index.get(t.from) as number)), N))
     input.receiverIndex = dec(pad(transfers.map(t => BigInt(index.get(t.to) as number)), N))
-    return { input, publicSignals }
+    return { input, publicSignals, publicHash }
 }

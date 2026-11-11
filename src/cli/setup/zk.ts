@@ -16,11 +16,12 @@ export type ZkTarget = BatchSize | typeof SETTLEMENT_TARGET
 export const ZK_TARGETS: readonly ZkTarget[] = [...BATCH_SIZES, SETTLEMENT_TARGET]
 
 // Power of Tau file per circuit; same pairing as setup_all_batches.sh for the
-// batches. The settlement circuit has 55,860 PLONK constraints, under 2^16.
+// batches. The settlement circuit (9 transfers) has 65,388 PLONK constraints,
+// just under 2^16.
 const PTAU_POWER: Record<ZkTarget, number> = { 5: 16, 10: 17, [SETTLEMENT_TARGET]: 16 }
 
 interface CircuitBuild {
-    /** batch_5, batch_10, settlement_10: the keys directory and the label in messages. */
+    /** batch_5, batch_10, settlement: the keys directory and the label in messages. */
     label: string
     /** Circuit file name without extension, also the zkey and wasm name. */
     name: string

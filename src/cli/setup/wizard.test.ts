@@ -303,7 +303,7 @@ describe("interactive setup (mocked prompts)", () => {
 
 describe("ZK step", () => {
     function seedVkeys() {
-        for (const sub of ["batch_5", "batch_10", "settlement_10"]) {
+        for (const sub of ["batch_5", "batch_10", "settlement"]) {
             const dir = path.join(root, "src/libs/l2ps/zk/keys", sub)
             fs.mkdirSync(dir, { recursive: true })
             fs.writeFileSync(path.join(dir, "verification_key.json"), JSON.stringify(BATCH_VKEY))

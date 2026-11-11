@@ -52,12 +52,12 @@ beforeAll(() => {
         "src/features/zk/keys/verification_key_merkle.json",
         "src/libs/l2ps/zk/keys/batch_5/verification_key.json",
         "src/libs/l2ps/zk/keys/batch_10/verification_key.json",
-        "src/libs/l2ps/zk/keys/settlement_10/verification_key.json",
+        "src/libs/l2ps/zk/keys/settlement/verification_key.json",
     ]) {
         copyFile(rel)
     }
     // A finished ZK build, so the run enables proofs without downloading anything.
-    for (const [sub, name] of [["batch_5", "l2ps_batch_5"], ["batch_10", "l2ps_batch_10"], ["settlement_10", "l2ps_settlement_10"]]) {
+    for (const [sub, name] of [["batch_5", "l2ps_batch_5"], ["batch_10", "l2ps_batch_10"], ["settlement", "l2ps_settlement"]]) {
         const dir = path.join(copy, "src/libs/l2ps/zk/keys", sub)
         fs.mkdirSync(path.join(dir, `${name}_js`), { recursive: true })
         fs.writeFileSync(path.join(dir, `${name}.zkey`), "zkey")

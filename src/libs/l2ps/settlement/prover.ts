@@ -9,14 +9,20 @@ import { Config } from "src/config"
 import { plonkVerifyBun } from "../zk/BunPlonkWrapper"
 import { settlementFiles } from "../zk/settlementArtifacts"
 import { buildSettlementCircuitInput, PUBLIC_INPUT_LAYOUT } from "./circuitInput"
-import { AMOUNT_LIMIT, NONCE_LIMIT, SETTLEMENT_PUBLIC_SIGNALS } from "./encoding"
+import {
+    AMOUNT_LIMIT,
+    FIELD_ORDER,
+    NONCE_LIMIT,
+    SETTLEMENT_PUBLIC_SIGNALS,
+    SettlementEncodingError,
+    settlementPublicHash,
+} from "./encoding"
 import { SettlementProverPool } from "./proverPool"
 import type { SettlementPlan, SettlementProof, SettlementProofResult } from "./types"
 
 export { buildSettlementCircuitInput } from "./circuitInput"
 
-/** BN254 scalar field order: public signals and proof evaluations live below it. */
-export const FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n
+export { FIELD_ORDER } from "./encoding"
 /** BN254 base field order: proof point coordinates live below it. */
 export const BASE_FIELD_ORDER = 21888242871839275222246405745257275088696311157297823662689037894645226208583n
 
@@ -27,7 +33,7 @@ export const BASE_FIELD_ORDER = 218882428718392752222464057452572750886963111572
  * whose file differs refuses to verify instead of forking off quietly.
  * Changing the circuit means changing this digest in the same commit.
  */
-export const SETTLEMENT_VKEY_DIGEST = "e803f4e14ba03c7498a3792efda54c8411cef5cbf929febe479b8305092de8d7"
+export const SETTLEMENT_VKEY_DIGEST = "bf3d72794436aa2a78a0c0fc6df4059561de55103a913656a0ffbcb24cddddeb"
 
 const sortedDeep = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(sortedDeep)
@@ -55,8 +61,9 @@ export function loadSettlementVerificationKey(file: string = settlementFiles().v
         throw new Error(`settlement verification key ${file} is not the one committed in this release (digest ${digest})`)
     }
     const vkey = JSON.parse(text)
-    if (vkey.nPublic !== SETTLEMENT_PUBLIC_SIGNALS) {
-        throw new Error(`settlement verification key has ${vkey.nPublic} public signals, expected ${SETTLEMENT_PUBLIC_SIGNALS}`)
+    // Interface v1.1: one public input, the hash of the statement.
+    if (vkey.nPublic !== 1) {
+        throw new Error(`settlement verification key has ${vkey.nPublic} public inputs, expected 1`)
     }
     cachedVkeys.set(file, vkey)
     return vkey
@@ -76,10 +83,9 @@ const SIGNAL_LIMITS: bigint[] = PUBLIC_INPUT_LAYOUT.flatMap(([name, count]) => {
 
 /**
  * Why the public signals are not a statement the circuit can be asked about,
- * or undefined. The circuit range-checks the values its arithmetic uses
- * (fees, balances, magnitudes) but leaves account limbs and nonces to these
- * bounds, and a value at or above the field order would be reduced by the
- * verifier and accepted as a different number.
+ * or undefined. The circuit hashes balances, magnitudes and account limbs as
+ * whole field elements and relies on these bounds for them, and the packing
+ * of the public hash is injective only within them.
  */
 export function publicSignalsProblem(publicSignals: unknown): string | undefined {
     if (!Array.isArray(publicSignals)) return "public signals are not an array"
@@ -137,14 +143,27 @@ export async function verifySettlementProof(
     const vkey = loadSettlementVerificationKey()
     if (publicSignalsProblem(publicSignals) !== undefined) return false
     if (settlementProofProblem(proof) !== undefined) return false
+    const publicHash = statementHash(publicSignals)
+    if (publicHash === undefined) return false
     const run = verifying.then(async () =>
-        plonkVerifyBun(vkey, publicSignals.map(String), proof, undefined, await verifierCurve()),
+        plonkVerifyBun(vkey, [publicHash.toString()], proof, undefined, await verifierCurve()),
     )
     verifying = run.then(
         () => undefined,
         () => undefined,
     )
     return run
+}
+
+// A signer that is not an account of the batch has no hash: no proof can
+// show such a statement.
+function statementHash(publicSignals: bigint[]): bigint | undefined {
+    try {
+        return settlementPublicHash(publicSignals)
+    } catch (error) {
+        if (error instanceof SettlementEncodingError) return undefined
+        throw error
+    }
 }
 
 // Building the bn128 curve takes longer than a verification, so one curve is
@@ -178,18 +197,17 @@ export async function proveSettlement(
     plan: SettlementPlan,
     pool: SettlementProverPool = settlementProverPool(),
 ): Promise<SettlementProofResult> {
-    const { input, publicSignals } = buildSettlementCircuitInput(plan)
-    const expected = publicSignals.map(String)
+    const { input, publicSignals, publicHash } = buildSettlementCircuitInput(plan)
     const raw = await pool.prove(input)
     if (
         !Array.isArray(raw.publicSignals) ||
-        raw.publicSignals.length !== expected.length ||
-        raw.publicSignals.some((s, i) => s !== expected[i])
+        raw.publicSignals.length !== 1 ||
+        raw.publicSignals[0] !== publicHash.toString()
     ) {
-        throw new Error("settlement prover returned public signals that differ from the plan")
+        throw new Error("settlement prover returned a public input that differs from the plan")
     }
     if (!(await verifySettlementProof(publicSignals, raw.proof))) {
         throw new Error("settlement proof does not verify against the committed key")
     }
-    return { proof: raw.proof, publicSignals: expected }
+    return { proof: raw.proof, publicSignals: publicSignals.map(String) }
 }

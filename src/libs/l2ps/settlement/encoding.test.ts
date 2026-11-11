@@ -4,12 +4,17 @@ import vectors from "./__fixtures__/settlementVectors.json"
 import {
     accountLimbs,
     commitmentsHash,
+    FIELD_ORDER,
     fieldToHex,
     parseDelta,
     settlementCommitment,
+    settlementPublicHash,
     settlementPublicSignals,
     settlementSignatureMessage,
+    SETTLEMENT_ACCOUNTS as M,
     SETTLEMENT_PUBLIC_SIGNALS,
+    SETTLEMENT_TRANSFERS as N,
+    SettlementEncodingError,
 } from "./encoding"
 
 const A = "0x" + "11".repeat(32)
@@ -84,10 +89,11 @@ describe("encoding rules", () => {
         )
         expect(s).toHaveLength(SETTLEMENT_PUBLIC_SIGNALS)
         expect(s[0]).toBe(commitmentsHash([c]))
-        expect(s.slice(1, 11)).toEqual([1n, ...Array(9).fill(0n)])
-        // deltaNegative and deltaMagnitude are the last 2 * 20 signals
-        expect(s.slice(131, 133)).toEqual([1n, 0n])
-        expect(s.slice(151, 153)).toEqual([11n, 10n])
+        expect(s.slice(1, 1 + N)).toEqual([1n, ...Array(N - 1).fill(0n)])
+        // deltaNegative and deltaMagnitude are the last 2 * M signals
+        const negative = 1 + 5 * N + 4 * M
+        expect(s.slice(negative, negative + 2)).toEqual([1n, 0n])
+        expect(s.slice(negative + M, negative + M + 2)).toEqual([11n, 10n])
     })
 
     it("refuses unsorted or repeated accounts", () => {
@@ -104,5 +110,130 @@ describe("encoding rules", () => {
                 { account: A, balanceBefore: 0n, delta: 0n },
             ]),
         ).toThrow()
+    })
+})
+
+// The design doc's Interface v1.1 example; changing it is an interface change.
+const PINNED_PUBLIC_HASH = "0x06e69393040f0b0be0b77a589cb51dc8d89beb42f28b4a26eec431cb8b544c27"
+
+describe("settlementPublicHash (Interface v1.1)", () => {
+    const C = "0x" + "33".repeat(32)
+    const statement = () => {
+        const c1 = settlementCommitment({ from: A, to: B, amount: 10n, fee: 1n, nonce: 3n, salt: 9n })
+        const c2 = settlementCommitment({ from: C, to: A, amount: 4n, fee: 2n, nonce: 7n, salt: 8n })
+        return settlementPublicSignals(
+            [
+                { commitment: c1, signer: A, nonce: 3n, fee: 1n },
+                { commitment: c2, signer: C, nonce: 7n, fee: 2n },
+            ],
+            [
+                { account: A, balanceBefore: 100n, delta: -7n },
+                { account: B, balanceBefore: 0n, delta: 10n },
+                { account: C, balanceBefore: 50n, delta: -6n },
+            ],
+        )
+    }
+    // Offsets of the Interface v1 signal groups.
+    const at = {
+        transferActive: 1,
+        signerHi: 1 + N,
+        signerLo: 1 + 2 * N,
+        nonce: 1 + 3 * N,
+        fee: 1 + 4 * N,
+        accountActive: 1 + 5 * N,
+        accountHi: 1 + 5 * N + M,
+        balanceBefore: 1 + 5 * N + 3 * M,
+        deltaNegative: 1 + 5 * N + 4 * M,
+        deltaMagnitude: 1 + 5 * N + 5 * M,
+    }
+    const refuses = (s: bigint[], message: RegExp) => {
+        expect(() => settlementPublicHash(s)).toThrow(SettlementEncodingError)
+        expect(() => settlementPublicHash(s)).toThrow(message)
+    }
+    const set = (k: number, v: bigint) => {
+        const s = statement()
+        s[k] = v
+        return s
+    }
+
+    it("is pinned: other implementations must reproduce this value", () => {
+        expect(fieldToHex(settlementPublicHash(statement()))).toBe(PINNED_PUBLIC_HASH)
+    })
+
+    it("is a field element", () => {
+        const h = settlementPublicHash(statement())
+        expect(h > 0n && h < FIELD_ORDER).toBe(true)
+    })
+
+    it("changes with every signal, or refuses the changed statement", () => {
+        const base = settlementPublicHash(statement())
+        const seen = new Set([base])
+        let refused = 0
+        for (let k = 0; k < SETTLEMENT_PUBLIC_SIGNALS; k++) {
+            const s = statement()
+            s[k] = s[k] === 0n ? 1n : s[k] === 1n ? 0n : s[k] + 1n
+            let h: bigint
+            try {
+                h = settlementPublicHash(s)
+            } catch (error) {
+                expect(error).toBeInstanceOf(SettlementEncodingError)
+                refused++
+                continue
+            }
+            expect(seen.has(h)).toBe(false)
+            seen.add(h)
+        }
+        // Signer limbs never hash on their own: a changed limb names no
+        // account of the batch (active slot) or names a signer (idle slot).
+        // Flipping an active flag can strand a signer the same way.
+        expect(refused).toBeGreaterThanOrEqual(2 * N)
+        expect(seen.size + refused).toBe(SETTLEMENT_PUBLIC_SIGNALS + 1)
+    })
+
+    it("binds the signer through its account slot", () => {
+        // Swapping the signers of two transfers moves the debit.
+        const s = statement()
+        ;[s[at.signerHi], s[at.signerHi + 1]] = [s[at.signerHi + 1], s[at.signerHi]]
+        ;[s[at.signerLo], s[at.signerLo + 1]] = [s[at.signerLo + 1], s[at.signerLo]]
+        expect(settlementPublicHash(s)).not.toBe(settlementPublicHash(statement()))
+    })
+
+    it("refuses a signer that is not an account of the batch", () => {
+        refuses(set(at.signerHi, 0x99n), /not an account of the batch/)
+    })
+
+    it("refuses a signer that matches only an inactive account slot", () => {
+        const s = statement()
+        s[at.signerHi] = 0n
+        s[at.signerLo] = 0n
+        refuses(s, /not an account of the batch/)
+    })
+
+    it("refuses an idle transfer slot that names a signer", () => {
+        refuses(set(at.signerLo + 2, 1n), /idle transfer slot 2 names a signer/)
+    })
+
+    it("refuses the wrong number of signals", () => {
+        refuses(statement().slice(1), /expected/)
+        refuses([...statement(), 0n], /expected/)
+    })
+
+    it("refuses values outside their ranges", () => {
+        const cases: [number, bigint][] = [
+            [0, FIELD_ORDER],
+            [0, -1n],
+            [at.transferActive, 2n],
+            [at.signerHi, 1n << 128n],
+            [at.nonce, 1n << 64n],
+            [at.fee, 1n << 128n],
+            [at.accountActive, 2n],
+            [at.accountHi, 1n << 128n],
+            [at.balanceBefore, 1n << 128n],
+            [at.balanceBefore, FIELD_ORDER - 5n],
+            [at.deltaNegative, 2n],
+            [at.deltaMagnitude, 1n << 128n],
+            [at.deltaMagnitude, FIELD_ORDER - 7n],
+        ]
+        for (const [k, v] of cases) refuses(set(k, v), new RegExp(`public signal ${k} is out of range`))
     })
 })

@@ -115,7 +115,7 @@ export type ZkKeySet = number | "settlement"
 
 export function zkKeyNames(set: ZkKeySet): { dir: string; name: string } {
     return set === "settlement"
-        ? { dir: "settlement_10", name: "l2ps_settlement_10" }
+        ? { dir: "settlement", name: "l2ps_settlement" }
         : { dir: `batch_${set}`, name: `l2ps_batch_${set}` }
 }
 

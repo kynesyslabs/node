@@ -5,16 +5,22 @@ include "comparators.circom";
 include "poseidon.circom";
 
 /*
- * L2PS settlement: the public net change per account of a batch is exactly
- * the result of applying the signed transfers behind its commitments, in
- * batch order, with no overdraft and no overflow.
- * Spec: docs/design/l2ps-zk-settlement.md, "Circuit" and "Interface v1".
+ * L2PS settlement: the net change per account of a batch is exactly the
+ * result of applying the signed transfers behind its commitments, in batch
+ * order, with no overdraft and no overflow.
+ * Spec: docs/design/l2ps-zk-settlement.md, "Circuit" and "Interface v1.1".
  *
- * Every value that enters the balance arithmetic is range-checked here,
- * public ones included, and stays below 2^130, far from the field order, so
- * integer and field arithmetic agree wherever a range check draws a
- * conclusion from them. Balances, fees and changes therefore cannot wrap
- * whatever public signals the verifier is given.
+ * The statement's values (Interface v1's 1 + 5N + 6M signals) are private;
+ * the one public input is a Poseidon sponge over them, which the verifier
+ * recomputes from its own values. One public input keeps the proving key
+ * small and the prover off the per-input Lagrange work.
+ *
+ * Every value that enters the balance arithmetic is below 2^130, far from
+ * the field order, so integer and field arithmetic agree wherever a range
+ * check draws a conclusion from them. Witness values and running balances
+ * are range-checked here; balances before the batch and net change
+ * magnitudes are hashed as whole field elements, so they are exactly the
+ * verifier's values, which it accepts only below 2^128.
  */
 
 // x is a bit.
@@ -30,21 +36,23 @@ template RangeCheck(n) {
     bits.in <== in;
 }
 
-// One-hot selector of index over [0, size): exactly one output is 1, so an
-// index outside the range has no witness.
-template IndexSelector(size) {
+// One-hot selector of index over [0, size) when enable is 1, all zero when
+// it is 0: an index outside the range has no witness, and a disabled
+// selector forces index to 0.
+template GatedSelector(size) {
     signal input index;
+    signal input enable;
     signal output sel[size];
-    component eq[size];
     var total = 0;
+    var position = 0;
     for (var j = 0; j < size; j++) {
-        eq[j] = IsEqual();
-        eq[j].in[0] <== index;
-        eq[j].in[1] <== j;
-        sel[j] <== eq[j].out;
+        sel[j] <-- (enable == 1 && index == j) ? 1 : 0;
+        sel[j] * (sel[j] - 1) === 0;
         total += sel[j];
+        position += j * sel[j];
     }
-    total === 1;
+    total === enable;
+    position === index;
 }
 
 // Sum of sel[j] * values[j].
@@ -62,12 +70,10 @@ template Select(size) {
 }
 
 template L2PSSettlement(N, M) {
-    // Public, in the order of Interface v1 (circom numbers public inputs in
-    // declaration order).
+    // The statement, in the order of Interface v1 except the signer limbs,
+    // which are the sender account's limbs (bound through senderIndex).
     signal input commitmentsHash;
     signal input transferActive[N];
-    signal input signerHi[N];
-    signal input signerLo[N];
     signal input nonce[N];
     signal input fee[N];
     signal input accountActive[M];
@@ -76,8 +82,10 @@ template L2PSSettlement(N, M) {
     signal input balanceBefore[M];
     signal input deltaNegative[M];
     signal input deltaMagnitude[M];
+    // The only public input: settlementPublicHash of the statement.
+    signal input publicHash;
 
-    // Private.
+    // Witness only.
     signal input toHi[N];
     signal input toLo[N];
     signal input amount[N];
@@ -98,14 +106,12 @@ template L2PSSettlement(N, M) {
             transferActive[i] * (1 - transferActive[i - 1]) === 0;
         }
         transferIdle[i] <== 1 - transferActive[i];
-        // Signer and receiver limbs of an idle slot are forced to 0 by the
+        // Indices and receiver limbs of an idle slot are forced to 0 by the
         // selectors below, which are gated by the active flag.
         nonce[i] * transferIdle[i] === 0;
         fee[i] * transferIdle[i] === 0;
         amount[i] * transferIdle[i] === 0;
         salt[i] * transferIdle[i] === 0;
-        senderIndex[i] * transferIdle[i] === 0;
-        receiverIndex[i] * transferIdle[i] === 0;
     }
 
     // ---- Account slots: active prefix, inactive slots all zero ----
@@ -130,29 +136,22 @@ template L2PSSettlement(N, M) {
 
     // ---- Range checks ----
     // The running balances and the delta equation reason about integers; they
-    // hold only while every operand is a small non-negative integer. A balance
-    // or fee written as p - x would otherwise read as a negative number, and a
-    // debit magnitude written as p - x as a credit, so every value that enters
-    // that arithmetic is checked here, public or not. Account limbs and nonces
-    // only enter hashes and equalities, and the ordering below keeps accounts
-    // unique for any limbs (see there), so they are left to the verifier's
-    // bounds: checking them would push the circuit past 2^16 rows and double
-    // the proving time.
+    // hold only while every operand is a small non-negative integer. A fee
+    // written as p - x would otherwise read as a negative number. The fee and
+    // nonce ranges also keep their packed public hash element injective.
+    // Balances before the batch, magnitudes and account limbs are hashed
+    // whole and range-checked by the verifier; the ordering below keeps
+    // accounts unique for any limbs.
     component amountRange[N];
     component feeRange[N];
+    component nonceRange[N];
     for (var i = 0; i < N; i++) {
         amountRange[i] = RangeCheck(128);
         amountRange[i].in <== amount[i];
         feeRange[i] = RangeCheck(128);
         feeRange[i].in <== fee[i];
-    }
-    component balanceRange[M];
-    component magnitudeRange[M];
-    for (var j = 0; j < M; j++) {
-        balanceRange[j] = RangeCheck(128);
-        balanceRange[j].in <== balanceBefore[j];
-        magnitudeRange[j] = RangeCheck(128);
-        magnitudeRange[j].in <== deltaMagnitude[j];
+        nonceRange[i] = RangeCheck(64);
+        nonceRange[i].in <== nonce[i];
     }
 
     // ---- Accounts strictly increasing by (hi, lo) ----
@@ -181,8 +180,10 @@ template L2PSSettlement(N, M) {
 
     // ---- Sender and receiver selection ----
     // Selectors are gated by the active flag, so an idle slot selects nothing.
-    // An active slot must select an active account whose limbs are the
-    // signer's (sender) and the committed receiver's.
+    // An active slot must select an active account for its sender and one
+    // whose limbs are the committed receiver's. The sender's limbs open the
+    // commitment and senderIndex is in the public hash, so the signer the
+    // validator checked the signature of is the account debited.
     component senderSel[N];
     component receiverSel[N];
     signal senderPick[N][M];
@@ -194,13 +195,15 @@ template L2PSSettlement(N, M) {
     component receiverHi[N];
     component receiverLo[N];
     for (var i = 0; i < N; i++) {
-        senderSel[i] = IndexSelector(M);
+        senderSel[i] = GatedSelector(M);
         senderSel[i].index <== senderIndex[i];
-        receiverSel[i] = IndexSelector(M);
+        senderSel[i].enable <== transferActive[i];
+        receiverSel[i] = GatedSelector(M);
         receiverSel[i].index <== receiverIndex[i];
+        receiverSel[i].enable <== transferActive[i];
         for (var j = 0; j < M; j++) {
-            senderPick[i][j] <== senderSel[i].sel[j] * transferActive[i];
-            receiverPick[i][j] <== receiverSel[i].sel[j] * transferActive[i];
+            senderPick[i][j] <== senderSel[i].sel[j];
+            receiverPick[i][j] <== receiverSel[i].sel[j];
         }
 
         senderActive[i] = Select(M);
@@ -225,9 +228,6 @@ template L2PSSettlement(N, M) {
         }
         senderActive[i].out === transferActive[i];
         receiverActive[i].out === transferActive[i];
-        // A member cannot sign a commitment that debits another account.
-        senderHi[i].out === signerHi[i];
-        senderLo[i].out === signerLo[i];
         receiverHi[i].out === toHi[i];
         receiverLo[i].out === toLo[i];
     }
@@ -254,8 +254,8 @@ template L2PSSettlement(N, M) {
     component batchHash = Poseidon(N);
     for (var i = 0; i < N; i++) {
         commitment[i] = Poseidon(8);
-        commitment[i].inputs[0] <== signerHi[i];
-        commitment[i].inputs[1] <== signerLo[i];
+        commitment[i].inputs[0] <== senderHi[i].out;
+        commitment[i].inputs[1] <== senderLo[i].out;
         commitment[i].inputs[2] <== toHi[i];
         commitment[i].inputs[3] <== toLo[i];
         commitment[i].inputs[4] <== amount[i];
@@ -271,7 +271,7 @@ template L2PSSettlement(N, M) {
     // Each transfer debits amount + fee from the sender, then credits amount
     // to the receiver; only the touched account changes, and its new value is
     // range-checked, so every running balance stays in [0, 2^128) by
-    // induction from the range-checked balances before the batch. A
+    // induction from the balances before the batch, which are below 2^128. A
     // self-transfer must afford the debit before its own credit.
     signal balance[N + 1][M];
     signal afterDebit[N][M];
@@ -307,8 +307,9 @@ template L2PSSettlement(N, M) {
 
     // ---- Net change per account ----
     // after - before = (1 - 2 * negative) * magnitude. With magnitude below
-    // 2^128 and both balances in [0, 2^128) the equation holds over the
-    // integers, and magnitude 0 has one encoding (not negative).
+    // 2^128 (the verifier's value) and both balances in [0, 2^128) the
+    // equation holds over the integers, and magnitude 0 has one encoding (not
+    // negative).
     component zeroMagnitude[M];
     signal negativeMagnitude[M];
     for (var j = 0; j < M; j++) {
@@ -318,11 +319,50 @@ template L2PSSettlement(N, M) {
         negativeMagnitude[j] <== deltaNegative[j] * deltaMagnitude[j];
         balance[N][j] - balanceBefore[j] === deltaMagnitude[j] - 2 * negativeMagnitude[j];
     }
+
+    // ---- Public hash ----
+    // Interface v1.1: the statement packed into 2 + N + 4M field elements and
+    // absorbed 7 at a time, h = Poseidon8(h, e[7k .. 7k + 6]) from h = 0, the
+    // last chunk padded with zeros:
+    //   commitmentsHash,
+    //   per transfer: fee + nonce * 2^128 + senderIndex * 2^192
+    //                 + transferActive * 2^200,
+    //   per account: hi, lo, balanceBefore, deltaMagnitude,
+    //   sum over accounts of accountActive * 4^j + deltaNegative * 2 * 4^j.
+    // The packing is injective because fee < 2^128 and nonce < 2^64 are
+    // range-checked, senderIndex < M <= 126 by its selector, and the flags
+    // are bits.
+    assert(M <= 126);
+    var E = 2 + N + 4 * M;
+    var CHUNKS = (E + 6) \ 7;
+    signal packed[CHUNKS * 7];
+    packed[0] <== commitmentsHash;
+    for (var i = 0; i < N; i++) {
+        packed[1 + i] <== fee[i] + nonce[i] * (1 << 128) + senderIndex[i] * (1 << 192) + transferActive[i] * (1 << 200);
+    }
+    var flags = 0;
+    for (var j = 0; j < M; j++) {
+        packed[1 + N + 4 * j] <== accountHi[j];
+        packed[1 + N + 4 * j + 1] <== accountLo[j];
+        packed[1 + N + 4 * j + 2] <== balanceBefore[j];
+        packed[1 + N + 4 * j + 3] <== deltaMagnitude[j];
+        flags += accountActive[j] * (1 << (2 * j)) + deltaNegative[j] * (1 << (2 * j + 1));
+    }
+    packed[1 + N + 4 * M] <== flags;
+    for (var k = E; k < CHUNKS * 7; k++) {
+        packed[k] <== 0;
+    }
+    component sponge[CHUNKS];
+    for (var c = 0; c < CHUNKS; c++) {
+        sponge[c] = Poseidon(8);
+        sponge[c].inputs[0] <== c == 0 ? 0 : sponge[c - 1].out;
+        for (var k = 0; k < 7; k++) {
+            sponge[c].inputs[1 + k] <== packed[7 * c + k];
+        }
+    }
+    sponge[CHUNKS - 1].out === publicHash;
 }
 
-component main {public [
-    commitmentsHash,
-    transferActive, signerHi, signerLo, nonce, fee,
-    accountActive, accountHi, accountLo, balanceBefore,
-    deltaNegative, deltaMagnitude
-]} = L2PSSettlement(10, 20);
+// N = SETTLEMENT_TRANSFERS and M = SETTLEMENT_ACCOUNTS of
+// src/libs/l2ps/settlement/encoding.ts.
+component main {public [publicHash]} = L2PSSettlement(9, 18);

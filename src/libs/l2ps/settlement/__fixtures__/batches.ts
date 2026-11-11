@@ -3,7 +3,7 @@
  * tests and by the proof fixture generator. Signatures are not part of the
  * proof, so they are left empty here.
  */
-import { settlementCommitment } from "../encoding"
+import { SETTLEMENT_TRANSFERS, settlementCommitment } from "../encoding"
 import type { DecryptedTransfer } from "../types"
 
 /** An account made of one repeated byte. */
@@ -49,17 +49,18 @@ export function oneTransfer(): Batch {
 }
 
 /**
- * Ten transfers over six accounts: repeated signers with consecutive
- * nonces, a receiver spending what it received earlier in the batch, a
- * self-transfer, a zero amount, and two accounts ordered by their lo limb.
+ * Nine transfers (a full batch) over six accounts: repeated signers with
+ * consecutive nonces, a receiver spending what it received earlier in the
+ * batch, a self-transfer, a zero amount, and two accounts ordered by their
+ * lo limb.
  */
-export function tenTransfers(): Batch {
+export function mixedTransfers(): Batch {
     const a = acct(0x11)
     const b = acct(0x22)
     const c = acct(0x33)
     const d = acct(0x44)
     return {
-        name: "ten transfers",
+        name: "mixed transfers",
         transfers: [
             transfer(a, b, 300n * DEM, 1_000n, 6n, 11n),
             transfer(a, b, 200n * DEM, 1_000n, 7n, 12n),
@@ -71,7 +72,6 @@ export function tenTransfers(): Batch {
             transfer(SAME_HI_HIGH, SAME_HI_LOW, 1n * DEM, 1_000n, 1n, 17n),
             transfer(SAME_HI_LOW, a, 1n, 1_000n, 1n, 18n),
             transfer(a, d, 7n, 1_000n, 8n, 19n),
-            transfer(d, a, 3n * DEM, 1_000n, 2n, 20n),
         ],
         balances: new Map([
             [a, 1_000n * DEM],
@@ -86,18 +86,18 @@ export function tenTransfers(): Batch {
     }
 }
 
-/** Ten transfers between twenty distinct accounts: every slot in use. */
-export function twentyAccounts(): Batch {
+/** N transfers between 2N distinct accounts: every slot in use. */
+export function allAccounts(): Batch {
     const transfers: DecryptedTransfer[] = []
     const balances = new Map<string, bigint>()
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < SETTLEMENT_TRANSFERS; i++) {
         // Senders and receivers interleave so the sorted order differs from batch order.
         const from = acct(0xf0 - 2 * i)
         const to = acct(0x10 + 2 * i)
         balances.set(from, 1_000_000n + BigInt(i))
         transfers.push(transfer(from, to, 1_000n + BigInt(i), 10n, 1n, 100n + BigInt(i)))
     }
-    return { name: "twenty accounts", transfers, balances, nonces: new Map() }
+    return { name: "all accounts", transfers, balances, nonces: new Map() }
 }
 
 /** The sender must afford amount + fee before its own credit comes back. */
@@ -144,4 +144,4 @@ export function fixtureBatch(): Batch {
     }
 }
 
-export const PROVEN_BATCHES = [oneTransfer, tenTransfers, twentyAccounts, selfTransfer, zeroAmountWithFee]
+export const PROVEN_BATCHES = [oneTransfer, mixedTransfers, allAccounts, selfTransfer, zeroAmountWithFee]

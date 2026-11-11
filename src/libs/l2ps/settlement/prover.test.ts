@@ -1,8 +1,8 @@
 /**
  * Settlement proof verification against the committed key, with a committed
  * proof (__fixtures__/settlementProof.json), so it runs without the proving
- * key. Every public signal is part of the statement: changing any one of them
- * must make the proof fail.
+ * key. Every public signal is part of the statement (through the public hash
+ * of Interface v1.1): changing any one of them must make the proof fail.
  */
 import { describe, expect, it } from "bun:test"
 import * as fs from "node:fs"
@@ -12,7 +12,13 @@ import { getCurveFromName } from "ffjavascript"
 import { fixtureBatch } from "./__fixtures__/batches"
 import fixture from "./__fixtures__/settlementProof.json"
 import { buildSettlementCircuitInput } from "./circuitInput"
-import { commitmentsHash, SETTLEMENT_PUBLIC_SIGNALS, settlementPublicSignals } from "./encoding"
+import {
+    commitmentsHash,
+    SETTLEMENT_ACCOUNTS as M,
+    SETTLEMENT_PUBLIC_SIGNALS,
+    SETTLEMENT_TRANSFERS as N,
+    settlementPublicSignals,
+} from "./encoding"
 import { planSettlement } from "./planner"
 import {
     BASE_FIELD_ORDER,
@@ -27,6 +33,21 @@ import {
 import { settlementFiles } from "../zk/settlementArtifacts"
 
 const signals = () => fixture.publicSignals.map(BigInt)
+
+// Offsets of the Interface v1 signal groups.
+const AT = {
+    transferActive: 1,
+    signerHi: 1 + N,
+    signerLo: 1 + 2 * N,
+    nonce: 1 + 3 * N,
+    fee: 1 + 4 * N,
+    accountActive: 1 + 5 * N,
+    accountHi: 1 + 5 * N + M,
+    balanceBefore: 1 + 5 * N + 3 * M,
+    deltaNegative: 1 + 5 * N + 4 * M,
+    deltaMagnitude: 1 + 5 * N + 5 * M,
+    last: SETTLEMENT_PUBLIC_SIGNALS - 1,
+}
 const proof = () => structuredClone(fixture.proof) as Record<string, unknown>
 
 function plan() {
@@ -51,7 +72,8 @@ describe("settlement verification key", () => {
         const text = fs.readFileSync(settlementFiles().vkey, "utf8")
         expect(vkeyDigest(text)).toBe(SETTLEMENT_VKEY_DIGEST)
         expect(fixture.vkeyDigest).toBe(SETTLEMENT_VKEY_DIGEST)
-        expect((loadSettlementVerificationKey() as { nPublic: number }).nPublic).toBe(SETTLEMENT_PUBLIC_SIGNALS)
+        // Interface v1.1: the hash of the statement is the one public input.
+        expect((loadSettlementVerificationKey() as { nPublic: number }).nPublic).toBe(1)
     })
 
     it("refuses a modified key instead of verifying with it", () => {
@@ -158,7 +180,7 @@ describe("verifySettlementProof", () => {
     })
 
     it("rejects any signal at or above the field order, which would alias a valid one", async () => {
-        for (const i of [0, 1, 31, 60, 111, 170]) {
+        for (const i of [0, AT.transferActive, AT.nonce, AT.accountActive + 3, AT.balanceBefore, AT.last]) {
             const s = signals()
             s[i] += FIELD_ORDER
             expect(publicSignalsProblem(s)).toMatch(/out of range/)
@@ -175,15 +197,32 @@ describe("verifySettlementProof", () => {
             s[i] = v
             return publicSignalsProblem(s)
         }
-        expect(at(1, 2n)).toMatch(/out of range/) // transferActive
-        expect(at(41, 1n << 128n)).toMatch(/out of range/) // fee
-        expect(at(51, 2n)).toMatch(/out of range/) // accountActive
-        expect(at(71, 1n << 128n)).toMatch(/out of range/) // accountHi
-        expect(at(31, 1n << 64n)).toMatch(/out of range/) // nonce
-        expect(at(31, (1n << 64n) - 1n)).toBeUndefined()
-        expect(at(111, 1n << 128n)).toMatch(/out of range/) // balanceBefore
-        expect(at(131, 2n)).toMatch(/out of range/) // deltaNegative
-        expect(at(151, -1n)).toMatch(/out of range/)
+        expect(at(AT.transferActive, 2n)).toMatch(/out of range/)
+        expect(at(AT.fee, 1n << 128n)).toMatch(/out of range/)
+        expect(at(AT.accountActive, 2n)).toMatch(/out of range/)
+        expect(at(AT.accountHi, 1n << 128n)).toMatch(/out of range/)
+        expect(at(AT.nonce, 1n << 64n)).toMatch(/out of range/)
+        expect(at(AT.nonce, (1n << 64n) - 1n)).toBeUndefined()
+        expect(at(AT.balanceBefore, 1n << 128n)).toMatch(/out of range/)
+        expect(at(AT.deltaNegative, 2n)).toMatch(/out of range/)
+        expect(at(AT.deltaMagnitude, -1n)).toMatch(/out of range/)
+    })
+
+    it("rejects, without throwing, a signer that is not an account of the batch", async () => {
+        const s = signals()
+        s[AT.signerHi] = 0x99n
+        expect(publicSignalsProblem(s)).toBeUndefined()
+        expect(await verifySettlementProof(s, proof())).toBe(false)
+        const idle = signals()
+        idle[AT.signerLo + N - 1] = 1n
+        expect(await verifySettlementProof(idle, proof())).toBe(false)
+    })
+
+    it("rejects signers swapped between two transfers", async () => {
+        const s = signals()
+        ;[s[AT.signerHi], s[AT.signerHi + 1]] = [s[AT.signerHi + 1], s[AT.signerHi]]
+        ;[s[AT.signerLo], s[AT.signerLo + 1]] = [s[AT.signerLo + 1], s[AT.signerLo]]
+        expect(await verifySettlementProof(s, proof())).toBe(false)
     })
 
     it("rejects malformed signal lists", async () => {

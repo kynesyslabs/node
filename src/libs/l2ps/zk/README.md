@@ -31,8 +31,8 @@ bun run setup --only zk --zk --zk-generate
 ```
 
 This downloads the Hermez Powers of Tau files 16 and 17 (about 225 MB, from
-circom.info) and writes about 2 GB of proving keys: about 90 MB for the
-batch circuits and 1.9 GB for the settlement circuit
+circom.info) and writes about 190 MB of proving keys: about 90 MB for the
+batch circuits and 100 MB for the settlement circuit
 (`docs/design/l2ps-zk-settlement.md`, "Circuit"). The build fails unless
 the derived verification keys equal the committed ones, which is also the
 integrity check on the download.
@@ -109,10 +109,10 @@ zk/
 
 **Generated (gitignored):**
 ```
-├── keys/                       # about 2 GB proving keys (verification_key.json committed)
+├── keys/                       # about 190 MB proving keys (verification_key.json committed)
 │   ├── batch_5/
 │   ├── batch_10/
-│   └── settlement_10/          # 1.9 GB zkey + wasm
+│   └── settlement/             # 100 MB zkey + wasm
 └── ptau/                       # about 225 MB Powers of Tau (build input only)
 ```
 

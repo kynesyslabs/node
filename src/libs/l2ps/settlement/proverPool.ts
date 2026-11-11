@@ -1,6 +1,6 @@
 /**
- * Pool of settlement prover subprocesses. A proof takes one core for about a
- * minute and about 4 GB of memory, so it never runs on the node's event
+ * Pool of settlement prover subprocesses. A proof takes one core for about 40
+ * seconds and about 1 GB of memory, so it never runs on the node's event
  * loop: there is no main-thread fallback, and a proof that cannot be made
  * fails so its batch stays in the L2PS mempool.
  */
@@ -76,10 +76,10 @@ class ProverWorker {
         const [cmd, args] = isBun
             ? [process.execPath, [PROCESS_SCRIPT, this.zkeyPath, this.wasmPath]]
             : ["npx", ["tsx", PROCESS_SCRIPT, this.zkeyPath, this.wasmPath]]
-        // Bun's collector sizes itself to the host's RAM and lets a proof peak
-        // at about 5.5 GB; telling it the host has 2 GiB brings the peak to
-        // about 4 GB at the same speed. A heuristic, not a cap: a proof that
-        // needs more still gets it.
+        // Bun's collector sizes itself to the host's RAM; telling it the host
+        // has 2 GiB brings a proof's peak from about 1.3 GB to 1 GB at the
+        // same speed. A heuristic, not a cap: a proof that needs more still
+        // gets it.
         const env = { BUN_JSC_forceRAMSize: String(2 * 1024 ** 3), ...process.env }
         const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd(), env })
         this.child = child

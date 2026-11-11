@@ -74,7 +74,7 @@ COPY package.json bun.lock ./
 # with prebuilt binaries, so no `bun add` at build time.
 RUN bun install --frozen-lockfile
 
-# L2PS batch and settlement proving keys (about 2 GB, 1.9 GB of it the
+# L2PS batch and settlement proving keys (about 190 MB, 100 MB of it the
 # settlement zkey that subnet members prove with). Not committed: they derive
 # deterministically from the public Hermez Powers of Tau, and the build fails
 # unless the derived verification keys equal the committed ones, so a swapped
