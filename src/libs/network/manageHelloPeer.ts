@@ -15,12 +15,14 @@ import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import {
     helloOmniAdvertMessage,
     helloResponseMessage,
+    standbyKeepsKnownUrl,
     URL_BOUND_TO_OTHER,
 } from "../peer/helloAuth"
 import GossipManager from "../gossip/GossipManager"
 import { parseNodeUrl } from "src/config"
 import { reportTwin } from "../peer/identityLiveness"
 import { corroborateSyncData } from "../peer/syncClaims"
+import { signingStopState } from "../identity/signingRecord"
 
 const HELLO_PEERLIST_SAMPLE_SIZE = 32
 
@@ -35,17 +37,19 @@ export interface HelloPeerRequest {
     nonce?: string
     /** Hash of the caller's block 0. Absent from nodes that predate the check. */
     genesisHash?: string
+    /** The caller has stopped signing: it must not take over its key's URL. */
+    standby?: boolean
 }
 
 /**
  * Proof that the node answering this hello holds our key and serves the
  * URL we advertise. Bound to the caller's nonce so it cannot be replayed.
  */
-async function signHelloResponse(nonce: string) {
+async function signHelloResponse(nonce: string, standby = false) {
     const url = getSharedState.exposedUrl
     const signed = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
-        helloResponseMessage(nonce, url),
+        helloResponseMessage(nonce, url, standby),
     )
     return {
         identity: getSharedState.publicKeyHex,
@@ -220,37 +224,54 @@ export async function manageHelloPeer(
             ? known.connection.string
             : undefined
 
+    // A copy that stopped signing leaves the entry with the copy that signs,
+    // also while that copy is listed offline: taking its place there would
+    // route the key's consensus calls to a node that refuses every vote.
+    const listed =
+        known ?? peerManager.getOfflinePeers()[peerObject.identity]
+    const standbyElsewhere = standbyKeepsKnownUrl(
+        listed?.connection.string,
+        content.url,
+        content.standby,
+    )
+
     if (known) {
-        // Known peer: the signed hello may update its URL and sync data
-        const [isAddedToPeerlist, message] = peerManager.addPeer(
-            peerObject,
-            true,
-        )
-        if (!isAddedToPeerlist) {
-            // The new URL is held by another identity: only dialing it can
-            // show the caller now serves it, so check before moving anything.
-            if (
-                message.startsWith(URL_BOUND_TO_OTHER) &&
-                !PeerManager.verifying.has(peerObject.identity)
-            ) {
-                void PeerManager.sayHelloToPeer(
-                    new Peer(peerObject.connection.string, peerObject.identity),
-                ).catch(error =>
-                    log.warning(
-                        `[Hello Peer Listener] Verifying ${peerObject.identity} @ ${peerObject.connection.string} failed: ${
-                            error instanceof Error ? error.message : String(error)
-                        }`,
-                    ),
-                )
+        if (!standbyElsewhere) {
+            // Known peer: the signed hello may update its URL and sync data
+            const [isAddedToPeerlist, message] = peerManager.addPeer(
+                peerObject,
+                true,
+            )
+            if (!isAddedToPeerlist) {
+                // The new URL is held by another identity: only dialing it
+                // can show the caller now serves it, so check before moving
+                // anything.
+                if (
+                    message.startsWith(URL_BOUND_TO_OTHER) &&
+                    !PeerManager.verifying.has(peerObject.identity)
+                ) {
+                    void PeerManager.sayHelloToPeer(
+                        new Peer(
+                            peerObject.connection.string,
+                            peerObject.identity,
+                        ),
+                    ).catch(error =>
+                        log.warning(
+                            `[Hello Peer Listener] Verifying ${peerObject.identity} @ ${peerObject.connection.string} failed: ${
+                                error instanceof Error ? error.message : String(error)
+                            }`,
+                        ),
+                    )
+                }
+                response.result = 400
+                response.response = false
+                response.extra = {
+                    msg: "Peer not added to peerlist: " + message,
+                }
+                return response
             }
-            response.result = 400
-            response.response = false
-            response.extra = {
-                msg: "Peer not added to peerlist: " + message,
-            }
-            return response
         }
-    } else {
+    } else if (!standbyElsewhere) {
         // Stranger: the caller proved it holds the key, not that the URL
         // reaches it. Hello back and let the verified reply add it.
         const [acceptable, message] = peerManager.canAddPeer(peerObject)
@@ -279,12 +300,16 @@ export async function manageHelloPeer(
 
     // INFO: Return a list of all our connected peers
 
+    const standby = signingStopState(getSharedState.identityFile).stopped
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
         ...(callerKnownAt ? { callerKnownAt } : {}),
-        ...(content.nonce ? await signHelloResponse(content.nonce) : {}),
+        ...(standby ? { standby: true } : {}),
+        ...(content.nonce
+            ? await signHelloResponse(content.nonce, standby)
+            : {}),
         ...gossipAdvert(),
         ...(await signedOmniAdvert(content.nonce)),
         syncData: peerManager.ourSyncData,

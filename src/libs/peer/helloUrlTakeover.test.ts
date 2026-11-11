@@ -25,6 +25,8 @@ const sharedState: Record<string, unknown> = {
     syncStatus: true,
     genesisBlockHash: GENESIS,
     getConsensusTime: () => 10,
+    markPeerOmniCapable: () => {},
+    forgetPeerOmni: () => {},
 }
 
 mockCore(sharedState)
@@ -56,6 +58,9 @@ function helloFrom(identity: string, url: string): any {
 beforeEach(() => {
     const manager = PeerManager.getInstance()
     for (const peer of manager.getPeers()) manager.removeOnlinePeer(peer.identity)
+    for (const identity of Object.keys(manager.getOfflinePeers())) {
+        manager.removeOfflinePeer(identity)
+    }
     hellos.length = 0
     ;(PeerManager as any).sayHelloToPeer = async (peer: InstanceType<typeof Peer>) => {
         hellos.push({ identity: peer.identity, url: peer.connection.string })
@@ -108,5 +113,109 @@ describe("a hello reply proven at the address", () => {
         expect(ok).toBe(true)
         expect(manager.getPeer(ALICE)?.connection.string).toBe(BOB_URL)
         expect(manager.getPeer(BOB)).toBeUndefined()
+    })
+})
+
+describe("a copy of a key that stopped signing", () => {
+    const ALICE_COPY_URL = "http://alice-copy.example:53550"
+
+    function signedReply(identity: string, url: string, standby: boolean) {
+        return {
+            result: 200,
+            response: true,
+            require_reply: false,
+            extra: {
+                msg: "Peer connected",
+                identity,
+                url,
+                signature: { type: "ed25519", data: "cc".repeat(64) },
+                genesisHash: GENESIS,
+                ...(standby ? { standby: true } : {}),
+            },
+        } as any
+    }
+
+    it("does not take over the key's URL with its hello", async () => {
+        const reply = await manageHelloPeer(
+            { ...helloFrom(ALICE, ALICE_COPY_URL), standby: true },
+            ALICE,
+        )
+        expect(reply.result).toBe(200)
+        expect(PeerManager.getInstance().getPeer(ALICE)?.connection.string).toBe(
+            ALICE_URL,
+        )
+    })
+
+    it("does not take over the key's URL with a proven hello reply", async () => {
+        const { verdict } = await PeerManager.helloPeerCallback(
+            signedReply(ALICE, ALICE_COPY_URL, true),
+            new Peer(ALICE_COPY_URL, ALICE),
+            "nonce",
+        )
+        expect(verdict).toBe("verified")
+        expect(PeerManager.getInstance().getPeer(ALICE)?.connection.string).toBe(
+            ALICE_URL,
+        )
+    })
+
+    it("does not take over the URL of a signing copy listed offline", async () => {
+        const manager = PeerManager.getInstance()
+        PeerManager.markPeerOffline(manager.getPeer(ALICE)!)
+        expect(manager.getPeer(ALICE)).toBeUndefined()
+
+        await manageHelloPeer(
+            { ...helloFrom(ALICE, ALICE_COPY_URL), standby: true },
+            ALICE,
+        )
+        await PeerManager.helloPeerCallback(
+            signedReply(ALICE, ALICE_COPY_URL, true),
+            new Peer(ALICE_COPY_URL, ALICE),
+            "nonce",
+        )
+
+        expect(manager.getPeer(ALICE)).toBeUndefined()
+        expect(manager.getOfflinePeers()[ALICE]?.connection.string).toBe(ALICE_URL)
+        expect(hellos).toEqual([])
+    })
+
+    it("is still added when its key is not known yet", async () => {
+        const CAROL = "0x" + "c0".repeat(32)
+        const CAROL_URL = "http://carol.example:53550"
+        await PeerManager.helloPeerCallback(
+            signedReply(CAROL, CAROL_URL, true),
+            new Peer(CAROL_URL, CAROL),
+            "nonce",
+        )
+        expect(PeerManager.getInstance().getPeer(CAROL)?.connection.string).toBe(
+            CAROL_URL,
+        )
+    })
+
+    it("leaves a failover to a copy that signs untouched", async () => {
+        await PeerManager.helloPeerCallback(
+            signedReply(ALICE, ALICE_COPY_URL, false),
+            new Peer(ALICE_COPY_URL, ALICE),
+            "nonce",
+        )
+        expect(PeerManager.getInstance().getPeer(ALICE)?.connection.string).toBe(
+            ALICE_COPY_URL,
+        )
+    })
+
+    it("says so in its own hello and hello replies", async () => {
+        const { haltSigning, __resetSigningHalt } = await import(
+            "src/libs/identity/signingRecord"
+        )
+        try {
+            expect((await PeerManager.buildHelloRequest()).request.standby).toBeUndefined()
+            haltSigning("test: another process signs with this key")
+            expect((await PeerManager.buildHelloRequest()).request.standby).toBe(
+                true,
+            )
+            const reply = await manageHelloPeer(helloFrom(BOB, BOB_URL), BOB)
+            expect(reply.extra.standby).toBe(true)
+        } finally {
+            __resetSigningHalt()
+        }
     })
 })
