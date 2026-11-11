@@ -71,6 +71,9 @@ function helloFrom(identity: string, url: string): any {
 beforeEach(() => {
     const manager = PeerManager.getInstance()
     for (const peer of manager.getPeers()) manager.removeOnlinePeer(peer.identity)
+    for (const identity of Object.keys(manager.getOfflinePeers())) {
+        manager.removeOfflinePeer(identity)
+    }
     hellos.length = 0
     ;(PeerManager as any).sayHelloToPeer = async (peer: InstanceType<typeof Peer>) => {
         hellos.push({ identity: peer.identity, url: peer.connection.string })
@@ -166,6 +169,26 @@ describe("a copy of a key that stopped signing", () => {
         expect(PeerManager.getInstance().getPeer(ALICE)?.connection.string).toBe(
             ALICE_URL,
         )
+    })
+
+    it("does not take over the URL of a signing copy listed offline", async () => {
+        const manager = PeerManager.getInstance()
+        PeerManager.markPeerOffline(manager.getPeer(ALICE)!)
+        expect(manager.getPeer(ALICE)).toBeUndefined()
+
+        await manageHelloPeer(
+            { ...helloFrom(ALICE, ALICE_COPY_URL), standby: true },
+            ALICE,
+        )
+        await PeerManager.helloPeerCallback(
+            signedReply(ALICE, ALICE_COPY_URL, true),
+            new Peer(ALICE_COPY_URL, ALICE),
+            "nonce",
+        )
+
+        expect(manager.getPeer(ALICE)).toBeUndefined()
+        expect(manager.getOfflinePeers()[ALICE]?.connection.string).toBe(ALICE_URL)
+        expect(hellos).toEqual([])
     })
 
     it("is still added when its key is not known yet", async () => {

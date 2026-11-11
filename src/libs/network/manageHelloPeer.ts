@@ -186,15 +186,19 @@ export async function manageHelloPeer(
             ? known.connection.string
             : undefined
 
+    // A copy that stopped signing leaves the entry with the copy that signs,
+    // also while that copy is listed offline: taking its place there would
+    // route the key's consensus calls to a node that refuses every vote.
+    const listed =
+        known ?? peerManager.getOfflinePeers()[peerObject.identity]
+    const standbyElsewhere = standbyKeepsKnownUrl(
+        listed?.connection.string,
+        content.url,
+        content.standby,
+    )
+
     if (known) {
-        // A copy that stopped signing leaves the entry with the copy that signs
-        if (
-            !standbyKeepsKnownUrl(
-                known.connection.string,
-                content.url,
-                content.standby,
-            )
-        ) {
+        if (!standbyElsewhere) {
             // Known peer: the signed hello may update its URL and sync data
             const [isAddedToPeerlist, message] = peerManager.addPeer(
                 peerObject,
@@ -229,7 +233,7 @@ export async function manageHelloPeer(
                 return response
             }
         }
-    } else {
+    } else if (!standbyElsewhere) {
         // Stranger: the caller proved it holds the key, not that the URL
         // reaches it. Hello back and let the verified reply add it.
         const [acceptable, message] = peerManager.canAddPeer(peerObject)

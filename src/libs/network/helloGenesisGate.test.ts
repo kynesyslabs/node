@@ -38,6 +38,7 @@ const peerManager = {
         return [true, ""]
     },
     canAddPeer: () => [true, ""],
+    getOfflinePeers: () => ({}),
     getPeers: () => [],
     ourSyncData: { status: true, block: 0, block_hash: GENESIS },
 }

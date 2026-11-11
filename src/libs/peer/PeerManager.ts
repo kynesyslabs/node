@@ -786,7 +786,10 @@ export default class PeerManager {
                 )
             }
 
-            const knownUrl = peerman.getPeer(peer.identity)?.connection.string
+            const knownUrl = (
+                peerman.getPeer(peer.identity) ??
+                peerman.getOfflinePeers()[peer.identity]
+            )?.connection.string
             if (
                 standbyKeepsKnownUrl(
                     knownUrl,
