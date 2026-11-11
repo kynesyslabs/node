@@ -18,7 +18,7 @@
  * intentionally change block-0 hash; restoring snapshot rows does not.
  */
 
-import { seededNftReasons } from "src/features/staking/seedNft"
+import { verifySeededNfts } from "src/features/staking/seedNft"
 import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
@@ -442,7 +442,7 @@ async function* nftCheckedValidators(
         seen.push(row)
         yield row
     }
-    const reasons = seededNftReasons(seen, "validators.jsonl")
+    const reasons = await verifySeededNfts(seen, "validators.jsonl")
     if (reasons.length > 0) {
         throw new Error(`[GENESIS][SNAPSHOT] ${reasons.join("; ")}`)
     }

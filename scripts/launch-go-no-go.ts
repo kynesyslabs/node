@@ -45,6 +45,7 @@ import {
 } from "src/forks/forkConfig"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
+import { verifySeededNfts, type SeededValidatorNft } from "src/features/staking/seedNft"
 import {
     type BlockZeroValidators,
     type ValidatorRow,
@@ -658,6 +659,12 @@ export function mainnetGenesisReasons(
     return reasons
 }
 
+/** What a node's NFT checks, Solana included, would refuse in the genesis validators at first boot. */
+async function genesisNftProblems(genesis: { validators?: unknown }): Promise<string[]> {
+    const rows = Array.isArray(genesis.validators) ? (genesis.validators as SeededValidatorNft[]) : []
+    return verifySeededNfts(rows, "genesis.validators")
+}
+
 /** The addresses of genesis validator entries seated without an NFT. */
 function nftExemptEntries(validators: unknown): string[] {
     if (!Array.isArray(validators)) return []
@@ -1099,6 +1106,7 @@ async function runPlan(
         // A schedule the node refuses to load is a failed check here, not bad input
         genesisFileProblems = [(e as Error).message]
     }
+    genesisFileProblems.push(...(await genesisNftProblems(genesis)))
     const checks = launchPlanChecks({ genesis, blockZero, shardSize, operators, genesisFileProblems })
     const table = validatorTable(blockZero ? launchIdentities(blockZero.rows) : [], operators, shardSize)
     if (args.json) {
@@ -1208,7 +1216,7 @@ async function main(): Promise<number> {
 
     if (args.plan) return await runPlan(args, genesis, blockZero, shardSize, operators, manifestSha256, snapshotForkState)
 
-    let expectations = {}
+    let expectations: Partial<Awaited<ReturnType<typeof launchGenesisExpectations>>> = {}
     if (genesis) {
         try {
             expectations = await launchGenesisExpectations(genesis, manifestSha256, snapshotForkState)
@@ -1216,6 +1224,10 @@ async function main(): Promise<number> {
             console.error(`genesis: ${(e as Error).message}`)
             return 2
         }
+        expectations.genesisFileProblems = [
+            ...(expectations.genesisFileProblems ?? []),
+            ...(await genesisNftProblems(genesis)),
+        ]
     }
 
     const prover = await startIdentityProver(args.timeoutMs)

@@ -1,4 +1,5 @@
 import { isAllowlistedMint } from "./nftAllowlist"
+import { verifyCurrentOwner, verifyNftProof } from "./solanaProof"
 import { getMinValidatorStake } from "./minStake"
 import { VALIDATOR_STATUS_ACTIVE, VALIDATOR_STATUS_UNSTAKING } from "./constants"
 
@@ -15,6 +16,16 @@ export interface SeededValidatorNft {
 }
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/
+
+/** Whether a seeded row takes a seat; an exited row carries no NFT rules. */
+function holdsSeat(row: Pick<SeededValidatorNft, "status">): boolean {
+    return (
+        row.status === undefined ||
+        row.status === null ||
+        row.status === VALIDATOR_STATUS_ACTIVE ||
+        row.status === VALIDATOR_STATUS_UNSTAKING
+    )
+}
 
 /** Whether a seeded row opts out of the NFT fields. Only a literal `true` counts. */
 export function isNftExemptSeed(row: Pick<SeededValidatorNft, "nft_exempt">): boolean {
@@ -41,12 +52,7 @@ export function seededNftReasons(
     const holders = new Map<string, string>()
     rows.forEach((row, index) => {
         const where = `${label}[${index}] (${row.address})`
-        const seated =
-            row.status === undefined ||
-            row.status === null ||
-            row.status === VALIDATOR_STATUS_ACTIVE ||
-            row.status === VALIDATOR_STATUS_UNSTAKING
-        if (!seated) return
+        if (!holdsSeat(row)) return
         if (row.nft_exempt !== undefined && row.nft_exempt !== null && typeof row.nft_exempt !== "boolean") {
             reasons.push(`${where}: nft_exempt must be a boolean`)
             return
@@ -91,4 +97,33 @@ export function seededNftReasons(
         }
     })
     return reasons
+}
+
+/**
+ * The seeded-set rules, then the Solana side of every proof: the proof
+ * checks out and the wallet still holds the NFT. Age is not checked, a
+ * genesis proof is as old as the launch. An unreachable chain is a reason
+ * too: a node that cannot verify its seats does not seat them.
+ */
+export async function verifySeededNfts(
+    rows: readonly SeededValidatorNft[],
+    label: string,
+): Promise<string[]> {
+    const reasons = seededNftReasons(rows, label)
+    if (reasons.length > 0) return reasons
+    const checks = rows.map(async (row, index) => {
+        if (!holdsSeat(row) || isNftExemptSeed(row)) return null
+        const where = `${label}[${index}] (${row.address})`
+        const nft = {
+            mint: row.nft_mint as string,
+            owner: row.nft_owner as string,
+            proofTx: row.nft_proof_tx as string,
+        }
+        const proof = await verifyNftProof(nft, row.address, Date.now(), Infinity)
+        if (proof.status !== "valid") return `${where}: NFT proof ${proof.status}: ${proof.reason}`
+        const owner = await verifyCurrentOwner(nft.mint, nft.owner)
+        if (owner.status !== "valid") return `${where}: NFT ownership ${owner.status}: ${owner.reason}`
+        return null
+    })
+    return (await Promise.all(checks)).filter((r): r is string => r !== null)
 }

@@ -17,7 +17,7 @@ import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
 import { Validators } from "src/model/entities/Validators"
-import { nftExemptSeeds, seededNftReasons } from "src/features/staking/seedNft"
+import { nftExemptSeeds, verifySeededNfts } from "src/features/staking/seedNft"
 
 // Matches `0x` followed by exactly 64 hex characters.
 const ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/
@@ -121,7 +121,7 @@ export async function seedValidators(
 
     // Per-row validation — throws immediately on the first offending row.
     validators.forEach((v, i) => validateSeed(v, i))
-    const nftReasons = seededNftReasons(validators, "genesis.validators")
+    const nftReasons = await verifySeededNfts(validators, "genesis.validators")
     if (nftReasons.length > 0) {
         throw new Error(`[GENESIS][VALIDATORS] ${nftReasons.join("; ")}`)
     }

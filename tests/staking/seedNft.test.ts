@@ -1,8 +1,16 @@
-import { describe, expect, it, jest } from "@jest/globals"
+import { beforeEach, describe, expect, it, jest } from "@jest/globals"
 
 jest.mock("@/features/staking/nftAllowlist", () => ({
     __esModule: true,
     isAllowlistedMint: jest.fn((mint: string) => mint !== "3BadMintxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
+}))
+
+const verifyNftProof = jest.fn(async () => ({ status: "valid", slot: 1 }))
+const verifyCurrentOwner = jest.fn(async () => ({ status: "valid", slot: 1 }))
+jest.mock("@/features/staking/solanaProof", () => ({
+    __esModule: true,
+    verifyNftProof,
+    verifyCurrentOwner,
 }))
 
 jest.mock("@/utilities/sharedState", () => ({
@@ -10,7 +18,7 @@ jest.mock("@/utilities/sharedState", () => ({
     getSharedState: { networkParameters: { minValidatorStake: "1000" } },
 }))
 
-import { seededNftReasons } from "@/features/staking/seedNft"
+import { seededNftReasons, verifySeededNfts } from "@/features/staking/seedNft"
 
 const MINT = "7M7TxyCHoX3jmUNh68QxWWnUSbxJwEUTJoN5dHxTctGH"
 const MINT2 = "2edqWDWbFkTjkcTb4zzj3PwQBHJeXbFuiAynm4bj46yP"
@@ -69,5 +77,51 @@ describe("a seeded validator set under NFT gating", () => {
 
     it("ignores exited rows, which hold no seat", () => {
         expect(seededNftReasons([row({ status: "0", nft_mint: null, nft_owner: null, nft_proof_tx: null })], "g")).toEqual([])
+    })
+})
+
+describe("a seeded validator set checked against Solana", () => {
+    beforeEach(() => {
+        verifyNftProof.mockClear()
+        verifyCurrentOwner.mockClear()
+        verifyNftProof.mockResolvedValue({ status: "valid", slot: 1 })
+        verifyCurrentOwner.mockResolvedValue({ status: "valid", slot: 1 })
+    })
+
+    it("passes when every proof checks out and the wallet still holds the NFT; the age bound is lifted", async () => {
+        await expect(verifySeededNfts([row()], "g")).resolves.toEqual([])
+        expect(verifyNftProof).toHaveBeenCalledWith(
+            { mint: MINT, owner: OWNER, proofTx: SIG },
+            "0x" + "a".repeat(64),
+            expect.any(Number),
+            Infinity,
+        )
+        expect(verifyCurrentOwner).toHaveBeenCalledWith(MINT, OWNER)
+    })
+
+    it("refuses a seat whose NFT has moved, or whose proof an endpoint rejects", async () => {
+        verifyCurrentOwner.mockResolvedValue({ status: "invalid", reason: "nft.owner no longer holds the NFT" })
+        const moved = await verifySeededNfts([row()], "g")
+        expect(moved[0]).toContain("no longer holds")
+        verifyNftProof.mockResolvedValue({ status: "invalid", reason: "proof memo names 0xbb, not 0xaa" })
+        const bad = await verifySeededNfts([row()], "g")
+        expect(bad[0]).toContain("NFT proof invalid")
+    })
+
+    it("refuses when Solana cannot be reached, and never asks for an exempt or exited row", async () => {
+        verifyNftProof.mockResolvedValue({ status: "unreachable", reason: "all endpoints timed out" })
+        const down = await verifySeededNfts([row()], "g")
+        expect(down[0]).toContain("unreachable")
+        verifyNftProof.mockClear()
+        const exempt = { address: "0x" + "c".repeat(64), status: "2", staked_amount: "1000", nft_exempt: true }
+        const exited = row({ status: "0", nft_mint: null, nft_owner: null, nft_proof_tx: null })
+        await expect(verifySeededNfts([exempt, exited], "g")).resolves.toEqual([])
+        expect(verifyNftProof).not.toHaveBeenCalled()
+    })
+
+    it("stops at the shape rules before touching Solana", async () => {
+        const reasons = await verifySeededNfts([row({ staked_amount: "999" })], "g")
+        expect(reasons[0]).toContain("below the minimum")
+        expect(verifyNftProof).not.toHaveBeenCalled()
     })
 })

@@ -122,12 +122,13 @@ async function fetchParsed(
 /**
  * Check a stake's NFT proof against the chain. `validatorAddress` is the
  * Demos address the memo must name; `txTimestampMs` is the stake tx's
- * signed timestamp, which bounds the proof's age.
+ * signed timestamp, which bounds the proof's age by `maxAgeSeconds`.
  */
 export async function verifyNftProof(
     proof: ValidatorNftProof,
     validatorAddress: string,
     txTimestampMs: number,
+    maxAgeSeconds: number = PROOF_MAX_AGE_SECONDS,
 ): Promise<SolanaCheck> {
     for (const key of ["mint", "owner", "proofTx"] as const) {
         if (!BASE58.test(proof[key])) return invalid(`nft.${key} is not base58`)
@@ -145,7 +146,7 @@ export async function verifyNftProof(
     }
     if (inspected.blockTime === null) return invalid("proof has no block time")
     const txSeconds = Math.floor(txTimestampMs / 1000)
-    const maxAge = PROOF_MAX_AGE_SECONDS
+    const maxAge = maxAgeSeconds
     if (inspected.blockTime > txSeconds + PROOF_CLOCK_SKEW_SECONDS) {
         return invalid("proof is later than the stake transaction")
     }

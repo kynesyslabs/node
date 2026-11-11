@@ -127,6 +127,14 @@ describe("verifyNftProof", () => {
             (1_700_000_000 - 61) * 1000,
         )
         expect((future as { reason: string }).reason).toContain("later than")
+        // A seeded proof is as old as the launch: the age bound can be lifted.
+        const ageless = await verifyNftProof(
+            { mint: MINT, owner: OWNER, proofTx: SIG },
+            VALIDATOR,
+            (1_700_000_000 + 86_400 + 1) * 1000,
+            Infinity,
+        )
+        expect(ageless.status).toBe("valid")
     })
 
     it("reports unreachable, not invalid, when no endpoint answers or the tx is unknown", async () => {
