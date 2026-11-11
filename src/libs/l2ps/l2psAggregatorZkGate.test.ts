@@ -36,6 +36,7 @@ mock.module("@/utilities/logger", () => ({
 }))
 
 const { L2PSBatchAggregator } = await import("./L2PSBatchAggregator")
+const { settlementProverPool } = await import("./settlement/prover")
 const aggregator = L2PSBatchAggregator.getInstance() as any
 
 afterEach(async () => {
@@ -75,5 +76,16 @@ describe("L2PS batch proofs gate", () => {
         await aggregator.start()
         expect(initialize).toHaveBeenCalledTimes(2)
         expect(aggregator.zkEnabled).toBe(true)
+    })
+
+    it("stops the settlement provers with the service, and a restart gets new ones", async () => {
+        aggregator.zkRequested = false
+        await aggregator.start()
+        const pool = settlementProverPool()
+
+        await aggregator.stop()
+
+        await expect(pool.probe()).rejects.toThrow("closed")
+        expect(settlementProverPool()).not.toBe(pool)
     })
 })

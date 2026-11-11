@@ -28,7 +28,7 @@ import {
 import { openSettlementTransfer } from "./settlement/transfer"
 import { readTipAccounts } from "./settlement/tipState"
 import { planSettlement } from "./settlement/planner"
-import { proveSettlement } from "./settlement/prover"
+import { closeSettlementProverPool, proveSettlement } from "./settlement/prover"
 import { nativeTransferFeeOs, type SettlementRecord } from "./settlement/validation"
 import { ensureNetworkParametersCurrent } from "@/libs/blockchain/routines/loadNetworkParameters"
 
@@ -253,6 +253,8 @@ export class L2PSBatchAggregator {
         this.zkProver = null
         this.zkEnabled = false
         await prover?.terminate()
+        // Settlement provers would otherwise outlive the service as well.
+        await closeSettlementProverPool()
 
         log.info("[L2PS Batch Aggregator] Stopped successfully")
         this.logStatistics()
@@ -961,6 +963,15 @@ export class L2PSBatchAggregator {
             if (staleProcessed > 0) {
                 this.stats.cleanedUpTransactions += staleProcessed
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${staleProcessed} synced transactions`)
+            }
+
+            // A failed row is never settled or read again: the history keeps
+            // its status and reason and answers duplicates, so its ciphertext
+            // goes once it is as old as a confirmed row's.
+            const failed = await L2PSMempool.cleanupByStatus(L2PS_STATUS.FAILED, this.CLEANUP_AGE_MS)
+            if (failed > 0) {
+                this.stats.cleanedUpTransactions += failed
+                log.info(`[L2PS Batch Aggregator] Cleaned up ${failed} failed transactions`)
             }
 
         } catch (error: unknown) {

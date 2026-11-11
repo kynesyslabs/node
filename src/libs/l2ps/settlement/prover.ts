@@ -242,6 +242,13 @@ export function settlementProverPool(): SettlementProverPool {
     return defaultPool
 }
 
+/** Stops the node's prover subprocesses; the next use starts a new pool. */
+export async function closeSettlementProverPool(): Promise<void> {
+    const pool = defaultPool
+    defaultPool = null
+    await pool?.terminate()
+}
+
 /**
  * Proves a plan in a prover subprocess and checks the proof against the
  * committed key before returning it, so a proof that peers would reject
