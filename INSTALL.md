@@ -451,7 +451,9 @@ For exchanges and wallets that reconcile balances. Amounts are in OS (1 DEM = 1 
 
 - The sender is debited `amount + network_fee + rpc_fee`, the values in the transaction's `content.transaction_fee`. With the launch parameters that is the amount plus 1 DEM + 1 DEM. The SDK still ships a flat 1 DEM gas edit; the node does not charge it, and a transfer is confirmed only when the balance covers the amount plus that fee.
 - `network_fee` is split 50/50 between the burn address (`0x` + 64 zeros) and the genesis treasury (`forks.gasFeeSeparation.treasuryAddress`). `rpc_fee` goes to the treasury while the transaction names no rpc operator. The burn address is an ordinary account, so total supply (the sum of all balances) does not change.
-- A transaction included in a block that then fails pays its fee and spends its nonce; the amount does not move. If the balance cannot cover the fee, only the nonce is spent.
+- A native TLSNotary request or store also debits its burn: 1 DEM for a request, 1 DEM plus 1 DEM per started KB of proof for a store. Confirmation requires the balance to cover it too. That burn is credited to no account, so it lowers total supply.
+- Every other transaction type except `identity` and `d402_payment` pays the flat 1 DEM gas edit the SDK ships, not `transaction_fee`. The sender is debited exactly that gas, and the block credits it as it credits a `network_fee`: 50/50 to the burn address and the treasury, the treasury taking any rounding remainder. Total supply does not change.
+- A transaction included in a block that then fails pays its fee (or, for a non-native type, its gas with the same credits) and spends its nonce; the amount does not move. If the balance cannot cover the fee, only the nonce is spent.
 - The fee values, `additional_fee` (0 at launch) and the split percentages are network parameters that governance can change; read them from the transaction's `transaction_fee`, not from this page.
 
 ### Network Exposure
