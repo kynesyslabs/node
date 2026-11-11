@@ -3,7 +3,7 @@
  * batch, so the proving tests run only with L2PS_SETTLEMENT_PROVE_TESTS=1 and
  * the keys built (bun run setup --only zk --zk --zk-generate).
  */
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, jest } from "bun:test"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -11,7 +11,7 @@ import { PROVEN_BATCHES } from "./__fixtures__/batches"
 import { buildSettlementCircuitInput } from "./circuitInput"
 import { planSettlement } from "./planner"
 import { proveSettlement, verifySettlementProof } from "./prover"
-import { SettlementProverPool } from "./proverPool"
+import { SettlementProverPool, killProver, proverCommand } from "./proverPool"
 import { isSettlementBuilt } from "../zk/settlementArtifacts"
 
 const proveTests = process.env.L2PS_SETTLEMENT_PROVE_TESTS === "1" && isSettlementBuilt()
@@ -139,4 +139,31 @@ describe.skipIf(!proveTests)("settlement proofs in the subprocess", () => {
             await pool.terminate()
         }
     }, 120_000)
+})
+
+describe("killing a prover subprocess", () => {
+    it("starts the npx launcher in a group of its own, so a kill reaches the prover under it", () => {
+        expect(proverCommand(false, "k.zkey", "c.wasm")).toMatchObject({ cmd: "npx", detached: true })
+        expect(proverCommand(true, "k.zkey", "c.wasm")).toMatchObject({ cmd: process.execPath, detached: false })
+    })
+
+    it("kills the whole group and closes stdin, so a prover the signal misses still exits", () => {
+        const end = jest.fn()
+        const kill = jest.fn()
+        const signals: unknown[][] = []
+        const realKill = process.kill
+        ;(process as any).kill = (...args: unknown[]) => (signals.push(args), true)
+        try {
+            killProver({ pid: 4242, stdin: { end } as any, kill }, true)
+        } finally {
+            ;(process as any).kill = realKill
+        }
+        expect(signals).toEqual([[-4242, "SIGKILL"]])
+        expect(end).toHaveBeenCalledTimes(1)
+        expect(kill).not.toHaveBeenCalled()
+
+        killProver({ pid: 4243, stdin: { end } as any, kill }, false)
+        expect(kill).toHaveBeenCalledWith("SIGKILL")
+        expect(end).toHaveBeenCalledTimes(2)
+    })
 })

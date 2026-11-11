@@ -42,8 +42,44 @@ interface Job {
     reject: (error: Error) => void
 }
 
+/**
+ * How a prover subprocess is started. Without Bun the script runs through
+ * `npx tsx`, a launcher whose prover is a grandchild that a signal to the
+ * launcher never reaches, so it gets a process group of its own to kill.
+ */
+export function proverCommand(
+    isBun: boolean,
+    zkeyPath: string,
+    wasmPath: string,
+): { cmd: string; args: string[]; detached: boolean } {
+    return isBun
+        ? { cmd: process.execPath, args: [PROCESS_SCRIPT, zkeyPath, wasmPath], detached: false }
+        : { cmd: "npx", args: ["tsx", PROCESS_SCRIPT, zkeyPath, wasmPath], detached: true }
+}
+
+/**
+ * Kills a prover subprocess and everything it started. Its stdin is closed
+ * as well: the prover exits on EOF, should a kill not reach it.
+ */
+export function killProver(
+    child: Pick<ChildProcess, "pid" | "stdin" | "kill">,
+    detached: boolean,
+): void {
+    child.stdin?.end()
+    if (detached && child.pid !== undefined) {
+        try {
+            process.kill(-child.pid, "SIGKILL")
+            return
+        } catch {
+            // The group is gone already; the launcher itself may not be.
+        }
+    }
+    child.kill("SIGKILL")
+}
+
 class ProverWorker {
     private child: ChildProcess | null = null
+    private detached = false
     private ready: Promise<void> | null = null
     private buffer = ""
     private current: { id: string; job: Job; timer: ReturnType<typeof setTimeout> | undefined } | null = null
@@ -72,17 +108,15 @@ class ProverWorker {
     }
 
     private spawnChild(): Promise<void> {
-        const isBun = (globalThis as any).Bun !== undefined
-        const [cmd, args] = isBun
-            ? [process.execPath, [PROCESS_SCRIPT, this.zkeyPath, this.wasmPath]]
-            : ["npx", ["tsx", PROCESS_SCRIPT, this.zkeyPath, this.wasmPath]]
+        const { cmd, args, detached } = proverCommand((globalThis as any).Bun !== undefined, this.zkeyPath, this.wasmPath)
         // Bun's collector sizes itself to the host's RAM; telling it the host
         // has 2 GiB brings a proof's peak from about 1.3 GB to 1 GB at the
         // same speed. A heuristic, not a cap: a proof that needs more still
         // gets it.
         const env = { BUN_JSC_forceRAMSize: String(2 * 1024 ** 3), ...process.env }
-        const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd(), env })
+        const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd(), env, detached })
         this.child = child
+        this.detached = detached
         this.buffer = ""
 
         return new Promise<void>((resolve, reject) => {
@@ -186,7 +220,7 @@ class ProverWorker {
         const child = this.child
         this.child = null
         this.ready = null
-        child?.kill("SIGKILL")
+        if (child) killProver(child, this.detached)
     }
 
     terminate(error: Error): void {
