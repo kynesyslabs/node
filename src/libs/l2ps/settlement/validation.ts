@@ -272,8 +272,10 @@ export function settlementNonceSpend(settlement: ParsedSettlement): Map<string, 
 
 /**
  * Public signals rebuilt from the transaction and the working state, and the
- * PLONK proof checked against them. A verifier that throws (a malformed proof
- * object included) refuses the batch: the input is the same on every node.
+ * PLONK proof checked against them. Only a false verdict refuses the batch:
+ * it is the same on every honest node. A verifier that throws could not judge
+ * (a missing key, a failed curve build, no memory), so the error leaves the
+ * block apply and this node halts instead of failing a batch its peers apply.
  */
 export async function settlementProofRefusal(
     settlement: ParsedSettlement,
@@ -298,12 +300,7 @@ export async function settlementProofRefusal(
     } catch (error) {
         return `public signals: ${(error as Error).message}`
     }
-    let valid: boolean
-    try {
-        valid = await verifySettlementProof(signals, settlement.proof)
-    } catch (error) {
-        return `settlement proof could not be verified: ${(error as Error).message}`
-    }
+    const valid = await verifySettlementProof(signals, settlement.proof)
     return valid === true ? null : "settlement proof does not verify"
 }
 

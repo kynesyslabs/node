@@ -401,11 +401,6 @@ describe("a failing settlement is included as failed with no edits", () => {
         await expectFailed(batch(proven([pay(ALICE, BOB.account, OS, 5n)], plannedOn)), "proof does not verify")
     })
 
-    it("verifier that throws", async () => {
-        verifierThrows = true
-        await expectFailed(batch(proven([pay(ALICE, BOB.account, OS, 5n)], tipBalances())), "could not be verified")
-    })
-
     it("no settlement record (the format before the fork)", async () => {
         const tx = batch(undefined)
         delete tx.content.data[1].settlement
@@ -425,6 +420,51 @@ describe("a failing settlement is included as failed with no edits", () => {
             record.changes.push({ account: "0x" + "ee".repeat(31) + i.toString(16).padStart(2, "0"), delta: "0" })
         }
         await expectFailed(batch(record), `1..${SETTLEMENT_ACCOUNTS} changes`)
+    })
+})
+
+describe("a verifier that cannot judge a proof", () => {
+    const clock = { height: 7, timestampSec: 1_700_000_000 }
+    // Forge and a verified Sync block defer the write; the plain shape saves it.
+    const shapes: [string, Record<string, unknown>][] = [
+        ["forge and Sync (deferred write)", { defer: true }],
+        ["direct apply (immediate write)", {}],
+    ]
+
+    for (const [name, options] of shapes) {
+        it(`rejects the whole block apply with no edits: ${name}`, async () => {
+            let saved = 0
+            ;(HandleGCR as any).saveGCREditChanges = async () => {
+                saved++
+            }
+            const tx = batch(proven([pay(ALICE, BOB.account, OS, 5n)], tipBalances()))
+            const before = snapshot()
+            verifierThrows = true
+
+            await expect(
+                HandleGCR.applyTransactions([tx as any], false, clock, options),
+            ).rejects.toThrow("verifier crashed")
+
+            expect(saved).toBe(0)
+            expect(snapshot()).toEqual(before)
+        })
+    }
+
+    it("is not the same as a proof that does not verify, which fails only its batch", async () => {
+        const plannedOn = tipBalances()
+        plannedOn.set(ALICE.account, 1_000n * OS)
+        const bad = batch(proven([pay(ALICE, BOB.account, OS, 5n)], plannedOn))
+        const good = batch(proven([pay(BOB, CAROL.account, 2n * OS, 1n)], tipBalances()))
+
+        const out = await HandleGCR.applyTransactions(orderDeterministically([bad, good]) as any, false, clock, {
+            defer: true,
+        })
+
+        expect(out.failedTxs).toEqual([bad.hash])
+        expect(out.successfulTxs).toEqual([good.hash])
+        expect(out.pending).toBeDefined()
+        expect(balanceOf(CAROL.account)).toBe(2n * OS)
+        expect(balanceOf(ALICE.account)).toBe(100n * OS)
     })
 })
 
