@@ -434,6 +434,12 @@ async function executeAndRecordL2PSTransaction(
         )
     }
 
+    if (settles) {
+        const refusal = await queueForSettlement(l2psUid, l2psTx, decryptedTx, onExecuted)
+        if (refusal) return createErrorResponse(response, 500, refusal)
+        return admitted(response, l2psUid, l2psTx, decryptedTx, originalHash, executionResult)
+    }
+
     // Update status and return success. The slot moves into the executed
     // count right here, before any further database work, so a refresh
     // landing in between cannot count the row twice for longer than it
@@ -463,6 +469,65 @@ async function executeAndRecordL2PSTransaction(
         // Don't fail the transaction, just log the error
     }
 
+    return admitted(response, l2psUid, l2psTx, decryptedTx, originalHash, executionResult)
+}
+
+/**
+ * Writes the history row first, then queues the mempool row. Admission
+ * counts a sender's queued transfers from the history, so a transfer
+ * queued without one would go uncounted; either write failing refuses it.
+ * Returns the refusal, or null once both writes are in.
+ */
+async function queueForSettlement(
+    l2psUid: string,
+    l2psTx: L2PSTransaction,
+    decryptedTx: Transaction,
+    onExecuted: () => void,
+): Promise<string | null> {
+    try {
+        await L2PSTransactionExecutor.recordTransaction(
+            l2psUid,
+            decryptedTx,
+            "",
+            l2psTx.hash,
+            0,
+            "pending",
+            l2psTx as unknown as Record<string, any>,
+        )
+    } catch (error) {
+        const reason = error instanceof Error ? error.message : "Unknown error"
+        log.error(`[handleL2PS] Could not record ${l2psTx.hash} in the history; refusing it: ${reason}`)
+        await L2PSMempool.updateStatus(l2psTx.hash, "failed")
+        return `Failed to record the L2PS transaction: ${reason}`
+    }
+    if (await L2PSMempool.updateStatus(l2psTx.hash, "executed")) {
+        onExecuted()
+        return null
+    }
+    log.warning(`[handleL2PS] Could not queue ${l2psTx.hash} for settlement; refusing it`)
+    // The history row would otherwise count as queued for good.
+    await L2PSTransactionExecutor.updateTransactionStatus(
+        l2psTx.hash,
+        "failed",
+        undefined,
+        "Could not be queued for settlement; sign the transfer again",
+    ).catch(error =>
+        log.error(
+            `[handleL2PS] Could not mark the history of ${l2psTx.hash} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        ),
+    )
+    await L2PSMempool.updateStatus(l2psTx.hash, "failed")
+    return "Failed to queue the L2PS transaction for settlement"
+}
+
+function admitted(
+    response: RPCResponse,
+    l2psUid: string,
+    l2psTx: L2PSTransaction,
+    decryptedTx: Transaction,
+    originalHash: string,
+    executionResult: { success: boolean; message: string; affected_accounts_count?: number; gcr_edits?: unknown[] },
+): RPCResponse {
     response.result = 200
     response.response = {
         message: "L2PS transaction executed - awaiting batch aggregation",

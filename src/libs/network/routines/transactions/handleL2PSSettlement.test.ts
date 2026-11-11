@@ -21,6 +21,8 @@ const existsByOriginalHash = jest.fn(async (..._args: unknown[]) => false)
 const decryptTx = jest.fn()
 const getL2PS = jest.fn(async (..._args: unknown[]) => ({ decryptTx }))
 const confirmTx = jest.fn(async (..._args: unknown[]) => ({ success: true }))
+const recordTransaction = jest.fn(async (..._args: unknown[]): Promise<void> => undefined)
+const updateTransactionStatus = jest.fn(async (..._args: unknown[]): Promise<void> => undefined)
 /** History rows of the sender's queued transfers; each envelope decrypts to `__inner`. */
 let unsettled: { encrypted_hash: string; encrypted_payload: { __inner: unknown } }[] = []
 
@@ -48,7 +50,8 @@ mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
     default: {
         hasExecuted: async () => false,
         execute,
-        recordTransaction: async () => undefined,
+        recordTransaction,
+        updateTransactionStatus,
         getUnsettledBySender: async (..._args: unknown[]) => unsettled,
     },
 }))
@@ -139,6 +142,11 @@ beforeEach(() => {
     updateStatus.mockReset()
     updateStatus.mockResolvedValue(true)
     existsByOriginalHash.mockResolvedValue(false)
+    recordTransaction.mockReset()
+    recordTransaction.mockResolvedValue(undefined)
+    updateTransactionStatus.mockReset()
+    updateTransactionStatus.mockResolvedValue(undefined)
+    settle.mockClear()
     for (const fn of Object.values(logger)) fn.mockClear()
 })
 
@@ -155,6 +163,31 @@ describe("handleL2PS under l2psSettlement", () => {
         expect(response.result).toBe(200)
         expect(addTransaction).toHaveBeenCalledTimes(1)
         expect(execute).not.toHaveBeenCalled()
+    })
+
+    it("refuses a transfer whose history row cannot be written, so none is queued uncounted", async () => {
+        decrypted(transfer())
+        recordTransaction.mockRejectedValue(new Error("connection terminated"))
+
+        const response = await handleL2PS(tx)
+
+        expect(response.result).toBe(500)
+        expect(updateStatus.mock.calls.map(call => call[1])).toEqual(["failed"])
+        expect(settle).not.toHaveBeenCalled()
+    })
+
+    it("records the history before queuing, and refuses a transfer it cannot queue", async () => {
+        decrypted(transfer())
+        const order: string[] = []
+        recordTransaction.mockImplementation(async () => void order.push("history"))
+        updateStatus.mockImplementation(async (_hash, status) => (order.push(String(status)), status !== "executed"))
+
+        const response = await handleL2PS(tx)
+
+        expect(response.result).toBe(500)
+        expect(order).toEqual(["history", "executed", "failed"])
+        expect(updateTransactionStatus.mock.calls[0][1]).toBe("failed")
+        expect(settle).not.toHaveBeenCalled()
     })
 
     it("refuses the format before the fork with an error that says to update the SDK", async () => {
