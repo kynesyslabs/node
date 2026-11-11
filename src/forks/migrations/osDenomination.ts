@@ -38,6 +38,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import type { EntityManager } from "typeorm"
 import log from "@/utilities/logger"
+import { applyTime } from "@/libs/blockchain/gcr/applyTime"
 
 /**
  * Cap value for legacy GCR balances that would exceed JS number precision
@@ -383,7 +384,7 @@ export async function runOsDenominationMigration(
         entityManager.connection.options.type === "cockroachdb"
     const appliedValue: boolean | number = isPg ? true : 1
     // Postgres' driver doesn't reliably bind JS Date as `timestamp`; use ISO.
-    const appliedAtValue: string = new Date().toISOString()
+    const appliedAtValue: string = applyTime().toISOString()
     const ph = (i: number) => placeholder(entityManager, i)
     await entityManager.query(
         `INSERT INTO fork_state (

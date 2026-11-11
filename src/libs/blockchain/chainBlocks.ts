@@ -47,6 +47,7 @@ import {
     pruneValidatorSetSnapshots,
     recordValidatorSetSnapshot,
 } from "./finality/validatorSet"
+import { withBlockTime } from "./gcr/applyTime"
 import { pruneStorageHistory, resetStorageHistory } from "./finality/storageHistory"
 
 export function isGenesis(block: Block): boolean {
@@ -427,9 +428,11 @@ export async function insertBlock(
                     log.info(
                         `[forks][osDenomination] activation hook firing at block ${block.number}`,
                     )
-                    await runOsDenominationMigration(
-                        transactionalEntityManager,
-                        block.number,
+                    await withBlockTime(block.content?.timestamp, () =>
+                        runOsDenominationMigration(
+                            transactionalEntityManager,
+                            block.number,
+                        ),
                     )
                 }
 
@@ -453,11 +456,13 @@ export async function insertBlock(
                     log.info(
                         `[forks][gasFeeSeparation] activation hook firing at block ${block.number}`,
                     )
-                    await runGasFeeSeparationMigration(
-                        transactionalEntityManager,
-                        block.number,
-                        getSharedState.forkConfig.gasFeeSeparation
-                            .treasuryAddress,
+                    await withBlockTime(block.content?.timestamp, () =>
+                        runGasFeeSeparationMigration(
+                            transactionalEntityManager,
+                            block.number,
+                            getSharedState.forkConfig.gasFeeSeparation
+                                .treasuryAddress,
+                        ),
                     )
                 }
 
