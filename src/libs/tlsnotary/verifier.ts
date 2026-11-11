@@ -90,7 +90,35 @@ function isHex(value: string): boolean {
     return /^[0-9a-fA-F]+$/.test(value)
 }
 
-function decodeRevealedRecv(revealedRecv: number[]): Uint8Array | null {
+/**
+ * Largest `revealedRecv` accepted, in bytes. The JSON scans below are
+ * quadratic in their input and run at admission and in block apply, so the
+ * size is refused before anything reads the bytes. 16384 is the upstream
+ * notary-server default `max_recv_data`, which the default docker mode
+ * keeps (`tlsnotary/docker-compose.yml` overrides only the sent limit).
+ * Notary settings do not bound this input anyway: a claimant can submit any
+ * bytes. A genuine ffi-mode proof over 16384 bytes (`DEFAULT_MAX_RECV_DATA`
+ * is 65536 there) is refused. It is a fixed literal, not
+ * `TLSNOTARY_MAX_RECV_DATA`, because validators must agree on it.
+ *
+ * Applied only while the `tlsnRecvCap` fork is active: a node that refuses
+ * what its peers accept splits from them, so below the fork height an
+ * oversized payload is judged as it was before the cap.
+ */
+export const MAX_REVEALED_RECV_BYTES = 16384
+
+function isOversizedRevealedRecv(revealedRecv: number[]): boolean {
+    return (
+        Array.isArray(revealedRecv) &&
+        revealedRecv.length > MAX_REVEALED_RECV_BYTES
+    )
+}
+
+function decodeRevealedRecv(
+    revealedRecv: number[],
+    refuseOversized: boolean,
+): Uint8Array | null {
+    if (refuseOversized && isOversizedRevealedRecv(revealedRecv)) return null
     if (Array.isArray(revealedRecv)) {
         const isValid = revealedRecv.every(
             n => Number.isInteger(n) && n >= 0 && n <= 255,
@@ -785,8 +813,18 @@ export async function verifyTLSNProof(payload: TLSNIdentityPayload): Promise<{
         }
     }
 
-    const recvBytes = decodeRevealedRecv(revealedRecv)
+    const recvCapActive = isForkActive(
+        "tlsnRecvCap",
+        getSharedState.lastBlockNumber ?? 0,
+    )
+    const recvBytes = decodeRevealedRecv(revealedRecv, recvCapActive)
     if (!recvBytes) {
+        if (recvCapActive && isOversizedRevealedRecv(revealedRecv)) {
+            return {
+                success: false,
+                message: `Invalid TLSN revealedRecv: payload exceeds ${MAX_REVEALED_RECV_BYTES} bytes`,
+            }
+        }
         return {
             success: false,
             message: "Invalid TLSN revealedRecv: expected byte array (0-255)",

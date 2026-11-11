@@ -89,6 +89,9 @@
     "atomicWork": {
       "activationHeight": null
     },
+    "tlsnRecvCap": {
+      "activationHeight": null
+    },
     "networkGovernance": {
       "activationHeight": null
     },

@@ -133,6 +133,19 @@ export type XmProofBindingConfig = BaseForkConfig
 export type TlsnProofEnforcementConfig = BaseForkConfig
 
 /**
+ * `tlsnRecvCap` fork: a TLSNotary identity claim whose `revealedRecv` is
+ * longer than `MAX_REVEALED_RECV_BYTES` (16384) is refused before its bytes
+ * are hashed or scanned (see `libs/tlsnotary/verifier.ts`).
+ *
+ * Before it, a payload of any size was decoded, hashed and scanned for the
+ * identity, and the scans are quadratic in its length. Judged when the
+ * proof is verified, at the tip, so a block applied on tip H or later
+ * refuses an oversized claim. Dormant by default. No payload beyond the
+ * base.
+ */
+export type TlsnRecvCapConfig = BaseForkConfig
+
+/**
  * `atomicWork` fork: lets a transaction carry Work edits (resource-slot
  * CAS, Work attempt, storage put) that apply all-or-nothing, with a
  * receipt the node builds.
@@ -551,6 +564,7 @@ export type ForkConfig =
     | TokenStakingConfig
     | TelegramSenderBindingConfig
     | XmRemoveCanonicalConfig
+    | TlsnRecvCapConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -586,6 +600,7 @@ export type ForkName =
     | "tokenStaking"
     | "telegramSenderBinding"
     | "xmRemoveCanonical"
+    | "tlsnRecvCap"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -620,6 +635,7 @@ export interface ForkConfigByName {
     tokenStaking: TokenStakingConfig
     telegramSenderBinding: TelegramSenderBindingConfig
     xmRemoveCanonical: XmRemoveCanonicalConfig
+    tlsnRecvCap: TlsnRecvCapConfig
 }
 
 /**
@@ -923,6 +939,16 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "An xm identity remove finds the stored entry by the chain's canonical " +
             "address form, as admission compares them.",
     },
+    tlsnRecvCap: {
+        // Dormant by default: a running chain's genesis predates this entry,
+        // and a missing entry hydrates from here, so a height-0 default would
+        // switch the cap on at the binary upgrade and split upgraded
+        // validators from the rest on an oversized claim.
+        activationHeight: null,
+        description:
+            "Refuse a TLSNotary identity claim whose revealedRecv exceeds 16384 bytes, " +
+            "before it is hashed or scanned.",
+    },
 }
 
 /**
@@ -961,5 +987,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
         telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
         xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
+        tlsnRecvCap: { ...DEFAULT_FORK_CONFIG.tlsnRecvCap },
     }
 }
