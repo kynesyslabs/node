@@ -4,8 +4,9 @@ import type { SavedHumanPassportIdentity } from "@/model/entities/types/Identity
  * What a Human Passport identity assign signs. `score` and `threshold` are
  * the values Human Passport reported to the client (the node's
  * `getHumanPassportClaim` routine returns the whole claim); admission checks them
- * against the provider and apply stores them as signed. The optional fields
- * are checked and stored when sent.
+ * against the provider and apply stores them as signed. Admission requires
+ * stamps and both timestamps too; they stay optional here because apply
+ * must not refuse a block over a rule only admission enforces.
  */
 export interface HumanPassportClaim {
     address: string
@@ -21,6 +22,14 @@ export interface HumanPassportClaim {
 }
 
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/i
+
+/**
+ * Stamps in code-unit order. A locale-aware order could differ between
+ * nodes, and the sorted list is stored in state every node must agree on.
+ */
+export function sortedStamps(stamps: readonly string[] | undefined): string[] {
+    return [...(stamps ?? [])].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+}
 
 /**
  * The record a Human Passport claim stores, built from the signed claim
@@ -68,7 +77,7 @@ export function humanPassportRecord(
         score: c.score,
         passingScore: true,
         threshold: c.threshold,
-        stamps: [...((c.stamps as string[] | undefined) ?? [])].sort(),
+        stamps: sortedStamps(c.stamps as string[] | undefined),
         verificationMethod: c.verificationMethod,
         verifiedAt: scoredAt ?? 0,
         expiresAt,

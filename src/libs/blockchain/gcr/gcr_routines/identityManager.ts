@@ -25,7 +25,11 @@ import { CrossChainTools } from "@/libs/identity/tools/crosschain"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { NomisWalletIdentity, SavedHumanPassportIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { HumanPassportProvider, type HumanPassportVerification } from "@/libs/identity/tools/humanpassport"
-import { type HumanPassportClaim, humanPassportRecord } from "@/libs/identity/humanPassportClaim"
+import {
+    type HumanPassportClaim,
+    humanPassportRecord,
+    sortedStamps,
+} from "@/libs/identity/humanPassportClaim"
 import { verifyMessage as verifyEvmMessage } from "ethers"
 import TxValidatorPool from "../../validation/txValidatorPool"
 import { NomisApiClient } from "@/libs/identity/tools/nomis"
@@ -694,8 +698,8 @@ export default class IdentityManager {
      * Verify a Human Passport identity assign payload before the transaction
      * is accepted. Apply stores the signed score as is and never asks Human
      * Passport, so this is the only place the score is checked against the
-     * provider: the signed score and threshold (and stamps, score time and
-     * expiry when sent) must equal what Human Passport reports now, the score
+     * provider: the signed score, threshold, stamps, score time and expiry
+     * must equal what Human Passport reports now, the score
      * must pass, and an unreachable provider refuses the transaction.
      *
      * @param payload - The signed identity payload
@@ -720,6 +724,20 @@ export default class IdentityManager {
             }
         }
 
+        // Apply stores what was signed and reads nothing else, so a field left
+        // out here is stored empty for good: an omitted expiry never expires.
+        if (
+            payload.stamps === undefined ||
+            payload.lastScoreTimestamp === undefined ||
+            payload.expirationTimestamp === undefined
+        ) {
+            return {
+                success: false,
+                message:
+                    "Invalid Human Passport payload: stamps, lastScoreTimestamp and expirationTimestamp are required: send the claim getHumanPassportClaim returns",
+            }
+        }
+
         let fetched: HumanPassportVerification
         try {
             fetched = await HumanPassportProvider.getInstance().verifyAddress(payload.address)
@@ -741,17 +759,14 @@ export default class IdentityManager {
         }
 
         const sameStamps =
-            payload.stamps === undefined ||
-            JSON.stringify([...payload.stamps].sort()) ===
-                JSON.stringify([...fetched.stamps].sort())
+            JSON.stringify(sortedStamps(payload.stamps)) ===
+            JSON.stringify(sortedStamps(fetched.stamps))
         if (
             !sameProviderNumber(payload.score, fetched.score) ||
             !sameProviderNumber(payload.threshold, fetched.threshold) ||
             !sameStamps ||
-            (payload.lastScoreTimestamp !== undefined &&
-                payload.lastScoreTimestamp !== fetched.lastScoreTimestamp) ||
-            (payload.expirationTimestamp !== undefined &&
-                (payload.expirationTimestamp ?? null) !== (fetched.expirationTimestamp ?? null))
+            payload.lastScoreTimestamp !== fetched.lastScoreTimestamp ||
+            (payload.expirationTimestamp ?? null) !== (fetched.expirationTimestamp ?? null)
         ) {
             return {
                 success: false,

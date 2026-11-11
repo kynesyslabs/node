@@ -609,7 +609,16 @@ describe("IdentityManager.verifyHumanPassportPayload: signed score against the p
         verifiedAt: 1,
     }
     const claim = (o: Record<string, unknown> = {}) =>
-        ({ address: evmAddr, verificationMethod: "api", score: 25.5, threshold: 20, ...o }) as any
+        ({
+            address: evmAddr,
+            verificationMethod: "api",
+            score: 25.5,
+            threshold: 20,
+            stamps: ["Google", "Discord"],
+            lastScoreTimestamp: reported.lastScoreTimestamp,
+            expirationTimestamp: reported.expirationTimestamp,
+            ...o,
+        }) as any
 
     beforeEach(() => {
         getIdentities = spyOn(IdentityManager, "getIdentities").mockResolvedValue({
@@ -627,18 +636,31 @@ describe("IdentityManager.verifyHumanPassportPayload: signed score against the p
         instance.mockRestore()
     })
 
-    it("accepts the score and threshold the provider reports", async () => {
-        const r = await IdentityManager.verifyHumanPassportPayload(claim(), SENDER)
-        expect(r.success).toBe(true)
-        const full = await IdentityManager.verifyHumanPassportPayload(
-            claim({
-                stamps: ["Discord", "Google"],
-                lastScoreTimestamp: reported.lastScoreTimestamp,
-                expirationTimestamp: reported.expirationTimestamp,
-            }),
+    it("accepts the claim the provider reports, stamps in any order", async () => {
+        const full = await IdentityManager.verifyHumanPassportPayload(claim(), SENDER)
+        expect(full.success).toBe(true)
+        const reordered = await IdentityManager.verifyHumanPassportPayload(
+            claim({ stamps: ["Discord", "Google"] }),
             SENDER,
         )
-        expect(full.success).toBe(true)
+        expect(reordered.success).toBe(true)
+        provider.mockImplementation(async () => ({ ...reported, expirationTimestamp: null }))
+        const noExpiry = await IdentityManager.verifyHumanPassportPayload(
+            claim({ expirationTimestamp: null }),
+            SENDER,
+        )
+        expect(noExpiry.success).toBe(true)
+    })
+
+    it("refuses a claim that leaves out the stamps, score time or expiry apply stores", async () => {
+        for (const o of [
+            { stamps: undefined },
+            { lastScoreTimestamp: undefined },
+            { expirationTimestamp: undefined },
+        ]) {
+            const r = await IdentityManager.verifyHumanPassportPayload(claim(o), SENDER)
+            expect({ o, ok: r.success }).toEqual({ o, ok: false })
+        }
     })
 
     it("refuses a payload without the signed score, as the SDK's typed API builds it", async () => {
