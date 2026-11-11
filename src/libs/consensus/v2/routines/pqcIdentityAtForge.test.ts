@@ -6,7 +6,7 @@
  * the check Sync runs, on the state block N is built on, and leaves it out.
  */
 
-import { afterEach, beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from "bun:test"
 
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
@@ -41,6 +41,7 @@ import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import { ErrorCode } from "@/errors"
 import { verifyBlockTxSignatures } from "@/libs/blockchain/validation/verifyBlockTxSignatures"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import { judgeBlockTransactions } from "./blockTransactions"
 
 const HEIGHT = 101
@@ -136,5 +137,25 @@ describe("a PQC-only tx whose key was removed in block N-1", () => {
 
         expect(judged.txs.map(t => t.hash)).toEqual([pqcTx.hash])
         expect(judged.failedTxs).toEqual([])
+    })
+})
+
+describe("a PQC-only tx the validator could not judge", () => {
+    it("is left out of block N without being failed, so it waits for the next block", async () => {
+        const pqcTx = inPool(await DemosTransactions.pay(PEER, 1n, pqc))
+        identityRows = [linkedRow]
+        const validate = spyOn(TxValidatorPool.getInstance(), "validate").mockResolvedValue([
+            { hash: pqcTx.hash, valid: false, undecided: true, reason: "validator pool error: worker timed out" },
+        ] as any)
+        try {
+            const judged = await judgeBlockTransactions([pqcTx], HEIGHT, {
+                capped: false,
+                osDenominationActive: true,
+            })
+            expect(judged.txs).toEqual([])
+            expect(judged.failedTxs).toEqual([])
+        } finally {
+            validate.mockRestore()
+        }
     })
 })

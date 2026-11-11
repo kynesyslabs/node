@@ -72,17 +72,21 @@ export async function judgeBlockTransactions(
  * block `height` is built on. Admission judged them against the record as it
  * was then; a `pqcremove` in an earlier block deletes it, and a node syncing
  * this block would refuse it for that. Failed as well as applied txs are
- * judged, since Sync checks the signature of every tx a block lists.
+ * judged, since Sync checks the signature of every tx a block lists. A tx
+ * the validator could not judge is left out unfailed, for a later block.
  */
 export async function leaveOutRefusedPqcTxs(
     txs: MempoolTransaction[],
     height: number,
 ): Promise<{ kept: MempoolTransaction[]; failedTxs: FailedTranscation[] }> {
-    const refused = await pqcTxsRefusedAt(height, txs as never)
-    if (refused.size === 0) return { kept: txs, failedTxs: [] }
+    const { refused, undecided } = await pqcTxsRefusedAt(height, txs as never)
+    if (refused.size === 0 && undecided.size === 0) return { kept: txs, failedTxs: [] }
     const failedTxs: FailedTranscation[] = []
     for (const [txhash, reason] of refused) {
         failedTxs.push({ txhash, code: ErrorCode.VALIDATION_TX_INVALID, message: reason })
     }
-    return { kept: txs.filter(tx => !refused.has(tx.hash)), failedTxs }
+    return {
+        kept: txs.filter(tx => !refused.has(tx.hash) && !undecided.has(tx.hash)),
+        failedTxs,
+    }
 }

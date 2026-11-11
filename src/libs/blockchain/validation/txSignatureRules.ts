@@ -53,20 +53,23 @@ export function isPqcOnlyTx(tx: Transaction): boolean {
  * transaction on both sides. Others are not judged: admission already
  * checked their signatures, which state cannot change.
  *
- * @returns hash -> reason for each transaction to leave out.
+ * @returns `refused`: hash -> reason for each transaction to fail;
+ *   `undecided`: those the validator could not judge, to leave out of this
+ *   block without failing them.
  */
 export async function pqcTxsRefusedAt(
     height: number,
     txs: Transaction[],
-): Promise<Map<string, string>> {
+): Promise<{ refused: Map<string, string>; undecided: Set<string> }> {
     const refused = new Map<string, string>()
+    const undecided = new Set<string>()
     const pqcOnly = txs.filter(isPqcOnlyTx)
-    if (pqcOnly.length === 0) return refused
+    if (pqcOnly.length === 0) return { refused, undecided }
     const results = await verdictsUnder(signatureRulesAt(height), pqcOnly)
     for (let i = 0; i < results.length; i++) {
-        if (!results[i].valid) {
-            refused.set(pqcOnly[i].hash, results[i].reason ?? "invalid signature")
-        }
+        if (results[i].valid) continue
+        if (results[i].undecided) undecided.add(pqcOnly[i].hash)
+        else refused.set(pqcOnly[i].hash, results[i].reason ?? "invalid signature")
     }
-    return refused
+    return { refused, undecided }
 }
