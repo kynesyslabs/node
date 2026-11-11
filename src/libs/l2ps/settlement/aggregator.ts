@@ -441,10 +441,15 @@ export class SettlementAggregator {
             }
 
             let proof: SettlementProofResult
+            const provingSince = this.deps.now()
             try {
                 proof = await this.deps.prove(plan)
                 this.proofsMade++
                 this.proverPause.delete(l2psUid)
+                // Proof time bounds a subnet's throughput, so operators need it per batch.
+                log.info(
+                    `[L2PS Settlement] Proved a ${plan.transfers.length}-transfer batch for ${l2psUid} in ${this.deps.now() - provingSince} ms`,
+                )
             } catch (error) {
                 const failures = (this.proverPause.get(l2psUid)?.failures ?? 0) + 1
                 const pause = Math.min(
