@@ -5,9 +5,14 @@
  */
 import { beforeEach, describe, expect, it, mock } from "bun:test"
 
+/** Everything logged above debug. */
+const loud: string[] = []
+const shout = (...args: unknown[]) => {
+    loud.push(args.map(String).join(" "))
+}
 mock.module("src/utilities/logger", () => ({
     __esModule: true,
-    default: { debug() {}, info() {}, warning() {}, warn() {}, error() {}, only() {}, custom() {} },
+    default: { debug() {}, info: shout, warning: shout, warn: shout, error: shout, only: shout, custom() {} },
 }))
 
 import { L2PS_STATUS } from "@/libs/blockchain/l2ps_mempool"
@@ -123,6 +128,7 @@ const pay = (from: typeof ALICE, to: string, amount: bigint, nonce: bigint) =>
 const statusOf = (t: DecryptedTransfer) => rows.get(t.txHash)!.status
 
 beforeEach(() => {
+    loud.length = 0
     rows = new Map()
     tip = new Map([
         [ALICE.account, { balance: 100n, nonce: 4n }],
@@ -198,6 +204,9 @@ describe("SettlementAggregator", () => {
         expect(submitted).toHaveLength(0)
         expect(statusOf(cheap)).toBe(L2PS_STATUS.FAILED)
         expect(history.find(h => h.hash === cheap.txHash)!.message).toContain("below the native transfer fee")
+        // The reason names the fee, which only subnet members may see.
+        expect(loud.join("\n")).not.toContain(`fee ${FEE}`)
+        expect(loud.join("\n")).toContain(cheap.txHash.slice(0, 16))
     })
 
     it("keeps a transfer the planner defers queued", async () => {

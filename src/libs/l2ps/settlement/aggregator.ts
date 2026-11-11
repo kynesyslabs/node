@@ -249,7 +249,9 @@ export class SettlementAggregator {
     private async drop(row: L2PSMempoolTx, reason: string): Promise<void> {
         await this.deps.setRows([row.hash], L2PS_STATUS.FAILED)
         await this.deps.history(row.hash, "failed", reason)
-        log.info(`[L2PS Settlement] Dropped transfer ${row.hash.slice(0, 16)}...: ${reason}`)
+        // A reason can carry the fee or the nonce, which only subnet members may see.
+        log.info(`[L2PS Settlement] Dropped transfer ${row.hash.slice(0, 16)}...`)
+        log.debug(`[L2PS Settlement] Dropped transfer ${row.hash.slice(0, 16)}...: ${reason}`)
     }
 
     private async settleSubnet(
