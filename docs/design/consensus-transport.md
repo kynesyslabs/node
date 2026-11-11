@@ -55,14 +55,20 @@ carries our signed auth block.
 - No answer within the call's timeout on a live connection: a 504, as HTTP
   reports it. The connection stays open: the request's entry is dropped and
   a late answer is ignored by its sequence number, while the other requests
-  on the connection carry on. No HTTP resend and no cooldown.
+  on the connection carry on. No HTTP resend, no cooldown, and the peer
+  stays in the online table: one slow answer on a live connection is not
+  a dead peer, and dropping it is what took the shard below its minimum.
 - The connection drops with the request on it: a 503 and no HTTP resend, as
   the peer may already have acted on the request. The caller's retry
   reconnects over Omni.
+- An answer that arrives but cannot be decoded: a 502 and no HTTP resend,
+  as the peer has the request. Later calls to that peer use HTTP for the
+  cooldown.
 - The per-attempt timeout is one value for both transports
   (`CallOptions.timeoutMs`, default 3 s; Omni's was 30 s). Mempool merge
-  gives one attempt its whole 10 s budget, so a receiver still validating a
-  batch is not sent it again.
+  makes one attempt per batch with its whole 10 s budget, so a receiver
+  still validating a batch is not sent it again, and no retry runs on after
+  the merge stopped waiting.
 - A burst of first calls to a peer shares one connect instead of opening a
   socket each beyond the per-peer cap, which the receiver would close again.
 - Calls that ask for `protocol: "http"` stay on HTTP. Only Sync does, for

@@ -43,130 +43,174 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
             return peer.httpCall(request, isAuthenticated, timeoutMs)
         }
 
-        // REVIEW Wave 8.1: TCP transport implementation with ConnectionPool
+        let responseBuffer: Buffer | null
         try {
-            // For self-calls, always use localhost to avoid going through the
-            // public URL — the node may be unreachable from outside under load.
-            let tcpConnectionString: string
-            if (peer.isLocalNode) {
-                const omniPort = getSharedState.omniConfig.port
-                tcpConnectionString = `${this.getTcpProtocol()}://127.0.0.1:${omniPort}`
-            } else {
-                tcpConnectionString = this.omniConnectionString(
-                    peer.identity,
-                    peer.connection.string,
-                )
-            }
-
-            // Encode RPC request as binary NodeCall format
-            const payload = encodeNodeCallRequest({
-                method: request.method,
-                params: request.params ?? [],
-            })
-
-            // If authenticated, use sendAuthenticated with node's keys
-            let responseBuffer: Buffer
-
-            if (isAuthenticated) {
-                const privateKey = this.getPrivateKey()
-                const publicKey = this.getPublicKey()
-
-                if (!privateKey || !publicKey) {
-                    log.warning(
-                        "[PeerOmniAdapter] Node keys not available, falling back to HTTP",
-                    )
-                    // Use httpCall directly to avoid recursion through call()
-                    return peer.httpCall(request, isAuthenticated, timeoutMs)
-                }
-
-                // Send authenticated via OmniProtocol
-                responseBuffer = await this.connectionPool.sendAuthenticated(
-                    peer.identity,
-                    tcpConnectionString,
-                    OmniOpcode.NODE_CALL,
-                    payload,
-                    privateKey,
-                    publicKey,
-                    { timeout: timeoutMs },
-                )
-            } else {
-                // Send unauthenticated via OmniProtocol
-                responseBuffer = await this.connectionPool.send(
-                    peer.identity,
-                    tcpConnectionString,
-                    OmniOpcode.NODE_CALL,
-                    payload,
-                    { timeout: timeoutMs },
-                )
-            }
-
-            // Decode response from binary NodeCall format
-            const decoded = decodeNodeCallResponse(responseBuffer)
-
-            this.noteOmniAnswer(peer.identity)
-
-            // Any answer proves the peer is alive, as on the HTTP path.
-            if (!peer.isLocalNode) {
-                PeerManager.getInstance().updatePeerLastSeen(peer.identity)
-            }
-
-            return {
-                result: decoded.status,
-                response: decoded.value,
-                require_reply: decoded.requireReply,
-                extra: decoded.extra,
-            }
+            responseBuffer = await this.sendNodeCall(
+                peer,
+                request,
+                isAuthenticated,
+                timeoutMs,
+            )
         } catch (error) {
-            // A slow answer on a live connection is what HTTP reports as a
-            // 504. Retrying over HTTP would put the call behind the client
-            // traffic Omni exists to avoid, and double its wait.
-            if (error instanceof RequestTimeoutError) {
-                log.warning(
-                    `[PeerOmniAdapter] [${request.method}] no answer from ${peer.identity} within ${timeoutMs}ms`,
-                )
-                PeerManager.markPeerOffline(peer)
-                return {
-                    result: 504,
-                    response: "Request timeout",
-                    require_reply: false,
-                    extra: { code: "ETIMEDOUT", transport: "omni" },
-                }
-            }
-            // The connection was up, so Omni works for this peer; the peer
-            // may already have acted on the request, and resending it over
-            // HTTP could deliver it twice. The caller's retry reconnects.
-            if (error instanceof ConnectionLostError) {
-                log.warning(
-                    `[PeerOmniAdapter] [${request.method}] connection to ${peer.identity} lost: ${error.message}`,
-                )
-                return {
-                    result: 503,
-                    response: "Connection lost",
-                    require_reply: false,
-                    extra: { code: "ECONNRESET", transport: "omni" },
-                }
-            }
-            handleError(error, "NETWORK", {
-                source: "OmniProtocol PeerAdapter.adaptCall",
-            })
-            // Check for fatal mode - will exit if OMNI_FATAL=true
-            this.handleFatalError(
+            return this.omniFailure(
+                peer,
+                request,
+                isAuthenticated,
+                timeoutMs,
                 error,
-                `OmniProtocol failed for peer ${peer.identity}`,
             )
-
-            // On OmniProtocol failure, fall back to HTTP
-            log.warning(
-                `[PeerOmniAdapter] OmniProtocol failed for ${peer.identity}, falling back to HTTP: ` +
-                    error,
-            )
-
-            // Mark peer as HTTP-only to avoid repeated TCP failures
-            this.markHttpPeer(peer.identity)
-
+        }
+        if (responseBuffer === null) {
             // Use httpCall directly to avoid recursion through call()
             return peer.httpCall(request, isAuthenticated, timeoutMs)
         }
+        return this.toRpcResponse(peer, request, responseBuffer)
+    }
+
+    /** The peer's raw answer, or null when our node keys are not loaded yet. */
+    private async sendNodeCall(
+        peer: Peer,
+        request: RPCRequest,
+        isAuthenticated: boolean,
+        timeoutMs: number,
+    ): Promise<Buffer | null> {
+        // For self-calls, always use localhost to avoid going through the
+        // public URL — the node may be unreachable from outside under load.
+        const tcpConnectionString = peer.isLocalNode
+            ? `${this.getTcpProtocol()}://127.0.0.1:${getSharedState.omniConfig.port}`
+            : this.omniConnectionString(peer.identity, peer.connection.string)
+
+        const payload = encodeNodeCallRequest({
+            method: request.method,
+            params: request.params ?? [],
+        })
+
+        if (!isAuthenticated) {
+            return this.connectionPool.send(
+                peer.identity,
+                tcpConnectionString,
+                OmniOpcode.NODE_CALL,
+                payload,
+                { timeout: timeoutMs },
+            )
+        }
+
+        const privateKey = this.getPrivateKey()
+        const publicKey = this.getPublicKey()
+        if (!privateKey || !publicKey) {
+            log.warning(
+                "[PeerOmniAdapter] Node keys not available, falling back to HTTP",
+            )
+            return null
+        }
+        return this.connectionPool.sendAuthenticated(
+            peer.identity,
+            tcpConnectionString,
+            OmniOpcode.NODE_CALL,
+            payload,
+            privateKey,
+            publicKey,
+            { timeout: timeoutMs },
+        )
+    }
+
+    private toRpcResponse(
+        peer: Peer,
+        request: RPCRequest,
+        responseBuffer: Buffer,
+    ): RPCResponse {
+        let decoded: ReturnType<typeof decodeNodeCallResponse>
+        try {
+            decoded = decodeNodeCallResponse(responseBuffer)
+        } catch (error) {
+            // The peer has already received and may have acted on the
+            // request, so it is not resent over HTTP. Its later calls go
+            // over HTTP for the cooldown, as an Omni server whose answers
+            // we cannot read is of no use until then.
+            log.warning(
+                `[PeerOmniAdapter] [${request.method}] unreadable answer from ${peer.identity}: ${error}`,
+            )
+            this.markHttpPeer(peer.identity)
+            return {
+                result: 502,
+                response: "Malformed Omni answer",
+                require_reply: false,
+                extra: { code: "EBADMSG", transport: "omni" },
+            }
+        }
+
+        this.noteOmniAnswer(peer.identity)
+
+        // Any answer proves the peer is alive, as on the HTTP path.
+        if (!peer.isLocalNode) {
+            PeerManager.getInstance().updatePeerLastSeen(peer.identity)
+        }
+
+        return {
+            result: decoded.status,
+            response: decoded.value,
+            require_reply: decoded.requireReply,
+            extra: decoded.extra,
+        }
+    }
+
+    private omniFailure(
+        peer: Peer,
+        request: RPCRequest,
+        isAuthenticated: boolean,
+        timeoutMs: number,
+        error: unknown,
+    ): RPCResponse | Promise<RPCResponse> {
+        // A slow answer on a live connection is what HTTP reports as a 504.
+        // Retrying over HTTP would put the call behind the client traffic
+        // Omni exists to avoid, and double its wait. The pool keeps the
+        // connection, so the peer stays online: dropping it from the table
+        // for one slow answer is what took the shard below quorum under load.
+        if (error instanceof RequestTimeoutError) {
+            log.warning(
+                `[PeerOmniAdapter] [${request.method}] no answer from ${peer.identity} within ${timeoutMs}ms`,
+            )
+            return {
+                result: 504,
+                response: "Request timeout",
+                require_reply: false,
+                extra: { code: "ETIMEDOUT", transport: "omni" },
+            }
+        }
+        // The connection was up, so Omni works for this peer; the peer may
+        // already have acted on the request, and resending it over HTTP
+        // could deliver it twice. The caller's retry reconnects.
+        if (error instanceof ConnectionLostError) {
+            log.warning(
+                `[PeerOmniAdapter] [${request.method}] connection to ${peer.identity} lost: ${error.message}`,
+            )
+            return {
+                result: 503,
+                response: "Connection lost",
+                require_reply: false,
+                extra: { code: "ECONNRESET", transport: "omni" },
+            }
+        }
+        handleError(error, "NETWORK", {
+            source: "OmniProtocol PeerAdapter.adaptCall",
+        })
+        // Check for fatal mode - will exit if OMNI_FATAL=true
+        this.handleFatalError(
+            error,
+            `OmniProtocol failed for peer ${peer.identity}`,
+        )
+
+        // Nothing reached the peer: fall back to HTTP
+        log.warning(
+            `[PeerOmniAdapter] OmniProtocol failed for ${peer.identity}, falling back to HTTP: ` +
+                error,
+        )
+
+        // Mark peer as HTTP-only to avoid repeated TCP failures
+        this.markHttpPeer(peer.identity)
+
+        // Use httpCall directly to avoid recursion through call()
+        return peer.httpCall(request, isAuthenticated, timeoutMs)
     }
 
     /**

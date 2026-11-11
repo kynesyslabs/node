@@ -6,19 +6,7 @@
  */
 
 import { describe, expect, it, jest } from "bun:test"
-
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-        custom: jest.fn(),
-    },
-}))
+import { mockCore } from "src/utilities/testSupport/coreMocks"
 
 const sharedState: Record<string, any> = {
     publicKeyHex: "0xself",
@@ -26,13 +14,14 @@ const sharedState: Record<string, any> = {
     isOmniProtocolEnabled: true,
     omniAdapter: null,
 }
-jest.mock("src/utilities/sharedState", () => ({ getSharedState: sharedState }))
+mockCore(sharedState)
 
 const { PeerOmniAdapter } = await import("./peerAdapter")
 const { RequestTimeoutError } = await import("../types/errors")
 const { default: Peer, DEFAULT_RPC_TIMEOUT_MS } = await import(
     "src/libs/peer/Peer"
 )
+const { default: PeerManager } = await import("src/libs/peer/PeerManager")
 
 const PEER = "0x" + "ab".repeat(32)
 const URL_A = "http://10.0.0.9:53550"
@@ -111,6 +100,7 @@ describe("a request timeout on a live Omni connection", () => {
                 throw new RequestTimeoutError("Request timeout after 3000ms")
             }),
         }
+        const markPeerOffline = jest.spyOn(PeerManager, "markPeerOffline")
         const peer = fakePeer()
         const response = await adapter.adaptCall(peer, {
             method: "consensus_routine",
@@ -119,6 +109,9 @@ describe("a request timeout on a live Omni connection", () => {
         expect(response.result).toBe(504)
         expect(peer.httpCall).not.toHaveBeenCalled()
         expect(adapter.shouldUseOmni(PEER, URL_A)).toBe(true)
+        // The connection stays open, so the peer stays in the online table
+        expect(markPeerOffline).not.toHaveBeenCalled()
+        markPeerOffline.mockRestore()
     })
 
     it("a failed connect still falls back to HTTP with a cooldown", async () => {
@@ -136,6 +129,25 @@ describe("a request timeout on a live Omni connection", () => {
         })
         expect(response.result).toBe(200)
         expect(peer.httpCall).toHaveBeenCalledTimes(1)
+        expect(adapter.shouldUseOmni(PEER, URL_A)).toBe(false)
+    })
+})
+
+describe("an answer that cannot be decoded", () => {
+    it("is an error, not a reason to send the request again over HTTP", async () => {
+        const adapter = preferred()
+        adapter.recordOmniEndpoint(PEER, URL_A, 63551)
+        ;(adapter as any).connectionPool = {
+            sendAuthenticated: jest.fn(async () => Buffer.from([0xff])),
+        }
+        const peer = fakePeer()
+        const response = await adapter.adaptCall(peer, {
+            method: "mempool",
+            params: [],
+        })
+        expect(response.result).toBe(502)
+        expect(peer.httpCall).not.toHaveBeenCalled()
+        // Later calls avoid the Omni server we cannot read
         expect(adapter.shouldUseOmni(PEER, URL_A)).toBe(false)
     })
 })

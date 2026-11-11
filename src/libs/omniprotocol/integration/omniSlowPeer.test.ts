@@ -5,25 +5,13 @@
  */
 
 import { afterEach, describe, expect, it, jest, setSystemTime } from "bun:test"
-
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-        custom: jest.fn(),
-    },
-}))
+import { mockCore } from "src/utilities/testSupport/coreMocks"
 
 const sharedState: Record<string, any> = {
     publicKeyHex: "0xself",
     omniConfig: { port: 0, rateLimit: { enabled: false } },
 }
-jest.mock("src/utilities/sharedState", () => ({ getSharedState: sharedState }))
+mockCore(sharedState)
 
 // What the next sendAuthenticated on a stub connection does
 const script: ("timeout" | "slow-ok")[] = []
