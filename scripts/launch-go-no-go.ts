@@ -980,33 +980,57 @@ export async function startIdentityProver(timeoutMs: number): Promise<IdentityPr
     const pool = validatorPool.getInstance()
     await pool.start(1)
 
+    // Peer auth is bound to a genesis hash (the node's shared state). Probes
+    // run in parallel and may report different genesis hashes, so one probe
+    // at a time sets it for its own handshake
+    let turn: Promise<unknown> = Promise.resolve()
+    const oneAtATime = <T>(fn: () => Promise<T>): Promise<T> => {
+        const run = turn.then(fn, fn)
+        turn = run.catch(() => undefined)
+        return run
+    }
+
     return {
-        async prove(identity, url, genesisHash) {
-            const { request, nonce } = await PeerManager.buildHelloRequest()
-            // Only the URL is signed in the request; the genesis lets a node
-            // on that genesis answer at all
-            if (genesisHash) request.genesisHash = genesisHash
-            const peer = new Peer(url, identity)
-            const response = await Promise.race([
-                peer.call({ method: "hello_peer", params: [request] }, true),
-                new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error(`hello timed out after ${timeoutMs} ms`)), timeoutMs),
-                ),
-            ]).catch(e => ({ result: 0, response: (e as Error).message, extra: null }) as any)
-            if (response.result !== 200) {
-                const msg = response.extra?.msg ?? response.response
-                return { proof: "failed", detail: `hello_peer ${response.result}: ${typeof msg === "string" ? msg : JSON.stringify(msg)}` }
-            }
-            if (typeof response.extra?.msg === "string" && response.extra.msg.startsWith("Peer is us")) {
-                return { proof: "invalid", detail: "the endpoint answered as this checker" }
-            }
-            const proof = await PeerManager.verifyHelloResponse(response, peer, nonce)
-            return { proof, detail: proof === "verified" ? null : `identity proof ${proof}` }
-        },
+        prove: (identity, url, genesisHash) =>
+            oneAtATime(async () => {
+                getSharedState.genesisBlockHash = genesisHash
+                try {
+                    return await proveOnce(identity, url, genesisHash)
+                } finally {
+                    getSharedState.genesisBlockHash = null
+                }
+            }),
         async stop() {
             await pool.stop()
             fs.rmSync(dir, { recursive: true, force: true })
         },
+    }
+
+    async function proveOnce(
+        identity: string,
+        url: string,
+        genesisHash: string | null,
+    ): Promise<{ proof: IdentityProof; detail: string | null }> {
+        const { request, nonce } = await PeerManager.buildHelloRequest()
+        // Only the URL is signed in the request; the genesis lets a node
+        // on that genesis answer at all
+        if (genesisHash) request.genesisHash = genesisHash
+        const peer = new Peer(url, identity)
+        const response = await Promise.race([
+            peer.call({ method: "hello_peer", params: [request] }, true),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`hello timed out after ${timeoutMs} ms`)), timeoutMs),
+            ),
+        ]).catch(e => ({ result: 0, response: (e as Error).message, extra: null }) as any)
+        if (response.result !== 200) {
+            const msg = response.extra?.msg ?? response.response
+            return { proof: "failed", detail: `hello_peer ${response.result}: ${typeof msg === "string" ? msg : JSON.stringify(msg)}` }
+        }
+        if (typeof response.extra?.msg === "string" && response.extra.msg.startsWith("Peer is us")) {
+            return { proof: "invalid", detail: "the endpoint answered as this checker" }
+        }
+        const proof = await PeerManager.verifyHelloResponse(response, peer, nonce)
+        return { proof, detail: proof === "verified" ? null : `identity proof ${proof}` }
     }
 }
 
