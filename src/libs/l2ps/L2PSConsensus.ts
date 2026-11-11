@@ -15,6 +15,7 @@
  */
 
 import L2PSProofManager from "./L2PSProofManager"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { L2PSProof } from "@/model/entities/L2PSProofs"
 import HandleGCR, {
     isGCRMainEdit,
@@ -171,6 +172,13 @@ export default class L2PSConsensus {
             affectedAccountsCount: 0,
             l1BatchTxHashes: [],
             proofResults: [],
+        }
+
+        // Local proofs move balances on the entry node alone (DEM-816);
+        // under the fork balances move only through settlement batches.
+        if (l2psSettlementActive()) {
+            result.message = "L2PS proofs are not applied under l2psSettlement"
+            return result
         }
 
         try {
