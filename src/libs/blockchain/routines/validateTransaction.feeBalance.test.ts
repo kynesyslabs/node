@@ -9,10 +9,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
 
 let balance = 0n
-mock.module("src/utilities/logger", () => ({
-    __esModule: true,
-    default: { debug: () => {}, info: () => {}, warning: () => {}, warn: () => {}, error: () => {}, only: () => {}, custom: () => {} },
-}))
+const quiet = Object.fromEntries(
+    ["debug", "info", "warning", "warn", "error", "only", "custom"].map(level => [level, () => {}]),
+)
+mock.module("src/utilities/logger", () => ({ __esModule: true, default: quiet }))
 mock.module("src/libs/blockchain/chain", () => ({
     __esModule: true,
     default: { getLastBlockNumber: async () => 100 },

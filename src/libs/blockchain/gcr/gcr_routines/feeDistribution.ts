@@ -67,15 +67,16 @@ export interface FeeDistributionInput {
     isRollback: boolean
 }
 
+type FeeDistribution = NonNullable<typeof getSharedState.feeDistribution>
+type TwoRecipientComponent = "network_fee" | "additional_fee"
+
 /**
  * Lazy guard: returns the runtime `feeDistribution` view if both
  * bootstraps (P2's loader + P13's governance fold) have run, otherwise
  * logs and returns null. Callers receiving null MUST treat it as a
  * fork-not-yet-armed condition and emit no edits.
  */
-function requireFeeDistribution(): NonNullable<
-    typeof getSharedState.feeDistribution
-> | null {
+function requireFeeDistribution(): FeeDistribution | null {
     const fd = getSharedState.feeDistribution
     if (!fd) {
         log.error(
@@ -140,16 +141,15 @@ function makeBalanceEdit(
  * with a 0% share contribute nothing; treasury takes the rounding remainder.
  */
 function twoRecipientCredits(
-    componentName: "network_fee" | "additional_fee",
+    fd: FeeDistribution,
+    componentName: TwoRecipientComponent,
     total: number,
-    burnPct: number,
-    treasuryPct: number,
-    burnAddress: string,
-    treasuryAddress: string,
     txHash: string,
     isRollback: boolean,
 ): GCREditBalance[] {
     if (total <= 0) return []
+    const { burnPct, treasuryPct } =
+        componentName === "network_fee" ? fd.networkFee : fd.additionalFee
     const edits: GCREditBalance[] = []
     const burnAmount = Math.floor((total * burnPct) / 100)
     const treasuryAmount = total - burnAmount // remainder to treasury
@@ -158,7 +158,7 @@ function twoRecipientCredits(
         edits.push(
             makeBalanceEdit(
                 "add",
-                burnAddress,
+                fd.burnAddress,
                 burnAmount,
                 txHash,
                 isRollback,
@@ -169,7 +169,7 @@ function twoRecipientCredits(
         edits.push(
             makeBalanceEdit(
                 "add",
-                treasuryAddress,
+                fd.treasuryAddress,
                 treasuryAmount,
                 txHash,
                 isRollback,
@@ -192,12 +192,9 @@ function twoRecipientCredits(
  * `add` amounts equals the `remove` amount exactly.
  */
 function emitTwoRecipientSplit(
-    componentName: "network_fee" | "additional_fee",
+    fd: FeeDistribution,
+    componentName: TwoRecipientComponent,
     total: number,
-    burnPct: number,
-    treasuryPct: number,
-    burnAddress: string,
-    treasuryAddress: string,
     senderAddress: string,
     txHash: string,
     isRollback: boolean,
@@ -205,16 +202,7 @@ function emitTwoRecipientSplit(
     if (total <= 0) return []
     return [
         makeBalanceEdit("remove", senderAddress, total, txHash, isRollback),
-        ...twoRecipientCredits(
-            componentName,
-            total,
-            burnPct,
-            treasuryPct,
-            burnAddress,
-            treasuryAddress,
-            txHash,
-            isRollback,
-        ),
+        ...twoRecipientCredits(fd, componentName, total, txHash, isRollback),
     ]
 }
 
@@ -232,16 +220,7 @@ export function generateNetworkFeeCredits(
 ): GCREditBalance[] {
     const fd = requireFeeDistribution()
     if (!fd) return []
-    return twoRecipientCredits(
-        "network_fee",
-        amount,
-        fd.networkFee.burnPct,
-        fd.networkFee.treasuryPct,
-        fd.burnAddress,
-        fd.treasuryAddress,
-        txHash,
-        isRollback,
-    )
+    return twoRecipientCredits(fd, "network_fee", amount, txHash, isRollback)
 }
 
 /**
@@ -285,12 +264,9 @@ export function generateFeeDistributionEdits(
     // --- network_fee block ---
     edits.push(
         ...emitTwoRecipientSplit(
+            fd,
             "network_fee",
             networkFee,
-            fd.networkFee.burnPct,
-            fd.networkFee.treasuryPct,
-            fd.burnAddress,
-            fd.treasuryAddress,
             senderAddress,
             txHash,
             isRollback,
@@ -345,12 +321,9 @@ export function generateFeeDistributionEdits(
     // --- additional_fee block ---
     edits.push(
         ...emitTwoRecipientSplit(
+            fd,
             "additional_fee",
             additionalFee,
-            fd.additionalFee.burnPct,
-            fd.additionalFee.treasuryPct,
-            fd.burnAddress,
-            fd.treasuryAddress,
             senderAddress,
             txHash,
             isRollback,

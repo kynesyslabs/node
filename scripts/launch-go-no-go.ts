@@ -635,7 +635,7 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
         )
     }
     const gas = forks.gasFeeSeparation
-    if (gas && gas.activationHeight !== null && gas.activationHeight !== undefined) {
+    if (gas?.activationHeight !== null && gas?.activationHeight !== undefined) {
         if (typeof gas.treasuryAddress !== "string") {
             reasons.push("fork gasFeeSeparation is scheduled without a treasuryAddress; the code default would receive the fees")
         } else {
