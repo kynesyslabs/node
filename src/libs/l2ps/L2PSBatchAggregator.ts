@@ -15,6 +15,7 @@ import type { L2PSBatchPayload } from "./types"
 import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN, HISTORY_RETENTION_SWEEP_INTERVAL_MS } from "./constants"
 import { RetentionSweepGate } from "./retentionSweepGate"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import Chain from "@/libs/blockchain/chain"
 
 // Re-export for backward compatibility
 export type { L2PSBatchPayload } from "./types"
@@ -783,7 +784,10 @@ export class L2PSBatchAggregator {
                     data: uint8ArrayToHex(signature.signature),
                     domain: this.SIGNATURE_DOMAIN, // Include domain for verification
                 } : null,
-                reference_block: 0, // Will be set by mempool
+                // Peers drop a tx whose reference block is outside the deep
+                // window at their head, so it is the tip at submit time, as
+                // for every node-built tx; a resubmission takes a fresh one.
+                reference_block: await Chain.getLastBlockNumber(),
                 status: "pending", // Required by MempoolTx entity
                 extra: null, // Optional field
             }
