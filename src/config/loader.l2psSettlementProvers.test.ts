@@ -25,4 +25,11 @@ describe("L2PS settlement prover pool size", () => {
             expect(loadConfig().l2ps.settlementProvers).toBe(1)
         }
     })
+
+    it("refuses more provers than a node can run", () => {
+        process.env.L2PS_SETTLEMENT_PROVERS = "17"
+        expect(() => loadConfig()).toThrow(/L2PS_SETTLEMENT_PROVERS must be at most 16/)
+        process.env.L2PS_SETTLEMENT_PROVERS = "16"
+        expect(loadConfig().l2ps.settlementProvers).toBe(16)
+    })
 })

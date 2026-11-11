@@ -218,9 +218,18 @@ about 1 s to block validation.
 - No main-thread fallback. A batch that cannot be proved stays in the L2PS
   mempool and is retried; it never goes out without a proof.
 - Throughput is about one core and 1 GB per 0.24 transfer/s (a full batch of
-  9 in about 38 s). A configurable pool of prover subprocesses
-  (`L2PS_SETTLEMENT_PROVERS`) scales it per node; a native PLONK prover is
-  the next step if one core per subnet is not enough.
+  9 in about 38 s). A pool of prover subprocesses (`L2PS_SETTLEMENT_PROVERS`,
+  1 to 16, default 1) scales it per node; a native PLONK prover is the next
+  step if that is not enough.
+- Parallel proving: a cycle first plans all its batches, across every subnet
+  the node is a member of, each on accounts that no batch in flight or
+  planned before it in the cycle names (sender, receiver or change), so every
+  batch binds tip balances no other unsettled batch moves. It then proves up
+  to `L2PS_SETTLEMENT_PROVERS` of them at once and submits them in plan
+  order, so the same queue and tip give the same batches in the same order
+  however the proofs interleave. Subnets are visited in uid order.
+- A batch the mempool refuses counts like a failed proof: the subnet backs
+  off and its transfers are blamed; other subnets go on.
 
 ### Admission and the queue (subnet member nodes)
 
@@ -230,9 +239,13 @@ bounds are constants in the code, not configuration, so every member admits
 and expires the same transfers.
 
 - Nonce: above the sender's L1 account nonce and at most `MAX_NONCE_AHEAD`
-  = 20 (two full batches) past it, and not a nonce this member already holds
-  unsettled for the sender. So a sender has at most 20 unsettled transfers on
+  = 18 (two full batches) past it, and not a nonce this member already holds
+  unsettled for the sender. So a sender has at most 18 unsettled transfers on
   one member.
+- Size: the stored envelope (the outer L2PS transaction as JSON) is at most
+  `SETTLEMENT_ENVELOPE_MAX_BYTES` = 174,762 bytes, so a full batch of 9 in
+  base64 stays within half of an empty block (4 MiB); a larger one would
+  make every batch it joins too big for the mempool.
 - Balance: the sender's tip balance covers `amount + fee` of this transfer
   plus every unsettled transfer this member holds for it (amounts and nonces
   from the history, fees from the stored envelopes).
@@ -243,14 +256,23 @@ and expires the same transfers.
   transfer settles as soon as a batch can place it, and fails with a history
   reason `SETTLEMENT_DEFERRED_TTL_BLOCKS` = 300 blocks (about 35 minutes)
   after admission. The backlog cap counts deferred rows.
-- Blame: a transfer whose batch failed twice, at proving or on L1, is proved
-  alone from then on, so the transfers batched with it settle without it.
+- Blame: a transfer whose batch failed twice, at proving, at the mempool or
+  on L1, is proved alone from then on, so the transfers batched with it settle without it.
   One that also fails twice alone is dropped with a reason, but only once
   another proof (for proving failures) or another batch (for L1 failures)
   has worked since its first failure alone; a prover or verifier that fails
-  everything drops nothing. A transfer whose account keeps moving on L1
+  everything drops nothing. A batch that expired past its reference block
+  (`TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE`) is not counted against its
+  transfers. A transfer whose account keeps moving on L1
   between proving and inclusion can be dropped this way and is signed again.
 - The prover back-off is per subnet; other subnets keep settling.
+- Restart: rows still `batched` are tied back to their L1 batch through the
+  history, all of them, page by page; a failed read stops the cycle and is
+  tried again, never taken for an empty queue. Failed rows leave the L2PS
+  mempool after the cleanup age; the history keeps their reason.
+- Boot: once the fork is scheduled (any activation height), every node loads
+  the verification key at start and a subnet member also checks its proving
+  key and circuit and starts one prover; a node that fails either exits.
 
 ### Fork
 
