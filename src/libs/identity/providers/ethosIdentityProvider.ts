@@ -1,5 +1,4 @@
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { readGCRForUser } from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
+import readGCRForUser, { type ReadAccount } from "@/libs/blockchain/gcr/gcr_routines/readGCRForUser"
 import {
     EthosWalletIdentity,
     SavedEthosIdentity,
@@ -53,7 +52,7 @@ export class EthosIdentityProvider {
     }
 
     private static assertWalletLinked(
-        account: GCRMain,
+        account: ReadAccount,
         chain: string,
         subchain: string,
         walletAddress: string,
@@ -71,7 +70,7 @@ export class EthosIdentityProvider {
     }
 
     private static flattenIdentities(
-        account: GCRMain,
+        account: ReadAccount,
     ): EthosIdentitySummary[] {
         const summaries: EthosIdentitySummary[] = []
         const ethosIdentities = account.identities?.ethos || {}

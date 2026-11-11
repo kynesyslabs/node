@@ -1,5 +1,5 @@
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import { readGCRForUser } from "./ensureGCRForUser"
+import readGCRForUser from "./readGCRForUser"
 import log from "src/utilities/logger"
 import {
     InferFromWritePayload,

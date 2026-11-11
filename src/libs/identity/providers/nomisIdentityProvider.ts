@@ -1,5 +1,4 @@
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { readGCRForUser } from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
+import readGCRForUser, { type ReadAccount } from "@/libs/blockchain/gcr/gcr_routines/readGCRForUser"
 import log from "@/utilities/logger"
 import {
     NomisWalletIdentity,
@@ -60,7 +59,7 @@ export class NomisIdentityProvider {
     }
 
     private static assertWalletLinked(
-        account: GCRMain,
+        account: ReadAccount,
         chain: string,
         subchain: string,
         walletAddress: string,
@@ -101,7 +100,7 @@ export class NomisIdentityProvider {
         }
     }
 
-    private static flattenIdentities(account: GCRMain): NomisIdentitySummary[] {
+    private static flattenIdentities(account: ReadAccount): NomisIdentitySummary[] {
         const summaries: NomisIdentitySummary[] = []
         const nomisIdentities = account.identities?.nomis || {}
 

@@ -2,7 +2,7 @@ import { ethers, namehash, JsonRpcProvider, verifyMessage } from "ethers"
 
 import log from "@/utilities/logger"
 import IdentityManager from "./identityManager"
-import { readGCRForUser } from "./ensureGCRForUser"
+import readGCRForUser from "./readGCRForUser"
 import { detectSignatureType } from "./signatureDetector"
 import { SolanaDomainResolver } from "./udSolanaResolverHelper"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
