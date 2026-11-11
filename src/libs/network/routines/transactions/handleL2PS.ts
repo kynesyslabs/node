@@ -11,6 +11,9 @@ import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import log from "@/utilities/logger"
 import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
 import { backlogFullMessage, getExecutedBacklogGuard } from "@/libs/l2ps/executedBacklogGuard"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
+import { openSettlementTransfer, transferAdmissionRefusal } from "@/libs/l2ps/settlement/transfer"
+import type { DecryptedTransfer } from "@/libs/l2ps/settlement/types"
 
 /**
  * Create an error response with the given status code and message
@@ -75,6 +78,44 @@ async function decryptAndValidate(
 }
 
 
+
+/**
+ * Admission of a settlement transfer at the tip: signature, fee and nonce
+ * (transferAdmissionRefusal), and a balance that covers amount + fee now.
+ * Reads only: the planner judges running balances and nonce order when it
+ * builds a batch, and block apply is the authority.
+ */
+export async function settlementAdmissionRefusal(
+    transfer: DecryptedTransfer,
+    l2psUid: string,
+): Promise<string | null> {
+    let minimumFee: bigint
+    let chainId: number | null
+    let sender: { balance: bigint; nonce: bigint }
+    try {
+        // Loaded here: these pull in the block-apply, prover and database
+        // modules, which the RPC path needs only once a settlement transfer
+        // arrives.
+        const { nativeTransferFeeOs, settlementChainId } = await import("@/libs/l2ps/settlement/validation")
+        const { readTipAccounts } = await import("@/libs/l2ps/settlement/tipState")
+        minimumFee = await nativeTransferFeeOs()
+        chainId = settlementChainId()
+        sender = (await readTipAccounts([transfer.from])).get(transfer.from)
+    } catch (error) {
+        return `Settlement admission could not read the tip: ${error instanceof Error ? error.message : "Unknown error"}`
+    }
+    const refusal = transferAdmissionRefusal(transfer, {
+        chainId,
+        l2psUid,
+        minimumFee,
+        accountNonce: sender.nonce,
+    })
+    if (refusal) return refusal
+    if (sender.balance < transfer.amount + transfer.fee) {
+        return `Insufficient balance: need ${transfer.amount + transfer.fee} (amount + fee) but have ${sender.balance}`
+    }
+    return null
+}
 
 /**
  * Per-sender in-process serialisation gate for the balance pre-check.
@@ -179,6 +220,30 @@ export default async function handleL2PS(
         )
     }
 
+    if (l2psSettlementActive()) {
+        const opened = openSettlementTransfer(decryptedTx, l2psTx.hash)
+        if (opened.ok === false) {
+            return createErrorResponse(response, 400, `Refused L2PS transfer: ${opened.reason}`)
+        }
+        return await withSenderLock(sender, async () => {
+            const refusal = await settlementAdmissionRefusal(opened.transfer, l2psUid)
+            if (refusal) {
+                // A reason can carry the amount, which only subnet members may see.
+                log.info(`[handleL2PS] Settlement admission refused ${l2psTx.hash}`)
+                log.debug(`[handleL2PS] Settlement admission refused ${l2psTx.hash}: ${refusal}`)
+                return createErrorResponse(response, 400, `Refused L2PS transfer: ${refusal}`)
+            }
+            return await processValidL2PSTransaction(
+                response,
+                l2psUid,
+                l2psTx,
+                decryptedTx,
+                originalHash,
+                true,
+            )
+        })
+    }
+
     // Serialise (check + insert + execute) per sender — see
     // `withSenderLock` for why this closes the TOCTOU window between
     // the balance read and the executor debit. Two concurrent
@@ -216,6 +281,7 @@ async function processValidL2PSTransaction(
     l2psTx: L2PSTransaction,
     decryptedTx: Transaction,
     originalHash: string,
+    settles = false,
 ): Promise<RPCResponse> {
     // Check for duplicates. The mempool only remembers recent traffic — its
     // rows are cleaned by age — so ask the permanent execution history too,
@@ -258,7 +324,7 @@ async function processValidL2PSTransaction(
         backlog.settle(l2psUid)
     }
     try {
-        return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash, onExecuted)
+        return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash, onExecuted, settles)
     } finally {
         if (!executed) backlog.release(l2psUid)
     }
@@ -274,10 +340,22 @@ async function executeAndRecordL2PSTransaction(
     decryptedTx: Transaction,
     originalHash: string,
     onExecuted: () => void,
+    settles = false,
 ): Promise<RPCResponse> {
     let executionResult
     try {
-        executionResult = await L2PSTransactionExecutor.execute(l2psUid, decryptedTx, l2psTx.hash, false)
+        // A settlement transfer moves balances only through its batch's
+        // settlement; the executor's edits fed the local proof path, which
+        // the fork turns off, and its account reads create gcr_main rows on
+        // this node alone.
+        executionResult = settles
+            ? {
+                success: true,
+                message: "Admitted for settlement",
+                gcr_edits: [],
+                affected_accounts_count: 2,
+            }
+            : await L2PSTransactionExecutor.execute(l2psUid, decryptedTx, l2psTx.hash, false)
     } catch (error) {
         log.error(`[handleL2PS] Execution error: ${error instanceof Error ? error.message : "Unknown error"}`)
         await L2PSMempool.updateStatus(l2psTx.hash, "failed")
