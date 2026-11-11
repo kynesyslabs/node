@@ -99,7 +99,8 @@ DRILL_REQUIRED_FORKS = ("quorumParity", "committeeBinding", "commitLock")
 # gasFeeSeparation validates a treasury even when it is off (loadForkConfig.ts)
 OFF_TREASURY = "0x" + "0" * 64
 # Active, the zero address is the burn account and the node refuses to boot on
-# it, so a genesis without a treasury of its own gets this drill-only account.
+# it, so a genesis without a treasury of its own, or with that one, gets this
+# drill-only account.
 DRILL_TREASURY = "0x" + "7d" * 32
 
 # Forks the template activates at 0 that the drills keep off, by name, each with
@@ -170,7 +171,10 @@ def with_launch_forks(genesis, template):
     for name, height in launch_fork_heights(template).items():
         entry = {k: v for k, v in own.get(name, {}).items() if k not in ("activationHeight", "description")}
         if name == "gasFeeSeparation":
-            entry.setdefault("treasuryAddress", OFF_TREASURY if height is None else DRILL_TREASURY)
+            if height is None:
+                entry.setdefault("treasuryAddress", OFF_TREASURY)
+            elif entry.get("treasuryAddress", OFF_TREASURY) == OFF_TREASURY:
+                entry["treasuryAddress"] = DRILL_TREASURY
         forks[name] = {"activationHeight": height, **entry}
     out = dict(genesis)
     out["forks"] = forks

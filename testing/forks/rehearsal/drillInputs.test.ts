@@ -365,8 +365,14 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         // an off gasFeeSeparation still carries a treasury, which the node validates
         expect(g.forks.gasFeeSeparation.treasuryAddress).toBe(key(0xee))
         expect(withLaunchForks(genesis(), template({ ...MIN, gasFeeSeparation: { activationHeight: null } })).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x0{64}$/)
-        // an active one gets an account the node boots on, not the burn address
-        expect(withLaunchForks(genesis(), template({ ...MIN, gasFeeSeparation: { activationHeight: 0 } })).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x(?!0{64}$)[0-9a-f]{64}$/)
+        // an active one gets an account the node boots on, not the burn address,
+        // also where the genesis' own entry names the burn address
+        const active = template({ ...MIN, gasFeeSeparation: { activationHeight: 0 } })
+        const zero = { ...genesis(), forks: { gasFeeSeparation: { activationHeight: null, treasuryAddress: "0x" + "0".repeat(64) } } }
+        for (const base of [genesis(), zero]) {
+            expect(withLaunchForks(base, active).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x(?!0{64}$)[0-9a-f]{64}$/)
+        }
+        expect(withLaunchForks(own, active).forks.gasFeeSeparation.treasuryAddress).toBe(key(0xee))
     })
     it("keeps the rest of the genesis and does not modify its input", () => {
         const input = genesis()
