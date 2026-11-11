@@ -56,6 +56,7 @@ import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import {
     chargedFeeMismatch,
+    legacyGasRetired,
     shippedFeeMismatch,
 } from "@/libs/blockchain/validation/feeBinding"
 
@@ -223,7 +224,28 @@ export async function applyGasFeeSeparation(
             }`,
         }
     }
-    if (senderBalance < BigInt(breakdown.total)) {
+    // Where the fee edits are the whole fee (legacyGasRetired), the block
+    // debits the amount and the fee in ledger units and nothing else, so the
+    // sender must hold exactly their sum. The amount alone was checked before,
+    // and the fee was compared as a DEM count against an OS balance.
+    if (legacyGasRetired(tx)) {
+        const unit = isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0)
+            ? 1_000_000_000n
+            : 1n
+        let amount: bigint
+        try {
+            amount = BigInt((tx.content.amount as unknown as string | number | bigint) ?? 0)
+        } catch {
+            return { ok: false, message: `invalid amount ${String(tx.content.amount)}` }
+        }
+        const fee = BigInt(breakdown.total) * unit
+        if (senderBalance < amount + fee) {
+            return {
+                ok: false,
+                message: `sender balance ${senderBalance.toString()} < amount ${amount.toString()} + fee ${fee.toString()}`,
+            }
+        }
+    } else if (senderBalance < BigInt(breakdown.total)) {
         return {
             ok: false,
             message: `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`,
