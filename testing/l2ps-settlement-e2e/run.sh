@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # L2PS settlement end to end, in one command.
 #
-#   run.sh [--no-build] [label]
+#   run.sh [--no-build | --overlay] [label]
 #
-# Builds the devnet image (keys layer cached), boots postgres + 4 validators
+# Builds the devnet image (keys layer cached), or with --overlay copies this
+# tree onto the existing image (same dependencies, no install), boots postgres + 4 validators
 # (shardSize 4) with node-1 and node-2 as members of a fresh subnet, drives
 # e2e.ts against them with the local SDK worktree, and writes report.md,
 # report.json, evidence/ and logs/ into the run dir. Everything is torn down
@@ -34,6 +35,7 @@ BUILD=1
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-build) BUILD=0; shift ;;
+        --overlay) BUILD=2; shift ;;
         -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         --*) echo "unknown option $1" >&2; exit 2 ;;
         *) break ;;
@@ -106,23 +108,28 @@ done
 
 # ---- 2. SDK and image -----------------------------------------------------------
 step=02-build
-{
-    set -e
+# A subshell with an explicit exit per command: `set -e` does nothing on the
+# left of `||`, and a failed build once went on with the previous image.
+(
     # The harness resolves @kynesyslabs/demosdk to the SDK worktree's build.
     [ -f "${SDK_TREE}/package.json" ] || { echo "no SDK worktree at ${SDK_TREE}"; exit 1; }
     newest_src=$(find "${SDK_TREE}/src" -type f -newer "${SDK_TREE}/build" -print -quit 2>/dev/null || true)
     if [ ! -d "${SDK_TREE}/build" ] || [ -n "${newest_src}" ]; then
         echo "SDK build is stale (${newest_src:-no build}); building"
-        (cd "${SDK_TREE}" && bun run build)
+        (cd "${SDK_TREE}" && bun run build) || exit 1
     fi
     echo "SDK $(git -C "${SDK_TREE}" rev-parse --short HEAD)$(git -C "${SDK_TREE}" diff --quiet HEAD -- src || echo +dirty)"
     mkdir -p "${HERE}/node_modules/@kynesyslabs"
     ln -sfn "$(cd "${SDK_TREE}" && pwd)" "${HERE}/node_modules/@kynesyslabs/demosdk"
     if [ "${BUILD}" = 1 ]; then
-        docker build -f "${REPO_ROOT}/testing/devnet/Dockerfile" -t "${IMAGE}" "${REPO_ROOT}"
+        docker build -f "${REPO_ROOT}/testing/devnet/Dockerfile" -t "${IMAGE}" "${REPO_ROOT}" || exit 1
+    elif [ "${BUILD}" = 2 ]; then
+        docker image inspect "${IMAGE}" >/dev/null || exit 1
+        printf 'FROM %s\nCOPY . .\nRUN chmod +x ./testing/devnet/run-devnet\n' "${IMAGE}" |
+            docker build -f - -t "${IMAGE}" "${REPO_ROOT}" || exit 1
     fi
-    docker image inspect "${IMAGE}" --format 'image {{.Id}} {{.Created}}'
-} > "${LOG_DIR}/${step}.log" 2>&1 || { say "ABORT: build failed (see ${step}.log)"; exit 2; }
+    docker image inspect "${IMAGE}" --format 'image {{.Id}} {{.Created}}' || exit 1
+) > "${LOG_DIR}/${step}.log" 2>&1 || { say "ABORT: build failed (see ${step}.log)"; exit 2; }
 say "node $(git -C "${REPO_ROOT}" rev-parse --short HEAD)$(git -C "${REPO_ROOT}" diff --quiet HEAD -- src testing/devnet || echo +dirty), $(grep '^SDK ' "${LOG_DIR}/${step}.log"), image ${IMAGE}"
 
 # ---- 3. inputs: identities, wallets, genesis, peerlist, subnet --------------------
