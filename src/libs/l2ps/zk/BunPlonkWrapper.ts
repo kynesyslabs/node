@@ -153,6 +153,7 @@ export async function plonkVerifyBun(
     _publicSignals: any[],
     _proof: any,
     logger?: any,
+    sharedCurve?: any,
 ): Promise<boolean> {
     let curve: any = null
     
@@ -161,7 +162,9 @@ export async function plonkVerifyBun(
         const proofRaw = unstringifyBigInts(_proof)
         const publicSignals = unstringifyBigInts(_publicSignals)
 
-        curve = await initializeCurve(vk_verifier_raw)
+        // Building the curve costs more than the verification itself; a caller
+        // verifying many proofs passes one it keeps (and never terminates it here).
+        curve = sharedCurve ?? await initializeCurve(vk_verifier_raw)
         if (logger) logger.info("PLONK VERIFIER STARTED (Bun-compatible)")
 
         const proof = fromObjectProof(curve, proofRaw)
@@ -191,7 +194,7 @@ export async function plonkVerifyBun(
         return false
     } finally {
         // Terminate curve to prevent memory leaks
-        if (curve && typeof curve.terminate === "function") {
+        if (curve && !sharedCurve && typeof curve.terminate === "function") {
             await curve.terminate()
         }
     }

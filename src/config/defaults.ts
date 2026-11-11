@@ -142,6 +142,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         // checked by no other node (docs/design/l2ps-zk-settlement.md).
         zkEnabled: false,
         zkUseMainThread: false,
+        settlementProvers: 1,
         hashIntervalMs: 5000,
         aggregationIntervalMs: 10000,
         minBatchSize: 1,

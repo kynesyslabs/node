@@ -298,6 +298,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.L2PS_ZK_USE_MAIN_THREAD,
                 d.l2ps.zkUseMainThread,
             ),
+            settlementProvers: Math.max(
+                1,
+                envInt(EnvKey.L2PS_SETTLEMENT_PROVERS, d.l2ps.settlementProvers),
+            ),
             hashIntervalMs: envInt(
                 EnvKey.L2PS_HASH_INTERVAL_MS,
                 d.l2ps.hashIntervalMs,
