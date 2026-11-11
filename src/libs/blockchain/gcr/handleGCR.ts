@@ -56,12 +56,13 @@ import {
 import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
 import {
     debitCredits,
+    isWorkReplay,
     legacyGasCredited,
     legacyGasRetired,
     tlsnBurnCredited,
     withTrailingDebitCredit,
     withoutLegacyGas,
-} from "src/libs/blockchain/validation/feeBinding"
+} from "src/libs/blockchain/validation/legacyGas"
 import { ensureNetworkParametersCurrent } from "src/libs/blockchain/routines/loadNetworkParameters"
 import {
     blockTxTypeRefusal,
@@ -1154,12 +1155,7 @@ export default class HandleGCR {
         osAmounts: boolean,
     ): Promise<GCREdit[]> {
         const edits = tx.content.gcr_edits ?? []
-        const isReplay = edits.some(
-            e =>
-                (e.type as string) === "work-attempt" &&
-                (e as unknown as WorkAttemptEdit).attemptClass === "replay",
-        )
-        if (isReplay) return []
+        if (isWorkReplay(edits)) return []
 
         const fee: GCREdit[] = []
         const derived = deriveFeeEditsForApply(tx)

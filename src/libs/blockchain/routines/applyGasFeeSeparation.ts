@@ -57,10 +57,12 @@ import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import {
     chargedFeeMismatch,
-    legacyGasRetired,
     shippedFeeMismatch,
-    withoutLegacyGas,
 } from "@/libs/blockchain/validation/feeBinding"
+import {
+    legacyGasRetired,
+    withoutLegacyGas,
+} from "@/libs/blockchain/validation/legacyGas"
 import { generateGcrEdits } from "@/libs/blockchain/validation/generateGcrEdits"
 
 /**
@@ -118,6 +120,49 @@ export type ApplyGasFeeSeparationTx = Pick<
     ITransaction,
     "content" | "hash"
 >
+
+/**
+ * Why the sender cannot pay what the block will debit it, or null when it can.
+ */
+async function balanceRefusal(
+    tx: ApplyGasFeeSeparationTx,
+    senderAddress: string,
+    breakdown: FeeBreakdown,
+): Promise<string | null> {
+    let senderBalance: bigint
+    try {
+        senderBalance = await GCR.getAccountBalance(senderAddress)
+    } catch (e) {
+        return `failed to read sender balance: ${
+            e instanceof Error ? e.message : stringifyNonError(e)
+        }`
+    }
+    // Where the fee edits are the whole fee (legacyGasRetired), the block
+    // debits the transaction's own debits and the fee in ledger units and
+    // nothing else, so the sender must hold exactly their sum. The amount
+    // alone was checked before, and the fee was compared as a DEM count
+    // against an OS balance; a TLSNotary request or store also burns its
+    // special-operation fee in the block.
+    if (legacyGasRetired(tx)) {
+        const postFork = isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0)
+        const unit = postFork ? 1_000_000_000n : 1n
+        let amount: bigint
+        try {
+            amount = await nativeSenderDebit(tx, postFork)
+        } catch (e) {
+            return `cannot compute what the block debits the sender: ${
+                e instanceof Error ? e.message : stringifyNonError(e)
+            }`
+        }
+        const fee = BigInt(breakdown.total) * unit
+        return senderBalance < amount + fee
+            ? `sender balance ${senderBalance.toString()} < amount ${amount.toString()} + fee ${fee.toString()}`
+            : null
+    }
+    return senderBalance < BigInt(breakdown.total)
+        ? `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`
+        : null
+}
 
 export async function applyGasFeeSeparation(
     tx: ApplyGasFeeSeparationTx,
@@ -243,50 +288,8 @@ export async function applyGasFeeSeparation(
     // made devnet/staging diverge from PROD validation semantics.
     // Devnet uses a funded-genesis fixture, so unfunded broadcasts
     // are no longer needed for local testing.
-    let senderBalance: bigint
-    try {
-        senderBalance = await GCR.getAccountBalance(senderAddress)
-    } catch (e) {
-        return {
-            ok: false,
-            message: `failed to read sender balance: ${
-                e instanceof Error ? e.message : stringifyNonError(e)
-            }`,
-        }
-    }
-    // Where the fee edits are the whole fee (legacyGasRetired), the block
-    // debits the transaction's own debits and the fee in ledger units and
-    // nothing else, so the sender must hold exactly their sum. The amount
-    // alone was checked before, and the fee was compared as a DEM count
-    // against an OS balance; a TLSNotary request or store also burns its
-    // special-operation fee in the block.
-    if (legacyGasRetired(tx)) {
-        const postFork = isForkActive("osDenomination", getSharedState.lastBlockNumber ?? 0)
-        const unit = postFork ? 1_000_000_000n : 1n
-        let amount: bigint
-        try {
-            amount = await nativeSenderDebit(tx, postFork)
-        } catch (e) {
-            return {
-                ok: false,
-                message: `cannot compute what the block debits the sender: ${
-                    e instanceof Error ? e.message : stringifyNonError(e)
-                }`,
-            }
-        }
-        const fee = BigInt(breakdown.total) * unit
-        if (senderBalance < amount + fee) {
-            return {
-                ok: false,
-                message: `sender balance ${senderBalance.toString()} < amount ${amount.toString()} + fee ${fee.toString()}`,
-            }
-        }
-    } else if (senderBalance < BigInt(breakdown.total)) {
-        return {
-            ok: false,
-            message: `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`,
-        }
-    }
+    const unfunded = await balanceRefusal(tx, senderAddress, breakdown)
+    if (unfunded) return { ok: false, message: unfunded }
 
     // Epic #21 #204: fee edits are NO LONGER prepended here. They are
     // derived at apply (deriveFeeEdits in handleGCR) from the SDK-shipped

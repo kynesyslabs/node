@@ -19,22 +19,13 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
 
 let tip = 100
+const quiet = Object.fromEntries(["debug", "info", "warning", "error", "only", "custom"].map(level => [level, () => {}]))
+mock.module("src/utilities/logger", () => ({ __esModule: true, default: quiet }))
 mock.module("src/libs/blockchain/chain", () => ({
     __esModule: true,
     default: {
         getLastBlockNumber: async () => tip,
         getExistingTransactionHashes: async () => new Set<string>(),
-    },
-}))
-mock.module("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: () => {},
-        info: () => {},
-        warning: () => {},
-        error: () => {},
-        only: () => {},
-        custom: () => {},
     },
 }))
 
@@ -54,6 +45,13 @@ const { default: HandleGCR, withDerivedFeeEdits } = await import("./handleGCR")
 const TREASURY = "0x" + "f7".repeat(32)
 const BURN = "0x" + "00".repeat(32)
 const FEE = 2n * OS // network_fee 1 DEM + rpc_fee 1 DEM, the mainnet sheet
+const SHEET = {
+    burnAddress: BURN,
+    treasuryAddress: TREASURY,
+    networkFee: { burnPct: 50, treasuryPct: 50 },
+    additionalFee: { burnPct: 25, treasuryPct: 75 },
+    specialOps: { burnPct: 25, rpcPct: 50, treasuryPct: 25 },
+}
 
 let caches: GCREntityCaches
 const original = {
@@ -128,13 +126,7 @@ beforeEach(() => {
     ;(HandleGCR as any).prepareEntities = async () => caches
     ;(HandleGCR as any).saveGCREditChanges = async () => {}
     ;(HandleGCR as any).bulkUpdateAssignedTxs = async () => {}
-    getSharedState.feeDistribution = {
-        burnAddress: BURN,
-        treasuryAddress: TREASURY,
-        networkFee: { burnPct: 50, treasuryPct: 50 },
-        additionalFee: { burnPct: 25, treasuryPct: 75 },
-        specialOps: { burnPct: 25, rpcPct: 50, treasuryPct: 25 },
-    }
+    getSharedState.feeDistribution = structuredClone(SHEET)
     getSharedState.networkFee = 1
     getSharedState.rpcFee = 1
     getSharedState.additionalFee = 0
@@ -281,12 +273,16 @@ async function web2(): Promise<Transaction> {
     return onTheWire(await handMade("web2Request", { url: "https://example.com", method: "GET" }))
 }
 
-/** A Work claiming slot `k1`, built and signed by the SDK on nonce `nonce`. */
-async function work(nonce: number, over: { expiresAt?: number } = {}): Promise<Transaction> {
+/**
+ * A Work claiming slot `k1`, built and signed by the SDK on nonce `nonce`;
+ * with `replay`, an attempt that reads that Work back and claims nothing.
+ */
+async function work(nonce: number, over: { expiresAt?: number; replay?: boolean } = {}): Promise<Transaction> {
     const intent: Record<string, unknown> = { profile: PROFILE, seed: "s1", operations }
     if (over.expiresAt !== undefined) intent.expiresAt = over.expiresAt
     const workId = computeWorkId(intent, DOMAINS.workId)
     const attempt = { type: "work-attempt", workId, attemptId: "s1-a1", canonicalBytesHash: intentBytesHash(intent) }
+    const replay = { ...attempt, attemptId: "s1-a2", attemptClass: "replay" }
     const slot = {
         type: "resource-slot-cas",
         resourceKey: "k1",
@@ -297,7 +293,10 @@ async function work(nonce: number, over: { expiresAt?: number } = {}): Promise<T
     }
     demos.getAddressNonce = async () => nonce - 1
     const tx = onTheWire(
-        await DemosTransactions.atomicWork({ intent, authorizations: [], edits: [attempt, slot], transfers: [] } as never, demos),
+        await DemosTransactions.atomicWork(
+            { intent, authorizations: [], edits: over.replay ? [replay] : [attempt, slot], transfers: [] } as never,
+            demos,
+        ),
     ) as Transaction
     expect(tx.content.nonce).toBe(nonce)
     return tx
@@ -374,6 +373,22 @@ describe("non-native transactions under gasFeeSeparation and feeBinding", () => 
 
         expect(out.failedTxs).toEqual([])
         expect(balances()).toEqual(start)
+    })
+
+    it("recovers a settled Work with a replay that pays nothing, so nothing is credited", async () => {
+        const settled = await work(8)
+        expect((await block([settled])).failedTxs).toEqual([])
+        const before = balances()
+        const replay = await work(9, { replay: true })
+        expect(gasOf(replay)).toBe(OS)
+
+        expect(withDerivedFeeEdits(replay)).toBe(replay)
+        const out = await block([replay])
+
+        expect(out.failedTxs).toEqual([])
+        expect(out.successfulTxs).toEqual([replay.hash])
+        expect(balances()).toEqual(before)
+        expect(nonceOf(SENDER)).toBe(9)
     })
 
     it("charges a Work that fails in the block its gas, credited, and conserves supply", async () => {

@@ -51,7 +51,7 @@ import {
     tlsnBurnCredited,
     withTrailingDebitCredit,
     withoutLegacyGas,
-} from "./feeBinding"
+} from "./legacyGas"
 import log from "src/utilities/logger"
 
 /** JSON with object keys in code-unit order: key order is not part of an edit's meaning. */
