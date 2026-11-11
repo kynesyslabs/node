@@ -20,6 +20,7 @@ const sharedState: Record<string, any> = {
     signingAlgorithm: "ed25519",
     lastBlockNumber: 10,
     keypair: { publicKey: new Uint8Array(32).fill(7) },
+    publicKeyHex: "07".repeat(32),
     SUDO_PUBKEY: "",
     connectionString: "http://us:53550",
     genesisBlockHash: OUR_GENESIS,
@@ -247,8 +248,16 @@ describe("sudo methods", () => {
     const award = { method: "awardPoints", params: [{ message: [{ address: SENDER, points: 1 }] }] }
     const sign = async (message: Uint8Array) =>
         new Uint8Array(forge.pki.ed25519.sign({ message: Buffer.from(message), privateKey: pair.privateKey }))
-    const operatorHeaders = (body: string) =>
-        bodyBoundAuthHeaders({ genesisHash: OUR_GENESIS, identity: IDENTITY, body, sign })
+    const OUR_KEY = "07".repeat(32)
+    const operatorHeaders = (body: string, audience: string | null = OUR_KEY, timestamp?: number) =>
+        bodyBoundAuthHeaders({
+            genesisHash: OUR_GENESIS,
+            identity: IDENTITY,
+            body,
+            sign,
+            audience: audience ?? undefined,
+            timestamp,
+        })
 
     for (const method of ["rate-limit/unblock", "getCampaignData", "awardPoints"]) {
         it(`refuses ${method} signed in the old form, which leaves the body unsigned`, async () => {
@@ -280,6 +289,35 @@ describe("sudo methods", () => {
             params: [{ message: [{ address: "0x" + "ab".repeat(32), points: 1_000_000 }] }],
         })
         const res = await deliver(swapped, headers)
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("refuses a sudo call signed for another node", async () => {
+        const body = JSON.stringify(award)
+        const res = await deliver(body, await operatorHeaders(body, "0x" + "08".repeat(32)))
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("refuses a sudo call that names no node", async () => {
+        const body = JSON.stringify(award)
+        const res = await deliver(body, await operatorHeaders(body, null))
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("refuses an audience header the signature does not cover", async () => {
+        const body = JSON.stringify(award)
+        const headers = await operatorHeaders(body, null)
+        const res = await deliver(body, { ...headers, audience: OUR_KEY })
+        expect(res.status).toBe(401)
+        expect(dispatched).toEqual([])
+    })
+
+    it("refuses a sudo call signed before this node started, which its replay memory never saw", async () => {
+        const body = JSON.stringify(award)
+        const res = await deliver(body, await operatorHeaders(body, OUR_KEY, Date.now() - 60_000))
         expect(res.status).toBe(401)
         expect(dispatched).toEqual([])
     })

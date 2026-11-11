@@ -6,8 +6,10 @@
  *   bun scripts/sudo-call.ts --rpc URL --method NAME --mnemonic-file FILE [--params JSON]
  *
  * Nodes take these methods only in the body-bound auth form, which signs
- * the exact body, the timestamp and the network's genesis hash; SDK
- * `demos.call` sends the older form and is refused with 401.
+ * the exact body, the timestamp, the network's genesis hash and the public
+ * key of the node called, so the call is refused by every other node; SDK
+ * `demos.call` sends the older form and is refused with 401. Call each node
+ * separately.
  *
  * Examples:
  *   --method rate-limit/unblock --params '["203.0.113.4"]'
@@ -18,7 +20,12 @@
 import { readFileSync } from "node:fs"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { SUDO_METHODS, bodyBoundAuthHeaders, fetchGenesisHash } from "src/libs/network/peerHttpAuth"
+import {
+    SUDO_METHODS,
+    bodyBoundAuthHeaders,
+    fetchGenesisHash,
+    fetchNodePublicKey,
+} from "src/libs/network/peerHttpAuth"
 
 const USAGE =
     "usage: bun scripts/sudo-call.ts --rpc URL --method NAME [--params JSON] [--mnemonic-file FILE]"
@@ -52,6 +59,7 @@ async function main() {
     const body = JSON.stringify({ method: args.method, params: JSON.parse(args.params ?? "[]") })
     const headers = await bodyBoundAuthHeaders({
         genesisHash: await fetchGenesisHash(args.rpc),
+        audience: await fetchNodePublicKey(args.rpc),
         identity: `ed25519:${uint8ArrayToHex(publicKey as Uint8Array)}`,
         body,
         sign: async message => (await demos.crypto.sign("ed25519", message)).signature as Uint8Array,

@@ -11,7 +11,17 @@ export const HTTP_AUTH_DOMAIN = "DEMOS_HTTP_AUTH_V2"
 /** Header carrying the hex SHA-256 of the request body the signature covers. */
 export const BODY_HASH_HEADER = "body-hash"
 
-/** Methods only the genesis sudo key may call. */
+/**
+ * Header naming the node a request is for: that node's public key hex. The
+ * signature covers it, so a captured request is refused by every other node.
+ */
+export const AUDIENCE_HEADER = "audience"
+
+/**
+ * Methods only the genesis sudo key may call. They must name the node they
+ * are for: the same sudo call is valid on every node, so without that a call
+ * captured on one node could be replayed on the others.
+ */
 export const SUDO_METHODS: ReadonlySet<string> = new Set([
     "rate-limit/unblock",
     "getCampaignData",
@@ -55,12 +65,15 @@ export async function bodyBoundAuthHeaders(params: {
     body: string
     sign: (message: Uint8Array) => Promise<Uint8Array>
     timestamp?: number
+    /** The receiving node's public key hex; required by sudo methods. */
+    audience?: string
 }): Promise<Record<string, string>> {
     const timestamp = params.timestamp ?? nextAuthTimestamp()
     const bodyHash = Hashing.sha256(params.body)
+    const audience = params.audience === undefined ? undefined : audienceKey(params.audience)
     const signature = await params.sign(
         new TextEncoder().encode(
-            httpAuthMessage(params.genesisHash, params.identity, timestamp, bodyHash),
+            httpAuthMessage(params.genesisHash, params.identity, timestamp, bodyHash, audience),
         ),
     )
     return {
@@ -68,7 +81,13 @@ export async function bodyBoundAuthHeaders(params: {
         signature: Buffer.from(signature).toString("hex"),
         timestamp: String(timestamp),
         [BODY_HASH_HEADER]: bodyHash,
+        ...(audience === undefined ? {} : { [AUDIENCE_HEADER]: audience }),
     }
+}
+
+/** A node public key as the audience names it: lowercase hex, no 0x. */
+export function audienceKey(publicKeyHex: string): string {
+    return publicKeyHex.toLowerCase().replace(/^0x/, "")
 }
 
 /**
@@ -80,10 +99,20 @@ export function httpAuthMessage(
     identity: string,
     timestamp: string | number,
     bodyHash: string,
+    audience?: string,
 ): string {
-    return Hashing.sha256(
-        `${HTTP_AUTH_DOMAIN}:${genesisHash}:${identity}:${timestamp}:${bodyHash}`,
-    )
+    const base = `${HTTP_AUTH_DOMAIN}:${genesisHash}:${identity}:${timestamp}:${bodyHash}`
+    return Hashing.sha256(audience === undefined ? base : `${base}:${audience}`)
+}
+
+/** The public key a node serves, which sudo signatures name as their audience. */
+export async function fetchNodePublicKey(rpcUrl: string): Promise<string> {
+    const res = await fetch(new URL("/publickey", rpcUrl))
+    const key = (await res.json().catch(() => null)) as unknown
+    if (!res.ok || typeof key !== "string" || !/^(0x)?[0-9a-fA-F]{64}$/.test(key)) {
+        throw new Error(`${rpcUrl} did not serve its public key (HTTP ${res.status})`)
+    }
+    return audienceKey(key)
 }
 
 /** The genesis block hash a node serves, which body-bound signatures name. */

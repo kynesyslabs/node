@@ -3,7 +3,7 @@ import { getRunConfig, writeJson } from "../../framework/io"
 import { nodeCall, NO_FALLBACKS, rpcPost } from "../../framework/rpc"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { bodyBoundAuthHeaders, fetchGenesisHash } from "src/libs/network/peerHttpAuth"
+import { bodyBoundAuthHeaders, fetchGenesisHash, fetchNodePublicKey } from "src/libs/network/peerHttpAuth"
 import {
   getWalletAddresses,
   getTokenTargets,
@@ -49,6 +49,7 @@ async function maybeBuildSudoHeaders(body: string): Promise<Record<string, strin
 
   return bodyBoundAuthHeaders({
     genesisHash: await fetchGenesisHash(rpcUrl),
+    audience: await fetchNodePublicKey(rpcUrl),
     identity: `ed25519:${publicKeyHex}`,
     body,
     sign: async message => (await demos.crypto.sign("ed25519", message)).signature as Uint8Array,

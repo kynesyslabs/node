@@ -13,7 +13,7 @@ import { isOperatorRequest } from "./operatorAuth"
 import { isMergePeerEligible } from "../consensus/mergePeerEligibility"
 import { Config } from "src/config"
 import { getAuthContext } from "./authContext"
-import { BODY_BOUND_METHODS } from "./peerHttpAuth"
+import { BODY_BOUND_METHODS, SUDO_METHODS } from "./peerHttpAuth"
 import Hashing from "src/libs/crypto/hashing"
 import { handleError } from "src/errors"
 
@@ -486,6 +486,18 @@ export async function serverRpcBun() {
                     {
                         result: 401,
                         response: `${payload.method} requires a body-bound signature`,
+                        require_reply: false,
+                        extra: null,
+                    },
+                    401,
+                )
+            }
+
+            if (SUDO_METHODS.has(payload.method) && !authCtx.audienceBound) {
+                return jsonResponse(
+                    {
+                        result: 401,
+                        response: `${payload.method} must be signed for this node: name its public key as the audience`,
                         require_reply: false,
                         extra: null,
                     },

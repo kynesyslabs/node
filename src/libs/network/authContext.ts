@@ -32,6 +32,9 @@ export interface AuthContext {
      * handler that reads the body must check it against this.
      */
     bodyHash?: string | null
+
+    /** Whether the verified signature names this node as its audience. */
+    audienceBound?: boolean
 }
 
 /**

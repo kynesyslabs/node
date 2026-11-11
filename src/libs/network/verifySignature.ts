@@ -10,7 +10,7 @@ import { Ed25519SignedObject, signedObject } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import Hashing from "src/libs/crypto/hashing"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
-import { httpAuthMessage } from "./peerHttpAuth"
+import { audienceKey, httpAuthMessage } from "./peerHttpAuth"
 import { SeenAuthMessages } from "./authReplayCache"
 import { getSharedState } from "src/utilities/sharedState"
 
@@ -25,6 +25,15 @@ const AUTH_TIMESTAMP_MAX_AGE_MS = 5 * 60 * 1000
  * replay. Sized well above what honest peers send in one window.
  */
 export const seenAuthMessages = new SeenAuthMessages(200_000)
+
+/**
+ * The replay cache lives in memory, so it starts empty: a request signed
+ * before this process started could be replayed once. Body-bound requests
+ * signed before then are refused; the slack covers a peer clock a little
+ * behind ours.
+ */
+const PROCESS_START_MS = Date.now()
+export const RESTART_CLOCK_SLACK_MS = 2_000
 
 export interface VerificationResult {
     /**
@@ -53,6 +62,9 @@ export interface VerificationResult {
      */
     bodyHash?: string | null
 
+    /** Whether the signature names this node as the request's audience. */
+    audienceBound?: boolean
+
     /**
      * Error message if verification failed
      */
@@ -79,6 +91,7 @@ export async function verifySignature(
     timestamp?: string | null,
     requireTimestampBinding = false,
     bodyHash?: string | null,
+    audience?: string | null,
 ): Promise<VerificationResult> {
     if (!identity || !signature) {
         return {
@@ -103,6 +116,21 @@ export async function verifySignature(
         }
     }
 
+    // An audience is part of the body-bound form only, and must be us.
+    const audienceBound = typeof audience === "string"
+    if (audienceBound) {
+        const ours = getSharedState.publicKeyHex
+        if (!bodyBound || !ours || audienceKey(audience) !== audienceKey(ours)) {
+            return {
+                valid: false,
+                identity,
+                publicKey: null,
+                algorithm: null,
+                error: bodyBound ? "Request is for another node" : "Audience needs a body-bound signature",
+            }
+        }
+    }
+
     // The body-bound form names our network; until it is known no such
     // request can be checked, so peer methods are not served yet.
     const genesisHash = getSharedState.genesisBlockHash
@@ -122,7 +150,11 @@ export async function verifySignature(
     // token. A legacy client that signs the bare public key (no/empty
     // timestamp) is rejected with a clear upgrade message.
     if (requireTimestampBinding || bodyBound) {
-        const timestampError = checkAuthTimestamp(timestamp)
+        const timestampError =
+            checkAuthTimestamp(timestamp) ??
+            (bodyBound && Number(timestamp) < PROCESS_START_MS - RESTART_CLOCK_SLACK_MS
+                ? "Auth timestamp predates this node's start"
+                : null)
         if (timestampError) {
             return {
                 valid: false,
@@ -149,7 +181,13 @@ export async function verifySignature(
         // form signs the bare publicKey hex or plain identity.
         let authMessage = publicKeyHex
         if (bodyBound) {
-            authMessage = httpAuthMessage(genesisHash!, identity, timestamp!, bodyHash!)
+            authMessage = httpAuthMessage(
+                genesisHash!,
+                identity,
+                timestamp!,
+                bodyHash!,
+                audienceBound ? audienceKey(audience) : undefined,
+            )
         } else if (requireTimestampBinding) {
             authMessage = Hashing.sha256(`${identity}:${timestamp}`)
         }
@@ -188,6 +226,7 @@ export async function verifySignature(
                 publicKey: publicKeyHex,
                 algorithm,
                 bodyHash: bodyBound ? bodyHash : null,
+                audienceBound,
             }
         }
 
