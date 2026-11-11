@@ -30,14 +30,22 @@ const saved = Object.fromEntries(SAVED_KEYS.map(k => [k, process.env[k]]))
 
 // The genesis stored in block 0, or null for an empty database
 let storedGenesis: unknown = null
+// Runs when the boot looks for block 0, after the first read of the genesis file
+let onBlockLookup: (() => void) | null = null
+// What block generation was handed
+let generatedFrom: unknown
 
 mock.module("src/libs/blockchain/chain", () => ({
     default: {
-        getGenesisBlockHash: async () => (storedGenesis === null ? null : "cd".repeat(32)),
+        getGenesisBlockHash: async () => {
+            onBlockLookup?.()
+            return storedGenesis === null ? null : "cd".repeat(32)
+        },
         getGenesisBlock: async () => ({
             content: { extra: { genesisData: JSON.stringify(storedGenesis) } },
         }),
-        generateGenesisBlock: async () => {
+        generateGenesisBlock: async (genesisData: unknown) => {
+            generatedFrom = genesisData
             throw new Error("reached block generation")
         },
     },
@@ -93,6 +101,8 @@ beforeAll(async () => {
 afterEach(() => {
     delete process.env.DEMOS_REQUIRE_VALIDATORS
     storedGenesis = null
+    onBlockLookup = null
+    generatedFrom = undefined
 })
 
 afterAll(() => {
@@ -141,6 +151,24 @@ describe("findGenesisBlock and DEMOS_REQUIRE_VALIDATORS", () => {
         delete process.env.DEMOS_REQUIRE_VALIDATORS
         for (const id of [1, 1337]) {
             expect(await bootMessage(id)).not.toContain(REFUSAL)
+        }
+    })
+})
+
+describe("findGenesisBlock on a fresh start", () => {
+    it("builds block 0 from the genesis data its checks ran on", async () => {
+        const { Config } = await import("src/config")
+        // No pin, so the checks do not compare the file with a hash
+        delete process.env.EXPECTED_GENESIS_HASH
+        Config.resetInstance()
+        try {
+            writeGenesis(1)
+            onBlockLookup = () => writeGenesis(1337)
+            expect(await refusalMessage()).toBe("reached block generation")
+            expect((generatedFrom as { properties: { id: number } }).properties.id).toBe(1)
+        } finally {
+            process.env.EXPECTED_GENESIS_HASH = "ab".repeat(32)
+            Config.resetInstance()
         }
     })
 })

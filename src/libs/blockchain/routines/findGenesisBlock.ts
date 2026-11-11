@@ -249,8 +249,8 @@ export default async function findGenesisBlock() {
         )
     }
 
-    // Loading the genesis block
-    const genesisData = readGenesisFile()
+    // Block 0 is built from the data the boot-setting checks already ran on
+    const genesisData = fileGenesis
 
     // Everything is checked before the first write: a refused node must leave
     // an empty database, or its next boot finds a block 0 and trusts it.
