@@ -445,6 +445,15 @@ A reissued genesis (new published hashes) is a new chain: the stored block 0 no 
 
 The key stays the same; only its copy in the volume is replaced. Its signing records (`.demos_identity.signed.json` and the others in [docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "Signing state files") belong to the old chain and go with the volume, which is safe because that chain is abandoned. To keep the state volume instead, remove only the database and data volumes (`docker compose down`, then `docker volume rm` the `demos_pgdata` and `demos_node_data` volumes of this install, suffix included) and, if the key had signed blocks on the old chain, start once with `DEMOS_SIGNING_RECORD_REBIND=true` and remove it again ([docs/runbooks/validator-key.md](docs/runbooks/validator-key.md), "After a chain reset").
 
+### Fees charged per native send
+
+For exchanges and wallets that reconcile balances. Amounts are in OS (1 DEM = 1 000 000 000 OS). From block 0 on mainnet (`gasFeeSeparation` and `feeBinding` active):
+
+- The sender is debited `amount + network_fee + rpc_fee`, the values in the transaction's `content.transaction_fee`. With the launch parameters that is the amount plus 1 DEM + 1 DEM. The SDK still ships a flat 1 DEM gas edit; the node does not charge it, and a transfer is confirmed only when the balance covers the amount plus that fee.
+- `network_fee` is split 50/50 between the burn address (`0x` + 64 zeros) and the genesis treasury (`forks.gasFeeSeparation.treasuryAddress`). `rpc_fee` goes to the treasury while the transaction names no rpc operator. The burn address is an ordinary account, so total supply (the sum of all balances) does not change.
+- A transaction included in a block that then fails pays its fee and spends its nonce; the amount does not move. If the balance cannot cover the fee, only the nonce is spent.
+- The fee values, `additional_fee` (0 at launch) and the split percentages are network parameters that governance can change; read them from the transaction's `transaction_fee`, not from this page.
+
 ### Network Exposure
 
 When running on a VPS or any machine you want peers to connect to, you must allow inbound connections on these ports. Each row names the `.env` variable that moves it; Docker publishes host and container port 1:1, so the node listens on the same number.
