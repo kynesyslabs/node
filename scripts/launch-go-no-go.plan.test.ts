@@ -191,6 +191,22 @@ describe("mainnetGenesisReasons", () => {
         expect(mainnetGenesisReasons(g).join("\n")).toContain("without a treasuryAddress")
     })
 
+    it("refuses a scheduled gasFeeSeparation whose treasury the node would refuse", () => {
+        for (const [treasuryAddress, why] of [
+            ["0x" + "AB".repeat(32), "must match"],
+            ["0x" + "ab".repeat(31), "must match"],
+            ["ab".repeat(32), "must match"],
+            ["0x" + "0".repeat(64), "equals BURN_ADDRESS"],
+        ]) {
+            const g = filledTemplate()
+            g.forks.gasFeeSeparation = { activationHeight: 0, treasuryAddress }
+            const reasons = mainnetGenesisReasons(g).join("\n")
+            expect(reasons).toContain("scheduled with a treasuryAddress the node refuses")
+            expect(reasons).toContain(why)
+        }
+        expect(mainnetGenesisReasons(filledTemplate()).join("\n")).not.toContain("treasuryAddress")
+    })
+
     it("refuses a genesis that leaves gasFeeSeparation off, where a transfer pays a flat gas no account receives", () => {
         const g = filledTemplate()
         g.forks.gasFeeSeparation.activationHeight = null
