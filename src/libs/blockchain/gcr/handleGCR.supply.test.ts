@@ -10,6 +10,10 @@
  * transfer. Behind `feeBinding` the block leaves that gas edit out on every
  * path that applies a block: forging, syncing a served block, rolling it back
  * and charging a transaction that fails in it.
+ *
+ * Every other type is charged its gas edit, not `transaction_fee`. Behind the
+ * same forks the block keeps that debit and credits it as a network fee is
+ * credited, split between burn and treasury, on the same paths.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test"
@@ -37,9 +41,13 @@ mock.module("src/utilities/logger", () => ({
 import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import type { Transaction } from "@kynesyslabs/demosdk/types"
 import { cloneDefaultForkConfig, type ForkConfigByName } from "@/forks/forkConfig"
+import { declareNativeOperationKinds } from "@/libs/atomic-work/effectBoundary"
+import { registerAtomicWorkProfile } from "@/libs/atomic-work/profile"
+import { intentBytesHash } from "@/libs/atomic-work/workEnvelope"
+import { computeWorkId } from "@/libs/atomic-work/workId"
 import { getSharedState } from "@/utilities/sharedState"
 import type { GCREntityCaches } from "./handleGCR"
-import { OS, PEER, SENDER, VICTIM, demos, onTheWire } from "@/libs/blockchain/validation/editBinding.fixtures"
+import { OS, PEER, SENDER, VICTIM, demos, handMade, onTheWire } from "@/libs/blockchain/validation/editBinding.fixtures"
 
 const { default: HandleGCR, withDerivedFeeEdits } = await import("./handleGCR")
 
@@ -112,7 +120,8 @@ async function transfers(payments: Array<[string, bigint]>): Promise<Transaction
     return out
 }
 
-const block = (txs: Transaction[]) => HandleGCR.applyTransactions(txs, false, { height: 101, timestampSec: 1 })
+const CLOCK = { height: 101, timestampSec: 1_800_000_000 }
+const block = (txs: Transaction[]) => HandleGCR.applyTransactions(txs, false, CLOCK)
 
 beforeEach(() => {
     caches = freshCaches(100n * OS)
@@ -248,4 +257,157 @@ describe("chains that keep the earlier charge, so their history replays as appli
         expect(balanceOf(BURN) + balanceOf(TREASURY)).toBe(0n)
         expect(supply()).toBe(before - OS)
     })
+})
+
+const PROFILE = "supply-slot-v1"
+const DOMAINS = {
+    workId: "supply-work:v1:",
+    authorization: "supply-auth:v1:",
+    operationReceipt: "supply-op-receipt:v1:",
+    workReceipt: "supply-receipt:v1:",
+}
+const operations = [{ operationId: "claim", kind: "resource-slot-cas", dependsOn: [] as string[], requiredRoles: [] as string[] }]
+registerAtomicWorkProfile({
+    name: PROFILE,
+    operationGraph: operations.map(({ kind, ...o }) => ({ ...o, kinds: [kind] })),
+    roles: [],
+    domains: DOMAINS,
+    verifyAuthorizations: () => {},
+})
+declareNativeOperationKinds()
+
+/** A web2Request from SENDER on nonce 8: the gas and the nonce are all it applies. */
+async function web2(): Promise<Transaction> {
+    return onTheWire(await handMade("web2Request", { url: "https://example.com", method: "GET" }))
+}
+
+/** A Work claiming slot `k1`, built and signed by the SDK on nonce `nonce`. */
+async function work(nonce: number, over: { expiresAt?: number } = {}): Promise<Transaction> {
+    const intent: Record<string, unknown> = { profile: PROFILE, seed: "s1", operations }
+    if (over.expiresAt !== undefined) intent.expiresAt = over.expiresAt
+    const workId = computeWorkId(intent, DOMAINS.workId)
+    const attempt = { type: "work-attempt", workId, attemptId: "s1-a1", canonicalBytesHash: intentBytesHash(intent) }
+    const slot = {
+        type: "resource-slot-cas",
+        resourceKey: "k1",
+        expected: { state: "vacant", generation: 0 },
+        transition: "settle",
+        workId,
+        conflictDigest: "c1",
+    }
+    demos.getAddressNonce = async () => nonce - 1
+    const tx = onTheWire(
+        await DemosTransactions.atomicWork({ intent, authorizations: [], edits: [attempt, slot], transfers: [] } as never, demos),
+    ) as Transaction
+    expect(tx.content.nonce).toBe(nonce)
+    return tx
+}
+
+const gasOf = (tx: Transaction) => {
+    const edits = tx.content.gcr_edits as any[]
+    const gas = edits[edits.length - 2]
+    expect(gas).toMatchObject({ type: "balance", operation: "remove", account: SENDER })
+    return BigInt(gas.amount)
+}
+
+describe("non-native transactions under gasFeeSeparation and feeBinding", () => {
+    beforeEach(() => {
+        forks({ gasFee: true, fee: true })
+        // The forged-edit guard runs, so a Work's applied edits are compared
+        // with the ones regenerated from its signed body.
+        getSharedState.forkConfig.nonceEnforcement.activationHeight = 0
+        getSharedState.forkConfig.atomicWork.activationHeight = 0
+    })
+
+    it("keeps the signed gas edit and credits it right after, as a network fee", async () => {
+        const tx = await web2()
+        const signed = structuredClone(tx.content.gcr_edits)
+
+        const applied = withDerivedFeeEdits(tx).content.gcr_edits as any[]
+
+        expect(gasOf(tx)).toBe(OS)
+        expect(applied).toEqual([
+            ...signed.slice(0, -1),
+            expect.objectContaining({ type: "balance", operation: "add", account: BURN, amount: Number(OS / 2n) }),
+            expect.objectContaining({ type: "balance", operation: "add", account: TREASURY, amount: Number(OS / 2n) }),
+            signed[signed.length - 1],
+        ])
+        expect(tx.content.gcr_edits).toEqual(signed)
+        const again = withDerivedFeeEdits(withDerivedFeeEdits(tx))
+        expect(again.content.gcr_edits).toEqual(applied)
+    })
+
+    it("conserves total supply: the sender pays each gas, and burn and treasury receive it", async () => {
+        const before = supply()
+        const txs = [await web2(), await work(9)]
+
+        const out = await block(txs)
+
+        expect(out.failedTxs).toEqual([])
+        expect(out.successfulTxs).toEqual(txs.map(t => t.hash))
+        expect(supply()).toBe(before)
+        expect(balanceOf(SENDER)).toBe(100n * OS - 2n * OS)
+        expect(balanceOf(BURN)).toBe(OS)
+        expect(balanceOf(TREASURY)).toBe(OS)
+        expect(nonceOf(SENDER)).toBe(9)
+        expect((caches.resourceSlots.get("k1") as any)?.state).toBe("settled")
+    })
+
+    it("applies a served block the same on a syncing node", async () => {
+        const txs = [await web2(), await work(9)]
+        await block(txs)
+        const producer = balances()
+
+        caches = freshCaches(100n * OS)
+        const out = await block(txs.map(tx => onTheWire(tx)))
+
+        expect(out.failedTxs).toEqual([])
+        expect(balances()).toEqual(producer)
+    })
+
+    it("restores every balance when the block is rolled back", async () => {
+        const start = balances()
+        const txs = [await web2()]
+        await block(txs)
+
+        const out = await HandleGCR.applyTransactions(txs, true)
+
+        expect(out.failedTxs).toEqual([])
+        expect(balances()).toEqual(start)
+    })
+
+    it("charges a Work that fails in the block its gas, credited, and conserves supply", async () => {
+        const before = supply()
+        const tx = await work(8, { expiresAt: 1 })
+
+        const out = await block([tx])
+
+        expect(out.failedTxs).toEqual([tx.hash])
+        expect(out.nonceChargedTxs).toEqual([tx.hash])
+        expect(supply()).toBe(before)
+        expect(balanceOf(SENDER)).toBe(100n * OS - OS)
+        expect(balanceOf(BURN) + balanceOf(TREASURY)).toBe(OS)
+        expect(nonceOf(SENDER)).toBe(8)
+    })
+})
+
+describe("non-native transactions on chains without both fee forks", () => {
+    for (const rules of [
+        { gasFee: true, fee: false },
+        { gasFee: false, fee: true },
+    ]) {
+        it(`apply the gas edit as signed, credited to no account (gasFeeSeparation ${rules.gasFee}, feeBinding ${rules.fee})`, async () => {
+            forks(rules)
+            const before = supply()
+            const tx = await web2()
+
+            expect(withDerivedFeeEdits(tx)).toBe(tx)
+            const out = await block([tx])
+
+            expect(out.successfulTxs).toEqual([tx.hash])
+            expect(balanceOf(SENDER)).toBe(100n * OS - OS)
+            expect(balanceOf(BURN) + balanceOf(TREASURY)).toBe(0n)
+            expect(supply()).toBe(before - OS)
+        })
+    }
 })

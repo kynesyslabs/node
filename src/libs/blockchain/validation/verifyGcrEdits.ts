@@ -45,7 +45,12 @@ import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
-import { legacyGasRetired, withoutLegacyGas } from "./feeBinding"
+import {
+    legacyGasCredited,
+    legacyGasRetired,
+    withLegacyGasCredit,
+    withoutLegacyGas,
+} from "./feeBinding"
 import log from "src/utilities/logger"
 
 /** JSON with object keys in code-unit order: key order is not part of an edit's meaning. */
@@ -237,7 +242,12 @@ export async function verifyGcrEditsMatch(
 
     const normalise = wireShapeNormaliser(tx, await osDenominationActive())
 
-    const normalisedRegen = normalise(regen)
+    // withDerivedFeeEdits credits a non-native gas edit from its shipped wire
+    // amount, so the regen credits its gas once it has that shape too.
+    const normalisedRegen =
+        expectFeeEdits && legacyGasCredited(tx)
+            ? normalise(withLegacyGasCredit(normalise(regen), ""))
+            : normalise(regen)
     const regenEditsHash = digest(normalisedRegen)
 
     const normalisedTxEdits = normalise(

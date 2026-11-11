@@ -20,12 +20,13 @@ KyneSys Labs: https://www.kynesys.xyz/
  * same fee as one that did not.
  */
 
-import type { Transaction } from "@kynesyslabs/demosdk/types"
+import type { GCREditBalance, Transaction } from "@kynesyslabs/demosdk/types"
 import { isForkActive } from "@/forks/forkGates"
 import {
     calculateFeeBreakdown,
     type FeeBreakdown,
 } from "@/libs/blockchain/routines/calculateCurrentGas"
+import { generateGasCreditEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import { getSharedState } from "@/utilities/sharedState"
 
 type ShippedFee = NonNullable<Transaction["content"]["transaction_fee"]>
@@ -175,20 +176,79 @@ export function legacyGasRetired(tx: Pick<Transaction, "content">): boolean {
 }
 
 /**
- * `edits` without the SDK gas edit: the debit of the nonce edit's account
- * that the SDK places right before that trailing nonce edit. Edits of any
- * other shape come back as the same array.
+ * Whether a non-native transaction's SDK gas edit is credited. The sender
+ * still pays the gas as signed: only native transactions are charged from
+ * `transaction_fee`, so for every other type the gas is its fee. Under the
+ * same forks as {@link legacyGasRetired} that debit gets matching credits,
+ * routed like a network fee, so no transaction takes DEM out of the total
+ * supply. Identity and d402 transactions ship no gas.
  */
-export function withoutLegacyGas<T extends { type: string }>(edits: T[]): T[] {
+export function legacyGasCredited(tx: Pick<Transaction, "content">): boolean {
+    const type = tx.content?.type as string
+    if (type === "native" || type === "identity" || type === "d402_payment") {
+        return false
+    }
+    const height = getSharedState.lastBlockNumber ?? 0
+    return (
+        isForkActive("gasFeeSeparation", height) &&
+        isForkActive("feeBinding", height)
+    )
+}
+
+/**
+ * Where the SDK gas edit sits in `edits`: the debit of the nonce edit's
+ * account right before that trailing nonce edit, or -1.
+ */
+function legacyGasIndex(edits: Array<{ type: string }>): number {
     const last = edits.length - 1
-    if (last < 1) return edits
+    if (last < 1) return -1
     const nonce = edits[last] as unknown as { type: string; account?: unknown }
     const gas = edits[last - 1] as unknown as {
         type: string
         operation?: unknown
         account?: unknown
     }
-    if (nonce.type !== "nonce" || gas.type !== "balance") return edits
-    if (gas.operation !== "remove" || gas.account !== nonce.account) return edits
-    return [...edits.slice(0, last - 1), edits[last]]
+    if (nonce.type !== "nonce" || gas.type !== "balance") return -1
+    if (gas.operation !== "remove" || gas.account !== nonce.account) return -1
+    return last - 1
+}
+
+/**
+ * `edits` without the SDK gas edit. Edits of any other shape come back as
+ * the same array.
+ */
+export function withoutLegacyGas<T extends { type: string }>(edits: T[]): T[] {
+    const at = legacyGasIndex(edits)
+    if (at < 0) return edits
+    return [...edits.slice(0, at), ...edits.slice(at + 1)]
+}
+
+/**
+ * The credits for a gas debit, in the ledger units apply deducts it in, or
+ * none for an amount apply could not deduct either.
+ */
+export function legacyGasCredits(gas: { amount?: unknown }, txHash: string): GCREditBalance[] {
+    const amount = Number(gas.amount)
+    if (!Number.isSafeInteger(amount) || amount <= 0) return []
+    return generateGasCreditEdits(amount, txHash, false)
+}
+
+/**
+ * `edits` with the credits of the SDK gas edit placed right after it. A set
+ * that already carries them has the credits, not the gas, before its nonce
+ * edit, so it comes back as the same array, as does a set without the gas.
+ */
+export function withLegacyGasCredit<T extends { type: string }>(
+    edits: T[],
+    txHash: string,
+): T[] {
+    const at = legacyGasIndex(edits)
+    if (at < 0) return edits
+    const credits = legacyGasCredits(edits[at] as unknown as { amount?: unknown }, txHash)
+    if (credits.length === 0) return edits
+    return [
+        ...edits.slice(0, at + 1),
+        ...(credits as unknown as T[]),
+        ...edits.slice(at + 1),
+    ]
 }

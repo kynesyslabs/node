@@ -135,22 +135,17 @@ function makeBalanceEdit(
 }
 
 /**
- * Emit the burn / treasury distribution edits for a two-recipient
- * component (network_fee or additional_fee). Returns an array of 0..3
- * edits: one `remove` from the sender plus up to two `add`s to burn and
- * treasury. Recipients with a 0% share contribute nothing.
- *
- * Treasury captures the rounding remainder so the sum of the
- * `add` amounts equals the `remove` amount exactly.
+ * The burn and treasury credits of a two-recipient component (network_fee or
+ * additional_fee): 0..2 `add` edits whose amounts sum to `total`. Recipients
+ * with a 0% share contribute nothing; treasury takes the rounding remainder.
  */
-function emitTwoRecipientSplit(
+function twoRecipientCredits(
     componentName: "network_fee" | "additional_fee",
     total: number,
     burnPct: number,
     treasuryPct: number,
     burnAddress: string,
     treasuryAddress: string,
-    senderAddress: string,
     txHash: string,
     isRollback: boolean,
 ): GCREditBalance[] {
@@ -159,15 +154,6 @@ function emitTwoRecipientSplit(
     const burnAmount = Math.floor((total * burnPct) / 100)
     const treasuryAmount = total - burnAmount // remainder to treasury
 
-    edits.push(
-        makeBalanceEdit(
-            "remove",
-            senderAddress,
-            total,
-            txHash,
-            isRollback,
-        ),
-    )
     if (burnAmount > 0) {
         edits.push(
             makeBalanceEdit(
@@ -194,6 +180,67 @@ function emitTwoRecipientSplit(
         `[FeeDistribution] ${componentName} split total=${total} burn=${burnAmount}(${burnPct}%) treasury=${treasuryAmount}(remainder of ${treasuryPct}%)`,
     )
     return edits
+}
+
+/**
+ * Emit the burn / treasury distribution edits for a two-recipient
+ * component (network_fee or additional_fee). Returns an array of 0..3
+ * edits: one `remove` from the sender plus up to two `add`s to burn and
+ * treasury. Recipients with a 0% share contribute nothing.
+ *
+ * Treasury captures the rounding remainder so the sum of the
+ * `add` amounts equals the `remove` amount exactly.
+ */
+function emitTwoRecipientSplit(
+    componentName: "network_fee" | "additional_fee",
+    total: number,
+    burnPct: number,
+    treasuryPct: number,
+    burnAddress: string,
+    treasuryAddress: string,
+    senderAddress: string,
+    txHash: string,
+    isRollback: boolean,
+): GCREditBalance[] {
+    if (total <= 0) return []
+    return [
+        makeBalanceEdit("remove", senderAddress, total, txHash, isRollback),
+        ...twoRecipientCredits(
+            componentName,
+            total,
+            burnPct,
+            treasuryPct,
+            burnAddress,
+            treasuryAddress,
+            txHash,
+            isRollback,
+        ),
+    ]
+}
+
+/**
+ * The credits for a flat gas debit the sender signed and pays as is: routed
+ * like a network fee, split between burn and treasury, with no sender debit
+ * of their own. `amount` is in the ledger units apply deducts the debit in.
+ * Empty when the distribution is not primed (see `requireFeeDistribution`).
+ */
+export function generateGasCreditEdits(
+    amount: number,
+    txHash: string,
+    isRollback: boolean,
+): GCREditBalance[] {
+    const fd = requireFeeDistribution()
+    if (!fd) return []
+    return twoRecipientCredits(
+        "network_fee",
+        amount,
+        fd.networkFee.burnPct,
+        fd.networkFee.treasuryPct,
+        fd.burnAddress,
+        fd.treasuryAddress,
+        txHash,
+        isRollback,
+    )
 }
 
 /**

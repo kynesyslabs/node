@@ -55,7 +55,10 @@ import {
 } from "src/libs/blockchain/validation/editBinding"
 import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
 import {
+    legacyGasCredited,
+    legacyGasCredits,
     legacyGasRetired,
+    withLegacyGasCredit,
     withoutLegacyGas,
 } from "src/libs/blockchain/validation/feeBinding"
 import { ensureNetworkParametersCurrent } from "src/libs/blockchain/routines/loadNetworkParameters"
@@ -546,9 +549,22 @@ function sameFeeEdit(a: GCREdit, b: GCREdit): boolean {
  *
  * Where the fee edits replace the SDK's gas edit (`legacyGasRetired`), the
  * copy leaves that gas edit out, so the sender pays the fee once and every
- * debit has its credit.
+ * debit has its credit. Where the gas is a non-native transaction's whole
+ * fee (`legacyGasCredited`), the copy keeps it and credits it right after.
  */
 export function withDerivedFeeEdits(tx: Transaction): Transaction {
+    if (legacyGasCredited(tx)) {
+        const signed = tx.content.gcr_edits ?? []
+        const credited = withLegacyGasCredit(signed, tx.hash ?? "")
+        if (credited === signed) return tx
+        return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
+            content: {
+                ...tx.content,
+                gcr_edits: credited.map(edit => structuredClone(edit)),
+            },
+        }) as Transaction
+    }
+
     const feeEdits = deriveFeeEditsForApply(tx)
     const retireGas = legacyGasRetired(tx)
     if (feeEdits.length === 0 && !retireGas) return tx
@@ -1122,7 +1138,8 @@ export default class HandleGCR {
      * transactions pay no gas, and a Work replay pays nothing because the
      * Work it reads back already paid. A type's own debits (a storage burn,
      * a stake) are never charged. Where the fee edits replace the gas
-     * (`legacyGasRetired`), the gas is not charged on top of them.
+     * (`legacyGasRetired`), the gas is not charged on top of them; where the
+     * gas is credited (`legacyGasCredited`), its credits are charged with it.
      *
      * Copied, because a failed apply reverses the edits it ran in place.
      */
@@ -1153,7 +1170,12 @@ export default class HandleGCR {
             normalizePubkey(nonceEdit.account),
             osAmounts,
         )
-        if (gas) fee.push(gas)
+        if (gas) {
+            fee.push(gas)
+            if (legacyGasCredited(tx)) {
+                fee.push(...(legacyGasCredits(gas as GCREditBalance, tx.hash ?? "") as GCREdit[]))
+            }
+        }
         return fee.map(e => structuredClone(e))
     }
 
