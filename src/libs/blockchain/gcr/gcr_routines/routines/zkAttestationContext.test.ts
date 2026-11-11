@@ -9,6 +9,7 @@ import { mockDatasource, mockLogger, mockXmLocalSdk } from "@/utilities/testSupp
 
 mockDatasource({ findOne: async () => null })
 mockLogger()
+mockXmLocalSdk()
 
 const { ProofVerifier } = await import("@/features/zk/proof/ProofVerifier")
 // Stands in for a proof that verifies: the context rule is what is under test.
@@ -17,6 +18,9 @@ ProofVerifier.prototype.checkIdentityAttestation = async function (a: any) {
 }
 
 const { applyZkAttestationAdd } = await import("./zkRoutines")
+const { default: handleIdentityRequest } = await import(
+    "@/libs/network/routines/transactions/handleIdentityRequest"
+)
 const { ATTESTATION_CONTEXT, ATTESTATION_CONTEXT_SIGNAL } = await import("@/features/zk/proof/publicSignals")
 
 /** The context signal the SDK prover (ProofGenerator.stringToBigInt) emits. */
@@ -53,5 +57,20 @@ describe("ZK attestation context", () => {
             expect(r.success).toBe(false)
             expect(r.message).toContain(ATTESTATION_CONTEXT)
         }
+    })
+
+    it("is refused at the identity request too, so a client is not told an attestation apply drops passed", async () => {
+        const request = (context: string) =>
+            ({
+                content: {
+                    from_ed25519_address: "0x" + "ab".repeat(32),
+                    data: ["identity", { method: "zk_attestationadd", payload: [attestation(context).data] }],
+                },
+            }) as any
+        const wrong = await handleIdentityRequest(request("dao_vote_123"), "0x" + "ab".repeat(32))
+        expect(wrong.success).toBe(false)
+        expect(wrong.message).toContain(ATTESTATION_CONTEXT)
+        const right = await handleIdentityRequest(request(ATTESTATION_CONTEXT), "0x" + "ab".repeat(32))
+        expect(right.success).toBe(true)
     })
 })

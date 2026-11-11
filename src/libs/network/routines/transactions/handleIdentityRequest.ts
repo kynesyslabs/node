@@ -17,6 +17,7 @@ import { Referrals } from "@/features/incentive/referrals"
 import { verifyTLSNProof, TLSNIdentityPayload } from "@/libs/tlsnotary"
 import Datasource from "@/model/datasource"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
+import { attestationContextError } from "@/features/zk/proof/publicSignals"
 
 interface IdentityResponse {
     success: boolean
@@ -156,6 +157,11 @@ export default async function handleIdentityRequest(
                     message: "Invalid ZK attestation payload",
                 }
             }
+
+            // Apply refuses another context; refusing it here too keeps a
+            // client from being told an attestation passed that never lands.
+            const contextError = attestationContextError(attestation.public_signals)
+            if (contextError) return { success: false, message: contextError }
 
             // Checked only: the nullifier is marked when the block that
             // carries the transaction commits

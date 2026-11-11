@@ -21,10 +21,8 @@ import {
     isTextStorable,
 } from "@/libs/blockchain/validation/postgresStorable"
 import {
-    ATTESTATION_CONTEXT,
-    ATTESTATION_CONTEXT_SIGNAL,
+    attestationContextError,
     BN254_FIELD_ORDER,
-    parseIdentityPublicSignals,
 } from "@/features/zk/proof/publicSignals"
 
 export const PROVIDER_MAX_BYTES = 64
@@ -235,16 +233,9 @@ export async function applyZkAttestationAdd(
         }
     }
 
-    // Checked on the proof's own signal, before any database work: it is a
-    // pure function of the signed payload, so every node, a syncing one
-    // included, reaches the same verdict.
-    const signals = parseIdentityPublicSignals(payload.public_signals).signals
-    if (signals && signals.context !== ATTESTATION_CONTEXT_SIGNAL) {
-        return {
-            success: false,
-            message: `ZK attestation must prove under the context "${ATTESTATION_CONTEXT}"`,
-        }
-    }
+    // Before any database work, so a syncing node reaches the same verdict.
+    const contextError = attestationContextError(payload.public_signals)
+    if (contextError) return { success: false, message: contextError }
 
     // Get datasource for verification
     const db = await Datasource.getInstance()

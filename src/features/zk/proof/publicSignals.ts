@@ -132,3 +132,19 @@ export function canonicalFieldElement(value: string): string | null {
         return null
     }
 }
+
+/**
+ * Why an attestation does not prove under the launch context, or null.
+ * Unreadable signals pass here: the proof check refuses them with its own
+ * reason. A pure function of the signed payload, so admission and every
+ * node's apply reach the same verdict.
+ */
+export function attestationContextError(
+    publicSignals: string[] | undefined | null,
+): string | null {
+    const signals = parseIdentityPublicSignals(publicSignals).signals
+    if (signals && signals.context !== ATTESTATION_CONTEXT_SIGNAL) {
+        return `ZK attestation must prove under the context "${ATTESTATION_CONTEXT}"`
+    }
+    return null
+}
