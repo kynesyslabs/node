@@ -180,10 +180,7 @@ export abstract class BaseOmniAdapter {
         httpUrl: string,
     ): OmniEndpoint | null {
         const endpoint = this.omniEndpoints.get(peerIdentity)
-        if (!endpoint || endpoint.origin !== originOf(httpUrl)) {
-            return null
-        }
-        return endpoint
+        return endpoint?.origin === originOf(httpUrl) ? endpoint : null
     }
 
     /**

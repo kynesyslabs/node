@@ -55,20 +55,20 @@ import {
  */
 export class ConnectionPool extends EventEmitter {
     private static instance: ConnectionPool | null = null
-    private connections: Map<string, PeerConnection[]> = new Map()
-    private pendingConnections: Map<string, PeerConnection> = new Map() // Temp tracking before auth
+    private readonly connections: Map<string, PeerConnection[]> = new Map()
+    private readonly pendingConnections: Map<string, PeerConnection> = new Map() // Temp tracking before auth
     // Inbound connections that hold a per-IP slot in the rate limiter
     // (pending ones, and those authenticated as non-validators), with the IP
     // captured at accept time: remoteAddress is gone once the socket is
     // destroyed, and outbound connections never took a slot to give back.
-    private ipSlots: Map<PeerConnection, string> = new Map()
+    private readonly ipSlots: Map<PeerConnection, string> = new Map()
     // Callers between acquire() and release(), per connection. A caller
     // resumes after acquire() a turn later and only then puts its request in
     // flight, so an idle-looking socket may still be about to carry one.
-    private reservations: Map<PeerConnection, number> = new Map()
+    private readonly reservations: Map<PeerConnection, number> = new Map()
     // Outbound connects in progress, by peer identity and address.
-    private connecting: Map<string, Promise<PeerConnection>> = new Map()
-    private config: PoolConfig
+    private readonly connecting: Map<string, Promise<PeerConnection>> = new Map()
+    private readonly config: PoolConfig
     private cleanupTimer: NodeJS.Timeout | null = null
     public rateLimiter?: RateLimiter
 
@@ -306,7 +306,7 @@ export class ConnectionPool extends EventEmitter {
         // be over the per-peer cap and closed again by the receiver.
         const connectKey = `${peerIdentity} ${connectionString}`
         const connecting = this.connecting.get(connectKey)
-        if (connecting) {
+        if (connecting !== undefined) {
             const connection = await connecting
             this.reserve(connection)
             return connection
