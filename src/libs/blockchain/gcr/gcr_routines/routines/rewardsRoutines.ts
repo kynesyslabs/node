@@ -1,3 +1,4 @@
+import { applyTime } from "../../applyTime"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../../handleGCR"
 import { Repository } from "typeorm"
@@ -26,7 +27,7 @@ export async function applyAwardPoints(
 
     account.points.breakdown.weeklyChallenge.push(challengeEntry)
     account.points.totalPoints = (account.points.totalPoints || 0) + amount
-    account.points.lastUpdated = new Date()
+    account.points.lastUpdated = applyTime()
 
     return { success: true, message: "Points awarded", entity: accountGCR }
 }

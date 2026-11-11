@@ -1,3 +1,4 @@
+import { applyTime } from "../../applyTime"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import type { GCREntityCaches, GCRResult } from "../../handleGCR"
 import { EntityManager, Repository } from "typeorm"
@@ -346,7 +347,7 @@ export async function applyZkAttestationAdd(
             const account = await ensureGCRForUser(submitter, em)
 
             const zkAttestationEntry = {
-                date: new Date().toISOString(),
+                date: applyTime().toISOString(),
                 points: zkAttestationPoints,
                 nullifier: payload.nullifier_hash.slice(0, 10) + "...", // Store abbreviated for reference
             }
@@ -358,7 +359,7 @@ export async function applyZkAttestationAdd(
             account.points.breakdown.zkAttestation.push(zkAttestationEntry)
             account.points.totalPoints =
                 (account.points.totalPoints || 0) + zkAttestationPoints
-            account.points.lastUpdated = new Date()
+            account.points.lastUpdated = applyTime()
 
             await em.save(account)
 

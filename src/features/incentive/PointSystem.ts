@@ -1,3 +1,4 @@
+import { applyTime } from "@/libs/blockchain/gcr/applyTime"
 import log from "@/utilities/logger"
 import { Referrals } from "./referrals"
 import Datasource from "../../model/datasource"
@@ -405,7 +406,7 @@ export class PointSystem {
 
         if (appliedDelta !== 0) {
             account.points.totalPoints = oldTotal + appliedDelta
-            account.points.lastUpdated = new Date()
+            account.points.lastUpdated = applyTime()
         }
 
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)

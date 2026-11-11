@@ -1,3 +1,4 @@
+import { applyTime } from "@/libs/blockchain/gcr/applyTime"
 import bs58 from "bs58"
 import Hashing from "@/libs/crypto/hashing"
 import Datasource from "@/model/datasource"
@@ -198,7 +199,7 @@ export class Referrals {
             newUserAccount.points.breakdown.referrals = 0
         }
 
-        const date = new Date()
+        const date = applyTime()
 
         // Award points to referrer
         referrerAccount.points.totalPoints += this.REFERRER_BONUS
