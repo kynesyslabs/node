@@ -223,6 +223,12 @@ export class SettlementProverPool {
         return this.workers.length
     }
 
+    /** Starts the first subprocess and resolves once it is ready; for the boot check. */
+    probe(): Promise<void> {
+        if (this.closed) return Promise.reject(new Error("settlement prover pool is closed"))
+        return this.workers[0].start()
+    }
+
     prove(input: SettlementCircuitInput): Promise<RawSettlementProof> {
         if (this.closed) return Promise.reject(new Error("settlement prover pool is closed"))
         if (this.queue.length >= this.maxQueue) {

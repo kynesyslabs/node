@@ -39,6 +39,27 @@ describe("settlement prover pool without keys", () => {
         }
     })
 
+    it("fails the boot probe when the subprocess cannot start, and passes it once it can", async () => {
+        const { dir, zkeyPath, wasmPath } = missing()
+        const broken = new SettlementProverPool({ size: 2, zkeyPath, wasmPath })
+        // Not the real files: the subprocess only checks they are there before it is ready.
+        fs.writeFileSync(path.join(dir, "present.zkey"), "x")
+        fs.writeFileSync(path.join(dir, "present.wasm"), "x")
+        const ready = new SettlementProverPool({
+            size: 1,
+            zkeyPath: path.join(dir, "present.zkey"),
+            wasmPath: path.join(dir, "present.wasm"),
+        })
+        try {
+            await expect(broken.probe()).rejects.toThrow(/exited \(code 2/)
+            await ready.probe()
+        } finally {
+            await broken.terminate()
+            await ready.terminate()
+            fs.rmSync(dir, { recursive: true, force: true })
+        }
+    })
+
     it("refuses work beyond its queue", async () => {
         const { dir, zkeyPath, wasmPath } = missing()
         const pool = new SettlementProverPool({ size: 1, zkeyPath, wasmPath, maxQueue: 1 })

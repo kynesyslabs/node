@@ -25,6 +25,13 @@ import {
     onSelfStakeChange,
 } from "./libs/consensus/stakedSet"
 import { syncL2PSServices } from "./libs/l2ps/roleServices"
+import {
+    settlementProverProblem,
+    settlementScheduled,
+    settlementVerifierProblem,
+} from "./libs/l2ps/settlement/bootCheck"
+import { loadSettlementVerificationKey, settlementProverPool } from "./libs/l2ps/settlement/prover"
+import { isSettlementBuilt } from "./libs/l2ps/zk/settlementArtifacts"
 import { Waiter } from "./utilities/waiter"
 import { TimeoutError, AbortError } from "@/errors"
 import {
@@ -622,6 +629,14 @@ async function preMainLoop() {
     // hits a handler that reads networkParameters / fees. Order matters:
     // findGenesisBlock → loadNetworkParameters → peerBootstrap.
     await loadNetworkParameters()
+
+    // The fork schedule is known from here; the key is otherwise read at the
+    // first settlement batch, where a missing one halts block apply.
+    const verifierProblem = settlementVerifierProblem(settlementScheduled(), () => loadSettlementVerificationKey())
+    if (verifierProblem) {
+        log.error(`[BOOT] Refusing to start: ${verifierProblem}`)
+        process.exit(1)
+    }
 
     // INFO: Set initial last block data before the first hello goes out, so
     // the sync data we advertise carries the real tip and genesis hash
@@ -1349,6 +1364,18 @@ async function main() {
             })
             bootTracker.fail("l2ps.networks", error)
             subsystemError(getSharedState.subsystems, "l2ps", error)
+        }
+
+        // A member that cannot prove would admit transfers it never settles.
+        const proverProblem = await settlementProverProblem({
+            scheduled: settlementScheduled(),
+            member: (getSharedState.l2psJoinedUids?.length ?? 0) > 0,
+            built: () => isSettlementBuilt(),
+            probe: () => settlementProverPool().probe(),
+        })
+        if (proverProblem) {
+            log.error(`[BOOT] Refusing to start: ${proverProblem}`)
+            process.exit(1)
         }
 
         // Start L2PS hash generation service (for L2PS participating nodes)
