@@ -333,7 +333,12 @@ block_at() { # $1 node, $2 height -> the block's JSON
     rpc "$1" "{\"method\":\"nodeCall\",\"params\":[{\"message\":\"getBlockByNumber\",\"data\":{\"blockNumber\":$2},\"muid\":null}]}" |
         jq -ec 'select(.result == 200) | .response | objects' 2>/dev/null
 }
-hash_at() { block_at "$1" "$2" | jq -er '.hash | strings | select(length > 0)' 2>/dev/null; }
+hash_at() { # fails on no output too: a jq before 1.7 exits 0 on no input, even with -e
+    local h
+    h="$(block_at "$1" "$2" | jq -er '.hash | strings | select(length > 0)' 2>/dev/null)" || return 1
+    [ -n "${h}" ] || return 1
+    echo "${h}"
+}
 serving() {
     local cid="${CID[$1]:-}"
     [ -n "${cid}" ] || return 1
@@ -392,8 +397,9 @@ span_head_of() { # "lowest<TAB>highest" head of the given nodes, empty if any do
 }
 # Caught up, on one chain, from the heads read here, one read per node: every given node
 # answers (a head not read fails it, never skipped), the first is within 2 blocks of the
-# highest of the others, the lowest of all is above $1, and all give the same block hash
-# at it. Prints the heads and that block, or the heads and what is not so, then returns 1
+# highest of the others, the lowest of all is above $1, and all give the same non-empty
+# block hash at it. Prints the heads and that block, or the heads and what is not so, then
+# returns 1
 same_chain() { # $1 floor, rest: nodes, the one judged first
     local floor="$1" i h hx="" ho="" lo="" miss="" ref="" heads
     shift
@@ -408,7 +414,7 @@ same_chain() { # $1 floor, rest: nodes, the one judged first
     is_num "${ho}" && [ "${hx}" -ge $((ho - 2)) ] || { echo "${heads}; node $1 more than 2 blocks behind"; return 1; }
     [ "${lo}" -gt "${floor}" ] || { echo "${heads}; the highest height all of nodes $* have, ${lo}, is not above ${floor}"; return 1; }
     for i in "$@"; do
-        h="$(hash_at "${i}" "${lo}")" || { echo "${heads}; no hash of block ${lo} on node ${i}"; return 1; }
+        h="$(hash_at "${i}" "${lo}")" && [ -n "${h}" ] || { echo "${heads}; no hash of block ${lo} on node ${i}"; return 1; }
         ref="${ref:-${h}}"
         [ "${h}" = "${ref}" ] || { echo "${heads}; block ${lo} is ${h:0:12}.. on node ${i}, ${ref:0:12}.. on node $1"; return 1; }
     done

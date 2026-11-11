@@ -330,7 +330,7 @@ node X stopped or restarted during the isolated drill".
 | no halt marker | the state volume's listing is read and holds `node.identity`, with no `*.halted`; node X's log is read once and is not empty, with no foreign-signature line. A log `docker logs` cannot give (a logging driver without reads), or an empty one, fails it |
 | signing floor | the `Restart signing floor` line is in node X's log, read to its end; INFO if a log that was read lacks the line, FAIL if the log cannot be read or is empty |
 | node X signs | see D above |
-| other nodes never stalled | every 5 s the run reads the head of each watched node (the other nodes in `rejoin`, all four validators in `isolated`) and keeps the lowest and the highest; a head read in which one of them does not answer counts as failed. So the slowest validator decides, one node rising alone does not pass, and nor does a slow one catching up while the others make no new block. With the devnet's quorum (below), the longest gap between increases of the lowest head, or of the highest, while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and at most half the head reads failed. It also needs at least one new block on every watched validator: the lowest head at the window's last successful read must be above the highest at its first, however short the window; a window without one fails with "no new block on the watched validators between `<t0>` and `<t1>`" (unix times, as in `logs/monitor.tsv`). No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
+| other nodes never stalled | every 5 s the run reads the head of each watched node (the other nodes in `rejoin`, all four validators in `isolated`) and keeps the lowest and the highest; a head read in which one of them does not answer counts as failed. So the slowest validator decides, one node rising alone does not pass, and nor does a slow one catching up while the others make no new block. With the devnet's quorum (below), the longest gap between increases of the lowest head, or of the highest, while node X was down, counted up to the read that sees the rise and to the end of the outage, is at most `STALL_LIMIT`, and the failed head reads are at most half the number of successful ones (the detail's `unreadable` and `samples`, which counts successful reads only: 3 failed with 6 successful passes, 4 fails). It also needs at least one new block on every watched validator: the lowest head at the window's last successful read must be above the highest at its first, however short the window; a window without one fails with "no new block on the watched validators between `<t0>` and `<t1>`" (unix times, as in `logs/monitor.tsv`). No successful head read for longer than `STALL_LIMIT` fails it, saying a stall in that time cannot be ruled out. The `isolated` variant's "validators kept forging" check applies the same rule to the whole drill |
 | restored counts match the dump | max block, blocks and transactions inside the before/after window of the dump; `fork_state` and `migrations` rows in the dump's counts and equal; same table set. Written after the restore's migration, before node X starts again |
 | schema at the image's head | rows in `migrations` equal the migration files in the image's `src/migrations`, of which there must be at least one counted (preflight stops with exit 2 otherwise) |
 | one instance of the key | asserted before the single start (a `docker ps` listing that fails stops the run); written after it |
@@ -421,8 +421,9 @@ nodes that stay at one head, or one that does not answer, while another keeps
 rising, for longer than `STALL_LIMIT`, every watched node at one head for a
 whole window shorter than `STALL_LIMIT`, and a lagging watched node catching up
 while the others make no new block (the stall checks of both variants fail;
-with the same settings and no fault they pass), more than half the head reads
-failed, a node X that never comes within 2 blocks, falls behind again after
+with the same settings and no fault they pass), failed head reads more than
+half the number of successful ones (3 failed with 6 successful passes, 4
+fails), a node X that never comes within 2 blocks, falls behind again after
 signing, or never signs (no D or ALL row), a node X at the head of one other node
 while the two others do not answer one read and answer the next 900 blocks
 above it (the rejoin check fails, no D1 row), a changed identity file, a restored
@@ -438,7 +439,10 @@ matches the validators up to its stop (its restored database's head) and forks
 after it (the rejoin or catch-up check fails), a signing file gone from the state
 volume before the stop (the signing state check fails), every read giving nothing
 with exit 0 once the restarted node X or node-iso serves (every check written from
-then on fails, exit 1), the default `OUT_DIR` of a run started in the same second
+then on fails, exit 1), block reads giving nothing with exit 0 from that point
+while heads are read, with the jq on `PATH` and with `test/jq-before-1.7/jq`,
+which exits 0 on no input as jq before 1.7 does (the rejoin or catch-up check
+fails), the default `OUT_DIR` of a run started in the same second
 as another of the project, a second run of a project whose
 lock is held and an `OUT_DIR` that already exists, empty or not (exit 2, nothing
 written), the project in the default `OUT_DIR` name, a teardown whose `down`

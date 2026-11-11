@@ -63,7 +63,9 @@ database's head, with another hash: a fork after those heights), FAKE_STATE_LOST
 backup's pg_dump on, before its stop), FAKE_EMPTY_READS (once the drilled node
 started again, or node-iso, first answers its RPC, every read prints nothing and
 exits 0: node RPC, commands in postgres containers, helper scripts, `docker logs`,
-`docker inspect` and `docker ps` of running containers), FAKE_LIST_FAIL (ps,volume:
+`docker inspect` and `docker ps` of running containers), FAKE_EMPTY_BLOCKS (from
+the same point, every node answers a block read with nothing, exit 0, and its head
+as before), FAKE_LIST_FAIL (ps,volume:
 `docker ps` / `docker volume ls` filtered on the compose project label print
 nothing and exit 1, as with a daemon that does not answer), FAKE_OWNER_READ_FAIL
 (n: the n-th read of a state dir's owners, `stat -c` in a helper, fails with
@@ -480,6 +482,9 @@ def exec_cmd(a):
             if os.environ.get("FAKE_EMPTY_READS") and (c.get("restarted") or svc == "node-iso"):
                 st["empty"] = True
                 save(st)
+            if os.environ.get("FAKE_EMPTY_BLOCKS") and (c.get("restarted") or svc == "node-iso"):
+                st["empty_blocks"] = True
+                save(st)
             sys.stdout.write("Hello World!")
             sys.exit(0)
         d = json.loads(body)["params"][0]
@@ -510,6 +515,8 @@ def exec_cmd(a):
                     fail("curl: (28) Operation timed out", 28)
                 h += int(ahead)
             out(json.dumps({"result": 200, "response": h}))
+        if st.get("empty_blocks"):
+            sys.exit(0)
         bn = d["data"]["blockNumber"]
         bh = f"other{bn}" if svc in envlist("FAKE_OTHER_HASH") else f"hash{bn}"
         if svc in envlist("FAKE_FORK"):

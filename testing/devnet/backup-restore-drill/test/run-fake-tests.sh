@@ -726,6 +726,40 @@ if sel empty-reads; then
     torn_down
 fi
 
+# ── block reads empty, heads read ───────────────────────────────────────
+# From the same point as above, every node answers a block read with nothing, exit 0, and
+# its head as before (FAKE_EMPTY_BLOCKS): no block hash is read, so the rejoin and the
+# catch-up checks fail. Each runs with the jq on PATH (1.7 and later: -e on no input
+# exits 4) and with test/jq-before-1.7 ahead of it (exits 0, as jq 1.6 does)
+JQ16_PATH="${HERE}/jq-before-1.7:${HERE}/fake-bin:${PATH}"
+empty_blocks_rejoin() {
+    want_rc 1
+    want_out "CHECK FAIL: node 4 rejoins \(head within 2 blocks, on the others' chain\) \(after 6s: head [0-9]+ vs others [0-9]+; no hash of block [0-9]+ on node 4\)" "the rejoin fails: no hash read"
+    no_out 'CHECK PASS: node 4 (rejoins|within 2 blocks)' "a PASS of the rejoin checks"
+    no_out 'PHASE D1? ' "a D1 or D phase row"
+    only_fails_among 'node 4 rejoins' 'block hash at pre-wipe heights'
+    no_all_row
+    torn_down
+}
+empty_blocks_iso() {
+    want_rc 1
+    want_out "CHECK FAIL: isolated node reaches the expected head, on the validators' chain \(DB head [0-9]+ after 6s: head [0-9]+ vs others [0-9]+; no hash of block [0-9]+ on node iso\)" "the catch-up fails: no hash read"
+    no_out 'CHECK PASS: isolated node reaches' "a PASS of the catch-up check"
+    no_out 'PHASE ID ' "a phase ID row"
+    one_fail 'isolated node reaches the expected head'
+    torn_down
+}
+if sel empty-blocks; then
+    go empty-blocks FAKE_EMPTY_BLOCKS=1 REJOIN_TIMEOUT=6
+    empty_blocks_rejoin
+    go empty-blocks-jq16 FAKE_EMPTY_BLOCKS=1 REJOIN_TIMEOUT=6 "PATH=${JQ16_PATH}"
+    empty_blocks_rejoin
+    go empty-blocks-isolated VARIANT=isolated FAKE_EMPTY_BLOCKS=1 REJOIN_TIMEOUT=6
+    empty_blocks_iso
+    go empty-blocks-isolated-jq16 VARIANT=isolated FAKE_EMPTY_BLOCKS=1 REJOIN_TIMEOUT=6 "PATH=${JQ16_PATH}"
+    empty_blocks_iso
+fi
+
 # ── volumes that exist before the run ───────────────────────────────────
 seed_vols() { # case name, volume names: volumes without the compose labels, there before the run
     local d="${WORK}/$1"
@@ -853,6 +887,15 @@ if sel monitor-stats; then
     for t in $(seq 0 5 60); do if [ $((t % 15)) = 0 ]; then printf '%s\t%s\n' "${t}" $((10 + t / 15)); else printf '%s\t\n' "${t}"; fi; done > "${CDIR}/sparse.tsv"
     stall_of "${CDIR}/sparse.tsv" 0 60
     want_out '^FAIL: longest gap 15s, longest without a head read 15s \(limit 90s\), head 10 -> 14, 5 samples, 8 unreadable' "more than half the reads failed: FAIL"
+    no_out '^PASS' "PASS"
+    # the limit counts failed reads against successful ones: 6 successful, the head rising at
+    # each, and 3 failed between them is at the limit, PASS; one more failed read, FAIL
+    printf '0\t10\n5\t\n10\t11\n15\t\n20\t12\n25\t\n30\t13\n35\t14\n40\t15\n' > "${CDIR}/half.tsv"
+    stall_of "${CDIR}/half.tsv" 0 40
+    want_out '^PASS: longest gap 10s, longest without a head read 10s \(limit 90s\), head 10 -> 15, 6 samples, 3 unreadable' "6 successful reads and 3 failed: PASS"
+    { cat "${CDIR}/half.tsv"; printf '45\t\n'; } > "${CDIR}/over-half.tsv"
+    stall_of "${CDIR}/over-half.tsv" 0 45
+    want_out '^FAIL: longest gap 10s, longest without a head read 10s \(limit 90s\), head 10 -> 15, 6 samples, 4 unreadable' "6 successful reads and 4 failed: FAIL"
     no_out '^PASS' "PASS"
     # as the run writes them: the lowest and the highest head of the watched nodes. The
     # lowest rises from 1 to 5, the highest stays at 5: a node catching up, no new block
