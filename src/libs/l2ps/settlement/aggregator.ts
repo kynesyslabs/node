@@ -260,14 +260,22 @@ export class SettlementAggregator {
         const claimed = this.lockedAccounts()
         const slots = Math.max(1, Math.floor(this.limits.provers))
         const planned: PlannedBatch[] = []
+        const planFailed = new Set<string>()
         for (const l2psUid of order) {
             if (planned.length >= slots) break
             if (this.deps.now() < (this.proverPause.get(l2psUid)?.until ?? 0)) continue
-            planned.push(...(await this.planSubnet(l2psUid, claimed, slots - planned.length)))
+            try {
+                planned.push(...(await this.planSubnet(l2psUid, claimed, slots - planned.length)))
+            } catch (error) {
+                // A failed read or write here stops only this subnet, which
+                // backs off; the others still settle.
+                planFailed.add(l2psUid)
+                log.error(`[L2PS Settlement] Planning ${l2psUid} failed; transfers stay queued: ${getErrorMessage(error)}`)
+            }
         }
         if (this.closed) return { submitted: 0, transfers: 0 }
 
-        const tally: CycleTally = { submitted: 0, transfers: 0, failed: new Set(), worked: new Set() }
+        const tally: CycleTally = { submitted: 0, transfers: 0, failed: planFailed, worked: new Set() }
         const outcomes = planned.map(batch => this.prove(batch))
         for (const [i, batch] of planned.entries()) {
             // Each batch goes out once it and every batch planned before it
@@ -433,63 +441,75 @@ export class SettlementAggregator {
     private async track(): Promise<void> {
         const head = this.deps.head()
         for (const batch of [...this.inFlight.values()]) {
-            if (batch.landedAt !== undefined) {
-                if (head > batch.landedAt) this.inFlight.delete(batch.l1TxHash)
-                continue
-            }
-            let status: TxStatus
             try {
-                status = await this.deps.status(batch.l1TxHash)
+                await this.trackBatch(batch, head)
             } catch (error) {
-                log.warning(
-                    `[L2PS Settlement] Could not read the status of batch ${batch.l1TxHash.slice(0, 16)}...: ${getErrorMessage(error)}`,
-                )
-                continue
-            }
-            if (status.state === "included") {
-                await this.deps.setRows(batch.rowHashes, L2PS_STATUS.CONFIRMED)
-                for (const hash of batch.rowHashes) {
-                    await this.deps.history(
-                        hash,
-                        "confirmed",
-                        `Settled on L1 in block ${status.blockNumber}`,
-                        batch.l1TxHash,
-                        status.blockNumber,
-                    )
-                }
-                this.batchesLanded++
-                for (const hash of batch.rowHashes) this.blame.delete(hash)
-                batch.landedAt = status.blockNumber ?? head
-                if (head > batch.landedAt) this.inFlight.delete(batch.l1TxHash)
-                log.info(
-                    `[L2PS Settlement] Batch ${batch.l1TxHash.slice(0, 16)}... settled ${batch.rowHashes.length} transfers for ${batch.l2psUid} in block ${status.blockNumber}`,
-                )
-                continue
-            }
-            const expired =
-                status.state === "unknown" && head - batch.submittedAt > this.limits.expiryBlocks
-            if (status.state === "failed" || expired) {
-                const why =
-                    status.state === "failed"
-                        ? `L1 batch failed${status.code ? ` (${status.code})` : ""}: re-planning`
-                        : "L1 batch expired before inclusion: re-planning"
-                await this.deps.setRows(batch.rowHashes, L2PS_STATUS.EXECUTED)
-                for (const hash of batch.rowHashes) {
-                    await this.deps.history(hash, "pending", why, batch.l1TxHash)
-                }
-                this.inFlight.delete(batch.l1TxHash)
-                // An unseen or expired batch says nothing about its transfers.
-                if (
-                    status.state === "failed" &&
-                    !NOT_THE_TRANSFERS.has(status.code ?? "") &&
-                    !(await this.tipMoved(batch))
-                ) {
-                    await this.blameFailure(batch.rowHashes, batch.alone, "l1")
-                }
-                log.warning(
-                    `[L2PS Settlement] Batch ${batch.l1TxHash.slice(0, 16)}... for ${batch.l2psUid}: ${why}${status.message ? ` (${status.message})` : ""}`,
+                // The batch stays in flight, so the next cycle writes its rows
+                // again; dropping it here would leave them batched for good.
+                log.error(
+                    `[L2PS Settlement] Could not record the outcome of batch ${batch.l1TxHash.slice(0, 16)}...; retrying next cycle: ${getErrorMessage(error)}`,
                 )
             }
+        }
+    }
+
+    private async trackBatch(batch: InFlightBatch, head: number): Promise<void> {
+        if (batch.landedAt !== undefined) {
+            if (head > batch.landedAt) this.inFlight.delete(batch.l1TxHash)
+            return
+        }
+        let status: TxStatus
+        try {
+            status = await this.deps.status(batch.l1TxHash)
+        } catch (error) {
+            log.warning(
+                `[L2PS Settlement] Could not read the status of batch ${batch.l1TxHash.slice(0, 16)}...: ${getErrorMessage(error)}`,
+            )
+            return
+        }
+        if (status.state === "included") {
+            await this.deps.setRows(batch.rowHashes, L2PS_STATUS.CONFIRMED)
+            for (const hash of batch.rowHashes) {
+                await this.deps.history(
+                    hash,
+                    "confirmed",
+                    `Settled on L1 in block ${status.blockNumber}`,
+                    batch.l1TxHash,
+                    status.blockNumber,
+                )
+            }
+            this.batchesLanded++
+            for (const hash of batch.rowHashes) this.blame.delete(hash)
+            batch.landedAt = status.blockNumber ?? head
+            if (head > batch.landedAt) this.inFlight.delete(batch.l1TxHash)
+            log.info(
+                `[L2PS Settlement] Batch ${batch.l1TxHash.slice(0, 16)}... settled ${batch.rowHashes.length} transfers for ${batch.l2psUid} in block ${status.blockNumber}`,
+            )
+            return
+        }
+        const expired =
+            status.state === "unknown" && head - batch.submittedAt > this.limits.expiryBlocks
+        if (status.state === "failed" || expired) {
+            const why =
+                status.state === "failed"
+                    ? `L1 batch failed${status.code ? ` (${status.code})` : ""}: re-planning`
+                    : "L1 batch expired before inclusion: re-planning"
+            await this.deps.setRows(batch.rowHashes, L2PS_STATUS.EXECUTED)
+            for (const hash of batch.rowHashes) {
+                await this.deps.history(hash, "pending", why, batch.l1TxHash)
+            }
+            this.inFlight.delete(batch.l1TxHash)
+            // An unseen or expired batch says nothing about its transfers.
+            if (
+                status.state === "failed" &&
+                !NOT_THE_TRANSFERS.has(status.code ?? "") &&
+                !(await this.tipMoved(batch))
+            ) {
+                await this.blameFailure(batch.rowHashes, batch.alone, "l1")
+            }
+            log.warning(
+                `[L2PS Settlement] Batch ${batch.l1TxHash.slice(0, 16)}... for ${batch.l2psUid}: ${why}${status.message ? ` (${status.message})` : ""}`,
+            )
         }
     }
 
@@ -551,7 +571,6 @@ export class SettlementAggregator {
                       ? this.batchesSubmitted > blame.submittedAt
                       : this.batchesLanded > blame.landedAt
             if (blame.alone >= SUSPECT_AFTER_FAILURES && othersWorked) {
-                this.blame.delete(hash)
                 await this.drop(
                     { hash } as L2PSMempoolTx,
                     kind === "prove"
@@ -569,9 +588,11 @@ export class SettlementAggregator {
     }
 
     private async drop(row: L2PSMempoolTx, reason: string): Promise<void> {
-        this.blame.delete(row.hash)
         await this.deps.setRows([row.hash], L2PS_STATUS.FAILED)
         await this.deps.history(row.hash, "failed", reason)
+        // Only once written: a failed write leaves the row queued, and its
+        // record is what drops it on the next try.
+        this.blame.delete(row.hash)
         // A reason can carry the fee or the nonce, which only subnet members may see.
         log.info(`[L2PS Settlement] Dropped transfer ${row.hash.slice(0, 16)}...`)
         log.debug(`[L2PS Settlement] Dropped transfer ${row.hash.slice(0, 16)}...: ${reason}`)

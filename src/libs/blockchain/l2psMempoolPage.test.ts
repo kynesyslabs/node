@@ -154,3 +154,23 @@ describe("getPageByUIDAndStatus", () => {
         expect(await L2PSMempool.getByUIDAndStatus("subnet_a", "batched", 50)).toEqual([])
     })
 })
+
+describe("setStatusBatch", () => {
+    it("throws on a failed write instead of answering that no row changed", async () => {
+        const updates: unknown[] = []
+        ;(L2PSMempool as any).repo = {
+            update: async (where: unknown, values: unknown) => (updates.push([where, values]), { affected: 2 }),
+        }
+        expect(await L2PSMempool.setStatusBatch(["a", "b"], "confirmed")).toBe(2)
+        expect(updates).toHaveLength(1)
+
+        ;(L2PSMempool as any).repo = {
+            update: async () => {
+                throw new Error("connection terminated")
+            },
+        }
+        await expect(L2PSMempool.setStatusBatch(["a"], "confirmed")).rejects.toThrow("connection terminated")
+        // The lenient writer still answers 0 for its other callers.
+        expect(await L2PSMempool.updateStatusBatch(["a"], "confirmed")).toBe(0)
+    })
+})

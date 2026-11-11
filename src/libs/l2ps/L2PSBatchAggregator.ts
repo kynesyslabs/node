@@ -906,18 +906,14 @@ export class L2PSBatchAggregator {
             submit: async (l2psUid, record, rows) =>
                 this.sendBatch(await this.createBatchPayload(l2psUid, rows, record)),
             status: hash => Chain.getTransactionStatus(hash),
+            // Both writes throw on failure, so the settlement loop keeps the
+            // batch and writes again instead of losing track of its rows.
             setRows: async (hashes, status) => {
-                await L2PSMempool.updateStatusBatch(hashes, status)
+                await L2PSMempool.setStatusBatch(hashes, status)
             },
             history: async (txHash, status, message, l1BatchHash, l1BlockNumber) => {
-                try {
-                    const executor = (await import("./L2PSTransactionExecutor")).default
-                    await executor.updateTransactionStatus(txHash, status, l1BlockNumber, message, l1BatchHash)
-                } catch (error) {
-                    log.warning(
-                        `[L2PS Batch Aggregator] Failed to update history for ${txHash.slice(0, 16)}...: ${getErrorMessage(error)}`,
-                    )
-                }
+                const executor = (await import("./L2PSTransactionExecutor")).default
+                await executor.updateTransactionStatus(txHash, status, l1BlockNumber, message, l1BatchHash)
             },
             historyBatchHash: async (l2psUid, row) => {
                 const executor = (await import("./L2PSTransactionExecutor")).default

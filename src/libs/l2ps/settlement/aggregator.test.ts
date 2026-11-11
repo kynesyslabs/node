@@ -695,6 +695,87 @@ describe("a submission that throws", () => {
     })
 })
 
+describe("a row write that fails", () => {
+    const sink = (b: string) => "0x" + b.repeat(32)
+
+    it("keeps a landed batch in flight and confirms its rows once the write goes through", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        const other = pay(DAVE, sink("d1"), 1n, 1n)
+        tip.set(DAVE.account, { balance: 10n, nonce: 0n })
+        queue(t)
+        const d = deps()
+        const setRows = d.setRows
+        let down = false
+        d.setRows = async (hashes, status) => {
+            if (down && status === L2PS_STATUS.CONFIRMED) throw new Error("database unavailable")
+            return setRows(hashes, status)
+        }
+        const agg = new SettlementAggregator(d, LIMITS)
+        await agg.cycle()
+
+        statuses.set("l1_1", { state: "included", blockNumber: head + 1 })
+        head += 5
+        down = true
+        queue(other)
+        // The failed write does not stop the cycle: other transfers settle.
+        await agg.cycle()
+        expect(statusOf(t)).toBe(L2PS_STATUS.BATCHED)
+        expect(agg.inFlightBatches().has("l1_1")).toBe(true)
+        expect(statusOf(other)).toBe(L2PS_STATUS.BATCHED)
+
+        down = false
+        await agg.cycle()
+        expect(statusOf(t)).toBe(L2PS_STATUS.CONFIRMED)
+        expect(agg.inFlightBatches().has("l1_1")).toBe(false)
+    })
+
+    it("keeps a failed batch in flight until its rows are queued again", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        queue(t)
+        const d = deps()
+        const history = d.history
+        let down = false
+        d.history = async (hash, status, message, l1, block) => {
+            if (down && status === "pending") throw new Error("database unavailable")
+            return history(hash, status, message, l1, block)
+        }
+        const agg = new SettlementAggregator(d, LIMITS)
+        await agg.cycle()
+
+        statuses.set("l1_1", { state: "failed", code: "SOMETHING" })
+        down = true
+        await agg.cycle()
+        expect(agg.inFlightBatches().has("l1_1")).toBe(true)
+        // Its accounts stay locked, so it is not proved again on top of itself.
+        expect(proveCalls).toBe(1)
+
+        down = false
+        await agg.cycle()
+        expect(agg.inFlightBatches().has("l1_1")).toBe(false)
+        expect(proveCalls).toBe(2)
+    })
+
+    it("stops only the subnet whose planning write fails", async () => {
+        const stale = pay(ALICE, sink("a1"), 1n, 5n)
+        const fine = pay(BOB, sink("b1"), 1n, 1n)
+        // A spent nonce: planning drops the row, and the drop's write fails.
+        tip.set(ALICE.account, { balance: 100n, nonce: 5n })
+        queue(stale, L2PS_STATUS.EXECUTED, innerTx(stale), "subnet_a")
+        queue(fine, L2PS_STATUS.EXECUTED, innerTx(fine), "subnet_b")
+        const d = deps()
+        const setRows = d.setRows
+        d.setRows = async (hashes, status) => {
+            if (status === L2PS_STATUS.FAILED) throw new Error("database unavailable")
+            return setRows(hashes, status)
+        }
+        const agg = new SettlementAggregator(d, { ...LIMITS, provers: 2 })
+
+        expect(await agg.cycle()).toEqual({ submitted: 1, transfers: 1 })
+        expect(statusOf(fine)).toBe(L2PS_STATUS.BATCHED)
+        expect(statusOf(stale)).toBe(L2PS_STATUS.EXECUTED)
+    })
+})
+
 describe("planning per cycle", () => {
     const sink = (b: string) => "0x" + b.repeat(32)
 

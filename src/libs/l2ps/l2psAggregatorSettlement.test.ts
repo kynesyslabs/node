@@ -15,10 +15,22 @@ const constructed = jest.fn()
 const added: any[] = []
 let unfit: string | null = null
 let poolError: string | null = null
+let writeError: string | null = null
 
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
-    default: { cleanupByStatus, cleanupBatchedWithoutEdits, getExecutedSubnets, cleanupByAge: async () => 0 },
+    default: {
+        cleanupByStatus,
+        cleanupBatchedWithoutEdits,
+        getExecutedSubnets,
+        cleanupByAge: async () => 0,
+        // The lenient writer answers 0 on a failed write; settlement must not use it.
+        updateStatusBatch: async () => 0,
+        setStatusBatch: async () => {
+            if (writeError) throw new Error(writeError)
+            return 1
+        },
+    },
     L2PS_STATUS: {
         PENDING: "pending",
         PROCESSED: "processed",
@@ -56,7 +68,12 @@ mock.module("@/libs/l2ps/L2PSProofManager", () => ({ __esModule: true, default: 
 mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
     __esModule: true,
     L2PS_TX_FEE: 1,
-    default: { updateTransactionStatus: async () => undefined, scrubStoredPlaintext: async () => 0 },
+    default: {
+        updateTransactionStatus: async () => {
+            if (writeError) throw new Error(writeError)
+        },
+        scrubStoredPlaintext: async () => 0,
+    },
 }))
 mockLogger()
 
@@ -86,6 +103,7 @@ beforeEach(() => {
     added.length = 0
     unfit = null
     poolError = null
+    writeError = null
     cleanupBatchedWithoutEdits.mockClear()
     getExecutedSubnets.mockClear()
     constructed.mockClear()
@@ -151,5 +169,17 @@ describe("L2PSBatchAggregator under l2psSettlement", () => {
         poolError = null
         const sent = await aggregator.sendBatch(payload)
         expect(sent).toEqual({ ok: true, l1TxHash: added[0].hash })
+    })
+
+    it("lets a failed row or history write reach the settlement loop, which then keeps the batch", async () => {
+        const deps = aggregator.settlementLoop().deps
+        await deps.setRows(["a".repeat(64)], "confirmed")
+        await deps.history("a".repeat(64), "confirmed", "Settled on L1 in block 9", "c".repeat(64), 9)
+
+        writeError = "connection terminated"
+        await expect(deps.setRows(["a".repeat(64)], "confirmed")).rejects.toThrow("connection terminated")
+        await expect(
+            deps.history("a".repeat(64), "confirmed", "Settled on L1 in block 9", "c".repeat(64), 9),
+        ).rejects.toThrow("connection terminated")
     })
 })

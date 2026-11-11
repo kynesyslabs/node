@@ -717,27 +717,35 @@ export default class L2PSMempool {
      */
     public static async updateStatusBatch(hashes: string[], status: L2PSStatus): Promise<number> {
         try {
-            if (hashes.length === 0) {
-                return 0
-            }
-
-            await this.ensureInitialized()
-
-            const result = await this.repo.update(
-                { hash: In(hashes) },
-                { status, timestamp: Date.now().toString() },
-            )
-
-            const updated = result.affected || 0
-            if (updated > 0) {
-                log.info(`[L2PS Mempool] Batch updated ${updated} transactions to status ${status}`)
-            }
-            return updated
-
+            return await this.setStatusBatch(hashes, status)
         } catch (error) {
             log.error("[L2PS Mempool] Error batch updating status:", error)
             return 0
         }
+    }
+
+    /**
+     * {@link updateStatusBatch} that throws on a failed write. Settlement
+     * needs it: a write it believes done while the rows kept their old
+     * status would strand them in that status for good.
+     */
+    public static async setStatusBatch(hashes: string[], status: L2PSStatus): Promise<number> {
+        if (hashes.length === 0) {
+            return 0
+        }
+
+        await this.ensureInitialized()
+
+        const result = await this.repo.update(
+            { hash: In(hashes) },
+            { status, timestamp: Date.now().toString() },
+        )
+
+        const updated = result.affected || 0
+        if (updated > 0) {
+            log.info(`[L2PS Mempool] Batch updated ${updated} transactions to status ${status}`)
+        }
+        return updated
     }
 
     /**
