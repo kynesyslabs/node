@@ -47,9 +47,9 @@ function processStartMs(now: number): number {
 export const RESTART_CLOCK_SLACK_MS = 2_000
 
 /**
- * How far ahead of our clock a call that names this node may be dated.
- * Such a call accepted before a restart is dated earlier than the restart
- * plus this slack, so one dated no later than that is refused after it.
+ * How far ahead of our clock a call that names this node may be dated: a
+ * sudo call raises the durable replay floor to its timestamp, and one dated
+ * far ahead would refuse every honest call until the clock caught up.
  */
 export const AUDIENCE_FUTURE_SLACK_MS = 5_000
 
@@ -82,6 +82,9 @@ export interface VerificationResult {
 
     /** Whether the signature names this node as the request's audience. */
     audienceBound?: boolean
+
+    /** The timestamp the signature covers, in the body-bound form. */
+    timestamp?: number
 
     /**
      * Error message if verification failed
@@ -243,6 +246,7 @@ export async function verifySignature(
                 algorithm,
                 bodyHash: bodyBound ? bodyHash : null,
                 audienceBound,
+                timestamp: bodyBound ? Number(timestamp) : undefined,
             }
         }
 
@@ -269,30 +273,18 @@ export async function verifySignature(
 /**
  * Why a body-bound request may be one this node accepted before it last
  * started, which the replay memory, empty since then, cannot recognise.
- * Calls that name this node (sudo calls) are dated at most a few seconds
- * ahead, which closes that gap; peer requests keep the wide window and are
- * only refused when dated before the start.
- *
- * Peer requests take the start as uptime, so a clock set back does not cut
- * the node off. A sudo call takes the later of that and the start as the
- * wall clock read it: with the clock set back, a call run by the previous
- * process would otherwise fit again, so sudo calls wait until the clock
- * passes the old reading.
+ * The start is taken as uptime, so a clock set back does not cut the node
+ * off. Sudo calls are guarded across restarts by the durable floor
+ * (sudoReplayFloor); here they are only kept from being dated far ahead,
+ * which would hold that floor above every honest call.
  */
 function restartReplayError(ts: number, audienceBound: boolean, now = Date.now()): string | null {
     const startedAt = processStartMs(now)
     if (ts < startedAt - RESTART_CLOCK_SLACK_MS) {
         return "Auth timestamp predates this node's start"
     }
-    if (!audienceBound) return null
-    if (ts > now + AUDIENCE_FUTURE_SLACK_MS) {
+    if (audienceBound && ts > now + AUDIENCE_FUTURE_SLACK_MS) {
         return "Auth timestamp is ahead of this node's clock"
-    }
-    const sudoStart = Math.max(startedAt, PROCESS_START_MS)
-    if (ts <= sudoStart + AUDIENCE_FUTURE_SLACK_MS) {
-        return now < PROCESS_START_MS
-            ? `This node's clock was set back after it started; sudo calls resume after ${new Date(sudoStart + AUDIENCE_FUTURE_SLACK_MS).toISOString()}`
-            : "Auth timestamp too close to this node's start; sign the call again"
     }
     return null
 }

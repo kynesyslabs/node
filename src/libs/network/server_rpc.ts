@@ -14,6 +14,7 @@ import { isMergePeerEligible } from "../consensus/mergePeerEligibility"
 import { Config } from "src/config"
 import { getAuthContext } from "./authContext"
 import { BODY_BOUND_METHODS, SUDO_METHODS } from "./peerHttpAuth"
+import { admitSudoCall } from "./sudoReplayFloor"
 import Hashing from "src/libs/crypto/hashing"
 import { handleError } from "src/errors"
 
@@ -506,6 +507,17 @@ export async function serverRpcBun() {
             }
 
             const sender = authCtx.publicKey || ""
+            // Only a call from the sudo key may raise the floor; any other
+            // sender is refused by processPayload without touching it.
+            if (SUDO_METHODS.has(payload.method) && sender === getSharedState.SUDO_PUBKEY) {
+                const refusal = admitSudoCall(getSharedState.identityFile, authCtx.timestamp)
+                if (refusal) {
+                    return jsonResponse(
+                        { result: 401, response: refusal, require_reply: false, extra: null },
+                        401,
+                    )
+                }
+            }
             const response = await processPayload(payload, sender)
 
             // Surface current rate-limit window so SDK clients can

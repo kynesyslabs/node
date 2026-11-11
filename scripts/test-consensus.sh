@@ -126,6 +126,7 @@ SUITE_FILES=(
     src/libs/omniprotocol/protocol/noConsensusStateWrites.test.ts
     src/libs/l2ps/l2psApplyTime.test.ts
     src/libs/network/peerHttpAuth.test.ts
+    src/libs/network/sudoReplayFloor.test.ts
     scripts/sudo-call.test.ts
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
 )

@@ -35,6 +35,9 @@ export interface AuthContext {
 
     /** Whether the verified signature names this node as its audience. */
     audienceBound?: boolean
+
+    /** The timestamp the verified signature covers, when it covers one. */
+    timestamp?: number
 }
 
 /**

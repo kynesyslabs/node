@@ -7,6 +7,9 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest, setSystemTime, spyOn } from "bun:test"
 import forge from "node-forge"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { mockCore } from "src/utilities/testSupport/coreMocks"
 
 const pair = forge.pki.ed25519.generateKeyPair()
@@ -116,6 +119,7 @@ const { default: Peer } = await import("src/libs/peer/Peer")
 const Hashing = (await import("src/libs/crypto/hashing")).default
 const { bodyBoundAuthHeaders } = await import("./peerHttpAuth")
 const { PROCESS_START_MONO_MS, PROCESS_START_MS, seenAuthMessages } = await import("./verifySignature")
+const { sudoFloorPath } = await import("./sudoReplayFloor")
 
 const server: any = await serverRpcBun()
 const fakeServer = { requestIP: () => ({ address: "198.51.100.7" }) }
@@ -246,18 +250,39 @@ describe("peer HTTP auth", () => {
 })
 
 describe("sudo methods", () => {
-    // Sudo calls dated within a few seconds of the node's start are refused,
-    // so these run a minute after it, on both clocks.
+    // These run a minute after the node's start, on both clocks.
     const UPTIME = 60_000
     const NOW = PROCESS_START_MS + UPTIME
     let monotonic: ReturnType<typeof spyOn>
+    let floorDir = ""
+    let floors = 0
+    /** A node whose durable sudo floor is `acceptedUpTo`, or unset. */
+    const useFloor = (acceptedUpTo?: number) => {
+        const identityFile = join(floorDir, `identity-${++floors}`)
+        if (acceptedUpTo !== undefined) {
+            writeFileSync(sudoFloorPath(identityFile), JSON.stringify({ acceptedUpTo }))
+        }
+        sharedState.identityFile = identityFile
+    }
+    /** What a restart loses: the in-memory replay memory. */
+    const restart = () => seenAuthMessages.clear()
     beforeAll(() => {
         setSystemTime(new Date(NOW))
         monotonic = spyOn(performance, "now").mockReturnValue(PROCESS_START_MONO_MS + UPTIME)
+        floorDir = mkdtempSync(join(tmpdir(), "sudo-floor-"))
+        sharedState.SUDO_PUBKEY = SENDER
+    })
+    // Signed at the frozen clock, calls in different tests can carry the
+    // same message; each test starts with an empty replay memory.
+    beforeEach(() => {
+        useFloor()
+        restart()
     })
     afterAll(() => {
         setSystemTime()
         monotonic.mockRestore()
+        rmSync(floorDir, { recursive: true, force: true })
+        sharedState.SUDO_PUBKEY = ""
     })
 
     const award = { method: "awardPoints", params: [{ message: [{ address: SENDER, points: 1 }] }] }
@@ -344,18 +369,42 @@ describe("sudo methods", () => {
         expect(dispatched).toEqual([])
     })
 
-    it("refuses a sudo call this node could have accepted before a restart, which its replay memory lost", async () => {
+    it("refuses, after a restart, a sudo call the previous process accepted", async () => {
         const body = JSON.stringify(award)
-        const res = await deliver(body, await operatorHeaders(body, OUR_KEY, PROCESS_START_MS + 1_000))
+        const headers = await operatorHeaders(body, OUR_KEY, NOW - 1_000)
+        expect((await deliver(body, headers)).status).toBe(200)
+        restart()
+        expect((await deliver(body, headers)).status).toBe(401)
+        expect(dispatched).toHaveLength(1)
+    })
+
+    it("refuses that replay when the clock was set back before the restart", async () => {
+        // The previous process accepted a call dated 30 s past this start;
+        // its clock was ahead, set back, and the node restarted.
+        const accepted = PROCESS_START_MS + 30_000
+        useFloor(accepted)
+        const body = JSON.stringify(award)
+        const res = await deliver(body, await operatorHeaders(body, OUR_KEY, accepted))
         expect(res.status).toBe(401)
         expect(dispatched).toEqual([])
     })
 
     it("accepts a sudo call dated a little ahead, for an operator clock slightly fast", async () => {
-        seenAuthMessages.clear()
         const body = JSON.stringify(award)
         const res = await deliver(body, await operatorHeaders(body, OUR_KEY, NOW + 1_000))
         expect(res.status).toBe(200)
+    })
+
+    it("does not let a sudo call from another key raise the floor", async () => {
+        sharedState.SUDO_PUBKEY = "0x" + "99".repeat(32)
+        try {
+            const body = JSON.stringify(award)
+            await deliver(body, await operatorHeaders(body, OUR_KEY, NOW + 4_000))
+        } finally {
+            sharedState.SUDO_PUBKEY = SENDER
+        }
+        const body = JSON.stringify(award)
+        expect((await deliver(body, await operatorHeaders(body, OUR_KEY, NOW))).status).toBe(200)
     })
 
     describe("after the clock is set back past the node's start", () => {
@@ -368,17 +417,19 @@ describe("sudo methods", () => {
             expect(res.status).toBe(200)
         })
 
-        it("refuses sudo calls, which its replay memory could not tell from ones run before a restart", async () => {
+        it("refuses sudo calls dated before the last one it accepted, and takes later ones", async () => {
+            useFloor(NOW)
             const body = JSON.stringify(award)
-            const res = await deliver(body, await operatorHeaders(body))
-            expect(res.status).toBe(401)
-            expect(dispatched).toEqual([])
+            expect((await deliver(body, await operatorHeaders(body))).status).toBe(401)
+            useFloor()
+            expect((await deliver(body, await operatorHeaders(body))).status).toBe(200)
         })
     })
 
     it("refuses a sudo call accepted just before a restart, replayed once the clock is set back", async () => {
         // Accepted at S - 1 s by the old process; this one started at S and,
         // a minute later, has its clock set back by that minute.
+        useFloor(PROCESS_START_MS - 1_000)
         setSystemTime(new Date(PROCESS_START_MS))
         try {
             const body = JSON.stringify(award)

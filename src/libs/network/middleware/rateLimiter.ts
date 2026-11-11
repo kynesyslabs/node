@@ -882,6 +882,7 @@ export class RateLimiter {
                     algorithm: verifyResult.algorithm,
                     bodyHash: verifyResult.bodyHash ?? null,
                     audienceBound: verifyResult.audienceBound ?? false,
+                    timestamp: verifyResult.timestamp,
                 })
             }
 
