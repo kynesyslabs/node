@@ -120,12 +120,19 @@ const PROOF_KEYS = new Set<string>([...POINT_KEYS, ...SCALAR_KEYS, "protocol", "
 const canonicalBelow = (v: unknown, limit: bigint): boolean =>
     typeof v === "string" && DECIMAL.test(v) && BigInt(v) < limit
 
+// BN254 G1: y^2 = x^3 + 3 over the base field, cofactor 1, so a point on the
+// curve is in the group the pairing expects.
+const onCurve = (x: bigint, y: bigint): boolean =>
+    (y * y - x * x * x - 3n) % BASE_FIELD_ORDER === 0n
+
 /**
  * Why a proof JSON is not a well-formed snarkjs PLONK proof, or undefined.
  * The proof comes from a transaction, so its shape is checked before any
  * library parses it: canonical decimals only, scalars below the field order,
- * points as affine [x, y, "1"] (or infinity [0, 1, 0]) with coordinates below
- * the base field order, no extra fields. One proof has one encoding.
+ * points as affine [x, y, "1"] on the curve (or infinity [0, 1, 0]) with
+ * coordinates below the base field order, no extra fields. One proof has one
+ * encoding, and nothing a transaction can put in a proof reaches the PLONK
+ * library unless the library takes it without throwing.
  */
 export function settlementProofProblem(proof: unknown): string | undefined {
     if (proof === null || typeof proof !== "object" || Array.isArray(proof)) return "proof is not an object"
@@ -140,6 +147,7 @@ export function settlementProofProblem(proof: unknown): string | undefined {
         // have many encodings; only affine [x, y, 1] and infinity [0, 1, 0].
         const infinity = point[0] === "0" && point[1] === "1" && point[2] === "0"
         if (point[2] !== "1" && !infinity) return `proof ${key} is not in affine form`
+        if (!infinity && !onCurve(BigInt(point[0]), BigInt(point[1]))) return `proof ${key} is not on the curve`
     }
     for (const key of SCALAR_KEYS) {
         if (!canonicalBelow(p[key], FIELD_ORDER)) return `proof ${key} is not a canonical scalar`

@@ -264,7 +264,7 @@ describe("verifySettlementProof", () => {
         const swapped = { ...p, eval_a: p.eval_b, eval_b: p.eval_a }
         expect(await verifySettlementProof(signals(), swapped)).toBe(false)
         const offCurve = { ...p, A: ["1", "1", "1"] }
-        expect(settlementProofProblem(offCurve)).toBeUndefined()
+        expect(settlementProofProblem(offCurve)).toMatch(/not on the curve/)
         expect(await verifySettlementProof(signals(), offCurve)).toBe(false)
         const moved = { ...p, Wxi: p.Wxiw, Wxiw: p.Wxi }
         expect(await verifySettlementProof(signals(), moved)).toBe(false)
