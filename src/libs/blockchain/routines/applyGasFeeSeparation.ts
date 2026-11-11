@@ -121,6 +121,26 @@ export type ApplyGasFeeSeparationTx = Pick<
     "content" | "hash"
 >
 
+/** Why a fee component is not a non-negative integer, or null when none is. */
+function breakdownRefusal(breakdown: FeeBreakdown): string | null {
+    const components: Array<[keyof FeeBreakdown, number]> = [
+        ["network_fee", breakdown.network_fee],
+        ["rpc_fee", breakdown.rpc_fee],
+        ["additional_fee", breakdown.additional_fee],
+        ["total", breakdown.total],
+    ]
+    for (const [name, value] of components) {
+        if (
+            !Number.isFinite(value) ||
+            !Number.isInteger(value) ||
+            value < 0
+        ) {
+            return `calculateFeeBreakdown produced an invalid ${name}: ${value} (must be a non-negative integer; full breakdown: network_fee=${breakdown.network_fee}, rpc_fee=${breakdown.rpc_fee}, additional_fee=${breakdown.additional_fee}, total=${breakdown.total})`
+        }
+    }
+    return null
+}
+
 /**
  * Why the sender cannot pay what the block will debit it, or null when it can.
  */
@@ -205,24 +225,8 @@ export async function applyGasFeeSeparation(
     // validator-side consensus disagreement. Validate each component
     // here so the tx is rejected at the RPC boundary with an
     // actionable per-component message instead.
-    const components: Array<[keyof FeeBreakdown, number]> = [
-        ["network_fee", breakdown.network_fee],
-        ["rpc_fee", breakdown.rpc_fee],
-        ["additional_fee", breakdown.additional_fee],
-        ["total", breakdown.total],
-    ]
-    for (const [name, value] of components) {
-        if (
-            !Number.isFinite(value) ||
-            !Number.isInteger(value) ||
-            value < 0
-        ) {
-            return {
-                ok: false,
-                message: `calculateFeeBreakdown produced an invalid ${name}: ${value} (must be a non-negative integer; full breakdown: network_fee=${breakdown.network_fee}, rpc_fee=${breakdown.rpc_fee}, additional_fee=${breakdown.additional_fee}, total=${breakdown.total})`,
-            }
-        }
-    }
+    const invalid = breakdownRefusal(breakdown)
+    if (invalid) return { ok: false, message: invalid }
 
     // Epic #21 #204: do NOT mutate tx.content. Stamping transaction_fee
     // and prepending fee edits AFTER the SDK signed the tx broke
