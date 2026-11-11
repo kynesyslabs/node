@@ -13,7 +13,7 @@
  *                  transfer to a fresh receiver settles
  *   03-restart     a member is killed while holding admitted transfers and
  *                  catches up via Sync to the same state
- *   04-throughput  3N transfers with L1 load beside them: L2PS TPS, proof
+ *   04-throughput  3N transfers (TP_TRANSFERS) with L1 load beside them: L2PS TPS, proof
  *                  time, submit-to-applied time, block times, main TPS
  *   05-final       every height's block hash and the whole state agree
  *
@@ -28,7 +28,7 @@ import {
     say, sendTransfer, sleep, stateDifferences, stateSummary, step, tip, tips, txStatus, waitBlocks, waitHeight,
     type NodeState, type SendResult, type Settlement,
 } from "./lib"
-import { DEM, type Wallet } from "./wallets"
+import { DEM, throughputTransfers, type Wallet } from "./wallets"
 
 const N = SETTLEMENT_TRANSFERS
 const W: Record<string, Wallet> = JSON.parse(readFileSync(`${RUN_DIR}/inputs/wallets.secret.json`, "utf8"))
@@ -412,7 +412,7 @@ await step("04-throughput", async () => {
     })()
 
     const t0 = Date.now()
-    const sends = await pool(Array.from({ length: 3 * N }, (_, i) => i), 8, i =>
+    const sends = await pool(Array.from({ length: throughputTransfers(N) }, (_, i) => i), 8, i =>
         send("throughput", `tp${i}`, i % 2 === 0 ? n1 : n2, { to: W[`tq${i}`].address, amount: BigInt(1 + (i % 7)) * DEM }))
     const submitSeconds = (Date.now() - t0) / 1000
     check("04.admitted", `${sends.length} transfers admitted`, sends.every(s => s.accepted), `submitted in ${submitSeconds.toFixed(1)} s`)
@@ -444,6 +444,7 @@ await step("04-throughput", async () => {
     }
     const firstSubmit = Math.min(...sends.map(s => s.submittedAt))
     const windowS = (lastApplied - firstSubmit) / 1000
+    metrics.settlementProvers = Number(process.env.SETTLEMENT_PROVERS ?? 1)
     metrics.l2psTps = confirmed.length > 0 && windowS > 0 ? Number((confirmed.length / windowS).toFixed(3)) : 0
     metrics.l2psWindowSeconds = Math.round(windowS)
     metrics.l2psTransfers = confirmed.length

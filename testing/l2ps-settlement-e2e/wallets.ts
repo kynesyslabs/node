@@ -27,6 +27,15 @@ export interface WalletSpec {
 }
 
 /**
+ * Transfers of the throughput scenario: 3 batches by default, more with
+ * TP_TRANSFERS to keep several provers per member busy.
+ */
+export function throughputTransfers(n: number = SETTLEMENT_TRANSFERS): number {
+    const asked = Number(process.env.TP_TRANSFERS ?? 0)
+    return Number.isInteger(asked) && asked > 0 ? asked : 3 * n
+}
+
+/**
  * Every account the scenarios touch. Groups never share an account, so one
  * scenario's batches cannot make another's proofs stale.
  */
@@ -56,8 +65,8 @@ export function walletPlan(n: number = SETTLEMENT_TRANSFERS): WalletSpec[] {
     for (let i = 0; i < n; i++) add(`rs${i}`, 1000n * DEM)
     for (let i = 0; i < n; i++) add(`rr${i}`, 0n, false)
     // throughput, with L1 load beside it
-    for (let i = 0; i < 3 * n; i++) add(`tp${i}`, 1000n * DEM)
-    for (let i = 0; i < 3 * n; i++) add(`tq${i}`, 0n, false)
+    for (let i = 0; i < throughputTransfers(n); i++) add(`tp${i}`, 1000n * DEM)
+    for (let i = 0; i < throughputTransfers(n); i++) add(`tq${i}`, 0n, false)
     add("l1", 1_000_000n * DEM)
     return plan
 }
