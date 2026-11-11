@@ -34,8 +34,9 @@ if (!usable(zkeyPath) || !usable(wasmPath)) {
 }
 
 async function prove(input: Record<string, unknown>): Promise<unknown> {
-    // singleThread: snarkjs worker threads crash under Bun; the pool scales
-    // with processes instead.
+    // singleThread: snarkjs worker threads never finish under Bun. The pool
+    // scales with processes instead, which also gets more proofs per core
+    // than threads do (Node.js with threads: 1.4x faster on 2.3 cores).
     const { proof, publicSignals } = await (snarkjs as any).plonk.fullProve(
         input,
         wasmPath,

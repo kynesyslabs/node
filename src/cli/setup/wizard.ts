@@ -751,7 +751,7 @@ async function wantsGeneration(deps: WizardDeps): Promise<boolean> {
     if (!prompter) return false
     return confirm(
         prompter,
-        "Build the L2PS proving keys now? (about 225 MB download, several minutes, about 2 GB of disk and 3.5 GB of memory)",
+        "Build the L2PS proving keys now? (about 225 MB download, several minutes, about 200 MB of disk and 3.5 GB of memory)",
         true,
         say,
     )
