@@ -120,8 +120,20 @@ describe("the L2PS hash update", () => {
             "l2ps_hash_update",
             expect.objectContaining({ l2ps_uid: UID, consolidated_hash: "ab".repeat(32), transaction_count: 3 }),
         ])
-        // Past the account nonce and every nonce this identity has pending.
-        expect(tx.content.nonce).toBe(10)
+        // Account nonce 7 with 9 pending: 8 fills the gap, or a block that
+        // takes nonces in order would never reach 9 or anything after it.
+        expect(tx.content.nonce).toBe(8)
+    })
+
+    it("takes the first nonce past the account nonce that nothing pending holds", async () => {
+        listPendingBySenders.mockResolvedValueOnce([
+            { hash: "p8", sender: IDENTITY, nonce: "8", type: "native" },
+            { hash: "p9", sender: IDENTITY, nonce: "9", type: "native" },
+            { hash: "p11", sender: IDENTITY, nonce: "11", type: "native" },
+        ])
+        await (L2PSHashService.getInstance() as any).processL2PSNetwork(UID)
+
+        expect(confirmed[0].content.nonce).toBe(10)
     })
 
     it("is not sent under l2psSettlement, whose batches commit every transfer on L1", async () => {

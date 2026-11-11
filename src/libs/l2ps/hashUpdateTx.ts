@@ -31,7 +31,7 @@ export async function buildNodeHashUpdate(
     const identity = uint8ArrayToHex(publicKey).toLowerCase()
 
     const referenceBlock = await Chain.getLastBlockNumber()
-    const nonce = (await highestNonce(identity)) + 1
+    const nonce = await nextFreeNonce(identity)
     const timestamp = Date.now()
 
     const tx = new Transaction()
@@ -84,14 +84,18 @@ export async function buildNodeHashUpdate(
 }
 
 /**
- * The account nonce, or the highest one this identity already has pending:
- * a hash update every cycle must not reuse a nonce the pool holds.
+ * The first nonce past the account nonce that no pending tx of this identity
+ * holds. A hash update every cycle must not reuse a pooled nonce, and must
+ * not skip a free one either: blocks take a sender's nonces in order, so a
+ * gap would hold back this update and every one after it.
  */
-async function highestNonce(identity: string): Promise<number> {
-    let highest = Number(await GCR.getAccountNonce(identity))
+async function nextFreeNonce(identity: string): Promise<number> {
+    const pooled = new Set<number>()
     for (const pending of await Mempool.listPendingBySenders([identity])) {
         const value = Number(pending.nonce)
-        if (Number.isSafeInteger(value) && value > highest) highest = value
+        if (Number.isSafeInteger(value)) pooled.add(value)
     }
-    return highest
+    let nonce = Number(await GCR.getAccountNonce(identity)) + 1
+    while (pooled.has(nonce)) nonce++
+    return nonce
 }
