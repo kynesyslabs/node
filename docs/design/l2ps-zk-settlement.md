@@ -126,10 +126,32 @@ their own GCR instead of trusting the prover: the working state after every
 earlier transaction in the block, L1 transfers and earlier batches included.
 Two batches proven against the same parent balance cannot then both spend it.
 
-Estimated size for N = 10: 30-40K PLONK constraints, against 24,263 for the
-current `batch_10`. Proving time scales about linearly (15.3 s for 24K at 1.5
-CPUs, measured in the rc.6 image), so about 20-25 s per batch. This is an
-estimate to confirm on the first build.
+Measured for N = 10, M = 20 (`l2ps_settlement_10.circom`, first build
+2026-11-11, 32-core host, other load present):
+
+| | |
+|---|---|
+| R1CS | 20,867 non-linear + 9,707 linear constraints, 30,327 wires |
+| PLONK | 55,860 constraints, domain 2^16 (Hermez ptau 16) |
+| Proving key | 1.88 GB zkey (171 public signals each carry a Lagrange polynomial of about 10.5 MB), 4.4 MB wasm |
+| Key build | about 23 s and 3.3 GB for the PLONK setup; byte-identical zkey, wasm and vkey on a second build |
+| Proof | 44-59 s per batch in the prover subprocess (Bun, one core, first proof includes the subprocess start), whatever the number of transfers; peak about 4 GB (5.5 GB without the GC hint the pool sets) |
+| Verify | 13-20 ms warm, 35 ms worst seen; the first call also builds the curve once per process |
+
+Witness generation alone takes about 60 ms. Node.js proves the same batch in
+77 s single-threaded (1.9 GB) or 43 s with snarkjs worker threads (4 GB,
+under two cores busy), so Bun single-threaded stays the prover runtime.
+
+Range checks: amounts, fees, balances before and net change magnitudes are
+range-checked to 128 bits inside the circuit, public ones included, so the
+balance arithmetic cannot wrap whatever public signals a verifier is given.
+Account limbs and nonces only enter hashes and equalities and are bounded by
+the verifier (`verifySettlementProof` rejects any public signal outside its
+declared range, which also rules out aliases at or above the field order);
+checking them in the circuit would cross 2^16 rows and double the proving
+time. The account ordering keeps accounts unique for any limb values (the
+argument is in the circuit). Every active account must be touched by an
+active transfer, so the account list is exactly the touched set.
 
 ### Validation (every validator, block and Sync)
 
@@ -160,9 +182,10 @@ about 1 s to block validation.
   proven again; an account that is busy on L1 can delay its subnet's batches.
 - No main-thread fallback. A batch that cannot be proved stays in the L2PS
   mempool and is retried; it never goes out without a proof.
-- Throughput is about one core per 0.5 transfer/s. A configurable pool of
-  prover subprocesses scales it per node; a native PLONK prover is the next
-  step if one core per subnet is not enough.
+- Throughput is about one core and 4 GB per 0.2 transfer/s (a full batch of
+  10 in about 50 s). A configurable pool of prover subprocesses
+  (`L2PS_SETTLEMENT_PROVERS`) scales it per node; a native PLONK prover is
+  the next step if one core per subnet is not enough.
 
 ### Fork
 
