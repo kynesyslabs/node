@@ -776,6 +776,80 @@ describe("a row write that fails", () => {
     })
 })
 
+describe("a terminal write that fails", () => {
+    const sink = (b: string) => "0x" + b.repeat(32)
+
+    it("keeps a dropped transfer queued until its history is written, then drops it", async () => {
+        const stale = pay(ALICE, sink("a2"), 1n, 4n)
+        queue(stale)
+        const d = deps()
+        const history = d.history
+        let down = true
+        d.history = async (hash, status, message, l1, block) => {
+            if (down && status === "failed") throw new Error("database unavailable")
+            return history(hash, status, message, l1, block)
+        }
+        const agg = new SettlementAggregator(d, LIMITS)
+
+        await agg.cycle()
+        expect(statusOf(stale)).toBe(L2PS_STATUS.EXECUTED)
+
+        down = false
+        // Past the subnet's back-off.
+        now += LIMITS.proverBackoffMaxMs
+        await agg.cycle()
+        expect(statusOf(stale)).toBe(L2PS_STATUS.FAILED)
+    })
+
+    it("keeps a landed batch's rows batched until their history reads confirmed", async () => {
+        const t = pay(ALICE, BOB.account, 1n, 5n)
+        queue(t)
+        const d = deps()
+        const history = d.history
+        let down = false
+        d.history = async (hash, status, message, l1, block) => {
+            if (down && status === "confirmed") throw new Error("database unavailable")
+            return history(hash, status, message, l1, block)
+        }
+        const agg = new SettlementAggregator(d, LIMITS)
+        await agg.cycle()
+
+        statuses.set("l1_1", { state: "included", blockNumber: head + 1 })
+        head += 5
+        down = true
+        await agg.cycle()
+        // Still batched, so recovery after a restart follows it again.
+        expect(statusOf(t)).toBe(L2PS_STATUS.BATCHED)
+
+        down = false
+        await agg.cycle()
+        expect(statusOf(t)).toBe(L2PS_STATUS.CONFIRMED)
+    })
+
+    it("frees the accounts a subnet claimed when its planning fails", async () => {
+        const first = pay(ALICE, sink("a3"), 1n, 5n)
+        // A nonce gap: it cannot be placed, and deferring it fails.
+        const gap = pay(DAVE, sink("a4"), 1n, 3n)
+        const other = pay(BOB, ALICE.account, 1n, 1n)
+        tip.set(DAVE.account, { balance: 10n, nonce: 0n })
+        queue(first, L2PS_STATUS.EXECUTED, innerTx(first), "subnet_a")
+        queue(gap, L2PS_STATUS.EXECUTED, innerTx(gap), "subnet_a")
+        queue(other, L2PS_STATUS.EXECUTED, innerTx(other), "subnet_b")
+        const d = deps()
+        const setRows = d.setRows
+        d.setRows = async (hashes, status) => {
+            if (status === L2PS_STATUS.DEFERRED) throw new Error("database unavailable")
+            return setRows(hashes, status)
+        }
+        const agg = new SettlementAggregator(d, { ...LIMITS, provers: 2 })
+
+        await agg.cycle()
+
+        expect(statusOf(first)).toBe(L2PS_STATUS.EXECUTED)
+        expect(statusOf(other)).toBe(L2PS_STATUS.BATCHED)
+    })
+})
+
 describe("planning per cycle", () => {
     const sink = (b: string) => "0x" + b.repeat(32)
 

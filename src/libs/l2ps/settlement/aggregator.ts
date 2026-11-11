@@ -265,7 +265,11 @@ export class SettlementAggregator {
             if (planned.length >= slots) break
             if (this.deps.now() < (this.proverPause.get(l2psUid)?.until ?? 0)) continue
             try {
-                planned.push(...(await this.planSubnet(l2psUid, claimed, slots - planned.length)))
+                // Claimed on a copy: a subnet whose planning fails submits
+                // nothing, so its accounts stay free for the subnets after it.
+                const claims = new Set(claimed)
+                planned.push(...(await this.planSubnet(l2psUid, claims, slots - planned.length)))
+                for (const account of claims) claimed.add(account)
             } catch (error) {
                 // A failed read or write here stops only this subnet, which
                 // backs off; the others still settle.
@@ -468,7 +472,8 @@ export class SettlementAggregator {
             return
         }
         if (status.state === "included") {
-            await this.deps.setRows(batch.rowHashes, L2PS_STATUS.CONFIRMED)
+            // History first: until the rows read confirmed, the batch is
+            // followed again, across a restart too (rows still batched).
             for (const hash of batch.rowHashes) {
                 await this.deps.history(
                     hash,
@@ -478,6 +483,7 @@ export class SettlementAggregator {
                     status.blockNumber,
                 )
             }
+            await this.deps.setRows(batch.rowHashes, L2PS_STATUS.CONFIRMED)
             this.batchesLanded++
             for (const hash of batch.rowHashes) this.blame.delete(hash)
             batch.landedAt = status.blockNumber ?? head
@@ -588,10 +594,12 @@ export class SettlementAggregator {
     }
 
     private async drop(row: L2PSMempoolTx, reason: string): Promise<void> {
-        await this.deps.setRows([row.hash], L2PS_STATUS.FAILED)
+        // History first: a failed write leaves the row queued, so it is
+        // dropped again on the next try, while a failed row is read by
+        // nothing that could write its history later.
         await this.deps.history(row.hash, "failed", reason)
-        // Only once written: a failed write leaves the row queued, and its
-        // record is what drops it on the next try.
+        await this.deps.setRows([row.hash], L2PS_STATUS.FAILED)
+        // Only once written: the record is what drops it on the next try.
         this.blame.delete(row.hash)
         // A reason can carry the fee or the nonce, which only subnet members may see.
         log.info(`[L2PS Settlement] Dropped transfer ${row.hash.slice(0, 16)}...`)
