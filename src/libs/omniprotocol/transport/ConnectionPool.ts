@@ -53,6 +53,26 @@ import {
  *   3. Connection now usable for bidirectional messaging
  *   4. Automatic idle cleanup after timeout
  */
+/**
+ * The options for the send that follows a connect, with what is left of the
+ * request's timeout. Nothing left means the request is not sent at all.
+ */
+function remainingOptions(
+    options: ConnectionOptions,
+    deadline: number | undefined,
+): ConnectionOptions {
+    if (deadline === undefined) {
+        return options
+    }
+    const timeout = deadline - Date.now()
+    if (timeout <= 0) {
+        throw new RequestTimeoutError(
+            `Request timeout: connecting took the whole ${options.timeout}ms`,
+        )
+    }
+    return { ...options, timeout }
+}
+
 export class ConnectionPool extends EventEmitter {
     private static instance: ConnectionPool | null = null
     private readonly connections: Map<string, PeerConnection[]> = new Map()
@@ -514,34 +534,13 @@ export class ConnectionPool extends EventEmitter {
         payload: Buffer,
         options: ConnectionOptions = {},
     ): Promise<Buffer> {
-        const peer = PeerManager.getInstance().getPeer(peerIdentity)
-        let connection: PeerConnection | null = null
-
-        try {
-            connection = await this.acquire(
-                peerIdentity,
-                connectionString,
-                options,
-            )
-
-            if (!connection) {
-                throw new Error("Connection not found")
-            }
-
-            const response = await connection.send(opcode, payload, options)
-            this.release(connection)
-            return response
-        } catch (error) {
-            log.error(
-                `[ConnectionPool] Error sending request to ${peerIdentity}: ${error}`,
-            )
-            if (connection) {
-                this.release(connection)
-                await this.closeUnlessSlow(connection, error)
-            }
-
-            throw error
-        }
+        return this.request(
+            peerIdentity,
+            connectionString,
+            options,
+            (connection, remaining) =>
+                connection.send(opcode, payload, remaining),
+        )
     }
 
     /**
@@ -565,6 +564,39 @@ export class ConnectionPool extends EventEmitter {
         publicKey: Buffer,
         options: ConnectionOptions = {},
     ): Promise<Buffer> {
+        return this.request(
+            peerIdentity,
+            connectionString,
+            options,
+            (connection, remaining) =>
+                connection.sendAuthenticated(
+                    opcode,
+                    payload,
+                    privateKey,
+                    publicKey,
+                    remaining,
+                ),
+        )
+    }
+
+    /**
+     * One request on a pooled connection. options.timeout bounds the whole
+     * request, connect included: the answer gets only what the connect,
+     * our own or one we joined, left of it.
+     */
+    private async request(
+        peerIdentity: string,
+        connectionString: string,
+        options: ConnectionOptions,
+        sendOn: (
+            connection: PeerConnection,
+            remaining: ConnectionOptions,
+        ) => Promise<Buffer>,
+    ): Promise<Buffer> {
+        const deadline =
+            options.timeout === undefined
+                ? undefined
+                : Date.now() + options.timeout
         let connection: PeerConnection | null = null
 
         try {
@@ -578,16 +610,16 @@ export class ConnectionPool extends EventEmitter {
                 throw new Error("Connection not found")
             }
 
-            const response = await connection.sendAuthenticated(
-                opcode,
-                payload,
-                privateKey,
-                publicKey,
-                options,
+            const response = await sendOn(
+                connection,
+                remainingOptions(options, deadline),
             )
             this.release(connection)
             return response
         } catch (error) {
+            log.error(
+                `[ConnectionPool] Error sending request to ${peerIdentity}: ${error}`,
+            )
             if (connection) {
                 this.release(connection)
                 await this.closeUnlessSlow(connection, error)

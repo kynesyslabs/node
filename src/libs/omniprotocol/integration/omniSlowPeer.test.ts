@@ -16,6 +16,7 @@ mockCore(sharedState)
 // What the next sendAuthenticated on a stub connection does
 const script: ("timeout" | "slow-ok")[] = []
 const connectOptions: any[] = []
+const sendOptions: any[] = []
 let created = 0
 let connectGate: Promise<void> = Promise.resolve()
 
@@ -49,7 +50,8 @@ jest.mock("../transport/PeerConnection", () => {
             await connectGate
             this.state = 11 // READY
         }
-        sendAuthenticated() {
+        sendAuthenticated(...args: any[]) {
+            sendOptions.push(args[4])
             const step = script.shift()
             return new Promise((resolve, reject) => {
                 this.pending.add(reject)
@@ -95,6 +97,7 @@ afterEach(() => {
     setSystemTime()
     script.length = 0
     connectOptions.length = 0
+    sendOptions.length = 0
     created = 0
     connectGate = Promise.resolve()
 })
@@ -215,6 +218,38 @@ describe("a shared connect", () => {
         open()
         expect(await starter).not.toBeNull()
         expect(created).toBe(1)
+        await pool.shutdown?.()
+    })
+})
+
+describe("a request's timeout", () => {
+    const address = "tcp://10.0.0.9:63551"
+    const key = Buffer.alloc(32)
+
+    function connectAfter(ms: number) {
+        connectGate = new Promise<void>(resolve => setTimeout(resolve, ms))
+    }
+
+    it("leaves the answer only what the connect did not use", async () => {
+        const pool = new ConnectionPool()
+        connectAfter(60)
+        script.push("slow-ok")
+        await pool.sendAuthenticated(PEER, address, 1, key, key, key, {
+            timeout: 300,
+        })
+        expect(sendOptions[0].timeout).toBeLessThanOrEqual(250)
+        await pool.shutdown?.()
+    })
+
+    it("is not sent once the connect used all of it, and the connection stays", async () => {
+        const pool = new ConnectionPool()
+        connectAfter(60)
+        const outcome = await pool
+            .sendAuthenticated(PEER, address, 1, key, key, key, { timeout: 20 })
+            .catch(e => e)
+        expect(outcome).toBeInstanceOf(RequestTimeoutError)
+        expect(sendOptions).toHaveLength(0)
+        expect(pool.getConnections(PEER)).toHaveLength(1)
         await pool.shutdown?.()
     })
 })
