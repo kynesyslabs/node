@@ -3,10 +3,12 @@ import { fileURLToPath } from "node:url"
 import { nonEmptyFile, rawBatchVkeyProblem } from "./batchArtifacts"
 
 // Where the settlement circuit's files live, shared by the prover, the
-// verifier and the setup build so all three read the same paths.
+// verifier and the setup build so all three read the same paths. The names
+// carry no batch size: SETTLEMENT_TRANSFERS sets it and the committed key's
+// digest pins it.
 
-export const SETTLEMENT_CIRCUIT = "l2ps_settlement_10"
-export const SETTLEMENT_KEYS_SUBDIR = "settlement_10"
+export const SETTLEMENT_CIRCUIT = "l2ps_settlement"
+export const SETTLEMENT_KEYS_SUBDIR = "settlement"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const DEFAULT_KEYS_DIR = path.join(here, "keys")

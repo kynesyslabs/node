@@ -4,16 +4,19 @@ import {
     oneTransfer,
     PROVEN_BATCHES,
     selfTransfer,
-    tenTransfers,
+    allAccounts,
+    mixedTransfers,
     transfer,
-    twentyAccounts,
     zeroAmountWithFee,
 } from "./__fixtures__/batches"
 import { buildSettlementCircuitInput } from "./circuitInput"
 import {
     AMOUNT_LIMIT,
+    SETTLEMENT_ACCOUNTS,
     SETTLEMENT_PUBLIC_SIGNALS,
+    SETTLEMENT_TRANSFERS,
     SettlementEncodingError,
+    settlementPublicHash,
     settlementPublicSignals,
 } from "./encoding"
 import { DEFER_REASON, planSettlement } from "./planner"
@@ -37,9 +40,9 @@ describe("planSettlement", () => {
     })
 
     it("names every touched account, sorted, with the balance before for each", () => {
-        const { transfers, balances, nonces } = tenTransfers()
+        const { transfers, balances, nonces } = mixedTransfers()
         const plan = planSettlement(transfers, balances, nonces)
-        expect(plan.transfers.length).toBe(10)
+        expect(plan.transfers.length).toBe(SETTLEMENT_TRANSFERS)
         const accounts = plan.changes.map(c => c.account)
         expect(accounts).toEqual([...new Set(transfers.flatMap(t => [t.from, t.to]))].sort())
         expect([...plan.balancesBefore.keys()]).toEqual(accounts)
@@ -64,7 +67,7 @@ describe("planSettlement", () => {
     })
 
     it("is deterministic", () => {
-        const { transfers, balances, nonces } = tenTransfers()
+        const { transfers, balances, nonces } = mixedTransfers()
         expect(planSettlement(transfers, balances, nonces)).toEqual(planSettlement(transfers, balances, nonces))
     })
 
@@ -150,19 +153,20 @@ describe("planSettlement", () => {
         )
     })
 
-    it("defers the eleventh transfer", () => {
-        const ts = Array.from({ length: 11 }, (_, i) => transfer(A, B, 1n, 1n, BigInt(i + 1)))
+    it("defers the transfer after a full batch", () => {
+        const N = SETTLEMENT_TRANSFERS
+        const ts = Array.from({ length: N + 1 }, (_, i) => transfer(A, B, 1n, 1n, BigInt(i + 1)))
         const plan = planSettlement(ts, new Map([[A, 1_000n]]), new Map())
-        expect(plan.transfers).toEqual(ts.slice(0, 10))
-        expect(plan.deferred).toEqual([{ transfer: ts[10], reason: DEFER_REASON.batchFull }])
+        expect(plan.transfers).toEqual(ts.slice(0, N))
+        expect(plan.deferred).toEqual([{ transfer: ts[N], reason: DEFER_REASON.batchFull }])
     })
 
-    it("fills all twenty account slots; the transfer limit binds first (M = 2N)", () => {
-        const { transfers, balances } = twentyAccounts()
+    it("fills every account slot; the transfer limit binds first (M = 2N)", () => {
+        const { transfers, balances } = allAccounts()
         const extra = transfer(transfers[0].from, acct(0x03), 1n, 1n, 2n)
         const plan = planSettlement([...transfers, extra], balances, new Map())
         expect(plan.transfers).toEqual(transfers)
-        expect(plan.changes.length).toBe(20)
+        expect(plan.changes.length).toBe(SETTLEMENT_ACCOUNTS)
         expect(plan.deferred).toEqual([{ transfer: extra, reason: DEFER_REASON.batchFull }])
     })
 
@@ -211,8 +215,13 @@ describe("buildSettlementCircuitInput", () => {
         for (const make of PROVEN_BATCHES) {
             const { transfers, balances, nonces } = make()
             const plan = planSettlement(transfers, balances, nonces)
-            const { input, publicSignals } = buildSettlementCircuitInput(plan)
+            const { input, publicSignals, publicHash } = buildSettlementCircuitInput(plan)
             expect(publicSignals.length).toBe(SETTLEMENT_PUBLIC_SIGNALS)
+            expect(publicHash).toBe(settlementPublicHash(publicSignals))
+            expect(input.publicHash).toBe(publicHash.toString())
+            // The circuit reads the signer limbs from the sender's account slot.
+            expect(input.signerHi).toBeUndefined()
+            expect(input.signerLo).toBeUndefined()
             const expected = settlementPublicSignals(
                 plan.transfers.map(t => ({ commitment: t.commitment, signer: t.from, nonce: t.nonce, fee: t.fee })),
                 plan.changes.map(c => ({
@@ -223,13 +232,13 @@ describe("buildSettlementCircuitInput", () => {
             )
             expect(publicSignals).toEqual(expected)
             for (const key of ["toHi", "toLo", "amount", "salt", "senderIndex", "receiverIndex"]) {
-                expect((input[key] as string[]).length).toBe(10)
+                expect((input[key] as string[]).length).toBe(SETTLEMENT_TRANSFERS)
             }
         }
     })
 
     it("points each transfer at its sender and receiver among the sorted accounts", () => {
-        const { transfers, balances, nonces } = tenTransfers()
+        const { transfers, balances, nonces } = mixedTransfers()
         const plan = planSettlement(transfers, balances, nonces)
         const { input } = buildSettlementCircuitInput(plan)
         const accounts = plan.changes.map(c => c.account)

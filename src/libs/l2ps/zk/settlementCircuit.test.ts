@@ -2,8 +2,10 @@
  * Witness generation against the compiled settlement circuit: every valid
  * batch has a witness, and every tampered statement fails a constraint. The
  * tampered inputs are kept consistent everywhere except the one property
- * under test, and each failure is matched to the circuit line that rejects
- * it, so a test cannot pass because some unrelated constraint broke.
+ * under test (the public hash is recomputed the way the circuit packs it),
+ * and each failure is matched to the circuit line that rejects it, so a test
+ * cannot pass because some unrelated constraint broke. The public hash
+ * itself is checked against settlementPublicHash, the verifier's side.
  *
  * Needs the compiled circuit (bun run setup --only zk --zk --zk-generate);
  * skipped without it.
@@ -12,19 +14,26 @@ import { describe, expect, it } from "bun:test"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { poseidon8 } from "poseidon-lite/poseidon8"
-import { poseidon10 } from "poseidon-lite/poseidon10"
 import * as snarkjs from "snarkjs"
 import { acct, fixtureBatch, PROVEN_BATCHES } from "../settlement/__fixtures__/batches"
 import { buildSettlementCircuitInput } from "../settlement/circuitInput"
-import { accountLimbs, SETTLEMENT_ACCOUNTS as M, SETTLEMENT_TRANSFERS as N } from "../settlement/encoding"
+import {
+    accountLimbs,
+    commitmentsHash,
+    FIELD_ORDER as P,
+    SETTLEMENT_ACCOUNTS as M,
+    SETTLEMENT_PUBLIC_SIGNALS,
+    SETTLEMENT_TRANSFERS as N,
+    SettlementEncodingError,
+    settlementPublicHash,
+} from "../settlement/encoding"
 import { planSettlement } from "../settlement/planner"
 import { settlementFiles } from "./settlementArtifacts"
 
-const P = 21888242871839275222246405745257275088548364400416034343698204186575808495617n
 const files = settlementFiles()
 const built = fs.existsSync(files.wasm)
 const CIRCUIT_LINES = fs
-    .readFileSync(path.join(path.dirname(files.dir), "..", "circuits", "l2ps_settlement_10.circom"), "utf8")
+    .readFileSync(path.join(path.dirname(files.dir), "..", "circuits", "l2ps_settlement.circom"), "utf8")
     .split("\n")
 
 type Signals = Record<string, bigint[]>
@@ -50,7 +59,9 @@ const ZERO = "0x" + "00".repeat(32)
 
 /**
  * Circuit input from explicit slots, with no checks at all: the circuit is
- * the only judge. `null` is an inactive slot (all zero).
+ * the only judge. `null` is an inactive slot (all zero). signerHi/signerLo
+ * are who signed each commitment; they open the commitment here but are not
+ * a circuit input.
  */
 function raw(transfers: (RawTransfer | null)[], accounts: (RawAccount | null)[]): Signals {
     const s: Signals = {}
@@ -88,7 +99,7 @@ function raw(transfers: (RawTransfer | null)[], accounts: (RawAccount | null)[])
         s.deltaNegative[j] = a.delta < 0n ? 1n : 0n
         s.deltaMagnitude[j] = a.delta < 0n ? -a.delta : a.delta
     })
-    return rehash(s)
+    return seal(rehash(s))
 }
 
 const commitmentOf = (s: Signals, i: number): bigint =>
@@ -98,21 +109,61 @@ const commitmentOf = (s: Signals, i: number): bigint =>
 
 /** Recomputes the commitments hash from the slots, in the given slot order. */
 function rehash(s: Signals, order: number[] = [...Array(N).keys()]): Signals {
-    s.commitmentsHash = [poseidon10(order.map(i => commitmentOf(s, i)))]
+    s.commitmentsHash = [commitmentsHash(order.map(i => commitmentOf(s, i)))]
     return s
 }
 
+/**
+ * The public hash as the circuit packs it from its own inputs (Interface
+ * v1.1), reduced mod p like the witness calculator does. Written from the
+ * spec, independently of settlementPublicHash.
+ */
+function circuitHash(s: Signals): bigint {
+    const e: bigint[] = [s.commitmentsHash[0]]
+    for (let i = 0; i < N; i++) {
+        e.push(s.fee[i] + (s.nonce[i] << 128n) + (s.senderIndex[i] << 192n) + (s.transferActive[i] << 200n))
+    }
+    let flags = 0n
+    for (let j = 0; j < M; j++) {
+        e.push(s.accountHi[j], s.accountLo[j], s.balanceBefore[j], s.deltaMagnitude[j])
+        flags += s.accountActive[j] * 4n ** BigInt(j) + s.deltaNegative[j] * 2n * 4n ** BigInt(j)
+    }
+    e.push(flags)
+    while (e.length % 7 !== 0) e.push(0n)
+    let h = 0n
+    for (let k = 0; k < e.length; k += 7) h = poseidon8([h, ...e.slice(k, k + 7).map(x => ((x % P) + P) % P)])
+    return h
+}
+
+/** Sets the public hash to the one the circuit computes from these inputs. */
+function seal(s: Signals): Signals {
+    s.publicHash = [circuitHash(s)]
+    return s
+}
+
+/**
+ * Circuit input from the planner and builder, with the Interface v1 signals
+ * (the validator's statement) kept as `statement` and the signer limbs taken
+ * from it.
+ */
 function fromBatch(make: () => { transfers: any; balances: any; nonces: any }): Signals {
     const { transfers, balances, nonces } = make()
-    const { input } = buildSettlementCircuitInput(planSettlement(transfers, balances, nonces))
+    const { input, publicSignals } = buildSettlementCircuitInput(planSettlement(transfers, balances, nonces))
     const s: Signals = {}
     for (const [k, v] of Object.entries(input)) s[k] = (Array.isArray(v) ? v : [v]).map(x => BigInt(x))
+    s.statement = publicSignals
+    s.signerHi = publicSignals.slice(1 + N, 1 + 2 * N)
+    s.signerLo = publicSignals.slice(1 + 2 * N, 1 + 3 * N)
     return s
 }
 
+const NOT_INPUTS = new Set(["signerHi", "signerLo", "statement"])
+const SCALARS = new Set(["commitmentsHash", "publicHash"])
 const toInput = (s: Signals) =>
     Object.fromEntries(
-        Object.entries(s).map(([k, v]) => [k, k === "commitmentsHash" ? v[0].toString() : v.map(String)]),
+        Object.entries(s)
+            .filter(([k]) => !NOT_INPUTS.has(k))
+            .map(([k, v]) => [k, SCALARS.has(k) ? v[0].toString() : v.map(String)]),
     )
 
 async function witness(s: Signals): Promise<void> {
@@ -152,7 +203,7 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             })
         }
         it("the raw builder agrees with the planner on the fixture batch", () => {
-            const fromPlanner = fromBatch(fixtureBatch)
+            const fromPlanner = toInput(fromBatch(fixtureBatch))
             const built = raw(
                 [
                     base(),
@@ -165,7 +216,70 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
                     { account: c, balance: 5n, delta: 640n },
                 ],
             )
-            expect(built).toEqual(fromPlanner)
+            // Includes the public hash: circuit packing here, settlementPublicHash there.
+            expect(toInput(built)).toEqual(fromPlanner)
+        })
+    })
+
+    describe("public hash: circuit and verifier agree", () => {
+        const PUBLIC_HASH = "sponge[CHUNKS - 1].out === publicHash"
+
+        for (const make of [...PROVEN_BATCHES, fixtureBatch]) {
+            it(`${make().name}: the circuit's packing is settlementPublicHash`, () => {
+                const s = fromBatch(make)
+                expect(circuitHash(s)).toBe(settlementPublicHash(s.statement))
+                expect(s.publicHash).toEqual([settlementPublicHash(s.statement)])
+            })
+        }
+
+        it("a public hash of another statement fails", async () => {
+            const s = fromBatch(fixtureBatch)
+            s.publicHash = [s.publicHash[0] + 1n]
+            await rejects(s, PUBLIC_HASH)
+        })
+
+        it("every signal of the statement is bound: changing any one fails the proof", async () => {
+            const valid = fromBatch(fixtureBatch)
+            let checked = 0
+            for (let k = 0; k < SETTLEMENT_PUBLIC_SIGNALS; k++) {
+                const statement = [...valid.statement]
+                const v = statement[k]
+                statement[k] = v === 0n ? 1n : v === 1n ? 0n : v + 1n
+                let hash: bigint
+                try {
+                    hash = settlementPublicHash(statement)
+                } catch (error) {
+                    // Not a statement any verifier hashes, so not one it can accept.
+                    expect(error).toBeInstanceOf(SettlementEncodingError)
+                    continue
+                }
+                await rejects({ ...valid, publicHash: [hash] }, PUBLIC_HASH)
+                checked++
+            }
+            expect(checked).toBeGreaterThan(SETTLEMENT_PUBLIC_SIGNALS / 2)
+        }, 120_000)
+
+        it("a balance before other than the validator's fails", async () => {
+            // The circuit alone accepts any consistent balance; the hash pins
+            // it to the validator's own.
+            const s = fromBatch(fixtureBatch)
+            s.balanceBefore[1] += 1n
+            await witness(seal({ ...s }))
+            s.publicHash = [settlementPublicHash(s.statement)]
+            await rejects(s, PUBLIC_HASH)
+        })
+
+        it("signer is not the debited account", async () => {
+            // The validator saw c sign transfer 0, which debits a: proving
+            // with a's slot misses the validator's hash. Proving with c's slot
+            // instead is "commitment signed over another sender" below.
+            const s = fromBatch(fixtureBatch)
+            const statement = [...s.statement]
+            const [ch, cl] = accountLimbs(c)
+            statement[1 + N] = ch
+            statement[1 + 2 * N] = cl
+            s.publicHash = [settlementPublicHash(statement)]
+            await rejects(s, PUBLIC_HASH)
         })
     })
 
@@ -191,28 +305,44 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
         it("wrong delta", async () => {
             const s = fromBatch(fixtureBatch)
             s.deltaMagnitude[2] += 1n
-            await rejects(s, "balance[N][j] - balanceBefore[j] ===")
+            await rejects(seal(s), "balance[N][j] - balanceBefore[j] ===")
         })
 
         it("delta sign flipped", async () => {
             const s = fromBatch(fixtureBatch)
             s.deltaNegative[0] = 0n
-            await rejects(s, "balance[N][j] - balanceBefore[j] ===")
+            await rejects(seal(s), "balance[N][j] - balanceBefore[j] ===")
         })
+
+        // Magnitudes and balances before are hashed whole, so they are the
+        // verifier's values, and the verifier hashes none at or above 2^128.
+        // The circuit alone accepts these field wraps; the hash refuses them.
+        const verifierRefuses = (s: Signals, k: number, value: bigint) => {
+            const statement = [...s.statement]
+            statement[k] = value
+            expect(() => settlementPublicHash(statement)).toThrow(`public signal ${k} is out of range`)
+        }
+        const MAGNITUDE = 1 + 5 * N + 5 * M
+        const NEGATIVE = 1 + 5 * N + 4 * M
+        const BALANCE = 1 + 5 * N + 3 * M
 
         it("debit written as a credit of p - x (field wrap)", async () => {
             const s = fromBatch(fixtureBatch)
             expect([s.deltaNegative[0], s.deltaMagnitude[0]]).toEqual([1n, 710n])
             s.deltaNegative[0] = 0n
             s.deltaMagnitude[0] = P - 710n
-            await rejects(s, "magnitudeRange[j].in <==")
+            await witness(seal(s))
+            s.statement[NEGATIVE] = 0n
+            verifierRefuses(s, MAGNITUDE, P - 710n)
         })
 
         it("credit written as a debit of p - x (field wrap)", async () => {
             const s = fromBatch(fixtureBatch)
             s.deltaNegative[1] = 1n
             s.deltaMagnitude[1] = P - 40n
-            await rejects(s, "magnitudeRange[j].in <==")
+            await witness(seal(s))
+            s.statement[NEGATIVE + 1] = 1n
+            verifierRefuses(s, MAGNITUDE + 1, P - 40n)
         })
 
         it("negative zero", async () => {
@@ -221,19 +351,18 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
                 { account: b, balance: 0n, delta: 0n },
             ])
             s.deltaNegative[1] = 1n
-            await rejects(s, "deltaNegative[j] * zeroMagnitude[j].out === 0")
+            await rejects(seal(s), "deltaNegative[j] * zeroMagnitude[j].out === 0")
         })
 
         it("balance before written as p - x (an account below zero)", async () => {
             // b "holds -5", receives 700 and ends at 695: every running value
             // after it is in range, only the balance itself is not.
-            await rejects(
-                raw([base()], [
-                    { account: a, balance: 1_000n, delta: -710n },
-                    { account: b, balance: P - 5n, delta: 700n },
-                ]),
-                "balanceRange[j].in <==",
-            )
+            const s = raw([base()], [
+                { account: a, balance: 1_000n, delta: -710n },
+                { account: b, balance: P - 5n, delta: 700n },
+            ])
+            await witness(s)
+            verifierRefuses(fromBatch(fixtureBatch), BALANCE + 1, P - 5n)
         })
 
         it("fee written as p - x (a fee that pays the sender)", async () => {
@@ -294,14 +423,14 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             )
         })
 
-        it("signer is not the debited account", async () => {
-            // c signs, a pays.
+        it("commitment signed over another sender than the debited account", async () => {
+            // c signed a commitment from c; a's slot pays.
             await rejects(
                 raw([base({ signer: c })], [
                     { account: a, balance: 1_000n, delta: -710n },
                     { account: b, balance: 0n, delta: 700n },
                 ]),
-                "senderHi[i].out === signerHi[i]",
+                "batchHash.out === commitmentsHash",
             )
         })
 
@@ -324,15 +453,14 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
                 ["account limb", s => (s.accountHi[2] = 1n), "accountHi[j] * accountIdle[j] === 0"],
                 ["account lo limb", s => (s.accountLo[5] = 7n), "accountLo[j] * accountIdle[j] === 0"],
                 ["balance", s => (s.balanceBefore[2] = 5n), "balanceBefore[j] * accountIdle[j] === 0"],
-                ["delta magnitude", s => (s.deltaMagnitude[19] = 1n), "deltaMagnitude[j] * accountIdle[j] === 0"],
+                ["delta magnitude", s => (s.deltaMagnitude[M - 1] = 1n), "deltaMagnitude[j] * accountIdle[j] === 0"],
                 ["delta sign", s => (s.deltaNegative[3] = 1n), "deltaNegative[j] * accountIdle[j] === 0"],
                 ["fee", s => (s.fee[1] = 1n), "fee[i] * transferIdle[i] === 0"],
-                ["nonce", s => (s.nonce[9] = 1n), "nonce[i] * transferIdle[i] === 0"],
+                ["nonce", s => (s.nonce[N - 1] = 1n), "nonce[i] * transferIdle[i] === 0"],
                 ["amount", s => (s.amount[1] = 1n), "amount[i] * transferIdle[i] === 0"],
                 ["salt", s => (s.salt[1] = 1n), "salt[i] * transferIdle[i] === 0"],
-                ["sender index", s => (s.senderIndex[1] = 1n), "senderIndex[i] * transferIdle[i] === 0"],
-                ["receiver index", s => (s.receiverIndex[1] = 1n), "receiverIndex[i] * transferIdle[i] === 0"],
-                ["signer limb", s => (s.signerHi[1] = 1n), "senderHi[i].out === signerHi[i]"],
+                ["sender index", s => (s.senderIndex[1] = 1n), "senderSel[i].enable <=="],
+                ["receiver index", s => (s.receiverIndex[1] = 1n), "receiverSel[i].enable <=="],
                 ["receiver limb", s => (s.toLo[1] = 1n), "receiverLo[i].out === toLo[i]"],
             ]
             it("the untouched base witness is valid", async () => {
@@ -342,7 +470,7 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
                 it(name, async () => {
                     const s = valid()
                     tamper(s)
-                    await rejects(rehash(s), where)
+                    await rejects(seal(rehash(s)), where)
                 })
             }
         })
@@ -381,14 +509,14 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             await rejects(s, "accountActive[j] * untouched[j].out === 0")
         })
 
-        for (const index of [20, 31, 1_000_000]) {
+        for (const index of [M, 31, 1_000_000]) {
             it(`sender index ${index} (not below M)`, async () => {
                 const s = raw([base()], [
                     { account: a, balance: 1_000n, delta: -710n },
                     { account: b, balance: 0n, delta: 700n },
                 ])
                 s.senderIndex[0] = BigInt(index)
-                await rejects(s, "senderSel[i].index <==")
+                await rejects(seal(s), "senderSel[i].enable <==")
             })
         }
 
@@ -398,7 +526,7 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
                 { account: b, balance: 0n, delta: 700n },
             ])
             s.receiverIndex[0] = P - 1n
-            await rejects(s, "receiverSel[i].index <==")
+            await rejects(seal(s), "receiverSel[i].enable <==")
         })
 
         it("receiver index pointing at an inactive slot", async () => {
@@ -421,7 +549,8 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
 
         it("commitments hashed in another order", async () => {
             const s = fromBatch(fixtureBatch)
-            await rejects(rehash(s, [1, 0, 2, 3, 4, 5, 6, 7, 8, 9]), "batchHash.out === commitmentsHash")
+            const swapped = [1, 0, ...Array.from({ length: N - 2 }, (_, i) => i + 2)]
+            await rejects(seal(rehash(s, swapped)), "batchHash.out === commitmentsHash")
         })
 
         it("a commitment opened to another amount", async () => {
@@ -431,15 +560,7 @@ describe.skipIf(!built)("settlement circuit witnesses", () => {
             s.deltaMagnitude[0] -= 1n
             s.deltaMagnitude[1] -= 1n
             s.commitmentsHash = [hash]
-            await rejects(s, "batchHash.out === commitmentsHash")
-        })
-
-        it("an extra public balance on the receiver does not change the statement's arithmetic", async () => {
-            // Balances before are the validator's own; the proof binds them as
-            // public signals (see the verifier tests), the witness alone cannot.
-            const s = fromBatch(fixtureBatch)
-            s.balanceBefore[1] += 1n
-            await witness(s)
+            await rejects(seal(s), "batchHash.out === commitmentsHash")
         })
     })
 })
