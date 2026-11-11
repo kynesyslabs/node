@@ -513,6 +513,9 @@ export default class L2PSConsensus {
             const l1BatchTx = {
                 type: "l2psBatch",
                 hash: `0x${batchHash}`,
+                // Top-level columns of the stored row, both NOT NULL.
+                blockNumber,
+                status: TRANSACTION_STATUS.CONFIRMED,
                 signature: {
                     type: "ed25519",
                     data: "", // System-generated, no actual signature needed

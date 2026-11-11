@@ -21,13 +21,18 @@ const { default: Transaction } = await import("@/libs/blockchain/transaction")
 const { default: L2PSConsensus } = await import("./L2PSConsensus")
 
 const originalInsert = Chain.insertTransaction
+/** The transactions table's NOT NULL columns (model/entities/Transactions.ts). */
+const NOT_NULL = ["blockNumber", "signature", "status", "hash", "content", "type", "from", "to", "timestamp"]
 const stored: any[] = []
 
 beforeEach(() => {
     stored.length = 0
-    // The real insert minus the database: the row shape is what threw.
+    // The real insert minus the database: the row shape is what threw, and
+    // a null in a NOT NULL column fails the save, which answers false.
     ;(Chain as any).insertTransaction = async (tx: any) => {
-        stored.push(Transaction.toRawTransaction(tx))
+        const row: any = Transaction.toRawTransaction(tx)
+        if (NOT_NULL.some(column => row[column] === undefined || row[column] === null)) return false
+        stored.push(row)
         return true
     }
 })
@@ -37,7 +42,7 @@ afterEach(() => {
 })
 
 describe("the L1 batch tx of the local L2PS proof path", () => {
-    it("carries a complete zero fee and is stored", async () => {
+    it("carries a complete zero fee, its block and status, and is stored", async () => {
         const proofs = [
             {
                 id: 1,
@@ -53,6 +58,8 @@ describe("the L1 batch tx of the local L2PS proof path", () => {
         expect(stored).toHaveLength(1)
         expect(stored[0]).toMatchObject({
             type: "l2psBatch",
+            blockNumber: 560,
+            status: "confirmed",
             networkFee: 0,
             rpcFee: 0,
             additionalFee: 0,
