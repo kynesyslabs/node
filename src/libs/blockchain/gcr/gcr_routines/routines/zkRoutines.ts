@@ -19,7 +19,12 @@ import {
     isBigintStorable,
     isTextStorable,
 } from "@/libs/blockchain/validation/postgresStorable"
-import { BN254_FIELD_ORDER } from "@/features/zk/proof/publicSignals"
+import {
+    ATTESTATION_CONTEXT,
+    ATTESTATION_CONTEXT_SIGNAL,
+    BN254_FIELD_ORDER,
+    parseIdentityPublicSignals,
+} from "@/features/zk/proof/publicSignals"
 
 export const PROVIDER_MAX_BYTES = 64
 
@@ -226,6 +231,17 @@ export async function applyZkAttestationAdd(
         return {
             success: false,
             message: "Invalid nullifier hash format",
+        }
+    }
+
+    // Checked on the proof's own signal, before any database work: it is a
+    // pure function of the signed payload, so every node, a syncing one
+    // included, reaches the same verdict.
+    const signals = parseIdentityPublicSignals(payload.public_signals).signals
+    if (signals && signals.context !== ATTESTATION_CONTEXT_SIGNAL) {
+        return {
+            success: false,
+            message: `ZK attestation must prove under the context "${ATTESTATION_CONTEXT}"`,
         }
     }
 

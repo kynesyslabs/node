@@ -29,6 +29,20 @@ export interface IdentityPublicSignals {
 export const IDENTITY_PUBLIC_SIGNAL_COUNT = 3
 
 /**
+ * The only context a points-earning attestation may prove under. The
+ * nullifier is Poseidon(provider_id, secret, context), so with a free
+ * context one identity yields a fresh nullifier, and fresh points, per
+ * context. The SDK prover takes the context as a string and uses its UTF-8
+ * bytes as one big-endian number; this string is 29 bytes, inside the field.
+ */
+export const ATTESTATION_CONTEXT = "demos-identity-attestation-v1"
+
+/** `ATTESTATION_CONTEXT` as the public signal the prover emits for it. */
+export const ATTESTATION_CONTEXT_SIGNAL = BigInt(
+    "0x" + Buffer.from(ATTESTATION_CONTEXT, "utf8").toString("hex"),
+).toString(10)
+
+/**
  * Read the signals by position, or explain why they cannot be trusted.
  *
  * Fails closed on any other length: a proof carrying fewer signals comes from
