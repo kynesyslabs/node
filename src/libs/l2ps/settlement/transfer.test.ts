@@ -4,8 +4,14 @@
  * the admission rules (signature, fee floor, unspent nonce).
  */
 import { describe, expect, it } from "bun:test"
-import { fieldToHex } from "./encoding"
-import { openSettlementTransfer, transferAdmissionRefusal } from "./transfer"
+import { SETTLEMENT_TRANSFERS, fieldToHex } from "./encoding"
+import {
+    SETTLEMENT_ENVELOPE_MAX_BYTES,
+    envelopeSizeRefusal,
+    openSettlementTransfer,
+    transferAdmissionRefusal,
+} from "./transfer"
+import { BLOCK_MAX_CONTENT_BYTES } from "@/utilities/constants"
 import { CHAIN_ID, UID, innerTx, key, signedTransfer, vectors } from "./__fixtures__/settlementKit"
 
 const ALICE = key(1)
@@ -126,5 +132,28 @@ describe("transferAdmissionRefusal", () => {
             "settlement signature does not verify for the sender",
         )
         expect(transferAdmissionRefusal(transfer, { ...admission(0n, 0n), chainId: null })).toContain("declares no id")
+    })
+})
+
+describe("envelopeSizeRefusal", () => {
+    const envelopeOf = (bytes: number) => {
+        const base = JSON.stringify({ hash: "h", content: { data: "" } }).length
+        return { hash: "h", content: { data: "x".repeat(bytes - base) } }
+    }
+
+    it("admits an envelope at the cap and refuses one byte more", () => {
+        expect(envelopeSizeRefusal(envelopeOf(SETTLEMENT_ENVELOPE_MAX_BYTES))).toBeNull()
+        expect(envelopeSizeRefusal(envelopeOf(SETTLEMENT_ENVELOPE_MAX_BYTES + 1))).toContain("over the")
+    })
+
+    it("keeps a full batch of envelopes at the cap within half an empty block", () => {
+        const rows = Array.from({ length: SETTLEMENT_TRANSFERS }, (_, i) => ({
+            hash: "0x" + String(i).padStart(64, "0"),
+            original_hash: "0x" + String(i).padStart(64, "1"),
+            encrypted_tx: envelopeOf(SETTLEMENT_ENVELOPE_MAX_BYTES),
+        }))
+        // The aggregator embeds the rows as base64 JSON (createBatchPayload).
+        const embedded = Buffer.from(JSON.stringify(rows)).toString("base64").length
+        expect(embedded).toBeLessThan(BLOCK_MAX_CONTENT_BYTES / 2 + 4096)
     })
 })

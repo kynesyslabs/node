@@ -14,6 +14,7 @@ import { backlogFullMessage, getExecutedBacklogGuard } from "@/libs/l2ps/execute
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import {
     MAX_NONCE_AHEAD,
+    envelopeSizeRefusal,
     openSettlementTransfer,
     queueAdmissionRefusal,
     transferAdmissionRefusal,
@@ -269,6 +270,10 @@ export default async function handleL2PS(
     }
 
     if (l2psSettlementActive()) {
+        const oversize = envelopeSizeRefusal(l2psTx)
+        if (oversize) {
+            return createErrorResponse(response, 400, `Refused L2PS transfer: ${oversize}`)
+        }
         const opened = openSettlementTransfer(decryptedTx, l2psTx.hash)
         if (opened.ok === false) {
             return createErrorResponse(response, 400, `Refused L2PS transfer: ${opened.reason}`)

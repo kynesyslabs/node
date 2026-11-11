@@ -22,6 +22,7 @@ import {
 } from "./encoding"
 import type { DecryptedTransfer } from "./types"
 import { verifyEd25519 } from "./ed25519"
+import { BLOCK_MAX_CONTENT_BYTES } from "@/utilities/constants"
 
 const ACCOUNT = /^0x[0-9a-f]{64}$/
 const FIELD_HEX = /^0x[0-9a-f]{64}$/
@@ -178,6 +179,24 @@ export function transferAdmissionRefusal(
  * batches. A constant, so every member admits the same transfers.
  */
 export const MAX_NONCE_AHEAD = 2n * BigInt(SETTLEMENT_TRANSFERS)
+
+/**
+ * Most bytes of a stored L2PS envelope (the outer transaction, as JSON) a
+ * member admits for settlement. A batch carries up to SETTLEMENT_TRANSFERS
+ * envelopes in base64, which grows them by a third, and is held to half of
+ * an empty block so its record, proof and the block's other txs still fit.
+ * A larger envelope would make every batch it joins too big for the mempool.
+ */
+export const SETTLEMENT_ENVELOPE_MAX_BYTES = Math.floor(
+    ((BLOCK_MAX_CONTENT_BYTES / 2) * 3) / 4 / SETTLEMENT_TRANSFERS,
+)
+
+export function envelopeSizeRefusal(envelope: unknown): string | null {
+    const bytes = Buffer.byteLength(JSON.stringify(envelope) ?? "")
+    return bytes > SETTLEMENT_ENVELOPE_MAX_BYTES
+        ? `L2PS envelope is ${bytes} bytes, over the ${SETTLEMENT_ENVELOPE_MAX_BYTES} a settlement batch can carry`
+        : null
+}
 
 /** A transfer this member already queued for the sender and has not settled. */
 export interface QueuedTransfer {
