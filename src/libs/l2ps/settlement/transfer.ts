@@ -13,6 +13,7 @@ import {
     AMOUNT_LIMIT,
     NONCE_LIMIT,
     SALT_BYTES,
+    SETTLEMENT_TRANSFERS,
     hexToField,
     parseUnsigned,
     settlementCommitment,
@@ -168,6 +169,50 @@ export function transferAdmissionRefusal(
     }
     if (transfer.nonce < context.accountNonce + 1n) {
         return `settlement nonce ${transfer.nonce} is already spent (account nonce ${context.accountNonce})`
+    }
+    return null
+}
+
+/**
+ * How far past its account nonce a sender may queue transfers: two full
+ * batches. A constant, so every member admits the same transfers.
+ */
+export const MAX_NONCE_AHEAD = 2n * BigInt(SETTLEMENT_TRANSFERS)
+
+/** A transfer this member already queued for the sender and has not settled. */
+export interface QueuedTransfer {
+    nonce: bigint
+    amount: bigint
+    fee: bigint
+}
+
+/**
+ * Admission against what the sender already has queued here: a nonce within
+ * MAX_NONCE_AHEAD of the account nonce and not queued yet, and a balance
+ * that covers every queued transfer still to settle plus this one. Without
+ * these one sender could fill the subnet's queue with transfers that can
+ * never be placed in a batch.
+ */
+export function queueAdmissionRefusal(
+    transfer: DecryptedTransfer,
+    sender: { balance: bigint; nonce: bigint },
+    queued: QueuedTransfer[],
+): string | null {
+    const limit = sender.nonce + MAX_NONCE_AHEAD
+    if (transfer.nonce > limit) {
+        return `settlement nonce ${transfer.nonce} is more than ${MAX_NONCE_AHEAD} past the account nonce ${sender.nonce}`
+    }
+    let committed = 0n
+    for (const q of queued) {
+        if (q.nonce <= sender.nonce) continue
+        if (q.nonce === transfer.nonce) {
+            return `a transfer with settlement nonce ${transfer.nonce} is already queued for this sender`
+        }
+        committed += q.amount + q.fee
+    }
+    const need = committed + transfer.amount + transfer.fee
+    if (sender.balance < need) {
+        return `Insufficient balance: need ${need} (queued transfers, amount and fee) but have ${sender.balance}`
     }
     return null
 }

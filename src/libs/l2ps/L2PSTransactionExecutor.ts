@@ -16,7 +16,7 @@
  * @module L2PSTransactionExecutor
  */
 
-import { Repository } from "typeorm"
+import { In, MoreThan, Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
@@ -718,6 +718,31 @@ export default class L2PSTransactionExecutor {
             if (count < batchSize) return total
             lastId = rows.reduce((max, r) => Math.max(max, Number(r.id)), lastId)
         }
+    }
+
+    /**
+     * A sender's transfers this node admitted to the subnet that have not
+     * settled or failed yet, past its account nonce, lowest nonce first.
+     */
+    static async getUnsettledBySender(
+        l2psUid: string,
+        from: string,
+        accountNonce: bigint,
+        limit: number,
+    ): Promise<L2PSTransaction[]> {
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+        return ds.getRepository(L2PSTransaction).find({
+            where: {
+                l2ps_uid: l2psUid,
+                from_address: from,
+                status: In(["pending", "batched"]),
+                nonce: MoreThan(accountNonce.toString() as unknown as bigint),
+            },
+            order: { nonce: "ASC" },
+            take: limit,
+        })
     }
 
     /**

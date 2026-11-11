@@ -12,7 +12,13 @@ import log from "@/utilities/logger"
 import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
 import { backlogFullMessage, getExecutedBacklogGuard } from "@/libs/l2ps/executedBacklogGuard"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
-import { openSettlementTransfer, transferAdmissionRefusal } from "@/libs/l2ps/settlement/transfer"
+import {
+    MAX_NONCE_AHEAD,
+    openSettlementTransfer,
+    queueAdmissionRefusal,
+    transferAdmissionRefusal,
+    type QueuedTransfer,
+} from "@/libs/l2ps/settlement/transfer"
 import type { DecryptedTransfer } from "@/libs/l2ps/settlement/types"
 
 /**
@@ -88,6 +94,7 @@ async function decryptAndValidate(
 export async function settlementAdmissionRefusal(
     transfer: DecryptedTransfer,
     l2psUid: string,
+    l2psInstance: L2PS,
 ): Promise<string | null> {
     let minimumFee: bigint
     let chainId: number | null
@@ -111,10 +118,51 @@ export async function settlementAdmissionRefusal(
         accountNonce: sender.nonce,
     })
     if (refusal) return refusal
-    if (sender.balance < transfer.amount + transfer.fee) {
-        return `Insufficient balance: need ${transfer.amount + transfer.fee} (amount + fee) but have ${sender.balance}`
+    let queued: QueuedTransfer[]
+    try {
+        queued = await queuedTransfersOf(l2psInstance, l2psUid, transfer, sender.nonce)
+    } catch (error) {
+        return `Settlement admission could not read the sender's queued transfers: ${error instanceof Error ? error.message : "Unknown error"}`
     }
-    return null
+    return queueAdmissionRefusal(transfer, sender, queued)
+}
+
+/**
+ * The sender's transfers this node queued and has not settled, opened from
+ * their stored envelopes: the history keeps amounts and nonces, the fee only
+ * inside the ciphertext. The transfer itself is left out, so a resubmission
+ * still gets the duplicate answer.
+ */
+async function queuedTransfersOf(
+    l2psInstance: L2PS,
+    l2psUid: string,
+    transfer: DecryptedTransfer,
+    accountNonce: bigint,
+): Promise<QueuedTransfer[]> {
+    // Nonces past the account nonce are unique per sender, so at most
+    // MAX_NONCE_AHEAD rows can be unsettled; one more shows a breach.
+    const rows = await L2PSTransactionExecutor.getUnsettledBySender(
+        l2psUid,
+        transfer.from,
+        accountNonce,
+        Number(MAX_NONCE_AHEAD) + 1,
+    )
+    const queued: QueuedTransfer[] = []
+    for (const row of rows) {
+        if (row.encrypted_hash === transfer.txHash || !row.encrypted_payload) continue
+        let inner: unknown
+        try {
+            inner = await l2psInstance.decryptTx(row.encrypted_payload as unknown as L2PSTransaction)
+        } catch {
+            continue
+        }
+        const opened = openSettlementTransfer(inner as never, row.encrypted_hash ?? "")
+        if (opened.ok) {
+            const { nonce, amount, fee } = opened.transfer
+            queued.push({ nonce, amount, fee })
+        }
+    }
+    return queued
 }
 
 /**
@@ -226,7 +274,7 @@ export default async function handleL2PS(
             return createErrorResponse(response, 400, `Refused L2PS transfer: ${opened.reason}`)
         }
         return await withSenderLock(sender, async () => {
-            const refusal = await settlementAdmissionRefusal(opened.transfer, l2psUid)
+            const refusal = await settlementAdmissionRefusal(opened.transfer, l2psUid, l2psInstance)
             if (refusal) {
                 // A reason can carry the amount, which only subnet members may see.
                 log.info(`[handleL2PS] Settlement admission refused ${l2psTx.hash}`)

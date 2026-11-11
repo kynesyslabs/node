@@ -21,6 +21,8 @@ const existsByOriginalHash = jest.fn(async (..._args: unknown[]) => false)
 const decryptTx = jest.fn()
 const getL2PS = jest.fn(async (..._args: unknown[]) => ({ decryptTx }))
 const confirmTx = jest.fn(async (..._args: unknown[]) => ({ success: true }))
+/** History rows of the sender's queued transfers; each envelope decrypts to `__inner`. */
+let unsettled: { encrypted_hash: string; encrypted_payload: { __inner: unknown } }[] = []
 
 mock.module("src/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
 mock.module("src/libs/blockchain/transaction", () => ({ __esModule: true, default: { confirmTx } }))
@@ -47,6 +49,7 @@ mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
         hasExecuted: async () => false,
         execute,
         recordTransaction: async () => undefined,
+        getUnsettledBySender: async (..._args: unknown[]) => unsettled,
     },
 }))
 const checkInnerTxBalance = jest.fn(async (..._args: unknown[]): Promise<string | null> => null)
@@ -105,7 +108,12 @@ function decrypted(t: ReturnType<typeof signedTransfer>, mutate?: (inner: any) =
     const inner = innerTx(t, UID) as any
     inner.hash = "orig"
     mutate?.(inner)
-    decryptTx.mockResolvedValue(inner)
+    decryptTx.mockImplementation(async (envelope: any) => envelope?.__inner ?? inner)
+}
+
+/** Records `t` as already queued here for its sender, as the history holds it. */
+function queued(t: ReturnType<typeof signedTransfer>) {
+    unsettled.push({ encrypted_hash: t.txHash, encrypted_payload: { __inner: innerTx(t, UID) } })
 }
 
 const transfer = (over: Partial<Parameters<typeof signedTransfer>[0]> = {}) =>
@@ -120,6 +128,7 @@ beforeEach(() => {
     getSharedState.rpcFee = 1
     getSharedState.additionalFee = 1
     tipAccounts = new Map([[ALICE.account, { balance: 100n * OS, nonce: 4n }]])
+    unsettled = []
     check.mockResolvedValue({ admitted: true, count: 1, cap: 50_000, retryAfterMs: 10_000 })
     claim.mockReturnValue(true)
     execute.mockReset()
@@ -198,6 +207,51 @@ describe("handleL2PS under l2psSettlement", () => {
         // sender and to debug only.
         expect(loudLogs()).not.toContain((5n * OS + FEE).toString())
         expect(loudLogs()).not.toContain("Insufficient balance")
+    })
+
+    it("admits a transfer queued behind others while the balance covers all of them", async () => {
+        queued(transfer({ nonce: 5n }))
+        queued(transfer({ nonce: 6n }))
+        decrypted(transfer({ nonce: 7n }))
+        const response = await handleL2PS(tx)
+        expect(response.result).toBe(200)
+    })
+
+    it("refuses a nonce more than two batches past the account nonce", async () => {
+        decrypted(transfer({ nonce: 4n + 21n }))
+        const response = await handleL2PS(tx)
+        expect(response.result).toBe(400)
+        expect(JSON.stringify(response)).toContain("more than 20 past the account nonce")
+        expect(addTransaction).not.toHaveBeenCalled()
+
+        decrypted(transfer({ nonce: 4n + 20n }))
+        expect((await handleL2PS(tx)).result).toBe(200)
+    })
+
+    it("refuses a second transfer with a nonce already queued for the sender", async () => {
+        queued(transfer({ nonce: 5n, amount: 1n }))
+        decrypted(transfer({ nonce: 5n }))
+        const response = await handleL2PS(tx)
+        expect(response.result).toBe(400)
+        expect(JSON.stringify(response)).toContain("already queued")
+    })
+
+    it("refuses a transfer the balance covers only without the sender's queued transfers", async () => {
+        // 100 OS: two queued transfers take 2 x (45 + 3), this one needs 5 + 3 more.
+        queued(transfer({ nonce: 5n, amount: 45n * OS }))
+        queued(transfer({ nonce: 6n, amount: 45n * OS }))
+        decrypted(transfer({ nonce: 7n }))
+        const response = await handleL2PS(tx)
+        expect(response.result).toBe(400)
+        expect(JSON.stringify(response)).toContain("Insufficient balance")
+        expect(JSON.stringify(response)).toContain("queued transfers")
+        expect(addTransaction).not.toHaveBeenCalled()
+    })
+
+    it("counts no queued transfer whose nonce L1 already spent", async () => {
+        queued(transfer({ nonce: 3n, amount: 90n * OS }))
+        decrypted(transfer())
+        expect((await handleL2PS(tx)).result).toBe(200)
     })
 
     it("logs no amount above debug when the old path refuses a balance", async () => {
