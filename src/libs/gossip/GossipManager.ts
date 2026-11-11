@@ -11,6 +11,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { Peer, PeerManager } from "src/libs/peer"
 import { reportTwin } from "src/libs/peer/identityLiveness"
 import { URL_BOUND_TO_OTHER } from "src/libs/peer/helloAuth"
+import { signingStopState } from "src/libs/identity/signingRecord"
 
 import {
     buildHeightsRecord,
@@ -1025,6 +1026,14 @@ export class GossipManager {
 
     async publishOwnHeights(): Promise<boolean> {
         if (!(await this.mayPublish(HEIGHTS_TOPIC))) return false
+        // Peers send the key's consensus calls to the URL in its latest
+        // heights record. A copy that refuses to sign must not draw them
+        // away from the copy that does.
+        if (signingStopState(getSharedState.identityFile).stopped) {
+            countPublishSkipped("signing_stopped")
+            this.logPublishSkipped(HEIGHTS_TOPIC, "block signing is stopped")
+            return false
+        }
         const advertised = this.getListenAddr()
         const record = await buildHeightsRecord(
             this.getPeerId() ?? "",

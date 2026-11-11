@@ -17,8 +17,13 @@ import { getSharedState } from "src/utilities/sharedState"
 import { isLoopbackHost, parseNodeUrl } from "src/config"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import type { HelloPeerRequest } from "../network/manageHelloPeer"
-import { helloResponseMessage, URL_BOUND_TO_OTHER } from "./helloAuth"
+import {
+    helloResponseMessage,
+    standbyKeepsKnownUrl,
+    URL_BOUND_TO_OTHER,
+} from "./helloAuth"
 import { noteCallerKnownAt } from "./identityLiveness"
+import { signingStopState } from "../identity/signingRecord"
 import { corroborateSyncData } from "./syncClaims"
 import {
     hexToUint8Array,
@@ -649,6 +654,9 @@ export default class PeerManager {
             ...(getSharedState.genesisBlockHash
                 ? { genesisHash: getSharedState.genesisBlockHash }
                 : {}),
+            ...(signingStopState(getSharedState.identityFile).stopped
+                ? { standby: true }
+                : {}),
         }
         return { request, nonce }
     }
@@ -778,6 +786,19 @@ export default class PeerManager {
                 )
             }
 
+            const knownUrl = peerman.getPeer(peer.identity)?.connection.string
+            if (
+                standbyKeepsKnownUrl(
+                    knownUrl,
+                    peer.connection.string,
+                    response.extra.standby,
+                )
+            ) {
+                log.info(
+                    `[PEERMANAGER] ${peer.identity} @ ${peer.connection.string} has stopped signing: keeping its URL ${knownUrl}`,
+                )
+                return { peers: response.extra.peerlist || [], verdict }
+            }
             peerman.addPeer(peer, verdict === "verified", verdict === "verified")
             peerman.removeOfflinePeer(peer.identity)
 

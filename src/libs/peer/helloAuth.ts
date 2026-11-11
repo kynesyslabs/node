@@ -1,3 +1,5 @@
+import { parseNodeUrl } from "src/config"
+
 export const HELLO_AUTH_DOMAIN = "DEMOS_PEER_AUTH_V1"
 
 /**
@@ -11,3 +13,17 @@ export function helloResponseMessage(nonce: string, url: string): Uint8Array {
 
 /** Prefix of addPeer's refusal when another identity holds the URL. */
 export const URL_BOUND_TO_OTHER = "URL already bound to another identity: "
+
+/**
+ * A copy of a key that stopped signing still syncs and says hello, but the
+ * key's consensus calls must keep going to the copy that signs: a standby
+ * claim never moves a known identity to another URL.
+ */
+export function standbyKeepsKnownUrl(
+    knownUrl: string | undefined,
+    claimedUrl: string,
+    standby: unknown,
+): boolean {
+    if (standby !== true || knownUrl === undefined) return false
+    return parseNodeUrl(knownUrl)?.origin !== parseNodeUrl(claimedUrl)?.origin
+}
