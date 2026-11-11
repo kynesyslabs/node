@@ -63,7 +63,7 @@ change and this design does not close it off.
 
 Each L2PS transfer carries, in plaintext on L1, a commitment
 
-    c = Poseidon(from, to, amount, nonce, salt)
+    c = Poseidon8(from_hi, from_lo, to_hi, to_lo, amount, fee, nonce, salt)
 
 where `salt` is random and stays inside the encrypted payload. The sender
 signs `c` with their account key, with a new signature domain. A validator
@@ -104,8 +104,8 @@ of its sender and receiver among the M accounts.
 
 Constraints, per transfer:
 
-- `Poseidon(from, to, amount, nonce, salt)` equals commitment i, with the
-  public nonce, and the Poseidon hash over the N commitments so computed
+- `Poseidon8(from_hi, from_lo, to_hi, to_lo, amount, fee, nonce, salt)`
+  equals commitment i, with the public nonce, and the Poseidon hash over the N commitments so computed
   equals the public commitments hash. Validators compute that hash from the
   transaction's `commitments`, so the proof covers exactly the signed
   transfers;
@@ -192,7 +192,13 @@ For each `l2psBatch` in a block, once `l2psSettlement` is active:
 2. The public inputs are rebuilt from the transaction and the validator's own
    working state at that transaction, never taken from the transaction.
 3. The PLONK proof verifies against the committed key, with the hash of the
-   rebuilt signals as its public input (about 20 ms).
+   rebuilt signals as its public input (about 20 ms). `verifySettlementProof`
+   returns false only when the proof is invalid on every honest node
+   (signals out of range, malformed or non-canonical proof, a point off the
+   curve, a failed pairing). When this node cannot judge (verification key
+   missing or modified, curve not built, verifier error) it throws
+   `SettlementVerifierFault`, which block apply rethrows: a local fault
+   never becomes a failed-batch verdict.
 4. The settlement is applied in block apply, in transaction order, by every
    validator and by Sync. A batch that fails any step makes the block invalid.
 
