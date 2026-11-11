@@ -4,7 +4,10 @@ const sharedState: {
     forkConfig: Record<string, { activationHeight: number | null }>
     lastBlockNumber: number
 } = {
-    forkConfig: { tlsnProofEnforcement: { activationHeight: null } },
+    forkConfig: {
+        tlsnProofEnforcement: { activationHeight: null },
+        tlsnRecvCap: { activationHeight: 0 },
+    },
     lastBlockNumber: 0,
 }
 
@@ -51,6 +54,8 @@ beforeEach(() => {
     // The enforcement fork refuses every claim before revealedRecv is read,
     // so it stays unscheduled here to reach the decoding path.
     sharedState.forkConfig.tlsnProofEnforcement = { activationHeight: null }
+    // The cap fork is active from block 0 unless a test says otherwise.
+    sharedState.forkConfig.tlsnRecvCap = { activationHeight: 0 }
     sharedState.lastBlockNumber = 0
 })
 
@@ -139,4 +144,78 @@ describe("TLSN revealedRecv size cap", () => {
             extractedUserId: "1234",
         })
     })
+})
+
+describe("TLSN revealedRecv size cap behind the tlsnRecvCap fork", () => {
+    const H = 1000
+
+    function oversizedClaim() {
+        return claimFor(
+            githubResponse("victim", "1234", MAX_REVEALED_RECV_BYTES + 1),
+            "victim",
+            "1234",
+        )
+    }
+
+    it("does not refuse an oversized payload for its size while unscheduled", async () => {
+        sharedState.forkConfig.tlsnRecvCap = { activationHeight: null }
+        sharedState.lastBlockNumber = 1_000_000
+
+        const result = await verifyTLSNProof(oversizedClaim())
+
+        expect(result.message).not.toContain(OVERSIZED_MESSAGE)
+        expect(result).toEqual({
+            success: true,
+            message: "Proof and recvHash verified",
+            extractedUsername: "victim",
+            extractedUserId: "1234",
+        })
+    })
+
+    it("judges an oversized payload with an out-of-range element as a bad byte while unscheduled", async () => {
+        sharedState.forkConfig.tlsnRecvCap = { activationHeight: null }
+        const claim = claimFor(
+            new Uint8Array(MAX_REVEALED_RECV_BYTES + 1),
+            "victim",
+            "1234",
+        ) as unknown as { revealedRecv: number[] }
+        claim.revealedRecv[0] = 256
+
+        const result = await verifyTLSNProof(claim as never)
+
+        expect(result).toEqual({
+            success: false,
+            message: "Invalid TLSN revealedRecv: expected byte array (0-255)",
+        })
+    })
+
+    it("does not refuse an oversized payload for its size one block before activation", async () => {
+        sharedState.forkConfig.tlsnRecvCap = { activationHeight: H }
+        sharedState.lastBlockNumber = H - 1
+
+        const result = await verifyTLSNProof(oversizedClaim())
+
+        expect(result.message).not.toContain(OVERSIZED_MESSAGE)
+        expect(result.success).toBe(true)
+    })
+
+    for (const height of [H, H + 1]) {
+        it(`refuses an oversized payload before hashing it at height ${height === H ? "H" : "H+1"}`, async () => {
+            sharedState.forkConfig.tlsnRecvCap = { activationHeight: H }
+            sharedState.lastBlockNumber = height
+            const claim = oversizedClaim()
+            const hashSpy = spyOn(Hashing, "sha256Bytes")
+            try {
+                const result = await verifyTLSNProof(claim)
+
+                expect(result).toEqual({
+                    success: false,
+                    message: `${OVERSIZED_MESSAGE} ${MAX_REVEALED_RECV_BYTES} bytes`,
+                })
+                expect(hashSpy).not.toHaveBeenCalled()
+            } finally {
+                hashSpy.mockRestore()
+            }
+        })
+    }
 })
