@@ -154,13 +154,17 @@ class ProverWorker {
                 const text = data.toString().trim()
                 if (text) log.debug(`[SettlementProver ${this.index}] ${text}`)
             })
+            // The launcher can go while the prover under it lives on, so
+            // whatever it started is taken down with it.
             child.on("error", error => {
                 if (this.child !== child) return
+                killProver(child, detached)
                 settle(error)
                 this.down(error)
             })
             child.on("exit", (code, signal) => {
                 if (this.child !== child) return
+                killProver(child, detached)
                 const error = new Error(`settlement prover ${this.index} exited (code ${code}, signal ${signal})`)
                 settle(error)
                 this.down(error)
