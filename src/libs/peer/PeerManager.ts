@@ -780,6 +780,9 @@ export default class PeerManager {
 
             peerman.addPeer(peer, verdict === "verified", verdict === "verified")
             peerman.removeOfflinePeer(peer.identity)
+            if (verdict === "verified") {
+                PeerManager.noteOmniAdvert(peer, response.extra.omni)
+            }
 
             return { peers: response.extra.peerlist || [], verdict }
         } else if (response.result === 409) {
@@ -794,6 +797,24 @@ export default class PeerManager {
         }
 
         return { peers: [], verdict: "unreachable" }
+    }
+
+    /**
+     * Only a reply proven to come from the peer at the URL we dialed may
+     * move its calls to another port of that host. Nodes that predate the
+     * advert send none and stay on HTTP.
+     */
+    static noteOmniAdvert(peer: Peer, omni: unknown): void {
+        const port = (omni as { port?: unknown } | null | undefined)?.port
+        if (typeof port === "number") {
+            getSharedState.markPeerOmniCapable(
+                peer.identity,
+                peer.connection.string,
+                port,
+            )
+        } else {
+            getSharedState.forgetPeerOmni(peer.identity)
+        }
     }
 
     /**

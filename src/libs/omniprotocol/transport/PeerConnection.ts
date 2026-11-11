@@ -25,6 +25,7 @@ import {
 } from "./types"
 import {
     ConnectionTimeoutError,
+    RequestTimeoutError,
     SigningError,
     InvalidAuthBlockFormatError,
     ConnectionError,
@@ -392,7 +393,7 @@ export class PeerConnection extends EventEmitter {
             const timeoutTimer = setTimeout(() => {
                 this.inFlightRequests.delete(sequence)
                 reject(
-                    new ConnectionTimeoutError(
+                    new RequestTimeoutError(
                         `Request timeout after ${timeout}ms`,
                     ),
                 )
@@ -509,7 +510,7 @@ export class PeerConnection extends EventEmitter {
             const timeoutTimer = setTimeout(() => {
                 this.inFlightRequests.delete(sequence)
                 reject(
-                    new ConnectionTimeoutError(
+                    new RequestTimeoutError(
                         `Request timeout after ${timeout}ms`,
                     ),
                 )

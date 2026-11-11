@@ -90,9 +90,13 @@ export async function mergeMempools(
         const call = async (request: RPCRequest) => {
             const [outcome] = await Promise.allSettled([
                 withTimeout(
+                    // One attempt may use the whole budget: a receiver still
+                    // validating a batch after 3 s would otherwise be sent it
+                    // again and validate it twice while under load.
                     peer.longCall(request, true, {
                         sleepTime: 250,
                         retries: 2,
+                        timeoutMs: PEER_CALL_TIMEOUT_MS,
                     }),
                     PEER_CALL_TIMEOUT_MS,
                     peer,

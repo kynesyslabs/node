@@ -25,6 +25,21 @@ export interface BaseAdapterOptions {
     config?: OmniProtocolConfig
 }
 
+/** Where a peer said, in a verified hello reply, its Omni server listens. */
+interface OmniEndpoint {
+    /** Origin of the HTTP URL the advertisement was verified for. */
+    origin: string
+    port: number
+}
+
+function originOf(httpUrl: string): string | null {
+    try {
+        return new URL(httpUrl).origin
+    } catch {
+        return null
+    }
+}
+
 /**
  * Deep clone OmniProtocolConfig to avoid mutation
  */
@@ -47,6 +62,7 @@ export abstract class BaseOmniAdapter {
     protected readonly connectionPool: ConnectionPool
     /** Peers answered over HTTP only, keyed by identity, until the given time. */
     private readonly httpOnlyUntil = new Map<string, number>()
+    private readonly omniEndpoints = new Map<string, OmniEndpoint>()
 
     constructor(options: BaseAdapterOptions = {}) {
         this.config = cloneConfig(options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG)
@@ -78,7 +94,7 @@ export abstract class BaseOmniAdapter {
      * A peer whose OmniProtocol call failed stays on HTTP for the cooldown,
      * so a closed Omni port costs one connect timeout, not one per call.
      */
-    shouldUseOmni(peerIdentity: string): boolean {
+    shouldUseOmni(peerIdentity: string, httpUrl?: string): boolean {
         const { mode, omniPeers } = this.config.migration
 
         if (this.isHttpOnly(peerIdentity)) {
@@ -89,7 +105,16 @@ export abstract class BaseOmniAdapter {
             case "HTTP_ONLY":
                 return false
             case "OMNI_PREFERRED":
-                return omniPeers.has(peerIdentity)
+                if (!omniPeers.has(peerIdentity)) {
+                    return false
+                }
+                // The port was advertised for one address; once the peer
+                // moves, it says nothing about the new host.
+                return (
+                    httpUrl === undefined ||
+                    this.endpointFor(peerIdentity, httpUrl) !== null ||
+                    !this.omniEndpoints.has(peerIdentity)
+                )
             case "OMNI_ONLY":
                 return true
             default:
@@ -118,6 +143,37 @@ export abstract class BaseOmniAdapter {
     markOmniPeer(peerIdentity: string): void {
         this.httpOnlyUntil.delete(peerIdentity)
         this.config.migration.omniPeers.add(peerIdentity)
+    }
+
+    /**
+     * Record the Omni port a peer advertised in a hello reply that proved it
+     * serves httpUrl. Calls to it then dial that host at that port.
+     */
+    recordOmniEndpoint(peerIdentity: string, httpUrl: string, port: number) {
+        const origin = originOf(httpUrl)
+        if (!origin || !Number.isInteger(port) || port < 1 || port > 65535) {
+            this.forgetOmniPeer(peerIdentity)
+            return
+        }
+        this.omniEndpoints.set(peerIdentity, { origin, port })
+        this.markOmniPeer(peerIdentity)
+    }
+
+    /** The peer no longer advertises an Omni server: back to HTTP. */
+    forgetOmniPeer(peerIdentity: string): void {
+        this.omniEndpoints.delete(peerIdentity)
+        this.config.migration.omniPeers.delete(peerIdentity)
+    }
+
+    private endpointFor(
+        peerIdentity: string,
+        httpUrl: string,
+    ): OmniEndpoint | null {
+        const endpoint = this.omniEndpoints.get(peerIdentity)
+        if (!endpoint || endpoint.origin !== originOf(httpUrl)) {
+            return null
+        }
+        return endpoint
     }
 
     /**
@@ -151,6 +207,20 @@ export abstract class BaseOmniAdapter {
         const omniPort = peerHttpPort + 1
 
         return `${protocol}://${host}:${omniPort}`
+    }
+
+    /**
+     * TCP connection string for a peer: the port it advertised for this
+     * address, else the HTTP port + 1 convention (OMNI_ONLY only).
+     */
+    protected omniConnectionString(peerIdentity: string, httpUrl: string) {
+        const endpoint = this.endpointFor(peerIdentity, httpUrl)
+        if (!endpoint) {
+            return this.httpToTcpConnectionString(httpUrl)
+        }
+        // Only plain-TCP servers advertise a port
+        const host = new URL(httpUrl).hostname
+        return `tcp://${host}:${endpoint.port}`
     }
 
     /**

@@ -241,6 +241,7 @@ export async function manageHelloPeer(
     const gossipAddr = GossipManager.isEnabled()
         ? GossipManager.getInstance().getListenAddr()
         : null
+    const omni = getSharedState.omniAdvert
 
     response.result = 200
     response.response = true
@@ -256,6 +257,7 @@ export async function manageHelloPeer(
                   },
               }
             : {}),
+        ...(omni ? { omni } : {}),
         syncData: peerManager.ourSyncData,
         genesisHash: ourGenesis,
         peerlist: peerManager

@@ -8,7 +8,7 @@
 import log from "src/utilities/logger"
 import { handleError } from "src/errors"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
-import Peer, { CallOptions } from "src/libs/peer/Peer"
+import Peer, { CallOptions, DEFAULT_RPC_TIMEOUT_MS } from "src/libs/peer/Peer"
 import PeerManager from "src/libs/peer/PeerManager"
 
 import { BaseOmniAdapter, BaseAdapterOptions } from "./BaseAdapter"
@@ -17,6 +17,7 @@ import {
     decodeNodeCallResponse,
 } from "../serialization/control"
 import { OmniOpcode } from "../protocol/opcodes"
+import { RequestTimeoutError } from "../types/errors"
 import { getSharedState } from "@/utilities/sharedState"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
@@ -35,10 +36,11 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
         peer: Peer,
         request: RPCRequest,
         isAuthenticated = true,
+        timeoutMs = DEFAULT_RPC_TIMEOUT_MS,
     ): Promise<RPCResponse> {
-        if (!this.shouldUseOmni(peer.identity)) {
+        if (!this.shouldUseOmni(peer.identity, peer.connection.string)) {
             // Use httpCall directly to avoid recursion through call()
-            return peer.httpCall(request, isAuthenticated)
+            return peer.httpCall(request, isAuthenticated, timeoutMs)
         }
 
         // REVIEW Wave 8.1: TCP transport implementation with ConnectionPool
@@ -50,7 +52,8 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 const omniPort = getSharedState.omniConfig.port
                 tcpConnectionString = `${this.getTcpProtocol()}://127.0.0.1:${omniPort}`
             } else {
-                tcpConnectionString = this.httpToTcpConnectionString(
+                tcpConnectionString = this.omniConnectionString(
+                    peer.identity,
                     peer.connection.string,
                 )
             }
@@ -73,7 +76,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                         "[PeerOmniAdapter] Node keys not available, falling back to HTTP",
                     )
                     // Use httpCall directly to avoid recursion through call()
-                    return peer.httpCall(request, isAuthenticated)
+                    return peer.httpCall(request, isAuthenticated, timeoutMs)
                 }
 
                 // Send authenticated via OmniProtocol
@@ -84,9 +87,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                     payload,
                     privateKey,
                     publicKey,
-                    {
-                        timeout: 30000, // 30 second timeout
-                    },
+                    { timeout: timeoutMs },
                 )
             } else {
                 // Send unauthenticated via OmniProtocol
@@ -95,9 +96,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                     tcpConnectionString,
                     OmniOpcode.NODE_CALL,
                     payload,
-                    {
-                        timeout: 30000, // 30 second timeout
-                    },
+                    { timeout: timeoutMs },
                 )
             }
 
@@ -116,6 +115,21 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 extra: decoded.extra,
             }
         } catch (error) {
+            // A slow answer on a live connection is what HTTP reports as a
+            // 504. Retrying over HTTP would put the call behind the client
+            // traffic Omni exists to avoid, and double its wait.
+            if (error instanceof RequestTimeoutError) {
+                log.warning(
+                    `[PeerOmniAdapter] [${request.method}] no answer from ${peer.identity} within ${timeoutMs}ms`,
+                )
+                PeerManager.markPeerOffline(peer)
+                return {
+                    result: 504,
+                    response: "Request timeout",
+                    require_reply: false,
+                    extra: { code: "ETIMEDOUT", transport: "omni" },
+                }
+            }
             handleError(error, "NETWORK", {
                 source: "OmniProtocol PeerAdapter.adaptCall",
             })
@@ -135,7 +149,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
             this.markHttpPeer(peer.identity)
 
             // Use httpCall directly to avoid recursion through call()
-            return peer.httpCall(request, isAuthenticated)
+            return peer.httpCall(request, isAuthenticated, timeoutMs)
         }
     }
 
@@ -149,7 +163,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
         isAuthenticated = true,
         options?: CallOptions,
     ): Promise<RPCResponse> {
-        if (!this.shouldUseOmni(peer.identity)) {
+        if (!this.shouldUseOmni(peer.identity, peer.connection.string)) {
             return peer.longCall(request, isAuthenticated, options)
         }
 

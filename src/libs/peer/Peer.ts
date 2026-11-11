@@ -26,7 +26,11 @@ export interface CallOptions {
     sleepTime?: number
     /** Response codes that don't trigger retry (default: []) */
     allowedCodes?: number[]
+    /** Per-attempt answer timeout, HTTP and Omni alike (default: DEFAULT_RPC_TIMEOUT_MS) */
+    timeoutMs?: number
 }
+
+export const DEFAULT_RPC_TIMEOUT_MS = 3000
 
 export default class Peer {
     // connection informations
@@ -259,6 +263,7 @@ export default class Peer {
                     this,
                     request,
                     isAuthenticated,
+                    options?.timeoutMs,
                 )
             } catch (error) {
                 log.error(
@@ -269,13 +274,14 @@ export default class Peer {
         }
 
         // HTTP fallback / default path
-        return await this.httpCall(request, isAuthenticated)
+        return await this.httpCall(request, isAuthenticated, options?.timeoutMs)
     }
 
     // Single HTTP call (no retry logic - use longCall for retries)
     async httpCall(
         request: RPCRequest,
         isAuthenticated = true,
+        timeoutMs = DEFAULT_RPC_TIMEOUT_MS,
     ): Promise<RPCResponse> {
         const timestamp = Date.now()
         const timestampReadable = new Date(timestamp).toISOString()
@@ -334,7 +340,7 @@ export default class Peer {
         try {
             // Create AbortController for connection timeout (covers TCP handshake + HTTP request)
             const abortController = new AbortController()
-            const RPC_TIMEOUT_MS = 3000
+            const RPC_TIMEOUT_MS = timeoutMs
             timeoutId = setTimeout(() => {
                 abortController.abort()
             }, RPC_TIMEOUT_MS)
