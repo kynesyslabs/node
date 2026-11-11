@@ -2246,12 +2246,24 @@ export default class HandleGCR {
         const overCap = settlementBatchesOverCap(orderDeterministically(batches))
         // Stale parameters would refuse correctly priced batches on this node alone.
         await ensureNetworkParametersCurrent()
-        const minimumFee = await nativeTransferFeeOs()
+        // The parameters are the same on every node, so a fee that is not an
+        // amount fails the batches everywhere instead of the whole block.
+        let minimumFee: bigint | null = null
+        let feeError = ""
+        try {
+            minimumFee = await nativeTransferFeeOs()
+        } catch (error) {
+            feeError = error instanceof Error ? error.message : String(error)
+        }
         const chainId = settlementChainId()
         for (const tx of batches) {
             if (refused.has(tx.hash)) continue
             if (overCap.has(tx.hash)) {
                 refuse(tx, "over the per-block settlement batch cap")
+                continue
+            }
+            if (minimumFee === null) {
+                refuse(tx, `the native transfer fee is not an amount: ${feeError}`)
                 continue
             }
             const parsed = parseSettlement(tx)

@@ -298,6 +298,12 @@ describe("a failing settlement is included as failed with no edits", () => {
         expect(logged.some(m => m.includes(reason))).toBe(true)
     }
 
+    it("a native transfer fee that is not an amount, without failing the block", async () => {
+        const tx = batch(proven([pay(ALICE, BOB.account, OS, 5n)], tipBalances()))
+        getSharedState.networkFee = 0.5
+        await expectFailed(tx, "native transfer fee is not an amount")
+    })
+
     it("bad signature", async () => {
         const t = pay(ALICE, BOB.account, 1n * OS, 5n)
         t.signature = pay(BOB, BOB.account, 1n * OS, 5n).signature
