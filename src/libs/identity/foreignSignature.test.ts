@@ -58,10 +58,36 @@ describe("judgeOwnSignature", () => {
         ).toBe("ours")
     })
 
-    it("skips when there is no record yet", () => {
+    it("only warns when there is no record for a known chain", () => {
+        const verdict = judgeOwnSignature(
+            block(500, "x"),
+            null,
+            "genesis-a",
+            never,
+        )
+        expect(verdict.kind).toBe("ambiguous")
+        expect((verdict as { reason: string }).reason).toContain("500")
+        expect((verdict as { reason: string }).reason).toContain("hash x")
+        expect((verdict as { reason: string }).reason).toContain(
+            "no signing record",
+        )
+    })
+
+    it("accepts a block this process signed when there is no record", () => {
         expect(
-            judgeOwnSignature(block(500, "x"), null, "genesis-a", never).kind,
+            judgeOwnSignature(
+                block(500, "mine"),
+                null,
+                "genesis-a",
+                hash => hash === "mine",
+            ).kind,
         ).toBe("ours")
+    })
+
+    it("skips when there is no record and the genesis is unknown", () => {
+        expect(judgeOwnSignature(block(500, "x"), null, null, never).kind).toBe(
+            "ours",
+        )
     })
 
     it("skips a record of another chain or an unknown genesis", () => {
@@ -174,9 +200,33 @@ describe("checkOwnSignature", () => {
         ).not.toThrow()
     })
 
-    it("does nothing on a fresh node", () => {
-        expect(checkOwnSignature(block(11, "bb", 1010)).kind).toBe("ours")
+    it("only warns on a fresh node with no signing record", () => {
+        expect(checkOwnSignature(block(11, "bb", 1010)).kind).toBe("ambiguous")
         expect(signingHaltReason()).toBeNull()
+        expect(warning).toHaveBeenCalledTimes(1)
+        expect(error).not.toHaveBeenCalled()
+        expect(incrementCounter).not.toHaveBeenCalled()
+        expect(fs.existsSync(signingHaltMarkerPath(sharedState.identityFile))).toBe(
+            false,
+        )
+    })
+
+    it("warns without stopping signing when our key signed a block with no record", () => {
+        const verdict = checkOwnSignature(block(42, "unrecorded", 4200))
+        expect(verdict.kind).toBe("ambiguous")
+        expect(warning).toHaveBeenCalledTimes(1)
+        expect(warning.mock.calls[0][0]).toContain("42")
+        expect(warning.mock.calls[0][0]).toContain("unrecorded")
+        expect(warning.mock.calls[0][0]).toContain("no signing record")
+        expect(error).not.toHaveBeenCalled()
+        expect(incrementCounter).not.toHaveBeenCalled()
+        expect(signingHaltReason()).toBeNull()
+        expect(fs.existsSync(signingHaltMarkerPath(sharedState.identityFile))).toBe(
+            false,
+        )
+        expect(() =>
+            checkBlockSignature(sharedState.identityFile, round(43, 4300, "next")),
+        ).not.toThrow()
     })
 
     it("does not stop signing when the record cannot be read", () => {
