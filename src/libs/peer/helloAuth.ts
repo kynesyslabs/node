@@ -5,10 +5,17 @@ export const HELLO_AUTH_DOMAIN = "DEMOS_PEER_AUTH_V1"
 /**
  * Message a node signs in its hello reply: bound to the caller's nonce so it
  * cannot be replayed, and to the URL the node advertises so the caller can
- * check it matches the URL it dialed.
+ * check it matches the URL it dialed. A standby reply signs a different
+ * message, so the flag can be neither stripped nor added in transit; a
+ * signing node keeps the message older nodes verify.
  */
-export function helloResponseMessage(nonce: string, url: string): Uint8Array {
-    return new TextEncoder().encode(`${HELLO_AUTH_DOMAIN}:${nonce}:${url}`)
+export function helloResponseMessage(
+    nonce: string,
+    url: string,
+    standby = false,
+): Uint8Array {
+    const base = `${HELLO_AUTH_DOMAIN}:${nonce}:${url}`
+    return new TextEncoder().encode(standby ? `${base}:standby` : base)
 }
 
 /** Prefix of addPeer's refusal when another identity holds the URL. */

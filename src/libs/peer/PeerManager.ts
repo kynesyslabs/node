@@ -822,7 +822,8 @@ export default class PeerManager {
 
     /**
      * "verified": the reply is signed by the key we dialed for, over our
-     * nonce and the URL we dialed. "unsigned": a pre-upgrade node.
+     * nonce, the URL we dialed and its standby flag. "unsigned": a
+     * pre-upgrade node.
      * "invalid": someone else answered, or a bad signature.
      */
     static async verifyHelloResponse(
@@ -859,7 +860,7 @@ export default class PeerManager {
         }
         const valid = await TxValidatorPool.getInstance().verify({
             algorithm: signature.type,
-            message: helloResponseMessage(nonce, url),
+            message: helloResponseMessage(nonce, url, extra.standby === true),
             signature: hexToUint8Array(signature.data),
             publicKey: hexToUint8Array(identity),
         })

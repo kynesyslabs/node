@@ -44,11 +44,11 @@ export interface HelloPeerRequest {
  * Proof that the node answering this hello holds our key and serves the
  * URL we advertise. Bound to the caller's nonce so it cannot be replayed.
  */
-async function signHelloResponse(nonce: string) {
+async function signHelloResponse(nonce: string, standby = false) {
     const url = getSharedState.exposedUrl
     const signed = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
-        helloResponseMessage(nonce, url),
+        helloResponseMessage(nonce, url, standby),
     )
     return {
         identity: getSharedState.publicKeyHex,
@@ -266,15 +266,16 @@ export async function manageHelloPeer(
         ? GossipManager.getInstance().getListenAddr()
         : null
 
+    const standby = signingStopState(getSharedState.identityFile).stopped
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
         ...(callerKnownAt ? { callerKnownAt } : {}),
-        ...(signingStopState(getSharedState.identityFile).stopped
-            ? { standby: true }
+        ...(standby ? { standby: true } : {}),
+        ...(content.nonce
+            ? await signHelloResponse(content.nonce, standby)
             : {}),
-        ...(content.nonce ? await signHelloResponse(content.nonce) : {}),
         ...(gossipAddr
             ? {
                   gossip: {
