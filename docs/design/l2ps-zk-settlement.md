@@ -256,8 +256,9 @@ and expires the same transfers.
 
 - Nonce: above the sender's L1 account nonce and at most `MAX_NONCE_AHEAD`
   = 18 (two full batches) past it, and not a nonce this member already holds
-  unsettled for the sender. So a sender has at most 18 unsettled transfers on
-  one member.
+  unsettled for the sender in any of its subnets: they all settle against
+  the one L1 nonce. So a sender has at most 18 unsettled transfers on one
+  member.
 - Size: the stored envelope (the outer L2PS transaction as JSON) is at most
   `SETTLEMENT_ENVELOPE_MAX_BYTES` = 174,506 bytes, so a full batch of 9
   rows (each envelope with its about 180-byte row wrapper, 256 reserved) in
@@ -265,8 +266,11 @@ and expires the same transfers.
   make every batch it joins too big for the mempool. It is checked before
   the subnet lookup, the backlog read and the decrypt.
 - Balance: the sender's tip balance covers `amount + fee` of this transfer
-  plus every unsettled transfer this member holds for it (amounts and nonces
-  from the history, fees from the stored envelopes).
+  plus every unsettled transfer this member holds for it in any subnet
+  (amounts and nonces from the history, fees from the stored envelopes).
+  The history row is written before the transfer is queued, and a transfer
+  whose history or queue write fails is refused, so none is queued
+  uncounted.
 - Deferred: when the planner can place none of the transfers left in a
   cycle, they become `deferred`. Deferred rows are read in a window of their
   own next to the window of fresh rows, so they never keep fresh transfers
