@@ -263,6 +263,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PROD: ${PROD:-false}
       L2PS_ZK_ENABLED: ${L2PS_ZK_ENABLED:-false}
+      L2PS_SETTLEMENT_PROVERS: ${L2PS_SETTLEMENT_PROVERS:-1}
       # Written by `bun run setup`; the defaults equal the node's built-in ones.
       L2PS_HISTORY_RETENTION_DAYS: ${L2PS_HISTORY_RETENTION_DAYS:-0}
       L2PS_HISTORY_STORE_PLAINTEXT: ${L2PS_HISTORY_STORE_PLAINTEXT:-false}

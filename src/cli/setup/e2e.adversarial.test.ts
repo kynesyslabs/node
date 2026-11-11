@@ -48,18 +48,20 @@ beforeAll(() => {
         "src/config/envKeys.ts",
         "src/config/envFlags.ts",
         "src/libs/l2ps/zk/batchArtifacts.ts",
+        "src/libs/l2ps/zk/settlementArtifacts.ts",
         "src/features/zk/keys/verification_key_merkle.json",
         "src/libs/l2ps/zk/keys/batch_5/verification_key.json",
         "src/libs/l2ps/zk/keys/batch_10/verification_key.json",
+        "src/libs/l2ps/zk/keys/settlement_10/verification_key.json",
     ]) {
         copyFile(rel)
     }
     // A finished ZK build, so the run enables proofs without downloading anything.
-    for (const size of [5, 10]) {
-        const dir = path.join(copy, "src/libs/l2ps/zk/keys", `batch_${size}`)
-        fs.mkdirSync(path.join(dir, `l2ps_batch_${size}_js`), { recursive: true })
-        fs.writeFileSync(path.join(dir, `l2ps_batch_${size}.zkey`), "zkey")
-        fs.writeFileSync(path.join(dir, `l2ps_batch_${size}_js`, `l2ps_batch_${size}.wasm`), "wasm")
+    for (const [sub, name] of [["batch_5", "l2ps_batch_5"], ["batch_10", "l2ps_batch_10"], ["settlement_10", "l2ps_settlement_10"]]) {
+        const dir = path.join(copy, "src/libs/l2ps/zk/keys", sub)
+        fs.mkdirSync(path.join(dir, `${name}_js`), { recursive: true })
+        fs.writeFileSync(path.join(dir, `${name}.zkey`), "zkey")
+        fs.writeFileSync(path.join(dir, `${name}_js`, `${name}.wasm`), "wasm")
     }
     fs.writeFileSync(path.join(copy, ".env"), "# operator file\nRPC_PORT=53550\nPG_PASSWORD=pa=ss#word\nexport EXPOSED_URL=http://203.0.113.9:53550\n")
 })

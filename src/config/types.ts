@@ -162,6 +162,8 @@ export interface OmniConfig {
 export interface L2PSConfig {
     zkEnabled: boolean
     zkUseMainThread: boolean
+    /** Settlement prover subprocesses; each takes a core and about 4 GB while it proves. */
+    settlementProvers: number
     hashIntervalMs: number
     aggregationIntervalMs: number
     minBatchSize: number
