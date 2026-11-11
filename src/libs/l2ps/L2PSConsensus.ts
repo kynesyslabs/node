@@ -20,6 +20,7 @@ import HandleGCR, {
     isGCRMainEdit,
     type PendingGCRWrite,
 } from "@/libs/blockchain/gcr/handleGCR"
+import { applyTime, bindApplyTime, withBlockTime } from "@/libs/blockchain/gcr/applyTime"
 import Chain from "@/libs/blockchain/chain"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
@@ -155,11 +156,24 @@ export default class L2PSConsensus {
      *
      * With `pending`, the proofs' edits and status changes join the block's
      * pending state and commit with the block; the bookkeeping that follows
-     * from them runs once the block is durable.
+     * from them runs once the block is durable. `timestampSec` is the
+     * block's timestamp: what the edits stamp commits with the block, so it
+     * must not be this node's clock.
      */
     static async applyPendingProofs(
         blockNumber: number,
         simulate = false,
+        pending?: PendingGCRWrite,
+        timestampSec?: number,
+    ): Promise<L2PSConsensusResult> {
+        return await withBlockTime(timestampSec, () =>
+            this.applyPendingProofsAt(blockNumber, simulate, pending),
+        )
+    }
+
+    private static async applyPendingProofsAt(
+        blockNumber: number,
+        simulate: boolean,
         pending?: PendingGCRWrite,
     ): Promise<L2PSConsensusResult> {
         const result: L2PSConsensusResult = {
@@ -217,7 +231,7 @@ export default class L2PSConsensus {
                         result,
                     )
                 if (pending) {
-                    pending.sideEffects.push(process)
+                    pending.sideEffects.push(bindApplyTime(process))
                 } else {
                     await process()
                 }
@@ -253,7 +267,7 @@ export default class L2PSConsensus {
                 from: editAccount,
                 to: editAccount,
                 from_ed25519_address: editAccount,
-                timestamp: Date.now(),
+                timestamp: applyTime().getTime(),
                 gcr_edits: proof.gcr_edits,
             } as any,
             signature: null,
