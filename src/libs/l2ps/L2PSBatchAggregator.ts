@@ -861,7 +861,8 @@ export class L2PSBatchAggregator {
         if (this.settlement) return this.settlement
         const deps: SettlementDeps = {
             subnets: status => L2PSMempool.getSubnetsWithStatus(status),
-            rows: (l2psUid, status, limit) => L2PSMempool.getByUIDAndStatus(l2psUid, status, limit),
+            rows: (l2psUid, status, limit, offset) =>
+                L2PSMempool.getPageByUIDAndStatus(l2psUid, status, limit, offset),
             open: async (l2psUid, row) => {
                 const l2ps = await ParallelNetworks.getInstance().loadL2PS(l2psUid)
                 let inner: unknown
@@ -913,6 +914,7 @@ export class L2PSBatchAggregator {
             deferredTtlBlocks: SETTLEMENT_DEFERRED_TTL_BLOCKS,
             proverBackoffMs: 5_000,
             proverBackoffMaxMs: 300_000,
+            provers: Config.getInstance().l2ps.settlementProvers,
         })
         return this.settlement
     }

@@ -17,8 +17,14 @@
  * - A batch L1 includes as failed, or that expires unseen, puts its transfers
  *   back in the queue to be planned and proved again. Re-sending a transfer is
  *   safe: whichever batch lands second fails on its spent nonce.
- * - Proving runs in the prover subprocess; when it fails the subnet waits with
- *   a growing back-off instead of retrying every cycle, and other subnets go on.
+ * - A cycle plans every batch first, on the accounts no batch in flight or
+ *   planned before it touches, across subnets too, then proves up to
+ *   `provers` of them at once and submits them in plan order: the same queue
+ *   and tip give the same batches and the same submission order however the
+ *   proofs interleave.
+ * - Proving runs in the prover subprocesses; when a proof fails, or the
+ *   mempool refuses a batch, the subnet waits with a growing back-off instead
+ *   of retrying every cycle, and other subnets go on.
  * - A transfer whose batch failed SUSPECT_AFTER_FAILURES times, at proving or
  *   on L1, is proved alone from then on, so the transfers it was batched with
  *   settle without it. One that also fails alone that often is dropped, but
@@ -46,7 +52,8 @@ export type HistoryStatus = "pending" | "batched" | "confirmed" | "failed"
 export interface SettlementDeps {
     /** Subnets with rows in `status`. */
     subnets(status: L2PSStatus): Promise<string[]>
-    rows(l2psUid: string, status: L2PSStatus, limit: number): Promise<L2PSMempoolTx[]>
+    /** Rows in queue order from `offset`; throws when the read fails, so a failed read is never an empty queue. */
+    rows(l2psUid: string, status: L2PSStatus, limit: number, offset?: number): Promise<L2PSMempoolTx[]>
     /** Decrypts a queued row and opens its settlement transfer. Throws when the subnet cannot decrypt at all. */
     open(l2psUid: string, row: L2PSMempoolTx): Promise<TransferVerdict>
     tip(accounts: Iterable<string>): Promise<Map<string, TipAccount>>
@@ -93,6 +100,8 @@ export interface SettlementLimits {
     deferredTtlBlocks: number
     proverBackoffMs: number
     proverBackoffMaxMs: number
+    /** Proofs made at once: the size of the prover pool. */
+    provers: number
 }
 
 interface InFlightBatch {
@@ -110,7 +119,26 @@ interface InFlightBatch {
 /** Failed batches, at proving or on L1, after which a transfer is proved alone. */
 export const SUSPECT_AFTER_FAILURES = 2
 
-type FailureKind = "prove" | "l1"
+type FailureKind = "prove" | "submit" | "l1"
+
+/** A batch planned this cycle, waiting for its proof. */
+interface PlannedBatch {
+    l2psUid: string
+    plan: SettlementPlan
+    rows: L2PSMempoolTx[]
+    accounts: Set<string>
+    alone: boolean
+}
+
+type ProveOutcome =
+    | { ok: true; proof: SettlementProofResult; ms: number }
+    | { ok: false; error: unknown }
+
+/**
+ * An L1 failure that says nothing about the batch's transfers: the batch
+ * waited past its reference block's window, as any batch can under load.
+ */
+const NOT_THE_TRANSFERS = new Set(["TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE"])
 
 /** Why a transfer's batches failed, for isolating the transfer that breaks them. */
 interface Blame {
@@ -118,8 +146,9 @@ interface Blame {
     group: number
     /** Failed batches it was alone in. */
     alone: number
-    /** Proofs made and batches landed when it first failed alone. */
+    /** Proofs made, batches submitted and batches landed when it first failed alone. */
     provedAt: number
+    submittedAt: number
     landedAt: number
 }
 
@@ -148,6 +177,7 @@ export class SettlementAggregator {
     private readonly proverPause = new Map<string, { failures: number; until: number }>()
     private readonly blame = new Map<string, Blame>()
     private proofsMade = 0
+    private batchesSubmitted = 0
     private batchesLanded = 0
 
     constructor(
@@ -163,25 +193,114 @@ export class SettlementAggregator {
     /** One aggregation cycle; the caller paces cycles and keeps them from overlapping. */
     async cycle(): Promise<{ submitted: number; transfers: number }> {
         if (!this.recovered) {
+            // Throws on a failed read, so the next cycle recovers again
+            // instead of planning around batches it does not know of.
             await this.recoverBatched()
             this.recovered = true
         }
         await this.track()
 
-        let submitted = 0
-        let transfers = 0
-        const subnets = new Set([
-            ...(await this.deps.subnets(L2PS_STATUS.EXECUTED)),
-            ...(await this.deps.subnets(L2PS_STATUS.DEFERRED)),
-        ])
+        const subnets = [
+            ...new Set([
+                ...(await this.deps.subnets(L2PS_STATUS.EXECUTED)),
+                ...(await this.deps.subnets(L2PS_STATUS.DEFERRED)),
+            ]),
+        ].sort()
+        // A proof binds the tip balances of its accounts, so no two batches
+        // waiting to land may share one, whichever subnet planned them.
+        const claimed = this.lockedAccounts()
+        const planned: PlannedBatch[] = []
         for (const l2psUid of subnets) {
             if (this.deps.now() < (this.proverPause.get(l2psUid)?.until ?? 0)) continue
-            const result = await this.settleSubnet(l2psUid)
-            submitted += result.submitted
-            transfers += result.transfers
-            if (result.stop) break
+            planned.push(...(await this.planSubnet(l2psUid, claimed)))
         }
-        return { submitted, transfers }
+
+        const outcomes = await this.proveAll(planned)
+        const done = { submitted: 0, transfers: 0 }
+        const failed = new Set<string>()
+        const worked = new Set<string>()
+        for (const [i, batch] of planned.entries()) {
+            const outcome = outcomes[i]
+            const { l2psUid, plan } = batch
+            const hashes = plan.transfers.map(t => t.txHash)
+            if (outcome.ok === false) {
+                failed.add(l2psUid)
+                log.error(
+                    `[L2PS Settlement] Proving a ${plan.transfers.length}-transfer batch for ${l2psUid} failed; transfers stay queued: ${getErrorMessage(outcome.error)}`,
+                )
+                await this.blameFailure(hashes, batch.alone, "prove")
+                continue
+            }
+            this.proofsMade++
+            // Proof time bounds a subnet's throughput, so operators need it per batch.
+            log.info(
+                `[L2PS Settlement] Proved a ${plan.transfers.length}-transfer batch for ${l2psUid} in ${outcome.ms} ms`,
+            )
+
+            const l1TxHash = await this.deps.submit(l2psUid, settlementRecord(plan, outcome.proof), batch.rows)
+            if (!l1TxHash) {
+                // Proving it again at once would be refused again; the
+                // subnet backs off and its transfers are blamed like a
+                // failed proof, so one that breaks every batch is isolated.
+                failed.add(l2psUid)
+                log.warning(
+                    `[L2PS Settlement] The mempool refused a ${plan.transfers.length}-transfer batch for ${l2psUid}; transfers stay queued`,
+                )
+                await this.blameFailure(hashes, batch.alone, "submit")
+                continue
+            }
+            this.batchesSubmitted++
+            worked.add(l2psUid)
+
+            const rowHashes = batch.rows.map(row => row.hash)
+            await this.deps.setRows(rowHashes, L2PS_STATUS.BATCHED)
+            for (const hash of rowHashes) {
+                await this.deps.history(hash, "batched", "Included in an L1 settlement batch", l1TxHash)
+            }
+            this.inFlight.set(l1TxHash, {
+                l2psUid,
+                l1TxHash,
+                rowHashes,
+                accounts: batch.accounts,
+                submittedAt: this.deps.head(),
+                alone: batch.alone,
+            })
+            log.info(
+                `[L2PS Settlement] Submitted batch ${l1TxHash.slice(0, 16)}... for ${l2psUid}: ${plan.transfers.length} transfers, ${plan.changes.length} accounts`,
+            )
+            done.submitted++
+            done.transfers += plan.transfers.length
+        }
+
+        for (const l2psUid of worked) if (!failed.has(l2psUid)) this.proverPause.delete(l2psUid)
+        for (const l2psUid of failed) {
+            const failures = (this.proverPause.get(l2psUid)?.failures ?? 0) + 1
+            const pause = Math.min(this.limits.proverBackoffMs * 2 ** (failures - 1), this.limits.proverBackoffMaxMs)
+            this.proverPause.set(l2psUid, { failures, until: this.deps.now() + pause })
+            log.warning(`[L2PS Settlement] ${l2psUid}: next settlement attempt in ${pause} ms`)
+        }
+        return done
+    }
+
+    /** Proves the batches, up to `provers` at once; outcomes in plan order. */
+    private async proveAll(batches: PlannedBatch[]): Promise<ProveOutcome[]> {
+        const outcomes: ProveOutcome[] = new Array(batches.length)
+        let next = 0
+        const lane = async () => {
+            while (next < batches.length) {
+                const i = next++
+                const since = this.deps.now()
+                try {
+                    const proof = await this.deps.prove(batches[i].plan)
+                    outcomes[i] = { ok: true, proof, ms: this.deps.now() - since }
+                } catch (error) {
+                    outcomes[i] = { ok: false, error }
+                }
+            }
+        }
+        const lanes = Math.min(Math.max(1, Math.floor(this.limits.provers)), batches.length)
+        await Promise.all(Array.from({ length: lanes }, lane))
+        return outcomes
     }
 
     /**
@@ -190,8 +309,19 @@ export class SettlementAggregator {
      * row whose batch is unknown goes back to the queue.
      */
     private async recoverBatched(): Promise<void> {
+        // Every batched row, read in full before anything changes: a row
+        // left out would keep its accounts unlocked and stay batched for good.
+        const batched = new Map<string, L2PSMempoolTx[]>()
         for (const l2psUid of await this.deps.subnets(L2PS_STATUS.BATCHED)) {
-            const rows = await this.deps.rows(l2psUid, L2PS_STATUS.BATCHED, this.limits.queueWindow)
+            const rows: L2PSMempoolTx[] = []
+            for (;;) {
+                const page = await this.deps.rows(l2psUid, L2PS_STATUS.BATCHED, this.limits.queueWindow, rows.length)
+                rows.push(...page)
+                if (page.length < this.limits.queueWindow) break
+            }
+            batched.set(l2psUid, rows)
+        }
+        for (const [l2psUid, rows] of batched) {
             const byBatch = new Map<string, L2PSMempoolTx[]>()
             const orphans: string[] = []
             for (const row of rows) {
@@ -275,8 +405,10 @@ export class SettlementAggregator {
                     await this.deps.history(hash, "pending", why, batch.l1TxHash)
                 }
                 this.inFlight.delete(batch.l1TxHash)
-                // An unseen batch says nothing about its transfers.
-                if (status.state === "failed") await this.blameFailure(batch.rowHashes, batch.alone, "l1")
+                // An unseen or expired batch says nothing about its transfers.
+                if (status.state === "failed" && !NOT_THE_TRANSFERS.has(status.code ?? "")) {
+                    await this.blameFailure(batch.rowHashes, batch.alone, "l1")
+                }
                 log.warning(
                     `[L2PS Settlement] Batch ${batch.l1TxHash.slice(0, 16)}... for ${batch.l2psUid}: ${why}${status.message ? ` (${status.message})` : ""}`,
                 )
@@ -298,7 +430,7 @@ export class SettlementAggregator {
      */
     private async blameFailure(rowHashes: string[], alone: boolean, kind: FailureKind): Promise<void> {
         for (const hash of rowHashes) {
-            const blame = this.blame.get(hash) ?? { group: 0, alone: 0, provedAt: 0, landedAt: 0 }
+            const blame = this.blame.get(hash) ?? { group: 0, alone: 0, provedAt: 0, submittedAt: 0, landedAt: 0 }
             if (!alone) {
                 blame.group++
                 this.blame.set(hash, blame)
@@ -306,19 +438,26 @@ export class SettlementAggregator {
             }
             if (blame.alone === 0) {
                 blame.provedAt = this.proofsMade
+                blame.submittedAt = this.batchesSubmitted
                 blame.landedAt = this.batchesLanded
             }
             blame.alone++
             this.blame.set(hash, blame)
             const othersWorked =
-                kind === "prove" ? this.proofsMade > blame.provedAt : this.batchesLanded > blame.landedAt
+                kind === "prove"
+                    ? this.proofsMade > blame.provedAt
+                    : kind === "submit"
+                      ? this.batchesSubmitted > blame.submittedAt
+                      : this.batchesLanded > blame.landedAt
             if (blame.alone >= SUSPECT_AFTER_FAILURES && othersWorked) {
                 this.blame.delete(hash)
                 await this.drop(
                     { hash } as L2PSMempoolTx,
                     kind === "prove"
                         ? `could not be proved, alone, ${blame.alone} times while other transfers were; sign the transfer again`
-                        : `its settlement failed on L1, alone, ${blame.alone} times while other batches landed; sign the transfer again`,
+                        : kind === "submit"
+                          ? `its batch was refused by the mempool, alone, ${blame.alone} times while other batches were taken; sign the transfer again`
+                          : `its settlement failed on L1, alone, ${blame.alone} times while other batches landed; sign the transfer again`,
                 )
             }
         }
@@ -337,10 +476,12 @@ export class SettlementAggregator {
         log.debug(`[L2PS Settlement] Dropped transfer ${row.hash.slice(0, 16)}...: ${reason}`)
     }
 
-    private async settleSubnet(
-        l2psUid: string,
-    ): Promise<{ submitted: number; transfers: number; stop: boolean }> {
-        const done = { submitted: 0, transfers: 0, stop: false }
+    /**
+     * Plans this cycle's batches of a subnet over accounts not in `claimed`,
+     * and claims the accounts of each batch it plans.
+     */
+    private async planSubnet(l2psUid: string, claimed: Set<string>): Promise<PlannedBatch[]> {
+        const batches: PlannedBatch[] = []
         const head = this.deps.head()
         const parked: L2PSMempoolTx[] = []
         for (const row of await this.deps.rows(l2psUid, L2PS_STATUS.DEFERRED, this.limits.queueWindow)) {
@@ -355,7 +496,7 @@ export class SettlementAggregator {
         }
         const fresh = await this.deps.rows(l2psUid, L2PS_STATUS.EXECUTED, this.limits.queueWindow)
         const rows = [...fresh, ...parked]
-        if (rows.length < this.limits.minBatchSize) return done
+        if (rows.length < this.limits.minBatchSize) return batches
 
         const rowOf = new Map<string, L2PSMempoolTx>()
         const opened: DecryptedTransfer[] = []
@@ -367,7 +508,7 @@ export class SettlementAggregator {
                 // The subnet cannot decrypt (config missing or reloading):
                 // nothing about the rows is known, so they stay queued.
                 log.warning(`[L2PS Settlement] Cannot open ${l2psUid} transfers: ${getErrorMessage(error)}`)
-                return done
+                return batches
             }
             if (verdict.ok === false) {
                 await this.drop(row, verdict.reason)
@@ -376,7 +517,7 @@ export class SettlementAggregator {
             rowOf.set(row.hash, row)
             opened.push(verdict.transfer)
         }
-        if (opened.length === 0) return done
+        if (opened.length === 0) return batches
 
         const tip = await this.deps.tip(opened.flatMap(t => [t.from, t.to]))
         const minimumFee = await this.deps.minimumFee()
@@ -407,12 +548,11 @@ export class SettlementAggregator {
             nonces.set(account, state.nonce)
         }
 
-        const locked = this.lockedAccounts()
-        const unlocked = live.filter(t => !locked.has(t.from) && !locked.has(t.to))
-        let candidates = unlocked.filter(t => !this.isSuspect(t.txHash))
+        const unclaimed = live.filter(t => !claimed.has(t.from) && !claimed.has(t.to))
+        let candidates = unclaimed.filter(t => !this.isSuspect(t.txHash))
         // Fewest failures alone first, so a transfer that keeps failing alone
         // does not stop the others from showing that the prover works.
-        let suspects = unlocked
+        let suspects = unclaimed
             .filter(t => this.isSuspect(t.txHash))
             .sort((a, b) => (this.blame.get(a.txHash)?.alone ?? 0) - (this.blame.get(b.txHash)?.alone ?? 0))
 
@@ -440,61 +580,21 @@ export class SettlementAggregator {
                 break
             }
 
-            let proof: SettlementProofResult
-            const provingSince = this.deps.now()
-            try {
-                proof = await this.deps.prove(plan)
-                this.proofsMade++
-                this.proverPause.delete(l2psUid)
-                // Proof time bounds a subnet's throughput, so operators need it per batch.
-                log.info(
-                    `[L2PS Settlement] Proved a ${plan.transfers.length}-transfer batch for ${l2psUid} in ${this.deps.now() - provingSince} ms`,
-                )
-            } catch (error) {
-                const failures = (this.proverPause.get(l2psUid)?.failures ?? 0) + 1
-                const pause = Math.min(
-                    this.limits.proverBackoffMs * 2 ** (failures - 1),
-                    this.limits.proverBackoffMaxMs,
-                )
-                this.proverPause.set(l2psUid, { failures, until: this.deps.now() + pause })
-                log.error(
-                    `[L2PS Settlement] Proving a ${plan.transfers.length}-transfer batch for ${l2psUid} failed; transfers stay queued, next attempt in ${pause} ms: ${getErrorMessage(error)}`,
-                )
-                await this.blameFailure(
-                    plan.transfers.map(t => t.txHash),
-                    alone,
-                    "prove",
-                )
-                return done
-            }
-
-            const batchRows = plan.transfers.map(t => rowOf.get(t.txHash)!)
-            const l1TxHash = await this.deps.submit(l2psUid, settlementRecord(plan, proof), batchRows)
-            if (!l1TxHash) {
-                // The mempool refused it; the next cycle plans again.
-                done.stop = true
-                return done
-            }
-
-            const rowHashes = batchRows.map(row => row.hash)
-            await this.deps.setRows(rowHashes, L2PS_STATUS.BATCHED)
-            for (const hash of rowHashes) {
-                await this.deps.history(hash, "batched", "Included in an L1 settlement batch", l1TxHash)
-            }
+            // Every account a transfer names, not only those the changes
+            // list: an account left out could be planned again elsewhere.
             const accounts = new Set(plan.changes.map(c => c.account))
-            this.inFlight.set(l1TxHash, {
+            for (const t of plan.transfers) {
+                accounts.add(t.from)
+                accounts.add(t.to)
+            }
+            for (const account of accounts) claimed.add(account)
+            batches.push({
                 l2psUid,
-                l1TxHash,
-                rowHashes,
+                plan,
+                rows: plan.transfers.map(t => rowOf.get(t.txHash)!),
                 accounts,
-                submittedAt: this.deps.head(),
                 alone,
             })
-            log.info(
-                `[L2PS Settlement] Submitted batch ${l1TxHash.slice(0, 16)}... for ${l2psUid}: ${plan.transfers.length} transfers, ${plan.changes.length} accounts`,
-            )
-            done.submitted++
-            done.transfers += plan.transfers.length
 
             const planned = new Set(plan.transfers.map(t => t.txHash))
             const settles = (t: DecryptedTransfer) =>
@@ -502,6 +602,6 @@ export class SettlementAggregator {
             candidates = candidates.filter(settles)
             suspects = suspects.filter(settles)
         }
-        return done
+        return batches
     }
 }

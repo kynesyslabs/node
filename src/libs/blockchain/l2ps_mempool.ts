@@ -812,6 +812,26 @@ export default class L2PSMempool {
     }
 
     /**
+     * A page of a subnet's rows in one status, in queue order. Unlike
+     * getByUIDAndStatus a failed read throws: the settlement loop must not
+     * take a database fault for an empty queue.
+     */
+    public static async getPageByUIDAndStatus(
+        l2psUid: string,
+        status: L2PSStatus,
+        limit: number,
+        offset = 0,
+    ): Promise<L2PSMempoolTx[]> {
+        await this.ensureInitialized()
+        return await this.repo.find({
+            where: { l2ps_uid: l2psUid, status },
+            order: { timestamp: "ASC", hash: "ASC" },
+            take: limit,
+            skip: offset,
+        })
+    }
+
+    /**
      * Delete transactions by their hashes (for cleanup after confirmation)
      * 
      * @param hashes - Array of transaction hashes to delete
