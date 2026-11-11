@@ -12,7 +12,11 @@ import {
 } from "@kynesyslabs/demosdk/encryption"
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
-import { helloResponseMessage, URL_BOUND_TO_OTHER } from "../peer/helloAuth"
+import {
+    helloOmniAdvertMessage,
+    helloResponseMessage,
+    URL_BOUND_TO_OTHER,
+} from "../peer/helloAuth"
 import GossipManager from "../gossip/GossipManager"
 import { parseNodeUrl } from "src/config"
 import { reportTwin } from "../peer/identityLiveness"
@@ -50,6 +54,43 @@ async function signHelloResponse(nonce: string) {
             type: getSharedState.signingAlgorithm,
             data: uint8ArrayToHex(signed.signature),
         },
+    }
+}
+
+/**
+ * Our Omni port, signed over the caller's nonce and our URL: a port
+ * rewritten on the way would otherwise send the caller's peer calls to
+ * another service on our host.
+ */
+async function signedOmniAdvert(nonce: string | undefined) {
+    const advert = getSharedState.omniAdvert
+    if (!advert || !nonce) {
+        return {}
+    }
+    const signed = await TxValidatorPool.getInstance().sign(
+        getSharedState.signingAlgorithm,
+        helloOmniAdvertMessage(nonce, getSharedState.exposedUrl, advert.port),
+    )
+    return {
+        omni: {
+            port: advert.port,
+            signature: {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signed.signature),
+            },
+        },
+    }
+}
+
+function gossipAdvert() {
+    const multiaddr = GossipManager.isEnabled()
+        ? GossipManager.getInstance().getListenAddr()
+        : null
+    if (!multiaddr) {
+        return {}
+    }
+    return {
+        gossip: { peerId: GossipManager.getInstance().getPeerId(), multiaddr },
     }
 }
 
@@ -238,26 +279,14 @@ export async function manageHelloPeer(
 
     // INFO: Return a list of all our connected peers
 
-    const gossipAddr = GossipManager.isEnabled()
-        ? GossipManager.getInstance().getListenAddr()
-        : null
-    const omni = getSharedState.omniAdvert
-
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
         ...(callerKnownAt ? { callerKnownAt } : {}),
         ...(content.nonce ? await signHelloResponse(content.nonce) : {}),
-        ...(gossipAddr
-            ? {
-                  gossip: {
-                      peerId: GossipManager.getInstance().getPeerId(),
-                      multiaddr: gossipAddr,
-                  },
-              }
-            : {}),
-        ...(omni ? { omni } : {}),
+        ...gossipAdvert(),
+        ...(await signedOmniAdvert(content.nonce)),
         syncData: peerManager.ourSyncData,
         genesisHash: ourGenesis,
         peerlist: peerManager

@@ -22,8 +22,8 @@ spiked to 45-71 s. Two causes:
 
 ### Which peers use Omni
 
-- A node whose Omni server runs on plain TCP adds `omni: { port }` to its
-  hello replies. The port is the one it actually listens on, not a guess.
+- A node whose Omni server runs on plain TCP adds `omni: { port, signature }`
+  to its hello replies. The port is the one it actually listens on, not a guess.
   With Omni TLS on it advertises nothing: the outbound connection pool only
   speaks plain TCP.
 - The caller records the port only from a hello reply verified as signed by
@@ -33,16 +33,18 @@ spiked to 45-71 s. Two causes:
 - Calls dial the verified URL's host at the advertised port. If the peer's
   URL later moves to another origin, the record no longer applies and the
   peer is called over HTTP until a verified reply from the new address.
-- A verified reply without the field (rc.7, Omni off, TLS) drops the record.
+- A verified reply without a validly signed advert (rc.7, Omni off, TLS, or
+  a port that is not the one signed) drops the record.
   Unsigned replies never change it.
 - Calls to ourselves go to the loopback Omni port.
 - `OMNI_ONLY` keeps the RPC port + 1 fallback for peers without a record.
 
-The port itself is not under the hello signature: changing the signed message
-would break verification with rc.7 peers. Anyone able to rewrite the reply
-could already rewrite everything else in it; the port can only point to
-another port on the host that proved the URL, and every Omni request still
-carries our signed auth block.
+The port carries its own signature, over the caller's nonce, the signed URL
+and the port, under a separate domain (`DEMOS_PEER_OMNI_V1`, see
+`helloAuth.ts`). Putting it under the hello signature would change the
+message rc.7 peers verify. An advert whose signature does not verify is
+treated as no advert, so a port rewritten on the way cannot point our calls
+at another service on the host that proved the URL.
 
 ### Failures
 

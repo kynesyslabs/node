@@ -5,8 +5,9 @@
  * our nonce by the key we dialed, moves a binding.
  */
 
-import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { beforeEach, describe, expect, it } from "bun:test"
 import { mockCore } from "src/utilities/testSupport/coreMocks"
+import { mockHelloDeps } from "./testSupport/helloMocks"
 
 const OUR_KEY = "0x" + "aa".repeat(32)
 const ALICE = "0x" + "a1".repeat(32)
@@ -27,23 +28,7 @@ const sharedState: Record<string, unknown> = {
 }
 
 mockCore(sharedState)
-jest.mock("src/libs/blockchain/validation/txValidatorPool", () => ({
-    __esModule: true,
-    default: {
-        getInstance: () => ({
-            verify: async () => true,
-            sign: async () => ({ signature: new Uint8Array(64) }),
-        }),
-    },
-}))
-jest.mock("src/libs/peer/syncClaims", () => ({
-    unknownSync: () => ({ status: false, block: null, block_hash: null }),
-    corroborateSyncData: async () => ({ status: false, block: null, block_hash: null }),
-}))
-jest.mock("src/libs/gossip/GossipManager", () => ({
-    __esModule: true,
-    default: { isEnabled: () => false },
-}))
+mockHelloDeps()
 
 const { default: PeerManager } = await import("src/libs/peer/PeerManager")
 const { Peer } = await import("src/libs/peer")
