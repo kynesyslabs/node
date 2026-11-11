@@ -1,6 +1,6 @@
 import { Config } from "src/config"
 import log from "src/utilities/logger"
-import { isNftGatingEnabled, loadNftAllowlist } from "./nftAllowlist"
+import { loadNftAllowlist } from "./nftAllowlist"
 import { probeSolanaEndpoints } from "./solanaRpc"
 
 /**
@@ -9,14 +9,9 @@ import { probeSolanaEndpoints } from "./solanaRpc"
  * that cannot verify proofs refuses to start rather than vote blind.
  */
 export async function ensureNftGatingReady(): Promise<void> {
-    if (!isNftGatingEnabled()) {
-        log.warning("[BOOT] validator NFT gating is OFF; any account can take a seat")
-        return
-    }
     if (Config.getInstance().identity.heliusApiKey.trim() === "") {
         throw new Error(
-            "[BOOT] HELIUS_API_KEY is not set; validator NFT gating needs a Helius key for proof checks " +
-                "and the staking page, or set VALIDATOR_NFT_REQUIRED=false on a development chain",
+            "[BOOT] HELIUS_API_KEY is not set; validator NFT gating needs a Helius key for proof checks and the staking page",
         )
     }
     loadNftAllowlist()
@@ -30,8 +25,7 @@ export async function ensureNftGatingReady(): Promise<void> {
     }
     if (!probes.some(probe => probe.ok)) {
         throw new Error(
-            "[BOOT] no Solana endpoint answers; set SOLANA_RPC or HELIUS_API_KEY, " +
-                "or set VALIDATOR_NFT_REQUIRED=false on a development chain",
+            "[BOOT] no Solana endpoint answers; set SOLANA_RPC or HELIUS_API_KEY",
         )
     }
 }

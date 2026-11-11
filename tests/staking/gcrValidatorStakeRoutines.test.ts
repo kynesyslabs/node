@@ -10,7 +10,6 @@ import {
 // NFT gating is off for the legacy lifecycle rules; the NFT suites turn it on.
 jest.mock("@/features/staking/nftAllowlist", () => ({
     __esModule: true,
-    isNftGatingEnabled: jest.fn(() => false),
     isAllowlistedMint: jest.fn(() => true),
 }))
 
@@ -84,6 +83,9 @@ function createMockRepo(seed: FakeRow | null = null) {
         findOneBy: jest.fn(async ({ address }: { address: string }) =>
             state.row && state.row.address === address ? state.row : null,
         ),
+        findBy: jest.fn(async ({ nft_mint }: { nft_mint: string }) =>
+            state.row && state.row.nft_mint === nft_mint ? [state.row] : [],
+        ),
         save: jest.fn(async (row: FakeRow) => {
             state.row = { ...row }
             return state.row
@@ -114,6 +116,7 @@ function stakeEdit(overrides: Record<string, unknown> = {}) {
         operation: "stake",
         amount: "10000000000000000000000000",
         connectionUrl: "https://v1.example",
+        nft: { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) },
         txhash: "0xtxstake",
         ...overrides,
     }

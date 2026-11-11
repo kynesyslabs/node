@@ -112,8 +112,6 @@ export interface CoreConfig {
      *  See `forking/decimal_planning/SPEC.md` and Mycelium epic E#3. */
     burnFee: number
     minValidatorStake: string
-    /** Whether a validator seat must be backed by an allowlisted node NFT. */
-    validatorNftRequired: boolean
 }
 
 // --- TLSNotary ---

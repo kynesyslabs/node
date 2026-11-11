@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Demos Node NFT Proof</title>
 <!--
-  Served by the node at /staking/validation while it holds no seat. The node
+  Served by the node at /staking while it holds no seat. The node
   injects its own address and relay paths in a <script id="node-config"> block.
 
   The proof is one Solana transaction signed by the wallet that holds the node
@@ -121,7 +121,7 @@
 
   if (!config || !DEMOS_ADDRESS.test(config.demosAddress || "")) {
     config = null;
-    set("nodeStatus", "This page has to be opened from your node at http://<node>:<rpc port>/staking/validation; it carries no node config.", "err");
+    set("nodeStatus", "This page has to be opened from your node at http://<node>:<rpc port>/staking; it carries no node config.", "err");
   } else {
     el("demos").value = config.demosAddress;
     config.rpcUrl = new URL(config.rpcUrl, location.href).toString();

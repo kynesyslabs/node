@@ -1,4 +1,4 @@
-import { isAllowlistedMint, isNftGatingEnabled } from "./nftAllowlist"
+import { isAllowlistedMint } from "./nftAllowlist"
 import { getMinValidatorStake } from "./minStake"
 import { VALIDATOR_STATUS_ACTIVE, VALIDATOR_STATUS_UNSTAKING } from "./constants"
 
@@ -10,7 +10,7 @@ export interface SeededValidatorNft {
     nft_mint?: string | null
     nft_owner?: string | null
     nft_proof_tx?: string | null
-    /** Test networks only: the seat holds without an NFT. */
+    /** Genesis only: the seat holds without an NFT. A snapshot row never is. */
     nft_exempt?: boolean | null
 }
 
@@ -30,13 +30,12 @@ export function nftExemptSeeds(rows: readonly SeededValidatorNft[]): string[] {
  * The reasons a seeded validator set breaks the NFT rules: every row that
  * holds a seat carries a proof, its mint is allowlisted, no mint backs two
  * seats, and the stake meets the minimum. An exempt row skips the NFT
- * fields and is still held to the minimum stake. Empty when gating is off.
+ * fields and is still held to the minimum stake.
  */
 export function seededNftReasons(
     rows: readonly SeededValidatorNft[],
     label: string,
 ): string[] {
-    if (!isNftGatingEnabled()) return []
     const reasons: string[] = []
     const min = getMinValidatorStake()
     const holders = new Map<string, string>()

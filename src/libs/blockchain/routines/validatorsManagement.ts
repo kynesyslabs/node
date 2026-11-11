@@ -14,7 +14,7 @@ import type {
     ValidatorChallengePayload,
     ValidatorNftProof,
 } from "src/features/staking/types"
-import { isAllowlistedMint, isNftGatingEnabled } from "src/features/staking/nftAllowlist"
+import { isAllowlistedMint } from "src/features/staking/nftAllowlist"
 import {
     verifyChallengeEvidence,
     verifyProofSupersedes,
@@ -151,9 +151,6 @@ export default class ValidatorsManagement {
         sender: string,
         txTimestampMs: number,
     ): Promise<StakeTxResult> {
-        if (!isNftGatingEnabled()) {
-            return { valid: true, message: "NFT gating disabled" }
-        }
         if (nft === undefined) {
             return {
                 valid: false,

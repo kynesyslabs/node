@@ -481,15 +481,13 @@ export async function serverRpcBun() {
     }
 
     // Staking page and its proof relay; the routes answer only while this
-    // node has no seat, and never exist without NFT gating.
-    if (Config.getInstance().core.validatorNftRequired) {
-        try {
-            const { registerStakingValidationRoutes } =
-                await import("@/features/staking/validationPage")
-            registerStakingValidationRoutes(server)
-        } catch (error) {
-            log.warning("[RPC] Failed to register staking page routes: " + error)
-        }
+    // node has no seat.
+    try {
+        const { registerStakingValidationRoutes } =
+            await import("@/features/staking/validationPage")
+        registerStakingValidationRoutes(server)
+    } catch (error) {
+        log.warning("[RPC] Failed to register staking page routes: " + error)
     }
 
     log.info(`[RPC Call] Server is running on ${rpcBind}:${port}`, true)

@@ -10,9 +10,9 @@ import {
     injectPageConfig,
 } from "./pageBudget"
 
-export const STAKING_PAGE_PATH = "/staking/validation"
-export const STAKING_RELAY_PATH = "/staking/validation/rpc"
-export const STAKING_SUBMIT_PATH = "/staking/validation/submit"
+export const STAKING_PAGE_PATH = "/staking"
+export const STAKING_RELAY_PATH = "/staking/rpc"
+export const STAKING_SUBMIT_PATH = "/staking/submit"
 
 /** Upstream calls made for one relayed request before answering 502. */
 export const RELAY_ATTEMPTS = 2

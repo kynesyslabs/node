@@ -51,7 +51,7 @@ export interface GenesisValidatorSeed {
     nft_mint?: string | null
     nft_owner?: string | null
     nft_proof_tx?: string | null
-    /** Test networks only: the seat holds without an NFT. */
+    /** Genesis only: the seat holds without an NFT. */
     nft_exempt?: boolean | null
 }
 
@@ -119,9 +119,6 @@ export async function ensureValidatorSeed(
     const snapshotSeeds = await loadSnapshotValidators()
     if (snapshotSeeds.length > 0) {
         refuseOnNftReasons(snapshotSeeds, "validators.jsonl")
-        for (const address of nftExemptSeeds(snapshotSeeds)) {
-            log.warning(`[BOOT] ${address} is seated without an NFT (nft_exempt); test networks only`)
-        }
         log.warning(
             `[BOOT] validators table empty; re-seeding ${snapshotSeeds.length} entries from data/snapshot/validators.jsonl`,
         )

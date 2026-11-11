@@ -29,15 +29,13 @@ describe("launchValidatorRows", () => {
         expect(JSON.stringify(row)).not.toContain("nft_exempt")
     })
 
-    it("keeps nft_exempt only when true", () => {
-        const rows = launchValidatorRows([entry(0, { nft_exempt: true }), entry(1, { nft_exempt: false })])
-        expect(rows[0].nft_exempt).toBe(true)
-        expect(rows[1]).not.toHaveProperty("nft_exempt")
+    it("refuses an nft_exempt entry: the exemption is a genesis rule", () => {
+        expect(() => launchValidatorRows([entry(0, { nft_exempt: true })])).toThrow("nft_exempt is a genesis rule")
+        expect(launchValidatorRows([entry(1, { nft_exempt: false })])[0]).not.toHaveProperty("nft_exempt")
     })
 
-    it("rejects malformed NFT fields and a non-boolean nft_exempt", () => {
+    it("rejects malformed NFT fields", () => {
         expect(() => launchValidatorRows([entry(0, { nft_mint: "" })])).toThrow("nft_mint must be null")
         expect(() => launchValidatorRows([entry(0, { nft_proof_tx: 5 })])).toThrow("nft_proof_tx must be null")
-        expect(() => launchValidatorRows([entry(0, { nft_exempt: "yes" })])).toThrow("nft_exempt must be a boolean")
     })
 })

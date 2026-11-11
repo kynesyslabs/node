@@ -1,7 +1,6 @@
 import { createHash } from "crypto"
 import fs from "fs"
 import path from "path"
-import { Config } from "src/config"
 import log from "src/utilities/logger"
 
 /**
@@ -55,15 +54,10 @@ export function parseAllowlist(
     return new Set(mints)
 }
 
-/** Whether validator seats must be backed by an allowlisted NFT. */
 /** The allowlist shipped with the node and the digest its sorted mints must hash to. */
 export const NFT_ALLOWLIST_PATH = "data/nft-allowlist.json"
 export const NFT_ALLOWLIST_SHA256 =
     "3da7c881016692f1724c34c4d68ce6233e6f34eb3a5cf34323022c8930bab116"
-
-export function isNftGatingEnabled(): boolean {
-    return Config.getInstance().core.validatorNftRequired
-}
 
 /**
  * Read the allowlist from disk. Throws when gating is on and the file is

@@ -60,7 +60,6 @@ export const DEFAULT_CONFIG: AppConfig = {
         networkFee: 1,
         burnFee: 1,
         minValidatorStake: demToOs(1000).toString(),
-        validatorNftRequired: true,
         identityFile: ".demos_identity",
         peerListFile: "demos_peerlist.json",
         exposedUrl: "", // calculated from serverPort if empty

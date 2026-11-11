@@ -1,9 +1,7 @@
 import { describe, expect, it, jest } from "@jest/globals"
 
-const gating = { on: true }
 jest.mock("@/features/staking/nftAllowlist", () => ({
     __esModule: true,
-    isNftGatingEnabled: jest.fn(() => gating.on),
     isAllowlistedMint: jest.fn((mint: string) => mint !== "3BadMintxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
 }))
 
@@ -71,11 +69,5 @@ describe("a seeded validator set under NFT gating", () => {
 
     it("ignores exited rows, which hold no seat", () => {
         expect(seededNftReasons([row({ status: "0", nft_mint: null, nft_owner: null, nft_proof_tx: null })], "g")).toEqual([])
-    })
-
-    it("checks nothing when gating is off", () => {
-        gating.on = false
-        expect(seededNftReasons([row({ nft_mint: null })], "g")).toEqual([])
-        gating.on = true
     })
 })

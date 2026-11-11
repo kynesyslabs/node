@@ -10,7 +10,6 @@ import {
 // NFT gating is off for the legacy lifecycle rules; the NFT suites turn it on.
 jest.mock("@/features/staking/nftAllowlist", () => ({
     __esModule: true,
-    isNftGatingEnabled: jest.fn(() => false),
     isAllowlistedMint: jest.fn(() => true),
 }))
 
@@ -41,7 +40,11 @@ jest.mock("@/libs/blockchain/chain", () => ({
 // we need to control.
 jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
-    default: { getGCRValidatorStatus: jest.fn(), getAccountBalance: jest.fn() },
+    default: {
+        getGCRValidatorStatus: jest.fn(),
+        getAccountBalance: jest.fn(),
+        getGCRValidatorByMint: jest.fn(async () => null),
+    },
 }))
 
 // sharedState pulls in the whole framework (Chain → Peer → SDK/utils);
@@ -84,6 +87,7 @@ beforeAll(async () => {
 })
 
 const SENDER = "deadbeef"
+const NFT = { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) }
 
 // Payload amounts ride as bigint-encoded strings; the constant itself is a
 // bigint (demToOs result).
@@ -91,16 +95,21 @@ const MIN_STAKE = DEFAULT_MIN_VALIDATOR_STAKE.toString()
 // Flat fee-breakdown total pinned by the calculateCurrentGas mock above.
 const GAS_FEE = 2n
 
-function stakeTx(amount: string, connectionUrl = "https://v.example") {
+function stakeTx(amount: string, connectionUrl = "https://v.example", nft: object | null = NFT) {
     return {
         content: {
             type: "validatorStake",
             from: SENDER,
             from_ed25519_address: SENDER,
-            data: ["validatorStake", { amount, connectionUrl }],
+            data: ["validatorStake", { amount, connectionUrl, ...(nft && { nft }) }],
         },
         hash: "0xtxstake",
     } as any
+}
+
+/** A stake on a held seat: no proof travels with it. */
+function topUpTx(amount: string) {
+    return stakeTx(amount, "https://v.example", null)
 }
 
 function unstakeTx() {
@@ -195,7 +204,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             status: VALIDATOR_STATUS_ACTIVE,
             staked_amount: DEFAULT_MIN_VALIDATOR_STAKE,
         } as never)
-        const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx("1"))
+        const r = await ValidatorsManagement.manageValidatorStakeTx(topUpTx("1"))
         expect(r.valid).toBe(true)
     })
 
@@ -206,7 +215,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             staked_amount: DEFAULT_MIN_VALIDATOR_STAKE,
         } as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx("100"),
+            topUpTx("100"),
         )
         expect(r.valid).toBe(true)
     })
@@ -326,7 +335,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
         } as never)
         jest.mocked(GCR.getAccountBalance).mockResolvedValue(1000n as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx("600"),
+            topUpTx("600"),
         )
         expect(r.valid).toBe(false)
         expect(r.message).toContain("Insufficient balance")
@@ -342,7 +351,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             (600n + 300n + GAS_FEE) as never,
         )
         const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx("300"),
+            topUpTx("300"),
         )
         expect(r.valid).toBe(true)
     })

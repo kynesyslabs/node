@@ -36,7 +36,6 @@ jest.mock("@/libs/blockchain/routines/calculateCurrentGas", () => ({
 const allowlisted = new Set<string>()
 jest.mock("@/features/staking/nftAllowlist", () => ({
     __esModule: true,
-    isNftGatingEnabled: jest.fn(() => true),
     isAllowlistedMint: jest.fn((mint: string) => allowlisted.has(mint)),
 }))
 

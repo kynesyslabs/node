@@ -57,7 +57,7 @@ describe("HourlyBudget", () => {
 })
 
 describe("injectPageConfig", () => {
-    const config = { demosAddress: "0x" + "ab".repeat(32), rpcUrl: "http://n/staking/validation/rpc", submitUrl: "http://n/staking/validation/submit" }
+    const config = { demosAddress: "0x" + "ab".repeat(32), rpcUrl: "http://n/staking/rpc", submitUrl: "http://n/staking/submit" }
 
     it("adds the JSON block before </head>", () => {
         const html = injectPageConfig("<html><head><title>t</title></head><body></body></html>", config)

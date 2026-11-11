@@ -19,7 +19,6 @@ import {
 // NFT gating is off for the legacy lifecycle rules; the NFT suites turn it on.
 jest.mock("@/features/staking/nftAllowlist", () => ({
     __esModule: true,
-    isNftGatingEnabled: jest.fn(() => false),
     isAllowlistedMint: jest.fn(() => true),
 }))
 
@@ -53,7 +52,11 @@ jest.mock("@/libs/blockchain/chain", () => ({
 
 jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
-    default: { getGCRValidatorStatus: jest.fn(), getAccountBalance: jest.fn() },
+    default: {
+        getGCRValidatorStatus: jest.fn(),
+        getAccountBalance: jest.fn(),
+        getGCRValidatorByMint: jest.fn(async () => null),
+    },
 }))
 
 // sharedState pulls in the whole framework — substitute a minimal stand-in.
@@ -110,6 +113,7 @@ interface Row {
     valid_at: number | null
     unstake_requested_at: number | null
     unstake_available_at: number | null
+    nft_mint?: string | null
 }
 
 function createRepo() {
@@ -118,6 +122,9 @@ function createRepo() {
         rows,
         findOneBy: jest.fn(async ({ address }: { address: string }) =>
             rows.get(address) ?? null,
+        ),
+        findBy: jest.fn(async ({ nft_mint }: { nft_mint: string }) =>
+            [...rows.values()].filter(row => row.nft_mint === nft_mint),
         ),
         save: jest.fn(async (row: Row) => {
             rows.set(row.address, { ...row })
@@ -130,12 +137,13 @@ function createRepo() {
 // ---------- tx factories ----------
 
 const SENDER = "aabbcc"
+const NFT = { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) }
 
 // Payload amounts ride as bigint-encoded strings; the constant itself is a
 // bigint (demToOs result).
 const MIN_STAKE = DEFAULT_MIN_VALIDATOR_STAKE.toString()
 
-function stakeTx(amount: string, hash = "0xhash_stake") {
+function stakeTx(amount: string, hash = "0xhash_stake", nft: object | null = NFT) {
     return {
         hash,
         content: {
@@ -144,7 +152,7 @@ function stakeTx(amount: string, hash = "0xhash_stake") {
             from_ed25519_address: SENDER,
             data: [
                 "validatorStake",
-                { amount, connectionUrl: "https://v.example" },
+                { amount, connectionUrl: "https://v.example", ...(nft && { nft }) },
             ],
             gcr_edits: [],
         },
@@ -193,6 +201,7 @@ function attachStakingEdit(tx: any) {
             operation: "stake",
             amount: payload?.amount ?? "0",
             connectionUrl: payload?.connectionUrl ?? "",
+            nft: payload?.nft,
             txhash: tx.hash,
         })
     } else if (tx.content.type === "validatorUnstake") {
@@ -298,7 +307,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
             status: VALIDATOR_STATUS_ACTIVE,
             staked_amount: MIN_STAKE,
         } as never)
-        const t2 = stakeTx("500", "0xtx2")
+        const t2 = stakeTx("500", "0xtx2", null) // a top-up carries no proof
         await handleStakingTx(t2)
         attachStakingEdit(t2)
         row = await apply(t2, 200)
@@ -390,6 +399,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
                     {
                         amount: MIN_STAKE,
                         connectionUrl: "https://v.example",
+                        nft: NFT,
                     },
                 ],
                 gcr_edits: [],

@@ -30,6 +30,8 @@ function repoFor(table: string, sink: Map<string, unknown[]>, tag: string) {
         create: (row: unknown) => row,
         findOneBy: async (where: Record<string, unknown>) =>
             rows().find(row => matches(row, where)) ?? null,
+        findBy: async (where: Record<string, unknown>) =>
+            rows().filter(row => matches(row, where)),
         findOne: async ({ where }: { where: Record<string, unknown> }) =>
             rows().find(row => matches(row, where)) ?? null,
         find: async (options?: { where?: Record<string, unknown> }) =>
@@ -64,7 +66,6 @@ mock.module("@/model/datasource", datasourceModule)
 // These edits exercise staging, not the seat rules: no NFT and no minimum.
 const policyModule = () => ({
     __esModule: true,
-    isNftGatingEnabled: () => false,
     isAllowlistedMint: () => true,
 })
 mock.module("src/features/staking/nftAllowlist", policyModule)
@@ -91,6 +92,7 @@ const stake = (amount: string): any => ({
     account: "0xabc",
     amount,
     connectionUrl: "https://v1.example",
+    nft: { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) },
 })
 
 beforeEach(() => {

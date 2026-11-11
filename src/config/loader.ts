@@ -144,10 +144,6 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.MIN_VALIDATOR_STAKE,
                 d.core.minValidatorStake,
             ),
-            validatorNftRequired: envBool(
-                EnvKey.VALIDATOR_NFT_REQUIRED,
-                d.core.validatorNftRequired,
-            ),
             identityFile: envStr(EnvKey.IDENTITY_FILE, d.core.identityFile),
             peerListFile: envStr(EnvKey.PEER_LIST_FILE, d.core.peerListFile),
             exposedUrl: validateExposedUrl(

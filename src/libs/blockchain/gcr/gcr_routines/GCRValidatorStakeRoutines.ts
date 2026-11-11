@@ -13,7 +13,7 @@ import {
     VALIDATOR_STATUS_EXITED,
     VALIDATOR_STATUS_UNSTAKING,
 } from "src/features/staking/constants"
-import { isAllowlistedMint, isNftGatingEnabled } from "src/features/staking/nftAllowlist"
+import { isAllowlistedMint } from "src/features/staking/nftAllowlist"
 import { getMinValidatorStake } from "src/features/staking/minStake"
 
 /**
@@ -114,7 +114,6 @@ async function takeSeatNft(
     account: string,
     edit: GCREditValidatorStake,
 ): Promise<GCRResult | null> {
-    if (!isNftGatingEnabled()) return null
     const nft = edit.nft
     if (!nft || !nft.mint || !nft.owner || !nft.proofTx) {
         return { success: false, message: "Validator entrance requires an NFT proof" }

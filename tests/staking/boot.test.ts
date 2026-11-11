@@ -11,11 +11,9 @@ jest.mock("src/config", () => ({
     Config: { getInstance: () => ({ identity }) },
 }))
 
-const gating = { enabled: true }
 const loadNftAllowlist = jest.fn()
 jest.mock("@/features/staking/nftAllowlist", () => ({
     __esModule: true,
-    isNftGatingEnabled: () => gating.enabled,
     loadNftAllowlist,
 }))
 
@@ -30,12 +28,11 @@ import { ensureNftGatingReady } from "@/features/staking/boot"
 describe("ensureNftGatingReady", () => {
     beforeEach(() => {
         jest.clearAllMocks()
-        gating.enabled = true
         identity.heliusApiKey = "key"
         probes.splice(0, probes.length, { url: "https://mainnet.helius-rpc.com", ok: true })
     })
 
-    it("refuses to start without a Helius key while gating is on", async () => {
+    it("refuses to start without a Helius key", async () => {
         identity.heliusApiKey = "  "
         await expect(ensureNftGatingReady()).rejects.toThrow("HELIUS_API_KEY is not set")
         expect(loadNftAllowlist).not.toHaveBeenCalled()
@@ -49,12 +46,5 @@ describe("ensureNftGatingReady", () => {
     it("refuses when no endpoint answers", async () => {
         probes.splice(0, probes.length, { url: "https://mainnet.helius-rpc.com", ok: false })
         await expect(ensureNftGatingReady()).rejects.toThrow("no Solana endpoint answers")
-    })
-
-    it("needs nothing when gating is off", async () => {
-        gating.enabled = false
-        identity.heliusApiKey = ""
-        await expect(ensureNftGatingReady()).resolves.toBeUndefined()
-        expect(loadNftAllowlist).not.toHaveBeenCalled()
     })
 })

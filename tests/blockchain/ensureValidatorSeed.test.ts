@@ -10,7 +10,6 @@ import {
 // NFT gating is off for the legacy lifecycle rules; the NFT suites turn it on.
 jest.mock("@/features/staking/nftAllowlist", () => ({
     __esModule: true,
-    isNftGatingEnabled: jest.fn(() => false),
     isAllowlistedMint: jest.fn(() => true),
 }))
 
@@ -96,6 +95,10 @@ function makeSnapshotValidator(addr: string) {
         valid_at: 0,
         unstake_requested_at: null,
         unstake_available_at: null,
+        // A snapshot seat always carries its NFT; the mint is unique per address.
+        nft_mint: addr.slice(2, 46),
+        nft_owner: addr.slice(2, 46),
+        nft_proof_tx: addr.slice(2, 46),
     }
 }
 
@@ -393,12 +396,7 @@ describe("ensureValidatorSeed", () => {
         expect(result).toEqual({ reseeded: true, count: 1, source: "genesis" })
     })
 
-    describe("with NFT gating on", () => {
-        const gating = jest.requireMock("@/features/staking/nftAllowlist") as {
-            isNftGatingEnabled: jest.Mock<() => boolean>
-        }
-        beforeEach(() => gating.isNftGatingEnabled.mockReturnValue(true))
-        afterEach(() => gating.isNftGatingEnabled.mockReturnValue(false))
+    describe("NFT rules", () => {
 
         it("refuses a genesis seat without an NFT", async () => {
             repoCount.mockResolvedValue(0)
@@ -416,27 +414,21 @@ describe("ensureValidatorSeed", () => {
             expect(rows[0]).toMatchObject({ nft_mint: null, nft_owner: null, nft_proof_tx: null })
         })
 
-        it("seats an nft_exempt snapshot row and refuses one without the flag", async () => {
+        it("refuses a snapshot row without an NFT; the flag is a genesis rule", async () => {
             const addr = "0x" + "b".repeat(64)
-            repoCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1)
+            repoCount.mockResolvedValue(0)
             snapshotLoader.mockResolvedValue({
                 available: true,
                 manifest: { files: { "validators.jsonl": {} } },
                 streamValidators: async function* () {
-                    yield { ...makeSnapshotValidator(addr), nft_exempt: true }
+                    yield {
+                        ...makeSnapshotValidator(addr),
+                        nft_mint: null,
+                        nft_owner: null,
+                        nft_proof_tx: null,
+                    }
                 },
             })
-            await expect(ensureValidatorSeed({})).resolves.toEqual({
-                reseeded: true,
-                count: 1,
-                source: "snapshot",
-            })
-            const [rows] = insertChain.values.mock.calls[0] as [Record<string, unknown>[]]
-            expect(rows[0]).not.toHaveProperty("nft_exempt")
-
-            repoCount.mockReset()
-            repoCount.mockResolvedValue(0)
-            snapshotLoader.mockResolvedValue(snapshotWith([addr]))
             await expect(ensureValidatorSeed({})).rejects.toThrow(/validators\.jsonl\[0\].*nft_mint/)
         })
     })

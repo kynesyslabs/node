@@ -69,7 +69,7 @@ describe("staking page", () => {
 
     it("serves the page with the node address and relay paths injected", async () => {
         const h = createValidationHandlers(deps())
-        const res = await h.page(new Request("http://node/staking/validation"))
+        const res = await h.page(new Request("http://node/staking"))
         expect(res.status).toBe(200)
         expect(res.headers.get("content-type")).toMatch(/text\/html/)
         const html = await res.text()
@@ -80,7 +80,7 @@ describe("staking page", () => {
 
     it("is a 404 on every route once the node holds a seat", async () => {
         const h = createValidationHandlers(deps({ nodeHoldsSeat: jest.fn(async () => true) }))
-        expect((await h.page(new Request("http://node/staking/validation"))).status).toBe(404)
+        expect((await h.page(new Request("http://node/staking"))).status).toBe(404)
         expect((await h.relay(post(STAKING_RELAY_PATH, { jsonrpc: "2.0", id: 1, method: "getBlockHeight" }))).status).toBe(404)
         expect((await h.submit(post(STAKING_SUBMIT_PATH, { transaction: "AA==" }))).status).toBe(404)
     })
@@ -89,7 +89,7 @@ describe("staking page", () => {
         const h = createValidationHandlers(
             deps({ nodeHoldsSeat: jest.fn(async () => { throw new AnchorUnreachableError("timeout") }) }),
         )
-        const res = await h.page(new Request("http://node/staking/validation"))
+        const res = await h.page(new Request("http://node/staking"))
         expect(res.status).toBe(503)
         expect((await body(res)).error).toMatch(/anchor node unreachable: timeout/)
     })
