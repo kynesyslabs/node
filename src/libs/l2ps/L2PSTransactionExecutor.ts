@@ -721,11 +721,10 @@ export default class L2PSTransactionExecutor {
     }
 
     /**
-     * A sender's transfers this node admitted to the subnet that have not
+     * A sender's transfers this node admitted, in any subnet, that have not
      * settled or failed yet, past its account nonce, lowest nonce first.
      */
     static async getUnsettledBySender(
-        l2psUid: string,
         from: string,
         accountNonce: bigint,
         limit: number,
@@ -735,7 +734,6 @@ export default class L2PSTransactionExecutor {
         const ds = dsInstance.getDataSource()
         return ds.getRepository(L2PSTransaction).find({
             where: {
-                l2ps_uid: l2psUid,
                 from_address: from,
                 status: In(["pending", "batched"]),
                 nonce: MoreThan(accountNonce.toString() as unknown as bigint),

@@ -24,7 +24,7 @@ const confirmTx = jest.fn(async (..._args: unknown[]) => ({ success: true }))
 const recordTransaction = jest.fn(async (..._args: unknown[]): Promise<void> => undefined)
 const updateTransactionStatus = jest.fn(async (..._args: unknown[]): Promise<void> => undefined)
 /** History rows of the sender's queued transfers; each envelope decrypts to `__inner`. */
-let unsettled: { encrypted_hash: string; encrypted_payload: { __inner: unknown } }[] = []
+let unsettled: { l2ps_uid: string; encrypted_hash: string; encrypted_payload: { __inner: unknown } }[] = []
 
 mock.module("src/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
 mock.module("src/libs/blockchain/transaction", () => ({ __esModule: true, default: { confirmTx } }))
@@ -52,7 +52,9 @@ mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
         execute,
         recordTransaction,
         updateTransactionStatus,
-        getUnsettledBySender: async (..._args: unknown[]) => unsettled,
+        // As the query reads them: filtered by subnet only when given one.
+        getUnsettledBySender: async (...args: unknown[]) =>
+            unsettled.filter(row => args.length < 4 || row.l2ps_uid === args[0]),
     },
 }))
 const checkInnerTxBalance = jest.fn(async (..._args: unknown[]): Promise<string | null> => null)
@@ -116,8 +118,8 @@ function decrypted(t: ReturnType<typeof signedTransfer>, mutate?: (inner: any) =
 }
 
 /** Records `t` as already queued here for its sender, as the history holds it. */
-function queued(t: ReturnType<typeof signedTransfer>) {
-    unsettled.push({ encrypted_hash: t.txHash, encrypted_payload: { __inner: innerTx(t, UID) } })
+function queued(t: ReturnType<typeof signedTransfer>, uid = UID) {
+    unsettled.push({ l2ps_uid: uid, encrypted_hash: t.txHash, encrypted_payload: { __inner: innerTx(t, uid) } })
 }
 
 const transfer = (over: Partial<Parameters<typeof signedTransfer>[0]> = {}) =>
@@ -268,6 +270,16 @@ describe("handleL2PS under l2psSettlement", () => {
         const response = await handleL2PS(tx)
         expect(response.result).toBe(400)
         expect(JSON.stringify(response)).toContain("already queued")
+    })
+
+    it("counts the sender's transfers queued in its other subnets, which spend the same L1 nonce and balance", async () => {
+        const OTHER = "other_subnet"
+        queued(transfer({ nonce: 5n, amount: 1n, l2psUid: OTHER }), OTHER)
+        decrypted(transfer({ nonce: 5n }))
+        const response = await handleL2PS(tx)
+        expect(response.result).toBe(400)
+        expect(JSON.stringify(response)).toContain("already queued")
+        expect(getL2PS.mock.calls.map(call => call[0])).toContain(OTHER)
     })
 
     it("refuses a transfer the balance covers only without the sender's queued transfers", async () => {

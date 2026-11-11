@@ -140,20 +140,26 @@ async function queuedTransfersOf(
     transfer: DecryptedTransfer,
     accountNonce: bigint,
 ): Promise<QueuedTransfer[]> {
-    // Nonces past the account nonce are unique per sender, so at most
-    // MAX_NONCE_AHEAD rows can be unsettled; one more shows a breach.
+    // Every subnet's: they all settle against the sender's one L1 nonce
+    // and balance. Nonces past the account nonce are unique per sender, so
+    // at most MAX_NONCE_AHEAD rows can be unsettled; one more shows a breach.
     const rows = await L2PSTransactionExecutor.getUnsettledBySender(
-        l2psUid,
         transfer.from,
         accountNonce,
         Number(MAX_NONCE_AHEAD) + 1,
     )
+    const instances = new Map<string, L2PS | null>([[l2psUid, l2psInstance]])
     const queued: QueuedTransfer[] = []
     for (const row of rows) {
         if (row.encrypted_hash === transfer.txHash || !row.encrypted_payload) continue
+        if (!instances.has(row.l2ps_uid)) {
+            instances.set(row.l2ps_uid, await getL2PSInstance(row.l2ps_uid).catch(() => null))
+        }
+        const instance = instances.get(row.l2ps_uid)
+        if (!instance) continue
         let inner: unknown
         try {
-            inner = await l2psInstance.decryptTx(row.encrypted_payload as unknown as L2PSTransaction)
+            inner = await instance.decryptTx(row.encrypted_payload as unknown as L2PSTransaction)
         } catch {
             continue
         }
