@@ -458,13 +458,18 @@ export default class L2PSMempool {
      * subnets however deep a backlog is.
      */
     public static async getExecutedSubnets(): Promise<string[]> {
+        return this.getSubnetsWithStatus(L2PS_STATUS.EXECUTED)
+    }
+
+    /** Subnets with at least one row in `status`, one row per subnet. */
+    public static async getSubnetsWithStatus(status: L2PSStatus): Promise<string[]> {
         await this.ensureInitialized()
 
         const rows = await this.repo
             .createQueryBuilder("tx")
             .select("tx.l2ps_uid", "l2ps_uid")
             .distinct(true)
-            .where("tx.status = :status", { status: L2PS_STATUS.EXECUTED })
+            .where("tx.status = :status", { status })
             .orderBy("tx.l2ps_uid", "ASC")
             .getRawMany()
         return rows.map(row => row.l2ps_uid)

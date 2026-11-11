@@ -16,6 +16,17 @@ import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN, HISTORY_RETENTION_SW
 import { RetentionSweepGate } from "./retentionSweepGate"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
+import ParallelNetworks from "./parallelNetworks"
+import { EXPIRED_TX_DEEP_WINDOW_MULTIPLIER } from "@/libs/blockchain/referenceBlockWindow"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
+import { SETTLEMENT_TRANSFERS } from "./settlement/encoding"
+import { SettlementAggregator, type SettlementDeps } from "./settlement/aggregator"
+import { openSettlementTransfer } from "./settlement/transfer"
+import { readTipAccounts } from "./settlement/tipState"
+import { planSettlement } from "./settlement/planner"
+import { proveSettlement } from "./settlement/prover"
+import { nativeTransferFeeOs, type SettlementRecord } from "./settlement/validation"
+import { ensureNetworkParametersCurrent } from "@/libs/blockchain/routines/loadNetworkParameters"
 
 // Re-export for backward compatibility
 export type { L2PSBatchPayload } from "./types"
@@ -100,6 +111,9 @@ export class L2PSBatchAggregator {
     /** Statistics tracking */
     private stats = this.createInitialStats()
 
+    /** The settlement loop under `l2psSettlement`; built on first use. */
+    private settlement: SettlementAggregator | null = null
+
     /**
      * Create initial statistics object
      * Helper to avoid code duplication when resetting stats
@@ -152,7 +166,13 @@ export class L2PSBatchAggregator {
         // Off unless L2PS_ZK_ENABLED=true: the image ships the proving keys, and
         // a proof costs a core for seconds per batch while validators do not
         // check it yet (docs/design/l2ps-zk-settlement.md).
-        if (this.zkRequested) {
+        if (l2psSettlementActive()) {
+            // Settlement proves every batch itself; the old batch proof
+            // (L2PS_ZK_ENABLED) is not made or checked under the fork.
+            if (this.zkRequested) {
+                log.info("[L2PS Batch Aggregator] L2PS_ZK_ENABLED is obsolete under l2psSettlement and is ignored")
+            }
+        } else if (this.zkRequested) {
             await this.initializeZkProver()
         } else {
             log.info("[L2PS Batch Aggregator] ZK batch proofs are off (L2PS_ZK_ENABLED is not true)")
@@ -258,7 +278,14 @@ export class L2PSBatchAggregator {
 
         try {
             this.isAggregating = true
-            await this.aggregateAndSubmitBatches()
+            if (l2psSettlementActive()) {
+                const { submitted, transfers } = await this.settlementLoop().cycle()
+                this.stats.totalBatchesCreated += submitted
+                this.stats.successfulSubmissions += submitted
+                this.stats.totalTransactionsBatched += transfers
+            } else {
+                await this.aggregateAndSubmitBatches()
+            }
 
             // Run cleanup after successful aggregation
             await this.cleanupOldBatchedTransactions()
@@ -463,6 +490,7 @@ export class L2PSBatchAggregator {
     private async createBatchPayload(
         l2psUid: string,
         transactions: L2PSMempoolTx[],
+        settlement?: SettlementRecord,
     ): Promise<L2PSBatchPayload> {
         const sharedState = getSharedState
 
@@ -499,6 +527,18 @@ export class L2PSBatchAggregator {
             .createHmac("sha256", hmacKey)
             .update(hmacData)
             .digest("hex")
+
+        if (settlement) {
+            return {
+                l2ps_uid: l2psUid,
+                encrypted_batch: encryptedBatch,
+                transaction_count: transactions.length,
+                batch_hash: batchHash,
+                transaction_hashes: transactionHashes,
+                authentication_tag: authenticationTag,
+                settlement,
+            }
+        }
 
         // Generate ZK proof if prover is available
         const zkProof = await this.generateZkProofForBatch(transactions, batchHash)
@@ -691,9 +731,9 @@ export class L2PSBatchAggregator {
      * to prevent cross-protocol signature reuse.
      * 
      * @param batchPayload - Encrypted batch payload (includes l2ps_uid)
-     * @returns true if submission was successful
+     * @returns the batch transaction's hash, or null when it was not submitted
      */
-    private async submitBatchToMempool(batchPayload: L2PSBatchPayload): Promise<boolean> {
+    private async submitBatchToMempool(batchPayload: L2PSBatchPayload): Promise<string | null> {
         try {
             const sharedState = getSharedState
 
@@ -701,7 +741,7 @@ export class L2PSBatchAggregator {
             if (this.zkEnabled && batchPayload.zk_proof) {
                 if (!this.zkProver) {
                     log.error("[L2PS Batch Aggregator] ZK proof provided but zkProver is not initialized")
-                    return false
+                    return null
                 }
 
                 const { proof, publicSignals, batchSize, finalStateRoot, totalVolume } = batchPayload.zk_proof
@@ -713,7 +753,7 @@ export class L2PSBatchAggregator {
                     totalVolumeBigInt = BigInt(totalVolume)
                 } catch {
                     log.error("[L2PS Batch Aggregator] Invalid BigInt values in ZK proof")
-                    return false
+                    return null
                 }
 
                 const isValid = await this.zkProver.verifyProof({
@@ -726,14 +766,14 @@ export class L2PSBatchAggregator {
                 })
                 if (!isValid) {
                     log.error(`[L2PS Batch Aggregator] Rejecting batch ${batchPayload.batch_hash.substring(0, 16)}...: invalid ZK proof`)
-                    return false
+                    return null
                 }
             }
 
             // Use keypair.publicKey (set by loadIdentity) instead of identity.ed25519
             if (!sharedState.keypair?.publicKey) {
                 log.error("[L2PS Batch Aggregator] Node keypair not loaded yet")
-                return false
+                return null
             }
 
             // Get node's public key as hex string for 'from' field
@@ -797,11 +837,11 @@ export class L2PSBatchAggregator {
 
             if (result.error) {
                 log.error(`[L2PS Batch Aggregator] Failed to add batch to mempool: ${result.error}`)
-                return false
+                return null
             }
 
             log.info(`[L2PS Batch Aggregator] Batch ${batchPayload.batch_hash.substring(0, 16)}... submitted to mempool (block ${result.confirmationBlock})`)
-            return true
+            return hash
 
         } catch (error: unknown) {
             const message = getErrorMessage(error)
@@ -809,8 +849,67 @@ export class L2PSBatchAggregator {
             if (error instanceof Error && error.stack) {
                 log.debug(`[L2PS Batch Aggregator] Stack trace: ${error.stack}`)
             }
-            return false
+            return null
         }
+    }
+
+    private settlementLoop(): SettlementAggregator {
+        if (this.settlement) return this.settlement
+        const deps: SettlementDeps = {
+            subnets: status => L2PSMempool.getSubnetsWithStatus(status),
+            rows: (l2psUid, status, limit) => L2PSMempool.getByUIDAndStatus(l2psUid, status, limit),
+            open: async (l2psUid, row) => {
+                const l2ps = await ParallelNetworks.getInstance().loadL2PS(l2psUid)
+                let inner: unknown
+                try {
+                    inner = await l2ps.decryptTx(row.encrypted_tx as any)
+                } catch (error) {
+                    return { ok: false, reason: `cannot decrypt: ${getErrorMessage(error)}` }
+                }
+                return openSettlementTransfer(inner as any, row.hash)
+            },
+            tip: accounts => readTipAccounts(accounts),
+            minimumFee: async () => {
+                // Stale parameters would drop correctly priced transfers.
+                await ensureNetworkParametersCurrent()
+                return nativeTransferFeeOs()
+            },
+            plan: planSettlement,
+            prove: proveSettlement,
+            submit: async (l2psUid, record, rows) =>
+                this.submitBatchToMempool(await this.createBatchPayload(l2psUid, rows, record)),
+            status: hash => Chain.getTransactionStatus(hash),
+            setRows: async (hashes, status) => {
+                await L2PSMempool.updateStatusBatch(hashes, status)
+            },
+            history: async (txHash, status, message, l1BatchHash, l1BlockNumber) => {
+                try {
+                    const executor = (await import("./L2PSTransactionExecutor")).default
+                    await executor.updateTransactionStatus(txHash, status, l1BlockNumber, message, l1BatchHash)
+                } catch (error) {
+                    log.warning(
+                        `[L2PS Batch Aggregator] Failed to update history for ${txHash.slice(0, 16)}...: ${getErrorMessage(error)}`,
+                    )
+                }
+            },
+            historyBatchHash: async (l2psUid, row) => {
+                const executor = (await import("./L2PSTransactionExecutor")).default
+                const record = await executor.getTransactionByHash(l2psUid, row.original_hash)
+                return record?.l1_batch_hash ?? null
+            },
+            head: () => getSharedState.lastBlockNumber ?? 0,
+            now: () => Date.now(),
+        }
+        this.settlement = new SettlementAggregator(deps, {
+            minBatchSize: this.MIN_BATCH_SIZE,
+            maxBatchesPerCycle: this.MAX_BATCHES_PER_CYCLE,
+            queueWindow: 4 * SETTLEMENT_TRANSFERS * this.MAX_BATCHES_PER_CYCLE,
+            expiryBlocks:
+                EXPIRED_TX_DEEP_WINDOW_MULTIPLIER * Math.max(getSharedState.referenceBlockRoom ?? 1, 1) + 1,
+            proverBackoffMs: 5_000,
+            proverBackoffMaxMs: 300_000,
+        })
+        return this.settlement
     }
 
     /**
@@ -833,10 +932,11 @@ export class L2PSBatchAggregator {
             }
 
             // Batched rows without edits never get a proof, and a proof is the
-            // only thing that removes a batched row.
-            const batchedWithoutEdits = await L2PSMempool.cleanupBatchedWithoutEdits(
-                this.CLEANUP_AGE_MS,
-            )
+            // only thing that removes a batched row. Under settlement no row
+            // carries edits, and a batched row waits for its L1 batch instead.
+            const batchedWithoutEdits = l2psSettlementActive()
+                ? 0
+                : await L2PSMempool.cleanupBatchedWithoutEdits(this.CLEANUP_AGE_MS)
             if (batchedWithoutEdits > 0) {
                 this.stats.cleanedUpTransactions += batchedWithoutEdits
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${batchedWithoutEdits} batched transactions without edits`)
