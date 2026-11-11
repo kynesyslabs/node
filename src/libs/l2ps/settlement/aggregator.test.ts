@@ -49,6 +49,8 @@ let head: number
 let now: number
 let proveCalls: number
 let proverFails: boolean
+/** Transfers the prover cannot build a witness for. */
+let poisoned: Set<string>
 let submitRefuses: boolean
 let minimumFee: bigint
 
@@ -75,8 +77,9 @@ function plan(transfers: DecryptedTransfer[], balances: Map<string, bigint>, non
 
 function deps(): SettlementDeps {
     return {
-        subnets: async status => ([...rows.values()].some(r => r.status === status) ? [UID] : []),
-        rows: async (_uid, status, limit) => [...rows.values()].filter(r => r.status === status).slice(0, limit) as any,
+        subnets: async status => [...new Set([...rows.values()].filter(r => r.status === status).map(r => r.l2ps_uid))],
+        rows: async (uid, status, limit) =>
+            [...rows.values()].filter(r => r.l2ps_uid === uid && r.status === status).slice(0, limit) as any,
         open: async (_uid, row: any) => openSettlementTransfer(row.encrypted_tx, row.hash),
         tip: async accounts => {
             const out = new Map<string, { balance: bigint; nonce: bigint }>()
@@ -85,9 +88,10 @@ function deps(): SettlementDeps {
         },
         minimumFee: async () => minimumFee,
         plan,
-        prove: async () => {
+        prove: async p => {
             proveCalls++
             if (proverFails) throw new Error("prover subprocess exited")
+            if (p.transfers.some(t => poisoned.has(t.txHash))) throw new Error("witness builder refused the batch")
             return { proof: { id: `proof${proveCalls}` }, publicSignals: [] }
         },
         submit: async (_uid, record, batchRows) => {
@@ -126,11 +130,11 @@ const LIMITS = {
     proverBackoffMaxMs: 60_000,
 }
 
-function queue(t: DecryptedTransfer, status: string = L2PS_STATUS.EXECUTED, inner: unknown = innerTx(t)) {
+function queue(t: DecryptedTransfer, status: string = L2PS_STATUS.EXECUTED, inner: unknown = innerTx(t), uid = UID) {
     rows.set(t.txHash, {
         hash: t.txHash,
         original_hash: `orig_${t.txHash}`,
-        l2ps_uid: UID,
+        l2ps_uid: uid,
         encrypted_tx: inner,
         status,
         block_number: head,
@@ -157,6 +161,7 @@ beforeEach(() => {
     now = 1_000_000
     proveCalls = 0
     proverFails = false
+    poisoned = new Set()
     submitRefuses = false
     minimumFee = FEE
 })
@@ -405,5 +410,93 @@ describe("SettlementAggregator", () => {
         expect(statusOf(stuck)).toBe(L2PS_STATUS.FAILED)
         expect(history.find(h => h.hash === stuck.txHash)).toMatchObject({ status: "failed" })
         expect(history.find(h => h.hash === stuck.txHash)!.message).toContain("not settled within 30 blocks")
+    })
+    describe("a transfer that breaks every batch it is in", () => {
+        const sink = (b: string) => "0x" + b.repeat(32)
+        let poison: DecryptedTransfer
+        let innocents: DecryptedTransfer[]
+
+        beforeEach(() => {
+            tip.set(DAVE.account, { balance: 10n, nonce: 0n })
+            poison = pay(ALICE, sink("e1"), 1n, 5n)
+            innocents = [pay(BOB, sink("e2"), 1n, 1n), pay(DAVE, sink("e3"), 1n, 1n)]
+            for (const t of [poison, ...innocents]) queue(t)
+        })
+
+        it("is isolated after two failed proofs, so the transfers batched with it settle, and is then dropped", async () => {
+            poisoned.add(poison.txHash)
+            const agg = new SettlementAggregator(deps(), LIMITS)
+
+            await agg.cycle()
+            now += 5_000
+            await agg.cycle()
+            expect(submitted).toHaveLength(0)
+
+            // Proved alone from here on; the back-off still paces the subnet.
+            now += 10_000
+            await agg.cycle()
+            now += 20_000
+            await agg.cycle()
+
+            expect(innocents.map(statusOf)).toEqual([L2PS_STATUS.BATCHED, L2PS_STATUS.BATCHED])
+            expect(submitted.map(s => s.rows)).toEqual(innocents.map(t => [t.txHash]))
+            expect(statusOf(poison)).toBe(L2PS_STATUS.FAILED)
+            expect(history.find(h => h.hash === poison.txHash && h.status === "failed")!.message).toContain(
+                "could not be proved",
+            )
+        })
+
+        it("is isolated after its batch failed on L1 twice, and dropped once others land while it fails alone", async () => {
+            const agg = new SettlementAggregator(deps(), LIMITS)
+            const failLast = async () => {
+                statuses.set(submitted[submitted.length - 1].l1, { state: "failed", blockNumber: head + 1, code: "TX_FAILED" })
+                head += 1
+                await agg.cycle()
+            }
+            await agg.cycle()
+            await failLast()
+            await failLast()
+            // Three batches of one transfer each, the poison's first.
+            expect(submitted.slice(2).map(s => s.rows)).toEqual([poison, ...innocents].map(t => [t.txHash]))
+
+            statuses.set(submitted[2].l1, { state: "failed", blockNumber: head + 1, code: "TX_FAILED" })
+            statuses.set(submitted[3].l1, { state: "included", blockNumber: head + 1 })
+            statuses.set(submitted[4].l1, { state: "included", blockNumber: head + 1 })
+            head += 1
+            await agg.cycle()
+            expect(statusOf(poison)).toBe(L2PS_STATUS.BATCHED)
+
+            await failLast()
+            expect(innocents.map(statusOf)).toEqual([L2PS_STATUS.CONFIRMED, L2PS_STATUS.CONFIRMED])
+            expect(statusOf(poison)).toBe(L2PS_STATUS.FAILED)
+            expect(history.find(h => h.hash === poison.txHash && h.status === "failed")!.message).toContain(
+                "failed on L1, alone, 2 times",
+            )
+        })
+
+        it("drops nothing while the prover fails every batch", async () => {
+            proverFails = true
+            const agg = new SettlementAggregator(deps(), LIMITS)
+            for (let i = 0; i < 12; i++) {
+                await agg.cycle()
+                now += LIMITS.proverBackoffMaxMs
+            }
+            expect(proveCalls).toBeGreaterThan(6)
+            expect([poison, ...innocents].map(statusOf)).toEqual([poison, ...innocents].map(() => L2PS_STATUS.EXECUTED))
+        })
+    })
+
+    it("keeps settling other subnets while one subnet's proofs fail", async () => {
+        const broken = pay(ALICE, BOB.account, 1n, 5n)
+        const fine = pay(BOB, CAROL.account, 1n, 1n)
+        queue(broken, L2PS_STATUS.EXECUTED, innerTx(broken), "subnet_broken")
+        queue(fine)
+        poisoned.add(broken.txHash)
+        const agg = new SettlementAggregator(deps(), LIMITS)
+
+        await agg.cycle()
+
+        expect(statusOf(fine)).toBe(L2PS_STATUS.BATCHED)
+        expect(statusOf(broken)).toBe(L2PS_STATUS.EXECUTED)
     })
 })

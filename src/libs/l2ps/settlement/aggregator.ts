@@ -17,8 +17,13 @@
  * - A batch L1 includes as failed, or that expires unseen, puts its transfers
  *   back in the queue to be planned and proved again. Re-sending a transfer is
  *   safe: whichever batch lands second fails on its spent nonce.
- * - Proving runs in the prover subprocess; when it fails the queue waits with
- *   a growing back-off instead of retrying every cycle.
+ * - Proving runs in the prover subprocess; when it fails the subnet waits with
+ *   a growing back-off instead of retrying every cycle, and other subnets go on.
+ * - A transfer whose batch failed SUSPECT_AFTER_FAILURES times, at proving or
+ *   on L1, is proved alone from then on, so the transfers it was batched with
+ *   settle without it. One that also fails alone that often is dropped, but
+ *   only once a proof or batch of someone else has worked since its first
+ *   failure alone: a prover or verifier that fails everything drops nothing.
  */
 import type { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 import type { TxStatus } from "@/libs/blockchain/chainTypes"
@@ -96,8 +101,26 @@ interface InFlightBatch {
     rowHashes: string[]
     accounts: Set<string>
     submittedAt: number
+    /** Proved alone, to isolate a transfer earlier batches failed with. */
+    alone: boolean
     /** Block the batch landed in; its accounts unlock once the tip is past it. */
     landedAt?: number
+}
+
+/** Failed batches, at proving or on L1, after which a transfer is proved alone. */
+export const SUSPECT_AFTER_FAILURES = 2
+
+type FailureKind = "prove" | "l1"
+
+/** Why a transfer's batches failed, for isolating the transfer that breaks them. */
+interface Blame {
+    /** Failed batches it shared with other transfers. */
+    group: number
+    /** Failed batches it was alone in. */
+    alone: number
+    /** Proofs made and batches landed when it first failed alone. */
+    provedAt: number
+    landedAt: number
 }
 
 export function settlementRecord(
@@ -121,8 +144,11 @@ export function settlementRecord(
 export class SettlementAggregator {
     private readonly inFlight = new Map<string, InFlightBatch>()
     private recovered = false
-    private proverFailures = 0
-    private proverPausedUntil = 0
+    /** Prover back-off per subnet: one subnet's failing proofs do not pause the others. */
+    private readonly proverPause = new Map<string, { failures: number; until: number }>()
+    private readonly blame = new Map<string, Blame>()
+    private proofsMade = 0
+    private batchesLanded = 0
 
     constructor(
         private readonly deps: SettlementDeps,
@@ -144,13 +170,12 @@ export class SettlementAggregator {
 
         let submitted = 0
         let transfers = 0
-        if (this.deps.now() < this.proverPausedUntil) return { submitted, transfers }
-
         const subnets = new Set([
             ...(await this.deps.subnets(L2PS_STATUS.EXECUTED)),
             ...(await this.deps.subnets(L2PS_STATUS.DEFERRED)),
         ])
         for (const l2psUid of subnets) {
+            if (this.deps.now() < (this.proverPause.get(l2psUid)?.until ?? 0)) continue
             const result = await this.settleSubnet(l2psUid)
             submitted += result.submitted
             transfers += result.transfers
@@ -195,6 +220,7 @@ export class SettlementAggregator {
                     rowHashes: group.map(row => row.hash),
                     accounts,
                     submittedAt: this.deps.head(),
+                    alone: false,
                 })
             }
         }
@@ -228,6 +254,8 @@ export class SettlementAggregator {
                         status.blockNumber,
                     )
                 }
+                this.batchesLanded++
+                for (const hash of batch.rowHashes) this.blame.delete(hash)
                 batch.landedAt = status.blockNumber ?? head
                 if (head > batch.landedAt) this.inFlight.delete(batch.l1TxHash)
                 log.info(
@@ -247,6 +275,8 @@ export class SettlementAggregator {
                     await this.deps.history(hash, "pending", why, batch.l1TxHash)
                 }
                 this.inFlight.delete(batch.l1TxHash)
+                // An unseen batch says nothing about its transfers.
+                if (status.state === "failed") await this.blameFailure(batch.rowHashes, batch.alone, "l1")
                 log.warning(
                     `[L2PS Settlement] Batch ${batch.l1TxHash.slice(0, 16)}... for ${batch.l2psUid}: ${why}${status.message ? ` (${status.message})` : ""}`,
                 )
@@ -262,7 +292,44 @@ export class SettlementAggregator {
         return locked
     }
 
+    /**
+     * Counts a failed batch against its transfers, and drops a transfer that
+     * failed alone SUSPECT_AFTER_FAILURES times while others still worked.
+     */
+    private async blameFailure(rowHashes: string[], alone: boolean, kind: FailureKind): Promise<void> {
+        for (const hash of rowHashes) {
+            const blame = this.blame.get(hash) ?? { group: 0, alone: 0, provedAt: 0, landedAt: 0 }
+            if (!alone) {
+                blame.group++
+                this.blame.set(hash, blame)
+                continue
+            }
+            if (blame.alone === 0) {
+                blame.provedAt = this.proofsMade
+                blame.landedAt = this.batchesLanded
+            }
+            blame.alone++
+            this.blame.set(hash, blame)
+            const othersWorked =
+                kind === "prove" ? this.proofsMade > blame.provedAt : this.batchesLanded > blame.landedAt
+            if (blame.alone >= SUSPECT_AFTER_FAILURES && othersWorked) {
+                this.blame.delete(hash)
+                await this.drop(
+                    { hash } as L2PSMempoolTx,
+                    kind === "prove"
+                        ? `could not be proved, alone, ${blame.alone} times while other transfers were; sign the transfer again`
+                        : `its settlement failed on L1, alone, ${blame.alone} times while other batches landed; sign the transfer again`,
+                )
+            }
+        }
+    }
+
+    private isSuspect(hash: string): boolean {
+        return (this.blame.get(hash)?.group ?? 0) >= SUSPECT_AFTER_FAILURES
+    }
+
     private async drop(row: L2PSMempoolTx, reason: string): Promise<void> {
+        this.blame.delete(row.hash)
         await this.deps.setRows([row.hash], L2PS_STATUS.FAILED)
         await this.deps.history(row.hash, "failed", reason)
         // A reason can carry the fee or the nonce, which only subnet members may see.
@@ -341,11 +408,24 @@ export class SettlementAggregator {
         }
 
         const locked = this.lockedAccounts()
-        let candidates = live.filter(t => !locked.has(t.from) && !locked.has(t.to))
+        const unlocked = live.filter(t => !locked.has(t.from) && !locked.has(t.to))
+        let candidates = unlocked.filter(t => !this.isSuspect(t.txHash))
+        // Fewest failures alone first, so a transfer that keeps failing alone
+        // does not stop the others from showing that the prover works.
+        let suspects = unlocked
+            .filter(t => this.isSuspect(t.txHash))
+            .sort((a, b) => (this.blame.get(a.txHash)?.alone ?? 0) - (this.blame.get(b.txHash)?.alone ?? 0))
 
         for (let n = 0; n < this.limits.maxBatchesPerCycle; n++) {
-            if (candidates.length < this.limits.minBatchSize) break
-            const plan = this.deps.plan(candidates, balances, nonces)
+            const alone = suspects.length > 0
+            const offered = alone ? [suspects[0]] : candidates
+            if (alone) suspects = suspects.slice(1)
+            else if (candidates.length < this.limits.minBatchSize) break
+            const plan = this.deps.plan(offered, balances, nonces)
+            if (alone && plan.transfers.length === 0) {
+                await this.deps.setRows([offered[0].txHash], L2PS_STATUS.DEFERRED)
+                continue
+            }
             if (plan.transfers.length === 0) {
                 // None of these can be placed at this tip. Deferring them (again)
                 // moves them behind the other deferred rows and out of the
@@ -363,18 +443,23 @@ export class SettlementAggregator {
             let proof: SettlementProofResult
             try {
                 proof = await this.deps.prove(plan)
-                this.proverFailures = 0
+                this.proofsMade++
+                this.proverPause.delete(l2psUid)
             } catch (error) {
-                this.proverFailures++
+                const failures = (this.proverPause.get(l2psUid)?.failures ?? 0) + 1
                 const pause = Math.min(
-                    this.limits.proverBackoffMs * 2 ** (this.proverFailures - 1),
+                    this.limits.proverBackoffMs * 2 ** (failures - 1),
                     this.limits.proverBackoffMaxMs,
                 )
-                this.proverPausedUntil = this.deps.now() + pause
+                this.proverPause.set(l2psUid, { failures, until: this.deps.now() + pause })
                 log.error(
                     `[L2PS Settlement] Proving a ${plan.transfers.length}-transfer batch for ${l2psUid} failed; transfers stay queued, next attempt in ${pause} ms: ${getErrorMessage(error)}`,
                 )
-                done.stop = true
+                await this.blameFailure(
+                    plan.transfers.map(t => t.txHash),
+                    alone,
+                    "prove",
+                )
                 return done
             }
 
@@ -398,6 +483,7 @@ export class SettlementAggregator {
                 rowHashes,
                 accounts,
                 submittedAt: this.deps.head(),
+                alone,
             })
             log.info(
                 `[L2PS Settlement] Submitted batch ${l1TxHash.slice(0, 16)}... for ${l2psUid}: ${plan.transfers.length} transfers, ${plan.changes.length} accounts`,
@@ -406,9 +492,10 @@ export class SettlementAggregator {
             done.transfers += plan.transfers.length
 
             const planned = new Set(plan.transfers.map(t => t.txHash))
-            candidates = candidates.filter(
-                t => !planned.has(t.txHash) && !accounts.has(t.from) && !accounts.has(t.to),
-            )
+            const settles = (t: DecryptedTransfer) =>
+                !planned.has(t.txHash) && !accounts.has(t.from) && !accounts.has(t.to)
+            candidates = candidates.filter(settles)
+            suspects = suspects.filter(settles)
         }
         return done
     }
