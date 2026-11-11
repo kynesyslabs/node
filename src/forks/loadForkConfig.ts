@@ -29,6 +29,7 @@ import type {
     XmRemoveCanonicalConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
+    TlsnRecvCapConfig,
     UnpinnedCommitteeConfig,
     Web2ProofBindingConfig,
     XmProofBindingConfig,
@@ -354,6 +355,9 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.tlsnProofEnforcement =
                 config as TlsnProofEnforcementConfig
             return
+        case "tlsnRecvCap":
+            getSharedState.forkConfig.tlsnRecvCap = config as TlsnRecvCapConfig
+            return
         case "atomicWork":
             getSharedState.forkConfig.atomicWork = config as AtomicWorkConfig
             return
@@ -552,6 +556,9 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
         case "tlsnProofEnforcement":
             // No payload beyond the base.
             return base as TlsnProofEnforcementConfig
+        case "tlsnRecvCap":
+            // No payload beyond the base.
+            return base as TlsnRecvCapConfig
         case "atomicWork":
             return base as AtomicWorkConfig
         case "editBinding":
