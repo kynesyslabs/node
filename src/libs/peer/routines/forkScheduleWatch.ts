@@ -19,9 +19,9 @@
  * under `warn`, a mismatch is only reported: stopping a node during a rolling
  * genesis edit far from any fork would cost liveness for no gain.
  *
- * A validator whose gasFeeSeparation treasury differs is the exception: both
- * already apply the fork, so every fee-bearing block splits them and there is
- * no later height to wait for. A round where one answers so is handled as a
+ * A validator whose gasFeeSeparation treasury differs while both already
+ * apply the fork is the exception: every fee-bearing block splits them and
+ * there is no later height to wait for. A round where one answers so is handled as a
  * round inside the window, at any height, and logged as an error.
  *
  * The watch is driven by inserted blocks, so a node that restarts inside the
@@ -325,7 +325,7 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
     await mapWithLimit(peers, PEER_CONCURRENCY, async peer => {
         try {
             const result = await withTimeout<Awaited<ReturnType<typeof agreement.checkPeerSchedule>>>(
-                agreement.checkPeerSchedule(peer, ours, { attempts: 1 }),
+                agreement.checkPeerSchedule(peer, ours, { attempts: 1, tip }),
                 PEER_TIMEOUT_MS,
                 { status: "unreachable", reason: "timed out" },
             )

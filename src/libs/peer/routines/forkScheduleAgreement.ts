@@ -11,8 +11,10 @@
  *
  * The gasFeeSeparation treasury is published beside its height, so a peer
  * whose fees go to another account is named as such rather than as an
- * unexplained digest difference: once both apply the fork, every fee-bearing
- * block splits them, whatever the height.
+ * unexplained digest difference. Once both apply the fork, every fee-bearing
+ * block splits them, whatever the height; before either applies it, the
+ * difference is a schedule mismatch like any other, urgent only near the
+ * activation height.
  */
 
 import { stableStringify } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
@@ -128,9 +130,9 @@ export type ScheduleComparison =
     /** The peer reports no fork data at all: nothing to compare. */
     | { status: "skipped" }
     /**
-     * `treasuryDiffers` when both sides schedule gasFeeSeparation with
-     * different treasuries: a split from the first fee-bearing block, not a
-     * future one.
+     * `treasuryDiffers` when both sides have gasFeeSeparation active at the
+     * tip with different treasuries: a split from the next fee-bearing block,
+     * not a future one.
      */
     | { status: "mismatch"; lines: string[]; treasuryDiffers?: boolean }
 
@@ -139,11 +141,13 @@ export type ScheduleComparison =
  * the forks whose heights differ, if any, are named. A peer on an older build
  * that publishes no digest is compared by the activation heights of the forks
  * both sides report and the chain id alone: a peer says nothing about a fork it
- * does not know.
+ * does not know. `tip` is this node's tip, against which a treasury difference
+ * is judged active or still ahead.
  */
 export function compareSchedules(
     ours: ScheduleView,
     theirs: ScheduleView,
+    tip: number,
 ): ScheduleComparison {
     if (theirs.digest !== undefined && ours.digest === theirs.digest) {
         return { status: "agree" }
@@ -163,8 +167,8 @@ export function compareSchedules(
     if (theirs.chainId !== undefined && ours.chainId !== theirs.chainId) {
         lines.push(`chainId: ours ${show(ours.chainId)}, theirs ${show(theirs.chainId)}`)
     }
-    const treasuryDiffers = scheduledTreasuriesDiffer(ours, theirs)
-    if (treasuryDiffers) {
+    const treasuryDiffers = activeTreasuriesDiffer(ours, theirs, tip)
+    if (scheduledTreasuriesDiffer(ours, theirs)) {
         lines.push(
             `gasFeeSeparation.treasuryAddress: ours ${ours.treasuryAddress}, theirs ${theirs.treasuryAddress}`,
         )
@@ -194,6 +198,21 @@ function scheduledTreasuriesDiffer(ours: ScheduleView, theirs: ScheduleView): bo
     )
 }
 
+/**
+ * A treasury difference splits the nodes only once both credit fees by it.
+ * Before that it is an ordinary schedule mismatch, which the watch escalates
+ * only near the activation height, so a fork scheduled far ahead does not
+ * stop a validator early.
+ */
+function activeTreasuriesDiffer(ours: ScheduleView, theirs: ScheduleView, tip: number): boolean {
+    const activeAt = (height: number | null | undefined) => typeof height === "number" && height <= tip
+    return (
+        scheduledTreasuriesDiffer(ours, theirs) &&
+        activeAt(ours.forks.gasFeeSeparation) &&
+        activeAt(theirs.forks.gasFeeSeparation)
+    )
+}
+
 export interface SchedulePeer {
     // `any` so that `Peer.call(request: RPCRequest)` is assignable without this module importing it.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -207,14 +226,15 @@ export type PeerScheduleCheck =
     | { status: "unreachable"; reason: string }
 
 /**
- * Ask a peer for its schedule and compare. A peer that is still starting
- * answers 503 until it has loaded its genesis; that is not a mismatch, so it is
- * asked again a few times and then reported as not ready, to be checked later.
+ * Ask a peer for its schedule and compare at `options.tip`. A peer that is
+ * still starting answers 503 until it has loaded its genesis; that is not a
+ * mismatch, so it is asked again a few times and then reported as not ready,
+ * to be checked later.
  */
 export async function checkPeerSchedule(
     peer: SchedulePeer,
     ours: ScheduleView,
-    options: { attempts?: number; sleepMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+    options: { tip: number; attempts?: number; sleepMs?: number; sleep?: (ms: number) => Promise<void> },
 ): Promise<PeerScheduleCheck> {
     const attempts = options.attempts ?? 5
     const sleepMs = options.sleepMs ?? 2000
@@ -241,7 +261,7 @@ export async function checkPeerSchedule(
         }
         const theirs = peerScheduleView(answer.response)
         if (!theirs) return { status: "skipped" }
-        return compareSchedules(ours, theirs)
+        return compareSchedules(ours, theirs, options.tip)
     }
     return { status: "not-ready" }
 }

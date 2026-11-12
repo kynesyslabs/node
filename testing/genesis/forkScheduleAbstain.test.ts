@@ -641,15 +641,15 @@ describe("a treasury mismatch end to end", () => {
     const TREASURY = "0x" + "7e".repeat(32)
     const OTHER = "0x" + "11".repeat(32)
 
-    async function withPeer(theirTreasury: string, run: () => Promise<void>) {
+    async function withPeer(theirTreasury: string, run: () => Promise<void>, height = 0) {
         const PeerManager = (await import("src/libs/peer/PeerManager")).default
         const agreement = await import("src/libs/peer/routines/forkScheduleAgreement")
         const saved = { forkConfig: getSharedState.forkConfig, chainId: getSharedState.chainId }
         getSharedState.forkConfig = {
-            gasFeeSeparation: { activationHeight: 0, treasuryAddress: TREASURY },
+            gasFeeSeparation: { activationHeight: height, treasuryAddress: TREASURY },
         } as never
         getSharedState.chainId = 7
-        const theirConfig = { gasFeeSeparation: { activationHeight: 0, treasuryAddress: theirTreasury } }
+        const theirConfig = { gasFeeSeparation: { activationHeight: height, treasuryAddress: theirTreasury } }
         const peer = {
             identity: "peer",
             connection: { string: "http://peer:53550" },
@@ -657,7 +657,7 @@ describe("a treasury mismatch end to end", () => {
                 result: 200,
                 response: {
                     chainId: 7,
-                    forks: { gasFeeSeparation: { activationHeight: 0, treasuryAddress: theirTreasury } },
+                    forks: { gasFeeSeparation: { activationHeight: height, treasuryAddress: theirTreasury } },
                     forkScheduleDigest: agreement.forkScheduleDigest(theirConfig as never, 7),
                 },
             }),
@@ -693,6 +693,21 @@ describe("a treasury mismatch end to end", () => {
         } finally {
             error.mockRestore()
         }
+    }, 30000)
+
+    it("waits for the window when the fork with the different treasury is still ahead of the tip", async () => {
+        await withPeer(
+            OTHER,
+            async () => {
+                await onBlockInserted(300)
+                expect(getSharedState.forkScheduleAbstain).toBe(false)
+                expect(gauges.fork_schedule_mismatch).toBe(1)
+                await onBlockInserted(960)
+                expect(getSharedState.forkScheduleAbstain).toBe(true)
+                expect(getSharedState.forkScheduleAbstainReason).not.toContain("treasury differs")
+            },
+            1000,
+        )
     }, 30000)
 
     it("runs a round on request, without waiting for a due block", async () => {

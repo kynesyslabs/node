@@ -290,7 +290,9 @@ async function warnOnForkScheduleMismatch(peer: Peer) {
         getSharedState.forkConfig as unknown as ForkConfigLike,
         getSharedState.chainId,
     )
-    const result = await checkPeerSchedule(peer, ours)
+    const result = await checkPeerSchedule(peer, ours, {
+        tip: getSharedState.lastBlockNumber ?? 0,
+    })
     switch (result.status) {
         case "mismatch":
             log.error(
