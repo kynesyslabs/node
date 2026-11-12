@@ -123,6 +123,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/gcr_routines/routines/scoreIdentityRoutines.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/zkAttestationContext.test.ts
     src/libs/blockchain/genesis/genesisSeedingTime.test.ts
+    src/libs/identity/humanPassportClaimGate.test.ts
     src/libs/identity/providers/scoreRefresh.test.ts
     src/libs/network/authReplayCache.test.ts
     src/libs/network/httpBodyBinding.test.ts

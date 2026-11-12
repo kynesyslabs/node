@@ -8,6 +8,7 @@ import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
 import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityProvider"
 import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
+import { humanPassportClaimGate } from "@/libs/identity/humanPassportClaimGate"
 import { EthosIdentityProvider } from "@/libs/identity/providers/ethosIdentityProvider"
 import { BroadcastManager } from "../communications/broadcastManager"
 import { GCRStorageProgramRoutines } from "../blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
@@ -200,8 +201,19 @@ export default async function manageGCRRoutines(
                 break
             }
             try {
-                response.response =
-                    await IdentityManager.getHumanPassportClaim(address)
+                const gated = await humanPassportClaimGate(a =>
+                    IdentityManager.getHumanPassportClaim(a),
+                ).get(sender, address)
+                if ("retryAfterMs" in gated) {
+                    response.result = 429
+                    response.response = null
+                    response.extra = {
+                        error: "Rate limit exceeded",
+                        retryAfter: Math.ceil(gated.retryAfterMs / 1000),
+                    }
+                    break
+                }
+                response.response = gated.claim
             } catch (error) {
                 response.result = 400
                 response.response = null

@@ -15,6 +15,7 @@ const { default: manageGCRRoutines } = await import("./manageGCRRoutines")
 const IdentityManager = (await import("@/libs/blockchain/gcr/gcr_routines/identityManager")).default
 const { HumanPassportProvider } = await import("@/libs/identity/tools/humanpassport")
 const { humanPassportRecord } = await import("@/libs/identity/humanPassportClaim")
+const { resetHumanPassportClaimGate, CLAIM_FETCH_BURST } = await import("@/libs/identity/humanPassportClaimGate")
 
 const SENDER = "0x" + "5e".repeat(32)
 const EVM = "0x" + "ab".repeat(20)
@@ -30,10 +31,16 @@ const reported = {
 
 describe("getHumanPassportClaim", () => {
     const spies: { mockRestore(): void }[] = []
+    let fetches = 0
     beforeEach(() => {
+        resetHumanPassportClaimGate()
+        fetches = 0
         spies.push(
             spyOn(HumanPassportProvider, "getInstance").mockReturnValue({
-                verifyAddress: async () => reported,
+                verifyAddress: async (address: string) => {
+                    fetches++
+                    return { ...reported, address }
+                },
             } as any),
             spyOn(IdentityManager, "isXmWalletLinked").mockResolvedValue(true),
         )
@@ -58,5 +65,40 @@ describe("getHumanPassportClaim", () => {
     it("leaves getHumanPassportScore answering the bare score, for existing callers", async () => {
         const res = await manageGCRRoutines(SENDER, { method: "getHumanPassportScore", params: [EVM] })
         expect(res.response).toBe(25.5)
+    })
+
+    it("answers a repeated address from the cache instead of the provider", async () => {
+        const first = await manageGCRRoutines(SENDER, { method: "getHumanPassportClaim", params: [EVM] })
+        const again = await manageGCRRoutines("0x" + "77".repeat(32), {
+            method: "getHumanPassportClaim",
+            params: [{ address: EVM.toUpperCase().replace("0X", "0x") }],
+        })
+        expect(again.result).toBe(200)
+        expect(again.response).toEqual(first.response)
+        expect(fetches).toBe(1)
+    })
+
+    it("refuses a caller past its provider fetches with 429 and a retry time", async () => {
+        const addresses = Array.from({ length: CLAIM_FETCH_BURST + 1 }, (_, i) =>
+            "0x" + i.toString(16).padStart(2, "0").repeat(20),
+        )
+        const results = []
+        for (const address of addresses) {
+            results.push(await manageGCRRoutines(SENDER, { method: "getHumanPassportClaim", params: [address] }))
+        }
+        expect(results.slice(0, -1).map(r => r.result)).toEqual(addresses.slice(0, -1).map(() => 200))
+        const refused = results.at(-1)!
+        expect(refused.result).toBe(429)
+        expect(refused.response).toBeNull()
+        expect(refused.extra).toEqual({ error: "Rate limit exceeded", retryAfter: expect.any(Number) })
+        expect(refused.extra.retryAfter).toBeGreaterThan(0)
+        expect(fetches).toBe(CLAIM_FETCH_BURST)
+
+        // Another caller still gets its own fetches.
+        const other = await manageGCRRoutines("0x" + "77".repeat(32), {
+            method: "getHumanPassportClaim",
+            params: [addresses.at(-1)],
+        })
+        expect(other.result).toBe(200)
     })
 })
