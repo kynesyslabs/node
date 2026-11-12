@@ -117,7 +117,6 @@ export async function processPayload(
                 sender,
             )
             log.info(`[RPC Call] Merged mempool from: ${sender}`)
-            log.info(JSON.stringify(res))
             return res
         }
         case "peerlist":

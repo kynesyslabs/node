@@ -3,8 +3,9 @@
 # Demos Network Node - Production Image
 #
 # Multistage build:
-#   1. builder  - installs deps, native modules, applies falcon-sign patch
-#   2. runtime  - minimal image, non-root user, healthcheck, exec CMD
+#   0. node-base - Bun base plus pinned Node.js, shared by builder and runtime
+#   1. builder   - installs deps, native modules, applies falcon-sign patch
+#   2. runtime   - minimal image, non-root user, healthcheck, exec CMD
 #
 # Run with --no-tui (passed in CMD) since TUI requires a TTY.
 # All persistent state lives under /app and is intended to be bind/volume mounted:
@@ -12,6 +13,38 @@
 #   - /app/demos_peerlist.json      (file, bind-mount)
 #   - /app/data                     (dir,  volume)
 #   - /app/logs                     (dir,  volume)
+
+# Base images are pinned by digest: a tag like 1.3-debian moves, so two
+# builds of the same commit could otherwise start from different images.
+# Bump the tag and digest together with .bun-version.
+FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS node-base
+
+# Shared by the runtime and, for Node.js alone, the builder.
+# Runtime essentials only: curl for HEALTHCHECK, ca-certificates for TLS,
+# xz to unpack Node. Node.js is required by the gossip sidecar (libp2p
+# cannot run under Bun for frames >1KB; see specs/gossip-sidecar.md).
+# The apt and dpkg logs are dropped in the same step because they carry
+# the time of the run, which would make two builds of one commit differ.
+# Node comes from one pinned release, checked against its published
+# sha256, so the image does not depend on what a package repository
+# serves on build day. Bump NODE_VERSION and NODE_SHA256 together
+# (sha256 from https://nodejs.org/dist/v<version>/SHASUMS256.txt).
+ARG NODE_VERSION=22.23.4
+ARG NODE_SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        ca-certificates \
+        xz-utils \
+    && rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log \
+         /var/log/alternatives.log /var/cache/ldconfig/aux-cache \
+    && case "$(dpkg --print-architecture)" in amd64) ;; *) \
+         echo >&2 "Node is pinned for amd64 only; add the sha256 for this architecture"; exit 1 ;; esac \
+    && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+         --exclude='*/CHANGELOG.md' --exclude='*/README.md' --exclude='*/LICENSE' \
+    && rm /tmp/node.tar.xz \
+    && node --version
 
 # =============================================================================
 # Stage 1: builder
@@ -40,6 +73,23 @@ COPY package.json bun.lock ./
 # dependency ships. bufferutil and utf-8-validate come from the lockfile
 # with prebuilt binaries, so no `bun add` at build time.
 RUN bun install --frozen-lockfile
+
+# L2PS batch proving keys (about 90 MB). Not committed: they derive
+# deterministically from the public Hermez Powers of Tau, and the build fails
+# unless the derived verification keys equal the committed ones, so a swapped
+# or corrupted download cannot produce keys peers would reject. The Powers of
+# Tau files are only inputs and are dropped from the image. Built from the
+# circuits and the setup code alone, so a source edit elsewhere keeps the
+# cached layer instead of downloading and proving setup again. circom2 and
+# snarkjs run under the image's Node.js: run by Bun, the snarkjs CLI exits 0
+# without writing the key.
+COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
+COPY src/libs/l2ps/zk/circuits/ ./src/libs/l2ps/zk/circuits/
+COPY src/libs/l2ps/zk/keys/ ./src/libs/l2ps/zk/keys/
+COPY src/libs/l2ps/zk/batchArtifacts.ts ./src/libs/l2ps/zk/
+COPY src/cli/setup/ ./src/cli/setup/
+COPY scripts/build-l2ps-zk-keys.ts ./scripts/
+RUN bun scripts/build-l2ps-zk-keys.ts && rm -rf src/libs/l2ps/zk/ptau
 
 # Bring in the runtime payload. Explicit allow-list (rather than `COPY . .`)
 # so host-only files (run wrapper, captraf.sh, jest config, etc.) and any
@@ -183,39 +233,13 @@ RUN if [ "$REQUIRE_GIT_COMMIT" = "true" ]; then \
         fi; \
     fi
 
-FROM oven/bun:1.4.4-debian@sha256:93d5032fe06d163427822dc1598f420363759bb18155c9cc90eb1be05a64a19e AS runtime
+FROM node-base AS runtime
 
 # OCI image metadata.
 LABEL org.opencontainers.image.source="https://github.com/kynesyslabs/node" \
       org.opencontainers.image.description="Demos Network node (RPC + consensus runtime)" \
       org.opencontainers.image.licenses="CC-BY-NC-SA-4.0" \
       org.opencontainers.image.vendor="Kynesys Labs"
-
-# Runtime essentials only: curl for HEALTHCHECK, ca-certificates for TLS,
-# xz to unpack Node. Node.js is required by the gossip sidecar (libp2p
-# cannot run under Bun for frames >1KB; see specs/gossip-sidecar.md).
-# The apt and dpkg logs are dropped in the same step because they carry
-# the time of the run, which would make two builds of one commit differ.
-# Node comes from one pinned release, checked against its published
-# sha256, so the image does not depend on what a package repository
-# serves on build day. Bump NODE_VERSION and NODE_SHA256 together
-# (sha256 from https://nodejs.org/dist/v<version>/SHASUMS256.txt).
-ARG NODE_VERSION=22.23.4
-ARG NODE_SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl \
-        ca-certificates \
-        xz-utils \
-    && rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log \
-         /var/log/alternatives.log /var/cache/ldconfig/aux-cache \
-    && case "$(dpkg --print-architecture)" in amd64) ;; *) \
-         echo >&2 "Node is pinned for amd64 only; add the sha256 for this architecture"; exit 1 ;; esac \
-    && curl --proto '=https' --tlsv1.2 -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
-    && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
-    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
-         --exclude='*/CHANGELOG.md' --exclude='*/README.md' --exclude='*/LICENSE' \
-    && rm /tmp/node.tar.xz \
-    && node --version
 
 # Non-root user. The base image already ships a `bun` user/group at uid/gid
 # 1000; rename them to `demos` in-place so the uid stays predictable for

@@ -24,6 +24,8 @@ import type {
     FeeBindingConfig,
     BlockCapsConfig,
     CanonicalSignersConfig,
+    TokenStakingGateConfig,
+    TokenStakingConfig,
     TelegramSenderBindingConfig,
     XmRemoveCanonicalConfig,
     SignatureDomainConfig,
@@ -415,6 +417,13 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.canonicalSigners =
                 config as CanonicalSignersConfig
             return
+        case "tokenStakingGate":
+            getSharedState.forkConfig.tokenStakingGate =
+                config as TokenStakingGateConfig
+            return
+        case "tokenStaking":
+            getSharedState.forkConfig.tokenStaking = config as TokenStakingConfig
+            return
         case "unpinnedCommittee":
             getSharedState.forkConfig.unpinnedCommittee =
                 config as UnpinnedCommitteeConfig
@@ -582,6 +591,10 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as BlockCapsConfig
         case "canonicalSigners":
             return base as CanonicalSignersConfig
+        case "tokenStakingGate":
+            return base as TokenStakingGateConfig
+        case "tokenStaking":
+            return base as TokenStakingConfig
         case "unpinnedCommittee":
             return base as UnpinnedCommitteeConfig
         case "telegramSenderBinding":

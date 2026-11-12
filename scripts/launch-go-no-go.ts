@@ -43,6 +43,7 @@ import {
     NON_MAINNET_CHAIN_IDS,
     type ForkName,
 } from "src/forks/forkConfig"
+import { treasuryAddressProblem } from "src/forks/treasuryAddress"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
@@ -180,13 +181,15 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "unpinnedCommittee",
     "telegramSenderBinding",
     "xmRemoveCanonical",
+    "tokenStakingGate",
+    "gasFeeSeparation",
 ]
 
 /**
  * Forks a mainnet genesis must leave unscheduled: the launch decision is
  * that they are switched on later, at a height agreed on the running chain.
  */
-export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["networkGovernance"]
+export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["networkGovernance", "tokenStaking"]
 
 /**
  * Every fork this build knows. A mainnet genesis declares each one, with a
@@ -632,8 +635,13 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
         )
     }
     const gas = forks.gasFeeSeparation
-    if (gas && gas.activationHeight !== null && gas.activationHeight !== undefined && typeof gas.treasuryAddress !== "string") {
-        reasons.push("fork gasFeeSeparation is scheduled without a treasuryAddress; the code default would receive the fees")
+    if (gas?.activationHeight !== null && gas?.activationHeight !== undefined) {
+        if (typeof gas.treasuryAddress !== "string") {
+            reasons.push("fork gasFeeSeparation is scheduled without a treasuryAddress; the code default would receive the fees")
+        } else {
+            const problem = treasuryAddressProblem(gas.treasuryAddress)
+            if (problem) reasons.push(`fork gasFeeSeparation is scheduled with a treasuryAddress the node refuses: ${problem}`)
+        }
     }
     return reasons
 }

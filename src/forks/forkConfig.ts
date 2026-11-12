@@ -311,6 +311,38 @@ export type IdentityCarryoverConfig = BaseForkConfig
 export type StakeApplyChecksConfig = BaseForkConfig
 
 /**
+ * `tokenStakingGate` fork: the validator set is the genesis list until
+ * `tokenStaking` opens token staking. A `validatorStake` or
+ * `validatorUnstake` transaction, and a `validatorStake` edit that stakes,
+ * unstakes or is an exit flagged `isRollback` in a transaction of any type,
+ * is refused at RPC intake, at pool admission and at apply.
+ *
+ * It refuses what a chain without it accepts, so it is the fork that is
+ * scheduled, not the one that opens staking: a genesis that leaves it out
+ * keeps staking open, and a build that does not know it refuses to boot on
+ * a genesis that schedules it instead of applying stakes its peers refuse.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`), so a node carrying
+ * the code applies existing history exactly as before. A mainnet genesis
+ * sets 0. No payload beyond the base.
+ */
+export type TokenStakingGateConfig = BaseForkConfig
+
+/**
+ * `tokenStaking` fork: token staking opens by network upgrade. From its
+ * activation height a stake or unstake is judged by the staking rules again,
+ * as on a chain without `tokenStakingGate`; without that gate it changes
+ * nothing.
+ *
+ * Activation at H binds from the block applied on tip H, which is block
+ * H + 1. Dormant by default (`activationHeight: null`) and at launch: a
+ * mainnet genesis leaves it null, and a later height-pinned activation turns
+ * token staking on. No payload beyond the base.
+ */
+export type TokenStakingConfig = BaseForkConfig
+
+/**
  * `nativeSendBinding` fork: a native send pays the recipient and the amount
  * its signed body names. The payment is applied from the native payload's
  * args, while explorers, receipts and the RPC balance check read
@@ -357,6 +389,11 @@ export type CanonicalAddressesConfig = BaseForkConfig
  * `rpc_address`. Compared on what apply deducts: apply charges a component
  * in ledger units as written, so after osDenomination a DEM number would pay
  * a billionth of the fee its hash commits to.
+ *
+ * From the same height, apply leaves out of a native transaction the flat gas
+ * edit the SDK still ships: the fee edits are its whole fee, and the gas, a
+ * debit nothing credits, charged it twice and burned 1 DEM of supply per
+ * transaction.
  *
  * Activation at H binds from the block applied on tip H, which is block
  * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
@@ -534,6 +571,8 @@ export type ForkConfig =
     | FeeBindingConfig
     | BlockCapsConfig
     | CanonicalSignersConfig
+    | TokenStakingGateConfig
+    | TokenStakingConfig
     | TelegramSenderBindingConfig
     | XmRemoveCanonicalConfig
 
@@ -568,6 +607,8 @@ export type ForkName =
     | "feeBinding"
     | "blockCaps"
     | "canonicalSigners"
+    | "tokenStakingGate"
+    | "tokenStaking"
     | "telegramSenderBinding"
     | "xmRemoveCanonical"
 
@@ -601,6 +642,8 @@ export interface ForkConfigByName {
     feeBinding: FeeBindingConfig
     blockCaps: BlockCapsConfig
     canonicalSigners: CanonicalSignersConfig
+    tokenStakingGate: TokenStakingGateConfig
+    tokenStaking: TokenStakingConfig
     telegramSenderBinding: TelegramSenderBindingConfig
     xmRemoveCanonical: XmRemoveCanonicalConfig
 }
@@ -873,6 +916,23 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A block's signatures match its signer set by lowercase identity, and a key " +
             "written in two cases counts once.",
     },
+    tokenStakingGate: {
+        // Dormant by default: it refuses stakes a running chain accepts, and a
+        // missing genesis entry hydrates from here, so a running chain keeps
+        // staking open. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "Validators come from the genesis list: validatorStake and validatorUnstake " +
+            "are refused until tokenStaking opens token staking.",
+    },
+    tokenStaking: {
+        // Dormant by default and at launch: token staking opens by a later
+        // height-pinned activation. Changes nothing without tokenStakingGate.
+        activationHeight: null,
+        description:
+            "Token staking opens by network upgrade: validatorStake and validatorUnstake " +
+            "are admitted and applied again under tokenStakingGate.",
+    },
     unpinnedCommittee: {
         // Dormant by default: a missing genesis entry hydrates from here, and
         // the testnet's committees still put the pinned identities first. A
@@ -934,6 +994,8 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
         blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
         canonicalSigners: { ...DEFAULT_FORK_CONFIG.canonicalSigners },
+        tokenStakingGate: { ...DEFAULT_FORK_CONFIG.tokenStakingGate },
+        tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
         telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
         xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
     }

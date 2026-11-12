@@ -82,6 +82,21 @@ signed release. A hand edit of `genesis.json` on a live validator is not allowed
    validators. Agreement shows as 0 everywhere; the window opening on an
    unresolved mismatch means abstention.
 
+The genesis data hash covers `forks`, so the new file no longer hashes to the
+launch `EXPECTED_GENESIS_HASH`, and a node on a fresh database refuses it. The
+pins never change: a node that joins after a schedule change builds block 0
+from the launch file, then loads the new schedule before it syncs.
+
+1. Put the launch genesis file in `data/genesis.json` and keep the launch
+   `EXPECTED_GENESIS_HASH` and `EXPECTED_GENESIS_BLOCK_HASH`.
+2. Start the node with an empty peer list (do not seed `demos_peerlist.json`
+   yet, see INSTALL.md). It writes block 0 and finds no one to sync from.
+3. Stop it, replace `data/genesis.json` with the file from the release that
+   carries the change, seed the peer list and start it again. The restart checks
+   the stored block 0 against the pin and the file against block 0 except for
+   the fork schedule, so the new schedule is accepted while the tip is still
+   below the window.
+
 ## Launch stance (proposed decision)
 
 After launch, future forks stay in each node's `genesis.json` and are delivered

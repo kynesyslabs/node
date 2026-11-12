@@ -15,6 +15,11 @@ import {
 } from "src/features/staking/constants"
 import type { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { isForkActive } from "@/forks"
+import {
+    TOKEN_STAKING_REFUSAL,
+    isTokenStakingEdit,
+    tokenStakingOpen,
+} from "@/forks/tokenStakingGate"
 import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import { getSharedState } from "src/utilities/sharedState"
 import { chainMinValidatorStakeAtApply } from "src/features/staking/chainMinStake"
@@ -84,6 +89,17 @@ export default class GCRValidatorStakeRoutines {
                 .getRepository(Validators)
         const resolvedBlock =
             currentBlock ?? (await Chain.getLastBlockNumber())
+
+        // Every node refuses a token stake while the gate is closed, whatever
+        // the node that took the transaction in let through. A rollback
+        // undoes what an applied block did, so it is not judged again.
+        if (
+            context.rollback !== true &&
+            isTokenStakingEdit(stakeEdit) &&
+            !tokenStakingOpen(resolvedBlock)
+        ) {
+            return { success: false, message: TOKEN_STAKING_REFUSAL }
+        }
 
         const existing = await resolvedRepo.findOneBy({ address: account })
 
