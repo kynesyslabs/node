@@ -1,12 +1,13 @@
 import fs from "fs"
 import { Server } from "bun"
 import ipaddr from "ipaddr.js"
+import { rateLimitSubject } from "./rateLimitSubject"
 import log from "src/utilities/logger"
 import { Middleware } from "../bunServer"
 import { getSharedState } from "@/utilities/sharedState"
 import { isForkActive } from "@/forks"
 import { getAuthContext, setAuthContext } from "../authContext"
-import { BODY_HASH_HEADER } from "../peerHttpAuth"
+import { AUDIENCE_HEADER, BODY_HASH_HEADER } from "../peerHttpAuth"
 import {
     verifySignature,
     isKeyWhitelisted,
@@ -42,25 +43,6 @@ interface RateLimitData {
      * The block expiry time in milliseconds
      */
     blockExpiry?: number
-}
-
-/**
- * What a client is counted as. An IPv6 customer is routinely handed a whole
- * /64, so counting each address separately would give one client as many
- * quotas as it has addresses; every address in a /64 shares one.
- */
-function rateLimitSubject(ip: string): string {
-    if (!ip.includes(":")) return ip
-    try {
-        const parsed = ipaddr.parse(ip)
-        if (parsed.kind() !== "ipv6") return ip
-        const v6 = parsed as ipaddr.IPv6
-        if (v6.isIPv4MappedAddress()) return v6.toIPv4Address().toString()
-        const network = ipaddr.IPv6.networkAddressFromCIDR(`${ip}/64`)
-        return `${network.toRFC5952String()}/64`
-    } catch {
-        return ip
-    }
 }
 
 /** Counter key: one per limit bucket per client subject. */
@@ -810,6 +792,7 @@ export class RateLimiter {
             const signature = req.headers.get("signature")
             const timestamp = req.headers.get("timestamp")
             const bodyHash = req.headers.get(BODY_HASH_HEADER)
+            const audience = req.headers.get(AUDIENCE_HEADER)
             let verifyResult: VerificationResult | null = null
 
             if (identity && signature) {
@@ -844,6 +827,7 @@ export class RateLimiter {
                     timestamp,
                     requireTimestampBinding,
                     bodyHash,
+                    audience,
                 )
 
                 if (!verifyResult.valid) {
@@ -879,6 +863,8 @@ export class RateLimiter {
                     publicKey: verifyResult.publicKey,
                     algorithm: verifyResult.algorithm,
                     bodyHash: verifyResult.bodyHash ?? null,
+                    audienceBound: verifyResult.audienceBound ?? false,
+                    timestamp: verifyResult.timestamp,
                 })
             }
 

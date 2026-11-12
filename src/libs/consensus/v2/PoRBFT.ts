@@ -1,6 +1,7 @@
 import Transaction from "src/libs/blockchain/transaction"
 import getCommonValidatorSeed from "./routines/getCommonValidatorSeed"
 import Mempool from "src/libs/blockchain/mempool"
+import { holdSendersToCap } from "src/libs/blockchain/mempoolLimits"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
@@ -63,6 +64,7 @@ import { orderDeterministically } from "./routines/deterministicOrder"
 import { judgeBlockTransactions } from "./routines/blockTransactions"
 import { blockCapsActive } from "@/forks/blockCapsGate"
 import { isForkActive } from "@/forks/forkGates"
+import { l2psOffAt } from "@/forks/l2psGate"
 import {
     MAX_NONCE_TRACE_ACCOUNTS,
     NONCE_TRACE_ATTR_KEY,
@@ -602,24 +604,29 @@ export async function consensusRoutine(): Promise<void> {
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
             // Their edits join the block's pending state and commit with it.
-            const l2psStart = Date.now()
-            const l2psResult = await L2PSConsensus.applyPendingProofs(
-                blockRef,
-                false,
-                pendingGCR,
-            )
-            const l2psEnd = Date.now()
-            log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
+            // Under l2psGate none apply: a proof debits the L2 fee with no
+            // credit, and the proofs a node holds are its own, not the block's.
+            if (!l2psOffAt(blockRef - 1)) {
+                const l2psStart = Date.now()
+                const l2psResult = await L2PSConsensus.applyPendingProofs(
+                    blockRef,
+                    false,
+                    pendingGCR,
+                    block.content.timestamp,
+                )
+                const l2psEnd = Date.now()
+                log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
 
-            if (l2psResult.proofsApplied > 0) {
-                log.info(
-                    `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
-                )
-            }
-            if (l2psResult.proofsFailed > 0) {
-                log.warning(
-                    `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
-                )
+                if (l2psResult.proofsApplied > 0) {
+                    log.info(
+                        `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
+                    )
+                }
+                if (l2psResult.proofsFailed > 0) {
+                    log.warning(
+                        `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
+                    )
+                }
             }
             log.debug(
                 "[consensusRoutine] [result] Block is valid with " +
@@ -893,11 +900,14 @@ async function mergeAndOrderMempools(
 ): Promise<{ txs: MempoolTransaction[]; peerlist: string[] }> {
     // Fetch mempool, check chain for executed txs. Under blockCaps the pool
     // first gives up what the per-sender cap leaves out, as every peer's
-    // merge does with the same txs.
+    // merge does with the same txs. What stays queued past the cap (our own
+    // relay txs, our locked block's txs) is left out of the round, so the
+    // round's pool is the one peers holding the same txs keep.
     const capped = blockCapsActive(blockRef)
     const preMempool = await Mempool.lock.runExclusive(async () => {
-        if (capped) await Mempool.capPoolSenders()
-        return await Mempool.getMempool(blockRef)
+        if (capped) await Mempool.capPoolSenders(blockRef)
+        const pool = await Mempool.getMempool(blockRef)
+        return capped ? holdSendersToCap(pool) : pool
     })
 
     log.only(`[mergeAndOrderMempools] Pre mempool: ${preMempool.length} txs`)
@@ -933,7 +943,8 @@ async function mergeAndOrderMempools(
         `[mergeAndOrderMempools] Merged peerlist: ${mergedPeerlist.length} validators`,
     )
 
-    const postMempool = await Mempool.getMempool(blockRef)
+    const postPool = await Mempool.getMempool(blockRef)
+    const postMempool = capped ? holdSendersToCap(postPool) : postPool
     log.only(`[mergeAndOrderMempools] Post mempool: ${postMempool.length} txs`)
     const preChecked = new Set(preHashes)
     const newHashes = postMempool

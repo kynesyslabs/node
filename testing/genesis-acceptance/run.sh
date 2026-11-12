@@ -45,7 +45,7 @@ RPC_PORT=53550
 PG_USER=demosuser
 PG_PASSWORD=demospassword
 # Same list as MAINNET_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal
-MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs identityCarryover stakeApplyChecks txTypeAllowList instantMessagingBinding nativeSendBinding canonicalAddresses feeBinding blockCaps"
+MAINNET_FORKS="osDenomination nonceEnforcement signatureDomain editBinding nonceIntegrity quorumParity committeeBinding commitLock finalityProofs identityCarryover stakeApplyChecks txTypeAllowList instantMessagingBinding nativeSendBinding canonicalAddresses feeBinding blockCaps unpinnedCommittee telegramSenderBinding xmRemoveCanonical tokenStakingGate gasFeeSeparation web2ProofBinding tlsnProofEnforcement l2psGate tlsnDisabled xmProofBinding"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -167,9 +167,11 @@ python3 "${HERE}/fixtures.py" --base "${FIX}/image/genesis.json" --manifest "${F
 cp -a "${FIX}/snapshot" "${FIX}/snapshot-ws"
 printf '\n' >> "${FIX}/snapshot-ws/manifest.json"
 
+# The fixtures copy the image genesis (fewer validators than its quorum): these
+# nodes boot and are refused, they never forge, so that finding is a warning here.
 genesis_hash() { # $1 genesis file -> JSON from scripts/genesis-hash.ts (log lines dropped)
     local out
-    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/snapshot" --json 2>>"${RUNLOG}")
+    out=$(cd "${REPO_ROOT}" && bun scripts/genesis-hash.ts --genesis "$1" --snapshot "${FIX}/snapshot" --json --allow-unforgeable 2>>"${RUNLOG}")
     local rc=$?
     echo "${out}" | sed -n '/^{/,$p'
     return ${rc}
@@ -279,6 +281,8 @@ start_node() { # $1 scenario id, $2 db, $3 state volume, $4 genesis file, $5 pin
     [ "${pin}" != "-" ] && pin_env=(-e "EXPECTED_GENESIS_HASH=${pin}")
     local snap_env=(-v "${RID}-snap:/app/snapshot-carry:ro" -e DEMOS_SNAPSHOT_DIR=/app/snapshot-carry)
     [[ " $* " == *" DEMOS_SNAPSHOT_DIR="* ]] && snap_env=()
+    # The node is reached by name only inside the run's private docker network.
+    local exposed_url="http://${NODE}:${RPC_PORT}" # NOSONAR
     docker run -d --name "${NODE}" --network "${NET}" \
         --memory "${NODE_MEM}" --memory-swap "${NODE_MEM}" --cpus "${NODE_CPUS}" \
         -e PG_HOST="${PG}" -e PG_PORT=5432 -e PG_USER="${PG_USER}" -e PG_PASSWORD="${PG_PASSWORD}" \
@@ -288,6 +292,7 @@ start_node() { # $1 scenario id, $2 db, $3 state volume, $4 genesis file, $5 pin
         -e GOSSIP_ENABLED=false -e OMNI_ENABLED=false -e OMNI_MODE=HTTP_ONLY \
         -e L2PS_MESSAGING_ENABLED=false -e L2PS_ZK_ENABLED=false \
         -e DEMOS_SKIP_SETUP_CHECK=true -e LOG_LEVEL=info \
+        -e PROD=true -e EXPOSED_URL="${exposed_url}" \
         "${pin_env[@]}" "${snap_env[@]}" "$@" \
         -v "${vol}:/app/state" \
         -v "${gen}:/app/data/genesis.json:ro" \

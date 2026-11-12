@@ -59,6 +59,8 @@ Head over to https://faucet.demos.sh and paste your public key to get 2400 DEM.
 
 ## Staking
 
+> This guide is for testnet. On mainnet, token staking is off at launch (fork `tokenStakingGate`), and `validator:stake` is refused until the network opens it with the `tokenStaking` fork. See [docs/mainnet/genesis.md](../docs/mainnet/genesis.md).
+
 Update your node's `demos_peerlist.json` to look like this:
 
 ```json

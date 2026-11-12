@@ -27,6 +27,7 @@ const {
     judgeLock,
     loadCommitLock,
     lockAt,
+    lockedTransactionHashes,
     writeCommitLock,
 } = await import("./lockStore")
 const { recordBlockSignature, signingRecordPath } = await import("src/libs/identity/signingRecord")
@@ -177,5 +178,21 @@ describe("lock rule", () => {
 
     it("refuses a height below the lock", () => {
         expect(judgeLock(lock({ height: 11 }), req("x", 9999)).action).toBe("refuse")
+    })
+})
+
+describe("lockedTransactionHashes", () => {
+    it("names the txs of the block the lock binds at that height only", () => {
+        writeCommitLock(identityFile, lock())
+        expect([...lockedTransactionHashes(identityFile, "genesis-a", 10)]).toEqual(["t1", "t2"])
+        expect(lockedTransactionHashes(identityFile, "genesis-a", 11).size).toBe(0)
+        expect(lockedTransactionHashes(identityFile, "genesis-b", 10).size).toBe(0)
+        expect(lockedTransactionHashes(identityFile, null, 10).size).toBe(0)
+    })
+
+    it("names none when there is no lock or it cannot be read", () => {
+        expect(lockedTransactionHashes(identityFile, "genesis-a", 10).size).toBe(0)
+        fs.writeFileSync(commitLockPath(identityFile), "{not json")
+        expect(lockedTransactionHashes(identityFile, "genesis-a", 10).size).toBe(0)
     })
 })

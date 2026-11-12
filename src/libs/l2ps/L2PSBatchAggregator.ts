@@ -11,6 +11,7 @@ import { L2PSBatchProver } from "@/libs/l2ps/zk/L2PSBatchProver"
 import L2PSProofManager from "./L2PSProofManager"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
+import { l2psOff } from "@/forks/l2psGate"
 import type { L2PSBatchPayload } from "./types"
 import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN, HISTORY_RETENTION_SWEEP_INTERVAL_MS } from "./constants"
 import { RetentionSweepGate } from "./retentionSweepGate"
@@ -55,8 +56,11 @@ export class L2PSBatchAggregator {
     /** ZK Batch Prover for generating PLONK proofs */
     private zkProver: L2PSBatchProver | null = null
 
-    /** Whether ZK proofs are enabled (requires setup_all_batches.sh to be run first) */
-    private zkEnabled = Config.getInstance().l2ps.zkEnabled
+    /** L2PS_ZK_ENABLED: kept apart from zkEnabled so a failed setup is retried on the next start */
+    private readonly zkRequested = Config.getInstance().l2ps.zkEnabled
+
+    /** Whether the prover is ready and batches carry proofs */
+    private zkEnabled = false
 
     /** Batch aggregation interval in milliseconds */
     private readonly AGGREGATION_INTERVAL = Config.getInstance().l2ps.aggregationIntervalMs
@@ -145,8 +149,14 @@ export class L2PSBatchAggregator {
         this.isRunning = true
         this.isAggregating = false
 
-        // Initialize ZK Prover (optional - gracefully degrades if keys not available)
-        await this.initializeZkProver()
+        // Off unless L2PS_ZK_ENABLED=true: the image ships the proving keys, and
+        // a proof costs a core for seconds per batch while validators do not
+        // check it yet (docs/design/l2ps-zk-settlement.md).
+        if (this.zkRequested) {
+            await this.initializeZkProver()
+        } else {
+            log.info("[L2PS Batch Aggregator] ZK batch proofs are off (L2PS_ZK_ENABLED is not true)")
+        }
 
         // Reset statistics using helper method
         this.stats = this.createInitialStats()
@@ -214,6 +224,12 @@ export class L2PSBatchAggregator {
             log.warning("[L2PS Batch Aggregator] Forced shutdown - operation still in progress")
         }
 
+        // start() builds a new prover, so the old subprocess would outlive the service.
+        const prover = this.zkProver
+        this.zkProver = null
+        this.zkEnabled = false
+        await prover?.terminate()
+
         log.info("[L2PS Batch Aggregator] Stopped successfully")
         this.logStatistics()
     }
@@ -234,6 +250,15 @@ export class L2PSBatchAggregator {
 
         // Service shutdown check
         if (!this.isRunning) {
+            return
+        }
+
+        // The stake hook that starts and stops this service does not fire
+        // when l2psGate activates at a later height on a node that stays
+        // staked, so each cycle checks the gate itself.
+        if (l2psOff()) {
+            log.info("[L2PS Batch Aggregator] L2PS is off at the tip (fork l2psGate): stopping")
+            await this.stop()
             return
         }
 

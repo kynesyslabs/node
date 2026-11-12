@@ -1,5 +1,5 @@
 import { DefaultChain } from "node_modules/@kynesyslabs/demosdk/build/multichain/core"
-import ensureGCRForUser from "./ensureGCRForUser"
+import readGCRForUser from "./readGCRForUser"
 import log from "src/utilities/logger"
 import {
     InferFromWritePayload,
@@ -24,7 +24,12 @@ import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { CrossChainTools } from "@/libs/identity/tools/crosschain"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { NomisWalletIdentity, SavedHumanPassportIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
-import { HumanPassportProvider } from "@/libs/identity/tools/humanpassport"
+import { HumanPassportProvider, type HumanPassportVerification } from "@/libs/identity/tools/humanpassport"
+import {
+    type HumanPassportClaim,
+    humanPassportRecord,
+    sortedStamps,
+} from "@/libs/identity/humanPassportClaim"
 import { verifyMessage as verifyEvmMessage } from "ethers"
 import TxValidatorPool from "../../validation/txValidatorPool"
 import { NomisApiClient } from "@/libs/identity/tools/nomis"
@@ -109,7 +114,7 @@ export default class IdentityManager {
         twitterAccountConnected: boolean
     }> {
         // INFO: Check if the user has a Twitter account
-        const account = await ensureGCRForUser(sender)
+        const account = await readGCRForUser(sender)
         const twitterAccounts = account.identities.web2["twitter"] || []
         let twitterAccountConnected = false
 
@@ -656,7 +661,9 @@ export default class IdentityManager {
         address: string,
         key?: "xm" | "web2" | "pqc" | "ud" | "nomis" | "humanpassport" | "ethos",
     ): Promise<any> {
-        const gcr = await ensureGCRForUser(address)
+        // Admission and reads land here; a stored row may only come from
+        // block apply, or nodes would hold different account sets.
+        const gcr = await readGCRForUser(address)
         if (key) {
             return gcr.identities[key]
         }
@@ -688,45 +695,28 @@ export default class IdentityManager {
     // SECTION: Human Passport Identity
 
     /**
-     * Verify the payload for a Human Passport identity assign
+     * Verify a Human Passport identity assign payload before the transaction
+     * is accepted. Apply stores the signed score as is and never asks Human
+     * Passport, so this is the only place the score is checked against the
+     * provider: the signed score, threshold, stamps, score time and expiry
+     * must equal what Human Passport reports now, the score
+     * must pass, and an unreachable provider refuses the transaction.
      *
-     * Validates the address and fetches the score from Human Passport API.
-     * Requires score >= 20 (passing threshold) to succeed.
-     *
-     * @param payload - The payload containing the address and signature
-     * @param sender - The transaction sender's address (for binding verification)
-     * @returns {success: boolean, message: string, data?: SavedHumanPassportIdentity}
+     * @param payload - The signed identity payload
+     * @param sender - The transaction sender, whose linked xm wallet the address must be
      */
     static async verifyHumanPassportPayload(
-        payload: {
-            address: string
-            signature?: string
-            verificationMethod: "api" | "onchain"
-            chainId?: number
-            referralCode?: string
-        },
+        payload: HumanPassportClaim,
         sender: string,
-    ): Promise<{ success: boolean; message: string; data?: SavedHumanPassportIdentity }> {
+    ): Promise<{ success: boolean; message: string }> {
         // payload.signature is not consulted: ownership of the address is the
         // xm identity the sender already proved, checked below.
-
-        // TODO: Implement verificationMethod branching
-        // Currently both "api" and "onchain" use identical API verification logic
-        // "onchain" should query on-chain passport data when implemented
-
-        // Note: referralCode is processed in GCRIdentityRoutines.applyHumanPassportIdentityAdd
-        // It's passed through the editOperation, not used here
-
-        const { address, verificationMethod } = payload
-
-        if (!address) {
-            return {
-                success: false,
-                message: "Invalid Human Passport payload: missing address",
-            }
+        const record = humanPassportRecord(payload)
+        if (typeof record === "string") {
+            return { success: false, message: `Invalid Human Passport payload: ${record}` }
         }
 
-        if (!(await this.isXmWalletLinked(sender, "evm", address))) {
+        if (!(await this.isXmWalletLinked(sender, "evm", payload.address))) {
             return {
                 success: false,
                 message:
@@ -734,51 +724,60 @@ export default class IdentityManager {
             }
         }
 
-        try {
-            // Verify score via Human Passport API
-            const provider = HumanPassportProvider.getInstance()
-            const verification = await provider.verifyAddress(address)
-
-            if (!verification.passingScore) {
-                return {
-                    success: false,
-                    message: `Human Passport score ${verification.score} below threshold (${verification.threshold}). ` +
-                        "User needs to verify more stamps at https://app.passport.xyz/. Transaction not applied.",
-                }
-            }
-
-            // Build saved identity
-            const savedIdentity: SavedHumanPassportIdentity = {
-                address: verification.address,
-                score: verification.score,
-                passingScore: verification.passingScore,
-                threshold: verification.threshold,
-                stamps: verification.stamps,
-                verificationMethod: verificationMethod,
-                chainId: payload.chainId,
-                verifiedAt: verification.verifiedAt,
-                expiresAt: verification.expirationTimestamp
-                    ? new Date(verification.expirationTimestamp).getTime()
-                    : null,
-            }
-
-            log.info(
-                `[IdentityManager] Human Passport verified: ${address} ` +
-                `(score: ${verification.score}, stamps: ${verification.stamps.length})`,
-            )
-
+        // Apply stores what was signed and reads nothing else, so a field left
+        // out here is stored empty for good: an omitted expiry never expires.
+        if (
+            payload.stamps === undefined ||
+            payload.lastScoreTimestamp === undefined ||
+            payload.expirationTimestamp === undefined
+        ) {
             return {
-                success: true,
-                message: `Human Passport identity verified with score ${verification.score}`,
-                data: savedIdentity,
+                success: false,
+                message:
+                    "Invalid Human Passport payload: stamps, lastScoreTimestamp and expirationTimestamp are required: send the claim getHumanPassportClaim returns",
             }
+        }
+
+        let fetched: HumanPassportVerification
+        try {
+            fetched = await HumanPassportProvider.getInstance().verifyAddress(payload.address)
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error)
             log.error(`[IdentityManager] Human Passport verification failed: ${errorMsg}`)
             return {
                 success: false,
-                message: errorMsg || "Failed to verify Human Passport identity",
+                message: "Could not confirm the Human Passport score with Human Passport; try again later",
             }
+        }
+
+        if (!fetched.passingScore) {
+            return {
+                success: false,
+                message: `Human Passport score ${fetched.score} below threshold (${fetched.threshold}). ` +
+                    "User needs to verify more stamps at https://app.passport.xyz/. Transaction not applied.",
+            }
+        }
+
+        const sameStamps =
+            JSON.stringify(sortedStamps(payload.stamps)) ===
+            JSON.stringify(sortedStamps(fetched.stamps))
+        if (
+            !sameProviderNumber(payload.score, fetched.score) ||
+            !sameProviderNumber(payload.threshold, fetched.threshold) ||
+            !sameStamps ||
+            payload.lastScoreTimestamp !== fetched.lastScoreTimestamp ||
+            (payload.expirationTimestamp ?? null) !== (fetched.expirationTimestamp ?? null)
+        ) {
+            return {
+                success: false,
+                message:
+                    "Human Passport score in the transaction does not match the score Human Passport reports; fetch it again",
+            }
+        }
+
+        return {
+            success: true,
+            message: `Human Passport identity verified with score ${fetched.score}`,
         }
     }
 
@@ -793,25 +792,22 @@ export default class IdentityManager {
     }
 
     /**
-     * Get Human Passport score for an address (fetches from API)
+     * The Human Passport claim a wallet signs into an identity assign, as
+     * Human Passport reports it now. Admission compares every one of these
+     * fields with the provider, so a wallet must send them all; the score
+     * alone cannot build an admissible claim. The fetch refreshes the
+     * provider cache that this node's admission reads next.
      */
-    static async getHumanPassportScore(address: string): Promise<{
-        address: string
-        score: number
-        passingScore: boolean
-        stamps: string[]
-    } | null> {
-        try {
-            const provider = HumanPassportProvider.getInstance()
-            const verification = await provider.verifyAddress(address)
-            return {
-                address: verification.address,
-                score: verification.score,
-                passingScore: verification.passingScore,
-                stamps: verification.stamps,
-            }
-        } catch {
-            return null
+    static async getHumanPassportClaim(address: string): Promise<HumanPassportClaim> {
+        const v = await HumanPassportProvider.getInstance().verifyAddress(address, true)
+        return {
+            address: v.address,
+            verificationMethod: "api",
+            score: v.score,
+            threshold: v.threshold,
+            stamps: v.stamps,
+            lastScoreTimestamp: v.lastScoreTimestamp,
+            expirationTimestamp: v.expirationTimestamp,
         }
     }
 }

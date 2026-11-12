@@ -137,6 +137,9 @@ until the network has committed past the height first.
 Exactly one named host runs a validator for a given key at any time. Write the
 host down next to the key's backup. Never start a second node with the same
 key "just to test".
+Never run a second process for a validator key, even a stopped or halted one:
+peers count connections per key, so the copies evict each other's connections,
+and a halted copy keeps holding peer slots the live validator needs.
 
 ## The identity lock
 

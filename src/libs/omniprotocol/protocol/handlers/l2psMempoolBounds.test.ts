@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { mockL2psGateDormant } from "@/utilities/testSupport/coreMocks"
 import { mockLogger } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 
 const getByUID = jest.fn(async (..._args: unknown[]) => [] as unknown[])
@@ -16,6 +17,7 @@ const getSummaryByUIDAndStatus = jest.fn(async (..._args: unknown[]) => ({
     newestTimestamp: null,
 }))
 
+mockL2psGateDormant()
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
     default: { getByUID, getPageByUID, getSummaryByUIDAndStatus },

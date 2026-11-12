@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it, jest, mock } from "bun:test"
+import { mockL2psGateDormant } from "@/utilities/testSupport/coreMocks"
 
 const addTransaction = jest.fn(async (..._args: unknown[]) => ({ success: true }))
 const getL2PS = jest.fn(async (..._args: unknown[]) => ({}))
@@ -14,6 +15,7 @@ mock.module("./server_rpc", () => ({
     emptyResponse: { result: 200, response: "", require_reply: false, extra: null },
 }))
 mock.module("src/libs/network/securityModule", () => ({}))
+mockL2psGateDormant()
 mock.module("@/libs/l2ps/parallelNetworks", () => ({
     __esModule: true,
     default: { getInstance: () => ({ getL2PS, loadL2PS: getL2PS }) },

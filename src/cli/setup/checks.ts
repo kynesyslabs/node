@@ -247,7 +247,7 @@ function identityItem(root: string, env: Record<string, string | undefined>): Ch
 function notRequestedDetail(flag: boolean | undefined, anyComplete: boolean): string {
     if (flag === true) return "L2PS_ZK_ENABLED=true but no subnet is configured, nothing to prove"
     if (flag === false) return "off (L2PS_ZK_ENABLED=false)"
-    if (anyComplete) return "keys are present; proofs are used when a subnet is joined"
+    if (anyComplete) return "keys are present; proofs are off by default (set L2PS_ZK_ENABLED=true to use them)"
     return "not requested (set L2PS_ZK_ENABLED=true to require them)"
 }
 
@@ -290,8 +290,7 @@ function zkChecks(ctx: SetupContext, hasSubnet: boolean): CheckItem[] {
     const batches = inspectBatchArtifacts(ctx.codeRoot)
     const anyComplete = batches.some(b => b.complete)
 
-    // The code default is on, which only means "use the keys if they exist";
-    // an explicit true is the operator asking for proofs.
+    // The code default is off; only an explicit true asks for proofs.
     if (!(flag === true && hasSubnet)) {
         out.push({
             area: "L2PS ZK",

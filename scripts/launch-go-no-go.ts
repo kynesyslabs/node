@@ -7,7 +7,8 @@
  * commit, no operator or cloud provider holds more launch validators than
  * the committee can lose (shardSize - q) or more than a third of the votes,
  * the genesis schedules the mainnet forks at block 0 and declares every fork
- * this build knows, its chain id is no other network's, its shardSize is
+ * this build knows, its chain id is no other network's and not a reserved
+ * one (REFUSED_MAINNET_CHAIN_IDS), its shardSize is
  * the launch one, and no launch validator is a pinned committee identity.
  * With a genesis file, every validator must also report that file's genesis
  * data hash and fork schedule digest, and the mainnet forks as active, and
@@ -18,7 +19,7 @@
  *
  *   bun scripts/launch-go-no-go.ts --genesis data/genesis.json \
  *       --operators operators.json --snapshot data/snapshot \
- *       --genesis-hash BLOCK_HASH --commit SHA \
+ *       --genesis-hash BLOCK_HASH --commit SHA --expected-treasury ADDRESS \
  *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] [--json]
  *
  * operators.json maps each validator identity to { operator, provider,
@@ -26,7 +27,8 @@
  * that table alone, with no network:
  *
  *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
- *       --snapshot mainnet/snapshot --operators operators.json
+ *       --snapshot mainnet/snapshot --operators operators.json \
+ *       --expected-treasury ADDRESS
  *
  * Exit codes: 0 GO (or every --plan check passed), 1 NO-GO, 2 bad input.
  */
@@ -43,6 +45,7 @@ import {
     NON_MAINNET_CHAIN_IDS,
     type ForkName,
 } from "src/forks/forkConfig"
+import { treasuryAddressProblem } from "src/forks/treasuryAddress"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
@@ -177,13 +180,23 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "canonicalAddresses",
     "feeBinding",
     "blockCaps",
+    "unpinnedCommittee",
+    "telegramSenderBinding",
+    "xmRemoveCanonical",
+    "tokenStakingGate",
+    "gasFeeSeparation",
+    "web2ProofBinding",
+    "tlsnProofEnforcement",
+    "l2psGate",
+    "tlsnDisabled",
+    "xmProofBinding",
 ]
 
 /**
  * Forks a mainnet genesis must leave unscheduled: the launch decision is
  * that they are switched on later, at a height agreed on the running chain.
  */
-export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["networkGovernance"]
+export const LAUNCH_DORMANT_FORKS: readonly ForkName[] = ["networkGovernance", "tokenStaking"]
 
 /**
  * Every fork this build knows. A mainnet genesis declares each one, with a
@@ -196,6 +209,23 @@ export const KNOWN_FORKS = Object.keys(DEFAULT_FORK_CONFIG) as ForkName[]
 export const LAUNCH_SHARD_SIZE = 10
 
 export { NON_MAINNET_CHAIN_IDS }
+
+/** The chain id the owners decided for mainnet; the template carries it. */
+export const MAINNET_CHAIN_ID = 8587492
+
+/**
+ * Chain ids a mainnet genesis may not use, besides the testnet's and the
+ * devnets'. Signatures bind to the chain id, so a transaction signed on a
+ * network with one of these ids would be valid on mainnet. The node does not
+ * treat them as test networks, so they are not in NON_MAINNET_CHAIN_IDS.
+ */
+export const RESERVED_CHAIN_IDS: Readonly<Record<number, string>> = {
+    0: "the id an unset or zeroed field reads as",
+    31337: "the default of the fork rehearsal networks and of local EVM development chains",
+}
+
+/** Every chain id go/no-go and the plan check refuse for a mainnet genesis. */
+export const REFUSED_MAINNET_CHAIN_IDS: readonly number[] = [0, ...NON_MAINNET_CHAIN_IDS, 31337]
 
 const norm = (id: string) => id.trim().toLowerCase()
 /** Operator and provider names are free text typed by people. */
@@ -349,9 +379,21 @@ export function firstCommittee(
     validators: ValidatorRow[],
     genesisHash: string,
     shardSize: number,
+    pins: readonly string[] = PINNED_SHARD_IDENTITIES,
 ): string[] {
     const pool = [...new Set(activeAtBlockZero(validators).map(v => String(v.address)))].sort(compareIdentities)
-    return drawBoundCommittee(firstCommitteeSeed(normHash(genesisHash)), pool, shardSize).map(norm)
+    return drawBoundCommittee(firstCommitteeSeed(normHash(genesisHash)), pool, shardSize, pins).map(norm)
+}
+
+/**
+ * The pins the node applies to block 1's committee under the genesis fork
+ * schedule (pinnedShardIdentities(1)): none once `unpinnedCommittee` is
+ * active at block 1. A missing entry is dormant, as the node hydrates it.
+ */
+export function firstCommitteePins(genesis: { forks?: unknown } | null): readonly string[] {
+    const forks = (genesis?.forks ?? {}) as Record<string, { activationHeight?: unknown } | null | undefined>
+    const height = forks.unpinnedCommittee?.activationHeight
+    return typeof height === "number" && height <= 1 ? [] : PINNED_SHARD_IDENTITIES
 }
 
 function countBy(ids: string[], key: (id: string) => string | null): Record<string, number> {
@@ -617,8 +659,13 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
         )
     }
     const gas = forks.gasFeeSeparation
-    if (gas && gas.activationHeight !== null && gas.activationHeight !== undefined && typeof gas.treasuryAddress !== "string") {
-        reasons.push("fork gasFeeSeparation is scheduled without a treasuryAddress; the code default would receive the fees")
+    if (gas?.activationHeight !== null && gas?.activationHeight !== undefined) {
+        if (typeof gas.treasuryAddress !== "string") {
+            reasons.push("fork gasFeeSeparation is scheduled without a treasuryAddress; the code default would receive the fees")
+        } else {
+            const problem = treasuryAddressProblem(gas.treasuryAddress)
+            if (problem) reasons.push(`fork gasFeeSeparation is scheduled with a treasuryAddress the node refuses: ${problem}`)
+        }
     }
     return reasons
 }
@@ -640,6 +687,11 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
             `genesis properties.id ${chainId} is the chain id of the testnet or a devnet; ` +
                 "transactions signed there would be valid on this chain",
         )
+    } else if (RESERVED_CHAIN_IDS[chainId] !== undefined) {
+        reasons.push(
+            `genesis properties.id ${chainId} is reserved, ${RESERVED_CHAIN_IDS[chainId]}; ` +
+                "transactions signed there would be valid on this chain",
+        )
     }
     if (properties.shardSize !== LAUNCH_SHARD_SIZE) {
         reasons.push(
@@ -654,6 +706,44 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
         reasons.push(`genesis still holds template FILL values at ${markers.join(", ")}`)
     }
     return reasons
+}
+
+/**
+ * NO-GO reasons for a genesis whose treasury is not the one the owners
+ * agreed: the treasury shape check accepts any well-formed address, and a
+ * wrong one would receive every fee from block 0. On the mainnet chain id the
+ * agreed treasury must be given; on the testnet and devnets it is checked
+ * only when given.
+ */
+export function treasuryReasons(
+    genesis: { forks?: unknown; properties?: unknown } | null,
+    expectedTreasury: string | null | undefined,
+): string[] {
+    if (!genesis) return []
+    const expected = typeof expectedTreasury === "string" && expectedTreasury.trim() ? normTreasury(expectedTreasury) : null
+    const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
+    const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+    if (expected === null) {
+        return mainnet
+            ? [
+                  "no --expected-treasury given: pass the agreed gasFeeSeparation treasury address " +
+                      "(or DEMOS_EXPECTED_TREASURY) so the genesis treasury can be checked against it",
+              ]
+            : []
+    }
+    const gas = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).gasFeeSeparation
+    const actual = gas?.treasuryAddress
+    if (typeof actual !== "string") {
+        return [`the genesis gasFeeSeparation has no treasuryAddress; the agreed treasury is ${expected}`]
+    }
+    if (normTreasury(actual) !== expected) {
+        return [`the genesis gasFeeSeparation treasuryAddress ${actual} is not the agreed treasury ${expected}`]
+    }
+    return []
+}
+
+function normTreasury(address: string): string {
+    return address.trim().toLowerCase()
 }
 
 function templateMarkers(value: unknown, at = "genesis"): string[] {
@@ -708,6 +798,8 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
     genesisFileBlockHash?: string | null
     /** What a node would refuse in the genesis file at its first boot. */
     genesisFileProblems?: string[]
+    /** The agreed gasFeeSeparation treasury (--expected-treasury). */
+    expectedTreasury?: string | null
 }
 
 /**
@@ -716,16 +808,20 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
  * the genesis hash the probes agree on (or the expected one).
  */
 export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
-    const { genesis, blockZero, launchValidators, genesisFileBlockHash, genesisFileProblems, ...rest } = input
+    const { genesis, blockZero, launchValidators, genesisFileBlockHash, genesisFileProblems, expectedTreasury, ...rest } = input
     const rows = genesis && blockZero ? blockZero.rows : null
     const base: GoNoGoInput = {
         ...rest,
         launchValidators: rows ? launchIdentities(rows) : (launchValidators ?? []),
     }
     const agreedHash = decideGoNoGo(base).genesisHash
-    const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize) : null
+    const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize, firstCommitteePins(genesis)) : null
     const decision = decideGoNoGo({ ...base, committee })
-    decision.reasons.push(...(blockZero?.reasons ?? []), ...mainnetGenesisReasons(genesis))
+    decision.reasons.push(
+        ...(blockZero?.reasons ?? []),
+        ...mainnetGenesisReasons(genesis),
+        ...treasuryReasons(genesis, expectedTreasury),
+    )
     for (const problem of genesisFileProblems ?? []) {
         decision.reasons.push(`a node would refuse this genesis at its first boot: ${problem}`)
     }
@@ -758,6 +854,8 @@ export interface LaunchPlanInput {
     operators: Record<string, unknown> | null
     /** What a node would refuse in the genesis file at its first boot. */
     genesisFileProblems?: string[]
+    /** The agreed gasFeeSeparation treasury (--expected-treasury). */
+    expectedTreasury?: string | null
 }
 
 /**
@@ -781,6 +879,7 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
     const pinned = new Set(PINNED_SHARD_IDENTITIES.map(norm))
     return [
         check("genesis forks", forkReasons),
+        check("treasury", treasuryReasons(input.genesis, input.expectedTreasury)),
         check("chain id", genesisReasons.filter(r => r.startsWith("genesis properties.id"))),
         check("shard size", genesisReasons.filter(r => r.startsWith("genesis properties.shardSize"))),
         // Whatever mainnetGenesisReasons adds beyond the checks above, so a
@@ -826,6 +925,7 @@ interface CliArgs {
     shardSize: number | null
     genesisHash: string | null
     commit: string | null
+    expectedTreasury: string | null
     json: boolean
     plan: boolean
     timeoutMs: number
@@ -834,7 +934,8 @@ interface CliArgs {
 function usage(): string {
     return [
         "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE [options]",
-        "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE",
+        "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE \\",
+        "           --expected-treasury ADDRESS",
         "  --plan               check the genesis file and the launch validator table only, with no",
         "                       network: one PASS/FAIL line per check, exit 0 when all pass",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
@@ -852,6 +953,10 @@ function usage(): string {
         "                       scripts/genesis-hash.ts prints (not the genesis data hash)",
         "  --commit SHA         required for GO: the agreed release commit, a full or short SHA;",
         "                       a branch prefix in what a node reports is ignored",
+        "  --expected-treasury ADDRESS",
+        "                       required for GO and --plan on the mainnet chain id: the agreed",
+        "                       gasFeeSeparation treasury; the genesis must name it (default:",
+        "                       DEMOS_EXPECTED_TREASURY)",
         "  --timeout MS         per-request timeout (default 5000)",
         "  --json               machine-readable output",
     ].join("\n")
@@ -874,6 +979,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         shardSize: null,
         genesisHash: null,
         commit: null,
+        expectedTreasury: null,
         json: false,
         plan: false,
         timeoutMs: 5000,
@@ -894,6 +1000,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
             case "--shard-size": args.shardSize = Number(value()); break
             case "--genesis-hash": args.genesisHash = value(); break
             case "--commit": args.commit = value(); break
+            case "--expected-treasury": args.expectedTreasury = value(); break
             case "--timeout": args.timeoutMs = Number(value()); break
             case "--json": args.json = true; break
             case "--plan": args.plan = true; break
@@ -910,6 +1017,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         args.genesis = fromEnv("DEMOS_GENESIS_FILE")
         if (args.genesis !== null) args.snapshot = fromEnv("DEMOS_SNAPSHOT_DIR")
     }
+    if (args.expectedTreasury === null) args.expectedTreasury = fromEnv("DEMOS_EXPECTED_TREASURY")
     return args
 }
 
@@ -962,33 +1070,57 @@ export async function startIdentityProver(timeoutMs: number): Promise<IdentityPr
     const pool = validatorPool.getInstance()
     await pool.start(1)
 
+    // Peer auth is bound to a genesis hash (the node's shared state). Probes
+    // run in parallel and may report different genesis hashes, so one probe
+    // at a time sets it for its own handshake
+    let turn: Promise<unknown> = Promise.resolve()
+    const oneAtATime = <T>(fn: () => Promise<T>): Promise<T> => {
+        const run = turn.then(fn, fn)
+        turn = run.catch(() => undefined)
+        return run
+    }
+
     return {
-        async prove(identity, url, genesisHash) {
-            const { request, nonce } = await PeerManager.buildHelloRequest()
-            // Only the URL is signed in the request; the genesis lets a node
-            // on that genesis answer at all
-            if (genesisHash) request.genesisHash = genesisHash
-            const peer = new Peer(url, identity)
-            const response = await Promise.race([
-                peer.call({ method: "hello_peer", params: [request] }, true),
-                new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error(`hello timed out after ${timeoutMs} ms`)), timeoutMs),
-                ),
-            ]).catch(e => ({ result: 0, response: (e as Error).message, extra: null }) as any)
-            if (response.result !== 200) {
-                const msg = response.extra?.msg ?? response.response
-                return { proof: "failed", detail: `hello_peer ${response.result}: ${typeof msg === "string" ? msg : JSON.stringify(msg)}` }
-            }
-            if (typeof response.extra?.msg === "string" && response.extra.msg.startsWith("Peer is us")) {
-                return { proof: "invalid", detail: "the endpoint answered as this checker" }
-            }
-            const proof = await PeerManager.verifyHelloResponse(response, peer, nonce)
-            return { proof, detail: proof === "verified" ? null : `identity proof ${proof}` }
-        },
+        prove: (identity, url, genesisHash) =>
+            oneAtATime(async () => {
+                getSharedState.genesisBlockHash = genesisHash
+                try {
+                    return await proveOnce(identity, url, genesisHash)
+                } finally {
+                    getSharedState.genesisBlockHash = null
+                }
+            }),
         async stop() {
             await pool.stop()
             fs.rmSync(dir, { recursive: true, force: true })
         },
+    }
+
+    async function proveOnce(
+        identity: string,
+        url: string,
+        genesisHash: string | null,
+    ): Promise<{ proof: IdentityProof; detail: string | null }> {
+        const { request, nonce } = await PeerManager.buildHelloRequest()
+        // Only the URL is signed in the request; the genesis lets a node
+        // on that genesis answer at all
+        if (genesisHash) request.genesisHash = genesisHash
+        const peer = new Peer(url, identity)
+        const response = await Promise.race([
+            peer.call({ method: "hello_peer", params: [request] }, true),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`hello timed out after ${timeoutMs} ms`)), timeoutMs),
+            ),
+        ]).catch(e => ({ result: 0, response: (e as Error).message, extra: null }) as any)
+        if (response.result !== 200) {
+            const msg = response.extra?.msg ?? response.response
+            return { proof: "failed", detail: `hello_peer ${response.result}: ${typeof msg === "string" ? msg : JSON.stringify(msg)}` }
+        }
+        if (typeof response.extra?.msg === "string" && response.extra.msg.startsWith("Peer is us")) {
+            return { proof: "invalid", detail: "the endpoint answered as this checker" }
+        }
+        const proof = await PeerManager.verifyHelloResponse(response, peer, nonce)
+        return { proof, detail: proof === "verified" ? null : `identity proof ${proof}` }
     }
 }
 
@@ -1089,7 +1221,14 @@ async function runPlan(
         // A schedule the node refuses to load is a failed check here, not bad input
         genesisFileProblems = [(e as Error).message]
     }
-    const checks = launchPlanChecks({ genesis, blockZero, shardSize, operators, genesisFileProblems })
+    const checks = launchPlanChecks({
+        genesis,
+        blockZero,
+        shardSize,
+        operators,
+        genesisFileProblems,
+        expectedTreasury: args.expectedTreasury,
+    })
     const table = validatorTable(blockZero ? launchIdentities(blockZero.rows) : [], operators, shardSize)
     if (args.json) {
         console.log(JSON.stringify({ pass: checks.every(c => c.ok), checks, operatorCounts: table.operatorCounts, providerCounts: table.providerCounts, groupCap: table.groupCap }, null, 2))
@@ -1128,6 +1267,10 @@ async function main(): Promise<number> {
     }
     if (args.commit !== null && commitSha(args.commit) === null) {
         console.error(`--commit must be a 7 to 40 character hex SHA, got ${JSON.stringify(args.commit)}`)
+        return 2
+    }
+    if (args.expectedTreasury !== null && !/^0x[0-9a-f]{64}$/.test(args.expectedTreasury.trim().toLowerCase())) {
+        console.error(`--expected-treasury must be 0x and 64 hex characters, got ${JSON.stringify(args.expectedTreasury)}`)
         return 2
     }
 
@@ -1247,6 +1390,7 @@ async function main(): Promise<number> {
         expectedGenesisHash: args.genesisHash,
         ...expectations,
         expectedCommit: args.commit,
+        expectedTreasury: args.expectedTreasury,
     })
 
     if (args.json) {

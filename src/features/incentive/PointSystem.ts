@@ -1,12 +1,12 @@
+import { applyTime } from "@/libs/blockchain/gcr/applyTime"
 import log from "@/utilities/logger"
 import { Referrals } from "./referrals"
 import Datasource from "../../model/datasource"
 import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
-import { RPCResponse, Web2GCRData } from "@kynesyslabs/demosdk/types"
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
-import { Twitter } from "@/libs/identity/tools/twitter"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
@@ -213,7 +213,10 @@ export class PointSystem {
     /**
      * Get user's points from GCR
      */
-    private async getUserPointsInternal(userId: string): Promise<UserPoints> {
+    private async getUserPointsInternal(
+        userId: string,
+        persist = true,
+    ): Promise<UserPoints> {
         // Convert userId to hex string if it's a Buffer
         const userIdStr = Buffer.isBuffer(userId)
             ? userId.toString("hex")
@@ -223,11 +226,22 @@ export class PointSystem {
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         let account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
 
+        // A read (persist false) of an unknown address has nothing linked,
+        // and reading the identities would create its account.
         const { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedHumanPassport, linkedEthos } =
-            await this.getUserIdentitiesFromGCR(userIdStr)
+            account || persist
+                ? await this.getUserIdentitiesFromGCR(userIdStr)
+                : {
+                      linkedWallets: [],
+                      linkedSocials: {},
+                      linkedUDDomains: {},
+                      linkedNomis: [],
+                      linkedHumanPassport: [],
+                      linkedEthos: [],
+                  }
 
         if (!account) {
-            account = await HandleGCR.createAccount(userIdStr)
+            account = await HandleGCR.createAccount(userIdStr, {}, !persist)
         }
 
         // INFO: This is a fallback for accounts that were created before the referral code was added
@@ -238,7 +252,9 @@ export class PointSystem {
                 referrals: [],
                 referredBy: null,
             }
-            await gcrMainRepository.save(account)
+            if (persist) {
+                await gcrMainRepository.save(account)
+            }
         }
 
         // Create and return the response object
@@ -278,7 +294,11 @@ export class PointSystem {
     }
 
     /**
-     * Add points to the GCR for a user
+     * Add points to the GCR for a user.
+     *
+     * Runs in block apply on every node, a syncing one included, so it reads
+     * nothing but the chain: asking an outside service (the Twitter follow
+     * check this used to make) gives nodes different points for one block.
      */
     private async addPointsToGCR(
         userId: string,
@@ -293,7 +313,6 @@ export class PointSystem {
             | "humanPassport",
         platform: string,
         referralCode?: string,
-        twitterUserId?: string,
     ): Promise<void> {
         const db = await Datasource.getInstance()
         const account = await ensureGCRForUser(userId)
@@ -387,7 +406,7 @@ export class PointSystem {
 
         if (appliedDelta !== 0) {
             account.points.totalPoints = oldTotal + appliedDelta
-            account.points.lastUpdated = new Date()
+            account.points.lastUpdated = applyTime()
         }
 
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
@@ -401,34 +420,6 @@ export class PointSystem {
             )
         }
 
-        const shouldCheckFollow =
-            type === "socialAccounts" &&
-            platform === "twitter" &&
-            points > 0 &&
-            twitterUserId
-
-        if (shouldCheckFollow) {
-            const twitter = Twitter.getInstance()
-            const twitterUser = (account.identities.web2["twitter"] || []).find(
-                (twitterIdentity: Web2GCRData["data"]) =>
-                    sameLinkedUserId(twitterIdentity.userId, twitterUserId),
-            )
-
-            if (twitterUser && twitterUser.username) {
-                const isFollowingDemos = await twitter.checkFollow(
-                    twitterUser.username,
-                )
-                if (
-                    isFollowingDemos &&
-                    (account.points.breakdown.demosFollow || 0) <= 0
-                ) {
-                    account.points.breakdown.demosFollow =
-                        pointValues.FOLLOW_DEMOS
-                    account.points.totalPoints += pointValues.FOLLOW_DEMOS
-                }
-            }
-        }
-
         await gcrMainRepository.save(account)
     }
 
@@ -439,7 +430,8 @@ export class PointSystem {
      */
     async getUserPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPoints = await this.getUserPointsInternal(userId)
+            // Served to anyone over RPC: must not store an account.
+            const userPoints = await this.getUserPointsInternal(userId, false)
 
             return {
                 result: 200,
@@ -596,7 +588,6 @@ export class PointSystem {
                 "socialAccounts",
                 "twitter",
                 referralCode,
-                twitterUserId,
             )
 
             const updatedPoints = await this.getUserPointsInternal(userId)

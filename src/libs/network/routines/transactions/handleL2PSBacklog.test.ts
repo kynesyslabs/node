@@ -8,6 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { mockL2psGateDormant } from "@/utilities/testSupport/coreMocks"
 
 const check = jest.fn()
 const claim = jest.fn()
@@ -27,6 +28,7 @@ mock.module("src/libs/blockchain/transaction", () => ({ __esModule: true, defaul
 mock.module("../../server_rpc", () => ({
     emptyResponse: { result: 200, response: "", require_reply: false, extra: null },
 }))
+mockL2psGateDormant()
 mock.module("@/libs/l2ps/parallelNetworks", () => ({
     __esModule: true,
     default: { getInstance: () => ({ getL2PS, loadL2PS: getL2PS }) },

@@ -1,5 +1,4 @@
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
+import readGCRForUser, { type ReadAccount } from "@/libs/blockchain/gcr/gcr_routines/readGCRForUser"
 import log from "@/utilities/logger"
 import {
     NomisWalletIdentity,
@@ -30,21 +29,13 @@ export class NomisIdentityProvider {
         const subchain = options.subchain || "mainnet"
         const normalizedWallet = this.normalizeAddress(walletAddress, chain)
 
-        const account = await ensureGCRForUser(pubkey)
+        const account = await readGCRForUser(pubkey)
 
         this.assertWalletLinked(account, chain, subchain, normalizedWallet)
 
-        const existing = this.getExistingIdentity(
-            account,
-            chain,
-            subchain,
-            normalizedWallet,
-        )
-
-        if (existing) {
-            return existing
-        }
-
+        // Always the live score, even for a wallet already linked: a wallet
+        // signs this into its assign, and admission compares it with what
+        // Nomis reports now, so a stored score could never pass a refresh.
         const apiClient = NomisApiClient.getInstance()
         const payload = await apiClient.getWalletScore(
             normalizedWallet,
@@ -63,12 +54,12 @@ export class NomisIdentityProvider {
     static async listIdentities(
         pubkey: string,
     ): Promise<NomisIdentitySummary[]> {
-        const account = await ensureGCRForUser(pubkey)
+        const account = await readGCRForUser(pubkey)
         return this.flattenIdentities(account)
     }
 
     private static assertWalletLinked(
-        account: GCRMain,
+        account: ReadAccount,
         chain: string,
         subchain: string,
         walletAddress: string,
@@ -109,7 +100,7 @@ export class NomisIdentityProvider {
         }
     }
 
-    private static flattenIdentities(account: GCRMain): NomisIdentitySummary[] {
+    private static flattenIdentities(account: ReadAccount): NomisIdentitySummary[] {
         const summaries: NomisIdentitySummary[] = []
         const nomisIdentities = account.identities?.nomis || {}
 
@@ -138,19 +129,5 @@ export class NomisIdentityProvider {
         }
 
         return address.trim()
-    }
-
-    private static getExistingIdentity(
-        account: GCRMain,
-        chain: string,
-        subchain: string,
-        walletAddress: string,
-    ): SavedNomisIdentity | undefined {
-        const nomisIdentities = account.identities?.nomis || {}
-        const normalizedWallet = this.normalizeAddress(walletAddress, chain)
-        return nomisIdentities?.[chain]?.[subchain]?.find(identity => {
-            const storedAddress = this.normalizeAddress(identity.address, chain)
-            return storedAddress === normalizedWallet
-        })
     }
 }

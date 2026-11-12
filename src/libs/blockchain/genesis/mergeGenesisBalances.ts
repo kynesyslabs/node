@@ -41,6 +41,8 @@ import log from "src/utilities/logger"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import type { SavedUdIdentity } from "src/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
+import { duplicateBalanceProblems } from "./genesisPin"
+import { applyTime } from "@/libs/blockchain/gcr/applyTime"
 
 const GENESIS_ADDRESS_RE = /^0x[0-9a-f]{64}$/
 
@@ -123,6 +125,9 @@ export function genesisBalancesProblems(balances: unknown): string[] {
             problems.push((e as Error).message)
         }
     })
+    for (const problem of duplicateBalanceProblems(balances)) {
+        problems.push(`[GENESIS][BALANCES] ${problem}`)
+    }
     return problems
 }
 
@@ -132,7 +137,7 @@ export function genesisBalancesProblems(balances: unknown): string[] {
  * indistinguishable from one created via the normal account flow.
  */
 function defaultEmptyAccountFields(pubkey: string) {
-    const now = new Date()
+    const now = applyTime()
     // NOTE: no `assignedTxs` — that array was moved off gcr_main into the
     // dedicated gcr_assigned_txs relation (MoveAssignedTxsToOwnTable). A
     // freshly-merged genesis account simply has no assignments yet.
@@ -221,13 +226,16 @@ export async function mergeGenesisBalances(
         `[GENESIS][BALANCES] overlaying ${balances.length} entries from genesisData.balances`,
     )
 
-    // Parse + dedupe upfront so we fail before any DB write if the
-    // operator shipped a malformed entry. Last-wins on duplicate pubkey
-    // — same rule createAccount would apply if called twice.
+    // Parsed upfront so a malformed or repeated entry fails before any DB
+    // write.
     const parsed = new Map<string, bigint>()
     for (let i = 0; i < balances.length; i++) {
         const [pubkey, balance] = parseGenesisBalanceEntry(balances[i], i)
         parsed.set(pubkey, balance)
+    }
+    const duplicates = duplicateBalanceProblems(balances)
+    if (duplicates.length > 0) {
+        throw new Error(`[GENESIS][BALANCES] ${duplicates.join("; ")}`)
     }
     result.total = parsed.size
 
@@ -240,7 +248,7 @@ export async function mergeGenesisBalances(
             // (identities, points, referralInfo, flagged, …) belongs to
             // the snapshot row and we have no business stomping it.
             existing.balance = balance
-            existing.updatedAt = new Date()
+            existing.updatedAt = applyTime()
             await repo.save(existing)
             result.updated++
         } else {

@@ -13,7 +13,8 @@ import { isOperatorRequest } from "./operatorAuth"
 import { isMergePeerEligible } from "../consensus/mergePeerEligibility"
 import { Config } from "src/config"
 import { getAuthContext } from "./authContext"
-import { BODY_BOUND_METHODS } from "./peerHttpAuth"
+import { BODY_BOUND_METHODS, SUDO_METHODS } from "./peerHttpAuth"
+import { admitSudoCall } from "./sudoReplayFloor"
 import Hashing from "src/libs/crypto/hashing"
 import { handleError } from "src/errors"
 
@@ -493,8 +494,31 @@ export async function serverRpcBun() {
                 )
             }
 
+            if (SUDO_METHODS.has(payload.method) && !authCtx.audienceBound) {
+                return jsonResponse(
+                    {
+                        result: 401,
+                        response: `${payload.method} must be signed for this node: name its public key as the audience`,
+                        require_reply: false,
+                        extra: null,
+                    },
+                    401,
+                )
+            }
+
             const sender = authCtx.publicKey || ""
-            const response = await processPayload(payload, sender)
+            // Only a call from the sudo key may raise the floor; any other
+            // sender is refused by processPayload without touching it.
+            if (SUDO_METHODS.has(payload.method) && sender === getSharedState.SUDO_PUBKEY) {
+                const refusal = admitSudoCall(getSharedState.identityFile, authCtx.timestamp)
+                if (refusal) {
+                    return jsonResponse(
+                        { result: 401, response: refusal, require_reply: false, extra: null },
+                        401,
+                    )
+                }
+            }
+            const response = await processPayload(payload, sender, clientIP)
 
             // Surface current rate-limit window so SDK clients can
             // self-throttle (best-effort: skip when no IP data yet).

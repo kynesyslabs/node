@@ -13,6 +13,7 @@ import { requireSender } from "src/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { isForkActive } from "@/forks"
+import { TOKEN_STAKING_REFUSAL, tokenStakingOpen } from "@/forks/tokenStakingGate"
 import { chainMinValidatorStake } from "src/features/staking/chainMinStake"
 import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 import type {
@@ -55,7 +56,36 @@ async function stakeChecksActive(): Promise<boolean> {
     return isForkActive("stakeApplyChecks", await Chain.getLastBlockNumber())
 }
 
+/** Whether token staking is open for the block applied on the current tip. */
+async function stakingOpen(): Promise<boolean> {
+    return tokenStakingOpen(await Chain.getLastBlockNumber())
+}
+
 type StakeTxResult = { valid: boolean; message: string }
+
+function parseStakeTx(tx: Transaction):
+    | { valid: true; payload: ValidatorStakePayload; sender: string; amount: bigint }
+    | { valid: false; result: StakeTxResult } {
+    const payload = extractStakePayload(tx)
+    if (!payload) {
+        return { valid: false, result: { valid: false, message: "Missing stake payload" } }
+    }
+
+    const sender = requireSender(tx)
+    if (!sender) return { valid: false, result: { valid: false, message: "Missing sender" } }
+
+    let amount: bigint
+    try {
+        amount = BigInt(payload.amount)
+    } catch {
+        return { valid: false, result: { valid: false, message: "Invalid stake amount encoding" } }
+    }
+    if (amount <= 0n) {
+        return { valid: false, result: { valid: false, message: "Stake amount must be positive" } }
+    }
+
+    return { valid: true, payload, sender, amount }
+}
 
 export default class ValidatorsManagement {
     // ------------------------------------------------------------------
@@ -69,23 +99,12 @@ export default class ValidatorsManagement {
     static async manageValidatorStakeTx(
         tx: Transaction,
     ): Promise<StakeTxResult> {
-        const payload = extractStakePayload(tx)
-        if (!payload) {
-            return { valid: false, message: "Missing stake payload" }
+        if (!(await stakingOpen())) {
+            return { valid: false, message: TOKEN_STAKING_REFUSAL }
         }
-
-        const sender = requireSender(tx)
-        if (!sender) return { valid: false, message: "Missing sender" }
-
-        let amount: bigint
-        try {
-            amount = BigInt(payload.amount)
-        } catch {
-            return { valid: false, message: "Invalid stake amount encoding" }
-        }
-        if (amount <= 0n) {
-            return { valid: false, message: "Stake amount must be positive" }
-        }
+        const parsed = parseStakeTx(tx)
+        if (parsed.valid === false) return parsed.result
+        const { payload, sender, amount } = parsed
 
         const existing = await GCR.getGCRValidatorStatus(sender)
         const bonding = await stakeChecksActive()
@@ -165,6 +184,9 @@ export default class ValidatorsManagement {
     static async manageValidatorUnstakeTx(
         tx: Transaction,
     ): Promise<StakeTxResult> {
+        if (!(await stakingOpen())) {
+            return { valid: false, message: TOKEN_STAKING_REFUSAL }
+        }
         const sender = requireSender(tx)
         if (!sender) return { valid: false, message: "Missing sender" }
 

@@ -8,6 +8,7 @@ import {
 import log from "src/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
 import prefetchIdentities from "./prefetchIdentities"
+import { IdentityPrefetchError } from "./identityPrefetchError"
 import { validateTx } from "./txValidator"
 import type { TxSignatureDomain } from "./txValidator"
 
@@ -29,6 +30,10 @@ import type { signedObject } from "../../../../node_modules/@kynesyslabs/demosdk
 // safety net for "validate() called before start()", but with start()
 // blocking on identity load it should never fire in practice.
 const SMALL_BATCH_THRESHOLD = 1
+
+function errorText(err: unknown): string {
+    return err instanceof Error ? err.message : String(err)
+}
 const PER_CHUNK_TIMEOUT_MS = 30_000
 const PER_REQUEST_TIMEOUT_MS = 30_000
 const STOP_TIMEOUT_DEFAULT_MS = 2_000
@@ -361,20 +366,13 @@ export default class TxValidatorPool {
                 out.push(...result.value)
                 continue
             }
-            const reason =
-                result.reason instanceof Error
-                    ? result.reason.message
-                    : String(result.reason)
+            const reason = errorText(result.reason)
             log.error(
-                `[TxValidatorPool] Chunk ${b} (${bucketTxs.length} txs) failed: ${reason}`,
+                `[TxValidatorPool] Chunk ${b} (${bucketTxs.length} txs) failed: ${reason}; judging it inline`,
             )
-            for (const tx of bucketTxs) {
-                out.push({
-                    hash: tx.hash,
-                    valid: false,
-                    reason: `validator pool error: ${reason}`,
-                })
-            }
+            out.push(
+                ...(await this.rejudgeInline(bucketTxs, isPostFork, signatureDomain, reason)),
+            )
         }
         const end = Date.now()
         log.only(`[TxValidatorPool] validate() took ${end - now}ms`)
@@ -458,6 +456,29 @@ export default class TxValidatorPool {
                 reject(err instanceof Error ? err : new Error(String(err)))
             }
         })
+    }
+
+    /**
+     * A failed chunk says nothing about its transactions, so they are judged
+     * here instead; one that cannot be judged at all is undecided, never
+     * invalid. Unreadable identity records are not a verdict on a transaction
+     * but on this node's state, so that error goes to the caller, as it does
+     * from the first prefetch in validate().
+     */
+    private async rejudgeInline(
+        txs: Transaction[],
+        isPostFork: boolean,
+        signatureDomain: TxSignatureDomain,
+        poolReason: string,
+    ): Promise<TxValidationResult[]> {
+        try {
+            return await this.validateInline(txs, isPostFork, signatureDomain)
+        } catch (err) {
+            if (err instanceof IdentityPrefetchError) throw err
+            const reason = `validator pool error: ${poolReason}; inline: ${errorText(err)}`
+            log.error(`[TxValidatorPool] ${txs.length} txs left undecided: ${reason}`)
+            return txs.map(tx => ({ hash: tx.hash, valid: false, undecided: true, reason }))
+        }
     }
 
     private async validateInline(

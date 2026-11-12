@@ -19,12 +19,19 @@
  * under `warn`, a mismatch is only reported: stopping a node during a rolling
  * genesis edit far from any fork would cost liveness for no gain.
  *
+ * A validator whose gasFeeSeparation treasury differs while both already
+ * apply the fork is the exception: every fee-bearing block splits them and
+ * there is no later height to wait for. A round where one answers so is handled as a
+ * round inside the window, at any height, and logged as an error.
+ *
  * The watch is driven by inserted blocks, so a node that restarts inside the
  * window would otherwise forge before its first comparison. The consensus
  * routine therefore awaits ensureWindowChecked() first: one conclusive round
- * per scheduled height before the node takes part. A round that reached no
- * validator stays inconclusive and is retried on the next consensus round, so a
- * node cut off from every peer is not held back by it.
+ * per scheduled height before the node takes part, and one conclusive round
+ * started after each requestScheduleCheck() (a peer seen with a different
+ * treasury), at any height. A round that reached no validator stays
+ * inconclusive and is retried on the next consensus round, so a node cut off
+ * from every peer is not held back by it.
  */
 
 import type { ForkConfigLike } from "./forkScheduleAgreement"
@@ -102,6 +109,11 @@ let windowCheckedFor: number | null = null
 // kept, so a slow round delays the next check but never drops it, and a backlog
 // cannot build up.
 let pendingTip: number | null = null
+// requestScheduleCheck() calls so far, and how many of them a conclusive round
+// started after the call has answered. A round already running when a call
+// came may not have asked the peer that prompted it, so it does not count.
+let requestedChecks = 0
+let answeredChecks = 0
 
 export interface RoundOutcome {
     /** Connection strings of the validators whose schedule differs. */
@@ -114,6 +126,8 @@ export interface RoundOutcome {
     agreedIdentities?: string[]
     /** Staked validators at this tip, lowercased; null when every peer counts. */
     validatorIdentities?: string[] | null
+    /** Connection strings of the validators in `mismatched` whose gasFeeSeparation treasury differs. */
+    treasuryMismatched?: string[]
 }
 
 /** How often the comparison is repeated while the node abstains or leaves peers out. */
@@ -192,11 +206,15 @@ export async function applyRoundOutcome(
     if (plan.inWindow) windowCheckedFor = plan.nearest
     setForkScheduleMismatch(differing > 0)
 
+    const treasuryDiffers = (outcome.treasuryMismatched?.length ?? 0) > 0
+    // A different treasury splits the chain already, so it is acted on as a
+    // mismatch inside the window would be, wherever the tip is
+    const urgent = plan.inWindow || treasuryDiffers
     const majorityDiffers = differing > outcome.agreed
     const abstaining =
         policy === "abstain" &&
         majorityDiffers &&
-        (plan.inWindow || getSharedState.forkScheduleAbstain)
+        (urgent || getSharedState.forkScheduleAbstain)
     const before = getSharedState.forkScheduleDifferingPeers
     const leaveOut = new Set<string>()
     if (policy === "abstain" && !abstaining) {
@@ -211,7 +229,7 @@ export async function applyRoundOutcome(
         // A node that abstained itself is past a mismatch too: the minority
         // still differing when it resumes may still abstain.
         const pastMismatch = before.size > 0 || getSharedState.forkScheduleAbstain
-        if (!majorityDiffers && differing > 0 && (plan.inWindow || pastMismatch)) {
+        if (!majorityDiffers && differing > 0 && (urgent || pastMismatch)) {
             for (const id of outcome.mismatchedIdentities ?? []) leaveOut.add(id.toLowerCase())
         }
     }
@@ -230,11 +248,14 @@ export async function applyRoundOutcome(
 
     if (majorityDiffers) {
         if (!abstaining && leaveOut.size > 0) startRecheck()
-        if (policy === "abstain" && plan.inWindow) {
+        if (policy === "abstain" && urgent) {
             const reason =
                 "fork schedule differs from " +
                 outcome.mismatched.join(", ") +
                 ` (${differing} of ${differing + outcome.agreed} validators)` +
+                (treasuryDiffers
+                    ? `, gasFeeSeparation treasury differs from ${outcome.treasuryMismatched!.join(", ")}`
+                    : "") +
                 (plan.nearest !== null
                     ? `, nearest scheduled height ${plan.nearest}`
                     : "") +
@@ -266,6 +287,7 @@ export async function applyRoundOutcome(
 }
 
 async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
+    const answers = requestedChecks
     const { getSharedState } = await import("@/utilities/sharedState")
     const forkConfig = getSharedState.forkConfig as unknown as ForkConfigLike
     const [{ default: PeerManager }, { default: log }, agreement] = await Promise.all([
@@ -277,13 +299,15 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
     // Only staked validators count: a non-validator can open a connection and
     // answer getNetworkInfo with anything, and must not be able to sway the
     // majority. With no staked set (bare dev networks) every peer counts, as in
-    // the shard pool. If the set cannot be read the round is skipped.
+    // the shard pool. If the set cannot be read the round is skipped: the
+    // lenient read answers a failure with an empty set, which would let every
+    // connected peer count.
     let validators: Set<string> | null
     try {
         const { readActiveValidatorAddresses } = await import(
             "@/libs/consensus/v2/routines/getShard"
         )
-        const staked = await readActiveValidatorAddresses(tip)
+        const staked = await readActiveValidatorAddresses(tip, true)
         validators = staked.size > 0 ? new Set([...staked].map(a => a.toLowerCase())) : null
     } catch (error) {
         log.warn(
@@ -306,11 +330,12 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
         mismatchedIdentities: [],
         agreedIdentities: [],
         validatorIdentities: validators === null ? null : [...validators],
+        treasuryMismatched: [],
     }
     await mapWithLimit(peers, PEER_CONCURRENCY, async peer => {
         try {
             const result = await withTimeout<Awaited<ReturnType<typeof agreement.checkPeerSchedule>>>(
-                agreement.checkPeerSchedule(peer, ours, { attempts: 1 }),
+                agreement.checkPeerSchedule(peer, ours, { attempts: 1, tip }),
                 PEER_TIMEOUT_MS,
                 { status: "unreachable", reason: "timed out" },
             )
@@ -321,6 +346,7 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
             if (result.status !== "mismatch") return
             outcome.mismatched.push(peer.connection.string)
             outcome.mismatchedIdentities!.push(String(peer.identity))
+            if (result.treasuryDiffers) outcome.treasuryMismatched!.push(peer.connection.string)
             const text =
                 "[FORK SCHEDULE] MISMATCH with " +
                 peer.connection.string +
@@ -331,13 +357,16 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
                     : "") +
                 ": " +
                 result.lines.join("; ")
-            if (plan.inWindow) log.error(text)
+            if (plan.inWindow || result.treasuryDiffers) log.error(text)
             else log.warn(text)
         } catch {
             // One peer failing must not stop the others from being compared.
         }
     })
     await applyRoundOutcome(tip, plan, outcome)
+    if (outcome.mismatched.length + outcome.agreed > 0) {
+        answeredChecks = Math.max(answeredChecks, answers)
+    }
 }
 
 function runRounds(first: number): Promise<void> {
@@ -366,14 +395,17 @@ async function drainRounds(first: number): Promise<void> {
 export function resetWindowCheck(): void {
     windowCheckedFor = null
     currentRun = null
+    requestedChecks = 0
+    answeredChecks = 0
 }
 
 /**
  * Makes sure the schedule was compared against the validators at least once
- * since the tip entered the window of the nearest scheduled fork, waiting for a
- * round that is already running or starting one. Returns at once outside the
- * window, under the warn policy, or when that height was already checked. Never
- * throws: on failure the node proceeds, as the periodic watch still runs.
+ * since the tip entered the window of the nearest scheduled fork, and once
+ * since the last requestScheduleCheck(), waiting for a round that is already
+ * running (with the one queued behind it) or starting one. Returns at once
+ * under the warn policy, or when neither check is owed. Never throws: on
+ * failure the node proceeds, as the periodic watch still runs.
  */
 export async function ensureWindowChecked(tip: number): Promise<void> {
     try {
@@ -388,12 +420,38 @@ export async function ensureWindowChecked(tip: number): Promise<void> {
             tip,
             getSharedState.forkConfig as unknown as ForkConfigLike,
         )
-        if (!plan.inWindow || windowCheckedFor === plan.nearest) return
+        const owed = () =>
+            answeredChecks < requestedChecks ||
+            (plan.inWindow && windowCheckedFor !== plan.nearest)
+        if (!owed()) return
         if (running && currentRun !== null) await currentRun.catch(() => undefined)
-        if (windowCheckedFor === plan.nearest || running) return
+        if (!owed() || running) return
         await runRounds(tip)
     } catch {
         // A failed comparison must not stop consensus; the periodic watch retries.
+    }
+}
+
+/**
+ * Runs a comparison now rather than at the next due block, for a caller that
+ * has just seen a peer whose treasury differs. Queued behind a running round
+ * like a due block is. Until a conclusive round started after this call has
+ * run, ensureWindowChecked() holds the consensus routine, so the caller need
+ * not wait. Never throws.
+ */
+export async function requestScheduleCheck(): Promise<void> {
+    // Counted before the first await, so it is owed as soon as the caller returns.
+    requestedChecks++
+    try {
+        const { getSharedState } = await import("@/utilities/sharedState")
+        const tip = getSharedState.lastBlockNumber
+        if (running) {
+            pendingTip = tip
+            return
+        }
+        await runRounds(tip)
+    } catch {
+        // A failed comparison must not affect the caller; the periodic watch retries.
     }
 }
 

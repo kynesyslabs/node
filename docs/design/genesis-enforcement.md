@@ -60,6 +60,11 @@ With `NODE_ENV=production`, a node without a pin refuses to start unless
 opts out explicitly. Testnet installs that predate the pin set the opt-out once; the devnet compose
 overlay sets it.
 
+A genesis whose `properties.id` is not the testnet's or a devnet's (mainnet, or a
+network run like it) needs a pin whatever `NODE_ENV` says, and the opt-out is refused there: a node
+with `DEMOS_ALLOW_UNPINNED_GENESIS=true` on such a chain id stops at boot, pinned
+or not. On a restart without a genesis file the id is read from block 0.
+
 ### Fresh database (no block 0)
 
 All checks run before anything is written to the database.
@@ -116,6 +121,15 @@ At every boot, once block 0 and the tip are known:
    without one adds it together with that fork) only while `signatureDomain`
    lies beyond the line in both versions.
 4. An allowed change is stored as the new accepted schedule.
+
+Before these rules, a missing source never falls back to this build's defaults
+on a pinned node or a mainnet chain id (`genesisScheduleProblems`): a restart
+without a genesis file and a genesis without `forks` stop the boot when a pin is
+set or the chain id is not a test network's, and on a mainnet chain id every fork
+this build knows must be declared with a height or null (the go/no-go rule). A
+new release that adds a fork therefore needs its entry in the genesis file before
+it starts on mainnet. On any other chain a genesis that leaves `gasFeeSeparation`
+undeclared logs that it runs with the built-in treasury address.
 
 An operator who must change the schedule inside the window, for example to undo
 an activation everyone agrees was wrong, sets `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST`

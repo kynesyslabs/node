@@ -19,28 +19,57 @@ Generates ZK-SNARK proofs for L2PS transaction batches. Supports up to **10 tran
 
 ## Quick Start
 
-### 1. Install circom (one-time)
+### 1. Keys
+
+The release image ships the proving keys, built at image build time by
+`scripts/build-l2ps-zk-keys.ts`. On a source install, build them with the
+setup wizard; it uses the circom2 and snarkjs in `node_modules`, so no native
+circom is needed:
+
 ```bash
-curl -Ls https://scrypt.io/scripts/setup-circom.sh | sh
+bun run setup --only zk --zk --zk-generate
 ```
 
-### 2. Generate ZK Keys (~2 minutes)
-```bash
-cd src/libs/l2ps/zk/scripts
-./setup_all_batches.sh
-```
+This downloads the Hermez Powers of Tau files 16 and 17 (about 225 MB, from
+circom.info) and writes about 90 MB of proving keys. The build fails unless
+the derived verification keys equal the committed ones, which is also the
+integrity check on the download.
 
-This downloads ptau files (~200MB) and generates proving keys (~350MB).
+### 2. Turn proofs on
+
+Batch proofs are off by default, even when the keys are present: validators do
+not check them yet (`docs/design/l2ps-zk-settlement.md`), and each proof takes
+a core for seconds. The proof inputs are also placeholders: the aggregator
+uses neutral balances and the batch hash as the initial root, and the circuit
+does not bind its amounts to the batch (a missing or invalid amount becomes 0,
+a fractional one is truncated). A proof therefore only bounds the prover's
+inputs; it says nothing about the batch's transfers. The settlement design
+replaces this with inputs bound to the signed transfers and real balances.
+
+To turn them on, add `L2PS_ZK_ENABLED=true` to the node's `.env` or
+deployment environment, or export it before starting from a shell. With
+Docker, recreate the container so it reads the new environment
+(`docker compose restart` keeps the old one) by running the command that
+started the node again, for example `./run --docker --proxy`. A bare
+`docker compose up` without the same compose files drops overrides such as
+the proxy, which publishes RPC directly.
+
+```bash
+# shell start:
+export L2PS_ZK_ENABLED=true
+```
 
 ### 3. Usage
 
-The `L2PSBatchAggregator` automatically uses ZK proofs when keys are available:
+With `L2PS_ZK_ENABLED=true`, the `L2PSBatchAggregator` starts the prover when
+it starts, and its batches carry a `zk_proof`. A batch still goes out without
+a proof when the prover cannot start (for example, the keys are missing; the
+next start tries again) or when a proof fails after startup (the subprocess
+exits, or the proof does not verify locally):
 
 ```typescript
-// Automatic integration - just start the aggregator
 const aggregator = L2PSBatchAggregator.getInstance()
 await aggregator.start()
-// Batches will include zk_proof field when keys are available
 ```
 
 Manual usage:
@@ -66,8 +95,8 @@ const valid = await prover.verifyProof(proof)
 zk/
 ├── L2PSBatchProver.ts          # Main prover class (auto-selects batch size)
 ├── circuits/
-│   ├── l2ps_batch_5.circom     # 1-5 transactions (~37K constraints)
-│   └── l2ps_batch_10.circom    # 6-10 transactions (~74K constraints)
+│   ├── l2ps_batch_5.circom     # 1-5 transactions (12,133 PLONK constraints)
+│   └── l2ps_batch_10.circom    # 6-10 transactions (24,263 PLONK constraints)
 ├── scripts/
 │   └── setup_all_batches.sh    # Compiles circuits & generates keys
 ├── tests/
@@ -78,20 +107,25 @@ zk/
 
 **Generated (gitignored):**
 ```
-├── keys/                       # ~1GB proving keys
+├── keys/                       # about 90 MB proving keys
 │   ├── batch_5/
-│   ├── batch_10/
-│   └── batch_20/
-└── ptau/                       # ~500MB powers of tau
+│   └── batch_10/
+└── ptau/                       # about 225 MB Powers of Tau (build input only)
 ```
 
 ## Performance
 
-| Batch Size | Constraints | Proof Generation | Verification |
-|------------|-------------|------------------|--------------|
-| 5 tx       | 37K         | ~20s             | ~15ms        |
-| 10 tx      | 74K         | ~40s             | ~15ms        |
-| 20 tx      | 148K        | ~80s             | ~15ms        |
+Measured 2026-11-10 in the v1.0.0-rc.6 image with `--cpus 1.5`, through
+`L2PSBatchProver` in its subprocess, three runs each:
+
+| Circuit  | Transactions | PLONK constraints | Proof (p50) | Verification |
+|----------|--------------|-------------------|-------------|--------------|
+| batch_5  | 1-5          | 12,133            | 7.8 s       | 50-230 ms    |
+| batch_10 | 6-10         | 24,263            | 15.3 s      | about 50 ms  |
+
+Proofs are built one at a time, so one node proves about 0.65 transactions
+per second per subnet. The prover is single-threaded and takes one core while
+it runs.
 
 ## Graceful Degradation
 

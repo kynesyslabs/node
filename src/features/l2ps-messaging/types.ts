@@ -248,6 +248,7 @@ export type ErrorCode =
     | "INVALID_PROOF"
     | "PEER_NOT_FOUND"
     | "L2PS_NOT_FOUND"
+    | "L2PS_DISABLED"
     | "L2PS_SUBMIT_FAILED"
     | "L2PS_BACKLOG_FULL"
     | "RATE_LIMITED"

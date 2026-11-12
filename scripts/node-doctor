@@ -364,6 +364,9 @@ PROD_WARNS=0
 PROD_CHECKS=0
 ENV_SOURCE="auto"
 NODE_ENV_SOURCE=""
+# Set when the settings come from `docker compose config`; the genesis check
+# reads the node's bind mounts from it.
+COMPOSE_CONFIG_JSON=""
 declare -A NODE_ENV_VALUES=()
 PARAMETER_SHEET="docs/mainnet/parameters.env"
 declare -A SHEET_VALUES=()
@@ -395,6 +398,7 @@ load_node_env() {
 	if [[ "${ENV_SOURCE}" != "env" ]] && [[ -f docker-compose.yml ]] && command -v docker &>/dev/null; then
 		local json
 		if json=$(docker compose config --format json 2>/dev/null) && command -v python3 &>/dev/null; then
+			COMPOSE_CONFIG_JSON="${json}"
 			local line
 			while IFS= read -r -d '' line; do
 				NODE_ENV_VALUES["${line%%=*}"]="${line#*=}"
@@ -614,6 +618,229 @@ check_extra_env_files() {
 	fi
 }
 
+# The range the node accepts for properties.shardSize, mirrored from
+# src/libs/consensus/genesisShardSize.ts (no Bun on a Docker host); a test
+# keeps the two equal.
+GENESIS_SHARD_SIZE_MIN=3
+GENESIS_SHARD_SIZE_MAX=100
+
+# The genesis checks a node only makes at boot, or never: a pinned hash
+# accepts a file the node then refuses (shardSize out of range), or one it
+# boots on but can never forge a block with (fewer validators active at
+# block 0 than the quorum). Reads the host file the node container mounts (compose) or
+# DEMOS_GENESIS_FILE (bare metal). Prints LEVEL<TAB>item<TAB>detail lines.
+read -r -d '' GENESIS_CHECK_PY <<'PY'
+import json, os, re, sys
+from urllib.parse import urlsplit
+
+mode, genesis_setting, snapshot_setting, smin, smax = sys.argv[1:6]
+smin, smax = int(smin), int(smax)
+
+
+def out(level, item, detail):
+    print(level + "\t" + item + "\t" + detail)
+
+
+def in_container(p, default):
+    return os.path.normpath(os.path.join("/app", p or default))
+
+
+def host_path(mounts, target):
+    # The mount nearest to the path decides what the container reads there
+    best = None
+    for m in mounts:
+        t = (m.get("target") or "").rstrip("/")
+        if t and (target == t or target.startswith(t + "/")):
+            if best is None or len(t) > len(best[0]):
+                best = (t, m)
+    if best is None or best[1].get("type") != "bind":
+        return None
+    return best[1]["source"] + target[len(best[0]):]
+
+
+PORT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*:(\d+)(?:[/?#]|$)")
+
+
+def url_problem(u):
+    if u is None:
+        return None
+    if not isinstance(u, str) or u == "":
+        return "must be null or a non-empty string"
+    m = PORT_RE.match(u)
+    if m and not 1 <= int(m.group(1)) <= 65535:
+        return "port " + m.group(1) + " is outside 1-65535"
+    try:
+        parts = urlsplit(u)
+        parts.port
+    except ValueError:
+        return "is not a valid URL"
+    # urlsplit takes what WHATWG URL parsing (the node's) refuses
+    if not parts.scheme or re.search(r"\s", u):
+        return "is not a valid URL"
+    if parts.scheme not in ("http", "https"):
+        return "is not an http or https URL"
+    if not parts.hostname:
+        return "has no host"
+    return None
+
+
+def main():
+    if mode == "compose":
+        mounts = json.load(sys.stdin).get("services", {}).get("node", {}).get("volumes") or []
+        target = in_container(genesis_setting, "data/genesis.json")
+        genesis_file = host_path(mounts, target)
+        if genesis_file is None:
+            out("FAIL", "genesis file", target + " in the node container is not mounted from the host, so the node "
+                "reads the genesis bundled in the image (the testnet's): mount the published file read-only "
+                "(INSTALL.md, \"Pin the network's genesis\")")
+            return
+        snapshot_dir = host_path(mounts, in_container(snapshot_setting, "data/snapshot"))
+    else:
+        if not genesis_setting:
+            out("FAIL", "genesis file", "DEMOS_GENESIS_FILE is not set, so the node reads data/genesis.json from the "
+                "checkout (the testnet's): point it at the published file")
+            return
+        genesis_file = genesis_setting
+        snapshot_dir = snapshot_setting or "data/snapshot"
+
+    if os.path.isdir(genesis_file):
+        out("FAIL", "genesis file", genesis_file + " is a directory, not the published file (Docker creates a "
+            "directory when the file it should mount does not exist)")
+        return
+    try:
+        with open(genesis_file, encoding="utf-8") as f:
+            genesis = json.load(f)
+        if isinstance(genesis, str):
+            genesis = json.loads(genesis)
+    except (OSError, ValueError) as e:
+        out("FAIL", "genesis file", genesis_file + " cannot be read as JSON: " + str(e))
+        return
+    if not isinstance(genesis, dict):
+        out("FAIL", "genesis file", genesis_file + " does not hold a JSON object")
+        return
+    out("PASS", "genesis file", genesis_file)
+
+    props = genesis.get("properties")
+    shard = props.get("shardSize") if isinstance(props, dict) else None
+    if isinstance(shard, float) and shard.is_integer():
+        shard = int(shard)
+    if not isinstance(shard, int) or isinstance(shard, bool):
+        out("FAIL", "genesis shardSize", "properties.shardSize is " + json.dumps(shard) +
+            ", not an integer: the node refuses this genesis at boot")
+        shard = None
+    elif not smin <= shard <= smax:
+        out("FAIL", "genesis shardSize", "properties.shardSize is %d, outside the [%d, %d] the node accepts: "
+            "it refuses this genesis at boot" % (shard, smin, smax))
+        shard = None
+    else:
+        out("PASS", "genesis shardSize", str(shard))
+
+    validators = genesis.get("validators")
+    rows = validators if isinstance(validators, list) else []
+    source, from_snapshot = "the genesis validators", False
+    manifest_file = os.path.join(snapshot_dir, "manifest.json") if snapshot_dir else None
+    listed = None
+    if manifest_file and os.path.isfile(manifest_file):
+        try:
+            with open(manifest_file, encoding="utf-8") as f:
+                listed = (json.load(f).get("files") or {}).get("validators.jsonl")
+        except (OSError, ValueError, AttributeError):
+            listed = None
+    if listed is not None:
+        # Block 0 seeds the validator set from the snapshot when it carries one
+        try:
+            with open(os.path.join(snapshot_dir, "validators.jsonl"), encoding="utf-8") as f:
+                rows = [json.loads(line) for line in f.read().split("\n") if line]
+        except (OSError, ValueError) as e:
+            out("FAIL", "genesis validators", "the snapshot's validators.jsonl cannot be read: " + str(e))
+            return
+        source, from_snapshot = "the snapshot's validators.jsonl", True
+
+    def active(v):
+        # The committee of block 1 is drawn from status "2" rows with valid_at <= 0
+        if not isinstance(v, dict):
+            return False
+        at = v.get("valid_at")
+        # JSON 0.0 is the integer 0 to the node (JavaScript numbers); Python reads a float
+        if isinstance(at, float) and at.is_integer():
+            at = int(at)
+        return v.get("status") == "2" and isinstance(at, int) and not isinstance(at, bool) and at <= 0
+
+    count = sum(1 for v in rows if active(v))
+    if shard is not None:
+        quorum = shard * 2 // 3 + 1
+        listed_note = "" if count == len(rows) else \
+            " (of %d listed; only status \"2\" with valid_at 0 vote from block 1)" % len(rows)
+        if count < quorum:
+            out("FAIL", "genesis validators", "%d in %s%s, below the quorum of %d (2/3 + 1 of shardSize %d): "
+                "the node boots but no block after block 0 can be forged" % (count, source, listed_note, quorum, shard))
+        else:
+            out("PASS", "genesis validators", "%d in %s%s, quorum %d" % (count, source, listed_note, quorum))
+
+    bad = 0
+    for i, v in enumerate(rows):
+        if not isinstance(v, dict):
+            continue
+        url = v.get("connection_url")
+        if from_snapshot:
+            # The snapshot loader restores a row without a URL as it is
+            url = None if url in (None, "") else url
+        elif "connection_url" not in v:
+            url = ""
+        problem = url_problem(url)
+        if problem:
+            bad += 1
+            where = ("validators.jsonl row %d" % (i + 1)) if from_snapshot else ("validators[%d]" % i)
+            out("FAIL", "genesis connection_url", "%s (%s) %s %s" % (
+                where, v.get("address"), json.dumps(v.get("connection_url")), problem))
+    if bad == 0:
+        out("PASS", "genesis connection_url", "%d validators in %s" % (len(rows), source))
+
+
+try:
+    main()
+except Exception as e:  # one FAIL line instead of a traceback the caller cannot parse
+    out("FAIL", "genesis file", "the check failed: %s: %s" % (type(e).__name__, e))
+PY
+
+check_genesis_file() {
+	if ! command -v python3 &>/dev/null; then
+		prod_line WARN "genesis file" "skipped: python3 is needed to read the genesis file"
+		return
+	fi
+	local mode=env level item detail
+	[[ -n "${COMPOSE_CONFIG_JSON}" ]] && mode=compose
+	while IFS=$'\t' read -r level item detail; do
+		prod_line "${level}" "${item}" "${detail}"
+	done < <(python3 -c "${GENESIS_CHECK_PY}" "${mode}" \
+		"$(node_env DEMOS_GENESIS_FILE)" "$(node_env DEMOS_SNAPSHOT_DIR)" \
+		"${GENESIS_SHARD_SIZE_MIN}" "${GENESIS_SHARD_SIZE_MAX}" <<<"${COMPOSE_CONFIG_JSON}")
+}
+
+# The provider credentials the node verifies web2 identity links with. No
+# node setting refuses those links, so a mainnet validator always takes
+# them: without a credential it refuses every link of that provider (proof
+# fetch, or the Twitter/X bot check) that validators holding one admit.
+WEB2_IDENTITY_CREDENTIALS=(
+	"GITHUB_TOKEN:GitHub identity links"
+	"DISCORD_BOT_TOKEN:Discord identity links"
+	"RAPID_API_KEY:Twitter/X identity links"
+	"RAPID_API_HOST:Twitter/X identity links"
+)
+check_web2_identity_credentials() {
+	local entry key what v
+	for entry in "${WEB2_IDENTITY_CREDENTIALS[@]}"; do
+		key="${entry%%:*}"
+		what="${entry#*:}"
+		v=$(node_env "${key}")
+		if [[ -z "${v//[[:space:]]/}" ]]; then
+			prod_line FAIL "${key}" "empty: this node would refuse every ${what}, which mainnet allows"
+		else
+			prod_line PASS "${key}" "set"
+		fi
+	done
+}
+
 run_production_checks() {
 	load_node_env || return 1
 	echo "Mainnet validator host checks (node settings from ${NODE_ENV_SOURCE}, parameter sheet ${PARAMETER_SHEET}):"
@@ -623,6 +850,8 @@ run_production_checks() {
 	check_ntp_egress
 	check_genesis_pin EXPECTED_GENESIS_HASH
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
+	check_genesis_file
+	check_web2_identity_credentials
 	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
 	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
 	check_unset DEMOS_IDENTITY_TAKEOVER "set it for the one takeover start only (docs/runbooks/validator-key.md)"
@@ -655,8 +884,10 @@ OPTIONS:
     --production    Mainnet validator host checks only: every value in the
                     mainnet parameter sheet (PROD, DEMOS_REQUIRE_VALIDATORS,
                     mismatch policy, block timing, fees, stake floor, ZK points),
-                    clock sync, outbound NTP, genesis pins, and one-start
-                    switches left set; one PASS/WARN/FAIL line each, exit 1 on any FAIL
+                    clock sync, outbound NTP, genesis pins, the genesis file the
+                    node reads (shardSize range, validators against the quorum,
+                    validator URLs), and one-start switches left set; one
+                    PASS/WARN/FAIL line each, exit 1 on any FAIL
     --parameters FILE
                     With --production: the parameter sheet to compare with
                     (default: docs/mainnet/parameters.env in this checkout)

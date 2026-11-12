@@ -12,6 +12,8 @@ import {
     HUMAN_PASSPORT_DEFAULT_HUMAN_THRESHOLD,
     HUMAN_PASSPORT_DEFAULT_SCORE,
     HUMAN_PASSPORT_DEFAULT_THRESHOLD,
+    HUMAN_PASSPORT_EVM_ADDRESS_REGEX,
+    HUMAN_PASSPORT_INVALID_ADDRESS_MESSAGE,
 } from "./constants"
 
 // backward-compatible re-export
@@ -82,10 +84,9 @@ export class HumanPassportProvider {
             )
         }
 
-        // REVIEW: Validate EVM address format to prevent URL path injection
-        const evmAddressRegex = /^0x[a-fA-F0-9]{40}$/
-        if (!evmAddressRegex.test(address)) {
-            throw new Error("Invalid EVM address format: must be 0x followed by 40 hex characters")
+        // The address goes into the URL path; anything else could inject into it.
+        if (!HUMAN_PASSPORT_EVM_ADDRESS_REGEX.test(address)) {
+            throw new Error(HUMAN_PASSPORT_INVALID_ADDRESS_MESSAGE)
         }
 
         const normalizedAddress = address.toLowerCase()

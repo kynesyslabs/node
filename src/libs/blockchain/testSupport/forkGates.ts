@@ -166,3 +166,106 @@ export function stubBlockApply(handleGCR: object): BlockApply {
     })
     return block
 }
+
+interface TxGate {
+    /** The fork's name in the fork config. */
+    fork: string
+    /** What the refused transactions are, for the test names. */
+    gated: string
+    /** The reason every refusal carries. */
+    refusal: string
+    /** One transaction of each kind the fork refuses. */
+    txs(): Promise<Transaction[]>
+    /** A transaction the fork lets through. */
+    other(): Promise<Transaction>
+    handleGCR: object
+}
+
+/**
+ * The intake and block apply tests every fork that refuses a set of
+ * transaction types passes: refused at RPC intake, pool admission, the block
+ * pre-pass and apply, judged from the tip, and refused before any edit when
+ * applied on its own.
+ */
+export function describeTxGate(spec: TxGate): void {
+    const { fork, gated, refusal } = spec
+    const at = (height: number | null) => mainnetForks({ [fork]: height })
+    const validation = () => import("@/libs/blockchain/validation/editBinding")
+
+    describe(`${fork} intake`, () => {
+        it(`pool admission refuses ${gated} while the fork is active`, async () => {
+            at(0)
+            const { verifyAdmissionEdits } = await validation()
+            for (const tx of await spec.txs()) {
+                expect(await verifyAdmissionEdits(tx)).toEqual({ ok: false, reason: refusal })
+            }
+        })
+
+        it(`RPC submission refuses ${gated} too`, async () => {
+            at(0)
+            const { verifyRpcEdits } = await validation()
+            for (const tx of await spec.txs()) {
+                expect(await verifyRpcEdits(tx)).toEqual({ ok: false, reason: refusal })
+            }
+        })
+
+        it("admits other transactions while the fork is active", async () => {
+            at(0)
+            const { verifyAdmissionEdits, verifyRpcEdits } = await validation()
+            expect(await verifyAdmissionEdits(await spec.other())).toEqual({ ok: true })
+            expect(await verifyRpcEdits(await spec.other())).toEqual({ ok: true })
+        })
+
+        it(`does not refuse ${gated} for ${fork} while the fork is dormant`, async () => {
+            at(null)
+            const { verifyRpcEdits } = await validation()
+            for (const tx of await spec.txs()) {
+                expect((await verifyRpcEdits(tx)).reason).not.toBe(refusal)
+            }
+        })
+    })
+
+    describe(`${fork} block apply`, () => {
+        const block = stubBlockApply(spec.handleGCR)
+        const gcr = spec.handleGCR as Record<string, any>
+        const sender = () => block.caches.accounts.get(SENDER) as any
+
+        it(`refuses ${gated} in the pre-pass, next to a transaction the block applies`, async () => {
+            at(0)
+            const txs = await spec.txs()
+            expect(await block.refused([...txs, await spec.other()])).toEqual(txs.map(tx => tx.hash))
+        })
+
+        it("fails them with no balance, nonce or attestation change", async () => {
+            at(0)
+            const txs = await spec.txs()
+            const out = await block.apply(txs)
+            expect(new Set(out.failedTxs)).toEqual(new Set(txs.map(tx => tx.hash)))
+            expect(out.failedTxs).toHaveLength(txs.length)
+            expect(out.successfulTxs).toEqual([])
+            expect(sender().balance).toBe(SENDER_BALANCE)
+            expect(sender().nonce).toBe(7)
+            expect(block.caches.tlsNotaries.size).toBe(0)
+        })
+
+        it("judges the fork from the tip, like the other apply gates", async () => {
+            at(101)
+            const [tx] = await spec.txs()
+            expect(await block.refused([tx])).toEqual([])
+            chainTip.height = 101
+            expect(await block.refused([tx])).toEqual([tx.hash])
+        })
+
+        it("refuses one applied on its own before any edit, and charges nothing", async () => {
+            at(0)
+            for (const tx of await spec.txs()) {
+                for (const simulate of [true, false]) {
+                    const out = await gcr.applyTransaction(block.caches, tx, false, simulate)
+                    expect(out).toMatchObject({ success: false, message: refusal, appliedEditsCount: 0, unproven: true })
+                }
+            }
+            expect(sender().balance).toBe(SENDER_BALANCE)
+            expect(sender().nonce).toBe(7)
+        })
+    })
+}

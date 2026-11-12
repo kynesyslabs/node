@@ -39,6 +39,7 @@ mock.module("@/libs/blockchain/routines/validateTransaction", () => ({
 mock.module("@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser", () => ({
     __esModule: true,
     default: async () => null,
+    readGCRForUser: async () => null,
 }))
 mock.module("@/libs/network/dtr/dtrmanager", () => ({ DTRManager: {} }))
 mock.module("@/libs/consensus/v2/routines/getShard", () => ({
@@ -48,7 +49,13 @@ mock.module("@/libs/consensus/v2/routines/getShard", () => ({
     getEligiblePool: async () => [],
     getBoundCommittee: async () => [],
     pinShardIdentities: () => "",
+    pinnedShardIdentities: () => [],
     rankPool: (_seed: string, pool: string[]) => pool,
+    drawLiveShard: (_seed: string, pool: string[]) => pool,
+    readActiveValidatorAddresses: async () => new Set<string>(),
+    getBoundPool: async () => [],
+    pinRankedPool: (ranked: string[]) => ranked,
+    drawBoundCommittee: () => [],
     __resetValidatorCache: () => undefined,
 }))
 mock.module("@/libs/consensus/v2/routines/getCommonValidatorSeed", () => ({

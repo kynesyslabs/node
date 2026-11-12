@@ -64,7 +64,9 @@ export default class Identity {
      */
     async ensureIdentity(): Promise<void> {
         if (fs.existsSync(getSharedState.identityFile)) {
-            restrictIdentityFileMode(getSharedState.identityFile)
+            restrictIdentityFileMode(getSharedState.identityFile, {
+                refuseOpen: getSharedState.PROD,
+            })
             // Loading the identity
             // TODO Add load with cryptography
             this.ed25519 = await cryptography.load(getSharedState.identityFile)
@@ -148,7 +150,9 @@ export default class Identity {
         const demos = new Demos()
 
         if (fs.existsSync(getSharedState.identityFile)) {
-            restrictIdentityFileMode(getSharedState.identityFile)
+            restrictIdentityFileMode(getSharedState.identityFile, {
+                refuseOpen: getSharedState.PROD,
+            })
             const mnemonic = fs.readFileSync(
                 getSharedState.identityFile,
                 "utf8",

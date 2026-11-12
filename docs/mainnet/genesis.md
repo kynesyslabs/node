@@ -10,23 +10,27 @@ status: active
 `docs/mainnet/genesis.template.json` is the mainnet genesis with every
 value the code fixes already set and every owner decision left as a
 `FILL: ...` string. A node refuses to boot on a file that still holds a
-`FILL` value in the chain id, a fork height, `sudoPubkey` or `balances`
+`FILL` value in a fork height, `sudoPubkey` or `balances`
 (and, with the genesis pinned, the timestamp), before it writes block 0.
 The plan check below reports each of them, so an unfilled template can
 never boot by accident.
 
-The template sets no identity, no chain id and no allocation. Those are
-decided by the genesis owners and filled in once.
+The template sets the mainnet chain id, `8587492`, and no identity and no
+allocation. Those are decided by the genesis owners and filled in once.
 
 ## What is already fixed
 
 | Field | Value | Why |
 |---|---|---|
+| `properties.id` | `8587492` | the mainnet chain id the owners decided. go/no-go and the plan check refuse `0`, testnet `1`, devnet `1337` and `31337` (the fork rehearsals' and local EVM development chains' default): every signature binds to the chain id, so a reused id lets a transaction signed on another network replay on mainnet |
 | `properties.shardSize` | `10` | the launch committee: quorum 7, at most 3 seats lost |
 | `mutables.minBlocksForValidationOnlineStatus` | `4` | same as testnet |
-| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps` | `activationHeight: 0` | mainnet starts with every safety fork on; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height. `identityCarryover` makes block 0 import user data without balances and refuse any other snapshot ([genesis-import.md](genesis-import.md)) |
-| `forks.xmProofBinding`, `forks.atomicWork` | `activationHeight: null` | not scheduled at launch; a later activation is a coordinated schedule change |
+| `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `web2ProofBinding`, `tlsnProofEnforcement`, `l2psGate`, `tlsnDisabled`, `xmProofBinding` | `activationHeight: 0` | mainnet starts with every safety fork on; `web2ProofBinding` takes only web2 proofs that sign the bound message (SDK ≥ 4.0.20 `createWeb2ProofPayload` with a claim), and `xmProofBinding` takes only cross-chain identity proofs that sign the `demos-xm:v1` message, so clients need `@kynesyslabs/demosdk` 4.0.21; and `tlsnProofEnforcement` refuses every TLSN identity claim until the node verifies the notary signature itself; L2PS and TLSNotary are off at launch: `l2psGate` refuses every L2PS transaction, request and pending proof (a proof debits the L2 fee with no credit, which breaks supply conservation), and `tlsnDisabled` refuses `tlsn_request` and `tlsn_store` before any fee or burn and issues no attestation token; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height. `identityCarryover` makes block 0 import user data without balances and refuse any other snapshot ([genesis-import.md](genesis-import.md)) |
+| `forks.atomicWork` | `activationHeight: null` | not scheduled at launch; a later activation is a coordinated schedule change |
 | `forks.networkGovernance` | `activationHeight: null` | network-upgrade proposals and votes are refused at launch; go/no-go is NO-GO on a genesis that schedules it. Turning governance on is a later, height-pinned schedule change |
+| `forks.tokenStakingGate` | `activationHeight: 0` | token staking is off at launch: the validators are the ones in `validators`, and a `validatorStake` or `validatorUnstake` transaction is refused at intake and at apply with "token staking is not enabled on this network (fork tokenStaking)". A node whose build does not know the fork refuses to boot on this genesis |
+| `forks.tokenStaking` | `activationHeight: null` | token staking opens by network upgrade. Opening it is a later, height-pinned schedule change: with `tokenStaking` at H, stakes and unstakes are taken in and applied from block H + 1 under the `stakeApplyChecks` rules. The change ships as a signed release that sets only `tokenStaking` and leaves every active fork at 0 ([fork-schedule-policy.md, Changing the schedule](../runbooks/fork-schedule-policy.md#changing-the-schedule)); go/no-go is NO-GO on a genesis that schedules it |
+| `forks.gasFeeSeparation` | `activationHeight: 0`, with the treasury the owners fill | a native transaction pays the fee its `transaction_fee` names, split between the burn and treasury accounts (the rpc share goes to treasury while no operator is named), and with `feeBinding` that fee is all it pays: no flat gas on top, so transfers keep the total supply. Without the fork the fee is a flat 1 DEM per transaction that no account receives |
 | `status` | `"confirmed"` | as on testnet |
 
 This list matches `MAINNET_FORKS` in `scripts/launch-go-no-go.ts` and the
@@ -37,11 +41,9 @@ them equal.
 
 | Field | Fill with |
 |---|---|
-| `properties.id` | the mainnet chain id, an integer. go/no-go and the plan check refuse testnet `1` and devnet `1337`: every signature binds to the chain id, so a reused id lets a testnet transaction replay on mainnet |
 | `properties.name`, `properties.currency` | network name and currency symbol |
 | `properties.sudoPubkey` | the lowercase `0x` + 64 hex key that may sign award transactions, or delete the field to accept none |
-| `forks.gasFeeSeparation` | `activationHeight` `0` or `null`, and `treasuryAddress`, the mainnet treasury account, in both cases: the node refuses the entry without it, and block 0 creates the burn and treasury accounts whenever the entry is present. The zero address is refused once the fork is scheduled, and with a `null` height too when the snapshot's `fork_state` does not carry the fork, since block 0 then runs its migration |
-| `forks.web2ProofBinding`, `forks.tlsnProofEnforcement` | `activationHeight` `0` or `null` |
+| `forks.gasFeeSeparation.treasuryAddress` | the mainnet treasury account. The node refuses the entry without it and refuses the zero address, and block 0 creates the burn and treasury accounts |
 | `snapshot.manifestSha256` | `sha256sum` of the launch snapshot's `manifest.json`. Keep the field: the launch tools model block 0 on the snapshot path, and the plan check and the height-1 check both require the snapshot |
 | `balances` | the agreed allocations, `[["0x<64 hex address>", "<amount>"], ...]`, each address lowercase. An entry replaces the balance an address has in the snapshot, it is not added to it, so write the whole balance the account starts with, never a top-up. The amount is in the snapshot's unit: these balances are written over the snapshot before block 0 applies `osDenomination`. Over a DEM snapshot (its manifest's `fork_state` has no applied `osDenomination`) enter DEM, and block 0 multiplies it by 10^9 with every other balance; over a snapshot already in OS units enter OS (1 DEM = 10^9 OS) |
 | `timestamp` | the launch time in seconds as a positive integer string. Block 0 is built from it, so the block 0 hash is known only once it is fixed |
@@ -68,10 +70,12 @@ launch snapshot and the validator table
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
-  --operators mainnet/launch-validators.json
+  --operators mainnet/launch-validators.json \
+  --expected-treasury <agreed treasury address>
 ```
 
-It prints one `PASS` or `FAIL` line per check (genesis forks, chain id,
+It prints one `PASS` or `FAIL` line per check (genesis forks, the
+treasury against `--expected-treasury`, chain id,
 shard size, genesis values (no template `FILL` left), whether a node
 would load the file, block 0 validator set,
 launch validators against the quorum, the validator table, the operator
@@ -84,6 +88,23 @@ Then print the values to publish:
 bun scripts/genesis-hash.ts --genesis mainnet/genesis.json --snapshot mainnet/snapshot
 sha256sum mainnet/genesis.json
 ```
+
+It must exit 0 and print no `problem:` line. Besides the hashes, it reports
+what a validator would hit on this file, and the same checks fail
+`node-doctor --production` on the validators' hosts:
+
+- `properties.shardSize` outside 3-100: the node refuses the genesis at boot;
+- fewer validators active at block 0 (status `"2"` and `valid_at` 0) than
+  the quorum of `shardSize`, 2/3 + 1, in the set block 0 seeds (the
+  snapshot's `validators.jsonl` when it has one, otherwise `validators`):
+  the node boots but no block after block 0 can be forged;
+- a validator `connection_url` in that set that is not an http(s) URL with a
+  host (and, if it names a port, one in 1-65535). Each one is exactly the
+  `EXPOSED_URL` that operator runs with, port included; peers dial it.
+  A validator without a URL is not reported, because the node accepts it:
+  `null` in either list, and a missing or empty URL in a `validators.jsonl`
+  row (a genesis `validators` entry without one is refused at boot). Before
+  publishing, check separately that every launch validator has a URL.
 
 What each value covers, how they are published, the 24 h rule and the
 height-1 check after launch are in [genesis-hash.md](genesis-hash.md).

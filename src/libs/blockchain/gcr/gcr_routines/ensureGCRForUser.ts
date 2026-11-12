@@ -6,14 +6,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { validateEd25519Address } from "@kynesyslabs/demosdk/utils"
 import type { EntityManager } from "typeorm"
 
-/**
- * The account for `pubkey`, created when missing. With `manager`, read and
- * created inside that transaction.
- */
-export default async function ensureGCRForUser(
-    pubkey: string,
-    manager?: EntityManager,
-): Promise<GCRMain> {
+function normalizedPubkey(pubkey: string): string {
     if (!pubkey.startsWith("0x")) {
         pubkey = `0x${pubkey}`
     }
@@ -22,6 +15,18 @@ export default async function ensureGCRForUser(
     if (!isValidPubKey) {
         throw new Error("Invalid public key")
     }
+    return pubkey
+}
+
+/**
+ * The account for `pubkey`, created when missing. With `manager`, read and
+ * created inside that transaction.
+ */
+export default async function ensureGCRForUser(
+    pubkey: string,
+    manager?: EntityManager,
+): Promise<GCRMain> {
+    pubkey = normalizedPubkey(pubkey)
 
     // TODO Create the GCR for the user if it doesn't exist
     // TODO Create the GCR extended for the user if it doesn't exist

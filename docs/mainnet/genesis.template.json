@@ -1,6 +1,6 @@
 {
   "properties": {
-    "id": "FILL: mainnet chain id, an integer no other Demos network uses (testnet 1 and devnet 1337 are refused)",
+    "id": 8587492,
     "name": "FILL: network name (testnet: DEMOS)",
     "currency": "FILL: currency symbol (testnet: DEM)",
     "shardSize": 10,
@@ -61,23 +61,44 @@
     "blockCaps": {
       "activationHeight": 0
     },
+    "unpinnedCommittee": {
+      "activationHeight": 0
+    },
+    "telegramSenderBinding": {
+      "activationHeight": 0
+    },
+    "xmRemoveCanonical": {
+      "activationHeight": 0
+    },
+    "tokenStakingGate": {
+      "activationHeight": 0
+    },
     "gasFeeSeparation": {
-      "activationHeight": "FILL: 0 or null",
-      "treasuryAddress": "FILL: lowercase 0x + 64 hex treasury account, required whether the height is 0 or null"
+      "activationHeight": 0,
+      "treasuryAddress": "FILL: lowercase 0x + 64 hex mainnet treasury account"
     },
     "web2ProofBinding": {
-      "activationHeight": "FILL: 0 or null"
+      "activationHeight": 0
     },
     "tlsnProofEnforcement": {
-      "activationHeight": "FILL: 0 or null"
+      "activationHeight": 0
+    },
+    "l2psGate": {
+      "activationHeight": 0
+    },
+    "tlsnDisabled": {
+      "activationHeight": 0
     },
     "xmProofBinding": {
-      "activationHeight": null
+      "activationHeight": 0
     },
     "atomicWork": {
       "activationHeight": null
     },
     "networkGovernance": {
+      "activationHeight": null
+    },
+    "tokenStaking": {
       "activationHeight": null
     }
   },
