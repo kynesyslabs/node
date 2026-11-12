@@ -72,6 +72,9 @@
     },
     "tlsnDisabled": {
       "activationHeight": 0
+    },
+    "xmProofBinding": {
+      "activationHeight": 0
     }
   },
   "balances": [

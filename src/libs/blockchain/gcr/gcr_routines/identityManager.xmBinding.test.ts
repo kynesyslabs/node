@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock, jest } from "bun:test"
-import { dirname, join } from "node:path"
+import { readFileSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 import { Address } from "@ton/core"
 import { AccountAddress } from "@aptos-labs/ts-sdk"
 import { cloneDefaultForkConfig, type ForkConfigByName } from "@/forks/forkConfig"
@@ -428,6 +429,31 @@ describe("IdentityManager.verifyPayload: xm proof quality", () => {
             getSharedState.lastBlockNumber = 1000
             const bound = await IdentityManager.verifyPayload(await payloadFor(f, SENDER), SENDER)
             expect(bound.success).toBe(false)
+        })
+    })
+
+    describe("on the mainnet schedule", () => {
+        beforeEach(() => {
+            const template = JSON.parse(
+                readFileSync(resolve(import.meta.dir, "../../../../../docs/mainnet/genesis.template.json"), "utf8"),
+            )
+            getSharedState.forkConfig.xmProofBinding.activationHeight =
+                template.forks.xmProofBinding.activationHeight
+            getSharedState.lastBlockNumber = 0
+        })
+
+        it("refuses an unbound xm proof from the genesis tip on", async () => {
+            for (const f of await allChains()) {
+                const r = await IdentityManager.verifyPayload(await payloadFor(f, SENDER), SENDER)
+                expect({ chain: f.chain, success: r.success }).toEqual({ chain: f.chain, success: false })
+            }
+        })
+
+        it("accepts the bound message at the genesis tip", async () => {
+            const f = evmFixture()
+            const msg = xmBoundProofMessage(f.chain, f.targetAddress, SENDER, Date.now())
+            const r = await IdentityManager.verifyPayload(await payloadFor(f, msg), SENDER)
+            expect(r.success).toBe(true)
         })
     })
 })

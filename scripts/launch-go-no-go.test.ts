@@ -618,10 +618,10 @@ describe("checkLaunch", () => {
         expect(MAINNET_FORKS).not.toContain("tokenStaking")
     })
 
-    it("launches with bound web2 proofs and no structure-only TLSN claims, xm binding left for its SDK", () => {
+    it("launches with bound web2 and xm proofs and no structure-only TLSN claims", () => {
         expect(MAINNET_FORKS).toContain("web2ProofBinding")
         expect(MAINNET_FORKS).toContain("tlsnProofEnforcement")
-        expect(MAINNET_FORKS).not.toContain("xmProofBinding")
+        expect(MAINNET_FORKS).toContain("xmProofBinding")
     })
 
     describe("the agreed treasury", () => {
@@ -669,7 +669,7 @@ describe("checkLaunch", () => {
     it("launches with L2PS and TLSNotary off", () => {
         expect(MAINNET_FORKS).toContain("l2psGate")
         expect(MAINNET_FORKS).toContain("tlsnDisabled")
-        expect(MAINNET_FORKS).toHaveLength(26)
+        expect(MAINNET_FORKS).toHaveLength(27)
     })
 
     it("is NO-GO without a genesis file, whose forks and validators it cannot check", () => {

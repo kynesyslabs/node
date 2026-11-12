@@ -307,11 +307,15 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
   - The ZK merkle-proof and nullifier routes accept canonical decimal as well
     as hex.
 - From `v1.0.0-rc.8`:
-  - Two new forks, both at height 0 in the mainnet set (26 forks at 0):
+  - Two new forks, both at height 0 in the mainnet set (27 forks at 0):
     `l2psGate` refuses every L2PS transaction and node call and starts no
     L2PS service, and `tlsnDisabled` refuses `tlsn_request` and `tlsn_store`
     before any fee or token. A network that does not schedule them keeps L2PS
     and TLSNotary as before.
+  - `xmProofBinding` moves into the mainnet set at height 0: a cross-chain
+    identity proof must sign the `demos-xm:v1` message, so wallets and
+    clients that link xm identities need `@kynesyslabs/demosdk` 4.0.21. An
+    older SDK's proof (the sender's address) is refused from block 0.
   - `launch-go-no-go` needs `--expected-treasury` (or
     `DEMOS_EXPECTED_TREASURY`) on a mainnet chain id and is NO-GO when the
     genesis names another treasury. A peer whose `gasFeeSeparation` treasury
