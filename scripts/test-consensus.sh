@@ -14,6 +14,7 @@ SUITE_FILES=(
     scripts/launch-go-no-go.test.ts
     scripts/launch-go-no-go.snapshot.test.ts
     scripts/launch-go-no-go.plan.test.ts
+    scripts/launch-go-no-go.prover.test.ts
     scripts/launch-height1-check.test.ts
     scripts/node-doctor.test.ts
     scripts/validator-prove-signing.test.ts
@@ -43,6 +44,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/handleGCR.nativeValue.test.ts
     src/libs/blockchain/gcr/gcr_routines/routines/identityCarryover.test.ts
     src/libs/blockchain/gcr/handleGCR.nonceIntegrity.test.ts
+    src/libs/blockchain/gcr/handleGCR.supply.test.ts
     src/libs/blockchain/gcr/stagedWrites.test.ts
     src/libs/blockchain/gcr/storageLeafWrite.test.ts
     src/libs/blockchain/gcr/storableRows.test.ts
@@ -53,6 +55,7 @@ SUITE_FILES=(
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
     src/libs/blockchain/routines/Sync.verification.test.ts
     src/libs/blockchain/routines/syncVerification.test.ts
+    src/libs/blockchain/routines/validateTransaction.feeBalance.test.ts
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/blockchain/routines/validateTransaction.valueRules.test.ts
     src/libs/blockchain/routines/validatorsManagement.typecheck.test.ts
@@ -86,6 +89,7 @@ SUITE_FILES=(
     src/libs/peer/routines/anchorPairing.test.ts
     src/libs/omniprotocol/server/preauthLimits.test.ts
     src/libs/omniprotocol/transport/ConnectionPool.connectTimeout.test.ts
+    src/libs/omniprotocol/transport/ConnectionPool.perPeerCap.test.ts
     src/libs/omniprotocol/transport/preauthBuffering.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/routines/peerBootstrap.test.ts
@@ -99,6 +103,7 @@ SUITE_FILES=(
     testing/consensus/forkScheduleAbstainRoutine.test.ts
     testing/forks/disableForkMachineryFlag.test.ts
     testing/forks/loadForkConfig.test.ts
+    testing/forks/web2ProofBindingWiring.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
     testing/genesis/buildGenesisBlock.test.ts
     testing/genesis/forkScheduleAbstain.test.ts

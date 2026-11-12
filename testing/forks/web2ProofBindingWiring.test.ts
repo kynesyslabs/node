@@ -10,6 +10,9 @@ const LEGACY_MESSAGE = "dw2p"
 const payload: any = {
     context: "github",
     username: "someone",
+    // GitHub claims carry the numeric account id; without it the claim is
+    // refused as non-canonical before the binding gate is reached.
+    userId: "12345",
     proof: "https://gist.github.com/someone/abc",
 }
 
