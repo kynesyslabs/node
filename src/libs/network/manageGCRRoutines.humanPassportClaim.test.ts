@@ -108,6 +108,20 @@ describe("getHumanPassportClaim", () => {
         expect(valid.result).toBe(200)
     })
 
+    it("limits unsigned IPv6 callers per /64, like the HTTP limiter", async () => {
+        const addresses = Array.from({ length: CLAIM_FETCH_BURST + 1 }, (_, i) =>
+            "0x" + (i + 48).toString(16).padStart(2, "0").repeat(20),
+        )
+        const results = []
+        for (const [i, address] of addresses.entries()) {
+            results.push(await manageGCRRoutines("", { method: "getHumanPassportClaim", params: [address] }, `2001:db8:1:2::${i + 1}`))
+        }
+        expect(results.at(-1)!.result).toBe(429)
+
+        const otherNetwork = await manageGCRRoutines("", { method: "getHumanPassportClaim", params: [addresses.at(-1)] }, "2001:db8:1:3::1")
+        expect(otherNetwork.result).toBe(200)
+    })
+
     it("answers a repeated address from the cache instead of the provider", async () => {
         const first = await manageGCRRoutines(SENDER, { method: "getHumanPassportClaim", params: [EVM] })
         const again = await manageGCRRoutines("0x" + "77".repeat(32), {

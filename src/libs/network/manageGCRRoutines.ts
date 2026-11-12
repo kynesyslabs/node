@@ -15,6 +15,7 @@ import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { getSharedState } from "@/utilities/sharedState"
 import { syncLock } from "../blockchain/routines/Sync"
+import { rateLimitSubject } from "./middleware/rateLimitSubject"
 
 /** An account's identities for a read: nothing is created for an unknown address. */
 async function readIdentities(
@@ -30,11 +31,13 @@ interface GCRRoutinePayload {
     params: any[] // ? Define the params type or nah
 }
 
-// Unsigned calls are limited per source address: one shared bucket would
-// let a single client starve every wallet on this node.
+// Unsigned calls are limited per client, counted like the HTTP limiter does
+// (an IPv6 /64 is one client): one shared bucket would let a single client
+// starve every wallet on this node, and one bucket per IPv6 address would
+// hand a /64 holder a fresh quota per address.
 function claimCaller(sender: string, clientIP?: string): string {
     if (sender) return sender
-    return clientIP ? `ip:${clientIP}` : ""
+    return clientIP ? `ip:${rateLimitSubject(clientIP)}` : ""
 }
 
 export default async function manageGCRRoutines(
