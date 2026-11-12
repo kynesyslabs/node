@@ -3,7 +3,7 @@ import _ from "lodash"
 import IdentityManager from "../blockchain/gcr/gcr_routines/identityManager"
 import { emptyResponse } from "./server_rpc"
 import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManager"
-import { readGCRForUser } from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import readGCRForUser from "../blockchain/gcr/gcr_routines/readGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
 import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityProvider"
@@ -178,6 +178,30 @@ export default async function manageGCRRoutines(
                 )
                 // Return only the numeric score (method name implies a number, not full object)
                 response.response = verification.score
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        case "getHumanPassportClaim": {
+            const options = params[0]
+            const address =
+                typeof options === "string" ? options : options?.address
+            if (typeof address !== "string" || !address) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "address is required" }
+                break
+            }
+            try {
+                response.response =
+                    await IdentityManager.getHumanPassportClaim(address)
             } catch (error) {
                 response.result = 400
                 response.response = null

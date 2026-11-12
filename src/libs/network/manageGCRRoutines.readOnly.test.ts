@@ -53,14 +53,15 @@ describe("GCR read routines on an address with no account", () => {
         expect(rows.size).toBe(0)
     })
 
-    it("answers getReferralInfo with the derived code and stores nothing", async () => {
+    // validateReferralCode and identity admission look codes up among stored
+    // rows, so a code handed out before the account exists would be refused.
+    it("answers getReferralInfo with no code and stores nothing", async () => {
         const res = await manageGCRRoutines(UNKNOWN, {
             method: "getReferralInfo",
             params: [UNKNOWN],
         })
         expect(res.result).toBe(200)
-        expect(typeof res.response.referralCode).toBe("string")
-        expect(res.response.referralCode.length).toBeGreaterThan(0)
+        expect(res.response.referralCode).toBeNull()
         expect(saves).toBe(0)
         expect(rows.size).toBe(0)
     })

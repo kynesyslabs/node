@@ -1,3 +1,4 @@
+import { applyTime } from "../../applyTime"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../../handleGCR"
 import { Web2GCRData } from "@kynesyslabs/demosdk/types"
@@ -181,7 +182,7 @@ export async function applyTLSNIdentityAdd(
         proof: proof,
         proofHash: proofHash,
         proofType: "tlsn", // Mark as TLSNotary-verified
-        timestamp: Date.now(),
+        timestamp: applyTime().getTime(),
     }
 
     accountGCR.identities.web2[context].push(data)

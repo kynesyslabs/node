@@ -6,7 +6,7 @@ import { Middleware } from "../bunServer"
 import { getSharedState } from "@/utilities/sharedState"
 import { isForkActive } from "@/forks"
 import { getAuthContext, setAuthContext } from "../authContext"
-import { BODY_HASH_HEADER } from "../peerHttpAuth"
+import { AUDIENCE_HEADER, BODY_HASH_HEADER } from "../peerHttpAuth"
 import {
     verifySignature,
     isKeyWhitelisted,
@@ -810,6 +810,7 @@ export class RateLimiter {
             const signature = req.headers.get("signature")
             const timestamp = req.headers.get("timestamp")
             const bodyHash = req.headers.get(BODY_HASH_HEADER)
+            const audience = req.headers.get(AUDIENCE_HEADER)
             let verifyResult: VerificationResult | null = null
 
             if (identity && signature) {
@@ -844,6 +845,7 @@ export class RateLimiter {
                     timestamp,
                     requireTimestampBinding,
                     bodyHash,
+                    audience,
                 )
 
                 if (!verifyResult.valid) {
@@ -879,6 +881,8 @@ export class RateLimiter {
                     publicKey: verifyResult.publicKey,
                     algorithm: verifyResult.algorithm,
                     bodyHash: verifyResult.bodyHash ?? null,
+                    audienceBound: verifyResult.audienceBound ?? false,
+                    timestamp: verifyResult.timestamp,
                 })
             }
 

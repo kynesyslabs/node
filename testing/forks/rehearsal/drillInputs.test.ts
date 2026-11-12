@@ -276,11 +276,12 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         // The launch set includes at least these forks at 0, and none of the FILL or null ones
         for (const n of [
             "osDenomination", "nonceEnforcement", "signatureDomain", "editBinding", "nonceIntegrity",
-            "quorumParity", "committeeBinding", "commitLock", "finalityProofs",
+            "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "gasFeeSeparation",
+            "web2ProofBinding", "tlsnProofEnforcement",
         ]) {
             expect(expected[n]).toBe(0)
         }
-        for (const n of ["gasFeeSeparation", "web2ProofBinding", "tlsnProofEnforcement", "xmProofBinding", "atomicWork", "networkGovernance"]) {
+        for (const n of ["xmProofBinding", "atomicWork", "networkGovernance"]) {
             expect(expected[n]).toBeNull()
         }
     })
@@ -365,6 +366,14 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         // an off gasFeeSeparation still carries a treasury, which the node validates
         expect(g.forks.gasFeeSeparation.treasuryAddress).toBe(key(0xee))
         expect(withLaunchForks(genesis(), template({ ...MIN, gasFeeSeparation: { activationHeight: null } })).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x0{64}$/)
+        // an active one gets an account the node boots on, not the burn address,
+        // also where the genesis' own entry names the burn address
+        const active = template({ ...MIN, gasFeeSeparation: { activationHeight: 0 } })
+        const zero = { ...genesis(), forks: { gasFeeSeparation: { activationHeight: null, treasuryAddress: "0x" + "0".repeat(64) } } }
+        for (const base of [genesis(), zero]) {
+            expect(withLaunchForks(base, active).forks.gasFeeSeparation.treasuryAddress).toMatch(/^0x(?!0{64}$)[0-9a-f]{64}$/)
+        }
+        expect(withLaunchForks(own, active).forks.gasFeeSeparation.treasuryAddress).toBe(key(0xee))
     })
     it("keeps the rest of the genesis and does not modify its input", () => {
         const input = genesis()
@@ -465,7 +474,7 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
         it("--fork-set launch writes the same forks scenario 12 gets", () => {
             const { r, genesis: g } = gen("launch")
             expect(r.status).toBe(0)
-            expect(r.stdout).toMatch(/launch fork set .*finalityProofs@0.* \| off: identityCarryover, gasFeeSeparation/)
+            expect(r.stdout).toMatch(/launch fork set .*finalityProofs@0.*gasFeeSeparation@0.* \| off: identityCarryover, /)
             expect(r.stdout).toContain(`| excluded: identityCarryover (${REASON})`)
             // off because the template has it null, not excluded by name
             expect(r.stdout).toMatch(/\| off: [^|]*\bnetworkGovernance\b[^|]*\| excluded: identityCarryover \(/)
@@ -476,7 +485,7 @@ describe("launch fork set (drill_inputs.py launch-forks)", () => {
             const devnet = JSON.parse(readFileSync(resolve(repo, "testing/devnet/genesis.devnet.json"), "utf8"))
             expect(g.forks).toEqual(withLaunchForks(devnet).forks)
             expect(g.forks.gasFeeSeparation).toEqual({
-                activationHeight: null,
+                activationHeight: 0,
                 treasuryAddress: devnet.forks.gasFeeSeparation.treasuryAddress,
             })
         })

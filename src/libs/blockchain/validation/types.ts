@@ -9,6 +9,11 @@ export interface TxValidationResult {
     hash: string
     valid: boolean
     reason?: string
+    /**
+     * No verdict: the validator itself failed, so `valid: false` says
+     * nothing about the transaction and must not fail it.
+     */
+    undecided?: boolean
 }
 
 export type PqcIdentityHint = SavedPqcIdentity | null

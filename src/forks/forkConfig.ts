@@ -390,6 +390,11 @@ export type CanonicalAddressesConfig = BaseForkConfig
  * in ledger units as written, so after osDenomination a DEM number would pay
  * a billionth of the fee its hash commits to.
  *
+ * From the same height, apply leaves out of a native transaction the flat gas
+ * edit the SDK still ships: the fee edits are its whole fee, and the gas, a
+ * debit nothing credits, charged it twice and burned 1 DEM of supply per
+ * transaction.
+ *
  * Activation at H binds from the block applied on tip H, which is block
  * H + 1. Dormant by default; a mainnet genesis sets 0. No payload beyond
  * the base.

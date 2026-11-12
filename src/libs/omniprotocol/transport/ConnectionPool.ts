@@ -199,16 +199,39 @@ export class ConnectionPool extends EventEmitter {
             ConnectionStateUtils.isUsable(c.getState()),
         )
         if (usableConnections.length >= this.config.maxConnectionsPerPeer) {
-            // INFO: Reject the connection
-            log.error(
-                `[ConnectionPool] Max connections per peer reached for ${peerIdentity}`,
+            // The new connection has just proved the key. Older inbound ones
+            // under the same identity can belong to a process that no longer
+            // speaks for it (a halted copy of the key, a restarted peer's
+            // half-open socket); refusing the newest would lock the live
+            // holder out of this node, so the least recently used one goes.
+            // Closing rejects a connection's pending requests, so an idle one
+            // goes before any that still waits for a reply.
+            const stalest = usableConnections
+                .filter(c => c.origin === "inbound")
+                .sort(
+                    (a, b) =>
+                        Number(a.inFlightRequests.size > 0) -
+                            Number(b.inFlightRequests.size > 0) ||
+                        a.getLastActivity() - b.getLastActivity(),
+                )[0]
+            if (!stalest) {
+                log.error(
+                    `[ConnectionPool] Max connections per peer reached for ${peerIdentity}`,
+                )
+                log.error(
+                    `[ConnectionPool] Rejecting connection ${connection.socketId} for ${peerIdentity}`,
+                )
+                connection.close().catch(() => {})
+                this.emit("connection_rejected", peerIdentity, "max_connections")
+                return
+            }
+            log.warning(
+                `[ConnectionPool] Max connections per peer reached for ${peerIdentity}: ` +
+                    `closing its least recently used inbound connection ${stalest.socketId} for ${connection.socketId}`,
             )
-            log.error(
-                `[ConnectionPool] Rejecting connection ${connection.socketId} for ${peerIdentity}`,
-            )
-            connection.close().catch(() => {})
-            this.emit("connection_rejected", peerIdentity, "max_connections")
-            return
+            existing.splice(existing.indexOf(stalest), 1)
+            stalest.close().catch(() => {})
+            this.emit("connection_evicted", peerIdentity, stalest.socketId)
         }
 
         // Add new connection

@@ -611,6 +611,7 @@ export async function consensusRoutine(): Promise<void> {
                     blockRef,
                     false,
                     pendingGCR,
+                    block.content.timestamp,
                 )
                 const l2psEnd = Date.now()
                 log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
