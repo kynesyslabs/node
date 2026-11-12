@@ -306,6 +306,23 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     yet, so turning them on changes no consensus result.
   - The ZK merkle-proof and nullifier routes accept canonical decimal as well
     as hex.
+- From `v1.0.0-rc.8`:
+  - Two new forks, both at height 0 in the mainnet set (26 forks at 0):
+    `l2psGate` refuses every L2PS transaction and node call and starts no
+    L2PS service, and `tlsnDisabled` refuses `tlsn_request` and `tlsn_store`
+    before any fee or token. A network that does not schedule them keeps L2PS
+    and TLSNotary as before.
+  - `launch-go-no-go` needs `--expected-treasury` (or
+    `DEMOS_EXPECTED_TREASURY`) on a mainnet chain id and is NO-GO when the
+    genesis names another treasury. A peer whose `gasFeeSeparation` treasury
+    differs is handled as a fork-schedule mismatch at any height.
+  - A node on a mainnet chain id refuses to boot with
+    `DEMOS_ALLOW_UNPINNED_GENESIS` set, pinned or not.
+  - `node-doctor --production` fails when `GITHUB_TOKEN`,
+    `DISCORD_BOT_TOKEN`, `RAPID_API_KEY` or `RAPID_API_HOST` is empty: web2
+    identity links stay on and the node checks them against the providers.
+  - The Omni per-identity cap counts inbound connections only. Run one
+    process per validator key.
 
 ## Known limits
 
