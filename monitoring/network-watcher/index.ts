@@ -114,13 +114,16 @@ export class Watcher {
             })
         }))
         const reachable = this.endpoints.filter(e => e.head)
+        // Advance only past the highest mark any reachable endpoint held before this poll, so an endpoint catching up,
+        // resyncing or returning to a head another endpoint already reported is not progress. This fails closed: an
+        // inflated mark holds the stall alert on until that endpoint drops back or is unreachable.
+        const top = Math.max(-1, ...reachable.map(e => e.mark ?? -1))
         for (const e of reachable) {
-            // Advance only past this endpoint's own high-water mark, so a head seen before is not progress again and
-            // another endpoint's inflated head blocks nothing. An endpoint's first head only sets its mark (another
-            // endpoint may have reported it already), and so does a drop of more than the window (a chain reset).
+            // An endpoint's first head only sets its mark (another endpoint may have reported it already), and so does
+            // a drop of more than the window (a chain reset).
             const n = e.head!.number
             if (e.mark === undefined || n < e.mark - this.window) e.mark = n
-            else if (n > e.mark) { this.lastAdvance = now; e.mark = n }
+            else if (n > e.mark) { if (n > top) this.lastAdvance = now; e.mark = n }
         }
         if (reachable.length) this.headMax = Math.max(...reachable.map(e => e.head!.number))
         this.emit("head_max", this.headMax)

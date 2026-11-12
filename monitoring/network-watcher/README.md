@@ -89,21 +89,28 @@ the metric and `SignerCountLow` are unavailable (the error counter increases).
 no margin above quorum: under commitLock the stored certificate is the precommits held
 the moment quorum was reached (`commitLock/precommit.ts:417-419,489-519`,
 `PoRBFT.ts:1315-1316`), so healthy blocks can carry exactly quorum. Block signers are
-from the comparison block. The stall timer restarts when any endpoint reports a head above
-its own high-water mark (the highest head that endpoint has reported; a lagging endpoint
-catching up counts). An endpoint that drops out and returns at a head already seen is not
-an advance, and an inflated head on one endpoint does not stop other endpoints' advances
-from counting. The timer starts on the first poll; an endpoint's first head (at startup or
-when it first comes up later) only sets its mark and is not an advance, since another
-endpoint may already have reported that head. A chain reset is detected by height, not
-by genesis hash (which would cost a request per poll): when an endpoint's head drops more
-than `WATCH_SIGN_WINDOW` blocks below its mark, the mark restarts at that head, and that
-drop is not an advance. A smaller reset counts again once the new chain passes the old
-mark, at most `WATCH_SIGN_WINDOW` + 1 blocks later. An endpoint whose head swings back and
-forth by more than `WATCH_SIGN_WINDOW` blocks (for example a load balancer over backends
-that far apart) counts each upswing as an advance. An endpoint that keeps reporting an
-inflated head still holds `head_max` up, and `RpcEndpointBehind` then fires for every
-honest endpoint.
+from the comparison block. Each endpoint has a high-water mark: the highest head it has
+reported. The stall timer restarts only when an endpoint reports a head above every mark
+that the endpoints answering that poll held before it. So an endpoint catching up,
+resyncing from a low head, or returning after an outage to a head another endpoint
+already reported is not an advance. An endpoint that does not answer a poll does not
+count in it: if every endpoint holding the highest mark is unreachable, the highest mark
+among the others is used, so a lagging endpoint rising past it counts until they answer
+again. The timer starts on the first poll; an endpoint's first head (at startup or when
+it first comes up later) only sets its mark and is not an advance, since another endpoint
+may already have reported that head. A chain reset is detected by height, not by genesis
+hash (which would cost a request per poll): when an endpoint's head drops more than
+`WATCH_SIGN_WINDOW` blocks below its mark, the mark restarts at that head, and that drop
+is not an advance. New-chain heads count again once every answering endpoint has reset;
+until then, an endpoint still reporting the old chain's head holds the alert on, like an
+inflated head. A smaller reset counts again once the new chain passes the old mark, at
+most `WATCH_SIGN_WINDOW` + 1 blocks later. An endpoint whose head swings back and forth by
+more than `WATCH_SIGN_WINDOW` blocks (for example a load balancer over backends that far
+apart) counts each upswing as an advance, unless another answering endpoint has already
+reported that head or a higher one. This rule fails closed: an endpoint that keeps
+reporting an inflated head holds `NetworkHeadStalled` on and `head_max` up, and
+`RpcEndpointBehind` then fires for every honest endpoint, which points at the bad one.
+Fix that endpoint or remove it from `WATCH_RPC_URLS`.
 Losing all endpoints preserves the last advance time and drops signer observations.
 
 From `monitoring/` (the profile exists only in `monitoring/docker-compose.yml`; from the

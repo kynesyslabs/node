@@ -197,18 +197,21 @@ test("scrapes retain the previous complete poll while the next poll is pending",
     release!()
     await poll
 })
-test("an inflated head on one endpoint does not block advances on the others; a reset endpoint resumes counting", async () => {
-    const heads: Record<string, number> = { "one.test": 9_000_000, "two.test": 100 }
-    const w = new Watcher(["https://one.test", "https://two.test"], 3, stub({ heads }).fetcher)
+test("an inflated head on one endpoint holds the stall alert on, with the honest heads behind head_max; once it drops back, advances count", async () => {
+    const heads: Record<string, number> = { "one.test": 9_000_000, "two.test": 100, "three.test": 100 }
+    const w = new Watcher(["https://one.test", "https://two.test", "https://three.test"], 3, stub({ heads }).fetcher)
+    const value = (name: string) => Number(line(w, name)!.split(" ")[1])
     await w.poll(1000)
     await w.poll(1100)
     expect(w.lastAdvance).toBe(1000)
-    heads["two.test"] = 101
+    heads["two.test"] = heads["three.test"] = 101
     await w.poll(1200)
-    expect(w.lastAdvance).toBe(1200)
+    // Fails closed: the honest heads are below one.test's mark, so they are not progress, and RpcEndpointBehind fires for them.
+    expect(w.lastAdvance).toBe(1000)
+    for (const host of ["two.test", "three.test"]) expect(value("head_max") - value(`endpoint_head{endpoint="${host}"}`)).toBeGreaterThan(10)
     heads["one.test"] = 101
     await w.poll(1300)
-    expect(w.lastAdvance).toBe(1200)
+    expect(w.lastAdvance).toBe(1000)
     heads["one.test"] = 102
     await w.poll(1400)
     expect(w.lastAdvance).toBe(1400)
@@ -233,7 +236,8 @@ test("an endpoint that drops out and returns at a head already seen does not res
     expect(w.lastAdvance).toBe(1000)
     heads["two.test"] = 100
     await w.poll(2000)
-    expect(w.lastAdvance).toBe(2000)
+    // one.test already reported 100, so two.test reaching it is catching up, not progress.
+    expect(w.lastAdvance).toBe(1000)
     heads["one.test"] = 101
     await w.poll(2100)
     expect(w.lastAdvance).toBe(2100)
@@ -263,6 +267,70 @@ test("a single endpoint started on a healthy chain starts the timer at the first
     heads["one.test"] = 31
     await w.poll(1200)
     expect(w.lastAdvance).toBe(1200)
+})
+const trio = ["https://a.test", "https://b.test", "https://c.test"]
+test("during a halt, an endpoint 30 behind catching up one block per poll does not restart the stall timer", async () => {
+    const heads: Record<string, number> = { "a.test": 100, "b.test": 100, "c.test": 70 }
+    const w = new Watcher(trio, 3, stub({ heads }).fetcher)
+    await w.poll(1000)
+    for (let i = 1; i <= 30; i++) { heads["c.test"] = 70 + i; await w.poll(1000 + i * 15) }
+    expect(w.lastAdvance).toBe(1000)
+    heads["a.test"] = 101
+    await w.poll(1500)
+    expect(w.lastAdvance).toBe(1500)
+})
+test("during a halt, an endpoint resyncing from a low head does not restart the stall timer", async () => {
+    const heads: Record<string, number> = { "a.test": 1000, "b.test": 1000, "c.test": 1000 }
+    const w = new Watcher(trio, 3, stub({ heads }).fetcher)
+    await w.poll(1000)
+    for (let i = 0; i <= 10; i++) { heads["c.test"] = 10 + i * 99; await w.poll(1100 + i * 100) }
+    expect(w.endpoints[2]!.mark).toBe(1000)
+    expect(w.lastAdvance).toBe(1000)
+    heads["c.test"] = 1001
+    await w.poll(2300)
+    expect(w.lastAdvance).toBe(2300)
+})
+test("during a halt, an endpoint down at its mark and returning at a head the others reported does not restart the stall timer", async () => {
+    const heads: Record<string, number> = { "a.test": 96, "b.test": 96, "c.test": 96 }
+    let down = false
+    const { fetcher } = stub({ heads })
+    const w = new Watcher(trio, 3, (url, init) => down && new URL(url).host === "a.test" ? Promise.reject(Error("down")) : fetcher(url, init))
+    await w.poll(1000)
+    down = true
+    heads["b.test"] = heads["c.test"] = 100
+    await w.poll(1100)
+    await w.poll(1200)
+    expect(w.lastAdvance).toBe(1100)
+    down = false
+    heads["a.test"] = 100
+    await w.poll(1300)
+    expect(w.lastAdvance).toBe(1100)
+})
+test("a chain reset does not leave the stall timer stuck, whether every endpoint resets at once or only some do", async () => {
+    const heads: Record<string, number> = {}
+    let down = ""
+    const { fetcher } = stub({ heads })
+    const watcher = async () => {
+        Object.assign(heads, { "a.test": 500, "b.test": 500, "c.test": 500 })
+        const w = new Watcher(trio, 3, (url, init) => new URL(url).host === down ? Promise.reject(Error("down")) : fetcher(url, init))
+        await w.poll(1000)
+        return async (now: number, next: Record<string, number>) => { Object.assign(heads, next); await w.poll(now); return w.lastAdvance }
+    }
+    // Every endpoint resets in one poll: the drop is not an advance, and the next new head is.
+    let step = await watcher()
+    expect(await step(1100, { "a.test": 5, "b.test": 5, "c.test": 5 })).toBe(1000)
+    expect(await step(1200, { "a.test": 6 })).toBe(1200)
+    // Only some reset: an endpoint still at the old head holds the alert on, like an inflated head, until it is
+    // unreachable or resets too.
+    step = await watcher()
+    expect(await step(1100, { "a.test": 5 })).toBe(1000)
+    expect(await step(1200, { "a.test": 6, "b.test": 6 })).toBe(1000)
+    expect(await step(1300, { "a.test": 7 })).toBe(1000)
+    down = "c.test"
+    expect(await step(1400, { "a.test": 8 })).toBe(1400)
+    down = ""
+    expect(await step(1500, { "a.test": 9, "c.test": 9 })).toBe(1400)
+    expect(await step(1600, { "a.test": 10 })).toBe(1600)
 })
 for (const bad of ["tab\there", "nul\u0000here"]) test(`identity ${JSON.stringify(bad)} in a block or validator set is a counted bad reply`, async () => {
     const { fetcher } = stub({ sets: { blockNumber: 28, validators: [{ identity: "a", status: "2", validAt: 0 }, { identity: bad, status: "2", validAt: 0 }] },
