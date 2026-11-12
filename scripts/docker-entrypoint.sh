@@ -30,7 +30,8 @@ mkdir -p "$STATE_DIR" "$LOGS_DIR"
 
 # The node reads LOGS_DIR and creates logs_<port>_<id>/ inside it. A volume the
 # node user cannot write to keeps the old behaviour (logs in /app, which the
-# container loses on recreation) instead of stopping the node at startup.
+# container loses on recreation) instead of the node failing to create its
+# log folder there and falling back to the same volume.
 if [ -w "$LOGS_DIR" ]; then
     export LOGS_DIR
 else
