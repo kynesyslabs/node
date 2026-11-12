@@ -128,6 +128,12 @@ export interface RoundOutcome {
     validatorIdentities?: string[] | null
     /** Connection strings of the validators in `mismatched` whose gasFeeSeparation treasury differs. */
     treasuryMismatched?: string[]
+    /**
+     * Identities of the validators in `mismatched` whose own nearest scheduled
+     * height is within WINDOW_BLOCKS of the tip: by their schedule they are in
+     * the window, so they abstain even when ours schedules nothing near.
+     */
+    mismatchedInTheirWindow?: string[]
 }
 
 /** How often the comparison is repeated while the node abstains or leaves peers out. */
@@ -232,6 +238,12 @@ export async function applyRoundOutcome(
         if (!majorityDiffers && differing > 0 && (urgent || pastMismatch)) {
             for (const id of outcome.mismatchedIdentities ?? []) leaveOut.add(id.toLowerCase())
         }
+        // A validator inside its own window abstains whatever our schedule
+        // says. Left in the shard it is still drawn as secretary, and a round
+        // whose secretary never starts stalls every validator.
+        if (!majorityDiffers) {
+            for (const id of outcome.mismatchedInTheirWindow ?? []) leaveOut.add(id.toLowerCase())
+        }
     }
     if (leaveOut.size !== before.size || [...leaveOut].some(id => !before.has(id))) {
         getSharedState.forkScheduleDifferingPeers = leaveOut
@@ -331,6 +343,7 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
         agreedIdentities: [],
         validatorIdentities: validators === null ? null : [...validators],
         treasuryMismatched: [],
+        mismatchedInTheirWindow: [],
     }
     await mapWithLimit(peers, PEER_CONCURRENCY, async peer => {
         try {
@@ -347,6 +360,9 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
             outcome.mismatched.push(peer.connection.string)
             outcome.mismatchedIdentities!.push(String(peer.identity))
             if (result.treasuryDiffers) outcome.treasuryMismatched!.push(peer.connection.string)
+            const theirWindow =
+                result.theirNearest !== undefined && result.theirNearest - tip <= WINDOW_BLOCKS
+            if (theirWindow) outcome.mismatchedInTheirWindow!.push(String(peer.identity))
             const text =
                 "[FORK SCHEDULE] MISMATCH with " +
                 peer.connection.string +
@@ -356,8 +372,9 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
                     ? " (nearest scheduled height " + plan.nearest + ")"
                     : "") +
                 ": " +
-                result.lines.join("; ")
-            if (plan.inWindow || result.treasuryDiffers) log.error(text)
+                result.lines.join("; ") +
+                (theirWindow ? ` (their nearest scheduled height ${result.theirNearest})` : "")
+            if (plan.inWindow || result.treasuryDiffers || theirWindow) log.error(text)
             else log.warn(text)
         } catch {
             // One peer failing must not stop the others from being compared.
@@ -394,6 +411,7 @@ async function drainRounds(first: number): Promise<void> {
 /** Forgets which scheduled height was checked. Exported for the test. */
 export function resetWindowCheck(): void {
     windowCheckedFor = null
+    lastStallCheckAt = null
     currentRun = null
     requestedChecks = 0
     answeredChecks = 0
@@ -452,6 +470,29 @@ export async function requestScheduleCheck(): Promise<void> {
         await runRounds(tip)
     } catch {
         // A failed comparison must not affect the caller; the periodic watch retries.
+    }
+}
+
+let lastStallCheckAt: number | null = null
+
+/**
+ * For the consensus routine when a round stops because the secretary never
+ * answered. The block-driven watch runs only on inserted blocks, so on a chain
+ * stalled by an abstaining secretary it would never run again; this starts a
+ * round instead, and ensureWindowChecked holds the next consensus round until
+ * it has answered, so that round's shard already leaves the abstainer out.
+ * At most once per RECHECK_INTERVAL_MS: secretary timeouts repeat every few
+ * seconds, and each comparison asks every validator. Never throws.
+ */
+export async function onSecretaryUnresponsive(now: number = Date.now()): Promise<void> {
+    try {
+        const { Config } = await import("@/config")
+        if (Config.getInstance().core.forkScheduleMismatchPolicy !== "abstain") return
+        if (lastStallCheckAt !== null && now - lastStallCheckAt < RECHECK_INTERVAL_MS) return
+        lastStallCheckAt = now
+        await requestScheduleCheck()
+    } catch {
+        // A failed comparison must not affect the consensus routine.
     }
 }
 

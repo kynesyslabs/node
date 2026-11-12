@@ -134,7 +134,18 @@ export type ScheduleComparison =
      * tip with different treasuries: a split from the next fee-bearing block,
      * not a future one.
      */
-    | { status: "mismatch"; lines: string[]; treasuryDiffers?: boolean }
+    | {
+          status: "mismatch"
+          lines: string[]
+          treasuryDiffers?: boolean
+          /**
+           * The peer's own nearest scheduled height above the tip, when it has
+           * one. The peer decides whether to abstain by its own schedule, so a
+           * height only it schedules can put it out of consensus while ours
+           * shows no window at all.
+           */
+          theirNearest?: number
+      }
 
 /**
  * Compare two views. Equal digests agree. Differing digests are a mismatch, and
@@ -185,7 +196,21 @@ export function compareSchedules(
     } else if (lines.length === 0) {
         return { status: "agree" }
     }
-    return treasuryDiffers ? { status: "mismatch", lines, treasuryDiffers } : { status: "mismatch", lines }
+    const result: Extract<ScheduleComparison, { status: "mismatch" }> = { status: "mismatch", lines }
+    if (treasuryDiffers) result.treasuryDiffers = true
+    const theirNearest = nearestScheduledAbove(theirs, tip)
+    if (theirNearest !== null) result.theirNearest = theirNearest
+    return result
+}
+
+function nearestScheduledAbove(view: ScheduleView, tip: number): number | null {
+    let nearest: number | null = null
+    for (const height of Object.values(view.forks)) {
+        if (typeof height === "number" && height > tip && (nearest === null || height < nearest)) {
+            nearest = height
+        }
+    }
+    return nearest
 }
 
 function scheduledTreasuriesDiffer(ours: ScheduleView, theirs: ScheduleView): boolean {
