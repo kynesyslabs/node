@@ -7,7 +7,8 @@
  * commit, no operator or cloud provider holds more launch validators than
  * the committee can lose (shardSize - q) or more than a third of the votes,
  * the genesis schedules the mainnet forks at block 0 and declares every fork
- * this build knows, its chain id is no other network's, its shardSize is
+ * this build knows, its chain id is no other network's and not a reserved
+ * one (REFUSED_MAINNET_CHAIN_IDS), its shardSize is
  * the launch one, and no launch validator is a pinned committee identity.
  * With a genesis file, every validator must also report that file's genesis
  * data hash and fork schedule digest, and the mainnet forks as active, and
@@ -208,6 +209,23 @@ export const KNOWN_FORKS = Object.keys(DEFAULT_FORK_CONFIG) as ForkName[]
 export const LAUNCH_SHARD_SIZE = 10
 
 export { NON_MAINNET_CHAIN_IDS }
+
+/** The chain id the owners decided for mainnet; the template carries it. */
+export const MAINNET_CHAIN_ID = 8587492
+
+/**
+ * Chain ids a mainnet genesis may not use, besides the testnet's and the
+ * devnets'. Signatures bind to the chain id, so a transaction signed on a
+ * network with one of these ids would be valid on mainnet. The node does not
+ * treat them as test networks, so they are not in NON_MAINNET_CHAIN_IDS.
+ */
+export const RESERVED_CHAIN_IDS: Readonly<Record<number, string>> = {
+    0: "the id an unset or zeroed field reads as",
+    31337: "the default of the fork rehearsal networks and of local EVM development chains",
+}
+
+/** Every chain id go/no-go and the plan check refuse for a mainnet genesis. */
+export const REFUSED_MAINNET_CHAIN_IDS: readonly number[] = [0, ...NON_MAINNET_CHAIN_IDS, 31337]
 
 const norm = (id: string) => id.trim().toLowerCase()
 /** Operator and provider names are free text typed by people. */
@@ -667,6 +685,11 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
     } else if (NON_MAINNET_CHAIN_IDS.includes(chainId)) {
         reasons.push(
             `genesis properties.id ${chainId} is the chain id of the testnet or a devnet; ` +
+                "transactions signed there would be valid on this chain",
+        )
+    } else if (RESERVED_CHAIN_IDS[chainId] !== undefined) {
+        reasons.push(
+            `genesis properties.id ${chainId} is reserved, ${RESERVED_CHAIN_IDS[chainId]}; ` +
                 "transactions signed there would be valid on this chain",
         )
     }

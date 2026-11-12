@@ -179,7 +179,8 @@ exposed by the node, so it comes from the T-24h posts). Then:
   `activationHeight` 0, leaves `networkGovernance` and `tokenStaking` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
   code default), gives `gasFeeSeparation` the agreed `treasuryAddress`
   (`--expected-treasury`),
-  uses a chain id other than testnet `1` and devnet `1337`, and sets
+  uses a chain id other than `0`, testnet `1`, devnet `1337` and `31337`
+  (mainnet is `8587492`), and sets
   `shardSize` 10; and no launch validator is one of
   the pinned committee identities (`PINNED_SHARD_IDENTITIES`), which take
   a seat on any network whose pool holds them; and a node would accept

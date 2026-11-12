@@ -320,6 +320,8 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     `DEMOS_EXPECTED_TREASURY`) on a mainnet chain id and is NO-GO when the
     genesis names another treasury. A peer whose `gasFeeSeparation` treasury
     differs is handled as a fork-schedule mismatch at any height.
+  - The mainnet template carries chain id `8587492`. `launch-go-no-go` and
+    `--plan` refuse chain ids `0`, `1`, `1337` and `31337`.
   - A node on a mainnet chain id refuses to boot with
     `DEMOS_ALLOW_UNPINNED_GENESIS` set, pinned or not.
   - `node-doctor --production` fails when `GITHUB_TOKEN`,

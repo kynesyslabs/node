@@ -10,8 +10,10 @@ import {
     KNOWN_FORKS,
     LAUNCH_DORMANT_FORKS,
     LAUNCH_SHARD_SIZE,
+    MAINNET_CHAIN_ID,
     MAINNET_FORKS,
     NON_MAINNET_CHAIN_IDS,
+    REFUSED_MAINNET_CHAIN_IDS,
     launchGenesisExpectations,
     launchPlanChecks,
     mainnetGenesisReasons,
@@ -28,7 +30,6 @@ const TREASURY = "0x" + "ab".repeat(32)
 /** The template with every FILL field given a value, as the owners would. */
 function filledTemplate(validators = 10) {
     const g = readTemplate()
-    g.properties.id = 7
     g.properties.name = "DEMOS-MAINNET-TEST"
     g.properties.currency = "DEM"
     delete g.properties.sudoPubkey
@@ -84,7 +85,6 @@ describe("mainnet genesis template", () => {
     it("leaves the owners' decisions as FILL values the node refuses to load", async () => {
         const g = readTemplate()
         for (const v of [
-            g.properties.id,
             g.forks.gasFeeSeparation.treasuryAddress,
             g.balances,
             g.timestamp,
@@ -95,9 +95,16 @@ describe("mainnet genesis template", () => {
         await expect(launchGenesisExpectations(g)).rejects.toThrow()
     })
 
-    it("pins no identity and no chain id", () => {
+    it("pins no identity", () => {
         const text = readFileSync(TEMPLATE, "utf8")
         expect(text).not.toMatch(/0x[0-9a-f]{64}/)
+    })
+
+    it("carries the decided mainnet chain id, which is none of the refused ones", () => {
+        expect(MAINNET_CHAIN_ID).toBe(8587492)
+        expect(readTemplate().properties.id).toBe(MAINNET_CHAIN_ID)
+        expect(REFUSED_MAINNET_CHAIN_IDS).not.toContain(MAINNET_CHAIN_ID)
+        expect(mainnetGenesisReasons(filledTemplate()).filter(r => r.startsWith("genesis properties.id"))).toEqual([])
     })
 
     it("once filled, passes the genesis checks and loads as a node loads it", async () => {
@@ -164,6 +171,24 @@ describe("mainnetGenesisReasons", () => {
         const g = filledTemplate()
         delete g.properties.id
         expect(mainnetGenesisReasons(g).join("\n")).toContain("must be the agreed mainnet chain id")
+    })
+
+    it("refuses 0 and 31337 as reserved chain ids", () => {
+        for (const chainId of [0, 31337]) {
+            const g = filledTemplate()
+            g.properties.id = chainId
+            expect(mainnetGenesisReasons(g).join("\n")).toContain(`properties.id ${chainId} is reserved`)
+        }
+    })
+
+    it("refuses each of 0, 1, 1337 and 31337, and the plan check fails on it", () => {
+        expect([...REFUSED_MAINNET_CHAIN_IDS].sort((a, b) => a - b)).toEqual([0, 1, 1337, 31337])
+        for (const chainId of REFUSED_MAINNET_CHAIN_IDS) {
+            const g = filledTemplate()
+            g.properties.id = chainId
+            const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury: TREASURY })
+            expect(failing(checks)).toEqual(["chain id"])
+        }
     })
 
     it(`refuses a shardSize other than ${LAUNCH_SHARD_SIZE}`, () => {

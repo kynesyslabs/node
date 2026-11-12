@@ -6,6 +6,7 @@ import {
     LAUNCH_DORMANT_FORKS,
     MAINNET_FORKS,
     NON_MAINNET_CHAIN_IDS,
+    REFUSED_MAINNET_CHAIN_IDS,
     type ValidatorProbe,
     checkLaunch,
     commitSha,
@@ -670,6 +671,15 @@ describe("checkLaunch", () => {
         expect(MAINNET_FORKS).toContain("l2psGate")
         expect(MAINNET_FORKS).toContain("tlsnDisabled")
         expect(MAINNET_FORKS).toHaveLength(27)
+    })
+
+    it("is NO-GO on chain ids 0, 1, 1337 and 31337", () => {
+        for (const chainId of REFUSED_MAINNET_CHAIN_IDS) {
+            const genesis = { ...genesisFile(rows), properties: { id: chainId, shardSize: 10 } }
+            const d = checkLaunch({ ...base, genesis, blockZero: blockZero(rows) })
+            expect(d.go).toBe(false)
+            expect(d.reasons.join("\n")).toContain(`genesis properties.id ${chainId} is`)
+        }
     })
 
     it("is NO-GO without a genesis file, whose forks and validators it cannot check", () => {

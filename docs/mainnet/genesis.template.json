@@ -1,6 +1,6 @@
 {
   "properties": {
-    "id": "FILL: mainnet chain id, an integer no other Demos network uses (testnet 1 and devnet 1337 are refused)",
+    "id": 8587492,
     "name": "FILL: network name (testnet: DEMOS)",
     "currency": "FILL: currency symbol (testnet: DEM)",
     "shardSize": 10,

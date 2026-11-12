@@ -10,18 +10,19 @@ status: active
 `docs/mainnet/genesis.template.json` is the mainnet genesis with every
 value the code fixes already set and every owner decision left as a
 `FILL: ...` string. A node refuses to boot on a file that still holds a
-`FILL` value in the chain id, a fork height, `sudoPubkey` or `balances`
+`FILL` value in a fork height, `sudoPubkey` or `balances`
 (and, with the genesis pinned, the timestamp), before it writes block 0.
 The plan check below reports each of them, so an unfilled template can
 never boot by accident.
 
-The template sets no identity, no chain id and no allocation. Those are
-decided by the genesis owners and filled in once.
+The template sets the mainnet chain id, `8587492`, and no identity and no
+allocation. Those are decided by the genesis owners and filled in once.
 
 ## What is already fixed
 
 | Field | Value | Why |
 |---|---|---|
+| `properties.id` | `8587492` | the mainnet chain id the owners decided. go/no-go and the plan check refuse `0`, testnet `1`, devnet `1337` and `31337` (the fork rehearsals' and local EVM development chains' default): every signature binds to the chain id, so a reused id lets a transaction signed on another network replay on mainnet |
 | `properties.shardSize` | `10` | the launch committee: quorum 7, at most 3 seats lost |
 | `mutables.minBlocksForValidationOnlineStatus` | `4` | same as testnet |
 | `forks.osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`, `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `web2ProofBinding`, `tlsnProofEnforcement`, `l2psGate`, `tlsnDisabled`, `xmProofBinding` | `activationHeight: 0` | mainnet starts with every safety fork on; `web2ProofBinding` takes only web2 proofs that sign the bound message (SDK ≥ 4.0.20 `createWeb2ProofPayload` with a claim), and `xmProofBinding` takes only cross-chain identity proofs that sign the `demos-xm:v1` message, so clients need `@kynesyslabs/demosdk` 4.0.21; and `tlsnProofEnforcement` refuses every TLSN identity claim until the node verifies the notary signature itself; L2PS and TLSNotary are off at launch: `l2psGate` refuses every L2PS transaction, request and pending proof (a proof debits the L2 fee with no credit, which breaks supply conservation), and `tlsnDisabled` refuses `tlsn_request` and `tlsn_store` before any fee or burn and issues no attestation token; at height 0 block 0 records `osDenomination` as applied for a snapshot that is already in OS units, and a node refuses such a snapshot under any other height. `identityCarryover` makes block 0 import user data without balances and refuse any other snapshot ([genesis-import.md](genesis-import.md)) |
@@ -40,7 +41,6 @@ them equal.
 
 | Field | Fill with |
 |---|---|
-| `properties.id` | the mainnet chain id, an integer. go/no-go and the plan check refuse testnet `1` and devnet `1337`: every signature binds to the chain id, so a reused id lets a testnet transaction replay on mainnet |
 | `properties.name`, `properties.currency` | network name and currency symbol |
 | `properties.sudoPubkey` | the lowercase `0x` + 64 hex key that may sign award transactions, or delete the field to accept none |
 | `forks.gasFeeSeparation.treasuryAddress` | the mainnet treasury account. The node refuses the entry without it and refuses the zero address, and block 0 creates the burn and treasury accounts |
