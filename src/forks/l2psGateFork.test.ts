@@ -9,32 +9,15 @@
  * The transactions come from the real SDK signer.
  */
 
-import { afterEach, describe, expect, it, mock, spyOn } from "bun:test"
-import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
+import { afterEach, describe, expect, it, spyOn } from "bun:test"
+import { mockEntityDatasource } from "@/utilities/testSupport/coreMocks"
 
-const repoFor = (name: string) => ({
-    target: { name },
-    create: (row: unknown) => ({ ...(row as object) }),
-    findOneBy: async () => null,
-    findOne: async () => null,
-    find: async () => [],
-    save: async (row: unknown) => row,
-})
-const fakeDataSource = {
-    getRepository: (entity: any) => repoFor(entity?.name ?? String(entity)),
-}
-const datasourceModule = () => ({
-    __esModule: true,
-    dataSource: fakeDataSource,
-    default: { getInstance: async () => ({ getDataSource: () => fakeDataSource }) },
-})
-mock.module("src/model/datasource", datasourceModule)
-mock.module("@/model/datasource", datasourceModule)
+mockEntityDatasource()
 
 const {
     SENDER_BALANCE,
-    chainTip,
     describeForkConfig,
+    describeTxGate,
     mainnetForks,
     mockChainAndLogger,
     restoreForkConfigAfterEach,
@@ -43,22 +26,13 @@ const {
 mockChainAndLogger()
 
 const handleGCR = (await import("@/libs/blockchain/gcr/handleGCR")).default
-const { verifyAdmissionEdits, verifyRpcEdits } = await import("@/libs/blockchain/validation/editBinding")
-const { PEER, SENDER, demos, handMade, onTheWire } = await import("@/libs/blockchain/validation/editBinding.fixtures")
+const { SENDER } = await import("@/libs/blockchain/validation/editBinding.fixtures")
+const { l2psTxs, pay } = await import("@/libs/blockchain/testSupport/featureGateTxs")
 const { L2PS_GATE_REFUSAL, L2PS_TX_TYPES, isL2psTx, l2psGateRefusal, l2psOffAt } = await import("./l2psGate")
 const { default: L2PSProofManager } = await import("@/libs/l2ps/L2PSProofManager")
 const { default: L2PSConsensus } = await import("@/libs/l2ps/L2PSConsensus")
 
 restoreForkConfigAfterEach()
-
-/** One signed transaction of each L2PS type, with the universal edits the SDK gives every type. */
-const l2psTxs = async () => [
-    onTheWire(await handMade("l2psEncryptedTx", { l2ps_uid: "net", encrypted_data: "x", tag: "t", original_hash: "ab".repeat(32) })),
-    onTheWire(await handMade("subnet", { l2ps_uid: "net", encrypted_data: "x" })),
-    onTheWire(await handMade("l2ps_hash_update", { l2ps_uid: "net", consolidated_hash: "cd".repeat(32), transaction_count: 1 })),
-    onTheWire(await handMade("l2psBatch", { l2ps_uid: "net", batch_hash: "ef".repeat(32) })),
-]
-const pay = async () => onTheWire(await DemosTransactions.pay(PEER, 3n, demos))
 
 /** The mainnet forks, with l2psGate at `height`. */
 const gate = (height: number | null) => mainnetForks({ l2psGate: height })
@@ -84,75 +58,13 @@ describe("l2psGate types", () => {
     })
 })
 
-describe("intake", () => {
-    it("pool admission refuses every L2PS type while the gate is active", async () => {
-        gate(0)
-        for (const tx of await l2psTxs()) {
-            expect(await verifyAdmissionEdits(tx)).toEqual({ ok: false, reason: L2PS_GATE_REFUSAL })
-        }
-    })
-
-    it("RPC submission refuses them too", async () => {
-        gate(0)
-        for (const tx of await l2psTxs()) {
-            expect(await verifyRpcEdits(tx)).toEqual({ ok: false, reason: L2PS_GATE_REFUSAL })
-        }
-    })
-
-    it("admits other transactions while the gate is active", async () => {
-        gate(0)
-        expect(await verifyAdmissionEdits(await pay())).toEqual({ ok: true })
-        expect(await verifyRpcEdits(await pay())).toEqual({ ok: true })
-    })
-
-    it("does not refuse them for L2PS while the gate is dormant", async () => {
-        gate(null)
-        for (const tx of await l2psTxs()) {
-            expect((await verifyRpcEdits(tx)).reason).not.toBe(L2PS_GATE_REFUSAL)
-        }
-    })
-})
-
-describe("block apply", () => {
-    const block = stubBlockApply(handleGCR)
-    const sender = () => block.caches.accounts.get(SENDER) as any
-
-    it("refuses every L2PS type in the pre-pass, next to a transaction the block applies", async () => {
-        gate(0)
-        const txs = await l2psTxs()
-        const good = await pay()
-        expect(await block.refused([...txs, good])).toEqual(txs.map(tx => tx.hash))
-    })
-
-    it("fails them with no balance or nonce change", async () => {
-        gate(0)
-        const txs = await l2psTxs()
-        const out = await block.apply(txs)
-        expect(out.failedTxs.sort()).toEqual(txs.map(tx => tx.hash).sort())
-        expect(out.successfulTxs).toEqual([])
-        expect(sender().balance).toBe(SENDER_BALANCE)
-        expect(sender().nonce).toBe(7)
-    })
-
-    it("judges the gate from the tip, like the other apply gates", async () => {
-        gate(101)
-        const [tx] = await l2psTxs()
-        expect(await block.refused([tx])).toEqual([])
-        chainTip.height = 101
-        expect(await block.refused([tx])).toEqual([tx.hash])
-    })
-
-    it("refuses one applied on its own before any edit, and charges nothing", async () => {
-        gate(0)
-        for (const tx of await l2psTxs()) {
-            for (const simulate of [true, false]) {
-                const out = await handleGCR.applyTransaction(block.caches, tx, false, simulate)
-                expect(out).toMatchObject({ success: false, message: L2PS_GATE_REFUSAL, appliedEditsCount: 0, unproven: true })
-            }
-        }
-        expect(sender().balance).toBe(SENDER_BALANCE)
-        expect(sender().nonce).toBe(7)
-    })
+describeTxGate({
+    fork: "l2psGate",
+    gated: "every L2PS type",
+    refusal: L2PS_GATE_REFUSAL,
+    txs: l2psTxs,
+    other: pay,
+    handleGCR,
 })
 
 describe("pending L2PS proofs at consensus", () => {

@@ -10,11 +10,17 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { installPoolStorageMocks, installPoolValidationMocks } from "./mempool.fixtures"
 import { mockLogger } from "./testSupport/mockMempoolDeps"
-import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
-import { TLSNotaryService } from "@kynesyslabs/demosdk/tlsnotary/service"
 import type { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
-import { OS, PEER, chainIs, demos, handMade, onTheWire } from "./validation/editBinding.fixtures"
-import { getSharedState } from "@/utilities/sharedState"
+import {
+    featureGates as forks,
+    l2psBatch as batch,
+    l2psEncrypted as encrypted,
+    l2psHashUpdate as hashUpdate,
+    pay,
+    tlsnRequest as request,
+    tlsnStore as store,
+    tlsnTxs,
+} from "./testSupport/featureGateTxs"
 import { L2PS_GATE_REFUSAL } from "@/forks/l2psGate"
 import { TLSN_DISABLED_REFUSAL } from "@/forks/tlsnDisabledGate"
 import Mempool from "./mempool"
@@ -27,26 +33,6 @@ const validity = (tx: Transaction): ValidityData =>
     ({ data: { transaction: tx, reference_block: 100 } }) as unknown as ValidityData
 const row = (tx: Transaction) =>
     ({ ...tx, reference_block: 100, blockNumber: 100, status: "pending" }) as unknown as Transaction
-
-const encrypted = async () =>
-    onTheWire(await handMade("l2psEncryptedTx", { l2ps_uid: "net", encrypted_data: "x", tag: "t", original_hash: "ab".repeat(32) }))
-const hashUpdate = async () =>
-    onTheWire(await handMade("l2ps_hash_update", { l2ps_uid: "net", consolidated_hash: "cd".repeat(32), transaction_count: 1 }))
-const batch = async () => onTheWire(await handMade("l2psBatch", { l2ps_uid: "net", batch_hash: "ef".repeat(32) }))
-const tlsnService = () => {
-    demos.connected = true
-    return new TLSNotaryService(demos) as any
-}
-const request = async () => onTheWire(await tlsnService().createTlsnRequestTransaction("https://example.com", 8))
-const store = async () => onTheWire(await tlsnService().createTlsnStoreTransaction("token-1", "proof", "onchain", 2n * OS, 8))
-const pay = async () => onTheWire(await DemosTransactions.pay(PEER, 3n, demos))
-
-function forks(l2psGate: number | null, tlsnDisabled: number | null) {
-    chainIs(true, 0)
-    const config = getSharedState.forkConfig as unknown as Record<string, { activationHeight: number | null }>
-    config.l2psGate = { activationHeight: l2psGate }
-    config.tlsnDisabled = { activationHeight: tlsnDisabled }
-}
 
 const pool = Mempool as any
 const original = { repo: pool.repo, addWithLock: pool.addTransactionWithLock, exists: pool.checkTransactionByHash }
@@ -75,7 +61,7 @@ describe("Mempool.ingestGossiped", () => {
 
     it("refuses a TLSNotary request and store under tlsnDisabled", async () => {
         forks(null, 0)
-        for (const tx of [await request(), await store()]) {
+        for (const tx of await tlsnTxs()) {
             const out = await Mempool.ingestGossiped(validity(tx))
             expect(out).toMatchObject({ accepted: false, reason: TLSN_DISABLED_REFUSAL })
         }

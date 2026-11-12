@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from "bun:test"
+import { mockL2psGateDormant } from "@/utilities/testSupport/coreMocks"
 import { mockLogger } from "@/libs/blockchain/testSupport/mockMempoolDeps"
 
 const getByUID = jest.fn(async (..._args: unknown[]) => [] as unknown[])
@@ -16,16 +17,7 @@ const getSummaryByUIDAndStatus = jest.fn(async (..._args: unknown[]) => ({
     newestTimestamp: null,
 }))
 
-// The real gate reads the node's shared state, whose module graph these stubs
-// cannot load; the gate has its own tests, here it stays dormant.
-mock.module("@/forks/l2psGate", () => ({
-    L2PS_TX_TYPES: new Set<string>(),
-    L2PS_GATE_REFUSAL: "L2PS is not enabled on this network (fork l2psGate)",
-    l2psOff: () => false,
-    l2psOffAt: () => false,
-    isL2psTx: () => false,
-    l2psGateRefusal: () => null,
-}))
+mockL2psGateDormant()
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({
     __esModule: true,
     default: { getByUID, getPageByUID, getSummaryByUIDAndStatus },

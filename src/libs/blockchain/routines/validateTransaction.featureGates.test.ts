@@ -7,11 +7,9 @@
  */
 
 import { afterEach, describe, expect, it, mock } from "bun:test"
+import { mockLogger } from "@/utilities/testSupport/coreMocks"
 
-const quiet = Object.fromEntries(
-    ["debug", "info", "warning", "warn", "error", "only", "custom"].map(level => [level, () => {}]),
-)
-mock.module("src/utilities/logger", () => ({ __esModule: true, default: quiet }))
+mockLogger("src/utilities/logger")
 mock.module("src/libs/blockchain/chain", () => ({
     __esModule: true,
     default: { getLastBlockNumber: async () => 100 },
@@ -30,10 +28,10 @@ mock.module("src/libs/blockchain/validation/validityData", () => ({
     signValidityData: async (v: unknown) => v,
 }))
 
-import { TLSNotaryService } from "@kynesyslabs/demosdk/tlsnotary/service"
 import type { Transaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
-import { OS, SENDER, chainIs, demos, handMade, onTheWire } from "src/libs/blockchain/validation/editBinding.fixtures"
+import { SENDER } from "src/libs/blockchain/validation/editBinding.fixtures"
+import { featureGates as forks, l2psEncrypted, l2psHashUpdate, l2psSubnet, tlsnRequest, tlsnTxs } from "@/libs/blockchain/testSupport/featureGateTxs"
 
 const { confirmTransaction } = await import("./validateTransaction")
 const { L2PS_GATE_REFUSAL } = await import("@/forks/l2psGate")
@@ -47,20 +45,6 @@ afterEach(() => {
 
 const confirm = async (tx: Transaction) => (await confirmTransaction(tx as never, SENDER)).data
 
-function forks(l2psGate: number | null, tlsnDisabled: number | null) {
-    chainIs(true, 0)
-    const config = getSharedState.forkConfig as unknown as Record<string, { activationHeight: number | null }>
-    config.l2psGate = { activationHeight: l2psGate }
-    config.tlsnDisabled = { activationHeight: tlsnDisabled }
-}
-
-const encrypted = async () =>
-    onTheWire(await handMade("l2psEncryptedTx", { l2ps_uid: "net", encrypted_data: "x", tag: "t", original_hash: "ab".repeat(32) }))
-const tlsnService = () => {
-    demos.connected = true
-    return new TLSNotaryService(demos) as any
-}
-
 describe("confirm under l2psGate", () => {
     it("refuses every L2PS type before the L2PS payload is read", async () => {
         forks(0, null)
@@ -70,11 +54,8 @@ describe("confirm under l2psGate", () => {
         instance.getL2PS = async (uid: string) => (loads.push(uid), null)
         instance.loadL2PS = async (uid: string) => (loads.push(uid), null)
         try {
-            for (const tx of [
-                await encrypted(),
-                onTheWire(await handMade("subnet", { l2ps_uid: "net" })),
-                onTheWire(await handMade("l2ps_hash_update", { l2ps_uid: "net", consolidated_hash: "cd".repeat(32), transaction_count: 1 })),
-            ]) {
+            // A client never submits an l2psBatch; confirm refuses it as node-authored first.
+            for (const tx of [await l2psEncrypted(), await l2psSubnet(), await l2psHashUpdate()]) {
                 const data = await confirm(tx)
                 expect(data.valid).toBe(false)
                 expect(data.message).toBe(`[Tx Validation] [TYPE ERROR] ${L2PS_GATE_REFUSAL}\n`)
@@ -87,18 +68,15 @@ describe("confirm under l2psGate", () => {
 
     it("does not refuse them for L2PS while the gate is dormant", async () => {
         forks(null, null)
-        const data = await confirm(await encrypted())
+        const data = await confirm(await l2psEncrypted())
         expect(data.message).not.toContain(L2PS_GATE_REFUSAL)
     })
 })
 
 describe("confirm under tlsnDisabled", () => {
-    const request = async () => onTheWire(await tlsnService().createTlsnRequestTransaction("https://example.com", 8))
-    const store = async () => onTheWire(await tlsnService().createTlsnStoreTransaction("token-1", "proof", "onchain", 2n * OS, 8))
-
     it("refuses a request and a store", async () => {
         forks(null, 0)
-        for (const tx of [await request(), await store()]) {
+        for (const tx of await tlsnTxs()) {
             const data = await confirm(tx)
             expect(data.valid).toBe(false)
             expect(data.message).toBe(`[Tx Validation] [TYPE ERROR] ${TLSN_DISABLED_REFUSAL}\n`)
@@ -107,7 +85,7 @@ describe("confirm under tlsnDisabled", () => {
 
     it("confirms a request while the fork is dormant", async () => {
         forks(null, null)
-        const data = await confirm(await request())
+        const data = await confirm(await tlsnRequest())
         expect(data.message).not.toContain(TLSN_DISABLED_REFUSAL)
     })
 })

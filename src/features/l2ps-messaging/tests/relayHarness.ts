@@ -107,7 +107,9 @@ jest.mock("@/libs/l2ps/parallelNetworks", () => ({
 jest.mock("@/libs/blockchain/transaction", () => ({ __esModule: true, default: class {} }))
 jest.mock("@/libs/blockchain/l2ps_mempool", () => ({ __esModule: true, default: {} }))
 jest.mock("@/libs/l2ps/L2PSTransactionExecutor", () => ({ __esModule: true, default: {} }))
-jest.mock("@/utilities/sharedState", () => ({ getSharedState: { signingAlgorithm: "ed25519" } }))
+/** The node's shared state; a test sets `forkConfig` and `lastBlockNumber` to put the relay under a fork. */
+export const sharedState: Record<string, any> = { signingAlgorithm: "ed25519" }
+jest.mock("@/utilities/sharedState", () => ({ getSharedState: sharedState }))
 
 const { L2PSMessagingService } = await import("../L2PSMessagingService")
 const { L2PSMessagingServer } = await import("../L2PSMessagingServer")
@@ -189,8 +191,8 @@ export class Client {
         return new Client(ws)
     }
 
-    frame(type: string, payload: Record<string, unknown>, timestamp = Date.now()): void {
-        this.ws.send(JSON.stringify({ type, payload, timestamp }))
+    frame(type: string, payload: Record<string, unknown>, timestamp = Date.now(), requestId?: string): void {
+        this.ws.send(JSON.stringify({ type, payload, timestamp, requestId }))
     }
 
     async next(type: string | string[], timeout = 2000): Promise<any> {

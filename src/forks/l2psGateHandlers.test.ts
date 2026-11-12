@@ -5,26 +5,10 @@
  * dormant the same calls reach their own input checks.
  */
 
-import { afterEach, describe, expect, it, mock, spyOn } from "bun:test"
+import { afterEach, describe, expect, it, spyOn } from "bun:test"
+import { mockEntityDatasource } from "@/utilities/testSupport/coreMocks"
 
-const repoFor = (name: string) => ({
-    target: { name },
-    create: (row: unknown) => ({ ...(row as object) }),
-    findOneBy: async () => null,
-    findOne: async () => null,
-    find: async () => [],
-    save: async (row: unknown) => row,
-})
-const fakeDataSource = {
-    getRepository: (entity: any) => repoFor(entity?.name ?? String(entity)),
-}
-const datasourceModule = () => ({
-    __esModule: true,
-    dataSource: fakeDataSource,
-    default: { getInstance: async () => ({ getDataSource: () => fakeDataSource }) },
-})
-mock.module("src/model/datasource", datasourceModule)
-mock.module("@/model/datasource", datasourceModule)
+mockEntityDatasource()
 
 const { mainnetForks, mockChainAndLogger, restoreForkConfigAfterEach } = await import(
     "@/libs/blockchain/testSupport/forkGates"
@@ -49,6 +33,9 @@ const emptyResponse = () => ({ result: 200, response: "", require_reply: false, 
 
 const omniHandlers = Object.entries(omni).filter(([name]) => name.startsWith("handleL2PS")) as [string, any][]
 const callOmni = async (handler: any) => decodeRpcResponse(await handler({ message: { payload: Buffer.alloc(0) }, context: {} }))
+/** `name` answered 403 with the gate's refusal; the name labels a failure. */
+const expectRefused = (name: string, out: { result: unknown; response: unknown }) =>
+    expect({ name, result: out.result, response: out.response }).toEqual({ name, result: 403, response: L2PS_GATE_REFUSAL })
 
 describe("client RPC under l2psGate", () => {
     it("refuses an L2PS submission and a hash update with 403", async () => {
@@ -69,12 +56,7 @@ describe("node calls under l2psGate", () => {
         gate(0)
         expect(Object.keys(l2psHandlers).length).toBeGreaterThan(0)
         for (const [name, handler] of Object.entries(l2psHandlers)) {
-            const out = await handler({}, emptyResponse(), "peer")
-            expect({ name, result: out.result, response: out.response }).toEqual({
-                name,
-                result: 403,
-                response: L2PS_GATE_REFUSAL,
-            })
+            expectRefused(name, await handler({}, emptyResponse(), "peer"))
         }
     })
 
@@ -90,12 +72,7 @@ describe("omni opcodes under l2psGate", () => {
         gate(0)
         expect(omniHandlers).toHaveLength(7)
         for (const [name, handler] of omniHandlers) {
-            const out = await callOmni(handler)
-            expect({ name, result: out.result, response: out.response }).toEqual({
-                name,
-                result: 403,
-                response: L2PS_GATE_REFUSAL,
-            })
+            expectRefused(name, await callOmni(handler))
         }
     })
 

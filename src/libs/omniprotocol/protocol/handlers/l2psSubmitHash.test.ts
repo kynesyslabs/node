@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it, jest, mock } from "bun:test"
+import { mockL2psGateDormant } from "@/utilities/testSupport/coreMocks"
 
 const addTransaction = jest.fn(async (..._args: unknown[]) => ({ success: true }))
 const getL2PS = jest.fn(async (..._args: unknown[]) => ({}))
@@ -16,16 +17,7 @@ mock.module("@/libs/network/server_rpc", () => ({
 mock.module("../../../network/server_rpc", () => ({
     emptyResponse: { result: 200, response: "", require_reply: false, extra: null },
 }))
-// The real gate reads the node's shared state, whose module graph these stubs
-// cannot load; the gate has its own tests, here it stays dormant.
-mock.module("@/forks/l2psGate", () => ({
-    L2PS_TX_TYPES: new Set<string>(),
-    L2PS_GATE_REFUSAL: "L2PS is not enabled on this network (fork l2psGate)",
-    l2psOff: () => false,
-    l2psOffAt: () => false,
-    isL2psTx: () => false,
-    l2psGateRefusal: () => null,
-}))
+mockL2psGateDormant()
 mock.module("@/libs/l2ps/parallelNetworks", () => ({
     __esModule: true,
     default: { getInstance: () => ({ getL2PS, loadL2PS: getL2PS }) },
