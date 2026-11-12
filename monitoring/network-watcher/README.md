@@ -93,8 +93,9 @@ from the comparison block. The stall timer restarts when any endpoint reports a 
 its own high-water mark (the highest head that endpoint has reported; a lagging endpoint
 catching up counts). An endpoint that drops out and returns at a head already seen is not
 an advance, and an inflated head on one endpoint does not stop other endpoints' advances
-from counting. The timer starts on the first successful observation, and an entirely
-unreachable network starts it on the first poll. A chain reset is detected by height, not
+from counting. The timer starts on the first poll; an endpoint's first head (at startup or
+when it first comes up later) only sets its mark and is not an advance, since another
+endpoint may already have reported that head. A chain reset is detected by height, not
 by genesis hash (which would cost a request per poll): when an endpoint's head drops more
 than `WATCH_SIGN_WINDOW` blocks below its mark, the mark restarts at that head, and that
 drop is not an advance. A smaller reset counts again once the new chain passes the old

@@ -175,7 +175,7 @@ test("startup failures start the stall timer once, and new heads advance it", as
     expect(w.lastAdvance).toBe(1000)
     down = false
     await w.poll(1500)
-    expect(w.lastAdvance).toBe(1500)
+    expect(w.lastAdvance).toBe(1000)
     number++
     await w.poll(1600)
     expect(w.lastAdvance).toBe(1600)
@@ -237,6 +237,32 @@ test("an endpoint that drops out and returns at a head already seen does not res
     heads["one.test"] = 101
     await w.poll(2100)
     expect(w.lastAdvance).toBe(2100)
+})
+test("an endpoint's first head only sets its mark, so one joining at the stalled head is not an advance", async () => {
+    const heads: Record<string, number> = { "one.test": 100, "two.test": 100 }
+    let down = true
+    const { fetcher } = stub({ heads })
+    const w = new Watcher(["https://one.test", "https://two.test"], 3,
+        (url, init) => down && new URL(url).host === "two.test" ? Promise.reject(Error("down")) : fetcher(url, init))
+    await w.poll(1000)
+    await w.poll(1100)
+    down = false
+    await w.poll(1200)
+    expect(w.lastAdvance).toBe(1000)
+    heads["two.test"] = 101
+    await w.poll(1300)
+    expect(w.lastAdvance).toBe(1300)
+})
+test("a single endpoint started on a healthy chain starts the timer at the first poll and advances on its next new head", async () => {
+    const heads: Record<string, number> = { "one.test": 30 }
+    const w = new Watcher(["https://one.test"], 3, stub({ heads }).fetcher)
+    await w.poll(1000)
+    expect(w.lastAdvance).toBe(1000)
+    await w.poll(1100)
+    expect(w.lastAdvance).toBe(1000)
+    heads["one.test"] = 31
+    await w.poll(1200)
+    expect(w.lastAdvance).toBe(1200)
 })
 for (const bad of ["tab\there", "nul\u0000here"]) test(`identity ${JSON.stringify(bad)} in a block or validator set is a counted bad reply`, async () => {
     const { fetcher } = stub({ sets: { blockNumber: 28, validators: [{ identity: "a", status: "2", validAt: 0 }, { identity: bad, status: "2", validAt: 0 }] },

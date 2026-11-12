@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>
 type Block = { number: number; hash: string; previous?: unknown; timestamp: number; signers: string[] }
 type Endpoint = { url: string; genesis: string; host: string; errors: number; up: number; head?: Block; shard?: number
-    mark: number; unsupported: Map<string, number>; blocks: Map<number, Block> }
+    mark?: number; unsupported: Map<string, number>; blocks: Map<number, Block> }
 // Bounds on what one endpoint can make the watcher parse, compute or label in one poll. They do not bound
 // churn: validator labels come unverified from the window endpoint, so every listed endpoint is trusted for
 // them (up to 1000 new identities x 2 series per poll); the cap stays loose until the validator count is known.
@@ -59,7 +59,7 @@ export class Watcher {
             if (!["http:", "https:"].includes(parsed.protocol)) throw Error("WATCH_RPC_URLS requires HTTP(S)")
             // The node serves GET /genesis beside its POST / root, so keep any proxy path prefix.
             parsed.pathname = parsed.pathname.replace(/\/?$/, "/genesis")
-            return { url, genesis: parsed.href, host: parsed.host, errors: 0, up: 0, mark: 0, unsupported: new Map(), blocks: new Map() }
+            return { url, genesis: parsed.href, host: parsed.host, errors: 0, up: 0, unsupported: new Map(), blocks: new Map() }
         })
         if (!urls.length || new Set(this.endpoints.map(e => e.host)).size !== urls.length) throw Error("WATCH_RPC_URLS requires distinct hosts")
         this.snapshot = this.render()
@@ -116,10 +116,11 @@ export class Watcher {
         const reachable = this.endpoints.filter(e => e.head)
         for (const e of reachable) {
             // Advance only past this endpoint's own high-water mark, so a head seen before is not progress again and
-            // another endpoint's inflated head blocks nothing. A drop of more than the window is a chain reset.
+            // another endpoint's inflated head blocks nothing. An endpoint's first head only sets its mark (another
+            // endpoint may have reported it already), and so does a drop of more than the window (a chain reset).
             const n = e.head!.number
-            if (n > e.mark) this.lastAdvance = now
-            if (n > e.mark || n < e.mark - this.window) e.mark = n
+            if (e.mark === undefined || n < e.mark - this.window) e.mark = n
+            else if (n > e.mark) { this.lastAdvance = now; e.mark = n }
         }
         if (reachable.length) this.headMax = Math.max(...reachable.map(e => e.head!.number))
         this.emit("head_max", this.headMax)
