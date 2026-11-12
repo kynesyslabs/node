@@ -113,7 +113,7 @@ describe("the consensus routine while the fork schedule flag is up", () => {
         const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
             getPeers: () => [peer],
         } as never)
-        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue([
             { address: "peer" },
         ] as never)
         try {

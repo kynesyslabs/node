@@ -86,10 +86,11 @@ genesis file, the snapshot and the table exist, with no node running:
 ```bash
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json --snapshot mainnet/snapshot \
-  --operators mainnet/launch-validators.json [--json]
+  --operators mainnet/launch-validators.json \
+  --expected-treasury <agreed treasury address> [--json]
 ```
 
-One `PASS`/`FAIL` line per check: genesis forks, chain id, shard size,
+One `PASS`/`FAIL` line per check: genesis forks, treasury, chain id, shard size,
 genesis values (no template `FILL` left), genesis file (a node would load it), block 0 validator set, launch
 validators against the quorum, validator table (an entry with operator,
 provider and region for each), operator and provider cap, voting power per
@@ -121,12 +122,25 @@ bun scripts/launch-go-no-go.ts \
   --operators launch-operators.json \
   --genesis-hash <agreed genesis block hash> \
   --commit <release commit SHA> \
+  --expected-treasury <agreed treasury address> \
   [--peerlist demos_peerlist.json] [--rpc https://v1.example:53550,...] \
   [--json]
 ```
 
 `--genesis-hash`, `--commit` and `--snapshot` are required for GO; without
-any of them the result is NO-GO and says which one is missing.
+any of them the result is NO-GO and says which one is missing. On the
+mainnet chain id (any `properties.id` other than testnet `1` and devnet
+`1337`) `--expected-treasury` is required as well, for GO and for `--plan`.
+
+- `--expected-treasury` is the agreed `gasFeeSeparation` treasury address,
+  taken from the owners' sign-off, not from the genesis file being checked.
+  The genesis `forks.gasFeeSeparation.treasuryAddress` must equal it (case
+  and surrounding spaces are ignored), or the result is NO-GO: the node
+  only checks the treasury's shape, so any well-formed address would
+  otherwise receive every fee from block 0. Without the flag the tool reads
+  `DEMOS_EXPECTED_TREASURY`. It is exit 2 when the value is not `0x` and 64
+  hex characters. On the testnet and devnet chain ids it is optional and
+  checked only when given.
 
 - `--genesis-hash` is the agreed genesis block hash (above). The tool also
   builds block 0 from `--genesis` and is NO-GO when the two differ, so the
@@ -161,10 +175,12 @@ exposed by the node, so it comes from the T-24h posts). Then:
   entry with no group above `min(launch validators, shardSize) − q` and none holding more than a
   third of the first committee's votes; the genesis schedules
   `osDenomination`, `nonceEnforcement`, `signatureDomain`, `editBinding`,
-  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding` and `tlsnProofEnforcement` at
+  `nonceIntegrity`, `quorumParity`, `committeeBinding`, `commitLock`, `finalityProofs`, `identityCarryover`, `stakeApplyChecks`, `txTypeAllowList`, `instantMessagingBinding`, `nativeSendBinding`, `canonicalAddresses`, `feeBinding`, `blockCaps`, `unpinnedCommittee`, `telegramSenderBinding`, `xmRemoveCanonical`, `tokenStakingGate`, `gasFeeSeparation`, `web2ProofBinding`, `tlsnProofEnforcement`, `l2psGate`, `tlsnDisabled` and `xmProofBinding` at
   `activationHeight` 0, leaves `networkGovernance` and `tokenStaking` unscheduled (`null`), declares every fork the build knows (an undeclared one would take the
-  code default), gives `gasFeeSeparation` its `treasuryAddress`,
-  uses a chain id other than testnet `1` and devnet `1337`, and sets
+  code default), gives `gasFeeSeparation` the agreed `treasuryAddress`
+  (`--expected-treasury`),
+  uses a chain id other than `0`, testnet `1`, devnet `1337` and `31337`
+  (mainnet is `8587492`), and sets
   `shardSize` 10; and no launch validator is one of
   the pinned committee identities (`PINNED_SHARD_IDENTITIES`), which take
   a seat on any network whose pool holds them; and a node would accept
@@ -178,8 +194,8 @@ exposed by the node, so it comes from the T-24h posts). Then:
   block, other genesis data (`getGenesisDataHash`), another fork schedule
   digest, one of the mainnet forks not active, or another commit. It would abstain or split at
   launch, so its operator fixes it before the chain starts.
-- Exit 2: bad input, including a malformed `--genesis-hash` or `--commit`
-  and a `--shard-size` that differs from the genesis.
+- Exit 2: bad input, including a malformed `--genesis-hash`, `--commit` or
+  `--expected-treasury`, and a `--shard-size` that differs from the genesis.
 
 **Identity proof.** `/info` is a claim anyone can make, so an endpoint
 (for example a `--rpc` URL) could otherwise answer for an offline

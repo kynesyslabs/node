@@ -3,7 +3,8 @@
  * the key takes the slot of the least recently used one. Refusing it instead
  * let a halted copy of a validator key, holding both slots, lock the live
  * validator out of its peers and stall consensus (launch rehearsal, phase A
- * of the key-copy drill).
+ * of the key-copy drill). The cap counts the peer's inbound connections
+ * only: our outbound sockets to it never take its slots.
  */
 
 import { beforeAll, describe, expect, it, mock } from "bun:test"
@@ -130,15 +131,40 @@ describe("per-identity connection cap", () => {
         await pool.shutdown?.()
     })
 
-    it("still refuses past the cap when every slot is our own outbound connection", async () => {
+    it("does not count our own outbound connections against the peer's inbound slots", async () => {
         const pool = new ConnectionPool({ maxConnectionsPerPeer: 1 })
         const ours: any = { origin: "outbound", getState: () => 20, getLastActivity: () => 0, socketId: "ours", close: async () => {} }
         ;(pool as any).connections.set(KEY, [ours])
         const theirs = pool.handleInboundSocket(fakeSocket())
         theirs.adoptVerifiedIdentity(KEY)
         await settle()
-        expect(pool.getConnections(KEY)).toEqual([ours])
-        expect(theirs.isUsable()).toBe(false)
+        expect(pool.getConnections(KEY)).toEqual([ours, theirs])
+        expect(theirs.isUsable()).toBe(true)
+        await pool.shutdown?.()
+    })
+
+    it("admits a second inbound connection next to our outbound one without evicting the live inbound one", async () => {
+        const pool = new ConnectionPool({ maxConnectionsPerPeer: 2 })
+        const ours: any = { origin: "outbound", getState: () => 20, getLastActivity: () => 0, socketId: "ours", close: async () => {} }
+        ;(pool as any).connections.set(KEY, [ours])
+        const open = (lastActivity: number) => {
+            const conn = pool.handleInboundSocket(fakeSocket())
+            conn.adoptVerifiedIdentity(KEY)
+            ;(conn as any).lastActivity = lastActivity
+            return conn
+        }
+        const live = open(1_000)
+        const second = open(5_000)
+        await settle()
+        expect(pool.getConnections(KEY)).toEqual([ours, live, second])
+        expect(live.isUsable()).toBe(true)
+
+        // Past the inbound cap the least recently used inbound one goes;
+        // our outbound connection is never a candidate.
+        const third = open(Date.now())
+        await settle()
+        expect(pool.getConnections(KEY)).toEqual([ours, second, third])
+        expect(live.isUsable()).toBe(false)
         await pool.shutdown?.()
     })
 })

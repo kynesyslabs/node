@@ -61,6 +61,7 @@ export function isRPCRequest(obj: any): obj is RPCRequest {
 export async function processPayload(
     payload: RPCRequest,
     sender: string,
+    clientIP?: string,
 ): Promise<RPCResponse> {
     const splits = sender.split(":")
     if (splits.length > 1) {
@@ -149,7 +150,7 @@ export async function processPayload(
         }
 
         case "gcr_routine":
-            return await manageGCRRoutines(sender, payload.params[0])
+            return await manageGCRRoutines(sender, payload.params[0], clientIP)
 
         case "bridge":
             return await manageBridges(sender, payload.params[0])

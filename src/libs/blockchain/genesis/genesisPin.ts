@@ -70,19 +70,28 @@ export function isMainnetChainId(chainId: unknown): boolean {
  * A production node, and any node on a mainnet chain id, runs with a pinned
  * genesis. Only a production node on a test network may opt out by name: a
  * bare-metal install runs as development, so NODE_ENV alone would let a
- * mainnet validator boot on whatever genesis file it holds.
+ * mainnet validator boot on whatever genesis file it holds. The opt-out set on
+ * a mainnet chain id is refused even beside a pin: it is meant for networks
+ * that publish no hash, so on mainnet it only marks a node one edit away from
+ * running unpinned.
  */
 export function pinRequirementProblem(
     pin: string,
     env: Record<string, string | undefined>,
     chainId?: unknown,
 ): string | null {
+    if (isMainnetChainId(chainId) && isTrue(env.DEMOS_ALLOW_UNPINNED_GENESIS)) {
+        return (
+            `DEMOS_ALLOW_UNPINNED_GENESIS is set and the genesis has chain id ${String(chainId)}, ` +
+            "which is not a test network's. It is refused there: remove it and pin the published " +
+            "genesis hash in EXPECTED_GENESIS_HASH"
+        )
+    }
     if (pin !== "") return null
     if (isMainnetChainId(chainId)) {
         return (
             `EXPECTED_GENESIS_HASH is not set and the genesis has chain id ${String(chainId)}, ` +
-            "which is not a test network's. A node on it must pin the published genesis hash; " +
-            "DEMOS_ALLOW_UNPINNED_GENESIS does not apply"
+            "which is not a test network's. A node on it must pin the published genesis hash"
         )
     }
     if (env.NODE_ENV !== "production") return null

@@ -26,11 +26,15 @@ import type { NodeCallHandler } from "./types"
  *   node has processed (`SharedState.lastBlockNumber`). Lets clients do
  *   their own near-fork detection without an extra `getLastBlockNumber`
  *   call.
+ * @property treasuryAddress gasFeeSeparation only: the account its fees are
+ *   credited to, so peers can tell a different treasury from another
+ *   difference in the schedule digest.
  */
 export interface ForkStatus {
     activationHeight: number | null
     activated: boolean
     currentHeight: number
+    treasuryAddress?: string
 }
 
 /**
@@ -129,6 +133,10 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
                 activated: isForkActive(name, currentHeight + (nextBlock ? 1 : 0)),
                 currentHeight,
             }
+        }
+        const treasury = forkConfig.gasFeeSeparation?.treasuryAddress
+        if (forks.gasFeeSeparation && typeof treasury === "string") {
+            forks.gasFeeSeparation.treasuryAddress = treasury
         }
 
         const networkInfo: NetworkInfo = {

@@ -66,7 +66,8 @@ A bare-metal node reads the process environment and then `.env`; run
 
 `node-doctor --production` fails while any of these is set:
 `DEMOS_DISABLE_FORK_MACHINERY` (the node also refuses it at boot on any chain
-id other than the testnet's and the devnets'), `DEMOS_ALLOW_UNPINNED_GENESIS`,
+id other than the testnet's and the devnets'), `DEMOS_ALLOW_UNPINNED_GENESIS`
+(refused at boot on the same chain ids),
 and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 `DEMOS_IDENTITY_TAKEOVER`, `DEMOS_SIGNING_RECORD_REBIND` and
 `DEMOS_ACCEPT_FORK_SCHEDULE_DIGEST`.

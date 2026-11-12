@@ -70,8 +70,9 @@ Where the node uses it:
   `EXPECTED_GENESIS_HASH` (`src/libs/blockchain/genesis/genesisPin.ts:178-183`,
   called from `findGenesisBlock.ts:196-203`). A production node with no pin
   refuses to start unless `DEMOS_ALLOW_UNPINNED_GENESIS=true`; a node whose genesis
-  has the mainnet chain id refuses to start without a pin in any mode
-  (`pinRequirementProblem` in `genesisPin.ts`).
+  has the mainnet chain id refuses to start without a pin in any mode, and
+  refuses to start while `DEMOS_ALLOW_UNPINNED_GENESIS=true` is set, pinned or
+  not (`pinRequirementProblem` in `genesisPin.ts`).
 - `getGenesisDataHash` hashes the genesis data stored inside block 0
   (`src/libs/network/handlers/blockHandlers.ts:15-33`), so it reports what the
   node actually started from.

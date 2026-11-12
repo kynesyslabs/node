@@ -64,6 +64,7 @@ import { orderDeterministically } from "./routines/deterministicOrder"
 import { judgeBlockTransactions } from "./routines/blockTransactions"
 import { blockCapsActive } from "@/forks/blockCapsGate"
 import { isForkActive } from "@/forks/forkGates"
+import { l2psOffAt } from "@/forks/l2psGate"
 import {
     MAX_NONCE_TRACE_ACCOUNTS,
     NONCE_TRACE_ATTR_KEY,
@@ -603,25 +604,29 @@ export async function consensusRoutine(): Promise<void> {
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
             // Their edits join the block's pending state and commit with it.
-            const l2psStart = Date.now()
-            const l2psResult = await L2PSConsensus.applyPendingProofs(
-                blockRef,
-                false,
-                pendingGCR,
-                block.content.timestamp,
-            )
-            const l2psEnd = Date.now()
-            log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
+            // Under l2psGate none apply: a proof debits the L2 fee with no
+            // credit, and the proofs a node holds are its own, not the block's.
+            if (!l2psOffAt(blockRef - 1)) {
+                const l2psStart = Date.now()
+                const l2psResult = await L2PSConsensus.applyPendingProofs(
+                    blockRef,
+                    false,
+                    pendingGCR,
+                    block.content.timestamp,
+                )
+                const l2psEnd = Date.now()
+                log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
 
-            if (l2psResult.proofsApplied > 0) {
-                log.info(
-                    `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
-                )
-            }
-            if (l2psResult.proofsFailed > 0) {
-                log.warning(
-                    `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
-                )
+                if (l2psResult.proofsApplied > 0) {
+                    log.info(
+                        `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
+                    )
+                }
+                if (l2psResult.proofsFailed > 0) {
+                    log.warning(
+                        `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
+                    )
+                }
             }
             log.debug(
                 "[consensusRoutine] [result] Block is valid with " +

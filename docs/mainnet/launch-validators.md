@@ -55,7 +55,8 @@ visible; it is not capped.
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
-  --operators mainnet/launch-validators.json
+  --operators mainnet/launch-validators.json \
+  --expected-treasury <agreed treasury address>
 ```
 
 Each rule prints one `PASS` or `FAIL` line, followed by the counts per

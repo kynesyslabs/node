@@ -61,8 +61,9 @@ opts out explicitly. Testnet installs that predate the pin set the opt-out once;
 overlay sets it.
 
 A genesis whose `properties.id` is not the testnet's or a devnet's (mainnet, or a
-network run like it) needs a pin whatever `NODE_ENV` says, and the opt-out does
-not apply to it: on a restart without a genesis file the id is read from block 0.
+network run like it) needs a pin whatever `NODE_ENV` says, and the opt-out is refused there: a node
+with `DEMOS_ALLOW_UNPINNED_GENESIS=true` on such a chain id stops at boot, pinned
+or not. On a restart without a genesis file the id is read from block 0.
 
 ### Fresh database (no block 0)
 
