@@ -33,7 +33,9 @@ const sharedState: Record<string, unknown> = {
 mockCore(sharedState)
 mockHelloDeps()
 
+// eslint-disable-next-line @typescript-eslint/naming-convention
 const { default: PeerManager } = await import("src/libs/peer/PeerManager")
+// eslint-disable-next-line @typescript-eslint/naming-convention
 const { Peer } = await import("src/libs/peer")
 
 function clearTable() {

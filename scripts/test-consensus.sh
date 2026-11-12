@@ -89,6 +89,7 @@ SUITE_FILES=(
     src/libs/omniprotocol/transport/preauthBuffering.test.ts
     src/libs/peer/routines/checkOfflinePeers.test.ts
     src/libs/peer/routines/peerBootstrap.test.ts
+    src/libs/peer/selfUrlAlias.test.ts
     src/libs/peer/syncClaims.test.ts
     src/libs/utils/clockProbe.test.ts
     src/libs/utils/keyMaker.test.ts
