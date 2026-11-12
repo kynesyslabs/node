@@ -14,11 +14,13 @@ const PTAU_POWER: Record<BatchSize, number> = { 5: 16, 10: 17 }
 const PTAU_MIN_BYTES = 1_000_000
 
 // The committed verification keys only match files from the Hermez ceremony,
-// and the hosts serving them can disappear. Each one is tried in turn and the
-// list can be replaced with --ptau-url, so a dead host never blocks the setup.
+// and the hosts serving them can disappear: the original Google Cloud and S3
+// buckets answered 403 on 2026-11-10. circom.info is the mirror the snarkjs README
+// links to. Each host is tried in turn and the list can be replaced with
+// --ptau-url, so a dead host never blocks the setup.
 export const PTAU_BASE_URLS = [
+    "https://circom.info",
     "https://storage.googleapis.com/zkevm/ptau",
-    "https://hermez.s3-eu-west-1.amazonaws.com",
 ]
 
 export interface BatchArtifacts {
@@ -71,7 +73,7 @@ export function inspectBatchArtifacts(root: string): BatchArtifacts[] {
  * make this validator reject proofs its peers accept. Changing the key means
  * changing this digest in the same commit; a test fails when they disagree.
  */
-export const IDENTITY_CIRCUIT_DIGEST = "246abe5d7da79c64925375dd3e7360e82fa38e93a657132351e93461b407d622"
+export const IDENTITY_CIRCUIT_DIGEST = "34e842bb8aa62c57022ba3ee4e5e6836c1ea853239ceef7e8d7f1555af707737"
 
 /**
  * A key rotation done on purpose (`zk:setup`, `zk:ceremony`) rewrites the
@@ -390,7 +392,9 @@ export async function runL2psZkSetup(
         const committedVkey = path.join(out, "verification_key.json")
         const abandon = () => fs.rmSync(staging, { recursive: true, force: true })
         try {
-            const steps: Array<[string, string, string[]]> = [
+            // Each step names the file it must leave behind: the snarkjs CLI
+            // run by Bun instead of Node.js exits 0 without writing anything.
+            const steps: Array<[string, string, string[], string]> = [
                 [
                     `Compiling ${name}`,
                     circom2,
@@ -404,23 +408,32 @@ export async function runL2psZkSetup(
                         "-l",
                         circomlib,
                     ],
+                    r1cs,
                 ],
                 [
                     `Generating the proving key for ${name}`,
                     snarkjs,
                     ["plonk", "setup", r1cs, ptau, zkeyNew],
+                    zkeyNew,
                 ],
                 [
                     `Exporting the verification key for ${name}`,
                     snarkjs,
                     ["zkey", "export", "verificationkey", zkeyNew, generatedVkey],
+                    generatedVkey,
                 ],
             ]
-            for (const [label, cmd, args] of steps) {
+            for (const [label, cmd, args, output] of steps) {
                 say(`${label}...`)
                 const code = await runner.exec(cmd, args, root)
                 if (code !== 0) {
                     messages.push(`${label} failed (exit code ${code})`)
+                    return { ok: false, messages }
+                }
+                if (!nonEmptyFile(output)) {
+                    messages.push(
+                        `${label} exited without writing ${path.relative(root, output)}; circom2 and snarkjs need Node.js on PATH`,
+                    )
                     return { ok: false, messages }
                 }
             }

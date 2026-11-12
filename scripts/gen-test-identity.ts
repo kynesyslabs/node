@@ -58,10 +58,13 @@ await ucrypto.generateAllIdentities(seedBytes)
 const identity = await ucrypto.getIdentity("ed25519")
 const pubkey = "0x" + identity.publicKey.toString("hex")
 
-fs.mkdirSync(OUT_DIR, { recursive: true })
+// The directory holds a private key, as does the mnemonic file itself
+fs.mkdirSync(OUT_DIR, { recursive: true, mode: 0o700 })
+fs.chmodSync(OUT_DIR, 0o700)
 fs.writeFileSync(MNEMONIC_FILE, mnemonic, { mode: 0o600 })
 fs.writeFileSync(PUBKEY_FILE, pubkey, { mode: 0o644 })
 
 console.log(`[gen-test-identity] generated identity at ${OUT_DIR}`)
 console.log(`[gen-test-identity] pubkey=${pubkey}`)
 console.log(`[gen-test-identity] mnemonic at ${MNEMONIC_FILE} (mode 0600)`)
+console.log(`[gen-test-identity] pubkey at ${PUBKEY_FILE}`)

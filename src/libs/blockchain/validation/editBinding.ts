@@ -47,6 +47,7 @@ import { isForkActive } from "@/forks/forkGates"
 import { readState } from "@/libs/blockchain/gcr/stateReadError"
 import { ensureNetworkParametersCurrent } from "@/libs/blockchain/routines/loadNetworkParameters"
 import { governanceGateRefusal } from "@/forks/governanceGate"
+import { tokenStakingOpen, tokenStakingRefusal } from "@/forks/tokenStakingGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import { generateGcrEdits } from "./generateGcrEdits"
@@ -138,8 +139,9 @@ async function osDenominationActive(): Promise<boolean> {
  * `stakeChecks` are the `networkGovernance`, `txTypeAllowList`,
  * `instantMessagingBinding` and `stakeApplyChecks` states, read from the same
  * tip so admission and apply judge them alike, and so are the value rules
- * (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`); `tip` is that
- * tip.
+ * (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`) and
+ * `stakingOpen`, whether token staking is open (`tokenStakingGate`,
+ * `tokenStaking`); `tip` is that tip.
  */
 export interface EditBindingState extends ValueRules {
     active: boolean
@@ -149,6 +151,7 @@ export interface EditBindingState extends ValueRules {
     typeAllowList: boolean
     messageBinding: boolean
     stakeChecks: boolean
+    stakingOpen: boolean
     tip: number
 }
 
@@ -162,6 +165,7 @@ export async function editBindingState(): Promise<EditBindingState> {
         typeAllowList: isForkActive("txTypeAllowList", tip),
         messageBinding: isForkActive("instantMessagingBinding", tip),
         stakeChecks: isForkActive("stakeApplyChecks", tip),
+        stakingOpen: tokenStakingOpen(tip),
         sendBound: isForkActive("nativeSendBinding", tip),
         canonical: isForkActive("canonicalAddresses", tip),
         feeBound: isForkActive("feeBinding", tip),
@@ -171,7 +175,8 @@ export async function editBindingState(): Promise<EditBindingState> {
 
 /**
  * The reads admission makes that do not depend on the transaction: the fork
- * state at the tip and, for fee-free messages, the validators staked there.
+ * state at the tip, for fee-free messages the validators staked there, and
+ * under `feeBinding` a refresh of network parameters a failed read left stale.
  * A batch (the consensus merge) shares one instance, so each is read once per
  * batch rather than once per transaction; the validator set only when a
  * message needs it. A failed read refuses every transaction that needs it,
@@ -181,17 +186,23 @@ export async function editBindingState(): Promise<EditBindingState> {
 export interface AdmissionReads {
     state(): Promise<EditBindingState>
     validators(): Promise<ReadonlySet<string>>
+    parameters(): Promise<void>
 }
 
 export function admissionReads(): AdmissionReads {
     let state: Promise<EditBindingState> | undefined
     let validators: Promise<ReadonlySet<string>> | undefined
+    let parameters: Promise<void> | undefined
     const reads: AdmissionReads = {
         state: () => (state ??= readState("fork state", editBindingState)),
         validators: () =>
             (validators ??= reads
                 .state()
                 .then(s => readState("validator set", () => validatorKeysAt(s.tip)))),
+        parameters: () =>
+            (parameters ??= readState("network parameters", () =>
+                ensureNetworkParametersCurrent(),
+            )),
     }
     return reads
 }
@@ -209,11 +220,7 @@ export async function loadAdmissionReads(
     reads: AdmissionReads,
 ): Promise<void> {
     const { messageBinding, feeBound } = await reads.state()
-    if (feeBound && txs.length > 0) {
-        await readState("network parameters", () =>
-            ensureNetworkParametersCurrent(),
-        )
-    }
+    if (feeBound && txs.length > 0) await reads.parameters()
     if (messageBinding && txs.some(isNodeMessage)) await reads.validators()
 }
 
@@ -551,9 +558,10 @@ export function verifyNonceEditBinding(tx: Transaction): EditVerdict {
  *
  * Under `nonceIntegrity`, on either side of `editBinding`, the nonce edit is
  * bound as well: the value-edit projection does not look at it. The
- * `networkGovernance`, `txTypeAllowList` and `instantMessagingBinding` rules
- * and the value rules (`nativeSendBinding`, `canonicalAddresses`,
- * `feeBinding`) also hold on either side of `editBinding`.
+ * `networkGovernance`, `tokenStakingGate`, `txTypeAllowList` and
+ * `instantMessagingBinding` rules and the value rules (`nativeSendBinding`,
+ * `canonicalAddresses`, `feeBinding`) also hold on either side of
+ * `editBinding`.
  *
  * Fails closed: a transaction that cannot be checked is refused. A batch
  * passes one `reads` to every call (see `admissionReads`).
@@ -574,6 +582,12 @@ export async function verifyAdmissionEdits(
         }
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
+        const stakingRefusal = tokenStakingRefusal(tx, state.stakingOpen)
+        if (stakingRefusal) return refuse(stakingRefusal)
+        // A fee judged on parameters a failed read left behind a governance
+        // change would refuse what every peer accepts. A batch loaded them
+        // first; a single intake refuses until they can be read.
+        if (state.feeBound) await reads.parameters()
         const valueRefusal = await valueRulesRefusal(tx, state)
         if (valueRefusal) return refuse(valueRefusal)
         const verdict = active
@@ -612,8 +626,9 @@ async function verifyAdmissionEditsBeforeBinding(tx: Transaction): Promise<EditV
  * apply step refuse.
  *
  * Inactive: only the nonce edit (under `nonceIntegrity`) and the
- * `networkGovernance` rule, because RPC intake keeps the comparison it always
- * made. `tx` must carry the edits as the sender signed them.
+ * `networkGovernance` and `tokenStakingGate` rules, because RPC intake keeps
+ * the comparison it always made. `tx` must carry the edits as the sender
+ * signed them.
  */
 export async function verifyRpcEdits(tx: Transaction): Promise<EditVerdict> {
     try {
@@ -621,7 +636,10 @@ export async function verifyRpcEdits(tx: Transaction): Promise<EditVerdict> {
         const { active, nonceBound, governance } = state
         const governanceRefusal = governanceGateRefusal(tx, governance)
         if (governanceRefusal) return refuse(governanceRefusal)
+        const stakingRefusal = tokenStakingRefusal(tx, state.stakingOpen)
+        if (stakingRefusal) return refuse(stakingRefusal)
         if (active) return await verifyAdmissionEdits(tx)
+        if (state.feeBound) await ensureNetworkParametersCurrent()
         const valueRefusal = await valueRulesRefusal(tx, state)
         if (valueRefusal) return refuse(valueRefusal)
         return nonceBound ? verifyNonceEditBinding(tx) : OK

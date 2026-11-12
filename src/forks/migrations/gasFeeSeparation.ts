@@ -109,24 +109,8 @@ export async function isGasFeeSeparationMigrationApplied(
     return applied === true || applied === 1 || applied === "1" || applied === "t"
 }
 
-/**
- * Why the migration would refuse this treasury address, or null when it
- * accepts it. Exported so launch tooling can report it before block 0.
- */
-export function treasuryAddressProblem(treasuryAddress: unknown): string | null {
-    if (
-        typeof treasuryAddress !== "string" ||
-        !/^0x[0-9a-f]{64}$/.test(treasuryAddress)
-    ) {
-        return `[forks][gasFeeSeparation] treasuryAddress must match /^0x[0-9a-f]{64}$/, got: ${JSON.stringify(
-            treasuryAddress,
-        )}`
-    }
-    if (treasuryAddress === BURN_ADDRESS) {
-        return "[forks][gasFeeSeparation] treasuryAddress equals BURN_ADDRESS — refusing to route fees into the burn account (placeholder must be replaced before sealing genesis)."
-    }
-    return null
-}
+export { treasuryAddressProblem } from "../treasuryAddress"
+import { treasuryAddressProblem } from "../treasuryAddress"
 
 /**
  * Build the JSONB-serialised payload for a zero-balance account.

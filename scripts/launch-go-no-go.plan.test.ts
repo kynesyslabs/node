@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
     KNOWN_FORKS,
+    LAUNCH_DORMANT_FORKS,
     LAUNCH_SHARD_SIZE,
     MAINNET_FORKS,
     NON_MAINNET_CHAIN_IDS,
@@ -69,7 +70,12 @@ const failing = (checks: ReturnType<typeof launchPlanChecks>) => checks.filter(c
 describe("mainnet genesis template", () => {
     it("schedules every mainnet fork at block 0", () => {
         const forks = readTemplate().forks
-        for (const name of MAINNET_FORKS) expect(forks[name]).toEqual({ activationHeight: 0 })
+        for (const name of MAINNET_FORKS) {
+            const { treasuryAddress, ...schedule } = forks[name]
+            expect(schedule).toEqual({ activationHeight: 0 })
+            // Only gasFeeSeparation carries a payload: the treasury the owners fill
+            expect(treasuryAddress === undefined || name === "gasFeeSeparation").toBe(true)
+        }
     })
 
     it("declares every fork this build knows and no other", () => {
@@ -80,7 +86,6 @@ describe("mainnet genesis template", () => {
         const g = readTemplate()
         for (const v of [
             g.properties.id,
-            g.forks.gasFeeSeparation.activationHeight,
             g.forks.gasFeeSeparation.treasuryAddress,
             g.forks.web2ProofBinding.activationHeight,
             g.forks.tlsnProofEnforcement.activationHeight,
@@ -133,6 +138,12 @@ describe("mainnet genesis template", () => {
         const fromPy = /^MAINNET_FORKS = \[([^\]]*)\]/m.exec(py)?.[1].split(",").map(s => s.trim().replace(/"/g, ""))
         expect(fromSh).toEqual([...MAINNET_FORKS])
         expect(fromPy).toEqual([...MAINNET_FORKS])
+        // The harness's launch genesis must declare every fork, or the node
+        // refuses it on the mainnet-shaped chain id
+        const knownPy = /^KNOWN_FORKS = \[([^\]]*)\]/m.exec(py)?.[1].split(",").map(s => s.trim().replace(/"/g, ""))
+        expect(knownPy).toEqual([...KNOWN_FORKS])
+        const dormantPy = /^LAUNCH_DORMANT_FORKS = \[([^\]]*)\]/m.exec(py)?.[1].split(",").map(s => s.trim().replace(/"/g, ""))
+        expect(dormantPy).toEqual([...LAUNCH_DORMANT_FORKS])
     })
 })
 
@@ -178,8 +189,30 @@ describe("mainnetGenesisReasons", () => {
         const g = filledTemplate()
         g.forks.gasFeeSeparation = { activationHeight: 0 }
         expect(mainnetGenesisReasons(g).join("\n")).toContain("without a treasuryAddress")
-        g.forks.gasFeeSeparation = { activationHeight: null }
-        expect(mainnetGenesisReasons(g)).toEqual([])
+    })
+
+    it("refuses a scheduled gasFeeSeparation whose treasury the node would refuse", () => {
+        for (const [treasuryAddress, why] of [
+            ["0x" + "AB".repeat(32), "must match"],
+            ["0x" + "ab".repeat(31), "must match"],
+            ["ab".repeat(32), "must match"],
+            ["0x" + "0".repeat(64), "equals BURN_ADDRESS"],
+        ]) {
+            const g = filledTemplate()
+            g.forks.gasFeeSeparation = { activationHeight: 0, treasuryAddress }
+            const reasons = mainnetGenesisReasons(g).join("\n")
+            expect(reasons).toContain("scheduled with a treasuryAddress the node refuses")
+            expect(reasons).toContain(why)
+        }
+        expect(mainnetGenesisReasons(filledTemplate()).join("\n")).not.toContain("treasuryAddress")
+    })
+
+    it("refuses a genesis that leaves gasFeeSeparation off, where a transfer pays a flat gas no account receives", () => {
+        const g = filledTemplate()
+        g.forks.gasFeeSeparation.activationHeight = null
+        expect(mainnetGenesisReasons(g)).toEqual([
+            "fork gasFeeSeparation is not scheduled at activationHeight 0 in the genesis (found null)",
+        ])
     })
 })
 

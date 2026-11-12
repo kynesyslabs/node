@@ -17,11 +17,17 @@ export { mockLogger }
 export function mockMempoolDeps(getDataSource: () => unknown = () => ({})): void {
     mock.module("@/model/datasource", () => ({
         __esModule: true,
+        get dataSource() {
+            return getDataSource()
+        },
         default: { getInstance: async () => ({ getDataSource }) },
     }))
     mock.module("@/libs/blockchain/chain", () => ({ __esModule: true, default: {} }))
     mock.module("@/libs/consensus/v2/types/secretaryManager", () => ({
         __esModule: true,
+        AbortConsensusError: class AbortConsensusError extends Error {},
+        PEERLIST_PHASE: 3,
+        HEAD_ALIGN_WAIT_MS: 2000,
         default: { getInstance: () => ({}) },
     }))
     mockLogger()

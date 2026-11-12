@@ -22,7 +22,7 @@ built-in values or `docker-compose.yml` drift apart.
 ## How the values reach the node
 
 1. Copy every `KEY=value` line of `parameters.env` into `.env` (INSTALL.md,
-   "Run a released image", step 2). Set them explicitly even where they equal
+   "Run a released image", step 3). Set them explicitly even where they equal
    the node's built-in value, so a later change of a default can never move a
    validator off the sheet without anyone noticing.
 2. Docker passes only the variables that `docker-compose.yml` lists under the
@@ -56,7 +56,7 @@ A bare-metal node reads the process environment and then `.env`; run
 | `RPC_FEE_PERCENT` | `10` | `SharedState.rpcFee` initial value only | Overwritten by `RPC_FEE` at boot, so nothing depends on it today. Kept on the sheet so no node carries a stray value if code starts reading it again. |
 | `MIN_VALIDATOR_STAKE` | `1000000000000` (1000 DEM in OS) | `getGenesisNetworkParameters`, `getMinValidatorStake` (stake tx validation), `getBigintBounds` (governance floor = 1%) | A node with another floor accepts or refuses stake transactions the others do not, and checks governance proposals against another floor. |
 | `ZK_ATTESTATION_POINTS` | `10` | `zkRoutines` (ZK attestation apply) | Points are written into the sender's account at apply. A node with another value holds different points for the same chain, and since the block's `native_tables_hashes` do not cover accounts, nothing flags it. |
-| `PROD` | `true` | `SharedState.PROD`, `loader.ts` | Production refusals (loopback or missing `EXPOSED_URL`, missing build commit, missing identity file) and the block-signing policy. Overdraft refusal no longer depends on it. |
+| `PROD` | `true` | `SharedState.PROD`, `loader.ts` | Production refusals (loopback or missing `EXPOSED_URL`, missing build commit, missing identity file) and the block-signing policy. Overdraft refusal no longer depends on it. A node whose genesis has the mainnet chain id refuses to start without it (`devModeProblem`). |
 | `DEMOS_REQUIRE_VALIDATORS` | `true` | `getShard`, `loader.ts` | Without it a node that cannot read the validator set uses every online peer as the committee, and `warn` mismatch policy is not refused. |
 | `FORK_SCHEDULE_MISMATCH_POLICY` | `abstain` | `loader.ts` | `warn` keeps voting on another fork schedule inside the pre-activation window; a validator would sign blocks its peers reject at the activation height. The node refuses `warn` together with `DEMOS_REQUIRE_VALIDATORS=true`. |
 | `EXPECTED_GENESIS_HASH` | published with the genesis | `findGenesisBlock`, `genesisMismatch` | Without it a fresh node can adopt whatever genesis its first peers serve. The value is added to `parameters.env` when the genesis is published ([genesis-hash.md](genesis-hash.md)); until then `node-doctor` checks only that it is a 64-hex hash. |

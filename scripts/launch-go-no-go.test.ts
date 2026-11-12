@@ -522,9 +522,15 @@ describe("decideGoNoGo", () => {
     })
 })
 
+/** A mainnet fork at 0, gasFeeSeparation with the treasury it is refused without. */
+const atZero = (name: string, extra: Record<string, unknown> = {}) =>
+    name === "gasFeeSeparation"
+        ? { activationHeight: 0, treasuryAddress: "0x" + "ab".repeat(32), ...extra }
+        : { activationHeight: 0, ...extra }
+
 /** Every fork this build knows declared: the mainnet ones at 0, the rest off. */
 const mainnetForks = () =>
-    Object.fromEntries(KNOWN_FORKS.map(name => [name, { activationHeight: MAINNET_FORKS.includes(name) ? 0 : null }]))
+    Object.fromEntries(KNOWN_FORKS.map(name => [name, MAINNET_FORKS.includes(name) ? atZero(name) : { activationHeight: null }]))
 
 function genesisFile(rows: Array<{ address: string; status: string; valid_at: number | null }>, forks: Record<string, unknown> = mainnetForks()) {
     return { properties: { id: 7, shardSize: 10 }, forks, validators: rows }
@@ -601,6 +607,12 @@ describe("checkLaunch", () => {
         expect(KNOWN_FORKS).toContain("networkGovernance")
     })
 
+    it("launches with token staking off: the gate at block 0, tokenStaking left for a later upgrade", () => {
+        expect(MAINNET_FORKS).toContain("tokenStakingGate")
+        expect(LAUNCH_DORMANT_FORKS).toContain("tokenStaking")
+        expect(MAINNET_FORKS).not.toContain("tokenStaking")
+    })
+
     it("is NO-GO without a genesis file, whose forks and validators it cannot check", () => {
         const d = checkLaunch({ ...base, genesis: null, blockZero: null, launchValidators: launch })
         expect(d.go).toBe(false)
@@ -629,6 +641,20 @@ describe("checkLaunch", () => {
             expect(d.reasons.join("\n")).toContain("cannot be known before launch")
             expect(d.reasons.join("\n")).toContain("a node would refuse this genesis at its first boot: genesis has no timestamp")
         })
+    })
+
+    it("draws the first committee under the genesis schedule of unpinnedCommittee", () => {
+        // A pinned identity in a mainnet genesis is NO-GO anyway; the committee
+        // reported beside that verdict must still be the node's
+        const pinned = PINNED_SHARD_IDENTITIES[1]
+        const all = [...launchSet(14).map(address => ({ address, status: "2", valid_at: 0 })), { address: pinned, status: "2", valid_at: 0 }]
+        const unpinned = checkLaunch({ ...base, genesis: genesisFile(all), blockZero: blockZero(all) })
+        const pinnedForks = { ...mainnetForks(), unpinnedCommittee: { activationHeight: null } }
+        const legacy = checkLaunch({ ...base, genesis: genesisFile(all, pinnedForks), blockZero: blockZero(all) })
+        expect(legacy.committee[0]).toBe(pinned)
+        expect(unpinned.committee[0]).not.toBe(pinned)
+        expect(unpinned.go).toBe(false)
+        expect(unpinned.reasons.join("\n")).toContain(`launch validator is a pinned committee identity: ${pinned}`)
     })
 
     it("carries the validator set's reasons and warnings into the decision", () => {
@@ -675,7 +701,7 @@ describe("launchGenesisExpectations", () => {
         const { hashGenesisData } = await import("src/libs/blockchain/genesis/normalizeGenesisForHash")
         const genesis = {
             properties: { id: 7, shardSize: 10 },
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0, description: "x" }])),
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f, { description: "x" })])),
         }
         const a = await launchGenesisExpectations(genesis)
         expect(a.expectedGenesisDataHash).toBe(hashGenesisData(genesis))
@@ -683,7 +709,7 @@ describe("launchGenesisExpectations", () => {
         // A description is not part of the schedule; a height is
         const b = await launchGenesisExpectations({
             ...genesis,
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0 }])),
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f)])),
         })
         expect(b.expectedScheduleDigest).toBe(a.expectedScheduleDigest)
         const c = await launchGenesisExpectations({
@@ -698,7 +724,7 @@ describe("launchGenesisExpectations", () => {
         const { buildGenesisBlock } = await import("src/libs/blockchain/genesis/buildGenesisBlock")
         const genesis = {
             properties: { id: 7, shardSize: 10 },
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0 }])),
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f)])),
             balances: [],
             timestamp: 1793318400,
         }

@@ -61,9 +61,21 @@
     "blockCaps": {
       "activationHeight": 0
     },
+    "unpinnedCommittee": {
+      "activationHeight": 0
+    },
+    "telegramSenderBinding": {
+      "activationHeight": 0
+    },
+    "xmRemoveCanonical": {
+      "activationHeight": 0
+    },
+    "tokenStakingGate": {
+      "activationHeight": 0
+    },
     "gasFeeSeparation": {
-      "activationHeight": "FILL: 0 or null",
-      "treasuryAddress": "FILL: lowercase 0x + 64 hex treasury account, required whether the height is 0 or null"
+      "activationHeight": 0,
+      "treasuryAddress": "FILL: lowercase 0x + 64 hex mainnet treasury account"
     },
     "web2ProofBinding": {
       "activationHeight": "FILL: 0 or null"
@@ -78,6 +90,9 @@
       "activationHeight": null
     },
     "networkGovernance": {
+      "activationHeight": null
+    },
+    "tokenStaking": {
       "activationHeight": null
     }
   },

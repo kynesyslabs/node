@@ -25,9 +25,11 @@ import {
 } from "./types"
 import {
     ConnectionTimeoutError,
+    RequestTimeoutError,
     SigningError,
     InvalidAuthBlockFormatError,
     ConnectionError,
+    ConnectionLostError,
     OmniProtocolError,
 } from "../types/errors"
 import {
@@ -132,6 +134,10 @@ export class PeerConnection extends EventEmitter {
 
     // Rate limiting (for inbound connections)
     private rateLimiter?: RateLimiter
+    // Set once the chain lists the proven identity as a validator: its
+    // requests then count on its own identity, not on the source IP it may
+    // share (NAT, proxy) with clients that can flood that IP's budget.
+    private provenValidator = false
 
     // Outbound only: settles once the peer has verified an auth block from
     // us on this socket, after which it accepts full-size frames.
@@ -226,6 +232,11 @@ export class PeerConnection extends EventEmitter {
         // Hash with keccak256 for a compact, unique identifier
         const hash = keccak_256(Buffer.from(data, "utf8"))
         return Buffer.from(hash).toString("hex")
+    }
+
+    /** The identity this connection proved is a validator (see ConnectionPool). */
+    markProvenValidator(): void {
+        this.provenValidator = true
     }
 
     /**
@@ -383,7 +394,7 @@ export class PeerConnection extends EventEmitter {
             const timeoutTimer = setTimeout(() => {
                 this.inFlightRequests.delete(sequence)
                 reject(
-                    new ConnectionTimeoutError(
+                    new RequestTimeoutError(
                         `Request timeout after ${timeout}ms`,
                     ),
                 )
@@ -463,6 +474,7 @@ export class PeerConnection extends EventEmitter {
 
         const dataToSign = timestampedSignedData(
             genesisHash,
+            this._peerIdentity,
             opcode,
             sequence,
             timestamp,
@@ -499,7 +511,7 @@ export class PeerConnection extends EventEmitter {
             const timeoutTimer = setTimeout(() => {
                 this.inFlightRequests.delete(sequence)
                 reject(
-                    new ConnectionTimeoutError(
+                    new RequestTimeoutError(
                         `Request timeout after ${timeout}ms`,
                     ),
                 )
@@ -718,7 +730,7 @@ export class PeerConnection extends EventEmitter {
         // Reject all pending requests
         for (const [, pending] of this.inFlightRequests) {
             clearTimeout(pending.timer)
-            pending.reject(new Error("Connection closing"))
+            pending.reject(new ConnectionLostError("Connection closing"))
         }
         this.inFlightRequests.clear()
 
@@ -904,7 +916,9 @@ export class PeerConnection extends EventEmitter {
             const ipAddress = this.socket?.remoteAddress || "unknown"
 
             // Check IP-based rate limit
-            const ipResult = this.rateLimiter.checkIPRequest(ipAddress)
+            const ipResult: { allowed: boolean; reason?: string } = this.provenValidator
+                ? { allowed: true }
+                : this.rateLimiter.checkIPRequest(ipAddress)
             if (!ipResult.allowed) {
                 log.warning(
                     `[PeerConnection] ${this._peerIdentity} IP rate limit exceeded: ${ipResult.reason}`,
@@ -1031,7 +1045,7 @@ export class PeerConnection extends EventEmitter {
         // Reject all pending requests
         for (const [, pending] of this.inFlightRequests) {
             clearTimeout(pending.timer)
-            pending.reject(new Error("Connection closed"))
+            pending.reject(new ConnectionLostError("Connection closed"))
         }
         this.inFlightRequests.clear()
         this.framer.clear()

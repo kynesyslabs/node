@@ -1,6 +1,7 @@
 import Transaction from "src/libs/blockchain/transaction"
 import getCommonValidatorSeed from "./routines/getCommonValidatorSeed"
 import Mempool from "src/libs/blockchain/mempool"
+import { holdSendersToCap } from "src/libs/blockchain/mempoolLimits"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
@@ -893,11 +894,14 @@ async function mergeAndOrderMempools(
 ): Promise<{ txs: MempoolTransaction[]; peerlist: string[] }> {
     // Fetch mempool, check chain for executed txs. Under blockCaps the pool
     // first gives up what the per-sender cap leaves out, as every peer's
-    // merge does with the same txs.
+    // merge does with the same txs. What stays queued past the cap (our own
+    // relay txs, our locked block's txs) is left out of the round, so the
+    // round's pool is the one peers holding the same txs keep.
     const capped = blockCapsActive(blockRef)
     const preMempool = await Mempool.lock.runExclusive(async () => {
-        if (capped) await Mempool.capPoolSenders()
-        return await Mempool.getMempool(blockRef)
+        if (capped) await Mempool.capPoolSenders(blockRef)
+        const pool = await Mempool.getMempool(blockRef)
+        return capped ? holdSendersToCap(pool) : pool
     })
 
     log.only(`[mergeAndOrderMempools] Pre mempool: ${preMempool.length} txs`)
@@ -933,7 +937,8 @@ async function mergeAndOrderMempools(
         `[mergeAndOrderMempools] Merged peerlist: ${mergedPeerlist.length} validators`,
     )
 
-    const postMempool = await Mempool.getMempool(blockRef)
+    const postPool = await Mempool.getMempool(blockRef)
+    const postMempool = capped ? holdSendersToCap(postPool) : postPool
     log.only(`[mergeAndOrderMempools] Post mempool: ${postMempool.length} txs`)
     const preChecked = new Set(preHashes)
     const newHashes = postMempool

@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import { SHARD_SIZE_MAX, SHARD_SIZE_MIN } from "src/libs/consensus/genesisShardSize"
+import { quorumThreshold } from "src/libs/consensus/v2/quorum"
 
 // `--env-from env` keeps docker out of it: the doctor reads the process
 // environment we pass, over a .env this checkout may hold.
@@ -241,3 +243,214 @@ describe("node-doctor checks against fake commands", () => {
         })
     })
 })
+
+const PYTHON3 = Bun.which("python3") as string
+
+describe("node-doctor --production genesis file", () => {
+    let dir: string
+    beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-doctor-genesis-"))
+        fs.symlinkSync(PYTHON3, path.join(dir, "python3"))
+    })
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+    const validator = (i: number, url: unknown = `http://10.0.0.${i}:53550`) => ({
+        address: "0x" + i.toString(16).padStart(64, "0"),
+        status: "2",
+        connection_url: url,
+        staked_amount: "1000000000000",
+        first_seen: 0,
+        valid_at: 0,
+    })
+    const many = (n: number) => Array.from({ length: n }, (_, i) => validator(i + 1))
+
+    function writeGenesis(shardSize: unknown, validators: unknown[]): string {
+        const file = path.join(dir, "genesis.json")
+        fs.writeFileSync(file, JSON.stringify({ properties: { id: 4242, shardSize }, validators }))
+        return file
+    }
+
+    /** Runs check_genesis_file alone, with the node settings and compose config given. */
+    function check(settings: Record<string, string>, composeJson = ""): { lines: string[]; fails: number } {
+        const assign = Object.entries(settings)
+            .map(([k, v]) => `NODE_ENV_VALUES[${k}]=${JSON.stringify(v)}`)
+            .join("; ") || ":"
+        const run = Bun.spawnSync(
+            [BASH, "-c", `source "${doctor}"; ${assign}; COMPOSE_CONFIG_JSON="$DOCTOR_COMPOSE"; check_genesis_file; echo "fails=$PROD_FAILS"`],
+            { env: { PATH: dir, DOCTOR_COMPOSE: composeJson } },
+        )
+        const lines = run.stdout.toString().trim().split("\n")
+        return { lines: lines.slice(0, -1), fails: Number(/fails=(\d+)/.exec(lines.at(-1) ?? "")?.[1]) }
+    }
+    const lineOf = (lines: string[], item: string) => lines.find(l => / /.test(l) && l.slice(5).startsWith(`${item}:`))
+
+    it("mirrors the node's shardSize range", () => {
+        const script = fs.readFileSync(doctor, "utf8")
+        expect(Number(/^GENESIS_SHARD_SIZE_MIN=(\d+)$/m.exec(script)?.[1])).toBe(SHARD_SIZE_MIN)
+        expect(Number(/^GENESIS_SHARD_SIZE_MAX=(\d+)$/m.exec(script)?.[1])).toBe(SHARD_SIZE_MAX)
+    })
+
+    it("passes a genesis the node accepts and can forge on", () => {
+        const file = writeGenesis(10, many(7))
+        const { lines, fails } = check({ DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir })
+        expect(lines).toEqual([
+            `PASS genesis file: ${file}`,
+            "PASS genesis shardSize: 10",
+            "PASS genesis validators: 7 in the genesis validators, quorum 7",
+            "PASS genesis connection_url: 7 validators in the genesis validators",
+        ])
+        expect(fails).toBe(0)
+    })
+
+    it("fails a shardSize outside the range the node accepts", () => {
+        for (const bad of [SHARD_SIZE_MIN - 1, SHARD_SIZE_MAX + 1, 1, "10", null]) {
+            const { lines, fails } = check({ DEMOS_GENESIS_FILE: writeGenesis(bad, many(10)), DEMOS_SNAPSHOT_DIR: dir })
+            expect([bad, lineOf(lines, "genesis shardSize")?.slice(0, 4)]).toEqual([bad, "FAIL"])
+            expect(fails).toBe(1)
+        }
+        const { lines } = check({ DEMOS_GENESIS_FILE: writeGenesis(1, many(1)), DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(lines, "genesis shardSize")).toBe(
+            `FAIL genesis shardSize: properties.shardSize is 1, outside the [${SHARD_SIZE_MIN}, ${SHARD_SIZE_MAX}] the node accepts: it refuses this genesis at boot`,
+        )
+    })
+
+    it("fails fewer validators than the node's quorum of shardSize", () => {
+        for (const shardSize of [SHARD_SIZE_MIN, 4, 10, SHARD_SIZE_MAX]) {
+            const quorum = quorumThreshold(shardSize)
+            const short = check({ DEMOS_GENESIS_FILE: writeGenesis(shardSize, many(quorum - 1)), DEMOS_SNAPSHOT_DIR: dir })
+            expect(lineOf(short.lines, "genesis validators")).toBe(
+                `FAIL genesis validators: ${quorum - 1} in the genesis validators, below the quorum of ${quorum} ` +
+                    `(2/3 + 1 of shardSize ${shardSize}): the node boots but no block after block 0 can be forged`,
+            )
+            const enough = check({ DEMOS_GENESIS_FILE: writeGenesis(shardSize, many(quorum)), DEMOS_SNAPSHOT_DIR: dir })
+            expect(enough.fails).toBe(0)
+        }
+    })
+
+    function writeSnapshotValidators(rows: unknown[]) {
+        fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ files: { "validators.jsonl": { rows: rows.length } } }))
+        fs.writeFileSync(path.join(dir, "validators.jsonl"), rows.map(r => JSON.stringify(r)).join("\n") + "\n")
+    }
+
+    it("counts the snapshot's validators.jsonl when the snapshot carries one", () => {
+        const file = writeGenesis(10, many(1))
+        writeSnapshotValidators(many(7))
+        const { lines, fails } = check({ DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(lines, "genesis validators")).toBe("PASS genesis validators: 7 in the snapshot's validators.jsonl, quorum 7")
+        expect(lineOf(lines, "genesis connection_url")).toBe(
+            "PASS genesis connection_url: 7 validators in the snapshot's validators.jsonl",
+        )
+        expect(fails).toBe(0)
+
+        fs.writeFileSync(path.join(dir, "validators.jsonl"), "{ not json\n")
+        const broken = check({ DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(broken.lines, "genesis validators")).toStartWith(
+            "FAIL genesis validators: the snapshot's validators.jsonl cannot be read",
+        )
+    })
+
+    it("counts only the validators active at block 0, as the committee of block 1 is drawn", () => {
+        const rows: Record<string, unknown>[] = many(7)
+        rows[4] = { ...rows[4], valid_at: null }
+        rows[5] = { ...rows[5], valid_at: 1 }
+        rows[6] = { ...rows[6], status: "1" }
+        const expected =
+            '4 in %s (of 7 listed; only status "2" with valid_at 0 vote from block 1), below the quorum of 7 ' +
+            "(2/3 + 1 of shardSize 10): the node boots but no block after block 0 can be forged"
+        const fromGenesis = check({ DEMOS_GENESIS_FILE: writeGenesis(10, rows), DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(fromGenesis.lines, "genesis validators")).toBe(
+            "FAIL genesis validators: " + expected.replace("%s", "the genesis validators"),
+        )
+        writeSnapshotValidators(rows)
+        const fromSnapshot = check({ DEMOS_GENESIS_FILE: writeGenesis(10, many(7)), DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(fromSnapshot.lines, "genesis validators")).toBe(
+            "FAIL genesis validators: " + expected.replace("%s", "the snapshot's validators.jsonl"),
+        )
+    })
+
+    it("reads valid_at 0.0 as the node does, as the integer 0", () => {
+        // JSON.stringify writes 0, so the file is written by hand: the node parses 0.0 to 0
+        const lines = many(7).map(v => JSON.stringify(v).replace('"valid_at":0', '"valid_at":0.0'))
+        lines[6] = lines[6].replace('"valid_at":0.0', '"valid_at":1.0')
+        expect(lines[0]).toContain('"valid_at":0.0')
+        const file = path.join(dir, "genesis.json")
+        fs.writeFileSync(file, `{"properties":{"id":4242,"shardSize":7},"validators":[${lines.join(",")}]}`)
+        const parsed = JSON.parse(fs.readFileSync(file, "utf8")).validators
+        expect(parsed.filter((v: { valid_at: number }) => Number.isInteger(v.valid_at) && v.valid_at <= 0)).toHaveLength(6)
+        const { lines: out, fails } = check({ DEMOS_GENESIS_FILE: file, DEMOS_SNAPSHOT_DIR: dir })
+        expect(lineOf(out, "genesis validators")).toBe(
+            'PASS genesis validators: 6 in the genesis validators (of 7 listed; only status "2" with valid_at 0 vote from block 1), quorum 5',
+        )
+        expect(fails).toBe(0)
+    })
+
+    it("checks the URLs of the snapshot's validators when the snapshot owns the set", () => {
+        const rows: Record<string, unknown>[] = many(7)
+        rows[2] = validator(3, "http://45.13.233.189:65550")
+        rows[3] = validator(4, "")
+        rows[4] = validator(5, null)
+        const { connection_url: _, ...noUrl } = validator(6)
+        rows[5] = noUrl
+        writeSnapshotValidators(rows)
+        const { lines, fails } = check({ DEMOS_GENESIS_FILE: writeGenesis(10, []), DEMOS_SNAPSHOT_DIR: dir })
+        expect(lines.filter(l => l.startsWith("FAIL genesis connection_url:"))).toEqual([
+            `FAIL genesis connection_url: validators.jsonl row 3 (${validator(3).address}) "http://45.13.233.189:65550" port 65550 is outside 1-65535`,
+        ])
+        expect(fails).toBe(1)
+    })
+
+    it("fails a validator URL no peer can dial", () => {
+        const validators = many(7)
+        validators[2] = validator(3, "http://45.13.233.189:65550")
+        validators[4] = validator(5, "not a url")
+        const { lines, fails } = check({ DEMOS_GENESIS_FILE: writeGenesis(10, validators), DEMOS_SNAPSHOT_DIR: dir })
+        expect(lines.filter(l => l.startsWith("FAIL genesis connection_url:"))).toEqual([
+            `FAIL genesis connection_url: validators[2] (${validator(3).address}) "http://45.13.233.189:65550" port 65550 is outside 1-65535`,
+            `FAIL genesis connection_url: validators[4] (${validator(5).address}) "not a url" is not a valid URL`,
+        ])
+        expect(fails).toBe(2)
+        const ok = many(7)
+        ok[0] = validator(1, null)
+        ok[1] = validator(2, "https://node2.demos.sh")
+        ok[2] = validator(3, "http://[::1]:65535/")
+        expect(check({ DEMOS_GENESIS_FILE: writeGenesis(10, ok), DEMOS_SNAPSHOT_DIR: dir }).fails).toBe(0)
+    })
+
+    it("fails a bare-metal node without DEMOS_GENESIS_FILE", () => {
+        const { lines, fails } = check({})
+        expect(lines[0]).toStartWith("FAIL genesis file: DEMOS_GENESIS_FILE is not set")
+        expect(fails).toBe(1)
+    })
+
+    it("reads the file the node container mounts, and fails when nothing is mounted there", () => {
+        const file = writeGenesis(1, many(1))
+        const compose = (volumes: unknown[], env: Record<string, string> = {}) =>
+            JSON.stringify({ services: { node: { volumes, environment: env } } })
+        const dataVolume = { type: "volume", source: "node_data", target: "/app/data" }
+        const mounted = check({}, compose([dataVolume, { type: "bind", source: file, target: "/app/data/genesis.json" }]))
+        expect(mounted.lines[0]).toBe(`PASS genesis file: ${file}`)
+        expect(lineOf(mounted.lines, "genesis shardSize")).toStartWith("FAIL genesis shardSize: properties.shardSize is 1")
+
+        // DEMOS_GENESIS_FILE names the path inside the container
+        const elsewhere = check(
+            { DEMOS_GENESIS_FILE: "/app/mainnet/genesis.json" },
+            compose([dataVolume, { type: "bind", source: dir, target: "/app/mainnet" }]),
+        )
+        expect(elsewhere.lines[0]).toBe(`PASS genesis file: ${dir}/genesis.json`)
+
+        const bundled = check({}, compose([dataVolume]))
+        expect(bundled.lines).toEqual([
+            "FAIL genesis file: /app/data/genesis.json in the node container is not mounted from the host, so the node " +
+                "reads the genesis bundled in the image (the testnet's): mount the published file read-only " +
+                "(INSTALL.md, \"Pin the network's genesis\")",
+        ])
+        expect(bundled.fails).toBe(1)
+
+        // Docker makes a directory where a bind-mounted file did not exist
+        const missing = path.join(dir, "absent")
+        fs.mkdirSync(missing)
+        const created = check({}, compose([dataVolume, { type: "bind", source: missing, target: "/app/data/genesis.json" }]))
+        expect(created.lines[0]).toStartWith(`FAIL genesis file: ${missing} is a directory`)
+    })
+})
+

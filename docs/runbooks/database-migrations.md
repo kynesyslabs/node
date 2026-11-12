@@ -49,14 +49,16 @@ database by the same `PG_*` settings the node uses.
 | `bun run migration:revert` | undoes the last one. Lossy, see above |
 
 In the Docker stack, run them in a one-off container (the node can be stopped,
-Postgres must be up: `--no-deps` does not start it). `--name demos-migrate` gives
+Postgres must be up: `--no-deps` does not start it). `--name "demos-migrate$SUFFIX"` gives
 the one-off container its own name, so it can never clash with the node service's
-`container_name` while the stopped node container still exists. (Checked on
+`container_name` while the stopped node container still exists, nor with the
+one-off container of another install on the same host (`SUFFIX` is the install's
+`INSTANCE_SUFFIX`, empty by default; INSTALL.md, "Run a released image", step 3). (Checked on
 Compose 2.40.3: `run` without `--name` did not clash there either; the flag is kept
 for Compose versions that behave differently.)
 
 ```bash
-docker compose run --rm --no-deps --name demos-migrate node bun run migration:show
+docker compose run --rm --no-deps --name "demos-migrate$SUFFIX" node bun run migration:show
 ```
 
 ## Procedure
@@ -194,7 +196,7 @@ Do it on **one** validator first, then the rest. Never on all at once.
    ```
 
    On the Docker stack, run each as
-   `docker compose run --rm --no-deps --name demos-migrate node bun run migration:show` (see
+   `docker compose run --rm --no-deps --name "demos-migrate$SUFFIX" node bun run migration:show` (see
    Commands). On bare metal, run each as
    `PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:show`: the launcher
    passes its port only to the node it starts, and `.env` may name another.
