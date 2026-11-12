@@ -27,9 +27,11 @@
  * The watch is driven by inserted blocks, so a node that restarts inside the
  * window would otherwise forge before its first comparison. The consensus
  * routine therefore awaits ensureWindowChecked() first: one conclusive round
- * per scheduled height before the node takes part. A round that reached no
- * validator stays inconclusive and is retried on the next consensus round, so a
- * node cut off from every peer is not held back by it.
+ * per scheduled height before the node takes part, and one conclusive round
+ * started after each requestScheduleCheck() (a peer seen with a different
+ * treasury), at any height. A round that reached no validator stays
+ * inconclusive and is retried on the next consensus round, so a node cut off
+ * from every peer is not held back by it.
  */
 
 import type { ForkConfigLike } from "./forkScheduleAgreement"
@@ -107,6 +109,11 @@ let windowCheckedFor: number | null = null
 // kept, so a slow round delays the next check but never drops it, and a backlog
 // cannot build up.
 let pendingTip: number | null = null
+// requestScheduleCheck() calls so far, and how many of them a conclusive round
+// started after the call has answered. A round already running when a call
+// came may not have asked the peer that prompted it, so it does not count.
+let requestedChecks = 0
+let answeredChecks = 0
 
 export interface RoundOutcome {
     /** Connection strings of the validators whose schedule differs. */
@@ -280,6 +287,7 @@ export async function applyRoundOutcome(
 }
 
 async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
+    const answers = requestedChecks
     const { getSharedState } = await import("@/utilities/sharedState")
     const forkConfig = getSharedState.forkConfig as unknown as ForkConfigLike
     const [{ default: PeerManager }, { default: log }, agreement] = await Promise.all([
@@ -356,6 +364,9 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
         }
     })
     await applyRoundOutcome(tip, plan, outcome)
+    if (outcome.mismatched.length + outcome.agreed > 0) {
+        answeredChecks = Math.max(answeredChecks, answers)
+    }
 }
 
 function runRounds(first: number): Promise<void> {
@@ -384,14 +395,17 @@ async function drainRounds(first: number): Promise<void> {
 export function resetWindowCheck(): void {
     windowCheckedFor = null
     currentRun = null
+    requestedChecks = 0
+    answeredChecks = 0
 }
 
 /**
  * Makes sure the schedule was compared against the validators at least once
- * since the tip entered the window of the nearest scheduled fork, waiting for a
- * round that is already running or starting one. Returns at once outside the
- * window, under the warn policy, or when that height was already checked. Never
- * throws: on failure the node proceeds, as the periodic watch still runs.
+ * since the tip entered the window of the nearest scheduled fork, and once
+ * since the last requestScheduleCheck(), waiting for a round that is already
+ * running (with the one queued behind it) or starting one. Returns at once
+ * under the warn policy, or when neither check is owed. Never throws: on
+ * failure the node proceeds, as the periodic watch still runs.
  */
 export async function ensureWindowChecked(tip: number): Promise<void> {
     try {
@@ -406,9 +420,12 @@ export async function ensureWindowChecked(tip: number): Promise<void> {
             tip,
             getSharedState.forkConfig as unknown as ForkConfigLike,
         )
-        if (!plan.inWindow || windowCheckedFor === plan.nearest) return
+        const owed = () =>
+            answeredChecks < requestedChecks ||
+            (plan.inWindow && windowCheckedFor !== plan.nearest)
+        if (!owed()) return
         if (running && currentRun !== null) await currentRun.catch(() => undefined)
-        if (windowCheckedFor === plan.nearest || running) return
+        if (!owed() || running) return
         await runRounds(tip)
     } catch {
         // A failed comparison must not stop consensus; the periodic watch retries.
@@ -418,9 +435,13 @@ export async function ensureWindowChecked(tip: number): Promise<void> {
 /**
  * Runs a comparison now rather than at the next due block, for a caller that
  * has just seen a peer whose treasury differs. Queued behind a running round
- * like a due block is. Never throws.
+ * like a due block is. Until a conclusive round started after this call has
+ * run, ensureWindowChecked() holds the consensus routine, so the caller need
+ * not wait. Never throws.
  */
 export async function requestScheduleCheck(): Promise<void> {
+    // Counted before the first await, so it is owed as soon as the caller returns.
+    requestedChecks++
     try {
         const { getSharedState } = await import("@/utilities/sharedState")
         const tip = getSharedState.lastBlockNumber

@@ -754,6 +754,118 @@ describe("a treasury mismatch end to end", () => {
     }, 30000)
 })
 
+describe("a treasury mismatch seen at bootstrap", () => {
+    const TREASURY = "0x" + "7e".repeat(32)
+    const OTHER = "0x" + "11".repeat(32)
+
+    /** One validator whose answers are released by the test, each with the treasury it names. */
+    async function withHeldPeer(
+        run: (answer: (treasury: string) => void, calls: () => number, setReadFails: (fails: boolean) => void) => Promise<void>,
+    ) {
+        const PeerManager = (await import("src/libs/peer/PeerManager")).default
+        const agreement = await import("src/libs/peer/routines/forkScheduleAgreement")
+        const saved = {
+            forkConfig: getSharedState.forkConfig,
+            chainId: getSharedState.chainId,
+            tip: getSharedState.lastBlockNumber,
+        }
+        getSharedState.forkConfig = {
+            gasFeeSeparation: { activationHeight: 0, treasuryAddress: TREASURY },
+        } as never
+        getSharedState.chainId = 7
+        getSharedState.lastBlockNumber = 5000
+        // Calls and released answers are paired in order, whichever comes first.
+        const waiting: Array<(treasury: string) => void> = []
+        const released: string[] = []
+        const pair = () => {
+            while (waiting.length > 0 && released.length > 0) waiting.shift()!(released.shift()!)
+        }
+        let called = 0
+        const reply = (treasury: string) => {
+            const forks = { gasFeeSeparation: { activationHeight: 0, treasuryAddress: treasury } }
+            return {
+                result: 200,
+                response: { chainId: 7, forks, forkScheduleDigest: agreement.forkScheduleDigest(forks as never, 7) },
+            }
+        }
+        const peer = {
+            identity: "peer",
+            connection: { string: "http://peer:53550" },
+            call: () => {
+                called++
+                return new Promise(resolve => {
+                    waiting.push(treasury => resolve(reply(treasury)))
+                    pair()
+                })
+            },
+        }
+        const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
+            getPeers: () => [peer],
+        } as never)
+        let readFails = false
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockImplementation((async () => {
+            if (readFails) throw new Error("validator read failed")
+            return [{ address: "peer" }]
+        }) as never)
+        const answer = (treasury: string) => {
+            released.push(treasury)
+            pair()
+        }
+        try {
+            await run(answer, () => called, fails => {
+                readFails = fails
+            })
+        } finally {
+            getPeers.mockRestore()
+            validators.mockRestore()
+            getSharedState.forkConfig = saved.forkConfig
+            getSharedState.chainId = saved.chainId
+            getSharedState.lastBlockNumber = saved.tip
+        }
+    }
+
+    it("holds the consensus check until the round queued behind a running one has answered", async () => {
+        await withHeldPeer(async (answer, calls) => {
+            // A round already running when the mismatch is seen; it asked the peer before.
+            const running = onBlockInserted(5000)
+            await waitFor(() => calls() === 1)
+            void requestScheduleCheck()
+
+            const consensusMayStart = ensureWindowChecked(5000)
+            answer(TREASURY)
+            answer(OTHER)
+            await consensusMayStart
+            expect(getSharedState.forkScheduleAbstain).toBe(true)
+            expect(calls()).toBe(2)
+            await running
+        })
+    }, 30000)
+
+    it("runs the owed round itself when none is running, then lets consensus go without asking again", async () => {
+        await withHeldPeer(async (answer, calls, setReadFails) => {
+            const first = requestScheduleCheck()
+            answer(TREASURY)
+            await first
+            expect(calls()).toBe(1)
+
+            // Inconclusive: the validator set cannot be read, so the check stays owed.
+            setReadFails(true)
+            await requestScheduleCheck()
+            setReadFails(false)
+            expect(calls()).toBe(1)
+
+            const consensusMayStart = ensureWindowChecked(5000)
+            answer(TREASURY)
+            await consensusMayStart
+            expect(calls()).toBe(2)
+            expect(getSharedState.forkScheduleAbstain).toBe(false)
+
+            await ensureWindowChecked(5000)
+            expect(calls()).toBe(2)
+        })
+    }, 30000)
+})
+
 describe("the check before the first round inside the window", () => {
     async function withPeers(
         digestOf: (ours: string) => string,

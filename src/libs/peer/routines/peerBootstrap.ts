@@ -283,7 +283,8 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
  * A different gasFeeSeparation treasury splits the nodes at once rather than
  * at a later height, so it starts a watch round now, which leaves the peer out
  * of the shard (or this node out of consensus) as a mismatch inside the window
- * would.
+ * would. Boot does not wait for that round; the consensus routine does, through
+ * ensureWindowChecked, before it forges or votes.
  */
 async function warnOnForkScheduleMismatch(peer: Peer) {
     const ours = localScheduleView(
