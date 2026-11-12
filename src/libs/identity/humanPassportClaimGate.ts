@@ -86,7 +86,7 @@ export class HumanPassportClaimGate {
         if (cached) this.cache.delete(key)
 
         const pending = this.inFlight.get(key)
-        if (pending) return { claim: await pending }
+        if (pending !== undefined) return { claim: await pending }
 
         const retryAfterMs = this.take(caller, now)
         if (retryAfterMs > 0) return { retryAfterMs }
