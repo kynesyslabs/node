@@ -204,14 +204,13 @@ export class ConnectionPool extends EventEmitter {
             // speaks for it (a halted copy of the key, a restarted peer's
             // half-open socket); refusing the newest would lock the live
             // holder out of this node, so the least recently used one goes.
-            // Closing rejects a connection's pending requests, so an idle one
-            // goes before any that still waits for a reply.
+            // Closing loses the replies still owed in either direction, so an
+            // idle one goes before any with work pending.
             const stalest = usableConnections
                 .filter(c => c.origin === "inbound")
                 .sort(
                     (a, b) =>
-                        Number(a.inFlightRequests.size > 0) -
-                            Number(b.inFlightRequests.size > 0) ||
+                        Number(a.hasPendingWork()) - Number(b.hasPendingWork()) ||
                         a.getLastActivity() - b.getLastActivity(),
                 )[0]
             if (!stalest) {
