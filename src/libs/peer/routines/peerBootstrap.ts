@@ -31,6 +31,7 @@ import {
     showPeerValue,
     type ForkConfigLike,
 } from "./forkScheduleAgreement"
+import { requestScheduleCheck } from "./forkScheduleWatch"
 import { Config } from "src/config"
 import { replaceFileAtomically } from "./replaceFileAtomically"
 import {
@@ -279,6 +280,10 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
  * genesis edit peers legitimately disagree for a while. A peer that has not
  * loaded its own genesis yet answers "not ready"; that is retried and then left
  * to the periodic comparison (forkScheduleWatch.ts), not reported as a mismatch.
+ * A different gasFeeSeparation treasury splits the nodes at once rather than
+ * at a later height, so it starts a watch round now, which leaves the peer out
+ * of the shard (or this node out of consensus) as a mismatch inside the window
+ * would.
  */
 async function warnOnForkScheduleMismatch(peer: Peer) {
     const ours = localScheduleView(
@@ -296,6 +301,15 @@ async function warnOnForkScheduleMismatch(peer: Peer) {
                     ". This node will split from its peers at the first activation height that differs. " +
                     `Fix the forks entries and properties.id in ${genesisFilePath()} and restart.`,
             )
+            if (result.treasuryDiffers) {
+                log.error(
+                    "[BOOTSTRAP] gasFeeSeparation TREASURY MISMATCH with " +
+                        peer.connection.string +
+                        ": fees are credited to different accounts from the first block, so the two " +
+                        "nodes cannot agree on any block that carries a fee",
+                )
+                void requestScheduleCheck()
+            }
             break
         case "skipped":
             log.debug(

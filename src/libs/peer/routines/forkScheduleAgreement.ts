@@ -8,6 +8,11 @@
  * through `getNetworkInfo`; equal digests settle it, and when they differ the
  * per-fork activation heights, which every build publishes, name what differs.
  * A peer that predates the digest is compared by those heights alone.
+ *
+ * The gasFeeSeparation treasury is published beside its height, so a peer
+ * whose fees go to another account is named as such rather than as an
+ * unexplained digest difference: once both apply the fork, every fee-bearing
+ * block splits them, whatever the height.
  */
 
 import { stableStringify } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
@@ -19,6 +24,11 @@ export interface ScheduleView {
     forks: Record<string, number | null>
     /** Absent on a node that predates the digest. */
     digest?: string
+    /**
+     * The gasFeeSeparation treasury, lowercased. Absent when the node does not
+     * report one (older builds), so it is then compared through the digest alone.
+     */
+    treasuryAddress?: string
 }
 
 /**
@@ -35,6 +45,7 @@ export type ForkEntry = { activationHeight: number | null } & Record<string, unk
 export type ForkConfigLike = Record<string, ForkEntry | undefined>
 
 const DIGEST_FORMAT = /^[0-9a-f]{64}$/
+const TREASURY_FORMAT = /^0x[0-9a-f]{64}$/
 
 /** Longest piece of peer-supplied text that is put into a log line. */
 const MAX_LOGGED_LENGTH = 64
@@ -77,14 +88,17 @@ export function localScheduleView(
         const entry = forkConfig[name]
         if (entry) forks[name] = entry.activationHeight
     }
-    return { chainId, forks, digest: forkScheduleDigest(forkConfig, chainId) }
+    const view: ScheduleView = { chainId, forks, digest: forkScheduleDigest(forkConfig, chainId) }
+    const treasury = forkConfig.gasFeeSeparation?.treasuryAddress
+    if (typeof treasury === "string") view.treasuryAddress = treasury.toLowerCase()
+    return view
 }
 
 /** A peer's view from its `getNetworkInfo` answer, or null when the answer has no fork table. */
 export function peerScheduleView(info: unknown): ScheduleView | null {
     if (info === null || typeof info !== "object") return null
     const { forks, chainId, forkScheduleDigest: digest } = info as {
-        forks?: Record<string, { activationHeight?: number | null } | undefined>
+        forks?: Record<string, { activationHeight?: number | null; treasuryAddress?: unknown } | undefined>
         chainId?: number | null
         forkScheduleDigest?: string
     }
@@ -94,19 +108,31 @@ export function peerScheduleView(info: unknown): ScheduleView | null {
         const height = forks[name]?.activationHeight
         if (height === null || typeof height === "number") out[name] = height
     }
-    return {
+    const view: ScheduleView = {
         chainId: chainId === null || typeof chainId === "number" ? chainId : undefined,
         forks: out,
         // Anything but a sha256 hex string is not a digest this node can use or print.
         digest: typeof digest === "string" && DIGEST_FORMAT.test(digest) ? digest : undefined,
     }
+    // Only an address-shaped value is compared and printed whole; anything
+    // else is left to the digest.
+    const treasury = forks.gasFeeSeparation?.treasuryAddress
+    if (typeof treasury === "string" && TREASURY_FORMAT.test(treasury.toLowerCase())) {
+        view.treasuryAddress = treasury.toLowerCase()
+    }
+    return view
 }
 
 export type ScheduleComparison =
     | { status: "agree" }
     /** The peer reports no fork data at all: nothing to compare. */
     | { status: "skipped" }
-    | { status: "mismatch"; lines: string[] }
+    /**
+     * `treasuryDiffers` when both sides schedule gasFeeSeparation with
+     * different treasuries: a split from the first fee-bearing block, not a
+     * future one.
+     */
+    | { status: "mismatch"; lines: string[]; treasuryDiffers?: boolean }
 
 /**
  * Compare two views. Equal digests agree. Differing digests are a mismatch, and
@@ -137,6 +163,12 @@ export function compareSchedules(
     if (theirs.chainId !== undefined && ours.chainId !== theirs.chainId) {
         lines.push(`chainId: ours ${show(ours.chainId)}, theirs ${show(theirs.chainId)}`)
     }
+    const treasuryDiffers = scheduledTreasuriesDiffer(ours, theirs)
+    if (treasuryDiffers) {
+        lines.push(
+            `gasFeeSeparation.treasuryAddress: ours ${ours.treasuryAddress}, theirs ${theirs.treasuryAddress}`,
+        )
+    }
     if (theirs.digest !== undefined) {
         // Digests cover only scheduled forks, so with equal heights and chain id a
         // difference can only be a scheduled fork's payload or the set of scheduled forks.
@@ -149,7 +181,17 @@ export function compareSchedules(
     } else if (lines.length === 0) {
         return { status: "agree" }
     }
-    return { status: "mismatch", lines }
+    return treasuryDiffers ? { status: "mismatch", lines, treasuryDiffers } : { status: "mismatch", lines }
+}
+
+function scheduledTreasuriesDiffer(ours: ScheduleView, theirs: ScheduleView): boolean {
+    return (
+        typeof ours.forks.gasFeeSeparation === "number" &&
+        typeof theirs.forks.gasFeeSeparation === "number" &&
+        ours.treasuryAddress !== undefined &&
+        theirs.treasuryAddress !== undefined &&
+        ours.treasuryAddress !== theirs.treasuryAddress
+    )
 }
 
 export interface SchedulePeer {

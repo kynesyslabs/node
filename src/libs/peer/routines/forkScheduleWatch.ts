@@ -19,6 +19,11 @@
  * under `warn`, a mismatch is only reported: stopping a node during a rolling
  * genesis edit far from any fork would cost liveness for no gain.
  *
+ * A validator whose gasFeeSeparation treasury differs is the exception: both
+ * already apply the fork, so every fee-bearing block splits them and there is
+ * no later height to wait for. A round where one answers so is handled as a
+ * round inside the window, at any height, and logged as an error.
+ *
  * The watch is driven by inserted blocks, so a node that restarts inside the
  * window would otherwise forge before its first comparison. The consensus
  * routine therefore awaits ensureWindowChecked() first: one conclusive round
@@ -114,6 +119,8 @@ export interface RoundOutcome {
     agreedIdentities?: string[]
     /** Staked validators at this tip, lowercased; null when every peer counts. */
     validatorIdentities?: string[] | null
+    /** Connection strings of the validators in `mismatched` whose gasFeeSeparation treasury differs. */
+    treasuryMismatched?: string[]
 }
 
 /** How often the comparison is repeated while the node abstains or leaves peers out. */
@@ -192,11 +199,15 @@ export async function applyRoundOutcome(
     if (plan.inWindow) windowCheckedFor = plan.nearest
     setForkScheduleMismatch(differing > 0)
 
+    const treasuryDiffers = (outcome.treasuryMismatched?.length ?? 0) > 0
+    // A different treasury splits the chain already, so it is acted on as a
+    // mismatch inside the window would be, wherever the tip is
+    const urgent = plan.inWindow || treasuryDiffers
     const majorityDiffers = differing > outcome.agreed
     const abstaining =
         policy === "abstain" &&
         majorityDiffers &&
-        (plan.inWindow || getSharedState.forkScheduleAbstain)
+        (urgent || getSharedState.forkScheduleAbstain)
     const before = getSharedState.forkScheduleDifferingPeers
     const leaveOut = new Set<string>()
     if (policy === "abstain" && !abstaining) {
@@ -211,7 +222,7 @@ export async function applyRoundOutcome(
         // A node that abstained itself is past a mismatch too: the minority
         // still differing when it resumes may still abstain.
         const pastMismatch = before.size > 0 || getSharedState.forkScheduleAbstain
-        if (!majorityDiffers && differing > 0 && (plan.inWindow || pastMismatch)) {
+        if (!majorityDiffers && differing > 0 && (urgent || pastMismatch)) {
             for (const id of outcome.mismatchedIdentities ?? []) leaveOut.add(id.toLowerCase())
         }
     }
@@ -230,11 +241,14 @@ export async function applyRoundOutcome(
 
     if (majorityDiffers) {
         if (!abstaining && leaveOut.size > 0) startRecheck()
-        if (policy === "abstain" && plan.inWindow) {
+        if (policy === "abstain" && urgent) {
             const reason =
                 "fork schedule differs from " +
                 outcome.mismatched.join(", ") +
                 ` (${differing} of ${differing + outcome.agreed} validators)` +
+                (treasuryDiffers
+                    ? `, gasFeeSeparation treasury differs from ${outcome.treasuryMismatched!.join(", ")}`
+                    : "") +
                 (plan.nearest !== null
                     ? `, nearest scheduled height ${plan.nearest}`
                     : "") +
@@ -306,6 +320,7 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
         mismatchedIdentities: [],
         agreedIdentities: [],
         validatorIdentities: validators === null ? null : [...validators],
+        treasuryMismatched: [],
     }
     await mapWithLimit(peers, PEER_CONCURRENCY, async peer => {
         try {
@@ -321,6 +336,7 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
             if (result.status !== "mismatch") return
             outcome.mismatched.push(peer.connection.string)
             outcome.mismatchedIdentities!.push(String(peer.identity))
+            if (result.treasuryDiffers) outcome.treasuryMismatched!.push(peer.connection.string)
             const text =
                 "[FORK SCHEDULE] MISMATCH with " +
                 peer.connection.string +
@@ -331,7 +347,7 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
                     : "") +
                 ": " +
                 result.lines.join("; ")
-            if (plan.inWindow) log.error(text)
+            if (plan.inWindow || result.treasuryDiffers) log.error(text)
             else log.warn(text)
         } catch {
             // One peer failing must not stop the others from being compared.
@@ -394,6 +410,25 @@ export async function ensureWindowChecked(tip: number): Promise<void> {
         await runRounds(tip)
     } catch {
         // A failed comparison must not stop consensus; the periodic watch retries.
+    }
+}
+
+/**
+ * Runs a comparison now rather than at the next due block, for a caller that
+ * has just seen a peer whose treasury differs. Queued behind a running round
+ * like a due block is. Never throws.
+ */
+export async function requestScheduleCheck(): Promise<void> {
+    try {
+        const { getSharedState } = await import("@/utilities/sharedState")
+        const tip = getSharedState.lastBlockNumber
+        if (running) {
+            pendingTip = tip
+            return
+        }
+        await runRounds(tip)
+    } catch {
+        // A failed comparison must not affect the caller; the periodic watch retries.
     }
 }
 

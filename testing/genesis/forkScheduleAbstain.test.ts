@@ -3,6 +3,7 @@ import {
     applyRoundOutcome,
     ensureWindowChecked,
     onBlockInserted,
+    requestScheduleCheck,
     resetWindowCheck,
     RECHECK_INTERVAL_MS,
     type CheckPlan,
@@ -133,6 +134,64 @@ describe("a peer with a different schedule", () => {
         expect(getSharedState.forkScheduleAbstain).toBe(false)
         expect(gauges.fork_schedule_mismatch).toBe(1)
         expect(gauges.consensus_abstaining).toBeUndefined()
+    })
+})
+
+describe("a validator with a different gasFeeSeparation treasury", () => {
+    const past: CheckPlan = { due: true, inWindow: false, nearest: null }
+
+    it("makes the node abstain outside the window when most validators credit fees elsewhere", async () => {
+        await applyRoundOutcome(300, past, {
+            mismatched: ["http://a", "http://b"],
+            treasuryMismatched: ["http://a", "http://b"],
+            agreed: 1,
+        })
+        expect(getSharedState.forkScheduleAbstain).toBe(true)
+        expect(getSharedState.forkScheduleAbstainReason).toContain(
+            "gasFeeSeparation treasury differs from http://a, http://b",
+        )
+        expect(gauges.consensus_abstaining).toBe(1)
+    })
+
+    it("leaves a minority out of the shard outside the window, as inside it", async () => {
+        await applyRoundOutcome(300, outsideWindow, {
+            mismatched: ["http://d"],
+            mismatchedIdentities: ["0xDD"],
+            treasuryMismatched: ["http://d"],
+            agreed: 2,
+        })
+        expect([...getSharedState.forkScheduleDifferingPeers]).toEqual(["0xdd"])
+        expect(getSharedState.forkScheduleAbstain).toBe(false)
+        expect(intervalsStarted).toEqual([RECHECK_INTERVAL_MS])
+    })
+
+    it("does not count as the window being checked for the nearest height", async () => {
+        await applyRoundOutcome(300, outsideWindow, {
+            mismatched: ["http://d"],
+            mismatchedIdentities: ["0xDD"],
+            treasuryMismatched: ["http://d"],
+            agreed: 2,
+        })
+        // ensureWindowChecked must still run a round once the tip enters the window
+        const PeerManager = (await import("src/libs/peer/PeerManager")).default
+        let asked = 0
+        const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
+            getPeers: () => {
+                asked++
+                return []
+            },
+        } as never)
+        const saved = getSharedState.forkConfig
+        getSharedState.forkConfig = { signatureDomain: { activationHeight: 1000 } } as never
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([] as never)
+        try {
+            await ensureWindowChecked(960)
+            expect(asked).toBe(1)
+        } finally {
+            getPeers.mockRestore()
+            validators.mockRestore()
+            getSharedState.forkConfig = saved
+        }
     })
 })
 
@@ -574,6 +633,82 @@ describe("the watch end to end", () => {
             validators.mockRestore()
             getSharedState.forkConfig = saved.forkConfig
             getSharedState.chainId = saved.chainId
+        }
+    }, 30000)
+})
+
+describe("a treasury mismatch end to end", () => {
+    const TREASURY = "0x" + "7e".repeat(32)
+    const OTHER = "0x" + "11".repeat(32)
+
+    async function withPeer(theirTreasury: string, run: () => Promise<void>) {
+        const PeerManager = (await import("src/libs/peer/PeerManager")).default
+        const agreement = await import("src/libs/peer/routines/forkScheduleAgreement")
+        const saved = { forkConfig: getSharedState.forkConfig, chainId: getSharedState.chainId }
+        getSharedState.forkConfig = {
+            gasFeeSeparation: { activationHeight: 0, treasuryAddress: TREASURY },
+        } as never
+        getSharedState.chainId = 7
+        const theirConfig = { gasFeeSeparation: { activationHeight: 0, treasuryAddress: theirTreasury } }
+        const peer = {
+            identity: "peer",
+            connection: { string: "http://peer:53550" },
+            call: async () => ({
+                result: 200,
+                response: {
+                    chainId: 7,
+                    forks: { gasFeeSeparation: { activationHeight: 0, treasuryAddress: theirTreasury } },
+                    forkScheduleDigest: agreement.forkScheduleDigest(theirConfig as never, 7),
+                },
+            }),
+        }
+        const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
+            getPeers: () => [peer],
+        } as never)
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+            { address: "peer" },
+        ] as never)
+        try {
+            await run()
+        } finally {
+            getPeers.mockRestore()
+            validators.mockRestore()
+            getSharedState.forkConfig = saved.forkConfig
+            getSharedState.chainId = saved.chainId
+        }
+    }
+
+    it("logs an error and abstains far from any scheduled height", async () => {
+        const log = (await import("src/utilities/logger")).default
+        const error = spyOn(log, "error")
+        try {
+            await withPeer(OTHER, async () => {
+                await onBlockInserted(5000)
+                expect(getSharedState.forkScheduleAbstain).toBe(true)
+                expect(getSharedState.forkScheduleAbstainReason).toContain("gasFeeSeparation treasury differs")
+                const lines = error.mock.calls.map(c => String(c[0])).join("\n")
+                expect(lines).toContain("[FORK SCHEDULE] MISMATCH with http://peer:53550 at block 5000")
+                expect(lines).toContain(`gasFeeSeparation.treasuryAddress: ours ${TREASURY}, theirs ${OTHER}`)
+            })
+        } finally {
+            error.mockRestore()
+        }
+    }, 30000)
+
+    it("runs a round on request, without waiting for a due block", async () => {
+        const savedTip = getSharedState.lastBlockNumber
+        getSharedState.lastBlockNumber = 5001
+        try {
+            await withPeer(OTHER, async () => {
+                await requestScheduleCheck()
+                expect(getSharedState.forkScheduleAbstain).toBe(true)
+            })
+            await withPeer(TREASURY, async () => {
+                await requestScheduleCheck()
+                expect(getSharedState.forkScheduleAbstain).toBe(false)
+            })
+        } finally {
+            getSharedState.lastBlockNumber = savedTip
         }
     }, 30000)
 })

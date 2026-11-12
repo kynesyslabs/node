@@ -115,6 +115,68 @@ describe("comparing schedules", () => {
         expect(result.lines[1]).toMatch(/^scheduled fork payload or set differs/)
     })
 
+    describe("with the treasury published beside gasFeeSeparation", () => {
+        const OTHER = "0x" + "11".repeat(32)
+        /** What a build that publishes the treasury answers. */
+        const published = (c: any, id: number) => {
+            const a: any = answer(c, id)
+            a.forks.gasFeeSeparation.treasuryAddress = c.gasFeeSeparation.treasuryAddress
+            return peerScheduleView(a)!
+        }
+        const scheduled = (treasury?: string) => {
+            const c = config({ gasFeeSeparation: 0 })
+            if (treasury) c.gasFeeSeparation.treasuryAddress = treasury
+            return c
+        }
+
+        it("names a different treasury and marks the mismatch as one", () => {
+            const mine = localScheduleView(scheduled(), 31337)
+            const theirs = published(scheduled(OTHER), 31337)
+            const result = compareSchedules(mine, theirs)
+            if (result.status !== "mismatch") throw new Error("expected a mismatch")
+            expect(result.treasuryDiffers).toBe(true)
+            expect(result.lines).toContain(
+                `gasFeeSeparation.treasuryAddress: ours ${mine.treasuryAddress}, theirs ${OTHER}`,
+            )
+            expect(result.lines.join("\n")).not.toContain("payload or set differs")
+        })
+
+        it("compares the treasury without regard to case", () => {
+            const c = scheduled(OTHER)
+            const a: any = answer(c, 31337)
+            a.forks.gasFeeSeparation.treasuryAddress = OTHER.toUpperCase().replace("0X", "0x")
+            const theirs = peerScheduleView(a)!
+            expect(theirs.treasuryAddress).toBe(OTHER)
+            expect(compareSchedules(localScheduleView(c, 31337), theirs)).toEqual({ status: "agree" })
+        })
+
+        it("does not mark a mismatch elsewhere as a treasury one", () => {
+            const mine = localScheduleView(scheduled(), 31337)
+            const theirs = published(config({ gasFeeSeparation: 0, atomicWork: 900 }), 31337)
+            const result = compareSchedules(mine, theirs)
+            if (result.status !== "mismatch") throw new Error("expected a mismatch")
+            expect(result.treasuryDiffers).toBeUndefined()
+        })
+
+        it("does not mark it when either side leaves gasFeeSeparation off", () => {
+            const off = config({ gasFeeSeparation: null })
+            off.gasFeeSeparation.treasuryAddress = OTHER
+            const result = compareSchedules(localScheduleView(scheduled(), 31337), published(off, 31337))
+            if (result.status !== "mismatch") throw new Error("expected a mismatch")
+            expect(result.treasuryDiffers).toBeUndefined()
+        })
+
+        it("leaves a peer that publishes no treasury to the digest, and ignores one that is not an address", () => {
+            const mine = localScheduleView(scheduled(), 31337)
+            const old = compareSchedules(mine, view(scheduled(OTHER), 31337))
+            if (old.status !== "mismatch") throw new Error("expected a mismatch")
+            expect(old.treasuryDiffers).toBeUndefined()
+            const a: any = answer(scheduled(OTHER), 31337)
+            a.forks.gasFeeSeparation.treasuryAddress = "x".repeat(500)
+            expect(peerScheduleView(a)!.treasuryAddress).toBeUndefined()
+        })
+    })
+
     it("does not use or print a peer digest that is not a sha256 hex string", () => {
         const hostile = peerScheduleView({
             ...answer(config({ atomicWork: 900 }), 31337),
