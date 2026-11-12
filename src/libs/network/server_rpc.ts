@@ -518,7 +518,7 @@ export async function serverRpcBun() {
                     )
                 }
             }
-            const response = await processPayload(payload, sender)
+            const response = await processPayload(payload, sender, clientIP)
 
             // Surface current rate-limit window so SDK clients can
             // self-throttle (best-effort: skip when no IP data yet).

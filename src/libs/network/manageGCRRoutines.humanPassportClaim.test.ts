@@ -67,6 +67,36 @@ describe("getHumanPassportClaim", () => {
         expect(res.response).toBe(25.5)
     })
 
+    it("charges getHumanPassportScore to the same cache and limit as the claim", async () => {
+        await manageGCRRoutines(SENDER, { method: "getHumanPassportClaim", params: [EVM] })
+        const score = await manageGCRRoutines(SENDER, { method: "getHumanPassportScore", params: [EVM] })
+        expect(score.response).toBe(25.5)
+        expect(fetches).toBe(1)
+
+        const addresses = Array.from({ length: CLAIM_FETCH_BURST }, (_, i) =>
+            "0x" + (i + 16).toString(16).padStart(2, "0").repeat(20),
+        )
+        const results = []
+        for (const address of addresses) {
+            results.push(await manageGCRRoutines(SENDER, { method: "getHumanPassportScore", params: [address] }))
+        }
+        expect(results.at(-1)!.result).toBe(429)
+    })
+
+    it("limits unsigned callers per source address, not as one shared bucket", async () => {
+        const addresses = Array.from({ length: CLAIM_FETCH_BURST + 1 }, (_, i) =>
+            "0x" + (i + 32).toString(16).padStart(2, "0").repeat(20),
+        )
+        const results = []
+        for (const address of addresses) {
+            results.push(await manageGCRRoutines("", { method: "getHumanPassportClaim", params: [address] }, "198.51.100.1"))
+        }
+        expect(results.at(-1)!.result).toBe(429)
+
+        const otherClient = await manageGCRRoutines("", { method: "getHumanPassportClaim", params: [addresses.at(-1)] }, "198.51.100.2")
+        expect(otherClient.result).toBe(200)
+    })
+
     it("answers a repeated address from the cache instead of the provider", async () => {
         const first = await manageGCRRoutines(SENDER, { method: "getHumanPassportClaim", params: [EVM] })
         const again = await manageGCRRoutines("0x" + "77".repeat(32), {
