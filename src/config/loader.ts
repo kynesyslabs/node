@@ -298,6 +298,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.L2PS_ZK_USE_MAIN_THREAD,
                 d.l2ps.zkUseMainThread,
             ),
+            settlementProvers: Math.max(
+                1,
+                envInt(EnvKey.L2PS_SETTLEMENT_PROVERS, d.l2ps.settlementProvers),
+            ),
             hashIntervalMs: envInt(
                 EnvKey.L2PS_HASH_INTERVAL_MS,
                 d.l2ps.hashIntervalMs,
@@ -707,6 +711,12 @@ function assertGossipSane(config: AppConfig): void {
 const MAX_BATCHES_PER_CYCLE_LIMIT = 100
 
 /**
+ * Each settlement prover takes a core and about 1 GB while it proves; past
+ * this a typo starves the node it runs on instead of speeding it up.
+ */
+export const MAX_SETTLEMENT_PROVERS = 16
+
+/**
  * Reject L2PS backlog and relay limits that would wedge a subnet or silently
  * switch a protection off.
  */
@@ -728,6 +738,11 @@ function assertL2psLimitsSane(config: AppConfig): void {
             `L2PS_MEMPOOL_MAX_EXECUTED_PER_SUBNET (${cap}) is below L2PS_MIN_BATCH_SIZE (${minBatchSize}): ` +
                 "a subnet would fill up before its first batch could form. " +
                 "Raise the cap to at least the minimum batch size, or set it to 0 to disable the limit.",
+        )
+    }
+    if (config.l2ps.settlementProvers > MAX_SETTLEMENT_PROVERS) {
+        problems.push(
+            `L2PS_SETTLEMENT_PROVERS must be at most ${MAX_SETTLEMENT_PROVERS} (got ${config.l2ps.settlementProvers})`,
         )
     }
     if (batches > MAX_BATCHES_PER_CYCLE_LIMIT) {

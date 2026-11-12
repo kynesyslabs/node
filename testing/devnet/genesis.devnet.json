@@ -66,6 +66,9 @@
     },
     "tlsnProofEnforcement": {
       "activationHeight": 0
+    },
+    "l2psSettlement": {
+      "activationHeight": 0
     }
   },
   "balances": [

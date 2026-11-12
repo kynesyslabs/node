@@ -13,7 +13,8 @@ mock.module("@/utilities/logger", () => ({
 }))
 mock.module("@/libs/blockchain/l2ps_mempool", () => ({ __esModule: true, default: {} }))
 
-const { ExecutedBacklogGuard } = await import("./executedBacklogGuard")
+const { ExecutedBacklogGuard, getExecutedBacklogGuard } = await import("./executedBacklogGuard")
+const { default: mempool } = (await import("@/libs/blockchain/l2ps_mempool")) as { default: any }
 
 let clock = 1_000_000
 let backlog: Record<string, number>
@@ -428,5 +429,17 @@ describe("executed backlog cap", () => {
 
     it("claims nothing for a subnet it has never checked", () => {
         expect(guard().claim("never-seen")).toBe(true)
+    })
+})
+
+describe("the node's guard", () => {
+    it("counts deferred settlement transfers as queued work", async () => {
+        const byStatus: Record<string, number> = { executed: 10, deferred: 7 }
+        mempool.countByUIDAndStatus = async (_uid: string, status: string) => byStatus[status] ?? 0
+        mempool.countExecutedFromMessaging = async () => 0
+
+        const admission = await getExecutedBacklogGuard().check("subnet_with_deferred")
+
+        expect(admission.count).toBe(17)
     })
 })

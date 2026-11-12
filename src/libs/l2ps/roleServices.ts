@@ -12,6 +12,9 @@ import { L2PSBatchAggregator } from "./L2PSBatchAggregator"
 export async function syncL2PSServices(staked: boolean): Promise<void> {
     const joined = getSharedState.l2psJoinedUids?.length ?? 0
     const shouldRun = staked && joined > 0
+    // The networks load before the node syncs; services that settle on a
+    // tip still being synced start with the rest once the node is up.
+    if (shouldRun && !getSharedState.isInitialized) return
     const hashService = L2PSHashService.getInstance()
     const aggregator = L2PSBatchAggregator.getInstance()
     try {

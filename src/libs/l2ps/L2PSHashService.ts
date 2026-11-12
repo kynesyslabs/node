@@ -1,13 +1,13 @@
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
-import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import SharedState, { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
-import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import { confirmTransaction } from "@/libs/blockchain/routines/validateTransaction"
 import type { ValidityData } from "@kynesyslabs/demosdk/types"
 import { submitValidatedTx } from "@/libs/network/txSubmission"
 import { Config } from "src/config"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
+import { buildNodeHashUpdate } from "./hashUpdateTx"
 
 /**
  * L2PS Hash Generation Service
@@ -54,9 +54,6 @@ export class L2PSHashService {
         averageCycleTime: 0,
     }
 
-    /** Shared Demos SDK instance for creating transactions */
-    private demos: Demos | null = null
-
     /**
      * Get singleton instance of L2PS Hash Service
      * @returns L2PSHashService instance
@@ -97,9 +94,6 @@ export class L2PSHashService {
             lastCycleTime: 0,
             averageCycleTime: 0,
         }
-
-        // Initialize Demos instance once for reuse
-        this.demos = new Demos()
 
         // Start the interval timer
         this.intervalId = setInterval(async () => {
@@ -161,6 +155,13 @@ export class L2PSHashService {
 
         // Service shutdown check
         if (!this.isRunning) {
+            return
+        }
+
+        // Under l2psSettlement every transfer is committed on L1 by its
+        // settlement batch, so a hash update would only spend the node's fees.
+        if (l2psSettlementActive()) {
+            this.stats.skippedCycles++
             return
         }
 
@@ -241,21 +242,14 @@ export class L2PSHashService {
                 return
             }
 
-            // Create L2PS hash update transaction using SDK
-            if (!this.demos) {
-                throw new Error("[L2PS Hash Service] Demos instance not initialized - service not started properly")
-            }
-            const hashUpdateTx = await DemosTransactions.createL2PSHashUpdate(
+            const hashUpdateTx = await buildNodeHashUpdate(
                 l2psUid,
                 consolidatedHash,
                 transactionCount,
-                this.demos,
             )
-            const normalizedHashUpdateTx =
-                await this.normalizeHashUpdateTransaction(hashUpdateTx)
             const validityData = await confirmTransaction(
-                normalizedHashUpdateTx as any,
-                normalizedHashUpdateTx.content.from,
+                hashUpdateTx as any,
+                hashUpdateTx.content.from as string,
             )
 
             this.stats.totalHashesGenerated++
@@ -273,52 +267,6 @@ export class L2PSHashService {
             log.error(`[L2PS Hash Service] Error processing L2PS ${l2psUid}: ${message}`)
             // Continue processing other L2PS networks even if one fails
         }
-    }
-
-    /**
-     * Normalize SDK-produced hash update transactions before relay.
-     *
-     * The published demosdk can return a malformed nonce payload from
-     * `getAddressNonce()` in some environments, which produces values like
-     * `"[object Object]1"`. Re-read the authoritative nonce from RPC and re-sign
-     * locally so relay payloads stay coherent even when the bundled SDK is stale.
-     */
-    private async normalizeHashUpdateTransaction(hashUpdateTx: any): Promise<any> {
-        const nonce = hashUpdateTx?.content?.nonce
-
-        if (
-            (typeof nonce === "number" && Number.isFinite(nonce)) ||
-            (typeof nonce === "string" && /^\d+$/.test(nonce))
-        ) {
-            return hashUpdateTx
-        }
-
-        const address = hashUpdateTx?.content?.from
-        if (!address) {
-            throw new Error("[L2PS Hash Service] Hash update transaction missing sender address")
-        }
-
-        const account = await ensureGCRForUser(address)
-        const rawNonce = account?.nonce
-        const currentNonce =
-            typeof rawNonce === "number"
-                ? rawNonce
-                : Number.parseInt(String(rawNonce ?? "0"), 10)
-
-        if (!Number.isFinite(currentNonce)) {
-            throw new Error(
-                `[L2PS Hash Service] Failed to recover nonce for ${address}: ${String(rawNonce)}`,
-            )
-        }
-
-        const normalizedTx = structuredClone(hashUpdateTx)
-        normalizedTx.content.nonce = currentNonce + 1
-
-        log.debug(
-            `[L2PS Hash Service] Normalized malformed hash-update nonce for ${address} -> ${normalizedTx.content.nonce}`,
-        )
-
-        return await this.demos.sign(normalizedTx)
     }
 
     /**

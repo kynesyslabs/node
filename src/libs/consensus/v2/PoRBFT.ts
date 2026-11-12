@@ -63,6 +63,7 @@ import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
 import { judgeBlockTransactions } from "./routines/blockTransactions"
 import { blockCapsActive } from "@/forks/blockCapsGate"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
 import { isForkActive } from "@/forks/forkGates"
 import {
     MAX_NONCE_TRACE_ACCOUNTS,
@@ -600,28 +601,31 @@ export async function consensusRoutine(): Promise<void> {
                 )
             }
 
-            // Apply pending L2PS proofs to L1 state
-            // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
-            // Their edits join the block's pending state and commit with it.
-            const l2psStart = Date.now()
-            const l2psResult = await L2PSConsensus.applyPendingProofs(
-                blockRef,
-                false,
-                pendingGCR,
-                block.content.timestamp,
-            )
-            const l2psEnd = Date.now()
-            log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
+            // Before l2psSettlement only the entry node held these proofs, so
+            // only it moved the balances (DEM-816). Under the fork a batch
+            // settles inside applyTransactions on every node instead.
+            if (!l2psSettlementActive()) {
+                // Their edits join the block's pending state and commit with it.
+                const l2psStart = Date.now()
+                const l2psResult = await L2PSConsensus.applyPendingProofs(
+                    blockRef,
+                    false,
+                    pendingGCR,
+                    block.content.timestamp,
+                )
+                const l2psEnd = Date.now()
+                log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
 
-            if (l2psResult.proofsApplied > 0) {
-                log.info(
-                    `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
-                )
-            }
-            if (l2psResult.proofsFailed > 0) {
-                log.warning(
-                    `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
-                )
+                if (l2psResult.proofsApplied > 0) {
+                    log.info(
+                        `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
+                    )
+                }
+                if (l2psResult.proofsFailed > 0) {
+                    log.warning(
+                        `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
+                    )
+                }
             }
             log.debug(
                 "[consensusRoutine] [result] Block is valid with " +

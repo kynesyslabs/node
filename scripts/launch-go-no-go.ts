@@ -185,6 +185,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "gasFeeSeparation",
     "web2ProofBinding",
     "tlsnProofEnforcement",
+    "l2psSettlement",
 ]
 
 /**

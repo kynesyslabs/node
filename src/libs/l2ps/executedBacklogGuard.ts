@@ -251,7 +251,10 @@ export function getExecutedBacklogGuard(): ExecutedBacklogGuard {
     shared ??= new ExecutedBacklogGuard({
         cap: Config.getInstance().l2ps.mempoolMaxExecutedPerSubnet,
         retryAfterMs: Config.getInstance().l2ps.aggregationIntervalMs,
-        countExecuted: uid => L2PSMempool.countByUIDAndStatus(uid, "executed"),
+        // Deferred settlement transfers are still queued work the aggregator reads.
+        countExecuted: async uid =>
+            (await L2PSMempool.countByUIDAndStatus(uid, "executed")) +
+            (await L2PSMempool.countByUIDAndStatus(uid, "deferred")),
         countMessaging: uid => L2PSMempool.countExecutedFromMessaging(uid),
         messagingShare: Config.getInstance().l2ps.messagingBacklogShare,
         minBatchSize: Config.getInstance().l2ps.minBatchSize,

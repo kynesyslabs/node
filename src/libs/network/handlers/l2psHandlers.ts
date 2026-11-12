@@ -230,7 +230,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             const queued = await L2PSMempool.getByOriginalHashes(
                 data.l2psUid,
                 missingPayload.map(tx => tx.hash),
-                [L2PS_STATUS.EXECUTED, L2PS_STATUS.BATCHED, L2PS_STATUS.CONFIRMED],
+                [L2PS_STATUS.EXECUTED, L2PS_STATUS.DEFERRED, L2PS_STATUS.BATCHED, L2PS_STATUS.CONFIRMED],
             )
             const queuedByOriginalHash = new Map(queued.map(tx => [tx.original_hash, tx]))
 

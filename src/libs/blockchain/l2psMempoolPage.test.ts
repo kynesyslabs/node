@@ -129,3 +129,68 @@ describe("cleanupBatchedWithoutEdits", () => {
         expect(keptClauses.some(c => c.startsWith("NOT EXISTS") && c.includes("tx.original_hash"))).toBe(true)
     })
 })
+
+describe("getPageByUIDAndStatus", () => {
+    it("pages in queue order and throws on a failed read instead of answering an empty page", async () => {
+        const finds: any[] = []
+        ;(L2PSMempool as any).repo = { find: async (options: unknown) => (finds.push(options), []) }
+        await L2PSMempool.getPageByUIDAndStatus("subnet_a", "batched", 50, 100)
+        expect(finds[0]).toMatchObject({
+            where: { l2ps_uid: "subnet_a", status: "batched" },
+            order: { timestamp: "ASC", hash: "ASC" },
+            take: 50,
+            skip: 100,
+        })
+
+        ;(L2PSMempool as any).repo = {
+            find: async () => {
+                throw new Error("connection terminated")
+            },
+        }
+        await expect(L2PSMempool.getPageByUIDAndStatus("subnet_a", "batched", 50)).rejects.toThrow(
+            "connection terminated",
+        )
+        // The lenient reader still answers [] for its other callers.
+        expect(await L2PSMempool.getByUIDAndStatus("subnet_a", "batched", 50)).toEqual([])
+    })
+})
+
+describe("setStatusBatch", () => {
+    it("throws on a failed write instead of answering that no row changed", async () => {
+        const updates: unknown[] = []
+        ;(L2PSMempool as any).repo = {
+            update: async (where: unknown, values: unknown) => (updates.push([where, values]), { affected: 2 }),
+        }
+        expect(await L2PSMempool.setStatusBatch(["a", "b"], "confirmed")).toBe(2)
+        expect(updates).toHaveLength(1)
+
+        ;(L2PSMempool as any).repo = {
+            update: async () => {
+                throw new Error("connection terminated")
+            },
+        }
+        await expect(L2PSMempool.setStatusBatch(["a"], "confirmed")).rejects.toThrow("connection terminated")
+        // The lenient writer still answers 0 for its other callers.
+        expect(await L2PSMempool.updateStatusBatch(["a"], "confirmed")).toBe(0)
+    })
+})
+
+describe("getSettleableHashes", () => {
+    it("answers the rows the settlement loop can still settle, and throws on a failed read", async () => {
+        const finds: any[] = []
+        ;(L2PSMempool as any).repo = {
+            find: async (options: unknown) => (finds.push(options), [{ hash: "a" }]),
+        }
+        expect(await L2PSMempool.getSettleableHashes(["a", "b"])).toEqual(new Set(["a"]))
+        expect(JSON.stringify(finds[0].where.status)).toContain("deferred")
+        expect(await L2PSMempool.getSettleableHashes([])).toEqual(new Set())
+        expect(finds).toHaveLength(1)
+
+        ;(L2PSMempool as any).repo = {
+            find: async () => {
+                throw new Error("connection terminated")
+            },
+        }
+        await expect(L2PSMempool.getSettleableHashes(["a"])).rejects.toThrow("connection terminated")
+    })
+})

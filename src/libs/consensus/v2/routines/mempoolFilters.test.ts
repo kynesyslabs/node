@@ -186,4 +186,15 @@ describe("filterMempoolByNonce", () => {
         expect(res.validTxs).toEqual([plain])
         expect(res.failedTxs).toEqual([])
     })
+
+    it("passes a tx that carries no gcr_edits field, as an l2psBatch does", async () => {
+        // Admission reads a missing field as no edits; a throw here would
+        // abort the round on every member holding the tx.
+        const batch = tx("0xbatch", LAST_BLOCK)
+        delete (batch.content as { gcr_edits?: unknown }).gcr_edits
+        const valid = nonceTx("0xvalid", 6)
+        const res = await filterMempoolByNonce([batch, valid])
+        expect(res.validTxs).toEqual([batch, valid])
+        expect(res.failedTxs).toEqual([])
+    })
 })

@@ -432,6 +432,20 @@ export type TelegramSenderBindingConfig = BaseForkConfig
 export type XmRemoveCanonicalConfig = BaseForkConfig
 
 /**
+ * `l2psSettlement` fork: an `l2psBatch` moves L1 balances on every node, in
+ * the block that carries it, through a settlement record (net change per
+ * account, the senders' signed transfer commitments and a PLONK proof that
+ * ties them together). Spec: docs/design/l2ps-zk-settlement.md, "Interface v1".
+ *
+ * Before it, only the entry node applied a batch's edits, from its local
+ * `l2ps_proofs` rows, so every other node's balances diverged (DEM-816).
+ * Active, that local path is off, a batch without a valid settlement fails
+ * with no edits, and members refuse old-format L2PS transfers. Dormant by
+ * default; a mainnet genesis sets 0. No payload beyond the base.
+ */
+export type L2psSettlementConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -556,6 +570,7 @@ export type ForkConfig =
     | TokenStakingConfig
     | TelegramSenderBindingConfig
     | XmRemoveCanonicalConfig
+    | L2psSettlementConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -591,6 +606,7 @@ export type ForkName =
     | "tokenStaking"
     | "telegramSenderBinding"
     | "xmRemoveCanonical"
+    | "l2psSettlement"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -625,6 +641,7 @@ export interface ForkConfigByName {
     tokenStaking: TokenStakingConfig
     telegramSenderBinding: TelegramSenderBindingConfig
     xmRemoveCanonical: XmRemoveCanonicalConfig
+    l2psSettlement: L2psSettlementConfig
 }
 
 /**
@@ -928,6 +945,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "An xm identity remove finds the stored entry by the chain's canonical " +
             "address form, as admission compares them.",
     },
+    l2psSettlement: {
+        // Dormant by default: it changes the balances an l2psBatch moves, and
+        // a missing genesis entry hydrates from here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "An l2psBatch settles on every node through a proven net-change record; " +
+            "the entry node's local L2PS proof path is off.",
+    },
 }
 
 /**
@@ -966,5 +991,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
         telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
         xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
+        l2psSettlement: { ...DEFAULT_FORK_CONFIG.l2psSettlement },
     }
 }

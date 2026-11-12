@@ -6,6 +6,7 @@
  */
 
 import type * as forge from "node-forge"
+import type { SettlementRecord } from "./settlement/validation"
 
 /**
  * Encrypted transaction for L2PS (Layer 2 Parallel Subnets)
@@ -45,6 +46,11 @@ export interface L2PSBatchPayload {
     transaction_hashes: string[]
     /** HMAC-SHA256 authentication tag for tamper detection */
     authentication_tag: string
+    /**
+     * Under `l2psSettlement`: the proven settlement record validators apply
+     * (docs/design/l2ps-zk-settlement.md, "Interface v1 → Transaction").
+     */
+    settlement?: SettlementRecord
     /** ZK-SNARK PLONK proof for batch validity (optional during transition) */
     zk_proof?: {
         proof: any

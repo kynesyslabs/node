@@ -11,6 +11,16 @@ import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import log from "@/utilities/logger"
 import { isValidL2PSTxHash } from "@/libs/l2ps/txHash"
 import { backlogFullMessage, getExecutedBacklogGuard } from "@/libs/l2ps/executedBacklogGuard"
+import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
+import {
+    MAX_NONCE_AHEAD,
+    envelopeSizeRefusal,
+    openSettlementTransfer,
+    queueAdmissionRefusal,
+    transferAdmissionRefusal,
+    type QueuedTransfer,
+} from "@/libs/l2ps/settlement/transfer"
+import type { DecryptedTransfer } from "@/libs/l2ps/settlement/types"
 
 /**
  * Create an error response with the given status code and message
@@ -77,6 +87,95 @@ async function decryptAndValidate(
 
 
 /**
+ * Admission of a settlement transfer at the tip: signature, fee and nonce
+ * (transferAdmissionRefusal), and a balance that covers amount + fee now.
+ * Reads only: the planner judges running balances and nonce order when it
+ * builds a batch, and block apply is the authority.
+ */
+export async function settlementAdmissionRefusal(
+    transfer: DecryptedTransfer,
+    l2psUid: string,
+    l2psInstance: L2PS,
+): Promise<string | null> {
+    let minimumFee: bigint
+    let chainId: number | null
+    let sender: { balance: bigint; nonce: bigint }
+    try {
+        // Loaded here: these pull in the block-apply, prover and database
+        // modules, which the RPC path needs only once a settlement transfer
+        // arrives.
+        const { nativeTransferFeeOs, settlementChainId } = await import("@/libs/l2ps/settlement/validation")
+        const { readTipAccounts } = await import("@/libs/l2ps/settlement/tipState")
+        minimumFee = await nativeTransferFeeOs()
+        chainId = settlementChainId()
+        sender = (await readTipAccounts([transfer.from])).get(transfer.from)
+    } catch (error) {
+        return `Settlement admission could not read the tip: ${error instanceof Error ? error.message : "Unknown error"}`
+    }
+    const refusal = transferAdmissionRefusal(transfer, {
+        chainId,
+        l2psUid,
+        minimumFee,
+        accountNonce: sender.nonce,
+    })
+    if (refusal) return refusal
+    let queued: QueuedTransfer[]
+    try {
+        queued = await queuedTransfersOf(l2psInstance, l2psUid, transfer, sender.nonce)
+    } catch (error) {
+        return `Settlement admission could not read the sender's queued transfers: ${error instanceof Error ? error.message : "Unknown error"}`
+    }
+    return queueAdmissionRefusal(transfer, sender, queued)
+}
+
+/**
+ * The sender's transfers this node queued and has not settled, opened from
+ * their stored envelopes: the history keeps amounts and nonces, the fee only
+ * inside the ciphertext. The transfer itself is left out, so a resubmission
+ * still gets the duplicate answer.
+ */
+async function queuedTransfersOf(
+    l2psInstance: L2PS,
+    l2psUid: string,
+    transfer: DecryptedTransfer,
+    accountNonce: bigint,
+): Promise<QueuedTransfer[]> {
+    // Every subnet's: they all settle against the sender's one L1 nonce
+    // and balance. Nonces past the account nonce are unique per sender, so
+    // at most MAX_NONCE_AHEAD rows can be unsettled; one more shows a breach.
+    // Only a transfer whose queue row can still settle holds a nonce: a
+    // history row left pending by a refusal whose cleanup failed would
+    // otherwise hold one for good. Paged until that many live rows are
+    // read, so such rows never push live ones out of the window.
+    const window = Number(MAX_NONCE_AHEAD) + 1
+    const rows: Awaited<ReturnType<typeof L2PSTransactionExecutor.getUnsettledBySender>> = []
+    for (let offset = 0; rows.length < window; offset += window) {
+        const page = await L2PSTransactionExecutor.getUnsettledBySender(transfer.from, accountNonce, window, offset)
+        const settleable = await L2PSMempool.getSettleableHashes(
+            page.map(row => row.encrypted_hash).filter((hash): hash is string => !!hash),
+        )
+        rows.push(...page.filter(row => !!row.encrypted_hash && settleable.has(row.encrypted_hash)))
+        if (page.length < window) break
+    }
+    const instances = new Map<string, L2PS | null>([[l2psUid, l2psInstance]])
+    const queued: QueuedTransfer[] = []
+    for (const row of rows) {
+        if (row.encrypted_hash === transfer.txHash || !row.encrypted_payload) continue
+        // A row that can still settle but cannot be opened here would go
+        // uncounted; the sender is refused until it settles or is dropped.
+        if (!instances.has(row.l2ps_uid)) instances.set(row.l2ps_uid, await getL2PSInstance(row.l2ps_uid))
+        const instance = instances.get(row.l2ps_uid)
+        if (!instance) throw new Error(`subnet ${row.l2ps_uid} of a queued transfer is not loaded`)
+        const inner = await instance.decryptTx(row.encrypted_payload as unknown as L2PSTransaction)
+        const opened = openSettlementTransfer(inner as never, row.encrypted_hash ?? "")
+        if (opened.ok === false) throw new Error(`a queued transfer does not open: ${opened.reason}`)
+        const { nonce, amount, fee } = opened.transfer
+        queued.push({ nonce, amount, fee })
+    }
+    return queued
+}
+
+/**
  * Per-sender in-process serialisation gate for the balance pre-check.
  *
  * Without this, two concurrent broadcasts from the same sender both
@@ -134,6 +233,15 @@ export default async function handleL2PS(
         return createErrorResponse(response, 400, "Invalid L2PS transaction hash: expected 64 lower-case hex characters")
     }
 
+    // An envelope no batch can carry is refused before it costs a lookup,
+    // a backlog read or a decrypt.
+    if (l2psSettlementActive()) {
+        const oversize = envelopeSizeRefusal(l2psTx)
+        if (oversize) {
+            return createErrorResponse(response, 400, `Refused L2PS transfer: ${oversize}`)
+        }
+    }
+
     const payloadData = l2psTx.content.data[1]
     const l2psUid = payloadData.l2ps_uid
 
@@ -179,6 +287,30 @@ export default async function handleL2PS(
         )
     }
 
+    if (l2psSettlementActive()) {
+        const opened = openSettlementTransfer(decryptedTx, l2psTx.hash)
+        if (opened.ok === false) {
+            return createErrorResponse(response, 400, `Refused L2PS transfer: ${opened.reason}`)
+        }
+        return await withSenderLock(sender, async () => {
+            const refusal = await settlementAdmissionRefusal(opened.transfer, l2psUid, l2psInstance)
+            if (refusal) {
+                // A reason can carry the amount, which only subnet members may see.
+                log.info(`[handleL2PS] Settlement admission refused ${l2psTx.hash}`)
+                log.debug(`[handleL2PS] Settlement admission refused ${l2psTx.hash}: ${refusal}`)
+                return createErrorResponse(response, 400, `Refused L2PS transfer: ${refusal}`)
+            }
+            return await processValidL2PSTransaction(
+                response,
+                l2psUid,
+                l2psTx,
+                decryptedTx,
+                originalHash,
+                true,
+            )
+        })
+    }
+
     // Serialise (check + insert + execute) per sender — see
     // `withSenderLock` for why this closes the TOCTOU window between
     // the balance read and the executor debit. Two concurrent
@@ -192,7 +324,9 @@ export default async function handleL2PS(
         // against OS-unit balance was a silent no-op post-fork.
         const balanceError = await checkInnerTxBalance(decryptedTx)
         if (balanceError) {
-            log.error(`[handleL2PS] Balance pre-check failed: ${balanceError}`)
+            // The reason carries the amount, which only subnet members may see.
+            log.info(`[handleL2PS] Balance pre-check refused ${l2psTx.hash}`)
+            log.debug(`[handleL2PS] Balance pre-check refused ${l2psTx.hash}: ${balanceError}`)
             return createErrorResponse(response, 400, balanceError)
         }
         return await processValidL2PSTransaction(
@@ -214,6 +348,7 @@ async function processValidL2PSTransaction(
     l2psTx: L2PSTransaction,
     decryptedTx: Transaction,
     originalHash: string,
+    settles = false,
 ): Promise<RPCResponse> {
     // Check for duplicates. The mempool only remembers recent traffic — its
     // rows are cleaned by age — so ask the permanent execution history too,
@@ -256,7 +391,7 @@ async function processValidL2PSTransaction(
         backlog.settle(l2psUid)
     }
     try {
-        return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash, onExecuted)
+        return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash, onExecuted, settles)
     } finally {
         if (!executed) backlog.release(l2psUid)
     }
@@ -272,10 +407,22 @@ async function executeAndRecordL2PSTransaction(
     decryptedTx: Transaction,
     originalHash: string,
     onExecuted: () => void,
+    settles = false,
 ): Promise<RPCResponse> {
     let executionResult
     try {
-        executionResult = await L2PSTransactionExecutor.execute(l2psUid, decryptedTx, l2psTx.hash, false)
+        // A settlement transfer moves balances only through its batch's
+        // settlement; the executor's edits fed the local proof path, which
+        // the fork turns off, and its account reads create gcr_main rows on
+        // this node alone.
+        executionResult = settles
+            ? {
+                success: true,
+                message: "Admitted for settlement",
+                gcr_edits: [],
+                affected_accounts_count: 2,
+            }
+            : await L2PSTransactionExecutor.execute(l2psUid, decryptedTx, l2psTx.hash, false)
     } catch (error) {
         log.error(`[handleL2PS] Execution error: ${error instanceof Error ? error.message : "Unknown error"}`)
         await L2PSMempool.updateStatus(l2psTx.hash, "failed")
@@ -294,6 +441,12 @@ async function executeAndRecordL2PSTransaction(
             executionResult.gcr_edits,
             executionResult.affected_accounts_count || 0,
         )
+    }
+
+    if (settles) {
+        const refusal = await queueForSettlement(l2psUid, l2psTx, decryptedTx, onExecuted)
+        if (refusal) return createErrorResponse(response, 500, refusal)
+        return admitted(response, l2psUid, l2psTx, decryptedTx, originalHash, executionResult)
     }
 
     // Update status and return success. The slot moves into the executed
@@ -325,6 +478,65 @@ async function executeAndRecordL2PSTransaction(
         // Don't fail the transaction, just log the error
     }
 
+    return admitted(response, l2psUid, l2psTx, decryptedTx, originalHash, executionResult)
+}
+
+/**
+ * Writes the history row first, then queues the mempool row. Admission
+ * counts a sender's queued transfers from the history, so a transfer
+ * queued without one would go uncounted; either write failing refuses it.
+ * Returns the refusal, or null once both writes are in.
+ */
+async function queueForSettlement(
+    l2psUid: string,
+    l2psTx: L2PSTransaction,
+    decryptedTx: Transaction,
+    onExecuted: () => void,
+): Promise<string | null> {
+    try {
+        await L2PSTransactionExecutor.recordTransaction(
+            l2psUid,
+            decryptedTx,
+            "",
+            l2psTx.hash,
+            0,
+            "pending",
+            l2psTx as unknown as Record<string, any>,
+        )
+    } catch (error) {
+        const reason = error instanceof Error ? error.message : "Unknown error"
+        log.error(`[handleL2PS] Could not record ${l2psTx.hash} in the history; refusing it: ${reason}`)
+        await L2PSMempool.updateStatus(l2psTx.hash, "failed")
+        return `Failed to record the L2PS transaction: ${reason}`
+    }
+    if (await L2PSMempool.updateStatus(l2psTx.hash, "executed")) {
+        onExecuted()
+        return null
+    }
+    log.warning(`[handleL2PS] Could not queue ${l2psTx.hash} for settlement; refusing it`)
+    // The history row would otherwise count as queued for good.
+    await L2PSTransactionExecutor.updateTransactionStatus(
+        l2psTx.hash,
+        "failed",
+        undefined,
+        "Could not be queued for settlement; sign the transfer again",
+    ).catch(error =>
+        log.error(
+            `[handleL2PS] Could not mark the history of ${l2psTx.hash} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        ),
+    )
+    await L2PSMempool.updateStatus(l2psTx.hash, "failed")
+    return "Failed to queue the L2PS transaction for settlement"
+}
+
+function admitted(
+    response: RPCResponse,
+    l2psUid: string,
+    l2psTx: L2PSTransaction,
+    decryptedTx: Transaction,
+    originalHash: string,
+    executionResult: { success: boolean; message: string; affected_accounts_count?: number; gcr_edits?: unknown[] },
+): RPCResponse {
     response.result = 200
     response.response = {
         message: "L2PS transaction executed - awaiting batch aggregation",

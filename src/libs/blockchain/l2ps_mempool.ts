@@ -28,6 +28,11 @@ export const L2PS_STATUS = {
     BATCHED: "batched",
     /** Batch containing this transaction has been included in a block */
     CONFIRMED: "confirmed",
+    /**
+     * Executed, but no settlement batch can place it at the current tip; read
+     * apart from executed rows so it cannot starve them, and failed once old
+     */
+    DEFERRED: "deferred",
 } as const
 
 export type L2PSStatus = typeof L2PS_STATUS[keyof typeof L2PS_STATUS]
@@ -458,13 +463,18 @@ export default class L2PSMempool {
      * subnets however deep a backlog is.
      */
     public static async getExecutedSubnets(): Promise<string[]> {
+        return this.getSubnetsWithStatus(L2PS_STATUS.EXECUTED)
+    }
+
+    /** Subnets with at least one row in `status`, one row per subnet. */
+    public static async getSubnetsWithStatus(status: L2PSStatus): Promise<string[]> {
         await this.ensureInitialized()
 
         const rows = await this.repo
             .createQueryBuilder("tx")
             .select("tx.l2ps_uid", "l2ps_uid")
             .distinct(true)
-            .where("tx.status = :status", { status: L2PS_STATUS.EXECUTED })
+            .where("tx.status = :status", { status })
             .orderBy("tx.l2ps_uid", "ASC")
             .getRawMany()
         return rows.map(row => row.l2ps_uid)
@@ -707,27 +717,35 @@ export default class L2PSMempool {
      */
     public static async updateStatusBatch(hashes: string[], status: L2PSStatus): Promise<number> {
         try {
-            if (hashes.length === 0) {
-                return 0
-            }
-
-            await this.ensureInitialized()
-
-            const result = await this.repo.update(
-                { hash: In(hashes) },
-                { status, timestamp: Date.now().toString() },
-            )
-
-            const updated = result.affected || 0
-            if (updated > 0) {
-                log.info(`[L2PS Mempool] Batch updated ${updated} transactions to status ${status}`)
-            }
-            return updated
-
+            return await this.setStatusBatch(hashes, status)
         } catch (error) {
             log.error("[L2PS Mempool] Error batch updating status:", error)
             return 0
         }
+    }
+
+    /**
+     * {@link updateStatusBatch} that throws on a failed write. Settlement
+     * needs it: a write it believes done while the rows kept their old
+     * status would strand them in that status for good.
+     */
+    public static async setStatusBatch(hashes: string[], status: L2PSStatus): Promise<number> {
+        if (hashes.length === 0) {
+            return 0
+        }
+
+        await this.ensureInitialized()
+
+        const result = await this.repo.update(
+            { hash: In(hashes) },
+            { status, timestamp: Date.now().toString() },
+        )
+
+        const updated = result.affected || 0
+        if (updated > 0) {
+            log.info(`[L2PS Mempool] Batch updated ${updated} transactions to status ${status}`)
+        }
+        return updated
     }
 
     /**
@@ -799,6 +817,43 @@ export default class L2PSMempool {
             log.error(`[L2PS Mempool] Error getting transactions for UID ${l2psUid} with status ${status}:`, error)
             return []
         }
+    }
+
+    /**
+     * A page of a subnet's rows in one status, in queue order. Unlike
+     * getByUIDAndStatus a failed read throws: the settlement loop must not
+     * take a database fault for an empty queue.
+     */
+    public static async getPageByUIDAndStatus(
+        l2psUid: string,
+        status: L2PSStatus,
+        limit: number,
+        offset = 0,
+    ): Promise<L2PSMempoolTx[]> {
+        await this.ensureInitialized()
+        return await this.repo.find({
+            where: { l2ps_uid: l2psUid, status },
+            order: { timestamp: "ASC", hash: "ASC" },
+            take: limit,
+            skip: offset,
+        })
+    }
+
+    /**
+     * The hashes among `hashes` whose rows the settlement loop can still
+     * settle: executed, deferred or batched. Throws on a failed read.
+     */
+    public static async getSettleableHashes(hashes: string[]): Promise<Set<string>> {
+        if (hashes.length === 0) return new Set()
+        await this.ensureInitialized()
+        const rows = await this.repo.find({
+            where: {
+                hash: In(hashes),
+                status: In([L2PS_STATUS.EXECUTED, L2PS_STATUS.DEFERRED, L2PS_STATUS.BATCHED]),
+            },
+            select: { hash: true },
+        })
+        return new Set(rows.map(row => row.hash))
     }
 
     /**

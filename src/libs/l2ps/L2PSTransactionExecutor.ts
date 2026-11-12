@@ -16,7 +16,7 @@
  * @module L2PSTransactionExecutor
  */
 
-import { Repository } from "typeorm"
+import { In, MoreThan, Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
@@ -718,6 +718,43 @@ export default class L2PSTransactionExecutor {
             if (count < batchSize) return total
             lastId = rows.reduce((max, r) => Math.max(max, Number(r.id)), lastId)
         }
+    }
+
+    /**
+     * A sender's transfers this node admitted, in any subnet, that have not
+     * settled or failed yet, past its account nonce, lowest nonce first.
+     */
+    static async getUnsettledBySender(
+        from: string,
+        accountNonce: bigint,
+        limit: number,
+        offset = 0,
+    ): Promise<L2PSTransaction[]> {
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+        return ds.getRepository(L2PSTransaction).find({
+            where: {
+                from_address: from,
+                status: In(["pending", "batched"]),
+                nonce: MoreThan(accountNonce.toString() as unknown as bigint),
+            },
+            order: { nonce: "ASC", id: "ASC" },
+            take: limit,
+            skip: offset,
+        })
+    }
+
+    /** The encrypted hashes among `hashes` whose history row reads failed. Throws on a failed read. */
+    static async getFailedByEncryptedHashes(hashes: string[]): Promise<Set<string>> {
+        if (hashes.length === 0) return new Set()
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const rows = await dsInstance.getDataSource().getRepository(L2PSTransaction).find({
+            where: { encrypted_hash: In(hashes), status: "failed" },
+            select: { encrypted_hash: true },
+        })
+        return new Set(rows.map(row => row.encrypted_hash))
     }
 
     /**

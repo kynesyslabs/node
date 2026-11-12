@@ -73,6 +73,9 @@
     "tokenStakingGate": {
       "activationHeight": 0
     },
+    "l2psSettlement": {
+      "activationHeight": 0
+    },
     "gasFeeSeparation": {
       "activationHeight": 0,
       "treasuryAddress": "FILL: lowercase 0x + 64 hex mainnet treasury account"

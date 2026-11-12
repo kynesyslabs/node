@@ -136,6 +136,29 @@ describe("rolling back orphaned GCR state", () => {
         expect(pending.afterCommit).not.toHaveBeenCalled()
     })
 
+    it("keeps everything when a settlement batch would be undone under l2psSettlement", async () => {
+        getSharedState.forkConfig.l2psSettlement.activationHeight = ORPHAN - 1
+        spyOn(Mempool, "getTransactionsByHashes").mockImplementation(async () =>
+            bodies().map((tx: any, i: number) => (i === 1 ? { ...tx, content: { ...tx.content, type: "l2psBatch" } } : tx)),
+        )
+        applyTransactions.mockResolvedValue({
+            successfulTxs: ORPHANS.map(o => o.hash),
+            failedTxs: [],
+            skippedTxs: [],
+            pending,
+        } as any)
+
+        // Its fee credits are rebuilt from the live fee split, which may not
+        // be the one the block applied under.
+        expect(await rollbackOrphanedGcrState(TIP)).toBe(false)
+        expect(applyTransactions).not.toHaveBeenCalled()
+        expect(log).toEqual([])
+
+        // Before the fork an l2psBatch moves no balance and rolls back as before.
+        getSharedState.forkConfig.l2psSettlement.activationHeight = null
+        expect(await rollbackOrphanedGcrState(TIP)).toBe(true)
+    })
+
     it("keeps everything when a body is missing from the mempool", async () => {
         spyOn(Mempool, "getTransactionsByHashes").mockResolvedValue([{ hash: "tx-a" }] as any)
 

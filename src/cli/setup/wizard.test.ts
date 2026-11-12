@@ -303,8 +303,8 @@ describe("interactive setup (mocked prompts)", () => {
 
 describe("ZK step", () => {
     function seedVkeys() {
-        for (const size of [5, 10]) {
-            const dir = path.join(root, "src/libs/l2ps/zk/keys", `batch_${size}`)
+        for (const sub of ["batch_5", "batch_10", "settlement"]) {
+            const dir = path.join(root, "src/libs/l2ps/zk/keys", sub)
             fs.mkdirSync(dir, { recursive: true })
             fs.writeFileSync(path.join(dir, "verification_key.json"), JSON.stringify(BATCH_VKEY))
         }
@@ -378,6 +378,7 @@ describe("ZK step", () => {
         installZkTools(root)
         writeZkBatch(root, 5)
         writeZkBatch(root, 10)
+        writeZkBatch(root, "settlement")
         const runner = fakeRunner()
         await cli(["--yes", "--zk", "--zk-generate"], { runner })
         expect(runner.calls).toEqual([])

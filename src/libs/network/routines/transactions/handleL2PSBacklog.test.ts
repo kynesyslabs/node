@@ -50,6 +50,8 @@ mock.module("@/libs/l2ps/L2PSTransactionExecutor", () => ({
     },
 }))
 mock.module("@/libs/l2ps/balanceCheck", () => ({ checkInnerTxBalance: async () => null }))
+// Before l2psSettlement: the executor path these tests cover.
+mock.module("@/forks/l2psSettlementGate", () => ({ l2psSettlementActive: () => false }))
 mock.module("@/libs/l2ps/executedBacklogGuard", () => ({
     __esModule: true,
     L2PS_BACKLOG_FULL: "L2PS_BACKLOG_FULL",

@@ -91,9 +91,12 @@ export async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
     const validTxs: MempoolTransaction[] = []
     const failedTxs: Array<FailedTranscation> = []
     const nonceAccounts = new Set<string>()
+    // Admission reads a missing field as no edits (an l2psBatch ships none).
+    const editsOf = (tx: MempoolTransaction) =>
+        Array.isArray(tx.content.gcr_edits) ? tx.content.gcr_edits : []
 
     for (const tx of mempool) {
-        for (const edit of tx.content.gcr_edits) {
+        for (const edit of editsOf(tx)) {
             if (edit.type === "nonce") {
                 nonceAccounts.add(normalizeAccount(edit.account))
             }
@@ -119,7 +122,7 @@ export async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
             continue txLoop
         }
 
-        const nonceEdits = tx.content.gcr_edits.filter(e => e.type === "nonce")
+        const nonceEdits = editsOf(tx).filter(e => e.type === "nonce")
 
         if (nonceEdits.length === 0) {
             validTxs.push(tx)

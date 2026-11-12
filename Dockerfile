@@ -74,7 +74,8 @@ COPY package.json bun.lock ./
 # with prebuilt binaries, so no `bun add` at build time.
 RUN bun install --frozen-lockfile
 
-# L2PS batch proving keys (about 90 MB). Not committed: they derive
+# L2PS batch and settlement proving keys (about 190 MB, 100 MB of it the
+# settlement zkey that subnet members prove with). Not committed: they derive
 # deterministically from the public Hermez Powers of Tau, and the build fails
 # unless the derived verification keys equal the committed ones, so a swapped
 # or corrupted download cannot produce keys peers would reject. The Powers of
@@ -86,7 +87,7 @@ RUN bun install --frozen-lockfile
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
 COPY src/libs/l2ps/zk/circuits/ ./src/libs/l2ps/zk/circuits/
 COPY src/libs/l2ps/zk/keys/ ./src/libs/l2ps/zk/keys/
-COPY src/libs/l2ps/zk/batchArtifacts.ts ./src/libs/l2ps/zk/
+COPY src/libs/l2ps/zk/batchArtifacts.ts src/libs/l2ps/zk/settlementArtifacts.ts ./src/libs/l2ps/zk/
 COPY src/cli/setup/ ./src/cli/setup/
 COPY scripts/build-l2ps-zk-keys.ts ./scripts/
 RUN bun scripts/build-l2ps-zk-keys.ts && rm -rf src/libs/l2ps/zk/ptau
