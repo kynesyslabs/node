@@ -40,16 +40,18 @@ release@kynesyslabs.com namespaces="git" ssh-ed25519 AAAA...
 ```
 
 A signer configures git in the checkout used to tag. The first two lines are
-needed once; run the last three again before each tag, because the signer
+needed once; run the last four again before each tag, because the signer
 file is a copy of the list at that moment and goes stale when a signer is
-added or removed:
+added or removed. The copy goes into the clone's own `.git`, as in
+`INSTALL.md` step 1:
 
 ```bash
 git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/<key>.pub
 git fetch --tags origin stabilisation &&
-git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers &&
-git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS"
 ```
 
 Keep the private key off the validators and out of CI. How a holder
@@ -138,23 +140,26 @@ INSTALL.md, "After the genesis is reissued".
 
 ## What a validator runs
 
-First verify and check out the release tag, so the compose file, scripts and
-parameter sheet match the image:
+Before changing `IMAGE_TAG`, verify and check out the release tag, so the
+compose file, scripts and parameter sheet match the image. The signer list
+goes into the clone's own `.git`, as in `INSTALL.md` step 1:
 
 ```bash
 TAG=v1.0.0-rc.1
 
 git fetch --tags origin stabilisation &&
-git show origin/stabilisation:.github/allowed_signers > ~/demos-allowed-signers &&
-git config gpg.ssh.allowedSignersFile ~/demos-allowed-signers &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS" &&
 git merge-base --is-ancestor "$TAG" origin/stabilisation &&
 git verify-tag "$TAG" &&
 git checkout "$TAG"
 ```
 
 If this chain stops, do not continue the upgrade. A good signature from a key
-you do not recognise is a failure; compare the signer and fingerprint with the
-published list (see `INSTALL.md` step 1).
+you cannot match is a failure: the email `git verify-tag` prints must be a
+signer the announcement names, and the `SHA256:` fingerprint the one that
+signer published outside GitHub (see `INSTALL.md` step 1).
 
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
 and digest, copied from `checksums.txt`. If the release changes
