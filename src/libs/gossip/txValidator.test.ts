@@ -3,7 +3,7 @@
  * claims, and an origin that keeps forging runs out of signature checks.
  */
 
-import { beforeEach, describe, expect, it, jest } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it, jest, setSystemTime } from "bun:test"
 
 const PUBLISHER = "aa".repeat(32)
 
@@ -40,6 +40,13 @@ function envelope(n: number): Uint8Array {
 beforeEach(() => {
     verify.mockClear()
     verify.mockImplementation(async () => false)
+    // The budgets refill with the clock; a slow loop would earn the forger
+    // fresh checks and the burst would never run out.
+    setSystemTime(new Date(1_800_000_000_000))
+})
+
+afterEach(() => {
+    setSystemTime()
 })
 
 describe("validateTxMessage origin budget", () => {

@@ -172,3 +172,24 @@ describe("mergeMempools batching", () => {
         expect(good.requests).toHaveLength(3)
     })
 })
+
+describe("mergeMempools attempts", () => {
+    it("sends a batch that got no answer once, with the whole budget", async () => {
+        const { default: Peer } = await import("@/libs/peer/Peer")
+        const slow = {
+            identity: "0xslow",
+            connection: { string: "http://0xslow" },
+            call: jest.fn(async () => ({
+                result: 504,
+                response: "Request timeout",
+                require_reply: false,
+                extra: null,
+            })),
+            longCall: Peer.prototype.longCall,
+        } as any
+        await mergeMempools([tx("a")], [slow], 7)
+        await new Promise(resolve => setTimeout(resolve, 300))
+        expect(slow.call).toHaveBeenCalledTimes(1)
+        expect((slow.call.mock.calls[0] as any[])[2].timeoutMs).toBe(10_000)
+    })
+})

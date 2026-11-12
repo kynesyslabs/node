@@ -34,22 +34,19 @@ const OWN_KEY = "0x" + "aa".repeat(32)
 mockMempoolDeps(() => ds)
 // The real shared state pulls in the whole network stack, bridge SDK and
 // its tron dependency included, none of which these queries touch.
-mock.module("src/utilities/sharedState", () => ({
-    getSharedState: {
-        lastBlockNumber: 100,
-        referenceBlockRoom: 1,
-        publicKeyHex: OWN_KEY,
-        inConsensusLoop: false,
-    },
-}))
-mock.module("@/utilities/sharedState", () => ({
-    getSharedState: {
-        lastBlockNumber: 100,
-        referenceBlockRoom: 1,
-        publicKeyHex: OWN_KEY,
-        inConsensusLoop: false,
-    },
-}))
+const sharedState = {
+    lastBlockNumber: 100,
+    referenceBlockRoom: 1,
+    publicKeyHex: OWN_KEY,
+    inConsensusLoop: false,
+}
+const sharedStateModule = () => ({
+    __esModule: true,
+    getSharedState: sharedState,
+    default: { getInstance: () => sharedState },
+})
+mock.module("src/utilities/sharedState", sharedStateModule)
+mock.module("@/utilities/sharedState", sharedStateModule)
 mock.module("src/libs/network/manageBridge", () => ({ __esModule: true, default: () => undefined }))
 
 const { default: Mempool } = await import("./mempool")

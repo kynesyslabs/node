@@ -522,9 +522,15 @@ describe("decideGoNoGo", () => {
     })
 })
 
+/** A mainnet fork at 0, gasFeeSeparation with the treasury it is refused without. */
+const atZero = (name: string, extra: Record<string, unknown> = {}) =>
+    name === "gasFeeSeparation"
+        ? { activationHeight: 0, treasuryAddress: "0x" + "ab".repeat(32), ...extra }
+        : { activationHeight: 0, ...extra }
+
 /** Every fork this build knows declared: the mainnet ones at 0, the rest off. */
 const mainnetForks = () =>
-    Object.fromEntries(KNOWN_FORKS.map(name => [name, { activationHeight: MAINNET_FORKS.includes(name) ? 0 : null }]))
+    Object.fromEntries(KNOWN_FORKS.map(name => [name, MAINNET_FORKS.includes(name) ? atZero(name) : { activationHeight: null }]))
 
 function genesisFile(rows: Array<{ address: string; status: string; valid_at: number | null }>, forks: Record<string, unknown> = mainnetForks()) {
     return { properties: { id: 7, shardSize: 10 }, forks, validators: rows }
@@ -599,6 +605,12 @@ describe("checkLaunch", () => {
         expect(LAUNCH_DORMANT_FORKS).toContain("networkGovernance")
         expect(MAINNET_FORKS).not.toContain("networkGovernance")
         expect(KNOWN_FORKS).toContain("networkGovernance")
+    })
+
+    it("launches with token staking off: the gate at block 0, tokenStaking left for a later upgrade", () => {
+        expect(MAINNET_FORKS).toContain("tokenStakingGate")
+        expect(LAUNCH_DORMANT_FORKS).toContain("tokenStaking")
+        expect(MAINNET_FORKS).not.toContain("tokenStaking")
     })
 
     it("is NO-GO without a genesis file, whose forks and validators it cannot check", () => {
@@ -689,7 +701,7 @@ describe("launchGenesisExpectations", () => {
         const { hashGenesisData } = await import("src/libs/blockchain/genesis/normalizeGenesisForHash")
         const genesis = {
             properties: { id: 7, shardSize: 10 },
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0, description: "x" }])),
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f, { description: "x" })])),
         }
         const a = await launchGenesisExpectations(genesis)
         expect(a.expectedGenesisDataHash).toBe(hashGenesisData(genesis))
@@ -697,7 +709,7 @@ describe("launchGenesisExpectations", () => {
         // A description is not part of the schedule; a height is
         const b = await launchGenesisExpectations({
             ...genesis,
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0 }])),
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f)])),
         })
         expect(b.expectedScheduleDigest).toBe(a.expectedScheduleDigest)
         const c = await launchGenesisExpectations({
@@ -712,7 +724,7 @@ describe("launchGenesisExpectations", () => {
         const { buildGenesisBlock } = await import("src/libs/blockchain/genesis/buildGenesisBlock")
         const genesis = {
             properties: { id: 7, shardSize: 10 },
-            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, { activationHeight: 0 }])),
+            forks: Object.fromEntries(MAINNET_FORKS.map(f => [f, atZero(f)])),
             balances: [],
             timestamp: 1793318400,
         }

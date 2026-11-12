@@ -43,6 +43,7 @@ import {
     carriesGovernance,
     governanceGateRefusal,
 } from "@/forks/governanceGate"
+import { tokenStakingRefusal } from "@/forks/tokenStakingGate"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import {
@@ -53,6 +54,15 @@ import {
     verifyNonceEditBinding,
 } from "src/libs/blockchain/validation/editBinding"
 import { valueRulesRefusal } from "src/libs/blockchain/validation/nativeValueRules"
+import {
+    debitCredits,
+    isWorkReplay,
+    legacyGasCredited,
+    legacyGasRetired,
+    tlsnBurnCredited,
+    withTrailingDebitCredit,
+    withoutLegacyGas,
+} from "src/libs/blockchain/validation/legacyGas"
 import { ensureNetworkParametersCurrent } from "src/libs/blockchain/routines/loadNetworkParameters"
 import {
     blockTxTypeRefusal,
@@ -538,23 +548,48 @@ function sameFeeEdit(a: GCREdit, b: GCREdit): boolean {
  * A tx that already starts with exactly those edits is returned as is: rows
  * stored before the fee edits were kept off the persisted tx still carry
  * them, and peers serve those rows during sync.
+ *
+ * Where the fee edits replace the SDK's gas edit (`legacyGasRetired`), the
+ * copy leaves that gas edit out, so the sender pays the fee once and every
+ * debit has its credit. Where the gas is a non-native transaction's whole
+ * fee (`legacyGasCredited`), the copy keeps it and credits it right after,
+ * and so it does for the burn of a TLSNotary operation (`tlsnBurnCredited`).
  */
 export function withDerivedFeeEdits(tx: Transaction): Transaction {
+    if (legacyGasCredited(tx)) {
+        const signed = tx.content.gcr_edits ?? []
+        const credited = withTrailingDebitCredit(signed, tx.hash ?? "")
+        if (credited === signed) return tx
+        return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
+            content: {
+                ...tx.content,
+                gcr_edits: credited.map(edit => structuredClone(edit)),
+            },
+        }) as Transaction
+    }
+
     const feeEdits = deriveFeeEditsForApply(tx)
-    if (feeEdits.length === 0) return tx
+    const retireGas = legacyGasRetired(tx)
+    if (feeEdits.length === 0 && !retireGas) return tx
 
     const edits = tx.content.gcr_edits ?? []
     const alreadyCarried =
+        feeEdits.length > 0 &&
         edits.length >= feeEdits.length &&
         feeEdits.every((fee, i) => sameFeeEdit(fee, edits[i]))
-    if (alreadyCarried) return tx
+    const signed = alreadyCarried ? edits.slice(feeEdits.length) : edits
+    const withoutGas = retireGas ? withoutLegacyGas(signed) : signed
+    const kept = tlsnBurnCredited(tx)
+        ? withTrailingDebitCredit(withoutGas, tx.hash ?? "")
+        : withoutGas
+    if (kept === signed && (alreadyCarried || feeEdits.length === 0)) return tx
 
     // The edits are copied too, not just the array: apply writes into each
     // edit (its txhash), and those objects belong to the signed tx.
     return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
         content: {
             ...tx.content,
-            gcr_edits: [...feeEdits, ...edits.map(edit => structuredClone(edit))],
+            gcr_edits: [...feeEdits, ...kept.map(edit => structuredClone(edit))],
         },
     }) as Transaction
 }
@@ -1108,7 +1143,9 @@ export default class HandleGCR {
      * the gas out of while editBinding is dormant. Identity and d402
      * transactions pay no gas, and a Work replay pays nothing because the
      * Work it reads back already paid. A type's own debits (a storage burn,
-     * a stake) are never charged.
+     * a stake) are never charged. Where the fee edits replace the gas
+     * (`legacyGasRetired`), the gas is not charged on top of them; where the
+     * gas is credited (`legacyGasCredited`), its credits are charged with it.
      *
      * Copied, because a failed apply reverses the edits it ran in place.
      */
@@ -1118,12 +1155,7 @@ export default class HandleGCR {
         osAmounts: boolean,
     ): Promise<GCREdit[]> {
         const edits = tx.content.gcr_edits ?? []
-        const isReplay = edits.some(
-            e =>
-                (e.type as string) === "work-attempt" &&
-                (e as unknown as WorkAttemptEdit).attemptClass === "replay",
-        )
-        if (isReplay) return []
+        if (isWorkReplay(edits)) return []
 
         const fee: GCREdit[] = []
         const derived = deriveFeeEditsForApply(tx)
@@ -1132,13 +1164,19 @@ export default class HandleGCR {
             edits.length >= derived.length &&
             derived.every((d, i) => sameFeeEdit(d, edits[i]))
         if (carriesDerived) fee.push(...edits.slice(0, derived.length))
+        if (legacyGasRetired(tx)) return fee.map(e => structuredClone(e))
 
         const gas = await derivedGasEdit(
             tx.content.type as string,
             normalizePubkey(nonceEdit.account),
             osAmounts,
         )
-        if (gas) fee.push(gas)
+        if (gas) {
+            fee.push(gas)
+            if (legacyGasCredited(tx)) {
+                fee.push(...(debitCredits(gas as GCREditBalance, tx.hash ?? "") as GCREdit[]))
+            }
+        }
         return fee.map(e => structuredClone(e))
     }
 
@@ -1934,12 +1972,12 @@ export default class HandleGCR {
      * The transactions of a block refused before apply: those of a type the
      * node does not implement (`txTypeAllowList` fork), a fee-free message
      * not signed by a staked validator (`instantMessagingBinding`), those the
-     * `networkGovernance` rule or a value rule (`nativeSendBinding`,
-     * `canonicalAddresses`, `feeBinding`) refuses, whether or not
-     * `editBinding` is active, and those whose shipped edits are not the ones
-     * their signed body implies (`editBinding` fork). Apply runs the shipped
-     * edits as they are, so a block must never reach it with edits nobody
-     * derived.
+     * `networkGovernance` or `tokenStakingGate` rule or a value rule
+     * (`nativeSendBinding`, `canonicalAddresses`, `feeBinding`) refuses,
+     * whether or not `editBinding` is active, and those whose shipped edits
+     * are not the ones their signed body implies (`editBinding` fork). Apply
+     * runs the shipped edits as they are, so a block must never reach it with
+     * edits nobody derived.
      *
      * Judged on the transactions as received, before the node derives fee
      * edits or drops the edits of types that do not mutate entities, and not
@@ -1980,12 +2018,14 @@ export default class HandleGCR {
             typeAllowList,
             messageBinding,
             stakeChecks,
+            stakingOpen,
             tip,
         } = state
         for (const tx of txs) {
             const reason =
                 (typeAllowList ? blockTxTypeRefusal(tx) : null) ??
                 governanceGateRefusal(tx, governance) ??
+                tokenStakingRefusal(tx, stakingOpen) ??
                 (stakeChecks ? stakeSenderRefusal(tx) : null)
             if (reason) {
                 refuse(tx, reason)

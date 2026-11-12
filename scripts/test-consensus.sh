@@ -56,6 +56,7 @@ SUITE_FILES=(
     src/libs/blockchain/routines/validateTransaction.fees.test.ts
     src/libs/blockchain/routines/validateTransaction.nonceWindow.test.ts
     src/libs/blockchain/routines/validateTransaction.valueRules.test.ts
+    src/libs/blockchain/routines/validatorsManagement.typecheck.test.ts
     src/libs/communications/broadcastManager.syncData.test.ts
     src/libs/consensus/v2/types/secretaryManager.timeout.test.ts
     src/libs/crypto/canonicalJson.test.ts

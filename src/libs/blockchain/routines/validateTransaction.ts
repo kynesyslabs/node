@@ -29,6 +29,7 @@ import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import { normalizePubkey, withDerivedFeeEdits } from "../gcr/handleGCR"
 import { derivedGasEdit, expectsNonceEdit } from "../validation/editBinding"
+import { legacyGasRetired } from "../validation/legacyGas"
 import {
     nativeSendRefusal,
     nonCanonicalAddressRefusal,
@@ -76,8 +77,8 @@ async function nativeSendBalanceError(
     sendAmount: bigint,
     total: bigint,
 ): Promise<string | null> {
-    // Apply prepends the derived distribution edits to the signed send and
-    // SDK gas edits. Their account fields can name different payers.
+    // Apply prepends the derived distribution edits to the signed edits it
+    // keeps. Their account fields can name different payers.
     const debits = new Map<string, bigint>()
     for (const edit of withDerivedFeeEdits(tx).content.gcr_edits ?? []) {
         if (edit.type !== "balance" || edit.operation !== "remove") continue
@@ -106,10 +107,12 @@ async function quoteNativeSendFee(
     referenceBlock: number,
 ): Promise<string | null> {
     // transaction_fee is signed and covers distribution only. Native sends
-    // also carry the SDK gas edit; quote both without rewriting signed content.
+    // also carry the SDK gas edit, which apply charges unless the fee edits
+    // replace it (legacyGasRetired); quote what apply charges without
+    // rewriting signed content.
     if (!isNativeSend(tx)) return null
 
-    const gas = await derivedGasEdit(
+    const gas = legacyGasRetired(tx) ? null : await derivedGasEdit(
         "native",
         tx.content.from,
         isForkActive("osDenomination", referenceBlock),

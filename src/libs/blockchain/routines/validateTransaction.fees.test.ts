@@ -223,7 +223,7 @@ describe("native send confirmation fee quote", () => {
         const doc = await Bun.file("docs/native-send-fee-quote.md").text()
         expect(doc).toContain("gross fee (excluding the amount)")
         expect(doc).toMatch(/SDK (?:up to|through|≤) 4\.0\.19/)
-        expect(doc).toContain("With `gasFeeSeparation` active, the SDK undercounts")
+        expect(doc).toContain("With `gasFeeSeparation` active and `feeBinding` dormant, the SDK undercounts")
         expect(doc).toContain("With it dormant, the SDK overcounts")
         expect(doc).toContain("with `gasFeeSeparation` active")
         expect(doc).toContain("node half of #1165")
@@ -300,10 +300,11 @@ describe("native send confirmation fee quote", () => {
     })
 
     for (const postFork of [false, true]) {
-        for (const separated of [false, true]) {
-            it(`sends balance minus shown fee to zero (${postFork ? "OS" : "DEM"}, separation=${separated})`, async () => {
+        for (const [separated, bound] of [[false, false], [true, false], [true, true]]) {
+            it(`sends balance minus shown fee to zero (${postFork ? "OS" : "DEM"}, separation=${separated}, feeBinding=${bound})`, async () => {
                 chainIs(postFork, null)
                 getSharedState.forkConfig.gasFeeSeparation.activationHeight = separated ? 0 : null
+                getSharedState.forkConfig.feeBinding.activationHeight = bound ? 0 : null
                 const unit = postFork ? OS : 1n
                 caches.accounts.get(SENDER)!.balance = 100n * unit
                 const probe = await pay(3n * OS)
@@ -311,7 +312,7 @@ describe("native send confirmation fee quote", () => {
                 probe.attrs = { reference_block: 0, total_fee: "0" } as never
                 const confirmed = await confirm(probe)
                 expect(confirmed.valid).toBe(true)
-                expect(quote(confirmed.transaction)).toBe((separated ? 3n : 1n) * unit)
+                expect(quote(confirmed.transaction)).toBe((separated ? (bound ? 2n : 3n) : 1n) * unit)
                 expect(JSON.stringify([probe.content, probe.hash, probe.signature, probe.ed25519_signature])).toBe(signed)
 
                 const shownFee = quote(confirmed.transaction)

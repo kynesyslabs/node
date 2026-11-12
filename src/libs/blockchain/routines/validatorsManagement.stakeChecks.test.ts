@@ -19,6 +19,7 @@ const { default: Chain } = await import("../chain")
 const { getSharedState } = await import("@/utilities/sharedState")
 const { cloneDefaultForkConfig } = await import("@/forks/forkConfig")
 const { DEFAULT_MIN_VALIDATOR_STAKE } = await import("@/features/staking/constants")
+const { TOKEN_STAKING_REFUSAL } = await import("@/forks/tokenStakingGate")
 
 const MIN = BigInt(DEFAULT_MIN_VALIDATOR_STAKE)
 const SENDER = "0xabc"
@@ -100,5 +101,34 @@ describe("unstake admission under stakeApplyChecks", () => {
         getSharedState.forkConfig.stakeApplyChecks.activationHeight = null
         spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue(active(1))
         expect((await ValidatorsManagement.manageValidatorUnstakeTx(unstakeTx())).valid).toBe(true)
+    })
+})
+
+describe("intake while token staking is closed (tokenStakingGate)", () => {
+    beforeEach(() => {
+        getSharedState.forkConfig.tokenStakingGate.activationHeight = 0
+        spyOn(GCR, "getGCRValidatorStatus").mockResolvedValue(null)
+        spyOn(GCR, "getAccountBalance").mockResolvedValue(MIN * 2n as any)
+    })
+
+    it("refuses a stake and an unstake, naming the rule", async () => {
+        expect(await ValidatorsManagement.manageValidatorStakeTx(stakeTx(MIN))).toEqual({
+            valid: false,
+            message: TOKEN_STAKING_REFUSAL,
+        })
+        expect(await ValidatorsManagement.manageValidatorUnstakeTx(unstakeTx())).toEqual({
+            valid: false,
+            message: TOKEN_STAKING_REFUSAL,
+        })
+    })
+
+    it("takes a stake in again from the tokenStaking height", async () => {
+        getSharedState.forkConfig.tokenStaking.activationHeight = 101
+        expect((await ValidatorsManagement.manageValidatorStakeTx(stakeTx(MIN))).valid).toBe(false)
+        getSharedState.forkConfig.tokenStaking.activationHeight = 100
+        expect(await ValidatorsManagement.manageValidatorStakeTx(stakeTx(MIN))).toEqual({
+            valid: true,
+            message: "Validator entrance valid",
+        })
     })
 })
