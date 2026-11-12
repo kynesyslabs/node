@@ -113,6 +113,17 @@ describe("confirmTransaction behind nonceIntegrity", () => {
         const message = await confirm(await pay(confirmedNonce))
         expect(message).toContain("Transaction nonce error. Expected >=8")
     })
+
+    it("removes a client fee quote before signing a stale-nonce refusal", async () => {
+        const tx = await pay(confirmedNonce)
+        tx.attrs = { reference_block: 0, total_fee: "0" } as never
+
+        const result = await confirmTransaction(tx as never, SENDER)
+
+        expect(result.data.valid).toBe(false)
+        expect(result.data.message).toContain("NONCE ERROR")
+        expect(result.data.transaction.attrs).toEqual({ reference_block: 0 })
+    })
 })
 
 describe("confirmTransaction without nonceIntegrity", () => {

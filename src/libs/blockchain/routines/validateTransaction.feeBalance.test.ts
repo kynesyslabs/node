@@ -109,12 +109,15 @@ describe("confirm balance of a native transfer under gasFeeSeparation and feeBin
     })
 })
 
-describe("confirm balance without feeBinding, as before", () => {
-    it("checks the amount and the fee apart", async () => {
+describe("confirm balance without feeBinding", () => {
+    it("checks the amount and the fee apart at ingress, and a send's debits with its gas", async () => {
         forks(false)
         balance = AMOUNT
-        const data = await confirm(await transfer())
-        expect(data.valid).toBe(true)
+        const tx = await transfer()
+        expect(await applyGasFeeSeparation(tx)).toEqual({ ok: true })
+        const data = await confirm(tx)
+        expect(data.valid).toBe(false)
+        expect(data.message).toContain(`required ${AMOUNT + OS + FEE} exceeds balance ${AMOUNT}`)
     })
 })
 

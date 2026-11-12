@@ -41,6 +41,7 @@ mock.module("@/libs/blockchain/validation/validityData", () => ({ verifyValidity
 mock.module("../blockchain/gcr/handleGCR", () => ({
     __esModule: true,
     default: { prepareEntities: async () => ({}), applyTransaction: async () => ({ success: true }) },
+    withDerivedFeeEdits: (tx: unknown) => tx,
 }))
 mock.module("./txSubmission", () => ({ submitValidatedTx }))
 mock.module("src/libs/consensus/stakedSet", () => ({ isSelfStaked: async () => true }))

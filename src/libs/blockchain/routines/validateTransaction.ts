@@ -23,11 +23,13 @@ import { signValidityData } from "../validation/validityData"
 import { checkTxAdmissible } from "../validation/txAdmission"
 import { clientTxTypeRefusal } from "../validation/txTypes"
 import { isForkActive } from "@/forks"
+import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
-import { normalizePubkey } from "../gcr/handleGCR"
-import { expectsNonceEdit } from "../validation/editBinding"
+import { normalizePubkey, withDerivedFeeEdits } from "../gcr/handleGCR"
+import { derivedGasEdit, expectsNonceEdit } from "../validation/editBinding"
+import { legacyGasRetired } from "../validation/legacyGas"
 import {
     nativeSendRefusal,
     nonCanonicalAddressRefusal,
@@ -36,35 +38,123 @@ import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
-export async function confirmTransaction(
-    tx: Transaction, // Must contain a tx property being a Transaction object
-    sender: string,
-): Promise<ValidityData> {
-    // Getting the current block number
-    const getLastBlockNumberStart = Date.now()
-    const referenceBlock = await Chain.getLastBlockNumber()
-    const getLastBlockNumberEnd = Date.now()
-    log.only(
-        `[confirmTransaction] Get last block number in ${getLastBlockNumberEnd - getLastBlockNumberStart}ms`,
-    )
-
-    // REVIEW Below: if this does not work, use ValidityData interface and fill manually
-    let validityData: ValidityData = {
-        data: {
-            valid: false,
-            reference_block: referenceBlock,
-            message:
-                "[Native Tx Validation] [NOT PROCESSED] Transaction yet to be processed\n",
-            gas_operation: null,
-            transaction: tx,
-        },
-        signature: null,
-        rpc_public_key: {
-            type: getSharedState.signingAlgorithm,
-            data: getSharedState.publicKeyHex,
-        },
+function stripClientFeeQuote(tx: Transaction): void {
+    // Only the node may supply a fee quote, including on early refusals.
+    if (tx.attrs && typeof tx.attrs === "object" && "total_fee" in tx.attrs) {
+        delete tx.attrs.total_fee
     }
+}
 
+function isNativeSend(tx: Transaction): boolean {
+    return tx.content.type === "native" &&
+        (tx.content.data?.[1] as { nativeOperation?: string } | undefined)?.nativeOperation === "send"
+}
+
+function requiresAmountOnlyBalanceCheck(tx: Transaction, amount: bigint): boolean {
+    return amount > 0n && !isNativeSend(tx)
+}
+
+async function amountOnlyBalanceError(
+    tx: Transaction,
+    amount: bigint,
+): Promise<string | null> {
+    if (!requiresAmountOnlyBalanceCheck(tx, amount)) return null
+
+    const from =
+        typeof tx.content.from === "string"
+            ? tx.content.from
+            : forgeToHex(tx.content.from)
+
+    const fromBalance = await GCR.getAccountBalance(from)
+    if (fromBalance < amount) {
+        return `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${amount} but have ${fromBalance}\n`
+    }
+    return null
+}
+
+async function nativeSendBalanceError(
+    tx: Transaction,
+    sendAmount: bigint,
+    total: bigint,
+): Promise<string | null> {
+    // Apply prepends the derived distribution edits to the signed edits it
+    // keeps. Their account fields can name different payers.
+    const debits = new Map<string, bigint>()
+    for (const edit of withDerivedFeeEdits(tx).content.gcr_edits ?? []) {
+        if (edit.type !== "balance" || edit.operation !== "remove") continue
+        const account = normalizePubkey(edit.account)
+        debits.set(account, (debits.get(account) ?? 0n) + BigInt(edit.amount))
+    }
+    const signers = new Set([normalizePubkey(tx.content.from)])
+    if (tx.content.from_ed25519_address) {
+        signers.add(normalizePubkey(tx.content.from_ed25519_address))
+    }
+    // Only the signing accounts' balances are read.
+    if (debits.size > 2 || [...debits.keys()].some(account => !signers.has(account))) {
+        return "[Tx Validation] [BALANCE ERROR] debit from an account that does not sign this transaction\n"
+    }
+    for (const [account, required] of debits) {
+        const balance = await GCR.getAccountBalance(account)
+        if (balance < required) {
+            return `[Tx Validation] [BALANCE ERROR] Insufficient balance for native send: amount ${sendAmount} plus quoted total fee ${total}; account ${account} required ${required} exceeds balance ${balance}\n`
+        }
+    }
+    return null
+}
+
+async function quoteNativeSendFee(
+    tx: Transaction,
+    referenceBlock: number,
+): Promise<string | null> {
+    // transaction_fee is signed and covers distribution only. Native sends
+    // also carry the SDK gas edit, which apply charges unless the fee edits
+    // replace it (legacyGasRetired); quote what apply charges without
+    // rewriting signed content.
+    if (!isNativeSend(tx)) return null
+
+    const gas = legacyGasRetired(tx) ? null : await derivedGasEdit(
+        "native",
+        tx.content.from,
+        isForkActive("osDenomination", referenceBlock),
+    )
+    let total = BigInt(gas?.type === "balance" ? gas.amount : 0)
+    if (isForkActive("gasFeeSeparation", referenceBlock)) {
+        const fee = tx.content.transaction_fee
+        total += BigInt(fee.network_fee ?? 0) +
+            BigInt(fee.rpc_fee ?? 0) + BigInt(fee.additional_fee ?? 0)
+    }
+    tx.attrs = {
+        reference_block: referenceBlock,
+        total_fee: total.toString(),
+    }
+    // Apply debits each payer's send, gas, and distribution edits together.
+    // Check the signed amount edit here before submission.
+    const sendAmount = canonicalizeAmountToOs(
+        tx.content.amount,
+        isForkActive("osDenomination", referenceBlock),
+    )
+    return nativeSendBalanceError(tx, sendAmount, total)
+}
+
+async function signWithNativeSendFeeQuote(
+    tx: Transaction,
+    referenceBlock: number,
+    validityData: ValidityData,
+): Promise<ValidityData> {
+    const nativeSendFeeError = await quoteNativeSendFee(tx, referenceBlock)
+    if (nativeSendFeeError) {
+        validityData.data.valid = false
+        validityData.data.message = nativeSendFeeError
+    }
+    return signValidityData(validityData)
+}
+
+async function checkAdmissionAndStructure(
+    tx: Transaction,
+    sender: string,
+    referenceBlock: number,
+    validityData: ValidityData,
+): Promise<ValidityData | null> {
     const admission = await checkTxAdmissible(tx, {
         head: referenceBlock,
         checkMempool: true,
@@ -117,6 +207,14 @@ export async function confirmTransaction(
         return validityData
     }
 
+    return null
+}
+
+async function checkNonceAndEdit(
+    tx: Transaction,
+    referenceBlock: number,
+    validityData: ValidityData,
+): Promise<ValidityData | null> {
     // Check nonce > current nonce
     const currentNonce = await GCR.getAccountNonce(
         normalizePubkey(tx.content.from_ed25519_address || tx.content.from),
@@ -168,6 +266,13 @@ export async function confirmTransaction(
         }
     }
 
+    return null
+}
+
+async function checkAmountBalance(
+    tx: Transaction,
+    validityData: ValidityData,
+): Promise<ValidityData | null> {
     let txAmount: bigint
 
     try {
@@ -179,19 +284,12 @@ export async function confirmTransaction(
         return validityData
     }
 
-    if (txAmount > 0n) {
-        const from =
-            typeof tx.content.from === "string"
-                ? tx.content.from
-                : forgeToHex(tx.content.from)
-
-        const fromBalance = await GCR.getAccountBalance(from)
-        if (fromBalance < txAmount) {
-            validityData.data.message = `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${txAmount} but have ${fromBalance}\n`
-            validityData.data.valid = false
-            validityData = await signValidityData(validityData)
-            return validityData
-        }
+    const amountBalanceError = await amountOnlyBalanceError(tx, txAmount)
+    if (amountBalanceError) {
+        validityData.data.message = amountBalanceError
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
     }
 
     // For L2PS encrypted transactions, decrypt inner tx and check balance
@@ -205,6 +303,51 @@ export async function confirmTransaction(
         }
     }
 
+    return null
+}
+
+export async function confirmTransaction(
+    tx: Transaction, // Must contain a tx property being a Transaction object
+    sender: string,
+): Promise<ValidityData> {
+    stripClientFeeQuote(tx)
+
+    // Getting the current block number
+    const getLastBlockNumberStart = Date.now()
+    const referenceBlock = await Chain.getLastBlockNumber()
+    const getLastBlockNumberEnd = Date.now()
+    log.only(
+        `[confirmTransaction] Get last block number in ${getLastBlockNumberEnd - getLastBlockNumberStart}ms`,
+    )
+
+    // REVIEW Below: if this does not work, use ValidityData interface and fill manually
+    let validityData: ValidityData = {
+        data: {
+            valid: false,
+            reference_block: referenceBlock,
+            message:
+                "[Native Tx Validation] [NOT PROCESSED] Transaction yet to be processed\n",
+            gas_operation: null,
+            transaction: tx,
+        },
+        signature: null,
+        rpc_public_key: {
+            type: getSharedState.signingAlgorithm,
+            data: getSharedState.publicKeyHex,
+        },
+    }
+
+    const admissionRefusal = await checkAdmissionAndStructure(
+        tx, sender, referenceBlock, validityData,
+    )
+    if (admissionRefusal) return admissionRefusal
+
+    const nonceRefusal = await checkNonceAndEdit(tx, referenceBlock, validityData)
+    if (nonceRefusal) return nonceRefusal
+
+    const amountRefusal = await checkAmountBalance(tx, validityData)
+    if (amountRefusal) return amountRefusal
+
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
@@ -214,9 +357,8 @@ export async function confirmTransaction(
     // Post-fork the validating node computes the per-component fee
     // breakdown, stamps its own pubkey as `transaction_fee.rpc_address`
     // (so peers know where to route the rpc_fee share), checks the
-    // sender can cover the total, and prepends the fee-distribution
-    // GCREdits onto `tx.content.gcr_edits` so they apply before any
-    // tx-level edits.
+    // fee payer can cover the distribution fee. The fee edits are derived
+    // at apply and are checked with the signed edits by the quote above.
     //
     // Pre-fork: legacy path is preserved (the dead-code `defineGas`
     // function below is the historical placeholder). No edits emitted
@@ -259,8 +401,7 @@ export async function confirmTransaction(
         return validityData
     }
 
-    validityData = await signValidityData(validityData)
-    return validityData
+    return await signWithNativeSendFeeQuote(tx, referenceBlock, validityData)
 }
 
 async function runTypeDispatcher(
