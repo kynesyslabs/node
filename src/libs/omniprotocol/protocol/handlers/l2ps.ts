@@ -29,12 +29,24 @@ import type {
 export const MAX_SYNC_MEMPOOL_ENTRIES = 1000
 
 /**
+ * The 403 every L2PS opcode answers under `l2psGate`, or null. The gate reads
+ * node state, which these handlers load on call to keep the opcode registry
+ * light.
+ */
+async function l2psGateClosed(): Promise<Buffer | null> {
+    const { L2PS_GATE_REFUSAL, l2psOff } = await import("@/forks/l2psGate")
+    return l2psOff() ? encodeResponse(errorResponse(403, L2PS_GATE_REFUSAL)) : null
+}
+
+/**
  * Handler for 0x70 L2PS_GENERIC opcode
  *
  * Fallback handler for generic L2PS operations.
  * Routes to appropriate L2PS subsystem based on request.
  */
 export const handleL2PSGeneric: OmniHandler<Buffer> = async ({ message, context }) => {
+    const closed = await l2psGateClosed()
+    if (closed) return closed
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for L2PS generic"))
     }
@@ -79,6 +91,8 @@ export const handleL2PSGeneric: OmniHandler<Buffer> = async ({ message, context 
  * The transaction is decrypted, validated, and added to L2PS mempool.
  */
 export const handleL2PSSubmitEncryptedTx: OmniHandler<Buffer> = async ({ message, context }) => {
+    const closed = await l2psGateClosed()
+    if (closed) return closed
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for L2PS submit"))
     }
@@ -135,6 +149,8 @@ export const handleL2PSSubmitEncryptedTx: OmniHandler<Buffer> = async ({ message
  * Returns proof data if available, or 404 if not found.
  */
 export const handleL2PSGetProof: OmniHandler<Buffer> = async ({ message, context }) => {
+    const closed = await l2psGateClosed()
+    if (closed) return closed
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for L2PS get proof"))
     }
@@ -178,6 +194,8 @@ export const handleL2PSGetProof: OmniHandler<Buffer> = async ({ message, context
  * Checks proof validity and batch hash.
  */
 export const handleL2PSVerifyBatch: OmniHandler<Buffer> = async ({ message, context }) => {
+    const closed = await l2psGateClosed()
+    if (closed) return closed
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for L2PS verify batch"))
     }
@@ -235,6 +253,8 @@ export const handleL2PSVerifyBatch: OmniHandler<Buffer> = async ({ message, cont
  * Returns entries since the given timestamp.
  */
 export const handleL2PSSyncMempool: OmniHandler<Buffer> = async ({ message, context }) => {
+    const closed = await l2psGateClosed()
+    if (closed) return closed
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for L2PS sync mempool"))
     }
@@ -292,6 +312,8 @@ export const handleL2PSSyncMempool: OmniHandler<Buffer> = async ({ message, cont
  * Returns pending transactions and aggregation state.
  */
 export const handleL2PSGetBatchStatus: OmniHandler<Buffer> = async ({ message, context }) => {
+    const closed = await l2psGateClosed()
+    if (closed) return closed
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for L2PS batch status"))
     }
@@ -330,6 +352,8 @@ export const handleL2PSGetBatchStatus: OmniHandler<Buffer> = async ({ message, c
  * Used for network discovery and membership validation.
  */
 export const handleL2PSGetParticipation: OmniHandler<Buffer> = async ({ message, context }) => {
+    const closed = await l2psGateClosed()
+    if (closed) return closed
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
         return encodeResponse(errorResponse(400, "Missing payload for L2PS participation"))
     }

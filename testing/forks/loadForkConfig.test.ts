@@ -119,6 +119,8 @@ describe("loadForkConfigFromGenesis", () => {
         expect(defaults.web2ProofBinding.activationHeight).toBeNull()
         expect(defaults.editBinding.activationHeight).toBeNull()
         expect(defaults.xmProofBinding.activationHeight).toBeNull()
+        expect(defaults.l2psGate.activationHeight).toBeNull()
+        expect(defaults.tlsnDisabled.activationHeight).toBeNull()
     })
 
     it("hydrates osDenomination activation height when present", () => {

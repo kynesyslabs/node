@@ -432,6 +432,30 @@ export type TelegramSenderBindingConfig = BaseForkConfig
 export type XmRemoveCanonicalConfig = BaseForkConfig
 
 /**
+ * `l2psGate` fork: L2PS is off. The four L2PS transaction types
+ * (`l2psEncryptedTx`, `l2psBatch`, `l2ps_hash_update`, `subnet`) are refused
+ * at RPC intake, pool admission, the consensus merge and apply; the L2PS
+ * RPC and peer handlers refuse every request; consensus applies no pending
+ * L2PS proof; and the node starts no L2PS service.
+ *
+ * A pending proof debits the L2 fee from the sender with no credit
+ * anywhere, so applying one breaks supply conservation. A network that
+ * launches without L2PS sets 0 and lifts it with a later fork once
+ * settlement conserves supply. No payload beyond the base.
+ */
+export type L2psGateConfig = BaseForkConfig
+
+/**
+ * `tlsnDisabled` fork: TLSNotary attestation is off. A native `tlsn_request`
+ * or `tlsn_store`, or a transaction carrying a `tlsnotary` edit, is refused
+ * at RPC intake, pool admission, the consensus merge and apply, before any
+ * of its edits run: no fee is charged, nothing is burned and no attestation
+ * token is issued. Judged at the tip like the other apply-time gates.
+ * No payload beyond the base.
+ */
+export type TlsnDisabledConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -556,6 +580,8 @@ export type ForkConfig =
     | TokenStakingConfig
     | TelegramSenderBindingConfig
     | XmRemoveCanonicalConfig
+    | L2psGateConfig
+    | TlsnDisabledConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -591,6 +617,8 @@ export type ForkName =
     | "tokenStaking"
     | "telegramSenderBinding"
     | "xmRemoveCanonical"
+    | "l2psGate"
+    | "tlsnDisabled"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -625,6 +653,8 @@ export interface ForkConfigByName {
     tokenStaking: TokenStakingConfig
     telegramSenderBinding: TelegramSenderBindingConfig
     xmRemoveCanonical: XmRemoveCanonicalConfig
+    l2psGate: L2psGateConfig
+    tlsnDisabled: TlsnDisabledConfig
 }
 
 /**
@@ -928,6 +958,23 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "An xm identity remove finds the stored entry by the chain's canonical " +
             "address form, as admission compares them.",
     },
+    l2psGate: {
+        // Dormant by default: it refuses traffic a running chain accepts, and
+        // a missing genesis entry hydrates from here. A mainnet genesis that
+        // launches without L2PS sets 0.
+        activationHeight: null,
+        description:
+            "L2PS is off: its transaction types are refused at every layer, its handlers " +
+            "refuse, no pending proof applies and no L2PS service starts.",
+    },
+    tlsnDisabled: {
+        // Dormant by default, as above. A mainnet genesis that launches
+        // without TLSNotary sets 0.
+        activationHeight: null,
+        description:
+            "TLSNotary is off: tlsn_request and tlsn_store are refused before any edit " +
+            "applies, so no fee is charged and no attestation token is issued.",
+    },
 }
 
 /**
@@ -966,5 +1013,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
         telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },
         xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
+        l2psGate: { ...DEFAULT_FORK_CONFIG.l2psGate },
+        tlsnDisabled: { ...DEFAULT_FORK_CONFIG.tlsnDisabled },
     }
 }

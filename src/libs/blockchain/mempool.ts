@@ -27,6 +27,8 @@ import {
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
 import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
+import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
+import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
 import { oversizeTxRefusal } from "../consensus/v2/routines/blockCaps"
 import { lockedTransactionHashes } from "../consensus/v2/commitLock/lockStore"
 import { MEMPOOL_MAX_NONCE_AHEAD, TRANSACTION_STATUS } from "@/utilities/constants"
@@ -606,6 +608,14 @@ export default class Mempool {
         const unstorable = admissionRefusal(transaction)
         if (unstorable !== null) {
             return { confirmationBlock: null, error: unstorable }
+        }
+        // Node-built L2PS batches and hash updates come here directly, so the
+        // feature gates hold here too, not only at RPC and gossip intake.
+        const featureOff =
+            l2psGateRefusal(transaction, l2psOff()) ??
+            tlsnDisabledRefusal(transaction, tlsnDisabled())
+        if (featureOff !== null) {
+            return { confirmationBlock: null, error: featureOff }
         }
         const oversize = this.blockSizeRefusal(transaction)
         if (oversize !== null) {

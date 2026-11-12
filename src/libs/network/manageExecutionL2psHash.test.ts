@@ -14,6 +14,16 @@ mock.module("./server_rpc", () => ({
     emptyResponse: { result: 200, response: "", require_reply: false, extra: null },
 }))
 mock.module("src/libs/network/securityModule", () => ({}))
+// The real gate reads the node's shared state, whose module graph these stubs
+// cannot load; the gate has its own tests, here it stays dormant.
+mock.module("@/forks/l2psGate", () => ({
+    L2PS_TX_TYPES: new Set<string>(),
+    L2PS_GATE_REFUSAL: "L2PS is not enabled on this network (fork l2psGate)",
+    l2psOff: () => false,
+    l2psOffAt: () => false,
+    isL2psTx: () => false,
+    l2psGateRefusal: () => null,
+}))
 mock.module("@/libs/l2ps/parallelNetworks", () => ({
     __esModule: true,
     default: { getInstance: () => ({ getL2PS, loadL2PS: getL2PS }) },

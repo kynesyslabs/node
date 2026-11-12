@@ -4,6 +4,7 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { emptyResponse } from "./rpcDispatch"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
+import { L2PS_GATE_REFUSAL, l2psOff } from "@/forks/l2psGate"
 
 interface L2PSHashPayload {
     l2ps_uid: string
@@ -13,6 +14,13 @@ interface L2PSHashPayload {
 
 export async function handleL2PSHashUpdate(tx: Transaction): Promise<RPCResponse> {
     const response: RPCResponse = structuredClone(emptyResponse)
+
+    if (l2psOff()) {
+        response.result = 403
+        response.response = false
+        response.extra = L2PS_GATE_REFUSAL
+        return response
+    }
 
     try {
         if (!tx.content?.data?.[1]) {

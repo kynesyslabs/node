@@ -2,6 +2,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { L2PSHashService } from "./L2PSHashService"
 import { L2PSBatchAggregator } from "./L2PSBatchAggregator"
+import { l2psOff } from "@/forks/l2psGate"
 
 /**
  * L2PS services change network state (they submit hash updates and batch
@@ -11,7 +12,7 @@ import { L2PSBatchAggregator } from "./L2PSBatchAggregator"
  */
 export async function syncL2PSServices(staked: boolean): Promise<void> {
     const joined = getSharedState.l2psJoinedUids?.length ?? 0
-    const shouldRun = staked && joined > 0
+    const shouldRun = staked && joined > 0 && !l2psOff()
     const hashService = L2PSHashService.getInstance()
     const aggregator = L2PSBatchAggregator.getInstance()
     try {
@@ -25,7 +26,7 @@ export async function syncL2PSServices(staked: boolean): Promise<void> {
             await hashService.stop(3000)
             await aggregator.stop(3000)
             log.info(
-                `[L2PS] services stopped: ${staked ? "no joined networks" : "node not staked"}`,
+                `[L2PS] services stopped: ${l2psOff() ? "L2PS is off (fork l2psGate)" : staked ? "no joined networks" : "node not staked"}`,
             )
         }
     } catch (e) {
