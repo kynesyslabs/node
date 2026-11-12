@@ -70,10 +70,12 @@ launch snapshot and the validator table
 bun scripts/launch-go-no-go.ts --plan \
   --genesis mainnet/genesis.json \
   --snapshot mainnet/snapshot \
-  --operators mainnet/launch-validators.json
+  --operators mainnet/launch-validators.json \
+  --expected-treasury <agreed treasury address>
 ```
 
-It prints one `PASS` or `FAIL` line per check (genesis forks, chain id,
+It prints one `PASS` or `FAIL` line per check (genesis forks, the
+treasury against `--expected-treasury`, chain id,
 shard size, genesis values (no template `FILL` left), whether a node
 would load the file, block 0 validator set,
 launch validators against the quorum, the validator table, the operator

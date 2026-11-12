@@ -23,6 +23,7 @@ const TEMPLATE = join(ROOT, "docs/mainnet/genesis.template.json")
 const readTemplate = () => JSON.parse(readFileSync(TEMPLATE, "utf8"))
 const id = (i: number) => "0x" + (i + 1).toString(16).padStart(64, "0")
 const isFill = (v: unknown) => typeof v === "string" && v.startsWith("FILL")
+const TREASURY = "0x" + "ab".repeat(32)
 
 /** The template with every FILL field given a value, as the owners would. */
 function filledTemplate(validators = 10) {
@@ -31,7 +32,7 @@ function filledTemplate(validators = 10) {
     g.properties.name = "DEMOS-MAINNET-TEST"
     g.properties.currency = "DEM"
     delete g.properties.sudoPubkey
-    g.forks.gasFeeSeparation = { activationHeight: 0, treasuryAddress: "0x" + "ab".repeat(32) }
+    g.forks.gasFeeSeparation = { activationHeight: 0, treasuryAddress: TREASURY }
     delete g.snapshot
     g.balances = []
     g.timestamp = "1793318400"
@@ -220,6 +221,7 @@ describe("validator table", () => {
             shardSize: 10,
             operators: table(10),
             genesisFileProblems: [],
+            expectedTreasury: TREASURY,
         })
         expect(failing(checks)).toEqual([])
     })
@@ -234,6 +236,7 @@ describe("validator table", () => {
             shardSize: 10,
             operators: table(10),
             genesisFileProblems: [],
+            expectedTreasury: TREASURY,
         })
         expect(failing(checks)).toEqual(["genesis values"])
         const details = checks.find(c => c.name === "genesis values").details.join("\n")
@@ -248,6 +251,7 @@ describe("validator table", () => {
             shardSize: 10,
             operators: table(10, i => (i < 4 ? { operator: "big-op" } : { operator: `op-${i}` })),
             genesisFileProblems: [],
+            expectedTreasury: TREASURY,
         })
         expect(failing(checks)).toEqual(["operator and provider cap", "voting power per operator and provider"])
         expect(checks.find(c => c.name === "voting power per operator and provider").details.join("\n")).toContain(
@@ -263,6 +267,7 @@ describe("validator table", () => {
             shardSize: 10,
             operators: table(10, i => (i < 4 ? { provider: spellings[i] } : { provider: `cloud-${i}` })),
             genesisFileProblems: [],
+            expectedTreasury: TREASURY,
         })
         expect(failing(checks)).toContain("operator and provider cap")
         expect(checks.find(c => c.name === "operator and provider cap").details.join("\n")).toContain("provider aws runs 4 of 10")
@@ -272,7 +277,7 @@ describe("validator table", () => {
         const ops = table(10)
         delete (ops[id(2)] as Record<string, string>).region
         delete ops[id(3)]
-        const checks = launchPlanChecks({ genesis: filledTemplate(), blockZero: blockZero(10), shardSize: 10, operators: ops, genesisFileProblems: [] })
+        const checks = launchPlanChecks({ genesis: filledTemplate(), blockZero: blockZero(10), shardSize: 10, operators: ops, genesisFileProblems: [], expectedTreasury: TREASURY })
         expect(failing(checks)).toEqual(["validator table"])
         const details = checks.find(c => c.name === "validator table").details.join("\n")
         expect(details).toContain(`have no region: ${id(2)}`)
@@ -280,7 +285,7 @@ describe("validator table", () => {
     })
 
     it("fails fewer launch validators than the quorum", () => {
-        const checks = launchPlanChecks({ genesis: filledTemplate(6), blockZero: blockZero(6), shardSize: 10, operators: table(6), genesisFileProblems: [] })
+        const checks = launchPlanChecks({ genesis: filledTemplate(6), blockZero: blockZero(6), shardSize: 10, operators: table(6), genesisFileProblems: [], expectedTreasury: TREASURY })
         expect(failing(checks)).toContain("launch validators")
     })
 
@@ -289,10 +294,25 @@ describe("validator table", () => {
         g.properties.id = 1
         g.properties.shardSize = 4
         g.forks.commitLock = { activationHeight: null }
-        const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 4, operators: table(10), genesisFileProblems: ["x"] })
+        const checks = launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 4, operators: table(10), genesisFileProblems: ["x"], expectedTreasury: TREASURY })
         expect(failing(checks)).toEqual(
             expect.arrayContaining(["genesis forks", "chain id", "shard size", "genesis file"]),
         )
+    })
+
+    it("fails the treasury check without the agreed treasury, or with another one in the genesis", () => {
+        const plan = (expectedTreasury: string | null, g = filledTemplate()) =>
+            launchPlanChecks({ genesis: g, blockZero: blockZero(10), shardSize: 10, operators: table(10), genesisFileProblems: [], expectedTreasury })
+        const missing = plan(null)
+        expect(failing(missing)).toEqual(["treasury"])
+        expect(missing.find(c => c.name === "treasury").details.join("\n")).toContain("no --expected-treasury given")
+        const other = "0x" + "cd".repeat(32)
+        const wrong = plan(other)
+        expect(failing(wrong)).toEqual(["treasury"])
+        expect(wrong.find(c => c.name === "treasury").details.join("\n")).toContain(
+            `treasuryAddress ${TREASURY} is not the agreed treasury ${other}`,
+        )
+        expect(failing(plan(TREASURY.toUpperCase().replace("0X", "0x")))).toEqual([])
     })
 
     it("only warns about a missing region at T-0, where the table was already checked", () => {

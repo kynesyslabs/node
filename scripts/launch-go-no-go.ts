@@ -18,7 +18,7 @@
  *
  *   bun scripts/launch-go-no-go.ts --genesis data/genesis.json \
  *       --operators operators.json --snapshot data/snapshot \
- *       --genesis-hash BLOCK_HASH --commit SHA \
+ *       --genesis-hash BLOCK_HASH --commit SHA --expected-treasury ADDRESS \
  *       [--peerlist demos_peerlist.json] [--rpc URL[,URL...]] [--json]
  *
  * operators.json maps each validator identity to { operator, provider,
@@ -26,7 +26,8 @@
  * that table alone, with no network:
  *
  *   bun scripts/launch-go-no-go.ts --plan --genesis mainnet/genesis.json \
- *       --snapshot mainnet/snapshot --operators operators.json
+ *       --snapshot mainnet/snapshot --operators operators.json \
+ *       --expected-treasury ADDRESS
  *
  * Exit codes: 0 GO (or every --plan check passed), 1 NO-GO, 2 bad input.
  */
@@ -681,6 +682,44 @@ export function mainnetGenesisReasons(genesis: { forks?: unknown; properties?: u
     return reasons
 }
 
+/**
+ * NO-GO reasons for a genesis whose treasury is not the one the owners
+ * agreed: the treasury shape check accepts any well-formed address, and a
+ * wrong one would receive every fee from block 0. On the mainnet chain id the
+ * agreed treasury must be given; on the testnet and devnets it is checked
+ * only when given.
+ */
+export function treasuryReasons(
+    genesis: { forks?: unknown; properties?: unknown } | null,
+    expectedTreasury: string | null | undefined,
+): string[] {
+    if (!genesis) return []
+    const expected = typeof expectedTreasury === "string" && expectedTreasury.trim() ? normTreasury(expectedTreasury) : null
+    const chainId = ((genesis.properties ?? {}) as Record<string, unknown>).id
+    const mainnet = !(typeof chainId === "number" && NON_MAINNET_CHAIN_IDS.includes(chainId))
+    if (expected === null) {
+        return mainnet
+            ? [
+                  "no --expected-treasury given: pass the agreed gasFeeSeparation treasury address " +
+                      "(or DEMOS_EXPECTED_TREASURY) so the genesis treasury can be checked against it",
+              ]
+            : []
+    }
+    const gas = ((genesis.forks ?? {}) as Record<string, Record<string, unknown> | undefined>).gasFeeSeparation
+    const actual = gas?.treasuryAddress
+    if (typeof actual !== "string") {
+        return [`the genesis gasFeeSeparation has no treasuryAddress; the agreed treasury is ${expected}`]
+    }
+    if (normTreasury(actual) !== expected) {
+        return [`the genesis gasFeeSeparation treasuryAddress ${actual} is not the agreed treasury ${expected}`]
+    }
+    return []
+}
+
+function normTreasury(address: string): string {
+    return address.trim().toLowerCase()
+}
+
 function templateMarkers(value: unknown, at = "genesis"): string[] {
     if (typeof value === "string") return value.startsWith("FILL") ? [at] : []
     if (Array.isArray(value)) return value.flatMap((v, i) => templateMarkers(v, `${at}[${i}]`))
@@ -733,6 +772,8 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
     genesisFileBlockHash?: string | null
     /** What a node would refuse in the genesis file at its first boot. */
     genesisFileProblems?: string[]
+    /** The agreed gasFeeSeparation treasury (--expected-treasury). */
+    expectedTreasury?: string | null
 }
 
 /**
@@ -741,7 +782,7 @@ export interface LaunchCheckInput extends Omit<GoNoGoInput, "launchValidators" |
  * the genesis hash the probes agree on (or the expected one).
  */
 export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
-    const { genesis, blockZero, launchValidators, genesisFileBlockHash, genesisFileProblems, ...rest } = input
+    const { genesis, blockZero, launchValidators, genesisFileBlockHash, genesisFileProblems, expectedTreasury, ...rest } = input
     const rows = genesis && blockZero ? blockZero.rows : null
     const base: GoNoGoInput = {
         ...rest,
@@ -750,7 +791,11 @@ export function checkLaunch(input: LaunchCheckInput): GoNoGoDecision {
     const agreedHash = decideGoNoGo(base).genesisHash
     const committee = rows && agreedHash ? firstCommittee(rows, agreedHash, input.shardSize, firstCommitteePins(genesis)) : null
     const decision = decideGoNoGo({ ...base, committee })
-    decision.reasons.push(...(blockZero?.reasons ?? []), ...mainnetGenesisReasons(genesis))
+    decision.reasons.push(
+        ...(blockZero?.reasons ?? []),
+        ...mainnetGenesisReasons(genesis),
+        ...treasuryReasons(genesis, expectedTreasury),
+    )
     for (const problem of genesisFileProblems ?? []) {
         decision.reasons.push(`a node would refuse this genesis at its first boot: ${problem}`)
     }
@@ -783,6 +828,8 @@ export interface LaunchPlanInput {
     operators: Record<string, unknown> | null
     /** What a node would refuse in the genesis file at its first boot. */
     genesisFileProblems?: string[]
+    /** The agreed gasFeeSeparation treasury (--expected-treasury). */
+    expectedTreasury?: string | null
 }
 
 /**
@@ -806,6 +853,7 @@ export function launchPlanChecks(input: LaunchPlanInput): PlanCheck[] {
     const pinned = new Set(PINNED_SHARD_IDENTITIES.map(norm))
     return [
         check("genesis forks", forkReasons),
+        check("treasury", treasuryReasons(input.genesis, input.expectedTreasury)),
         check("chain id", genesisReasons.filter(r => r.startsWith("genesis properties.id"))),
         check("shard size", genesisReasons.filter(r => r.startsWith("genesis properties.shardSize"))),
         // Whatever mainnetGenesisReasons adds beyond the checks above, so a
@@ -851,6 +899,7 @@ interface CliArgs {
     shardSize: number | null
     genesisHash: string | null
     commit: string | null
+    expectedTreasury: string | null
     json: boolean
     plan: boolean
     timeoutMs: number
@@ -859,7 +908,8 @@ interface CliArgs {
 function usage(): string {
     return [
         "usage: bun scripts/launch-go-no-go.ts --genesis FILE --operators FILE [options]",
-        "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE",
+        "       bun scripts/launch-go-no-go.ts --plan --genesis FILE --snapshot DIR --operators FILE \\",
+        "           --expected-treasury ADDRESS",
         "  --plan               check the genesis file and the launch validator table only, with no",
         "                       network: one PASS/FAIL line per check, exit 0 when all pass",
         "  --genesis FILE       genesis JSON: launch validators, their URLs, shardSize and forks",
@@ -877,6 +927,10 @@ function usage(): string {
         "                       scripts/genesis-hash.ts prints (not the genesis data hash)",
         "  --commit SHA         required for GO: the agreed release commit, a full or short SHA;",
         "                       a branch prefix in what a node reports is ignored",
+        "  --expected-treasury ADDRESS",
+        "                       required for GO and --plan on the mainnet chain id: the agreed",
+        "                       gasFeeSeparation treasury; the genesis must name it (default:",
+        "                       DEMOS_EXPECTED_TREASURY)",
         "  --timeout MS         per-request timeout (default 5000)",
         "  --json               machine-readable output",
     ].join("\n")
@@ -899,6 +953,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         shardSize: null,
         genesisHash: null,
         commit: null,
+        expectedTreasury: null,
         json: false,
         plan: false,
         timeoutMs: 5000,
@@ -919,6 +974,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
             case "--shard-size": args.shardSize = Number(value()); break
             case "--genesis-hash": args.genesisHash = value(); break
             case "--commit": args.commit = value(); break
+            case "--expected-treasury": args.expectedTreasury = value(); break
             case "--timeout": args.timeoutMs = Number(value()); break
             case "--json": args.json = true; break
             case "--plan": args.plan = true; break
@@ -935,6 +991,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         args.genesis = fromEnv("DEMOS_GENESIS_FILE")
         if (args.genesis !== null) args.snapshot = fromEnv("DEMOS_SNAPSHOT_DIR")
     }
+    if (args.expectedTreasury === null) args.expectedTreasury = fromEnv("DEMOS_EXPECTED_TREASURY")
     return args
 }
 
@@ -1138,7 +1195,14 @@ async function runPlan(
         // A schedule the node refuses to load is a failed check here, not bad input
         genesisFileProblems = [(e as Error).message]
     }
-    const checks = launchPlanChecks({ genesis, blockZero, shardSize, operators, genesisFileProblems })
+    const checks = launchPlanChecks({
+        genesis,
+        blockZero,
+        shardSize,
+        operators,
+        genesisFileProblems,
+        expectedTreasury: args.expectedTreasury,
+    })
     const table = validatorTable(blockZero ? launchIdentities(blockZero.rows) : [], operators, shardSize)
     if (args.json) {
         console.log(JSON.stringify({ pass: checks.every(c => c.ok), checks, operatorCounts: table.operatorCounts, providerCounts: table.providerCounts, groupCap: table.groupCap }, null, 2))
@@ -1177,6 +1241,10 @@ async function main(): Promise<number> {
     }
     if (args.commit !== null && commitSha(args.commit) === null) {
         console.error(`--commit must be a 7 to 40 character hex SHA, got ${JSON.stringify(args.commit)}`)
+        return 2
+    }
+    if (args.expectedTreasury !== null && !/^0x[0-9a-f]{64}$/.test(args.expectedTreasury.trim().toLowerCase())) {
+        console.error(`--expected-treasury must be 0x and 64 hex characters, got ${JSON.stringify(args.expectedTreasury)}`)
         return 2
     }
 
@@ -1296,6 +1364,7 @@ async function main(): Promise<number> {
         expectedGenesisHash: args.genesisHash,
         ...expectations,
         expectedCommit: args.commit,
+        expectedTreasury: args.expectedTreasury,
     })
 
     if (args.json) {
