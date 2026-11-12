@@ -2,3 +2,8 @@
 2bac9b744f7634b819f8aefea230ebdbd6378cd0:src/cli/setup/prompt.pty.test.ts:generic-api-key:39
 # Guided-setup test: a Proxy get handler whose second argument was named like an API-key assignment and compared with an env-variable name; the argument was renamed in a later commit, the scanner still sees the original commit in the PR range.
 934c6640e44d88cae2a2db8152dfcc1c7af3e6d2:src/cli/setup/zk.adversarial.test.ts:generic-api-key:435
+# L2PS settlement (PR #1196): SETTLEMENT_VKEY_DIGEST and the proof fixture's vkeyDigest are the public SHA-256 of the committed settlement verification key, which the scanner reads as an API key because the name contains "KEY".
+d69f07c3a5d086b25237ee543458796395b5ca96:src/libs/l2ps/settlement/__fixtures__/settlementProof.json:generic-api-key:3
+d69f07c3a5d086b25237ee543458796395b5ca96:src/libs/l2ps/settlement/prover.ts:generic-api-key:36
+291dd709ec15991d9d34beef0fc799b67ce43e11:src/libs/l2ps/settlement/prover.ts:generic-api-key:30
+291dd709ec15991d9d34beef0fc799b67ce43e11:src/libs/l2ps/settlement/__fixtures__/settlementProof.json:generic-api-key:3
