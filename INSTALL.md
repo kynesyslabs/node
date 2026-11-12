@@ -607,9 +607,9 @@ else
 fi
 ```
 
-A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup. On a source build, replace both `docker compose up -d --no-build` lines with `./run --docker -d`.
+A copy taken while the node runs can hold a signing state older than the key's last vote, so the backup runs only after the stop succeeded, and a failed `tar` or `gpg` leaves no file behind that could pass for a backup. On a source build with no `INSTANCE_SUFFIX` in `.env`, replace both `docker compose up -d --no-build` lines with `./run --docker -d`, so the node comes back with the profiles `./run` started, which can differ from `COMPOSE_PROFILES`. With a suffix, keep the block as it is: `./run --docker` resets `INSTANCE_SUFFIX` to empty, so it would start the default-named stack and leave this install's node stopped.
 
-The block cannot clean up after an interrupt: if you press Ctrl-C at a passphrase prompt or the SSH session drops, it stops where it is and can leave the node stopped. Then run `docker compose up -d --no-build` (a source build: `./run --docker -d`) and delete this run's `node-state$SUFFIX-<date>-<time>.tar.gz.gpg` file, which the block did not finish checking.
+The block cannot clean up after an interrupt: if you press Ctrl-C at a passphrase prompt or the SSH session drops, it stops where it is and can leave the node stopped. Then run `docker compose up -d --no-build` (a source build with no `INSTANCE_SUFFIX` in `.env`: `./run --docker -d`) and delete this run's `node-state$SUFFIX-<date>-<time>.tar.gz.gpg` file, which the block did not finish checking.
 
 `GPG_TTY` lets `gpg` ask for the passphrase on this terminal, so `tty` must print a terminal path (not `not a tty`): use an interactive SSH session (`ssh -t`); if `gpg` still cannot ask, add `--pinentry-mode loopback`, and never pass the passphrase on the command line or in a file.
 
