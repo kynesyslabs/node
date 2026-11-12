@@ -97,6 +97,17 @@ describe("getHumanPassportClaim", () => {
         expect(otherClient.result).toBe(200)
     })
 
+    it("answers 400 to malformed addresses without using the caller's provider fetches", async () => {
+        for (let i = 0; i < CLAIM_FETCH_BURST + 1; i++) {
+            const bad = await manageGCRRoutines(SENDER, { method: "getHumanPassportClaim", params: [`0xbad${i}`] })
+            expect(bad.result).toBe(400)
+            expect(bad.extra.error).toContain("Invalid EVM address format")
+        }
+        expect(fetches).toBe(0)
+        const valid = await manageGCRRoutines(SENDER, { method: "getHumanPassportClaim", params: [EVM] })
+        expect(valid.result).toBe(200)
+    })
+
     it("answers a repeated address from the cache instead of the provider", async () => {
         const first = await manageGCRRoutines(SENDER, { method: "getHumanPassportClaim", params: [EVM] })
         const again = await manageGCRRoutines("0x" + "77".repeat(32), {

@@ -157,3 +157,13 @@ export const HELIUS_BASE_URL = "https://api.helius.xyz/v0"
 
 /** Default end-block sentinel for Etherscan pagination. */
 export const ETHERSCAN_DEFAULT_END_BLOCK = 99999999
+
+// ---------------------------------------------------------------------------
+// Human Passport – address shape
+// ---------------------------------------------------------------------------
+
+/** An EVM address as the Human Passport API takes it in its URL path. */
+export const HUMAN_PASSPORT_EVM_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/
+
+export const HUMAN_PASSPORT_INVALID_ADDRESS_MESSAGE =
+    "Invalid EVM address format: must be 0x followed by 40 hex characters"

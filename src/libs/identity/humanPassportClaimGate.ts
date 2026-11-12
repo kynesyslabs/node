@@ -1,4 +1,8 @@
 import type { HumanPassportClaim } from "@/libs/identity/humanPassportClaim"
+import {
+    HUMAN_PASSPORT_EVM_ADDRESS_REGEX,
+    HUMAN_PASSPORT_INVALID_ADDRESS_MESSAGE,
+} from "@/libs/identity/tools/constants"
 
 /**
  * getHumanPassportClaim is a public read that makes this node call the Human
@@ -62,9 +66,14 @@ export class HumanPassportClaimGate {
     /**
      * The claim for `address`, from the cache when it is fresh. Only a
      * provider fetch is charged to `caller`; a failed fetch is not cached.
-     * Callers without a verified key share one bucket ("").
+     * Callers without a verified key share one bucket (""). A malformed
+     * address throws before any token is taken: the provider refuses it
+     * without a request, so it must not use up the caller's fetches.
      */
     async get(caller: string, address: string): Promise<ClaimGateResult> {
+        if (!HUMAN_PASSPORT_EVM_ADDRESS_REGEX.test(address)) {
+            throw new Error(HUMAN_PASSPORT_INVALID_ADDRESS_MESSAGE)
+        }
         const key = address.toLowerCase()
         const now = this.now()
 

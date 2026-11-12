@@ -100,6 +100,15 @@ describe("Human Passport claim per-caller limit", () => {
         expect(await t.g.get("y", B)).toHaveProperty("claim")
     })
 
+    it("refuses a malformed address without a fetch and without charging the caller", async () => {
+        const t = gate({ burst: 1, ratePerSec: 0.1 })
+        for (const bad of ["not-an-address", "0x1234", A + "00", "0x" + "zz".repeat(20)]) {
+            await expect(t.g.get("x", bad)).rejects.toThrow("Invalid EVM address format")
+        }
+        expect(t.fetched).toEqual([])
+        expect(await t.g.get("x", A)).toHaveProperty("claim")
+    })
+
     it("tracks a bounded number of callers", async () => {
         const t = gate({ maxCallers: 3, burst: 1 })
         for (let i = 0; i < 10; i++) {
