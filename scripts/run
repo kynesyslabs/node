@@ -501,26 +501,19 @@ fi
 CLEAN="false"
 PORT=53550
 
-# Handle long options (--no-tui, --external-db) before getopts
+# Handle long options (--no-tui, --external-db, --no-monitoring) before getopts.
+# The argument list is rebuilt without them, every other argument kept in
+# order: an empty entry left in their place would stop getopts there.
+SHORT_ARGS=()
 for arg in "$@"; do
 	case ${arg} in
-	--no-tui)
-		NO_TUI=true
-		# Remove --no-tui from arguments so getopts doesn't choke on it
-		set -- "${@/--no-tui/}"
-		;;
-	--external-db)
-		EXTERNAL_DB=true
-		# Remove --external-db from arguments so getopts doesn't choke on it
-		set -- "${@/--external-db/}"
-		;;
-	--no-monitoring)
-		MONITORING_DISABLED=true
-		# Remove --no-monitoring from arguments so getopts doesn't choke on it
-		set -- "${@/--no-monitoring/}"
-		;;
+	--no-tui) NO_TUI=true ;;
+	--external-db) EXTERNAL_DB=true ;;
+	--no-monitoring) MONITORING_DISABLED=true ;;
+	*) SHORT_ARGS+=("${arg}") ;;
 	esac
 done
+set -- "${SHORT_ARGS[@]}"
 
 # Getting arguments
 while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehmU" opt; do

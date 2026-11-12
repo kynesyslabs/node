@@ -12,6 +12,7 @@
 #   - -e with PG_PORT in .env only -> the node gets the .env value
 #   - -e with PG_PORT in the shell (and .env) -> the shell value
 #   - -e -d <port> -> the flag value, over the shell and .env
+#   - --external-db -d <port> -> the flag value (short options after a long one are read)
 #   - -e with no PG_PORT anywhere -> nothing exported, the node's default applies
 #   - the banner names the PG_* variables, not DATABASE_URL, and the database host/port
 #   - without -e: 5332, or -d, whatever the shell or .env carry (unchanged)
@@ -125,6 +126,8 @@ DOTENV='PG_PORT=5433'
 check "-e -d 5435, shell and .env differ -> the flag value" 5435 PG_PORT=5434 -- -e -d 5435
 DOTENV='PG_PORT=5433'
 check "--external-db, PG_PORT only in .env -> the .env value" 5433 -- --external-db
+DOTENV='PG_PORT=5433'
+check "--external-db -d 5435, shell and .env differ -> the flag value" 5435 PG_PORT=5434 -- --external-db -d 5435
 DOTENV=''
 check "-e, no PG_PORT anywhere -> nothing exported, node default" 5332 -- -e
 if grep -q 'exported=yes' "$ST/node.log"; then FAIL=$((FAIL + 1)); echo "FAIL - -e with no PG_PORT exported one anyway"; else PASS=$((PASS + 1)); echo "ok   - -e with no PG_PORT exports none"; fi
