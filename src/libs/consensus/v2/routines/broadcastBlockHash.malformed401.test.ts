@@ -10,6 +10,7 @@ import { broadcastBlockHash } from "./broadcastBlockHash"
 import Mempool from "@/libs/blockchain/mempool"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
+import * as forkScheduleWatch from "@/libs/peer/routines/forkScheduleWatch"
 
 const block = {
     hash: "ours",
@@ -149,6 +150,22 @@ describe("broadcastBlockHash and malformed 401 replies", () => {
                 .find(line => line.includes("not confirmed by validator bad"))
             expect(refusalLine).toBeDefined()
             expect(refusalLine!.length).toBeLessThan(400)
+        } finally {
+            spy.mockRestore()
+        }
+    })
+
+    it("asks for a fork schedule comparison when a member refuses or does not answer", async () => {
+        getSharedState.candidateBlock = block as never
+        const spy = spyOn(forkScheduleWatch, "onShardMemberUnresponsive").mockResolvedValue(undefined)
+        try {
+            const silent = { identity: "silent", longCall: async () => undefined }
+            const busy = {
+                identity: "busy",
+                longCall: async () => ({ result: 404, response: "busy", extra: null }),
+            }
+            await broadcastBlockHash(block as never, [silent, busy] as never)
+            expect(spy).toHaveBeenCalledTimes(2)
         } finally {
             spy.mockRestore()
         }

@@ -476,15 +476,17 @@ export async function requestScheduleCheck(): Promise<void> {
 let lastStallCheckAt: number | null = null
 
 /**
- * For the consensus routine when a round stops because the secretary never
- * answered. The block-driven watch runs only on inserted blocks, so on a chain
- * stalled by an abstaining secretary it would never run again; this starts a
- * round instead, and ensureWindowChecked holds the next consensus round until
- * it has answered, so that round's shard already leaves the abstainer out.
- * At most once per RECHECK_INTERVAL_MS: secretary timeouts repeat every few
- * seconds, and each comparison asks every validator. Never throws.
+ * For the consensus routine when a shard member did not take part: the
+ * secretary never answered, or a member refused or missed the block hash or
+ * the precommit. It may be abstaining on its own fork schedule while ours
+ * shows no window, and the block-driven watch would not compare until the
+ * next due block, or never on a chain stalled by an abstaining secretary.
+ * This starts a round instead, and ensureWindowChecked holds the next
+ * consensus round until it has answered, so that round's shard already
+ * leaves the abstainer out. At most once per RECHECK_INTERVAL_MS: misses
+ * repeat every round, and each comparison asks every validator. Never throws.
  */
-export async function onSecretaryUnresponsive(now: number = Date.now()): Promise<void> {
+export async function onShardMemberUnresponsive(now: number = Date.now()): Promise<void> {
     try {
         const { Config } = await import("@/config")
         if (Config.getInstance().core.forkScheduleMismatchPolicy !== "abstain") return

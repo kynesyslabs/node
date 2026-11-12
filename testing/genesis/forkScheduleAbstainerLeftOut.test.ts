@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import {
     applyRoundOutcome,
-    onSecretaryUnresponsive,
+    onShardMemberUnresponsive,
     resetWindowCheck,
     RECHECK_INTERVAL_MS,
     type CheckPlan,
@@ -151,7 +151,7 @@ describe("a round whose secretary never answers", () => {
 
     it("compares the schedules at once and leaves the abstaining validator out", async () => {
         await withValidators(async () => {
-            await onSecretaryUnresponsive(1_000_000)
+            await onShardMemberUnresponsive(1_000_000)
             expect([...getSharedState.forkScheduleDifferingPeers]).toEqual(["0xd"])
             expect(getSharedState.forkScheduleAbstain).toBe(false)
         })
@@ -159,13 +159,13 @@ describe("a round whose secretary never answers", () => {
 
     it("compares at most once per recheck interval however often rounds abort", async () => {
         await withValidators(async calls => {
-            await onSecretaryUnresponsive(1_000_000)
+            await onShardMemberUnresponsive(1_000_000)
             const afterFirst = calls()
             expect(afterFirst).toBe(3)
-            await onSecretaryUnresponsive(1_000_000 + 1_000)
-            await onSecretaryUnresponsive(1_000_000 + RECHECK_INTERVAL_MS - 1)
+            await onShardMemberUnresponsive(1_000_000 + 1_000)
+            await onShardMemberUnresponsive(1_000_000 + RECHECK_INTERVAL_MS - 1)
             expect(calls()).toBe(afterFirst)
-            await onSecretaryUnresponsive(1_000_000 + RECHECK_INTERVAL_MS)
+            await onShardMemberUnresponsive(1_000_000 + RECHECK_INTERVAL_MS)
             expect(calls()).toBe(afterFirst * 2)
         })
     }, 30000)
