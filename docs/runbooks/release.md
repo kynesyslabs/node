@@ -147,6 +147,7 @@ goes into the clone's own `.git`, as in `INSTALL.md` step 1:
 ```bash
 TAG=v1.0.0-rc.1
 
+OLD_TAG="$(git describe --tags --exact-match HEAD)" &&
 git fetch --tags origin stabilisation &&
 SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
 git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
@@ -156,10 +157,14 @@ git verify-tag "$TAG" &&
 git checkout "$TAG"
 ```
 
-If this chain stops, do not continue the upgrade. A good signature from a key
-you cannot match is a failure: the email `git verify-tag` prints must be a
-signer the announcement names, and the `SHA256:` fingerprint the one that
-signer published outside GitHub (see `INSTALL.md` step 1).
+The first line records the tag the node runs now (`INSTALL.md` step 1 leaves
+the checkout exactly at a tag). If this chain stops, do not continue the
+upgrade. A good signature from a key you cannot match is a failure: the email
+`git verify-tag` prints must be a signer the announcement names, and the
+`SHA256:` fingerprint the one that signer published outside GitHub (see
+`INSTALL.md` step 1). The chain has already checked out the new tag by then,
+so before anything else go back to the tag the node runs, in the same shell:
+`git checkout "$OLD_TAG"`. Then do not continue the upgrade.
 
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
 and digest, copied from `checksums.txt`. If the release changes
