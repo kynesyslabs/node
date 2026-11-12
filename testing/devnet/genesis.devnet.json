@@ -60,6 +60,12 @@
     },
     "feeBinding": {
       "activationHeight": 0
+    },
+    "web2ProofBinding": {
+      "activationHeight": 0
+    },
+    "tlsnProofEnforcement": {
+      "activationHeight": 0
     }
   },
   "balances": [

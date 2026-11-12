@@ -32,8 +32,6 @@ function filledTemplate(validators = 10) {
     g.properties.currency = "DEM"
     delete g.properties.sudoPubkey
     g.forks.gasFeeSeparation = { activationHeight: 0, treasuryAddress: "0x" + "ab".repeat(32) }
-    g.forks.web2ProofBinding = { activationHeight: null }
-    g.forks.tlsnProofEnforcement = { activationHeight: null }
     delete g.snapshot
     g.balances = []
     g.timestamp = "1793318400"
@@ -87,8 +85,6 @@ describe("mainnet genesis template", () => {
         for (const v of [
             g.properties.id,
             g.forks.gasFeeSeparation.treasuryAddress,
-            g.forks.web2ProofBinding.activationHeight,
-            g.forks.tlsnProofEnforcement.activationHeight,
             g.balances,
             g.timestamp,
             g.validators,

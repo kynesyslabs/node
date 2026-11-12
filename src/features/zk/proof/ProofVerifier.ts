@@ -17,6 +17,7 @@
  * - Ensures Merkle root is current (prevents old proofs)
  */
 
+import { applyTime } from "@/libs/blockchain/gcr/applyTime"
 import * as snarkjs from "snarkjs"
 import {
     canonicalFieldElement,
@@ -258,7 +259,7 @@ export class ProofVerifier {
             await nullifierRepo.insert({
                 nullifierHash: nullifier,
                 blockNumber: metadata?.blockNumber || 0,
-                timestamp: Date.now(),
+                timestamp: applyTime().getTime(),
                 transactionHash: metadata?.transactionHash || "",
             })
 
@@ -400,7 +401,7 @@ export class ProofVerifier {
                 nullifierHash,
                 blockNumber,
                 // REVIEW: Use number for timestamp consistency with blockNumber (not string)
-                timestamp: Date.now(),
+                timestamp: applyTime().getTime(),
                 transactionHash,
             })
 

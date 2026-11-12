@@ -1,3 +1,4 @@
+import { applyTime } from "../../applyTime"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import type { GCREntityCaches, GCRResult } from "../../handleGCR"
 import { EntityManager, Repository } from "typeorm"
@@ -19,7 +20,10 @@ import {
     isBigintStorable,
     isTextStorable,
 } from "@/libs/blockchain/validation/postgresStorable"
-import { BN254_FIELD_ORDER } from "@/features/zk/proof/publicSignals"
+import {
+    attestationContextError,
+    BN254_FIELD_ORDER,
+} from "@/features/zk/proof/publicSignals"
 
 export const PROVIDER_MAX_BYTES = 64
 
@@ -229,6 +233,10 @@ export async function applyZkAttestationAdd(
         }
     }
 
+    // Before any database work, so a syncing node reaches the same verdict.
+    const contextError = attestationContextError(payload.public_signals)
+    if (contextError) return { success: false, message: contextError }
+
     // Get datasource for verification
     const db = await Datasource.getInstance()
     const dataSource = db.getDataSource()
@@ -330,7 +338,7 @@ export async function applyZkAttestationAdd(
             const account = await ensureGCRForUser(submitter, em)
 
             const zkAttestationEntry = {
-                date: new Date().toISOString(),
+                date: applyTime().toISOString(),
                 points: zkAttestationPoints,
                 nullifier: payload.nullifier_hash.slice(0, 10) + "...", // Store abbreviated for reference
             }
@@ -342,7 +350,7 @@ export async function applyZkAttestationAdd(
             account.points.breakdown.zkAttestation.push(zkAttestationEntry)
             account.points.totalPoints =
                 (account.points.totalPoints || 0) + zkAttestationPoints
-            account.points.lastUpdated = new Date()
+            account.points.lastUpdated = applyTime()
 
             await em.save(account)
 

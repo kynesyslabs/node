@@ -1,3 +1,4 @@
+import { dirname, join } from "node:path"
 import { jest, mock } from "bun:test"
 
 /**
@@ -44,4 +45,42 @@ export function mockCore(
 ): void {
     mockLogger("src/utilities/logger")
     mockSharedState(state, options)
+}
+
+/**
+ * Serves `repository` for every entity through both datasource specifiers,
+ * the module-level `dataSource` and the `getInstance()` singleton alike.
+ */
+export function mockDatasource(repository: unknown): void {
+    const factory = () => ({
+        __esModule: true,
+        dataSource: { getRepository: () => repository },
+        default: {
+            getInstance: async () => ({
+                getDataSource: () => ({ getRepository: () => repository }),
+            }),
+        },
+    })
+    mock.module("src/model/datasource", factory)
+    mock.module("@/model/datasource", factory)
+}
+
+/**
+ * The SDK's xm-localsdk barrel loads the Tron module, which does not
+ * initialise under bun test; this serves the chain modules one by one.
+ */
+export function mockXmLocalSdk(): void {
+    const dir = dirname(require.resolve("@kynesyslabs/demosdk/xm-localsdk"))
+    const load = (file: string) => require(join(dir, file))
+    mock.module("@kynesyslabs/demosdk/xm-localsdk", () => ({
+        XRPL: load("xrp.js").XRPL,
+        EVM: load("evm.js").EVM,
+        IBC: load("ibc.js").IBC,
+        TON: load("ton.js").TON,
+        SOLANA: load("solana.js").SOLANA,
+        MULTIVERSX: load("multiversx.js").MULTIVERSX,
+        NEAR: load("near.js").NEAR,
+        BTC: load("btc.js").BTC,
+        APTOS: load("aptos.js").APTOS,
+    }))
 }
