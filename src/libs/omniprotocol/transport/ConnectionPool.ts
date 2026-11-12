@@ -194,11 +194,16 @@ export class ConnectionPool extends EventEmitter {
         // Get existing connections for this peer
         const existing = this.connections.get(peerIdentity) || []
 
-        // Check if we're at max connections for this peer
-        const usableConnections = existing.filter(c =>
-            ConnectionStateUtils.isUsable(c.getState()),
+        // Only the peer's own inbound connections count against its cap, as
+        // only ours count on the outbound side: the sockets we opened to it
+        // are not its to spend, and counting them let a reconnect evict the
+        // only inbound connection it had.
+        const usableInbound = existing.filter(
+            c =>
+                c.origin === "inbound" &&
+                ConnectionStateUtils.isUsable(c.getState()),
         )
-        if (usableConnections.length >= this.config.maxConnectionsPerPeer) {
+        if (usableInbound.length >= this.config.maxConnectionsPerPeer) {
             // The new connection has just proved the key. Older inbound ones
             // under the same identity can belong to a process that no longer
             // speaks for it (a halted copy of the key, a restarted peer's
@@ -206,8 +211,7 @@ export class ConnectionPool extends EventEmitter {
             // holder out of this node, so the least recently used one goes.
             // Closing loses the replies still owed in either direction, so an
             // idle one goes before any with work pending.
-            const stalest = usableConnections
-                .filter(c => c.origin === "inbound")
+            const stalest = usableInbound
                 .sort(
                     (a, b) =>
                         Number(a.hasPendingWork()) - Number(b.hasPendingWork()) ||

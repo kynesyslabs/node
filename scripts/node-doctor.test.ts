@@ -140,6 +140,36 @@ describe("node-doctor --production against the parameter sheet", () => {
     }, 60_000)
 })
 
+describe("node-doctor --production web2 identity credentials", () => {
+    const credentials = {
+        GITHUB_TOKEN: "ghp_test",
+        DISCORD_BOT_TOKEN: "discord-test",
+        RAPID_API_KEY: "rapid-key",
+        RAPID_API_HOST: "twitter-api.example.com",
+    }
+
+    it("passes when every provider credential is set, without printing it", () => {
+        const { lines } = run(credentials)
+        for (const key of Object.keys(credentials)) {
+            expect(line(lines, key)).toBe(`PASS ${key}: set`)
+        }
+        expect(lines.some(l => l.includes("ghp_test"))).toBe(false)
+    }, 60_000)
+
+    it("fails each credential that is missing, empty or only whitespace", () => {
+        const { status, lines } = run({
+            GITHUB_TOKEN: "",
+            DISCORD_BOT_TOKEN: "  ",
+            RAPID_API_KEY: "rapid-key",
+        })
+        expect(status).toBe(1)
+        expect(line(lines, "GITHUB_TOKEN")).toStartWith("FAIL GITHUB_TOKEN: empty: this node would refuse every GitHub identity link")
+        expect(line(lines, "DISCORD_BOT_TOKEN")).toStartWith("FAIL DISCORD_BOT_TOKEN: empty: this node would refuse every Discord identity link")
+        expect(line(lines, "RAPID_API_KEY")).toBe("PASS RAPID_API_KEY: set")
+        expect(line(lines, "RAPID_API_HOST")).toStartWith("FAIL RAPID_API_HOST: empty: this node would refuse every Twitter/X identity link")
+    }, 60_000)
+})
+
 const BASH = Bun.which("bash") as string
 const GREP = Bun.which("grep") as string
 
