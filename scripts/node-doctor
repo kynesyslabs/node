@@ -817,6 +817,30 @@ check_genesis_file() {
 		"${GENESIS_SHARD_SIZE_MIN}" "${GENESIS_SHARD_SIZE_MAX}" <<<"${COMPOSE_CONFIG_JSON}")
 }
 
+# The provider credentials the node verifies web2 identity links with. No
+# node setting refuses those links, so a mainnet validator always takes
+# them: without a credential it refuses every link of that provider (proof
+# fetch, or the Twitter/X bot check) that validators holding one admit.
+WEB2_IDENTITY_CREDENTIALS=(
+	"GITHUB_TOKEN:GitHub identity links"
+	"DISCORD_BOT_TOKEN:Discord identity links"
+	"RAPID_API_KEY:Twitter/X identity links"
+	"RAPID_API_HOST:Twitter/X identity links"
+)
+check_web2_identity_credentials() {
+	local entry key what v
+	for entry in "${WEB2_IDENTITY_CREDENTIALS[@]}"; do
+		key="${entry%%:*}"
+		what="${entry#*:}"
+		v=$(node_env "${key}")
+		if [[ -z "${v//[[:space:]]/}" ]]; then
+			prod_line FAIL "${key}" "empty: this node would refuse every ${what}, which mainnet allows"
+		else
+			prod_line PASS "${key}" "set"
+		fi
+	done
+}
+
 run_production_checks() {
 	load_node_env || return 1
 	echo "Mainnet validator host checks (node settings from ${NODE_ENV_SOURCE}, parameter sheet ${PARAMETER_SHEET}):"
@@ -827,6 +851,7 @@ run_production_checks() {
 	check_genesis_pin EXPECTED_GENESIS_HASH
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
 	check_genesis_file
+	check_web2_identity_credentials
 	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
 	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
 	check_unset DEMOS_IDENTITY_TAKEOVER "set it for the one takeover start only (docs/runbooks/validator-key.md)"
