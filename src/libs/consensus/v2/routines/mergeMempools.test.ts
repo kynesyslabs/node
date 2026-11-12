@@ -38,6 +38,7 @@ mock.module("src/features/metrics/MetricsService", () => ({
 mock.module("@/libs/blockchain/mempool", () => ({
     __esModule: true,
     default: {
+        dropRefusedSeatTransactions: jest.fn(async () => []),
         receive: jest.fn(async (txs: unknown[]) => {
             received.push(txs)
             return { success: true, mempool: [] }

@@ -54,7 +54,6 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
     default: {
         getGCRValidatorStatus: jest.fn(),
-        getAccountBalance: jest.fn(),
         getGCRValidatorByMint: jest.fn(async () => null),
     },
 }))
@@ -81,7 +80,6 @@ jest.mock("@/libs/blockchain/routines/calculateCurrentGas", () => ({
 import Chain from "@/libs/blockchain/chain"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import {
-    DEFAULT_MIN_VALIDATOR_STAKE,
     UNSTAKE_LOCK_BLOCKS,
     VALIDATOR_STATUS_ACTIVE,
     VALIDATOR_STATUS_EXITED,
@@ -141,7 +139,7 @@ const NFT = { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(8
 
 // Payload amounts ride as bigint-encoded strings; the constant itself is a
 // bigint (demToOs result).
-const MIN_STAKE = DEFAULT_MIN_VALIDATOR_STAKE.toString()
+const MIN_STAKE = "0"
 
 function stakeTx(amount: string, hash = "0xhash_stake", nft: object | null = NFT) {
     return {
@@ -235,10 +233,6 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         jest.clearAllMocks()
         repo = createRepo()
         ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(100 as never)
-        // Default: balance comfortably covers stake + gas.
-        ;(GCR.getAccountBalance as jest.Mock).mockResolvedValue(
-            (DEFAULT_MIN_VALIDATOR_STAKE * 2n) as never,
-        )
     })
 
     async function apply(tx: any, currentBlock: number) {
@@ -307,13 +301,11 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
             status: VALIDATOR_STATUS_ACTIVE,
             staked_amount: MIN_STAKE,
         } as never)
-        const t2 = stakeTx("500", "0xtx2", null) // a top-up carries no proof
+        const t2 = stakeTx("0", "0xtx2", null) // a re-stake carries no proof
         await handleStakingTx(t2)
         attachStakingEdit(t2)
         row = await apply(t2, 200)
-        expect(row?.staked_amount).toBe(
-            (BigInt(DEFAULT_MIN_VALIDATOR_STAKE) + 500n).toString(),
-        )
+        expect(row?.staked_amount).toBe("0")
 
         // 3. Unstake request at block 300.
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
@@ -361,7 +353,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
-        const tx = stakeTx("1") // below minimum
+        const tx = stakeTx("1")
         const handled = await handleStakingTx(tx)
         expect(handled.success).toBe(false)
     })

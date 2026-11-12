@@ -10,7 +10,7 @@ import type { BunServer } from "@/libs/network/bunServer"
 import { isAllowlistedMint } from "./nftAllowlist"
 import { HourlyBudget, STAKING_PAGE_RPC_PER_HOUR } from "./pageBudget"
 import { normalizeDemosAddress } from "./proofBytes"
-import { mintHolder, nodeHoldsSeat, recordProofOnDemos } from "./proofSubmit"
+import { mintHolder, nodeHoldsSeat, sendProofToSolana } from "./proofSubmit"
 import { resolveSolanaEndpoints } from "./solanaRpc"
 import {
     STAKING_PAGE_PATH,
@@ -48,7 +48,7 @@ export function registerStakingValidationRoutes(server: BunServer): void {
         nodeHoldsSeat: () => nodeHoldsSeat(ownAddress()),
         mintHolder,
         isAllowlistedMint,
-        recordProof: recordProofOnDemos,
+        recordProof: sendProofToSolana,
     })
     server.get(STAKING_PAGE_PATH, req => handlers.page(req))
     server.post(STAKING_RELAY_PATH, req => handlers.relay(req))

@@ -8,8 +8,7 @@ import {
     PublicKey,
     type ParsedTransactionWithMeta,
 } from "@solana/web3.js"
-import { demToOs } from "@kynesyslabs/demosdk/utils"
-import { Demos, DemosTransactions, prepareXMPayload } from "@kynesyslabs/demosdk/websdk"
+import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 
 import { parseNodeUrl } from "../src/config/nodeUrl"
 import {
@@ -18,11 +17,9 @@ import {
     associatedTokenAddress,
     buildProofTransaction,
     decodeProofTransaction,
-    proofXmScript,
 } from "../src/features/staking/proofBytes"
 import { ACCEPTED_SECRET_FORMATS, loadSolanaSigner, type SolanaSigner } from "./solana-signer"
 
-const DEFAULT_AMOUNT_DEM = "1_000"
 const PEERLIST_FILE = "demos_peerlist.json"
 const DEFAULT_IDENTITY_FILE = ".demos_identity"
 const PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
@@ -36,7 +33,6 @@ const SOLANA_POLL_INTERVAL_MS = 5_000
 interface ValidatorContext {
     identity: string
     rpc: string
-    amountDem: string
     solanaRpc: string
     flags: Record<string, string>
 }
@@ -232,9 +228,8 @@ function loadSolanaKeypair(file: string): Keypair {
 }
 
 /**
- * Sign the proof locally, record it on Demos as a crosschainOperation sent
- * to the anchor RPC, which forwards it to Solana, then wait for Solana
- * finality. Returns the Solana signature.
+ * Sign the proof locally, send it to Solana, then wait for finality.
+ * Returns the Solana signature.
  */
 async function sendNftProof(
     keypair: Keypair,
@@ -266,30 +261,11 @@ async function sendNftProof(
     const signature = decoded.proof.signature
 
     console.log(`Proving NFT ${mint.toBase58()} for ${demosAddress}...`)
-    const xmTx = await prepareXMPayload(proofXmScript(bytes), demos)
-    const validation = await demos.confirm(xmTx)
-    const data = validation?.response?.data as
-        | { valid?: boolean; message?: string; transaction?: { hash?: string } }
-        | undefined
-    const demosHash = data?.transaction?.hash
-    if (!data?.valid || !demosHash) {
-        exitWith(`anchor refused the proof transaction: ${data?.message ?? "no reason given"}`)
+    try {
+        await connection.sendRawTransaction(bytes)
+    } catch (e) {
+        exitWith(`Solana refused the proof: ${e instanceof Error ? e.message : String(e)}`)
     }
-    const broadcast = (await demos.broadcast(validation)) as {
-        result?: number
-        response?: { message?: string; results?: Record<string, { error?: unknown }> }
-        extra?: unknown
-    }
-    if (broadcast?.result !== 200) {
-        const errors = Object.values(broadcast?.response?.results ?? {})
-            .map(r => r?.error)
-            .filter(e => e !== undefined)
-            .map(e => (typeof e === "string" ? e : JSON.stringify(e)))
-        exitWith(
-            `anchor could not send the proof: ${errors.length ? errors.join("; ") : broadcast?.response?.message ?? JSON.stringify(broadcast?.extra)}`,
-        )
-    }
-    console.log(`Demos tx hash:    ${purple(demosHash)}`)
     console.log(`Solana signature: ${purple(signature)}`)
 
     console.log("Waiting for Solana finality...")
@@ -389,7 +365,7 @@ async function cmdNftProof(): Promise<void> {
 }
 
 async function cmdStake(): Promise<void> {
-    const { amountDem, flags } = globalThis.validatorCtx
+    const { flags } = globalThis.validatorCtx
 
     // The seat records this node's public URL, not the node the tx goes through.
     const connectionUrl = process.env.EXPOSED_URL?.trim() ?? ""
@@ -397,20 +373,6 @@ async function cmdStake(): Promise<void> {
         exitWith(
             `EXPOSED_URL in .env is "${connectionUrl}"; the stake records it as this validator's connection URL and it must be http(s)://host:port`,
         )
-    }
-
-    let amountOs: string
-    try {
-        amountOs = demToOs(amountDem).toString()
-    } catch (e) {
-        exitWith(
-            `invalid --amount "${amountDem}": ${
-                e instanceof Error ? e.message : String(e)
-            }`,
-        )
-    }
-    if (BigInt(amountOs) <= 0n) {
-        exitWith(`stake amount must be greater than 0 (got ${amountDem} DEM)`)
     }
 
     const demos = await connect()
@@ -444,11 +406,12 @@ async function cmdStake(): Promise<void> {
         console.log(`NFT:    ${nft.mint}`)
         console.log(`Wallet: ${nft.owner}\n`)
     } else {
-        console.log(yellow("No --nft-proof given: this only works as a top-up of an existing seat.\n"))
+        console.log(yellow("No --nft-proof given: this only works to re-stake a seat this node already holds.\n"))
     }
 
-    const tx = await DemosTransactions.stake(amountOs, connectionUrl, demos, { nft })
-    await submit(demos, tx, `Staking ${amountDem} DEM`)
+    // A seat is backed by the NFT alone; the stake records no DEM.
+    const tx = await DemosTransactions.stake("0", connectionUrl, demos, { nft })
+    await submit(demos, tx, "Staking")
 }
 
 async function cmdUnstake(): Promise<void> {
@@ -481,17 +444,20 @@ async function cmdChallenge(): Promise<void> {
 
 const USAGE =
     "usage: validator <nft-proof|stake|unstake|exit|challenge> " +
-    "[--amount <DEM>] [--identity <file>] [--rpc <url>] [--solana-rpc <url>]\n" +
+    "[--identity <file>] [--rpc <url>] [--solana-rpc <url>]\n" +
     "  nft-proof --mint <MINT> --keypair <key file> [--account <n>] [--demos-address <0x...>]\n" +
-    "    signs the proof, records it on Demos through the --rpc anchor node, waits for Solana finality\n" +
-    "  stake --amount <DEM> --nft-proof <signature>\n" +
-    "  stake --amount <DEM> --nft-mint <MINT> --solana-keypair <key file> [--account <n>]\n" +
+    "    signs the proof, sends it to Solana, waits for finality\n" +
+    "  stake --nft-proof <signature>\n" +
+    "  stake --nft-mint <MINT> --solana-keypair <key file> [--account <n>]\n" +
     `  key file: ${ACCEPTED_SECRET_FORMATS}; --account picks the mnemonic account index\n` +
     "  challenge --validator <0x...> --transfer <signature>"
 
 async function main(): Promise<void> {
     const { positionals, flags } = parseArgs(process.argv.slice(2))
     const command = positionals[0]
+    if (flags.amount !== undefined) {
+        exitWith("--amount is no longer used: a seat carries no DEM")
+    }
 
     const solanaRpc =
         flags["solana-rpc"] ||
@@ -503,7 +469,6 @@ async function main(): Promise<void> {
     globalThis.validatorCtx = {
         identity: flags.identity ?? DEFAULT_IDENTITY_FILE,
         rpc: flags.rpc ?? firstPeerlistRpc(),
-        amountDem: flags.amount ?? DEFAULT_AMOUNT_DEM,
         solanaRpc: solanaRpc || PUBLIC_SOLANA_RPC,
         flags,
     }

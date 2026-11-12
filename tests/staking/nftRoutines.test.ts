@@ -100,7 +100,7 @@ const stake = (account: string, over: Record<string, unknown> = {}) => ({
     isRollback: false,
     account,
     operation: "stake",
-    amount: "1000",
+    amount: "0",
     connectionUrl: "https://v.example",
     nft: { mint: MINT, owner: OWNER, proofTx: SIG },
     txhash: "0xtx",
@@ -120,12 +120,11 @@ describe("a stake that takes a seat", () => {
         expect(r.rows.get(A)).toMatchObject({ nft_mint: MINT, nft_owner: OWNER, nft_proof_tx: SIG })
     })
 
-    it("refuses without an NFT, with an unlisted mint, or below the minimum", async () => {
+    it("refuses without an NFT or with an unlisted mint", async () => {
         expect((await Routines.apply(stake(A, { nft: undefined }) as any, repo() as any, 100)).message).toContain("requires an NFT")
         allowlisted.delete(MINT)
         expect((await Routines.apply(stake(A) as any, repo() as any, 100)).message).toContain("not eligible")
         allowlisted.add(MINT)
-        expect((await Routines.apply(stake(A, { amount: "999" }) as any, repo() as any, 100)).message).toContain("below minimum")
     })
 
     it("evicts the active or unstaking seat the mint backs, including one staged in this block", async () => {
@@ -169,8 +168,8 @@ describe("a stake that takes a seat", () => {
 
     it("tops up an existing seat without re-checking the NFT", async () => {
         const r = repo([row(A)])
-        expect((await Routines.apply(stake(A, { amount: "1", nft: undefined }) as any, r as any, 100)).success).toBe(true)
-        expect(r.rows.get(A)?.staked_amount).toBe("1001")
+        expect((await Routines.apply(stake(A, { amount: "0", nft: undefined }) as any, r as any, 100)).success).toBe(true)
+        expect(r.rows.get(A)?.staked_amount).toBe("1000")
         expect(r.findBy).not.toHaveBeenCalled()
     })
 })

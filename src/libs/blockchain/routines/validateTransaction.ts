@@ -27,6 +27,7 @@ import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import { normalizePubkey } from "../gcr/handleGCR"
 import { expectsNonceEdit } from "../validation/editBinding"
+import { GASLESS_TX_TYPES } from "@kynesyslabs/demosdk/websdk"
 import { MEMPOOL_MAX_NONCE_AHEAD } from "@/utilities/constants"
 
 // INFO Cryptographically validate a transaction and calculate gas
@@ -198,7 +199,10 @@ export async function confirmTransaction(
     // The fee-distribution write MUST happen before
     // `signValidityData(validityData)` so the appended edits are part
     // of the signed hash (peers compute the same hash).
-    if (isForkActive("gasFeeSeparation", referenceBlock)) {
+    if (
+        isForkActive("gasFeeSeparation", referenceBlock) &&
+        !GASLESS_TX_TYPES.has(tx.content.type)
+    ) {
         const feeBoundsResult = await applyGasFeeSeparation(tx)
         if (feeBoundsResult.ok === false) {
             validityData.data.valid = false

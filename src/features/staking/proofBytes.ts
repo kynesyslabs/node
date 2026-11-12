@@ -6,7 +6,6 @@ import {
     Transaction,
     TransactionInstruction,
 } from "@solana/web3.js"
-import type { XMScript } from "@kynesyslabs/demosdk/types"
 import bs58 from "bs58"
 
 export const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
@@ -188,25 +187,4 @@ export function decodeProofTransaction(bytes: Uint8Array): DecodeResult {
             recentBlockhash: tx.recentBlockhash,
         },
     }
-}
-
-/**
- * The XM script that records a signed proof on Demos: one Solana `pay`
- * operation whose payload is the signed bytes. `rpc` stays empty so the
- * executing node picks its own endpoint and no key enters chain data.
- */
-export function proofXmScript(bytes: Uint8Array): XMScript {
-    const id = crypto.randomUUID().replaceAll("-", "")
-    return {
-        operations: {
-            [id]: {
-                chain: "solana",
-                subchain: "mainnet",
-                is_evm: false,
-                rpc: "",
-                task: { type: "pay", signedPayloads: [Array.from(bytes)], params: null },
-            },
-        },
-        operations_order: [id],
-    } as unknown as XMScript
 }

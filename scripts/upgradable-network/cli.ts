@@ -69,8 +69,7 @@ async function cmdNewWallet(file?: string) {
     console.log(`   address: ${addr}`)
     console.log(`   mnemonic: (written to ${target}, mode 0600 — never printed)`)
     console.log(
-        "\n⚠️  Fund this address in the genesis before staking: it needs " +
-            "at least DEFAULT_MIN_VALIDATOR_STAKE to register as a validator.",
+        "\n⚠️  Staking needs no DEM: register with an allowlisted node NFT proof.",
     )
 }
 

@@ -218,3 +218,28 @@ describe("Mempool.receive admission", () => {
         editsVerdict.reason = undefined
     })
 })
+
+const seatVerdicts = new Map<string, { success: boolean; message: string; unreachable?: boolean }>()
+jest.mock("src/libs/network/routines/transactions/handleStakingTx", () => ({
+    handleStakingTx: jest.fn(async (t: { hash: string }) => seatVerdicts.get(t.hash)),
+}))
+
+describe("Mempool.dropRefusedSeatTransactions", () => {
+    it("drops the seat transactions a healthy Solana now refuses and keeps the rest", async () => {
+        const seat = (hash: string, type = "validatorStake") =>
+            ({ hash, content: { type, gcr_edits: [] } }) as any
+        const deleted: string[][] = []
+        ;(Mempool as any).repo = {
+            find: jest.fn(async () => [seat("0xmoved"), seat("0xheld"), seat("0xdown"), tx("0xpay", 100)]),
+            delete: jest.fn(async (where: { hash: { _value: string[] } }) => {
+                deleted.push(where.hash._value)
+            }),
+        }
+        seatVerdicts.set("0xmoved", { success: false, message: "nft.owner no longer holds the NFT" })
+        seatVerdicts.set("0xheld", { success: true, message: "ok" })
+        seatVerdicts.set("0xdown", { success: false, message: "timed out", unreachable: true })
+
+        expect(await Mempool.dropRefusedSeatTransactions()).toEqual(["0xmoved"])
+        expect(deleted).toEqual([["0xmoved"]])
+    })
+})

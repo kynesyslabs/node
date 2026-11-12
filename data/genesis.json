@@ -3,6 +3,7 @@
         "id": 1,
         "name": "DEMOS",
         "currency": "DEM",
+        "chainId": 8587492,
         "shardSize": 4
     },
     "mutables": {

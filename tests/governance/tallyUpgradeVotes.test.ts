@@ -95,9 +95,9 @@ describe("tallyUpgradeVotes", () => {
 
     it("approves a proposal that crosses the 2/3 threshold on snapshot weight", async () => {
         (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
-            { staked_amount: "60" },
-            { staked_amount: "30" },
-            { staked_amount: "10" },
+            { staked_amount: "0" },
+            { staked_amount: "0" },
+            { staked_amount: "0" },
         ] as never)
         const proposals = makeProposalRepo([
             {
@@ -110,9 +110,9 @@ describe("tallyUpgradeVotes", () => {
         ])
         const votes = makeVoteRepo({
             p1: [
-                { approve: true, weight: "60" },
-                { approve: true, weight: "10" },
-                // ceil(2*100/3) = 67; approve=70 ≥ 67 → pass
+                { approve: true, weight: "1" },
+                { approve: true, weight: "1" },
+                // ceil(2*3/3) = 2; approve=2 ≥ 2 → pass
             ],
         })
         const outcomes = await tallyUpgradeVotes(
@@ -122,15 +122,17 @@ describe("tallyUpgradeVotes", () => {
         )
         expect(outcomes).toHaveLength(1)
         expect(outcomes[0].status).toBe("approved")
-        expect(outcomes[0].approveWeight).toBe(70n)
-        expect(outcomes[0].snapshotWeight).toBe(100n)
-        expect(outcomes[0].threshold).toBe(67n)
+        expect(outcomes[0].approveWeight).toBe(2n)
+        expect(outcomes[0].snapshotWeight).toBe(3n)
+        expect(outcomes[0].threshold).toBe(2n)
         expect(proposals._rows[0].status).toBe("activating")
     })
 
     it("rejects one vote below the threshold (abstention = NO)", async () => {
         (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
-            { staked_amount: "100" },
+            { staked_amount: "0" },
+            { staked_amount: "0" },
+            { staked_amount: "0" },
         ] as never)
         const proposals = makeProposalRepo([
             {
@@ -143,7 +145,7 @@ describe("tallyUpgradeVotes", () => {
         ])
         const votes = makeVoteRepo({
             p1: [
-                { approve: true, weight: "65" }, // ceil(2*100/3) = 67; 65 < 67
+                { approve: true, weight: "1" }, // ceil(2*3/3) = 2; 1 < 2
             ],
         })
         const outcomes = await tallyUpgradeVotes(
@@ -197,7 +199,7 @@ describe("tallyUpgradeVotes", () => {
             },
         ])
         const votes = makeVoteRepo({
-            p_overdue: [{ approve: true, weight: "100" }],
+            p_overdue: [{ approve: true, weight: "1" }],
         })
         const outcomes = await tallyUpgradeVotes(
             205,
@@ -252,8 +254,8 @@ describe("tallyUpgradeVotes", () => {
             },
         ])
         const votes = makeVoteRepo({
-            p1: [{ approve: true, weight: "30" }], // 2/3 of 30 = 20; 30 ≥ 20 → pass
-            p2: [{ approve: false, weight: "30" }], // 0 approve < 20 → reject
+            p1: [{ approve: true, weight: "1" }], // 2/3 of 1 seat = 1; 1 ≥ 1 → pass
+            p2: [{ approve: false, weight: "1" }], // 0 approve < 1 → reject
         })
         const outcomes = await tallyUpgradeVotes(
             200,

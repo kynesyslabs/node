@@ -39,7 +39,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 import { denomination } from "@kynesyslabs/demosdk"
-import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
+import { GASLESS_TX_TYPES, GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 
 import Chain from "src/libs/blockchain/chain"
 import log from "src/utilities/logger"
@@ -111,7 +111,7 @@ export async function derivedGasEdit(
     account: string,
     postFork: boolean,
 ): Promise<GCREdit | null> {
-    if (type === "identity" || type === "d402_payment") return null
+    if (GASLESS_TX_TYPES.has(type)) return null
     const gas = (await GCRGeneration.createGasEdit(account, "", false)) as GCREdit
     return toWireShape([gas], postFork)[0] ?? null
 }

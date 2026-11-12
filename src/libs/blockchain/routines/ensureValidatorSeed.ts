@@ -315,9 +315,9 @@ function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
             `[BOOT] genesis.validators[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}"`,
         )
     }
-    if (stake <= 0n) {
+    if (stake < 0n) {
         throw new ConsensusInvariantError(
-            `[BOOT] genesis.validators[${index}].staked_amount must be > 0, got "${seed.staked_amount}"`,
+            `[BOOT] genesis.validators[${index}].staked_amount must not be negative, got "${seed.staked_amount}"`,
         )
     }
     if (seed.connection_url !== null) {

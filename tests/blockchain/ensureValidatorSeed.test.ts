@@ -341,15 +341,15 @@ describe("ensureValidatorSeed", () => {
         ).rejects.toThrow(/status/)
     })
 
-    it("rejects zero stake", async () => {
+    it("rejects a negative stake", async () => {
         repoCount.mockResolvedValue(0)
         chainLastBlock.mockResolvedValue(0)
 
         await expect(
             ensureValidatorSeed({
-                validators: [makeSeed({ staked_amount: "0" })],
+                validators: [makeSeed({ staked_amount: "-1" })],
             }),
-        ).rejects.toThrow(/staked_amount must be > 0/)
+        ).rejects.toThrow(/staked_amount must not be negative/)
     })
 
     it("rejects non-bigint stake string", async () => {

@@ -1,6 +1,5 @@
 import { isAllowlistedMint } from "./nftAllowlist"
 import { verifyNftProof } from "./solanaProof"
-import { getMinValidatorStake } from "./minStake"
 import { VALIDATOR_STATUS_ACTIVE, VALIDATOR_STATUS_UNSTAKING } from "./constants"
 
 /** The columns of a seeded validator row the NFT rules read. */
@@ -40,15 +39,13 @@ export function nftExemptSeeds(rows: readonly SeededValidatorNft[]): string[] {
 /**
  * The reasons a seeded validator set breaks the NFT rules: every row that
  * holds a seat carries a proof, its mint is allowlisted, no mint backs two
- * seats, and the stake meets the minimum. An exempt row skips the NFT
- * fields and is still held to the minimum stake.
+ * seats. An exempt row skips the NFT fields.
  */
 export function seededNftReasons(
     rows: readonly SeededValidatorNft[],
     label: string,
 ): string[] {
     const reasons: string[] = []
-    const min = getMinValidatorStake()
     const holders = new Map<string, string>()
     rows.forEach((row, index) => {
         const where = `${label}[${index}] (${row.address})`
@@ -85,15 +82,6 @@ export function seededNftReasons(
             } else {
                 holders.set(mint, row.address)
             }
-        }
-        let stake: bigint | null = null
-        try {
-            stake = BigInt(row.staked_amount)
-        } catch {
-            stake = null
-        }
-        if (stake !== null && stake < min) {
-            reasons.push(`${where}: staked_amount ${stake} is below the minimum ${min}`)
         }
     })
     return reasons

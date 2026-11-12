@@ -9,6 +9,9 @@ jest.mock("src/utilities/sharedState", () => ({
     getSharedState: { peerListFile: "demos_peerlist.json", exposedUrl: "http://me:53550", identityFile: ".demos_identity" },
 }))
 
+const withSolana = jest.fn<(what: string, read: unknown) => Promise<unknown>>()
+jest.mock("@/features/staking/solanaRpc", () => ({ __esModule: true, withSolana }))
+
 import { resolveAnchorRpc } from "@/features/staking/proofSubmit"
 
 const peers = (map: Record<string, unknown>) => () => JSON.stringify(map)
@@ -32,13 +35,15 @@ describe("resolveAnchorRpc", () => {
     })
 })
 
-describe("recordProofOnDemos", () => {
-    it("turns an SDK confirm throw into a refusal with the anchor's reason", async () => {
-        const mod = await import("@/features/staking/proofSubmit")
-        expect(mod.sdkReasonForTesting(new Error("[Confirm] Transaction is not valid: Insufficient balance: required 1, available 0")))
-            .toBe("Insufficient balance: required 1, available 0")
-        expect(mod.sdkReasonForTesting(new Error("[Broadcast] Transaction is not valid: nonce too low"))).toBe("nonce too low")
-        expect(mod.sdkReasonForTesting("ECONNREFUSED")).toBe("ECONNREFUSED")
-        expect(mod.sdkReasonForTesting(new Error(""))).toBe("anchor refused the proof transaction")
+describe("sendProofToSolana", () => {
+    it("answers with the signature on success and the endpoint failures as a refusal", async () => {
+        const { sendProofToSolana } = await import("@/features/staking/proofSubmit")
+        withSolana.mockResolvedValueOnce("5sig")
+        expect(await sendProofToSolana(new Uint8Array([1]))).toEqual({ accepted: true, message: "proof sent to Solana" })
+        withSolana.mockRejectedValueOnce(new Error("sendRawTransaction(proof): helius: blockhash not found"))
+        expect(await sendProofToSolana(new Uint8Array([1]))).toEqual({
+            accepted: false,
+            message: "sendRawTransaction(proof): helius: blockhash not found",
+        })
     })
 })

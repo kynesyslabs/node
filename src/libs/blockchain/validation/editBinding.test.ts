@@ -185,9 +185,19 @@ describe("a forged edit shipped by a peer that signed the transaction itself", (
     })
 
     it("a dropped gas edit, which would make the transaction free", async () => {
-        const tx = await wire("unstake")
-        tx.content.gcr_edits = edits(tx).filter(e => e.type !== "balance") as unknown as GCREdit[]
+        const tx = await wire("native")
+        const gas = edits(tx).filter(e => e.type === "balance" && e.operation === "remove")[1]
+        tx.content.gcr_edits = edits(tx).filter(e => e !== gas) as unknown as GCREdit[]
         await refusedEverywhere(tx)
+    })
+
+    it("a gas edit on a stake or unstake, which pay none", async () => {
+        for (const kind of ["stake", "unstake"] as const) {
+            const tx = await wire(kind)
+            expect(edits(tx).some(e => e.type === "balance")).toBe(false)
+            edits(tx).push({ type: "balance", operation: "remove", account: SENDER, amount: String(OS), isRollback: false, txhash: "" })
+            await refusedEverywhere(tx)
+        }
     })
 
     it("the same edits in another order", async () => {

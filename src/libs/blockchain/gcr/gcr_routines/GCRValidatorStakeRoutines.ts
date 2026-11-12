@@ -14,7 +14,6 @@ import {
     VALIDATOR_STATUS_UNSTAKING,
 } from "src/features/staking/constants"
 import { isAllowlistedMint } from "src/features/staking/nftAllowlist"
-import { getMinValidatorStake } from "src/features/staking/minStake"
 
 /**
  * Applies a GCREditValidatorStake against the Validators table.
@@ -156,19 +155,13 @@ async function applyStake(
     } catch {
         return { success: false, message: "Invalid stake amount" }
     }
-    if (amount <= 0n) {
-        return { success: false, message: "Stake must be positive" }
+    // Stake weight is a seat, never a number a sender picks.
+    if (amount !== 0n) {
+        return { success: false, message: "Stake must be 0" }
     }
 
     const entering = !existing || existing.status === VALIDATOR_STATUS_EXITED
     if (entering) {
-        const min = getMinValidatorStake()
-        if (amount < min) {
-            return {
-                success: false,
-                message: `Initial stake ${amount} below minimum ${min}`,
-            }
-        }
         const refused = await takeSeatNft(repo, account, edit)
         if (refused) return refused
     }

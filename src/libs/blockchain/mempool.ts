@@ -838,6 +838,33 @@ export default class Mempool {
         return await repo.delete({ hash: In(hashes) })
     }
 
+    /**
+     * Judges the staking policy again on the seat transactions this node
+     * admitted itself, the way `receive` judges those from peers, so a stake
+     * whose NFT moved since admission leaves this pool as it leaves theirs and
+     * the committee keeps building the same block. An unanswerable one stays.
+     */
+    public static async dropRefusedSeatTransactions(): Promise<string[]> {
+        const { isStakingTxType } = await import("src/features/staking/types")
+        const { handleStakingTx } = await import(
+            "src/libs/network/routines/transactions/handleStakingTx"
+        )
+        const seats = (await this.getMempool()).filter(tx =>
+            isStakingTxType(tx.content?.type ?? ""),
+        )
+        const verdicts = await Promise.all(seats.map(tx => handleStakingTx(tx)))
+        const refused = seats.filter((_, i) => !verdicts[i].success && !verdicts[i].unreachable)
+        for (const tx of refused) {
+            log.error(
+                `[Mempool] Dropping own tx ${tx.hash}: ${verdicts[seats.indexOf(tx)].message}`,
+            )
+        }
+        if (refused.length > 0) {
+            await this.removeTransactionsByHashes(refused.map(tx => tx.hash))
+        }
+        return refused.map(tx => tx.hash)
+    }
+
     public static async receive(incoming: Transaction[], returnDiff = true) {
         if (incoming.length === 0) {
             return {

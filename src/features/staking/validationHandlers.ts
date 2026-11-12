@@ -27,7 +27,6 @@ export class AnchorUnreachableError extends Error {
 
 export interface RecordedProof {
     accepted: boolean
-    demosTxHash: string | null
     message: string
 }
 
@@ -43,7 +42,7 @@ export interface ValidationDeps {
     /** The address whose seat `mint` backs now, asked of the anchor, or null. Throws AnchorUnreachableError. */
     mintHolder: (mint: string) => Promise<string | null>
     isAllowlistedMint: (mint: string) => boolean
-    /** Signs and submits the Demos transaction that records the proof. */
+    /** Sends the wallet-signed proof to Solana. */
     recordProof: (bytes: Uint8Array) => Promise<RecordedProof>
     fetch?: typeof fetch
     relayTimeoutMs?: number
@@ -207,11 +206,10 @@ export function createValidationHandlers(deps: ValidationDeps): ValidationHandle
             if (spent) return spent
             const recorded = await deps.recordProof(bytes)
             if (!recorded.accepted) {
-                return json({ error: recorded.message, demosTxHash: recorded.demosTxHash }, 502)
+                return json({ error: recorded.message }, 502)
             }
             return json({
                 solanaSignature: proof.signature,
-                demosTxHash: recorded.demosTxHash,
                 owner: proof.owner,
                 mint: proof.mint,
                 /** The validator whose seat this mint backs now; staking evicts it. */

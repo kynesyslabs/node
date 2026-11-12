@@ -54,7 +54,7 @@ A bare-metal node reads the process environment and then `.env`; run
 | `RPC_FEE` | `1` | same as `NETWORK_FEE` | same as `NETWORK_FEE`. |
 | `BURN_FEE` | `1` | `SharedState.burnFee`, read by `calculateCurrentGas` (the balance-for-gas check in `validateTransaction`) | Governance never refreshes it, so the env value is the only source. A different value changes which senders pass the balance-for-gas check. |
 | `RPC_FEE_PERCENT` | `10` | `SharedState.rpcFee` initial value only | Overwritten by `RPC_FEE` at boot, so nothing depends on it today. Kept on the sheet so no node carries a stray value if code starts reading it again. |
-| `MIN_VALIDATOR_STAKE` | `1000000000000` (1000 DEM in OS) | `getGenesisNetworkParameters`, `getMinValidatorStake` (stake tx validation), `getBigintBounds` (governance floor = 1%) | A node with another floor accepts or refuses stake transactions the others do not, and checks governance proposals against another floor. |
+| `MIN_VALIDATOR_STAKE` | `1000000000000` (1000 DEM in OS) | `getGenesisNetworkParameters`, `getBigintBounds` (governance floor = 1%) | Staking no longer reads it: a seat is backed by the NFT and the stake carries 0 DEM. A node with another value checks governance proposals against another floor. |
 | `ZK_ATTESTATION_POINTS` | `10` | `zkRoutines` (ZK attestation apply) | Points are written into the sender's account at apply. A node with another value holds different points for the same chain, and since the block's `native_tables_hashes` do not cover accounts, nothing flags it. |
 | `PROD` | `true` | `SharedState.PROD`, `loader.ts` | Production refusals (loopback or missing `EXPOSED_URL`, missing build commit, missing identity file) and the block-signing policy. Overdraft refusal no longer depends on it. |
 | `DEMOS_REQUIRE_VALIDATORS` | `true` | `getShard`, `loader.ts` | Without it a node that cannot read the validator set uses every online peer as the committee, and `warn` mismatch policy is not refused. |
@@ -86,7 +86,7 @@ rather than technical constraints:
 
 - Fees of 1 DEM per component, 3 DEM per transaction (the code still carries
   a note that the three should later add up to 1 DEM).
-- The 1000 DEM validator stake floor.
+- The validator stake floor parameter, which staking no longer reads.
 - 10 points per ZK attestation.
 - The 10 s block time and the 1 s / 60 s timestamp bounds (the time policy
   itself is tracked separately).

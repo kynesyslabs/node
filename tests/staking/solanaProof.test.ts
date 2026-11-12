@@ -26,6 +26,7 @@ jest.mock("@/features/staking/solanaRpc", () => ({
 
 import {
     resetSolanaProofCacheForTesting,
+    UNREACHABLE_CACHE_MS,
     verifyChallengeEvidence,
     verifyProofSupersedes,
     verifyCurrentOwner,
@@ -147,12 +148,18 @@ describe("verifyNftProof", () => {
         expect(missing.status).toBe("unreachable")
     })
 
-    it("caches a verdict by signature and never caches unreachable", async () => {
+    it("caches a verdict by signature for good, and an unreachable one for a minute", async () => {
+        const now = jest.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
         connection.getParsedTransaction.mockRejectedValueOnce(new Error("timeout"))
-        await verifyNftProof({ mint: MINT, owner: OWNER, proofTx: SIG }, VALIDATOR, STAKE_TS)
-        await verifyNftProof({ mint: MINT, owner: OWNER, proofTx: SIG }, VALIDATOR, STAKE_TS)
-        await verifyNftProof({ mint: MINT, owner: OWNER, proofTx: SIG }, VALIDATOR, STAKE_TS)
+        const proof = { mint: MINT, owner: OWNER, proofTx: SIG }
+        expect((await verifyNftProof(proof, VALIDATOR, STAKE_TS)).status).toBe("unreachable")
+        expect((await verifyNftProof(proof, VALIDATOR, STAKE_TS)).status).toBe("unreachable")
+        expect(connection.getParsedTransaction).toHaveBeenCalledTimes(1)
+        now.mockReturnValue(1_700_000_000_000 + UNREACHABLE_CACHE_MS)
+        expect((await verifyNftProof(proof, VALIDATOR, STAKE_TS)).status).toBe("valid")
+        await verifyNftProof(proof, VALIDATOR, STAKE_TS)
         expect(connection.getParsedTransaction).toHaveBeenCalledTimes(2)
+        now.mockRestore()
     })
 
     it("does not serve a cached verdict for the same signature under another mint or owner", async () => {
@@ -185,6 +192,18 @@ describe("verifyCurrentOwner", () => {
     it("is invalid when the wallet no longer holds it", async () => {
         connection.getParsedTokenAccountsByOwner.mockResolvedValue({ context: { slot: 7 }, value: [] })
         expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("invalid")
+    })
+
+    it("keeps an unreachable answer for a minute instead of asking again at every merge", async () => {
+        const now = jest.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
+        connection.getParsedTokenAccountsByOwner.mockRejectedValueOnce(new Error("timeout"))
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("unreachable")
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("unreachable")
+        expect(connection.getParsedTokenAccountsByOwner).toHaveBeenCalledTimes(1)
+        now.mockReturnValue(1_700_000_000_000 + UNREACHABLE_CACHE_MS)
+        connection.getParsedTokenAccountsByOwner.mockResolvedValue({ context: { slot: 7 }, value: [] })
+        expect((await verifyCurrentOwner(MINT, OWNER)).status).toBe("invalid")
+        now.mockRestore()
     })
 
     it("is unreachable on a transport failure", async () => {

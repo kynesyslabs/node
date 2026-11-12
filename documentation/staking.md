@@ -95,12 +95,6 @@ After your node is up and running (wait for debug prints), open `http://<your-ip
 
 ## TIPS
 
-You can customize the amount (in DEM) using the `--amount` flag:
-
-```sh
-bun run validator:stake --amount 1200
-```
-
 To run the node later on without deleting the database:
 
 ```sh

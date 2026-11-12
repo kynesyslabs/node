@@ -177,10 +177,10 @@ describe("governanceHandlers.getProposalVotes", () => {
             snapshotBlock: 100,
         })
         voteRepoMock.find.mockResolvedValue([
-            { voterAddress: "v1", approve: true, weight: "40" },
-            { voterAddress: "v2", approve: false, weight: "10" },
+            { voterAddress: "v1", approve: true, weight: "1" },
+            { voterAddress: "v2", approve: false, weight: "1" },
         ])
-        // snapshot has 100 total stake (including v3 who abstains with 50)
+        // snapshot has 3 seats (including v3 who abstains)
         ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
             { staked_amount: "40" },
             { staked_amount: "10" },
@@ -198,11 +198,11 @@ describe("governanceHandlers.getProposalVotes", () => {
             threshold: string
             passed: boolean
         }
-        expect(tally.approveWeight).toBe("40")
-        expect(tally.rejectWeight).toBe("10")
-        expect(tally.totalStakedWeight).toBe("100")
-        // ceil(2 * 100 / 3) = 67
-        expect(tally.threshold).toBe("67")
+        expect(tally.approveWeight).toBe("1")
+        expect(tally.rejectWeight).toBe("1")
+        expect(tally.totalStakedWeight).toBe("3")
+        // ceil(2 * 3 / 3) = 2
+        expect(tally.threshold).toBe("2")
         expect(tally.passed).toBe(false)
     })
 })

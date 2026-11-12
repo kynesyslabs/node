@@ -44,6 +44,8 @@ export async function mergeMempools(
     blockRef: number,
 ) {
     const now = Date.now()
+    // Our own seat transactions are judged again before peers' are taken in.
+    await Mempool.dropRefusedSeatTransactions()
     // INFO: if shard only contains us, skip network requests
     shard = shard.filter(peer => peer.identity !== getSharedState.publicKeyHex)
     // INFO: committee members we cannot resolve locally have no connection

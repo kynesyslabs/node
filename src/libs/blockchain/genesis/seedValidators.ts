@@ -63,9 +63,9 @@ function validateSeed(seed: GenesisValidatorSeed, index: number): void {
             `[GENESIS][VALIDATORS] seed[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}"`,
         )
     }
-    if (stakeAsBigInt <= 0n) {
+    if (stakeAsBigInt < 0n) {
         throw new Error(
-            `[GENESIS][VALIDATORS] seed[${index}].staked_amount must be > 0, got "${seed.staked_amount}"`,
+            `[GENESIS][VALIDATORS] seed[${index}].staked_amount must not be negative, got "${seed.staked_amount}"`,
         )
     }
 

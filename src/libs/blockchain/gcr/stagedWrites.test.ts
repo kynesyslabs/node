@@ -63,16 +63,13 @@ const datasourceModule = () => ({
 mock.module("src/model/datasource", datasourceModule)
 mock.module("@/model/datasource", datasourceModule)
 
-// These edits exercise staging, not the seat rules: no NFT and no minimum.
+// These edits exercise staging, not the seat rules: no NFT.
 const policyModule = () => ({
     __esModule: true,
     isAllowlistedMint: () => true,
 })
 mock.module("src/features/staking/nftAllowlist", policyModule)
 mock.module("@/features/staking/nftAllowlist", policyModule)
-const minStakeModule = () => ({ __esModule: true, getMinValidatorStake: () => 1n })
-mock.module("src/features/staking/minStake", minStakeModule)
-mock.module("@/features/staking/minStake", minStakeModule)
 
 const { default: HandleGCR } = await import("./handleGCR")
 const { default: Chain } = await import("../chain")
@@ -86,12 +83,13 @@ const caches = (): any => ({
     resourceSlots: new Map(),
 })
 
-const stake = (amount: string): any => ({
+// A stake carries no amount, so the edits differ by the connection URL they record.
+const stake = (url: string): any => ({
     type: "validatorStake",
     operation: "stake",
     account: "0xabc",
-    amount,
-    connectionUrl: "https://v1.example",
+    amount: "0",
+    connectionUrl: `https://${url}.example`,
     nft: { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) },
 })
 
@@ -116,7 +114,7 @@ describe("validator stake edits", () => {
 
         expect(issued).toEqual(["em:Validators"])
         expect(durable.get("Validators")).toMatchObject([
-            { address: "0xabc", staked_amount: "5", status: expect.any(String) },
+            { address: "0xabc", connection_url: "https://5.example", status: expect.any(String) },
         ])
     })
 
@@ -128,19 +126,19 @@ describe("validator stake edits", () => {
         expect(first.success).toBe(true)
         expect(second.success).toBe(true)
         expect(second.message).toBe("Stake increased")
-        expect(entities.validators.get("0xabc").staked_amount).toBe("12")
+        expect(entities.validators.get("0xabc").connection_url).toBe("https://7.example")
         expect(issued).toEqual([])
     })
 
     it("reads an existing row from the database once, then from the set", async () => {
         seeded = {
-            Validators: [{ address: "0xabc", status: "active", staked_amount: "10" }],
+            Validators: [{ address: "0xabc", status: "active", staked_amount: "0", connection_url: "https://10.example" }],
         }
         const entities = caches()
         const result = await HandleGCR.applyGCREdit(stake("1"), entities, false, false)
 
         expect(result.success).toBe(true)
-        expect(entities.validators.get("0xabc").staked_amount).toBe("11")
+        expect(entities.validators.get("0xabc").connection_url).toBe("https://1.example")
         expect(durable.size).toBe(0)
     })
 
@@ -159,7 +157,7 @@ describe("validator stake edits", () => {
 
         await fakeDataSource.transaction(async em => first.deferredWrite!(em as any))
 
-        expect(durable.get("Validators")).toMatchObject([{ staked_amount: "5" }])
+        expect(durable.get("Validators")).toMatchObject([{ connection_url: "https://5.example" }])
     })
 
     it("puts the staged row back when a later transaction fails", async () => {
@@ -179,11 +177,11 @@ describe("validator stake edits", () => {
 
         expect(second.success).toBe(false)
         expect(second.deferredWrites).toEqual([])
-        expect(entities.validators.get("0xabc").staked_amount).toBe("5")
+        expect(entities.validators.get("0xabc").connection_url).toBe("https://5.example")
 
-        const third = await HandleGCR.applyTransaction(entities, stakeTx(["1"]), false, false)
+        const third = await HandleGCR.applyTransaction(entities, stakeTx(["6"]), false, false)
         expect(third.success).toBe(true)
-        expect(entities.validators.get("0xabc").staked_amount).toBe("6")
+        expect(entities.validators.get("0xabc").connection_url).toBe("https://6.example")
 
         for (const r of [first, third]) {
             await fakeDataSource.transaction(async em => {
@@ -191,8 +189,8 @@ describe("validator stake edits", () => {
             })
         }
         expect(durable.get("Validators")).toMatchObject([
-            { staked_amount: "5" },
-            { staked_amount: "6" },
+            { connection_url: "https://5.example" },
+            { connection_url: "https://6.example" },
         ])
     })
 })

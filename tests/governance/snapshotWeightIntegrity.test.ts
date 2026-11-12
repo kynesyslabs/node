@@ -268,7 +268,7 @@ describe("Snapshot-weight integrity (spec v2 §Verification #3)", () => {
         // the snapshot validator set and persists.
         await applyEditsTo(voteTxObj)
         expect(voteRepo._votes).toHaveLength(1)
-        expect(voteRepo._votes[0].weight).toBe(SNAPSHOT_STAKE)
+        expect(voteRepo._votes[0].weight).toBe("1")
 
         // V unstakes between vote and tally. Even if GCR re-query after
         // vote returns POST_UNSTAKE_STAKE, the row in voteRepo stays at
@@ -282,7 +282,7 @@ describe("Snapshot-weight integrity (spec v2 §Verification #3)", () => {
         )
 
         expect(outcomes).toHaveLength(1)
-        expect(outcomes[0].approveWeight.toString()).toBe(SNAPSHOT_STAKE)
+        expect(outcomes[0].approveWeight.toString()).toBe("1")
     })
 
     it("if the stored vote weight were tampered post-hoc, tally would pick up the new value — confirms tally really reads from vote rows", async () => {
@@ -296,10 +296,10 @@ describe("Snapshot-weight integrity (spec v2 §Verification #3)", () => {
         await handleGovernanceTx(voteTxObj)
         attachVoteEdit(voteTxObj)
         await applyEditsTo(voteTxObj)
-        expect(voteRepo._votes[0].weight).toBe(SNAPSHOT_STAKE)
+        expect(voteRepo._votes[0].weight).toBe("1")
 
         // Tamper.
-        voteRepo._votes[0].weight = "1"
+        voteRepo._votes[0].weight = "5"
         ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValueOnce([
             { address: VOTER, staked_amount: SNAPSHOT_STAKE },
         ] as never)
@@ -309,6 +309,6 @@ describe("Snapshot-weight integrity (spec v2 §Verification #3)", () => {
             proposalRepo as any,
             voteRepo as any,
         )
-        expect(outcomes[0].approveWeight.toString()).toBe("1")
+        expect(outcomes[0].approveWeight.toString()).toBe("5")
     })
 })

@@ -7,10 +7,11 @@ status: active
 
 # Validator Staking, Unstaking and Exit
 
-A validator seat is a stake of at least 1000 DEM backed by a Demos Node NFT.
+A validator seat is backed by a Demos Node NFT and carries no DEM: the stake
+is 0 and stake, unstake, exit and challenge transactions pay no gas.
 The NFT stays in your Solana wallet; you prove you hold it with one signed
 Solana transaction, then stake from the node's identity. This runbook walks
-through the whole lifecycle: proof, stake, top-up, unstake, exit, and what
+through the whole lifecycle: proof, stake, re-stake, unstake, exit, and what
 happens if the NFT leaves your wallet.
 
 Every command below runs from the node's checkout directory and signs with
@@ -46,7 +47,7 @@ Seat states, as `getValidatorInfo` reports them:
 The proof is one Solana transaction signed by the wallet that holds the NFT:
 a transfer of the NFT from your token account to that same account, plus a
 memo `demos-validator:<your node address>`. The NFT does not move. The node
-records the signed bytes on Demos and an anchor node sends them to Solana.
+sends the signed bytes to Solana through its own RPC endpoints.
 
 Pick one of the two ways.
 
@@ -92,7 +93,7 @@ stake command.
 To prove and stake in one step:
 
 ```sh
-bun run validator:stake --amount 1000 --nft-mint <MINT> --solana-keypair <key file>
+bun run validator:stake --nft-mint <MINT> --solana-keypair <key file>
 ```
 
 
@@ -100,7 +101,7 @@ bun run validator:stake --amount 1000 --nft-mint <MINT> --solana-keypair <key fi
 ## 2. Stake
 
 ```sh
-bun run validator:stake --amount 1000 --nft-proof <solana signature>
+bun run validator:stake --nft-proof <solana signature>
 ```
 
 The node checks, against Solana, that the proof is finalized, was signed by
@@ -112,15 +113,15 @@ wallet must still hold the NFT when the stake is confirmed.
 If another validator's seat is backed by the same NFT, your stake evicts it:
 the newer proof wins. The reverse also holds, so keep the NFT where it is.
 
-### Top-up
+### Re-stake
 
-The same command without a proof adds to an existing seat:
+The same command without a proof re-stakes an existing seat:
 
 ```sh
-bun run validator:stake --amount 500
+bun run validator:stake
 ```
 
-A top-up must not carry `--nft-proof`. Topping up while unstaking cancels the
+A re-stake must not carry `--nft-proof`. Re-staking while unstaking cancels the
 unstake and makes the seat active again.
 
 ## 3. Unstake

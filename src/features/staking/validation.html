@@ -406,11 +406,11 @@
 
       set("signStatus", "Sending the signed proof to the node…");
       const out = await submitProof(bytes);
-      set("signStatus", `Recorded on Demos as ${out.demosTxHash}\nSolana ${out.solanaSignature}\nWaiting for finality…`);
+      set("signStatus", `Sent to Solana as ${out.solanaSignature}\nWaiting for finality…`);
       await waitFinalized(out.solanaSignature, lastValidBlockHeight);
 
       set("signStatus", `Finalized ${out.solanaSignature}`, "ok");
-      el("hashes").textContent = `Solana signature: ${out.solanaSignature}\nDemos tx hash:    ${out.demosTxHash}`
+      el("hashes").textContent = `Solana signature: ${out.solanaSignature}`
         + (out.evicts ? `\nStaking will close the seat of ${out.evicts}` : "");
       el("command").textContent = `bun run validator:stake --nft-proof ${out.solanaSignature}`;
       el("result").hidden = false;

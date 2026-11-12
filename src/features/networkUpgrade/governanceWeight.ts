@@ -1,7 +1,7 @@
 // Shared governance weight helpers.
 //
-// Two call sites need to compute the snapshot weight (sum of validator
-// stakes at a given block):
+// Two call sites need to compute the snapshot weight (one per validator
+// active at a given block):
 //   - `tallyUpgradeVotes`         — must be deterministic on every node.
 //                                   Wraps the kernel in try/catch and
 //                                   returns 0n on lookup failure (safe
@@ -42,8 +42,11 @@ export function safeBigInt(
     return v
 }
 
+/** A vote counts one seat, whatever the row's staked_amount says. */
+export const SEAT_WEIGHT = "1"
+
 /**
- * Sum `staked_amount` across every validator active at `snapshotBlock`.
+ * One seat per validator active at `snapshotBlock`.
  *
  * A failed validator query does not throw: `GCR.getGCRValidatorsAtBlock`
  * answers it with [], so the weight comes out 0n, the same value the
@@ -56,9 +59,5 @@ export async function computeSnapshotWeight(
     const validators = (await GCR.getGCRValidatorsAtBlock(
         snapshotBlock,
     )) as Validators[]
-    let total = 0n
-    for (const v of validators) {
-        total += safeBigInt(v.staked_amount)
-    }
-    return total
+    return BigInt(validators.length)
 }

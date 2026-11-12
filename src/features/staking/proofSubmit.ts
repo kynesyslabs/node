@@ -1,12 +1,11 @@
-// The anchor node and the Demos side of a proof: a synced RPC is asked
-// about seats, and the signed Solana proof is recorded on Demos as a
-// crosschainOperation signed by this node's identity and sent to the anchor.
+// The anchor node side of a proof: a synced RPC is asked about seats, and
+// the wallet-signed proof is sent to Solana through this node's endpoints.
 import { readFileSync } from "node:fs"
 
-import { Demos, prepareXMPayload } from "@kynesyslabs/demosdk/websdk"
+import { Demos } from "@kynesyslabs/demosdk/websdk"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
-import { proofXmScript } from "./proofBytes"
+import { withSolana } from "./solanaRpc"
 import { AnchorUnreachableError, type RecordedProof } from "./validationHandlers"
 
 const SEAT_HOLDING_STATUSES = new Set(["2", "3"])
@@ -84,80 +83,20 @@ export async function mintHolder(mint: string): Promise<string | null> {
     }
 }
 
-/** The mnemonic the node identity is derived from, as the SDK expects it. */
-function nodeMnemonic(): string {
-    return readFileSync(getSharedState.identityFile, "utf8").trim()
-}
-
 /**
- * Records a signed Solana proof on Demos: a crosschainOperation carrying
- * the bytes, signed by this node and sent to the anchor, which forwards the
- * Solana transaction and admits the Demos one.
+ * Sends the signed proof to Solana through this node's own endpoints. The
+ * proof is already signed by the wallet, so nothing of the node's is spent.
  */
-export async function recordProofOnDemos(bytes: Uint8Array): Promise<RecordedProof> {
-    const demos = await anchorClient()
-    await demos.connectWallet(nodeMnemonic())
-    const tx = await prepareXMPayload(proofXmScript(bytes), demos)
-
-    // The SDK throws on an invalid transaction at confirm and on a refused
-    // broadcast; both are answers for the operator, not server faults.
-    let validity: Awaited<ReturnType<Demos["confirm"]>>
+export async function sendProofToSolana(bytes: Uint8Array): Promise<RecordedProof> {
     try {
-        validity = await demos.confirm(tx)
+        const signature = await withSolana("sendRawTransaction(proof)", connection =>
+            connection.sendRawTransaction(bytes),
+        )
+        log.info(`[STAKING PAGE] proof sent to Solana as ${signature}`)
+        return { accepted: true, message: "proof sent to Solana" }
     } catch (e) {
-        const message = sdkReason(e)
-        log.warning(`[STAKING PAGE] proof tx refused at confirm: ${message}`)
-        return { accepted: false, demosTxHash: null, message }
+        const message = e instanceof Error ? e.message : String(e)
+        log.warning(`[STAKING PAGE] proof refused by Solana: ${message}`)
+        return { accepted: false, message }
     }
-    const data = validity?.response?.data as
-        | { valid?: boolean; message?: string; transaction?: { hash?: string } }
-        | undefined
-    const demosTxHash = data?.transaction?.hash ?? null
-    if (!data?.valid || demosTxHash === null) {
-        const message = data?.message ?? "anchor did not confirm the proof transaction"
-        log.warning(`[STAKING PAGE] proof tx refused at confirm: ${message}`)
-        return { accepted: false, demosTxHash, message }
-    }
-
-    let broadcast: { result?: number; response?: unknown; extra?: unknown }
-    try {
-        broadcast = (await demos.broadcast(validity)) as typeof broadcast
-    } catch (e) {
-        const message = sdkReason(e)
-        log.warning(`[STAKING PAGE] proof tx ${demosTxHash} refused at broadcast: ${message}`)
-        return { accepted: false, demosTxHash, message }
-    }
-    if (broadcast?.result !== 200) {
-        const message = describeBroadcastFailure(broadcast)
-        log.warning(`[STAKING PAGE] proof tx ${demosTxHash} refused at broadcast: ${message}`)
-        return { accepted: false, demosTxHash, message }
-    }
-    log.info(`[STAKING PAGE] proof recorded on Demos as ${demosTxHash}`)
-    return { accepted: true, demosTxHash, message: "proof sent to Solana and recorded on Demos" }
-}
-
-/** The SDK's error text without its "[Confirm] Transaction is not valid:" style prefix. */
-function sdkReason(e: unknown): string {
-    const text = e instanceof Error ? e.message : String(e)
-    return text.replace(/^\[(Confirm|Broadcast)\] Transaction is not valid:\s*/, "").trim() || "anchor refused the proof transaction"
-}
-
-export const sdkReasonForTesting = sdkReason
-
-function describeBroadcastFailure(broadcast: { response?: unknown; extra?: unknown }): string {
-    const response = broadcast.response as { message?: unknown; results?: unknown } | undefined
-    if (response && typeof response === "object") {
-        if (typeof response.message === "string" && response.message !== "all_ops_failed") return response.message
-        if (response.results && typeof response.results === "object") {
-            const errors = Object.values(response.results as Record<string, { error?: unknown }>)
-                .map(r => r?.error)
-                .filter(e => e !== undefined)
-                .map(e => (typeof e === "string" ? e : JSON.stringify(e)))
-            if (errors.length > 0) return `Solana send failed: ${errors.join("; ")}`
-        }
-    }
-    const extra = broadcast.extra as { error?: unknown } | string | undefined
-    if (typeof extra === "string") return extra
-    if (extra && typeof extra === "object" && typeof extra.error === "string") return extra.error
-    return "anchor rejected the proof transaction"
 }

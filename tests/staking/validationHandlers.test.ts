@@ -58,7 +58,7 @@ function deps(over: Partial<ValidationDeps> = {}): Deps {
         nodeHoldsSeat: jest.fn(async () => false),
         mintHolder: jest.fn(async () => null),
         isAllowlistedMint: () => true,
-        recordProof: jest.fn(async () => ({ accepted: true, demosTxHash: "0xdemos", message: "ok" })),
+        recordProof: jest.fn(async () => ({ accepted: true, message: "ok" })),
         fetch: jest.fn(async () => new Response("{\"jsonrpc\":\"2.0\",\"result\":42,\"id\":1}", { status: 200 })),
         ...over,
     } as Deps
@@ -177,14 +177,13 @@ describe("proof submission", () => {
     const submit = (h: ReturnType<typeof createValidationHandlers>, bytes: Uint8Array) =>
         h.submit(post(STAKING_SUBMIT_PATH, { transaction: Buffer.from(bytes).toString("base64") }))
 
-    it("records a valid proof for this node and returns both hashes", async () => {
+    it("sends a valid proof for this node and returns its signature", async () => {
         const d = deps()
         const h = createValidationHandlers(d)
         const bytes = signedProof()
         const res = await submit(h, bytes)
         expect(res.status).toBe(200)
         const out = await body(res)
-        expect(out.demosTxHash).toBe("0xdemos")
         expect(out.owner).toBe(owner.publicKey.toBase58())
         expect(out.mint).toBe(mint.toBase58())
         expect(typeof out.solanaSignature).toBe("string")
@@ -235,13 +234,13 @@ describe("proof submission", () => {
         expect(res.status).toBe(503)
     })
 
-    it("passes a refused Demos transaction back as 502 with the reason", async () => {
+    it("passes a proof Solana refused back as 502 with the reason", async () => {
         const d = deps({
-            recordProof: jest.fn(async () => ({ accepted: false, demosTxHash: "0xdead", message: "Solana send failed: blockhash not found" })),
+            recordProof: jest.fn(async () => ({ accepted: false, message: "blockhash not found" })),
         })
         const res = await submit(createValidationHandlers(d), signedProof())
         expect(res.status).toBe(502)
-        expect(await body(res)).toEqual({ error: "Solana send failed: blockhash not found", demosTxHash: "0xdead" })
+        expect(await body(res)).toEqual({ error: "blockhash not found" })
     })
 
     it("counts a submission against the hourly budget", async () => {

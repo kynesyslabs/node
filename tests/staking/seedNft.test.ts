@@ -36,14 +36,13 @@ const row = (over: Record<string, unknown> = {}) => ({
 })
 
 describe("a seeded validator set under NFT gating", () => {
-    it("passes when every seat carries an allowlisted, unique NFT and the minimum stake", () => {
-        expect(seededNftReasons([row(), row({ address: "0x" + "b".repeat(64), nft_mint: MINT2 })], "g")).toEqual([])
+    it("passes when every seat carries an allowlisted, unique NFT and a stake of 0", () => {
+        expect(seededNftReasons([row({ staked_amount: "0" }), row({ address: "0x" + "b".repeat(64), nft_mint: MINT2 })], "g")).toEqual([])
     })
 
-    it("seats an nft_exempt row without NFT fields, still held to the minimum stake", () => {
+    it("seats an nft_exempt row without NFT fields", () => {
         const exempt = { address: "0x" + "c".repeat(64), status: "2", staked_amount: "1000", nft_exempt: true }
         expect(seededNftReasons([row(), exempt], "g")).toEqual([])
-        expect(seededNftReasons([{ ...exempt, staked_amount: "999" }], "g")[0]).toContain("below the minimum")
         expect(seededNftReasons([{ ...exempt, nft_mint: null, nft_owner: null, nft_proof_tx: null }], "g")).toEqual([])
     })
 
@@ -69,10 +68,6 @@ describe("a seeded validator set under NFT gating", () => {
     it("refuses one mint backing two seats", () => {
         const reasons = seededNftReasons([row(), row({ address: "0x" + "b".repeat(64) })], "g")
         expect(reasons[0]).toContain("already backs")
-    })
-
-    it("refuses a stake below the minimum", () => {
-        expect(seededNftReasons([row({ staked_amount: "999" })], "g")[0]).toContain("below the minimum")
     })
 
     it("ignores exited rows, which hold no seat", () => {
@@ -117,8 +112,8 @@ describe("a seeded validator set checked against Solana", () => {
     })
 
     it("stops at the shape rules before touching Solana", async () => {
-        const reasons = await verifySeededNfts([row({ staked_amount: "999" })], "g")
-        expect(reasons[0]).toContain("below the minimum")
+        const reasons = await verifySeededNfts([row({ nft_mint: "3BadMintxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" })], "g")
+        expect(reasons[0]).toContain("allowlist")
         expect(verifyNftProof).not.toHaveBeenCalled()
     })
 })

@@ -83,7 +83,7 @@ function stakeTx(payload: Record<string, unknown>) {
             from: SENDER,
             from_ed25519_address: SENDER,
             timestamp: 1_700_000_600_000,
-            data: ["validatorStake", { amount: MIN, connectionUrl: "https://v.example", ...payload }],
+            data: ["validatorStake", { amount: "0", connectionUrl: "https://v.example", ...payload }],
         },
         hash: "0xstake",
     } as any
@@ -209,14 +209,14 @@ describe("taking a seat", () => {
 describe("topping up", () => {
     it("needs no proof and skips Solana", async () => {
         jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
-        const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ amount: "1" }))
+        const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({}))
         expect(r.valid).toBe(true)
         expect(solana.proof).not.toHaveBeenCalled()
     })
 
     it("refuses any proof, even for the seat's own mint, since it would go unchecked", async () => {
         jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(seat() as never)
-        const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ amount: "1", nft }))
+        const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx({ nft }))
         expect(r.valid).toBe(false)
         expect(r.message).toContain("cannot carry an NFT proof")
         expect(solana.proof).not.toHaveBeenCalled()

@@ -9,7 +9,6 @@ import validateIfUint8Array from "@/utilities/validateUint8Array"
 import handleAptosPayRest from "./aptos_pay_rest"
 import log from "@/utilities/logger"
 import { VersionedTransaction } from "@solana/web3.js"
-import { resolveSolanaEndpoints } from "@/features/staking/solanaRpc"
 
 /**
  * Executes a XM pay operation and returns
@@ -49,14 +48,8 @@ export default async function handlePayOperation(
     log.debug("[XMScript Parser] Non-EVM PAY")
 
     // ANCHOR Ripple
-    // A Solana mainnet operation without an RPC runs on this node's own
-    // endpoints, so a keyed URL never has to travel in the payload.
     const rpcUrl =
-        operation.rpc ||
-        (operation.chain === "solana" && operation.subchain === "mainnet"
-            ? resolveSolanaEndpoints()[0]
-            : undefined) ||
-        chainProviders[operation.chain][operation.subchain]
+        operation.rpc || chainProviders[operation.chain][operation.subchain]
     if (!rpcUrl) {
         return {
             result: "error",

@@ -19,7 +19,6 @@ import {
     buildProofTransaction,
     decodeProofTransaction,
     normalizeDemosAddress,
-    proofXmScript,
     transferCheckedData,
 } from "@/features/staking/proofBytes"
 
@@ -183,19 +182,5 @@ describe("normalizeDemosAddress", () => {
         expect(normalizeDemosAddress(DEMOS.toUpperCase())).toBe(DEMOS)
         expect(normalizeDemosAddress("0x12")).toBeNull()
         expect(normalizeDemosAddress("zz".repeat(32))).toBeNull()
-    })
-})
-
-describe("proofXmScript", () => {
-    it("wraps the bytes as one Solana pay operation with no RPC and reads the signature back after JSON", () => {
-        const tx = proof()
-        const bytes = signed(tx)
-        const script = proofXmScript(bytes)
-        const [id] = script.operations_order as string[]
-        const operation = (script.operations as Record<string, { chain: string; rpc: string; task: { type: string } }>)[id]
-        expect(operation.chain).toBe("solana")
-        expect(operation.rpc).toBe("")
-        expect(operation.task.type).toBe("pay")
-        expect(new PublicKey(decodeOk(bytes).owner).equals(owner.publicKey)).toBe(true)
     })
 })

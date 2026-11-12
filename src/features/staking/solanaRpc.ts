@@ -3,9 +3,9 @@ import { Config } from "src/config"
 import log from "src/utilities/logger"
 
 /**
- * Solana reads for validator gating, tried against each configured endpoint
- * in turn: the SOLANA_RPC list, then Helius when a key is set, then the
- * public mainnet endpoint.
+ * Solana reads for validator gating, asked of every configured endpoint at
+ * once: the SOLANA_RPC list, then Helius when a key is set, then the public
+ * mainnet endpoint.
  */
 
 export const PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
@@ -78,25 +78,28 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
 }
 
 /**
- * Run `read` against each endpoint until one answers. A thrown error or a
- * timeout moves to the next endpoint; when all fail the read is unreachable.
+ * Run `read` against every endpoint at once and take the first answer, so a
+ * read costs one timeout however many endpoints hang. An error or timeout at
+ * one endpoint is ignored while another answers; when all fail the read is
+ * unreachable.
  */
 export async function withSolana<T>(
     what: string,
     read: (connection: Connection) => Promise<T>,
 ): Promise<T> {
-    const timeoutMs = SOLANA_RPC_TIMEOUT_MS
-    const failures: string[] = []
-    for (const url of resolveSolanaEndpoints()) {
-        try {
-            return await withTimeout(read(connectionFor(url)), timeoutMs, what)
-        } catch (e) {
+    const attempts = resolveSolanaEndpoints().map(url =>
+        withTimeout(read(connectionFor(url)), SOLANA_RPC_TIMEOUT_MS, what).catch((e: unknown) => {
             const message = e instanceof Error ? e.message : String(e)
-            failures.push(`${describeEndpoint(url)}: ${message}`)
             log.warning(`[SOLANA] ${what} failed at ${describeEndpoint(url)}: ${message}`)
-        }
+            throw new Error(`${describeEndpoint(url)}: ${message}`)
+        }),
+    )
+    try {
+        return await Promise.any(attempts)
+    } catch (e) {
+        const failures = e instanceof AggregateError ? e.errors.map(f => String((f as Error).message)) : [String(e)]
+        throw new SolanaUnreachableError(`${what}: ${failures.join("; ")}`)
     }
-    throw new SolanaUnreachableError(`${what}: ${failures.join("; ")}`)
 }
 
 /** One `getSlot` per endpoint, for the boot check. */

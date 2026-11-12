@@ -284,22 +284,13 @@ function snapshotValidators(
         if (v.unstake_requested_at !== null || v.unstake_available_at !== null) {
             problems.push(`validators.jsonl row ${address} has an unstake under way`)
         }
-        if (!isPositiveStake(v.staked_amount)) {
+        if (!/^\d+$/.test(v.staked_amount)) {
             problems.push(
-                `validators.jsonl row ${address} has staked_amount "${v.staked_amount}", which must be a positive integer`,
+                `validators.jsonl row ${address} has staked_amount "${v.staked_amount}", which must be a non-negative integer`,
             )
         }
     }
     return fromSnapshot
-}
-
-/**
- * With validators.jsonl in the snapshot, block 0 seeds its rows directly and
- * skips seedValidators, the other place that refuses a stake of 0, and the
- * active-set query has no stake filter.
- */
-function isPositiveStake(stake: string): boolean {
-    return /^[1-9]\d*$/.test(stake)
 }
 
 function genesisValidatorMap(

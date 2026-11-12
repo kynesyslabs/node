@@ -114,7 +114,7 @@ function stakeEdit(overrides: Record<string, unknown> = {}) {
         isRollback: false,
         account: "aabbcc",
         operation: "stake",
-        amount: "10000000000000000000000000",
+        amount: "0",
         connectionUrl: "https://v1.example",
         nft: { mint: "4".repeat(44), owner: "5".repeat(44), proofTx: "6".repeat(88) },
         txhash: "0xtxstake",
@@ -142,7 +142,7 @@ describe("GCRValidatorStakeRoutines", () => {
     })
 
     describe("stake", () => {
-        it("creates a new validator row with the supplied amount", async () => {
+        it("creates a new validator row with a stake of 0", async () => {
             const repo = createMockRepo(null)
             const r = await GCRValidatorStakeRoutines.apply(
                 stakeEdit() as any,
@@ -155,7 +155,7 @@ describe("GCRValidatorStakeRoutines", () => {
                 address: "aabbcc",
                 status: VALIDATOR_STATUS_ACTIVE,
                 connection_url: "https://v1.example",
-                staked_amount: "10000000000000000000000000",
+                staked_amount: "0",
                 first_seen: 100,
                 valid_at: 100,
                 unstake_requested_at: null,
@@ -163,27 +163,29 @@ describe("GCRValidatorStakeRoutines", () => {
             })
         })
 
-        it("adds to the existing stake on a repeat stake tx", async () => {
+        it("keeps the recorded stake on a repeat stake tx", async () => {
             const existing = validatorRow({ staked_amount: "5" })
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
-                stakeEdit({ amount: "7" }) as any,
+                stakeEdit() as any,
                 repo as any,
                 100,
             )
             expect(r.success).toBe(true)
-            expect(repo.state.row?.staked_amount).toBe("12")
+            expect(repo.state.row?.staked_amount).toBe("5")
         })
 
-        it("rejects a zero stake amount", async () => {
+        it("rejects any amount but 0", async () => {
             const repo = createMockRepo(null)
-            const r = await GCRValidatorStakeRoutines.apply(
-                stakeEdit({ amount: "0" }) as any,
-                repo as any,
-                100,
-            )
-            expect(r.success).toBe(false)
-            expect(r.message).toContain("positive")
+            for (const amount of ["1", "-1", "1000000000000000000000000000000"]) {
+                const r = await GCRValidatorStakeRoutines.apply(
+                    stakeEdit({ amount }) as any,
+                    repo as any,
+                    100,
+                )
+                expect(r.success).toBe(false)
+                expect(r.message).toContain("must be 0")
+            }
         })
 
         it("rejects a non-numeric stake amount", async () => {
@@ -210,13 +212,13 @@ describe("GCRValidatorStakeRoutines", () => {
             } as any)
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
-                stakeEdit({ amount: "3" }) as any,
+                stakeEdit() as any,
                 repo as any,
                 100,
             )
             expect(r.success).toBe(true)
             expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_ACTIVE)
-            expect(repo.state.row?.staked_amount).toBe("13")
+            expect(repo.state.row?.staked_amount).toBe("10")
             expect(repo.state.row?.unstake_requested_at).toBeNull()
             expect(repo.state.row?.unstake_available_at).toBeNull()
         })
