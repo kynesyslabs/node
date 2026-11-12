@@ -1006,7 +1006,9 @@ async function main() {
         }
 
         // Start L2PS Messaging server (failsafe). It turns messages into L2PS
-        // transactions, so it stays down while l2psGate is active.
+        // transactions, so it stays down while l2psGate is active; a server
+        // started below a later gate height refuses every frame once the
+        // gate activates.
         if (indexState.L2PS_MESSAGING_ENABLED && l2psOff()) {
             log.info(
                 "[L2PS-IM] Messaging server not started: L2PS is off on this network (fork l2psGate)",
