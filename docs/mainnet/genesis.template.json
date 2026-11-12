@@ -83,6 +83,12 @@
     "tlsnProofEnforcement": {
       "activationHeight": 0
     },
+    "l2psGate": {
+      "activationHeight": 0
+    },
+    "tlsnDisabled": {
+      "activationHeight": 0
+    },
     "xmProofBinding": {
       "activationHeight": null
     },

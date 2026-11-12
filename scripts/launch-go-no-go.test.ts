@@ -666,6 +666,12 @@ describe("checkLaunch", () => {
         })
     })
 
+    it("launches with L2PS and TLSNotary off", () => {
+        expect(MAINNET_FORKS).toContain("l2psGate")
+        expect(MAINNET_FORKS).toContain("tlsnDisabled")
+        expect(MAINNET_FORKS).toHaveLength(26)
+    })
+
     it("is NO-GO without a genesis file, whose forks and validators it cannot check", () => {
         const d = checkLaunch({ ...base, genesis: null, blockZero: null, launchValidators: launch })
         expect(d.go).toBe(false)

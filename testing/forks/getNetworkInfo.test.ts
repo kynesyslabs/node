@@ -274,6 +274,8 @@ describe("getNetworkInfo RPC handler", () => {
         expect(Object.keys(body.forks).sort()).toEqual(Object.keys(getSharedState.forkConfig).sort())
         expect(Object.keys(body.forks)).toContain("atomicWork")
         expect(Object.keys(body.forks)).toContain("tlsnProofEnforcement")
+        expect(Object.keys(body.forks)).toContain("l2psGate")
+        expect(Object.keys(body.forks)).toContain("tlsnDisabled")
     })
 
     it("publishes the gasFeeSeparation treasury beside its height, and no payload for other forks", async () => {

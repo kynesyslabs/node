@@ -8,6 +8,7 @@ import type { L2PSTransaction } from "@/model/entities/L2PSTransactions"
 import { resolveHistoryEntry, subnetDecryptor } from "@/libs/l2ps/historyPayload"
 import { historyAuthMessageV2, readPageValue, type HistoryPageParams } from "@/libs/l2ps/historyAuth"
 import { isRefusal, parseHistoryRequest } from "@/libs/l2ps/historyRequest"
+import { L2PS_GATE_REFUSAL, l2psOff } from "@/forks/l2psGate"
 
 const historyAuthHint = (data: any) => ({
     messageV2:
@@ -127,7 +128,7 @@ function historyRow(
     }
 }
 
-export const l2psHandlers: Record<string, NodeCallHandler> = {
+const handlers: Record<string, NodeCallHandler> = {
     getL2PSParticipationById: async (data, response) => {
         log.debug("[L2PS] Received L2PS participation query")
         if (!data.l2psUid || typeof data.l2psUid !== "string") {
@@ -341,3 +342,19 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         return response
     },
 }
+
+/** Refuses before the handler reads anything while `l2psGate` is active. */
+function l2psGated(handler: NodeCallHandler): NodeCallHandler {
+    return async (data, response, sender) => {
+        if (l2psOff()) {
+            response.result = 403
+            response.response = L2PS_GATE_REFUSAL
+            return response
+        }
+        return handler(data, response, sender)
+    }
+}
+
+export const l2psHandlers: Record<string, NodeCallHandler> = Object.fromEntries(
+    Object.entries(handlers).map(([name, handler]) => [name, l2psGated(handler)]),
+)

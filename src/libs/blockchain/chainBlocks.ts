@@ -48,6 +48,7 @@ import {
     recordValidatorSetSnapshot,
 } from "./finality/validatorSet"
 import { withBlockTime } from "./gcr/applyTime"
+import { l2psOffAt } from "@/forks/l2psGate"
 import { pruneStorageHistory, resetStorageHistory } from "./finality/storageHistory"
 
 export function isGenesis(block: Block): boolean {
@@ -494,9 +495,13 @@ export async function insertBlock(
                         )
                     }
 
-                    const l2psTxs = transactionEntities.filter(
-                        tx => tx.content?.type === "l2ps_hash_update",
-                    )
+                    // Under l2psGate apply refuses every hash update, so none
+                    // may leave a row either. Block N is applied on tip N - 1.
+                    const l2psTxs = l2psOffAt(block.number - 1)
+                        ? []
+                        : transactionEntities.filter(
+                              tx => tx.content?.type === "l2ps_hash_update",
+                          )
                     for (const tx of l2psTxs) {
                         await persistConfirmedTransactionProjection(
                             tx,
