@@ -43,6 +43,7 @@ import {
     NON_MAINNET_CHAIN_IDS,
     type ForkName,
 } from "src/forks/forkConfig"
+import { treasuryAddressProblem } from "src/forks/treasuryAddress"
 import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import {
@@ -181,6 +182,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "telegramSenderBinding",
     "xmRemoveCanonical",
     "tokenStakingGate",
+    "gasFeeSeparation",
     "web2ProofBinding",
     "tlsnProofEnforcement",
 ]
@@ -635,8 +637,13 @@ export function mainnetForkReasons(genesis: { forks?: unknown } | null): string[
         )
     }
     const gas = forks.gasFeeSeparation
-    if (gas && gas.activationHeight !== null && gas.activationHeight !== undefined && typeof gas.treasuryAddress !== "string") {
-        reasons.push("fork gasFeeSeparation is scheduled without a treasuryAddress; the code default would receive the fees")
+    if (gas?.activationHeight !== null && gas?.activationHeight !== undefined) {
+        if (typeof gas.treasuryAddress !== "string") {
+            reasons.push("fork gasFeeSeparation is scheduled without a treasuryAddress; the code default would receive the fees")
+        } else {
+            const problem = treasuryAddressProblem(gas.treasuryAddress)
+            if (problem) reasons.push(`fork gasFeeSeparation is scheduled with a treasuryAddress the node refuses: ${problem}`)
+        }
     }
     return reasons
 }
