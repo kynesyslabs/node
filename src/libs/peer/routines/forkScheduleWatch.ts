@@ -291,13 +291,15 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
     // Only staked validators count: a non-validator can open a connection and
     // answer getNetworkInfo with anything, and must not be able to sway the
     // majority. With no staked set (bare dev networks) every peer counts, as in
-    // the shard pool. If the set cannot be read the round is skipped.
+    // the shard pool. If the set cannot be read the round is skipped: the
+    // lenient read answers a failure with an empty set, which would let every
+    // connected peer count.
     let validators: Set<string> | null
     try {
         const { readActiveValidatorAddresses } = await import(
             "@/libs/consensus/v2/routines/getShard"
         )
-        const staked = await readActiveValidatorAddresses(tip)
+        const staked = await readActiveValidatorAddresses(tip, true)
         validators = staked.size > 0 ? new Set([...staked].map(a => a.toLowerCase())) : null
     } catch (error) {
         log.warn(

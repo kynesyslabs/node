@@ -92,7 +92,7 @@ describe("rounds that become due while one is still running", () => {
             getPeers: () => [peer],
         } as never)
         // The watch compares staked validators only, so the peer must be in the set.
-        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue([
             { address: "peer" },
         ] as never)
 

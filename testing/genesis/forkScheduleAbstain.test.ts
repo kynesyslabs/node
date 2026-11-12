@@ -183,7 +183,7 @@ describe("a validator with a different gasFeeSeparation treasury", () => {
         } as never)
         const saved = getSharedState.forkConfig
         getSharedState.forkConfig = { signatureDomain: { activationHeight: 1000 } } as never
-        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([] as never)
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue([] as never)
         try {
             await ensureWindowChecked(960)
             expect(asked).toBe(1)
@@ -415,7 +415,7 @@ describe("the recheck timer while abstaining", () => {
                 { identity: "peer", connection: { string: "http://peer" }, call: peerCall },
             ],
         } as never)
-        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue([
             { address: "peer" },
         ] as never)
         try {
@@ -564,7 +564,7 @@ describe("the watch end to end", () => {
         const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
             getPeers: () => [peer],
         } as never)
-        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue([
             { address: "peer" },
         ] as never)
 
@@ -621,7 +621,7 @@ describe("the watch end to end", () => {
         const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
             getPeers: () => peers,
         } as never)
-        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue([
             { address: "Validator" },
         ] as never)
         try {
@@ -641,7 +641,12 @@ describe("a treasury mismatch end to end", () => {
     const TREASURY = "0x" + "7e".repeat(32)
     const OTHER = "0x" + "11".repeat(32)
 
-    async function withPeer(theirTreasury: string, run: () => Promise<void>, height = 0) {
+    async function withPeer(
+        theirTreasury: string,
+        run: () => Promise<void>,
+        height = 0,
+        readValidators: () => Promise<unknown[]> = async () => [{ address: "peer" }],
+    ) {
         const PeerManager = (await import("src/libs/peer/PeerManager")).default
         const agreement = await import("src/libs/peer/routines/forkScheduleAgreement")
         const saved = { forkConfig: getSharedState.forkConfig, chainId: getSharedState.chainId }
@@ -665,9 +670,9 @@ describe("a treasury mismatch end to end", () => {
         const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
             getPeers: () => [peer],
         } as never)
-        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
-            { address: "peer" },
-        ] as never)
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockImplementation(
+            readValidators as never,
+        )
         try {
             await run()
         } finally {
@@ -708,6 +713,27 @@ describe("a treasury mismatch end to end", () => {
             },
             1000,
         )
+    }, 30000)
+
+    it("skips the round when the validator set cannot be read, so a connected non-validator cannot sway it", async () => {
+        // The lenient read answers a failed query with no validators at all.
+        const lenient = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([] as never)
+        try {
+            await withPeer(
+                OTHER,
+                async () => {
+                    await onBlockInserted(5000)
+                    expect(getSharedState.forkScheduleAbstain).toBe(false)
+                    expect(gauges.fork_schedule_mismatch).toBeUndefined()
+                },
+                0,
+                async () => {
+                    throw new Error("connection terminated")
+                },
+            )
+        } finally {
+            lenient.mockRestore()
+        }
     }, 30000)
 
     it("runs a round on request, without waiting for a due block", async () => {
@@ -763,7 +789,7 @@ describe("the check before the first round inside the window", () => {
         const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
             getPeers: () => [peer],
         } as never)
-        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue([
             { address: "peer" },
         ] as never)
         try {
@@ -822,7 +848,7 @@ describe("the check before the first round inside the window", () => {
         const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
             getPeers: () => [],
         } as never)
-        const validators = spyOn(GCR, "getGCRValidatorsAtBlock").mockResolvedValue([
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue([
             { address: "peer" },
         ] as never)
         try {
