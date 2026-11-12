@@ -77,6 +77,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         blockTimestampMinDelta: 1,
         blockTimestampTolerance: 60,
         logLevel: "info",
+        logsDir: "",
         whitelistedIPs: [],
         whitelistedKeys: [],
         trustedProxies: [],

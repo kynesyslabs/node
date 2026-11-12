@@ -3,7 +3,7 @@
 #
 # Bridges the writable runtime files the node creates at /app/<file> to the
 # persistent volume at /app/state, so they survive `docker compose down`.
-# Also routes the timestamped logs_<port>_<id>/ directory into /app/logs.
+# Also points the node's logs_<port>_<id>/ directory at the /app/logs volume.
 #
 # Files bridged:
 #   /app/.demos_identity             <- /app/state/.demos_identity
@@ -19,13 +19,24 @@
 # identity file and its .signed.json must then be on a persistent volume.
 #
 # Logs:
-#   /app/logs_*  -> /app/logs/  (the legacy logger writes one dir per port+id)
+#   The node writes one logs_<port>_<id>/ dir per port+id under $LOGS_DIR
+#   (default /app/logs, the node_logs volume).
 set -eu
 
 STATE_DIR="${STATE_DIR:-/app/state}"
 LOGS_DIR="${LOGS_DIR:-/app/logs}"
 
 mkdir -p "$STATE_DIR" "$LOGS_DIR"
+
+# The node reads LOGS_DIR and creates logs_<port>_<id>/ inside it. A volume the
+# node user cannot write to keeps the old behaviour (logs in /app, which the
+# container loses on recreation) instead of stopping the node at startup.
+if [ -w "$LOGS_DIR" ]; then
+    export LOGS_DIR
+else
+    echo "entrypoint: $LOGS_DIR is not writable; node logs stay in /app and are lost when the container is recreated" >&2
+    unset LOGS_DIR
+fi
 
 # Files: create on volume if absent, then symlink from /app.
 # The node generates these on demand on first boot — we don't pre-create.
