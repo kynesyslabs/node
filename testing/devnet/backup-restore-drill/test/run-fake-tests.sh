@@ -18,7 +18,7 @@ ONLY="${1:-}"
 base_env() {
     export PATH="${HERE}/fake-bin:${PATH}"
     export IDENTITY_GEN=host LOAD_MAX=100000 NODE_EST_MB=1 HEADROOM_MB=1 MIN_DISK_GB=1
-    export BASE_PORT=65100 PROJECT=demos-faketest SERVE_TIMEOUT=30 BRINGUP_TIMEOUT=60 REJOIN_TIMEOUT=60 SIGN_TIMEOUT=60
+    export BASE_PORT=65100 PROJECT=demos-faketest SERVE_TIMEOUT=30 BRINGUP_TIMEOUT=60 REJOIN_TIMEOUT=60 SIGN_TIMEOUT=60 END_CHAIN_TIMEOUT=6
 }
 
 # go NAME [VAR=value ...]: run.sh with that environment; output in $WORK/NAME.out, exit code in RC
@@ -513,7 +513,7 @@ if sel rejoin-falls-behind; then
     go rejoin-falls-behind FAKE_REJOIN_LAG=9:signed FAKE_SLOW_RESTORE=6
     want_rc 1
     want_out 'PHASE D rejoin: head within 2 blocks and node signing' "phase D reached"
-    want_out 'CHECK FAIL: node 4 within 2 blocks of the others at the end of D, on their chain \(head [0-9]+ vs others [0-9]+; node 4 more than 2 blocks behind; it came within 2 blocks during D\)' "behind at the end of D: FAIL"
+    want_out 'CHECK FAIL: node 4 within 2 blocks of the others at the end of D, on their chain \(after 6s: head [0-9]+ vs others [0-9]+; node 4 more than 2 blocks behind; it came within 2 blocks during D\)' "behind at the end of D, through END_CHAIN_TIMEOUT: FAIL"
     no_out 'RESULT PASS' "RESULT PASS"
     one_fail 'node 4 within 2 blocks of the others at the end of D'
     torn_down
@@ -772,15 +772,22 @@ if sel stale-blocks; then
 fi
 
 # ── the chain reads on given answers ────────────────────────────────────
-# run.sh's own head_of, block_at, hash_at and same_chain (run.sh cannot be sourced: it runs
-# the drill), with rpc answering a head read from ${CDIR}/heads ("node head" lines) and a
-# read of a height from ${CDIR}/blocks ("node<TAB>height<TAB>block JSON" lines), so a read
-# can be answered with another block than the one asked for
+# run.sh's own head_of, block_at, hash_at, same_chain and same_chain_within (run.sh cannot
+# be sourced: it runs the drill), with rpc answering a head read from ${CDIR}/heads ("node
+# head" lines) and a read of a height from ${CDIR}/blocks ("node<TAB>height<TAB>block JSON"
+# lines), so a read can be answered with another block than the one asked for. sleep does
+# not wait: it moves SECONDS on by its argument, makes ${CDIR}/heads.next, if there, the
+# heads the next try reads, and adds a line to ${CDIR}/sleeps
 chain_of() { # the function and its arguments; prints PASS or FAIL: and what it printed
     (
         export PATH="${CHAIN_PATH}"
         # shellcheck disable=SC1090
-        source <(sed -n '/^is_num() {/p; /^head_of() {/,/^}/p; /^block_at() {/,/^}/p; /^hash_at() {/,/^}/p; /^same_chain() {/,/^}/p' "${DRILL}/run.sh")
+        source <(sed -n '/^is_num() {/p; /^head_of() {/,/^}/p; /^block_at() {/,/^}/p; /^hash_at() {/,/^}/p; /^same_chain() {/,/^}/p; /^same_chain_within() {/,/^}/p' "${DRILL}/run.sh")
+        sleep() {
+            echo "$1" >> "${CDIR}/sleeps"
+            SECONDS=$((SECONDS + $1))
+            if [ -f "${CDIR}/heads.next" ]; then mv "${CDIR}/heads.next" "${CDIR}/heads"; fi
+        }
         rpc() {
             local n
             n="$(jq -r '.params[0].data.blockNumber // empty' <<< "$2")"
@@ -850,6 +857,32 @@ chain_cases() { # $1 label, $2 PATH
 if sel chain-reads; then
     chain_cases "" "${PATH}"
     chain_cases -jq16 "${JQ16_PATH}"
+fi
+# The end-of-D check (same_chain_within, run.sh's END_CHAIN_TIMEOUT): node 1 one block below
+# node 4 on the first try and level on the next passes on that next try; node 1 below for
+# the whole 9 s window fails with the last try's reason, after more than one try
+if sel chain-retry; then
+    CASE=chain-retry
+    CDIR="${WORK}/${CASE}"
+    mkdir -p "${CDIR}"
+    CHAIN_PATH="${PATH}"
+    : > "${CDIR}/blocks"
+    for i in 4 1 2 3; do for h in $(seq 15 20); do blk "${i}" "${h}" "${h}" "hash${h}"; done; done
+    printf '4 20\n1 19\n2 20\n3 20\n' > "${CDIR}/heads"
+    printf '4 20\n1 20\n2 20\n3 20\n' > "${CDIR}/heads.next"
+    : > "${CDIR}/sleeps"
+    chain_of same_chain_within 9 17 4 1 2 3
+    want_out '^PASS: head 20 vs others 20; block 20 hash20\.\. on nodes 4 1 2 3$' "node 1 at 19, then at 20: PASS"
+    if [ "$(wc -l < "${CDIR}/sleeps")" = 1 ]; then ok "passed on the second try"; else bad "$(wc -l < "${CDIR}/sleeps") waits, wanted 1"; fi
+    # node 1 at 18, then at 19 for the rest of the window
+    printf '4 20\n1 18\n2 20\n3 20\n' > "${CDIR}/heads"
+    printf '4 20\n1 19\n2 20\n3 20\n' > "${CDIR}/heads.next"
+    : > "${CDIR}/sleeps"
+    chain_of same_chain_within 9 17 4 1 2 3
+    want_out "^FAIL: head 20 vs others 20; node 1 at 19, below node 4's head 20$" "node 1 below for the window: FAIL naming it, from the last try"
+    no_out '^PASS' "PASS while node 1 is below node 4"
+    n="$(wc -l < "${CDIR}/sleeps")"
+    if [ "${n}" -ge 2 ] && [ "${n}" -le 3 ]; then ok "${n} waits of 3 s in a 9 s window"; else bad "${n} waits, wanted 2 or 3 in a 9 s window"; fi
 fi
 
 # ── volumes that exist before the run ───────────────────────────────────
@@ -1055,9 +1088,10 @@ fi
 # so no new block in either variant's window. The restore's 6 s pg_restore
 # (FAKE_SLOW_RESTORE) gives the window five reads or more; with the default STALL_LIMIT
 # (90) it is still far shorter than the limit. The controls show the same settings
-# without the fault pass. Validators stuck below node 4's head at its stop (or the
-# restored database's head) have no common height above it, so the rejoin (catch-up)
-# check, which needs one, fails too: the stall check and it are the only failed checks
+# without the fault pass. With the validators stuck below node 4's head at its stop (or
+# the restored database's head), node X's (node-iso's) head cannot rise above it, so the
+# rejoin (catch-up) check, which needs that, fails too: the stall check and it are the
+# only failed checks
 if sel monitor-flat; then
     go monitor-flat-control FAKE_SLOW_RESTORE=6
     want_out 'CHECK PASS: other nodes never stalled while node 4 was down' "rejoin, no fault, the same settings: PASS"

@@ -71,6 +71,8 @@ BRINGUP_TIMEOUT="${BRINGUP_TIMEOUT:-900}"
 SERVE_TIMEOUT="${SERVE_TIMEOUT:-240}"
 REJOIN_TIMEOUT="${REJOIN_TIMEOUT:-420}"
 SIGN_TIMEOUT="${SIGN_TIMEOUT:-300}"
+# Seconds the chain check at the end of D tries again for (every 3 s; 0: one try)
+END_CHAIN_TIMEOUT="${END_CHAIN_TIMEOUT:-30}"
 STOP_GRACE="${STOP_GRACE:-10}"
 STALL_LIMIT="${STALL_LIMIT:-90}"
 # The one command that applies pending migrations (docs/runbooks/database-
@@ -119,7 +121,7 @@ is_num() { [[ "${1:-}" =~ ^[0-9]+$ ]]; }
 # ── configuration checks ────────────────────────────────────────────────
 cfg_err() { echo "config: $*" >&2; exit 2; }
 for v in BASE_PORT X_NODE SHARD_SIZE H0 CONSENSUS_TIME CPU_SHARES NODE_EST_MB HEADROOM_MB MIN_DISK_GB LOAD_MAX \
-    LOAD_WAIT_MAX LOAD_POLL GENESIS_DELAY BRINGUP_TIMEOUT SERVE_TIMEOUT REJOIN_TIMEOUT SIGN_TIMEOUT STOP_GRACE STALL_LIMIT \
+    LOAD_WAIT_MAX LOAD_POLL GENESIS_DELAY BRINGUP_TIMEOUT SERVE_TIMEOUT REJOIN_TIMEOUT SIGN_TIMEOUT END_CHAIN_TIMEOUT STOP_GRACE STALL_LIMIT \
     SMOKE_TIMEOUT SMOKE_HEAD MIGRATE_TIMEOUT; do
     is_num "${!v}" || cfg_err "${v} must be a whole number, got '${!v}'"
 done
@@ -421,6 +423,17 @@ same_chain() { # $1 floor, rest: nodes, the one judged first
         [ "${h}" = "${ref}" ] || { echo "${heads}; block ${hx} is ${h:0:12}.. on node ${i}, ${ref:0:12}.. on node $1"; return 1; }
     done
     echo "${heads}; block ${hx} ${ref:0:12}.. on nodes $*"
+}
+# same_chain, tried again every 3 s while it fails, for up to $1 seconds (0: one try).
+# Prints the try that passed, or the last try's reason, then returns 1
+same_chain_within() { # $1 seconds, rest: same_chain's arguments
+    local end=$((SECONDS + $1)) r
+    shift
+    until r="$(same_chain "$@")"; do
+        [ "${SECONDS}" -lt "${end}" ] || { echo "${r}"; return 1; }
+        sleep 3
+    done
+    echo "${r}"
 }
 
 # ── helpers: containers and volumes ─────────────────────────────────────
@@ -1275,12 +1288,13 @@ if [ "${VARIANT}" = rejoin ]; then
         check "restored head >= pre-wipe head" FAIL "head ${HX_END} < ${H_STOP}"
     fi
     # still within 2 blocks of the others now that D is over, not only once during it, and on
-    # their chain at node X's head, from heads all read again in same_chain
+    # their chain at node X's head, from heads all read again in same_chain. Tried again for
+    # up to END_CHAIN_TIMEOUT s: another node can store node X's newest block a moment later
     if [ "${SYNCED}" = 1 ]; then
-        if chain="$(same_chain "${H_STOP}" "${X_NODE}" "${OTHERS[@]}")"; then
+        if chain="$(same_chain_within "${END_CHAIN_TIMEOUT}" "${H_STOP}" "${X_NODE}" "${OTHERS[@]}")"; then
             check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" PASS "${chain}"
         else
-            check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" FAIL "${chain}; it came within 2 blocks during D"
+            check "node ${X_NODE} within 2 blocks of the others at the end of D, on their chain" FAIL "after ${END_CHAIN_TIMEOUT}s: ${chain}; it came within 2 blocks during D"
         fi
     fi
     # 2. hashes at the pre-wipe heights: each node's, node X's too, is the one recorded at
