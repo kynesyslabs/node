@@ -239,9 +239,9 @@ export function describeTxGate(spec: TxGate): void {
         it("fails them with no balance, nonce or attestation change", async () => {
             at(0)
             const txs = await spec.txs()
+            const out = await block.apply(txs)
             expect(new Set(out.failedTxs)).toEqual(new Set(txs.map(tx => tx.hash)))
             expect(out.failedTxs).toHaveLength(txs.length)
-            expect(out.failedTxs.sort()).toEqual(txs.map(tx => tx.hash).sort())
             expect(out.successfulTxs).toEqual([])
             expect(sender().balance).toBe(SENDER_BALANCE)
             expect(sender().nonce).toBe(7)
