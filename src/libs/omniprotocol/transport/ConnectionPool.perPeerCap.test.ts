@@ -76,6 +76,38 @@ describe("per-identity connection cap", () => {
         await pool.shutdown?.()
     })
 
+    it("evicts an idle inbound connection before an older one that waits for a reply", async () => {
+        const pool = new ConnectionPool({ maxConnectionsPerPeer: 2 })
+        const open = (lastActivity: number) => {
+            const conn = pool.handleInboundSocket(fakeSocket())
+            conn.adoptVerifiedIdentity(KEY)
+            ;(conn as any).lastActivity = lastActivity
+            return conn
+        }
+        const waiting = open(1_000)
+        let rejected: Error | undefined
+        waiting.inFlightRequests.set(1, {
+            resolve: () => {},
+            reject: (e: Error) => {
+                rejected = e
+            },
+            timer: setTimeout(() => {}, 0),
+            sentAt: 1_000,
+        })
+        const idle = open(5_000)
+        const fresh = open(Date.now())
+        await settle()
+
+        const held = pool.getConnections(KEY)
+        expect(held).toHaveLength(2)
+        expect(held).toContain(fresh)
+        expect(held).toContain(waiting)
+        expect(held).not.toContain(idle)
+        expect(rejected).toBeUndefined()
+        waiting.inFlightRequests.clear()
+        await pool.shutdown?.()
+    })
+
     it("still refuses past the cap when every slot is our own outbound connection", async () => {
         const pool = new ConnectionPool({ maxConnectionsPerPeer: 1 })
         const ours: any = { origin: "outbound", getState: () => 20, getLastActivity: () => 0, socketId: "ours", close: async () => {} }

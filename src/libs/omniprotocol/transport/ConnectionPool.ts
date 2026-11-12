@@ -204,9 +204,16 @@ export class ConnectionPool extends EventEmitter {
             // speaks for it (a halted copy of the key, a restarted peer's
             // half-open socket); refusing the newest would lock the live
             // holder out of this node, so the least recently used one goes.
+            // Closing rejects a connection's pending requests, so an idle one
+            // goes before any that still waits for a reply.
             const stalest = usableConnections
                 .filter(c => c.origin === "inbound")
-                .sort((a, b) => a.getLastActivity() - b.getLastActivity())[0]
+                .sort(
+                    (a, b) =>
+                        Number(a.inFlightRequests.size > 0) -
+                            Number(b.inFlightRequests.size > 0) ||
+                        a.getLastActivity() - b.getLastActivity(),
+                )[0]
             if (!stalest) {
                 log.error(
                     `[ConnectionPool] Max connections per peer reached for ${peerIdentity}`,
