@@ -12,6 +12,23 @@ export function isReferenceBlockAllowed(
     )
 }
 
+/**
+ * Whether a tx queued for `targetBlock` is still inside the window that
+ * block is built with: on the block before it, and never on less than our
+ * `head` (a queued block number at or below the head goes into the next
+ * block built).
+ */
+export function isReferenceBlockAllowedAt(
+    referenceBlock: number,
+    targetBlock: number,
+    head: number,
+): boolean {
+    return isReferenceBlockAllowed(
+        referenceBlock,
+        Math.max(targetBlock - 1, head),
+    )
+}
+
 export function deepWindowCutoff(lastBlock: number): number {
     return (
         lastBlock -

@@ -43,6 +43,7 @@ mock.module("../blockchain/gcr/handleGCR", () => ({
     default: { prepareEntities: async () => ({}), applyTransaction: async () => ({ success: true }) },
 }))
 mock.module("./txSubmission", () => ({ submitValidatedTx }))
+mock.module("src/libs/blockchain/mempool", () => ({ __esModule: true, default: { nextBlockRef: () => 101 } }))
 mock.module("src/libs/consensus/stakedSet", () => ({ isSelfStaked: async () => true }))
 const handleDemosWorkRequest = jest.fn(async (..._args: unknown[]) => ({ result: 200, response: {} }))
 mock.module("./routines/transactions/demosWork/handleDemosWorkRequest", () => ({
