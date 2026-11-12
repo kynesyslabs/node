@@ -1,6 +1,10 @@
 #!/bin/bash
 
+# PG_PORT as the operator set it in the shell, kept before the default below
+# overwrites it: with an external database (-e) it is still the operator's.
+OPERATOR_PG_PORT="${PG_PORT:-}"
 PG_PORT=5332
+PG_PORT_FROM_FLAG=false
 PEER_LIST_FILE="demos_peerlist.json"
 GOSSIP_PORT="${GOSSIP_PORT:-}"
 GOSSIP_KEY_FILE="${GOSSIP_KEY_FILE:-}"
@@ -80,7 +84,7 @@ Welcome to Demos Network! This script helps you run your blockchain node easily.
 
 OPTIONS:
     -p <port>                      Node port (default: 53550)
-    -d <port>                      PostgreSQL port (default: 5332)
+    -d <port>                      PostgreSQL port (default: 5332; with -e: PG_PORT from env or .env)
     -i <path>                      Identity file path (default: .demos_identity)
     -c <true/false>                Clean database on startup
     -U                             Update the checkout (git pull) before starting
@@ -108,7 +112,7 @@ EXAMPLES:
     ./run -U                       # Pull origin first (development only)
     ./run -t                       # Legacy mode (scrolling logs for developers)
     ./run --no-tui                 # Same as -t
-    ./run -e                       # Use external database (DATABASE_URL from env)
+    ./run -e                       # Use external database (PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE from env or .env)
     ./run --external-db            # Same as -e
 
 SYSTEM REQUIREMENTS:
@@ -522,7 +526,10 @@ done
 while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehmU" opt; do
 	case $opt in
 	p) PORT=$OPTARG ;;
-	d) PG_PORT=$OPTARG ;;
+	d)
+		PG_PORT=$OPTARG
+		PG_PORT_FROM_FLAG=true
+		;;
 	c) CLEAN=$OPTARG ;;
 	i) IDENTITY_FILE=$OPTARG ;;
 	l) PEER_LIST_FILE=$OPTARG ;;
@@ -548,6 +555,17 @@ while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehmU" opt; do
 	esac
 done
 shift $((OPTIND - 1))
+
+# With an external database the script's own default (5332, for the bundled
+# PostgreSQL) does not apply: PG_PORT is the -d value, else the shell's, else
+# unset, and the node then reads it from .env (or its default) itself.
+if [[ "${EXTERNAL_DB}" = true && "${PG_PORT_FROM_FLAG}" = false ]]; then
+	if [[ -n "${OPERATOR_PG_PORT}" ]]; then
+		PG_PORT=$OPERATOR_PG_PORT
+	else
+		unset PG_PORT
+	fi
+fi
 
 # if RESTORE is true, make clean false
 if [[ "${RESTORE}" == "true" ]]; then
@@ -627,6 +645,8 @@ echo "⚙️  Node Configuration:"
 echo "   🌐 Node Port: $PORT"
 if [[ "${EXTERNAL_DB}" = false ]]; then
 	echo "   🗄️  Database Port: $PG_PORT"
+else
+	echo "   🗄️  Database: host ${PG_HOST:-(PG_HOST from .env, default localhost)}, port ${PG_PORT:-(PG_PORT from .env, default 5332)}"
 fi
 if [[ ! -z "${IDENTITY_FILE}" ]]; then
 	echo "   🔑 Identity File: $IDENTITY_FILE"
@@ -642,7 +662,7 @@ if [[ ! -z "${GOSSIP_KEY_FILE}" ]]; then
 	echo "   🔐 Gossip Key File: $GOSSIP_KEY_FILE"
 fi
 if [[ "${EXTERNAL_DB}" = true ]]; then
-	echo "   🔗 Mode: External database (DATABASE_URL)"
+	echo "   🔗 Mode: External database (PG_HOST, PG_PORT, PG_USER, PG_PASSWORD, PG_DATABASE)"
 elif [[ "${RESTORE}" = "true" ]]; then
 	echo "   📦 Mode: Restore from backup"
 elif [[ "${CLEAN}" = "true" ]]; then
@@ -702,8 +722,11 @@ log_verbose "Using command: ${START_COMMAND}"
 echo "💡 This may take a moment to initialize all services..."
 sleep 1
 
-# PG_PORT and IDENTITY_FILE are exported for both docker and bun
-export PG_PORT=$PG_PORT
+# PG_PORT and IDENTITY_FILE are exported for both docker and bun (PG_PORT is
+# left alone when -e found no value: the node reads it from .env)
+if [[ -n "${PG_PORT:-}" ]]; then
+	export PG_PORT
+fi
 export IDENTITY_FILE=$IDENTITY_FILE
 export EXPOSED_URL=$EXPOSED_URL
 export PEER_LIST_FILE=$PEER_LIST_FILE
@@ -1046,9 +1069,9 @@ if [[ "${NO_TUI}" = true ]]; then
 fi
 
 # Starting the node managing errors
-log_verbose "Starting node with environment: RPC_PORT=${PORT} PG_PORT=${PG_PORT} IDENTITY_FILE=${IDENTITY_FILE}"
+log_verbose "Starting node with environment: RPC_PORT=${PORT} PG_PORT=${PG_PORT:-(from .env)} IDENTITY_FILE=${IDENTITY_FILE}"
 log_verbose "Command: ${FINAL_COMMAND}"
-if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND; then
+if ! RPC_PORT=$PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND; then
 	if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
 		echo ""
 		echo "✅ Demos Network node stopped successfully"
