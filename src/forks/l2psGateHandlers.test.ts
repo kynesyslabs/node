@@ -139,6 +139,34 @@ describe("L2PS services under l2psGate", () => {
         expect(s.aggStop).toHaveBeenCalled()
     })
 
+    it("stops a running service on its next cycle once a later gate height is reached", async () => {
+        gate(150)
+        const hash = L2PSHashService.getInstance() as any
+        const aggregator = L2PSBatchAggregator.getInstance() as any
+        const work = {
+            hash: spyOn(hash, "generateAndRelayHashes").mockResolvedValue(undefined),
+            batch: spyOn(aggregator, "aggregateAndSubmitBatches").mockResolvedValue(undefined),
+            cleanup: spyOn(aggregator, "cleanupOldBatchedTransactions").mockResolvedValue(undefined),
+            prune: spyOn(aggregator, "pruneHistoryRetention").mockResolvedValue(undefined),
+        }
+        spies.push(...Object.values(work))
+        hash.isRunning = true
+        aggregator.isRunning = true
+
+        await hash.safeGenerateAndRelayHashes()
+        await aggregator.safeAggregateAndSubmit()
+        expect(work.hash).toHaveBeenCalledTimes(1)
+        expect(work.batch).toHaveBeenCalledTimes(1)
+
+        getSharedState.lastBlockNumber = 150
+        await hash.safeGenerateAndRelayHashes()
+        await aggregator.safeAggregateAndSubmit()
+        expect(work.hash).toHaveBeenCalledTimes(1)
+        expect(work.batch).toHaveBeenCalledTimes(1)
+        expect(hash.isRunning).toBe(false)
+        expect(aggregator.isRunning).toBe(false)
+    })
+
     it("starts them as before while the gate is dormant", async () => {
         gate(null)
         const s = stubServices()

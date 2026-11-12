@@ -8,7 +8,9 @@ import { l2psOff } from "@/forks/l2psGate"
  * L2PS services change network state (they submit hash updates and batch
  * txs), so they run only while this node is staked and has joined at
  * least one L2PS network. Driven by the staked-set change hook; both
- * services have idempotent start/stop.
+ * services have idempotent start/stop. An l2psGate that activates later
+ * does not change the stake, so each service also stops itself on its
+ * next cycle once the gate is active at the tip.
  */
 export async function syncL2PSServices(staked: boolean): Promise<void> {
     const joined = getSharedState.l2psJoinedUids?.length ?? 0
