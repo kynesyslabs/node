@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>
 type Block = { number: number; hash: string; previous?: unknown; timestamp: number; signers: string[] }
 type Endpoint = { url: string; genesis: string; host: string; errors: number; up: number; head?: Block; shard?: number
-    unsupported: Map<string, number>; blocks: Map<number, Block> }
+    mark: number; unsupported: Map<string, number>; blocks: Map<number, Block> }
 // Bounds on what one endpoint can make the watcher parse, compute or label in one poll. They do not bound
 // churn: validator labels come unverified from the window endpoint, so every listed endpoint is trusted for
 // them (up to 1000 new identities x 2 series per poll); the cap stays loose until the validator count is known.
@@ -13,6 +13,9 @@ const RETRY_UNSUPPORTED_SECONDS = 600
 const object = (v: unknown): v is Record<string, any> => v !== null && typeof v === "object" && !Array.isArray(v)
 const height = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0
 const key = (v: unknown): v is string => typeof v === "string" && v.length > 0
+// An identity with a control character is a bad reply, never a label.
+// eslint-disable-next-line no-control-regex
+const identity = (v: unknown): v is string => key(v) && !/[\u0000-\u001f\u007f]/.test(v)
 const seconds = (v: unknown): number => {
     const n = typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v
     if (typeof n !== "number" || !Number.isFinite(n) || n < 0) throw Error("timestamp")
@@ -23,7 +26,7 @@ export function block(v: unknown, number: number): Block {
     if (number === 0) return { number, hash: v.hash, timestamp: 0, signers: [] }
     const signatures = v.validation_data?.signatures
     if (!object(signatures) || Object.keys(signatures).length > MAX_IDENTITIES ||
-        !Object.entries(signatures).every(([k, s]) => key(k) && key(s))) throw Error("signatures")
+        !Object.entries(signatures).every(([k, s]) => identity(k) && key(s))) throw Error("signatures")
     return { number, hash: v.hash, previous: v.content?.previousHash, timestamp: seconds(v.content?.timestamp), signers: Object.keys(signatures) }
 }
 export function fork(blocks: Block[]): number {
@@ -38,7 +41,8 @@ export function signerWindow(blocks: Block[], validators?: string[]) {
     }))
 }
 export const validatorLabel = (v: string) => v.length <= 128 ? v : `sha256:${createHash("sha256").update(v).digest("hex")}`
-const quote = (v: string) => JSON.stringify(v).replace(/\r/g, "\\r")
+// Prometheus text format label value: only \, " and line feed are escaped.
+const quote = (v: string) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\n/g, "\\n")}"`
 
 export class Watcher {
     endpoints: Endpoint[]
@@ -55,7 +59,7 @@ export class Watcher {
             if (!["http:", "https:"].includes(parsed.protocol)) throw Error("WATCH_RPC_URLS requires HTTP(S)")
             // The node serves GET /genesis beside its POST / root, so keep any proxy path prefix.
             parsed.pathname = parsed.pathname.replace(/\/?$/, "/genesis")
-            return { url, genesis: parsed.href, host: parsed.host, errors: 0, up: 0, unsupported: new Map(), blocks: new Map() }
+            return { url, genesis: parsed.href, host: parsed.host, errors: 0, up: 0, mark: 0, unsupported: new Map(), blocks: new Map() }
         })
         if (!urls.length || new Set(this.endpoints.map(e => e.host)).size !== urls.length) throw Error("WATCH_RPC_URLS requires distinct hosts")
         this.snapshot = this.render()
@@ -110,13 +114,14 @@ export class Watcher {
             })
         }))
         const reachable = this.endpoints.filter(e => e.head)
-        if (reachable.length) {
-            // Advance is measured against the previous observation, not an all-time peak,
-            // so one inflated head or a chain reset cannot hold the stall alert on.
-            const max = Math.max(...reachable.map(e => e.head!.number))
-            if (max > this.headMax) this.lastAdvance = now
-            this.headMax = max
+        for (const e of reachable) {
+            // Advance only past this endpoint's own high-water mark, so a head seen before is not progress again and
+            // another endpoint's inflated head blocks nothing. A drop of more than the window is a chain reset.
+            const n = e.head!.number
+            if (n > e.mark) this.lastAdvance = now
+            if (n > e.mark || n < e.mark - this.window) e.mark = n
         }
+        if (reachable.length) this.headMax = Math.max(...reachable.map(e => e.head!.number))
         this.emit("head_max", this.headMax)
         this.emit("head_last_advance_timestamp_seconds", this.lastAdvance)
         const compared = Math.max(0, Math.min(...reachable.map(e => e.head!.number)) - 2)
@@ -139,7 +144,7 @@ export class Watcher {
                 const set = await this.rpc(e, "getValidatorSet", { blockNumber: compared })
                 if (set === undefined && e.unsupported.has("getValidatorSet")) return undefined
                 if (!object(set) || set.blockNumber !== compared || !Array.isArray(set.validators) || set.validators.length > MAX_IDENTITIES ||
-                    !set.validators.every((v: unknown) => object(v) && key(v.identity) &&
+                    !set.validators.every((v: unknown) => object(v) && identity(v.identity) &&
                         (v.status === null || typeof v.status === "string") && (v.validAt === null || height(v.validAt)))) throw Error("validator set")
                 return set.validators.filter((v: any) => v.status === "2" && v.validAt !== null && v.validAt <= compared).map((v: any) => v.identity) as string[]
             })
@@ -195,5 +200,5 @@ if (import.meta.main) {
     Bun.serve({ port: integer("WATCH_PORT", 9465, 65535), fetch: request => new URL(request.url).pathname === "/metrics"
         ? new Response(watcher.metrics(), { headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" } })
         : new Response("Not found", { status: 404 }) })
-    while (true) { await watcher.poll(); await Bun.sleep(poll * 1000) }
+    for (;;) { await watcher.poll(); await Bun.sleep(poll * 1000) }
 }

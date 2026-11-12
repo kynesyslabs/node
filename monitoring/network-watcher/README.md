@@ -22,8 +22,9 @@ curl http://localhost:9465/metrics
 | `WATCH_SIGN_WINDOW` | 20 | Complete recent block window (1–20 blocks) |
 
 Every request has an 8-second deadline. Heads and comparison blocks are requested
-concurrently across endpoints. Errors, HTTP failures, bad JSON, invalid response shapes,
-and unsupported RPCs increment `demos_watch_poll_errors_total{endpoint}`, and so does
+concurrently across endpoints. Errors, HTTP failures, bad JSON, invalid response shapes
+(including a signer key or validator identity with a control character, U+0000–U+001F or
+U+007F, which rejects that block or validator list), and unsupported RPCs increment `demos_watch_poll_errors_total{endpoint}`, and so does
 each size bound: a response over 4 MiB (a declared `Content-Length` is refused before
 reading; an undeclared body is streamed and cancelled once it passes 4 MiB), a block with more
 than 1000 signatures, a validator list with more than 1000 entries (the signer union is
@@ -40,6 +41,7 @@ Hashes are compared at `max(0, min(reachable heads) - 2)`. The signer window end
 excludes unsigned genesis, and uses one endpoint's complete history. Another endpoint
 is tried if that history fails. No incomplete window is exported. Validator identity
 labels retain keys up to 128 characters, otherwise use the complete SHA-256 digest.
+Label values are escaped as the Prometheus text format requires (`\\`, `\"`, `\n`).
 `validator_last_signed_height` remembers the last observed signing height while an
 identity stays in the set; zero means not observed since startup. Departed series are
 removed from the watcher's output; Prometheus keeps them until head compaction. No
@@ -50,6 +52,9 @@ come unverified from the endpoint that supplies the window, and the 1000 caps bo
 poll, not the change between polls: a hostile or buggy endpoint can add up to 1000 new
 identities (2 series each) to Prometheus every poll. The cap is not lower because the
 mainnet validator count is not known yet. List only endpoints you trust with that.
+The path to each endpoint matters too: over `http://` to a remote host, anyone on the
+path can read or change replies (hiding or faking alerts) and read any token in the URL,
+so use `https://` for anything not on a private network.
 
 Window blocks are kept per endpoint and reused while the fresh comparison block's hash
 chain (`content.previousHash`) still reaches them; a broken chain drops them and counts
@@ -84,14 +89,20 @@ the metric and `SignerCountLow` are unavailable (the error counter increases).
 no margin above quorum: under commitLock the stored certificate is the precommits held
 the moment quorum was reached (`commitLock/precommit.ts:417-419,489-519`,
 `PoRBFT.ts:1315-1316`), so healthy blocks can carry exactly quorum. Block signers are
-from the comparison block. The stall timer restarts whenever the highest reachable head
-exceeds the previous poll's highest head (not an all-time peak, so one inflated head or
-a chain reset cannot hold `NetworkHeadStalled` on); it starts on the first successful
-observation, and an entirely unreachable network starts it on the first poll. An advance
-is any rise of the highest reachable head over the previous poll, so a highest endpoint
-that drops out and returns during a stall counts as one. An
-endpoint that keeps reporting an inflated head still holds `head_max` up, and
-`RpcEndpointBehind` then fires for every honest endpoint.
+from the comparison block. The stall timer restarts when any endpoint reports a head above
+its own high-water mark (the highest head that endpoint has reported; a lagging endpoint
+catching up counts). An endpoint that drops out and returns at a head already seen is not
+an advance, and an inflated head on one endpoint does not stop other endpoints' advances
+from counting. The timer starts on the first successful observation, and an entirely
+unreachable network starts it on the first poll. A chain reset is detected by height, not
+by genesis hash (which would cost a request per poll): when an endpoint's head drops more
+than `WATCH_SIGN_WINDOW` blocks below its mark, the mark restarts at that head, and that
+drop is not an advance. A smaller reset counts again once the new chain passes the old
+mark, at most `WATCH_SIGN_WINDOW` + 1 blocks later. An endpoint whose head swings back and
+forth by more than `WATCH_SIGN_WINDOW` blocks (for example a load balancer over backends
+that far apart) counts each upswing as an advance. An endpoint that keeps reporting an
+inflated head still holds `head_max` up, and `RpcEndpointBehind` then fires for every
+honest endpoint.
 Losing all endpoints preserves the last advance time and drops signer observations.
 
 From `monitoring/` (the profile exists only in `monitoring/docker-compose.yml`; from the
