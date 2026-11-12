@@ -174,6 +174,20 @@ const cases: Case[] = [
         () => viaConfirm(() => identities.addHumanPassportIdentity(demos, { address: "0x1", referralCode: null } as never)),
     ],
     [
+        "identity humanpassport add with the signed score",
+        () =>
+            viaConfirm(() =>
+                identities.addHumanPassportIdentity(demos, {
+                    address: "0x" + "ab".repeat(20),
+                    verificationMethod: "api",
+                    score: 25.5,
+                    threshold: 20,
+                    stamps: ["Google"],
+                    lastScoreTimestamp: "2026-10-27T10:00:00.000Z",
+                } as never),
+            ),
+    ],
+    [
         "identity ethos add",
         () => viaConfirm(() => identities.addEthosIdentity(demos, { chain: "evm", subchain: "mainnet", address: "0x" + "ee".repeat(20), score: 1, lastSyncedAt: "2026-01-01T00:00:00.000Z" } as never)),
     ],

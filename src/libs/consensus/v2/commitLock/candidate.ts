@@ -18,6 +18,7 @@ import { fetchLocks, type ReportedLock } from "./getLock"
 import { type CommitLock, type LockInputs, lockAt } from "./lockStore"
 import { committeePeers } from "./precommit"
 import { blockCapsRefusal, DEFAULT_BLOCK_CAPS } from "../routines/blockCaps"
+import { leaveOutRefusedPqcTxs } from "../routines/blockTransactions"
 import { blockCapsActive } from "src/forks/blockCapsGate"
 import { isForkActive } from "src/forks/forkGates"
 import { closePrevotes, withLockMutex } from "./roundState"
@@ -312,7 +313,8 @@ export async function rebuildTransactions(
         }
     }
 
-    const ref = filterMempoolByRefBlock(ordered, true)
+    const identity = await leaveOutRefusedPqcTxs(ordered, height)
+    const ref = filterMempoolByRefBlock(identity.kept, true)
     const nonce = await filterMempoolByNonce(ref.validTxs)
     const kept = nonce.validTxs.map(t => t.hash)
     if (

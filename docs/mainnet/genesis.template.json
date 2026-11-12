@@ -78,10 +78,10 @@
       "treasuryAddress": "FILL: lowercase 0x + 64 hex mainnet treasury account"
     },
     "web2ProofBinding": {
-      "activationHeight": "FILL: 0 or null"
+      "activationHeight": 0
     },
     "tlsnProofEnforcement": {
-      "activationHeight": "FILL: 0 or null"
+      "activationHeight": 0
     },
     "xmProofBinding": {
       "activationHeight": null

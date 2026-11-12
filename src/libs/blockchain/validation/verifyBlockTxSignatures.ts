@@ -1,9 +1,7 @@
 import type { Block, Transaction } from "@kynesyslabs/demosdk/types"
 
-import { isForkActive } from "@/forks/forkGates"
-import { txSignatureContext } from "@/forks/signatureDomainGate"
-import TxValidatorPool from "./txValidatorPool"
 import { isSystemRelayTx, verifySystemRelayTx } from "./systemRelayTx"
+import { type SignatureRules, signatureRulesAt, verdictsUnder } from "./txSignatureRules"
 
 export interface BlockTxSignatureVerdict {
     valid: boolean
@@ -108,22 +106,17 @@ export async function verifyBlockTxSignatures(
         return { valid: true }
     }
 
-    let signatureDomain
+    let rules: SignatureRules
     try {
-        signatureDomain = txSignatureContext(block.number)
+        rules = signatureRulesAt(block.number)
     } catch (e) {
         return {
             valid: false,
             reason: `cannot resolve signature context for block ${block.number}: ${e instanceof Error ? e.message : String(e)}`,
         }
     }
-    const isPostFork = isForkActive("osDenomination", block.number)
 
-    const results = await TxValidatorPool.getInstance().validate(
-        standard,
-        isPostFork,
-        signatureDomain,
-    )
+    const results = await verdictsUnder(rules, standard)
     for (let i = 0; i < results.length; i++) {
         if (!results[i].valid) {
             return {

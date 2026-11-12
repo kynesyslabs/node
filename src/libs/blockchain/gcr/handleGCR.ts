@@ -19,6 +19,7 @@
  * - Also implement the new GCROperation structure replacing the old Operation one
  */
 
+import { applyTime, bindApplyTime, withBlockTime } from "./applyTime"
 import _ from "lodash"
 
 import { Transaction, TransactionContent } from "@kynesyslabs/demosdk/types"
@@ -1674,11 +1675,12 @@ export default class HandleGCR {
                 }
             }
 
+            // They run after this call returns, still stamping the block's time.
             if (result.sideEffect) {
-                sideEffects.push(result.sideEffect)
+                sideEffects.push(bindApplyTime(result.sideEffect))
             }
             if (result.deferredWrite) {
-                deferredWrites.push(result.deferredWrite)
+                deferredWrites.push(bindApplyTime(result.deferredWrite))
             }
 
             appliedEdits.push(edit)
@@ -2154,6 +2156,17 @@ export default class HandleGCR {
     }
 
     static async applyTransactions(
+        txs: Transaction[],
+        isRollback: boolean,
+        clock?: BlockClock,
+        options: ApplyTransactionsOptions = {},
+    ): Promise<ApplyTransactionsResult> {
+        return await withBlockTime(clock?.timestampSec, () =>
+            HandleGCR.applyTransactionsAt(txs, isRollback, clock, options),
+        )
+    }
+
+    private static async applyTransactionsAt(
         txs: Transaction[],
         isRollback: boolean,
         clock?: BlockClock,
@@ -3407,7 +3420,7 @@ export default class HandleGCR {
                 referrals: 0,
                 demosFollow: 0,
             },
-            lastUpdated: new Date(),
+            lastUpdated: applyTime(),
         }
 
         account.referralInfo = fillData["referralInfo"] || {
@@ -3419,8 +3432,8 @@ export default class HandleGCR {
         account.flagged = fillData["flagged"] || false
         account.flaggedReason = fillData["flaggedReason"] || ""
         account.reviewed = fillData["reviewed"] || false
-        account.createdAt = fillData["createdAt"] || new Date()
-        account.updatedAt = fillData["updatedAt"] || new Date()
+        account.createdAt = fillData["createdAt"] || applyTime()
+        account.updatedAt = fillData["updatedAt"] || applyTime()
 
         if (skipSave) {
             return account
