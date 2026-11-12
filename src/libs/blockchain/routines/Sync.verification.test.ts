@@ -17,11 +17,14 @@ const verifyBlock = jest.fn(async (_block: unknown) => ({ valid: true }) as any)
 const verifyBlockCertificate = jest.fn(
     async (_block: unknown) => ({ valid: false, reason: "no quorum" }) as any,
 )
+// This suite's blocks carry no signatures; the signature tally has its own suite
+const withCountedSignatures = jest.fn(async (block: unknown) => block)
 const realVerifyBlock = await import("../validation/verifyBlock")
 mock.module("../validation/verifyBlock", () => ({
     ...realVerifyBlock,
     verifyBlock,
     verifyBlockCertificate,
+    withCountedSignatures,
 }))
 
 const hashGCRTables = jest.fn(async (_height: number) => ({}) as any)
@@ -156,6 +159,8 @@ beforeEach(() => {
     verifyBlock.mockResolvedValue({ valid: true })
     verifyBlockCertificate.mockReset()
     verifyBlockCertificate.mockResolvedValue({ valid: false, reason: "no quorum" })
+    withCountedSignatures.mockReset()
+    withCountedSignatures.mockImplementation(async block => block)
     hashGCRTables.mockReset()
     hashGCRTables.mockResolvedValue({ ...NATIVE_HASHES })
 
@@ -353,6 +358,61 @@ describe("fast sync after a rejected block", () => {
         expect(good.call).toHaveBeenCalledTimes(1)
         expect(insertBlock).toHaveBeenCalledTimes(1)
         expect(applyTransactions).toHaveBeenCalledTimes(1)
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
+    })
+
+    const insertAtTip = () =>
+        insertBlock.mockImplementation((async (inserted: any) => {
+            getSharedState.lastBlockNumber = inserted.number
+            return {}
+        }) as any)
+    const warned = () => (log.warning as any).mock.calls.map((c: unknown[]) => String(c[0]))
+
+    it("retries from the same peer, without cooling it down or discrediting it, when the signatures could not be checked here", async () => {
+        const honest = makeTx(alice)
+        const block = makeBlock([honest])
+        const peer = batchPeer("unlucky-peer", block, [honest])
+        spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([peer])
+        spyOn(Math, "random").mockReturnValue(0)
+        spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+        applyResult({ successfulTxs: [honest.hash] })
+        insertAtTip()
+        // The first round's tally fails here; the retry's goes through
+        withCountedSignatures.mockRejectedValueOnce(
+            new realVerifyBlock.SignatureCheckUnavailableError("signer set unavailable"),
+        )
+        getSharedState.fastSyncCount = 1
+        ;(log.warning as any).mockClear()
+
+        await fastSync([], "test")
+
+        expect(withCountedSignatures).toHaveBeenCalledTimes(2)
+        expect(peer.longCall).toHaveBeenCalledTimes(2)
+        expect(insertBlock).toHaveBeenCalledTimes(1)
+        expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
+        expect(warned().some((line: string) => line.includes("cooling down peer"))).toBe(false)
+        expect(warned().some((line: string) => line.includes("advertised height"))).toBe(false)
+    })
+
+    it("cools the peer down and syncs from the next one when a block's counted signatures fall short of the quorum", async () => {
+        const honest = makeTx(alice)
+        const block = makeBlock([honest])
+        const short = batchPeer("short-peer", block, [honest])
+        const good = batchPeer("quorum-peer", block, [honest])
+        spyOn(PeerManager.getInstance(), "getAll").mockReturnValue([short, good])
+        spyOn(Math, "random").mockReturnValue(0)
+        spyOn(BroadcastManager, "broadcastOurSyncData").mockResolvedValue(undefined as any)
+        applyResult({ successfulTxs: [honest.hash] })
+        insertAtTip()
+        withCountedSignatures.mockRejectedValueOnce(new Error("insufficient verified pool signatures"))
+        getSharedState.fastSyncCount = 1
+        ;(log.warning as any).mockClear()
+
+        await fastSync([], "test")
+
+        expect(warned().some((line: string) => line.includes("cooling down peer short-peer"))).toBe(true)
+        expect(good.longCall).toHaveBeenCalledTimes(1)
+        expect(insertBlock).toHaveBeenCalledTimes(1)
         expect(getSharedState.lastBlockNumber).toBe(HEIGHT)
     })
 })

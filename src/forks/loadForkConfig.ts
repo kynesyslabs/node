@@ -23,6 +23,7 @@ import type {
     CanonicalAddressesConfig,
     FeeBindingConfig,
     BlockCapsConfig,
+    CanonicalSignersConfig,
     TokenStakingGateConfig,
     TokenStakingConfig,
     TelegramSenderBindingConfig,
@@ -412,6 +413,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "blockCaps":
             getSharedState.forkConfig.blockCaps = config as BlockCapsConfig
             return
+        case "canonicalSigners":
+            getSharedState.forkConfig.canonicalSigners =
+                config as CanonicalSignersConfig
+            return
         case "tokenStakingGate":
             getSharedState.forkConfig.tokenStakingGate =
                 config as TokenStakingGateConfig
@@ -584,6 +589,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as FeeBindingConfig
         case "blockCaps":
             return base as BlockCapsConfig
+        case "canonicalSigners":
+            return base as CanonicalSignersConfig
         case "tokenStakingGate":
             return base as TokenStakingGateConfig
         case "tokenStaking":

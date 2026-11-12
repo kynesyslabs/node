@@ -24,7 +24,7 @@ MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editB
 # A node on a mainnet chain id refuses a genesis that leaves one undeclared.
 # Same list as LAUNCH_DORMANT_FORKS in scripts/launch-go-no-go.ts
 LAUNCH_DORMANT_FORKS = ["networkGovernance", "tokenStaking"]
-KNOWN_FORKS = ["osDenomination", "gasFeeSeparation", "tlsnProofEnforcement", "web2ProofBinding", "xmProofBinding", "signatureDomain", "nonceEnforcement", "atomicWork", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "stakeApplyChecks", "networkGovernance", "txTypeAllowList", "instantMessagingBinding", "nativeSendBinding", "canonicalAddresses", "feeBinding", "blockCaps", "tokenStakingGate", "tokenStaking", "unpinnedCommittee", "telegramSenderBinding", "xmRemoveCanonical"]
+KNOWN_FORKS = ["osDenomination", "gasFeeSeparation", "tlsnProofEnforcement", "web2ProofBinding", "xmProofBinding", "signatureDomain", "nonceEnforcement", "atomicWork", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "stakeApplyChecks", "networkGovernance", "txTypeAllowList", "instantMessagingBinding", "nativeSendBinding", "canonicalAddresses", "feeBinding", "blockCaps", "canonicalSigners", "tokenStakingGate", "tokenStaking", "unpinnedCommittee", "telegramSenderBinding", "xmRemoveCanonical"]
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--base", required=True, help="the image's data/genesis.json")

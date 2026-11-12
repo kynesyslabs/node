@@ -20,8 +20,10 @@ import Chain from "../chain"
 import log from "src/utilities/logger"
 import {
     type BlockVerification,
+    SignatureCheckUnavailableError,
     verifyBlock,
     verifyBlockCertificate,
+    withCountedSignatures,
 } from "../validation/verifyBlock"
 import {
     SyncBlockRejectedError,
@@ -60,6 +62,7 @@ import {
 } from "@/libs/l2ps/L2PSConcurrentSync"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import Mempool from "../mempool"
 import Datasource from "@/model/datasource"
 import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
@@ -684,6 +687,30 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
 }
 
 /**
+ * Handles an error thrown while verifying or applying a synced block.
+ *
+ * @returns false when the block was refused or cannot be checked yet
+ * @throws the original error when it is not a block refusal
+ */
+function handleApplyError(error: unknown, block: Block, peer: Peer): false {
+    if (error instanceof SignatureCheckUnavailableError) {
+        log.warning(
+            `[syncBlock] Not applying block ${block.number} yet, its signatures could not be checked here: ${error.message}`,
+        )
+        return false
+    }
+    if (error instanceof SyncBlockRejectedError) {
+        log.error(
+            `[syncBlock] Rejecting synced block ${block.number} (${block.hash}) from ${peer?.identity ?? "unknown peer"}: ${error.message}`,
+        )
+        // A pushed block can arrive from a sender we no longer list
+        if (peer?.identity) cooldownPeer(peer.identity, error.message)
+        return false
+    }
+    throw error
+}
+
+/**
  * Given a block and a peer, saves the block into the database, downloads the transactions
  * from the peer and updates the GCR and transaction tables.
  *
@@ -739,15 +766,7 @@ export async function syncBlock(
         await verifyBlockAttrs(block, txs)
         await applyVerifiedBlock(block, txs)
     } catch (error) {
-        if (error instanceof SyncBlockRejectedError) {
-            log.error(
-                `[syncBlock] Rejecting synced block ${block.number} (${block.hash}) from ${peer?.identity ?? "unknown peer"}: ${error.message}`,
-            )
-            // A pushed block can arrive from a sender we no longer list
-            if (peer?.identity) cooldownPeer(peer.identity, error.message)
-            return false
-        }
-        throw error
+        return handleApplyError(error, block, peer)
     }
     log.debug("Block inserted successfully")
     log.debug(
@@ -1217,14 +1236,27 @@ async function findOrphanedGcrBlock(): Promise<number | null> {
  * With the next block in hand, its result root must match the results about
  * to be stored: once stored, a status is final and a failure code changes
  * only by repair against a later verified block.
+ * The block is stored with only the signatures its quorum counted.
  *
  * @throws SyncBlockRejectedError when the block must not be applied
+ * @throws SignatureCheckUnavailableError when its signatures could not be
+ *   checked here again: no peer is at fault, the round ends and retries
  */
 async function applyVerifiedBlock(
     block: Block,
     txs: Transaction[],
     next?: Block,
 ): Promise<void> {
+    let certified: Block
+    try {
+        certified = await withCountedSignatures(block)
+    } catch (e) {
+        // Not the peer's fault: the caller ends the round and retries
+        if (e instanceof SignatureCheckUnavailableError) throw e
+        throw new SyncBlockRejectedError(
+            e instanceof Error ? e.message : getErrorMessage(e),
+        )
+    }
     await verifyBlockTransactions(block, txs)
     await verifyNativeTablesHashes(block)
     const plan = await planBlockOutcome(block, txs)
@@ -1247,7 +1279,7 @@ async function applyVerifiedBlock(
         // Rejects only what this peer served: the caller cools it down and
         // syncs the block from another one.
         await checkResultsAgainstNextBlock(block, txs, next)
-        await insertBlockOrHalt(block, txs, outcome.pending)
+        await insertBlockOrHalt(certified, txs, outcome.pending)
     })
 }
 
@@ -1673,6 +1705,13 @@ async function requestBlocks(): Promise<boolean> {
                 `[requestBlocks] Batch sync completed. Current block: ${getSharedState.lastBlockNumber}`,
             )
         } catch (error) {
+            // Neither cooled nor discredited: the peer served nothing wrong
+            if (error instanceof SignatureCheckUnavailableError) {
+                log.warning(
+                    `[requestBlocks] Ending this sync round, a block's signatures could not be checked here: ${error.message}`,
+                )
+                return false
+            }
             handleError(error, "SYNC", { source: "block download" })
             // Handle chain head reached
             if (error instanceof BlockNotFoundError) {

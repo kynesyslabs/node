@@ -504,6 +504,24 @@ export type InstantMessagingBindingConfig = BaseForkConfig
 export type BlockCapsConfig = BaseForkConfig
 
 /**
+ * `canonicalSigners` fork: a block's signatures are matched to its signer
+ * set by lowercase identity, and a key written in two cases is one signer
+ * that counts once.
+ *
+ * Before it, identities compared as written: a signature keyed in another
+ * case than its pool entry did not count, and a key the validator set
+ * listed in two cases could count twice. Sync stores only the counted
+ * signatures either way; this fork changes which ones count.
+ *
+ * Activation at H applies to block H and later. Dormant by default
+ * (`activationHeight: null`), so a node carrying the code counts exactly
+ * as one without it. A new chain may schedule it at height 0 explicitly;
+ * the mainnet genesis template leaves it dormant until it is scheduled.
+ * No payload beyond the base.
+ */
+export type CanonicalSignersConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -552,6 +570,7 @@ export type ForkConfig =
     | CanonicalAddressesConfig
     | FeeBindingConfig
     | BlockCapsConfig
+    | CanonicalSignersConfig
     | TokenStakingGateConfig
     | TokenStakingConfig
     | TelegramSenderBindingConfig
@@ -587,6 +606,7 @@ export type ForkName =
     | "canonicalAddresses"
     | "feeBinding"
     | "blockCaps"
+    | "canonicalSigners"
     | "tokenStakingGate"
     | "tokenStaking"
     | "telegramSenderBinding"
@@ -621,6 +641,7 @@ export interface ForkConfigByName {
     canonicalAddresses: CanonicalAddressesConfig
     feeBinding: FeeBindingConfig
     blockCaps: BlockCapsConfig
+    canonicalSigners: CanonicalSignersConfig
     tokenStakingGate: TokenStakingGateConfig
     tokenStaking: TokenStakingConfig
     telegramSenderBinding: TelegramSenderBindingConfig
@@ -885,6 +906,16 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A block takes a bounded, deterministic share of the pool by tx count and " +
             "content bytes, and the mempool merge holds each sender to the admission cap.",
     },
+    canonicalSigners: {
+        // Dormant by default: it changes which signatures count toward a
+        // block's quorum, and a missing genesis entry hydrates from here. A
+        // new chain may schedule it at height 0 explicitly; the mainnet
+        // genesis template leaves it dormant until it is scheduled.
+        activationHeight: null,
+        description:
+            "A block's signatures match its signer set by lowercase identity, and a key " +
+            "written in two cases counts once.",
+    },
     tokenStakingGate: {
         // Dormant by default: it refuses stakes a running chain accepts, and a
         // missing genesis entry hydrates from here, so a running chain keeps
@@ -962,6 +993,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         canonicalAddresses: { ...DEFAULT_FORK_CONFIG.canonicalAddresses },
         feeBinding: { ...DEFAULT_FORK_CONFIG.feeBinding },
         blockCaps: { ...DEFAULT_FORK_CONFIG.blockCaps },
+        canonicalSigners: { ...DEFAULT_FORK_CONFIG.canonicalSigners },
         tokenStakingGate: { ...DEFAULT_FORK_CONFIG.tokenStakingGate },
         tokenStaking: { ...DEFAULT_FORK_CONFIG.tokenStaking },
         telegramSenderBinding: { ...DEFAULT_FORK_CONFIG.telegramSenderBinding },

@@ -11,11 +11,15 @@ const B = "bb".repeat(32)
 const C = "cc".repeat(32)
 const D = "dd".repeat(32)
 const OUTSIDER = "ee".repeat(32)
+// A signature that does not verify under any key
+const FORGED = "0bad"
 
 let pool: string[] | Error = []
 let committee: string[] | Error = []
 let networkNow = 2000
 let verifyingSigners: Set<string> = new Set()
+// The key of every signature verify, in call order
+let verifiedKeys: string[] = []
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -36,6 +40,7 @@ jest.mock("src/utilities/sharedState", () => ({
         forkConfig: {
             quorumParity: { activationHeight: null },
             committeeBinding: { activationHeight: null },
+            canonicalSigners: { activationHeight: null },
         },
         getBlockTimestampMinDelta: () => 1,
         getBlockTimestampTolerance: () => 60,
@@ -87,8 +92,18 @@ jest.mock("./txValidatorPool", () => ({
     __esModule: true,
     default: {
         getInstance: () => ({
-            verify: async ({ publicKey }: { publicKey: Uint8Array }) => {
+            verify: async ({
+                publicKey,
+                signature,
+            }: {
+                publicKey: Uint8Array
+                signature: Uint8Array
+            }) => {
                 const hex = Buffer.from(publicKey).toString("hex")
+                verifiedKeys.push(hex)
+                if (Buffer.from(signature).toString("hex") === FORGED) {
+                    return false
+                }
                 return verifyingSigners.has(hex)
             },
         }),
@@ -143,8 +158,10 @@ beforeEach(() => {
     pool = [A, B, C, D]
     networkNow = 2000
     verifyingSigners = new Set([A, B, C, D])
+    verifiedKeys = []
     getSharedState.forkConfig.quorumParity.activationHeight = null
     getSharedState.forkConfig.committeeBinding.activationHeight = null
+    getSharedState.forkConfig.canonicalSigners.activationHeight = null
     committee = [A, B, C, D]
 })
 
@@ -349,6 +366,160 @@ describe("verifyBlock", () => {
                 validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
             })
             expect((await verifyBlock(block)).valid).toBe(false)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+    })
+
+    describe("own-key self-check under canonicalSigners", () => {
+        const ownCheck = { number: 10, hash: "valid-hash", timestamp: 1500 }
+        const signed = (signatures: Record<string, string>) =>
+            makeBlock({ validation_data: { signatures } })
+        // Twenty spellings of A, each with one more letter upper-cased
+        const spellingsOfA = Array.from(
+            { length: 20 },
+            (_, i) => A.slice(0, i + 1).toUpperCase() + A.slice(i + 1),
+        )
+        const verifiesOfA = () => verifiedKeys.filter(key => key === A).length
+
+        beforeEach(() => {
+            getSharedState.forkConfig.canonicalSigners.activationHeight = 0
+        })
+
+        it("checks our key written upper-case when it supplies the quorum", async () => {
+            const block = signed({ [A.toUpperCase()]: "s1", [B]: "s2", [C]: "s3" })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+        })
+
+        it("checks the one spelling the quorum counted among many, with one verify", async () => {
+            const block = signed({
+                ...Object.fromEntries(
+                    spellingsOfA.map((key, i) => [key, i === 0 ? "s1" : FORGED]),
+                ),
+                [B]: "s2",
+                [C]: "s3",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledTimes(1)
+            expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+            // The quorum tally's one verify, and the own-key check's one
+            expect(verifiesOfA()).toBe(2)
+        })
+
+        it("verifies none of the spellings the quorum skipped", async () => {
+            const block = signed({
+                ...Object.fromEntries(
+                    spellingsOfA.map((key, i) => [key, i < 19 ? FORGED : "s1"]),
+                ),
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+            // The quorum tally tried the first spelling; the exact key is absent
+            expect(verifiesOfA()).toBe(1)
+        })
+
+        it("does not check a later spelling the quorum did not count", async () => {
+            const block = signed({
+                [A]: FORGED,
+                [A.toUpperCase()]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+            })
+            // Our first spelling does not verify, so our identity does not count
+            expect((await verifyBlock(block)).valid).toBe(false)
+
+            block.validation_data.signatures[D] = "s4"
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
+        it("checks the counted spelling, not the garbage exact key after it", async () => {
+            const block = signed({
+                [A.toUpperCase()]: "s1",
+                [A]: FORGED,
+                [B]: "s2",
+                [C]: "s3",
+            })
+            // Valid only because our upper-case spelling counted
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+        })
+
+        it("checks the exact key when the other spelling's signature does not verify", async () => {
+            const block = signed({
+                [A.toUpperCase()]: FORGED,
+                [A]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledWith(ownCheck)
+        })
+
+        it("checks a block once when both spellings verify", async () => {
+            const block = signed({
+                [A]: "s1",
+                [A.toUpperCase()]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).toHaveBeenCalledTimes(1)
+        })
+
+        it("skips every spelling of our key whose signature does not verify", async () => {
+            const block = signed({
+                [A]: FORGED,
+                [A.toUpperCase()]: FORGED,
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
+        it("looks only at the exact key while the fork is dormant", async () => {
+            getSharedState.forkConfig.canonicalSigners.activationHeight = null
+            const block = signed({
+                [A.toUpperCase()]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+
+            delete block.validation_data.signatures[D]
+            expect((await verifyBlock(block)).valid).toBe(false)
+            expect(checkOwnSignature).not.toHaveBeenCalled()
+        })
+
+        it("accepts a block before our keypair is loaded", async () => {
+            const state = getSharedState as { publicKeyHex: string | null }
+            state.publicKeyHex = null
+            try {
+                const block = signed({ [A]: "s1", [B]: "s2", [C]: "s3" })
+                expect((await verifyBlock(block)).valid).toBe(true)
+                expect(checkOwnSignature).not.toHaveBeenCalled()
+            } finally {
+                state.publicKeyHex = A
+            }
+        })
+
+        it("looks only at blocks from the activation height on", async () => {
+            getSharedState.forkConfig.canonicalSigners.activationHeight = 11
+            const block = signed({
+                [A.toUpperCase()]: "s1",
+                [B]: "s2",
+                [C]: "s3",
+                [D]: "s4",
+            })
+            expect((await verifyBlock(block)).valid).toBe(true)
             expect(checkOwnSignature).not.toHaveBeenCalled()
         })
     })
