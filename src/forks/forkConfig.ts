@@ -456,6 +456,37 @@ export type L2psGateConfig = BaseForkConfig
 export type TlsnDisabledConfig = BaseForkConfig
 
 /**
+ * `storageFeeSettlement` fork: the storage fee of a Storage Program create or
+ * write is credited like a network fee, split between burn and treasury.
+ * The SDK builds that fee as a sender debit no edit credits, so each such
+ * transaction took the fee out of the total supply while every other fee is
+ * credited. The sender still pays it as signed, so the signed edits and
+ * their binding are unchanged; only the applied copy gains the credits.
+ * Credited where the gas of a non-native transaction is (`gasFeeSeparation`
+ * and `feeBinding`), judged at the tip like the other apply-time rules.
+ * Dormant by default, so an existing chain replays as applied; a mainnet
+ * genesis sets 0. No payload beyond the base.
+ */
+export type StorageFeeSettlementConfig = BaseForkConfig
+
+/**
+ * `referenceBlockRoom10` fork: a transaction's reference block may be up to
+ * 10 blocks behind the head instead of 1, and the deep window it can still
+ * be included as failed in is 50 blocks instead of 5.
+ *
+ * With a room of 1 a transaction confirmed at head N had to land in block
+ * N + 1 or N + 2, so under load (or a user who takes a few seconds to
+ * approve the fee) a large share failed with an expired reference. The room
+ * is a consensus rule: the forger's mempool filter, sync verification, the
+ * broadcast check and mempool cleanup all read it. Each judges a block on
+ * the rule of its own tip, so a block applied on a tip below the activation
+ * height verifies with room 1. Replay is refused by the nonce and the
+ * signature domain, not by the window. Dormant by default; a mainnet
+ * genesis sets 0. No payload beyond the base.
+ */
+export type ReferenceBlockRoom10Config = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -619,6 +650,8 @@ export type ForkName =
     | "xmRemoveCanonical"
     | "l2psGate"
     | "tlsnDisabled"
+    | "storageFeeSettlement"
+    | "referenceBlockRoom10"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -655,6 +688,8 @@ export interface ForkConfigByName {
     xmRemoveCanonical: XmRemoveCanonicalConfig
     l2psGate: L2psGateConfig
     tlsnDisabled: TlsnDisabledConfig
+    storageFeeSettlement: StorageFeeSettlementConfig
+    referenceBlockRoom10: ReferenceBlockRoom10Config
 }
 
 /**
@@ -975,6 +1010,24 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "TLSNotary is off: tlsn_request and tlsn_store are refused before any edit " +
             "applies, so no fee is charged and no attestation token is issued.",
     },
+    storageFeeSettlement: {
+        // Dormant by default: it changes the balances a Storage Program
+        // create or write leaves, and a missing genesis entry hydrates from
+        // here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A Storage Program storage fee is credited like a network fee, split between " +
+            "burn and treasury, so it no longer leaves the total supply.",
+    },
+    referenceBlockRoom10: {
+        // Dormant by default: it changes which transactions a block may hold
+        // as confirmed, and a missing genesis entry hydrates from here. A
+        // mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A transaction's reference block may be up to 10 blocks behind the head " +
+            "(deep window 50) instead of 1 (deep window 5).",
+    },
 }
 
 /**
@@ -1015,5 +1068,7 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
         l2psGate: { ...DEFAULT_FORK_CONFIG.l2psGate },
         tlsnDisabled: { ...DEFAULT_FORK_CONFIG.tlsnDisabled },
+        storageFeeSettlement: { ...DEFAULT_FORK_CONFIG.storageFeeSettlement },
+        referenceBlockRoom10: { ...DEFAULT_FORK_CONFIG.referenceBlockRoom10 },
     }
 }

@@ -36,7 +36,6 @@ mockMempoolDeps(() => ds)
 // its tron dependency included, none of which these queries touch.
 const sharedState = {
     lastBlockNumber: 100,
-    referenceBlockRoom: 1,
     publicKeyHex: OWN_KEY,
     inConsensusLoop: false,
 }

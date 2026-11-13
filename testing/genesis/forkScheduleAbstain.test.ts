@@ -90,7 +90,7 @@ describe("a peer with a different schedule", () => {
     it("makes the node abstain inside the window and names the peers and the nearest height", async () => {
         await applyRoundOutcome(960, inWindow, {
             mismatched: ["http://a:53550", "http://b:53550"],
-            agreed: 1,
+            agreed: 0,
         })
         expect(getSharedState.forkScheduleAbstain).toBe(true)
         expect(getSharedState.forkScheduleAbstainReason).toContain("http://a:53550")
@@ -137,6 +137,114 @@ describe("a peer with a different schedule", () => {
     })
 })
 
+describe("counting against the whole staked validator set", () => {
+    const past: CheckPlan = { due: true, inWindow: false, nearest: null }
+    // Four staked validators, this node among them.
+    const FOUR = ["0xself", "0xliar", "0xh1", "0xh2"]
+
+    it("does not abstain when one validator answers with a different treasury and the two honest ones time out", async () => {
+        await applyRoundOutcome(5000, past, {
+            mismatched: ["http://liar"],
+            mismatchedIdentities: ["0xliar"],
+            treasuryMismatched: ["http://liar"],
+            agreed: 0,
+            agreedIdentities: [],
+            validatorIdentities: FOUR,
+        })
+        expect(getSharedState.forkScheduleAbstain).toBe(false)
+        expect(gauges.fork_schedule_mismatch).toBe(1)
+        // Nor is the one that answered left out on its word alone.
+        expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
+    })
+
+    it("on a 2-2 split neither pair abstains or leaves the other out, so the chain stops until a schedule is fixed", async () => {
+        // Seen from either pair: the other two differ, the partner agrees.
+        await applyRoundOutcome(960, inWindow, {
+            mismatched: ["http://c", "http://d"],
+            mismatchedIdentities: ["0xc", "0xd"],
+            agreed: 1,
+            agreedIdentities: ["0xb"],
+            validatorIdentities: ["0xa", "0xb", "0xc", "0xd"],
+        })
+        expect(getSharedState.forkScheduleAbstain).toBe(false)
+        expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
+    })
+
+    it("abstains once three of four validators answer with a different schedule", async () => {
+        await applyRoundOutcome(960, inWindow, {
+            mismatched: ["http://h1", "http://h2", "http://liar"],
+            agreed: 0,
+            validatorIdentities: FOUR,
+        })
+        expect(getSharedState.forkScheduleAbstain).toBe(true)
+        expect(getSharedState.forkScheduleAbstainReason).toContain("3 of 4 validators")
+    })
+
+    it("keeps abstaining while the agreeing validators do not answer", async () => {
+        await applyRoundOutcome(960, inWindow, {
+            mismatched: ["http://h1", "http://h2", "http://liar"],
+            agreed: 0,
+            validatorIdentities: FOUR,
+        })
+        await applyRoundOutcome(1100, past, {
+            mismatched: ["http://h1"],
+            agreed: 0,
+            validatorIdentities: FOUR,
+        })
+        expect(getSharedState.forkScheduleAbstain).toBe(true)
+    })
+
+    it("does not abstain end to end when the honest validators time out", async () => {
+        const PeerManager = (await import("src/libs/peer/PeerManager")).default
+        const agreement = await import("src/libs/peer/routines/forkScheduleAgreement")
+        const TREASURY = "0x" + "7e".repeat(32)
+        const OTHER = "0x" + "11".repeat(32)
+        const saved = { forkConfig: getSharedState.forkConfig, chainId: getSharedState.chainId }
+        getSharedState.forkConfig = {
+            gasFeeSeparation: { activationHeight: 0, treasuryAddress: TREASURY },
+        } as never
+        getSharedState.chainId = 7
+        const theirConfig = { gasFeeSeparation: { activationHeight: 0, treasuryAddress: OTHER } }
+        const silent = (identity: string) => ({
+            identity,
+            connection: { string: "http://" + identity },
+            call: () => new Promise(() => {}),
+        })
+        const peers = [
+            {
+                identity: "0xliar",
+                connection: { string: "http://0xliar" },
+                call: async () => ({
+                    result: 200,
+                    response: {
+                        chainId: 7,
+                        forks: { gasFeeSeparation: { activationHeight: 0, treasuryAddress: OTHER } },
+                        forkScheduleDigest: agreement.forkScheduleDigest(theirConfig as never, 7),
+                    },
+                }),
+            },
+            silent("0xh1"),
+            silent("0xh2"),
+        ]
+        const getPeers = spyOn(PeerManager, "getInstance").mockReturnValue({
+            getPeers: () => peers,
+        } as never)
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue(
+            FOUR.map(address => ({ address })) as never,
+        )
+        try {
+            await onBlockInserted(5000)
+            expect(gauges.fork_schedule_mismatch).toBe(1)
+            expect(getSharedState.forkScheduleAbstain).toBe(false)
+        } finally {
+            getPeers.mockRestore()
+            validators.mockRestore()
+            getSharedState.forkConfig = saved.forkConfig
+            getSharedState.chainId = saved.chainId
+        }
+    }, 30000)
+})
+
 describe("a validator with a different gasFeeSeparation treasury", () => {
     const past: CheckPlan = { due: true, inWindow: false, nearest: null }
 
@@ -144,7 +252,7 @@ describe("a validator with a different gasFeeSeparation treasury", () => {
         await applyRoundOutcome(300, past, {
             mismatched: ["http://a", "http://b"],
             treasuryMismatched: ["http://a", "http://b"],
-            agreed: 1,
+            agreed: 0,
         })
         expect(getSharedState.forkScheduleAbstain).toBe(true)
         expect(getSharedState.forkScheduleAbstainReason).toContain(
@@ -197,7 +305,7 @@ describe("a validator with a different gasFeeSeparation treasury", () => {
 
 describe("once the schedules agree again", () => {
     it("a clean round clears the flag and both gauges", async () => {
-        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a"], agreed: 0 })
+        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], agreed: 0 })
         expect(getSharedState.forkScheduleAbstain).toBe(true)
 
         await applyRoundOutcome(970, inWindow, { mismatched: [], agreed: 3 })
@@ -208,7 +316,7 @@ describe("once the schedules agree again", () => {
     })
 
     it("a clean round outside the window clears it too, as after the fork activated", async () => {
-        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a"], agreed: 0 })
+        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], agreed: 0 })
         await applyRoundOutcome(1100, { due: true, inWindow: false, nearest: null }, {
             mismatched: [],
             agreed: 1,
@@ -238,14 +346,14 @@ describe("once the schedules agree again", () => {
     })
 
     it("a round that reached no peer changes nothing", async () => {
-        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a"], agreed: 0 })
+        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], agreed: 0 })
         await applyRoundOutcome(970, inWindow, { mismatched: [], agreed: 0 })
         expect(getSharedState.forkScheduleAbstain).toBe(true)
         expect(gauges.consensus_abstaining).toBe(1)
     })
 
     it("a mismatch outside the window does not clear a flag raised inside it", async () => {
-        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a"], agreed: 0 })
+        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], agreed: 0 })
         await applyRoundOutcome(1100, { due: true, inWindow: false, nearest: null }, {
             mismatched: ["http://a"],
             agreed: 0,
@@ -292,7 +400,7 @@ describe("leaving a differing validator out of the shard", () => {
     })
 
     it("leaves nobody out while this node is the one that abstains", async () => {
-        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], mismatchedIdentities: ["0xa", "0xb"], agreed: 1 })
+        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], mismatchedIdentities: ["0xa", "0xb"], agreed: 0 })
         expect(getSharedState.forkScheduleAbstain).toBe(true)
         expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
     })
@@ -341,7 +449,7 @@ describe("leaving a differing validator out of the shard", () => {
 
     it("empties the set and keeps abstaining once this node is the one that differs", async () => {
         await applyRoundOutcome(960, inWindow, odd)
-        await applyRoundOutcome(970, inWindow, { mismatched: ["http://a", "http://b"], mismatchedIdentities: ["0xa", "0xb"], agreed: 1 })
+        await applyRoundOutcome(970, inWindow, { mismatched: ["http://a", "http://b"], mismatchedIdentities: ["0xa", "0xb"], agreed: 0 })
         expect(getSharedState.forkScheduleAbstain).toBe(true)
         expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
         const past: CheckPlan = { due: true, inWindow: false, nearest: null }
@@ -353,7 +461,7 @@ describe("leaving a differing validator out of the shard", () => {
 
     it("leaves out the minority still differing when this node resumes past the window", async () => {
         const past: CheckPlan = { due: true, inWindow: false, nearest: null }
-        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], mismatchedIdentities: ["0xa", "0xb"], agreed: 1 })
+        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], mismatchedIdentities: ["0xa", "0xb"], agreed: 0 })
         expect(getSharedState.forkScheduleAbstain).toBe(true)
         await applyRoundOutcome(1100, past, { mismatched: ["http://b"], mismatchedIdentities: ["0xB"], agreed: 2, agreedIdentities: ["0xa", "0xc"] })
         expect(getSharedState.forkScheduleAbstain).toBe(false)
@@ -430,8 +538,8 @@ describe("the recheck timer while abstaining", () => {
     }
 
     it("starts once, every 30 seconds, when the flag is raised, and stops when it clears", async () => {
-        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a"], agreed: 0 })
-        await applyRoundOutcome(970, inWindow, { mismatched: ["http://a"], agreed: 0 })
+        await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], agreed: 0 })
+        await applyRoundOutcome(970, inWindow, { mismatched: ["http://a", "http://b"], agreed: 0 })
         expect(intervalsStarted).toEqual([RECHECK_INTERVAL_MS])
         expect(RECHECK_INTERVAL_MS).toBe(30_000)
         expect(intervalsCleared).toBe(0)
@@ -460,7 +568,7 @@ describe("the recheck timer while abstaining", () => {
             },
         })
         await withPeers(answer, async () => {
-            await applyRoundOutcome(950, inWindow, { mismatched: ["http://peer"], agreed: 0 })
+            await applyRoundOutcome(950, inWindow, { mismatched: ["http://peer"], agreed: 0, validatorIdentities: ["peer"] })
             expect(getSharedState.forkScheduleAbstain).toBe(true)
             const fire = tick!
             expect(typeof fire).toBe("function")
@@ -505,7 +613,7 @@ describe("the recheck timer while abstaining", () => {
             return new Promise(resolve => releases.push(() => resolve({ result: 503 })))
         }
         await withPeers(hang, async () => {
-            await applyRoundOutcome(950, inWindow, { mismatched: ["http://peer"], agreed: 0 })
+            await applyRoundOutcome(950, inWindow, { mismatched: ["http://peer"], agreed: 0, validatorIdentities: ["peer"] })
             const fire = tick!
             const first = onBlockInserted(950)
             await waitFor(() => asked === 1)
@@ -519,7 +627,7 @@ describe("the recheck timer while abstaining", () => {
 
     it("swallows a failing comparison", async () => {
         const PeerManager = (await import("src/libs/peer/PeerManager")).default
-        await applyRoundOutcome(950, inWindow, { mismatched: ["http://peer"], agreed: 0 })
+        await applyRoundOutcome(950, inWindow, { mismatched: ["http://peer"], agreed: 0, validatorIdentities: ["peer"] })
         const fire = tick!
         const peers = spyOn(PeerManager, "getInstance").mockImplementation((() => {
             throw new Error("peer manager down")

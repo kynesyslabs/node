@@ -289,8 +289,11 @@ chain.
 
 ## Expected file modes
 
-- Identity file: `600`. The node tightens it on start if group or other bits
-  are set, and logs a warning when it does. If it cannot (read-only mount,
-  other owner) it still starts, so fix the mode on the host.
+- Identity file: `600` (or stricter). The node tightens it on start if group
+  or other bits are set, and logs a warning when it does. If it cannot
+  (read-only mount, other owner), a production node (`PROD=true`) refuses to
+  start until the mode is fixed on the host; elsewhere it logs the problem
+  and starts. `scripts/node-doctor` (and `--production`) fails on a key file
+  group or other users can read.
 - Signing record: `600`, written by the node.
 - The directory holding them should not be readable by other users.

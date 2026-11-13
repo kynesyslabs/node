@@ -52,7 +52,10 @@ import {
     forkScheduleAbstainReason,
     shouldLogForkScheduleAbstain,
 } from "./routines/forkScheduleAbstain"
-import { ensureWindowChecked } from "@/libs/peer/routines/forkScheduleWatch"
+import {
+    ensureWindowChecked,
+    onShardMemberUnresponsive,
+} from "@/libs/peer/routines/forkScheduleWatch"
 import {
     filterMempoolByRefBlock,
     type FailedTranscation,
@@ -1556,6 +1559,9 @@ async function updateValidatorPhase(
 
     if (res === ("abortConsensus" as any)) {
         log.error("[consensusRoutine] Abort consensus routine")
+        // The secretary may be a validator that abstains on its own fork
+        // schedule; only a comparison round can leave it out of the next shard.
+        void onShardMemberUnresponsive()
         throw new AbortConsensusError("500 error received from secretary")
     }
 

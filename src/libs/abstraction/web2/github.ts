@@ -3,6 +3,7 @@ import { Octokit } from "@octokit/core"
 import { Web2ProofParser, Web2Claim, sameHandle, sameId } from "./parsers"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
+import { boundedFetch, web2Limits, type Web2Limits } from "./boundedFetch"
 
 export class GithubProofParser extends Web2ProofParser {
     private static instance: GithubProofParser
@@ -45,7 +46,11 @@ export class GithubProofParser extends Web2ProofParser {
         }
     }
 
-    async login() {
+    /**
+     * Gist reads run while a client waits on identity verification, so a
+     * slow or oversized GitHub response is cut at the web2 proxy limits.
+     */
+    async login(limits: Web2Limits = web2Limits()) {
         const githubToken = Config.getInstance().identity.githubToken
         if (!githubToken) {
             throw new Error("GITHUB_TOKEN is not configured")
@@ -53,6 +58,7 @@ export class GithubProofParser extends Web2ProofParser {
 
         this.github = new Octokit({
             auth: githubToken,
+            request: { fetch: boundedFetch(limits) },
         })
     }
 

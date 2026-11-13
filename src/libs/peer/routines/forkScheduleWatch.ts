@@ -8,21 +8,25 @@
  * where a mismatch is about to become a split and is logged as an error.
  *
  * Under FORK_SCHEDULE_MISMATCH_POLICY=abstain (the default) the node also skips
- * consensus rounds, but only when it is the odd one out: a strict majority of
- * the validators that answered must differ, inside the window. A minority of
- * differing peers is reported and left alone, because the node with the right
- * schedule is then this one, and a few bad peers (or non-validators) must not
- * be able to sideline it. While abstaining the node keeps syncing, and a timer
- * re-runs the comparison so the flag can clear without waiting for a block,
- * which a network of abstaining nodes would never produce. The flag clears once
+ * consensus rounds, but only when it is the odd one out: more than half of the
+ * whole staked validator set must answer with a different schedule, inside the
+ * window. A minority of differing peers is reported and left alone, because the
+ * node with the right schedule is then this one, and a few bad peers (or
+ * non-validators) must not be able to sideline it, also not while the honest
+ * validators are too slow to answer. While abstaining the node keeps syncing,
+ * and a timer re-runs the comparison so the flag can clear without waiting for
+ * a block, which a network of abstaining nodes would never produce. The flag clears once
  * no majority differs, inside the window or after it. Outside the window, or
  * under `warn`, a mismatch is only reported: stopping a node during a rolling
  * genesis edit far from any fork would cost liveness for no gain.
  *
  * A validator whose gasFeeSeparation treasury differs while both already
  * apply the fork is the exception: every fee-bearing block splits them and
- * there is no later height to wait for. A round where one answers so is handled as a
- * round inside the window, at any height, and logged as an error.
+ * there is no later height to wait for. So is one whose activation height for
+ * a fork differs while either side already applies that fork, which is the
+ * only kind of mismatch left on a network that activates every fork at
+ * genesis. A round where one answers so is handled as a round inside the
+ * window, at any height, and logged as an error.
  *
  * The watch is driven by inserted blocks, so a node that restarts inside the
  * window would otherwise forge before its first comparison. The consensus
@@ -128,6 +132,14 @@ export interface RoundOutcome {
     validatorIdentities?: string[] | null
     /** Connection strings of the validators in `mismatched` whose gasFeeSeparation treasury differs. */
     treasuryMismatched?: string[]
+    /** Connection strings of the validators in `mismatched` that differ on a fork already active on either side. */
+    activeForkMismatched?: string[]
+    /**
+     * Identities of the validators in `mismatched` whose own nearest scheduled
+     * height is within WINDOW_BLOCKS of the tip: by their schedule they are in
+     * the window, so they abstain even when ours schedules nothing near.
+     */
+    mismatchedInTheirWindow?: string[]
 }
 
 /** How often the comparison is repeated while the node abstains or leaves peers out. */
@@ -170,11 +182,18 @@ async function recheckOnce(): Promise<void> {
 /**
  * Turns one comparison round into the mismatch gauge and the abstain flag.
  *
- * Setting needs a strict majority of the validators that answered to differ,
- * inside the window, under the abstain policy. Clearing needs only that no
- * majority differs, wherever the tip is: once the nearest scheduled height is
+ * Setting needs more than half of the staked validator set to answer with a
+ * different schedule, inside the window, under the abstain policy. Counting
+ * against the whole set rather than the answers keeps a validator that did not
+ * answer from tipping the vote: otherwise one peer reporting a different
+ * schedule while the honest ones time out would sideline an honest node. On an
+ * even split neither side has that majority, so neither abstains; the two
+ * halves cannot reach a quorum together, and the chain stops until an operator
+ * fixes a schedule. Clearing needs that neither the set nor the answers show a
+ * differing majority, wherever the tip is: once the nearest scheduled height is
  * behind the tip the window is over, and the node stays out only while most of
- * its peers still disagree with it. A round that reached no validator is
+ * its peers still disagree with it; a round where the agreeing validators do
+ * not answer does not let it back in. A round that reached no validator is
  * inconclusive and changes nothing: clearing on silence would let a node whose
  * peers are all unreachable resume consensus on a schedule it never confirmed.
  *
@@ -207,14 +226,22 @@ export async function applyRoundOutcome(
     setForkScheduleMismatch(differing > 0)
 
     const treasuryDiffers = (outcome.treasuryMismatched?.length ?? 0) > 0
-    // A different treasury splits the chain already, so it is acted on as a
-    // mismatch inside the window would be, wherever the tip is
-    const urgent = plan.inWindow || treasuryDiffers
-    const majorityDiffers = differing > outcome.agreed
+    const activeForkDiffers = (outcome.activeForkMismatched?.length ?? 0) > 0
+    // A different treasury, or a different height for a fork already active,
+    // splits the chain already, so it is acted on as a mismatch inside the
+    // window would be, wherever the tip is
+    const urgent = plan.inWindow || treasuryDiffers || activeForkDiffers
+    // The staked set holds this node when it is a validator. With no staked
+    // set (bare dev networks) only the answers and this node are known.
+    const total = outcome.validatorIdentities
+        ? outcome.validatorIdentities.length
+        : differing + outcome.agreed + 1
+    const majorityDiffers = differing * 2 > total
+    const outnumbered = differing > outcome.agreed
+    const wasAbstaining = getSharedState.forkScheduleAbstain
     const abstaining =
         policy === "abstain" &&
-        majorityDiffers &&
-        (urgent || getSharedState.forkScheduleAbstain)
+        ((majorityDiffers && urgent) || (wasAbstaining && (majorityDiffers || outnumbered)))
     const before = getSharedState.forkScheduleDifferingPeers
     const leaveOut = new Set<string>()
     if (policy === "abstain" && !abstaining) {
@@ -228,9 +255,15 @@ export async function applyRoundOutcome(
         // timed out.
         // A node that abstained itself is past a mismatch too: the minority
         // still differing when it resumes may still abstain.
-        const pastMismatch = before.size > 0 || getSharedState.forkScheduleAbstain
-        if (!majorityDiffers && differing > 0 && (urgent || pastMismatch)) {
+        const pastMismatch = before.size > 0 || wasAbstaining
+        if (!outnumbered && differing > 0 && (urgent || pastMismatch)) {
             for (const id of outcome.mismatchedIdentities ?? []) leaveOut.add(id.toLowerCase())
+        }
+        // A validator inside its own window abstains whatever our schedule
+        // says. Left in the shard it is still drawn as secretary, and a round
+        // whose secretary never starts stalls every validator.
+        if (!outnumbered) {
+            for (const id of outcome.mismatchedInTheirWindow ?? []) leaveOut.add(id.toLowerCase())
         }
     }
     if (leaveOut.size !== before.size || [...leaveOut].some(id => !before.has(id))) {
@@ -246,37 +279,38 @@ export async function applyRoundOutcome(
         }
     }
 
-    if (majorityDiffers) {
-        if (!abstaining && leaveOut.size > 0) startRecheck()
-        if (policy === "abstain" && urgent) {
+    if (abstaining) {
+        if (urgent) {
             const reason =
                 "fork schedule differs from " +
                 outcome.mismatched.join(", ") +
-                ` (${differing} of ${differing + outcome.agreed} validators)` +
+                ` (${differing} of ${total} validators)` +
                 (treasuryDiffers
                     ? `, gasFeeSeparation treasury differs from ${outcome.treasuryMismatched!.join(", ")}`
+                    : "") +
+                (activeForkDiffers
+                    ? `, an active fork differs from ${outcome.activeForkMismatched!.join(", ")}`
                     : "") +
                 (plan.nearest !== null
                     ? `, nearest scheduled height ${plan.nearest}`
                     : "") +
                 "; the node keeps syncing and resumes once the schedules agree"
-            const wasAbstaining = getSharedState.forkScheduleAbstain
             getSharedState.forkScheduleAbstainReason = reason
             getSharedState.forkScheduleAbstain = true
             setConsensusAbstaining(true)
-            startRecheck()
             if (!wasAbstaining) {
                 log.error(
                     `[FORK SCHEDULE] Abstaining from consensus from block ${tip}: ${reason}`,
                 )
             }
         }
+        startRecheck()
         return
     }
 
     if (leaveOut.size > 0) startRecheck()
     else stopRecheck()
-    if (getSharedState.forkScheduleAbstain) {
+    if (wasAbstaining) {
         getSharedState.forkScheduleAbstain = false
         getSharedState.forkScheduleAbstainReason = ""
         setConsensusAbstaining(false)
@@ -331,6 +365,8 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
         agreedIdentities: [],
         validatorIdentities: validators === null ? null : [...validators],
         treasuryMismatched: [],
+        activeForkMismatched: [],
+        mismatchedInTheirWindow: [],
     }
     await mapWithLimit(peers, PEER_CONCURRENCY, async peer => {
         try {
@@ -347,6 +383,10 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
             outcome.mismatched.push(peer.connection.string)
             outcome.mismatchedIdentities!.push(String(peer.identity))
             if (result.treasuryDiffers) outcome.treasuryMismatched!.push(peer.connection.string)
+            if (result.activeForkDiffers) outcome.activeForkMismatched!.push(peer.connection.string)
+            const theirWindow =
+                result.theirNearest !== undefined && result.theirNearest - tip <= WINDOW_BLOCKS
+            if (theirWindow) outcome.mismatchedInTheirWindow!.push(String(peer.identity))
             const text =
                 "[FORK SCHEDULE] MISMATCH with " +
                 peer.connection.string +
@@ -356,8 +396,11 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
                     ? " (nearest scheduled height " + plan.nearest + ")"
                     : "") +
                 ": " +
-                result.lines.join("; ")
-            if (plan.inWindow || result.treasuryDiffers) log.error(text)
+                result.lines.join("; ") +
+                (theirWindow ? ` (their nearest scheduled height ${result.theirNearest})` : "")
+            if (plan.inWindow || result.treasuryDiffers || result.activeForkDiffers || theirWindow) {
+                log.error(text)
+            }
             else log.warn(text)
         } catch {
             // One peer failing must not stop the others from being compared.
@@ -394,6 +437,7 @@ async function drainRounds(first: number): Promise<void> {
 /** Forgets which scheduled height was checked. Exported for the test. */
 export function resetWindowCheck(): void {
     windowCheckedFor = null
+    lastStallCheckAt = null
     currentRun = null
     requestedChecks = 0
     answeredChecks = 0
@@ -434,7 +478,7 @@ export async function ensureWindowChecked(tip: number): Promise<void> {
 
 /**
  * Runs a comparison now rather than at the next due block, for a caller that
- * has just seen a peer whose treasury differs. Queued behind a running round
+ * has just seen a peer whose treasury, or an active fork, differs. Queued behind a running round
  * like a due block is. Until a conclusive round started after this call has
  * run, ensureWindowChecked() holds the consensus routine, so the caller need
  * not wait. Never throws.
@@ -452,6 +496,31 @@ export async function requestScheduleCheck(): Promise<void> {
         await runRounds(tip)
     } catch {
         // A failed comparison must not affect the caller; the periodic watch retries.
+    }
+}
+
+let lastStallCheckAt: number | null = null
+
+/**
+ * For the consensus routine when a shard member did not take part: the
+ * secretary never answered, or a member refused or missed the block hash or
+ * the precommit. It may be abstaining on its own fork schedule while ours
+ * shows no window, and the block-driven watch would not compare until the
+ * next due block, or never on a chain stalled by an abstaining secretary.
+ * This starts a round instead, and ensureWindowChecked holds the next
+ * consensus round until it has answered, so that round's shard already
+ * leaves the abstainer out. At most once per RECHECK_INTERVAL_MS: misses
+ * repeat every round, and each comparison asks every validator. Never throws.
+ */
+export async function onShardMemberUnresponsive(now: number = Date.now()): Promise<void> {
+    try {
+        const { Config } = await import("@/config")
+        if (Config.getInstance().core.forkScheduleMismatchPolicy !== "abstain") return
+        if (lastStallCheckAt !== null && now - lastStallCheckAt < RECHECK_INTERVAL_MS) return
+        lastStallCheckAt = now
+        await requestScheduleCheck()
+    } catch {
+        // A failed comparison must not affect the consensus routine.
     }
 }
 

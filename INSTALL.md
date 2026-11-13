@@ -11,10 +11,14 @@ Pick one. Both tracks produce a working node; they differ only in where the bina
 
 ### Hardware Minimum
 
-- 4GB RAM
-- 4 CPU cores (2GHz+)
+Per validator (node and its database):
+
+- 2 dedicated vCPU (2GHz+), not shared or burstable
+- 3 GB RAM
 - Modern SSD
 - 200 Mbps internet connection
+
+In the launch rehearsal under flood load a validator peaked at 150-164 % CPU (1.5-1.6 cores) and 0.86 GiB of memory. A shared or burstable vCPU is throttled at such peaks, and a slow validator slows every round it takes part in. Several validators on one host need this much each.
 
 ### Hardware Recommended
 
@@ -42,6 +46,8 @@ chronyc tracking       # "Leap status : Normal", "System time" well under 1 seco
 ```
 
 If NTP is off: `sudo timedatectl set-ntp true`.
+
+Keep NTP synced and alert on `demos_clock_offset_seconds` above 1 second. In the launch rehearsal a validator 4.5 seconds off still followed the chain, but that leaves only 0.5 seconds before the 5-second refusal.
 
 ---
 
@@ -185,6 +191,7 @@ TLSNOTARY_ENABLED=true
 - **`EXPOSED_URL`** is the address peers and clients reach this node's RPC at. Its port is the `RPC_PORT` you publish (change both together; a port forwarded by NAT or served by a proxy is the outside one), and it must be exactly the `connection_url` the network's genesis lists for your key: the release owner builds the genesis from the URL you sent, and clients read it from there (`getValidatorSet`). If the two differ, send the release owner the right URL before launch rather than editing the genesis.
 - **`COMPOSE_PROFILES`.** Block production needs neither TLSNotary nor monitoring. `tlsnotary` runs the notary sidecar for SDK clients that attest HTTPS responses; without it, set `COMPOSE_PROFILES=` and `TLSNOTARY_ENABLED=false`. `monitoring` adds Prometheus and Grafana and does not start without `GRAFANA_ADMIN_PASSWORD` (any strong password other than `demos`); a validator that runs it sets both. Leave out `reaper` (it mounts the Docker socket) and `neo4j`.
 - **TLSNotary clients.** With the `tlsnotary` profile the notary port (`TLSNOTARY_PORT`) is published on every interface. The node service publishes the advertised proxy port (`TLSNOTARY_PROXY_PORT`) on every interface and the per-session proxies (`TLSNOTARY_PROXY_PORT_MIN`-`MAX`) on loopback whatever the profiles, so those ports must be free on the host even with TLSNotary off (nothing answers on them then). A browser reaches the per-session proxies only through a reverse proxy on this host that routes `/tlsn/<port>/`: the `proxy` profile (Caddy; `TLSNOTARY_PROXY_MODE` picks `subpath`, `subdomain` or `direct` and matters only there) or your own nginx, as in [docs/runbooks/tlsn-reverse-proxy.md](docs/runbooks/tlsn-reverse-proxy.md). A validator that does not offer attestation to browsers needs neither. Pick `TLSNOTARY_PORT` so that it is not any peer's `RPC_PORT` + 1: a node in `OMNI_ONLY` mode dials a peer that has not advertised its `OMNI_PORT` at its RPC port + 1 (the node logs a reminder of this at every start; see Troubleshooting). In the default `OMNI_PREFERRED` mode a node dials only the `OMNI_PORT` a peer advertised in its signed hello reply, and uses HTTP for peers that advertise none.
+- **`SUDO_PUBKEY`** (optional) is the ed25519 public key (`0x` + 64 hex) this node answers its admin RPC to (`rate-limit/unblock`, `getCampaignData`, `awardPoints`). Empty, nobody may call them. It only authorises calls on this node: whether an award transaction is valid is decided by the genesis `properties.sudoPubkey`, the same on every node.
 - **Ports.** Every published port and the variable that moves it are in [Network Exposure](#network-exposure). Check that each one is free (`ss -ltn`) before the first start.
 - **Another install on this host** also sets `INSTANCE_SUFFIX` and `COMPOSE_PROJECT_NAME` and moves every port: see [More than one install on a host](#more-than-one-install-on-a-host).
 

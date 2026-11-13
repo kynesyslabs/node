@@ -5,7 +5,7 @@
  * the precommit exchange use real ed25519 for every other member.
  */
 
-import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it, jest } from "bun:test"
+import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it, jest, spyOn } from "bun:test"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -82,6 +82,7 @@ const votes = await import("./votes")
 const roundState = await import("./roundState")
 const lockStore = await import("./lockStore")
 const precommit = await import("./precommit")
+const forkScheduleWatch = await import("@/libs/peer/routines/forkScheduleWatch")
 
 const H = 10
 const R1 = 5000
@@ -582,5 +583,33 @@ describe("precommit exchange", () => {
         expect(retries.get(c.identity)).toBe(1)
         expect(retries.get(a.identity)).toBe(2)
         expect(retries.get(b.identity)).toBe(2)
+    })
+
+    it("asks for a fork schedule comparison when a member refuses or fails the precommit", async () => {
+        openPrevote(X, R1)
+        const pol = await prevotes(X, R1, others)
+        const own = await precommit.lockAndPrecommit({ height: H, round: R1, hash: X, pol })
+        if (!("signature" in own)) throw new Error(own.refused)
+
+        const [a, b, c] = others
+        const refusing = (s: Signer) => ({
+            identity: s.identity,
+            longCall: async () => ({ result: 409, response: "", require_reply: false, extra: { reason: "no open prevote" } }),
+        })
+        peers.set(a.identity, refusing(a))
+        peers.set(b.identity, refusing(b))
+        peers.set(c.identity, {
+            identity: c.identity,
+            longCall: async () => {
+                throw new Error("timeout")
+            },
+        })
+        const spy = spyOn(forkScheduleWatch, "onShardMemberUnresponsive").mockResolvedValue(undefined)
+        try {
+            await precommit.broadcastPrecommit({ height: H, round: R1, hash: X, pol }, own.signature, committee)
+            expect(spy).toHaveBeenCalledTimes(3)
+        } finally {
+            spy.mockRestore()
+        }
     })
 })

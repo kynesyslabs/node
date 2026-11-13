@@ -25,7 +25,11 @@ import {
     checkIdentityAdmission,
 } from "./validation/identityAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
-import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
+import {
+    deepWindowCutoff,
+    isWithinDeepWindow,
+    referenceBlockRoomAt,
+} from "./referenceBlockWindow"
 import { blockCapsActiveForPendingBlock } from "@/forks/blockCapsGate"
 import { l2psGateRefusal, l2psOff } from "@/forks/l2psGate"
 import { tlsnDisabled, tlsnDisabledRefusal } from "@/forks/tlsnDisabledGate"
@@ -233,7 +237,7 @@ export default class Mempool {
      * Counts every tx whose `content.from` matches the supplied
      * lowercase hex address AND whose `reference_block` is still
      * inside the allowed window
-     * (`lastBlock - referenceBlockRoom ..= lastBlock`) — the same
+     * (`lastBlock - referenceBlockRoomAt(lastBlock) ..= lastBlock`) — the same
      * cut-off that `cleanMempool` uses to mark a tx stale and that
      * `isReferenceBlockAllowed` enforces on inbound RPC. Without the
      * window filter, expired-but-not-yet-swept rows would inflate
@@ -257,7 +261,7 @@ export default class Mempool {
         address: string,
     ): Promise<number> {
         const lastBlock = await Chain.getLastBlockNumber()
-        const cutoff = lastBlock - getSharedState.referenceBlockRoom
+        const cutoff = lastBlock - referenceBlockRoomAt(lastBlock)
         return await this.repo
             .createQueryBuilder("tx")
             .where("LOWER(tx.content->>'from') = LOWER(:address)", {
@@ -515,7 +519,7 @@ export default class Mempool {
             )
             .andWhere("tx.nonce = :nonce", { nonce })
             .andWhere("tx.reference_block >= :cutoff", {
-                cutoff: head - getSharedState.referenceBlockRoom,
+                cutoff: head - referenceBlockRoomAt(head),
             })
             .getCount()
         return taken > 0
@@ -690,10 +694,11 @@ export default class Mempool {
         // System relay transactions (SYSTEM_RELAY_TX_TYPES, e.g.
         // `l2psBatch`) carry a node-generated monotonic-for-uniqueness
         // nonce, not a sequential per-account counter, and never advance
-        // the sender's account.nonce (no `nonce` GCR edit). The
-        // sequential `account.nonce + 1 + pendingCount` check below is
-        // built for value-transfer txs and would reject every batch (the
-        // timestamp nonce never equals account.nonce+1), trapping the
+        // the sender's account.nonce (no `nonce` GCR edit). The nonce
+        // window below (above the confirmed nonce, at most
+        // MEMPOOL_MAX_NONCE_AHEAD past it, one pending tx per nonce) is
+        // built for value-transfer txs and would reject every batch (a
+        // timestamp nonce is far past the window), trapping the
         // L2PSBatchAggregator in a permanent retry loop.
         //
         // The exemption is gated on the tx originating from THIS node's
@@ -1061,7 +1066,7 @@ export default class Mempool {
         const existingHashes = await this.getMempoolHashMap(blockNumber)
 
         // Drop gossiped txs whose reference block has aged out of the deep
-        // window (5x referenceBlockRoom) before they reach validation.
+        // window (5x the room of the head) before they reach validation.
         // Expired-but-recent txs — outside the inclusion window that
         // isReferenceBlockAllowed enforces on the endpoint admission path,
         // but inside the deep window — are admitted so consensus can
@@ -1375,7 +1380,7 @@ export default class Mempool {
      * Removes old and executed transactions from the mempool.
      *
      * Old: reference_block falls outside the deep window
-     * (5x referenceBlockRoom). Rows in the expired-but-includable band —
+     * (5x the room of the head). Rows in the expired-but-includable band —
      * outside the inclusion window isReferenceBlockAllowed enforces on
      * inbound RPC, but inside the deep window — are retained so consensus
      * can include them as failed.

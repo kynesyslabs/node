@@ -20,10 +20,12 @@ import required from "src/utilities/required"
 import SharedState from "@/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import log from "@/utilities/logger"
+import { WEB2_REQUEST_TIMEOUT_MS } from "@/libs/abstraction/web2/boundedFetch"
 import {
     DAHR_PROXY_ERROR_HEADER,
     UnattestableResponseError,
 } from "src/features/web2/dahr/originStatus"
+
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
@@ -53,6 +55,7 @@ export class Proxy {
         },
         private readonly _maxResponseBytes: number = Config.getInstance()
             .outbound.web2MaxResponseBytes,
+        private readonly _requestTimeoutMs: number = WEB2_REQUEST_TIMEOUT_MS,
     ) {
         required(this._dahrSessionId, "Missing dahr session Id")
     }
@@ -106,7 +109,29 @@ export class Proxy {
                 method: targetMethod,
                 path: "/",
                 headers,
-                timeout: 30000,
+                timeout: this._requestTimeoutMs,
+            })
+            const deadline = setTimeout(() => {
+                reject(
+                    new Error(
+                        `Web2 request did not complete within ${this._requestTimeoutMs} ms`,
+                    ),
+                )
+                req.destroy()
+            }, this._requestTimeoutMs)
+            const settle =
+                <T extends unknown[]>(fn: (...a: T) => void) =>
+                (...a: T) => {
+                    clearTimeout(deadline)
+                    fn(...a)
+                }
+            resolve = settle(resolve)
+            reject = settle(reject)
+            req.on("timeout", () => {
+                reject(
+                    new Error(`Web2 request idle for ${this._requestTimeoutMs} ms`),
+                )
+                req.destroy()
             })
             const chunks: Buffer[] = []
             let responseHeaders: http.IncomingHttpHeaders = {}
@@ -240,6 +265,22 @@ export class Proxy {
         await this.createNewServer(targetUrl)
     }
 
+    private relayOptions(targetUrl: string): httpProxy.ServerOptions {
+        const { targetProtocol } = this.parseUrl(targetUrl)
+        const isHttps = targetProtocol === "https:"
+        return {
+            target: targetUrl,
+            changeOrigin: true,
+            secure: isHttps ? this._sslConfig.verifyCertificates : false,
+            ssl: isHttps
+                ? { rejectUnauthorized: this._sslConfig.verifyCertificates }
+                : undefined,
+            // The relay drops the origin connection at the same deadline.
+            proxyTimeout: this._requestTimeoutMs,
+            timeout: this._requestTimeoutMs,
+        }
+    }
+
     private async createNewServer(targetUrl: string): Promise<void> {
         return new Promise<void>((resolve, reject) => {
             const { targetProtocol, targetHostname } = this.parseUrl(targetUrl)
@@ -288,20 +329,8 @@ export class Proxy {
 
             // Create the proxy server (defaults; per-request options are supplied in proxyServer.web)
             const proxyServer = httpProxy.createProxyServer({
-                target: targetUrl,
+                ...this.relayOptions(targetUrl),
                 agent,
-                changeOrigin: true,
-                secure:
-                    targetProtocol === "https:"
-                        ? this._sslConfig.verifyCertificates
-                        : false,
-                ssl:
-                    targetProtocol === "https:"
-                        ? {
-                              rejectUnauthorized:
-                                  this._sslConfig.verifyCertificates,
-                          }
-                        : undefined,
             })
 
             // Handle proxy errors

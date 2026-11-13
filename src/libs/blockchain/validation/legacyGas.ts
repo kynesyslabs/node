@@ -89,6 +89,20 @@ export function tlsnBurnCredited(tx: Pick<Transaction, "content">): boolean {
 }
 
 /**
+ * Whether a Storage Program transaction has its storage fee credited. The
+ * SDK builds that fee (create, write and the granular writes) as a sender
+ * debit that no edit credits, so it left the total supply. Under
+ * `storageFeeSettlement`, on a chain that credits the gas
+ * ({@link legacyGasCredited}), it gets credits routed like a network fee,
+ * while the sender still pays it as signed.
+ */
+export function storageFeeCredited(tx: Pick<Transaction, "content">): boolean {
+    if ((tx.content?.type as string) !== "storageProgram") return false
+    if (!legacyGasCredited(tx)) return false
+    return isForkActive("storageFeeSettlement", getSharedState.lastBlockNumber ?? 0)
+}
+
+/**
  * Where the sender debit right before the trailing nonce edit sits in
  * `edits`, or -1. In an SDK-built set that is the gas edit; once the gas is
  * left out of a TLSNotary operation, it is the burn.
@@ -105,6 +119,57 @@ function trailingDebitIndex(edits: Array<{ type: string }>): number {
     if (nonce.type !== "nonce" || debit.type !== "balance") return -1
     if (debit.operation !== "remove" || debit.account !== nonce.account) return -1
     return last - 1
+}
+
+type BalanceView = { type: string; operation?: unknown; account?: unknown; amount?: unknown }
+
+/** Whether `edits` from `at` on are exactly `credits`, in order. */
+function carriesCredits(edits: Array<{ type: string }>, at: number, credits: GCREditBalance[]): boolean {
+    if (at + credits.length > edits.length) return false
+    return credits.every((credit, i) => {
+        const edit = edits[at + i] as unknown as BalanceView
+        return (
+            edit.type === "balance" &&
+            edit.operation === "add" &&
+            edit.account === credit.account &&
+            String(edit.amount) === String(credit.amount)
+        )
+    })
+}
+
+/**
+ * `edits` with the credits of each sender debit ahead of the trailing gas
+ * edit placed right after that debit: the storage fee of a Storage Program
+ * create or write. The trailing debit is left to
+ * {@link withTrailingDebitCredit}, so no debit is credited twice. A debit
+ * already followed by its credits is left as it is, so a set that carries
+ * them comes back as the same array, as does a set without such a debit.
+ */
+export function withStorageFeeCredit<T extends { type: string }>(
+    edits: T[],
+    txHash: string,
+): T[] {
+    const last = edits.length - 1
+    if (last < 1) return edits
+    const nonce = edits[last] as unknown as { type: string; account?: unknown }
+    if (nonce.type !== "nonce") return edits
+    const gas = trailingDebitIndex(edits)
+    const end = gas < 0 ? last : gas
+
+    const out: T[] = []
+    let changed = false
+    for (let i = 0; i < edits.length; i++) {
+        out.push(edits[i])
+        if (i >= end) continue
+        const edit = edits[i] as unknown as BalanceView
+        if (edit.type !== "balance" || edit.operation !== "remove") continue
+        if (edit.account !== nonce.account) continue
+        const credits = debitCredits(edit, txHash)
+        if (credits.length === 0 || carriesCredits(edits, i + 1, credits)) continue
+        out.push(...(credits as unknown as T[]))
+        changed = true
+    }
+    return changed ? out : edits
 }
 
 /**

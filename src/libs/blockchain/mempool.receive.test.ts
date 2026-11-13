@@ -38,8 +38,11 @@ jest.mock("src/libs/blockchain/chain", () => ({
     },
 }))
 
+// Every fork is active except the wider reference block room, which a test
+// switches on to see the window move.
+let roomFork = false
 jest.mock("@/forks", () => ({
-    isForkActive: jest.fn(() => true),
+    isForkActive: jest.fn((name: string) => name !== "referenceBlockRoom10" || roomFork),
 }))
 
 let blockCapsOn = false
@@ -124,6 +127,7 @@ function resetReceiveState() {
     logError.mockClear()
     getExistingTransactionHashes.mockClear()
     blockCapsOn = false
+    roomFork = false
     heldBySender = []
     deletedHashes = []
     ;(Mempool as any).repo = {
@@ -175,6 +179,17 @@ describe("Mempool.receive admission", () => {
                 String(c[0]).includes("outside the allowed window"),
             ),
         ).toHaveLength(2)
+    })
+
+    it("keeps a deep window of 50 blocks under referenceBlockRoom10", async () => {
+        roomFork = true
+        await Mempool.receive([
+            tx("0xfive", 95),
+            tx("0xcutoff", 50),
+            tx("0xancient", 49),
+            tx("0xfuture", 101),
+        ])
+        expect(insertedRows.map(r => r.hash).sort()).toEqual(["0xcutoff", "0xfive"])
     })
 
     it("drops a tx whose signature fails and keeps the rest of the batch", async () => {

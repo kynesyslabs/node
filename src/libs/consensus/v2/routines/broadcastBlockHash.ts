@@ -15,6 +15,7 @@ import {
 import { commitLockActive, voteMessageOf } from "../commitLock/domain"
 import { getBoundCommittee, getEligiblePool } from "./getShard"
 import { isForkActive } from "@/forks/forkGates"
+import { onShardMemberUnresponsive } from "@/libs/peer/routines/forkScheduleWatch"
 import { getMempoolLimits } from "@/libs/blockchain/mempoolLimits"
 import { StateReadError } from "@/libs/blockchain/gcr/stateReadError"
 
@@ -317,6 +318,9 @@ async function proposeAndCollect(
             "[broadcastBlockHash] Block hash not confirmed by validator " +
                 `${peerId}: result=${response?.result} message=${extraMessage}`,
         )
+        // A member abstaining on its own fork schedule refuses every round
+        // until a schedule comparison leaves it out of the shard.
+        void onShardMemberUnresponsive()
 
         // The payload is the refusing peer's own candidate: diagnostics
         // only, so nothing in it may turn this con vote into a thrown round.

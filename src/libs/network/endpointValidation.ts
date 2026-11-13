@@ -33,6 +33,10 @@ export async function handleValidateTransaction(
         log.only(
             `[handleValidateTransaction] Transaction confirmed in ${handleConfirmTransactionEnd - handleConfirmTransactionStart}ms`,
         )
+        // A refusal already carries its reason (a launch gate, a signature,
+        // a nonce); judging the edits of a refused transaction would only
+        // replace that reason with an edit mismatch.
+        if (!validationData.data.valid) return validationData
 
         const handleGcrEditsStart = Date.now()
         const gcrEdits = await generateGcrEdits(tx)

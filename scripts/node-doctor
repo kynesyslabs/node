@@ -245,15 +245,34 @@ check_node_modules() {
 	fi
 }
 
+# Permission bits of a file in octal (GNU stat, then BSD stat).
+file_mode() {
+	stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
+# The identity file holds the validator key: any group or other bit lets
+# another local user read it.
+mode_opens_key() { # $1 octal mode
+	[[ "$1" =~ ^[0-7]+$ ]] || return 0
+	(((8#$1 & 8#077) != 0))
+}
+
 # --- Example Check: Identity File ---
 check_identity_file() {
-	local identity_file=".demos_identity"
+	local identity_file="${IDENTITY_FILE:-.demos_identity}"
 
 	if [[ -f "${identity_file}" ]]; then
+		local mode
+		mode=$(file_mode "${identity_file}")
+		if mode_opens_key "${mode}"; then
+			report_problem "Identity" "Identity file ${identity_file} has mode ${mode:-unknown}: other users can read the validator key" \
+				"Run: chmod 600 ${identity_file}"
+			return 1
+		fi
 		# Check if file is not empty and has reasonable size
 		local size=$(wc -c <"${identity_file}")
 		if [[ "${size}" -gt 50 ]]; then
-			report_ok "Identity" "Identity file exists (${size} bytes)"
+			report_ok "Identity" "Identity file exists (${size} bytes, mode ${mode})"
 			return 0
 		else
 			report_warning "Identity" "Identity file seems too small (${size} bytes)" \
@@ -841,6 +860,25 @@ check_web2_identity_credentials() {
 	done
 }
 
+# The node tightens the mode itself on start, but with PROD=true it refuses
+# to start when it cannot (read-only mount, other owner), so a host file
+# other users can read is caught here before the start fails.
+check_identity_file_mode() {
+	local file mode
+	file=$(node_env IDENTITY_FILE)
+	file="${file:-.demos_identity}"
+	if [[ ! -f "${file}" ]]; then
+		prod_line WARN "identity file mode" "${file} is not on this host path (under docker compose it lives in the node_state volume, where the node sets 600 on start)"
+		return
+	fi
+	mode=$(file_mode "${file}")
+	if mode_opens_key "${mode}"; then
+		prod_line FAIL "identity file mode" "${file} has mode ${mode:-unknown}, other users can read the validator key: run chmod 600 ${file}"
+	else
+		prod_line PASS "identity file mode" "${file} ${mode}"
+	fi
+}
+
 run_production_checks() {
 	load_node_env || return 1
 	echo "Mainnet validator host checks (node settings from ${NODE_ENV_SOURCE}, parameter sheet ${PARAMETER_SHEET}):"
@@ -852,6 +890,7 @@ run_production_checks() {
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
 	check_genesis_file
 	check_web2_identity_credentials
+	check_identity_file_mode
 	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
 	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
 	check_unset DEMOS_IDENTITY_TAKEOVER "set it for the one takeover start only (docs/runbooks/validator-key.md)"
@@ -886,7 +925,8 @@ OPTIONS:
                     mismatch policy, block timing, fees, stake floor, ZK points),
                     clock sync, outbound NTP, genesis pins, the genesis file the
                     node reads (shardSize range, validators against the quorum,
-                    validator URLs), and one-start switches left set; one
+                    validator URLs), the identity file mode (600 or stricter),
+                    and one-start switches left set; one
                     PASS/WARN/FAIL line each, exit 1 on any FAIL
     --parameters FILE
                     With --production: the parameter sheet to compare with
