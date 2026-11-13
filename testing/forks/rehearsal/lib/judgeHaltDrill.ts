@@ -10,9 +10,10 @@
  *
  *   bun testing/forks/rehearsal/lib/judgeHaltDrill.ts <input.json> [--out <verdict.json>]
  *
- * Exit codes: 0 pass, 1 fail, 2 the input could not be read or is malformed
- * (no verdict). Prints one line per phase, the timings and a `DRILL_TIMINGS`
- * JSON line, as scenario 12 does.
+ * Exit codes: 0 pass, 1 fail, 2 the input could not be read or is malformed,
+ * or its genesis did not have quorumParity, committeeBinding and commitLock
+ * active at block 0 (no verdict). Prints one line per phase, the timings and
+ * a `DRILL_TIMINGS` JSON line, as scenario 12 does.
  *
  * Two modes:
  *  - `halt`: P1 baseline, P2 settle, P3 halt, P4 halt agreement, P5 recovery
@@ -176,6 +177,16 @@ function readMarks(v: unknown, path: string, problems: Problems): DrillMarks {
     return marks
 }
 
+/**
+ * Forks the pass criteria rest on: the bound committee and the lock on top of
+ * it (DRILL_REQUIRED_FORKS in testing/devnet/quorum-drills/drill_inputs.py).
+ * run.sh and drill_inputs.py refuse a fork set without them before the drill
+ * starts; the judge checks again, since without them a pass or a fail would
+ * judge other rules: an input whose genesis does not have each one active at
+ * block 0 gets no verdict (exit 2).
+ */
+export const DRILL_REQUIRED_FORKS = ["quorumParity", "committeeBinding", "commitLock"] as const
+
 function readForks(v: unknown, path: string, problems: Problems): Record<string, number | null> {
     const out: Record<string, number | null> = {}
     if (!isRecord(v)) {
@@ -184,6 +195,11 @@ function readForks(v: unknown, path: string, problems: Problems): Record<string,
     }
     for (const [name, h] of Object.entries(v)) {
         out[name] = h === null ? null : readInt(h, `${path}.${name}`, problems)
+    }
+    for (const name of DRILL_REQUIRED_FORKS) {
+        if (name in v && v[name] === 0) continue
+        const got = name in v ? JSON.stringify(v[name]) : "no entry"
+        problems.push(`${path}.${name}: the drill needs ${name} active at block 0, got ${got}`)
     }
     return out
 }

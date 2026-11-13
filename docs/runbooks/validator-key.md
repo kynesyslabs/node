@@ -207,6 +207,10 @@ refused.
    every signing state file listed above. The record is what keeps the new
    host from signing a round the old one already signed. An older copy of the
    record makes the self-check below stop the new node.
+   The new host also needs the genesis snapshot, which is not in the state
+   directory: keep the genesis snapshot on every validator for the life of
+   the chain; with `identityCarryover` active a node without it refuses to
+   start ([genesis-import.md](../mainnet/genesis-import.md)).
 3. Start the new node. If the copied lock still beats, the old node is alive:
    go back to step 1. A stale lock is replaced after a watch of 10 to 25
    seconds; `DEMOS_IDENTITY_TAKEOVER=true` shortens it to about 7 seconds.

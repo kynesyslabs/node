@@ -149,6 +149,36 @@ check "returns 0" has "rc=0 h=25"
 check "finishes in under 8 s (more than 4 reads at a time)" test "${ms}" -lt 8000
 check "takes at least 2 s (one head round, one hash round)" test "${ms}" -ge 2000
 
+echo "== partition fork scan: an unread hash at a height every node holds is ERROR, above the lowest head it is left out"
+# run.sh's own fork_scan and read_error; heights 23..26, the lowest head 25. A subshell
+# so that read_error's exit ends the case: OUT is its output, then rc=
+source <(region 'fork_scan() {' 'scenario_partition() {')
+source <(region 'read_error() {' '# A node log whose matching')
+fs_case() { new_case "$1" 25 25 25 26 26 26; PHASES="${WORK}/${CASE}/phases.tsv"; RESULT=""; DETAIL=""; }
+fs_scan() {
+    OUT=$( ( write_verdict() { echo "VERDICT ${RESULT}: ${DETAIL}"; }
+        fork_scan 23 26 25; echo "scan done conflicts=[${FORK_CONFLICTS}]" ) 2>&1; echo "rc=$?")
+    echo "${OUT}" | tail -2 | cut -c1-200 | sed 's/^/    | /'
+}
+reads_of() { grep -c "^hash n$1 $2\$" "${FAKE}/calls"; } # hash reads of node $1 at height $2
+fs_case fs_same; fs_scan
+check "all hashes read, all equal: no fork" has "scan done conflicts=\[\]"
+check "all hashes read, all equal: rc=0" has "rc=0"
+check "a node is read once per height (n1 at 23, n6 at 26)" test "$(reads_of 1 23)$(reads_of 6 26)" = 11
+fs_case fs_fork; echo 0xfork > "${FAKE}/hash.3.24"; fs_scan
+check "two hashes at 24 (<= the lowest head): fork at 24 and no other height" has "scan done conflicts=\[ 24\]"
+check "two hashes at 24: rc=0 (a fork is a result, not an error)" has "rc=0"
+fs_case fs_gap; echo empty > "${FAKE}/hash.4.24"; fs_scan
+check "n4's hash at 24 (<= the lowest head) unread: exit 2, the scan does not finish" bash -c '! grep -q "scan done" <<< "$1" && grep -q "^rc=2$" <<< "$1"' _ "${OUT}"
+check "n4's hash at 24 unread: VERDICT ERROR, phase healed" bash -c 'grep -q "VERDICT ERROR: healed: node unreadable" <<< "$1" && grep -q "^healed" "$2"' _ "${OUT}" "${PHASES}"
+fs_case fs_gap_timeout; echo timeout > "${FAKE}/hash.2.23"; fs_scan
+check "n2's hash at 23 times out: exit 2, ERROR" bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "VERDICT ERROR" <<< "$1"' _ "${OUT}"
+fs_case fs_above; echo empty > "${FAKE}/hash.1.26"; fs_scan
+check "n1's hash at 26 (above the lowest head) unread: left out, no fork" has "scan done conflicts=\[\]"
+check "n1's hash at 26 unread: rc=0" has "rc=0"
+fs_case fs_above_fork; echo empty > "${FAKE}/hash.1.26"; echo 0xfork > "${FAKE}/hash.5.26"; echo 0xother > "${FAKE}/hash.6.26"; fs_scan
+check "n1 unread at 26, n5 and n6 differ there: fork at 26 still found" has "scan done conflicts=\[ 26\]"
+
 echo "== database reads (psql_node, block_rows) are bounded; a timed-out read is a failure, not an empty result"
 fn_src() { # $1 function name: its definition, from `name() {` to the first line that is `}`
     awk -v a="$1() {" 'index($0, a) == 1 { on = 1 } on { print } on && /^}/ { exit }' "${RUN_SH}"
@@ -160,17 +190,25 @@ source <(region 'block_rows() {' 'phase_row() {')
 source <(grep -E '^dc\(\) ' "${RUN_SH}")
 RUN_DIR="${WORK}/run"; PROJECT=qdrill-stub
 mkdir -p "${WORK}/bin"
-# docker exec ... psql: FAKE_DB is rows (default), hang, stmt (the server cancels the
-# query) or toomany (the server is out of connections); SHOW max_connections
+# docker exec ... psql: FAKE_DB is rows (default), hang, killed (SIGKILL, nothing on
+# stderr), stmt (the server cancels the query) or toomany (the server is out of
+# connections); SHOW max_connections
 # answers FAKE_MAXCONN (default 100, the postgres default). An exec with an empty
 # container fails, as docker's does.
 # The postgres lookup, `compose ... ps -q postgres`, answers fakepg; FAKE_PGPS
 # makes it hang (sleep 60 s), hang-once (only the first lookup of a case), empty
 # (no running container) or fail (a daemon error).
-# The node logs: `compose ... ps -aq node-<n>` answers cid<n> (nothing when
+# The node logs: `compose ... ps -aq node-<n>` (and `ps -q`) answers cid<n> (nothing when
 # FAKE/nocontainer.<n> exists), `logs ... cid<n>` prints FAKE/nodelog.<n> (its
 # last lines with --tail; no file: an empty log), after sleeping the seconds in
-# FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists
+# FAKE/nodelog.<n>.hang, or fails as a daemon error when FAKE/nodelog.<n>.fail exists.
+# A fake log holds no NUL byte: the fake reads it into a bash variable, which would
+# cut the log off at its first NUL (--tail all) or drop the NUL bytes (--tail N).
+# Cut off by its reader, it exits 141 as if it died of SIGPIPE, as the docker CLI
+# does whether SIGPIPE is ignored or not: a Go program that gets EPIPE on stdout
+# raises SIGPIPE with its default action. The fake's printf dies of SIGPIPE, or
+# where SIGPIPE is ignored fails with EPIPE, and in bash a SIGPIPE that came in
+# ignored cannot be unignored, so the fake exits 141 instead of raising it
 cat > "${WORK}/bin/docker" <<'FAKEDOCKER'
 #!/usr/bin/env bash
 echo "$*" >> "${FAKE_DOCKER_LOG}"
@@ -179,7 +217,7 @@ case "$*" in *"SHOW max_connections"*) echo "${FAKE_MAXCONN:-100}"; exit 0 ;; es
 case "$1" in
     compose)
         case "$*" in
-            *" ps -aq node-"*) n=${@: -1}; n=${n#node-}; [ -e "${FAKE}/nocontainer.${n}" ] || echo "cid${n}"; exit 0 ;;
+            *" ps -aq node-"* | *" ps -q node-"*) n=${@: -1}; n=${n#node-}; [ -e "${FAKE}/nocontainer.${n}" ] || echo "cid${n}"; exit 0 ;;
             *" ps -q postgres")
                 case "${FAKE_PGPS:-}" in
                     hang) sleep 60 ;;
@@ -194,11 +232,25 @@ case "$1" in
         [ "$2" = --tail ] && tail=$3
         [ -e "${FAKE}/nodelog.${n}.hang" ] && sleep "$(cat "${FAKE}/nodelog.${n}.hang")"
         [ -e "${FAKE}/nodelog.${n}.fail" ] && { echo "Error response from daemon: stub: cannot read the log of cid${n}" >&2; exit 1; }
-        if [ "${tail}" = all ]; then cat "${FAKE}/nodelog.${n}" 2>/dev/null; else tail -n "${tail}" "${FAKE}/nodelog.${n}" 2>/dev/null; fi
+        [ -e "${FAKE}/nodelog.${n}" ] || exit 0
+        # The log is taken into a variable first, then written by bash's own printf:
+        # no cat or tail faces the reader, so what happens when it stops reading
+        # does not depend on the coreutils on the PATH (GNU cat fails on EPIPE; uutils
+        # cat 0.12.0 exits 0 without a word, and the cat of the ubuntu-26.04 CI runner
+        # appears to behave the same)
+        if [ "${tail}" = all ]; then
+            IFS= read -r -d '' out < "${FAKE}/nodelog.${n}"
+        else
+            out=$(LC_ALL=C tail -n "${tail}" "${FAKE}/nodelog.${n}"; echo x); out=${out%x}
+        fi
+        # printf is killed by SIGPIPE where it is not ignored, and where it is ignored
+        # fails with EPIPE: docker's 141 then
+        printf '%s' "${out}" 2> /dev/null || exit 141
         exit 0 ;;
 esac
 case "${FAKE_DB:-rows}" in
     hang) sleep 30 ;;
+    killed) kill -KILL $$ ;;
     stmt) echo "ERROR:  canceling statement due to statement timeout" >&2; exit 1 ;;
     toomany) echo 'psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  sorry, too many clients already' >&2; exit 2 ;;
     *) printf '5|0xb5|7\n6|0xb6|8\n' ;;
@@ -309,6 +361,17 @@ check "only the append to psql-errors.log fails (it is over the limit): psql_nod
     bash -c 'grep -q "too many clients" "$1"/psql-err.*' _ "${LOG_DIR}"
 OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "and the gate exits 2" has "^rc=2$"
+check "a psql refused for connections, its errors written nowhere: not taken for one that gave none" \
+    bash -c '! grep -q "none given" "$1"/psql-err.* 2>/dev/null' _ "${WORK}/gate_psql_unwritten/logs"
+gate_case gate_psql_killed PASS; DB_TIMEOUT_S=3
+OUT=$(FAKE_DB=killed psql_node 3 "SELECT 1" 2>&1; echo "rc=$?")
+echo "${OUT}" | cut -c1-220 | sed 's/^/    | /'
+check "a psql killed with nothing on stderr: its exit status is passed on (137)" has "^rc=137$"
+check "and says the error text was none given, with the exit status" has "^psql node3_db: exit 137, error text: none given (${LOG_DIR}/psql-err\.[A-Za-z0-9]* is kept)$"
+check "not that its errors could not be written" eval '! has "could not be written"'
+check "the file it keeps says so too" grep -qx "psql node3_db: exit 137, error text: none given" "${LOG_DIR}"/psql-err.*
+OUT=$( ( pg_limit_gate ) 2>&1; echo "rc=$?" )
+check "the gate then exits 2, as for errors that could not be written" has "^rc=2$"
 
 echo "== the gate fails closed: a node log it cannot read whole is exit 2, never a pass or a fail"
 check "run.sh bounds each docker call of a node-log read at 60 s" test "${LOG_READ_TIMEOUT_S:-unset}" = 60
@@ -364,10 +427,105 @@ check "the same in the gate: it does not pass" bash -c '! grep -q "PG_GATE_PASSE
 gate
 check "the copy written: the gate finds the hit (exit 2)" has "postgres connection limit hit (1 'too many clients' lines; node-7 )"
 # At the cap head stops reading: sed and docker, still writing 1 MiB, die of SIGPIPE
-gate_case gate_big_pipe PASS; yes 'a log line' | head -c 1048576 > "${FAKE}/nodelog.4"
+gate_case gate_big_pipe PASS; yes 'a log line' 2> /dev/null | head -c 1048576 > "${FAKE}/nodelog.4"
 OUT=$( ( LOG_READ_MAX_BYTES=200; pg_limit_gate ) 2>&1; echo "rc=$?" )
 check "a 1 MiB log over LOG_READ_MAX_BYTES (200 here): still read as over it, not as a failed sed or docker" \
     has "could not read the log of node-4 to check for the postgres connection limit (the log is over 200 bytes)"
+
+echo "== grep_logs: a node log it cannot read whole fails the read and is named, within the bound"
+gl_case() { gate_case "$1" PASS; printf 'x below the quorum of 7\n' > "${FAKE}/nodelog.3"; printf 'y below the quorum of 7\n' > "${FAKE}/nodelog.9"; }
+gl() { local t0; t0=$(date +%s%N); OUT=$(grep_logs "below the quorum" 2> "${LOG_DIR}/gl.err"; echo "rc=$?"); ERR=$(cat "${LOG_DIR}/gl.err"); ms=$(( ($(date +%s%N) - t0) / 1000000 )); }
+gl_case gl_read; gl
+check "every log read: rc=0, each matching line once with its node" test "${OUT}" = $'node-3: x below the quorum of 7\nnode-9: y below the quorum of 7\nrc=0'
+gl_case gl_fail; touch "${FAKE}/nodelog.5.fail"; gl
+check "node-5's docker logs fails: rc=1, the lines of the logs read still given" test "${OUT}" = $'node-3: x below the quorum of 7\nnode-9: y below the quorum of 7\nrc=1'
+check "node-5's docker logs fails: stderr names node-5" grep -q "WARN: node-5: docker logs failed (exit 1), its log not read whole" <<< "${ERR}"
+gl_case gl_hang; echo 30 > "${FAKE}/nodelog.9.hang"; gl
+check "node-9's docker logs stalls: rc=1, stderr names node-9 and the bound" \
+    bash -c 'grep -q "^rc=1$" <<< "$1" && grep -q "WARN: node-9: docker logs did not answer within 3s, its log not read whole" <<< "$2"' _ "${OUT}" "${ERR}"
+check "node-9's docker logs stalls: returns within the bound (${ms} ms; the stub sleeps 30 s)" test "${ms}" -lt 15000
+# The display-only reads (`grep_logs ... | head -N`): head stops reading, and
+# grep_logs drains the rest so that docker is not cut off. Up to 74a076ea48 docker
+# died of SIGPIPE then, a WARN on a healthy run, and up to b4ccfffd3f still where
+# SIGPIPE is ignored (run this file under `trap '' PIPE` to see that case)
+glh() { OUT=$(grep_logs "$1" 2> "${LOG_DIR}/gl.err" | head -1; echo "rc=${PIPESTATUS[0]}"); ERR=$(cat "${LOG_DIR}/gl.err"); }
+big_log() { yes "z below the quorum of 7" 2> /dev/null | head -c 1048576 > "${FAKE}/nodelog.$1"; }
+gl_case gl_head; big_log 3
+OUT=$(bdocker logs --since 0 cid3 | head -1 > /dev/null; echo "${PIPESTATUS[0]}")
+# SIGPIPE as this shell got it (Linux: SigIgn of /proc/<pid>/status, bit 13 - 1)
+sigpipe=$(awk '/^SigIgn:/ { print $2 }' "/proc/$$/status" 2> /dev/null)
+sigpipe=$( (( 0x${sigpipe:-0} & 0x1000 )) && echo ignored || echo default)
+check "(the fake docker logs of a 1 MiB log, cut off by head -1, exits 141 as docker does, SIGPIPE ${sigpipe} here: exit ${OUT})" test "${OUT}" = 141
+glh "below the quorum"
+check "| head -1 on a 1 MiB log of matching lines: the first line, rc=0" test "${OUT}" = $'node-3: z below the quorum of 7\nrc=0'
+check "| head -1 on a 1 MiB log of matching lines: no WARN" test -z "${ERR}"
+gl_case gl_head_fail; big_log 3; touch "${FAKE}/nodelog.5.fail"; glh "below the quorum"
+check "| head -1, node-5's docker logs fails: rc=1, stderr names node-5 and only node-5" \
+    bash -c 'grep -q "^rc=1$" <<< "$1" && [ "$2" = "[qdrill] WARN: node-5: docker logs failed (exit 1), its log not read whole" ]' _ "${OUT}" "${ERR}"
+gl_case gl_head_hang; big_log 3; echo 30 > "${FAKE}/nodelog.9.hang"; glh "below the quorum"
+check "| head -1, node-9's docker logs stalls after head stopped reading: a timeout, not a SIGPIPE (rc=1, named with the bound)" \
+    bash -c 'grep -q "^rc=1$" <<< "$1" && [ "$2" = "[qdrill] WARN: node-9: docker logs did not answer within 3s, its log not read whole" ]' _ "${OUT}" "${ERR}"
+# The counting callers (scenario_floor, listed-below-q) read through tee and wc, which
+# read to the end: docker is never cut off there, and a failed read fails the count
+count() { OUT=$(lines=$(grep_logs "$1" 2> "${LOG_DIR}/gl.err" | tee -a "${STEP_LOG}" | wc -l) || echo "log_read_error"; echo "lines=${lines}"); ERR=$(cat "${LOG_DIR}/gl.err"); }
+gl_case gl_count; big_log 3; count "below the quorum"
+check "a count over a 1 MiB log: every matching line, no error" test "${OUT}" = "lines=$(( $(grep -c "below the quorum" "${FAKE}/nodelog.3") + 1 ))"
+gl_case gl_count_fail; big_log 3; touch "${FAKE}/nodelog.5.fail"; count "below the quorum"
+check "a count, node-5's docker logs fails: log_read_error" grep -q "^log_read_error$" <<< "${OUT}"
+gl_case gl_count_hang; echo 30 > "${FAKE}/nodelog.9.hang"; count "below the quorum"
+check "a count, node-9's docker logs stalls: log_read_error, named with the bound" \
+    bash -c 'grep -q "^log_read_error$" <<< "$1" && grep -q "WARN: node-9: docker logs did not answer within 3s" <<< "$2"' _ "${OUT}" "${ERR}"
+# docker cut off inside grep_logs, by a grep that stops reading, is lines missing
+gl_case gl_count_grep; big_log 3; count "("
+check "a count whose grep refuses the pattern: docker, cut off by it, is a failed read (log_read_error, node-3 named)" \
+    bash -c 'grep -q "^log_read_error$" <<< "$1" && grep -q "WARN: node-3: docker logs failed (exit 141), its log not read whole" <<< "$2"' _ "${OUT}" "${ERR}"
+# A short log can be in the pipe before grep stops: docker exits 0 then, and the
+# status of grep (2) or of the sed it cut off is what says lines are missing
+gl_case gl_count_grep_short; count "("
+check "a count whose grep refuses the pattern, on short logs: a failed read too (log_read_error, node-3 and node-9 named)" \
+    bash -c 'grep -q "^log_read_error$" <<< "$1" && grep -q "WARN: node-3: " <<< "$2" && grep -q "WARN: node-9: " <<< "$2"' _ "${OUT}" "${ERR}"
+
+echo "== stop_mid_round: no round start seen (a read that fails or stalls, or none in time) is ERROR, exit 2, and no node is stopped"
+for f in stop_mid_round round_start_error; do source <(fn_src "${f}"); done
+source <(grep -E '^event\(\) ' "${RUN_SH}")
+# run.sh's value with CONSENSUS_TIME unset, whatever the caller exports; the checks below use it
+ROUND_START_WAIT_S=$(bash -c 'unset CONSENSUS_TIME; source <(grep -E "^ROUND_START_WAIT_S=" "$1"); echo "${ROUND_START_WAIT_S:-unset}"' _ "${RUN_SH}")
+check "run.sh waits up to 60 s for a round start" test "${ROUND_START_WAIT_S}" = 60
+check "run.sh waits 3 rounds (180 s) for a round start when CONSENSUS_TIME=60" \
+    bash -c 'CONSENSUS_TIME=60; source <(grep -E "^ROUND_START_WAIT_S=" "$1"); test "${ROUND_START_WAIT_S:-unset}" = 180' _ "${RUN_SH}"
+smr_case() { # $1 name: 13 nodes up, node-1 (the watcher) at head 25 and its log $2
+    gate_case "$1" PASS; UP=(); for i in $(seq 1 13); do UP[i]=1; done
+    EVENTS="${LOG_DIR}/events.log"; : > "${EVENTS}"; : > "${FAKE_DOCKER_LOG}"; printf "$2" > "${FAKE}/nodelog.1"
+}
+smr() { # stop_mid_round 7 1 in a subshell: OUT (its output, then rc=), ms it took
+    local t0; t0=$(date +%s%N)
+    OUT=$( ( stop_mid_round 7 1; echo "returned, STOP_HEIGHT=${STOP_HEIGHT}" ) 2>&1; echo "rc=$?" )
+    ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+}
+stopped7() { grep -q " stop -t 0 node-7$" "${FAKE_DOCKER_LOG}"; }
+smr_error() { # $1 why: ERROR and exit 2 saying it, the verdict ERROR, node-7 not stopped
+    grep -q "^rc=2$" <<< "${OUT}" &&
+        has "ERROR: stop node-7: no round start seen on node-1 ($1); node-7 not stopped" &&
+        has "VERDICT ERROR: phases fine stop node-7: round start unseen on node-1 ($1)$" &&
+        grep -q "round start not seen on node-1 ($1): node-7 not stopped" "${EVENTS}" && ! stopped7
+}
+smr_case smr_seen 'We are forging block 25\n\e[32m[INFO] We are forging block 26\e[0m\nWe are forging block 27\n'
+smr
+check "a round past head 25 starts on node-1: node-7 is stopped, STOP_HEIGHT=25" \
+    bash -c 'grep -q "^returned, STOP_HEIGHT=25$" <<< "$1" && grep -q "^rc=0$" <<< "$1" && grep -q " stop -t 0 node-7$" "$2"' _ "${OUT}" "${FAKE_DOCKER_LOG}"
+check "and the event names the first round start past 25" grep -q "^[0-9:]* round start seen on node-1: We are forging block 26$" "${EVENTS}"
+smr_case smr_fail 'We are forging block 26\n'; touch "${FAKE}/nodelog.1.fail"; smr
+echo "${OUT}" | grep -E 'ERROR|^rc=' | cut -c1-220 | sed 's/^/    | /'
+check "node-1's docker logs fails: ERROR, exit 2, node-7 not stopped" smr_error "docker logs failed (exit 1)"
+smr_case smr_hang 'We are forging block 26\n'; echo 30 > "${FAKE}/nodelog.1.hang"; smr
+check "node-1's docker logs stalls: ERROR naming the bound, exit 2, node-7 not stopped" smr_error "docker logs did not answer within 3s"
+check "node-1's docker logs stalls: within the bound (${ms} ms; the stub sleeps 30 s)" test "${ms}" -lt 15000
+smr_case smr_nocontainer 'We are forging block 26\n'; touch "${FAKE}/nocontainer.1"; smr
+check "node-1 has no container: ERROR, exit 2, node-7 not stopped" smr_error "no container"
+smr_case smr_none 'We are forging block 24\nWe are forging block 25\n'; ROUND_START_WAIT_S=2; smr; ROUND_START_WAIT_S=60
+check "no round past 25 within ROUND_START_WAIT_S (2 s here): ERROR, exit 2, node-7 not stopped" smr_error "no round past 25 started within 2s"
+# SECONDS counts whole seconds of the clock: a 2 s deadline comes 1 to 2 s on
+check "and it waited for the deadline, not past it (${ms} ms)" bash -c '[ "$1" -ge 1000 ] && [ "$1" -lt 10000 ]' _ "${ms}"
 
 echo "== teardown backstop: an exit 0 or 1 the gate did not clear is exit 2 when a node log cannot be collected"
 teardown_rc() { # $1 the status run.sh exits with, $2 unwritable (as above): OUT, the status after teardown, and ms it took
@@ -412,6 +570,7 @@ check "exit 1, psql errors psql_node could not write to psql-errors.log: exit 2,
 
 echo "== teardown backstop after the verdict: an exit it replaces by 2 makes verdict.json and results.tsv ERROR too"
 for f in results_row rewrite_verdict; do source <(fn_src "${f}"); done
+source <(grep -E '^RESULTS_LOCK_WAIT_S=' "${RUN_SH}")
 # The end of run.sh as it runs: the EXIT trap, pg_limit_gate, the real
 # write_verdict, exit 0 on PASS or 1, then teardown. $3 late: node-6 logs a hit
 # after the verdict is written; unwritable: so does node-6, and verdict.json is
@@ -422,7 +581,7 @@ end_case() { # $1 name, $2 the result before the gate, $3 late, unwritable or no
     RUNS_DIR="${WORK}/$1/runs"; mkdir -p "${RUNS_DIR}"
     printf 'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\nearlier\tfloor\ton\t4\t10\t7\timage\tfine\tPASS\n' > "${RUNS_DIR}/results.tsv"
     OUT=$( (
-        source <(fn_src write_verdict); source <(grep -E '^step\(\) ' "${RUN_SH}")
+        for f in write_verdict verdict_json; do source <(fn_src "${f}"); done; source <(grep -E '^step\(\) ' "${RUN_SH}")
         RUN_ID="stub-$1"; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; IMAGE=stub; FORK_SET=devnet; EXCLUDED_FORKS='{}'
         PHASES="${LOG_DIR}/phases.tsv"; EVENTS="${LOG_DIR}/events.log"; : > "${PHASES}"; STARTED_STACK=1; SIDECARS=()
         trap teardown EXIT
@@ -476,6 +635,125 @@ check "rewrite_verdict, neither copy can be written: rc=1, verdict.json as it wa
 check "rewrite_verdict, neither copy can be written: results.tsv as it was, every row kept, and stderr says so" \
     bash -c 'cmp -s "$2" "$3" && grep -q "could not rewrite $2 (.*): the row of stub-copies still says PASS, the exit is 2" <<< "$1"' \
     _ "${ERR}" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+check "rewrite_verdict, neither copy can be written: the empty copy of results.tsv is removed" \
+    test -z "$(compgen -G "${RUNS_DIR}/results.tsv.tmp*")"
+
+echo "== results.tsv is shared: the append and the rewrite each hold the lock next to it, and without it fail and say so"
+check "run.sh waits up to 30 s for the lock" test "${RESULTS_LOCK_WAIT_S:-unset}" = 30
+TSV_HEAD=$'run\tscenario\tbinding\tN\tshardSize\tq\tcode\tdetail\tresult\nearlier\tfloor\ton\t4\t10\t7\timage\tfine\tPASS'
+lock_case() { # results.tsv: the header, an earlier run's row and stub-lock's PASS row
+    gate_case "$1" PASS; RUNS_DIR="${WORK}/$1/runs"; mkdir -p "${RUNS_DIR}"
+    printf '%s\nstub-lock\tdrop-n10s10\ton\t13\t10\t7\timage\tphases fine\tPASS\n' "${TSV_HEAD}" > "${RUNS_DIR}/results.tsv"
+    echo '{"result":"PASS","detail":"phases fine"}' > "${LOG_DIR}/verdict.json"
+    cp "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+}
+# Another run holds the lock (a process that took it, then sleeps) until release_lock
+hold_lock() {
+    ( exec 8>> "${RUNS_DIR}/results.tsv.lock"; flock 8; exec sleep 600 ) & HOLDER=$!
+    while flock -n "${RUNS_DIR}/results.tsv.lock" true; do sleep 0.05; done
+}
+release_lock() { kill "${HOLDER}"; wait "${HOLDER}" 2> /dev/null; }
+rewrite() { # rewrite_verdict of stub-lock, waiting $1 s for the lock: ERR (stderr, then rc=)
+    ERR=$( ( RUN_ID=stub-lock; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; RESULTS_LOCK_WAIT_S=$1
+        rewrite_verdict "could not run: stub" ) 2>&1 > /dev/null; echo "rc=$?")
+}
+append() { # the real write_verdict of stub-append, waiting $1 s for the lock, after the commands $2 (if any): ERR
+    ERR=$( ( for f in write_verdict verdict_json; do source <(fn_src "${f}"); done; source <(grep -E '^step\(\) ' "${RUN_SH}")
+        RUN_ID=stub-append; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image; IMAGE=stub; FORK_SET=devnet; EXCLUDED_FORKS='{}'
+        PHASES="${LOG_DIR}/phases.tsv"; EVENTS="${LOG_DIR}/events.log"; : > "${PHASES}"; RESULTS_LOCK_WAIT_S=$1
+        eval "${2:-}"
+        write_verdict ) 2>&1 > /dev/null; echo "rc=$?")
+}
+results_said() { grep -o 'RESULT [A-Z]*' "${LOG_DIR}/05-verdict.log" | tr '\n' ' '; }
+row() { awk -F'\t' -v r="$1" '$1 == r { print $9 }' "${RUNS_DIR}/results.tsv"; }
+# The run holding the lock has its copy next to results.tsv: results.tsv.tmp.other,
+# or results.tsv.tmp, the name every run used up to b4ccfffd3f
+lock_case lock_rewrite; hold_lock
+echo "run other's copy" > "${RUNS_DIR}/results.tsv.tmp.other"; echo "a shared copy" > "${RUNS_DIR}/results.tsv.tmp"
+rewrite 1; release_lock
+check "rewrite_verdict, the lock held by another run: rc=1, results.tsv as it was" \
+    bash -c 'grep -q "^rc=1$" <<< "$1" && cmp -s "$2" "$3"' _ "${ERR}" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+check "and stderr says it got no lock" \
+    grep -q "could not rewrite ${RUNS_DIR}/results.tsv (no lock on ${RUNS_DIR}/results.tsv.lock within 1s): the row of stub-lock still says PASS, the exit is 2" <<< "${ERR}"
+check "and the copies of the run holding the lock are left alone" \
+    test "$(cat "${RUNS_DIR}/results.tsv.tmp.other" "${RUNS_DIR}/results.tsv.tmp" 2>&1 | tr '\n' '|')" = "run other's copy|a shared copy|"
+rewrite 1
+check "the lock free: rc=0, the row says ERROR, the earlier one PASS, no row added" \
+    test "$(tail -1 <<< "${ERR}") $(row stub-lock) $(row earlier) $(wc -l < "${RUNS_DIR}/results.tsv")" = "rc=0 ERROR PASS 3"
+check "the lock free: its own copy (results.tsv.tmp.stub-lock) is gone, the others' are left" \
+    test "$(cd "${RUNS_DIR}" && ls results.tsv.tmp* | tr '\n' ' ')" = "results.tsv.tmp results.tsv.tmp.other "
+# Every line of rewrite_verdict that names its copy lies between the flock and the
+# end of the block the lock is held for
+rv=$(fn_src rewrite_verdict)
+lock_from=$(grep -n 'flock -w' <<< "${rv}" | head -1 | cut -d: -f1)
+lock_to=$(grep -n '^    } 9>> ' <<< "${rv}" | head -1 | cut -d: -f1)
+tmp_lines=$(grep -n '"${tmp}"' <<< "${rv}" | cut -d: -f1 | tr '\n' ' ')
+outside=$(for l in ${tmp_lines}; do [ "${l}" -gt "${lock_from:-0}" ] && [ "${l}" -lt "${lock_to:-0}" ] || echo "${l}"; done)
+check "rewrite_verdict makes, renames and removes its copy only under the lock (lines ${tmp_lines}in ${lock_from:-?}..${lock_to:-?})" \
+    test -n "${tmp_lines}" -a -n "${lock_from}" -a -n "${lock_to}" -a -z "${outside}"
+# Up to b4ccfffd3f a run whose row could not be added still exited 0 on a PASS.
+# verdict.json is written first, PASS, then rewritten as ERROR
+lock_case lock_append; hold_lock; append 1; release_lock
+check "write_verdict, the lock held by another run: exit 2, no row added, and stderr says why" \
+    bash -c 'grep -q "^rc=2$" <<< "$3" && cmp -s "$1" "$2" && grep -q "ERROR: the row of stub-append could not be added to $1 (no lock on $1.lock within 1s): the verdict is ERROR, the exit is 2" <<< "$3"' \
+    _ "${RUNS_DIR}/results.tsv" "${WORK}/results.before" "${ERR}"
+check "write_verdict, the lock held by another run: verdict.json, written as PASS first, says ERROR, why, and what the result was" \
+    verdict_is ERROR "could not record the verdict: no row added to ${RUNS_DIR}/results.tsv (no lock on ${RUNS_DIR}/results.tsv.lock within 1s); the result was PASS (phases fine)"
+check "write_verdict, the lock held by another run: the run log says RESULT PASS, then RESULT ERROR" \
+    bash -c 'test "$1" = "RESULT PASS RESULT ERROR " && grep -q "RESULT ERROR: drop-n10s10 .*could not record the verdict: " "$2"' _ "$(results_said)" "${LOG_DIR}/05-verdict.log"
+append 1
+check "the lock free: rc=0, the row is added after the others, verdict.json says PASS" \
+    test "$(tail -1 <<< "${ERR}") $(tail -1 "${RUNS_DIR}/results.tsv" | cut -f1,9) $(wc -l < "${RUNS_DIR}/results.tsv") $(jq -r .result "${LOG_DIR}/verdict.json")" = $'rc=0 stub-append\tPASS 4 PASS'
+lock_case lock_append_unwritable; rm "${RUNS_DIR}/results.tsv"; mkdir "${RUNS_DIR}/results.tsv"; append 1
+check "write_verdict, results.tsv cannot be written (a directory here): exit 2, and stderr says a write failed" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "ERROR: the row of stub-append could not be added to $2 (a write to it failed): the verdict is ERROR, the exit is 2" <<< "$1"' \
+    _ "${ERR}" "${RUNS_DIR}/results.tsv"
+check "write_verdict, results.tsv cannot be written: verdict.json says ERROR and why" \
+    verdict_is ERROR "could not record the verdict: no row added to ${RUNS_DIR}/results.tsv (a write to it failed); the result was PASS (phases fine)"
+# Where the append starts (flock, here a function that copies verdict.json and
+# results.tsv as they are, then kills the run as a crash would): verdict.json
+# already holds the result and results.tsv no row of the run. Up to f025ae13ed
+# the row came first, and a crash there left a PASS row with no verdict.json
+lock_case lock_order; rm "${LOG_DIR}/verdict.json"
+append 1 'flock() { cp "${LOG_DIR}/verdict.json" "${WORK}/lock_order/verdict.at-lock"; cp "${RUNS_DIR}/results.tsv" "${WORK}/lock_order/results.at-lock"; kill -KILL "${BASHPID}"; }'
+check "write_verdict, as it takes the lock: verdict.json is there and says PASS, results.tsv has no row of the run" \
+    bash -c 'jq -e ".run == \"stub-append\" and .result == \"PASS\" and .detail == \"phases fine\"" "$1" > /dev/null && cmp -s "$2" "$3"' \
+    _ "${WORK}/lock_order/verdict.at-lock" "${WORK}/lock_order/results.at-lock" "${WORK}/results.before"
+check "write_verdict, killed there: verdict.json says PASS, results.tsv as it was, no copy of verdict.json left" \
+    bash -c 'grep -q "^rc=137$" <<< "$1" && jq -e ".result == \"PASS\"" "$2" > /dev/null && [ ! -e "$2.tmp" ] && cmp -s "$3" "$4"' \
+    _ "${ERR}" "${LOG_DIR}/verdict.json" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+# Killed between writing verdict.json's copy and the mv: no verdict.json, no row
+lock_case lock_crash_mv; rm "${LOG_DIR}/verdict.json"
+append 1 'mv() { kill -KILL "${BASHPID}"; }'
+check "write_verdict, killed before verdict.json's mv: no verdict.json, results.tsv as it was" \
+    bash -c 'grep -q "^rc=137$" <<< "$1" && [ ! -e "$2" ] && cmp -s "$3" "$4"' _ "${ERR}" "${LOG_DIR}/verdict.json" "${RUNS_DIR}/results.tsv" "${WORK}/results.before"
+# No row, and verdict.json cannot be rewritten (its copy is a directory by then)
+lock_case lock_no_rewrite
+append 1 'flock() { mkdir "${LOG_DIR}/verdict.json.tmp"; return 1; }'
+check "write_verdict, no row and verdict.json not rewritten: exit 2, results.tsv as it was, verdict.json still PASS, and stderr says so" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && cmp -s "$2" "$3" && jq -e ".result == \"PASS\"" "$4" > /dev/null && grep -q "ERROR: could not rewrite $4: it still says PASS, the exit is 2" <<< "$1"' \
+    _ "${ERR}" "${RUNS_DIR}/results.tsv" "${WORK}/results.before" "${LOG_DIR}/verdict.json"
+# verdict.json cannot be written (its copy is a directory): no PASS row; the row
+# says ERROR
+lock_case lock_verdict_unwritable; rm "${LOG_DIR}/verdict.json"; mkdir "${LOG_DIR}/verdict.json.tmp"; append 1
+check "write_verdict, verdict.json cannot be written: exit 2, no verdict.json, and stderr says so" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && [ ! -e "$2" ] && grep -q "ERROR: could not write $2: the verdict is ERROR, the exit is 2" <<< "$1"' _ "${ERR}" "${LOG_DIR}/verdict.json"
+check "write_verdict, verdict.json cannot be written: the row says ERROR, why and what the result was, after the others; the run log RESULT ERROR" \
+    bash -c 'cmp -s <(head -3 "$1") "$2" && test "$(tail -n +4 "$1" | cut -f1,8,9)" = "$3" && test "$4" = "RESULT ERROR "' \
+    _ "${RUNS_DIR}/results.tsv" "${WORK}/results.before" \
+    "$(printf 'stub-append\tcould not record the verdict: %s not written; the result was PASS (phases fine)\tERROR' "${LOG_DIR}/verdict.json")" "$(results_said)"
+# Eight runs end at once, each rewriting its own row: one copy-and-replace at a
+# time, so none puts back a row another one changed
+lock_case lock_many
+for p in $(seq 1 8); do printf 'stub-p%s\tdrop-n10s10\ton\t13\t10\t7\timage\tphases fine\tPASS\n' "${p}" >> "${RUNS_DIR}/results.tsv"; done
+for p in $(seq 1 8); do
+    ( LOG_DIR="${WORK}/lock_many/p${p}"; STEP_LOG="${LOG_DIR}/step.log"; mkdir -p "${LOG_DIR}"; echo '{"result":"PASS"}' > "${LOG_DIR}/verdict.json"
+      RUN_ID="stub-p${p}"; SCENARIO=drop-n10s10; BINDING=on; SHARD=10; Q=7; CODE=image
+      rewrite_verdict "could not run: stub ${p}" ) > /dev/null 2>&1 &
+done
+wait
+check "eight rewrites at once: every row of the eight says ERROR, the other two PASS, none lost or added" \
+    test "$(awk -F'\t' '$1 ~ /^stub-p/ && $9 == "ERROR"' "${RUNS_DIR}/results.tsv" | wc -l) $(row earlier) $(row stub-lock) $(wc -l < "${RUNS_DIR}/results.tsv")" = "8 PASS PASS 11"
 
 echo "== the postgres container lookup is bounded: one that stalls, fails or finds nothing fails the read, or the preflight's try, and says why"
 # A function of this shell in a fresh bash under an outside guard of $1 s, so a
@@ -796,6 +1074,293 @@ check "image path, node3_db migration fails: no node was started" bash -c '! gre
 
 run_from_top 100 image
 check "image path, max_connections 100: exit 2 before any migration" bash -c 'grep -q "^rc=2$" "$1" && [ "$2" = 0 ]' _ "${WORK}/run-top.out" "$(migrations)"
+
+echo "== --binding off: the launch cases still refuse it, before any docker call"
+for sc in halt-n10s10 halt-n13s10 ride-n13s10; do
+    : > "${WORK}/run-top.docker.log"
+    OUT=$(STUB_LOG="${WORK}/run-top.docker.log" PATH="${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/runs" \
+        timeout 60 bash "${RUN_SH}" --binding off "${sc}" refused 2>&1; echo "rc=$?")
+    check "${sc} --binding off: exit 2, says why, no docker call" \
+        bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "runs the launch fork set, which activates committeeBinding: --binding off does not apply" <<< "$1" && [ ! -s "$2" ]' \
+        _ "${OUT}" "${WORK}/run-top.docker.log"
+done
+
+echo "== CONSENSUS_TIME that is not a whole number of seconds: exit 2 before any docker call"
+for ct in 10s 08 10.5 0 -5; do
+    : > "${WORK}/run-top.docker.log"
+    OUT=$(STUB_LOG="${WORK}/run-top.docker.log" PATH="${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/runs" CONSENSUS_TIME="${ct}" \
+        timeout 60 bash "${RUN_SH}" floor badtime 2>&1; echo "rc=$?")
+    check "CONSENSUS_TIME='${ct}': exit 2, says why, no docker call" \
+        bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "CONSENSUS_TIME must be a whole number of seconds" <<< "$1" && [ ! -s "$2" ]' \
+        _ "${OUT}" "${WORK}/run-top.docker.log"
+done
+
+echo "== two runs started in the same second with the same options: a run dir and a compose project each"
+# The run id's time is one fixed second (a stub date); each run stops at node-1 (the stub's SIGTERM)
+mkdir -p "${WORK}/datebin"
+REAL_DATE=$(command -v date); export REAL_DATE
+cat > "${WORK}/datebin/date" <<'STUBDATE'
+#!/usr/bin/env bash
+[ "$*" = "-u +%Y%m%dT%H%M%SZ" ] && { echo 20261106T000000Z; exit 0; }
+exec "${REAL_DATE}" "$@"
+STUBDATE
+chmod +x "${WORK}/datebin/date"
+same_second() {
+    STUB_LOG="${WORK}/same.docker.log" STUB_MAXCONN=280 STUB_START=run-devnet STUB_LOGDRIVER=json-file \
+        PATH="${WORK}/datebin:${WORK}/runbin:${PATH}" RUNS_DIR="${WORK}/same-runs" NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 \
+        timeout 120 bash "${RUN_SH}" floor same > /dev/null 2>&1
+}
+: > "${WORK}/same.docker.log"
+same_second; same_second
+check "two run dirs, the second with the suffix -2" test "$(ls "${WORK}/same-runs" | tr '\n' ' ')" = "20261106T000000Z-floor-on-same 20261106T000000Z-floor-on-same-2 "
+check "both mode 700" test "$(stat -c %a "${WORK}/same-runs/20261106T000000Z-floor-on-same" "${WORK}/same-runs/20261106T000000Z-floor-on-same-2" | tr '\n' ' ')" = "700 700 "
+for sfx in "" -2; do
+    check "the run${sfx:- without a suffix} starts node-1 with its own compose file and the project named after its dir" \
+        test "$(grep -c -- "^compose -f ${WORK}/same-runs/20261106T000000Z-floor-on-same${sfx}/compose.yml -p qdrill-20261106t000000z-floor-on-same${sfx} up -d node-1$" "${WORK}/same.docker.log")" = 1
+done
+
+# ── run.sh executed whole, against a stub chain ─────────────────────────
+# Past node-1: bring-up, the scenario and the verdict, with docker, bun and
+# sleep replaced (every sleep takes 20 ms; the stub's stalls use the real one).
+# The stub docker keeps the containers started (up.<n>, created.<n> in
+# STUB_STATE) and a head that grows one block every STUB_TICK_MS (300) while at
+# least STUB_MIN_LIVE (1) nodes run (STUB_STATE/chain: the head at the last
+# start or stop and the time of it in ms). It answers what run.sh asks: the
+# preflight's image and container checks, compose up/start/stop/ps, curl through
+# docker exec (serving, heads, blocks with hash 0xb<n> and a peerlist of the
+# STUB_N nodes), psql through docker exec (heads, block content, peerlist
+# length, block rows with 7 signatures, max_connections), inspect (restart
+# count 0, LogConfig.Config from STUB_LOGCONF, default null), stats, and node
+# logs with a round start past the head, a quorum refusal and a fallback line.
+# STUB_STALL makes calls stall (the real sleep, 300 s): logs:<n> node n's docker
+# logs, restart every RestartCount inspect, head:<n> node n's head reads once a
+# node was stopped. STUB_PSQL_KILL=<n>:<text> kills (SIGKILL, nothing on stderr)
+# node n's psql whose SQL holds text. With STUB_LATE_HIT=<n>, node n logs "too
+# many clients" once results.tsv (STUB_RESULTS) has a row. bun answers the
+# identity helper, and the judge with a pass.
+mkdir -p "${WORK}/fullbin"
+REAL_SLEEP=$(command -v sleep); export REAL_SLEEP
+cp "${WORK}/runbin/nproc" "${WORK}/runbin/vmstat" "${WORK}/fullbin/"
+printf '#!/usr/bin/env bash\nexec "${REAL_SLEEP}" 0.02\n' > "${WORK}/fullbin/sleep"
+cat > "${WORK}/fullbin/bun" <<'FULLBUN'
+#!/usr/bin/env bash
+case "$1" in
+    *judgeHaltDrill.ts)
+        jq -e . "$2" > /dev/null || { echo "stub judge: $2 is not JSON" >&2; exit 2; }
+        # STUB_JUDGE=refuse: the real judge's refusal of a genesis without commitLock at 0
+        if [ "${STUB_JUDGE:-}" = refuse ]; then
+            printf 'malformed drill input:\n  - forks.commitLock: the drill needs commitLock active at block 0, got null\n' >&2; exit 2
+        fi
+        [ "$3" = --out ] && echo '{"pass":true,"summary":"stub judge pass"}' > "$4"
+        echo "PASS: stub judge"; exit 0 ;;
+esac
+printf 'MNEMONIC:stub stub stub\nPUBKEY:0xAB%s%s\n' "$$" "${RANDOM}"
+FULLBUN
+cat > "${WORK}/fullbin/docker" <<'FULLDOCKER'
+#!/usr/bin/env bash
+echo "$*" >> "${STUB_LOG}"
+S="${STUB_STATE}"
+now_ms() { date +%s%3N; }
+head_now() {
+    local base since
+    read -r base since < "${S}/chain"
+    if [ "$(compgen -G "${S}/up.*" | wc -l)" -ge "${STUB_MIN_LIVE:-1}" ]; then
+        echo $((base + ($(now_ms) - since) / ${STUB_TICK_MS:-300}))
+    else
+        echo "${base}"
+    fi
+}
+# A start (+) or stop (-) of the nodes given: the head so far is carried over
+event() {
+    local op="$1" h n; shift
+    exec 9>> "${S}/lock"; flock 9
+    h=$(head_now)
+    for n in "$@"; do
+        if [ "${op}" = + ]; then touch "${S}/up.${n}" "${S}/created.${n}"; else rm -f "${S}/up.${n}"; touch "${S}/stopped"; fi
+    done
+    echo "${h} $(now_ms)" > "${S}/chain.tmp" && mv "${S}/chain.tmp" "${S}/chain"
+}
+stalls() { case " ${STUB_STALL:-} " in *" $1 "*) exec "${REAL_SLEEP}" 300 ;; esac; }
+peerlist() { local i; for i in $(seq 1 "${STUB_N}"); do printf '"0xp%s"\n' "${i}"; done | paste -sd, -; }
+case "$1" in
+    image)
+        case "$*" in
+            *"{{.Id}}"*) echo sha256:0123456789abcdef0123456789abcdef ;;
+            *Entrypoint* | *Cmd*) echo null ;;
+        esac ;;
+    run) case "${@: -1}" in -u | -g) echo 1000 ;; esac ;;
+    info) echo json-file ;;
+    compose)
+        shift 5 # compose -f FILE -p PROJECT
+        case "$1" in
+            up | start)
+                nodes=(); for s in "$@"; do case "${s}" in node-*) nodes+=("${s#node-}") ;; esac; done
+                [ "${#nodes[@]}" -gt 0 ] && event + "${nodes[@]}" ;;
+            stop) shift 3; event - "${@#node-}" ;; # stop -t 0 node-..
+            ps)
+                f=up; [ "$2" = -aq ] && f=created
+                case "${3:-}" in
+                    postgres) echo fakepg ;;
+                    node-*) [ -e "${S}/${f}.${3#node-}" ] && echo "c${3#node-}" ;;
+                    "") echo fakepg; for u in $(compgen -G "${S}/up.*"); do echo "c${u##*.}"; done ;;
+                esac ;;
+        esac ;;
+    exec)
+        shift
+        while [ "${1:0:1}" = - ]; do if [ "$1" = -e ]; then shift 2; else shift; fi; done
+        c="$1"; shift
+        case "$1" in
+            curl)
+                n=${c#c}; [ -e "${S}/up.${n}" ] || exit 1
+                case "$*" in
+                    *getLastBlockNumber*) [ -e "${S}/stopped" ] && stalls "head:${n}"; printf '{"result":200,"response":%s}' "$(head_now)" ;;
+                    *getBlockByNumber*)
+                        b=$(sed 's/.*"blockNumber":\([0-9]*\).*/\1/' <<< "$*")
+                        [ "${b}" -le "$(head_now)" ] || { echo '{"result":404}'; exit 0; }
+                        printf '{"result":200,"response":{"number":%s,"hash":"0xb%s","content":{"timestamp":%s,"peerlist":[%s]}}}' \
+                            "${b}" "${b}" $((1700000000 + 10 * b)) "$(peerlist)" ;;
+                    *) echo "Hello from the stub" ;;
+                esac ;;
+            cat) echo "anon 104857600" ;;
+            psql)
+                n=$(sed 's/.* -d node\([0-9]*\)_db .*/\1/' <<< "$*")
+                case "${STUB_PSQL_KILL:-}" in "${n}:"*) case "$*" in *"${STUB_PSQL_KILL#*:}"*) kill -KILL $$ ;; esac ;; esac
+                case "$*" in
+                    *"SHOW max_connections"*) echo "${STUB_MAXCONN:-1000}" ;;
+                    *" -f -") cat > /dev/null; touch "${S}/rewritten.${n}" ;;
+                    *"max(number)"*) head_now ;;
+                    *"SELECT content FROM"*) printf '{"peerlist":[%s],"timestamp":1}\n' "$(peerlist)" ;;
+                    *json_array_length*) if [ -e "${S}/rewritten.${n}" ]; then echo 6; else echo "${STUB_N}"; fi ;;
+                    *BETWEEN*)
+                        read -r from to < <(sed 's/.*BETWEEN \([0-9]*\) AND \([0-9]*\).*/\1 \2/' <<< "$*")
+                        h=$(head_now); [ "${to}" -gt "${h}" ] && to="${h}"
+                        for b in $(seq "${from}" "${to}"); do echo "${b}|0xb${b}|7"; done ;;
+                esac ;;
+        esac ;;
+    inspect)
+        case "$*" in
+            *RestartCount*) stalls restart; echo 0 ;;
+            *LogConfig*) echo "${STUB_LOGCONF:-null}" ;;
+            *) echo "/qdrill-${@: -1}" ;;
+        esac ;;
+    stats) shift 4; for c in "$@"; do echo "${c} 100MiB / 1.8GiB 1.00%"; done ;;
+    logs)
+        n=${@: -1}; n=${n#c}; stalls "logs:${n}"
+        printf '[INFO] node-%s up\n\e[32m[INFO] We are forging block %s\e[0m\n' "${n}" $(($(head_now) + 1))
+        printf '[WARN] Shard of 4 is below the quorum of 7\n[INFO] drawing the committee from all 10 staked validators\n'
+        if [ "${STUB_LATE_HIT:-}" = "${n}" ] && [ -s "${STUB_RESULTS}" ] && [ "$(wc -l < "${STUB_RESULTS}")" -ge 2 ]; then
+            echo "FATAL:  sorry, too many clients already"
+        fi ;;
+esac
+exit 0
+FULLDOCKER
+chmod +x "${WORK}/fullbin/"*
+full_run() { # $1 label, $2.. run.sh's options and scenario; STUB_* from the caller. FULL, RD (the run dir), ms
+    local label="$1" t0; shift
+    FULL="${WORK}/full-${label}"; rm -rf "${FULL}"; mkdir -p "${FULL}/state" "${FULL}/runs"; echo "0 0" > "${FULL}/state/chain"
+    t0=$(date +%s%N)
+    STUB_STATE="${FULL}/state" STUB_LOG="${FULL}/docker.log" STUB_RESULTS="${FULL}/runs/results.tsv" PATH="${WORK}/fullbin:${PATH}" RUNS_DIR="${FULL}/runs" \
+        QDRILL_TEST_LOG_READ_TIMEOUT_S=3 NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 GENESIS_DELAY=-1000 \
+        CONSENSUS_TIME=1 STALL_WINDOW=3 timeout 240 bash "${RUN_SH}" "$@" "${label}" > "${FULL}/out" 2>&1
+    echo "rc=$?" >> "${FULL}/out"
+    ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+    RD=$(compgen -G "${FULL}/runs/*-${label}" | head -1)
+    tail -3 "${FULL}/out" | cut -c1-200 | sed 's/^/    | /'
+}
+fout() { grep -q -- "$1" "${FULL}/out"; }
+exited() { grep -qE "^rc=($1)$" "${FULL}/out"; } # $1 a regex of exit statuses
+result_of() { jq -r .result "${RD}/logs/verdict.json" 2>/dev/null; }
+row_of() { awk -F'\t' -v r="${RD##*/}" '$1 == r { print $9 }' "${FULL}/runs/results.tsv" 2>/dev/null; }
+# verdict.json and this run's row of results.tsv both say $1, and the detail holds $2 (if given)
+recorded() { [ "$(result_of)" = "$1" ] && [ "$(row_of)" = "$1" ] && jq -e --arg d "${2:-}" '.detail | contains($d)' "${RD}/logs/verdict.json" > /dev/null; }
+
+echo "== drop-n7s10 --binding off, whole: stops node-7 mid-round, waits out the stall, restarts it, writes the verdict"
+# Whether the chain stalls in time is up to the host's speed: PASS or FAIL both reach the verdict
+STUB_N=7 STUB_MIN_LIVE=7 STUB_TICK_MS=1000 STUB_LOGCONF='{"max-file":"3","max-size":"10m"}' full_run drop-off --binding off drop-n7s10
+check "drop-n7s10 --binding off: no 'command not found'" eval '! fout "command not found"'
+check "drop-n7s10 --binding off: a verdict (PASS or FAIL: $(result_of)), exit 0 or 1, and its row in results.tsv" \
+    bash -c 'case "$1" in PASS | FAIL) [ "$1" = "$2" ] ;; *) false ;; esac' _ "$(result_of)" "$(row_of)"
+check "drop-n7s10 --binding off: exit 0 for a PASS, 1 for a FAIL" exited "$([ "$(result_of)" = PASS ] && echo 0 || echo 1)"
+check "drop-n7s10 --binding off: the genesis has committeeBinding and commitLock off, quorumParity at 0" \
+    jq -e '.forks.committeeBinding.activationHeight == null and .forks.commitLock.activationHeight == null and .forks.quorumParity.activationHeight == 0' "${RD}/inputs/genesis.json"
+check "drop-n7s10 --binding off: the run log names the node containers' log rotation" fout 'node log rotation: max-size 10m, max-file 3$'
+check "drop-n7s10 --binding off: the bring-up snapshot has the stats and anonymous memory of the 8 containers" \
+    test "$(grep -c ' 100MiB / 1.8GiB ' "${RD}/logs/03-bringup.log")" = 8 -a "$(grep -c ' anon 100 MiB$' "${RD}/logs/03-bringup.log")" = 8
+check "drop-n7s10 --binding off: stop_mid_round saw the round start in node-1's log" grep -q 'round start seen on node-1: We are forging block [0-9]' "${RD}/logs/events.log"
+check "drop-n7s10 --binding off: the phases all-up, down-1 and restarted were judged" \
+    test "$(cut -f1 "${RD}/phases.tsv" | tail -n +2 | tr '\n' ' ')" = "all-up down-1 restarted "
+
+echo "== fallback, whole: the peerlist rewrite goes to the postgres container pg_cid looked up"
+STUB_N=10 STUB_MIN_LIVE=7 full_run fallback-on fallback
+check "fallback: exit 0, and verdict.json and results.tsv say PASS" eval 'exited 0 && recorded PASS'
+check "fallback: every node database rewritten through the container the lookup gave (10)" \
+    test "$(grep -c '^exec -i -e PGCONNECT_TIMEOUT=10 -e PGOPTIONS=-c statement_timeout=20000 fakepg psql -U demosuser -d node[0-9]*_db -v ON_ERROR_STOP=1 -q -f -$' "${FULL}/docker.log")" = 10
+check "fallback: the fallback lines of all 10 node logs counted" fout 'fallback log lines: 10$'
+check "fallback: no rotation options set on the containers: said so" fout 'node log rotation: max-size/max-file none set$'
+
+echo "== ride-n13s10, whole: restart counts of the 10 survivors before and after, the judge's pass"
+STUB_N=13 STUB_MIN_LIVE=1 STUB_LOGCONF='{"max-size":"20m"}' full_run ride ride-n13s10
+check "ride-n13s10: exit 0, and verdict.json and results.tsv say PASS" eval 'exited 0 && recorded PASS'
+check "ride-n13s10: the judge got restart counts of the 10 survivors, before and after" \
+    jq -e '(.restartCounts.before | length) == 10 and (.restartCounts.after | length) == 10' "${RD}/drill-input.json"
+check "ride-n13s10: one rotation option set: the other is named as none set" fout 'node log rotation: max-size 20m, max-file none set$'
+STUB_N=13 STUB_MIN_LIVE=1 STUB_JUDGE=refuse full_run ride-refused ride-n13s10
+check "ride-n13s10, the judge refuses the fork set (exit 2): ERROR, exit 2, and the detail names the fork" \
+    eval 'exited 2 && recorded ERROR "(exit 2); forks.commitLock: the drill needs commitLock active at block 0, got null"'
+
+echo "== a stalled docker call fails the run closed, within the bound, never as a pass"
+# Each stalled call sleeps 300 s: a run that waited one out would take over 300 s
+STUB_N=4 STUB_MIN_LIVE=99 STUB_STALL=logs:2 full_run floor-stall --binding off floor
+check "floor, node-2's docker logs stalls: exit 2 (the other logs' refusals would have made a pass)" exited 2
+check "floor, node-2's docker logs stalls: the WARN names node-2 and the bound" fout 'WARN: node-2: docker logs did not answer within 3s, its log not read whole'
+check "floor, node-2's docker logs stalls: verdict.json and results.tsv say ERROR, node log unreadable" recorded ERROR 'floor: node log unreadable'
+check "floor, node-2's docker logs stalls: within the bound (${ms} ms)" test "${ms}" -lt 120000
+STUB_N=13 STUB_MIN_LIVE=1 STUB_STALL=restart full_run ride-stall ride-n13s10
+check "ride-n13s10, the restart count inspect stalls: exit 2, ABORT, no verdict" \
+    eval 'exited 2 && fout "ABORT: cannot read the survivors. restart counts" && [ ! -e "${RD}/logs/verdict.json" ]'
+check "ride-n13s10, the restart count inspect stalls: within the bound (${ms} ms)" test "${ms}" -lt 120000
+STUB_N=7 STUB_MIN_LIVE=7 STUB_TICK_MS=1000 STUB_STALL=head:1 full_run drop-stall drop-n7s10
+check "drop-n7s10, node-1's head reads stall after the stop: exit 2" exited 2
+check "drop-n7s10, node-1's head reads stall after the stop: ERROR, node-1 unread" fout 'ERROR: down-1: a running node does not answer its head (heads n1=? '
+check "drop-n7s10, node-1's head reads stall after the stop: verdict.json and results.tsv say ERROR" recorded ERROR 'down-1: node unreadable'
+check "drop-n7s10, node-1's head reads stall after the stop: within the bound (${ms} ms)" test "${ms}" -lt 120000
+# Up to b4ccfffd3f stop_mid_round stopped node-7 anyway, and the drill could pass
+STUB_N=7 STUB_MIN_LIVE=7 STUB_TICK_MS=1000 STUB_STALL=logs:1 full_run drop-unseen drop-n7s10
+check "drop-n7s10, node-1's docker logs stalls as stop_mid_round waits for a round start: exit 2, ERROR saying so" \
+    eval 'exited 2 && fout "ERROR: stop node-7: no round start seen on node-1 (docker logs did not answer within 3s); node-7 not stopped"'
+check "drop-n7s10, node-1's docker logs stalls as stop_mid_round waits: verdict.json and results.tsv say ERROR" \
+    recorded ERROR 'stop node-7: round start unseen on node-1 (docker logs did not answer within 3s)'
+check "drop-n7s10, node-1's docker logs stalls as stop_mid_round waits: node-7 is never stopped" bash -c '! grep -q " stop -t 0 node-7$" "$1"' _ "${FULL}/docker.log"
+check "drop-n7s10, node-1's docker logs stalls as stop_mid_round waits: within the bound (${ms} ms)" test "${ms}" -lt 120000
+
+echo "== floor --binding off, whole, a connection-limit hit logged after the verdict: the row is rewritten under the lock"
+STUB_N=4 STUB_MIN_LIVE=99 STUB_LATE_HIT=2 full_run floor-late --binding off floor
+check "floor, late hit: exit 0 replaced by 2" eval 'exited 2 && fout "postgres connection limit hit (exit 0 replaced by 2"'
+check "floor, late hit: verdict.json and results.tsv say ERROR, and that the result was PASS" \
+    recorded ERROR 'could not run: postgres connection limit hit (in the logs collected at teardown: node-2.log); the result was PASS'
+check "floor, late hit: one row, and the lock file next to results.tsv" \
+    test "$(wc -l < "${FULL}/runs/results.tsv") $([ -e "${FULL}/runs/results.tsv.lock" ] && echo lock)" = "2 lock"
+
+echo "== fallback, whole, node-3's head read from its database killed with nothing on stderr: none given, still exit 2"
+STUB_N=10 STUB_MIN_LIVE=7 STUB_PSQL_KILL='3:max(number)' full_run fallback-killed fallback
+check "fallback, psql killed: says the error text was none given, with the exit status" fout 'psql node3_db: exit 137, error text: none given ('
+check "fallback, psql killed: not that its errors could not be written" eval '! fout "could not be written"'
+check "fallback, psql killed: exit 2, the gate's ERROR naming the kept file, the result it replaced" \
+    eval 'exited 2 && recorded ERROR "(psql errors not written to it, kept in ${RD}/logs/psql-err." && recorded ERROR "; the result was PASS"'
+
+echo "== flock missing: run.sh does not start, and says why"
+# PATH: the stubs and links to every command of /usr/bin and /bin but flock
+mkdir -p "${WORK}/noflock"
+cp -s /usr/bin/* /bin/* "${WORK}/noflock/" 2> /dev/null
+rm -f "${WORK}/noflock/flock"
+: > "${WORK}/noflock.docker.log"
+OUT=$(STUB_LOG="${WORK}/noflock.docker.log" STUB_MAXCONN=280 STUB_START=run-devnet STUB_LOGDRIVER=json-file \
+    PATH="${WORK}/runbin:${WORK}/noflock" RUNS_DIR="${WORK}/noflock-runs" NODE_EST_MB=1 HEADROOM_MB=0 MIN_DISK_GB=0 \
+    timeout 60 bash "${RUN_SH}" floor noflock 2>&1; echo "rc=$?")
+check "(no flock on that PATH)" env PATH="${WORK}/runbin:${WORK}/noflock" bash -c '! command -v flock > /dev/null'
+check "flock missing: exit 2 with an ABORT that names it" \
+    bash -c 'grep -q "^rc=2$" <<< "$1" && grep -q "ABORT: flock (util-linux) is not installed" <<< "$1"' _ "${OUT}"
+check "flock missing: no container started" bash -c '! grep -q "^compose " "$1"' _ "${WORK}/noflock.docker.log"
 
 echo
 if [ "${fails}" = 0 ]; then echo "lockstep stub tests: all passed"; else echo "lockstep stub tests: ${fails} FAILED"; exit 1; fi

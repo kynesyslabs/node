@@ -28,8 +28,8 @@ prints the excluded forks the template activates at 0 as a JSON object of
 name -> reason ({} when there are none).
 
     drill_inputs.py readable --dir DIR
-sets every file under DIR to 644 and every directory to 755 (run.sh, once all
-its inputs are written).
+sets every file under DIR to 644 and every directory to 755 (run.sh and
+../consensus-race/run.sh, once all their inputs are written).
 
     drill_inputs.py tmpfs [--uid UID --gid GID]
 prints the node tmpfs entries, one per line, exactly as gen-inputs.py writes
