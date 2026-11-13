@@ -20,14 +20,12 @@ import required from "src/utilities/required"
 import SharedState from "@/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import log from "@/utilities/logger"
+import { WEB2_REQUEST_TIMEOUT_MS } from "@/libs/abstraction/web2/boundedFetch"
 import {
     DAHR_PROXY_ERROR_HEADER,
     UnattestableResponseError,
 } from "src/features/web2/dahr/originStatus"
 
-// Wall-clock limit for one web2 request, origin included. A socket idle
-// timeout alone never fires while the origin keeps trickling bytes.
-const WEB2_REQUEST_TIMEOUT_MS = 30_000
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
