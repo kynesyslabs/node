@@ -14,6 +14,7 @@ import {
     defaultTreasuryWarning,
     devModeProblem,
     genesisScheduleProblems,
+    requireValidatorsProblem,
 } from "src/libs/blockchain/genesis/genesisPin"
 
 const PIN = "ab".repeat(32)
@@ -137,6 +138,35 @@ describe("devModeProblem", () => {
         expect(devModeProblem(true, 4242)).toBeNull()
         for (const id of [1, 1337, undefined]) {
             expect(devModeProblem(false, id)).toBeNull()
+        }
+    })
+})
+
+describe("requireValidatorsProblem", () => {
+    // The caller passes process.env.DEMOS_REQUIRE_VALIDATORS === "true", the value getShard reads
+    const enabled = (raw: string | undefined) => raw === "true"
+
+    it("refuses a mainnet chain id without the variable, naming it and the value to set", () => {
+        const problem = requireValidatorsProblem(enabled(undefined), 4242)
+        expect(problem).toContain("DEMOS_REQUIRE_VALIDATORS")
+        expect(problem).toContain("set DEMOS_REQUIRE_VALIDATORS=true")
+    })
+
+    it("refuses a mainnet chain id when the variable is false or not exactly true", () => {
+        for (const raw of ["false", "", "1", "TRUE"]) {
+            expect(requireValidatorsProblem(enabled(raw), 4242)).not.toBeNull()
+        }
+    })
+
+    it("accepts a mainnet chain id when the variable is true", () => {
+        expect(requireValidatorsProblem(enabled("true"), 4242)).toBeNull()
+    })
+
+    it("leaves the testnet, the devnet and an id-less genesis unchanged", () => {
+        for (const id of [1, 1337, undefined]) {
+            for (const raw of [undefined, "false", "true"]) {
+                expect(requireValidatorsProblem(enabled(raw), id)).toBeNull()
+            }
         }
     })
 })

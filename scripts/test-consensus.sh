@@ -106,14 +106,17 @@ SUITE_FILES=(
     testing/forks/web2ProofBindingWiring.test.ts
     testing/genesis/acceptedForkSchedule.test.ts
     testing/genesis/buildGenesisBlock.test.ts
+    testing/genesis/findGenesisBlock.requireValidators.test.ts
     testing/genesis/forkScheduleAbstain.test.ts
     testing/genesis/forkScheduleAgreement.test.ts
     testing/genesis/forkScheduleWatch.test.ts
     testing/genesis/genesisHashTool.test.ts
     testing/genesis/genesisMismatch.test.ts
     testing/genesis/genesisPin.test.ts
+    testing/genesis/genesisSchedule.test.ts
     testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
+    testing/genesis/restoreSnapshot.hashAtRestore.test.ts
     tests/web2/proxy.test.ts
     # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)
     src/features/incentive/pointsApplyPure.test.ts

@@ -31,6 +31,7 @@ import {
     parseGenesisPin,
     parseStoredGenesisData,
     pinRequirementProblem,
+    requireValidatorsProblem,
     restartGenesisProblems,
     unpinnedWarning,
 } from "@/libs/blockchain/genesis/genesisPin"
@@ -137,6 +138,28 @@ function applyRecoveryData(genesisData, recoveryGenesis) {
     genesisData["balances"] = Object.entries(finalBalances)
 }
 
+/** Read as getShard and peerlistMerge read it: only the exact string "true" switches it on. */
+function requireValidatorsEnabled(): boolean {
+    return process.env.DEMOS_REQUIRE_VALIDATORS === "true"
+}
+
+/**
+ * The genesis file's data, or `fallback` when no file was read (`undefined`).
+ * A file that holds JSON `null` is still data, so only `undefined` falls back.
+ */
+function fileGenesisOr<T>(fileGenesis: unknown, fallback: T) {
+    return fileGenesis === undefined ? fallback : fileGenesis
+}
+
+/** Every boot setting the chain id requires and this node lacks, in one list. */
+function bootSettingProblems(pin: string, chainId: unknown): string[] {
+    return [
+        pinRequirementProblem(pin, process.env, chainId),
+        devModeProblem(Config.getInstance().core.prod, chainId),
+        requireValidatorsProblem(requireValidatorsEnabled(), chainId),
+    ].filter((problem): problem is string => problem !== null)
+}
+
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
     // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
@@ -161,11 +184,8 @@ export default async function findGenesisBlock() {
         Config.getInstance().core.expectedGenesisBlockHash,
         "EXPECTED_GENESIS_BLOCK_HASH",
     )
-    const fileChainId = hasGenesisFile ? chainIdOf(readGenesisFile()) : undefined
-    const pinProblem = pinRequirementProblem(pin, process.env, fileChainId)
-    if (pinProblem) refuse([pinProblem])
-    const modeProblem = devModeProblem(Config.getInstance().core.prod, fileChainId)
-    if (modeProblem) refuse([modeProblem])
+    const fileGenesis = hasGenesisFile ? readGenesisFile() : undefined
+    refuse(bootSettingProblems(pin, chainIdOf(fileGenesis)))
     const unpinned = unpinnedWarning(pin, process.env, blockPin)
     if (unpinned) log.warning(`[GENESIS] ${unpinned}`)
 
@@ -178,19 +198,16 @@ export default async function findGenesisBlock() {
             | undefined
         const stored = parseStoredGenesisData(genesisContent?.extra?.genesisData)
         // Without a file only block 0 says which chain this is
-        const storedPinProblem = pinRequirementProblem(pin, process.env, chainIdOf(stored))
-        if (storedPinProblem) refuse([storedPinProblem])
-        const storedModeProblem = devModeProblem(Config.getInstance().core.prod, chainIdOf(stored))
-        if (storedModeProblem) refuse([storedModeProblem])
+        refuse(bootSettingProblems(pin, chainIdOf(stored)))
         refuse(
             genesisScheduleProblems({
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : null,
+                fileGenesisData: fileGenesisOr(fileGenesis, null),
                 storedGenesisData: stored,
                 pin,
                 blockPin,
             }),
         )
-        warnDefaultTreasury(hasGenesisFile ? readGenesisFile() : stored)
+        warnDefaultTreasury(fileGenesisOr(fileGenesis, stored))
         // Without a file the fork loader never ran, so its chain id check did not either
         if (!hasGenesisFile && isForkMachineryDisabled()) {
             refuseDisabledForkMachineryOutsideTestChains(stored)
@@ -200,7 +217,7 @@ export default async function findGenesisBlock() {
                 storedGenesisData: stored,
                 // Without a file only the pin can be checked; the schedule check
                 // below still sees the defaults this node would run with.
-                fileGenesisData: hasGenesisFile ? readGenesisFile() : stored,
+                fileGenesisData: fileGenesisOr(fileGenesis, stored),
                 pin,
             }),
         )
@@ -232,8 +249,8 @@ export default async function findGenesisBlock() {
         )
     }
 
-    // Loading the genesis block
-    const genesisData = readGenesisFile()
+    // Block 0 is built from the data the boot-setting checks already ran on
+    const genesisData = fileGenesis
 
     // Everything is checked before the first write: a refused node must leave
     // an empty database, or its next boot finds a block 0 and trusts it.
