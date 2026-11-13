@@ -25,7 +25,7 @@ alerting:
             - alertmanager:9093
 
 # Alert rules (Epic 13 T14). Files under alerts/ are loaded at startup
-# and reloaded on SIGHUP. Routing to Slack is in monitoring/alertmanager/alertmanager.yml;
+# and reloaded on SIGHUP. Routing (Slack, paging, dead-man) is in monitoring/alertmanager/alertmanager.yml;
 # see docs/runbooks/mainnet-monitoring.md.
 rule_files:
   - alerts/*.yml
@@ -64,19 +64,26 @@ scrape_configs:
                 instance: host
       metrics_path: /metrics
       scrape_interval: 15s
-# Additional scrape configs for multi-node setups
-# Uncomment and customize for your deployment. Mainnet: one monitoring host off
-# the validators scrapes each validator on its PRIVATE address (the node's
-# METRICS_BIND), and keeps job_name demos-node so the alert rules match.
+
+# Mainnet (multi-validator) setup. One monitoring host off the validators scrapes each
+# validator on its PRIVATE address (the node's METRICS_BIND). In the demos-node job above,
+# replace the single target with ONE static_configs entry PER VALIDATOR, each with its
+# own `instance` name, and keep the job name demos-node so the alert rules match. A
+# separate entry per validator is what makes NodeDown, HeightStalled and DiskSpaceLow fire
+# for that validator alone instead of as one merged alert. The node-exporter job is
+# optional (host metrics; no alert rule reads it). The addresses below are placeholders:
 #
-# - job_name: 'demos-nodes-production'
-#   static_configs:
-#     - targets:
-#       - '10.0.0.11:9090'
-#       - '10.0.0.12:9090'
-#       - '10.0.0.13:9090'
-#   relabel_configs:
-#     - source_labels: [__address__]
-#       target_label: instance
-#       regex: '([^:]+):\d+'
-#       replacement: '${1}'
+#     - job_name: demos-node
+#       static_configs:
+#           - targets: ['<VALIDATOR_1_PRIVATE_ADDR>:9090']
+#             labels: {instance: validator-1, environment: mainnet}
+#           - targets: ['<VALIDATOR_2_PRIVATE_ADDR>:9090']
+#             labels: {instance: validator-2, environment: mainnet}
+#           - targets: ['<VALIDATOR_3_PRIVATE_ADDR>:9090']
+#             labels: {instance: validator-3, environment: mainnet}
+#
+#     - job_name: node-exporter     # one node-exporter per validator host, port 9100
+#       static_configs:
+#           - targets: ['<VALIDATOR_1_PRIVATE_ADDR>:9100']
+#             labels: {instance: validator-1, environment: mainnet}
+#           (same for validator-2, validator-3)

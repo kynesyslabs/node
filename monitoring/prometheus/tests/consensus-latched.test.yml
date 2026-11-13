@@ -1,0 +1,477 @@
+# promtool unit tests for the demos-consensus-latched group in alerts/consensus.yml:
+# ConflictingBlock, ForeignSignature and PrecommitEquivocation must keep firing after the
+# counter stops moving, and expire only 7 days after the last event.
+# In all three cases the series is: the event at minute 10, a node restart at minute 20
+# (counter back to 0) and no scrape at all from minute 30 on, and each alert is checked
+# to still fire 1 h or 2 h and 6 d later and to be gone 7 d 30 m later. ForeignSignature and PrecommitEquivocation are
+# double-sign signals: each also has a case for not firing when no event happened.
+# The last three cases cover the first sample of a counter already being 1: a new series, a
+# node back after a gap and a restart, and an old counter after a scrape gap (no new latch).
+# BlockHashMismatch is not latched; its tests are in consensus-blockhash.test.yml.
+# Run: scripts/check-monitoring.sh
+rule_files:
+  - ../alerts/consensus.yml
+
+# The rules run every 1 m in production. promtool caps a query at 10000 samples, and a
+# 7 d range of 1 m samples is 10080, so the test evaluates every 5 m (input stays at 1 m).
+evaluation_interval: 5m
+
+tests:
+  - interval: 1m
+    input_series:
+      # validator-1: one conflicting block at minute 10, the node is restarted at
+      # minute 20 (counter back to 0) and from minute 30 it is not scraped at all.
+      - series: 'demos_conflicting_block_total{job="demos-node",instance="validator-1"}'
+        values: '0x9 1x9 0x9 _x12000'
+      # validator-2: never saw a conflict.
+      - series: 'demos_conflicting_block_total{job="demos-node",instance="validator-2"}'
+        values: '0x12000'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ConflictingBlock
+        exp_alerts: []
+      # One conflicting block: fires for validator-1 only.
+      - eval_time: 15m
+        alertname: ConflictingBlock
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Two blocks with a verified quorum existed at one height (latched)"
+              description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # After the restart (counter reset to 0) and with the target no longer scraped
+      # at all (minute 30 onwards): still firing 2 h and 6 d later.
+      - eval_time: 2h
+        alertname: ConflictingBlock
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Two blocks with a verified quorum existed at one height (latched)"
+              description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 6d
+        alertname: ConflictingBlock
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Two blocks with a verified quorum existed at one height (latched)"
+              description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # One hour short of 7 days: still firing; one hour past: gone.
+      - eval_time: 6d23h
+        alertname: ConflictingBlock
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Two blocks with a verified quorum existed at one height (latched)"
+              description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 7d1h
+        alertname: ConflictingBlock
+        exp_alerts: []
+      # Expired 7 days after the event.
+      - eval_time: 7d30m
+        alertname: ConflictingBlock
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      # validator-1: a foreign signature at minute 10, the node is restarted at minute 20
+      # (counter back to 0) and from minute 30 it is not scraped at all.
+      - series: 'demos_foreign_signature_total{job="demos-node",instance="validator-1"}'
+        values: '0x9 1x9 0x9 _x12000'
+      # validator-2: never saw one.
+      - series: 'demos_foreign_signature_total{job="demos-node",instance="validator-2"}'
+        values: '0x12000'
+    alert_rule_test:
+      # Before the event: nothing.
+      - eval_time: 5m
+        alertname: ForeignSignature
+        exp_alerts: []
+      # The event: fires for validator-1 only (validator-2 is absent from the list).
+      - eval_time: 15m
+        alertname: ForeignSignature
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Another process is signing with this validator's key (latched)"
+              description: "validator-1 saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # The condition has cleared (the 10 m window is empty; the old rule would have
+      # resolved at minute ~21), the counter was reset by the restart and the target is no
+      # longer scraped: still firing 1 h and 6 d later.
+      - eval_time: 1h
+        alertname: ForeignSignature
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Another process is signing with this validator's key (latched)"
+              description: "validator-1 saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 6d
+        alertname: ForeignSignature
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Another process is signing with this validator's key (latched)"
+              description: "validator-1 saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # One hour short of 7 days: still firing; one hour past: gone.
+      - eval_time: 6d23h
+        alertname: ForeignSignature
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Another process is signing with this validator's key (latched)"
+              description: "validator-1 saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 7d1h
+        alertname: ForeignSignature
+        exp_alerts: []
+      # Expired 7 days after the event.
+      - eval_time: 7d30m
+        alertname: ForeignSignature
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      # validator-1: one equivocation at minute 10, the node is restarted at minute 20
+      # (counter back to 0) and from minute 30 it is not scraped at all.
+      - series: 'demos_precommit_equivocation_total{job="demos-node",instance="validator-1"}'
+        values: '0x9 1x9 0x9 _x12000'
+      # validator-2: never saw one.
+      - series: 'demos_precommit_equivocation_total{job="demos-node",instance="validator-2"}'
+        values: '0x12000'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+      # The event: fires for validator-1 only.
+      - eval_time: 15m
+        alertname: PrecommitEquivocation
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "A committee member precommitted two blocks in one round (latched)"
+              description: "validator-1 received precommits from one member for two different blocks at the same height and round, within the last 7 days. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # After the restart and with the target no longer scraped: still firing 1 h and 6 d later.
+      - eval_time: 1h
+        alertname: PrecommitEquivocation
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "A committee member precommitted two blocks in one round (latched)"
+              description: "validator-1 received precommits from one member for two different blocks at the same height and round, within the last 7 days. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 6d
+        alertname: PrecommitEquivocation
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "A committee member precommitted two blocks in one round (latched)"
+              description: "validator-1 received precommits from one member for two different blocks at the same height and round, within the last 7 days. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # One hour short of 7 days: still firing; one hour past: gone.
+      - eval_time: 6d23h
+        alertname: PrecommitEquivocation
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "A committee member precommitted two blocks in one round (latched)"
+              description: "validator-1 received precommits from one member for two different blocks at the same height and round, within the last 7 days. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 7d1h
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+      # Expired 7 days after the event.
+      - eval_time: 7d30m
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+
+  # No event at all on either counter: neither alert fires, at any time.
+  - interval: 1m
+    input_series:
+      - series: 'demos_foreign_signature_total{job="demos-node",instance="validator-1"}'
+        values: '0x12000'
+      - series: 'demos_precommit_equivocation_total{job="demos-node",instance="validator-1"}'
+        values: '0x12000'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 6d
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+      - eval_time: 6d
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+
+  # First sample already at 1 (the increase() blind spot). increase() over a window that holds
+  # no earlier sample is 0, so the recording rules also take the counter's own value while the
+  # series is under 10 m old and demos_process_start_time_seconds is under 15 m old.
+  #
+  # (a) A series that is new to Prometheus: the node started at 0 and its first sample, at
+  # minute 6, is already 1 on all three counters. validator-2 has the same shape with 0.
+  # time() is the evaluation time here, so a start of 0 is "minutes old" and -86400 is "a
+  # day old".
+  - interval: 1m
+    input_series:
+      - series: 'demos_conflicting_block_total{job="demos-node",instance="validator-1"}'
+        values: '_x6 1x12000'
+      - series: 'demos_foreign_signature_total{job="demos-node",instance="validator-1"}'
+        values: '_x6 1x12000'
+      - series: 'demos_precommit_equivocation_total{job="demos-node",instance="validator-1"}'
+        values: '_x6 1x12000'
+      - series: 'demos_process_start_time_seconds{job="demos-node",instance="validator-1"}'
+        values: '_x6 0x12000'
+      - series: 'demos_conflicting_block_total{job="demos-node",instance="validator-2"}'
+        values: '_x6 0x12000'
+      - series: 'demos_foreign_signature_total{job="demos-node",instance="validator-2"}'
+        values: '_x6 0x12000'
+      - series: 'demos_precommit_equivocation_total{job="demos-node",instance="validator-2"}'
+        values: '_x6 0x12000'
+      - series: 'demos_process_start_time_seconds{job="demos-node",instance="validator-2"}'
+        values: '_x6 0x12000'
+    promql_expr_test:
+      # Recorded value: 1 while the series is under 10 m old, then the plain increase() (0).
+      - expr: demos:foreign_signature:increase10m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'demos:foreign_signature:increase10m{job="demos-node",instance="validator-1"}'
+            value: 1
+          - labels: 'demos:foreign_signature:increase10m{job="demos-node",instance="validator-2"}'
+            value: 0
+      - expr: demos:foreign_signature:increase10m
+        eval_time: 30m
+        exp_samples:
+          - labels: 'demos:foreign_signature:increase10m{job="demos-node",instance="validator-1"}'
+            value: 0
+          - labels: 'demos:foreign_signature:increase10m{job="demos-node",instance="validator-2"}'
+            value: 0
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ConflictingBlock
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+      # The recorded value of an evaluation is visible to the alert from the next one on.
+      - eval_time: 15m
+        alertname: ConflictingBlock
+        exp_alerts: &first-sample-conflicting-block
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Two blocks with a verified quorum existed at one height (latched)"
+              description: "validator-1 held a block at some height while a peer served a different block there that carried a verified quorum, within the last 7 days. The node does not switch on its own. Search its log for [FORK] for the height and both hashes, then decide which chain to keep. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 15m
+        alertname: ForeignSignature
+        exp_alerts: &first-sample-foreign-signature
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "Another process is signing with this validator's key (latched)"
+              description: "validator-1 saw a peer block carrying a signature by its own key that it never recorded, and stopped signing, within the last 7 days. Stop every copy of this key and find the second host; see docs/runbooks/validator-key.md. SigningHalted tracks whether the stop is still in force. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      - eval_time: 15m
+        alertname: PrecommitEquivocation
+        exp_alerts: &first-sample-precommit-equivocation
+          - exp_labels:
+              severity: critical
+              job: demos-node
+              instance: validator-1
+            exp_annotations:
+              summary: "A committee member precommitted two blocks in one round (latched)"
+              description: "validator-1 received precommits from one member for two different blocks at the same height and round, within the last 7 days. Search its log for [commitLock] Equivocation for the member, the height and both signatures. The member's key is running twice or its signing state was rolled back. This alert does not resolve by itself; clear it as described in docs/runbooks/mainnet-monitoring.md."
+      # Still latched long after the series is steady, one hour short of 7 days, and gone after.
+      - eval_time: 2h
+        alertname: ForeignSignature
+        exp_alerts: *first-sample-foreign-signature
+      - eval_time: 6d23h
+        alertname: ConflictingBlock
+        exp_alerts: *first-sample-conflicting-block
+      - eval_time: 6d23h
+        alertname: ForeignSignature
+        exp_alerts: *first-sample-foreign-signature
+      - eval_time: 6d23h
+        alertname: PrecommitEquivocation
+        exp_alerts: *first-sample-precommit-equivocation
+      - eval_time: 7d1h
+        alertname: ConflictingBlock
+        exp_alerts: []
+      - eval_time: 7d1h
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 7d1h
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+
+  # (b) A node that was not scraped for 30 minutes (minutes 10 to 39) and restarted during
+  # the gap: the first sample after it, at minute 40, is already 1 on all three counters. The
+  # process started at minute 38 (time 2280), so its start is 2 minutes old at the first scrape.
+  - interval: 1m
+    input_series:
+      - series: 'demos_conflicting_block_total{job="demos-node",instance="validator-1"}'
+        values: '0x9 _x30 1x12000'
+      - series: 'demos_foreign_signature_total{job="demos-node",instance="validator-1"}'
+        values: '0x9 _x30 1x12000'
+      - series: 'demos_precommit_equivocation_total{job="demos-node",instance="validator-1"}'
+        values: '0x9 _x30 1x12000'
+      - series: 'demos_process_start_time_seconds{job="demos-node",instance="validator-1"}'
+        values: '-86400x9 _x30 2280x12000'
+    promql_expr_test:
+      - expr: demos:conflicting_block:increase10m
+        eval_time: 35m
+        exp_samples: []
+      - expr: demos:conflicting_block:increase10m
+        eval_time: 45m
+        exp_samples:
+          - labels: 'demos:conflicting_block:increase10m{job="demos-node",instance="validator-1"}'
+            value: 1
+      - expr: demos:conflicting_block:increase10m
+        eval_time: 1h
+        exp_samples:
+          - labels: 'demos:conflicting_block:increase10m{job="demos-node",instance="validator-1"}'
+            value: 0
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ForeignSignature
+        exp_alerts: []
+      # In the gap: nothing yet.
+      - eval_time: 35m
+        alertname: ConflictingBlock
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: ConflictingBlock
+        exp_alerts: *first-sample-conflicting-block
+      - eval_time: 45m
+        alertname: ForeignSignature
+        exp_alerts: *first-sample-foreign-signature
+      - eval_time: 45m
+        alertname: PrecommitEquivocation
+        exp_alerts: *first-sample-precommit-equivocation
+      - eval_time: 2h
+        alertname: ForeignSignature
+        exp_alerts: *first-sample-foreign-signature
+      - eval_time: 6d23h
+        alertname: ConflictingBlock
+        exp_alerts: *first-sample-conflicting-block
+      - eval_time: 6d23h
+        alertname: ForeignSignature
+        exp_alerts: *first-sample-foreign-signature
+      - eval_time: 6d23h
+        alertname: PrecommitEquivocation
+        exp_alerts: *first-sample-precommit-equivocation
+      - eval_time: 7d1h
+        alertname: ConflictingBlock
+        exp_alerts: []
+      - eval_time: 7d1h
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 7d1h
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+
+  # (c) No new latch for an old event: the counters have been 1 for hours on a process that
+  # started a day ago, and the target is not scraped for 20 minutes (minutes 300 to 319).
+  # The series is new again after the gap, but the process start is old, so nothing latches.
+  - interval: 1m
+    input_series:
+      - series: 'demos_conflicting_block_total{job="demos-node",instance="validator-1"}'
+        values: '1x299 _x20 1x12000'
+      - series: 'demos_foreign_signature_total{job="demos-node",instance="validator-1"}'
+        values: '1x299 _x20 1x12000'
+      - series: 'demos_precommit_equivocation_total{job="demos-node",instance="validator-1"}'
+        values: '1x299 _x20 1x12000'
+      - series: 'demos_process_start_time_seconds{job="demos-node",instance="validator-1"}'
+        values: '-86400x299 _x20 -86400x12000'
+    promql_expr_test:
+      # In the gap there is no recorded value; after it, the plain increase() (0).
+      - expr: demos:precommit_equivocation:increase10m
+        eval_time: 5h10m
+        exp_samples: []
+      - expr: demos:precommit_equivocation:increase10m
+        eval_time: 5h25m
+        exp_samples:
+          - labels: 'demos:precommit_equivocation:increase10m{job="demos-node",instance="validator-1"}'
+            value: 0
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: ConflictingBlock
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+      - eval_time: 5h10m
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 5h25m
+        alertname: ConflictingBlock
+        exp_alerts: []
+      - eval_time: 5h25m
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 5h25m
+        alertname: PrecommitEquivocation
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 6d
+        alertname: ConflictingBlock
+        exp_alerts: []
+      - eval_time: 6d
+        alertname: ForeignSignature
+        exp_alerts: []
+      - eval_time: 6d
+        alertname: PrecommitEquivocation
+        exp_alerts: []

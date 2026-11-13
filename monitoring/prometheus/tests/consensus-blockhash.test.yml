@@ -1,0 +1,65 @@
+# promtool unit tests for BlockHashMismatch in alerts/consensus.yml: increase over 10 m
+# above 3.5, held 5 m, not latched. The counter rises once per disagreeing peer, so 3 events
+# is one disagreeing round on a 4-validator network and must stay quiet; 4 events fire after
+# the `for` and resolve on their own once the burst has left the 10 m window.
+# Run: scripts/check-monitoring.sh
+rule_files:
+  - ../alerts/consensus.yml
+
+# increase() extrapolates to the end of the window when the newest sample is older than the
+# evaluation time, so 3 events read slightly above 3 (up to about 3.2) and "> 3" would fire
+# on them. Samples are 41 s apart and evaluations 37 s apart: the two grids only meet every
+# 1517 s, so no evaluation inside the burst window lands exactly on a sample (which would
+# read exactly 3 and reset the `for`). Eval times below are multiples of 37 s.
+evaluation_interval: 37s
+
+tests:
+  - interval: 41s
+    input_series:
+      # validator-1: 3 events at 615 s.
+      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-1"}'
+        values: '0x14 3x100'
+      # validator-2: 4 events at 615 s.
+      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-2"}'
+        values: '0x14 4x100'
+      # validator-3: counter never moves.
+      - series: 'demos_consensus_block_hash_mismatch_total{job="demos-node",instance="validator-3"}'
+        values: '0x115'
+    alert_rule_test:
+      # Before the burst: nothing.
+      - eval_time: 333s
+        alertname: BlockHashMismatch
+        exp_alerts: []
+      # 4 events are above the bar since about 630 s but the 5 m `for` has not elapsed.
+      - eval_time: 703s
+        alertname: BlockHashMismatch
+        exp_alerts: []
+      # Held past 5 m: fires for validator-2 only; validator-1 (3 events) stays quiet.
+      - eval_time: 1073s
+        alertname: BlockHashMismatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-2
+            exp_annotations:
+              summary: "Peers disagreed with this node's candidate block hash"
+              description: "About 4 peer disagreements on the candidate block hash within 10m on validator-2 (one per disagreeing peer per round, so a single round can add several). This node, or the peers, forged different block content. Check the mempool, clock skew and the node logs for the tx-set diff; see docs/runbooks/mainnet-monitoring.md."
+      # The burst is still inside the 10 m window: still firing.
+      - eval_time: 1147s
+        alertname: BlockHashMismatch
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: demos-node
+              instance: validator-2
+            exp_annotations:
+              summary: "Peers disagreed with this node's candidate block hash"
+              description: "About 4 peer disagreements on the candidate block hash within 10m on validator-2 (one per disagreeing peer per round, so a single round can add several). This node, or the peers, forged different block content. Check the mempool, clock skew and the node logs for the tx-set diff; see docs/runbooks/mainnet-monitoring.md."
+      # The window has passed: resolved on its own, no latch.
+      - eval_time: 1184s
+        alertname: BlockHashMismatch
+        exp_alerts: []
+      - eval_time: 3589s
+        alertname: BlockHashMismatch
+        exp_alerts: []
