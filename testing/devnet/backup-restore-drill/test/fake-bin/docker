@@ -1,0 +1,709 @@
+#!/usr/bin/env python3
+"""A fake `docker` for testing run.sh without Docker. It keeps containers and
+volumes in $FAKE_DIR/state.json and answers only what run.sh asks: compose
+up/stop/rm/ps/run/down, exec (curl RPC, psql, pg_*), run (probes and helpers),
+cp, logs, inspect, ps, volume, network (it has none). The chain is a clock:
+head = (now - first node start) * FAKE_RATE, until the drilled node starts again
+after the restore, or node-iso starts: from then on it stays at the head it had
+then, so reads made one after another agree however long they take
+(FAKE_KEEP_RISING: it keeps rising). A volume a test puts in
+state.json beforehand with project "" is one without the compose labels.
+
+Knobs (environment): FAKE_RATE (blocks per second, 3), FAKE_ROOT_VOLS (volume
+names containing one of these are created root-owned), FAKE_UNWRITABLE_PATHS
+(image dirs uid 1000 cannot write), FAKE_NEVER_SERVE / FAKE_BEHIND (node
+services that never answer / stay at head 0), FAKE_NO_NODE, FAKE_UNREADABLE,
+FAKE_MISSING_IMAGES, FAKE_MIGRATE_FAIL, FAKE_MIGRATE_HANG (a postgres service
+name: compose run against it sleeps 120 s; with FAKE_MIGRATE_IGNORE_TERM it
+ignores SIGTERM), FAKE_WIPE_CHANGES_OWNER, FAKE_WIPE_LEAVE (a state volume
+entry the wipe does not remove), FAKE_WIPE_FAIL (the wipe exits 1),
+FAKE_WIPE_DROP (a node.identity* file the wipe removes too),
+FAKE_DUMP_CUT (the dump ends after its table of contents: reading the whole
+archive fails),
+FAKE_DOWN_FAIL (compose down removes nothing and exits 1), FAKE_DOWN_LEAVE
+(compose down exits 0 but leaves the volumes whose name contains it),
+FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3; `none`: the count prints 0 and
+exits 1, as `grep -c` does on a src/migrations with no .ts or .js file in it,
+or none at all), FAKE_NO_FLOOR_LOG (a starting
+node does not log the restart signing floor), FAKE_LOG_FILL (lines `docker logs`
+prints after a container's log, 0; a reader that stops early kills it with
+SIGPIPE, as it does the docker CLI), FAKE_READ_OUTAGE (seconds from the
+restore's pg_restore during which no node answers its head), FAKE_STUCK /
+FAKE_SILENT (node services that, from the backup's pg_dump to the end of the
+run, answer the head they had then / do not answer their head), FAKE_STUCK_AT
+(with it, the FAKE_STUCK services instead stop at that head from the start),
+FAKE_SLOW_RESTORE (seconds the restore's pg_restore takes, 0), FAKE_OLDER_RECORD
+(<file>:<how>, file signed|commitlock|prevote: once its node is restarted that
+record is one height below its at-stop value (how=height), one round below at
+the same height (round), or equal to it (same)), FAKE_CATCHUP (<service>:<blocks>:
+that node's head trails the chain by that many blocks; from the backup's pg_dump on
+it is capped at the head the chain had then, so it catches up with FAKE_STUCK nodes
+without a new block), FAKE_REJOIN_LAG (<blocks>[:signed]: the head of a node
+started again after its stop trails the chain by that many blocks, from its start,
+or with :signed from the first read of its signing record after it), FAKE_OTHER_HASH
+(node services that answer every block with another hash), FAKE_RESTORE_SHORT (a
+stats row, e.g. transactions or max_block, that is 0 in a restored database),
+FAKE_STATS_ERROR (<row>:<when>: the statistics query fails on that row's table
+in the drilled node's database before the backup's pg_dump (when=before), after it
+(after), or in a restored database (restored); psql then prints the other rows and
+exits 0, or with ON_ERROR_STOP=1 stops there, exit 3), FAKE_IDENTITY_CHANGED
+(a node started again after its stop has another identity file),
+FAKE_HALT_MARKER / FAKE_FOREIGN_LOG (such a node writes a .halted marker /
+logs a foreign-signature line), FAKE_LOGS_FAIL (`docker logs` of such a node
+fails), FAKE_ISO_KEY_OF (a volume name: node-iso's state volume holds a copy of
+that volume's identity file), FAKE_ISO_UNREADABLE (reading node-iso's identity
+file fails: `empty` prints nothing and exits 0, as `sha256sum` of a missing file
+piped into `cut` does; any other value is a daemon error, exit 125),
+FAKE_EXTRA_HOLDER (a volume name: from the backup's pg_dump on, a
+running container that is no node holds it), FAKE_CP_CORRUPT (the dump copied to
+the host differs from the one hashed), FAKE_FORK (node services that answer each
+block above their node's head at its stop, or else above their restored
+database's head, with another hash: a fork after those heights), FAKE_STATE_LOST
+(a node.identity* file that is gone from the drilled node's state volume from the
+backup's pg_dump on, before its stop), FAKE_EMPTY_READS (once the drilled node
+started again, or node-iso, first answers its RPC, every read prints nothing and
+exits 0: node RPC, commands in postgres containers, helper scripts, `docker logs`,
+`docker inspect` and `docker ps` of running containers), FAKE_EMPTY_BLOCKS (from
+the same point, every node answers a block read with nothing, exit 0, and its head
+as before), FAKE_STALE_BLOCKS (from the same point, every node answers a read
+of block N with block N-1, its own number and hash), FAKE_LIST_FAIL (ps,volume:
+`docker ps` / `docker volume ls` filtered on the compose project label print
+nothing and exit 1, as with a daemon that does not answer), FAKE_OWNER_READ_FAIL
+(n: the n-th read of a state dir's owners, `stat -c` in a helper, fails with
+exit 125), FAKE_FLAKY_AHEAD (<blocks>:<service>[,...]: once the drilled node,
+started again, answered a head read, those node services do not answer a head
+read made while it has answered an odd number of them, and answer the others
+that many blocks above the chain head). Every call is appended to
+$FAKE_DIR/calls.log; compose down writes to $FAKE_DIR/lock-at-down whether
+$LOCK_DIR/<project>.lock is held at that moment.
+
+The signing state files hold (height, round): the head while their node runs,
+else the head at its stop; the round is ROUND0 + 10 * height, as .timestamp in
+.signed.json and .round in .commitlock.json and .prevote.json. A node without an
+identity mounted (node-iso) makes a node.identity of its own and no signing state.
+"""
+import fcntl
+import hashlib
+import json
+import os
+import re
+import signal
+import sys
+import time
+
+D = os.environ["FAKE_DIR"]
+SF = os.path.join(D, "state.json")
+RATE = float(os.environ.get("FAKE_RATE", "3"))
+ROUND0 = 1700000000
+RECORDS = ("signed", "commitlock", "prevote")
+
+
+def envlist(k):
+    return [x for x in os.environ.get(k, "").split(",") if x]
+
+
+def load():
+    if not os.path.exists(SF):
+        return {"volumes": {}, "containers": {}, "t0": None}
+    with open(SF) as f:
+        return json.load(f)
+
+
+def save(st):
+    tmp = SF + f".{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(st, f)
+    os.replace(tmp, SF)
+
+
+def head(st):
+    if "still_at" in st:
+        return st["still_at"]
+    return 0 if not st["t0"] else int((time.time() - st["t0"]) * RATE)
+
+
+def running_on(st, sv):
+    return any(c["state"] == "running" and sv in c["volumes"] and c["service"].startswith("node-") for c in st["containers"].values())
+
+
+def record(st, vol, sv, kind):
+    """The JSON of a signing state file (kind signed|commitlock|prevote)."""
+    h = head(st) if running_on(st, sv) else vol["frozen_head"]
+    r = ROUND0 + 10 * h
+    want, _, how = os.environ.get("FAKE_OLDER_RECORD", "").partition(":")
+    if want == kind and running_on(st, sv) and "stop_head" in vol:
+        s = vol["stop_head"]
+        h, r = {"height": (s - 1, ROUND0 + 10 * (s - 1)), "round": (s, ROUND0 + 10 * s - 1), "same": (s, ROUND0 + 10 * s)}[how]
+    return {"height": h, ("timestamp" if kind == "signed" else "round"): r, "hash": f"hash{h}"}
+
+
+def out(s=""):
+    print(s)
+    sys.exit(0)
+
+
+def fail(msg="", rc=1):
+    if msg:
+        print(msg, file=sys.stderr)
+    sys.exit(rc)
+
+
+with open(os.path.join(D, "calls.log"), "a") as f:
+    f.write(" ".join(sys.argv[1:])[:300].replace("\n", " ") + "\n")
+
+a = sys.argv[1:]
+st = load()
+
+
+def new_volume(full, project):
+    if full in st["volumes"]:
+        return
+    owner = "0" if any(x in full for x in envlist("FAKE_ROOT_VOLS")) else "1000"
+    st["volumes"][full] = {"owner": owner, "project": project, "files": [], "db": "empty", "frozen": False,
+                           "frozen_head": 0, "dump_head": 0}
+
+
+def vname(project, short):
+    return f"{project}_{short}"
+
+
+def cid_of(project, svc, n=1):
+    return hashlib.sha1(f"{project}/{svc}/{n}".encode()).hexdigest()[:12]
+
+
+def svc_vols(compose, svc):
+    res = []
+    for v in compose["services"][svc].get("volumes", []):
+        parts = v.split(":")
+        if re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", parts[0]):
+            res.append((parts[0], parts[1]))
+    return res
+
+
+def start_container(st, compose, project, svc, c):
+    c["state"] = "running"
+    c["started"] = time.time()
+    c["logs"] = c.get("logs", []) + [f"[fake] {svc} starting"]
+    if svc.startswith("node-"):
+        n = svc[5:]
+        sv = [vname(project, s) for s, p in svc_vols(compose, svc) if p == "/app/state"][0]
+        vol = st["volumes"][sv]
+        if vol["owner"] != "1000":
+            c["state"] = "exited"
+            c["logs"].append("cp: cannot create regular file '/app/state/node.identity': Permission denied")
+            return
+        keyed = any(v.endswith(":/app/keys/node.identity:ro") for v in compose["services"][svc]["volumes"])
+        for fn in ["node.identity"] + ([f"node.identity.{k}.json" for k in RECORDS] if keyed else []):
+            if fn not in vol["files"]:
+                vol["files"].append(fn)
+        for fn in ("extra.dat", "demos_peerlist.json"):
+            if fn not in vol["files"]:
+                vol["files"].append(fn)
+        # started again after its stop (the drilled node after the restore)
+        c["restarted"] = "stop_head" in vol
+        if (c["restarted"] or svc == "node-iso") and not os.environ.get("FAKE_KEEP_RISING") and "still_at" not in st:
+            st["still_at"] = head(st)
+        if c["restarted"] and os.environ.get("FAKE_HALT_MARKER"):
+            vol["files"].append("node.identity.signed.json.halted")
+        if c["restarted"] and os.environ.get("FAKE_FOREIGN_LOG"):
+            c["logs"].append("[SIGNING] another process is signing with this node's key: fake (record /app/state/node.identity.signed.json)")
+        vol["frozen"] = False
+        pg = st["volumes"].get(vname(project, f"pgdata-{n}"))
+        if pg is not None:
+            if pg["db"] != "empty" and pg["frozen"]:
+                pg["frozen"] = False
+            if pg["db"] == "empty":
+                pg["db"] = "chain"
+        if not st["t0"]:
+            st["t0"] = time.time()
+        # every boot of a real node logs it (src/index.ts), a container recreated after `compose rm` too
+        if not os.environ.get("FAKE_NO_FLOOR_LOG"):
+            c["logs"].append("[SIGNING] Restart signing floor: only rounds after 42 are signed")
+
+
+def compose_cmd(a):
+    if a[1] == "version":
+        out("Docker Compose version v2.fake")
+    f = a[a.index("-f") + 1]
+    project = a[a.index("-p") + 1]
+    rest = a[a.index("-p") + 2:]
+    cmd = rest[0]
+    args = rest[1:]
+    if cmd == "version":
+        out("Docker Compose version v2.fake")
+    with open(f) as fh:
+        compose = json.load(fh)
+    if cmd == "config":
+        # test hook: a tmpfs on node-1, as a compose file that has one would
+        if os.environ.get("FAKE_ADD_TMPFS"):
+            compose["services"]["node-1"]["tmpfs"] = [os.environ["FAKE_ADD_TMPFS"]]
+            with open(f, "w") as fh:
+                json.dump(compose, fh)
+        out()
+    svcs = []
+    flags = set()
+    i = 0
+    while i < len(args):
+        x = args[i]
+        if x in ("--pull", "-t", "-e"):
+            i += 2
+            continue
+        if x.startswith("-"):
+            flags.add(x)
+        else:
+            svcs.append(x)
+        i += 1
+    if cmd == "up":
+        todo = []
+        for s in svcs:
+            if "--no-deps" not in flags:
+                for dep in compose["services"][s].get("depends_on", {}):
+                    if dep not in todo:
+                        todo.append(dep)
+            todo.append(s)
+        for s in todo:
+            for short, _ in svc_vols(compose, s):
+                new_volume(vname(project, short), project)
+            cid = cid_of(project, s)
+            c = st["containers"].setdefault(cid, {"service": s, "project": project, "state": "created", "volumes": [vname(project, v) for v, _ in svc_vols(compose, s)]})
+            if "--no-start" not in flags and c["state"] != "running":
+                start_container(st, compose, project, s, c)
+        save(st)
+        out()
+    if cmd == "run":
+        if f"PG_HOST={os.environ.get('FAKE_MIGRATE_HANG')}" in args:
+            if os.environ.get("FAKE_MIGRATE_IGNORE_TERM"):
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            time.sleep(120)
+        if os.environ.get("FAKE_MIGRATE_FAIL"):
+            fail("migration failed")
+        out("migrations applied")
+    if cmd == "ps":
+        for cid, c in sorted(st["containers"].items()):
+            if c["project"] == project and c["service"] in svcs and ("-aq" in flags or c["state"] == "running"):
+                print(cid)
+        sys.exit(0)
+    if cmd == "stop":
+        for cid, c in st["containers"].items():
+            if c["project"] == project and c["service"] in svcs and c["state"] == "running":
+                c["state"] = "exited"
+                s = c["service"]
+                if s.startswith("node-"):
+                    n = s[5:]
+                    pg = st["volumes"].get(vname(project, f"pgdata-{n}"))
+                    if pg is not None and pg["db"] != "empty":
+                        pg["frozen"] = True
+                        pg["frozen_head"] = head(st)
+                    for sv, p in svc_vols(compose, s):
+                        if p == "/app/state":
+                            st["volumes"][vname(project, sv)]["frozen"] = True
+                            st["volumes"][vname(project, sv)]["frozen_head"] = head(st)
+                            st["volumes"][vname(project, sv)]["stop_head"] = st["volumes"][vname(project, sv)]["frozen_head"]
+        save(st)
+        out()
+    if cmd == "rm":
+        for cid in [k for k, c in st["containers"].items() if c["project"] == project and c["service"] in svcs]:
+            del st["containers"][cid]
+        save(st)
+        out()
+    if cmd == "down":
+        # is the run's project lock still held while it tears down? (a new open file
+        # description of the lock file conflicts with the run's own)
+        lock = os.path.join(os.environ.get("LOCK_DIR", "/nonexistent"), f"{project}.lock")
+        if os.path.exists(lock):
+            with open(lock, "a") as lf:
+                try:
+                    fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    held = "free"
+                except BlockingIOError:
+                    held = "held"
+            with open(os.path.join(D, "lock-at-down"), "a") as f:
+                f.write(held + "\n")
+        if os.environ.get("FAKE_DOWN_FAIL"):
+            fail("Error response from daemon: fake down failure")
+        keep = os.environ.get("FAKE_DOWN_LEAVE")
+        for cid in [k for k, c in st["containers"].items() if c["project"] == project]:
+            del st["containers"][cid]
+        for v in [k for k, x in st["volumes"].items() if x["project"] == project and not (keep and keep in k)]:
+            del st["volumes"][v]
+        save(st)
+        out()
+    fail(f"fake docker: compose {cmd} not handled", 99)
+
+
+def mounts_of(opts):
+    vols = {}
+    tmpfs = {}
+    for k, v in opts:
+        if k == "-v":
+            src, dst = v.split(":")[0:2]
+            vols[dst] = src
+        elif k == "--tmpfs":
+            tmpfs[v.split(":")[0]] = v
+    return vols, tmpfs
+
+
+def run_cmd(a):
+    opts = []
+    i = 0
+    entry = None
+    user = None
+    while i < len(a):
+        x = a[i]
+        if x in ("--rm", "-i", "-t"):
+            i += 1
+        elif x in ("--user", "--network", "--label", "-v", "--tmpfs", "-e", "--name"):
+            opts.append((x, a[i + 1]))
+            if x == "--user":
+                user = a[i + 1]
+            i += 2
+        elif x == "--entrypoint":
+            entry = a[i + 1]
+            i += 2
+        else:
+            break
+    image = a[i]
+    args = a[i + 1:]
+    vols, tmpfs = mounts_of(opts)
+    if image in envlist("FAKE_MISSING_IMAGES"):
+        fail("Unable to find image locally", 125)
+    if entry == "bun":
+        out("MNEMONIC: " + " ".join(hashlib.sha1(os.urandom(8)).hexdigest()[:6] for _ in range(12)) + "\nPUBKEY: 0x" + hashlib.sha256(os.urandom(8)).hexdigest())
+    if entry == "bash":
+        if os.environ.get("FAKE_NO_NODE"):
+            fail("", 1)
+        out("/usr/local/bin/node")
+    if entry != "sh" or args[:1] != ["-c"]:
+        out()
+    script = args[1]
+    pos = args[3:]
+    if st.get("empty"):
+        sys.exit(0)
+    if "src/migrations" in script:
+        if os.environ.get("FAKE_MIGRATION_FILES") == "none":
+            print("0")
+            sys.exit(1)
+        out(os.environ.get("FAKE_MIGRATION_FILES", "3"))
+    if "uid 1000 cannot read" in script:
+        fail("uid 1000 cannot read /in/peerlist.json" if os.environ.get("FAKE_UNREADABLE") else "", 1 if os.environ.get("FAKE_UNREADABLE") else 0)
+    if 'touch "$1/.w"' in script:
+        p = pos[0]
+        if p in tmpfs:
+            ok = "uid=1000" in tmpfs[p]
+        elif p in vols:
+            ok = st["volumes"][vols[p]]["owner"] == "1000"
+        else:
+            ok = p not in envlist("FAKE_UNWRITABLE_PATHS")
+        if user != "1000" or ok:
+            out()
+        fail(f"touch: {p}/.w: Permission denied")
+    sv = vols.get("/x") or vols.get("/s") or vols.get("/b")
+    vol = st["volumes"].get(sv) if sv else None
+    if "chown -R 1000:1000" in script:
+        vol["owner"] = "1000"
+        save(st)
+        out()
+    if "rm -rf" in script and "node.identity*" in script:
+        vol["files"] = [x for x in vol["files"] if (x.startswith("node.identity") and x != os.environ.get("FAKE_WIPE_DROP"))
+                        or x == os.environ.get("FAKE_WIPE_LEAVE")]
+        if os.environ.get("FAKE_WIPE_CHANGES_OWNER"):
+            vol["owner"] = "0"
+        save(st)
+        if os.environ.get("FAKE_WIPE_FAIL"):
+            fail(f"rm: can't remove '{os.environ.get('FAKE_WIPE_LEAVE', 'x')}': Operation not permitted")
+        out()
+    if "stat -c" in script:
+        st["owner_reads"] = st.get("owner_reads", 0) + 1
+        save(st)
+        if str(st["owner_reads"]) == os.environ.get("FAKE_OWNER_READ_FAIL"):
+            fail("docker: Error response from daemon: fake read failure", 125)
+        o = vol["owner"]
+        print(f"{o}:{o} 755 .")
+        for x in vol["files"]:
+            if x.startswith("node.identity"):
+                print(f"{o}:{o} 600 {x}")
+        sys.exit(0)
+    if "ls -A /s" in script:
+        for x in sorted(vol["files"]):
+            print(x)
+        sys.exit(0)
+    m = re.search(r"cat /s/node\.identity\.(\w+)\.json", script)
+    if m:
+        if m.group(1) == "signed" and "stop_head" in vol:
+            for c in st["containers"].values():
+                if c["state"] == "running" and sv in c["volumes"]:
+                    c["signed_seen"] = True
+            save(st)
+        if f"node.identity.{m.group(1)}.json" not in vol["files"]:
+            fail(f"cat: can't open '/s/node.identity.{m.group(1)}.json': No such file or directory")
+        out(json.dumps(record(st, vol, sv, m.group(1))))
+    if "sha256sum /s/node.identity" in script:
+        if os.environ.get("FAKE_ISO_UNREADABLE") == "empty":
+            sys.exit(0)
+        if os.environ.get("FAKE_ISO_UNREADABLE"):
+            fail("docker: Error response from daemon: fake read failure", 125)
+        if os.environ.get("FAKE_ISO_KEY_OF"):
+            print(hashlib.sha256(b"identity-" + (sv.rsplit("_", 1)[0] + "_" + os.environ["FAKE_ISO_KEY_OF"]).encode()).hexdigest())
+        elif "node.identity" in vol["files"]:
+            print(hashlib.sha256(b"identity-" + sv.encode()).hexdigest())
+        sys.exit(0)
+    if "sha256sum" in script and "node.identity*" in script:
+        changed = os.environ.get("FAKE_IDENTITY_CHANGED") and running_on(st, sv) and "stop_head" in vol
+        for x in sorted(vol["files"]):
+            if x.startswith("node.identity"):
+                kind = x[len("node.identity."):-len(".json")] if x.endswith(".json") else ""
+                body = x + json.dumps(record(st, vol, sv, kind)) if kind in RECORDS else ("identity-changed-" if changed else "identity-") + sv
+                print(f"{hashlib.sha256(body.encode()).hexdigest()}  {x}")
+        sys.exit(0)
+    out()
+
+
+def pg_state(st, project, cid):
+    c = st["containers"][cid]
+    n = c["service"][3:]
+    return n, st["volumes"][vname(project, f"pgdata-{n}")], st["volumes"].get(vname(project, f"backup-{n}"))
+
+
+def exec_cmd(a):
+    a = [x for x in a if x != "-i"]
+    cid, cmd = a[0], a[1:]
+    c = st["containers"].get(cid)
+    if not c or c["state"] != "running":
+        fail("Error response from daemon: container is not running", 1)
+    if st.get("empty"):
+        sys.exit(0)
+    svc, project = c["service"], c["project"]
+    if svc.startswith("node-"):
+        if cmd[0] != "curl":
+            out()
+        if svc in envlist("FAKE_NEVER_SERVE"):
+            fail("", 7)
+        body = cmd[cmd.index("-d") + 1] if "-d" in cmd else None
+        if body is None:
+            if os.environ.get("FAKE_EMPTY_READS") and (c.get("restarted") or svc == "node-iso"):
+                st["empty"] = True
+                save(st)
+            if os.environ.get("FAKE_EMPTY_BLOCKS") and (c.get("restarted") or svc == "node-iso"):
+                st["empty_blocks"] = True
+                save(st)
+            if os.environ.get("FAKE_STALE_BLOCKS") and (c.get("restarted") or svc == "node-iso"):
+                st["stale_blocks"] = True
+                save(st)
+            sys.stdout.write("Hello World!")
+            sys.exit(0)
+        d = json.loads(body)["params"][0]
+        h = 0 if svc in envlist("FAKE_BEHIND") else head(st)
+        if d["message"] == "getLastBlockNumber":
+            if time.time() < st.get("outage_until", 0):
+                fail("curl: (28) Operation timed out", 28)
+            if "head_at_dump" in st and svc in envlist("FAKE_SILENT"):
+                fail("curl: (28) Operation timed out", 28)
+            if svc in envlist("FAKE_STUCK") and os.environ.get("FAKE_STUCK_AT"):
+                h = min(h, int(os.environ["FAKE_STUCK_AT"]))
+            elif "head_at_dump" in st and svc in envlist("FAKE_STUCK"):
+                h = st["head_at_dump"]
+            lagsvc, _, lagby = os.environ.get("FAKE_CATCHUP", "").partition(":")
+            if svc == lagsvc:
+                h = max(0, h - int(lagby))
+                if "head_at_dump" in st:
+                    h = min(h, st["head_at_dump"])
+            lag, _, when = os.environ.get("FAKE_REJOIN_LAG", "").partition(":")
+            if lag and c.get("restarted") and (when != "signed" or c.get("signed_seen")):
+                h = max(0, h - int(lag))
+            ahead, _, flaky = os.environ.get("FAKE_FLAKY_AHEAD", "").partition(":")
+            if ahead and c.get("restarted"):
+                st["x_reads"] = st.get("x_reads", 0) + 1
+                save(st)
+            elif ahead and svc in flaky.split(",") and "x_reads" in st:
+                if st["x_reads"] % 2:
+                    fail("curl: (28) Operation timed out", 28)
+                h += int(ahead)
+            out(json.dumps({"result": 200, "response": h}))
+        if st.get("empty_blocks"):
+            sys.exit(0)
+        bn = d["data"]["blockNumber"]
+        if st.get("stale_blocks"):
+            bn = max(0, bn - 1)
+        bh =f"other{bn}" if svc in envlist("FAKE_OTHER_HASH") else f"hash{bn}"
+        if svc in envlist("FAKE_FORK"):
+            sv, pg = (st["volumes"].get(vname(project, f"{k}-{svc[5:]}"), {}) for k in ("state", "pgdata"))
+            floor = sv.get("stop_head", pg.get("frozen_head") if pg.get("db") == "restored" else None)
+            if floor is not None and bn > floor:
+                bh = f"fork{bn}"
+        out(json.dumps({"result": 200, "response": {"hash": bh, "number": bn, "content": {"timestamp": time.time()}, "validation_data": {"signatures": {}}}}))
+    n, pg, bk = pg_state(st, project, cid)
+    if cmd[0] == "pg_isready":
+        out()
+    dbhead = pg["frozen_head"] if pg["frozen"] else head(st)
+    if cmd[0] == "psql":
+        if pg["db"] == "empty":
+            if "-f" in cmd:
+                sys.stdin.read()
+                sys.exit(0)
+            q = cmd[cmd.index("-tAc") + 1]
+            out("0" if "pg_tables" in q else ("1" if "select 1" in q else ""))
+        if "-f" in cmd:
+            sys.stdin.read()
+            erow, _, ewhen = os.environ.get("FAKE_STATS_ERROR", "").partition(":")
+            when = "restored" if pg["db"] == "restored" else ("after" if "head_at_dump" in st else "before")
+            for line in (f"max_block|{dbhead}", f"blocks|{dbhead + 1}", "fork_state|1", "migrations|3", f"transactions|{dbhead * 2}"):
+                k = line.split("|")[0]
+                if k == erow and ewhen == when:
+                    print(f"psql:<stdin>:4: ERROR:  permission denied for table {k}", file=sys.stderr)
+                    if "ON_ERROR_STOP=1" in cmd:
+                        sys.exit(3)
+                    continue
+                print(f"{k}|0" if pg["db"] == "restored" and k == os.environ.get("FAKE_RESTORE_SHORT") else line)
+            sys.exit(0)
+        q = cmd[cmd.index("-tAc") + 1]
+        m = re.search(r"WHERE number = (\d+)", q)
+        if m:
+            out(f"hash{m.group(1)}")
+        if "max(number)" in q:
+            out(str(dbhead))
+        out("4" if "pg_tables" in q else "1")
+    if cmd[0] == "stat":
+        out("4096")
+    if cmd[0] == "sh":
+        script = cmd[2]
+        if "pg_dump" in script:
+            nm = re.search(r"/backup/(\S+)", script).group(1)
+            pg["dump_head"] = dbhead
+            st.setdefault("head_at_dump", head(st))
+            bk["files"] = [nm]
+            bk["dump"] = f"DUMP-head-{dbhead}\n"
+            if os.environ.get("FAKE_EXTRA_HOLDER"):
+                st["containers"][cid_of(project, "stray")] = {"service": "stray", "project": project, "state": "running",
+                                                              "volumes": [vname(project, os.environ["FAKE_EXTRA_HOLDER"])]}
+            if os.environ.get("FAKE_STATE_LOST"):
+                xs = st["volumes"][vname(project, f"state-{n}")]
+                xs["files"] = [x for x in xs["files"] if x != os.environ["FAKE_STATE_LOST"]]
+            save(st)
+            out()
+        if "pg_restore --file=/dev/null" in script:
+            nm = re.search(r"pg_restore --file=/dev/null (\S+)", script).group(1)
+            if os.environ.get("FAKE_DUMP_CUT"):
+                fail("pg_restore: error: could not read from input file: end of file")
+            bk["files"].append(nm + ".sha256")
+            save(st)
+            out()
+        if "pg_restore -U" in script:
+            data = sys.stdin.read()
+            time.sleep(float(os.environ.get("FAKE_SLOW_RESTORE", "0")))
+            m = re.search(r"DUMP-head-(\d+)", data)
+            if not m:
+                fail("pg_restore: not a dump", 1)
+            pg["db"], pg["frozen"], pg["frozen_head"] = "restored", True, int(m.group(1))
+            if os.environ.get("FAKE_READ_OUTAGE"):
+                st["outage_until"] = time.time() + float(os.environ["FAKE_READ_OUTAGE"])
+            save(st)
+            out()
+    out()
+
+
+def main():
+    cmd = a[0]
+    if cmd == "compose":
+        compose_cmd(a)
+    elif cmd == "info":
+        out()
+    elif cmd == "run":
+        run_cmd(a[1:])
+    elif cmd == "exec":
+        exec_cmd(a[1:])
+    elif cmd == "image":
+        img = a[2]
+        if img in envlist("FAKE_MISSING_IMAGES"):
+            fail("Error: No such image", 1)
+        fmt = a[a.index("--format") + 1] if "--format" in a else ""
+        if ".Id" in fmt:
+            out("sha256:" + hashlib.sha256(img.encode()).hexdigest())
+        if "Config.Volumes" in fmt:
+            out("null" if os.environ.get("FAKE_NO_IMG_VOLUMES") else '{"/app/data":{},"/app/logs":{},"/app/state":{}}')
+        if "WorkingDir" in fmt:
+            out("/app")
+        out()
+    elif cmd == "ps":
+        if st.get("empty") and "-aq" not in a:
+            sys.exit(0)
+        flt = [a[i + 1] for i, x in enumerate(a) if x == "--filter"]
+        if "ps" in envlist("FAKE_LIST_FAIL") and any(ff.startswith("label=com.docker.compose.project=") for ff in flt):
+            fail("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", 1)
+        for cid, c in sorted(st["containers"].items()):
+            ok = "-aq" in a or c["state"] == "running"
+            for ff in flt:
+                k, _, v = ff.partition("=")
+                if k == "label" and v.startswith("com.docker.compose.project="):
+                    ok = ok and c["project"] == v.split("=", 1)[1]
+                elif k == "label" and v.startswith("com.docker.compose.service="):
+                    ok = ok and c["service"] == v.split("=", 1)[1]
+                elif k == "label":
+                    ok = False
+                elif k == "volume":
+                    ok = ok and ff.split("=", 1)[1] in c["volumes"]
+            if ok:
+                print(cid)
+        sys.exit(0)
+    elif cmd == "volume":
+        sub = a[1]
+        if sub == "ls":
+            # no filter: every volume; else the project label filter
+            ff = a[a.index("--filter") + 1].split("=", 2)[2] if "--filter" in a else None
+            if ff is not None and "volume" in envlist("FAKE_LIST_FAIL"):
+                fail("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", 1)
+            for v, x in sorted(st["volumes"].items()):
+                if ff is None or x["project"] == ff:
+                    print(v)
+            sys.exit(0)
+        if sub == "rm":
+            for v in a[2:]:
+                st["volumes"].pop(v, None)
+            save(st)
+            out()
+        if sub == "inspect":
+            v = st["volumes"].get(a[-1])
+            if v is None:
+                fail("No such volume", 1)
+            out(v["project"])
+    elif cmd == "network" and a[1] == "ls":
+        sys.exit(0)
+    elif cmd == "rm":
+        out()
+    elif cmd == "cp":
+        src, dest = a[1], a[2]
+        cid = src.split(":")[0]
+        c = st["containers"][cid]
+        bk = st["volumes"][vname(c["project"], "backup-" + c["service"][3:])]
+        nm = bk["files"][0]
+        with open(os.path.join(dest, nm), "w") as f:
+            f.write(bk["dump"] + ("cut" if os.environ.get("FAKE_CP_CORRUPT") else ""))
+        with open(os.path.join(dest, nm + ".sha256"), "w") as f:
+            f.write(hashlib.sha256(bk["dump"].encode()).hexdigest() + "  " + nm + "\n")
+        out()
+    elif cmd == "logs":
+        cid = a[-1]
+        c = st["containers"].get(cid)
+        if not c:
+            fail("No such container", 1)
+        if st.get("empty"):
+            sys.exit(0)
+        if os.environ.get("FAKE_LOGS_FAIL") and c.get("restarted"):
+            fail("Error response from daemon: configured logging driver does not support reading", 1)
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+        fill = [f"[fake] {c['service']} log line {k}" for k in range(int(os.environ.get("FAKE_LOG_FILL", "0")))]
+        out("\n".join(c.get("logs", []) + fill))
+    elif cmd == "inspect":
+        fmt = a[a.index("-f") + 1]
+        if st.get("empty"):
+            sys.exit(0)
+        if ".Mounts" in fmt:
+            c = st["containers"].get(a[-1])
+            if not c:
+                fail(f"Error: No such object: {a[-1]}", 1)
+            out("\n".join(f"/var/lib/docker/volumes/{v}/_data {v}" for v in c["volumes"]))
+        out("0" if "ExitCode" in fmt else "")
+    else:
+        fail(f"fake docker: {cmd} not handled", 99)
+
+
+main()

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# jq as before 1.7, on one point: with -e and no JSON value in its input at all, it prints
+# nothing and exits 0 (jq 1.6 sets -e's status only per input value); 1.7 and later exit 4.
+# Every other call goes to the jq after this directory in PATH. For run.sh, whose -e reads
+# all take their input on stdin
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PATH="$(tr ':' '\n' <<< "${PATH}" | grep -vxF "${here}" | paste -sd: -)"
+[ "$(command -v jq)" != "${here}/jq" ] || { echo "jq-before-1.7: no other jq in PATH" >&2; exit 2; }
+e=0
+for a in "$@"; do
+    case "${a}" in
+        --null-input | -n* | -[!-]*n*) exec jq "$@" ;;
+        --exit-status | -e* | -[!-]*e*) e=1 ;;
+    esac
+done
+[ "${e}" = 1 ] || exec jq "$@"
+in="$(cat)"
+if [[ "${in}" =~ ^[[:space:]]*$ ]]; then exit 0; fi
+printf '%s\n' "${in}" | jq "$@"

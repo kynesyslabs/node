@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Fake bun for IDENTITY_GEN=host: what generate-identity-helper.ts prints
+echo "MNEMONIC: $(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+echo "PUBKEY: 0x$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
