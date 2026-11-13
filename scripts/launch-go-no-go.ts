@@ -190,6 +190,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "l2psGate",
     "tlsnDisabled",
     "xmProofBinding",
+    "storageFeeSettlement",
 ]
 
 /**

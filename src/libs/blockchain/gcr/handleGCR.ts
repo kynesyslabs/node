@@ -63,7 +63,9 @@ import {
     isWorkReplay,
     legacyGasCredited,
     legacyGasRetired,
+    storageFeeCredited,
     tlsnBurnCredited,
+    withStorageFeeCredit,
     withTrailingDebitCredit,
     withoutLegacyGas,
 } from "src/libs/blockchain/validation/legacyGas"
@@ -557,12 +559,16 @@ function sameFeeEdit(a: GCREdit, b: GCREdit): boolean {
  * copy leaves that gas edit out, so the sender pays the fee once and every
  * debit has its credit. Where the gas is a non-native transaction's whole
  * fee (`legacyGasCredited`), the copy keeps it and credits it right after,
- * and so it does for the burn of a TLSNotary operation (`tlsnBurnCredited`).
+ * and so it does for the burn of a TLSNotary operation (`tlsnBurnCredited`)
+ * and the storage fee of a Storage Program write (`storageFeeCredited`).
  */
 export function withDerivedFeeEdits(tx: Transaction): Transaction {
     if (legacyGasCredited(tx)) {
         const signed = tx.content.gcr_edits ?? []
-        const credited = withTrailingDebitCredit(signed, tx.hash ?? "")
+        const withFee = storageFeeCredited(tx)
+            ? withStorageFeeCredit(signed, tx.hash ?? "")
+            : signed
+        const credited = withTrailingDebitCredit(withFee, tx.hash ?? "")
         if (credited === signed) return tx
         return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
             content: {

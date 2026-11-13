@@ -29,6 +29,7 @@ import type {
     XmRemoveCanonicalConfig,
     L2psGateConfig,
     TlsnDisabledConfig,
+    StorageFeeSettlementConfig,
     SignatureDomainConfig,
     TlsnProofEnforcementConfig,
     UnpinnedCommitteeConfig,
@@ -439,6 +440,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "tlsnDisabled":
             getSharedState.forkConfig.tlsnDisabled = config as TlsnDisabledConfig
             return
+        case "storageFeeSettlement":
+            getSharedState.forkConfig.storageFeeSettlement =
+                config as StorageFeeSettlementConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -606,6 +611,8 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as L2psGateConfig
         case "tlsnDisabled":
             return base as TlsnDisabledConfig
+        case "storageFeeSettlement":
+            return base as StorageFeeSettlementConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

@@ -670,7 +670,11 @@ describe("checkLaunch", () => {
     it("launches with L2PS and TLSNotary off", () => {
         expect(MAINNET_FORKS).toContain("l2psGate")
         expect(MAINNET_FORKS).toContain("tlsnDisabled")
-        expect(MAINNET_FORKS).toHaveLength(27)
+        expect(MAINNET_FORKS).toHaveLength(28)
+    })
+
+    it("launches with the Storage Program fee kept in the supply", () => {
+        expect(MAINNET_FORKS).toContain("storageFeeSettlement")
     })
 
     it("is NO-GO on chain ids 0, 1, 1337 and 31337", () => {

@@ -92,6 +92,9 @@
     "xmProofBinding": {
       "activationHeight": 0
     },
+    "storageFeeSettlement": {
+      "activationHeight": 0
+    },
     "atomicWork": {
       "activationHeight": null
     },

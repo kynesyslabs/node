@@ -456,6 +456,20 @@ export type L2psGateConfig = BaseForkConfig
 export type TlsnDisabledConfig = BaseForkConfig
 
 /**
+ * `storageFeeSettlement` fork: the storage fee of a Storage Program create or
+ * write is credited like a network fee, split between burn and treasury.
+ * The SDK builds that fee as a sender debit no edit credits, so each such
+ * transaction took the fee out of the total supply while every other fee is
+ * credited. The sender still pays it as signed, so the signed edits and
+ * their binding are unchanged; only the applied copy gains the credits.
+ * Credited where the gas of a non-native transaction is (`gasFeeSeparation`
+ * and `feeBinding`), judged at the tip like the other apply-time rules.
+ * Dormant by default, so an existing chain replays as applied; a mainnet
+ * genesis sets 0. No payload beyond the base.
+ */
+export type StorageFeeSettlementConfig = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -619,6 +633,7 @@ export type ForkName =
     | "xmRemoveCanonical"
     | "l2psGate"
     | "tlsnDisabled"
+    | "storageFeeSettlement"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -655,6 +670,7 @@ export interface ForkConfigByName {
     xmRemoveCanonical: XmRemoveCanonicalConfig
     l2psGate: L2psGateConfig
     tlsnDisabled: TlsnDisabledConfig
+    storageFeeSettlement: StorageFeeSettlementConfig
 }
 
 /**
@@ -975,6 +991,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "TLSNotary is off: tlsn_request and tlsn_store are refused before any edit " +
             "applies, so no fee is charged and no attestation token is issued.",
     },
+    storageFeeSettlement: {
+        // Dormant by default: it changes the balances a Storage Program
+        // create or write leaves, and a missing genesis entry hydrates from
+        // here. A mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A Storage Program storage fee is credited like a network fee, split between " +
+            "burn and treasury, so it no longer leaves the total supply.",
+    },
 }
 
 /**
@@ -1015,5 +1040,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         xmRemoveCanonical: { ...DEFAULT_FORK_CONFIG.xmRemoveCanonical },
         l2psGate: { ...DEFAULT_FORK_CONFIG.l2psGate },
         tlsnDisabled: { ...DEFAULT_FORK_CONFIG.tlsnDisabled },
+        storageFeeSettlement: { ...DEFAULT_FORK_CONFIG.storageFeeSettlement },
     }
 }
