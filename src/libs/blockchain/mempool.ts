@@ -694,10 +694,11 @@ export default class Mempool {
         // System relay transactions (SYSTEM_RELAY_TX_TYPES, e.g.
         // `l2psBatch`) carry a node-generated monotonic-for-uniqueness
         // nonce, not a sequential per-account counter, and never advance
-        // the sender's account.nonce (no `nonce` GCR edit). The
-        // sequential `account.nonce + 1 + pendingCount` check below is
-        // built for value-transfer txs and would reject every batch (the
-        // timestamp nonce never equals account.nonce+1), trapping the
+        // the sender's account.nonce (no `nonce` GCR edit). The nonce
+        // window below (above the confirmed nonce, at most
+        // MEMPOOL_MAX_NONCE_AHEAD past it, one pending tx per nonce) is
+        // built for value-transfer txs and would reject every batch (a
+        // timestamp nonce is far past the window), trapping the
         // L2PSBatchAggregator in a permanent retry loop.
         //
         // The exemption is gated on the tx originating from THIS node's
