@@ -72,9 +72,10 @@ export function boundedFetch(limits: Web2Limits = web2Limits()): typeof fetch {
             controller.abort()
         }, limits.timeoutMs)
         const outer = init.signal
+        const onOuterAbort = () => controller.abort(outer?.reason)
         if (outer) {
             if (outer.aborted) controller.abort(outer.reason)
-            else outer.addEventListener("abort", () => controller.abort(outer.reason), { once: true })
+            else outer.addEventListener("abort", onOuterAbort, { once: true })
         }
         try {
             const res = await runtimeFetch()(input, { ...init, signal: controller.signal })
@@ -104,6 +105,9 @@ export function boundedFetch(limits: Web2Limits = web2Limits()): typeof fetch {
             throw error
         } finally {
             clearTimeout(timer)
+            // A long-lived caller signal would otherwise hold one listener,
+            // and this request's controller, per request.
+            outer?.removeEventListener("abort", onOuterAbort)
         }
     }
     return bounded as typeof fetch

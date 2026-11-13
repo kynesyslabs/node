@@ -89,6 +89,35 @@ describe("boundedFetch", () => {
         expect(ms).toBeLessThan(2_000)
     })
 
+    it("lets go of the caller's signal once the request is over", async () => {
+        const caller = new AbortController()
+        const added: unknown[] = []
+        const removed: unknown[] = []
+        const add = caller.signal.addEventListener.bind(caller.signal)
+        const remove = caller.signal.removeEventListener.bind(caller.signal)
+        caller.signal.addEventListener = ((type: string, fn: unknown, opts?: unknown) => {
+            if (type === "abort") added.push(fn)
+            return add(type, fn as EventListener, opts as AddEventListenerOptions)
+        }) as typeof caller.signal.addEventListener
+        caller.signal.removeEventListener = ((type: string, fn: unknown) => {
+            if (type === "abort") removed.push(fn)
+            return remove(type, fn as EventListener)
+        }) as typeof caller.signal.removeEventListener
+        await (await get(`${base}/ok`, { signal: caller.signal })).json()
+        await elapsed(get(`${base}/big`, { signal: caller.signal }))
+        expect(added.length).toBe(2)
+        expect(removed).toEqual(added)
+    })
+
+    it("still ends the request when the caller aborts", async () => {
+        const caller = new AbortController()
+        const pending = elapsed(get(`${base}/trickle`, { signal: caller.signal }))
+        setTimeout(() => caller.abort(), 50)
+        const { err, ms } = await pending
+        expect(err).not.toBeNull()
+        expect(ms).toBeLessThan(300)
+    })
+
     it("refuses a body over the cap, declared or streamed", async () => {
         for (const path of ["/big", "/chunked"]) {
             const { err } = await elapsed(get(`${base}${path}`))
