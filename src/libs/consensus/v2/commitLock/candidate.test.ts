@@ -15,7 +15,6 @@ const sharedState: Record<string, any> = {
     genesisBlockHash: "hash-0",
     identityFile: "",
     publicKeyHex: "self",
-    referenceBlockRoom: 10,
     batchSyncTxSize: 1000,
 }
 

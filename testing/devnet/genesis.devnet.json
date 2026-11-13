@@ -78,6 +78,9 @@
     },
     "storageFeeSettlement": {
       "activationHeight": 0
+    },
+    "referenceBlockRoom10": {
+      "activationHeight": 0
     }
   },
   "balances": [

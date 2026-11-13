@@ -184,7 +184,6 @@ beforeEach(() => {
     insertBlock.mockResolvedValue({} as any)
 
     getSharedState.lastBlockNumber = HEIGHT - 1
-    getSharedState.referenceBlockRoom = 1
 })
 
 describe("syncBlock verification", () => {

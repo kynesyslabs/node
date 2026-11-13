@@ -214,7 +214,6 @@ beforeEach(() => {
     snapshots = [{ block: 0, setHash: SET_HASH, validators }]
     sharedState.syncStatus = true
     sharedState.forkConfig = structuredClone(FORKS)
-    delete sharedState.referenceBlockRoom
     proveStoragePrograms.mockReset()
 })
 
@@ -292,7 +291,6 @@ describe("getTransactionProof", () => {
 
     it("serves a transaction admitted before osDenomination that landed just after it", async () => {
         sharedState.forkConfig = { ...structuredClone(FORKS), osDenomination: { activationHeight: 4 } }
-        sharedState.referenceBlockRoom = 10
         const content = { ...transfer(5), amount: 5, transaction_fee: { network_fee: 1, rpc_fee: 0, additional_fee: 0, rpc_address: null } }
         const legacy = JSON.stringify(content)
         expect(serializeTxContent(content as never, true)).not.toBe(legacy)
@@ -302,7 +300,9 @@ describe("getTransactionProof", () => {
         expect(reply.result).toBe(200)
         expect(reply.response.tx.contentBytes).toBe(legacy)
 
-        sharedState.referenceBlockRoom = 0
+        // Without the earlier rule (referenceBlockWindow.test.ts covers the
+        // heights past the deep window) the legacy bytes are not recovered.
+        sharedState.forkConfig = { ...structuredClone(FORKS), osDenomination: { activationHeight: 0 } }
         const outside = await getTransactionProof({ hash: sha256(legacy) })
         expect(outside.result).toBe(500)
         expect(outside.extra).toMatchObject({ reason: "content_unrecoverable" })

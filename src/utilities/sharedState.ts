@@ -116,7 +116,6 @@ export default class SharedState {
     currentUTCTime = 0
     lastTimestamp = 0
     lastShardSeed = ""
-    referenceBlockRoom = 1
 
     private _shardSize: number | null = null
     get shardSize(): number {

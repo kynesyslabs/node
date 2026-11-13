@@ -191,6 +191,7 @@ export const MAINNET_FORKS: readonly ForkName[] = [
     "tlsnDisabled",
     "xmProofBinding",
     "storageFeeSettlement",
+    "referenceBlockRoom10",
 ]
 
 /**

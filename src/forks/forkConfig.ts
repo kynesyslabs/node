@@ -470,6 +470,23 @@ export type TlsnDisabledConfig = BaseForkConfig
 export type StorageFeeSettlementConfig = BaseForkConfig
 
 /**
+ * `referenceBlockRoom10` fork: a transaction's reference block may be up to
+ * 10 blocks behind the head instead of 1, and the deep window it can still
+ * be included as failed in is 50 blocks instead of 5.
+ *
+ * With a room of 1 a transaction confirmed at head N had to land in block
+ * N + 1 or N + 2, so under load (or a user who takes a few seconds to
+ * approve the fee) a large share failed with an expired reference. The room
+ * is a consensus rule: the forger's mempool filter, sync verification, the
+ * broadcast check and mempool cleanup all read it. Each judges a block on
+ * the rule of its own tip, so a block applied on a tip below the activation
+ * height verifies with room 1. Replay is refused by the nonce and the
+ * signature domain, not by the window. Dormant by default; a mainnet
+ * genesis sets 0. No payload beyond the base.
+ */
+export type ReferenceBlockRoom10Config = BaseForkConfig
+
+/**
  * `networkGovernance` fork: admits and applies the two network-upgrade
  * transactions, `networkUpgrade` and `networkUpgradeVote`.
  *
@@ -634,6 +651,7 @@ export type ForkName =
     | "l2psGate"
     | "tlsnDisabled"
     | "storageFeeSettlement"
+    | "referenceBlockRoom10"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -671,6 +689,7 @@ export interface ForkConfigByName {
     l2psGate: L2psGateConfig
     tlsnDisabled: TlsnDisabledConfig
     storageFeeSettlement: StorageFeeSettlementConfig
+    referenceBlockRoom10: ReferenceBlockRoom10Config
 }
 
 /**
@@ -1000,6 +1019,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "A Storage Program storage fee is credited like a network fee, split between " +
             "burn and treasury, so it no longer leaves the total supply.",
     },
+    referenceBlockRoom10: {
+        // Dormant by default: it changes which transactions a block may hold
+        // as confirmed, and a missing genesis entry hydrates from here. A
+        // mainnet genesis sets 0.
+        activationHeight: null,
+        description:
+            "A transaction's reference block may be up to 10 blocks behind the head " +
+            "(deep window 50) instead of 1 (deep window 5).",
+    },
 }
 
 /**
@@ -1041,5 +1069,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         l2psGate: { ...DEFAULT_FORK_CONFIG.l2psGate },
         tlsnDisabled: { ...DEFAULT_FORK_CONFIG.tlsnDisabled },
         storageFeeSettlement: { ...DEFAULT_FORK_CONFIG.storageFeeSettlement },
+        referenceBlockRoom10: { ...DEFAULT_FORK_CONFIG.referenceBlockRoom10 },
     }
 }

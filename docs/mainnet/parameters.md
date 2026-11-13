@@ -76,6 +76,10 @@ and the one-start switches `DEMOS_GENERATE_IDENTITY`,
 
 - Chain id, shard size, fork heights, the treasury address and the sudo key
   come from the genesis file, so they match by construction.
+- The reference block room (how far behind the head a transaction's
+  reference block may be: 1, or 10 from the `referenceBlockRoom10` fork,
+  with a deep window of five times that) is a code constant chosen by the
+  genesis fork schedule, so it matches by construction too.
 - Ports, database settings, L2PS limits, rate limits and the watchdog are
   per-node: they change how one node runs, not which blocks it accepts.
 - `MAX_MESSAGE_SIZE` is parsed but never read.

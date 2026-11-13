@@ -19,7 +19,7 @@ jest.mock("src/utilities/logger", () => ({
 }))
 
 jest.mock("src/utilities/sharedState", () => ({
-    getSharedState: { lastBlockNumber: 100, referenceBlockRoom: 1 },
+    getSharedState: { lastBlockNumber: 100 },
 }))
 
 let accountNonces: Record<string, number> = {}
