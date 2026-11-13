@@ -39,11 +39,19 @@ key in the OpenSSH allowed-signers format:
 release@kynesyslabs.com namespaces="git" ssh-ed25519 AAAA...
 ```
 
-A signer configures git once:
+A signer configures git in the checkout used to tag. The first two lines are
+needed once; run the last four again before each tag, because the signer
+file is a copy of the list at that moment and goes stale when a signer is
+added or removed. The copy goes into the clone's own `.git`, as in
+`INSTALL.md` step 1:
 
 ```bash
 git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/<key>.pub
+git fetch --tags origin stabilisation &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS"
 ```
 
 Keep the private key off the validators and out of CI. How a holder
@@ -132,6 +140,42 @@ INSTALL.md, "After the genesis is reissued".
 
 ## What a validator runs
 
+Before changing `IMAGE_TAG`, verify and check out the release tag, so the
+compose file, scripts and parameter sheet match the image. The signer list
+goes into the clone's own `.git`, as in `INSTALL.md` step 1:
+
+```bash
+TAG=v1.0.0-rc.1
+
+OLD_HEAD="$(git rev-parse HEAD)" &&
+git fetch --tags origin stabilisation &&
+SIGNERS="$(git rev-parse --absolute-git-dir)/demos-allowed-signers" &&
+git show origin/stabilisation:.github/allowed_signers > "$SIGNERS" &&
+git config gpg.ssh.allowedSignersFile "$SIGNERS" &&
+git merge-base --is-ancestor "$TAG" origin/stabilisation &&
+git verify-tag "$TAG" &&
+git checkout "$TAG"
+```
+
+The first line records the commit the checkout is at now. If this chain
+stops, do not continue the upgrade. A good signature from a key you cannot
+match is a failure: the email `git verify-tag` prints must be a signer the
+announcement names, and the `SHA256:` fingerprint the one that signer
+published outside GitHub (see `INSTALL.md` step 1). The chain has already
+checked out the new tag by then, so before anything else go back to the
+commit the first line recorded, in the same shell: `git checkout "$OLD_HEAD"`.
+Then do not continue the upgrade.
+
+Run the chain once; to read the signature again, run `git verify-tag "$TAG"`,
+which moves nothing. If the shell is gone or the chain ran twice, `OLD_HEAD`
+is empty or holds the new tag's commit. Go back instead to the release named
+by `IMAGE_TAG` in `.env`, the part before `@` (`git checkout vX.Y.Z` for
+`IMAGE_TAG=vX.Y.Z@sha256:<digest>`): it still names the release the node
+runs, because this chain runs before `IMAGE_TAG` changes. If `IMAGE_TAG` is
+still `local` (an image built from this checkout), find the way back in
+`git reflog`: the oldest `checkout: moving from <place> to <tag>` line of
+this upgrade names the commit or branch to check out.
+
 In the node's `.env` (see `INSTALL.md`, Docker track), pin the image by tag
 and digest, copied from `checksums.txt`. If the release changes
 `docs/mainnet/parameters.env`, the announcement says so and every validator
@@ -182,8 +226,8 @@ the same for every release. A node started with migrations still pending
 refuses to boot and names the command.
 Procedure, including the backup: [database-migrations.md](database-migrations.md).
 
-A bare-metal validator (`./run`) checks out the tag instead and verifies it
-locally before starting:
+A bare-metal validator (`./run`) runs the same verify-and-checkout chain, then
+starts `./run`:
 
 ```bash
 git fetch --tags origin stabilisation &&
