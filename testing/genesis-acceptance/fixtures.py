@@ -23,7 +23,7 @@ MAINNET_FORKS = ["osDenomination", "nonceEnforcement", "signatureDomain", "editB
 # Same list as KNOWN_FORKS in scripts/launch-go-no-go.ts; a test keeps them equal.
 # A node on a mainnet chain id refuses a genesis that leaves one undeclared.
 # Same list as LAUNCH_DORMANT_FORKS in scripts/launch-go-no-go.ts
-LAUNCH_DORMANT_FORKS = ["networkGovernance", "tokenStaking"]
+LAUNCH_DORMANT_FORKS = ["atomicWork", "networkGovernance", "tokenStaking"]
 KNOWN_FORKS = ["osDenomination", "gasFeeSeparation", "tlsnProofEnforcement", "web2ProofBinding", "xmProofBinding", "signatureDomain", "nonceEnforcement", "atomicWork", "editBinding", "nonceIntegrity", "quorumParity", "committeeBinding", "commitLock", "finalityProofs", "identityCarryover", "stakeApplyChecks", "networkGovernance", "txTypeAllowList", "instantMessagingBinding", "nativeSendBinding", "canonicalAddresses", "feeBinding", "blockCaps", "tokenStakingGate", "tokenStaking", "unpinnedCommittee", "telegramSenderBinding", "xmRemoveCanonical", "l2psGate", "tlsnDisabled", "storageFeeSettlement", "referenceBlockRoom10"]
 
 ap = argparse.ArgumentParser()

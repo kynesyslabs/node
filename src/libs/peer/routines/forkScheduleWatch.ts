@@ -8,17 +8,19 @@
  * where a mismatch is about to become a split and is logged as an error.
  *
  * Under FORK_SCHEDULE_MISMATCH_POLICY=abstain (the default) the node also skips
- * consensus rounds, but only when it is the odd one out: more than half of the
- * whole staked validator set must answer with a different schedule, inside the
- * window. A minority of differing peers is reported and left alone, because the
- * node with the right schedule is then this one, and a few bad peers (or
- * non-validators) must not be able to sideline it, also not while the honest
- * validators are too slow to answer. While abstaining the node keeps syncing,
- * and a timer re-runs the comparison so the flag can clear without waiting for
- * a block, which a network of abstaining nodes would never produce. The flag clears once
- * no majority differs, inside the window or after it. Outside the window, or
- * under `warn`, a mismatch is only reported: stopping a node during a rolling
- * genesis edit far from any fork would cost liveness for no gain.
+ * consensus rounds, but only when it is not in the majority: at least half of
+ * the whole staked validator set must answer with a different schedule, inside
+ * the window. On an even split both halves abstain, so the chain halts instead
+ * of splitting state. A minority of differing peers is reported and left
+ * alone, because the node with the right schedule is then this one, and a few
+ * bad peers (or non-validators) must not be able to sideline it, also not
+ * while the honest validators are too slow to answer. While abstaining the
+ * node keeps syncing, and a timer re-runs the comparison so the flag can clear
+ * without waiting for a block, which a network of abstaining nodes would never
+ * produce. The flag clears once fewer than half differ, inside the window or
+ * after it. Outside the window, or under `warn`, a mismatch is only reported:
+ * stopping a node during a rolling genesis edit far from any fork would cost
+ * liveness for no gain.
  *
  * A validator whose gasFeeSeparation treasury differs while both already
  * apply the fork is the exception: every fee-bearing block splits them and
@@ -182,20 +184,30 @@ async function recheckOnce(): Promise<void> {
 /**
  * Turns one comparison round into the mismatch gauge and the abstain flag.
  *
- * Setting needs more than half of the staked validator set to answer with a
+ * Setting needs at least half of the staked validator set to answer with a
  * different schedule, inside the window, under the abstain policy. Counting
  * against the whole set rather than the answers keeps a validator that did not
  * answer from tipping the vote: otherwise one peer reporting a different
- * schedule while the honest ones time out would sideline an honest node. On an
- * even split neither side has that majority, so neither abstains; the two
- * halves cannot reach a quorum together, and the chain stops until an operator
- * fixes a schedule. Clearing needs that neither the set nor the answers show a
- * differing majority, wherever the tip is: once the nearest scheduled height is
- * behind the tip the window is over, and the node stays out only while most of
- * its peers still disagree with it; a round where the agreeing validators do
- * not answer does not let it back in. A round that reached no validator is
- * inconclusive and changes nothing: clearing on silence would let a node whose
- * peers are all unreachable resume consensus on a schedule it never confirmed.
+ * schedule while the honest ones time out would sideline an honest node.
+ *
+ * An even split abstains too, on both sides. Neither half alone reaches a
+ * quorum, but a quorum mixing both halves does: the block hash does not cover
+ * the applied state of every fork (storageFeeSettlement credits the fee only
+ * in the applied copy; the signed edits are the same), so both halves accept
+ * the same block and silently diverge in state while the chain runs on. With
+ * both halves out the chain halts, with no split, until an operator fixes a
+ * schedule. One liar still cannot sideline an honest node: half of the staked
+ * set has to differ, and in a set of two the other validator can stall the
+ * chain anyway by not voting.
+ *
+ * Clearing needs that the set shows fewer than half differing and the answers
+ * no differing majority, wherever the tip is: once the nearest scheduled
+ * height is behind the tip the window is over, and the node stays out only
+ * while at least half of its peers still disagree with it; a round where the
+ * agreeing validators do not answer does not let it back in. A round that
+ * reached no validator is inconclusive and changes nothing: clearing on
+ * silence would let a node whose peers are all unreachable resume consensus on
+ * a schedule it never confirmed.
  *
  * A node in the majority leaves the differing validators out of its shard:
  * they abstain, so waiting for them would only stretch every round to its
@@ -236,12 +248,14 @@ export async function applyRoundOutcome(
     const total = outcome.validatorIdentities
         ? outcome.validatorIdentities.length
         : differing + outcome.agreed + 1
-    const majorityDiffers = differing * 2 > total
+    // Exactly half counts as well: on an even split each half abstains, since
+    // a quorum drawn from both would accept blocks whose applied state differs
+    const halfDiffers = differing * 2 >= total
     const outnumbered = differing > outcome.agreed
     const wasAbstaining = getSharedState.forkScheduleAbstain
     const abstaining =
         policy === "abstain" &&
-        ((majorityDiffers && urgent) || (wasAbstaining && (majorityDiffers || outnumbered)))
+        ((halfDiffers && urgent) || (wasAbstaining && (halfDiffers || outnumbered)))
     const before = getSharedState.forkScheduleDifferingPeers
     const leaveOut = new Set<string>()
     if (policy === "abstain" && !abstaining) {

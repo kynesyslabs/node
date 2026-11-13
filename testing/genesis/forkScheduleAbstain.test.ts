@@ -116,7 +116,8 @@ describe("a peer with a different schedule", () => {
         expect(getSharedState.forkScheduleAbstain).toBe(true)
     })
 
-    it("does not abstain on an even split", async () => {
+    it("does not abstain when two of five differ: the two that agree and this node outnumber them", async () => {
+        // No staked set, so the total is the answers plus this node: 2 of 5.
         await applyRoundOutcome(960, inWindow, { mismatched: ["http://a", "http://b"], agreed: 2 })
         expect(getSharedState.forkScheduleAbstain).toBe(false)
     })
@@ -157,8 +158,11 @@ describe("counting against the whole staked validator set", () => {
         expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
     })
 
-    it("on a 2-2 split neither pair abstains or leaves the other out, so the chain stops until a schedule is fixed", async () => {
+    it("on a 2-2 split both pairs abstain and leave nobody out, so the chain halts until a schedule is fixed", async () => {
         // Seen from either pair: the other two differ, the partner agrees.
+        // Not abstaining here used to let a quorum of 3 mix both pairs, and a
+        // block hash that does not cover every fork's applied state let them
+        // accept the same block with different state.
         await applyRoundOutcome(960, inWindow, {
             mismatched: ["http://c", "http://d"],
             mismatchedIdentities: ["0xc", "0xd"],
@@ -166,7 +170,8 @@ describe("counting against the whole staked validator set", () => {
             agreedIdentities: ["0xb"],
             validatorIdentities: ["0xa", "0xb", "0xc", "0xd"],
         })
-        expect(getSharedState.forkScheduleAbstain).toBe(false)
+        expect(getSharedState.forkScheduleAbstain).toBe(true)
+        expect(getSharedState.forkScheduleAbstainReason).toContain("2 of 4 validators")
         expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
     })
 
@@ -243,6 +248,109 @@ describe("counting against the whole staked validator set", () => {
             getSharedState.chainId = saved.chainId
         }
     }, 30000)
+})
+
+describe("an even split on a fork that is already active", () => {
+    // Past every scheduled height: only the active-fork difference makes the
+    // mismatch urgent, as with storageFeeSettlement active on two of four
+    // validators and unscheduled on the other two.
+    const past: CheckPlan = { due: true, inWindow: false, nearest: null }
+    const FOUR = ["0xa", "0xb", "0xc", "0xd"]
+    // Seen from a: c and d differ, b agrees.
+    const fromA = {
+        mismatched: ["http://c", "http://d"],
+        mismatchedIdentities: ["0xc", "0xd"],
+        activeForkMismatched: ["http://c", "http://d"],
+        agreed: 1,
+        agreedIdentities: ["0xb"],
+        validatorIdentities: FOUR,
+    }
+    // Seen from c: a and b differ, d agrees.
+    const fromC = {
+        mismatched: ["http://a", "http://b"],
+        mismatchedIdentities: ["0xa", "0xb"],
+        activeForkMismatched: ["http://a", "http://b"],
+        agreed: 1,
+        agreedIdentities: ["0xd"],
+        validatorIdentities: FOUR,
+    }
+
+    it("makes a node on the side that applies the fork abstain", async () => {
+        await applyRoundOutcome(137, past, fromA)
+        expect(getSharedState.forkScheduleAbstain).toBe(true)
+        expect(getSharedState.forkScheduleAbstainReason).toContain("2 of 4 validators")
+        expect(getSharedState.forkScheduleAbstainReason).toContain("an active fork differs from http://c, http://d")
+        expect(gauges.consensus_abstaining).toBe(1)
+        expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
+    })
+
+    it("makes a node on the side that does not apply the fork abstain", async () => {
+        await applyRoundOutcome(137, past, fromC)
+        expect(getSharedState.forkScheduleAbstain).toBe(true)
+        expect(getSharedState.forkScheduleAbstainReason).toContain("2 of 4 validators")
+        expect(gauges.consensus_abstaining).toBe(1)
+        expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
+    })
+
+    it("keeps abstaining while the tie persists", async () => {
+        await applyRoundOutcome(137, past, fromA)
+        await applyRoundOutcome(140, past, fromA)
+        expect(getSharedState.forkScheduleAbstain).toBe(true)
+        // A recheck where the partner is too slow to answer does not let it back in.
+        await applyRoundOutcome(150, past, { ...fromA, agreed: 0, agreedIdentities: [] })
+        expect(getSharedState.forkScheduleAbstain).toBe(true)
+        expect(gauges.consensus_abstaining).toBe(1)
+    })
+
+    it("resumes once every validator agrees", async () => {
+        await applyRoundOutcome(137, past, fromA)
+        expect(getSharedState.forkScheduleAbstain).toBe(true)
+        await applyRoundOutcome(160, past, {
+            mismatched: [],
+            mismatchedIdentities: [],
+            agreed: 3,
+            agreedIdentities: ["0xb", "0xc", "0xd"],
+            validatorIdentities: FOUR,
+        })
+        expect(getSharedState.forkScheduleAbstain).toBe(false)
+        expect(getSharedState.forkScheduleAbstainReason).toBe("")
+        expect(gauges.consensus_abstaining).toBe(0)
+    })
+
+    it("does not make the three abstain over one differing validator, and leaves it out", async () => {
+        await applyRoundOutcome(137, past, {
+            mismatched: ["http://d"],
+            mismatchedIdentities: ["0xd"],
+            activeForkMismatched: ["http://d"],
+            agreed: 2,
+            agreedIdentities: ["0xb", "0xc"],
+            validatorIdentities: FOUR,
+        })
+        expect(getSharedState.forkScheduleAbstain).toBe(false)
+        expect([...getSharedState.forkScheduleDifferingPeers]).toEqual(["0xd"])
+    })
+
+    it("does not abstain over one differing answer while two honest validators are silent", async () => {
+        await applyRoundOutcome(137, past, {
+            mismatched: ["http://d"],
+            mismatchedIdentities: ["0xd"],
+            activeForkMismatched: ["http://d"],
+            agreed: 0,
+            agreedIdentities: [],
+            validatorIdentities: FOUR,
+        })
+        expect(getSharedState.forkScheduleAbstain).toBe(false)
+        expect(gauges.consensus_abstaining).toBeUndefined()
+        expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
+    })
+
+    it("never abstains under the warn policy", async () => {
+        usePolicy("warn")
+        await applyRoundOutcome(137, past, fromA)
+        expect(getSharedState.forkScheduleAbstain).toBe(false)
+        expect(gauges.fork_schedule_mismatch).toBe(1)
+        expect(gauges.consensus_abstaining).toBeUndefined()
+    })
 })
 
 describe("a validator with a different gasFeeSeparation treasury", () => {
