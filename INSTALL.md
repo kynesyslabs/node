@@ -701,6 +701,8 @@ docker volume ls --filter "name=^demos_.*$SUFFIX\$"    # left over; without a su
 
 `down -v` removes only the volumes labelled with this project, which every volume this guide seeds is, since the seeding steps run `docker compose create` first. A volume made outside compose (an older `docker run -v demos_node_state:...` seed) has no label: `down -v` prints `Volume ... was not created by Docker Compose` and keeps it. Remove such a volume by its exact name (`docker volume rm demos_node_state$SUFFIX`), and only once you have checked that no other install uses it. Never run `docker volume prune` or `down -v` from another install's checkout to clean up this one.
 
+Through the launcher, `./run --docker down -v` (or `./scripts/docker-run down -v`, also as `--volumes` or in a flag group such as `-vt 0`; as in compose, the last of these settings counts, so a later `--volumes=false` turns it off) first lists the stack's declared named volumes (the ten `demos_*` ones) and asks you to type `delete`; `down -v` also removes the anonymous volumes attached to the containers, which are not listed. Where there is no terminal (scripts, CI) it stops unless you add `--yes-delete-volumes`.
+
 ### Troubleshooting
 
 **TLSNotary feature not initializing**

@@ -24,11 +24,21 @@ NC='\033[0m'
 
 # Configuration
 REPO_URL="https://github.com/kynesyslabs/node"
+# The identity a node started from this environment would use; its lock is
+# checked as well as the one of .demos_identity
+ENV_IDENTITY_FILE="${IDENTITY_FILE:-}"
 IDENTITY_FILE=".demos_identity"
 PEERLIST_FILE="demos_peerlist.json"
 # Written next to the identity; without them a restarted validator could sign
 # a height it already signed
 SIGNING_FILES=("${IDENTITY_FILE}.signed.json" "${IDENTITY_FILE}.signed.json.halted" "${IDENTITY_FILE}.commitlock.json" "${IDENTITY_FILE}.prevote.json")
+# A running node keeps <identity>.lock next to the real identity file and
+# rewrites it every 5s (src/libs/identity/identityLock.ts); as the node does,
+# the guard treats a lock of this host whose heartbeat is older than this as
+# stale
+LOCK_STALE_MS=20000
+# How long docker (the running containers) or lsof (a process's cwd) may take
+QUERY_S=10
 
 # ============================================================================
 # Helper Functions
@@ -48,6 +58,291 @@ print_error() {
 
 print_warning() {
 	echo -e "${YELLOW}⚠${NC} $1"
+}
+
+# Prints the file the node locks for the identity file $1 (relative to the
+# checkout): $1, or the end of its chain of links with each relative target
+# taken from the link's directory, as resolveWriteTarget
+# (src/libs/identity/signingRecord.ts) does. Fails when a link cannot be read
+# or the chain does not end within 40 links.
+resolve_identity() {
+	local current target hops=0
+	if current="$(readlink -f "$1" 2>/dev/null)" && [[ -n "${current}" ]]; then
+		echo "${current}"
+		return 0
+	fi
+	# readlink -f is missing on older macOS: follow the links one by one
+	current="$1"
+	[[ "${current}" == /* ]] || current="$(pwd)/${current}"
+	while [[ -L "${current}" ]]; do
+		((hops++ < 40)) || return 1
+		target="$(readlink "${current}")" || return 1
+		[[ "${target}" == /* ]] || target="$(dirname "${current}")/${target}"
+		current="${target}"
+	done
+	echo "${current}"
+}
+
+# Prints the output of the read-only query $@ (docker ps, lsof), by way of a
+# temporary file it removes; fails if the query fails, returns 124 if it gives
+# no answer within QUERY_S (a stalled daemon, context or file system), killing
+# it then, and 125 if it cannot make the file. A file, so a child of the query
+# left holding its output cannot keep reset-node waiting either.
+query() {
+	local out pid deadline=$((SECONDS + QUERY_S)) status
+	out="$(mktemp "${TMPDIR:-/tmp}/reset-node.XXXXXX")" || return 125
+	"$@" >"${out}" 2>/dev/null &
+	pid=$!
+	while kill -0 "${pid}" 2>/dev/null; do
+		if ((SECONDS >= deadline)); then
+			kill -KILL "${pid}" 2>/dev/null
+			wait "${pid}" 2>/dev/null
+			rm -f "${out}"
+			return 124
+		fi
+		sleep 0.1
+	done
+	wait "${pid}" 2>/dev/null && cat "${out}"
+	status=$?
+	rm -f "${out}"
+	return "${status}"
+}
+
+# Prints the value of each IDENTITY_FILE= line of the checkout's .env, without
+# its quotes or a trailing comment. Reads that key only: the file is not
+# sourced and no other line of it is printed.
+dotenv_identity_files() {
+	local value
+	[[ -f .env ]] || return 0
+	sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}IDENTITY_FILE[[:space:]]*=[[:space:]]*//p' .env 2>/dev/null |
+		while IFS= read -r value; do
+			value=${value%$'\r'}
+			case "${value}" in
+			\"*) value=${value#\"}; value=${value%%\"*} ;;
+			\'*) value=${value#\'}; value=${value%%\'*} ;;
+			*) value=${value%%#*}; value="${value%"${value##*[![:space:]]}"}" ;;
+			esac
+			[[ -n "${value}" ]] && printf '%s\n' "${value}"
+		done
+}
+
+# Names each running bun or node process whose working directory, as far as
+# this user can read it, is this checkout ($1, its physical path) or below it:
+# /proc/<pid>/cwd where /proc has it (Linux), else lsof; without either, if ps
+# fails, or if lsof cannot be run or is silent for QUERY_S, it says the check
+# was skipped. reset-node and the processes that started it are left out.
+# Returns 1 if it names any (also one named before lsof failed so).
+check_node_processes() {
+	local here_p="$1" own=" " p=$$ i list pid comm dir running=0
+	if [[ ! -e "/proc/$$/cwd" ]] && ! command -v lsof >/dev/null 2>&1; then
+		print_warning "Neither /proc nor lsof is available; skipped the check for bun or node processes in this checkout"
+		return 0
+	elif ! list="$(ps -A -o pid= -o comm= 2>/dev/null)"; then
+		print_warning "ps failed; skipped the check for bun or node processes in this checkout"
+		return 0
+	fi
+	for ((i = 0; i < 64 && p > 1; i++)); do
+		own+="${p} "
+		p="$(ps -o ppid= -p "${p}" 2>/dev/null)"
+		p="${p//[[:space:]]/}"
+	done
+	while read -r pid comm; do
+		case "${comm##*/}" in bun | node) ;; *) continue ;; esac
+		[[ "${own}" == *" ${pid} "* ]] && continue
+		if [[ -e "/proc/$$/cwd" ]]; then
+			dir="/proc/${pid}/cwd"
+		else
+			dir="$(query lsof -a -d cwd -p "${pid}" -Fn)"
+			case $? in
+			124) print_warning "lsof gave no answer within ${QUERY_S} seconds; skipped the check for bun or node processes in this checkout"; break ;;
+			125) print_warning "Could not create a temporary file in ${TMPDIR:-/tmp} for lsof; skipped the check for bun or node processes in this checkout"; break ;;
+			esac
+			dir="$(sed -n 's/^n//p' <<<"${dir}")"
+		fi
+		# An empty dir would make cd stay in the checkout
+		[[ -n "${dir}" ]] && dir="$(cd "${dir}" 2>/dev/null && pwd -P)" || continue
+		[[ "${dir}" == "${here_p}" || "${dir}" == "${here_p}"/* ]] || continue
+		print_error "Process ${pid} (${comm##*/}) is running in this checkout: ${dir}"
+		running=1
+	done <<<"${list}"
+	return "${running}"
+}
+
+# Names what still runs from this checkout (a container of its compose stacks,
+# a bun or node process in it, or a node holding the lock of an identity file
+# it may use: .demos_identity, IDENTITY_FILE from the environment or each
+# IDENTITY_FILE= line of the checkout's .env); returns 1 if anything does.
+# Returns 2 only when it cannot make a temporary file for the container list,
+# an identity is a link it cannot follow, or a lock's directory cannot be
+# searched or the lock read in full. With docker missing, failing or silent
+# for QUERY_S it checks the processes and locks only.
+check_node_stopped() {
+	local running=0 here here_p names name dir dir_p
+	here="$(pwd)"
+	here_p="$(pwd -P)"
+	if ! command -v docker >/dev/null 2>&1; then
+		print_warning "docker is not installed; checking for a local node process only"
+	elif names="$(query docker ps --format '{{.Names}} {{.Label "com.docker.compose.project.working_dir"}}')"; then
+		while read -r name dir; do
+			case "${dir}" in
+			"${here}" | "${here}"/* | "${here_p}" | "${here_p}"/*) ;;
+			/*)
+				# The label is the path compose ran from, which may reach
+				# this checkout through a link: its real path counts too
+				dir_p="$(cd "${dir}" 2>/dev/null && pwd -P)" || continue
+				[[ "${dir_p}" == "${here_p}" || "${dir_p}" == "${here_p}"/* ]] || continue
+				;;
+			*) continue ;;
+			esac
+			print_error "Container ${name} of this checkout is running"
+			running=1
+		done <<<"${names}"
+	elif (($? == 125)); then
+		print_error "Could not create a temporary file in ${TMPDIR:-/tmp} for the list of running containers"
+		echo "    Set TMPDIR to a writable directory, then run reset-node again. Nothing was deleted."
+		return 2
+	else
+		print_warning "docker is not reachable; checking for a local node process only"
+	fi
+
+	check_node_processes "${here_p}" || running=1
+
+	# Each distinct file the identity files resolve to (a relative path from
+	# the checkout) has its lock checked once
+	local files=("${IDENTITY_FILE}") file identity seen=$'\n'
+	[[ -n "${ENV_IDENTITY_FILE}" ]] && files+=("${ENV_IDENTITY_FILE}")
+	while IFS= read -r file; do
+		[[ -n "${file}" ]] && files+=("${file}")
+	done <<<"$(dotenv_identity_files)"
+	for file in "${files[@]}"; do
+		if ! identity="$(resolve_identity "${file}")"; then
+			print_error "${file} is a link that cannot be followed (unreadable, a loop, or more than 40 links), so the identity lock next to its target cannot be checked"
+			echo "    Point ${file} at the identity file, then run reset-node again. Nothing was deleted."
+			return 2
+		fi
+		[[ "${seen}" == *$'\n'"${identity}"$'\n'* ]] && continue
+		seen+="${identity}"$'\n'
+		check_identity_lock "${file}" "${identity}"
+		case $? in
+		1) running=1 ;;
+		2) return 2 ;;
+		esac
+	done
+	return "${running}"
+}
+
+# Checks the lock next to $2, the file the identity file $1 resolves to;
+# returns 1 if it counts, 2 when its directory cannot be searched or it cannot
+# be read in full
+check_identity_lock() {
+	local identity="$2" lock lock_dir body pid host beat age age_ms held="" this_host running=0
+	lock="${identity}.lock"
+	# A lock in a directory this user cannot search would look absent: the
+	# nearest directory on its path that exists must be searchable (one that
+	# does not exist holds no lock)
+	lock_dir="$(dirname "${lock}")"
+	while [[ ! -e "${lock_dir}" ]]; do lock_dir="$(dirname "${lock_dir}")"; done
+	if [[ ! -x "${lock_dir}" ]]; then
+		print_error "Cannot look for the identity lock ${lock}: ${lock_dir} cannot be searched by this user, so reset-node cannot tell whether a node is using this checkout"
+		echo "    Run reset-node as a user who can search ${lock_dir}. Nothing was deleted."
+		return 2
+	fi
+	# A configured identity file that does not exist has no lock: the node
+	# reads or creates it before it takes the lock (src/index.ts:748-750)
+	[[ "$1" == "${IDENTITY_FILE}" || -e "${identity}" ]] || return 0
+	# The name os.hostname() gives the node; $HOSTNAME can come from the environment
+	this_host="$(uname -n)"
+	if [[ -f "${lock}" ]]; then
+		# A read that fails counts as an empty lock, whatever it printed
+		body="$(cat "${lock}" 2>/dev/null)" || body=""
+		body="${body#"${body%%[![:space:]]*}"}"
+		body="${body%"${body##*[![:space:]]}"}"
+		pid="$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' <<<"${body}")"
+		host="$(sed -n 's/.*"hostname":"\([^"]*\)".*/\1/p' <<<"${body}")"
+		# A node of another user writes the lock 0600, and a starting node
+		# creates it before it writes it: only a whole object, {...}, with
+		# both pid and hostname is a node lock; anything else may still be held
+		if [[ "${body}" != "{"*"}" || -z "${pid}" || -z "${host}" ]]; then
+			print_error "Could not read the identity lock ${lock} (unreadable, empty, partly written, or not a node lock), so reset-node cannot tell whether a node is using this checkout"
+			echo "    If no node uses this checkout, remove the lock file and run reset-node again. Nothing was deleted."
+			return 2
+		fi
+		beat="$(sed -n 's/.*"heartbeat":\([0-9][0-9]*\).*/\1/p' <<<"${body}")"
+		age="no heartbeat"
+		if [[ -n "${beat}" ]]; then
+			age_ms=$(($(date +%s) * 1000 - beat))
+			age="heartbeat $((age_ms > 0 ? age_ms / 1000 : 0))s ago"
+		fi
+		# As the node judges it (identityLock.ts acquireIdentityLock). Clocks
+		# of two hosts can differ, so the node watches a lock from another
+		# host for changes instead of trusting its age (:228-256, :345-355,
+		# :362-376); here such a lock always counts. On this host a lock with
+		# a heartbeat is held only while the heartbeat is fresh, whatever its
+		# pid, and one without (a node from before the heartbeat) while its
+		# pid is alive
+		if [[ -n "${host}" && "${host}" != "${this_host}" ]]; then
+			print_error "Identity lock ${lock} was written on another host, ${host} (pid ${pid:-?}, ${age}${beat:+ by the local clock}); a lock from another host counts whatever its age"
+			echo "    If no node on ${host} uses this checkout, remove the lock file and run reset-node again: ${lock}"
+			running=1
+		elif [[ -n "${beat}" ]]; then
+			((age_ms < LOCK_STALE_MS)) && held="${age}"
+		elif [[ -n "${pid}" && "${host}" == "${this_host}" ]] && ps -p "${pid}" >/dev/null 2>&1; then
+			held="no heartbeat (older node version), pid alive on this host"
+		fi
+		if [[ -n "${held}" ]]; then
+			print_error "Identity lock ${lock} is held by pid ${pid:-?} on ${host:-?}: ${held}"
+			echo "    If no node is running, the lock is left over and can be removed: ${lock}"
+			running=1
+		fi
+	fi
+	return "${running}"
+}
+
+# Prints the physical path of $1 (relative to the checkout) without following
+# $1 itself; fails if $1 is empty or its directory cannot be entered
+physical_path() {
+	local dir
+	[[ -n "$1" ]] && dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || return 1
+	echo "${dir%/}/$(basename "$1")"
+}
+
+# Names each file reset-node does not keep that lies in this checkout (as a
+# link or file there, or the end of its links) and is the identity file
+# IDENTITY_FILE names (environment or .env, as above) or one of its signing
+# files (the SIGNING_FILES suffixes). Returns 1 if it names any.
+check_identity_files() {
+	local here_p file suffix p found=0 seen=$'\n'
+	here_p="$(pwd -P)"
+	for p in "${IDENTITY_FILE}" "${SIGNING_FILES[@]}"; do seen+="${here_p}/${p}"$'\n'; done
+	while IFS= read -r file; do
+		[[ -n "${file}" ]] || continue
+		for suffix in "" "${SIGNING_FILES[@]#"${IDENTITY_FILE}"}"; do
+			for p in "$(physical_path "${file}${suffix}")" "$(physical_path "$(resolve_identity "${file}${suffix}")")"; do
+				[[ "${p}" == "${here_p}"/* && (-e "${p}" || -L "${p}") && "${seen}" != *$'\n'"${p}"$'\n'* ]] || continue
+				seen+="${p}"$'\n'
+				print_error "${p} (of IDENTITY_FILE=${file}) is in this checkout"
+				found=1
+			done
+		done
+	done <<<"$(printf '%s\n' "${ENV_IDENTITY_FILE}"; dotenv_identity_files)"
+	((found)) || return 0
+	echo "    The reset keeps only ${IDENTITY_FILE} and its files. Move these out of the checkout (and point IDENTITY_FILE at the new place), or back them up and remove them from it, then run reset-node again. Nothing was deleted."
+	return 1
+}
+
+# Exits unless check_node_stopped and check_identity_files find nothing; the
+# backups already made, given as arguments, are named and left in place
+require_node_stopped() {
+	check_node_stopped
+	case $? in
+	0) check_identity_files && return 0 ;;
+	1) echo "    Stop what is named above, then run reset-node again. Nothing was deleted." ;;
+	esac
+	if (($# > 0)); then
+		echo "    The backups made so far are left in place:"
+		printf '      %s\n' "$@"
+	fi
+	exit 1
 }
 
 show_help() {
@@ -74,6 +369,27 @@ DESCRIPTION:
     - .demos_identity.signed.json, .demos_identity.commitlock.json,
       .demos_identity.prevote.json (the double-sign protection; dropped
       only with --wipe-signing-state)
+
+    Before it changes anything, reset-node checks the running containers
+    of this checkout that docker lists within 10 seconds (the
+    ./scripts/docker-run stack, the postgres container of ./run), the
+    running bun and node processes whose working directory it can read
+    and finds in this checkout (from /proc where it has them, as on Linux,
+    else lsof, given 10 seconds; skipped with a warning without either, if
+    ps fails, or if lsof gives no answer in time or cannot be run), and
+    the identity lock next to each identity file or its link target:
+    .demos_identity, IDENTITY_FILE if it is set in reset-node's
+    environment, and each IDENTITY_FILE= line of this checkout's .env (a
+    relative path is taken from the checkout; a configured file that does
+    not exist has no lock). It stops if it finds such a container or
+    process, a lock a node on this host still holds, any lock written on
+    another host, a lock it cannot read in full or whose directory it
+    cannot search, or an identity link it cannot follow. It also stops if
+    an identity file IDENTITY_FILE names, or one of its signing files, is
+    in this checkout and is not one of the files preserved. It checks again
+    after the confirmation, before the backup, and once more just before
+    it removes the directory; the backups already made are then left in
+    place.
 
     What happens:
     1. Backs up identity and peerlist to parent directory
@@ -130,6 +446,8 @@ main() {
 		echo "    Please run this script from inside the 'node' directory"
 		exit 1
 	fi
+
+	require_node_stopped
 
 	# Get current directory name and parent
 	local node_dir=$(basename "$(pwd)")
@@ -194,17 +512,26 @@ main() {
 
 	echo ""
 
+	# A supervisor can start the node while the prompt waits, and a node that
+	# signs after the backup would be restored behind its last signature: check
+	# again before the backup and again before the removal
+	require_node_stopped
+
 	# Step 1: Backup identity, peerlist and signing state
 	print_step "Backing up identity files..."
 
+	local backups=()
 	for f in "${preserve[@]}"; do
 		if cp "${f}" "${parent_dir}/${f}.backup"; then
+			backups+=("${parent_dir}/${f}.backup")
 			print_success "Backed up ${f}"
 		else
 			print_error "Failed to backup ${f}"
 			exit 1
 		fi
 	done
+
+	require_node_stopped "${backups[@]}"
 
 	# Step 2: Move to parent and remove node directory
 	print_step "Removing old node directory..."

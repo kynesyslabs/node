@@ -49,6 +49,13 @@
 #                `up` already rebuilds on source changes; reserve this for
 #                a suspect cache. Implied by nothing — pass explicitly.
 #   --detach,-d  Detach after start (`docker compose up -d`).
+#   --yes-delete-volumes
+#                Confirm `down -v` / `down --volumes` without the prompt.
+#                `down -v` lists the stack's declared named volumes (the ten
+#                `demos_*` ones, node_state included; compose also removes
+#                anonymous volumes attached to the containers) and asks you
+#                to type `delete`; without a terminal (CI, scripts) it stops
+#                unless this flag is given.
 #   --help,-h    Print this help.
 #
 # Identity sync (always-on, no flag):
@@ -75,7 +82,8 @@
 #   ./scripts/docker-run --devnet down         # tear devnet down only
 #   ./scripts/docker-run --port 53650 --db 5433 -d  # second isolated instance
 #   ./scripts/docker-run --port 53650 down     # tear that instance down only
-#   ./scripts/docker-run --port 53650 down -v  # ...and delete its volumes
+#   ./scripts/docker-run --port 53650 down -v  # ...and delete its volumes (asks first)
+#   ./scripts/docker-run --port 53650 --yes-delete-volumes down -v  # same, no prompt
 
 set -euo pipefail
 
@@ -88,6 +96,7 @@ WANT_MONITORING=true
 WANT_TLSN=true
 WIPE_VOLUMES=false
 REBUILD_IMAGE=false
+YES_DELETE_VOLUMES=false
 NODE_PORT=""
 DB_PORT=""
 PASSTHROUGH=()
@@ -138,6 +147,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --rebuild)
             REBUILD_IMAGE=true
+            shift
+            ;;
+        --yes-delete-volumes)
+            YES_DELETE_VOLUMES=true
             shift
             ;;
         --profile)
@@ -389,6 +402,61 @@ if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" && ${#SUBCOMMAND_ARGS[@
                 ;;
         esac
     done
+fi
+
+# `down -v` / `down --volumes` deletes the stack's declared named volumes (the
+# ten `demos_*` names of the compose `volumes:` section, devnet / --port
+# variants included) and the anonymous volumes attached to its containers.
+# List the named ones and ask first: type `delete` on a terminal, or pass
+# --yes-delete-volumes.
+confirm_volume_delete() {
+    local suffix="$INSTANCE_SUFFIX" vol answer=""
+    [[ "$USE_DEVNET" == "true" ]] && suffix="_devnet"
+    echo "scripts/docker-run: 'down -v' deletes the stack's declared named volumes listed below, and also the anonymous volumes attached to its containers; their data cannot be recovered:" >&2
+    for vol in pgdata node_data node_logs node_state prometheus_data grafana_data neo4j_data neo4j_logs caddy_data caddy_config; do
+        echo "    demos_${vol}${suffix}" >&2
+    done
+    if [[ "$YES_DELETE_VOLUMES" == "true" ]]; then
+        return 0
+    fi
+    if [[ ! -t 0 ]]; then
+        echo "scripts/docker-run: no terminal to confirm on; pass --yes-delete-volumes to delete them. Nothing was deleted." >&2
+        exit 2
+    fi
+    read -r -p "Type delete to delete them: " answer || true
+    if [[ "$answer" != "delete" ]]; then
+        echo "scripts/docker-run: not confirmed; nothing was deleted." >&2
+        exit 1
+    fi
+}
+# Compose parses flags with pflag, and the last volume setting wins:
+# `--volumes=<bool>` and `-v=<bool>` go through strconv.ParseBool, so
+# 0 f F false FALSE False set it false. Every other --volumes spelling sets
+# it or is refused by compose, and so does any short flag group with a v (-v,
+# -vt 0 and -vt0 are -v -t 0; -tv is refused by compose anyway). Prints true,
+# false or nothing.
+volume_setting() {
+    case "$1" in
+        --volumes=*|-v=*)
+            case "${1#*=}" in
+                0|f|F|false|FALSE|False) echo false ;;
+                *) echo true ;;
+            esac
+            ;;
+        --volumes|-v*|-[!-]*v*) echo true ;;
+    esac
+}
+if [[ "$SUBCOMMAND" == "down" ]]; then
+    delete_volumes=false
+    for arg in ${SUBCOMMAND_ARGS[@]+"${SUBCOMMAND_ARGS[@]}"}; do
+        case "$(volume_setting "$arg")" in
+            true) delete_volumes=true ;;
+            false) delete_volumes=false ;;
+        esac
+    done
+    if [[ "$delete_volumes" == "true" ]]; then
+        confirm_volume_delete
+    fi
 fi
 
 # --clean: bring everything down + drop the named volumes before `up`.
