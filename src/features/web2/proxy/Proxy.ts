@@ -275,7 +275,8 @@ export class Proxy {
             ssl: isHttps
                 ? { rejectUnauthorized: this._sslConfig.verifyCertificates }
                 : undefined,
-            // The relay drops the origin connection at the same deadline.
+            // Idle limit only: a trickling origin never trips it. The total
+            // deadline is enforced per request in createNewServer.
             proxyTimeout: this._requestTimeoutMs,
             timeout: this._requestTimeoutMs,
         }
@@ -333,8 +334,28 @@ export class Proxy {
                 agent,
             })
 
+            // http-proxy only knows an idle timeout, and its abort on a gone
+            // client does not fire under Bun, so the relay cuts the origin
+            // request itself; this maps each inbound request to that cut.
+            const originHandlers = new WeakMap<
+                http.IncomingMessage,
+                (proxyReq: http.ClientRequest) => void
+            >()
+            proxyServer.on("proxyReq", (proxyReq, req) => {
+                originHandlers.get(req)?.(proxyReq)
+            })
+
             // Handle proxy errors
             proxyServer.on("error", (err: any, _req, res) => {
+                // A cut origin errors after the response has started (or the
+                // client is gone); there is nothing left to answer.
+                if (
+                    res instanceof http.ServerResponse &&
+                    (res.headersSent || res.destroyed)
+                ) {
+                    res.destroy()
+                    return
+                }
                 // Handle SSL certificate errors specifically
                 if (
                     err.code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ||
@@ -391,6 +412,23 @@ export class Proxy {
 
             // Create the main HTTP server
             this._server = http.createServer(async (req, res) => {
+                let origin: http.ClientRequest | null = null
+                let closed = false
+                const deadline = setTimeout(() => {
+                    res.destroy()
+                    origin?.destroy()
+                }, this._requestTimeoutMs)
+                // A caller that left early must not keep the origin busy.
+                res.on("close", () => {
+                    closed = true
+                    clearTimeout(deadline)
+                    if (!res.writableFinished) origin?.destroy()
+                })
+                originHandlers.set(req, proxyReq => {
+                    origin = proxyReq
+                    if (closed && !res.writableFinished) proxyReq.destroy()
+                })
+
                 if (!this.isAuthorizedRequest(req)) {
                     res.writeHead(403, {
                         [DAHR_PROXY_ERROR_HEADER]: "unauthorized",
