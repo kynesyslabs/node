@@ -329,6 +329,36 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     identity links stay on and the node checks them against the providers.
   - The Omni per-identity cap counts inbound connections only. Run one
     process per validator key.
+- From `v1.0.0-rc.9`:
+  - Two new forks, both at height 0 in the mainnet set (29 forks at 0). A
+    network that does not schedule them keeps the rc.8 behaviour:
+    - `storageFeeSettlement`: the storage fee of a Storage Program create,
+      write or granular write is credited to the burn address and the
+      treasury per the network fee split, as gas already is. Before, the
+      fee left the total supply. The signed edits and admission do not
+      change; only the applied copy carries the credits.
+    - `referenceBlockRoom10`: a transaction may reference a block up to 10
+      blocks behind the head (1 before the fork), so a transaction
+      confirmed at head N stays valid for inclusion until block N+11. The
+      room is read at the tip each block is forged on, so sync of older
+      blocks applies the rule they were made under. The deep window that
+      keeps an expired transaction for inclusion as failed is 50 blocks.
+  - A validator abstaining on its own fork schedule is left out of the
+    shard after the first round it misses or refuses, so it no longer
+    slows every round or halts the chain once drawn as secretary.
+  - A web2 proxy request ends at its 30 s deadline even while the origin
+    keeps sending bytes. The GitHub and RapidAPI (Twitter) lookups behind
+    web2 identity verification have the same 30 s deadline and the
+    `web2MaxResponseBytes` size cap.
+  - `docker-compose.yml` passes `SUDO_PUBKEY` to the container; set it in
+    `.env` to answer the admin RPC. INSTALL gives the minimum per validator:
+    2 dedicated vCPU and 3 GB RAM. Keep host NTP synced: the rehearsal
+    clock skew of 4.5 s left 0.5 s before the 5 s refusal.
+  - A client whose transaction a launch gate (`l2psGate`, `tlsnDisabled`)
+    refuses at RPC validation gets the gate reason instead of
+    `GCREdit mismatch`.
+  - `node-doctor` (and `--production`) fails when the identity file is
+    readable by group or other users (`600` or stricter passes).
 
 ## Known limits
 
