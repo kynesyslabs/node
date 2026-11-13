@@ -83,9 +83,10 @@ that is off by some seconds moves the floor by the same amount. A round still
 in the files above stays refused whatever the clock says; a round missing from
 them is covered only when the restart took longer than the clock's actual
 error, which a normal boot does for a host synchronised by chrony or
-`systemd-timesyncd`. A production node refuses to start when two or more
-public NTP servers agree its clock is off by more than the block timestamp
-tolerance (60 s): fix the host's NTP and start again.
+`systemd-timesyncd`. A production node refuses to start when its clock is
+more than 5 s ahead or behind the median of the largest group of public NTP
+servers that agree within 2 s of each other (at least two, and only if no
+other group is as large): fix the host's NTP and start again.
 
 The files are not tied to a chain. When the key moves to another network
 with its old files, a round in them later than the network clock holds the
