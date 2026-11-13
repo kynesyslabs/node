@@ -14,7 +14,9 @@
  * unexplained digest difference. Once both apply the fork, every fee-bearing
  * block splits them, whatever the height; before either applies it, the
  * difference is a schedule mismatch like any other, urgent only near the
- * activation height.
+ * activation height. The same holds for a fork whose activation height
+ * differs while one side already applies it: a network that activates every
+ * fork at genesis has no height ahead to wait for.
  */
 
 import { stableStringify } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
@@ -139,6 +141,13 @@ export type ScheduleComparison =
           lines: string[]
           treasuryDiffers?: boolean
           /**
+           * A fork whose activation height differs is already active at the
+           * tip on either side (scheduled on one side and not the other
+           * counts): the nodes apply different rules now, so there is no
+           * later height to wait for.
+           */
+          activeForkDiffers?: boolean
+          /**
            * The peer's own nearest scheduled height above the tip, when it has
            * one. The peer decides whether to abstain by its own schedule, so a
            * height only it schedules can put it out of consensus while ours
@@ -198,6 +207,7 @@ export function compareSchedules(
     }
     const result: Extract<ScheduleComparison, { status: "mismatch" }> = { status: "mismatch", lines }
     if (treasuryDiffers) result.treasuryDiffers = true
+    if (activeForksDiffer(ours, theirs, tip)) result.activeForkDiffers = true
     const theirNearest = nearestScheduledAbove(theirs, tip)
     if (theirNearest !== null) result.theirNearest = theirNearest
     return result
@@ -211,6 +221,21 @@ function nearestScheduledAbove(view: ScheduleView, tip: number): number | null {
         }
     }
     return nearest
+}
+
+function activeForksDiffer(ours: ScheduleView, theirs: ScheduleView, tip: number): boolean {
+    const activeAt = (height: number | null) => height !== null && height <= tip
+    const names = new Set([...Object.keys(ours.forks), ...Object.keys(theirs.forks)])
+    for (const name of names) {
+        // A peer without a digest predates some forks and says nothing about
+        // one it does not report; a peer with one reports its whole registry,
+        // so a fork missing there is one it never applies.
+        if (!(name in theirs.forks) && theirs.digest === undefined) continue
+        const our = ours.forks[name] ?? null
+        const their = theirs.forks[name] ?? null
+        if (our !== their && (activeAt(our) || activeAt(their))) return true
+    }
+    return false
 }
 
 function scheduledTreasuriesDiffer(ours: ScheduleView, theirs: ScheduleView): boolean {

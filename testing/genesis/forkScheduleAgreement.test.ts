@@ -92,6 +92,60 @@ describe("comparing schedules", () => {
         expect(result.lines).toEqual(["atomicWork: ours null, theirs 900"])
     })
 
+    describe("a fork already active on either side", () => {
+        // Mainnet activates every fork at genesis, so no height lies ahead of the tip.
+        const genesis = () => {
+            const c: any = cloneDefaultForkConfig()
+            for (const name of Object.keys(c)) c[name].activationHeight = 0
+            return c
+        }
+        const mine = localScheduleView(genesis(), 31337)
+        const mismatch = (theirs: ScheduleView, tip = TIP) => {
+            const result = compareSchedules(mine, theirs, tip)
+            if (result.status !== "mismatch") throw new Error("expected a mismatch")
+            return result
+        }
+
+        it("marks a fork active here and not scheduled there as a split now", () => {
+            const theirs = genesis()
+            theirs.signatureDomain.activationHeight = null
+            expect(mismatch(view(theirs, 31337)).activeForkDiffers).toBe(true)
+        })
+
+        it("marks a fork active here and scheduled ahead there as a split now", () => {
+            const theirs = genesis()
+            theirs.atomicWork.activationHeight = 500
+            expect(mismatch(view(theirs, 31337)).activeForkDiffers).toBe(true)
+        })
+
+        it("marks a fork active only there, and one their registry lacks, as a split now", () => {
+            const late = localScheduleView(config({ atomicWork: null }), 31337)
+            const theirs = compareSchedules(late, view(config({ atomicWork: 10 }), 31337), TIP)
+            expect(theirs.status === "mismatch" && theirs.activeForkDiffers).toBe(true)
+
+            const older = genesis()
+            delete older.atomicWork
+            expect(mismatch(view(older, 31337)).activeForkDiffers).toBe(true)
+        })
+
+        it("does not mark a difference that lies wholly ahead of the tip", () => {
+            const result = compareSchedules(ours, view(config({ atomicWork: 900 }), 31337), TIP)
+            if (result.status !== "mismatch") throw new Error("expected a mismatch")
+            expect(result.activeForkDiffers).toBeUndefined()
+        })
+
+        it("says nothing about a fork a peer without a digest does not report", () => {
+            const a: any = answer(genesis(), 31337, false)
+            delete a.forks.atomicWork
+            a.forks.signatureDomain.activationHeight = 7
+            const result = mismatch(peerScheduleView(a)!)
+            expect(result.lines).toEqual(["signatureDomain: ours 0, theirs 7"])
+            expect(result.activeForkDiffers).toBe(true)
+            delete a.forks.signatureDomain
+            expect(compareSchedules(mine, peerScheduleView(a)!, TIP)).toEqual({ status: "agree" })
+        })
+    })
+
     it("skips a peer that reports no fork data at all", () => {
         expect(compareSchedules(ours, peerScheduleView({ forks: {}, chainId: 31337 })!, TIP)).toEqual({ status: "skipped" })
     })

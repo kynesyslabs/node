@@ -21,8 +21,11 @@
  *
  * A validator whose gasFeeSeparation treasury differs while both already
  * apply the fork is the exception: every fee-bearing block splits them and
- * there is no later height to wait for. A round where one answers so is handled as a
- * round inside the window, at any height, and logged as an error.
+ * there is no later height to wait for. So is one whose activation height for
+ * a fork differs while either side already applies that fork, which is the
+ * only kind of mismatch left on a network that activates every fork at
+ * genesis. A round where one answers so is handled as a round inside the
+ * window, at any height, and logged as an error.
  *
  * The watch is driven by inserted blocks, so a node that restarts inside the
  * window would otherwise forge before its first comparison. The consensus
@@ -128,6 +131,8 @@ export interface RoundOutcome {
     validatorIdentities?: string[] | null
     /** Connection strings of the validators in `mismatched` whose gasFeeSeparation treasury differs. */
     treasuryMismatched?: string[]
+    /** Connection strings of the validators in `mismatched` that differ on a fork already active on either side. */
+    activeForkMismatched?: string[]
     /**
      * Identities of the validators in `mismatched` whose own nearest scheduled
      * height is within WINDOW_BLOCKS of the tip: by their schedule they are in
@@ -213,9 +218,11 @@ export async function applyRoundOutcome(
     setForkScheduleMismatch(differing > 0)
 
     const treasuryDiffers = (outcome.treasuryMismatched?.length ?? 0) > 0
-    // A different treasury splits the chain already, so it is acted on as a
-    // mismatch inside the window would be, wherever the tip is
-    const urgent = plan.inWindow || treasuryDiffers
+    const activeForkDiffers = (outcome.activeForkMismatched?.length ?? 0) > 0
+    // A different treasury, or a different height for a fork already active,
+    // splits the chain already, so it is acted on as a mismatch inside the
+    // window would be, wherever the tip is
+    const urgent = plan.inWindow || treasuryDiffers || activeForkDiffers
     const majorityDiffers = differing > outcome.agreed
     const abstaining =
         policy === "abstain" &&
@@ -267,6 +274,9 @@ export async function applyRoundOutcome(
                 ` (${differing} of ${differing + outcome.agreed} validators)` +
                 (treasuryDiffers
                     ? `, gasFeeSeparation treasury differs from ${outcome.treasuryMismatched!.join(", ")}`
+                    : "") +
+                (activeForkDiffers
+                    ? `, an active fork differs from ${outcome.activeForkMismatched!.join(", ")}`
                     : "") +
                 (plan.nearest !== null
                     ? `, nearest scheduled height ${plan.nearest}`
@@ -343,6 +353,7 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
         agreedIdentities: [],
         validatorIdentities: validators === null ? null : [...validators],
         treasuryMismatched: [],
+        activeForkMismatched: [],
         mismatchedInTheirWindow: [],
     }
     await mapWithLimit(peers, PEER_CONCURRENCY, async peer => {
@@ -360,6 +371,7 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
             outcome.mismatched.push(peer.connection.string)
             outcome.mismatchedIdentities!.push(String(peer.identity))
             if (result.treasuryDiffers) outcome.treasuryMismatched!.push(peer.connection.string)
+            if (result.activeForkDiffers) outcome.activeForkMismatched!.push(peer.connection.string)
             const theirWindow =
                 result.theirNearest !== undefined && result.theirNearest - tip <= WINDOW_BLOCKS
             if (theirWindow) outcome.mismatchedInTheirWindow!.push(String(peer.identity))
@@ -374,7 +386,9 @@ async function compareWithPeers(tip: number, plan: CheckPlan): Promise<void> {
                 ": " +
                 result.lines.join("; ") +
                 (theirWindow ? ` (their nearest scheduled height ${result.theirNearest})` : "")
-            if (plan.inWindow || result.treasuryDiffers || theirWindow) log.error(text)
+            if (plan.inWindow || result.treasuryDiffers || result.activeForkDiffers || theirWindow) {
+                log.error(text)
+            }
             else log.warn(text)
         } catch {
             // One peer failing must not stop the others from being compared.
@@ -452,7 +466,7 @@ export async function ensureWindowChecked(tip: number): Promise<void> {
 
 /**
  * Runs a comparison now rather than at the next due block, for a caller that
- * has just seen a peer whose treasury differs. Queued behind a running round
+ * has just seen a peer whose treasury, or an active fork, differs. Queued behind a running round
  * like a due block is. Until a conclusive round started after this call has
  * run, ensureWindowChecked() holds the consensus routine, so the caller need
  * not wait. Never throws.

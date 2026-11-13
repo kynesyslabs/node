@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
 import {
     applyRoundOutcome,
+    onBlockInserted,
     onShardMemberUnresponsive,
     resetWindowCheck,
     RECHECK_INTERVAL_MS,
@@ -168,5 +169,100 @@ describe("a round whose secretary never answers", () => {
             await onShardMemberUnresponsive(1_000_000 + RECHECK_INTERVAL_MS)
             expect(calls()).toBe(afterFirst * 2)
         })
+    }, 30000)
+})
+
+describe("a validator that differs on a fork every node already applies", () => {
+    // Mainnet: every fork at genesis, so no scheduled height lies ahead and no
+    // window ever opens. The odd one leaves atomicWork off.
+    const GENESIS = { signatureDomain: { activationHeight: 0 }, atomicWork: { activationHeight: 0 } }
+    const ODD = { signatureDomain: { activationHeight: 0 }, atomicWork: { activationHeight: null } }
+    const DUE_TIP = 100
+
+    async function withNetwork(
+        mine: unknown,
+        peers: Array<{ identity: string; schedule: unknown }>,
+        run: () => Promise<void>,
+    ) {
+        const PeerManager = (await import("src/libs/peer/PeerManager")).default
+        const saved = { forkConfig: getSharedState.forkConfig, chainId: getSharedState.chainId }
+        getSharedState.forkConfig = mine as never
+        getSharedState.chainId = 1
+        const connected = peers.map(({ identity, schedule }) => ({
+            identity,
+            connection: { string: "http://" + identity },
+            call: async () => ({
+                result: 200,
+                response: {
+                    chainId: 1,
+                    forks: schedule,
+                    forkScheduleDigest: localScheduleView(schedule as never, 1).digest,
+                },
+            }),
+        }))
+        const manager = spyOn(PeerManager, "getInstance").mockReturnValue({
+            getPeers: () => connected,
+        } as never)
+        // This node is the fourth staked validator.
+        const validators = spyOn(GCR, "getGCRValidatorsAtBlockOrThrow").mockResolvedValue(
+            [...peers.map(p => ({ address: p.identity })), { address: "0xself" }] as never,
+        )
+        try {
+            await run()
+        } finally {
+            manager.mockRestore()
+            validators.mockRestore()
+            getSharedState.forkConfig = saved.forkConfig
+            getSharedState.chainId = saved.chainId
+        }
+    }
+
+    it("is left out of the shard by the majority, with no window open", async () => {
+        await withNetwork(
+            GENESIS,
+            [
+                { identity: "0xa", schedule: GENESIS },
+                { identity: "0xb", schedule: GENESIS },
+                { identity: "0xd", schedule: ODD },
+            ],
+            async () => {
+                await onBlockInserted(DUE_TIP)
+                expect([...getSharedState.forkScheduleDifferingPeers]).toEqual(["0xd"])
+                expect(getSharedState.forkScheduleAbstain).toBe(false)
+            },
+        )
+    }, 30000)
+
+    it("makes the odd validator itself abstain, with no window open", async () => {
+        await withNetwork(
+            ODD,
+            [
+                { identity: "0xa", schedule: GENESIS },
+                { identity: "0xb", schedule: GENESIS },
+                { identity: "0xc", schedule: GENESIS },
+            ],
+            async () => {
+                await onBlockInserted(DUE_TIP)
+                expect(getSharedState.forkScheduleAbstain).toBe(true)
+                expect(getSharedState.forkScheduleAbstainReason).toContain("an active fork differs from")
+                expect(getSharedState.forkScheduleDifferingPeers.size).toBe(0)
+            },
+        )
+    }, 30000)
+
+    it("is still only reported when the difference lies ahead of the tip and outside the window", async () => {
+        const AHEAD = { signatureDomain: { activationHeight: 0 }, atomicWork: { activationHeight: 900 } }
+        await withNetwork(
+            { signatureDomain: { activationHeight: 0 }, atomicWork: { activationHeight: null } },
+            [
+                { identity: "0xa", schedule: AHEAD },
+                { identity: "0xb", schedule: AHEAD },
+                { identity: "0xc", schedule: AHEAD },
+            ],
+            async () => {
+                await onBlockInserted(DUE_TIP)
+                expect(getSharedState.forkScheduleAbstain).toBe(false)
+            },
+        )
     }, 30000)
 })

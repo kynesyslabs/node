@@ -280,8 +280,9 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
  * genesis edit peers legitimately disagree for a while. A peer that has not
  * loaded its own genesis yet answers "not ready"; that is retried and then left
  * to the periodic comparison (forkScheduleWatch.ts), not reported as a mismatch.
- * A different gasFeeSeparation treasury splits the nodes at once rather than
- * at a later height, so it starts a watch round now, which leaves the peer out
+ * A different gasFeeSeparation treasury, or a different height for a fork
+ * already active, splits the nodes at once rather than at a later height, so
+ * it starts a watch round now, which leaves the peer out
  * of the shard (or this node out of consensus) as a mismatch inside the window
  * would. Boot does not wait for that round; the consensus routine does, through
  * ensureWindowChecked, before it forges or votes.
@@ -311,8 +312,16 @@ async function warnOnForkScheduleMismatch(peer: Peer) {
                         ": fees are credited to different accounts from the first block, so the two " +
                         "nodes cannot agree on any block that carries a fee",
                 )
-                void requestScheduleCheck()
             }
+            if (result.activeForkDiffers) {
+                log.error(
+                    "[BOOTSTRAP] ACTIVE FORK MISMATCH with " +
+                        peer.connection.string +
+                        ": a fork already active on one side has a different activation height on the " +
+                        "other, so the two nodes apply different rules from now on",
+                )
+            }
+            if (result.treasuryDiffers || result.activeForkDiffers) void requestScheduleCheck()
             break
         case "skipped":
             log.debug(
