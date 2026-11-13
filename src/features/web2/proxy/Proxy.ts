@@ -418,6 +418,9 @@ export class Proxy {
                     res.destroy()
                     origin?.destroy()
                 }, this._requestTimeoutMs)
+                // A finished response's socket may serve the next keep-alive
+                // request, so the deadline must not outlive it.
+                res.on("finish", () => clearTimeout(deadline))
                 // A caller that left early must not keep the origin busy.
                 res.on("close", () => {
                     closed = true

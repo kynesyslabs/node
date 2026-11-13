@@ -172,4 +172,38 @@ describe("web2 relay deadline", () => {
         expect(second).toBe("ok")
         await first
     })
+
+    it("leaves a finished response's keep-alive connection alone after the deadline", async () => {
+        const deadlineMs = 300
+        const fast = http.createServer((_req, res) => res.end("ok"))
+        servers.push(fast)
+        await new Promise<void>(r => fast.listen(0, "127.0.0.1", () => r()))
+        const proxy = relay(deadlineMs)
+        await proxy.createNewServer(`http://127.0.0.1:${(fast.address() as AddressInfo).port}/`)
+
+        const agent = new http.Agent({ keepAlive: true, maxSockets: 1 })
+        const get = () =>
+            new Promise<{ body: string; socket: Socket }>((resolve, reject) => {
+                const req = http.get(
+                    { hostname: "127.0.0.1", port: proxy._proxyPort, path: "/", agent },
+                    res => {
+                        let body = ""
+                        res.on("data", chunk => (body += chunk))
+                        res.on("end", () => resolve({ body, socket: req.socket as Socket }))
+                    },
+                )
+                req.on("error", reject)
+            })
+
+        const first = await get()
+        expect(first.body).toBe("ok")
+        let socketClosed = false
+        first.socket.on("close", () => (socketClosed = true))
+
+        await timeout(deadlineMs * 2, null)
+        expect(socketClosed).toBe(false)
+        const second = await get()
+        expect(second.body).toBe("ok")
+        agent.destroy()
+    })
 })
