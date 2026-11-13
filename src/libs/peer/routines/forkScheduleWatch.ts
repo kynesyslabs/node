@@ -8,13 +8,14 @@
  * where a mismatch is about to become a split and is logged as an error.
  *
  * Under FORK_SCHEDULE_MISMATCH_POLICY=abstain (the default) the node also skips
- * consensus rounds, but only when it is the odd one out: a strict majority of
- * the validators that answered must differ, inside the window. A minority of
- * differing peers is reported and left alone, because the node with the right
- * schedule is then this one, and a few bad peers (or non-validators) must not
- * be able to sideline it. While abstaining the node keeps syncing, and a timer
- * re-runs the comparison so the flag can clear without waiting for a block,
- * which a network of abstaining nodes would never produce. The flag clears once
+ * consensus rounds, but only when it is the odd one out: more than half of the
+ * whole staked validator set must answer with a different schedule, inside the
+ * window. A minority of differing peers is reported and left alone, because the
+ * node with the right schedule is then this one, and a few bad peers (or
+ * non-validators) must not be able to sideline it, also not while the honest
+ * validators are too slow to answer. While abstaining the node keeps syncing,
+ * and a timer re-runs the comparison so the flag can clear without waiting for
+ * a block, which a network of abstaining nodes would never produce. The flag clears once
  * no majority differs, inside the window or after it. Outside the window, or
  * under `warn`, a mismatch is only reported: stopping a node during a rolling
  * genesis edit far from any fork would cost liveness for no gain.
@@ -181,11 +182,18 @@ async function recheckOnce(): Promise<void> {
 /**
  * Turns one comparison round into the mismatch gauge and the abstain flag.
  *
- * Setting needs a strict majority of the validators that answered to differ,
- * inside the window, under the abstain policy. Clearing needs only that no
- * majority differs, wherever the tip is: once the nearest scheduled height is
+ * Setting needs more than half of the staked validator set to answer with a
+ * different schedule, inside the window, under the abstain policy. Counting
+ * against the whole set rather than the answers keeps a validator that did not
+ * answer from tipping the vote: otherwise one peer reporting a different
+ * schedule while the honest ones time out would sideline an honest node. On an
+ * even split neither side has that majority, so neither abstains; the two
+ * halves cannot reach a quorum together, and the chain stops until an operator
+ * fixes a schedule. Clearing needs that neither the set nor the answers show a
+ * differing majority, wherever the tip is: once the nearest scheduled height is
  * behind the tip the window is over, and the node stays out only while most of
- * its peers still disagree with it. A round that reached no validator is
+ * its peers still disagree with it; a round where the agreeing validators do
+ * not answer does not let it back in. A round that reached no validator is
  * inconclusive and changes nothing: clearing on silence would let a node whose
  * peers are all unreachable resume consensus on a schedule it never confirmed.
  *
@@ -223,11 +231,17 @@ export async function applyRoundOutcome(
     // splits the chain already, so it is acted on as a mismatch inside the
     // window would be, wherever the tip is
     const urgent = plan.inWindow || treasuryDiffers || activeForkDiffers
-    const majorityDiffers = differing > outcome.agreed
+    // The staked set holds this node when it is a validator. With no staked
+    // set (bare dev networks) only the answers and this node are known.
+    const total = outcome.validatorIdentities
+        ? outcome.validatorIdentities.length
+        : differing + outcome.agreed + 1
+    const majorityDiffers = differing * 2 > total
+    const outnumbered = differing > outcome.agreed
+    const wasAbstaining = getSharedState.forkScheduleAbstain
     const abstaining =
         policy === "abstain" &&
-        majorityDiffers &&
-        (urgent || getSharedState.forkScheduleAbstain)
+        ((majorityDiffers && urgent) || (wasAbstaining && (majorityDiffers || outnumbered)))
     const before = getSharedState.forkScheduleDifferingPeers
     const leaveOut = new Set<string>()
     if (policy === "abstain" && !abstaining) {
@@ -241,14 +255,14 @@ export async function applyRoundOutcome(
         // timed out.
         // A node that abstained itself is past a mismatch too: the minority
         // still differing when it resumes may still abstain.
-        const pastMismatch = before.size > 0 || getSharedState.forkScheduleAbstain
-        if (!majorityDiffers && differing > 0 && (urgent || pastMismatch)) {
+        const pastMismatch = before.size > 0 || wasAbstaining
+        if (!outnumbered && differing > 0 && (urgent || pastMismatch)) {
             for (const id of outcome.mismatchedIdentities ?? []) leaveOut.add(id.toLowerCase())
         }
         // A validator inside its own window abstains whatever our schedule
         // says. Left in the shard it is still drawn as secretary, and a round
         // whose secretary never starts stalls every validator.
-        if (!majorityDiffers) {
+        if (!outnumbered) {
             for (const id of outcome.mismatchedInTheirWindow ?? []) leaveOut.add(id.toLowerCase())
         }
     }
@@ -265,13 +279,12 @@ export async function applyRoundOutcome(
         }
     }
 
-    if (majorityDiffers) {
-        if (!abstaining && leaveOut.size > 0) startRecheck()
-        if (policy === "abstain" && urgent) {
+    if (abstaining) {
+        if (urgent) {
             const reason =
                 "fork schedule differs from " +
                 outcome.mismatched.join(", ") +
-                ` (${differing} of ${differing + outcome.agreed} validators)` +
+                ` (${differing} of ${total} validators)` +
                 (treasuryDiffers
                     ? `, gasFeeSeparation treasury differs from ${outcome.treasuryMismatched!.join(", ")}`
                     : "") +
@@ -282,23 +295,22 @@ export async function applyRoundOutcome(
                     ? `, nearest scheduled height ${plan.nearest}`
                     : "") +
                 "; the node keeps syncing and resumes once the schedules agree"
-            const wasAbstaining = getSharedState.forkScheduleAbstain
             getSharedState.forkScheduleAbstainReason = reason
             getSharedState.forkScheduleAbstain = true
             setConsensusAbstaining(true)
-            startRecheck()
             if (!wasAbstaining) {
                 log.error(
                     `[FORK SCHEDULE] Abstaining from consensus from block ${tip}: ${reason}`,
                 )
             }
         }
+        startRecheck()
         return
     }
 
     if (leaveOut.size > 0) startRecheck()
     else stopRecheck()
-    if (getSharedState.forkScheduleAbstain) {
+    if (wasAbstaining) {
         getSharedState.forkScheduleAbstain = false
         getSharedState.forkScheduleAbstainReason = ""
         setConsensusAbstaining(false)
