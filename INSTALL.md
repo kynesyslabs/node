@@ -952,6 +952,8 @@ For the bare-metal path, override these in `.env`:
 - `PG_PORT=5332` (the host-mapped port the `./run` Postgres sidecar uses)
 - `TLSNOTARY_HOST=localhost`
 
+With your own PostgreSQL (`./run -e` or `--external-db`), set `PG_HOST` and `PG_PORT` to that server. `./run -e` takes `PG_PORT` from `-d`, else from the shell, else from `.env`; earlier versions used 5332 unless `-d` was given, so check `PG_PORT` in `.env` before upgrading.
+
 Set `EXPOSED_URL` based on your setup:
 
 - Local testing: `http://localhost:53550`

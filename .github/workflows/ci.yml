@@ -34,6 +34,8 @@ jobs:
       # Stub-based (no Docker, no Postgres): the launchers never migrate a
       # database they did not just empty
       - run: bash scripts/launcher-wipe-guard.test.sh
+      # The PG_PORT the launcher hands the node, with and without -e
+      - run: bash scripts/launcher-external-db.test.sh
       - run: bun run test:consensus
 
   rehearsal-drill:
