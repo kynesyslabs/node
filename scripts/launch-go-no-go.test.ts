@@ -613,6 +613,15 @@ describe("checkLaunch", () => {
         expect(KNOWN_FORKS).toContain("networkGovernance")
     })
 
+    it("keeps atomicWork off at launch, as docs/mainnet/genesis.md states", () => {
+        expect(LAUNCH_DORMANT_FORKS).toContain("atomicWork")
+        expect(MAINNET_FORKS).not.toContain("atomicWork")
+        const forks = { ...mainnetForks(), atomicWork: { activationHeight: 1000000 } }
+        const d = checkLaunch({ ...base, genesis: genesisFile(rows, forks), blockZero: blockZero(rows) })
+        expect(d.go).toBe(false)
+        expect(d.reasons.join("\n")).toContain("fork atomicWork is scheduled at 1000000")
+    })
+
     it("launches with token staking off: the gate at block 0, tokenStaking left for a later upgrade", () => {
         expect(MAINNET_FORKS).toContain("tokenStakingGate")
         expect(LAUNCH_DORMANT_FORKS).toContain("tokenStaking")
