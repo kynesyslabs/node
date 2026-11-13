@@ -53,6 +53,19 @@ describe("metrics endpoint exposure", () => {
 })
 
 describe("block-stall alerting is loaded", () => {
+    it("runs these monitoring checks in the consensus suite", () => {
+        expect(read("scripts/test-consensus.sh")).toContain("testing/monitoring/metricsExposure.test.ts")
+    })
+
+    it("recognizes the temporary signing stop in both operator guides", () => {
+        const guidance = "A `[SIGNING] stopped until this process exits:` line with marker 0 means the node is exiting to resync from disk after a block commit it could not confirm; signing resumes on restart. This stop does not show whether another copy of the key is running, so check that as usual before restarting."
+        for (const file of ["docs/runbooks/mainnet-monitoring.md", "monitoring/prometheus/alerts/consensus.yml"]) {
+            expect(read(file)).toContain(guidance)
+            expect(read(file)).not.toContain("implies no second key")
+            expect(read(file)).toContain("If the log line names identity-lock loss, no marker is written; check for other copies of the key before restarting. For a foreign-signature stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again.")
+        }
+    })
+
     it("root compose Prometheus mounts the alert rules directory", () => {
         expect(read("docker-compose.yml")).toContain(
             "./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro",

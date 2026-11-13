@@ -29,7 +29,10 @@ import HandleGCR, {
     type PendingGCRWrite,
 } from "src/libs/blockchain/gcr/handleGCR"
 import { StateReadError } from "src/libs/blockchain/gcr/stateReadError"
-import { CommittedBlockFollowUpError } from "src/libs/blockchain/committedBlockError"
+import {
+    CommittedBlockFollowUpError,
+    stopAfterCommittedBlockFailure,
+} from "src/libs/blockchain/committedBlockError"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
@@ -128,6 +131,7 @@ export const txMap: Map<TxHash, MempoolTransaction> = new Map()
  * The main consensus routine calling all the subroutines.
  */
 export async function consensusRoutine(): Promise<void> {
+    if (!getSharedState.runMainLoop) return
     if (isConsensusAlreadyRunning()) {
         log.warning(
             "[consensusRoutine] Consensus loop already running: keeping it running (returning)",
@@ -762,10 +766,12 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
+        // Only a diverged round gets here
         console.error(error)
         console.error((error as Error).stack)
-        log.error(`[CONSENSUS] ${error}`)
-        process.exit(1)
+        log.error(`[CONSENSUS] ${error}; shutting down`)
+        exitReason = "diverged"
+        stopAfterCommittedBlockFailure(error as CommittedBlockFollowUpError)
     } finally {
         markStep("consensus", null)
         releaseSyncLock?.()
@@ -796,7 +802,7 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             if (
-                !new Set(["blockTimestampNotReceived", "abortConsensus"]).has(
+                !new Set(["blockTimestampNotReceived", "abortConsensus", "diverged"]).has(
                     exitReason,
                 ) &&
                 txs.length !== blockTxs.length
@@ -1041,6 +1047,9 @@ async function applyGCREditsFromMergedMempool(
         return { successfulTxs: [], appliedTxs: [], failedTxs }
     }
 
+    if (!getSharedState.runMainLoop) {
+        throw new AbortConsensusError("Refusing GCR apply during shutdown")
+    }
     const res = await HandleGCR.applyTransactions(pendingTxs, false, clock, {
         defer: true,
     })
@@ -1357,9 +1366,9 @@ async function voteOnBlock(
 }
 
 /**
- * A failed attempt to take a peer's block only means we do not have it: the
- * round's catch treats unknown errors as fatal and exits the process, which
- * a peer serving a certified header and then dropping must not cause.
+ * A failed attempt to take a peer's block only means we do not have it.
+ * An unknown error ends the round; a peer serving a certified header and
+ * then dropping must not cause that.
  *
  * The exception is a failed apply whose undo also failed: its edits stay in
  * local state without the block, so the round must not fall back to its own
@@ -1373,9 +1382,15 @@ async function adoptionSucceeded(
     try {
         adopted = await adopt()
     } catch (e) {
+        if (!getSharedState.runMainLoop) {
+            throw new AbortConsensusError("Shutting down; not deciding on our own round")
+        }
         log.error(
             `[consensusRoutine] Taking a member's block ${blockRef} failed, deciding on our own round: ${e instanceof Error ? e.message : String(e)}`,
         )
+    }
+    if (!getSharedState.runMainLoop) {
+        throw new AbortConsensusError("Shutting down; not deciding on our own round")
     }
     if (!adopted) abortIfGcrStateUnreconciled(blockRef)
     return adopted
@@ -1497,6 +1512,9 @@ async function finalizeBlock(
     txs: MempoolTransaction[],
     pendingGCR?: PendingGCRWrite,
 ): Promise<void> {
+    if (!getSharedState.runMainLoop) {
+        throw new AbortConsensusError("Refusing block insert during shutdown")
+    }
     await Chain.insertBlock(block, txs, undefined, pendingGCR) // NOTE Transactions are added to the Transactions table here
     getSharedState.consecutiveMissedShardBlocks = 0
     log.info("[CONSENSUS] Block added to the chain")

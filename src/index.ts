@@ -34,6 +34,7 @@ import {
 } from "./libs/omniprotocol/integration/startup"
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { getSharedState } from "./utilities/sharedState"
+import { createShutdownExitStatus } from "./utilities/shutdownExitStatus"
 import { markSubsystem, subsystemError } from "./utilities/subsystemRegistry"
 import {
     fastSync,
@@ -1453,8 +1454,11 @@ async function shutdownStep(
     }
 }
 
+const shutdownExitStatus = createShutdownExitStatus()
+
 // Graceful shutdown handler
 export async function gracefulShutdown(signal: string, exitCode = 0) {
+    shutdownExitStatus.request(exitCode)
     // Prevent re-entrant shutdown (e.g. second CTRL+C while already shutting down)
     if (getSharedState.isShuttingDown) {
         return
@@ -1465,9 +1469,8 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
 
     log.info(`[CORE] Received ${signal}, shutting down gracefully...`)
 
-    // A block apply writes GCR state and then inserts the block in separate
-    // commits; exiting between them leaves state ahead of the chain. Let the
-    // block in flight finish before anything else is torn down.
+    // An apply that has not reached its insert refuses it; one already
+    // inserting finishes, and the drain waits for it.
     const BLOCK_APPLY_DRAIN_MS = 30_000
     let drainTimer: ReturnType<typeof setTimeout> | null = null
     const drained = await Promise.race([
@@ -1483,10 +1486,10 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
         )
     }
 
-    // Force exit after 10 seconds if graceful shutdown hangs
+    // Force exit after 3 seconds if graceful shutdown hangs
     const forceExitTimeout = setTimeout(() => {
         log.warning("[CORE] Shutdown timeout exceeded, forcing exit...")
-        process.exit(exitCode)
+        process.exit(shutdownExitStatus.code)
     }, 3_000)
     // Don't let this timer itself keep the process alive
     if (forceExitTimeout.unref) forceExitTimeout.unref()
@@ -1623,14 +1626,14 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
 
         log.info("[CORE] Cleanup complete, exiting...")
         clearTimeout(forceExitTimeout)
-        process.exit(exitCode)
+        process.exit(shutdownExitStatus.code)
     } catch (error) {
         handleError(error, "CORE", {
             source: ErrorSource.GRACEFUL_SHUTDOWN,
             fatal: true,
         })
         clearTimeout(forceExitTimeout)
-        process.exit(exitCode === 0 ? 1 : exitCode)
+        process.exit(shutdownExitStatus.code || 1)
     }
 }
 

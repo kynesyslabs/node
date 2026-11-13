@@ -47,7 +47,7 @@ groups:
           severity: critical
         annotations:
           summary: Block signing is stopped on this validator
-          description: "{{ $labels.instance }} refuses to sign blocks; its log has a [SIGNING] or [IDENTITY] line with the reason. The stop survives a restart only while the marker file exists (demos_signing_halt_marker_present = 1). If the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. Delete the marker only after confirming a single copy of the key runs; see docs/runbooks/validator-key.md."
+          description: "{{ $labels.instance }} refuses to sign blocks; its log has a [SIGNING] or [IDENTITY] line with the reason. A `[SIGNING] stopped until this process exits:` line with marker 0 means the node is exiting to resync from disk after a block commit it could not confirm; signing resumes on restart. This stop does not show whether another copy of the key is running, so check that as usual before restarting. The stop survives a restart only while the marker file exists (demos_signing_halt_marker_present = 1). If the log line names identity-lock loss, no marker is written; check for other copies of the key before restarting. For a foreign-signature stop, if the marker is missing, the marker write failed: keep the node stopped until every other copy of the key is found and stopped, because a restart would sign again. Delete the marker only after confirming a single copy of the key runs; see docs/runbooks/validator-key.md."
 
       - alert: PrecommitEquivocation
         expr: increase(demos_precommit_equivocation_total[10m]) > 0

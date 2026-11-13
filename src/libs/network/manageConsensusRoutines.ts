@@ -299,7 +299,12 @@ export default async function manageConsensusRoutines(
         return response
     }
 
-    if (isInShard && !isBehindNetwork && !isConsensusAlreadyRunning()) {
+    if (
+        getSharedState.runMainLoop &&
+        isInShard &&
+        !isBehindNetwork &&
+        !isConsensusAlreadyRunning()
+    ) {
         log.debug(
             "[manageConsensusRoutines] STARTING COSENSUS FROM CONSENSUS HANDLER",
         )
