@@ -172,7 +172,7 @@ services = {
         "networks": ["drillnet"],
     }
 }
-# The image's own entrypoint (scripts/docker-entrypoint.sh:37-40) moves a real
+# The image's own entrypoint (bridge_file in scripts/docker-entrypoint.sh) moves a real
 # file it finds at /app/demos_peerlist.json into /app/state; a bind mount there
 # cannot be moved, and `set -e` ends the container. So on the image path the
 # peerlist is mounted elsewhere and copied into /app/state, where the

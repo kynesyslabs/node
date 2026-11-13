@@ -20,6 +20,7 @@ SUITE_FILES=(
     scripts/validator-prove-signing.test.ts
     src/config/loader.forkSchedulePolicy.test.ts
     src/config/loader.gossip.test.ts
+    src/config/loader.logsDir.test.ts
     src/config/mainnetParameters.test.ts
     src/config/proxyChecks.test.ts
     src/libs/blockchain/blockApplyAtomicity.test.ts
