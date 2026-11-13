@@ -360,6 +360,18 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     `GCREdit mismatch`.
   - `node-doctor` (and `--production`) fails when the identity file is
     readable by group or other users (`600` or stricter passes).
+- From `v1.0.0-rc.10`:
+  - A validator abstains when at least half of the staked set answers with a
+    different fork schedule (before: more than half). On an even split both
+    halves stop voting and the chain halts until an operator fixes a
+    schedule. Before, a quorum mixing both halves kept running while the
+    halves applied blocks differently (`storageFeeSettlement` changes only
+    the applied copy). A node that applied blocks under a wrong schedule must
+    be resynced from a correct peer.
+  - The web2 relay closes its outbound origin connection at the request
+    deadline and when its caller leaves early, not only the caller's side.
+  - `launch-go-no-go --plan` refuses a mainnet genesis that schedules
+    `atomicWork`.
 
 ## Known limits
 
