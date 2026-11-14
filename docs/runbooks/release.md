@@ -372,6 +372,22 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     deadline and when its caller leaves early, not only the caller's side.
   - `launch-go-no-go --plan` refuses a mainnet genesis that schedules
     `atomicWork`.
+- From `v1.0.0-rc.11`:
+  - The web2 (DAHR) proxy caps its outbound fetches. Per caller: 2 running
+    at once, 10 started per minute, 100 MiB of origin response per hour
+    (charged with the bytes read, a refused or cut response included). Per
+    node: 32 running at once. A caller is the client address of a
+    `web2ProxyRequest` (one IPv6 /64 is one address) and the sender of a
+    `web2Request` or DemosWork tx. Over a cap the caller gets result `429`
+    `WEB2_FETCH_LIMITED` with a reason and `retryAfterSeconds`. Loopback and
+    `WHITELISTED_IPS` skip the per-caller caps. Set with
+    `WEB2_MAX_INFLIGHT_PER_CALLER`, `WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER`,
+    `WEB2_MAX_BYTES_PER_HOUR_PER_CALLER` and `WEB2_MAX_INFLIGHT_TOTAL`
+    (positive integers, or the node does not start); local to the node,
+    no effect on blocks or state. Behind a reverse proxy, `TRUSTED_PROXIES`
+    must name it: otherwise every client counts as the proxy, which shares
+    one cap, or, for a proxy on the same host, is loopback and skips the
+    per-caller caps (only the node-wide cap applies).
 
 ## Known limits
 
