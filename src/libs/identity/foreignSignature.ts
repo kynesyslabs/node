@@ -34,8 +34,17 @@ export function judgeOwnSignature(
     genesisHash: string | null,
     signedHere: (hash: string) => boolean,
 ): OwnSignatureVerdict {
-    // No record: a fresh node, or a chain signed before records existed.
-    if (!record) return { kind: "ours" }
+    const seen = `block ${block.number} (hash ${block.hash}, timestamp ${block.timestamp})`
+    // No record: a fresh node, a chain signed before records existed, or a
+    // record lost with its volume while another host runs the same key.
+    // Only the last is dangerous, and nothing here tells them apart.
+    if (!record) {
+        if (!genesisHash || signedHere(block.hash)) return { kind: "ours" }
+        return {
+            kind: "ambiguous",
+            reason: `our key signed ${seen} but this node holds no signing record`,
+        }
+    }
     // A record of another chain says nothing about this one.
     if (!genesisHash || record.genesisHash !== genesisHash) {
         return { kind: "ours" }
@@ -45,7 +54,6 @@ export function judgeOwnSignature(
     if (block.number === record.height && block.hash === record.hash) {
         return { kind: "ours" }
     }
-    const seen = `block ${block.number} (hash ${block.hash}, timestamp ${block.timestamp})`
     const last = `last recorded signature: height ${record.height}, timestamp ${record.timestamp}, hash ${record.hash}`
     if (block.number > record.height) {
         return {
@@ -65,6 +73,28 @@ export function judgeOwnSignature(
     return {
         kind: "foreign",
         reason: `our key signed ${seen}, a different block for the ${last}`,
+    }
+}
+
+// A validator resyncing without its record sees our key on every block it
+// ever signed, so the no-record warning is logged at the 1st, 10th, 100th,
+// ... occurrence per identity file, each line naming the latest block.
+const noRecordSeen = new Map<string, number>()
+
+function isPowerOfTen(n: number): boolean {
+    while (n >= 10 && n % 10 === 0) n /= 10
+    return n === 1
+}
+
+function warnNoRecord(identityFile: string, reason: string): void {
+    const count = (noRecordSeen.get(identityFile) ?? 0) + 1
+    noRecordSeen.set(identityFile, count)
+    if (count === 1) {
+        log.warning(`[SIGNING] ${reason}`)
+    } else if (isPowerOfTen(count)) {
+        log.warning(
+            `[SIGNING] ${reason} (${count} occurrences so far; only the 1st, 10th, 100th, ... are logged)`,
+        )
     }
 }
 
@@ -110,7 +140,9 @@ export function checkOwnSignature(block: SignedBlock): OwnSignatureVerdict {
         genesisHash,
         signedByThisProcess,
     )
-    if (verdict.kind === "ambiguous") {
+    if (verdict.kind === "ambiguous" && !record) {
+        warnNoRecord(identityFile, verdict.reason)
+    } else if (verdict.kind === "ambiguous") {
         log.warning(`[SIGNING] ${verdict.reason}`)
     } else if (verdict.kind === "foreign") {
         countForeignSignature()

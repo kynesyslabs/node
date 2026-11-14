@@ -58,10 +58,36 @@ describe("judgeOwnSignature", () => {
         ).toBe("ours")
     })
 
-    it("skips when there is no record yet", () => {
+    it("only warns when there is no record for a known chain", () => {
+        const verdict = judgeOwnSignature(
+            block(500, "x"),
+            null,
+            "genesis-a",
+            never,
+        )
+        expect(verdict.kind).toBe("ambiguous")
+        expect((verdict as { reason: string }).reason).toContain("500")
+        expect((verdict as { reason: string }).reason).toContain("hash x")
+        expect((verdict as { reason: string }).reason).toContain(
+            "no signing record",
+        )
+    })
+
+    it("accepts a block this process signed when there is no record", () => {
         expect(
-            judgeOwnSignature(block(500, "x"), null, "genesis-a", never).kind,
+            judgeOwnSignature(
+                block(500, "mine"),
+                null,
+                "genesis-a",
+                hash => hash === "mine",
+            ).kind,
         ).toBe("ours")
+    })
+
+    it("skips when there is no record and the genesis is unknown", () => {
+        expect(judgeOwnSignature(block(500, "x"), null, null, never).kind).toBe(
+            "ours",
+        )
     })
 
     it("skips a record of another chain or an unknown genesis", () => {
@@ -174,8 +200,76 @@ describe("checkOwnSignature", () => {
         ).not.toThrow()
     })
 
-    it("does nothing on a fresh node", () => {
-        expect(checkOwnSignature(block(11, "bb", 1010)).kind).toBe("ours")
+    it("only warns on a fresh node with no signing record", () => {
+        expect(checkOwnSignature(block(11, "bb", 1010)).kind).toBe("ambiguous")
+        expect(signingHaltReason()).toBeNull()
+        expect(warning).toHaveBeenCalledTimes(1)
+        expect(error).not.toHaveBeenCalled()
+        expect(incrementCounter).not.toHaveBeenCalled()
+        expect(fs.existsSync(signingHaltMarkerPath(sharedState.identityFile))).toBe(
+            false,
+        )
+    })
+
+    it("warns without stopping signing when our key signed a block with no record", () => {
+        const verdict = checkOwnSignature(block(42, "unrecorded", 4200))
+        expect(verdict.kind).toBe("ambiguous")
+        expect(warning).toHaveBeenCalledTimes(1)
+        expect(warning.mock.calls[0][0]).toContain("42")
+        expect(warning.mock.calls[0][0]).toContain("unrecorded")
+        expect(warning.mock.calls[0][0]).toContain("no signing record")
+        expect(error).not.toHaveBeenCalled()
+        expect(incrementCounter).not.toHaveBeenCalled()
+        expect(signingHaltReason()).toBeNull()
+        expect(fs.existsSync(signingHaltMarkerPath(sharedState.identityFile))).toBe(
+            false,
+        )
+        expect(() =>
+            checkBlockSignature(sharedState.identityFile, round(43, 4300, "next")),
+        ).not.toThrow()
+    })
+
+    it("rate-limits the no-record warning during a long resync", () => {
+        // 5000 distinct blocks; the first 600 arrive twice, so the running
+        // count runs ahead of the number of distinct blocks.
+        for (let i = 0; i < 5000; i++) {
+            const seen = block(7001 + i, `nr-${7001 + i}`, 1)
+            const times = i < 600 ? 2 : 1
+            for (let n = 0; n < times; n++) {
+                expect(checkOwnSignature(seen).kind).toBe("ambiguous")
+            }
+        }
+
+        expect(warning.mock.calls.length).toBeLessThanOrEqual(6)
+        expect(warning.mock.calls.length).toBeGreaterThanOrEqual(2)
+        const lines = warning.mock.calls.map(call => call[0] as string)
+        expect(lines[0]).toContain("block 7001 (hash nr-7001")
+        expect(lines[0]).toContain("no signing record")
+        // The 1000th occurrence is the repeat of block 7500.
+        const summary = lines.find(line =>
+            line.includes("1000 occurrences so far"),
+        )
+        expect(summary).toBeDefined()
+        expect(summary).toContain("block 7500 (hash nr-7500")
+        expect(error).not.toHaveBeenCalled()
+        expect(incrementCounter).not.toHaveBeenCalled()
+        expect(signingHaltReason()).toBeNull()
+        expect(fs.existsSync(signingHaltMarkerPath(sharedState.identityFile))).toBe(
+            false,
+        )
+    })
+
+    it("warns every time for an earlier round at the recorded height", () => {
+        recordBlockSignature(sharedState.identityFile, round(10, 1000, "aa"))
+        warning.mockClear()
+        for (let i = 0; i < 25; i++) {
+            expect(checkOwnSignature(block(10, `early-${i}`, 990)).kind).toBe(
+                "ambiguous",
+            )
+        }
+        expect(warning).toHaveBeenCalledTimes(25)
+        expect(warning.mock.calls[24][0]).toContain("early-24")
+        expect(warning.mock.calls[24][0]).toContain("earlier round")
         expect(signingHaltReason()).toBeNull()
     })
 
