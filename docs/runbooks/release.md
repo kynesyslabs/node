@@ -385,7 +385,9 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     `WEB2_MAX_BYTES_PER_HOUR_PER_CALLER` and `WEB2_MAX_INFLIGHT_TOTAL`
     (positive integers, or the node does not start); local to the node,
     no effect on blocks or state. Behind a reverse proxy, `TRUSTED_PROXIES`
-    must name it, or every client shares one cap.
+    must name it: otherwise every client counts as the proxy, which shares
+    one cap, or, for a proxy on the same host, is loopback and skips the
+    per-caller caps (only the node-wide cap applies).
 
 ## Known limits
 
