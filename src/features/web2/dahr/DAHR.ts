@@ -3,7 +3,7 @@ import {
     IWeb2Request,
     IWeb2Result,
 } from "@kynesyslabs/demosdk/types"
-import { Proxy } from "src/features/web2/proxy/Proxy"
+import { Proxy, type Web2FetchMeter } from "src/features/web2/proxy/Proxy"
 import { ProxyFactory } from "src/features/web2/proxy/ProxyFactory"
 import required from "src/utilities/required"
 import { generateUniqueId } from "src/utilities/generateUniqueId"
@@ -18,6 +18,8 @@ import {
 export type DAHRStartProxyParams = IDAHRStartProxyParams & {
     /** Return non-2xx origin responses instead of refusing them. */
     allowNonSuccessStatus?: boolean
+    /** Receives the count of origin response bytes read, whatever the outcome. */
+    meter?: Web2FetchMeter
 }
 
 /**
@@ -82,6 +84,7 @@ export class DAHR {
         authorization,
         url,
         allowNonSuccessStatus = false,
+        meter,
     }: DAHRStartProxyParams): Promise<IWeb2Result> {
         // Make sure we have a web2Request at this point
         required(this._web2Request, "web2Request")
@@ -113,7 +116,7 @@ export class DAHR {
             targetHeaders: headers,
             payload,
             targetAuthorization: authorization,
-        })
+        }, meter)
 
         // An error page attested as data is indistinguishable from the real
         // thing to anyone reading the chain, so it needs an explicit opt-in.

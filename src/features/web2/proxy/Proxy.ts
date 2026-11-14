@@ -27,6 +27,11 @@ import {
 } from "src/features/web2/dahr/originStatus"
 
 
+/** Counts the origin response bytes one request read. */
+export interface Web2FetchMeter {
+    bytes: number
+}
+
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
  * This allows intercepting and forwarding requests to target URLs while managing sessions
@@ -68,11 +73,14 @@ export class Proxy {
      * would be sent as `Bearer Bearer abc123`). `targetHeaders` and the URL
      * are copied into the signed on-chain `web2Request` tx; `targetAuthorization`
      * is not, so pass credentials there, not in `targetHeaders`.
+     * `meter.bytes` grows by every response byte read, including those of a
+     * response later refused, so the caller can be charged for them.
      * @returns Promise resolving to the response data
      * @throws Error if the proxy server fails to start or if the request fails
      */
     async sendHTTPRequest(
         params: ISendHTTPRequestParams,
+        meter?: Web2FetchMeter,
     ): Promise<IWeb2Result> {
         const {
             web2Request,
@@ -164,6 +172,7 @@ export class Proxy {
                 res.on("data", chunk => {
                     if (tooLarge) return
                     received += chunk.length
+                    if (meter) meter.bytes += chunk.length
                     // An unbounded body would be held in memory whole.
                     if (received > this._maxResponseBytes) {
                         tooLarge = true
