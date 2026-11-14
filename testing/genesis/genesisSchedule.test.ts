@@ -4,16 +4,20 @@
  * src/libs/blockchain/genesis/genesisPin.ts): a missing genesis file, a missing
  * `forks` field or an undeclared fork must not fall back to the build's
  * defaults on a pinned node or a mainnet chain id; and devModeProblem, which
- * refuses PROD=false on a mainnet chain id.
+ * refuses PROD=false on a mainnet chain id; and xffModeProblem, which refuses
+ * XFF_MODE=legacy on one.
  */
 
 import { describe, it, expect } from "bun:test"
 import { readFileSync } from "node:fs"
 import { DEFAULT_FORK_CONFIG } from "src/forks/forkConfig"
 import {
+    bootSettingProblems,
     defaultTreasuryWarning,
     devModeProblem,
     genesisScheduleProblems,
+    pinRequirementProblem,
+    xffModeProblem,
 } from "src/libs/blockchain/genesis/genesisPin"
 
 const PIN = "ab".repeat(32)
@@ -138,5 +142,45 @@ describe("devModeProblem", () => {
         for (const id of [1, 1337, undefined]) {
             expect(devModeProblem(false, id)).toBeNull()
         }
+    })
+})
+
+describe("xffModeProblem", () => {
+    it("refuses XFF_MODE=legacy on a mainnet chain id, naming the mode, the reason and the fix", () => {
+        const problem = xffModeProblem("legacy", 4242)
+        expect(problem).toContain("XFF_MODE=legacy")
+        expect(problem).toContain("choose the IP")
+        expect(problem).toContain("XFF_MODE=strict with TRUSTED_PROXIES")
+        expect(problem).toContain("4242")
+    })
+
+    it("allows legacy on the testnet and the devnet", () => {
+        expect(xffModeProblem("legacy", 1)).toBeNull()
+        expect(xffModeProblem("legacy", 1337)).toBeNull()
+    })
+
+    it("allows strict, off, unset and empty on a mainnet chain id", () => {
+        for (const mode of ["strict", "off", undefined, null, ""]) {
+            expect(xffModeProblem(mode, 4242)).toBeNull()
+        }
+    })
+})
+
+describe("bootSettingProblems", () => {
+    const settings = { env: {}, prod: true, xffMode: undefined }
+
+    it("gives every refusal of a mainnet chain id in one list, in check order", () => {
+        const problems = bootSettingProblems("", 4242, { ...settings, prod: false })
+        expect(problems).toEqual([
+            pinRequirementProblem("", {}, 4242)!,
+            devModeProblem(false, 4242)!,
+        ])
+        expect(problems[0]).toContain("EXPECTED_GENESIS_HASH is not set")
+        expect(problems[1]).toContain("set PROD=true")
+    })
+
+    it("is empty when the settings are fine or the chain id is a test network's", () => {
+        expect(bootSettingProblems(PIN, 4242, settings)).toEqual([])
+        expect(bootSettingProblems("", 1337, { ...settings, prod: false, xffMode: "legacy" })).toEqual([])
     })
 })
