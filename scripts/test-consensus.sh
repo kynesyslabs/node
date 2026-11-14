@@ -50,6 +50,7 @@ SUITE_FILES=(
     src/libs/blockchain/gcr/storableRows.test.ts
     src/libs/blockchain/mempool.nonceIntegrity.test.ts
     src/libs/blockchain/mempool.editBinding.test.ts
+    src/libs/blockchain/mempool.nextBlockRef.test.ts
     src/libs/blockchain/mempool.receive.test.ts
     src/libs/blockchain/routines/Sync.mergePeerlist.test.ts
     src/libs/blockchain/routines/Sync.orphanRollback.test.ts
@@ -71,6 +72,7 @@ SUITE_FILES=(
     src/libs/identity/signingRecord.test.ts
     src/libs/identity/web2Unlink.test.ts
     src/libs/network/broadcastDisposition.test.ts
+    src/libs/network/broadcastReferenceWindow.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
