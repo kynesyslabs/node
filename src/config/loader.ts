@@ -31,6 +31,17 @@ function envInt(key: string, fallback: number): number {
     return parseIntSetting(process.env[key]) ?? fallback
 }
 
+/**
+ * A count setting that must be a plain decimal integer. Anything else set
+ * (e.g. "10k", "2.5", "abc") is NaN for the sanity check to refuse, where
+ * parseInt would read a prefix or fall back without a word.
+ */
+function envStrictInt(key: string, fallback: number): number {
+    const raw = process.env[key]
+    if (raw === undefined || raw.trim() === "") return fallback
+    return /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN
+}
+
 function envFloat(key: string, fallback: number): number {
     const raw = process.env[key]
     if (raw === undefined || raw === "") return fallback
@@ -553,6 +564,22 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.WEB2_INSECURE_TLS,
                 d.outbound.web2InsecureTls,
             ),
+            web2MaxInflightPerCaller: envStrictInt(
+                EnvKey.WEB2_MAX_INFLIGHT_PER_CALLER,
+                d.outbound.web2MaxInflightPerCaller,
+            ),
+            web2MaxFetchesPerMinutePerCaller: envStrictInt(
+                EnvKey.WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER,
+                d.outbound.web2MaxFetchesPerMinutePerCaller,
+            ),
+            web2MaxBytesPerHourPerCaller: envStrictInt(
+                EnvKey.WEB2_MAX_BYTES_PER_HOUR_PER_CALLER,
+                d.outbound.web2MaxBytesPerHourPerCaller,
+            ),
+            web2MaxInflightTotal: envStrictInt(
+                EnvKey.WEB2_MAX_INFLIGHT_TOTAL,
+                d.outbound.web2MaxInflightTotal,
+            ),
             tlsnotaryAllowedPorts: envList(
                 EnvKey.TLSNOTARY_ALLOWED_PORTS,
                 d.outbound.tlsnotaryAllowedPorts.map(String),
@@ -651,8 +678,9 @@ function assertConsensusTimingSane(config: AppConfig): void {
 
 /**
  * A cap or lifetime of 0 or less would refuse every web2 response or expire
- * every session at once; a bad port would silently allow nothing. Skipping
- * certificate checks is a dev setting and must not reach a production node.
+ * every session at once, and a fetch cap of 0 would refuse every web2 fetch;
+ * a bad port would silently allow nothing. Skipping certificate checks is a
+ * dev setting and must not reach a production node.
  */
 function assertOutboundSane(config: AppConfig): void {
     const o = config.outbound
@@ -666,6 +694,25 @@ function assertOutboundSane(config: AppConfig): void {
         problems.push(
             `WEB2_SESSION_TTL_MS must be an integer > 0 (got ${o.web2SessionTtlMs})`,
         )
+    }
+    const web2Caps: [string, number][] = [
+        [EnvKey.WEB2_MAX_INFLIGHT_PER_CALLER, o.web2MaxInflightPerCaller],
+        [
+            EnvKey.WEB2_MAX_FETCHES_PER_MINUTE_PER_CALLER,
+            o.web2MaxFetchesPerMinutePerCaller,
+        ],
+        [
+            EnvKey.WEB2_MAX_BYTES_PER_HOUR_PER_CALLER,
+            o.web2MaxBytesPerHourPerCaller,
+        ],
+        [EnvKey.WEB2_MAX_INFLIGHT_TOTAL, o.web2MaxInflightTotal],
+    ]
+    for (const [key, value] of web2Caps) {
+        if (!Number.isSafeInteger(value) || value <= 0) {
+            problems.push(
+                `${key} must be an integer > 0 (got ${process.env[key] ?? value})`,
+            )
+        }
     }
     const badPorts = o.tlsnotaryAllowedPorts.filter(
         p => !Number.isInteger(p) || p < 1 || p > 65535,
