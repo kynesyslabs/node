@@ -16,6 +16,7 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
+import { web2CallerForAddress } from "@/features/web2/web2FetchLimiter"
 import {
     credentialFieldsInDemoScript,
     credentialFieldsInWeb2Payload,
@@ -298,7 +299,10 @@ export async function handleExecuteTransaction(
                 params.web2Request.raw.headers,
             )
             params.authorization = undefined
-            const web2Result = await handleWeb2ProxyRequest(params)
+            const web2Result = await handleWeb2ProxyRequest(
+                params,
+                web2CallerForAddress(tx.content.from),
+            )
             result.response = web2Result
             const handleWeb2RequestEnd = Date.now()
             log.only(
@@ -322,8 +326,10 @@ export async function handleExecuteTransaction(
                 break
             }
             try {
-                const demosWorkResult =
-                    await handleDemosWorkRequest(demosWorkScript)
+                const demosWorkResult = await handleDemosWorkRequest(
+                    demosWorkScript,
+                    web2CallerForAddress(tx.content.from),
+                )
                 result.response = demosWorkResult
             } catch (e) {
                 log.error("[handleExecuteTransaction] Error in demosWork: " + e)

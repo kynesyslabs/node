@@ -674,11 +674,13 @@ export class RateLimiter {
             : AUTH_FAILURE_BUCKET
     }
 
+    /** Whether `ip` is on the operator's whitelist (loopback included). */
+    public isWhitelistedIP(ip: string | undefined): boolean {
+        return !!ip && this.config.whitelistedIPs.includes(ip)
+    }
+
     public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
-        if (
-            clientIP &&
-            this.config.whitelistedIPs.includes(clientIP)
-        ) {
+        if (this.isWhitelistedIP(clientIP)) {
             return true
         }
 
