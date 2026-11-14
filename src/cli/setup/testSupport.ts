@@ -137,7 +137,7 @@ export function recorder(): { say: (l: string) => void; lines: string[]; text: (
     return { say: l => lines.push(l), lines, text: () => lines.join("\n") }
 }
 
-export function fakeRunner(opts: { vkeyJson?: string; failOn?: string } = {}): ZkRunner & { calls: string[] } {
+export function fakeRunner(opts: { vkeyJson?: string; failOn?: string; silentOn?: string } = {}): ZkRunner & { calls: string[] } {
     const calls: string[] = []
     return {
         calls,
@@ -150,6 +150,7 @@ export function fakeRunner(opts: { vkeyJson?: string; failOn?: string } = {}): Z
             const name = `${path.basename(cmd)} ${args[0] === "plonk" || args[0] === "zkey" ? args.slice(0, 2).join(" ") : "compile"}`
             calls.push(name)
             if (opts.failOn && name.includes(opts.failOn)) return 1
+            if (opts.silentOn && name.includes(opts.silentOn)) return 0
             const last = args[args.length - 1]
             if (args[0] === "plonk") fs.writeFileSync(last, "zkey")
             if (args[0] === "zkey") fs.writeFileSync(last, opts.vkeyJson ?? JSON.stringify(BATCH_VKEY))

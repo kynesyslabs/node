@@ -138,7 +138,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
 
     l2ps: {
-        zkEnabled: true,
+        // Same as docker-compose and .env.example. The current batch proof is
+        // checked by no other node (docs/design/l2ps-zk-settlement.md).
+        zkEnabled: false,
         zkUseMainThread: false,
         hashIntervalMs: 5000,
         aggregationIntervalMs: 10000,

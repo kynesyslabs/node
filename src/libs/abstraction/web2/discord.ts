@@ -1,4 +1,4 @@
-import { Web2ProofParser, Web2Claim, sameId } from "./parsers"
+import { Web2ProofParser, Web2Claim, sameHandle, sameId } from "./parsers"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { Discord } from "@/libs/identity/tools/discord"
 
@@ -38,11 +38,21 @@ export class DiscordProofParser extends Web2ProofParser {
         this.parseDiscordMessageUrl(proofUrl)
         const msg = await this.discord.getMessageByUrl(proofUrl)
 
+        // A webhook posts under any name its owner picks, so its author
+        // fields say nothing about which account wrote the proof.
+        if (msg?.webhook_id) {
+            throw new Error("Proof message was posted by a webhook, not a user")
+        }
         // Anyone can post a signed proof in a channel; only the author's id
         // says whose account it proves, and the payload's userId is what
         // gets stored and rewarded.
         if (!sameId(msg?.author?.id, claim?.userId)) {
             throw new Error("Message author does not match the claimed user id")
+        }
+        // The username is stored with the link and accounts are looked up
+        // by it, so it must be the author's too, not one the sender picks.
+        if (!sameHandle(msg?.author?.username, claim?.username)) {
+            throw new Error("Message author does not match the claimed username")
         }
 
         const content = (msg?.content as string) || ""

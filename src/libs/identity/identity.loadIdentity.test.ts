@@ -123,6 +123,19 @@ describe("Identity.loadIdentity in production", () => {
         ).rejects.toThrow("refusing to generate")
     })
 
+    it("refuses to boot on a key other users can read that cannot be corrected", async () => {
+        sharedState.PROD = false
+        await Identity.getInstance().loadIdentity()
+        fs.chmodSync(sharedState.identityFile, 0o644)
+        sharedState.PROD = true
+        jest.spyOn(fs, "chmodSync").mockImplementation(() => {
+            throw new Error("EROFS: read-only file system")
+        })
+        await expect(Identity.getInstance().loadIdentity()).rejects.toThrow(
+            "Refusing to start with a key other users can read",
+        )
+    })
+
     it("loads an existing identity as before", async () => {
         sharedState.PROD = false
         await Identity.getInstance().loadIdentity()

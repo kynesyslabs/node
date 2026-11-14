@@ -125,6 +125,22 @@ export function selectBlockTransactions<T extends Transaction>(
 }
 
 /**
+ * Why no block can take `tx`, or null: its content alone is over the byte
+ * cap of an empty block. Such a tx would sit in the pool until it expires,
+ * and hold back every later nonce of its sender, so it is not admitted.
+ */
+export function oversizeTxRefusal(
+    tx: Pick<Transaction, "content">,
+    osDenominationActive: boolean,
+    caps: BlockCaps = DEFAULT_BLOCK_CAPS,
+): string | null {
+    const bytes = txContentBytes(tx, osDenominationActive)
+    return bytes > caps.maxContentBytes
+        ? `Transaction content is ${bytes} bytes, over the block cap of ${caps.maxContentBytes}: no block can take it`
+        : null
+}
+
+/**
  * Why a block's txs exceed `caps`, or null when they fit. Used to refuse
  * a rebuilt candidate that no honest member would have forged.
  */

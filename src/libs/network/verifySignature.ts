@@ -10,7 +10,8 @@ import { Ed25519SignedObject, signedObject } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import Hashing from "src/libs/crypto/hashing"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
-import { httpAuthMessage } from "./peerHttpAuth"
+import { audienceKey, httpAuthMessage } from "./peerHttpAuth"
+import { SeenAuthMessages } from "./authReplayCache"
 import { getSharedState } from "src/utilities/sharedState"
 
 /**
@@ -18,6 +19,39 @@ import { getSharedState } from "src/utilities/sharedState"
  * only replayable within this window, not forever.
  */
 const AUTH_TIMESTAMP_MAX_AGE_MS = 5 * 60 * 1000
+
+/**
+ * Body-bound requests accepted within the timestamp window; a repeat is a
+ * replay. Sized well above what honest peers send in one window.
+ */
+export const seenAuthMessages = new SeenAuthMessages(200_000)
+
+/**
+ * The replay cache lives in memory, so it starts empty: a request signed
+ * before this process started could be replayed once. Body-bound requests
+ * signed before then are refused; the slack covers a peer clock a little
+ * behind ours.
+ */
+export const PROCESS_START_MS = Date.now()
+export const PROCESS_START_MONO_MS = performance.now()
+
+/**
+ * When this process started, on the wall clock as it reads now. Taken as
+ * uptime on the monotonic clock, so a clock set back after start moves the
+ * start back with it instead of refusing every fresh request until the wall
+ * clock catches up with the old reading.
+ */
+function processStartMs(now: number): number {
+    return now - (performance.now() - PROCESS_START_MONO_MS)
+}
+export const RESTART_CLOCK_SLACK_MS = 2_000
+
+/**
+ * How far ahead of our clock a call that names this node may be dated: a
+ * sudo call raises the durable replay floor to its timestamp, and one dated
+ * far ahead would refuse every honest call until the clock caught up.
+ */
+export const AUDIENCE_FUTURE_SLACK_MS = 5_000
 
 export interface VerificationResult {
     /**
@@ -46,6 +80,12 @@ export interface VerificationResult {
      */
     bodyHash?: string | null
 
+    /** Whether the signature names this node as the request's audience. */
+    audienceBound?: boolean
+
+    /** The timestamp the signature covers, in the body-bound form. */
+    timestamp?: number
+
     /**
      * Error message if verification failed
      */
@@ -72,6 +112,7 @@ export async function verifySignature(
     timestamp?: string | null,
     requireTimestampBinding = false,
     bodyHash?: string | null,
+    audience?: string | null,
 ): Promise<VerificationResult> {
     if (!identity || !signature) {
         return {
@@ -96,6 +137,21 @@ export async function verifySignature(
         }
     }
 
+    // An audience is part of the body-bound form only, and must be us.
+    const audienceBound = typeof audience === "string"
+    if (audienceBound) {
+        const ours = getSharedState.publicKeyHex
+        if (!bodyBound || !ours || audienceKey(audience) !== audienceKey(ours)) {
+            return {
+                valid: false,
+                identity,
+                publicKey: null,
+                algorithm: null,
+                error: bodyBound ? "Request is for another node" : "Audience needs a body-bound signature",
+            }
+        }
+    }
+
     // The body-bound form names our network; until it is known no such
     // request can be checked, so peer methods are not served yet.
     const genesisHash = getSharedState.genesisBlockHash
@@ -115,7 +171,9 @@ export async function verifySignature(
     // token. A legacy client that signs the bare public key (no/empty
     // timestamp) is rejected with a clear upgrade message.
     if (requireTimestampBinding || bodyBound) {
-        const timestampError = checkAuthTimestamp(timestamp)
+        const timestampError =
+            checkAuthTimestamp(timestamp) ??
+            (bodyBound ? restartReplayError(Number(timestamp), audienceBound) : null)
         if (timestampError) {
             return {
                 valid: false,
@@ -142,7 +200,13 @@ export async function verifySignature(
         // form signs the bare publicKey hex or plain identity.
         let authMessage = publicKeyHex
         if (bodyBound) {
-            authMessage = httpAuthMessage(genesisHash!, identity, timestamp!, bodyHash!)
+            authMessage = httpAuthMessage(
+                genesisHash!,
+                identity,
+                timestamp!,
+                bodyHash!,
+                audienceBound ? audienceKey(audience) : undefined,
+            )
         } else if (requireTimestampBinding) {
             authMessage = Hashing.sha256(`${identity}:${timestamp}`)
         }
@@ -156,6 +220,24 @@ export async function verifySignature(
 
         const isValid = await TxValidatorPool.getInstance().verify(signatureObj)
 
+        if (
+            isValid &&
+            bodyBound &&
+            !seenAuthMessages.claim(
+                authMessage,
+                Number(timestamp) + AUTH_TIMESTAMP_MAX_AGE_MS,
+            )
+        ) {
+            log.debug(`[verifySignature] Replayed request from: ${identity}`)
+            return {
+                valid: false,
+                identity,
+                publicKey: publicKeyHex,
+                algorithm,
+                error: "Replayed request",
+            }
+        }
+
         if (isValid) {
             return {
                 valid: true,
@@ -163,6 +245,8 @@ export async function verifySignature(
                 publicKey: publicKeyHex,
                 algorithm,
                 bodyHash: bodyBound ? bodyHash : null,
+                audienceBound,
+                timestamp: bodyBound ? Number(timestamp) : undefined,
             }
         }
 
@@ -184,6 +268,25 @@ export async function verifySignature(
             error: `Verification error: ${error}`,
         }
     }
+}
+
+/**
+ * Why a body-bound request may be one this node accepted before it last
+ * started, which the replay memory, empty since then, cannot recognise.
+ * The start is taken as uptime, so a clock set back does not cut the node
+ * off. Sudo calls are guarded across restarts by the durable floor
+ * (sudoReplayFloor); here they are only kept from being dated far ahead,
+ * which would hold that floor above every honest call.
+ */
+function restartReplayError(ts: number, audienceBound: boolean, now = Date.now()): string | null {
+    const startedAt = processStartMs(now)
+    if (ts < startedAt - RESTART_CLOCK_SLACK_MS) {
+        return "Auth timestamp predates this node's start"
+    }
+    if (audienceBound && ts > now + AUDIENCE_FUTURE_SLACK_MS) {
+        return "Auth timestamp is ahead of this node's clock"
+    }
+    return null
 }
 
 /** Why a timestamp-bound auth header's timestamp is refused, or null if fresh. */

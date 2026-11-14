@@ -1,5 +1,4 @@
 import * as fs from "fs"
-import axios, { AxiosResponse } from "axios"
 import {
     Tweet,
     TwitterTimelineResponse,
@@ -7,6 +6,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
 import { Config } from "src/config"
+import { boundedFetch, web2Limits, type Web2Limits } from "@/libs/abstraction/web2/boundedFetch"
 import {
     TWITTER_BOT_SCORE_THRESHOLD,
     TWITTER_VERIFICATION_SCORE,
@@ -442,6 +442,14 @@ export class Twitter {
     api_key = Config.getInstance().identity.rapidApiKey
     api_host = Config.getInstance().identity.rapidApiHost
     api_url = "https://" + this.api_host
+    // Identity verification waits on these lookups, so a slow or oversized
+    // RapidAPI response is cut at the web2 proxy limits.
+    private fetch = boundedFetch()
+
+    /** Replaces the request limits (tests). */
+    setLimits(limits: Web2Limits = web2Limits()): void {
+        this.fetch = boundedFetch(limits)
+    }
 
     /**
      * Extracts tweet details from a Twitter/X URL
@@ -499,18 +507,26 @@ export class Twitter {
      * @param data - The data to send with the request (optional)
      * @returns The response from the request
      */
-    async makeRequest<T>(url: string, delay = 0): Promise<AxiosResponse<T>> {
+    async makeRequest<T>(
+        url: string,
+        delay = 0,
+    ): Promise<{ status: number; data: T }> {
         if (delay > 0) {
             await new Promise(resolve => setTimeout(resolve, delay))
             log.debug(`☺️😔👀 Delayed request to ${url} for ${delay}ms`)
         }
 
-        return await axios.get<T>(url, {
+        const res = await this.fetch(url, {
             headers: {
                 "x-rapidapi-key": this.api_key,
                 "x-rapidapi-host": this.api_host,
             },
         })
+        // Callers treat a non-2xx answer as a failed request.
+        if (res.status < 200 || res.status >= 300) {
+            throw new Error(`Request failed with status code ${res.status}`)
+        }
+        return { status: res.status, data: (await res.json()) as T }
     }
 
     async getTweetById(tweetId: string): Promise<Tweet> {

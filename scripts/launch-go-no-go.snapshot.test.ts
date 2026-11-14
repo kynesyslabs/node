@@ -104,7 +104,10 @@ function snapshotDir(
 const genesisRows = Array.from({ length: 10 }, (_, i) => row(i))
 const genesis = {
     properties: { id: 7, shardSize: 10 },
-    forks: Object.fromEntries(KNOWN_FORKS.map(name => [name, { activationHeight: MAINNET_FORKS.includes(name) ? 0 : null }])),
+    forks: {
+        ...Object.fromEntries(KNOWN_FORKS.map(name => [name, { activationHeight: MAINNET_FORKS.includes(name) ? 0 : null }])),
+        gasFeeSeparation: { activationHeight: 0, treasuryAddress: "0x" + "ab".repeat(32) },
+    },
     validators: genesisRows,
 }
 

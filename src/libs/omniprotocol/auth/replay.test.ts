@@ -25,7 +25,8 @@ jest.mock("src/utilities/logger", () => ({
 
 const OUR_GENESIS = "d5".repeat(32)
 const OTHER_GENESIS = "e7".repeat(32)
-const sharedState: Record<string, unknown> = { genesisBlockHash: OUR_GENESIS }
+const US = "0x" + "ab".repeat(32)
+const sharedState: Record<string, unknown> = { genesisBlockHash: OUR_GENESIS, publicKeyHex: US }
 jest.mock("src/utilities/sharedState", () => ({
     __esModule: true,
     default: { getInstance: () => sharedState },
@@ -64,9 +65,9 @@ const keys = () => {
 }
 
 /** What the real sender writes on the wire for one authenticated request. */
-async function sentFrame(opcode = OmniOpcode.NODE_CALL, payload = Buffer.from("hello")) {
+async function sentFrame(opcode = OmniOpcode.NODE_CALL, payload = Buffer.from("hello"), to = US) {
     const socket = new FakeSocket()
-    const conn = new PeerConnection("0xpeer", "", socket as any)
+    const conn = new PeerConnection(to, "", socket as any)
     ;(conn as any)._state = 11 // READY
     const { publicKey, privateKey } = keys()
     conn.sendAuthenticated(opcode, payload, privateKey, publicKey, { timeout: 20 }).catch(
@@ -127,6 +128,28 @@ describe("Omni auth network binding", () => {
         sharedState.genesisBlockHash = OUR_GENESIS
         const result = await verify(m)
         expect(result.valid).toBe(false)
+    })
+
+    it("refuses a frame sent to another node", async () => {
+        const m = await sentFrame(OmniOpcode.NODE_CALL, Buffer.from("hello"), "0x" + "0f".repeat(32))
+        const result = await verify(m)
+        expect(result.valid).toBe(false)
+        expect(result.error).toMatch(/signature/i)
+    })
+
+    it("accepts a frame sent to us under another spelling of our identity", async () => {
+        const m = await sentFrame(OmniOpcode.NODE_CALL, Buffer.from("hello"), US.slice(2).toUpperCase())
+        expect((await verify(m)).valid).toBe(true)
+    })
+
+    it("refuses to verify before the node knows its own identity", async () => {
+        const m = await sentFrame()
+        sharedState.publicKeyHex = null
+        try {
+            expect((await verify(m)).valid).toBe(false)
+        } finally {
+            sharedState.publicKeyHex = US
+        }
     })
 
     it("refuses to verify before the node knows its network", async () => {

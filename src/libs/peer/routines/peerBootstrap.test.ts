@@ -48,6 +48,10 @@ mock.module("@kynesyslabs/demosdk/utils", () => ({
     sleep: () => new Promise(r => setTimeout(r, 1)),
 }))
 
+const actualWatch = await import("./forkScheduleWatch")
+const requestScheduleCheck = jest.fn(async () => undefined)
+mock.module("./forkScheduleWatch", () => ({ ...actualWatch, requestScheduleCheck }))
+
 const peerManagerModule = await import("../PeerManager")
 const peerModule = await import("../Peer")
 // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -55,6 +59,7 @@ const PeerManager = peerManagerModule.default
 // eslint-disable-next-line @typescript-eslint/naming-convention
 const Peer = peerModule.default
 const { hashGenesisData } = await import("src/libs/blockchain/genesis/normalizeGenesisForHash")
+const { forkScheduleDigest } = await import("./forkScheduleAgreement")
 const { BOOT_RETRY_DELAYS_MS, DEFERRED_MAX_DELAY_MS } = await import("./anchorPairing")
 const {
     default: peerBootstrap,
@@ -85,6 +90,8 @@ const online = () => (peerman as any).peerList as Record<string, PeerT>
 let hello: Record<string, HelloVerdict | "wire">
 let wireHello: { result: number; extra?: Record<string, unknown> }
 let advertised: Record<string, string | { result: number }>
+/** What each anchor answers to getNetworkInfo; none means no fork table. */
+let networkInfo: Record<string, unknown>
 const genesisQueries: string[] = []
 
 const realSayHello = PeerManager.sayHelloToPeer.bind(PeerManager)
@@ -106,8 +113,8 @@ spyOn(Peer.prototype, "call").mockImplementation(async function (this: PeerT, re
         const answer = advertised[this.identity] ?? FILE_HASH
         return (typeof answer === "string" ? { result: 200, response: answer } : answer) as any
     }
-    // No fork table in the answer: the schedule is not compared.
-    return { result: 200, response: {} } as any
+    // Without an entry there is no fork table in the answer: the schedule is not compared.
+    return { result: 200, response: networkInfo[this.identity] ?? {} } as any
 })
 
 const anchor = (n: number) => new Peer(`http://node-${n}:53550`, `0xanchor${n}`)
@@ -133,7 +140,9 @@ beforeEach(() => {
     hello = {}
     wireHello = { result: 503 }
     advertised = {}
+    networkInfo = {}
     genesisQueries.length = 0
+    requestScheduleCheck.mockClear()
     storedGenesis = repoGenesis
     sayHello.mockClear()
 })
@@ -216,6 +225,43 @@ describe("peerBootstrap at boot", () => {
         advertised = { "0xanchor1": OTHER_HASH }
         await expect(peerBootstrap([anchor(1)])).rejects.toThrow("Genesis data match failed")
         expect(online()["0xanchor1"]).toBeUndefined()
+    })
+})
+
+describe("the fork schedule of a paired anchor", () => {
+    const TREASURY = "0x" + "7e".repeat(32)
+    const OTHER = "0x" + "11".repeat(32)
+    const answering = (treasury: string) => {
+        const forks = { gasFeeSeparation: { activationHeight: 0, treasuryAddress: treasury } }
+        return { chainId: 7, forks, forkScheduleDigest: forkScheduleDigest(forks, 7) }
+    }
+
+    beforeEach(() => {
+        sharedState.forkConfig = { gasFeeSeparation: { activationHeight: 0, treasuryAddress: TREASURY } }
+        sharedState.chainId = 7
+    })
+    afterEach(() => {
+        sharedState.forkConfig = {}
+        sharedState.chainId = null
+    })
+
+    it("logs a different treasury as an error and starts a watch round at once", async () => {
+        const log = (await import("src/utilities/logger")).default
+        ;(log.error as any).mockClear()
+        hello = { "0xanchor1": "verified" }
+        networkInfo = { "0xanchor1": answering(OTHER) }
+        await peerBootstrap([anchor(1)])
+        const lines = (log.error as any).mock.calls.map((c: unknown[]) => String(c[0])).join("\n")
+        expect(lines).toContain("gasFeeSeparation TREASURY MISMATCH with http://node-1:53550")
+        expect(lines).toContain(`gasFeeSeparation.treasuryAddress: ours ${TREASURY}, theirs ${OTHER}`)
+        expect(requestScheduleCheck).toHaveBeenCalledTimes(1)
+    })
+
+    it("starts no round for an anchor with the same treasury", async () => {
+        hello = { "0xanchor1": "verified" }
+        networkInfo = { "0xanchor1": answering(TREASURY) }
+        await peerBootstrap([anchor(1)])
+        expect(requestScheduleCheck).not.toHaveBeenCalled()
     })
 })
 

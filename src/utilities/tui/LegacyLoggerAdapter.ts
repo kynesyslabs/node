@@ -224,7 +224,7 @@ export default class LegacyLoggerAdapter {
         if (cleanFile) {
             try {
                 fs.rmSync(customPath, { force: true })
-                await fs.promises.writeFile(customPath, "")
+                await fs.promises.writeFile(customPath, "", { mode: 0o600 })
             } catch {
                 // Ignore errors
             }
@@ -232,7 +232,7 @@ export default class LegacyLoggerAdapter {
 
         // Write to custom file
         try {
-            fs.appendFileSync(customPath, logEntry)
+            fs.appendFileSync(customPath, logEntry, { mode: 0o600 })
         } catch {
             // Ignore errors
         }

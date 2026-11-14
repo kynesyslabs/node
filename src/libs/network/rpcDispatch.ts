@@ -21,17 +21,13 @@ import manageBridges from "./manageBridge"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import { RateLimiter } from "./middleware/rateLimiter"
+import { SUDO_METHODS } from "./peerHttpAuth"
 import GCR, { AccountParams } from "../blockchain/gcr/gcr"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import Datasource from "@/model/datasource"
 import type { IdentityAttestationProof } from "@/features/zk/proof/ProofVerifier"
 
-// Protected endpoints requiring SUDO access
-const PROTECTED_ENDPOINTS = new Set([
-    "rate-limit/unblock",
-    "getCampaignData",
-    "awardPoints",
-])
+const PROTECTED_ENDPOINTS = SUDO_METHODS
 
 export const emptyResponse: RPCResponse = {
     result: 0,
@@ -65,6 +61,7 @@ export function isRPCRequest(obj: any): obj is RPCRequest {
 export async function processPayload(
     payload: RPCRequest,
     sender: string,
+    clientIP?: string,
 ): Promise<RPCResponse> {
     const splits = sender.split(":")
     if (splits.length > 1) {
@@ -117,7 +114,6 @@ export async function processPayload(
                 sender,
             )
             log.info(`[RPC Call] Merged mempool from: ${sender}`)
-            log.info(JSON.stringify(res))
             return res
         }
         case "peerlist":
@@ -154,7 +150,7 @@ export async function processPayload(
         }
 
         case "gcr_routine":
-            return await manageGCRRoutines(sender, payload.params[0])
+            return await manageGCRRoutines(sender, payload.params[0], clientIP)
 
         case "bridge":
             return await manageBridges(sender, payload.params[0])

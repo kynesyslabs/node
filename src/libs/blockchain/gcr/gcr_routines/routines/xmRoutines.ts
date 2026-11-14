@@ -12,6 +12,22 @@ import {
     reinsert,
     removedIdentityKey,
 } from "./removedIdentities"
+import { xmRemoveCanonicalActiveAtApply } from "@/forks/xmRemoveCanonicalGate"
+import {
+    canonicalWalletAddress,
+    canonicalXmAddress,
+} from "@/libs/identity/xmProof"
+
+/**
+ * One comparable form per address, from the chain alone. The legacy rule
+ * folded case by the op's `isEVM` flag, so a remove could miss an entry the
+ * add stored, or take a case-variant entry on a chain where case matters.
+ */
+function sameXmAddress(chain: string, a: string, b: string): boolean {
+    const form = (x: string) =>
+        canonicalWalletAddress(chain, x) ?? canonicalXmAddress(chain, x)
+    return form(a) === form(b)
+}
 
 export async function applyXmIdentityAdd(
     editOperation: any,
@@ -136,10 +152,13 @@ export async function applyXmIdentityRemove(
         }
     }
 
+    const canonical = xmRemoveCanonicalActiveAtApply()
     const matches = (id: SavedXmIdentity) =>
-        isEVM
-            ? id.address.toLowerCase() === normalizedAddress
-            : id.address === normalizedAddress
+        canonical
+            ? sameXmAddress(chain, id.address, targetAddress)
+            : isEVM
+              ? id.address.toLowerCase() === normalizedAddress
+              : id.address === normalizedAddress
     const linked: SavedXmIdentity[] = accountGCR.identities.xm[chain][subchain]
     const removed: RemovedEntry<SavedXmIdentity>[] = []
     linked.forEach((id, index) => {
@@ -264,10 +283,13 @@ export async function rollbackXmIdentityRemove(
     accountGCR.identities.xm[chain] = accountGCR.identities.xm[chain] || {}
     const linked: SavedXmIdentity[] =
         accountGCR.identities.xm[chain][subchain] || []
+    const canonical = xmRemoveCanonicalActiveAtApply()
     const present = linked.some(id =>
-        isEVM
-            ? id.address.toLowerCase() === normalizedAddress
-            : id.address === normalizedAddress,
+        canonical
+            ? sameXmAddress(chain, id.address, targetAddress)
+            : isEVM
+              ? id.address.toLowerCase() === normalizedAddress
+              : id.address === normalizedAddress,
     )
     if (present) {
         return { success: false, message: "Identity already exists" }

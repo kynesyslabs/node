@@ -262,6 +262,8 @@ services:
       # Logging & misc
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PROD: ${PROD:-false}
+      # The only key the admin RPC answers to; empty, nobody may call it
+      SUDO_PUBKEY: ${SUDO_PUBKEY:-}
       L2PS_ZK_ENABLED: ${L2PS_ZK_ENABLED:-false}
       # Written by `bun run setup`; the defaults equal the node's built-in ones.
       L2PS_HISTORY_RETENTION_DAYS: ${L2PS_HISTORY_RETENTION_DAYS:-0}
@@ -323,6 +325,7 @@ services:
       NOMIS_API_KEY: ${NOMIS_API_KEY:-}
       NOMIS_CLIENT_ID: ${NOMIS_CLIENT_ID:-}
       RAPID_API_KEY: ${RAPID_API_KEY:-}
+      RAPID_API_HOST: ${RAPID_API_HOST:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
       HUMAN_PASSPORT_API_KEY: ${HUMAN_PASSPORT_API_KEY:-}
@@ -443,6 +446,7 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+      # Minimum 7d: the consensus alert latch needs seven days of recorded samples.
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
       - --web.console.libraries=/etc/prometheus/console_libraries
       - --web.console.templates=/etc/prometheus/consoles

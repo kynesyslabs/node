@@ -25,9 +25,11 @@ could not be carried out.
    (balances zeroed, validators from the image's genesis; `identityCarryover`
    refuses anything else) and writes the fixtures with `fixtures.py`: a
    launch genesis (timestamp 1793318400, chain id 4242, the mainnet forks
-   (`MAINNET_FORKS`) at height 0, the carry-over snapshot bound by
-   `snapshot.manifestSha256`) and its variants. Every node boots on that
-   snapshot through `DEMOS_SNAPSHOT_DIR`.
+   (`MAINNET_FORKS`) at height 0, every other fork the build knows declared
+   (`KNOWN_FORKS`; a node on a mainnet chain id refuses an undeclared one), the
+   carry-over snapshot bound by `snapshot.manifestSha256`) and its variants.
+   Every node boots on that snapshot through `DEMOS_SNAPSHOT_DIR`, with
+   `PROD=true` (a mainnet chain id refuses development mode).
 3. Computes the pin with `bun scripts/genesis-hash.ts --json` on the host.
 4. Starts a throwaway Postgres (the image pinned in `docker-compose.yml`) and
    one node at a time on a private bridge network with no published ports. A

@@ -3,6 +3,7 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
 import Datasource from "@/model/datasource"
+import { IdentityPrefetchError } from "./identityPrefetchError"
 import type { IdentityHintMap } from "./types"
 
 function normalizePubkey(addr: string): string {
@@ -33,13 +34,18 @@ export default async function prefetchIdentities(
         addresses.add(normalizePubkey(tx.content.from_ed25519_address))
     }
 
-    const repo = (await Datasource.getInstance())
-        .getDataSource()
-        .getRepository(GCRMain)
-    const rows = await repo.find({
-        where: { pubkey: In(Array.from(addresses)) },
-        select: ["pubkey", "identities"],
-    })
+    let rows: Pick<GCRMain, "pubkey" | "identities">[]
+    try {
+        const repo = (await Datasource.getInstance())
+            .getDataSource()
+            .getRepository(GCRMain)
+        rows = await repo.find({
+            where: { pubkey: In(Array.from(addresses)) },
+            select: ["pubkey", "identities"],
+        })
+    } catch (error) {
+        throw new IdentityPrefetchError(error)
+    }
 
     const pqcByPubkey = new Map<string, Record<string, SavedPqcIdentity[]>>()
     for (const row of rows) {

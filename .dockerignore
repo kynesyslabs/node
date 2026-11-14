@@ -110,3 +110,13 @@ tlsnotary/
 monitoring/
 sidecar/node_modules
 sidecar/dist
+
+# L2PS proving keys are derived inside the image; local copies must not
+# replace them or bring the Powers of Tau files back in.
+src/libs/l2ps/zk/ptau/
+src/libs/l2ps/zk/keys/**/*.zkey
+src/libs/l2ps/zk/keys/**/.building/
+src/libs/l2ps/zk/keys/**/*.r1cs
+src/libs/l2ps/zk/keys/**/*.sym
+src/libs/l2ps/zk/keys/**/*.wasm
+src/libs/l2ps/zk/keys/**/*_js/

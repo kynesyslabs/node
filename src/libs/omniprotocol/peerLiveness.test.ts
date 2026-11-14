@@ -91,7 +91,7 @@ function message(payload: Buffer, sign?: { claims: Keys; signer: Keys }) {
         bytes = MessageFramer.encodeMessage(header, payload)
     } else {
         const timestamp = Date.now()
-        const data = timestampedSignedData(sharedState.genesisBlockHash, header.opcode, seq, timestamp, payload)
+        const data = timestampedSignedData(sharedState.genesisBlockHash, sharedState.publicKeyHex, header.opcode, seq, timestamp, payload)
         const signature = forge.pki.ed25519.sign({
             message: data,
             privateKey: sign.signer.privateKey as forge.pki.ed25519.NativeBuffer,

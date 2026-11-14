@@ -37,16 +37,16 @@ const SNARKJS = join(ROOT_DIR, "node_modules/.bin/snarkjs")
 const PTAU_SOURCES = {
     identity: {
         file: "powersOfTau28_hez_final_14.ptau",
-        url: "https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_14.ptau",
+        url: "https://circom.info/powersOfTau28_hez_final_14.ptau",
         sha256: "489be9e5ac65d524f7b1685baac8a183c6e77924fdb73d2b8105e335f277895d",
     },
     l2ps_16: {
         file: "powersOfTau28_hez_final_16.ptau",
-        url: "https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_16.ptau",
+        url: "https://circom.info/powersOfTau28_hez_final_16.ptau",
     },
     l2ps_17: {
         file: "powersOfTau28_hez_final_17.ptau",
-        url: "https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_17.ptau",
+        url: "https://circom.info/powersOfTau28_hez_final_17.ptau",
     },
 }
 

@@ -149,7 +149,10 @@ async function main() {
 
     // Output to file if -o flag provided, otherwise display to console
     if (outputFile) {
-        await fs.promises.writeFile(outputFile, publicKeyHex, "utf8")
+        await fs.promises.writeFile(outputFile, publicKeyHex, {
+            encoding: "utf8",
+            mode: 0o600,
+        })
     } else {
         console.log("\n=== Demos Node Public Key ===\n")
         console.log(`Signing Algorithm: ${algorithm}`)

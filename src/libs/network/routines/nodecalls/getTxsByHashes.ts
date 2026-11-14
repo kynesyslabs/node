@@ -55,7 +55,18 @@ export default async function getTxsByHashes(
             // (because block is broadcasted right after voting,
             // and it's possible that this peer might be slow)
             // the block txs will not be in the transactions table yet,
-            // fetch them from the mempool, and update the blockNumber to match block
+            // fetch them from the mempool.
+            // In practice only the commitLock rebuild (candidate.ts) can use
+            // these: block sync (Sync.ts) rejects a tx whose blockNumber
+            // differs from the block's number, and this stamp is this node's
+            // own last height, not that block's.
+            // blockNumber is this node's last applied height. It is not an
+            // inclusion claim: `pending: true` tells readers these are
+            // unconfirmed. Peers do act on the value: Sync compares it with
+            // the block's number, and Mempool.receive requires an integer and
+            // stores it as the row's blockNumber. Do not change it without a
+            // protocol review.
+            // Stored txs carry no such key.
             const missing = await Mempool.getTransactionsByHashes(
                 Array.from(toGet),
             )
@@ -63,6 +74,7 @@ export default async function getTxsByHashes(
                 ...missing.map(tx => ({
                     ...tx,
                     blockNumber: getSharedState.lastBlockNumber,
+                    pending: true,
                 })),
             )
         }

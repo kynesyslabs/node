@@ -8,6 +8,15 @@
  * through `getNetworkInfo`; equal digests settle it, and when they differ the
  * per-fork activation heights, which every build publishes, name what differs.
  * A peer that predates the digest is compared by those heights alone.
+ *
+ * The gasFeeSeparation treasury is published beside its height, so a peer
+ * whose fees go to another account is named as such rather than as an
+ * unexplained digest difference. Once both apply the fork, every fee-bearing
+ * block splits them, whatever the height; before either applies it, the
+ * difference is a schedule mismatch like any other, urgent only near the
+ * activation height. The same holds for a fork whose activation height
+ * differs while one side already applies it: a network that activates every
+ * fork at genesis has no height ahead to wait for.
  */
 
 import { stableStringify } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
@@ -19,6 +28,11 @@ export interface ScheduleView {
     forks: Record<string, number | null>
     /** Absent on a node that predates the digest. */
     digest?: string
+    /**
+     * The gasFeeSeparation treasury, lowercased. Absent when the node does not
+     * report one (older builds), so it is then compared through the digest alone.
+     */
+    treasuryAddress?: string
 }
 
 /**
@@ -35,6 +49,7 @@ export type ForkEntry = { activationHeight: number | null } & Record<string, unk
 export type ForkConfigLike = Record<string, ForkEntry | undefined>
 
 const DIGEST_FORMAT = /^[0-9a-f]{64}$/
+const TREASURY_FORMAT = /^0x[0-9a-f]{64}$/
 
 /** Longest piece of peer-supplied text that is put into a log line. */
 const MAX_LOGGED_LENGTH = 64
@@ -77,14 +92,17 @@ export function localScheduleView(
         const entry = forkConfig[name]
         if (entry) forks[name] = entry.activationHeight
     }
-    return { chainId, forks, digest: forkScheduleDigest(forkConfig, chainId) }
+    const view: ScheduleView = { chainId, forks, digest: forkScheduleDigest(forkConfig, chainId) }
+    const treasury = forkConfig.gasFeeSeparation?.treasuryAddress
+    if (typeof treasury === "string") view.treasuryAddress = treasury.toLowerCase()
+    return view
 }
 
 /** A peer's view from its `getNetworkInfo` answer, or null when the answer has no fork table. */
 export function peerScheduleView(info: unknown): ScheduleView | null {
     if (info === null || typeof info !== "object") return null
     const { forks, chainId, forkScheduleDigest: digest } = info as {
-        forks?: Record<string, { activationHeight?: number | null } | undefined>
+        forks?: Record<string, { activationHeight?: number | null; treasuryAddress?: unknown } | undefined>
         chainId?: number | null
         forkScheduleDigest?: string
     }
@@ -94,30 +112,62 @@ export function peerScheduleView(info: unknown): ScheduleView | null {
         const height = forks[name]?.activationHeight
         if (height === null || typeof height === "number") out[name] = height
     }
-    return {
+    const view: ScheduleView = {
         chainId: chainId === null || typeof chainId === "number" ? chainId : undefined,
         forks: out,
         // Anything but a sha256 hex string is not a digest this node can use or print.
         digest: typeof digest === "string" && DIGEST_FORMAT.test(digest) ? digest : undefined,
     }
+    // Only an address-shaped value is compared and printed whole; anything
+    // else is left to the digest.
+    const treasury = forks.gasFeeSeparation?.treasuryAddress
+    if (typeof treasury === "string" && TREASURY_FORMAT.test(treasury.toLowerCase())) {
+        view.treasuryAddress = treasury.toLowerCase()
+    }
+    return view
 }
 
 export type ScheduleComparison =
     | { status: "agree" }
     /** The peer reports no fork data at all: nothing to compare. */
     | { status: "skipped" }
-    | { status: "mismatch"; lines: string[] }
+    /**
+     * `treasuryDiffers` when both sides have gasFeeSeparation active at the
+     * tip with different treasuries: a split from the next fee-bearing block,
+     * not a future one.
+     */
+    | {
+          status: "mismatch"
+          lines: string[]
+          treasuryDiffers?: boolean
+          /**
+           * A fork whose activation height differs is already active at the
+           * tip on either side (scheduled on one side and not the other
+           * counts): the nodes apply different rules now, so there is no
+           * later height to wait for.
+           */
+          activeForkDiffers?: boolean
+          /**
+           * The peer's own nearest scheduled height above the tip, when it has
+           * one. The peer decides whether to abstain by its own schedule, so a
+           * height only it schedules can put it out of consensus while ours
+           * shows no window at all.
+           */
+          theirNearest?: number
+      }
 
 /**
  * Compare two views. Equal digests agree. Differing digests are a mismatch, and
  * the forks whose heights differ, if any, are named. A peer on an older build
  * that publishes no digest is compared by the activation heights of the forks
  * both sides report and the chain id alone: a peer says nothing about a fork it
- * does not know.
+ * does not know. `tip` is this node's tip, against which a treasury difference
+ * is judged active or still ahead.
  */
 export function compareSchedules(
     ours: ScheduleView,
     theirs: ScheduleView,
+    tip: number,
 ): ScheduleComparison {
     if (theirs.digest !== undefined && ours.digest === theirs.digest) {
         return { status: "agree" }
@@ -137,6 +187,12 @@ export function compareSchedules(
     if (theirs.chainId !== undefined && ours.chainId !== theirs.chainId) {
         lines.push(`chainId: ours ${show(ours.chainId)}, theirs ${show(theirs.chainId)}`)
     }
+    const treasuryDiffers = activeTreasuriesDiffer(ours, theirs, tip)
+    if (scheduledTreasuriesDiffer(ours, theirs)) {
+        lines.push(
+            `gasFeeSeparation.treasuryAddress: ours ${ours.treasuryAddress}, theirs ${theirs.treasuryAddress}`,
+        )
+    }
     if (theirs.digest !== undefined) {
         // Digests cover only scheduled forks, so with equal heights and chain id a
         // difference can only be a scheduled fork's payload or the set of scheduled forks.
@@ -149,7 +205,62 @@ export function compareSchedules(
     } else if (lines.length === 0) {
         return { status: "agree" }
     }
-    return { status: "mismatch", lines }
+    const result: Extract<ScheduleComparison, { status: "mismatch" }> = { status: "mismatch", lines }
+    if (treasuryDiffers) result.treasuryDiffers = true
+    if (activeForksDiffer(ours, theirs, tip)) result.activeForkDiffers = true
+    const theirNearest = nearestScheduledAbove(theirs, tip)
+    if (theirNearest !== null) result.theirNearest = theirNearest
+    return result
+}
+
+function nearestScheduledAbove(view: ScheduleView, tip: number): number | null {
+    let nearest: number | null = null
+    for (const height of Object.values(view.forks)) {
+        if (typeof height === "number" && height > tip && (nearest === null || height < nearest)) {
+            nearest = height
+        }
+    }
+    return nearest
+}
+
+function activeForksDiffer(ours: ScheduleView, theirs: ScheduleView, tip: number): boolean {
+    const activeAt = (height: number | null) => height !== null && height <= tip
+    const names = new Set([...Object.keys(ours.forks), ...Object.keys(theirs.forks)])
+    for (const name of names) {
+        // A peer without a digest predates some forks and says nothing about
+        // one it does not report; a peer with one reports its whole registry,
+        // so a fork missing there is one it never applies.
+        if (!(name in theirs.forks) && theirs.digest === undefined) continue
+        const our = ours.forks[name] ?? null
+        const their = theirs.forks[name] ?? null
+        if (our !== their && (activeAt(our) || activeAt(their))) return true
+    }
+    return false
+}
+
+function scheduledTreasuriesDiffer(ours: ScheduleView, theirs: ScheduleView): boolean {
+    return (
+        typeof ours.forks.gasFeeSeparation === "number" &&
+        typeof theirs.forks.gasFeeSeparation === "number" &&
+        ours.treasuryAddress !== undefined &&
+        theirs.treasuryAddress !== undefined &&
+        ours.treasuryAddress !== theirs.treasuryAddress
+    )
+}
+
+/**
+ * A treasury difference splits the nodes only once both credit fees by it.
+ * Before that it is an ordinary schedule mismatch, which the watch escalates
+ * only near the activation height, so a fork scheduled far ahead does not
+ * stop a validator early.
+ */
+function activeTreasuriesDiffer(ours: ScheduleView, theirs: ScheduleView, tip: number): boolean {
+    const activeAt = (height: number | null | undefined) => typeof height === "number" && height <= tip
+    return (
+        scheduledTreasuriesDiffer(ours, theirs) &&
+        activeAt(ours.forks.gasFeeSeparation) &&
+        activeAt(theirs.forks.gasFeeSeparation)
+    )
 }
 
 export interface SchedulePeer {
@@ -165,14 +276,15 @@ export type PeerScheduleCheck =
     | { status: "unreachable"; reason: string }
 
 /**
- * Ask a peer for its schedule and compare. A peer that is still starting
- * answers 503 until it has loaded its genesis; that is not a mismatch, so it is
- * asked again a few times and then reported as not ready, to be checked later.
+ * Ask a peer for its schedule and compare at `options.tip`. A peer that is
+ * still starting answers 503 until it has loaded its genesis; that is not a
+ * mismatch, so it is asked again a few times and then reported as not ready,
+ * to be checked later.
  */
 export async function checkPeerSchedule(
     peer: SchedulePeer,
     ours: ScheduleView,
-    options: { attempts?: number; sleepMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+    options: { tip: number; attempts?: number; sleepMs?: number; sleep?: (ms: number) => Promise<void> },
 ): Promise<PeerScheduleCheck> {
     const attempts = options.attempts ?? 5
     const sleepMs = options.sleepMs ?? 2000
@@ -199,7 +311,7 @@ export async function checkPeerSchedule(
         }
         const theirs = peerScheduleView(answer.response)
         if (!theirs) return { status: "skipped" }
-        return compareSchedules(ours, theirs)
+        return compareSchedules(ours, theirs, options.tip)
     }
     return { status: "not-ready" }
 }

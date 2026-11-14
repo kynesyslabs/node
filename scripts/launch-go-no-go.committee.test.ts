@@ -26,7 +26,7 @@ const { default: getCommonValidatorSeed } = await import(
 const { getBoundCommittee, __resetValidatorCache } = await import(
     "src/libs/consensus/v2/routines/getShard"
 )
-const { firstCommittee, firstCommitteeSeed } = await import("./launch-go-no-go")
+const { firstCommittee, firstCommitteePins, firstCommitteeSeed } = await import("./launch-go-no-go")
 
 const address = (i: number) => "0x" + (i * 2654435761).toString(16).padStart(64, "ab")
 
@@ -75,6 +75,28 @@ describe("first committee", () => {
         const ours = firstCommittee(rows, "hash-0", 10)
         expect(ours[0]).toBe(PINNED_SHARD_IDENTITIES[1])
         expect(ours).toEqual(committee.map(id => id.toLowerCase()))
+    })
+
+    it("follows the genesis schedule of unpinnedCommittee, as the node does", async () => {
+        const rows = [...genesisRows(14), { address: PINNED_SHARD_IDENTITIES[1], status: "2", valid_at: 0 }]
+        const forks = { unpinnedCommittee: { activationHeight: 0 } }
+        sharedState.forkConfig = { ...sharedState.forkConfig, ...forks }
+        try {
+            const { committee } = await nodeCommittee(rows, 10)
+            const ours = firstCommittee(rows, "hash-0", 10, firstCommitteePins({ forks }))
+            expect(ours).toEqual(committee.map(id => id.toLowerCase()))
+            expect(ours[0]).not.toBe(PINNED_SHARD_IDENTITIES[1])
+        } finally {
+            sharedState.forkConfig = { committeeBinding: { activationHeight: 0 } }
+        }
+    })
+
+    it("keeps the pins while unpinnedCommittee is dormant or later than block 1", () => {
+        for (const forks of [{}, { unpinnedCommittee: { activationHeight: null } }, { unpinnedCommittee: { activationHeight: 2 } }]) {
+            expect(firstCommitteePins({ forks })).toEqual(PINNED_SHARD_IDENTITIES)
+        }
+        expect(firstCommitteePins(null)).toEqual(PINNED_SHARD_IDENTITIES)
+        expect(firstCommitteePins({ forks: { unpinnedCommittee: { activationHeight: 1 } } })).toEqual([])
     })
 
     it("leaves out validators that are not active at block 0", async () => {
