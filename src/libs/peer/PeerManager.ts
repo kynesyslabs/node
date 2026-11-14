@@ -14,7 +14,7 @@ import crypto from "node:crypto"
 import Peer from "./Peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
-import { isLoopbackHost, parseNodeUrl } from "src/config"
+import { isLoopbackHost, parseNodeUrl, stripTrailingDots } from "src/config"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import type { HelloPeerRequest } from "../network/manageHelloPeer"
 import {
@@ -597,7 +597,10 @@ export default class PeerManager {
 
         try {
             const ours = new URL(getSharedState.exposedUrl)
-            return url.hostname === ours.hostname && url.port === ours.port
+            return (
+                stripTrailingDots(url.hostname) ===
+                    stripTrailingDots(ours.hostname) && url.port === ours.port
+            )
         } catch (_e) {
             return false
         }

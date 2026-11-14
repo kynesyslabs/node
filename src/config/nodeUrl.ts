@@ -36,7 +36,7 @@ function stripZoneId(host: string): string {
     return at < 0 ? host : host.slice(0, at)
 }
 
-function stripTrailingDots(host: string): string {
+export function stripTrailingDots(host: string): string {
     let end = host.length
     while (end > 0 && host.charCodeAt(end - 1) === 46) end--
     return host.slice(0, end)

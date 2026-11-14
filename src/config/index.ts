@@ -131,6 +131,7 @@ export { loadConfig } from "./loader"
 export {
     parseNodeUrl,
     isLoopbackHost,
+    stripTrailingDots,
     validateExposedUrl,
     validateBuildProvenance,
 } from "./nodeUrl"
