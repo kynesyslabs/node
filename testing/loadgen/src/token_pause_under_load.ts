@@ -20,6 +20,7 @@ import {
   waitForTxReady,
   withDemosWallet,
 } from "./token_shared"
+import { logNonCriticalErrorOnce } from "./framework/common"
 
 type Mode = "pre_pause" | "transition_to_pause" | "paused" | "transition_to_unpause" | "post_unpause"
 
@@ -466,8 +467,9 @@ async function worker(params: {
     try {
       const current = await demos.getAddressNonce(senderHex)
       nextNonce = Number(current) + 1
-    } catch {
+    } catch (error) {
       // keep old nextNonce and continue; will show up in errorSamples if broken
+      logNonCriticalErrorOnce("token_pause_under_load.resyncNonce", "token_pause_under_load.resyncNonce", error, { senderHex })
       nextNonce++
     }
   }

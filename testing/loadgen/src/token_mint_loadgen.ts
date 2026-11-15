@@ -15,6 +15,7 @@ import {
   waitForRpcReady,
   waitForTxReady,
 } from "./token_shared"
+import { logNonCriticalErrorOnce } from "./framework/common"
 
 type LoadgenConfig = {
   targets: string[]
@@ -355,7 +356,8 @@ export async function runTokenMintLoadgen() {
     for (const [addr, balRaw] of Object.entries(postRunSettle.perNode[0].snapshot.balances)) {
       try {
         expectedPresent[addr] = BigInt(balRaw ?? "0") > 0n
-      } catch {
+      } catch (error) {
+        logNonCriticalErrorOnce("token_mint_loadgen.expectedPresent", "token_mint_loadgen.expectedPresent", error, { address: addr })
         expectedPresent[addr] = false
       }
     }

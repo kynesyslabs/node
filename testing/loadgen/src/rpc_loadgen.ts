@@ -1,6 +1,6 @@
 import { appendJsonl, getRunConfig, writeJson } from "./framework/io"
 import { type Counters, ReservoirSampler, summarizeLatency } from "./framework/metrics"
-import { envBool, envFloat, envInt, nowMs, sleep, splitCsv } from "./framework/common"
+import { envBool, envFloat, envInt, nowMs, sleep, splitCsv, logNonCriticalErrorOnce } from "./framework/common"
 import { HttpStatusError, NetworkError, RpcRequestError, normalizeLoadgenError } from "./framework/errors"
 import { startProgressReporter } from "./framework/progress"
 
@@ -54,7 +54,7 @@ function getConfig(): LoadgenConfig {
   }
 }
 
-async function isRpcReady(baseUrl: string, rpcPath: string): Promise<boolean> {
+export async function isRpcReady(baseUrl: string, rpcPath: string): Promise<boolean> {
   const url = baseUrl.replace(/\/+$/, "") + rpcPath
   try {
     const res = await fetch(url, {
@@ -65,7 +65,9 @@ async function isRpcReady(baseUrl: string, rpcPath: string): Promise<boolean> {
     if (!res.ok) return false
     const data = (await res.json().catch(() => null)) as any
     return typeof data?.result === "number" && data.result >= 200 && data.result < 300
-  } catch {
+  } catch (error) {
+    // Keyed per target: targets are awaited in parallel and each can fail differently.
+    logNonCriticalErrorOnce(`rpc_loadgen.isRpcReady:${baseUrl}`, "rpc_loadgen.isRpcReady", error, { baseUrl, rpcPath })
     return false
   }
 }

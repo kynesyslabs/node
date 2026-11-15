@@ -1,5 +1,5 @@
 import { getRunConfig, writeJson } from "../../framework/io"
-import { envInt } from "../../framework/common"
+import { envInt, logNonCriticalError } from "../../framework/common"
 import { maybeSilenceConsole } from "../../token_shared"
 import { PeerConnection } from "src/libs/omniprotocol/transport/PeerConnection"
 import { OmniOpcode } from "src/libs/omniprotocol/protocol/opcodes"
@@ -42,7 +42,7 @@ function getConnectionStateName(state: number): string {
   return Object.entries(ConnectionState).find(([_, v]) => v === state)?.[0] ?? `UNKNOWN(${state})`
 }
 
-async function probeTarget(target: string, connectTimeoutMs: number, requestTimeoutMs: number, cycles: number): Promise<ReconnectProbe> {
+export async function probeTarget(target: string, connectTimeoutMs: number, requestTimeoutMs: number, cycles: number): Promise<ReconnectProbe> {
   const connection = new PeerConnection(`loadgen:${target}`, target)
   const reports: ReconnectCycleReport[] = []
   const firstLatencies: number[] = []
@@ -111,7 +111,7 @@ async function probeTarget(target: string, connectTimeoutMs: number, requestTime
       error: error instanceof Error ? error.message : String(error),
     }
   } finally {
-    await connection.close().catch(() => {})
+    await connection.close().catch(error => logNonCriticalError("omni_reconnection.close", error, { target }))
   }
 }
 

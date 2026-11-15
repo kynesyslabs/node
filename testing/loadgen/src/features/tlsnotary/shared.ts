@@ -1,4 +1,4 @@
-import { envInt, normalizeRpcUrl, splitCsv } from "../../framework/common"
+import { envInt, normalizeRpcUrl, splitCsv, logNonCriticalErrorOnce } from "../../framework/common"
 
 export type TlsNotaryJsonResponse = {
   status: number
@@ -44,7 +44,8 @@ export async function fetchTlsNotaryJson(
     let json: any = null
     try {
       json = text.length > 0 ? JSON.parse(text) : null
-    } catch {
+    } catch (error) {
+      logNonCriticalErrorOnce("tlsnotary.requestJson", "tlsnotary.requestJson", error, { rpcUrl, route, status: response.status })
       json = null
     }
     return {

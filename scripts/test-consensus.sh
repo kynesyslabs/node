@@ -135,6 +135,17 @@ SUITE_FILES=(
     src/libs/network/sudoReplayFloor.test.ts
     scripts/sudo-call.test.ts
     testing/loadgen/src/features/gcr/gcr_points_smoke.test.ts
+    # Loadgen error logging (#708), including the guard against silent catches
+    testing/loadgen/src/features/omni/close_log.test.ts
+    testing/loadgen/src/features/peersync/shared.test.ts
+    testing/loadgen/src/features/tlsnotary/shared.test.ts
+    testing/loadgen/src/framework/common.test.ts
+    testing/loadgen/src/framework/silent_catch.test.ts
+    testing/loadgen/src/rpc_ready_log.test.ts
+    testing/loadgen/src/token_holders_export.test.ts
+    testing/loadgen/src/token_names_from_runs.test.ts
+    testing/loadgen/src/token_script_complex_policy_amounts.test.ts
+    testing/loadgen/src/token_total_supply_log.test.ts
 )
 
 runner_for() {

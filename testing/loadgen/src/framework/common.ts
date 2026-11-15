@@ -76,22 +76,77 @@ export function normalizeHexAddress(address: string): string {
 
 const loggedNonCriticalKeys = new Set<string>()
 
-function stringifyLogDetails(details: Record<string, unknown> | undefined): string {
-  if (!details) return ""
+const LOG_ESCAPES: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t" }
+
+// Peer- or node-supplied text can hold newlines, terminal escapes or bidi overrides
+// that forge or hide log lines: show C0/C1 controls, DEL and bidi controls as escapes.
+export function escapeControlChars(text: string): string {
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\u{202a}-\u{202e}\u{2066}-\u{2069}]/gu,
+    char => LOG_ESCAPES[char] ?? `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)
+}
+
+// Peer- or node-supplied text (RPC amounts, error messages) has no size limit, so each
+// log field and the whole record are cut. The message cap keeps a truncatedError copy
+// (500 characters plus its length marker) whole.
+const LOG_MESSAGE_MAX_CHARS = 1_000
+const LOG_FIELD_MAX_CHARS = 500
+const LOG_RECORD_MAX_CHARS = 2_000
+
+// `text` cut to `maxChars` plus a "…(N chars)" marker with the full length.
+function cutText(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…(${text.length} chars)` : text
+}
+
+// cutText for text that is escaped here: escapes can make the text up to six times
+// longer, so whole escapes are kept up to `maxChars` and the marker gives the original
+// length. Later cuts and escaping then leave the copy and its marker as they are.
+function cutEscaped(text: string, maxChars: number): string {
+  let shown = ""
+  for (const char of text.slice(0, maxChars)) {
+    const escaped = escapeControlChars(char)
+    if (shown.length + escaped.length > maxChars) return `${shown}…(${text.length} chars)`
+    shown += escaped
+  }
+  return text.length > maxChars ? `${shown}…(${text.length} chars)` : shown
+}
+
+// String() throws on values such as RPC JSON {"toString":null}; log the type instead.
+function textOrType(value: unknown): string {
   try {
-    return ` ${JSON.stringify(details)}`
+    return String(value)
   } catch {
-    return ""
+    return typeof value
   }
 }
 
+function logFieldText(value: unknown, cut: (text: string) => string): string {
+  return cut(textOrType(value))
+}
+
+// Numbers, booleans and null stay JSON values; strings, bigints and nested values
+// become cut text, so JSON.stringify sees only bounded, serializable fields.
+function stringifyLogDetails(details: Record<string, unknown> | undefined): string {
+  if (!details) return ""
+  const fields: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(details)) {
+    const keepAsJson = value == null || typeof value === "number" || typeof value === "boolean"
+    fields[key] = keepAsJson ? value : logFieldText(value, text => cutText(text, LOG_FIELD_MAX_CHARS))
+  }
+  return ` ${JSON.stringify(fields)}`
+}
+
+// One record per call: the message escaped and cut (so its marker stays within the
+// record cap), each details value cut, control characters escaped across the whole
+// line (JSON.stringify leaves DEL, C1 and bidi controls raw), then the line cut.
 export function logNonCriticalError(
   context: string,
   error: unknown,
   details?: Record<string, unknown>,
 ) {
-  const message = error instanceof Error ? error.message : String(error)
-  console.error(`[loadgen] Non-critical error in ${context}: ${message}${stringifyLogDetails(details)}`)
+  const message = logFieldText(error instanceof Error ? error.message : error,
+    text => cutEscaped(text, LOG_MESSAGE_MAX_CHARS))
+  const line = `[loadgen] Non-critical error in ${context}: ${message}${stringifyLogDetails(details)}`
+  console.error(cutText(escapeControlChars(line), LOG_RECORD_MAX_CHARS))
 }
 
 export function logNonCriticalErrorOnce(
@@ -103,6 +158,58 @@ export function logNonCriticalErrorOnce(
   if (loggedNonCriticalKeys.has(key)) return
   loggedNonCriticalKeys.add(key)
   logNonCriticalError(context, error, details)
+}
+
+const nonCriticalKeyBudgetUsed = new Map<string, number>()
+
+// logNonCriticalErrorOnce for keys built from peer-supplied text, which can vary
+// without limit: at most `budget` distinct keys are kept and logged per context.
+// The first new key past the budget logs one line instead; later ones log nothing.
+export function logNonCriticalErrorOnceCapped(
+  context: string,
+  budget: number,
+  key: string,
+  error: unknown,
+  details?: Record<string, unknown>,
+) {
+  const fullKey = `${context}:${key}`
+  if (loggedNonCriticalKeys.has(fullKey)) return
+  const used = nonCriticalKeyBudgetUsed.get(context) ?? 0
+  if (used > budget) return
+  nonCriticalKeyBudgetUsed.set(context, used + 1)
+  if (used < budget) {
+    logNonCriticalErrorOnce(fullKey, context, error, details)
+    return
+  }
+  logNonCriticalError(context, `${budget} distinct errors logged; further distinct errors are counted but not logged`)
+}
+
+export function loggedNonCriticalKeyCount(): number {
+  return loggedNonCriticalKeys.size
+}
+
+function errorName(error: unknown): string {
+  return textOrType((error as { name?: unknown } | null | undefined)?.name ?? typeof error)
+}
+
+// Error text from a peer has no size limit (e.g. a confirm rejection message): a new
+// Error with the same name and the message with control characters escaped, cut to
+// `maxChars` plus a "…(N chars)" marker with the original length. Key and log this copy,
+// not the original, so neither scans nor prints the full text.
+export function truncatedError(error: unknown, maxChars = 500): Error {
+  const message = textOrType(error instanceof Error ? error.message : error)
+  const cut = new Error(cutEscaped(message, maxChars))
+  cut.name = errorName(error)
+  return cut
+}
+
+// Once-log key that groups errors differing only in nonces, hashes or ids: the
+// error name plus the message with hex runs and digits replaced, capped at 200 chars.
+export function errorShapeKey(error: unknown): string {
+  const name = errorName(error)
+  const message = error instanceof Error ? error.message : String(error)
+  const shape = message.replace(/0x[0-9a-f]+|\b(?=[0-9a-f]*\d)[0-9a-f]+\b|\d+/gi, "#")
+  return `${name}:${shape}`.slice(0, 200)
 }
 
 export function installGlobalFetchTimeout(envName = "FETCH_TIMEOUT_MS"): number {

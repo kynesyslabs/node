@@ -19,6 +19,7 @@ import {
   withDemosWallet,
 } from "./token_shared"
 import { sleep, envInt, envBool, splitCsv, normalizeRpcUrl, nowMs, unique, percentile, ReservoirSampler } from "./testing_utils"
+import { logNonCriticalErrorOnce } from "./framework/common"
 
 type LoadgenConfig = {
   targets: string[]
@@ -455,7 +456,8 @@ export async function runTokenScriptTransferLoadgen() {
     for (const addr of settleSample) {
       try {
         expectedPresent[addr] = BigInt(b[addr] ?? "0") > 0n
-      } catch {
+      } catch (error) {
+        logNonCriticalErrorOnce("token_script_transfer_loadgen.expectedPresent", "token_script_transfer_loadgen.expectedPresent", error, { address: addr })
         expectedPresent[addr] = false
       }
     }

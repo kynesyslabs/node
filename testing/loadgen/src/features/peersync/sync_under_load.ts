@@ -1,6 +1,6 @@
 import { ReservoirSampler, summarizeLatency } from "../../framework/metrics"
 import { appendJsonl, getRunConfig, writeJson } from "../../framework/io"
-import { envBool, envFloat, envInt, nowMs, sleep } from "../../framework/common"
+import { envBool, envFloat, envInt, logNonCriticalErrorOnce, nowMs, sleep } from "../../framework/common"
 import { startProgressReporter } from "../../framework/progress"
 import { nodeCall, NO_FALLBACKS } from "../../framework/rpc"
 import { maybeSilenceConsole } from "../../token_shared"
@@ -129,7 +129,10 @@ export async function runSyncUnderLoad() {
   })
 
   const reporter = emitTimeseries ? setInterval(async () => {
-    const observation = await getClusterObservation(initial.healthyRpcUrls).catch(() => null)
+    const observation = await getClusterObservation(initial.healthyRpcUrls).catch(error => {
+      logNonCriticalErrorOnce("sync_under_load.timeseries", "sync_under_load.timeseries", error, { rpcUrls: initial.healthyRpcUrls })
+      return null
+    })
     const elapsedSec = Math.max(0.001, (nowMs() - counters.startedAtMs) / 1000)
     appendJsonl(timeseriesPath, {
       tSec: Number(elapsedSec.toFixed(3)),
