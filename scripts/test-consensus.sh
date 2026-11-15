@@ -115,6 +115,7 @@ SUITE_FILES=(
     testing/genesis/identityCarryover.test.ts
     testing/genesis/normalizeGenesisForHash.test.ts
     tests/web2/proxy.test.ts
+    src/libs/abstraction/web2/githubToken.test.ts
     # Apply determinism, identity admission and sudo auth (launch rows 3, 7, 8)
     src/features/incentive/pointsApplyPure.test.ts
     src/libs/blockchain/gcr/applyTime.test.ts

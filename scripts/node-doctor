@@ -860,6 +860,37 @@ check_web2_identity_credentials() {
 	done
 }
 
+# A set GITHUB_TOKEN can still be one GitHub no longer accepts: expired or
+# revoked, it makes the node refuse every GitHub identity link (#1027).
+check_github_token() {
+	local token out code
+	token=$(node_env GITHUB_TOKEN)
+	# An empty one is already a FAIL of check_web2_identity_credentials.
+	[[ -n "${token//[[:space:]]/}" ]] || return 0
+	if ! command -v curl &>/dev/null; then
+		prod_line WARN "GitHub token" "skipped: curl is needed to ask GitHub whether it accepts GITHUB_TOKEN"
+		return
+	fi
+	# The node's GitHub client drops a leading "token " or "bearer " (any
+	# case), so a token written that way works there and is asked about bare.
+	case "${token}" in
+	[Tt][Oo][Kk][Ee][Nn]\ * | [Bb][Ee][Aa][Rr][Ee][Rr]\ *)
+		token="${token#* }"
+		while [[ "${token}" == " "* ]]; do token="${token# }"; done
+		;;
+	esac
+	# The token goes in on stdin, not on a command line other users can list.
+	out=$(printf 'header = "Authorization: Bearer %s"\n' "${token}" |
+		curl -sS -K - -o /dev/null -w '\n%{http_code}' --max-time 10 https://api.github.com/rate_limit 2>&1)
+	code="${out##*$'\n'}"
+	case "${code}" in
+	200) prod_line PASS "GitHub token" "accepted by GitHub" ;;
+	401) prod_line FAIL "GitHub token" "this node's GitHub token was rejected by GitHub (expired or revoked); the node operator must renew GITHUB_TOKEN" ;;
+	000) prod_line WARN "GitHub token" "api.github.com could not be reached (${out%%$'\n'*}): the node reads gists there, so allow outbound HTTPS to it" ;;
+	*) prod_line WARN "GitHub token" "api.github.com answered HTTP ${code}, so whether it accepts GITHUB_TOKEN is unknown" ;;
+	esac
+}
+
 # The node tightens the mode itself on start, but with PROD=true it refuses
 # to start when it cannot (read-only mount, other owner), so a host file
 # other users can read is caught here before the start fails.
@@ -890,6 +921,7 @@ run_production_checks() {
 	check_genesis_pin EXPECTED_GENESIS_BLOCK_HASH
 	check_genesis_file
 	check_web2_identity_credentials
+	check_github_token
 	check_identity_file_mode
 	check_unset DEMOS_ALLOW_UNPINNED_GENESIS "mainnet validators always pin the genesis"
 	check_unset DEMOS_DISABLE_FORK_MACHINERY "rehearsal-only, it ignores the genesis fork schedule"
@@ -926,6 +958,7 @@ OPTIONS:
                     clock sync, outbound NTP, genesis pins, the genesis file the
                     node reads (shardSize range, validators against the quorum,
                     validator URLs), the identity file mode (600 or stricter),
+                    the GitHub token (one request to api.github.com),
                     and one-start switches left set; one
                     PASS/WARN/FAIL line each, exit 1 on any FAIL
     --parameters FILE
