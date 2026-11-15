@@ -193,6 +193,21 @@ function normalizeIP(raw: string): string {
 }
 
 /**
+ * Whether `raw` is a loopback address in any spelling: all of 127.0.0.0/8
+ * (not only 127.0.0.1) and `::1`, including their IPv4-mapped and bracketed
+ * forms. Hostnames, unparseable values and values longer than any address
+ * spelling (64 characters) are not loopback.
+ */
+function isLoopbackIP(raw: string): boolean {
+    if (raw.length > 64) return false
+    try {
+        return ipaddr.parse(normalizeIP(raw)).range() === "loopback"
+    } catch {
+        return false
+    }
+}
+
+/**
  * Check whether an IP is inside any CIDR in the resolved trusted-proxy set.
  */
 function isWithinTrusted(
@@ -249,11 +264,17 @@ export class RateLimiter {
     private static instance: RateLimiter
     /**
      * Loopback addresses that bypass proxy-header handling. When a header
-     * value is loopback we never trust it as a "real" client identifier;
-     * we fall through to the socket peer (which itself is whitelisted by
-     * `LOCALHOST_IPS` further down the pipeline if it's also loopback).
+     * value is loopback (in legacy and strict mode) we never trust it as a
+     * "real" client identifier; we skip it and fall through to the next
+     * header, then the socket peer (which itself is whitelisted by
+     * `isLoopbackIP` further down the pipeline if it's also loopback). Only
+     * the socket peer can make a request local.
      */
     private local_ips = ["127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"]
+
+    private isLocalHeaderValue(value: string): boolean {
+        return this.local_ips.includes(value) || isLoopbackIP(value)
+    }
 
     /** Resolved trusted-proxy CIDRs. Empty when no list configured. */
     private trustedProxies: TrustedProxyCIDR[]
@@ -541,14 +562,16 @@ export class RateLimiter {
         const cfIp = req.headers.get("cf-connecting-ip")
 
         if (this.xffMode === "legacy") {
+            // Check the normalised value, the same string the whitelist sees.
             if (forwardedFor) {
-                const firstIp = forwardedFor.split(",")[0].trim()
-                if (firstIp && !this.local_ips.includes(firstIp)) {
-                    return normalizeIP(firstIp)
+                const firstIp = normalizeIP(forwardedFor.split(",")[0].trim())
+                if (firstIp && !this.isLocalHeaderValue(firstIp)) {
+                    return firstIp
                 }
             }
-            if (realIp && !this.local_ips.includes(realIp)) {
-                return normalizeIP(realIp)
+            const realIpNorm = realIp ? normalizeIP(realIp) : ""
+            if (realIpNorm && !this.isLocalHeaderValue(realIpNorm)) {
+                return realIpNorm
             }
             return socketIp
         }
@@ -570,25 +593,30 @@ export class RateLimiter {
         }
 
         // Socket is trusted — walk XFF right-to-left, returning the
-        // left-most address that is NOT itself a trusted hop. Falls back
-        // to X-Real-IP, then CF-Connecting-IP, then socket.
+        // left-most address that is NOT itself a trusted hop or loopback.
+        // Falls back to X-Real-IP, then CF-Connecting-IP (each skipped when
+        // loopback), then socket. The walk examines at most the last 16
+        // entries.
         if (forwardedFor) {
             const chain = forwardedFor
                 .split(",")
                 .map(s => s.trim())
                 .filter(s => s.length > 0)
-            for (let i = chain.length - 1; i >= 0; i--) {
+            for (let i = chain.length - 1; i >= Math.max(0, chain.length - 16); i--) {
                 const candidate = normalizeIP(chain[i])
-                if (!isWithinTrusted(candidate, this.trustedProxies)) {
+                if (
+                    !isWithinTrusted(candidate, this.trustedProxies) &&
+                    !this.isLocalHeaderValue(candidate)
+                ) {
                     return candidate
                 }
             }
         }
-        if (realIp) {
-            return normalizeIP(realIp)
-        }
-        if (cfIp) {
-            return normalizeIP(cfIp)
+        for (const header of [realIp, cfIp]) {
+            const ip = header ? normalizeIP(header) : ""
+            if (ip && !this.isLocalHeaderValue(ip)) {
+                return ip
+            }
         }
         return socketIp
     }
@@ -674,9 +702,9 @@ export class RateLimiter {
             : AUTH_FAILURE_BUCKET
     }
 
-    /** Whether `ip` is on the operator's whitelist (loopback included). */
+    /** Whether `ip` is on the operator's whitelist or is loopback. */
     public isWhitelistedIP(ip: string | undefined): boolean {
-        return !!ip && this.config.whitelistedIPs.includes(ip)
+        return !!ip && (isLoopbackIP(ip) || this.config.whitelistedIPs.includes(ip))
     }
 
     public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
@@ -787,7 +815,7 @@ export class RateLimiter {
             }
 
             const clientIP = this.getClientIP(req, server)
-            const whitelistedIP = this.config.whitelistedIPs.includes(clientIP)
+            const whitelistedIP = this.isWhitelistedIP(clientIP)
 
             // Check for identity/signature headers for key-based whitelisting
             const identity = req.headers.get("identity")
