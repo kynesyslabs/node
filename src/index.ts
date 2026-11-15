@@ -51,6 +51,8 @@ import { ensureValidatorSetSnapshot } from "./libs/blockchain/finality/validator
 import { pruneStorageHistory } from "./libs/blockchain/finality/storageHistory"
 import { acquireIdentityLock } from "./libs/identity/identityLock"
 import {
+    bindSigningRecordKey,
+    SigningKeyMismatchError,
     haltSigning,
     holdSigningUntilRestartFloor,
     reportSigningHaltMarker,
@@ -762,6 +764,19 @@ async function main() {
             `[IDENTITY] ${error instanceof Error ? error.message : String(error)}`,
         )
         process.exit(1)
+    }
+    // From here on a signing record of another key is refused
+    try {
+        bindSigningRecordKey(
+            getSharedState.identityFile,
+            getSharedState.publicKeyHex,
+        )
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log.error(`[SIGNING] ${message}`)
+        // Stopped in this process only (no marker): a restart with the
+        // record's key, or with the record moved away, signs again
+        if (error instanceof SigningKeyMismatchError) haltSigning(message)
     }
     // The node still syncs and serves; only block signing stays refused.
     reportSigningHaltMarker(getSharedState.identityFile)

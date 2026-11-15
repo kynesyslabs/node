@@ -12,6 +12,8 @@ export interface SigningRecord {
     timestamp: number
     hash: string
     signedAt: number
+    /** Hex public key of the identity the record belongs to. */
+    publicKey?: string
 }
 
 export interface BlockSigningRequest {
@@ -41,6 +43,14 @@ export class SigningRecordError extends Error {
     constructor(message: string) {
         super(message)
         this.name = "SigningRecordError"
+    }
+}
+
+/** The signing record belongs to another key than the one this node runs. */
+export class SigningKeyMismatchError extends SigningRecordError {
+    constructor(message: string) {
+        super(message)
+        this.name = "SigningKeyMismatchError"
     }
 }
 
@@ -181,6 +191,7 @@ export function __resetSigningHalt(): void {
     signedHere.clear()
     cached = null
     leaseCheck = null
+    signingKey = null
 }
 
 // Block hashes this process recorded, newest last. A retried round replaces
@@ -255,9 +266,14 @@ function isValidRecord(value: unknown): value is SigningRecord {
         Number.isFinite(r.timestamp) &&
         typeof r.hash === "string" &&
         r.hash.length > 0 &&
-        Number.isFinite(r.signedAt)
+        Number.isFinite(r.signedAt) &&
+        (r.publicKey === undefined ||
+            (typeof r.publicKey === "string" && r.publicKey.length > 0))
     )
 }
+
+// The public key of this node's identity, set at boot by bindSigningRecordKey
+let signingKey: string | null = null
 
 /**
  * Returns null only when no record exists yet. A record that cannot be read
@@ -288,7 +304,45 @@ export function loadSigningRecord(identityFile: string): SigningRecord | null {
             `signing record ${file} has an unexpected shape; refusing to sign`,
         )
     }
+    if (
+        signingKey !== null &&
+        parsed.publicKey !== undefined &&
+        parsed.publicKey !== signingKey
+    ) {
+        throw new SigningKeyMismatchError(
+            `signing record ${file} belongs to key ${parsed.publicKey}, not to this node's key ${signingKey}; refusing to sign. ` +
+                "Run this node with the identity of that key, or, if it now runs another key on purpose, " +
+                `move the record and the other ${identityFile}.* signing-state files away together with the identity they belong to`,
+        )
+    }
     return parsed
+}
+
+/**
+ * At boot, once the identity is loaded: from here on a signing record of
+ * another key is refused, and a record without a key (written by an older
+ * version) is given this one.
+ */
+export function bindSigningRecordKey(
+    identityFile: string,
+    publicKey: string,
+): void {
+    signingKey = publicKey
+    cached = null
+    // A record of another key is refused even while its lock is held
+    loadSigningRecord(identityFile)
+    const file = resolveWriteTarget(signingRecordPath(identityFile))
+    const release = acquireRecordLock(file)
+    try {
+        const record = loadSigningRecord(identityFile)
+        if (!record || record.publicKey !== undefined) return
+        writeRecordAtomically(file, { ...record, publicKey })
+        log.info(
+            `[SIGNING] signing record ${signingRecordPath(identityFile)} had no key; bound it to ${publicKey}`,
+        )
+    } finally {
+        release()
+    }
 }
 
 // Container entrypoints bridge this file into a persistent volume with a
@@ -582,13 +636,14 @@ export function recordBlockSignature(
                 `[SIGNING] signing record ${signingRecordPath(identityFile)} belongs to another chain (genesis ${verdict.last.genesisHash}, current ${request.genesisHash}); overwriting it`,
             )
         }
-        const record = {
+        const record: SigningRecord = {
             genesisHash: request.genesisHash,
             height: request.height,
             timestamp: request.timestamp,
             hash: request.hash,
             signedAt: Date.now(),
         }
+        if (signingKey !== null) record.publicKey = signingKey
         writeRecordAtomically(file, record)
         cached = { identityFile, record, mtimeMs: recordMtime(identityFile) }
     } finally {
