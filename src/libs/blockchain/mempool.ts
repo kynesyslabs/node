@@ -364,13 +364,15 @@ export default class Mempool {
      * a usable timestamp at all. The
      * reference-block window already ages txs out, but only as blocks are
      * produced; a stalled chain would otherwise keep a flood forever.
-     * Throttled, since every admission asks for it.
+     * Throttled, since every admission asks for it. A clock stepped back
+     * behind the last sweep counts as a lapsed interval.
      */
     public static async pruneExpiredByAge(
         now = Date.now(),
         force = false,
     ): Promise<number> {
-        if (!force && now - this.lastAgeSweep < AGE_SWEEP_MIN_INTERVAL_MS) {
+        const last = this.lastAgeSweep
+        if (!force && now >= last && now - last < AGE_SWEEP_MIN_INTERVAL_MS) {
             return 0
         }
         this.lastAgeSweep = now
