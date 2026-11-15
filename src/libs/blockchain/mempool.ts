@@ -1111,10 +1111,10 @@ export default class Mempool {
                 )
                 return false
             }
-            if (!isWithinDeepWindow(tx.reference_block, lastBlock)) {
+            if (!isWithinDeepWindow(peerColumns.reference_block, lastBlock)) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${tx.hash}: reference block ` +
-                        `${tx.reference_block} outside the allowed window at block ${lastBlock}`,
+                        `${peerColumns.reference_block} outside the allowed window at block ${lastBlock}`,
                 )
                 return false
             }

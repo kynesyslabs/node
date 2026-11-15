@@ -26,7 +26,7 @@ const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304])
 async function readCapped(
     body: AsyncIterable<Uint8Array> | null,
     maxBytes: number,
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
     if (!body) return new Uint8Array(0)
     const chunks: Uint8Array[] = []
     let received = 0

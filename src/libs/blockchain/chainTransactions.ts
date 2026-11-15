@@ -203,7 +203,7 @@ export async function getBlockTransactions(
             getSharedState.candidateBlock.content.ordered_transactions,
         )
         const mempoolTxs = []
-        const status = new Set([
+        const status = new Set<string>([
             TRANSACTION_STATUS.CONFIRMED,
             TRANSACTION_STATUS.FAILED,
         ])
