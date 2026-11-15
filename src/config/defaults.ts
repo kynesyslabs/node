@@ -204,7 +204,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         etherscanApiKey: "",
         heliusApiKey: "",
         rapidApiKey: "",
-        rapidApiHost: "",
+        rapidApiHost: "twitter-api45.p.rapidapi.com",
         solanaRpc: "",
         zkAttestationPoints: 10,
     },

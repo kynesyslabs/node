@@ -388,6 +388,15 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     must name it: otherwise every client counts as the proxy, which shares
     one cap, or, for a proxy on the same host, is loopback and skips the
     per-caller caps (only the node-wide cap applies).
+- From the first release after `v1.0.0-rc.11`:
+  - An empty `RAPID_API_HOST` passes `node-doctor --production` and uses the
+    Twitter API45 default.
+  - Each RapidAPI (Twitter) provider read is capped at 4.5 s (was 30 s) and
+    at most 4 MiB, or `WEB2_MAX_RESPONSE_BYTES` if that is smaller (was
+    `WEB2_MAX_RESPONSE_BYTES` alone).
+  - A missing `RAPID_API_KEY` is now refused before any request is sent.
+    Before, the request went out without a key and RapidAPI refused it.
+    Either way the Twitter check fails.
 
 ## Known limits
 

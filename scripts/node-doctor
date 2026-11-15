@@ -844,7 +844,6 @@ WEB2_IDENTITY_CREDENTIALS=(
 	"GITHUB_TOKEN:GitHub identity links"
 	"DISCORD_BOT_TOKEN:Discord identity links"
 	"RAPID_API_KEY:Twitter/X identity links"
-	"RAPID_API_HOST:Twitter/X identity links"
 )
 check_web2_identity_credentials() {
 	local entry key what v
@@ -858,6 +857,15 @@ check_web2_identity_credentials() {
 			prod_line PASS "${key}" "set"
 		fi
 	done
+	local host
+	host=$(node_env RAPID_API_HOST)
+	if [[ -z "${host}" ]]; then
+		prod_line PASS "RAPID_API_HOST" "empty: using Twitter API45 default (twitter-api45.p.rapidapi.com)"
+	elif [[ -z "${host//[[:space:]]/}" ]]; then
+		prod_line FAIL "RAPID_API_HOST" "RAPID_API_HOST is whitespace only; the node will not fall back to the default for it"
+	else
+		prod_line PASS "RAPID_API_HOST" "set"
+	fi
 }
 
 # The node tightens the mode itself on start, but with PROD=true it refuses
