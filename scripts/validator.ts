@@ -266,4 +266,4 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch(e => exitWith(e))
+main().catch(e => exitWith(String(e?.message ?? e)))
