@@ -388,7 +388,7 @@ If running behind NAT, port-forward `RPC_PORT` (53550), `OMNI_PORT` (53551) and 
 
 **2. Provide a bootstrap peer list.**
 
-The node persists its peer list in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's full `EXPOSED_URL`, exactly as announced, port included (a peer may publish another `RPC_PORT` than 53550); an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key out: the node adds itself. On a validator network list every other validator.
+The node persists its peer list in its state volume (`demos_node_state`, plus `INSTANCE_SUFFIX` when set) at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write the known peers into that volume before the first start. Each entry maps a peer's public key (its identity, which the peer must prove by signing) to that peer's full `EXPOSED_URL`, exactly as announced, port included (a peer may publish another `RPC_PORT` than 53550); an entry with `null` as the URL is skipped with `Invalid peer data format`. Leave your own key and public URL out: the node adds itself, and a listed URL that is dialed and answers with this node's identity refuses boot. Remove such an entry before restarting. On a validator network list every other validator.
 
 Run this from the checkout, with `STATE_VOLUME` and `HELPER_IMAGE` set as in [step 3](#run-a-released-image-validators) of the released-image install (a source build sets them the same way):
 
@@ -953,6 +953,8 @@ Copy the templates and edit them:
 cp .env.example .env
 cp demos_peerlist.json.example demos_peerlist.json
 ```
+
+The peer list example is a placeholder: its key and URL are not valid, so the node skips it and boots with no peers (`[BOOTSTRAP] No usable peers`). Replace it with a real validator in [Joining a Network](#8-joining-a-network) before you expect to join one. On this node's RPC port, only two kinds of entry are skipped: the exact bound host (`RPC_BIND`), and, for a wildcard bind (`0.0.0.0` or `::`), a numeric loopback address the listener accepts (`127.0.0.0/8`, `::1`, or IPv4-mapped `127.0.0.0/8`). A hostname bind such as `RPC_BIND=localhost` matches only that hostname, and a numeric bind only that same address, so with `RPC_BIND=localhost` an entry for `http://127.0.0.1:53550` is dialed. Other spellings, including `localhost` on a wildcard bind and this node's public URL, are dialed; if they answer as this node, boot is refused and the error log names the URL. Remove that entry from the peer list by hand and restart.
 
 For the bare-metal path, override these in `.env`:
 

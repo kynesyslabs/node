@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs"
 
 import { demToOs } from "@kynesyslabs/demosdk/utils"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
+import { parseNodeUrl } from "../src/config/nodeUrl"
 
 const DEFAULT_AMOUNT_DEM = "1_000"
 const PEERLIST_FILE = "demos_peerlist.json"
@@ -67,7 +68,7 @@ function firstPeerlistRpc(): string {
             `${PEERLIST_FILE} not found. Pass --rpc <url> or create the peerlist.`,
         )
     }
-    let peers: Record<string, string>
+    let peers: Record<string, unknown>
     try {
         peers = JSON.parse(readFileSync(PEERLIST_FILE, "utf8"))
     } catch {
@@ -77,7 +78,15 @@ function firstPeerlistRpc(): string {
     if (urls.length === 0) {
         exitWith(`${PEERLIST_FILE} has no entries. Pass --rpc <url>.`)
     }
-    return urls[0]
+    const first = urls[0]
+    const rpc = typeof first === "string" ? first
+        : first && typeof first === "object" && "url" in first ? first.url : undefined
+    if (typeof rpc !== "string" || !parseNodeUrl(rpc)) {
+        exitWith(
+            `First peer entry in ${PEERLIST_FILE} has no usable URL. Set a real validator URL or pass --rpc <url>.`,
+        )
+    }
+    return rpc
 }
 
 function loadMnemonic(file: string): string {
