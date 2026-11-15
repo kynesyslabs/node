@@ -2,6 +2,7 @@ import type { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import Mempool from "src/libs/blockchain/mempool"
 import { isWithinDeepWindow } from "src/libs/blockchain/referenceBlockWindow"
 import GossipManager from "src/libs/gossip/GossipManager"
+import { TXS_MAX_BYTES } from "src/libs/gossip/topics"
 import { estimateNextConfirmationBlock } from "src/libs/consensus/confirmationEstimate"
 import { verifyRpcEdits } from "src/libs/blockchain/validation/editBinding"
 import { clientTxTypeRefusal } from "src/libs/blockchain/validation/txTypes"
@@ -59,6 +60,20 @@ function holdForRetry(validityData: ValidityData): void {
 }
 
 /**
+ * Why the tx topic cannot carry `validityData`, or null. Measured as the
+ * publish encodes it and as the topic validator counts it. Every staked peer
+ * refuses a larger message, so the tx would reach a block only while this
+ * node sat in the committee, and would otherwise leave the pool unannounced
+ * once its reference block expired.
+ */
+export function gossipSizeRefusal(validityData: ValidityData): string | null {
+    const bytes = Buffer.byteLength(JSON.stringify(validityData))
+    return bytes > TXS_MAX_BYTES
+        ? `Transaction envelope is ${bytes} bytes, over the tx gossip limit of ${TXS_MAX_BYTES}: peers would not receive it`
+        : null
+}
+
+/**
  * Re-offers held envelopes to the mesh. Called from the gossip heights
  * tick, so a sidecar that was down at submit time gets the tx as soon as
  * it is back. Entries whose reference block left the deep window are
@@ -91,8 +106,9 @@ export async function retryUnpublishedTxs(): Promise<void> {
  * mempool merge repairs anything the mesh dropped between committee
  * members. A publish that cannot happen now (sidecar down, not staked yet)
  * is held and retried, since a tx known only to a node outside the
- * committee reaches no block otherwise. The returned block number is an
- * estimate.
+ * committee reaches no block otherwise. For the same reason, with gossip
+ * on, a tx too large for the topic ever to carry is refused, not queued.
+ * The returned block number is an estimate.
  */
 export async function submitValidatedTx(
     validityData: ValidityData,
@@ -102,6 +118,14 @@ export async function submitValidatedTx(
     if (typeRefusal) {
         log.error(`[TX SUBMIT] refusing ${transaction.hash}: ${typeRefusal}`)
         return { ok: false, error: typeRefusal }
+    }
+
+    const sizeRefusal = GossipManager.isEnabled()
+        ? gossipSizeRefusal(validityData)
+        : null
+    if (sizeRefusal) {
+        log.error(`[TX SUBMIT] refusing ${transaction.hash}: ${sizeRefusal}`)
+        return { ok: false, error: sizeRefusal }
     }
 
     const edits = await verifyRpcEdits(transaction)
