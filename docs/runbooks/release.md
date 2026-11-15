@@ -388,6 +388,11 @@ PG_HOST=localhost PG_PORT=<PG_PORT> bun run migration:run && ./run -d <PG_PORT> 
     must name it: otherwise every client counts as the proxy, which shares
     one cap, or, for a proxy on the same host, is loopback and skips the
     per-caller caps (only the node-wide cap applies).
+- From the first release after `v1.0.0-rc.11`: while `editBinding` is active,
+  a transaction the admission rules refuse at RPC validation gets
+  `GCREdit mismatch: <reason>`. Before, it got the bare `GCREdit mismatch`. A
+  reason the node does not list as public still gets the bare text, and the
+  node log has it. Launch-gate refusals keep their own text, with no prefix.
 
 ## Known limits
 

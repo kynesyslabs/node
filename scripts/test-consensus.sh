@@ -71,6 +71,7 @@ SUITE_FILES=(
     src/libs/identity/signingRecord.test.ts
     src/libs/identity/web2Unlink.test.ts
     src/libs/network/broadcastDisposition.test.ts
+    src/libs/network/endpointValidation.admissionReason.test.ts
     src/libs/network/handlers/getAddressInfo.test.ts
     src/libs/network/handlers/getMempool.test.ts
     src/libs/network/handlers/getTxByHash.test.ts
@@ -83,6 +84,7 @@ SUITE_FILES=(
     src/libs/network/routines/nodecalls/readApi.test.ts
     src/libs/network/routines/nodecalls/requesterFixtures.head.test.ts
     src/libs/network/routines/nodecalls/requesterFixtures.status.test.ts
+    src/libs/network/rpcEditBinding.test.ts
     src/libs/omniprotocol/integration/BaseAdapter.test.ts
     src/libs/omniprotocol/peerAuthBinding.test.ts
     src/libs/omniprotocol/peerLiveness.test.ts
