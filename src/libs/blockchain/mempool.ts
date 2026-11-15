@@ -80,8 +80,8 @@ const SIGNED_TS_SQL =
 type PoolTx = Transaction & { reference_block: number }
 
 /**
- * Where a tx entered from. Only an RPC submit may displace other txs at a
- * full pool; see `checkAdmission`.
+ * Where a tx entered from. Only an RPC submit or a gossiped tx may displace
+ * other txs at a full pool; see `checkAdmission`.
  */
 export type AdmissionOrigin = "rpc" | "gossip" | "internal"
 
@@ -99,6 +99,11 @@ export interface ReceiveOptions {
 }
 
 const AGE_SWEEP_MIN_INTERVAL_MS = 2_000
+
+// At a full pool, a gossiped tx may try to evict at most once per interval.
+// A try reads every held tx under the mempool lock, and gossip brings every
+// peer's submissions here; the others are refused as full, as before.
+const MEMPOOL_GOSSIP_EVICT_INTERVAL_MS = 1_000
 
 /**
  * System relay transaction types: node-generated txs that carry no
@@ -352,6 +357,7 @@ export default class Mempool {
     }
 
     private static lastAgeSweep = 0
+    private static lastGossipEvictAttempt = 0
 
     /**
      * Drops txs whose signed timestamp is past the pool lifetime, or is not
@@ -386,12 +392,16 @@ export default class Mempool {
      * and the pool-wide count and byte caps, and decides, without changing
      * anything, which held txs would have to go to make room.
      *
-     * Only an RPC submit may displace held txs, and only when the sender can
-     * pay the fee it offers: a tx that pays nothing it can lose must not be
-     * able to push out others. Gossip and internal txs are turned away at a
-     * full pool instead. The caller deletes the returned victims in the same
-     * database transaction as the insert, after its own nonce and duplicate
-     * checks, so a tx that then fails never costs anyone their place.
+     * Only an RPC submit or a gossiped tx may displace held txs, and only when
+     * the sender can pay the fee it offers: a tx that pays nothing it can lose
+     * must not be able to push out others. A gossiped tx is judged by the
+     * same fee rule as an RPC one, but only the first gossiped tx to get here
+     * in each MEMPOOL_GOSSIP_EVICT_INTERVAL_MS is considered; the rest are
+     * refused as full. RPC is not limited. Internal txs are turned away at a
+     * full pool instead.
+     * The caller deletes the returned victims in the same database
+     * transaction as the insert, after its own nonce and duplicate checks, so
+     * a tx that then fails never costs anyone their place.
      *
      * The peer merge does not come through here: every committee member
      * must end it with the same pool, so it is not subject to caps or
@@ -447,8 +457,20 @@ export default class Mempool {
         // Deleting a held tx while a round runs would change the pool the
         // committee is exchanging: members that already received it keep it,
         // and this node's final read would not.
-        if (origin !== "rpc" || sender === null || getSharedState.inConsensusLoop) {
+        if (origin === "internal" || sender === null || getSharedState.inConsensusLoop) {
             return refuse(full)
+        }
+        // A try counts from here, refused or failed, timed when it gets here:
+        // the queries above can be slow. Gossip only comes in under
+        // Mempool.lock (addTransactionWithLock), so no other lock. A clock
+        // stepped back behind the last try counts as a lapsed interval.
+        if (origin === "gossip") {
+            const at = Date.now()
+            const last = this.lastGossipEvictAttempt
+            if (at >= last && at - last < MEMPOOL_GOSSIP_EVICT_INTERVAL_MS) {
+                return refuse(full)
+            }
+            this.lastGossipEvictAttempt = at
         }
 
         // One balance read, and only at a full pool.
