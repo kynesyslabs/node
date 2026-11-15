@@ -65,6 +65,7 @@ SUITE_FILES=(
     src/libs/debug/nonceTrace.test.ts
     src/libs/gossip/GossipManager.lifecycle.test.ts
     src/libs/gossip/sidecarHealth.test.ts
+    src/libs/gossip/txPublishPeers.test.ts
     src/libs/crypto/merkle/rfc6962.test.ts
     src/libs/crypto/merkle/sparse.test.ts
     src/libs/identity/foreignSignature.test.ts
