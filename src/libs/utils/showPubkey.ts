@@ -123,8 +123,8 @@ async function main() {
     // Read the mnemonic from identity file
     const mnemonic = fs.readFileSync(identityFile, "utf8").trim()
 
-    // Check if this looks like a mnemonic (has spaces) vs old hex format
-    if (!mnemonic.includes(" ")) {
+    // Check if this looks like a mnemonic (has whitespace) vs old hex format
+    if (!/\s/.test(mnemonic)) {
         console.error(
             "Error: Identity file appears to use old format (hex private key).",
         )
