@@ -22,7 +22,19 @@ FAKE_DUMP_CUT (the dump ends after its table of contents: reading the whole
 archive fails),
 FAKE_DOWN_FAIL (compose down removes nothing and exits 1), FAKE_DOWN_LEAVE
 (compose down exits 0 but leaves the volumes whose name contains it),
-FAKE_NO_IMG_VOLUMES, FAKE_MIGRATION_FILES (3; `none`: the count prints 0 and
+FAKE_NO_IMG_VOLUMES (the image's declared volumes read as `null`, as docker gives
+for an image without VOLUME), FAKE_IMG_VOLUMES_READ (`fail`: that read exits 1;
+`empty`: it prints nothing, exit 0; anything else: it prints that, exit 0),
+FAKE_IMG_WORKDIR_READ (`fail` / `empty`: the same for the image's working
+directory), FAKE_RESTART_IN_PLACE (`count` / `started`: from the backup's pg_dump
+on, the drilled node's container keeps its id, with a restart count one higher /
+a later start time, as after a restart in place), FAKE_RESTART_AT_UP (a node
+service: when compose up then starts another node-<n> service, its running
+container keeps its id, with restart count 1 and a later start time, once),
+FAKE_RUN_READ_FAIL (n: the n-th
+`docker inspect` of a container's start time and restart count fails with exit
+1), FAKE_RUN_GOTIME (n: the n-th such read prints the start time as a Go time,
+`2026-11-14 18:43:59.123456789 +0000 UTC`, not RFC 3339), FAKE_MIGRATION_FILES (3; `none`: the count prints 0 and
 exits 1, as `grep -c` does on a src/migrations with no .ts or .js file in it,
 or none at all), FAKE_NO_FLOOR_LOG (a starting
 node does not log the restart signing floor), FAKE_LOG_FILL (lines `docker logs`
@@ -268,6 +280,11 @@ def compose_cmd(a):
             c = st["containers"].setdefault(cid, {"service": s, "project": project, "state": "created", "volumes": [vname(project, v) for v, _ in svc_vols(compose, s)]})
             if "--no-start" not in flags and c["state"] != "running":
                 start_container(st, compose, project, s, c)
+        # test hook: that node restarts in place once, when another node service is started
+        rx = st["containers"].get(cid_of(project, os.environ.get("FAKE_RESTART_AT_UP", "")))
+        if rx and rx["state"] == "running" and not rx.get("restarts") and any(re.fullmatch(r"node-\d+", s) and s != rx["service"] for s in todo):
+            rx["restarts"] = 1
+            rx["started"] = max(time.time(), rx["started"] + 1)
         save(st)
         out()
     if cmd == "run":
@@ -575,6 +592,12 @@ def exec_cmd(a):
             if os.environ.get("FAKE_EXTRA_HOLDER"):
                 st["containers"][cid_of(project, "stray")] = {"service": "stray", "project": project, "state": "running",
                                                               "volumes": [vname(project, os.environ["FAKE_EXTRA_HOLDER"])]}
+            if os.environ.get("FAKE_RESTART_IN_PLACE"):
+                xc = st["containers"][cid_of(project, f"node-{n}")]
+                if os.environ["FAKE_RESTART_IN_PLACE"] == "count":
+                    xc["restarts"] = xc.get("restarts", 0) + 1
+                else:
+                    xc["started"] = max(time.time(), xc["started"] + 1)
             if os.environ.get("FAKE_STATE_LOST"):
                 xs = st["volumes"][vname(project, f"state-{n}")]
                 xs["files"] = [x for x in xs["files"] if x != os.environ["FAKE_STATE_LOST"]]
@@ -618,10 +641,16 @@ def main():
         fmt = a[a.index("--format") + 1] if "--format" in a else ""
         if ".Id" in fmt:
             out("sha256:" + hashlib.sha256(img.encode()).hexdigest())
-        if "Config.Volumes" in fmt:
-            out("null" if os.environ.get("FAKE_NO_IMG_VOLUMES") else '{"/app/data":{},"/app/logs":{},"/app/state":{}}')
-        if "WorkingDir" in fmt:
-            out("/app")
+        for k, knob, val in (("Config.Volumes", "FAKE_IMG_VOLUMES_READ",
+                              "null" if os.environ.get("FAKE_NO_IMG_VOLUMES") else '{"/app/data":{},"/app/logs":{},"/app/state":{}}'),
+                             ("WorkingDir", "FAKE_IMG_WORKDIR_READ", "/app")):
+            if k in fmt:
+                how = os.environ.get(knob)
+                if how == "fail":
+                    fail("Error response from daemon: fake: cannot inspect the image", 1)
+                if how == "empty":
+                    sys.exit(0)
+                out(how if how else val)
         out()
     elif cmd == "ps":
         if st.get("empty") and "-aq" not in a:
@@ -701,6 +730,18 @@ def main():
             if not c:
                 fail(f"Error: No such object: {a[-1]}", 1)
             out("\n".join(f"/var/lib/docker/volumes/{v}/_data {v}" for v in c["volumes"]))
+        if ".RestartCount" in fmt:
+            st["run_reads"] = st.get("run_reads", 0) + 1
+            save(st)
+            if str(st["run_reads"]) == os.environ.get("FAKE_RUN_READ_FAIL"):
+                fail("Error response from daemon: fake read failure", 1)
+            c = st["containers"].get(a[-1])
+            if not c or "started" not in c:
+                fail(f"Error: No such object: {a[-1]}", 1)
+            t = c["started"]
+            if str(st["run_reads"]) == os.environ.get("FAKE_RUN_GOTIME"):
+                out(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(t)) + f".{int(t % 1 * 1e9):09d} +0000 UTC {c.get('restarts', 0)}")
+            out(time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + f".{int(t % 1 * 1e9):09d}Z {c.get('restarts', 0)}")
         out("0" if "ExitCode" in fmt else "")
     else:
         fail(f"fake docker: {cmd} not handled", 99)

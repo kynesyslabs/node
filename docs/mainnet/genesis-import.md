@@ -16,7 +16,7 @@ testnet block 563,541 (`data/snapshot`). What it restores depends on the
 
 | Snapshot file | At mainnet block 0 |
 |---|---|
-| `gcr_main.jsonl` | Every account row comes over with its linked identities (Web2 links with their proofs and attestation signatures, wallets, Nomis, Ethos, Unstoppable Domains, Human Passport, post-quantum keys), its points and its `referralInfo`. Every balance is 0. Nonces were already 0 and `assignedTxs` empty in the export. |
+| `gcr_main.jsonl` | Every account row comes over with its linked identities (Web2 links with their proofs and attestation signatures, wallets, Nomis, Ethos, Unstoppable Domains, Human Passport, post-quantum keys), its points (see [Points not carried over](#points-not-carried-over)) and its `referralInfo`. Every balance is 0. Nonces were already 0 and `assignedTxs` empty in the export. |
 | `gcr_storageprogram.jsonl` | Copied byte for byte: every storage program, its data, owner and ACL. |
 | `identity_commitments.jsonl` | Copied byte for byte (6 rows). Their `block_number` fields name testnet blocks; nothing on the restore path reads them as mainnet heights. |
 | `validators.jsonl` | Replaced. The testnet validator rows and stakes are dropped; the file holds the launch validators from the genesis. |
@@ -93,6 +93,41 @@ disk, so the snapshot must stay in `data/snapshot` (or
 Consequence: unlinking an imported identity still deducts its points, as
 on testnet, and linking it again pays nothing. The points of an imported
 identity are kept only while it stays linked.
+
+## Points not carried over
+
+Some testnet accounts are flagged as farmed. Their points are a genesis
+decision: once the genesis is published the snapshot cannot change, and
+after launch points cannot be lowered by an award (`GCR.awardPoints` refuses
+`points <= 0`), only by a fork. Flagged accounts are left out of the
+leaderboard, nothing else.
+
+State at `v1.0.0-rc.11`: `data/snapshot/gcr_main.jsonl` holds 14,216
+accounts; 4,653 are flagged and hold 64,760 of the 170,404 points. The
+carry-over builder (`scripts/state-snapshot/carryover.ts`) copies points
+unchanged, and has no option to zero a list yet. Until that option exists
+and is run, every flagged account keeps its points at block 0.
+
+| Group | Accounts | Points | Decision | Approver | Date |
+|---|---|---|---|---|---|
+| A: referees of the two scripted roots (`0x9e91f5f593…`, `0x32d6dca811…`) | 1,949 | 18,913 | zero | TBD (owner) | 2026-11-06 |
+| B: the `0xd959…` referral tree | 1,601 flagged + 824 unflagged | 29,539 | TBD (owner): zero all, zero flagged only, or keep | TBD (owner) | TBD |
+| C: 19 smaller roots | 1,081 | 12,294 | TBD (owner): zero, or a per-root timing check first | TBD (owner) | TBD |
+| D: 22 flagged roots | 22 | TBD | TBD (owner): zero, and whether they can ever be restored | TBD (owner) | TBD |
+
+The zeroed list is a declared input of the snapshot build: one sorted
+address list per build, its sha256 recorded in the snapshot manifest, so
+anyone can rebuild the snapshot and get the same `snapshot.manifestSha256`.
+
+| Item | Value |
+|---|---|
+| Zero-points list sha256 | TBD (filled in when the snapshot is rebuilt) |
+| Accounts zeroed, points removed | TBD |
+| Snapshot manifest sha256 after the rebuild | TBD |
+
+If the list is not ready before the genesis is sealed, the owner either
+accepts carrying every flagged account's points over, to be corrected
+later by a fork, or the launch moves. That choice is recorded here.
 
 ## Web2 unlink
 

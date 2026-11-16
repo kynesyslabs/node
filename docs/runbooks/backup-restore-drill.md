@@ -96,13 +96,14 @@ It does not show:
   for the image's own writable directories (its declared volumes, `/app/data`
   and `/app/logs`, and its working directory). The probe mounts the volume
   where the node gets it, so a new volume takes the owner of that directory in
-  the image, as in the real run. If any probe fails the script stops with the
-  list, before any node starts, and changes nothing. If none fails, the
-  results get the INFO row "uid 1000 write probe of the node state", which
-  lists the image directories probed. It is not a check and shows nothing
-  beyond the paths probed: a path the node writes that is not listed was not
-  probed, and when the image's declared volumes cannot be read, only its
-  working directory is. `FIX_OWNERSHIP=1` is the
+  the image, as in the real run. The image's declared volumes (`docker image
+  inspect --format '{{json .Config.Volumes}}'`, one JSON object, or `null` for
+  an image without `VOLUME`) and its working directory (`.Config.WorkingDir`,
+  not empty) are read separately; a read that fails or gives anything else
+  stops the run (exit 2) before any node starts. If any probe fails the script
+  stops with the list, before any node starts, and changes nothing. If none
+  fails, the check "node state is writable by uid 1000" passes and lists the
+  image directories probed. `FIX_OWNERSHIP=1` is the
   opt-in: it chowns `1000:1000` (recursively) only the volumes of this compose
   project (`${PROJECT}_*`, checked by label) that failed, and probes again. The
   wipe (phase B) runs as root and only deletes; it never creates anything on
@@ -321,9 +322,7 @@ fails, or that gives nothing (no head, no hash, no checksum, an empty log or
 listing, or a block other than the one asked for), fails the check that needs
 it, with the reason; it is never skipped or
 turned into INFO. Before the wipe and the restart, such a read stops the run
-(exit 2) instead. Two rows are INFO by design, never PASS or FAIL, and claim
-nothing: "uid 1000 write probe of the node state" and, in `isolated`, "whether
-node X stopped or restarted during the isolated drill".
+(exit 2) instead.
 
 | Check | Passes when |
 |---|---|
@@ -343,9 +342,9 @@ node X stopped or restarted during the isolated drill".
 | isolated node reaches the expected head, on the validators' chain | (`isolated`, `ISO_NODE=1`) within `REJOIN_TIMEOUT`, in one try that reads the heads of node-iso and of every validator once each, every one of them answers, node-iso's head is within 2 blocks of the highest validator's and above the database's head, every validator has reached it, and node-iso and every validator give one non-empty block hash at node-iso's head (a block read answered with another block than the one asked for counts as not read) |
 | isolated node holds no copy of node X's key | (`isolated`) node-iso's mounts are read and include its own state volume and no identity or state volume of node X, and the identity file on node-iso's state volume, read as a SHA-256 (64 hex), differs from node X's step-2 one; an identity that cannot be read, or a read that gives no SHA-256, fails it |
 | node X's key is held by only the one container on its state volume | (`isolated`) the running node X containers and the running containers on its state volume are both listed (a listing that fails fails it), and each list is exactly the container started at bring-up |
-| whether node X stopped or restarted during the isolated drill | INFO only: the node X container running at the end and the one started at bring-up. A restart in place (`restart: unless-stopped`) keeps the container id, so the drill does not show that node X never stopped |
+| node X never stopped or restarted during the isolated drill | (`isolated`) at bring-up, as soon as node X serves and before the nodes after it start, `docker inspect` of node X's container gives its `.State.StartedAt` and `.RestartCount` (a read that fails or does not give both stops the run, exit 2); at the end the running node X containers are listed and are exactly the one started at bring-up, and its start time and restart count, read again, are the same. A restart in place (`restart: unless-stopped`) keeps the container id but not these. A listing or read that fails, or gives nothing, fails it |
 | gossip enabled on every node | `GOSSIP_ENABLED=true` in the generated compose file (INFO when `ALLOW_GOSSIP_OFF=1` lets it be off) |
-| uid 1000 write probe of the node state | INFO only, not a check: what the probes of "Writable state" above covered (a probe that fails stops the run before it starts) |
+| node state is writable by uid 1000 | every probe of "Writable state" above passed: each read-write mount of the node services, and the image's working directory and declared volumes they do not mount (a probe that fails, or a read of the image's declared volumes or working directory that fails or gives nothing, stops the run before it starts) |
 | the wipe kept the ownership of the state volume | owner and mode of the state dir and identity files equal before and after the wipe (a read of them that fails stops the run with exit 2: at stop before anything is removed, after the wipe before the restore) |
 
 ### Quorum
@@ -405,7 +404,11 @@ it is left.
 
 `testing/devnet/backup-restore-drill/test/run-fake-tests.sh` runs `run.sh`
 against a fake `docker` (`test/fake-bin/`): the gossip default and refusal,
-unwritable volumes (fail fast, `FIX_OWNERSHIP=1`), `SMOKE=1` pass and fail,
+unwritable volumes (fail fast, `FIX_OWNERSHIP=1`), a read of the image's
+declared volumes that fails, gives nothing or no JSON while its working
+directory is read, and a working directory read that fails or gives nothing
+(exit 2, nothing started; `null` and `{}` pass, and a declared volume path
+with a space in it is probed as one path), `SMOKE=1` pass and fail,
 the fork set `gen-inputs.py` gets (default `launch`, `FORK_SET=devnet`), the
 migrate step on the restored database (after `pg_restore` and before node X
 starts; a failure or a timeout stops the run with exit 2 and node X is not
@@ -436,7 +439,13 @@ above it (the rejoin check fails, no D1 row), a changed identity file, a restore
 row count outside the dump's window, another node's block hash, migrations short
 of the image's, a halt marker, a foreign-signature line or a log `docker logs`
 cannot read, a second container on node X's state volume (the run stops before
-node X starts again; in `isolated` the holder check fails), a dump copy that
+node X starts again; in `isolated` the holder check fails), in `isolated` node
+X's container keeping its id while its restart count or start time changes
+(after the backup, or with `X_NODE=2` while nodes 3 and 4 are still brought up), and
+its start time and restart count read failing at bring-up (exit 2, also for a
+start time the drill cannot parse, such as a Go time, which the error then
+shows) or at the end (each fails "node X never stopped or restarted", and the
+row shows what the read gave, or `nothing`), a dump copy that
 fails its hash (exit 2 in phase A2), and in `isolated` a restored database
 without the dump's head, another hash at its head, a node-iso that stays behind,
 and a node-iso identity that is node X's, cannot be read, or is read as nothing
