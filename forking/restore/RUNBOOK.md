@@ -14,10 +14,12 @@
 │  Source block:  2285755 on node3.demos.sh (v0.9.8, PG17)          │
 │  Fork bundle:   osDenomination + gasFeeSeparation at genesis       │
 │  Side-effect:   balances × 10⁹, burn + treasury accounts created  │
-│  Rollback:      impossible after genesis — plan accordingly        │
+│  Rollback:      see docs/runbooks/chain-halt-recovery.md           │
 │  SDK floor:     @kynesyslabs/demosdk@4.0.0 from block 0 onward    │
 └────────────────────────────────────────────────────────────────────┘
 ```
+
+After genesis a chain is never rolled back by restoring a database: a halt is handled as in [chain-halt-recovery.md](../../docs/runbooks/chain-halt-recovery.md) (restart the same chain, then an emergency signed release, a new genesis only as the last resort).
 
 On a fresh DB the genesis builder detects `data/snapshot/`, verifies integrity, restores all three tables, seeds 5 genesis validators, and **pre-applies both forks** — all inside a single transaction. A solo node with 20% stake boots fully post-fork immediately, without waiting for consensus quorum to produce block 1.
 

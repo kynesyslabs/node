@@ -7,11 +7,29 @@ description: "Detailed ACL configuration for StorageProgram read and write permi
 
 StorageProgram implements a robust Access Control List (ACL) system supporting owner-only, public, and restricted access modes with group-based permissions.
 
+## What the ACL protects
+
+The ACL controls who may write a storage program, and which callers the node
+API serves reads to. It does not make the data confidential:
+
+- The data is stored unencrypted. Every node keeps a copy in its database.
+- The data is also in the transaction that wrote it, and every node keeps
+  that transaction.
+- Anyone who runs a node, or reads its database or its stored transactions,
+  can read the data whatever the ACL mode is.
+
+To keep data confidential, encrypt it on the client before writing it, and
+manage the keys outside the chain. The "owner" and "restricted" modes then
+limit who the node API serves the encrypted bytes to.
+
+> Status: this wording is pending owner confirmation for the public
+> documentation. TBD (owner).
+
 ## ACL Modes
 
 ### Owner Mode
 
-The most restrictive mode. Only the storage program owner can read or modify data.
+The most restrictive mode. Only the storage program owner can modify the data, and the node API serves reads to the owner only. The data itself is not encrypted (see [What the ACL protects](#what-the-acl-protects)).
 
 ```typescript
 acl: {
@@ -21,7 +39,7 @@ acl: {
 
 | Operation | Permission |
 |-----------|------------|
-| Read | Owner only |
+| Read (node API) | Owner only |
 | Write | Owner only |
 | Delete | Owner only |
 | Update ACL | Owner only |
@@ -75,7 +93,7 @@ acl: {
 
 | Operation | Permission |
 |-----------|------------|
-| Read | Owner, allowed list, or group with "read" |
+| Read (node API) | Owner, allowed list, or group with "read" |
 | Write | Owner or group with "write" |
 | Delete | Owner or group with "delete" |
 | Update ACL | Owner only |

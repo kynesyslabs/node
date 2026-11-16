@@ -430,7 +430,8 @@ console.log(data)
 The SDK provides convenient ACL builders:
 
 ```typescript
-// Private/owner-only (default)
+// Owner-only reads through the node API (default).
+// Not encrypted: every node stores the data in clear. Encrypt client-side for confidentiality.
 const privateAcl = StorageProgram.privateACL()
 // => { mode: "owner" }
 
