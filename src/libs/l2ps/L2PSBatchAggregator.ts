@@ -175,7 +175,7 @@ export class L2PSBatchAggregator {
         this.isRunning = true
         // A cycle a timed-out stop() left behind still runs on the old loop;
         // a new loop started beside it would recover and plan the same rows.
-        if (this.cycleDone) {
+        if (this.cycleDone !== null) {
             log.info("[L2PS Batch Aggregator] Waiting for the previous cycle to end")
             await this.cycleDone
         }
