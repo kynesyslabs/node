@@ -6,7 +6,7 @@ import {
 } from "./mempoolFilters"
 import { DEFAULT_BLOCK_CAPS, selectBlockTransactions, type BlockCaps } from "./blockCaps"
 import { l2psSettlementActive } from "@/forks/l2psSettlementGate"
-import { settlementBatchesOverCap } from "@/libs/l2ps/settlement/validation"
+import { settlementBatchesOverCap } from "@/libs/l2ps/settlement/blockCap"
 import { orderDeterministically } from "./deterministicOrder"
 import { pqcTxsRefusedAt } from "@/libs/blockchain/validation/txSignatureRules"
 import { IdentityPrefetchError } from "@/libs/blockchain/validation/identityPrefetchError"

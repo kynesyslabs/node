@@ -33,6 +33,7 @@ import {
 } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/GCREdit"
 import log from "src/utilities/logger"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
+import { normalizePubkey } from "./normalizePubkey"
 
 // REVIEW Trying to use the new GCRv2
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
@@ -797,12 +798,7 @@ function accountKeyProblem(
     return loaded && !stored.has(pubkey) ? uncreatableAccountKey(pubkey) : null
 }
 
-/**
- * Helper to normalize pubkey from different formats
- */
-export function normalizePubkey(account: string | Uint8Array): string {
-    return typeof account === "string" ? account : forgeToHex(account)
-}
+export { normalizePubkey }
 
 /**
  * Interface for tracking entity snapshots for rollback

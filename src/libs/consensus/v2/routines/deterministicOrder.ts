@@ -1,4 +1,5 @@
-import { normalizePubkey } from "@/libs/blockchain/gcr/handleGCR"
+// Ordering needs the key format only, not the GCR apply path behind it.
+import { normalizePubkey } from "@/libs/blockchain/gcr/normalizePubkey"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 
 /**
